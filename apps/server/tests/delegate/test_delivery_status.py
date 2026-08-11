@@ -1053,8 +1053,9 @@ def test_verify_budget_exhausted_gap_not_still_running():
     budget_gaps = [g for g in payload["gaps"] if g.get("reason") == "verify_budget"]
     assert budget_gaps
     desc = budget_gaps[0]["description"]
-    assert "预算耗尽" in desc
+    assert "验证未完成" in desc
     assert "非仍在跑" in desc or "已中止" in desc
+    assert "预算耗尽" in desc or "无响应" in desc or "强制中止" in desc
     assert "仍在进行" not in desc
     assert not any(
         g.get("reason") == "verify_failed" and "测试未通过" in g.get("description", "")
@@ -1073,7 +1074,7 @@ def test_verify_budget_exhausted_gap_not_still_running():
         ),
     )
     assert rework is not None
-    assert "仍在进行" in rework or "预算耗尽" in rework
+    assert "仍在进行" in rework or "强制中止" in rework or "无响应" in rework
     clear_verify_budget_exhausted()
 
 

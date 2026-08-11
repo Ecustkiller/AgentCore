@@ -8758,6 +8758,14 @@ export interface components {
          */
         HostAxis: "off" | "ask" | "session";
         /**
+         * InferenceTokenRequest
+         * @description Optional mint body — scopes returned ``model`` to a conversation main slot.
+         */
+        InferenceTokenRequest: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+        };
+        /**
          * InferenceTokenResponse
          * @description A freshly minted inference token + its lifetime + server-resolved upstream model.
          */
@@ -18907,7 +18915,11 @@ export interface operations {
                 access_token?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["InferenceTokenRequest"] | null;
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

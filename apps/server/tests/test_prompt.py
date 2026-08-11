@@ -305,6 +305,9 @@ def test_core_teaches_split_criterion_over_count():
     assert "先问你" in hint
     # 午后巡 d4d5/53f0：继续须承接上轮确认项；新建仓库/本地目录须 default 路径
     assert "继续·承接确认项" in hint
+    assert "短确认·只补缺口" in hint
+    assert "prior_delivery_gaps" in hint
+    assert "整锅重派" in hint
     assert "等待确认后再派工" in hint
     assert "默认路径" in hint
     assert "一人包办" in hint or "自搜+成文" in hint
@@ -313,9 +316,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "独立审校" in hint
     assert "调研→撰稿" in hint
     assert "质量缝" in hint
-    # 路由第一拍：一句定方向，禁止思考里先干完。
-    assert "路由·第一拍" in hint or "第一拍" in hint
-    assert "只写一句" in hint or "十字以内" in hint
+    # 路由：禁止思考里先干完（强制「方向：…」一句模板已撤，试跑中）。
     assert "禁止长篇路由推演" in hint
     assert "完整设计" in hint  # 禁思考里先写完整设计
     assert "内部术语" in hint
@@ -431,7 +432,6 @@ def test_core_teaches_split_criterion_over_count():
     assert "kickoff" in hint or "方向：派团队" in hint
     assert "确认后开工" in hint or "方案已备好" in hint
     assert "至少 N 人" in hint or "tasks 至少" in hint
-    assert "写完这句立刻" in hint or "禁止第二句" in hint
     # 按场面 consult：与能力目录 preamble 同强度（禁「可选 vs 必先查」对打）。
     from agentcore.runtime.skills import CONSULT_TEAM_ORCH_BY_SCENE
 

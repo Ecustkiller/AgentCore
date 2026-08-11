@@ -33,7 +33,7 @@ _TRACE = "0123456789abcdef0123456789abcdef"
         ("搜索失败：无法建立连接（出网受限或站点不可达）", None, "egress_connect"),
         ("ConnectError: connection refused", None, "egress_connect"),
         ("连接超时（无法连上该站点）", None, "egress_connect"),
-        ("缺少必填参数：query", None, "other"),
+        ("缺少必填参数：query", None, "schema"),
         (
             "delegate 缺 tasks/playbook：请在 payload 顶层直接放非空 `tasks`",
             None,
@@ -50,10 +50,80 @@ _TRACE = "0123456789abcdef0123456789abcdef"
         ("anything", "searxng_unreachable", "searxng_unreachable"),
         ("searxng down", "egress_connect", "egress_connect"),
         ("unknown", "weird", "other"),
+        ("Timeout: execution exceeded 30s", None, "exec_timeout"),
+        ("Timeout: no output for 60s (execution stalled)", None, "exec_timeout"),
+        (
+            "Timeout: forced stop after 1200s (forced stop)",
+            None,
+            "exec_forced_stop",
+        ),
+        ("验证未在 300s 预算内完成（验证未完成，非工具故障）", None, "exec_timeout"),
+        ("ExecEnvProbeFailed: 本机执行环境自检未通过", None, "exec_timeout"),
+        ("anything", "verify_budget", "exec_timeout"),
+        ("anything", "exec_timeout", "exec_timeout"),
+        ("anything", "exec_forced_stop", "exec_forced_stop"),
+        ("git timed out", "git_timeout", "git_timeout"),
+        ("git timed out", "timeout", "git_timeout"),
+        ("no git repo", "no_repo", "no_repo"),
+        ("schema reject", "schema", "schema"),
+        ("dirty", "dirty_skip", "dirty_skip"),
+        ("auth", "unauthenticated", "unauthenticated"),
     ],
 )
 def test_normalize_local_turn_tool_failure_code(message, code, expected):
     assert normalize_local_turn_tool_failure_code(message, code=code) == expected
+
+
+def test_tool_failures_from_journal_passes_payload_code():
+    failures = tool_failures_from_journal(
+        [
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "name": "git",
+                    "success": False,
+                    "result": "git timed out after 30s",
+                    "code": "git_timeout",
+                },
+            }
+        ]
+    )
+    assert len(failures) == 1
+    assert failures[0]["tool"] == "git"
+    assert failures[0]["code"] == "git_timeout"
+
+
+def test_tool_failures_from_journal_schema_from_missing_arg_message():
+    failures = tool_failures_from_journal(
+        [
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "name": "code_search",
+                    "success": False,
+                    "result": "缺少必填参数：query",
+                },
+            }
+        ]
+    )
+    assert failures[0]["code"] == "schema"
+
+
+def test_tool_failures_from_journal_git_no_repo_code():
+    failures = tool_failures_from_journal(
+        [
+            {
+                "kind": "tool_call",
+                "payload": {
+                    "name": "git",
+                    "success": False,
+                    "result": "工作区无 git 仓库",
+                    "code": "no_repo",
+                },
+            }
+        ]
+    )
+    assert failures[0]["code"] == "no_repo"
 
 
 def test_tool_failures_from_journal_declaration_empty():
@@ -277,6 +347,7 @@ async def test_record_local_turn_logs_tool_failures(monkeypatch):
                 "message_id": "m1",
                 "count": 2,
                 "codes": ["searxng_unreachable", "egress_connect"],
+                "tools": ["web_search", "read_url"],
             },
         )
     ]

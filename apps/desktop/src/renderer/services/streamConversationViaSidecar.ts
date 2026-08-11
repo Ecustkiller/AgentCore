@@ -6,8 +6,16 @@ import { getFolders } from "@/hooks/useFolders";
 import { StreamError } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
 import { notifyWarning } from "@/lib/toast";
-import { resolveSidecarAccountAuth } from "@/services/accountToken";
-import { resolveSidecarFoldersAuth } from "@/services/foldersToken";
+import {
+  clearSidecarAccountAuth,
+  looksLikeAccountTokenFailure,
+  resolveSidecarAccountAuth,
+} from "@/services/accountToken";
+import {
+  clearSidecarFoldersAuth,
+  looksLikeFoldersTokenFailure,
+  resolveSidecarFoldersAuth,
+} from "@/services/foldersToken";
 import {
   clearSidecarInference,
   looksLikeInferenceTokenFailure,
@@ -220,15 +228,17 @@ export async function streamConversationViaSidecar({
   const turnId = newTurnId();
   // 本回合 trace_id：贯穿云代理推理调用 + 回写落库，使推理日志↔气泡同 trace（打通气泡↔日志）。
   const traceId = newTraceId();
-  // 云推理凭据（平台 key 不下放本机，走云端代理鉴权——Slice 4a）。每回合强制续铸，避免挂过期票。
+  // 云推理 / folders / account 窄票：TTL+skew 内复用，临近过期才 mint；三张并行。
   // 取不到则带 undefined：dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败。
-  let inference = (await resolveSidecarInference({ force: true })) ?? undefined;
-  // folders 窄票（定案甲）：与 inference 并列强制续铸；失败则 undefined（工具侧旧行为/诚实失败）。
-  const foldersAuth =
-    (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
-  // account 窄票（定案 R3a）：搜/读云对话日志；失败则 undefined（本机 DB / 诚实失败）。
-  const accountAuth =
-    (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
+  // 开跑前鉴权失败（尚无事件）可对各票 force remint 一次，不对每回合 force。
+  const [inferenceRaw, foldersAuthRaw, accountAuthRaw] = await Promise.all([
+    resolveSidecarInference({ conversationId }),
+    resolveSidecarFoldersAuth(),
+    resolveSidecarAccountAuth(),
+  ]);
+  let inference = inferenceRaw ?? undefined;
+  let foldersAuth = foldersAuthRaw ?? undefined;
+  let accountAuth = accountAuthRaw ?? undefined;
   // 本会话权限轴随回合送达本地引擎；取不到则 sidecar 沿用其当前值。
   const permissionAxes =
     await resolveConversationPermissionAxes(conversationId);
@@ -268,9 +278,29 @@ export async function streamConversationViaSidecar({
       }),
     remintInference: async () => {
       clearSidecarInference();
-      inference = (await resolveSidecarInference({ force: true })) ?? undefined;
+      inference =
+        (await resolveSidecarInference({
+          force: true,
+          conversationId,
+        })) ?? undefined;
       if (!inference) {
         throw new Error("推理凭证续铸失败，请重新登录后再试");
+      }
+    },
+    remintFolders: async () => {
+      clearSidecarFoldersAuth();
+      foldersAuth =
+        (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
+      if (!foldersAuth) {
+        throw new Error("folders 凭证续铸失败，请重新登录后再试");
+      }
+    },
+    remintAccount: async () => {
+      clearSidecarAccountAuth();
+      accountAuth =
+        (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
+      if (!accountAuth) {
+        throw new Error("account 凭证续铸失败，请重新登录后再试");
       }
     },
     writeBack: () => persistAndReconcile(conversationId, optimisticUserId),
@@ -302,14 +332,16 @@ export async function resumeConversationViaSidecar({
   console.warn(
     `[Resume] resumeConversationViaSidecar start conversationId=${conversationId} messageId=${messageId} decision=${decision} rootId=${rootId} subpath=${subpath}`,
   );
-  // 续跑同样要跑 LLM（重启后会新拉起引擎），故强制续铸当前云推理凭据（同 startTurn）。
-  let inference = (await resolveSidecarInference({ force: true })) ?? undefined;
-  // folders 窄票（同 startTurn）：续跑对称下发。
-  const foldersAuth =
-    (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
-  // account 窄票（同 startTurn）：续跑对称下发。
-  const accountAuth =
-    (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
+  // 续跑同 startTurn：TTL+skew 内复用三张窄票，并行解析；开跑前鉴权失败可各票 force remint 一次。
+  // inference 铸票带本会话 id，使 model 与该会话组合一致。
+  const [inferenceRaw, foldersAuthRaw, accountAuthRaw] = await Promise.all([
+    resolveSidecarInference({ conversationId }),
+    resolveSidecarFoldersAuth(),
+    resolveSidecarAccountAuth(),
+  ]);
+  let inference = inferenceRaw ?? undefined;
+  let foldersAuth = foldersAuthRaw ?? undefined;
+  let accountAuth = accountAuthRaw ?? undefined;
   // 本会话权限轴（同 startTurn）：续跑期间的能力授权按会话当前轴。
   const permissionAxes =
     await resolveConversationPermissionAxes(conversationId);
@@ -363,9 +395,28 @@ export async function resumeConversationViaSidecar({
       remintInference: async () => {
         clearSidecarInference();
         inference =
-          (await resolveSidecarInference({ force: true })) ?? undefined;
+          (await resolveSidecarInference({
+            force: true,
+            conversationId,
+          })) ?? undefined;
         if (!inference) {
           throw new Error("推理凭证续铸失败，请重新登录后再试");
+        }
+      },
+      remintFolders: async () => {
+        clearSidecarFoldersAuth();
+        foldersAuth =
+          (await resolveSidecarFoldersAuth({ force: true })) ?? undefined;
+        if (!foldersAuth) {
+          throw new Error("folders 凭证续铸失败，请重新登录后再试");
+        }
+      },
+      remintAccount: async () => {
+        clearSidecarAccountAuth();
+        accountAuth =
+          (await resolveSidecarAccountAuth({ force: true })) ?? undefined;
+        if (!accountAuth) {
+          throw new Error("account 凭证续铸失败，请重新登录后再试");
         }
       },
       writeBack: () => persistAndReconcile(conversationId, userMessageId),
@@ -399,10 +450,14 @@ interface RunSidecarTurnOptions {
   /** 兜底错误文案（onStatus / RPC 真因都取不到时）。 */
   failMessage: string;
   /** 实际的 RPC 调用（startTurn / resume），Promise 在回合结束时携最终结果 resolve。
-   *  可被调用多次：开跑前 inference JWT 失效时会清缓存换票后重调一次（仅 !sawAnyEvent）。 */
+   *  可被调用多次：开跑前窄票鉴权失败时会清缓存换票后重调一次（仅 !sawAnyEvent）。 */
   invoke: () => Promise<SidecarTurnResult>;
   /** 开跑前 inference 鉴权失败时：清缓存并换新票；失败则抛出让外层走原错误。 */
   remintInference?: () => Promise<void>;
+  /** 开跑前 folders 窄票鉴权失败时：清缓存并换新票（与 remintInference 同形）。 */
+  remintFolders?: () => Promise<void>;
+  /** 开跑前 account 窄票鉴权失败时：清缓存并换新票（与 remintInference 同形）。 */
+  remintAccount?: () => Promise<void>;
   /** 回合结束后冲刷 outbox 并对账（主进程回写；renderer 只反映同步态）。 */
   writeBack: (result: SidecarTurnResult) => Promise<void>;
 }
@@ -424,6 +479,8 @@ async function runSidecarTurn({
   failMessage,
   invoke,
   remintInference,
+  remintFolders,
+  remintAccount,
   writeBack,
 }: RunSidecarTurnOptions): Promise<SidecarTurnResult> {
   // 回合从干净的审批门开始（与云链路一致）。
@@ -458,18 +515,29 @@ async function runSidecarTurn({
     try {
       result = await invoke();
     } catch (firstErr) {
-      // 仅开跑前失败（尚无任何事件）才换票重试一次；中途 JWT 过期不能整回合重开。
-      if (
-        sawAnyEvent ||
-        !remintInference ||
-        !looksLikeInferenceTokenFailure(firstErr)
-      ) {
+      // 仅开跑前失败（尚无任何事件）才换票重试一次；中途鉴权失败不能整回合重开。
+      // 三张窄票对称：TTL 日常复用，遇对应鉴权失败 remint 一次（不对每回合 force）。
+      if (sawAnyEvent) {
         throw firstErr;
       }
-      console.warn(
-        "[sidecar] inference token rejected before turn events; reminting and retrying once",
-      );
-      await remintInference();
+      if (remintInference && looksLikeInferenceTokenFailure(firstErr)) {
+        console.warn(
+          "[sidecar] inference token rejected before turn events; reminting and retrying once",
+        );
+        await remintInference();
+      } else if (remintFolders && looksLikeFoldersTokenFailure(firstErr)) {
+        console.warn(
+          "[sidecar] folders token rejected before turn events; reminting and retrying once",
+        );
+        await remintFolders();
+      } else if (remintAccount && looksLikeAccountTokenFailure(firstErr)) {
+        console.warn(
+          "[sidecar] account token rejected before turn events; reminting and retrying once",
+        );
+        await remintAccount();
+      } else {
+        throw firstErr;
+      }
       result = await invoke();
     }
     // 记下本回合真正跑的模型（引擎侧 resolve_turn_model），供输入框徽章如实展示；纯云会话

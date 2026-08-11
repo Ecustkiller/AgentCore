@@ -466,9 +466,28 @@ def test_build_payload_omits_temperature_for_restricted_models(model: str):
     assert payload["model"] == model
 
 
+@pytest.mark.parametrize("model", ["kimi-k3", "kimi-k2.5", "kimi-k2.6"])
+def test_build_payload_omits_temperature_for_kimi_leaf(model: str):
+    provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
+    req = LLMRequest(
+        messages=[LLMMessage(role="user", content="hi")],
+        model=model,
+        temperature=0.7,
+    )
+    payload = provider._build_payload(req, stream=False)
+    assert "temperature" not in payload
+
+
 def test_build_payload_keeps_temperature_for_ordinary_models():
     provider = OpenAICompatibleProvider(name="test", api_key="k", base_url="http://x/v1")
-    for model in ("gpt-4o", "deepseek-v4-flash", "claude-opus-4-20250514", "hy3"):
+    for model in (
+        "gpt-4o",
+        "deepseek-v4-flash",
+        "claude-opus-4-20250514",
+        "hy3",
+        "moonshot-v1-128k",
+        "k3",
+    ):
         req = LLMRequest(
             messages=[LLMMessage(role="user", content="hi")],
             model=model,
@@ -527,14 +546,21 @@ def test_client_error_message_404_path_with_unrelated_message():
 def test_client_error_message_temperature_deprecated_product_copy():
     from agentcore.llm.errors import client_error_message
 
-    body = (
+    product = "平台 当前模型不接受 temperature 参数，请重试或更换模型"
+    anthropic_body = (
         b'{"error":{"message":"user `temperature` is deprecated for this model. '
         b'(request id: req_abc)"}}'
     )
-    msg = client_error_message("平台", 400, body)
-    assert "不接受 temperature" in msg
+    msg = client_error_message("平台", 400, anthropic_body)
+    assert msg == product
     assert "request id" not in msg
     assert "`temperature` is deprecated" not in msg
+
+    moonshot_body = b'{"error":{"message":"invalid temperature: only 1 is allowed"}}'
+    msg = client_error_message("平台", 400, moonshot_body)
+    assert msg == product
+    assert "invalid temperature" not in msg
+    assert "only 1 is allowed" not in msg
 
 
 def test_client_error_message_context_overflow_product_copy_aa519_shape():

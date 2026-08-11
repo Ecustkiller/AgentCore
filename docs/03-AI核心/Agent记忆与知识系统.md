@@ -56,13 +56,13 @@ AgentCore/
 ## 二、注入
 
 1. 工作记忆经 `load_recent_history` 进窗口（CEO / worker 共用）。
-2. 长期记忆折叠进共享 `<rules>` 基座：用户规则在前（权威）、AI 记忆在后（软措辞）；无用户规则时与旧 memory-only 块逐字节一致（护前缀缓存）。
+2. 长期记忆折叠进共享 `<rules>` 基座：用户规则在前（权威）、AI 记忆在后（软措辞）；无用户规则时与旧 memory-only 块逐字节一致（护前缀缓存）。桌面 sidecar **有 account 票**时：prepare/resume 对 always 规则 / AI 记忆正文 / on_demand 规则目录 / memory topics **只读进程快照缓存**（miss → 空注入、不 await 云 HTTP）；assemble 的 explore/画像/meta 经 `prepare_reads_cache_only` 同样只读快照（warm 含 `_memory_meta.json`）；非回合 `warmAccountRulesMemory` 并行拉取并 seed（`/rules/list` 一次供 always+on_demand）。**无票**仍走本地 DB。
 3. always 序：**全局偏好 → 全局画像 → 项目画像 → 项目导航**（缺文件跳过）；用户 always 规则进共享 `<rules>` 前半。on_demand **主题**只列目录 → `consult_memory`；on_demand **用户规则**只列目录 → `consult_rule`（均项目优先、全局兜底；仅当本回合已 wire 对应工具才露目录）。
 4. **当前课题认定**（✅）：「继续做项目 / 汇报现状」且用户未点名时，**工作区（及已绑工程）近况 ＞ 全局画像「正在做 X」**——全局仅软参考，不得压过工作区，也不得把旧项目名写进默认提问套用户。偏好/文风等仍可用全局记忆。
 5. 注入前剥人面 chrome（H1 + 说明引用块），文件本身不动。
 6. 装配顺序权威 → [执行引擎 §七](/docs/03-AI核心/执行引擎架构设计.md) / `runtime/context/`（`SectionOrder`）。
 
-→ 见代码：`memory/rules_injection.py`
+→ 见代码：`memory/rules_injection.py` · `memory/account_prepare_cache.py` · sidecar `warmAccountRulesMemory`
 
 ---
 
@@ -127,7 +127,7 @@ Worker 经 `search_conversations` / `read_conversation` 按需检索本账号历
 
 - **自动标题**：侧边栏 UX，非记忆层；不进 Agent 上下文。云/本地均在首条用户消息可用后并行铸题（只用用户首句，`assistant_reply=""`）。云走 `schedule_title_generation` + SSE `title_generated`；本地 sidecar 无云 SSE，桌面首发并行 `POST …/auto-title`，回合回写仅空标题兜底（`_title_inflight` 时跳过）。禁止首轮后再补铸。
 - **会话摘要记忆层已移除**：跨会话情景对 CEO 分工帮助有限；可复用信号由长期记忆承载。两层协议的「情景沉淀」不注入——与本否决不冲突。
-- **搜索**：取消向量 RAG 作 prompt 自动注入；agentic 检索（`file_read`/`grep`/`code_search`）为主路。`code_search` = 工具后端（**只查**当前已提交 BM25 快照）；索引由回合启动 / 写后后台 `IndexMaintainer` 维护。状态两轴：`building` = 尚无可用快照（首次构建）；`stale` = 有快照但已知落后（`index_meta.dirty` / truncated；无 meta 的旧库/半成品亦按 dirty 处理）；有快照时后台增量刷新不改报 `building`。`building`/`stale` 时模型改用 `grep` 核对关键结论。非 RAG 层。落盘 `index_meta`（generation / last_complete_at / truncated / dirty）跨回合 hydrate。Local 过桥建索：`index_files` 带本机 `mtime_ms`/`size_bytes` 指纹，与库中一致则**跳过**整文 `READ` 过桥（仅变更文件再读）。→ 见代码：`workspace/indexing/manager.py` · 桌面 `opIndexFiles`
+- **搜索**：取消向量 RAG 作 prompt 自动注入；agentic 检索（`file_read`/`grep`/`code_search`）为主路。`code_search` = 工具后端（**只查**当前已提交 BM25 快照）；索引由打开本机项目 / 写后 / 非 ready 的 `code_search` 后台 `IndexMaintainer` 维护（不挡回合准备）。状态两轴：`building` = 尚无可用快照（首次构建）；`stale` = 有快照但已知落后（`index_meta.dirty` / truncated；无 meta 的旧库/半成品亦按 dirty 处理）；有快照时后台增量刷新不改报 `building`。`building`/`stale` 时模型改用 `grep` 核对关键结论。非 RAG 层。落盘 `index_meta`（generation / last_complete_at / truncated / dirty）跨回合 hydrate。Local 过桥建索：`index_files` 带本机 `mtime_ms`/`size_bytes` 指纹，与库中一致则**跳过**整文 `READ` 过桥（仅变更文件再读）。→ 见代码：`workspace/indexing/manager.py` · 桌面 `opIndexFiles`
 - **远期**：TWM / recall / 委派预算等延后到窗口不足时（DeepSeek 1M 远大于 MVP 用量）。
 
 ---

@@ -25,6 +25,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import DocumentRepository
@@ -36,6 +37,9 @@ from agentcore.memory.store import (
     MemoryStore,
 )
 from agentcore.memory.user_memory import strip_memory_chrome, topic_summary_line
+
+if TYPE_CHECKING:
+    from agentcore.memory.account_prepare_cache import AccountPrepareSnapshot
 
 logger = get_logger(__name__)
 
@@ -457,6 +461,43 @@ async def assemble_injected_rules(
     return compose_injected_rules(fragments, max_docs=max_docs, max_chars=max_chars)
 
 
+def _memory_fragments_from_snapshot(
+    snapshot: AccountPrepareSnapshot, *, folder_id: str | None
+) -> list[RuleFragment]:
+    """AI-memory core fragments from a warm :class:`AccountPrepareSnapshot`."""
+    from agentcore.memory.account_prepare_cache import memory_body_from_snapshot
+
+    frags: list[RuleFragment] = []
+    for file in ALWAYS_MEMORY_FILES:
+        body = strip_memory_chrome(memory_body_from_snapshot(snapshot, file, scope=None))
+        if body:
+            frags.append(RuleFragment(scope="global", authority="ai", body=body))
+    if folder_id:
+        project_body = strip_memory_chrome(
+            memory_body_from_snapshot(snapshot, CORE_MEMORY_FILE, scope=folder_id)
+        )
+        if project_body:
+            frags.append(
+                RuleFragment(
+                    scope="project",
+                    authority="ai",
+                    body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}",
+                )
+            )
+        nav_body = strip_memory_chrome(
+            memory_body_from_snapshot(snapshot, NAVIGATION_MEMORY_FILE, scope=folder_id)
+        )
+        if nav_body:
+            frags.append(
+                RuleFragment(
+                    scope="project",
+                    authority="ai",
+                    body=f"{_PROJECT_NAV_LABEL}\n{nav_body}",
+                )
+            )
+    return frags
+
+
 async def assemble_turn_rules(
     store: MemoryStore,
     user_id: str,
@@ -468,33 +509,47 @@ async def assemble_turn_rules(
 ) -> tuple[str, str]:
     """Turn-time convenience over :func:`assemble_injected_rules` (the pipeline entry point).
 
-    AI memory is read through the given ``store`` (the patchable pipeline seam); user rules are
-    read through account-cloud HTTP when the sidecar turn bound account creds, else a fresh
-    document session. User-rule loading degrades to「no rules」on ANY error (missing DB in a
+    AI memory is read through the given ``store`` (the patchable pipeline seam) when no
+    account ticket is bound. With account creds, prepare reads the process snapshot
+    cache only (warm seeds it); miss → empty injection — never await cloud HTTP on the
+    turn hot path. User-rule loading degrades to「no rules」on ANY error (missing DB in a
     unit test, transient / offline failure) so memory injection can never break a turn —
     matching the rest of the memory system's defensive posture. Byte-stability holds: with no
     user rules the memory body is identical to the legacy concatenation.
     """
-    from agentcore.account.credentials import cloud_list_user_rules, get_account_credentials
+    from agentcore.account.credentials import get_account_credentials
     from agentcore.db.base import async_session_factory
+    from agentcore.memory.account_prepare_cache import get_account_rules_memory_snapshot
 
     user_fragments: list[RuleFragment] = []
+    memory_frags: list[RuleFragment] = []
     try:
         creds = get_account_credentials()
         if creds is not None:
-            payload = await cloud_list_user_rules(creds, folder_id=folder_id)
-            user_fragments = _user_rule_fragments_from_cloud(payload, folder_id=folder_id)
+            snap = get_account_rules_memory_snapshot(user_id, folder_id)
+            if snap is not None:
+                user_fragments = _user_rule_fragments_from_cloud(
+                    snap.rules_payload, folder_id=folder_id
+                )
+                if enabled:
+                    memory_frags = _memory_fragments_from_snapshot(
+                        snap, folder_id=folder_id
+                    )
+            # miss → empty injection (no cloud await)
         else:
             async with async_session_factory() as session:
                 user_fragments = await _user_rule_fragments(
                     DocumentRepository(session), user_id, folder_id=folder_id
                 )
+            if enabled:
+                memory_frags = await _memory_fragments(
+                    store, user_id, folder_id=folder_id
+                )
     except Exception as e:  # noqa: BLE001 - user rules must never break a turn's assembly
         logger.warning("memory.user_rules_load_failed", user_id=user_id, error=str(e))
 
     fragments = list(user_fragments)
-    if enabled:
-        fragments.extend(await _memory_fragments(store, user_id, folder_id=folder_id))
+    fragments.extend(memory_frags)
     return compose_injected_rules(fragments, max_docs=max_docs, max_chars=max_chars)
 
 
@@ -595,17 +650,22 @@ async def load_on_demand_user_rules(
     """Merge global + project on_demand user rules for the「规则目录」(or []).
 
     Degrades to [] on any error (same defensive posture as always-rule loading).
-    Account-cloud turns use ``POST …/account/rules/list`` on_demand fields (same
-    ticket as always rules); local / server turns read the document session.
+    Account-ticketed turns read the process prepare snapshot only (warm seeds it;
+    miss → []); local / server turns read the document session.
     """
-    from agentcore.account.credentials import cloud_list_user_rules, get_account_credentials
+    from agentcore.account.credentials import get_account_credentials
     from agentcore.db.base import async_session_factory
+    from agentcore.memory.account_prepare_cache import get_account_rules_memory_snapshot
 
     try:
         creds = get_account_credentials()
         if creds is not None:
-            payload = await cloud_list_user_rules(creds, folder_id=folder_id)
-            return on_demand_user_rules_from_cloud(payload, folder_id=folder_id)
+            snap = get_account_rules_memory_snapshot(user_id, folder_id)
+            if snap is None:
+                return []
+            return on_demand_user_rules_from_cloud(
+                snap.rules_payload, folder_id=folder_id
+            )
         async with async_session_factory() as session:
             repo = DocumentRepository(session)
             summaries: dict[str, str] = {}

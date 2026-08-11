@@ -874,14 +874,14 @@ def tool_failures_from_journal(
     if not entries:
         return []
 
-    def _row(tool: str, message: str) -> dict[str, str] | None:
+    def _row(tool: str, message: str, *, code: str | None = None) -> dict[str, str] | None:
         name = (tool or "").strip()
         if not name:
             return None
         msg = truncate_tool_failure_message(message)
         return {
             "tool": name[:128],
-            "code": normalize_local_turn_tool_failure_code(msg),
+            "code": normalize_local_turn_tool_failure_code(msg, code=code),
             "message": msg,
         }
 
@@ -896,7 +896,13 @@ def tool_failures_from_journal(
             continue
         if payload.get("success", True):
             continue
-        row = _row(str(payload.get("name") or ""), str(payload.get("result") or ""))
+        raw_code = payload.get("code")
+        code = str(raw_code).strip() if isinstance(raw_code, str) else None
+        row = _row(
+            str(payload.get("name") or ""),
+            str(payload.get("result") or ""),
+            code=code or None,
+        )
         if row:
             from_facts.append(row)
     if from_facts:
@@ -913,9 +919,12 @@ def tool_failures_from_journal(
             continue
         if payload.get("status", "success") == "success":
             continue
+        raw_code = payload.get("code")
+        code = str(raw_code).strip() if isinstance(raw_code, str) else None
         row = _row(
             str(payload.get("tool_name") or ""),
             str(payload.get("result") or ""),
+            code=code or None,
         )
         if row:
             from_ends.append(row)

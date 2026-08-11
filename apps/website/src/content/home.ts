@@ -101,8 +101,10 @@ export const GRAPH = {
   finished: { zh: "已完成", en: "Done" },
   queued: { zh: "等待依赖", en: "Waiting on deps" },
 
-  /* 五个 worker、三个波次——布局是 DAG（见 CollabGraph），不是扇出清单。
-     ①两个并行摸底 → ②吃①产出 → ③质检可打回。时间线错开只是加分。 */
+  /* 五个 worker、三个波次（与 CollabGraph 时间线 / 顶栏人数必须一致）。
+     呈现是扇出 + 时序错开，不必画 DAG 边；但角色与波次仍按依赖讲：
+     ①两个并行摸底 → ②吃①产出 → ③质检进场。若五条同时亮同时灭，
+     看起来就只是「一个助手分饰五角」，正是本站要反的那件事。 */
   workers: [
     {
       name: { zh: "资料检索", en: "Retrieval" },
@@ -158,8 +160,8 @@ export const GRAPH = {
     merging: { zh: "汇总中", en: "Merging" },
     ready: { zh: "报告已生成", en: "Report ready" },
     body: {
-      zh: "编排：①摸底 → ②研判吃①产出 → ③质检可打回。",
-      en: "Plan: ① scope → ② analyze on ① → ③ review may send back.",
+      zh: "编排：①并行摸底 → ②依赖起步 → ③质检收口。",
+      en: "Plan: ① parallel scope → ② run on ① → ③ review closes.",
     },
   },
 };

@@ -7571,6 +7571,24 @@
         "title": "HostAxis",
         "type": "string"
       },
+      "InferenceTokenRequest": {
+        "description": "Optional mint body — scopes returned ``model`` to a conversation main slot.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          }
+        },
+        "title": "InferenceTokenRequest",
+        "type": "object"
+      },
       "InferenceTokenResponse": {
         "description": "A freshly minted inference token + its lifetime + server-resolved upstream model.",
         "properties": {
@@ -15891,7 +15909,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.3.51"
+    "version": "0.3.53"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -30182,6 +30200,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/InferenceTokenRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {

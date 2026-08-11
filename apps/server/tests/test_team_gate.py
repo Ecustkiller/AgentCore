@@ -4,7 +4,7 @@ Covers investigation trigger, one-shot latch, worker isolation, hard-stop tool
 strip, and post-gate long-answer reject. Scripted fake provider — zero LLM.
 
 **不扫用户原文猜意图**分叉（无成篇/改文件/摸底正则路径）；统一硬闸文案。
-闸前长文直答仍靠提示词「路由·第一拍」（see test_prompt / _CEO_CORE_HINT）。
+闸前长文直答仍靠提示词路由段（禁止长篇推演 / 定方向后立刻行动；see test_prompt / _CEO_CORE_HINT）。
 """
 
 from __future__ import annotations

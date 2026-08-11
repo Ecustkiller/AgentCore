@@ -290,19 +290,26 @@ class ToolCallFact:
     arguments: str = ""
     result: str = ""
     success: bool = True
+    # Coarse failure code for local-turn write-back stats (omitted when empty).
+    code: str = ""
     kind: ClassVar[FactKind] = FactKind.TOOL_CALL
 
     def to_fact(self, ts: str | None = None) -> Fact:
+        payload: dict[str, Any] = {
+            "run_id": self.run_id,
+            "tool_call_id": self.tool_call_id,
+            "name": self.name,
+            "arguments": self.arguments,
+            "result": self.result,
+            "success": self.success,
+        }
+        # Old journals omit ``code``; only write when non-empty.
+        code = (self.code or "").strip()
+        if code:
+            payload["code"] = code
         return Fact(
             kind=self.kind.value,
-            payload={
-                "run_id": self.run_id,
-                "tool_call_id": self.tool_call_id,
-                "name": self.name,
-                "arguments": self.arguments,
-                "result": self.result,
-                "success": self.success,
-            },
+            payload=payload,
             ts=ts,
         )
 

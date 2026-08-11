@@ -78,6 +78,9 @@ class HandlerMixin:
             outbox=self._outbox_store is not None,
             durable_roster=self._run_session_store is not None,
         )
+        # Silent background index warm (Cursor-style): schedule once after root is
+        # bound; coalesce with later warmCodeIndex / write kicks. Never awaits ensure.
+        self._schedule_code_index_warm()
         await self._reply(
             request_id,
             {
@@ -92,7 +95,130 @@ class HandlerMixin:
                     "durablePause": self._paused_store is not None,
                     "outbox": self._outbox_store is not None,
                     "durableRoster": self._run_session_store is not None,
+                    "warmCodeIndex": True,
+                    # List+seed must run in Electron main (mcp-service); this flag
+                    # only advertises the RPC. Desktop warmMcpDiscover does the work.
+                    "warmMcpDiscover": True,
+                    # Non-turn warm: parallel account HTTP → seed prepare rules/memory cache.
+                    "warmAccountRulesMemory": True,
                 },
+            },
+        )
+
+    def _schedule_code_index_warm(self) -> None:
+        """Fire-and-forget code-index ensure for the initialized workspace root."""
+        if self._root is None:
+            return
+        backend = self._make_backend()
+        backend.start_code_index_maintenance()
+        logger.info("sidecar.warm_code_index", root_label=self._root.name)
+
+    async def _on_warm_code_index(self, request_id: Any, params: dict[str, Any]) -> None:
+        """Non-turn RPC: schedule background index ensure; return immediately."""
+        del params  # no params today; reserved for future force flags
+        if not self._initialized or self._root is None:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        self._schedule_code_index_warm()
+        await self._reply(request_id, {"ok": True})
+
+    async def _on_warm_mcp_discover(self, request_id: Any, params: dict[str, Any]) -> None:
+        """Non-turn RPC: seed MCP discover cache from desktop ``list_tools`` payload."""
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        from agentcore.tools.mcp.wire import (
+            parse_mcp_list_payload,
+            seed_mcp_discover_cache,
+        )
+
+        result = parse_mcp_list_payload(params)
+        # Align cache_scope with prepare: adopt per-call userId before seed
+        # (open-project warm may refresh after initialize'd as local / probe).
+        self._refresh_user_id(params)
+        # Open-project warm has no conversation yet — user-scoped key only.
+        seed_mcp_discover_cache("", result, cache_scope=self._user_id)
+        logger.info(
+            "sidecar.warm_mcp_discover",
+            user_id=self._user_id,
+            tool_count=result.tool_count,
+            ready_servers=result.ready_servers,
+            failed_servers=result.failed_servers,
+            degraded=result.degraded,
+        )
+        await self._reply(request_id, {"ok": True})
+
+    async def _on_warm_account_rules_memory(
+        self, request_id: Any, params: dict[str, Any]
+    ) -> None:
+        """Non-turn RPC: warm account rules/memory snapshot into prepare cache."""
+        if not self._initialized:
+            await self._send(
+                protocol.make_error(
+                    request_id, protocol.NOT_INITIALIZED, "initialize must be called first"
+                )
+            )
+            return
+        # Desktop may refresh the account ticket on warm (same shape as startTurn).
+        self._refresh_creds(params)
+        self._refresh_user_id(params)
+        if self._account_creds is None:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_REQUEST,
+                    "accountAuth required for warmAccountRulesMemory",
+                )
+            )
+            return
+        from agentcore.memory.account_prepare_cache import warm_account_rules_memory
+        from agentcore.sidecar.server_pkg.turns import normalize_folder_id_param
+
+        folder_id = (
+            normalize_folder_id_param(params.get("folderId"))
+            if "folderId" in params
+            else None
+        )
+        try:
+            snapshot = await warm_account_rules_memory(
+                self._account_creds,
+                user_id=self._user_id,
+                folder_id=folder_id,
+            )
+        except Exception as e:  # noqa: BLE001 - warm must not kill the sidecar
+            logger.warning(
+                "sidecar.warm_account_rules_memory_failed",
+                user_id=self._user_id,
+                folder_id=folder_id,
+                error=str(e),
+            )
+            await self._send(
+                protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e))
+            )
+            return
+        logger.info(
+            "sidecar.warm_account_rules_memory",
+            user_id=self._user_id,
+            folder_id=folder_id,
+            degraded=snapshot.degraded,
+            topic_count=len(snapshot.memory_topics),
+            memory_file_count=len(snapshot.memory_bodies),
+        )
+        await self._reply(
+            request_id,
+            {
+                "ok": True,
+                "degraded": snapshot.degraded,
+                "topicCount": len(snapshot.memory_topics),
+                "memoryFileCount": len(snapshot.memory_bodies),
             },
         )
 

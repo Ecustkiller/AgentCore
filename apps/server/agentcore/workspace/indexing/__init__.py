@@ -4,6 +4,11 @@ from agentcore.workspace.indexing.bm25 import BM25Index
 from agentcore.workspace.indexing.chunker import RawChunk, chunk_file
 from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
+from agentcore.workspace.indexing.registry import (
+    clear_index_registry,
+    shared_index_maintainer,
+    shared_index_manager,
+)
 
 __all__ = [
     "BM25Index",
@@ -11,4 +16,7 @@ __all__ = [
     "IndexManager",
     "RawChunk",
     "chunk_file",
+    "clear_index_registry",
+    "shared_index_maintainer",
+    "shared_index_manager",
 ]

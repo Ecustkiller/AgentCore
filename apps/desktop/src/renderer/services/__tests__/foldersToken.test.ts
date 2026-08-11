@@ -11,6 +11,7 @@ vi.mock("@/services/api", () => ({
 
 import {
   clearSidecarFoldersAuth,
+  looksLikeFoldersTokenFailure,
   resolveSidecarFoldersAuth,
 } from "../foldersToken";
 
@@ -97,5 +98,20 @@ describe("foldersToken", () => {
     const again = await resolveSidecarFoldersAuth();
     expect(apiPost).toHaveBeenCalledTimes(2);
     expect(again?.apiKey).toBe("new");
+  });
+
+  it("looksLikeFoldersTokenFailure matches unauthorized / code", () => {
+    expect(
+      looksLikeFoldersTokenFailure(
+        new Error("folders list unauthorized (401)"),
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeFoldersTokenFailure({
+        message: "x",
+        code: "folders_cloud_unauthorized",
+      }),
+    ).toBe(true);
+    expect(looksLikeFoldersTokenFailure(new Error("network down"))).toBe(false);
   });
 });

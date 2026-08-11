@@ -659,7 +659,7 @@ def test_local_package_install_follows_execution_class():
 
 
 def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
-    """样例 GVISOR_TIMEOUT_MAX_SECONDS 勿钉 60（会夹死外环 600s verify）。"""
+    """样例 GVISOR_TIMEOUT_MAX_SECONDS 勿钉 60（会夹死外环灾难顶 1200s）。"""
     from pathlib import Path
 
     roots = [
@@ -669,5 +669,5 @@ def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
     for path in roots:
         text = path.read_text(encoding="utf-8")
         assert "GVISOR_TIMEOUT_MAX_SECONDS=60" not in text
-        assert "GVISOR_TIMEOUT_MAX_SECONDS=630" in text
+        assert "GVISOR_TIMEOUT_MAX_SECONDS=1230" in text
         assert "夹死" in text or "外环" in text

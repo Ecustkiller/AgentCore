@@ -68,6 +68,78 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "found_role": "str",
     },
+    "chat.prepare_phase": {
+        "phase": "str",
+        "ms": "int",
+    },
+    "desktop.mcp_list_ok": {
+        "duration_ms": "int",
+        "tool_count": "int",
+        "ready_servers": "int",
+        "failed_servers": "int",
+    },
+    "desktop.mcp_list_degraded": {
+        "detail": "str",
+        "duration_ms": "int",
+        "tool_count": "int",
+        "failed_servers": "int",
+    },
+    "desktop.mcp_list_cache_hit": {
+        "conversation_id": "str",
+        "cache_scope": "str",
+        "degraded": "bool",
+        "tool_count": "int",
+        "duration_ms": "int",
+    },
+    "desktop.mcp_list_cache_miss": {
+        "conversation_id": "str",
+        "cache_scope": "str",
+        "detail": "str",
+        "duration_ms": "int",
+        "tool_count": "int",
+    },
+    "desktop.mcp_list_cache_seed": {
+        "conversation_id": "str",
+        "cache_scope": "str",
+        "degraded": "bool",
+        "tool_count": "int",
+    },
+    "account.rules_memory_cache_hit": {
+        "user_id": "str",
+        "folder_id": "str",
+        "degraded": "bool",
+        "topic_count": "int",
+    },
+    "account.rules_memory_cache_miss": {
+        "user_id": "str",
+        "folder_id": "str",
+    },
+    "account.rules_memory_cache_seed": {
+        "user_id": "str",
+        "folder_id": "str",
+        "degraded": "bool",
+        "topic_count": "int",
+        "memory_file_count": "int",
+        "ttl_seconds": "float",
+    },
+    "account.rules_memory_warm_failed": {
+        "user_id": "str",
+        "folder_id": "str",
+        "part": "str",
+        "error": "str",
+    },
+    "sidecar.warm_account_rules_memory": {
+        "user_id": "str",
+        "folder_id": "str",
+        "degraded": "bool",
+        "topic_count": "int",
+        "memory_file_count": "int",
+    },
+    "sidecar.warm_account_rules_memory_failed": {
+        "user_id": "str",
+        "folder_id": "str",
+        "error": "str",
+    },
     "delegate.started": {
         "nodes": "int",
         "call": "str",
@@ -307,6 +379,12 @@ KEY_DESC: dict[str, str] = {
     "chat.regenerate_rejected": (
         "regenerate 早退拒绝（会话不存在 / 目标非用户消息或已删除）；排前端传错 id"
     ),
+    "chat.prepare_phase": "prepare/assemble 分段耗时（phase + ms；每 phase 一行）",
+    "desktop.mcp_list_ok": "MCP list 成功（duration_ms / tool_count）",
+    "desktop.mcp_list_degraded": "MCP list 超时或降级（带 duration_ms）",
+    "desktop.mcp_list_cache_hit": "MCP list 命中进程内缓存（含 cache_scope / duration_ms）",
+    "desktop.mcp_list_cache_miss": "MCP list 只读缓存未命中（prepare/resume；不发 ClientTool）",
+    "desktop.mcp_list_cache_seed": "MCP list 结果写入进程内缓存（非回合暖）",
     "delegate.started": "编排委派开始（agents/plan/waves）",
     "delegate.completed": "委派批次完成（escalations/scope）",
     "delegate.yielded": "委派中途让出（replan 边界）",
@@ -367,6 +445,18 @@ KEY_DESC: dict[str, str] = {
         "Local channel 仍忙，跳过本轮索引并 coalesce 重试"
     ),
     "workspace.index_failed": "后台代码索引 ensure 失败（带 error/duration_ms）",
+    "sidecar.warm_code_index": "静默暖代码索引（initialize / warmCodeIndex RPC schedule）",
+    "sidecar.warm_mcp_discover": "静默暖 MCP 列表进进程缓存（warmMcpDiscover RPC seed）",
+    "sidecar.warm_account_rules_memory": (
+        "静默暖账户 rules/memory 进 prepare 快照缓存（warmAccountRulesMemory）"
+    ),
+    "sidecar.warm_account_rules_memory_failed": "warmAccountRulesMemory 拉取失败",
+    "account.rules_memory_cache_hit": "prepare rules/memory 命中进程快照缓存",
+    "account.rules_memory_cache_miss": (
+        "prepare rules/memory 只读缓存未命中（空注入；不 await 云）"
+    ),
+    "account.rules_memory_cache_seed": "账户 rules/memory 快照写入进程缓存（非回合暖）",
+    "account.rules_memory_warm_failed": "warm 拉取 rules/memory 部分失败（degraded seed）",
 }
 
 

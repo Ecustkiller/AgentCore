@@ -236,6 +236,12 @@ const sidecarApi: SidecarApi = {
   debateSteer: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.debateSteer, req),
   resume: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.resume, req),
   probe: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.probe, req),
+  warmCodeIndex: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.warmCodeIndex, req),
+  warmMcpDiscover: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.warmMcpDiscover, req),
+  warmAccountRulesMemory: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.warmAccountRulesMemory, req),
   recovery: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.recovery, req),
   attach: (req) => ipcRenderer.invoke(SIDECAR_CHANNELS.attach, req),
   turnFilesDiff: (req) =>

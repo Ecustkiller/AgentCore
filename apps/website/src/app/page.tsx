@@ -83,8 +83,9 @@ export default function Home() {
             className="pointer-events-none absolute inset-x-0 bottom-0 h-[12.5rem] bg-gradient-to-t from-background via-background/70 to-transparent"
           />
 
-          {/* Hero 版心加宽；左栏文案封顶，剩余全给协作图五列。 */}
-          <div className="relative mx-auto grid w-[min(94rem,100%-2rem)] items-center gap-10 xl:grid-cols-[minmax(0,22rem)_minmax(0,1fr)] xl:gap-8">
+          {/* 两栏推到 xl 而不是 lg：lg（1024px）下右栏只剩 ~470px，
+              协作图会被迫退到窄几何，反而比整宽单栏更挤。 */}
+          <div className="container-x relative grid items-center gap-14 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.06fr)] xl:gap-16">
             <div>
               {/* 品类行：首屏必须有一句说清「这是个什么平台」。
                   改版时一度被我换成头像堆丢掉了，补回来。 */}
@@ -168,13 +169,13 @@ export default function Home() {
               </p>
             </div>
 
-            {/* 单栏区间给更宽上限：五列 DAG 在窄容器里会被压扁。
-                两栏时右栏已够宽，放开即可。min-w-0 避免 grid 子项撑破。 */}
+            {/* 单栏区间（<xl）给个宽度上限：整宽铺开时协作图会长到 800px+ 高，
+                把下面的内容全推走。两栏时右栏本身就够窄，放开即可。 */}
             <div
-              className="float-in mx-auto w-full min-w-0 max-w-[56rem] max-sm:-mx-1 xl:max-w-none"
+              className="float-in mx-auto w-full max-w-[44rem] max-sm:-mx-1 xl:max-w-none"
               style={{ animationDelay: "420ms" }}
             >
-              <BrowserFrame url="app.agentcore.dev" tilt={false}>
+              <BrowserFrame url="app.agentcore.dev">
                 <CollabGraph />
               </BrowserFrame>
             </div>

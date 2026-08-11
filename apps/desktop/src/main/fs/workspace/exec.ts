@@ -129,8 +129,9 @@ export function pickRegistryEnv(raw: unknown): Record<string, string> {
 /**
  * 在 `cwd` 下跑一个脚本文件，捕获 stdout/stderr，超时则强杀。
  *
- * 镜像服务端 SubprocessSandbox：超时 → stdout 清空、stderr 写超时说明、exit -1；
- * 进程起不来（如 PATH 无 python）→ 失败结果而非抛错，保证通道总收到信封。永不 reject。
+ * 镜像服务端 SubprocessSandbox：墙钟灾难顶 / 静默活性超时 → stdout 清空、stderr
+ * 写超时说明、exit -1；进程起不来（如 PATH 无 python）→ 失败结果而非抛错，保证
+ * 通道总收到信封。永不 reject。
  */
 function runSubprocess(
   cmd: string[],
@@ -140,6 +141,7 @@ function runSubprocess(
   timeoutSeconds: number,
   startedMs: number,
   envExtra?: Record<string, string>,
+  idleTimeoutSeconds?: number | null,
 ): Promise<WorkspaceOpResult> {
   return new Promise((resolve) => {
     const [bin, ...preArgs] = cmd;
@@ -150,27 +152,50 @@ function runSubprocess(
     });
     let stdout = "";
     let stderr = "";
-    let timedOut = false;
+    let timedOut: "disaster" | "idle" | false = false;
     let settled = false;
+    let lastOutputMs = Date.now();
+
+    const noteOutput = () => {
+      lastOutputMs = Date.now();
+    };
 
     child.stdout.on("data", (chunk: Buffer) => {
+      noteOutput();
       if (stdout.length < EXEC_CAPTURE_CAP) stdout += decodePipeChunk(chunk);
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      noteOutput();
       if (stderr.length < EXEC_CAPTURE_CAP) stderr += decodePipeChunk(chunk);
     });
     // 进程未读 stdin 即退出会让写入抛 EPIPE——吞掉，不让它变成未捕获错误。
     child.stdin.on("error", () => {});
 
-    const timer = setTimeout(() => {
-      timedOut = true;
+    const disasterTimer = setTimeout(() => {
+      timedOut = "disaster";
       child.kill("SIGKILL");
     }, timeoutSeconds * 1000);
+
+    let idleTimer: ReturnType<typeof setInterval> | undefined;
+    const idleLimitMs =
+      idleTimeoutSeconds != null && idleTimeoutSeconds > 0
+        ? idleTimeoutSeconds * 1000
+        : null;
+    if (idleLimitMs != null) {
+      idleTimer = setInterval(() => {
+        if (settled || timedOut) return;
+        if (Date.now() - lastOutputMs >= idleLimitMs) {
+          timedOut = "idle";
+          child.kill("SIGKILL");
+        }
+      }, 200);
+    }
 
     const finish = (r: WorkspaceOpResult) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
+      clearTimeout(disasterTimer);
+      if (idleTimer) clearInterval(idleTimer);
       resolve(r);
     };
 
@@ -187,12 +212,24 @@ function runSubprocess(
     });
     child.on("close", (code) => {
       const duration_ms = Date.now() - startedMs;
-      if (timedOut) {
+      if (timedOut === "idle") {
         finish(
           execResult({
             success: false,
             stdout: "",
-            stderr: `Timeout: execution exceeded ${timeoutSeconds}s`,
+            stderr: `Timeout: no output for ${idleTimeoutSeconds}s (execution stalled)`,
+            exit_code: -1,
+            duration_ms,
+          }),
+        );
+        return;
+      }
+      if (timedOut === "disaster") {
+        finish(
+          execResult({
+            success: false,
+            stdout: "",
+            stderr: `Timeout: forced stop after ${timeoutSeconds}s (forced stop)`,
             exit_code: -1,
             duration_ms,
           }),
@@ -245,12 +282,17 @@ export async function opExecute(
 
   const code = String(args.code ?? "");
   const stdin = args.stdin == null ? null : String(args.stdin);
-  // 通道上限 = EXEC_TIMEOUT_CAP_S（须覆盖 test_run 验证预算）；工具层自己的上限
-  // （code_execute ≤60）在服务端 clamp，本处只兑现请求方给出的 timeout_seconds。
+  // 通道上限 = EXEC_TIMEOUT_CAP_S（须覆盖 test_run 灾难顶 20min + slack）；
+  // 工具层自己的上限（code_execute ≤60）在服务端 clamp，本处只兑现请求方给出的秒数。
   const timeoutSeconds = Math.max(
     1,
     Math.min(Number(args.timeout_seconds ?? 30), EXEC_TIMEOUT_CAP_S),
   );
+  const idleRaw = args.idle_timeout_seconds;
+  const idleTimeoutSeconds =
+    idleRaw == null || idleRaw === ""
+      ? null
+      : Math.max(1, Math.min(Number(idleRaw), timeoutSeconds));
 
   // cwd = 工作区子路径（工作区对称化 D1a）：把进程工作目录定到该子树，使本地执行与文件工具
   // 同目录（呼应服务端 cwd=workspace）。`""` / `"."` = 绑定根自身（现行为）。子树尚不存在
@@ -295,6 +337,7 @@ export async function opExecute(
       timeoutSeconds,
       startedMs,
       Object.keys(envExtra).length > 0 ? envExtra : undefined,
+      idleTimeoutSeconds,
     );
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));

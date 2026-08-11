@@ -20,6 +20,8 @@ PLATFORM_MODEL_FLASH = "deepseek-v4-flash"
 PLATFORM_MODEL_PRO = "deepseek-v4-pro"
 DEEPSEEK_V4_FLASH = PLATFORM_MODEL_FLASH
 DEEPSEEK_V4_PRO = PLATFORM_MODEL_PRO
+# OpenCode Zen free SKU (upstream ¥0); product still meters at Flash nominal via pricing.
+DEEPSEEK_V4_FLASH_FREE = "deepseek-v4-flash-free"
 
 # Router / ``agent_provider_id`` sentinel when a worker override runs on platform credentials
 # (main turn may be BYOK). ``route_model_for("agent")`` prefixes ``platform/{model}``;

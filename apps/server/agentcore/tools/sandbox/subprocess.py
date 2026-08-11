@@ -263,6 +263,7 @@ def _execute_blocking(
     env: dict[str, str] | None,
     stdin_bytes: bytes | None,
     timeout_seconds: float,
+    idle_timeout_seconds: float | None,
     cancel_flag: threading.Event,
     done_event: threading.Event,
     proc_holder: dict[str, subprocess.Popen[bytes]],
@@ -271,11 +272,24 @@ def _execute_blocking(
 ) -> tuple[str, str, int]:
     """Run the child with blocking stdlib subprocess.
 
-    Raises ``SandboxTimeoutError`` on timeout and ``_CancelledError`` when ``cancel_flag``
-    is set. Always sets ``done_event`` before returning/raising.
+    Raises ``SandboxTimeoutError`` on wall or idle timeout and ``_CancelledError``
+    when ``cancel_flag`` is set. Always sets ``done_event`` before returning/raising.
     """
+    from agentcore.tools.sandbox.exec_env import (
+        disaster_timeout_stderr,
+        idle_timeout_stderr,
+    )
+
+    last_output = time.monotonic()
+    idle_limit = (
+        float(idle_timeout_seconds)
+        if idle_timeout_seconds is not None and idle_timeout_seconds > 0
+        else None
+    )
 
     def emit(stream_name: str, text: str) -> None:
+        nonlocal last_output
+        last_output = time.monotonic()
         if on_output is None:
             return
         if loop is None:
@@ -329,11 +343,13 @@ def _execute_blocking(
             if cancel_flag.is_set():
                 _reap_tree_sync(process, child_pid)
                 raise _CancelledError
-            if time.monotonic() >= deadline:
+            now = time.monotonic()
+            if now >= deadline:
                 _reap_tree_sync(process, child_pid)
-                raise SandboxTimeoutError(
-                    f"Execution exceeded {timeout_seconds}s timeout"
-                )
+                raise SandboxTimeoutError(disaster_timeout_stderr(int(timeout_seconds)))
+            if idle_limit is not None and (now - last_output) >= idle_limit:
+                _reap_tree_sync(process, child_pid)
+                raise SandboxTimeoutError(idle_timeout_stderr(int(idle_limit)))
             # Short sleep so cancel / timeout are noticed promptly without spinning.
             time.sleep(0.05)
 
@@ -430,6 +446,11 @@ class SubprocessSandbox:
                     ),
                     stdin_bytes=request.stdin.encode() if request.stdin else None,
                     timeout_seconds=float(request.timeout_seconds),
+                    idle_timeout_seconds=(
+                        float(request.idle_timeout_seconds)
+                        if request.idle_timeout_seconds is not None
+                        else None
+                    ),
                     cancel_flag=cancel_flag,
                     done_event=done_event,
                     proc_holder=proc_holder,
@@ -465,12 +486,17 @@ class SubprocessSandbox:
                     duration_ms=duration_ms,
                 )
 
-            except SandboxTimeoutError:
+            except SandboxTimeoutError as exc:
                 duration_ms = int((time.monotonic() - start) * 1000)
+                from agentcore.tools.sandbox.exec_env import disaster_timeout_stderr
+
+                detail = str(exc).strip() or disaster_timeout_stderr(
+                    int(request.timeout_seconds)
+                )
                 return ExecutionResult(
                     success=False,
                     stdout="",
-                    stderr=f"Timeout: execution exceeded {request.timeout_seconds}s",
+                    stderr=detail,
                     exit_code=-1,
                     duration_ms=duration_ms,
                 )

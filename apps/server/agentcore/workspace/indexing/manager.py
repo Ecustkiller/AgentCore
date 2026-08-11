@@ -61,6 +61,9 @@ class IndexManager:
         self._index_truncated = False
         self._building = False
         self._content_dirty = False
+        # Bumps on every ``mark_content_dirty`` so ``ensure_index`` only clears dirty
+        # when no mutation arrived during the pass (coalesce follow-up stays valid).
+        self._dirty_epoch = 0
 
     @classmethod
     def for_workspace_root(cls, workspace_root: str) -> IndexManager:
@@ -99,6 +102,7 @@ class IndexManager:
         """Workspace files changed since the last completed ensure."""
         self._ensure_hydrated()
         self._content_dirty = True
+        self._dirty_epoch += 1
         # Persist across turn/backend rebuild when a committed meta row exists.
         self._get_bm25().mark_meta_dirty_sync()
 
@@ -124,6 +128,10 @@ class IndexManager:
 
         ``BUILDING`` only when no committed snapshot exists yet. A refresh of an
         already-built index stays ``READY`` / ``STALE`` so query keeps serving.
+
+        ``truncated`` alone → ``STALE`` (search UX: prefer grep for completeness).
+        That must **not** force background re-ensure — the file cap cannot heal
+        truncation; see :meth:`needs_background_ensure`.
         """
         self._ensure_hydrated()
         if self._building and not self._has_snapshot:
@@ -132,9 +140,20 @@ class IndexManager:
             return CodeIndexStatus.STALE
         return CodeIndexStatus.READY
 
+    def needs_background_ensure(self) -> bool:
+        """Whether warm / schedule should run a disk ensure (ignores truncated).
+
+        Large repos stay permanently truncated under the file cap; treating that
+        as ``STALE`` for search must not re-scan on every sidecar initialize.
+        Re-ensure only when there is no snapshot yet or content is dirty.
+        """
+        self._ensure_hydrated()
+        return (not self._has_snapshot) or self._content_dirty
+
     async def ensure_index(self, backend: WorkspaceBackend, *, force: bool = False) -> bool:
         """Ensure the index is up to date. Returns whether any file was re-indexed."""
         bm25 = self._ensure_hydrated()
+        dirty_epoch = self._dirty_epoch
         paths, truncated, fingerprints = await self._collect_indexable_paths(backend)
 
         indexed_paths = await bm25.list_indexed_paths()
@@ -207,7 +226,9 @@ class IndexManager:
         self._has_snapshot = True
         self._generation = int(meta.generation)
         self._index_truncated = truncated
-        self._content_dirty = False
+        # Only clear when no ``mark_content_dirty`` arrived during this pass.
+        if self._dirty_epoch == dirty_epoch:
+            self._content_dirty = False
         return updated
 
     async def _collect_indexable_paths(

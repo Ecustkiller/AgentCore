@@ -288,6 +288,41 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
     },
   },
   {
+    id: "quota_platform_restored",
+    label: "额度已恢复 · Flash Free",
+    description: "平台额度恢复 · 单模型 Flash Free（Zen）",
+    title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free",
+    body: `平台测试额度已恢复（内测期提供测试额度）。
+
+当前平台模型：DeepSeek V4 Flash Free（经 OpenCode Zen；限时免费档，条款以 OpenCode 为准）。额度仍为每月 / 每日上限；用尽后可在「设置 · 模型配置」接入自己的 Key 继续使用。
+
+如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
+    severity: "normal",
+    surface: "both",
+    dismiss_policy: "once",
+    card_template: "service",
+    endHint: "发前先归档进行中的 quota_jiurelay",
+    slots: [
+      {
+        key: "note",
+        label: "补充说明（可选）",
+        placeholder: "可留空；如额度数字微调说明",
+        multiline: true,
+      },
+    ],
+    build: (v) => {
+      const note = v.note?.trim();
+      const noteBlock = note ? `\n补充：${note}\n` : "\n";
+      return {
+        title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free",
+        body: `平台测试额度已恢复（内测期提供测试额度）。
+
+当前平台模型：DeepSeek V4 Flash Free（经 OpenCode Zen；限时免费档，条款以 OpenCode 为准）。额度仍为每月 / 每日上限；用尽后可在「设置 · 模型配置」接入自己的 Key 继续使用。
+${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
+      };
+    },
+  },
+  {
     id: "outage",
     label: "故障 / 降级",
     description: "突发不可用 · 横幅常驻",

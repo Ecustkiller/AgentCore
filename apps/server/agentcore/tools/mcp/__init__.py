@@ -7,7 +7,9 @@ from agentcore.tools.mcp.wire import (
     discover_and_register_mcp_tools,
     discover_mcp_tools,
     mcp_capability_label,
+    parse_mcp_list_payload,
     register_mcp_tools,
+    seed_mcp_discover_cache,
 )
 
 __all__ = [
@@ -17,5 +19,7 @@ __all__ = [
     "discover_and_register_mcp_tools",
     "discover_mcp_tools",
     "mcp_capability_label",
+    "parse_mcp_list_payload",
     "register_mcp_tools",
+    "seed_mcp_discover_cache",
 ]

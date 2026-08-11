@@ -44,6 +44,29 @@ def _drive_exhausted(session: CoordinationSession) -> bool:
     return task is None or task.done()
 
 
+def _wall_zero_still_pending(session: CoordinationSession) -> bool:
+    """wall + 0 完成：主回合须继续等首个真实完成，勿 idle_timeout / idle_yield。
+
+    Busy-stamp 只在 LLM/tool 进入后才有；调度间隙（drive 已活、尚未
+    ``mark_worker_busy``）或轮间 clear_busy→完成投递之间也会短暂无 inflight。
+    这些窗口下发 TIMEOUT / 空转让出，会让 CEO 在 ``completed_run_ids`` 仍空时
+    写合成草稿并 soft-stop，xdist 负载下尤为偶发。
+
+    例外：仅有界 verify 在跑时仍允许 idle 巡查（CEO 可 cancel_worker），
+    与 ``has_inflight_work`` 不含 verify 的既有语义对齐。
+    """
+    if session.coordination != "wall":
+        return False
+    if len(session.completed_run_ids) != 0:
+        return False
+    if session.has_verify_busy() and not session.has_inflight_work():
+        return False
+    if session.running_workers():
+        return True
+    task = session.drive_task
+    return task is not None and not task.done()
+
+
 def _synthetic_all_completed(session: CoordinationSession) -> CoordinationEvent:
     return CoordinationEvent(
         kind=CoordinationEventKind.ALL_COMPLETED,
@@ -266,10 +289,7 @@ async def await_coordination_injection(
                     else:
                         # wall + 0 完成：禁止 idle_yield（主回合先收摊 / turn_detached）。
                         # 可继续等真实团队事件；非 wall 或已有完成保持原 detach 语义。
-                        if (
-                            session.coordination == "wall"
-                            and len(session.completed_run_ids) == 0
-                        ):
+                        if _wall_zero_still_pending(session):
                             logger.info(
                                 "coordination.idle_yield_held_wall_zero",
                                 execution_id=session.execution_id,
@@ -292,6 +312,31 @@ async def await_coordination_injection(
                         )
 
                         return idle_yield_messages(session)
+                elif _wall_zero_still_pending(session):
+                    # No busy stamp yet (dispatch→LLM 间隙) or between clear_busy and
+                    # completion post — still not a true stall under wall+0.
+                    wait_reason = "idle_held_wall_zero"
+                    logger.info(
+                        "coordination.idle_yield_held_wall_zero",
+                        execution_id=session.execution_id,
+                        completed=0,
+                        total=session.total_workers,
+                        busy=len(session._busy_workers),
+                        running=len(session.running_workers()),
+                        drive_live=(
+                            session.drive_task is not None
+                            and not session.drive_task.done()
+                        ),
+                    )
+                    more = await _wait_events_with_ux(
+                        session, timeout=min(1.0, _WAIT_HEARTBEAT_S)
+                    )
+                    if more:
+                        events = more
+                        session.reset_idle_backoff()
+                        wait_reason = "waited"
+                    else:
+                        continue
                 else:
                     session.bump_idle_backoff()
                     wait_reason = "idle_timeout"

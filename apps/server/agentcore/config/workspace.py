@@ -85,8 +85,8 @@ class WorkspaceSettings(BaseModel):
     gvisor_memory_limit_mb: int = 512
     # Ceiling for sandbox requests. code_execute still caps itself at 60s; raised
     # so bounded project verify (test_run outer loop) is not silently truncated on
-    # cloud gVisor. 外环验收墙钟：covers typecheck/build budget (600s) + engine slack.
-    gvisor_timeout_max_seconds: int = 630
+    # cloud gVisor. Covers disaster wall (1200s) + engine slack (30s).
+    gvisor_timeout_max_seconds: int = 1230
     # 产物写回 (copy-in/copy-out): the workspace is COPIED into a per-execution
     # staging dir (mounted rw at /workspace), and new/changed regular files are
     # copied back after the run. Caps bound both legs.

@@ -51,6 +51,12 @@ CHANNEL_DEAD_USER_VISIBLE = (
     "本地文件暂时连不上。请检查桌面连接后重试；我将基于已有材料收口。"
 )
 
+# Quiet user-visible line when code_execute/test_run family retires on hangs
+# (mirrors CHANNEL_DEAD_USER_VISIBLE — no card, one-shot content_delta).
+EXEC_ENV_DEAD_USER_VISIBLE = (
+    "本机暂时跑不了命令。请检查桌面或安全软件后重试；我将基于已有材料收口。"
+)
+
 # Prepare / turn-start abort when the local channel is already sticky-dead —
 # no LLM, no "收口" framing (nothing ran yet). Keep ``channel dead`` so
 # ``is_channel_dead_detail`` / SSE mapping stay aligned with tool envelopes.

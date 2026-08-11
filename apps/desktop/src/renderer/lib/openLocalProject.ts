@@ -8,11 +8,13 @@ import {
 import { hasLocalFiles } from "@/lib/capabilities";
 import { startNewConversation } from "@/lib/newConversation";
 import { notifyError, notifySuccess } from "@/lib/toast";
+import { resolveSidecarAccountAuth } from "@/services/accountToken";
 import {
   type FolderMeta,
   createFolder,
   findLocalFolderByBinding,
 } from "@/services/folders";
+import { useAuthStore } from "@/stores/auth";
 import type { FsRoot } from "@shared/ipc-contract";
 import type { NavigateFunction } from "react-router-dom";
 
@@ -96,6 +98,40 @@ export async function pickAndOpenLocalProject(
     notifySuccess(
       created ? `已创建项目「${folder.name}」` : `已打开项目「${folder.name}」`,
     );
+    // Silent Cursor-style index + MCP + rules/memory warm: ensure sidecar (fire-and-forget).
+    if (window.sidecarApi?.warmCodeIndex) {
+      void window.sidecarApi
+        .warmCodeIndex({ rootId: picked.root.id, subpath: "" })
+        .catch(() => {
+          /* best-effort; no toast */
+        });
+    }
+    if (window.sidecarApi?.warmMcpDiscover) {
+      void window.sidecarApi
+        .warmMcpDiscover({
+          rootId: picked.root.id,
+          subpath: "",
+          userId: useAuthStore.getState().user?.id,
+        })
+        .catch(() => {
+          /* best-effort; no toast */
+        });
+    }
+    if (window.sidecarApi?.warmAccountRulesMemory) {
+      void (async () => {
+        const accountAuth = (await resolveSidecarAccountAuth()) ?? undefined;
+        if (!accountAuth) return;
+        await window.sidecarApi?.warmAccountRulesMemory({
+          rootId: picked.root.id,
+          subpath: "",
+          folderId: folder.id,
+          accountAuth,
+          userId: useAuthStore.getState().user?.id,
+        });
+      })().catch(() => {
+        /* best-effort; no toast */
+      });
+    }
     return { ok: true, root: picked.root, folder, created };
   } catch (e) {
     const message = e instanceof Error ? e.message : "打开本地项目失败，请重试";

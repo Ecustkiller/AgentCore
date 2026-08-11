@@ -7,13 +7,15 @@ import { GRAPH } from "@/content/home";
 /**
  * Hero 右侧的「协作图」——产品内协作画布的复刻。
  *
- * 叙事必须是 DAG，不是扇出并行子代理：
- *   你的任务 → ①摸底二人 → ②研判吃①产出 → ③质检（可打回）→ CEO 汇总
+ * 一次真实任务的时间线：你下达目标 → CEO 派出 5 个角色、按依赖分三波推进 →
+ * 各自调用不同工具、耗时不同 → 陆续交付 → CEO 汇总成报告。
  *
- * 静态截图也要读得出「谁等谁」：波次分列 + worker→worker 依赖边 +
- * 质检→分析的打回虚线。时间线错开只是加分，不能替代拓扑。
+ * 呈现接受「扇出 + 时间错开」（不必画 worker→worker 的 DAG 边）：
+ * 五个 worker 的 start/run/done 按波次错开——若五条同时亮同时灭，看起来就是
+ * 「一个助手分饰五角」；错开才读得出各自独立推进、后波在等前波产出。
  *
- * 动画由 120ms tick 驱动、状态从 elapsed 推导（不是一串 setTimeout）。
+ * 动画由一个 120ms 的 tick 驱动、状态全部从 elapsed 推导（不是一串 setTimeout），
+ * 所以循环、暂停、降级都只是改 t 的来源，不会出现半路错位的中间态。
  */
 
 const LOOP = 15_500;
@@ -24,6 +26,7 @@ const WIDE_AT = 560;
 /**
  * 每个 worker 的时间线（ms，相对循环起点）。
  * 波次①（0,1）先并行；②（2,3）等①的产出才起步；③（4）最后进场质检。
+ * 这份错开就是「按依赖分波」的全部证据，改动时别把它们对齐。
  */
 const TIMELINE = [
   { start: 600, run: 1600, done: 4200 },
@@ -45,245 +48,82 @@ const TONES = [
   "--agent-8",
 ];
 
-type Box = { x: number; y: number; w: number; h: number };
-type Pt = { x: number; y: number };
-type EdgeKind = "dispatch" | "dep" | "merge" | "challenge";
-type EdgeDef = {
-  id: string;
-  kind: EdgeKind;
-  /** 路径点（画布坐标） */
-  pts: Pt[];
-  /** 边何时「长」出来 / 何时流动 */
-  litWhen: (stages: Stage[], ceoTone: CeoTone) => boolean;
-  flowWhen: (stages: Stage[], ceoTone: CeoTone) => boolean;
-};
-
 type Geometry = {
   vw: number;
   vh: number;
   task: Box;
   workers: Box[];
   ceo: Box;
-  /** 波次色带（仅装饰，宽几何用） */
-  lanes: Box[];
-  edges: EdgeDef[];
+  edgeIn: (i: number) => Pt[];
+  edgeOut: (i: number) => Pt[];
 };
+type Box = { x: number; y: number; w: number; h: number };
+type Pt = { x: number; y: number };
 
-type Stage = "idle" | "thinking" | "running" | "done";
-type CeoTone = "wait" | "merge" | "ready";
-
-const midY = (b: Box) => b.y + b.h / 2;
-const midX = (b: Box) => b.x + b.w / 2;
-const right = (b: Box): Pt => ({ x: b.x + b.w, y: midY(b) });
-const bottom = (b: Box): Pt => ({ x: midX(b), y: b.y + b.h });
-const top = (b: Box): Pt => ({ x: midX(b), y: b.y });
-
-/** 列间水平依赖：同排直连；跨排在中缝错开折点，避免多条边叠成一根「树干」。 */
-function hPath(a: Box, b: Box, slot = 0.5): Pt[] {
-  const y1 = midY(a);
-  const y2 = midY(b);
-  const leftX = a.x + a.w;
-  const rightX = b.x;
-  if (Math.abs(y1 - y2) < 1) {
-    return [
-      { x: leftX, y: y1 },
-      { x: rightX, y: y2 },
-    ];
-  }
-  const gap = rightX - leftX;
-  const mx = leftX + gap * Math.min(0.85, Math.max(0.15, slot));
-  return [
-    { x: leftX, y: y1 },
-    { x: mx, y: y1 },
-    { x: mx, y: y2 },
-    { x: rightX, y: y2 },
-  ];
-}
-
-/** 同列上下：底出 → 顶进。 */
-function vPath(a: Box, b: Box): Pt[] {
-  const x1 = midX(a);
-  const x2 = midX(b);
-  const my = (a.y + a.h + b.y) / 2;
-  return [
-    { x: x1, y: a.y + a.h },
-    { x: x1, y: my },
-    { x: x2, y: my },
-    { x: x2, y: b.y },
-  ];
-}
-
-/** 打回：从质检左上绕过中缝上方回到分析右侧，不抢 CEO 那一列。 */
-function challengePath(from: Box, to: Box): Pt[] {
-  const start = { x: from.x, y: from.y + 18 };
-  const end = right(to);
-  const crest = Math.min(from.y, to.y) - 22;
-  const dropX = end.x + 22;
-  return [
-    start,
-    { x: start.x, y: crest },
-    { x: dropX, y: crest },
-    { x: dropX, y: end.y },
-    end,
-  ];
-}
-
-function buildEdges(
-  task: Box,
-  workers: Box[],
-  ceo: Box,
-  vertical: boolean,
-): EdgeDef[] {
-  const [w0, w1, w2, w3, w4] = workers;
-  const lit = (i: number) => (s: Stage[]) => s[i] !== "idle";
-  const flow = (i: number) => (s: Stage[]) =>
-    s[i] === "thinking" || s[i] === "running";
-
-  const dispatch = (i: number, pts: Pt[]): EdgeDef => ({
-    id: `d-${i}`,
-    kind: "dispatch",
-    pts,
-    litWhen: (s) => lit(i)(s),
-    flowWhen: (s) => flow(i)(s),
-  });
-  const dep = (id: string, to: number, pts: Pt[]): EdgeDef => ({
-    id,
-    kind: "dep",
-    pts,
-    litWhen: (s) => lit(to)(s),
-    flowWhen: (s) => flow(to)(s),
-  });
-
-  if (!vertical) {
-    return [
-      // 任务 → ①
-      dispatch(0, hPath(task, w0)),
-      dispatch(1, hPath(task, w1)),
-      // ① → ②（分析吃两人产出；趋势吃采集）——折点错开，避免叠成一根树干
-      dep("0-2", 2, hPath(w0, w2, 0.5)),
-      dep("1-2", 2, hPath(w1, w2, 0.28)),
-      dep("1-3", 3, hPath(w1, w3, 0.5)),
-      // ② → ③
-      dep("2-4", 4, hPath(w2, w4, 0.35)),
-      dep("3-4", 4, hPath(w3, w4, 0.65)),
-      // ③ → CEO（宽几何：CEO 独占右列，水平汇入）
-      {
-        id: "4-ceo",
-        kind: "merge",
-        pts: hPath(w4, ceo, 0.5),
-        litWhen: (s, c) => s[4] === "done" || c !== "wait",
-        flowWhen: (_s, c) => c === "merge",
-      },
-      // 质检打回分析
-      {
-        id: "chal",
-        kind: "challenge",
-        pts: challengePath(w4, w2),
-        litWhen: (s) => s[4] === "running" || s[4] === "done",
-        flowWhen: (s) => s[4] === "running",
-      },
-    ];
-  }
-
-  // 窄屏：上→下分层；①② 各两人并排。
-  const taskTo = (w: Box): Pt[] => [
-    bottom(task),
-    { x: midX(task), y: (task.y + task.h + w.y) / 2 },
-    { x: midX(w), y: (task.y + task.h + w.y) / 2 },
-    top(w),
-  ];
-  const down = (a: Box, b: Box): Pt[] => {
-    const my = (a.y + a.h + b.y) / 2;
-    return [
-      bottom(a),
-      { x: midX(a), y: my },
-      { x: midX(b), y: my },
-      top(b),
-    ];
-  };
-  // 打回走右侧沟，避免压住正向边。
-  const chalNarrow: Pt[] = [
-    right(w4),
-    { x: 400, y: midY(w4) },
-    { x: 400, y: midY(w2) },
-    right(w2),
-  ];
-
-  return [
-    dispatch(0, taskTo(w0)),
-    dispatch(1, taskTo(w1)),
-    dep("0-2", 2, down(w0, w2)),
-    dep("1-2", 2, [
-      bottom(w1),
-      { x: midX(w1), y: (w1.y + w1.h + w2.y) / 2 },
-      { x: midX(w2), y: (w1.y + w1.h + w2.y) / 2 },
-      top(w2),
-    ]),
-    dep("1-3", 3, down(w1, w3)),
-    dep("2-4", 4, down(w2, w4)),
-    dep("3-4", 4, down(w3, w4)),
-    {
-      id: "4-ceo",
-      kind: "merge",
-      pts: vPath(w4, ceo),
-      litWhen: (s, c) => s[4] === "done" || c !== "wait",
-      flowWhen: (_s, c) => c === "merge",
-    },
-    {
-      id: "chal",
-      kind: "challenge",
-      pts: chalNarrow,
-      litWhen: (s) => s[4] === "running" || s[4] === "done",
-      flowWhen: (s) => s[4] === "running",
-    },
-  ];
-}
-
-/* 宽屏：任务 | ① | ② | ③质检 | CEO — 中缝 ≥100，边与色带都有呼吸。 */
+/* 宽屏：左 → 中 → 右，扇出再收拢，一眼看出并行。 */
 const WIDE: Geometry = (() => {
-  const task = { x: 8, y: 152, w: 112, h: 80 };
-  const workers = [
-    { x: 156, y: 40, w: 152, h: 92 }, // ① 检索
-    { x: 156, y: 264, w: 152, h: 92 }, // ① 采集
-    { x: 420, y: 40, w: 152, h: 92 }, // ② 分析（中缝 112）
-    { x: 420, y: 264, w: 152, h: 92 }, // ② 趋势
-    { x: 684, y: 152, w: 152, h: 92 }, // ③ 质检
-  ];
-  const ceo = { x: 948, y: 152, w: 152, h: 92 };
+  const workers = [14, 120, 226, 332, 438].map((y) => ({
+    x: 240,
+    y,
+    w: 268,
+    h: 94,
+  }));
+  const cy = (i: number) => workers[i].y + workers[i].h / 2;
   return {
-    vw: 1120,
-    vh: 396,
-    task,
+    vw: 720,
+    vh: 540,
+    task: { x: 4, y: 226, w: 156, h: 88 },
     workers,
-    ceo,
-    lanes: [
-      { x: 140, y: 12, w: 184, h: 372 },
-      { x: 404, y: 12, w: 184, h: 372 },
-      { x: 668, y: 12, w: 184, h: 372 },
+    ceo: { x: 552, y: 226, w: 164, h: 88 },
+    edgeIn: (i) => [
+      { x: 160, y: 270 },
+      { x: 200, y: 270 },
+      { x: 200, y: cy(i) },
+      { x: 240, y: cy(i) },
     ],
-    edges: buildEdges(task, workers, ceo, false),
+    edgeOut: (i) => [
+      { x: 508, y: cy(i) },
+      { x: 530, y: cy(i) },
+      { x: 530, y: 270 },
+      { x: 552, y: 270 },
+    ],
   };
 })();
 
-/* 窄屏：上 → 下分层；①② 并排，保住依赖形状。 */
+/* 窄屏：上 → 下，分支走左沟、回流走右沟，保住扇出/收拢的形状。 */
 const NARROW: Geometry = (() => {
-  const task = { x: 112, y: 8, w: 196, h: 72 };
-  const workers = [
-    { x: 12, y: 104, w: 188, h: 92 },
-    { x: 220, y: 104, w: 188, h: 92 },
-    { x: 12, y: 248, w: 188, h: 92 },
-    { x: 220, y: 248, w: 188, h: 92 },
-    { x: 106, y: 392, w: 208, h: 92 },
-  ];
-  const ceo = { x: 106, y: 536, w: 208, h: 88 };
+  /*
+   * 卡高不能凭感觉给：卡高与字号都随容器等比缩放（前者 h/vw·W，后者 cqi·W），
+   * 比例一旦定错，在任何宽度下都是同样比例地溢出，不会「大屏就好了」。
+   * 这里的 84/420 是按实测内容高（≈0.182·容器宽）留出裕度倒推的。
+   */
+  const workers = [106, 196, 286, 376, 466].map((y) => ({
+    x: 56,
+    y,
+    w: 308,
+    h: 84,
+  }));
+  const cy = (i: number) => workers[i].y + workers[i].h / 2;
   return {
     vw: 420,
-    vh: 640,
-    task,
+    vh: 672,
+    task: { x: 112, y: 4, w: 196, h: 78 },
     workers,
-    ceo,
-    lanes: [],
-    edges: buildEdges(task, workers, ceo, true),
+    ceo: { x: 112, y: 578, w: 196, h: 82 },
+    edgeIn: (i) => [
+      { x: 210, y: 82 },
+      { x: 210, y: 94 },
+      { x: 28, y: 94 },
+      { x: 28, y: cy(i) },
+      { x: 56, y: cy(i) },
+    ],
+    edgeOut: (i) => [
+      { x: 364, y: cy(i) },
+      { x: 392, y: cy(i) },
+      { x: 392, y: 564 },
+      { x: 210, y: 564 },
+      { x: 210, y: 578 },
+    ],
   };
 })();
 
@@ -309,6 +149,8 @@ function orthPath(pts: Pt[], r = 12): string {
 
 const pct = (v: number, total: number) => `${(v / total) * 100}%`;
 
+type Stage = "idle" | "thinking" | "running" | "done";
+
 function stageOf(t: number, i: number): Stage {
   const w = TIMELINE[i];
   if (t < w.start) return "idle";
@@ -326,8 +168,9 @@ export default function CollabGraph() {
 
   /*
    * 几何按「容器宽」切，不是视口宽。
-   * Hero 在 xl 以上是两栏，右栏比视口窄得多；
-   * 阈值必须与 globals.css 里 @container 的 35rem 一致。
+   * Hero 在 lg 以上是两栏，右栏比视口窄得多（视口 1024px 时容器只有 ~430px），
+   * 若这里看视口、字号看 cqi 看容器，两者就会背离成「宽几何 + 窄字号」，
+   * 文字直接撑破卡片。阈值必须与 globals.css 里 @container 的 35rem 一致。
    */
   useEffect(() => {
     const host = hostRef.current;
@@ -341,7 +184,7 @@ export default function CollabGraph() {
 
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
-    // 降级：停在「全员交付、CEO 汇总完成」——静态也讲得完 DAG 故事。
+    // 降级：直接停在「五人都已交付、CEO 汇总完成」那一帧——静态也讲得完整个故事。
     if (reduced.matches) {
       setElapsed(MERGE_UNTIL + 600);
       return;
@@ -360,9 +203,7 @@ export default function CollabGraph() {
       timer = undefined;
     };
 
-    // Hero 首屏先跑：部分环境 IntersectionObserver 首回调会晚一拍，
-    // 若等回调才 start，静态首屏会停在 t=0（无边激活、像清单）。
-    run();
+    // 滚出视口就停表：Hero 在首屏，往下读的时候没必要一直跑。
     const host = hostRef.current;
     const io = host
       ? new IntersectionObserver(
@@ -371,6 +212,7 @@ export default function CollabGraph() {
         )
       : null;
     if (io && host) io.observe(host);
+    else run();
 
     const onVisibility = () =>
       document.hidden ? stop() : hostRef.current && run();
@@ -388,7 +230,7 @@ export default function CollabGraph() {
   const doneCount = stages.filter((s) => s === "done").length;
   const secs = (from: number) => Math.max(0, Math.round((elapsed - from) / 1000));
 
-  const ceoTone: CeoTone =
+  const ceoTone: "wait" | "merge" | "ready" =
     elapsed < ALL_DONE ? "wait" : elapsed < MERGE_UNTIL ? "merge" : "ready";
   const ceoLabel =
     ceoTone === "wait"
@@ -399,10 +241,11 @@ export default function CollabGraph() {
 
   return (
     <div ref={hostRef} className="cg-shell">
+      {/* 产品顶栏——让这块一眼读成「真实界面」而不是示意图 */}
       <div className="cg-toolbar">
         <span className="font-semibold">{tr(GRAPH.toolbarTitle)}</span>
         <span className="flex items-center gap-1.5">
-          <span className="cg-chip" style={{ color: "oklch(0.55 0.1 25)" }}>
+          <span className="cg-chip" style={{ color: "oklch(0.6 0.19 25)" }}>
             <span aria-hidden="true">■</span>
             {tr(GRAPH.toolbarStop)}
           </span>
@@ -411,169 +254,162 @@ export default function CollabGraph() {
       </div>
 
       <div className="cg" style={{ aspectRatio: `${g.vw} / ${g.vh}` }}>
+        {/* 点阵画布 */}
         <div aria-hidden="true" className="cg-canvas" />
 
-        {/* 波次色带：把「按依赖分波」做成空间结构，不只靠角标 */}
-        {g.lanes.map((lane, i) => (
-          <div
-            key={`lane-${i}`}
-            aria-hidden="true"
-            className="cg-lane"
-            style={{
-              left: pct(lane.x, g.vw),
-              top: pct(lane.y, g.vh),
-              width: pct(lane.w, g.vw),
-              height: pct(lane.h, g.vh),
-            }}
-          >
-            <span className="cg-lane-label">{["①", "②", "③"][i]}</span>
-          </div>
-        ))}
-
-        <svg
-          aria-hidden="true"
-          className="absolute inset-0 h-full w-full"
-          viewBox={`0 0 ${g.vw} ${g.vh}`}
-          fill="none"
-        >
-          {g.edges.map((edge) => {
-            const on = edge.litWhen(stages, ceoTone);
-            const flowing = edge.flowWhen(stages, ceoTone);
-            const d = orthPath(edge.pts, edge.kind === "challenge" ? 10 : 12);
-            return (
-              <g key={edge.id}>
-                <path
-                  d={d}
-                  className={`cg-edge cg-edge-${edge.kind} ${on ? "is-on" : ""}`}
-                />
-                {flowing && (
-                  <path
-                    d={d}
-                    className={`cg-flow ${edge.kind === "challenge" ? "is-challenge" : ""}`}
-                  />
-                )}
-              </g>
-            );
-          })}
-        </svg>
-
-        {/* 你的任务 */}
-        <div
-          className="cg-node cg-node-task"
-          style={{
-            left: pct(g.task.x, g.vw),
-            top: pct(g.task.y, g.vh),
-            width: pct(g.task.w, g.vw),
-            height: pct(g.task.h, g.vh),
-          }}
-        >
-          <div className="flex items-center gap-[0.55em]">
-            <span className="cg-avatar cg-avatar-user" aria-hidden="true">
-              <svg viewBox="0 0 16 16" className="w-[0.85em]" fill="currentColor">
-                <circle cx="8" cy="5" r="2.8" />
-                <path d="M2.6 14a5.4 5.4 0 0 1 10.8 0z" />
-              </svg>
-            </span>
-            <div className="min-w-0">
-              <p className="cg-title">{tr(GRAPH.task.title)}</p>
-              <p className="cg-sub">{tr(GRAPH.task.sub)}</p>
-            </div>
-          </div>
-          <p className="cg-meta">{tr(GRAPH.toolbarTitle)}</p>
-        </div>
-
-        {g.workers.map((box, i) => {
-          const stage = stages[i];
-          const spec = GRAPH.workers[i];
-          const active = stage === "thinking" || stage === "running";
-          const note = tr(spec.note);
-          const typed =
-            stage === "running"
-              ? note.slice(
-                  0,
-                  Math.max(
-                    1,
-                    Math.round(
-                      ((elapsed - TIMELINE[i].run) /
-                        (TIMELINE[i].done - TIMELINE[i].run)) *
-                        note.length *
-                        1.35,
-                    ),
-                  ),
-                )
-              : stage === "done"
-                ? note
-                : "";
-
+      {/* 连线：底层是描边（随节点激活「长」出来），上层是流动虚线（仅运行中显示） */}
+      <svg
+        aria-hidden="true"
+        className="absolute inset-0 h-full w-full"
+        viewBox={`0 0 ${g.vw} ${g.vh}`}
+        fill="none"
+      >
+        {g.workers.map((_, i) => {
+          const on = stages[i] !== "idle";
+          const flowing = stages[i] === "thinking" || stages[i] === "running";
           return (
-            <div
-              key={i}
-              className={`cg-node cg-node-worker ${active ? "is-active" : ""} ${
-                stage === "done" ? "is-done" : ""
-              } ${stage === "idle" ? "is-idle" : ""}`}
-              style={{
-                left: pct(box.x, g.vw),
-                top: pct(box.y, g.vh),
-                width: pct(box.w, g.vw),
-                height: pct(box.h, g.vh),
-              }}
-            >
-              <div className="flex items-center gap-[0.5em]">
-                <span
-                  className="cg-avatar"
-                  aria-hidden="true"
-                  style={{
-                    background: `color-mix(in oklab, var(${TONES[i]}), white 72%)`,
-                    color: `color-mix(in oklab, var(${TONES[i]}), black 34%)`,
-                  }}
-                >
-                  {tr(spec.name).slice(0, 1)}
-                </span>
-                <p className="cg-title">{tr(spec.name)}</p>
-                <span className="cg-wave" aria-hidden="true">
-                  {spec.wave}
-                </span>
-                <span className="flex-1" />
-                {stage === "done" && (
-                  <span className="cg-check" aria-hidden="true">
-                    ✓
-                  </span>
-                )}
-              </div>
-
-              <p className={`cg-status ${stage === "done" ? "is-done" : ""}`}>
-                {stage === "idle"
-                  ? tr(GRAPH.queued)
-                  : stage === "thinking"
-                    ? `${tr(GRAPH.thinking)} · ${secs(TIMELINE[i].start)}s`
-                    : stage === "running"
-                      ? `${spec.tool} · ${secs(TIMELINE[i].start)}s`
-                      : `${tr(GRAPH.finished)} · ${Math.round((TIMELINE[i].done - TIMELINE[i].start) / 1000)}s`}
-              </p>
-
-              <p className="cg-note">
-                {typed}
-                {stage === "running" && <span className="cg-caret" />}
-              </p>
-            </div>
+            <g key={`in-${i}`}>
+              <path
+                d={orthPath(g.edgeIn(i))}
+                pathLength={100}
+                className={`cg-edge cg-edge-in ${on ? "is-on" : ""}`}
+              />
+              {flowing && (
+                <path d={orthPath(g.edgeIn(i))} className="cg-flow" />
+              )}
+            </g>
           );
         })}
+        {g.workers.map((_, i) => (
+          <path
+            key={`out-${i}`}
+            d={orthPath(g.edgeOut(i))}
+            pathLength={100}
+            className={`cg-edge ${stages[i] === "done" ? "is-on" : ""}`}
+          />
+        ))}
+      </svg>
 
-        <div
-          className={`cg-node cg-node-ceo ${ceoTone === "ready" ? "is-done" : "is-active"}`}
-          style={{
-            left: pct(g.ceo.x, g.vw),
-            top: pct(g.ceo.y, g.vh),
-            width: pct(g.ceo.w, g.vw),
-            height: pct(g.ceo.h, g.vh),
-          }}
-        >
-          <div className="flex items-center gap-[0.55em]">
-            <span className="cg-avatar cg-avatar-ceo" aria-hidden="true">
-              {ceoTone === "ready" ? "✓" : <span className="cg-spin" />}
-            </span>
-            <p className="cg-title flex-1">{tr(GRAPH.ceo.title)}</p>
+      {/* 你的任务 */}
+      <div
+        className="cg-node cg-node-task"
+        style={{
+          left: pct(g.task.x, g.vw),
+          top: pct(g.task.y, g.vh),
+          width: pct(g.task.w, g.vw),
+          height: pct(g.task.h, g.vh),
+        }}
+      >
+        <div className="flex items-center gap-[0.55em]">
+          <span className="cg-avatar cg-avatar-user" aria-hidden="true">
+            <svg viewBox="0 0 16 16" className="w-[0.85em]" fill="currentColor">
+              <circle cx="8" cy="5" r="2.8" />
+              <path d="M2.6 14a5.4 5.4 0 0 1 10.8 0z" />
+            </svg>
+          </span>
+          <div className="min-w-0">
+            <p className="cg-title">{tr(GRAPH.task.title)}</p>
+            <p className="cg-sub">{tr(GRAPH.task.sub)}</p>
           </div>
+        </div>
+        <p className="cg-meta">{tr(GRAPH.toolbarTitle)}</p>
+      </div>
+
+      {/* 五个 worker · 三波次 */}
+      {g.workers.map((box, i) => {
+        const stage = stages[i];
+        const spec = GRAPH.workers[i];
+        const active = stage === "thinking" || stage === "running";
+        const note = tr(spec.note);
+        // 运行中让 note 逐字打出来：静止的省略号看着像卡住，打字才像在干活。
+        const typed =
+          stage === "running"
+            ? note.slice(
+                0,
+                Math.max(
+                  1,
+                  Math.round(
+                    ((elapsed - TIMELINE[i].run) /
+                      (TIMELINE[i].done - TIMELINE[i].run)) *
+                      note.length *
+                      1.35,
+                  ),
+                ),
+              )
+            : stage === "done"
+              ? note
+              : "";
+
+        return (
+          <div
+            key={i}
+            className={`cg-node cg-node-worker ${active ? "is-active" : ""} ${
+              stage === "done" ? "is-done" : ""
+            } ${stage === "idle" ? "is-idle" : ""}`}
+            style={{
+              left: pct(box.x, g.vw),
+              top: pct(box.y, g.vh),
+              width: pct(box.w, g.vw),
+              height: pct(box.h, g.vh),
+            }}
+          >
+            <div className="flex items-center gap-[0.5em]">
+              <span
+                className="cg-avatar"
+                aria-hidden="true"
+                style={{
+                  background: `color-mix(in oklab, var(${TONES[i]}), white 72%)`,
+                  color: `color-mix(in oklab, var(${TONES[i]}), black 34%)`,
+                }}
+              >
+                {tr(spec.name).slice(0, 1)}
+              </span>
+              <p className="cg-title">{tr(spec.name)}</p>
+              <span className="cg-wave" aria-hidden="true">
+                {spec.wave}
+              </span>
+              <span className="flex-1" />
+              {stage === "done" && (
+                <span className="cg-check" aria-hidden="true">
+                  ✓
+                </span>
+              )}
+            </div>
+
+            <p className={`cg-status ${stage === "done" ? "is-done" : ""}`}>
+              {stage === "idle"
+                ? tr(GRAPH.queued)
+                : stage === "thinking"
+                  ? `${tr(GRAPH.thinking)} · ${secs(TIMELINE[i].start)}s`
+                  : stage === "running"
+                    ? `${spec.tool} · ${secs(TIMELINE[i].start)}s`
+                    : `${tr(GRAPH.finished)} · ${Math.round((TIMELINE[i].done - TIMELINE[i].start) / 1000)}s`}
+            </p>
+
+            <p className="cg-note">
+              {typed}
+              {stage === "running" && <span className="cg-caret" />}
+            </p>
+          </div>
+        );
+      })}
+
+      {/* CEO 汇总 */}
+      <div
+        className={`cg-node cg-node-ceo ${ceoTone === "ready" ? "is-done" : "is-active"}`}
+        style={{
+          left: pct(g.ceo.x, g.vw),
+          top: pct(g.ceo.y, g.vh),
+          width: pct(g.ceo.w, g.vw),
+          height: pct(g.ceo.h, g.vh),
+        }}
+      >
+        <div className="flex items-center gap-[0.55em]">
+          <span className="cg-avatar cg-avatar-ceo" aria-hidden="true">
+            {ceoTone === "ready" ? "✓" : <span className="cg-spin" />}
+          </span>
+          <p className="cg-title flex-1">{tr(GRAPH.ceo.title)}</p>
+        </div>
           <p className={`cg-status ${ceoTone === "ready" ? "is-done" : ""}`}>
             {ceoLabel}
           </p>

@@ -31,7 +31,7 @@ from typing import Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.llm.community_prices import community_pricing_for
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_FLASH_FREE, DEEPSEEK_V4_PRO
 from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
@@ -85,6 +85,13 @@ _PRICING: dict[str, dict[str, Decimal]] = {
     # DeepSeek V4 — 中文定价页：百万 tokens 输入（缓存命中/未命中）/ 输出。
     # Flash: ¥0.02 / ¥1 / ¥2；Pro: ¥0.025 / ¥3 / ¥6（卡保留，allowlist 可暂不上架）。
     DEEPSEEK_V4_FLASH: {
+        "cache_hit": Decimal("0.02"),
+        "cache_miss": Decimal("1"),
+        "output": Decimal("2"),
+    },
+    # Zen ``deepseek-v4-flash-free``：上游免计费，但产品仍按 Flash 名义价扣
+    # ``quota_*``（防白嫖）；curated 卡与 Flash 同档，否则无法上架平台目录。
+    DEEPSEEK_V4_FLASH_FREE: {
         "cache_hit": Decimal("0.02"),
         "cache_miss": Decimal("1"),
         "output": Decimal("2"),

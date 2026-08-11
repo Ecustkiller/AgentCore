@@ -35,7 +35,9 @@ def _fresh_slots_and_linux(monkeypatch):
     reset_execution_slots()
 
 
-def _install_fake_runsc(tmp_path: Path, *, artifact_rel: str = "out/hello.txt") -> str:
+def _install_fake_runsc(
+    tmp_path: Path, *, artifact_rel: str = "out/hello.txt", hang: bool = False
+) -> str:
     """Install a cross-platform fake ``runsc`` that writes ``artifact_rel`` into /workspace."""
     impl = tmp_path / "fake_runsc_impl.py"
     impl.write_text(
@@ -79,6 +81,10 @@ def _install_fake_runsc(tmp_path: Path, *, artifact_rel: str = "out/hello.txt") 
             if ws is None:
                 print("fake_runsc: no workspace staging mount", file=sys.stderr)
                 raise SystemExit(2)
+
+            if {hang!r}:
+                import time
+                time.sleep(99999)
 
             rel = Path({artifact_rel!r})
             dest = ws / rel
@@ -140,19 +146,22 @@ async def test_gvisor_timeout_skips_write_back(tmp_path: Path, monkeypatch):
     ws = tmp_path / "workspace"
     ws.mkdir()
 
-    runsc = _install_fake_runsc(tmp_path)
+    # Hang so the deadline poll path fires (not a fast successful exit).
+    runsc = _install_fake_runsc(tmp_path, hang=True)
     sandbox = GVisorSandbox(runsc_path=runsc, runtime_root=str(tmp_path / "rt"))
 
-    # Force the wait_for deadline without relying on OS process kill timing
-    # (Windows .cmd wrappers often leave a child Python alive after kill).
-    # Call _execute_in_slot directly so we don't also patch the slot limiter's
-    # asyncio.wait_for (same module object).
-    async def _immediate_timeout(aw, timeout=None):  # noqa: ANN001
-        if hasattr(aw, "close"):
-            aw.close()
-        raise TimeoutError
+    # Advance the poll-loop clock past the disaster wall without waiting wall-clock
+    # or relying on OS process kill (Windows .cmd wrappers often leave children).
+    clock = {"t": time.monotonic()}
 
-    monkeypatch.setattr(gvisor_mod.asyncio, "wait_for", _immediate_timeout)
+    def fake_mono() -> float:
+        return clock["t"]
+
+    async def jump_sleep(_delay: float = 0) -> None:
+        clock["t"] += 10_000
+
+    monkeypatch.setattr(gvisor_mod.time, "monotonic", fake_mono)
+    monkeypatch.setattr(gvisor_mod.asyncio, "sleep", jump_sleep)
 
     start = time.monotonic()
     result = await sandbox._execute_in_slot(  # noqa: SLF001

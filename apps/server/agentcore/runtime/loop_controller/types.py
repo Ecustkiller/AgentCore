@@ -26,6 +26,15 @@ DEFAULT_EMPTY_THRESHOLD = 2
 # never resets — it catches "this tool just isn't working out, no matter the args".
 DEFAULT_TOOL_FAILURE_WARN = 2
 DEFAULT_TOOL_FAILURE_DISABLE = 3
+# Idle hang / probe fail across code_execute+test_run: retire both after N hits.
+# Disaster-wall forced stops are incomplete results, not this family path.
+EXEC_ENV_TIMEOUT_FAMILY = frozenset({"code_execute", "test_run"})
+DEFAULT_EXEC_ENV_TIMEOUT_RETIRE = 2
+EXEC_ENV_TIMEOUT_RETIRE_STEER = (
+    "本机执行环境连续超时（`code_execute` / `test_run`），本回合起停用这两项——"
+    "请改静态核验/读文件取证，向协调者如实报告「执行环境不可用、验证未实跑」；"
+    "禁止再原样重试跑命令。"
+)
 # Same-path consecutive classified write rejects → force_segmented early (策略机),
 # before the cumulative per-tool disable threshold. Covers prose-append / code
 # integrity / severe-shrink hard rejects (contract_failure) that skip the normal
@@ -319,6 +328,34 @@ def resolve_error_class(attempt: ToolAttempt) -> str | None:
     if attempt.contract_failure or attempt.parse_failure:
         return ERROR_CLASS_VALIDATION
     return ERROR_CLASS_TRANSIENT
+
+
+def is_exec_env_timeout(attempt: ToolAttempt) -> bool:
+    """True when ``code_execute`` / ``test_run`` hit idle hang or probe fail.
+
+    Disaster-wall forced stops are incomplete results, not exec-env hangs.
+    """
+    if attempt.success or attempt.tool_name not in EXEC_ENV_TIMEOUT_FAMILY:
+        return False
+    meta = attempt.meta or {}
+    if meta.get("exec_env_timeout"):
+        return True
+    if meta.get("timeout_kind") == "idle":
+        return True
+    code = meta.get("code")
+    if code in ("exec_timeout",):
+        return True
+    err = attempt.error_summary or ""
+    if "ExecEnvProbeFailed:" in err:
+        return True
+    if "Timeout: no output for" in err:
+        return True
+    # Legacy journals: verify_budget code / old wall-clock wording.
+    if code == "verify_budget":
+        return True
+    if "Timeout: execution exceeded" in err:
+        return True
+    return "验证未在" in err and "预算内完成" in err
 
 
 @dataclass(frozen=True)

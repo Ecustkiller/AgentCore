@@ -161,7 +161,9 @@ async def _wire_continuation_toolset(
     )
     from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
 
-    mcp_discover = await discover_mcp_tools(desktop_channel)
+    mcp_discover = await discover_mcp_tools(
+        desktop_channel, cache_scope=user_id, cache_only=True
+    )
     mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
     worker_tools = build_worker_registry(
         backend=backend,

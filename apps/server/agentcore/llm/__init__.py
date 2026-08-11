@@ -12,6 +12,7 @@ from agentcore.llm.model_selection import (
 )
 from agentcore.llm.profiles import (
     DEEPSEEK_V4_FLASH,
+    DEEPSEEK_V4_FLASH_FREE,
     DEEPSEEK_V4_PRO,
     ProfileParams,
     agent_profile,
@@ -32,6 +33,7 @@ from agentcore.llm.resolve import ModelConfig, resolve_model_config, resolve_tur
 
 __all__ = [
     "DEEPSEEK_V4_FLASH",
+    "DEEPSEEK_V4_FLASH_FREE",
     "DEEPSEEK_V4_PRO",
     "LLMChunk",
     "LLMCredentials",

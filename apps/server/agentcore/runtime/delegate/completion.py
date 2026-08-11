@@ -620,7 +620,7 @@ def _browser_navigate_failed_in_transcript(transcript: list[LLMMessage]) -> bool
     return False
 
 def _test_run_budget_exhausted_in_transcript(transcript: list[LLMMessage]) -> bool:
-    """True when a ``test_run`` result reports verify-budget incomplete (已中止)."""
+    """True when a ``test_run`` result reports timeout incomplete (已中止)."""
     if not transcript:
         return False
     calls = _tool_call_args_map(transcript)
@@ -634,6 +634,12 @@ def _test_run_budget_exhausted_in_transcript(transcript: list[LLMMessage]) -> bo
         if "预算耗尽" in content or "验证未完成" in content:
             return True
         if "未完成（预算耗尽）" in content:
+            return True
+        if "未完成（执行无响应）" in content or "未完成（强制中止）" in content:
+            return True
+        if "已跑满灾难顶" in content or "按挂起中止" in content:
+            return True
+        if "执行超过" in content and "无输出" in content:
             return True
     return False
 
@@ -683,7 +689,7 @@ def _verify_shaped_command_failed_in_transcript(transcript: list[LLMMessage]) ->
 _VERIFY_FAILED_REASON = "verify_failed"
 _VERIFY_BUDGET_REASON = "verify_budget"
 _VERIFY_BUDGET_GAP_DESC = (
-    "验证未完成（预算耗尽，进程已中止，非仍在跑）"
+    "验证未完成（无响应或强制中止，进程已中止，非仍在跑）"
 )
 
 def _verify_failure_rows(transcript: list[LLMMessage]) -> list[dict[str, str]]:
@@ -734,7 +740,7 @@ def collect_verify_failure_gaps(
 
     Scans worker transcripts for ``browser_navigate`` / ``test_run`` / verify-shaped
     ``code_execute``·``terminal`` failures. Each hit becomes a blocking gap row with
-    ``reason=verify_failed`` (or ``verify_budget`` for budget-exhausted incomplete)
+    ``reason=verify_failed`` (or ``verify_budget`` for idle/disaster timeout incomplete)
     so ``build_delivery_status`` cannot stay ``delivered``.
     """
     out: list[tuple[str, list[dict[str, str]]]] = []

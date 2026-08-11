@@ -47,19 +47,30 @@ vi.mock("@/services/inferenceToken", () => ({
 vi.mock("@/services/foldersToken", () => ({
   resolveSidecarFoldersAuth: vi.fn(),
   clearSidecarFoldersAuth: vi.fn(),
+  looksLikeFoldersTokenFailure: vi.fn(() => false),
 }));
 
 vi.mock("@/services/accountToken", () => ({
   resolveSidecarAccountAuth: vi.fn(),
   clearSidecarAccountAuth: vi.fn(),
+  looksLikeAccountTokenFailure: vi.fn(() => false),
 }));
 
 import { getConversations } from "@/hooks/useConversations";
 import { getFolders } from "@/hooks/useFolders";
 import { notifyWarning } from "@/lib/toast";
-import { resolveSidecarAccountAuth } from "@/services/accountToken";
-import { resolveSidecarFoldersAuth } from "@/services/foldersToken";
-import { resolveSidecarInference } from "@/services/inferenceToken";
+import {
+  looksLikeAccountTokenFailure,
+  resolveSidecarAccountAuth,
+} from "@/services/accountToken";
+import {
+  looksLikeFoldersTokenFailure,
+  resolveSidecarFoldersAuth,
+} from "@/services/foldersToken";
+import {
+  looksLikeInferenceTokenFailure,
+  resolveSidecarInference,
+} from "@/services/inferenceToken";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import { useAuthStore } from "@/stores/auth";
@@ -74,8 +85,17 @@ import {
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
 const resolveSidecarInferenceMock = vi.mocked(resolveSidecarInference);
+const looksLikeInferenceTokenFailureMock = vi.mocked(
+  looksLikeInferenceTokenFailure,
+);
 const resolveSidecarFoldersAuthMock = vi.mocked(resolveSidecarFoldersAuth);
+const looksLikeFoldersTokenFailureMock = vi.mocked(
+  looksLikeFoldersTokenFailure,
+);
 const resolveSidecarAccountAuthMock = vi.mocked(resolveSidecarAccountAuth);
+const looksLikeAccountTokenFailureMock = vi.mocked(
+  looksLikeAccountTokenFailure,
+);
 const notifyWarningMock = vi.mocked(notifyWarning);
 const getConversationsMock = vi.mocked(getConversations);
 const getFoldersMock = vi.mocked(getFolders);
@@ -139,9 +159,18 @@ beforeEach(() => {
   takeRecentSidecarFailureMock.mockReturnValue(null);
   // Default: no token mintable → the fallback path (what most existing cases assert with
   // `inference: undefined`). Cases that need a normal turn override this per-test.
+  resolveSidecarInferenceMock.mockReset();
   resolveSidecarInferenceMock.mockResolvedValue(null);
+  looksLikeInferenceTokenFailureMock.mockReset();
+  looksLikeInferenceTokenFailureMock.mockReturnValue(false);
+  resolveSidecarFoldersAuthMock.mockReset();
   resolveSidecarFoldersAuthMock.mockResolvedValue(null);
+  looksLikeFoldersTokenFailureMock.mockReset();
+  looksLikeFoldersTokenFailureMock.mockReturnValue(false);
+  resolveSidecarAccountAuthMock.mockReset();
   resolveSidecarAccountAuthMock.mockResolvedValue(null);
+  looksLikeAccountTokenFailureMock.mockReset();
+  looksLikeAccountTokenFailureMock.mockReturnValue(false);
 
   onEventCb = null;
   resumeMock = vi.fn();
@@ -210,6 +239,137 @@ function seedOriginalUserBubble(
 }
 
 describe("streamConversationViaSidecar", () => {
+  it("mints inference with conversationId on startTurn", async () => {
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarInferenceMock).toHaveBeenCalledWith({
+      conversationId: "c1",
+    });
+  });
+
+  it("remints inference with force + conversationId when pre-event token fails", async () => {
+    resolveSidecarInferenceMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://x/v1/inference/v1",
+        apiKey: "stale",
+        model: "m1",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://x/v1/inference/v1",
+        apiKey: "fresh",
+        model: "m1",
+      });
+    looksLikeInferenceTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock
+      .mockRejectedValueOnce(new Error("inference token expired"))
+      .mockResolvedValueOnce(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarInferenceMock).toHaveBeenNthCalledWith(1, {
+      conversationId: "c1",
+    });
+    expect(resolveSidecarInferenceMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+      conversationId: "c1",
+    });
+    expect(startTurnMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("remints folders with force when pre-event token fails", async () => {
+    resolveSidecarFoldersAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/folders",
+        apiKey: "stale-folders",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/folders",
+        apiKey: "fresh-folders",
+      });
+    looksLikeFoldersTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock
+      .mockRejectedValueOnce(new Error("folders list unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(startTurnMock).toHaveBeenCalledTimes(2);
+    expect(startTurnMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        foldersAuth: {
+          baseUrl: "https://api.test.example/v1/folders",
+          apiKey: "fresh-folders",
+        },
+      }),
+    );
+  });
+
+  it("remints account with force when pre-event token fails", async () => {
+    resolveSidecarAccountAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/account",
+        apiKey: "stale-account",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/account",
+        apiKey: "fresh-account",
+      });
+    looksLikeAccountTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock
+      .mockRejectedValueOnce(new Error("account search unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(resolveSidecarAccountAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarAccountAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(startTurnMock).toHaveBeenCalledTimes(2);
+    expect(startTurnMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accountAuth: {
+          baseUrl: "https://api.test.example/v1/account",
+          apiKey: "fresh-account",
+        },
+      }),
+    );
+  });
+
   it("forwards foldersAuth on startTurn when mint succeeds", async () => {
     resolveSidecarFoldersAuthMock.mockResolvedValue({
       baseUrl: "https://api.test.example",
@@ -226,7 +386,7 @@ describe("streamConversationViaSidecar", () => {
       history: [],
     });
 
-    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith();
     expect(startTurnMock).toHaveBeenCalledWith(
       expect.objectContaining({
         foldersAuth: {
@@ -271,7 +431,7 @@ describe("streamConversationViaSidecar", () => {
       history: [],
     });
 
-    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith();
     expect(startTurnMock).toHaveBeenCalledWith(
       expect.objectContaining({
         accountAuth: {
@@ -320,7 +480,7 @@ describe("streamConversationViaSidecar", () => {
       userMessageId: "u-orig",
     });
 
-    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenCalledWith();
     expect(resumeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         foldersAuth: {
@@ -351,7 +511,7 @@ describe("streamConversationViaSidecar", () => {
       userMessageId: "u-orig",
     });
 
-    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith({ force: true });
+    expect(resolveSidecarAccountAuthMock).toHaveBeenCalledWith();
     expect(resumeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         accountAuth: {
@@ -521,6 +681,113 @@ describe("streamConversationViaSidecar", () => {
 });
 
 describe("resumeConversationViaSidecar", () => {
+  it("mints inference with conversationId on resume", async () => {
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock.mockResolvedValue(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resolveSidecarInferenceMock).toHaveBeenCalledWith({
+      conversationId: "c1",
+    });
+  });
+
+  it("remints inference with force + conversationId when pre-event token fails on resume", async () => {
+    resolveSidecarInferenceMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://x/v1/inference/v1",
+        apiKey: "stale",
+        model: "m1",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://x/v1/inference/v1",
+        apiKey: "fresh",
+        model: "m1",
+      });
+    looksLikeInferenceTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock
+      .mockRejectedValueOnce(new Error("inference token expired"))
+      .mockResolvedValueOnce(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resolveSidecarInferenceMock).toHaveBeenNthCalledWith(1, {
+      conversationId: "c1",
+    });
+    expect(resolveSidecarInferenceMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+      conversationId: "c1",
+    });
+    expect(resumeMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("remints folders with force when pre-event token fails on resume", async () => {
+    resolveSidecarFoldersAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/folders",
+        apiKey: "stale-folders",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/folders",
+        apiKey: "fresh-folders",
+      });
+    looksLikeFoldersTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock
+      .mockRejectedValueOnce(new Error("folders list unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarFoldersAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(resumeMock).toHaveBeenCalledTimes(2);
+    expect(resumeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        foldersAuth: {
+          baseUrl: "https://api.test.example/v1/folders",
+          apiKey: "fresh-folders",
+        },
+      }),
+    );
+  });
+
+  it("remints account with force when pre-event token fails on resume", async () => {
+    resolveSidecarAccountAuthMock
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/account",
+        apiKey: "stale-account",
+      })
+      .mockResolvedValueOnce({
+        baseUrl: "https://api.test.example/v1/account",
+        apiKey: "fresh-account",
+      });
+    looksLikeAccountTokenFailureMock.mockReturnValue(true);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+    resumeMock
+      .mockRejectedValueOnce(new Error("account search unauthorized (401)"))
+      .mockResolvedValueOnce(turnResult());
+
+    await resumeConversationViaSidecar(baseRequest);
+
+    expect(resolveSidecarAccountAuthMock).toHaveBeenNthCalledWith(1);
+    expect(resolveSidecarAccountAuthMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+    });
+    expect(resumeMock).toHaveBeenCalledTimes(2);
+    expect(resumeMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        accountAuth: {
+          baseUrl: "https://api.test.example/v1/account",
+          apiKey: "fresh-account",
+        },
+      }),
+    );
+  });
+
   it("forwards project folderId + local binding on resume (symmetric with startTurn)", async () => {
     getConversationsMock.mockReturnValue([
       { id: "c1", folderId: "fold-local-1" } as never,

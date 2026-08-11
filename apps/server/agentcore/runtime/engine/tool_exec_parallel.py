@@ -13,6 +13,7 @@ from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, llm_content_text
 from agentcore.runtime.approvals import ApprovalGate
+from agentcore.runtime.engine.tool_call_fact_code import tool_call_fact_code
 from agentcore.runtime.events import (
     EventSink,
     run_phase,
@@ -779,6 +780,7 @@ async def execute_tools(
                 arguments=tc.function.arguments or "",
                 result=llm_content_text(message.content),
                 success=attempt.success,
+                code=tool_call_fact_code(attempt),
             ).to_fact()
         )
 

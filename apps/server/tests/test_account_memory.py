@@ -198,26 +198,68 @@ async def test_cloud_memory_load_ok(monkeypatch: pytest.MonkeyPatch, account_cre
 # --- assemble / remember / store with ContextVar ------------------------------
 
 
-async def test_assemble_turn_rules_uses_cloud_when_ticketed(
+async def test_assemble_turn_rules_ticketed_miss_skips_cloud(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    called: dict[str, Any] = {}
+    """Ticketed prepare is cache_only: miss → empty, never await /rules/list."""
+    from agentcore.memory.account_prepare_cache import clear_account_rules_memory_cache
 
-    async def _fake_list(creds, *, folder_id):
-        called["folder_id"] = folder_id
-        assert creds is account_creds
-        return {
-            "global_rules": [{"name": "用户规则.md", "content": "- 永远用中文"}],
-            "project_rules": [],
-        }
+    clear_account_rules_memory_cache()
+    called = {"n": 0}
+
+    async def _fake_list(*_a, **_k):
+        called["n"] += 1
+        return {"global_rules": [{"name": "用户规则.md", "content": "- 永远用中文"}]}
 
     monkeypatch.setattr(
         "agentcore.account.credentials.cloud_list_user_rules", _fake_list
     )
-    # Must not open a local DB session when ticketed.
+
+    with account_credentials_scope(account_creds):
+        user_md, mem_md = await assemble_turn_rules(
+            _EmptyMemoryStore(),  # type: ignore[arg-type]
+            "u1",
+            folder_id=None,
+            enabled=True,
+            max_docs=20,
+            max_chars=20000,
+        )
+    assert user_md == ""
+    assert mem_md == ""
+    assert called["n"] == 0
+
+
+async def test_assemble_turn_rules_ticketed_hit_after_seed(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    from agentcore.memory.account_prepare_cache import (
+        AccountPrepareSnapshot,
+        clear_account_rules_memory_cache,
+        seed_account_rules_memory_cache,
+    )
+
+    clear_account_rules_memory_cache()
+    seed_account_rules_memory_cache(
+        "u1",
+        None,
+        AccountPrepareSnapshot(
+            rules_payload={
+                "global_rules": [{"name": "用户规则.md", "content": "- 永远用中文"}],
+                "project_rules": [],
+            },
+            memory_bodies={("", "偏好.md"): "- 偏好偏好\n"},
+            memory_topics=(),
+        ),
+    )
+
+    async def _boom(*_a, **_k):
+        raise AssertionError("must not call cloud on cache hit")
+
     monkeypatch.setattr(
-        "agentcore.db.base.async_session_factory",
-        lambda: (_ for _ in ()).throw(AssertionError("must not open local DB")),
+        "agentcore.account.credentials.cloud_list_user_rules", _boom
+    )
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_memory_load", _boom
     )
 
     with account_credentials_scope(account_creds):
@@ -230,13 +272,17 @@ async def test_assemble_turn_rules_uses_cloud_when_ticketed(
             max_chars=20000,
         )
     assert "永远用中文" in user_md
-    assert mem_md == ""
-    assert called["folder_id"] is None
+    assert "偏好偏好" in mem_md
 
 
 async def test_assemble_turn_rules_cloud_failure_soft_empty(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
+    """Miss (no seed) with ticket → empty; cloud not consulted on prepare."""
+    from agentcore.memory.account_prepare_cache import clear_account_rules_memory_cache
+
+    clear_account_rules_memory_cache()
+
     async def _boom(*_a, **_k):
         raise AccountCloudError("down", code="account_cloud_unreachable")
 
@@ -448,26 +494,38 @@ def test_lookup_on_demand_body_project_then_global():
     )
 
 
-async def test_load_on_demand_uses_cloud_when_ticketed(
+async def test_load_on_demand_uses_snapshot_when_ticketed(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    """Regression: account path must NOT silently return [] when on_demand exists."""
+    """Regression: account path must NOT silently return [] when on_demand was seeded."""
+    from agentcore.memory.account_prepare_cache import (
+        AccountPrepareSnapshot,
+        clear_account_rules_memory_cache,
+        seed_account_rules_memory_cache,
+    )
     from agentcore.memory.rules_injection import load_on_demand_user_rules
 
-    async def _fake_list(creds, *, folder_id):
-        assert creds is account_creds
-        assert folder_id == "F1"
-        return {
-            "global_rules": [{"name": "用户规则.md", "content": "- always"}],
-            "project_rules": [],
-            "global_on_demand_rules": [
-                {"name": "合规附录.md", "content": "- 对外须用中文\n"},
-            ],
-            "project_on_demand_rules": [],
-        }
+    clear_account_rules_memory_cache()
+    seed_account_rules_memory_cache(
+        "u1",
+        "F1",
+        AccountPrepareSnapshot(
+            rules_payload={
+                "global_rules": [{"name": "用户规则.md", "content": "- always"}],
+                "project_rules": [],
+                "global_on_demand_rules": [
+                    {"name": "合规附录.md", "content": "- 对外须用中文\n"},
+                ],
+                "project_on_demand_rules": [],
+            }
+        ),
+    )
+
+    async def _boom(*_a, **_k):
+        raise AssertionError("must not call cloud on cache hit")
 
     monkeypatch.setattr(
-        "agentcore.account.credentials.cloud_list_user_rules", _fake_list
+        "agentcore.account.credentials.cloud_list_user_rules", _boom
     )
     monkeypatch.setattr(
         "agentcore.db.base.async_session_factory",
@@ -480,20 +538,52 @@ async def test_load_on_demand_uses_cloud_when_ticketed(
     assert rules[0].name == "合规附录"
 
 
-async def test_load_on_demand_ticketed_empty_catalog_is_honest(
+async def test_load_on_demand_ticketed_miss_is_empty(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
+    from agentcore.memory.account_prepare_cache import clear_account_rules_memory_cache
     from agentcore.memory.rules_injection import load_on_demand_user_rules
 
-    async def _fake_list(creds, *, folder_id):
+    clear_account_rules_memory_cache()
+    called = {"n": 0}
+
+    async def _fake_list(*_a, **_k):
+        called["n"] += 1
         return {
-            "global_rules": [{"name": "用户规则.md", "content": "- always"}],
-            "global_on_demand_rules": [],
-            "project_on_demand_rules": [],
+            "global_on_demand_rules": [
+                {"name": "合规附录.md", "content": "- x\n"},
+            ],
         }
 
     monkeypatch.setattr(
         "agentcore.account.credentials.cloud_list_user_rules", _fake_list
+    )
+    with account_credentials_scope(account_creds):
+        assert await load_on_demand_user_rules("u1", folder_id=None) == []
+    assert called["n"] == 0
+
+
+async def test_load_on_demand_ticketed_empty_catalog_is_honest(
+    monkeypatch: pytest.MonkeyPatch, account_creds
+):
+    from agentcore.memory.account_prepare_cache import (
+        AccountPrepareSnapshot,
+        clear_account_rules_memory_cache,
+        seed_account_rules_memory_cache,
+    )
+    from agentcore.memory.rules_injection import load_on_demand_user_rules
+
+    clear_account_rules_memory_cache()
+    seed_account_rules_memory_cache(
+        "u1",
+        None,
+        AccountPrepareSnapshot(
+            rules_payload={
+                "global_rules": [{"name": "用户规则.md", "content": "- always"}],
+                "global_on_demand_rules": [],
+                "project_on_demand_rules": [],
+            }
+        ),
     )
     with account_credentials_scope(account_creds):
         assert await load_on_demand_user_rules("u1", folder_id=None) == []

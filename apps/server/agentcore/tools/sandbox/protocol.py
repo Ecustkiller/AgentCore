@@ -20,6 +20,9 @@ class ExecutionRequest:
     # Optional callback for streaming stdout/stderr chunks during execution.
     # ``stream`` is ``"stdout"`` or ``"stderr"``; ``chunk`` is a decoded text fragment.
     on_output: Callable[[str, str], None] | None = None
+    # Primary hang detection: kill when no stdout/stderr for this many seconds.
+    # ``None`` = wall-clock only (``timeout_seconds``). Idle resets on any output.
+    idle_timeout_seconds: int | None = None
     # Resource / isolation knobs (optional; defaults preserve subprocess behaviour).
     env: dict[str, str] | None = None
     # Reserved historically; GVisorSandbox now honors this (P2):

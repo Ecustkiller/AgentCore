@@ -6,16 +6,18 @@ import type { SidecarInference } from "@shared/sidecar-contract";
  *
  * sidecar 跑在用户机器上，但平台 LLM key **绝不下放本机**：引擎的 LLM 调用改指向云端推理代理
  * `POST /v1/inference/v1/chat/completions`，以一枚**作用域受限的短期令牌**（inference token）
- * 作 Bearer 鉴权。本模块负责拿这枚令牌并拼出 sidecar 需要的 `{baseUrl, apiKey}`：
+ * 作 Bearer 鉴权。本模块负责拿这枚令牌并拼出 sidecar 需要的 `{baseUrl, apiKey, model}`：
  *
  * - `baseUrl` = `${BASE_URL}/v1/inference/v1`：`OpenAICompatibleProvider` 在其后拼 `/chat/completions`，
  *   命中代理路由 `/v1/inference/v1/chat/completions`（见服务端 `api/routes/inference/proxy.py`）。
  * - `apiKey` = 令牌本身（非平台 key）。
- * - `model` = 服务端按用户计费/BYOK 解析的 chat 模型名（与推理代理上游一致）。
+ * - `model` = 服务端按**该会话**（body `conversation_id`）计费/BYOK 解析的 chat 模型名，
+ *   与推理代理对该会话的上游选择一致；无会话 id 时回落账号默认。
  *
- * 令牌经 cookie 会话向 `POST /v1/inference/token` 兑换（与其余 API 同源鉴权）。令牌有 TTL
- * （服务端 `inference_token_expire_minutes`，默认 12h）。默认缓存到临近过期再续铸；
- * `startTurn` / `resume` 应传 `force: true` 每回合强制换新，避免长会话挂着过期票开跑。
+ * 令牌经 cookie 会话向 `POST /v1/inference/token` 兑换（与其余 API 同源鉴权）；有会话时 body
+ * 传 `{ conversation_id }`。令牌有 TTL（服务端 `inference_token_expire_minutes`，默认 12h）。
+ * 缓存按会话键隔离（`null` = 账号默认）：同会话在 TTL+skew 内复用；**会话切换**、临近过期或
+ * `force: true`（401 / remint）才重铸。`startTurn` / `resume` 走缓存并传入当前 `conversationId`。
  */
 
 interface InferenceTokenResponse {
@@ -24,19 +26,43 @@ interface InferenceTokenResponse {
   model: string;
 }
 
-/** 已缓存的令牌与其绝对过期时刻（ms）。null = 尚未铸过 / 已失效。 */
-let cached: { token: string; expiresAtMs: number; model: string } | null = null;
+/** 缓存键：会话 id；`null` = 未带会话（账号默认模型）。 */
+type CacheConversationKey = string | null;
+
+/** 已缓存的令牌、会话键与绝对过期时刻（ms）。null = 尚未铸过 / 已失效。 */
+let cached: {
+  conversationId: CacheConversationKey;
+  token: string;
+  expiresAtMs: number;
+  model: string;
+} | null = null;
 
 // 提前续铸的安全余量：在真正过期前 1 分钟就重铸，规避时钟偏移与「铸好到用上」之间的 TTL 损耗。
 const RENEW_SKEW_MS = 60_000;
 
-async function mint(): Promise<{
+function normalizeConversationKey(
+  conversationId: string | null | undefined,
+): CacheConversationKey {
+  if (typeof conversationId === "string" && conversationId.trim()) {
+    return conversationId;
+  }
+  return null;
+}
+
+async function mint(conversationId: CacheConversationKey): Promise<{
+  conversationId: CacheConversationKey;
   token: string;
   expiresAtMs: number;
   model: string;
 }> {
-  const res = await api.post<InferenceTokenResponse>("/v1/inference/token");
+  const res =
+    conversationId != null
+      ? await api.post<InferenceTokenResponse>("/v1/inference/token", {
+          conversation_id: conversationId,
+        })
+      : await api.post<InferenceTokenResponse>("/v1/inference/token");
   return {
+    conversationId,
     token: res.token,
     expiresAtMs: Date.now() + res.expires_in_sec * 1000,
     model: res.model,
@@ -44,8 +70,13 @@ async function mint(): Promise<{
 }
 
 export interface ResolveSidecarInferenceOptions {
-  /** 跳过缓存、立刻向云端兑换新令牌（startTurn / resume / 401 重试用）。 */
+  /** 跳过缓存、立刻向云端兑换新令牌（401 remint 用）。 */
   force?: boolean;
+  /**
+   * 当前会话 id：铸票 body `conversation_id`，并使缓存按会话隔离。
+   * 省略 / 空 = 账号默认（缓存键 `null`）。
+   */
+  conversationId?: string | null;
 }
 
 /**
@@ -60,8 +91,17 @@ export async function resolveSidecarInference(
 ): Promise<SidecarInference | null> {
   try {
     const force = options?.force === true;
-    if (force || !cached || cached.expiresAtMs - RENEW_SKEW_MS <= Date.now()) {
-      cached = await mint();
+    const conversationKey = normalizeConversationKey(options?.conversationId);
+    const cacheHit =
+      !force &&
+      cached != null &&
+      cached.conversationId === conversationKey &&
+      cached.expiresAtMs - RENEW_SKEW_MS > Date.now();
+    if (!cacheHit) {
+      cached = await mint(conversationKey);
+    }
+    if (cached == null) {
+      return null;
     }
     return {
       baseUrl: `${BASE_URL}/v1/inference/v1`,

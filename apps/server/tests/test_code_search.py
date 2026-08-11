@@ -76,8 +76,12 @@ async def test_index_manager_build_and_search(sample_py: Path):
 
 @pytest.mark.asyncio
 async def test_code_search_tool_end_to_end(sample_py: Path):
+    from unittest.mock import MagicMock
+
     ws = ServerWorkspace(root=sample_py, sandbox=SubprocessSandbox())
     await ws.ensure_code_index()
+    kick = MagicMock(wraps=ws.start_code_index_maintenance)
+    ws.start_code_index_maintenance = kick  # type: ignore[method-assign]
     tool = CodeSearchTool()
     ctx = ToolContext(
         execution_id="e1",
@@ -91,6 +95,7 @@ async def test_code_search_tool_end_to_end(sample_py: Path):
     assert "sample.py" in result.output
     assert "score=" in result.output
     assert result.metadata["index_status"] == "ready"
+    kick.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -132,8 +137,125 @@ async def test_code_search_tool_is_query_only_when_ensure_is_slow(
     elapsed = time.monotonic() - t0
     assert result.success
     assert elapsed < 2.0, f"tool blocked on ensure ({elapsed:.2f}s)"
-    assert result.metadata["index_status"] == "building"
+    # No snapshot yet and kick runs after search → stale (not building-in-flight).
+    assert result.metadata["index_status"] == "stale"
+    assert getattr(ws, "_index_maintainer", None) is not None  # non-ready kicked
     assert "grep" in result.output.lower() or "索引" in result.output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "status",
+    ["building", "stale"],
+)
+async def test_code_search_kicks_when_index_not_ready(status: str):
+    """No-snapshot / dirty still schedule background maintenance."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentcore.workspace.protocol import CodeIndexStatus, CodeSearchResult
+
+    index_status = CodeIndexStatus(status)
+    backend = MagicMock()
+    backend.start_code_index_maintenance = MagicMock()
+    mgr = MagicMock()
+    mgr.needs_background_ensure.return_value = True
+    backend._get_index_manager = MagicMock(return_value=mgr)
+    backend.code_search = AsyncMock(
+        return_value=CodeSearchResult(index_status=index_status, index_stale=True)
+    )
+    tool = CodeSearchTool()
+    ctx = ToolContext(
+        execution_id="e1",
+        run_id="r1",
+        agent_id="a1",
+        backend=backend,
+        user_id="u1",
+    )
+    result = await tool.execute({"query": "ApprovalGate"}, ctx)
+    assert result.success
+    assert result.metadata["index_status"] == status
+    backend.start_code_index_maintenance.assert_called_once()
+    backend.code_search.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_code_search_skips_kick_when_truncated_only_stale():
+    """Truncated snapshot is STALE for UX but must not re-kick ensure."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentcore.workspace.protocol import CodeIndexStatus, CodeSearchResult
+
+    backend = MagicMock()
+    backend.start_code_index_maintenance = MagicMock()
+    mgr = MagicMock()
+    mgr.needs_background_ensure.return_value = False
+    backend._get_index_manager = MagicMock(return_value=mgr)
+    backend.code_search = AsyncMock(
+        return_value=CodeSearchResult(
+            index_status=CodeIndexStatus.STALE, index_stale=True
+        )
+    )
+    tool = CodeSearchTool()
+    ctx = ToolContext(
+        execution_id="e1",
+        run_id="r1",
+        agent_id="a1",
+        backend=backend,
+        user_id="u1",
+    )
+    result = await tool.execute({"query": "ApprovalGate"}, ctx)
+    assert result.success
+    assert result.metadata["index_status"] == "stale"
+    backend.start_code_index_maintenance.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_code_search_skips_kick_when_index_ready():
+    """Ready snapshots must not kick maintenance on every query."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from agentcore.workspace.protocol import (
+        CodeChunk,
+        CodeIndexStatus,
+        CodeSearchResult,
+    )
+
+    backend = MagicMock()
+    backend.start_code_index_maintenance = MagicMock()
+    mgr = MagicMock()
+    mgr.needs_background_ensure.return_value = False
+    backend._get_index_manager = MagicMock(return_value=mgr)
+    backend.code_search = AsyncMock(
+        return_value=CodeSearchResult(
+            chunks=[
+                CodeChunk(
+                    path="pkg/sample.py",
+                    symbol="ApprovalGate",
+                    symbol_type="class",
+                    start_line=1,
+                    end_line=3,
+                    language="python",
+                    snippet="class ApprovalGate: ...",
+                )
+            ],
+            scores=[1.0],
+            index_status=CodeIndexStatus.READY,
+            index_stale=False,
+        )
+    )
+    tool = CodeSearchTool()
+    ctx = ToolContext(
+        execution_id="e1",
+        run_id="r1",
+        agent_id="a1",
+        backend=backend,
+        user_id="u1",
+    )
+    result = await tool.execute({"query": "ApprovalGate"}, ctx)
+    assert result.success
+    assert result.metadata["index_status"] == "ready"
+    backend.start_code_index_maintenance.assert_not_called()
+    backend.code_search.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -556,8 +678,28 @@ async def test_index_status_building_only_without_snapshot(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_needs_background_ensure_ignores_truncated(tmp_path: Path):
+    """Truncated snapshot with no dirty flag must not request background ensure."""
+    from agentcore.workspace.indexing.bm25 import BM25Index
+    from agentcore.workspace.indexing.manager import IndexManager
+    from agentcore.workspace.protocol import CodeIndexStatus
+    from agentcore.workspace.stage_dirs import INDEX_REL
+
+    index_dir = tmp_path / Path(*INDEX_REL.split("/"))
+    index_dir.mkdir(parents=True)
+    bm25 = BM25Index(str(index_dir / "code_search.db"))
+    await bm25.upsert_file("a.py", "def a():\n  pass\n", [])
+    await bm25.commit_meta(truncated=True)
+
+    manager = IndexManager(str(index_dir))
+    assert manager.index_status() == CodeIndexStatus.STALE
+    assert manager.needs_background_ensure() is False
+
+
+@pytest.mark.asyncio
 async def test_index_status_truncated_ensure_is_stale_snapshot(tmp_path: Path):
     """Truncated ensure still commits a snapshot → STALE, never BUILDING."""
+    from agentcore.workspace.indexing.manager import IndexManager
     from agentcore.workspace.protocol import (
         CodeIndexStatus,
         IndexFileEntry,
@@ -580,12 +722,14 @@ async def test_index_status_truncated_ensure_is_stale_snapshot(tmp_path: Path):
     manager = IndexManager(str(tmp_path / "trunc"))
     assert await manager.ensure_index(_Backend()) is True
     assert manager.index_status() == CodeIndexStatus.STALE
+    assert manager.needs_background_ensure() is False
     manager.set_building(True)
     assert manager.index_status() == CodeIndexStatus.STALE
 
     # New manager hydrates truncated meta → still STALE (has snapshot).
     again = IndexManager(str(tmp_path / "trunc"))
     assert again.index_status() == CodeIndexStatus.STALE
+    assert again.needs_background_ensure() is False
     again.set_building(True)
     assert again.index_status() == CodeIndexStatus.STALE
 

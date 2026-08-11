@@ -118,6 +118,7 @@ async def _read_stream(
     stream_name: str,
     buffer: list[str],
     on_output: Callable[[str, str], None] | None,
+    last_output_at: list[float] | None = None,
 ) -> None:
     """Read from a subprocess stream in chunks, optionally forwarding each chunk."""
     if stream is None:
@@ -128,6 +129,8 @@ async def _read_stream(
             break
         text = chunk.decode("utf-8", errors="replace")
         buffer.append(text)
+        if last_output_at is not None:
+            last_output_at[0] = time.monotonic()
         if on_output:
             on_output(stream_name, text)
 
@@ -394,31 +397,80 @@ class GVisorSandbox:
 
                     stdout_buf: list[str] = []
                     stderr_buf: list[str] = []
-                    await asyncio.gather(
+                    last_output_at = [time.monotonic()]
+                    readers = asyncio.gather(
                         _read_stream(
                             process.stdout,
                             "stdout",
                             stdout_buf,
                             request.on_output,
+                            last_output_at,
                         ),
                         _read_stream(
                             process.stderr,
                             "stderr",
                             stderr_buf,
                             request.on_output,
+                            last_output_at,
                         ),
                     )
+                    idle = request.idle_timeout_seconds
+                    idle_limit = (
+                        float(idle) if idle is not None and idle > 0 else None
+                    )
+                    deadline = time.monotonic() + float(timeout_seconds)
+                    wait_task = asyncio.ensure_future(readers)
+                    try:
+                        while True:
+                            if wait_task.done():
+                                await wait_task
+                                break
+                            now = time.monotonic()
+                            if now >= deadline:
+                                wait_task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await wait_task
+                                from agentcore.tools.sandbox.exec_env import (
+                                    disaster_timeout_stderr,
+                                )
+
+                                raise SandboxTimeoutError(
+                                    disaster_timeout_stderr(int(timeout_seconds))
+                                )
+                            if (
+                                idle_limit is not None
+                                and (now - last_output_at[0]) >= idle_limit
+                            ):
+                                wait_task.cancel()
+                                with contextlib.suppress(asyncio.CancelledError):
+                                    await wait_task
+                                from agentcore.tools.sandbox.exec_env import (
+                                    idle_timeout_stderr,
+                                )
+
+                                raise SandboxTimeoutError(
+                                    idle_timeout_stderr(int(idle_limit))
+                                )
+                            await asyncio.sleep(0.05)
+                    except SandboxTimeoutError:
+                        raise
+                    finally:
+                        if not wait_task.done():
+                            wait_task.cancel()
+                            with contextlib.suppress(asyncio.CancelledError):
+                                await wait_task
                     await process.wait()
                     return "".join(stdout_buf), "".join(stderr_buf)
 
-                stdout_str, stderr_str = await asyncio.wait_for(
-                    _collect_output(),
-                    timeout=timeout_seconds,
-                )
+                stdout_str, stderr_str = await _collect_output()
             except TimeoutError:
+                from agentcore.tools.sandbox.exec_env import disaster_timeout_stderr
+
                 raise SandboxTimeoutError(
-                    f"Execution exceeded {timeout_seconds}s timeout"
+                    disaster_timeout_stderr(int(timeout_seconds))
                 ) from None
+            except SandboxTimeoutError:
+                raise
             finally:
                 await asyncio.shield(self._stop_container(container_id, process))
 
@@ -446,14 +498,16 @@ class GVisorSandbox:
                 write_back_skipped=skipped,
             )
 
-        except SandboxTimeoutError:
+        except SandboxTimeoutError as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
+            from agentcore.tools.sandbox.exec_env import disaster_timeout_stderr
+
+            detail = str(exc).strip() or disaster_timeout_stderr(int(timeout_seconds))
             return ExecutionResult(
                 success=False,
                 stdout="",
                 stderr=(
-                    f"Timeout: execution exceeded {timeout_seconds}s"
-                    "；执行被中断，中断前的文件改动未写回工作区。"
+                    f"{detail}；执行被中断，中断前的文件改动未写回工作区。"
                 ),
                 exit_code=-1,
                 duration_ms=duration_ms,

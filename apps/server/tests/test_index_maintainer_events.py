@@ -11,6 +11,7 @@ import pytest
 import agentcore.workspace.indexing.maintainer as maint_mod
 from agentcore.observability.events import get_registry
 from agentcore.workspace.indexing.maintainer import IndexMaintainer
+from agentcore.workspace.protocol import CodeIndexStatus
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +32,7 @@ async def test_index_build_emits_start_and_complete(monkeypatch: pytest.MonkeyPa
 
     manager = SimpleNamespace(
         set_building=lambda _v: None,
+        index_status=lambda: CodeIndexStatus.STALE,
         ensure_index=AsyncMock(return_value=True),
     )
     maintainer = IndexMaintainer(manager, SimpleNamespace())  # type: ignore[arg-type]
@@ -58,6 +60,8 @@ async def test_index_skip_channel_busy_emits_fields(monkeypatch: pytest.MonkeyPa
     channel = SimpleNamespace(_inflight={"busy"})
     manager = SimpleNamespace(
         set_building=lambda _v: None,
+        index_status=lambda: CodeIndexStatus.STALE,
+        needs_background_ensure=lambda: True,
         ensure_index=AsyncMock(return_value=False),
     )
     maintainer = IndexMaintainer(manager, SimpleNamespace(_channel=channel))  # type: ignore[arg-type]
@@ -83,6 +87,8 @@ async def test_index_failed_emits_context(monkeypatch: pytest.MonkeyPatch) -> No
 
     manager = SimpleNamespace(
         set_building=lambda _v: None,
+        index_status=lambda: CodeIndexStatus.STALE,
+        needs_background_ensure=lambda: True,
         ensure_index=AsyncMock(side_effect=RuntimeError("boom")),
     )
     maintainer = IndexMaintainer(manager, SimpleNamespace())  # type: ignore[arg-type]
@@ -93,6 +99,49 @@ async def test_index_failed_emits_context(monkeypatch: pytest.MonkeyPatch) -> No
     assert failed["error"] == "RuntimeError"
     assert isinstance(failed["duration_ms"], int)
     assert "workspace.index_build_start" in {n for n, _ in events}
+
+
+async def test_schedule_ready_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-force schedule when ensure is unnecessary must not start ensure."""
+    manager = SimpleNamespace(
+        set_building=MagicMock(),
+        needs_background_ensure=lambda: False,
+        ensure_index=AsyncMock(return_value=False),
+    )
+    maintainer = IndexMaintainer(manager, SimpleNamespace())  # type: ignore[arg-type]
+    maintainer.schedule()
+    await asyncio.sleep(0)
+    assert maintainer.building is False
+    manager.set_building.assert_not_called()
+    manager.ensure_index.assert_not_awaited()
+
+
+async def test_schedule_truncated_stale_without_dirty_is_noop() -> None:
+    """Truncated-only STALE must not re-scan (file cap cannot heal)."""
+    manager = SimpleNamespace(
+        set_building=MagicMock(),
+        needs_background_ensure=lambda: False,
+        index_status=lambda: CodeIndexStatus.STALE,
+        ensure_index=AsyncMock(return_value=False),
+    )
+    maintainer = IndexMaintainer(manager, SimpleNamespace())  # type: ignore[arg-type]
+    maintainer.schedule()
+    await asyncio.sleep(0)
+    assert maintainer.building is False
+    manager.ensure_index.assert_not_awaited()
+
+
+async def test_schedule_force_runs_when_ready(monkeypatch: pytest.MonkeyPatch) -> None:
+    manager = SimpleNamespace(
+        set_building=lambda _v: None,
+        needs_background_ensure=lambda: False,
+        ensure_index=AsyncMock(return_value=False),
+    )
+    maintainer = IndexMaintainer(manager, SimpleNamespace())  # type: ignore[arg-type]
+    maintainer.schedule(force=True)
+    await maintainer.drain()
+    manager.ensure_index.assert_awaited_once()
+    assert manager.ensure_index.await_args.kwargs.get("force") is True
 
 
 def test_index_events_registered_in_catalog() -> None:

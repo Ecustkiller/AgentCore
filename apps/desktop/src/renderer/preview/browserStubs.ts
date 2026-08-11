@@ -97,6 +97,9 @@ const sidecarApi: SidecarApi = {
     throw new Error("sidecar unavailable in web preview");
   },
   probe: async () => {},
+  warmCodeIndex: async () => {},
+  warmMcpDiscover: async () => {},
+  warmAccountRulesMemory: async () => {},
   recovery: async () => ({
     liveRunning: false,
     unsynced: [],

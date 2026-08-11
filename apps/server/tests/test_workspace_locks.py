@@ -153,6 +153,10 @@ async def test_execute_holds_mutation_lock_against_write(tmp_path: Path):
     order: list[str] = []
 
     class SlowSandbox:
+        async def health_check(self) -> bool:
+            # ServerWorkspace probes once via health_check before execute.
+            return True
+
         async def execute(self, req: ExecutionRequest) -> ExecutionResult:
             order.append("exec-enter")
             await asyncio.sleep(0.05)

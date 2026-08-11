@@ -46,7 +46,7 @@ def test_execute_succeeds_under_selector_event_loop():
 
 
 def test_timeout_returns_graceful_result_under_selector_event_loop():
-    """Timeout contract: success=False, exit_code=-1, stderr mentions Timeout."""
+    """Disaster wall: success=False, exit_code=-1, stderr uses forced-stop marker."""
 
     async def _run() -> None:
         sandbox = SubprocessSandbox()
@@ -59,7 +59,31 @@ def test_timeout_returns_graceful_result_under_selector_event_loop():
         )
         assert result.success is False
         assert result.exit_code == -1
-        assert "Timeout" in result.stderr
+        assert "Timeout: forced stop after" in result.stderr
+
+    loop = _make_selector_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
+
+def test_idle_timeout_kills_silent_process_under_selector_event_loop():
+    """Idle silence is the primary hang kill (before disaster wall)."""
+
+    async def _run() -> None:
+        sandbox = SubprocessSandbox()
+        result = await sandbox.execute(
+            ExecutionRequest(
+                code="import time; time.sleep(10)",
+                language="python",
+                timeout_seconds=30,
+                idle_timeout_seconds=1,
+            )
+        )
+        assert result.success is False
+        assert result.exit_code == -1
+        assert "Timeout: no output for" in result.stderr
 
     loop = _make_selector_loop()
     try:

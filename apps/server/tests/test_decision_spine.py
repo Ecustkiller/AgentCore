@@ -287,3 +287,88 @@ def test_token_accounting_marks_full_trace_vs_resume_settlement() -> None:
     text = format_decision_spine(spine)
     assert "Token口径" in text
     assert "全trace" in text or "full_trace" in text or "resume" in text.lower()
+
+
+def _events_local_turn(trace_id: str = "e" * 32) -> list[dict]:
+    """Sidecar write-back sample: recorded + tool_failures (no turn_start/complete)."""
+    return [
+        {
+            "type": "log",
+            "event": "chat.local_turn_tool_failures",
+            "timestamp": "2026-08-11T12:00:00Z",
+            "trace_id": trace_id,
+            "conversation_id": "conv-local",
+            "message_id": "m-local",
+            "count": 2,
+            "codes": ["searxng_unreachable", "egress_connect"],
+            "tools": ["web_search", "read_url"],
+        },
+        {
+            "type": "log",
+            "event": "chat.local_turn_recorded",
+            "timestamp": "2026-08-11T12:00:01Z",
+            "trace_id": trace_id,
+            "conversation_id": "conv-local",
+            "message_id": "m-local",
+            "chars": 42,
+            "rounds": 3,
+            "finish_reason": "stop",
+        },
+    ]
+
+
+def test_local_turn_spine_head_and_tool_failure_codes() -> None:
+    """Local write-back: spine has non-none head; failures project without fake tool.execute_end."""
+    tid = "e" * 32
+    spine = build_decision_spine(_events_local_turn(tid), trace_id=tid)
+    assert spine["head"]["source"] == "chat.local_turn_recorded"
+    assert spine["head"]["source"] != "none"
+    assert spine["head"]["chars"] == 42
+    assert spine["tail"]["source"] == "jsonl_close"
+    assert spine["tail"]["event"] == "chat.local_turn_recorded"
+    assert spine["tail"]["finish_reason"] == "stop"
+    assert spine["health"]["incomplete"] is False
+    events = {d["event"] for d in spine["decisions"]}
+    assert "chat.local_turn_tool_failures" in events
+    assert "tool.execute_end" not in events
+    fail = next(d for d in spine["decisions"] if d["event"] == "chat.local_turn_tool_failures")
+    assert fail["detail"]["codes"] == ["searxng_unreachable", "egress_connect"]
+    assert fail["detail"]["tools"] == ["web_search", "read_url"]
+    text = format_decision_spine(spine)
+    assert "chat.local_turn_tool_failures" in text
+    assert "searxng_unreachable" in text
+
+
+def test_local_turn_recorded_does_not_mask_cloud_turn_close() -> None:
+    """If both local_turn_recorded and turn_complete exist, prefer primary close/start."""
+    tid = "f" * 32
+    events = [
+        {
+            "type": "log",
+            "event": "chat.turn_start",
+            "timestamp": "2026-08-11T12:00:00Z",
+            "trace_id": tid,
+            "preview": "cloud",
+            "via": "cloud",
+        },
+        {
+            "type": "log",
+            "event": "chat.local_turn_recorded",
+            "timestamp": "2026-08-11T12:00:01Z",
+            "trace_id": tid,
+            "chars": 1,
+            "rounds": 1,
+        },
+        {
+            "type": "log",
+            "event": "chat.turn_complete",
+            "timestamp": "2026-08-11T12:00:02Z",
+            "trace_id": tid,
+            "finish_reason": "stop",
+            "rounds": 2,
+        },
+    ]
+    spine = build_decision_spine(events, trace_id=tid)
+    assert spine["head"]["source"] == "chat.turn_start"
+    assert spine["tail"]["event"] == "chat.turn_complete"
+    assert spine["tail"]["rounds"] == 2

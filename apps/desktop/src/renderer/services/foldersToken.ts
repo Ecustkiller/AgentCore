@@ -11,7 +11,8 @@ import type { SidecarFoldersAuth } from "@shared/sidecar-contract";
  * - `apiKey` = folders 窄票本身（非平台 key / 非 access）。
  *
  * 铸票路径 `POST /v1/folders/token`，响应 `{token, expires_in_sec}`（亦兼容 `expires_at`）。
- * `startTurn` / `resume` 应传 `force: true` 每回合强制换新。
+ * TTL+skew 内复用；`startTurn` / `resume` 走缓存。鉴权失败时由调用方
+ * `clearSidecarFoldersAuth` + `force: true` remint 一次（见 `streamConversationViaSidecar`）。
  */
 
 interface FoldersTokenResponse {
@@ -58,7 +59,7 @@ async function mint(): Promise<{ token: string; expiresAtMs: number }> {
 }
 
 export interface ResolveSidecarFoldersAuthOptions {
-  /** 跳过缓存、立刻向云端兑换新令牌（startTurn / resume 用）。 */
+  /** 跳过缓存、立刻向云端兑换新令牌（401 remint 用）。 */
   force?: boolean;
 }
 
@@ -86,7 +87,38 @@ export async function resolveSidecarFoldersAuth(
   }
 }
 
-/** 丢弃缓存令牌（登出 / 换账号后调），使下次回合重新兑换。 */
+/** 丢弃缓存令牌（登出 / 鉴权失败后调），使下次回合重新兑换。 */
 export function clearSidecarFoldersAuth(): void {
   cached = null;
+}
+
+/** 文案 / 错误码是否像「folders 窄票失效」（云名册 401/403）。 */
+export function looksLikeFoldersTokenFailure(err: unknown): boolean {
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === "string"
+        ? err
+        : err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : String(err ?? "");
+  const lower = msg.toLowerCase();
+  if (
+    lower.includes("folders_cloud_unauthorized") ||
+    (lower.includes("folders") &&
+      (lower.includes("unauthorized") ||
+        lower.includes("401") ||
+        lower.includes("403")))
+  ) {
+    return true;
+  }
+  if (
+    err &&
+    typeof err === "object" &&
+    "code" in err &&
+    (err as { code?: string }).code === "folders_cloud_unauthorized"
+  ) {
+    return true;
+  }
+  return false;
 }

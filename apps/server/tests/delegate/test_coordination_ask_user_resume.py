@@ -89,6 +89,12 @@ class _CoordAskCeoProvider:
             m.role == "user" and m.content and "团队协调事件" in m.content
             for m in request.messages
         )
+        # Require a real completion — idle_timeout patrol also carries「团队协调事件」
+        # and must not drive synthesis while completed_run_ids is still empty.
+        worker_completed = any(
+            m.role == "user" and m.content and "worker_completed" in m.content
+            for m in request.messages
+        )
         all_done = any(
             m.role == "user" and m.content and "all_completed" in m.content
             for m in request.messages
@@ -142,7 +148,12 @@ class _CoordAskCeoProvider:
                     )
                 ]
             )
-        elif coord_injected and self.synth_calls == 0 and not all_done:
+        elif (
+            coord_injected
+            and worker_completed
+            and self.synth_calls == 0
+            and not all_done
+        ):
             self.synth_calls += 1
             args = json.dumps({"draft": DRAFT_TEXT})
             yield LLMChunk(

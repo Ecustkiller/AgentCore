@@ -16,7 +16,6 @@ import {
   getComposerChannelPreference,
   setComposerChannelPreference,
 } from "@/lib/composerChannelPreference";
-import { LOCAL_TRADITIONAL_LABEL } from "@/lib/conversationWorkspaceMode";
 import { visibleDraftProjects } from "@/lib/draftWorkspaceProjects";
 import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
 import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
@@ -116,7 +115,7 @@ function draftLabel(
   if (!folder) return { icon: "project", text: "项目" };
   return {
     icon: folder.mode === "local" ? "local" : "cloud",
-    text: `${folder.name} · ${folder.mode === "local" ? LOCAL_TRADITIONAL_LABEL : "云端"}`,
+    text: folder.name,
   };
 }
 

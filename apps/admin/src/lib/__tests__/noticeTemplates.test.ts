@@ -10,7 +10,7 @@ import {
 
 describe("noticeTemplates", () => {
   it("exposes operational templates with required fields", () => {
-    expect(NOTICE_TEMPLATES).toHaveLength(11);
+    expect(NOTICE_TEMPLATES).toHaveLength(12);
     for (const t of NOTICE_TEMPLATES) {
       expect(t.id).toBeTruthy();
       expect(t.title.trim().length).toBeGreaterThan(0);
@@ -30,6 +30,7 @@ describe("noticeTemplates", () => {
       "maintenance",
       "policy",
       "quota_jiurelay",
+      "quota_platform_restored",
       "outage",
       "feature",
       "security",
@@ -88,6 +89,22 @@ describe("noticeTemplates", () => {
     expect(seed.surface).toBe("both");
     const withNote = buildFromSlots(t, { note: "预计明日恢复" });
     expect(withNote.body).toContain("补充：预计明日恢复");
+  });
+
+  it("quota_platform_restored seeds Flash Free restore copy", () => {
+    const t = NOTICE_TEMPLATES.find((x) => x.id === "quota_platform_restored")!;
+    expect(t).toBeTruthy();
+    const seed = templateToFormSeed(t);
+    expect(seed.title).toBe("平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free");
+    expect(seed.body).toContain("内测期提供测试额度");
+    expect(seed.body).toContain("OpenCode Zen");
+    expect(seed.body).toContain("Flash Free");
+    expect(seed.body).toContain("设置 · 模型配置");
+    expect(seed.body).not.toMatch(/送\s*\d+\s*元|jiurelay/);
+    expect(seed.surface).toBe("both");
+    expect(seed.severity).toBe("normal");
+    const withNote = buildFromSlots(t, { note: "额度数字不变" });
+    expect(withNote.body).toContain("补充：额度数字不变");
   });
 
   it("buildFromSlots fills hotfix copy from slot values", () => {

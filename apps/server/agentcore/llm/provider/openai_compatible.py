@@ -632,7 +632,7 @@ class OpenAICompatibleProvider:
         # (reasoning_content echo / thinking.type / omit temperature) come from
         # ``wire_dialect`` — broadcasting DeepSeek/Hy3 fields to other relays
         # triggers invalid_request on multi-turn tool loops.
-        dialect = resolve_wire_dialect(request.model)
+        dialect = resolve_wire_dialect(request.model, base_url=self._base_url)
         messages = []
         for msg in request.messages:
             m: dict = {"role": msg.role}

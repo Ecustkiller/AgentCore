@@ -355,6 +355,31 @@ async def test_pillar_c_attached_inject_cancels_armed_harvest():
 
 
 @pytest.mark.asyncio
+async def test_soft_stop_skips_harvest_arming():
+    """ask_user soft_stop 取消 drive 不得武装 harvest（resume 从 journal 重建）。"""
+    session = CoordinationSession(
+        execution_id="exec-soft-skip-harvest",
+        total_workers=2,
+        conversation_id="conv-soft-skip-harvest",
+    )
+    session.soft_stop = True
+    session.turn_attached = True
+    session.completed_run_ids.add("r1")
+    set_active_coordination(session)
+
+    with patch(
+        "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+        new_callable=AsyncMock,
+    ) as harvest:
+        finish_detached_coordination(session)
+        assert session.harvest_scheduled is False
+        await asyncio.sleep(0.05)
+        harvest.assert_not_awaited()
+        # Session stays registered for turn release / resume rebuild.
+        assert active_coordination("exec-soft-skip-harvest") is session
+
+
+@pytest.mark.asyncio
 async def test_pillar_c_detach_during_grace_runs_harvest():
     """grace 期内 release 清掉 turn_attached → 立即 harvest（不必等满 grace）。"""
     import agentcore.runtime.coordination.session as session_mod

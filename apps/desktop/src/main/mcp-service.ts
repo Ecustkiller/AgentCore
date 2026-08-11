@@ -267,6 +267,10 @@ async function ensureReady(config: McpServerConfig): Promise<LiveSession> {
   return live;
 }
 
+export async function listMcpToolsValue(): Promise<Record<string, unknown>> {
+  return listToolsValue();
+}
+
 async function listToolsValue(): Promise<Record<string, unknown>> {
   const configs = loadConfigs().filter((s) => s.enabled);
   const servers: Array<Record<string, unknown>> = [];

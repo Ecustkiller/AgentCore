@@ -32,6 +32,19 @@ vi.mock("@/services/folders", () => ({
   findLocalFolderByBinding: vi.fn(() => undefined),
 }));
 
+vi.mock("@/services/accountToken", () => ({
+  resolveSidecarAccountAuth: vi.fn().mockResolvedValue({
+    baseUrl: "https://api.example.com/v1/account",
+    apiKey: "acct-tok",
+  }),
+}));
+
+vi.mock("@/stores/auth", () => ({
+  useAuthStore: {
+    getState: () => ({ user: { id: "user-1" } }),
+  },
+}));
+
 vi.mock("@/services/workspaceBinding", () => ({
   bindLocalWorkspace: vi.fn(),
 }));
@@ -123,6 +136,11 @@ describe("pickAndOpenLocalProject mode=local", () => {
       }),
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
+    window.sidecarApi = {
+      warmCodeIndex: vi.fn().mockResolvedValue(undefined),
+      warmMcpDiscover: vi.fn().mockResolvedValue(undefined),
+      warmAccountRulesMemory: vi.fn().mockResolvedValue(undefined),
+    } as unknown as typeof window.sidecarApi;
   });
 
   it("addRoot + createFolder(mode=local) then startNewConversation", async () => {
@@ -157,6 +175,27 @@ describe("pickAndOpenLocalProject mode=local", () => {
     });
     expect(addFolderCache).toHaveBeenCalledWith(folder);
     expect(startNewConversation).toHaveBeenCalledWith(navigate, "folder-1");
+    expect(window.sidecarApi.warmCodeIndex).toHaveBeenCalledWith({
+      rootId: "root-1",
+      subpath: "",
+    });
+    expect(window.sidecarApi.warmMcpDiscover).toHaveBeenCalledWith({
+      rootId: "root-1",
+      subpath: "",
+      userId: "user-1",
+    });
+    await vi.waitFor(() => {
+      expect(window.sidecarApi.warmAccountRulesMemory).toHaveBeenCalledWith({
+        rootId: "root-1",
+        subpath: "",
+        folderId: "folder-1",
+        accountAuth: {
+          baseUrl: "https://api.example.com/v1/account",
+          apiKey: "acct-tok",
+        },
+        userId: "user-1",
+      });
+    });
   });
 
   it("reuses existing local binding without createFolder", async () => {
@@ -200,6 +239,11 @@ describe("pickAndRegisterLocalProject mode=local", () => {
       }),
       listDir: vi.fn(),
     } as unknown as typeof window.fsApi;
+    window.sidecarApi = {
+      warmCodeIndex: vi.fn().mockResolvedValue(undefined),
+      warmMcpDiscover: vi.fn().mockResolvedValue(undefined),
+      warmAccountRulesMemory: vi.fn().mockResolvedValue(undefined),
+    } as unknown as typeof window.sidecarApi;
   });
 
   it("addRoot + createFolder(mode=local) without startNewConversation", async () => {
@@ -233,6 +277,27 @@ describe("pickAndRegisterLocalProject mode=local", () => {
     });
     expect(addFolderCache).toHaveBeenCalledWith(folder);
     expect(startNewConversation).not.toHaveBeenCalled();
+    expect(window.sidecarApi.warmCodeIndex).toHaveBeenCalledWith({
+      rootId: "root-2",
+      subpath: "",
+    });
+    expect(window.sidecarApi.warmMcpDiscover).toHaveBeenCalledWith({
+      rootId: "root-2",
+      subpath: "",
+      userId: "user-1",
+    });
+    await vi.waitFor(() => {
+      expect(window.sidecarApi.warmAccountRulesMemory).toHaveBeenCalledWith({
+        rootId: "root-2",
+        subpath: "",
+        folderId: "folder-2",
+        accountAuth: {
+          baseUrl: "https://api.example.com/v1/account",
+          apiKey: "acct-tok",
+        },
+        userId: "user-1",
+      });
+    });
   });
 });
 

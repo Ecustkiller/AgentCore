@@ -1,4 +1,4 @@
-"""Bounded project verification — test / typecheck / build / install with a minute-level budget.
+"""Bounded project verification — test / typecheck / build / install with idle + disaster caps.
 
 Expands the historical ``test_run`` surface into the first-class verify tool of the
 short-exec / bounded-verify / long-running triad:
@@ -8,9 +8,9 @@ short-exec / bounded-verify / long-running triad:
 - ``terminal`` — long-running processes
 
 Runs through the same sandbox chain and GRANTABLE posture as ``code_execute``.
-Over-budget timeouts are ``contract_failure`` (verify incomplete), not circuit-breaker
-fuel. Local runs launch via a Python argv runner so Windows never defaults through a
-WSL bash trampoline.
+Idle hang → ``exec_timeout`` (exec-env family); disaster wall → ``exec_forced_stop`` /
+``contract_failure`` (verify incomplete), not circuit-breaker fuel. Local runs launch
+via a Python argv runner so Windows never defaults through a WSL bash trampoline.
 
 Install path: registry pin / argv deny — see ``package_install``. Cloud
 (``backend.location=server``) also requires the packaging egress chokepoint
@@ -66,17 +66,29 @@ Framework = Literal["pytest", "vitest", "jest"]
 Scope = Literal["all", "affected", "file"]
 CheckKind = Literal["test", "typecheck", "build", "install", "command"]
 
-# Outer-loop verify budgets (分档，非盲加全局 timeout)：
-# - standard 300s: install / test / non-heavy command
-# - heavy 600s: typecheck / build / typecheck·build-shaped command
-# Engine schema timeout uses heavy + slack so the sandbox returns Timeout first.
-# Aligned with ``settings.gvisor_timeout_max_seconds`` (630 = 600 + slack) and
-# desktop ``EXEC_TIMEOUT_CAP_S`` — 外环验收墙钟.
-_VERIFY_BUDGET_STANDARD_SECONDS = 300
-_VERIFY_BUDGET_HEAVY_SECONDS = 600
-_VERIFY_BUDGET_SECONDS = _VERIFY_BUDGET_STANDARD_SECONDS  # back-compat alias
-_ENGINE_TIMEOUT_SLACK_SECONDS = 30
-_DEFAULT_TIMEOUT = _VERIFY_BUDGET_SECONDS
+# Outer-loop verify timeouts (定案：活性为主，灾难顶为辅；废弃「验证预算」合同):
+# - idle 60s (install 120s): no stdout/stderr → hang
+# - disaster 1200s: absolute safety net only
+# Engine schema timeout uses disaster + slack so sandbox returns Timeout first.
+# Aligned with ``settings.gvisor_timeout_max_seconds`` / desktop ``EXEC_TIMEOUT_CAP_S``.
+from agentcore.tools.sandbox.exec_env import (
+    _ENGINE_TIMEOUT_SLACK_SECONDS,
+    EXEC_DISASTER_TIMEOUT_S,
+    EXEC_FORCED_STOP_CODE,
+    EXEC_IDLE_TIMEOUT_DEFAULT_S,
+    EXEC_IDLE_TIMEOUT_INSTALL_S,
+    EXEC_TIMEOUT_CODE,
+    TIMEOUT_LEGACY_MARKER,
+    is_disaster_timeout_text,
+    is_idle_timeout_text,
+)
+
+_VERIFY_DISASTER_SECONDS = EXEC_DISASTER_TIMEOUT_S
+# Back-compat aliases for tests importing old names (map to disaster ceiling).
+_VERIFY_BUDGET_STANDARD_SECONDS = _VERIFY_DISASTER_SECONDS
+_VERIFY_BUDGET_HEAVY_SECONDS = _VERIFY_DISASTER_SECONDS
+_VERIFY_BUDGET_SECONDS = _VERIFY_DISASTER_SECONDS
+_DEFAULT_TIMEOUT = _VERIFY_DISASTER_SECONDS
 
 # Heavy outer-loop shape (typecheck / build) — lengthens command= budget only.
 _HEAVY_VERIFY_RE = re.compile(
@@ -256,7 +268,25 @@ _JEST_CONFIG_NAMES = (
 _SOURCE_EXTENSIONS = frozenset({".py", ".ts", ".tsx", ".js", ".jsx"})
 _MAX_AFFECTED_SOURCES = 10
 
-_TIMEOUT_MARKER = "Timeout: execution exceeded"
+_TIMEOUT_MARKER = TIMEOUT_LEGACY_MARKER  # legacy journals still match
+
+
+def resolve_verify_timeouts(check: CheckKind) -> tuple[int, int]:
+    """Return ``(disaster_wall_seconds, idle_silence_seconds)`` for outer verify."""
+    idle = (
+        EXEC_IDLE_TIMEOUT_INSTALL_S
+        if check == "install"
+        else EXEC_IDLE_TIMEOUT_DEFAULT_S
+    )
+    return EXEC_DISASTER_TIMEOUT_S, idle
+
+
+def resolve_verify_budget_seconds(
+    check: CheckKind, argv: list[str] | None = None
+) -> int:
+    """Deprecated alias — returns disaster ceiling only (idle is separate)."""
+    _ = argv
+    return resolve_verify_timeouts(check)[0]
 
 
 def _make_output_callback(context: ToolContext):
@@ -303,17 +333,8 @@ def _is_allowed_verify_argv(argv: list[str]) -> bool:
 
 
 def _is_heavy_verify_argv(argv: list[str]) -> bool:
-    """True when argv looks like typecheck/build (outer-loop heavy budget)."""
+    """True when argv looks like typecheck/build (legacy helper; unused for timeouts)."""
     return bool(_HEAVY_VERIFY_RE.search(_argv_to_shell(argv)))
-
-
-def resolve_verify_budget_seconds(check: CheckKind, argv: list[str] | None = None) -> int:
-    """Pick outer-loop wall budget: typecheck/build (+ heavy command) → 600; else 300."""
-    if check in ("typecheck", "build"):
-        return _VERIFY_BUDGET_HEAVY_SECONDS
-    if check == "command" and argv is not None and _is_heavy_verify_argv(argv):
-        return _VERIFY_BUDGET_HEAVY_SECONDS
-    return _VERIFY_BUDGET_STANDARD_SECONDS
 
 
 def verify_coalesce_fingerprint(
@@ -659,9 +680,15 @@ def _format_check_output(
     duration_seconds: float,
     budget_exceeded: bool,
     budget_seconds: int,
+    timeout_kind: str | None = None,
 ) -> str:
     if budget_exceeded:
-        status = "未完成（预算耗尽）"
+        if timeout_kind == "idle":
+            status = "未完成（执行无响应）"
+        elif timeout_kind == "disaster":
+            status = "未完成（强制中止）"
+        else:
+            status = "未完成（已中止）"
     elif exec_result.exit_code == 0:
         status = "通过"
     else:
@@ -674,29 +701,55 @@ def _format_check_output(
         f"- 命令：{_argv_to_shell(command_argv)}",
         f"- 退出码：{exec_result.exit_code}",
         f"- 耗时：{duration_seconds:.1f}s",
-        f"- 预算：{budget_seconds}s",
+        f"- 灾难顶：{budget_seconds}s",
     ]
-    if budget_exceeded:
+    if budget_exceeded and timeout_kind == "idle":
         parts.append(
-            f"- 说明：验证未在 {budget_seconds}s 预算内完成；"
-            "这是验证未完成，不是执行工具故障。可缩小范围、换更快的 check，或拆命令后重试。"
+            "- 说明：执行长时间无输出，已按挂起中止；"
+            "这是执行环境/进程无响应，不是「验证预算」合同。"
+            "请缩小范围或检查本机环境后重试。"
+        )
+    elif budget_exceeded and timeout_kind == "disaster":
+        parts.append(
+            f"- 说明：已跑满灾难顶 {budget_seconds}s，强制中止；"
+            "未取得完整验证结果。可缩小范围、拆命令后重试。"
+        )
+    elif budget_exceeded:
+        parts.append(
+            "- 说明：验证未取得完整结果（已中止）。可缩小范围或拆命令后重试。"
         )
     raw = (exec_result.stdout or "").strip()
     err = (exec_result.stderr or "").strip()
     if raw:
         parts.extend(["", "### stdout", raw])
-    if err and not (budget_exceeded and _TIMEOUT_MARKER in err):
-        parts.extend(["", "### stderr", err])
-    elif err and budget_exceeded:
-        # Keep the timeout line visible once.
+    if err:
         parts.extend(["", "### stderr", err])
     return "\n".join(parts)
 
 
 def _is_budget_timeout(exec_result: ExecutionResult) -> bool:
-    if exec_result.exit_code == -1 and _TIMEOUT_MARKER in (exec_result.stderr or ""):
+    """True when sandbox killed the process (idle hang or disaster wall)."""
+    err = exec_result.stderr or ""
+    if exec_result.exit_code == -1 and (
+        is_idle_timeout_text(err)
+        or is_disaster_timeout_text(err)
+        or TIMEOUT_LEGACY_MARKER in err
+    ):
         return True
-    return _TIMEOUT_MARKER in (exec_result.stderr or "")
+    return (
+        is_idle_timeout_text(err)
+        or is_disaster_timeout_text(err)
+        or TIMEOUT_LEGACY_MARKER in err
+    )
+
+
+def _timeout_kind(exec_result: ExecutionResult) -> str | None:
+    err = exec_result.stderr or ""
+    if is_idle_timeout_text(err):
+        return "idle"
+    if is_disaster_timeout_text(err) or TIMEOUT_LEGACY_MARKER in err:
+        return "disaster"
+    return None
 
 
 def _note_install_network_unavailable() -> None:
@@ -826,24 +879,24 @@ class TestRunTool:
             name="test_run",
             description=(
                 "有界项目验证：跑工作区声明的检查（受控装包 / 测试 / typecheck / build / "
-                "显式 verify 命令），分钟级预算、可流式输出。适合外环验绿与慢 build、"
+                "显式 verify 命令），可流式输出。适合外环验绿与慢 build、"
                 "全量 tsc、项目测试、npm/pnpm/yarn 或 uv/pip/poetry 装包——"
                 "【不要】用 code_execute 跑这些。云端装包用 check=install（或 "
                 "check=command + npm install / uv sync），需受限出网；无网时诚实降级，勿空转。"
-                "超预算返回「验证未完成」，不是工具故障。长驻进程请用 terminal。"
+                "长时间无输出会按挂起中止；灾难顶约 20 分钟强制中止。"
+                "长驻进程请用 terminal。"
                 "【范围】修码自检用内环 code_diagnostics；"
                 "全量 typecheck / build / `tsc -b` 仅验收员外环执行——"
                 "禁止多名 fix worker 三路并行全仓 tsc。"
-                "同 execution 内队友已跑过的相同验证会自动复用结果，勿重复硬烧预算。"
+                "同 execution 内队友已跑过的相同验证会自动复用结果，勿重复硬烧。"
             ),
             parameters=TEST_RUN_PARAMETERS,
             category=ToolCategory.EXECUTION,
             # Same sandbox chain + GRANTABLE posture as code_execute (P0): a project
             # check executes arbitrary project code, so governance must stay aligned.
             approval=ToolApproval.GRANTABLE,
-            # Engine wall covers heavy outer-loop budget so typecheck/build are not
-            # cancelled before the sandbox Timeout → contract_failure path.
-            timeout_seconds=_VERIFY_BUDGET_HEAVY_SECONDS + _ENGINE_TIMEOUT_SLACK_SECONDS,
+            # Engine wall covers disaster ceiling so sandbox Timeout wins first.
+            timeout_seconds=_VERIFY_DISASTER_SECONDS + _ENGINE_TIMEOUT_SLACK_SECONDS,
         )
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
@@ -1032,7 +1085,7 @@ class TestRunTool:
                 )
 
         command_shell = _argv_to_shell(argv)
-        budget_seconds = resolve_verify_budget_seconds(check, argv)
+        budget_seconds, idle_seconds = resolve_verify_timeouts(check)
         env: dict[str, str] | None = None
         cache_bucket: str | None = None
         registry_egress = False
@@ -1053,6 +1106,7 @@ class TestRunTool:
             code=_python_argv_runner(argv),
             language="python",
             timeout_seconds=budget_seconds,
+            idle_timeout_seconds=idle_seconds,
             on_output=_make_output_callback(context),
             network_mode="restricted" if allows_restricted else "none",
             registry_egress=registry_egress,
@@ -1100,8 +1154,44 @@ class TestRunTool:
                 )
             duration_ms = int((time.monotonic() - start) * 1000)
             duration_s = duration_ms / 1000.0
+            from agentcore.runtime.loop_controller.types import (
+                EXEC_ENV_TIMEOUT_FAMILY,
+                EXEC_ENV_TIMEOUT_RETIRE_STEER,
+            )
+            from agentcore.tools.sandbox.exec_env import (
+                is_exec_env_probe_failure,
+            )
+
+            if is_exec_env_probe_failure(exec_result.stderr) or is_exec_env_probe_failure(
+                exec_result.stdout
+            ):
+                msg = (exec_result.stderr or exec_result.stdout or "").strip()
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output=msg,
+                    error=msg,
+                    duration_ms=duration_ms,
+                    metadata={
+                        "check": check,
+                        "code": EXEC_TIMEOUT_CODE,
+                        "exec_env_timeout": True,
+                        "error_class": "permanent",
+                        "retire_tools": sorted(EXEC_ENV_TIMEOUT_FAMILY),
+                        "retire_message": EXEC_ENV_TIMEOUT_RETIRE_STEER,
+                    },
+                    display={
+                        "check": check,
+                        "command": command_shell,
+                        "exit_code": exec_result.exit_code,
+                        "stdout": exec_result.stdout,
+                        "stderr": exec_result.stderr,
+                    },
+                )
             budget_exceeded = _is_budget_timeout(exec_result)
+            kind = _timeout_kind(exec_result) if budget_exceeded else None
             if budget_exceeded:
+                # Keep hollow-rework latch (禁「仍在跑」); semantics no longer「验证预算」.
                 _note_verify_budget_exhausted()
 
             if check == "test" and framework is not None and not budget_exceeded:
@@ -1168,16 +1258,28 @@ class TestRunTool:
                 duration_seconds=duration_s,
                 budget_exceeded=budget_exceeded,
                 budget_seconds=budget_seconds,
+                timeout_kind=kind,
             )
             ok = (not budget_exceeded) and exec_result.exit_code == 0
             error: str | None
-            if budget_exceeded:
+            if budget_exceeded and kind == "idle":
                 error = (
-                    f"验证未在 {budget_seconds}s 预算内完成（验证未完成，非工具故障）"
+                    f"执行超过 {idle_seconds}s 无输出，已按挂起中止"
+                    "（未取得验证结果）"
+                )
+            elif budget_exceeded:
+                error = (
+                    f"已跑满灾难顶 {budget_seconds}s，强制中止"
+                    "（未取得完整验证结果）"
                 )
             else:
                 error = None if ok else f"验证未通过（退出码 {exec_result.exit_code}）"
 
+            meta_code = (
+                EXEC_TIMEOUT_CODE
+                if kind == "idle"
+                else (EXEC_FORCED_STOP_CODE if budget_exceeded else "verify_result")
+            )
             return ToolResult(
                 tool_call_id="",
                 success=ok,
@@ -1186,9 +1288,15 @@ class TestRunTool:
                 duration_ms=duration_ms,
                 metadata={
                     "check": check,
-                    "code": "verify_budget" if budget_exceeded else "verify_result",
+                    "code": meta_code,
                     "timeout_seconds": budget_seconds,
+                    "idle_timeout_seconds": idle_seconds,
                     "exit_code": exec_result.exit_code,
+                    **(
+                        {"exec_env_timeout": True, "timeout_kind": kind}
+                        if kind == "idle"
+                        else ({"timeout_kind": kind} if kind else {})
+                    ),
                 },
                 display={
                     "check": check,
@@ -1197,8 +1305,11 @@ class TestRunTool:
                     "stdout": exec_result.stdout,
                     "stderr": exec_result.stderr,
                     "budget_exceeded": budget_exceeded,
+                    "timeout_kind": kind,
                 },
-                contract_failure=budget_exceeded,
+                # Idle hang feeds exec-env retire via meta; disaster is contract-ish
+                # incomplete result (not a tool fuse / not「验证预算」).
+                contract_failure=bool(budget_exceeded and kind != "idle"),
             )
 
         session = None

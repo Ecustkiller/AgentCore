@@ -24,7 +24,9 @@ from agentcore.tools.mcp.wire import (
     clear_mcp_discover_cache,
     discover_mcp_tools,
     mcp_capability_label,
+    parse_mcp_list_payload,
     register_mcp_tools,
+    seed_mcp_discover_cache,
 )
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -191,7 +193,7 @@ async def test_discover_mcp_tools_parses_ready_and_failed():
     assert result.tool_count == 1
     assert result.specs[0].mcp_tool_name == "echo"
     channel.request_mcp.assert_awaited_once()
-    assert channel.request_mcp.await_args.kwargs.get("timeout") == 5.0
+    assert channel.request_mcp.await_args.kwargs.get("timeout") == 1.0
 
 
 @pytest.mark.asyncio
@@ -220,7 +222,159 @@ async def test_discover_mcp_tools_cache_hit_skips_request():
     assert second.tool_count == 1
     assert second.specs == first.specs
     channel.request_mcp.assert_awaited_once()
-    assert channel.request_mcp.await_args.kwargs.get("timeout") == 5.0
+    assert channel.request_mcp.await_args.kwargs.get("timeout") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_discover_mcp_tools_cache_only_miss_skips_channel(monkeypatch):
+    """prepare-path: cache miss must not await ClientTool / request_mcp."""
+    events: list[tuple[str, dict]] = []
+
+    def _capture(event: str, **kwargs):
+        events.append((event, kwargs))
+
+    monkeypatch.setattr("agentcore.tools.mcp.wire.logger.info", _capture)
+    channel = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="c-cache-only-miss",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    channel.request_mcp = AsyncMock(  # type: ignore[method-assign]
+        return_value={"servers": []}
+    )
+    result = await discover_mcp_tools(channel, cache_scope="user-1", cache_only=True)
+    assert result.tool_count == 0
+    assert result.detail == "cache_miss"
+    assert not result.degraded
+    channel.request_mcp.assert_not_awaited()
+    miss = [e for e in events if e[0] == "desktop.mcp_list_cache_miss"]
+    assert len(miss) == 1
+    assert miss[0][1]["detail"] == "cache_miss"
+    assert miss[0][1]["conversation_id"] == "c-cache-only-miss"
+    assert miss[0][1]["cache_scope"] == "user-1"
+    assert mcp_capability_label(result, desktop_online=True) == "未装配"
+
+
+@pytest.mark.asyncio
+async def test_seed_then_cache_only_prepare_path_hits():
+    """Non-turn seed → prepare-style cache_only discover hits without network."""
+    payload = {
+        "servers": [
+            {
+                "id": "ok",
+                "name": "OK",
+                "status": "ready",
+                "tools": [{"name": "echo", "description": "Echo"}],
+            }
+        ]
+    }
+    seeded = parse_mcp_list_payload(payload)
+    assert seeded.tool_count == 1
+    seed_mcp_discover_cache("conv-seed", seeded, cache_scope="user-seed")
+
+    channel = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-seed",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    channel.request_mcp = AsyncMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("cache_only must not call request_mcp")
+    )
+    result = await discover_mcp_tools(
+        channel, cache_scope="user-seed", cache_only=True
+    )
+    assert result.tool_count == 1
+    assert result.specs == seeded.specs
+    channel.request_mcp.assert_not_awaited()
+
+    # Same user, new conversation → scope hit still works under cache_only.
+    other = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-other",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    other.request_mcp = AsyncMock(  # type: ignore[method-assign]
+        side_effect=AssertionError("cache_only must not call request_mcp")
+    )
+    scoped = await discover_mcp_tools(
+        other, cache_scope="user-seed", cache_only=True
+    )
+    assert scoped.tool_count == 1
+    other.request_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_discover_mcp_tools_cache_scope_hits_across_conversations():
+    """Same user (cache_scope) + new conversation_id → shared cache hit."""
+    payload = {
+        "servers": [
+            {
+                "id": "ok",
+                "name": "OK",
+                "status": "ready",
+                "tools": [{"name": "echo", "description": "Echo"}],
+            }
+        ]
+    }
+    c1 = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-a",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    c1.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+    c2 = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-b",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    c2.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+
+    first = await discover_mcp_tools(c1, cache_scope="user-1")
+    second = await discover_mcp_tools(c2, cache_scope="user-1")
+    assert first.tool_count == 1
+    assert second.tool_count == 1
+    assert second.specs == first.specs
+    c1.request_mcp.assert_awaited_once()
+    c2.request_mcp.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_discover_mcp_tools_cache_scope_isolated_per_user():
+    """Different cache_scope must not share — no cross-tenant hit."""
+    payload = {
+        "servers": [
+            {
+                "id": "ok",
+                "name": "OK",
+                "status": "ready",
+                "tools": [{"name": "echo", "description": "Echo"}],
+            }
+        ]
+    }
+    c1 = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-a",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    c1.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+    c2 = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="conv-b",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    c2.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
+
+    await discover_mcp_tools(c1, cache_scope="user-1")
+    await discover_mcp_tools(c2, cache_scope="user-2")
+    c1.request_mcp.assert_awaited_once()
+    c2.request_mcp.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -238,7 +392,7 @@ async def test_discover_mcp_tools_degrades_on_timeout():
     assert result.degraded
     assert result.tool_count == 0
     channel.request_mcp.assert_awaited_once()
-    assert channel.request_mcp.await_args.kwargs.get("timeout") == 5.0
+    assert channel.request_mcp.await_args.kwargs.get("timeout") == 1.0
 
 
 @pytest.mark.asyncio
@@ -258,7 +412,74 @@ async def test_discover_mcp_tools_negative_cache_skips_request():
     assert second.degraded
     assert second.detail == first.detail
     channel.request_mcp.assert_awaited_once()
-    assert channel.request_mcp.await_args.kwargs.get("timeout") == 5.0
+    assert channel.request_mcp.await_args.kwargs.get("timeout") == 1.0
+
+
+@pytest.mark.asyncio
+async def test_discover_mcp_tools_ok_logs_duration_and_tool_count(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    def _capture(event: str, **kwargs):
+        events.append((event, kwargs))
+
+    monkeypatch.setattr(
+        "agentcore.tools.mcp.wire.logger.info",
+        _capture,
+    )
+    channel = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="c-ok-log",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    channel.request_mcp = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "servers": [
+                {
+                    "id": "ok",
+                    "name": "OK",
+                    "status": "ready",
+                    "tools": [{"name": "echo", "description": "Echo"}],
+                }
+            ]
+        }
+    )
+    result = await discover_mcp_tools(channel)
+    assert result.tool_count == 1
+    ok_events = [e for e in events if e[0] == "desktop.mcp_list_ok"]
+    assert len(ok_events) == 1
+    assert ok_events[0][1]["tool_count"] == 1
+    assert isinstance(ok_events[0][1]["duration_ms"], int)
+    assert ok_events[0][1]["duration_ms"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_discover_mcp_tools_degraded_logs_duration(monkeypatch):
+    events: list[tuple[str, dict]] = []
+
+    def _capture(event: str, **kwargs):
+        events.append((event, kwargs))
+
+    monkeypatch.setattr(
+        "agentcore.tools.mcp.wire.logger.info",
+        _capture,
+    )
+    channel = DesktopClientChannel(
+        sink=AsyncMock(),
+        conversation_id="c-deg-log",
+        registry=AsyncMock(),
+        timeout_seconds=5,
+    )
+    channel.request_mcp = AsyncMock(  # type: ignore[method-assign]
+        side_effect=McpOpError("timeout")
+    )
+    result = await discover_mcp_tools(channel)
+    assert result.degraded
+    deg = [e for e in events if e[0] == "desktop.mcp_list_degraded"]
+    assert len(deg) == 1
+    assert isinstance(deg[0][1]["duration_ms"], int)
+    assert deg[0][1]["duration_ms"] >= 0
+    assert deg[0][1]["tool_count"] == 0
 
 
 @pytest.mark.asyncio

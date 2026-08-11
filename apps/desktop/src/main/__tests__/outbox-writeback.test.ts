@@ -573,12 +573,17 @@ describe("drainOutbox", () => {
       "declaration_unknown",
     );
     expect(normalizeToolFailureCode("缺少参数")).toBe("other");
+    expect(normalizeToolFailureCode("缺少必填参数：query")).toBe("schema");
     expect(normalizeToolFailureCode("x", "egress_connect")).toBe(
       "egress_connect",
     );
     expect(normalizeToolFailureCode("x", "declaration_empty")).toBe(
       "declaration_empty",
     );
+    expect(normalizeToolFailureCode("x", "git_timeout")).toBe("git_timeout");
+    expect(normalizeToolFailureCode("x", "timeout")).toBe("git_timeout");
+    expect(normalizeToolFailureCode("x", "no_repo")).toBe("no_repo");
+    expect(normalizeToolFailureCode("x", "schema")).toBe("schema");
   });
 
   it("toolFailuresFromJournal prefers tool_call over tool_use_end", () => {
@@ -606,6 +611,49 @@ describe("drainOutbox", () => {
         tool: "web_search",
         code: "searxng_unreachable",
         message: "searxng down",
+      },
+    ]);
+  });
+
+  it("toolFailuresFromJournal passes payload.code", () => {
+    expect(
+      toolFailuresFromJournal([
+        {
+          kind: "tool_call",
+          payload: {
+            name: "git",
+            success: false,
+            result: "工作区无 git 仓库",
+            code: "no_repo",
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        tool: "git",
+        code: "no_repo",
+        message: "工作区无 git 仓库",
+      },
+    ]);
+  });
+
+  it("toolFailuresFromJournal maps 缺少必填参数 to schema", () => {
+    expect(
+      toolFailuresFromJournal([
+        {
+          kind: "tool_call",
+          payload: {
+            name: "code_search",
+            success: false,
+            result: "缺少必填参数：query",
+          },
+        },
+      ]),
+    ).toEqual([
+      {
+        tool: "code_search",
+        code: "schema",
+        message: "缺少必填参数：query",
       },
     ]);
   });

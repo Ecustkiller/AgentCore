@@ -1,5 +1,6 @@
 import {
   SIDECAR_CHANNELS,
+  type SidecarAccountAuth,
   type SidecarAttachRequest,
   type SidecarAttachResponse,
   type SidecarCancelRequest,
@@ -24,6 +25,7 @@ import { BrowserWindow, type WebContents } from "electron";
 import { getDesktopBrowserBridgeCredentials } from "../browser";
 import { listSessionRoots } from "../fs/roots";
 import { logDesktop } from "../log-service";
+import { listMcpToolsValue } from "../mcp-service";
 import { listUnsyncedSummaries, sidecarDataDir } from "../outbox-writeback";
 import { SidecarEventBuffer } from "../sidecar-event-buffer";
 import { SidecarClient } from "./client";
@@ -56,6 +58,15 @@ interface SidecarEntry {
   client: SidecarClient;
   /** initialize 的就绪 Promise（失败则该 entry 已被逐出，需重拉）。 */
   ready: Promise<void>;
+  /**
+   * 本 entry 已完成一次有票的 account rules/memory 暖（成功或 RPC 失败均算完成）。
+   * 无票跳过不置位——晚登录/补票可再踢。防有票路径叠跑猛踢。
+   */
+  accountRulesMemoryWarmed?: boolean;
+  /** 有票暖进行中（与 {@link accountRulesMemoryWarmed} 配合防并发双踢）。 */
+  accountRulesMemoryWarmInflight?: Promise<void>;
+  /** 在途 MCP / account rules-memory 暖；startTurn/resume 发回合 RPC 前 await。 */
+  inflightWarms: Set<Promise<void>>;
 }
 
 interface ActiveTurn {
@@ -122,19 +133,30 @@ export class SidecarManager {
    * `workspaceRoot` 已是绑定根目录（容器根 absPath 拼上子路径，由 IPC handler 算好），即引擎本
    * 回合的工作区；缓存键含 subpath，故同容器根下的不同子路径工作区互不串台。状态推送仍按容器
    * `rootId`（与 renderer 的 sidecarStatus / `takeRecentSidecarFailure(rootId)` 对齐——诊断按根聚合）。
+   *
+   * 不在此处踢 `warmCodeIndex` / `warmMcpDiscover`：服务端 `initialize` 已 schedule 代码
+   * 索引；MCP list 须桌面打开/登记显式 IPC（{@link warmCodeIndex} /
+   * {@link warmMcpDiscover}）。每回合 ensure（含 cache hit）再踢会与 prepare 叠跑。
+   *
+   * `warmAccountRulesMemory`：ensure 本身不踢；{@link startTurn} / {@link resume}（及显式
+   * {@link warmAccountRulesMemory}）在有票时暖一次（见 `accountRulesMemoryWarmed`）；
+   * 无票跳过不锁死。回合发 RPC 前 await 在途 warm（失败只记日志）。
    */
   private ensure(
     rootId: string,
     subpath: string,
     workspaceRoot: string,
     inference: SidecarInference | undefined,
-    /** 首次 initialize 的账号 id；缺省 / 空 → ``"local"``。长活进程的后续回合以
-     *  startTurn/resume 的 per-turn ``userId`` 为准。 */
+    /** 首次 initialize 的账号 id；缺省 / 空 → ``"local"``。已有登录 id 时应传入，
+     *  避免暖路径无故钉死 local。长活进程后续回合以 startTurn/resume 的 per-turn
+     *  ``userId`` + RPC ``_refresh_user_id`` 为准。 */
     userId?: string,
   ): SidecarEntry {
     const key = entryKey(rootId, subpath);
     const existing = this.entries.get(key);
-    if (existing) return existing;
+    if (existing) {
+      return existing;
+    }
 
     const transport = this.spawnFn(resolveSpawnConfig());
     const client = new SidecarClient(transport);
@@ -170,9 +192,46 @@ export class SidecarManager {
         throw err instanceof Error ? err : new Error(detail);
       });
 
-    const entry: SidecarEntry = { client, ready };
+    const entry: SidecarEntry = {
+      client,
+      ready,
+      inflightWarms: new Set(),
+    };
     this.entries.set(key, entry);
     return entry;
+  }
+
+  /** 登记在途暖；settled 后移出，供 startTurn/resume await。 */
+  private trackWarm(entry: SidecarEntry, work: Promise<void>): Promise<void> {
+    const tracked = work.finally(() => {
+      entry.inflightWarms.delete(tracked);
+    });
+    entry.inflightWarms.add(tracked);
+    return tracked;
+  }
+
+  /**
+   * 发回合 RPC 前等在途 MCP / account warm 落定。
+   * 失败只记日志后继续（此后 cache miss＝真没有）。
+   */
+  private async awaitInflightWarms(
+    entry: SidecarEntry,
+    rootId: string,
+  ): Promise<void> {
+    const pending = [...entry.inflightWarms];
+    if (pending.length === 0) return;
+    const results = await Promise.allSettled(pending);
+    for (const r of results) {
+      if (r.status === "rejected") {
+        const detail =
+          r.reason instanceof Error ? r.reason.message : String(r.reason);
+        logDesktop({
+          level: "warn",
+          event: "sidecar.inflight_warm_await_failed",
+          fields: { rootId, detail },
+        });
+      }
+    }
   }
 
   /**
@@ -192,6 +251,13 @@ export class SidecarManager {
       req.userId,
     );
     await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
+    // 有票则踢 account rules/memory 暖；随后 await 在途 warm（含打开项目踢的 MCP）。
+    this.maybeKickAccountRulesMemoryWarm(entry, req.rootId, {
+      folderId: req.folderId,
+      accountAuth: req.accountAuth,
+      userId: req.userId,
+    });
+    await this.awaitInflightWarms(entry, req.rootId);
 
     this.turns.set(req.turnId, {
       wc,
@@ -274,6 +340,145 @@ export class SidecarManager {
     await entry.ready;
   }
 
+  /**
+   * 打开/登记本机项目后：ensure sidecar + 等待 initialize，再显式踢 ``warmCodeIndex`` RPC。
+   * 与 {@link probe} 同形；语义上专供「打开项目必走到」暖索引，不挡 UI（RPC 失败只记日志）。
+   */
+  async warmCodeIndex(
+    rootId: string,
+    subpath: string,
+    workspaceRoot: string,
+  ): Promise<void> {
+    const entry = this.ensure(rootId, subpath, workspaceRoot, undefined);
+    await entry.ready;
+    try {
+      await entry.client.request("warmCodeIndex", {});
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      logDesktop({
+        level: "warn",
+        event: "sidecar.warm_code_index_failed",
+        fields: { rootId, detail },
+      });
+    }
+  }
+
+  /**
+   * 打开/登记本机项目后：ensure + initialize → 本机 mcp-service list_tools →
+   * 显式踢 ``warmMcpDiscover`` 把 ``{servers}`` seed 进 sidecar 进程缓存。
+   * 须传登录 ``userId``（与 prepare cache_scope 对齐）。不挡 UI；list/RPC 失败只记日志。
+   * 回合 ensure 不自动踢；promise 登记到 entry.inflightWarms 供 startTurn await。
+   */
+  async warmMcpDiscover(
+    rootId: string,
+    subpath: string,
+    workspaceRoot: string,
+    opts: { userId?: string } = {},
+  ): Promise<void> {
+    const entry = this.ensure(
+      rootId,
+      subpath,
+      workspaceRoot,
+      undefined,
+      opts.userId,
+    );
+    await entry.ready;
+    const work = (async () => {
+      try {
+        const listed = await listMcpToolsValue();
+        const servers = Array.isArray(listed.servers) ? listed.servers : [];
+        await entry.client.request("warmMcpDiscover", {
+          servers,
+          ...(opts.userId?.trim() ? { userId: opts.userId.trim() } : {}),
+        });
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err);
+        logDesktop({
+          level: "warn",
+          event: "sidecar.warm_mcp_discover_failed",
+          fields: { rootId, detail },
+        });
+      }
+    })();
+    await this.trackWarm(entry, work);
+  }
+
+  /**
+   * 打开/登记本机项目后：ensure + initialize → 显式踢 ``warmAccountRulesMemory``，
+   * 用 account 窄票让 sidecar 自拉 rules/memory 快照进进程缓存。无票则跳过（不发 RPC、
+   * 不锁死 warmed）。不挡 UI；失败只记日志。有票完成暖后与 startTurn 共用标记。
+   */
+  async warmAccountRulesMemory(
+    rootId: string,
+    subpath: string,
+    workspaceRoot: string,
+    opts: {
+      folderId?: string | null;
+      accountAuth?: SidecarAccountAuth;
+      userId?: string;
+    } = {},
+  ): Promise<void> {
+    const entry = this.ensure(
+      rootId,
+      subpath,
+      workspaceRoot,
+      undefined,
+      opts.userId,
+    );
+    await entry.ready;
+    this.maybeKickAccountRulesMemoryWarm(entry, rootId, opts);
+    if (entry.accountRulesMemoryWarmInflight) {
+      await entry.accountRulesMemoryWarmInflight;
+    }
+  }
+
+  /**
+   * 有票时踢一次 ``warmAccountRulesMemory``（登记 inflightWarms）。
+   * 无票只记跳过、不置 ``accountRulesMemoryWarmed``（晚登录可再踢）。
+   * 有票完成（成功或失败）后置位，禁止叠跑猛踢。
+   */
+  private maybeKickAccountRulesMemoryWarm(
+    entry: SidecarEntry,
+    rootId: string,
+    opts: {
+      folderId?: string | null;
+      accountAuth?: SidecarAccountAuth;
+      userId?: string;
+    },
+  ): void {
+    if (entry.accountRulesMemoryWarmed) return;
+    if (entry.accountRulesMemoryWarmInflight) return;
+    if (!opts.accountAuth) {
+      logDesktop({
+        level: "info",
+        event: "sidecar.warm_account_rules_memory_skipped",
+        fields: { rootId, detail: "no_account_auth" },
+      });
+      return;
+    }
+    const work = (async () => {
+      try {
+        await entry.client.request("warmAccountRulesMemory", {
+          folderId: opts.folderId ?? null,
+          accountAuth: opts.accountAuth,
+          ...(opts.userId?.trim() ? { userId: opts.userId.trim() } : {}),
+        });
+      } catch (err: unknown) {
+        const detail = err instanceof Error ? err.message : String(err);
+        logDesktop({
+          level: "warn",
+          event: "sidecar.warm_account_rules_memory_failed",
+          fields: { rootId, detail },
+        });
+      } finally {
+        entry.accountRulesMemoryWarmed = true;
+        entry.accountRulesMemoryWarmInflight = undefined;
+      }
+    })();
+    entry.accountRulesMemoryWarmInflight = work;
+    this.trackWarm(entry, work);
+  }
+
   /** A1+ 本机真 diff：ensure sidecar → `turnFilesDiff` RPC（相对本地基线 zip）。 */
   async turnFilesDiff(
     req: SidecarTurnFilesDiffRequest,
@@ -351,6 +556,13 @@ export class SidecarManager {
       req.userId,
     );
     await entry.ready;
+    // 同 startTurn：有票踢暖，发 resume RPC 前 await 在途 warm。
+    this.maybeKickAccountRulesMemoryWarm(entry, req.rootId, {
+      folderId: req.folderId,
+      accountAuth: req.accountAuth,
+      userId: req.userId,
+    });
+    await this.awaitInflightWarms(entry, req.rootId);
 
     this.turns.set(req.messageId, {
       wc,

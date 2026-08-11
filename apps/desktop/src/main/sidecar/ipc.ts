@@ -17,6 +17,9 @@ import {
   type SidecarTurnFilesDiffRequest,
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
+  type SidecarWarmAccountRulesMemoryRequest,
+  type SidecarWarmCodeIndexRequest,
+  type SidecarWarmMcpDiscoverRequest,
 } from "@shared/sidecar-contract";
 import { app, ipcMain } from "electron";
 import { getStoredRoot } from "../fs-service";
@@ -173,6 +176,78 @@ export function registerSidecarIpc(): void {
         req.subpath,
       );
       await manager.probe(req.rootId, req.subpath ?? "", workspaceRoot);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.warmCodeIndex,
+    async (_e, req: SidecarWarmCodeIndexRequest): Promise<void> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.warmCodeIndex,
+        req,
+        ["rootId"],
+        ["subpath"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      await manager.warmCodeIndex(req.rootId, req.subpath ?? "", workspaceRoot);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.warmMcpDiscover,
+    async (_e, req: SidecarWarmMcpDiscoverRequest): Promise<void> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.warmMcpDiscover,
+        req,
+        ["rootId"],
+        ["subpath", "userId"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      await manager.warmMcpDiscover(
+        req.rootId,
+        req.subpath ?? "",
+        workspaceRoot,
+        { userId: req.userId },
+      );
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.warmAccountRulesMemory,
+    async (_e, req: SidecarWarmAccountRulesMemoryRequest): Promise<void> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.warmAccountRulesMemory,
+        req,
+        ["rootId"],
+        // folderId / accountAuth 是对象/可空载荷，勿列入 optionalStrings（与 startTurn 同）。
+        ["subpath", "userId"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      await manager.warmAccountRulesMemory(
+        req.rootId,
+        req.subpath ?? "",
+        workspaceRoot,
+        {
+          folderId: req.folderId,
+          accountAuth: req.accountAuth,
+          userId: req.userId,
+        },
+      );
     },
   );
 

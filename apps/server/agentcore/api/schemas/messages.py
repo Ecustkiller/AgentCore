@@ -771,6 +771,23 @@ LOCAL_TURN_TOOL_FAILURE_CODES = frozenset(
         "declaration_empty",
         "declaration_xor",
         "declaration_unknown",
+        "exec_timeout",
+        "exec_forced_stop",
+        "schema",
+        "git_timeout",
+        "no_repo",
+        "dirty_skip",
+        "already_repo",
+        "no_remote",
+        "not_github",
+        "unauthenticated",
+        "invalid_args",
+        "network_error",
+        "auth_failed",
+        "api_error",
+        "not_found",
+        "validation_failed",
+        "no_default_branch",
         "other",
     }
 )
@@ -781,11 +798,18 @@ def normalize_local_turn_tool_failure_code(message: str, *, code: str | None = N
     """Map a tool-failure message (and optional client code) to a coarse stats bucket.
 
     Prefer known client ``code``. Else: structured declaration-gate templates,
-    then coarse keyword buckets for searxng/egress. Unknown → ``other``.
+    then coarse keyword buckets for searxng/egress/exec timeout. Unknown → ``other``.
     """
     raw_code = (code or "").strip()
     if raw_code in LOCAL_TURN_TOOL_FAILURE_CODES:
         return raw_code
+    # Legacy git wall-clock used bare ``timeout``; fact write now emits ``git_timeout``.
+    if raw_code == "timeout":
+        return "git_timeout"
+    if raw_code in ("verify_budget", "exec_env_timeout"):
+        return "exec_timeout"
+    if raw_code == "exec_forced_stop":
+        return "exec_forced_stop"
     # Declaration gate: structured reject templates (not free-text intent scan).
     from agentcore.runtime.delegate.playbook_declaration import (
         try_declaration_reject_gate,
@@ -794,8 +818,20 @@ def normalize_local_turn_tool_failure_code(message: str, *, code: str | None = N
     gate = try_declaration_reject_gate(message or "")
     if gate is not None:
         return f"declaration_{gate}"
+    from agentcore.tools.sandbox.exec_env import (
+        is_disaster_timeout_text,
+        looks_like_exec_timeout_text,
+    )
+
+    # Disaster wall ≠ idle hang (family retire only for the latter / probe / legacy).
+    if is_disaster_timeout_text(message):
+        return "exec_forced_stop"
+    if looks_like_exec_timeout_text(message):
+        return "exec_timeout"
     text = (message or "").lower()
     raw = message or ""
+    if "缺少必填参数" in raw:
+        return "schema"
     if (
         "searxng" in text
         or "搜索服务" in raw

@@ -610,6 +610,133 @@ def test_permanent_sandbox_network_retires_code_execute_on_first_fail():
     assert not c.tool_circuit_breaker()
 
 
+def test_exec_env_timeout_retires_family_after_two_hits():
+    """idle hang + code_execute sandbox timeout → retire both after 2 hits."""
+    from agentcore.runtime.loop_controller import EXEC_ENV_TIMEOUT_RETIRE_STEER
+
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    c.record(
+        [
+            ToolAttempt(
+                "t1",
+                "test_run",
+                success=False,
+                contract_failure=True,
+                error_summary="验证未在 300s 预算内完成（验证未完成，非工具故障）",
+                meta={"code": "verify_budget", "exec_env_timeout": True},
+            )
+        ]
+    )
+    assert not c.tool_circuit_breaker()
+    c.record(
+        [
+            ToolAttempt(
+                "c1",
+                "code_execute",
+                success=False,
+                error_summary="stderr:\nTimeout: execution exceeded 30s",
+                meta={"code": "exec_timeout", "exec_env_timeout": True},
+            )
+        ]
+    )
+    cb = c.tool_circuit_breaker()
+    assert set(cb.disabled) == {"code_execute", "test_run"}
+    assert cb.retire_message == EXEC_ENV_TIMEOUT_RETIRE_STEER
+    assert "执行环境连续超时" in (cb.message() or "")
+    # Success of either family tool would have cleared the streak earlier; after
+    # retire, further timeouts must not re-fire.
+    c.record(
+        [
+            ToolAttempt(
+                "t2",
+                "test_run",
+                success=False,
+                contract_failure=True,
+                meta={"code": "verify_budget", "exec_env_timeout": True},
+            )
+        ]
+    )
+    assert not c.tool_circuit_breaker()
+
+
+def test_exec_env_timeout_emits_user_notice_once():
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink, EventType
+    from agentcore.runtime.loop_controller import EXEC_ENV_TIMEOUT_RETIRE_STEER
+    from agentcore.workspace.limits import EXEC_ENV_DEAD_USER_VISIBLE
+
+    clear_active_coordination()
+    sink = EventSink()
+    session = CoordinationSession(
+        execution_id="exec-env-notice",
+        total_workers=1,
+        conversation_id="conv-env",
+    )
+    session.event_sink = sink
+    set_active_coordination(session)
+    try:
+        c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+        for i, tool in enumerate(("test_run", "code_execute")):
+            c.record(
+                [
+                    ToolAttempt(
+                        f"e{i}",
+                        tool,
+                        success=False,
+                        contract_failure=tool == "test_run",
+                        error_summary="Timeout: execution exceeded 30s",
+                        meta={
+                            "code": "exec_timeout",
+                            "exec_env_timeout": True,
+                            "execution_id": "exec-env-notice",
+                        },
+                    )
+                ]
+            )
+        assert session.exec_env_dead is True
+        assert session.exec_env_dead_user_notice_emitted is True
+        deltas = [e for e in sink._history if e.type is EventType.CONTENT_DELTA]
+        assert len(deltas) == 1
+        assert EXEC_ENV_DEAD_USER_VISIBLE in (deltas[0].payload.get("delta") or "")
+        cb = c.tool_circuit_breaker()
+        assert set(cb.disabled) == {"code_execute", "test_run"}
+        assert EXEC_ENV_TIMEOUT_RETIRE_STEER in (cb.message() or "")
+    finally:
+        clear_active_coordination()
+
+
+def test_exec_env_timeout_streak_clears_on_success():
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    c.record(
+        [
+            ToolAttempt(
+                "t1",
+                "test_run",
+                success=False,
+                contract_failure=True,
+                meta={"code": "verify_budget", "exec_env_timeout": True},
+            )
+        ]
+    )
+    c.record([ToolAttempt("ok", "code_execute", success=True)])
+    c.record(
+        [
+            ToolAttempt(
+                "t2",
+                "test_run",
+                success=False,
+                contract_failure=True,
+                meta={"code": "verify_budget", "exec_env_timeout": True},
+            )
+        ]
+    )
+    assert not c.tool_circuit_breaker()
+
+
 def test_permission_access_retires_tool_allowlist_does_not():
     """grep access permission retires; allowlist deny stays policy-only (no disable)."""
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)

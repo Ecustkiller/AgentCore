@@ -63,8 +63,13 @@ _HISTORICAL_DECISION_EVENTS = frozenset(
 
 _DECISION_EVENTS = _ACTIVE_DECISION_EVENTS | _HISTORICAL_DECISION_EVENTS
 
-_CLOSE_EVENTS = frozenset({"chat.turn_complete", "chat.resume_complete"})
-_START_EVENTS = frozenset({"chat.turn_start"})
+# Local sidecar write-back: one ``chat.local_turn_recorded`` is both head+close
+# anchor (do NOT also emit ``chat.turn_start/complete`` — avoids double-write).
+_CLOSE_EVENTS = frozenset(
+    {"chat.turn_complete", "chat.resume_complete", "chat.local_turn_recorded"}
+)
+_START_EVENTS = frozenset({"chat.turn_start", "chat.local_turn_recorded"})
+_PRIMARY_START_EVENT = "chat.turn_start"
 
 # Tail fields whose truth is turn_metrics when a row is present.
 _TAIL_METRIC_FIELDS = (
@@ -135,6 +140,9 @@ _DECISION_KEEP_KEYS = (
     "thrashing",
     "token_budget",
     "tokens",
+    "count",
+    "codes",
+    "tools",
 )
 
 
@@ -144,8 +152,14 @@ def _pick(obj: dict[str, Any], keys: tuple[str, ...]) -> dict[str, Any]:
 
 def _close_event(log_events: list[dict[str, Any]]) -> dict[str, Any] | None:
     close: dict[str, Any] | None = None
+    local_close: dict[str, Any] | None = None
     for ev in log_events:
-        if ev.get("event") not in _CLOSE_EVENTS:
+        event = ev.get("event")
+        if event not in _CLOSE_EVENTS:
+            continue
+        # Prefer real cloud/resume close; local_turn_recorded is fallback only.
+        if event == "chat.local_turn_recorded":
+            local_close = ev
             continue
         # Terminal close wins over paused mid-snapshot (same rule as collab_drift).
         if ev.get("finish_reason") == "paused":
@@ -153,14 +167,20 @@ def _close_event(log_events: list[dict[str, Any]]) -> dict[str, Any] | None:
                 close = ev
             continue
         close = ev
-    return close
+    return close if close is not None else local_close
 
 
 def _start_event(log_events: list[dict[str, Any]]) -> dict[str, Any] | None:
+    local: dict[str, Any] | None = None
     for ev in log_events:
-        if ev.get("event") in _START_EVENTS:
+        event = ev.get("event")
+        if event not in _START_EVENTS:
+            continue
+        if event == _PRIMARY_START_EVENT:
             return ev
-    return None
+        if local is None:
+            local = ev
+    return local
 
 
 def _project_decision(ev: dict[str, Any]) -> dict[str, Any]:
@@ -199,6 +219,10 @@ def _iter_decisions(log_events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         # Obvious tool failures only (success noise stays off the spine).
         if event == "tool.execute_end" and ev.get("status") == "error":
+            out.append(_project_decision(ev))
+            continue
+        # Local write-back: aggregate tool failure codes (no fake tool.execute_end).
+        if event == "chat.local_turn_tool_failures":
             out.append(_project_decision(ev))
     return out
 
@@ -445,10 +469,10 @@ def build_decision_spine(
     head: dict[str, Any] = {"source": "none"}
     if start is not None:
         head = {
-            "source": "chat.turn_start",
+            "source": str(start.get("event") or _PRIMARY_START_EVENT),
             "timestamp": start.get("timestamp", ""),
             "preview": start.get("preview", ""),
-            **_pick(start, ("chars", "history", "location", "via")),
+            **_pick(start, ("chars", "history", "location", "via", "rounds", "message_id")),
         }
 
     if turn_metrics is not None:

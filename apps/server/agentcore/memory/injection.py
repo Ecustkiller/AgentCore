@@ -265,9 +265,21 @@ async def load_memory_topics(
 
     ``folder_id`` selects the manual group whose project-layer topics to merge (D4 方案 1);
     NULL ⇒ global topics only.
+
+    Account-ticketed turns read the process prepare snapshot only (warm seeds it;
+    miss → []); no ticket keeps the store / local-DB path.
     """
     if not enabled:
         return []
+    from agentcore.account.credentials import get_account_credentials
+    from agentcore.memory.account_prepare_cache import get_account_rules_memory_snapshot
+
+    if get_account_credentials() is not None:
+        snap = get_account_rules_memory_snapshot(user_id, folder_id)
+        if snap is None:
+            return []
+        return list(snap.memory_topics)
+
     summaries: dict[str, str] = {}
     for name, summary in await _scope_topics(store, user_id, None):
         summaries.setdefault(name, summary)

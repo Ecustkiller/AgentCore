@@ -148,7 +148,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(formatWorkspaceChipLabel(ws)).toBe("本机草稿");
   });
 
-  it("labels project inheritance as 项目名 · 本机传统", () => {
+  it("labels project inheritance as project name only", () => {
     const ws = resolveEffectiveWorkspace({
       binding: projectLocal,
       localContainerRootId: null,
@@ -156,7 +156,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
       projectName: "Acme",
     });
     expect(ws.viaProject).toBe(true);
-    expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 本机传统");
+    expect(formatWorkspaceChipLabel(ws)).toBe("Acme");
     expect(formatWorkspaceChipTitle(ws)).toBe(
       "本机传统（本机文件夹权威，≠离线）",
     );
@@ -187,7 +187,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     expect(formatWorkspaceChipTitle(ws)).toBe("云端对话");
   });
 
-  it("labels cloud project as 项目名 · 云端对话", () => {
+  it("labels cloud project as project name only", () => {
     const projectCloud: WorkspaceBinding = {
       mode: "cloud",
       scope: "folder",
@@ -202,7 +202,7 @@ describe("resolveEffectiveWorkspace (chip status source)", () => {
     });
     expect(ws.isLocal).toBe(false);
     expect(ws.viaProject).toBe(true);
-    expect(formatWorkspaceChipLabel(ws)).toBe("Acme · 云端对话");
+    expect(formatWorkspaceChipLabel(ws)).toBe("Acme");
     expect(formatWorkspaceChipTitle(ws)).toBe("云端对话");
   });
 });

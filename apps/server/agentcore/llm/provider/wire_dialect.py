@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from agentcore.llm.byok_provider_presets import match_byok_provider_preset
+
 MatchKind = Literal["exact", "prefix", "contains"]
 
 
@@ -96,11 +98,20 @@ _DIALECT_OVERLAYS: tuple[_DialectOverlay, ...] = (
             "mythos-5",
         )
     ),
+    # Kimi leaf ids (incl. OpenCode Zen / other relays hosting ``kimi-*``).
+    # Do not blanket whole endpoints that happen to list Kimi models.
+    _DialectOverlay("prefix", "kimi-", omit_temperature=True),
 )
 
 
-def resolve_wire_dialect(model: str) -> WireDialect:
-    """Look up wire dialect flags for ``model`` (supports ``provider/leaf`` ids)."""
+def resolve_wire_dialect(model: str, *, base_url: str | None = None) -> WireDialect:
+    """Look up wire dialect flags for ``model`` (supports ``provider/leaf`` ids).
+
+    Optional ``base_url`` enables vendor-endpoint overlays (e.g. Moonshot BYOK
+    short ids like ``k3``). Multi-model hubs (OpenCode Zen) must not omit for
+    every model just because the catalog includes ``kimi-*`` — Zen relies on
+    the ``kimi-`` leaf rule above.
+    """
     leaf = wire_model_leaf(model)
     echo = False
     thinking = False
@@ -118,6 +129,12 @@ def resolve_wire_dialect(model: str) -> WireDialect:
             omit_temp = omit_temp or rule.omit_temperature
         if rule.retry_forced_tool_choice_on_400 is not None:
             retry_required = rule.retry_forced_tool_choice_on_400
+    # Moonshot BYOK: sampling is fixed for current Kimi leaves; legacy
+    # ``moonshot-v1*`` still accepts temperature → keep sending it.
+    if base_url:
+        preset = match_byok_provider_preset(base_url)
+        if preset is not None and preset.id == "moonshot" and not leaf.startswith("moonshot-v1"):
+            omit_temp = True
     return WireDialect(
         echo_reasoning_content=echo,
         thinking_type_switch=thinking,

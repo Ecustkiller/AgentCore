@@ -41,6 +41,7 @@ from .types import (
     _PERMANENT_RETIRE_STEER,
     _VALIDATION_PATH_STOP_STEER,
     DEFAULT_EMPTY_THRESHOLD,
+    DEFAULT_EXEC_ENV_TIMEOUT_RETIRE,
     DEFAULT_PATH_WRITE_REJECT_STREAK,
     DEFAULT_THRESHOLD,
     DEFAULT_TOOL_FAILURE_DISABLE,
@@ -52,6 +53,8 @@ from .types import (
     ERROR_CLASS_PERMISSION,
     ERROR_CLASS_TRANSIENT,
     ERROR_CLASS_VALIDATION,
+    EXEC_ENV_TIMEOUT_FAMILY,
+    EXEC_ENV_TIMEOUT_RETIRE_STEER,
     FORCE_SEGMENTED_NARROW_TOOLS,
     LANDING_TOOLS,
     MEMORY_TOOLS,
@@ -67,12 +70,14 @@ from .types import (
     delivery_idle_narrow_prompt,
     delivery_idle_nudge_prompt,
     fingerprint_tool_call,
+    is_exec_env_timeout,
     resolve_error_class,
 )
 from .write_reject import WriteRejectStreakMixin
 
 __all__ = [
     "DEFAULT_EMPTY_THRESHOLD",
+    "DEFAULT_EXEC_ENV_TIMEOUT_RETIRE",
     "DEFAULT_PATH_WRITE_REJECT_STREAK",
     "DEFAULT_THRESHOLD",
     "DEFAULT_TOOL_FAILURE_DISABLE",
@@ -84,6 +89,8 @@ __all__ = [
     "ERROR_CLASS_PERMISSION",
     "ERROR_CLASS_TRANSIENT",
     "ERROR_CLASS_VALIDATION",
+    "EXEC_ENV_TIMEOUT_FAMILY",
+    "EXEC_ENV_TIMEOUT_RETIRE_STEER",
     "FORCE_SEGMENTED_NARROW_TOOLS",
     "LANDING_TOOLS",
     "MEMORY_TOOLS",
@@ -100,6 +107,7 @@ __all__ = [
     "delivery_idle_narrow_prompt",
     "delivery_idle_nudge_prompt",
     "fingerprint_tool_call",
+    "is_exec_env_timeout",
     "resolve_error_class",
 ]
 
@@ -200,6 +208,8 @@ class LoopController(
         self._tool_liveness_last: dict[str, bool] = {}
         # Sticky: local workspace channel dead → allow disabling LANDING_TOOLS too.
         self._workspace_channel_dead: bool = False
+        # Consecutive sandbox wall-clock timeouts across code_execute/test_run.
+        self._exec_env_timeout_hits: int = 0
         self._tool_warned: set[str] = set()
         self._tool_disabled: set[str] = set()
         # Write/landing tools that hit disable threshold but stay enabled (强制分段).
@@ -589,6 +599,45 @@ class LoopController(
                         self._pending_retire_message = (
                             f"工具 {names} {_PERMANENT_RETIRE_STEER}"
                         )
+                    if any(n in EXEC_ENV_TIMEOUT_FAMILY for n in retire_list):
+                        from agentcore.runtime.coordination.exec_env_dead_notice import (
+                            mark_and_emit_exec_env_dead_user_notice,
+                        )
+
+                        eid = meta.get("execution_id")
+                        mark_and_emit_exec_env_dead_user_notice(
+                            execution_id=str(eid).strip() if eid else None
+                        )
+            # Exec-env idle hangs / probe fails: retire code_execute+test_run
+            # after N consecutive hits (disaster wall is not this path).
+            if is_exec_env_timeout(attempt):
+                self._exec_env_timeout_hits += 1
+                summary = (attempt.error_summary or "").strip()
+                name = attempt.tool_name
+                if summary:
+                    self._tool_last_error[name] = cap_error_summary(summary)
+                self._tool_succeeded_after_fail[name] = False
+                if (
+                    self._exec_env_timeout_hits >= DEFAULT_EXEC_ENV_TIMEOUT_RETIRE
+                    and not EXEC_ENV_TIMEOUT_FAMILY.issubset(self._tool_disabled)
+                ):
+                    for sname in EXEC_ENV_TIMEOUT_FAMILY:
+                        self._tool_failures[sname] = max(
+                            int(self._tool_failures.get(sname, 0)),
+                            self._tool_failure_disable,
+                        )
+                        self._tool_succeeded_after_fail[sname] = False
+                    self._pending_retire_message = EXEC_ENV_TIMEOUT_RETIRE_STEER
+                    from agentcore.runtime.coordination.exec_env_dead_notice import (
+                        mark_and_emit_exec_env_dead_user_notice,
+                    )
+
+                    eid = (attempt.meta or {}).get("execution_id")
+                    mark_and_emit_exec_env_dead_user_notice(
+                        execution_id=str(eid).strip() if eid else None
+                    )
+            elif attempt.success and attempt.tool_name in EXEC_ENV_TIMEOUT_FAMILY:
+                self._exec_env_timeout_hits = 0
             if attempt.success and self._tool_failures.get(attempt.tool_name, 0) > 0:
                 self._tool_succeeded_after_fail[attempt.tool_name] = True
             # Validation same-fingerprint streak → path stop (tool stays available).

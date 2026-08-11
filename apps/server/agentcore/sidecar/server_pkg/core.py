@@ -134,6 +134,12 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             await self._on_list_browser_sessions(request_id, params)
         elif method == "restoreTurnBaseline":
             await self._on_restore_turn_baseline(request_id, params)
+        elif method == "warmCodeIndex":
+            await self._on_warm_code_index(request_id, params)
+        elif method == "warmMcpDiscover":
+            await self._on_warm_mcp_discover(request_id, params)
+        elif method == "warmAccountRulesMemory":
+            await self._on_warm_account_rules_memory(request_id, params)
         elif method == "shutdown":
             from agentcore.demo_tape.recorder import uninstall_recorder
 
@@ -197,7 +203,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
                 )
             if mounts:
                 backend.attach_external_mounts(mounts)
-        backend.start_code_index_maintenance()
+        # Index maintenance: write paths / code_search only — not at turn entry.
         return backend
 
     def _suspension_hooks(

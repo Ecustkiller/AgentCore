@@ -457,6 +457,47 @@ export interface SidecarProbeRequest {
 }
 
 /**
+ * 打开/登记本机项目后静默暖代码索引：ensure sidecar（同 root 复用）+ initialize 后
+ * 主进程显式踢 `warmCodeIndex` JSON-RPC（不挡 UI；无进度条）。回合 ensure 不自动踢。
+ * 形状与 {@link SidecarProbeRequest} 对齐。
+ */
+export type SidecarWarmCodeIndexRequest = SidecarProbeRequest;
+
+/**
+ * 打开/登记本机项目后静默暖 MCP 列表：ensure + initialize 后，主进程本机
+ * `mcp-service` list_tools，再显式踢 `warmMcpDiscover` JSON-RPC 把 `{servers}` seed
+ * 进 sidecar 进程缓存。回合 ensure 不自动踢。
+ * 须带登录 ``userId``（与 prepare ``cache_scope`` / ``warmAccountRulesMemory`` 对齐）；
+ * open/register 可 fire-and-forget，但 ``startTurn``/``resume`` 会 await 在途 warm。
+ */
+export interface SidecarWarmMcpDiscoverRequest {
+  rootId: string;
+  /** 工作区子路径（同 {@link SidecarProbeRequest.subpath}）。 */
+  subpath?: string;
+  /** 登录账号 id；与 startTurn.userId / prepare cache_scope 同形。 */
+  userId?: string;
+}
+
+/**
+ * 打开/登记本机项目后静默暖 rules/memory instruction 快照：ensure + initialize 后，
+ * 主进程显式踢 `warmAccountRulesMemory` JSON-RPC；sidecar 用 account 窄票自拉并 seed
+ * 进进程缓存（与 prepare cache_only 同缓存）。
+ * 另：`startTurn` / `resume` 在该 root+subpath entry **首次**有票成功暖（或等价完成）
+ * 后标记 `accountRulesMemoryWarmed`；无票跳过不锁死，晚登录/补票可再踢。
+ * open/register 可 fire-and-forget；回合发 RPC 前会 await 在途 warm。
+ */
+export interface SidecarWarmAccountRulesMemoryRequest {
+  rootId: string;
+  subpath?: string;
+  /** 已知绑定 folder 时传入；缺省 / null = global-only 快照。 */
+  folderId?: string | null;
+  /** account 窄票；缺省则主进程跳过 RPC（暖需要票）。 */
+  accountAuth?: SidecarAccountAuth;
+  /** 登录账号 id（覆盖 initialize 时的 local）；与 startTurn.userId 同形。 */
+  userId?: string;
+}
+
+/**
  * 主进程 → renderer 的回合事件推送。`event` 与服务端 SSE 的事件同形状
  * （`@/types/events` 的 `SSEEvent`），故 renderer 可把它**原样**喂给同一个
  * `dispatchSSEEvent`——云 / 本地两条链路共用一套事件处理，零额外分支。
@@ -607,6 +648,9 @@ export const SIDECAR_CHANNELS = {
   debateSteer: "sidecar:debateSteer",
   resume: "sidecar:resume",
   probe: "sidecar:probe",
+  warmCodeIndex: "sidecar:warmCodeIndex",
+  warmMcpDiscover: "sidecar:warmMcpDiscover",
+  warmAccountRulesMemory: "sidecar:warmAccountRulesMemory",
   recovery: "sidecar:recovery",
   attach: "sidecar:attach",
   turnFilesDiff: "sidecar:turnFilesDiff",
@@ -635,6 +679,25 @@ export interface SidecarApi {
   /** 探活一个 root 的 sidecar（拉起 + initialize 握手即返回，不跑回合）。成功 = 本机环境能起
    * 本地引擎（握手成功的进程留存、被首个回合复用）；失败 reject（诊断经 `onStatus` 推送）。 */
   probe(req: SidecarProbeRequest): Promise<void>;
+  /**
+   * 打开/登记本机项目后静默暖索引：ensure + initialize 后显式踢 `warmCodeIndex` RPC。
+   * 失败可忽略（不 toast）；不挡 UI。回合 ensure / probe 不自动踢。
+   */
+  warmCodeIndex(req: SidecarWarmCodeIndexRequest): Promise<void>;
+  /**
+   * 打开/登记本机项目后静默暖 MCP：ensure + initialize 后本机 list_tools，再踢
+   * `warmMcpDiscover` RPC seed（须带登录 userId）。失败可忽略；不挡 UI。
+   * 回合 ensure / probe 不自动踢；startTurn/resume 会 await 在途 warm。
+   */
+  warmMcpDiscover(req: SidecarWarmMcpDiscoverRequest): Promise<void>;
+  /**
+   * 打开/登记本机项目后静默暖 rules/memory：ensure + initialize 后踢
+   * `warmAccountRulesMemory`（带 accountAuth + folderId + userId）。失败可忽略；不挡 UI。
+   * 有票完成暖后标记；无票跳过不锁死。startTurn/resume 会 await 在途 warm。
+   */
+  warmAccountRulesMemory(
+    req: SidecarWarmAccountRulesMemoryRequest,
+  ): Promise<void>;
   /** 查询本地恢复面（活回合 + 未同步 outbox + 挂起帧）；零 spawn。 */
   recovery(req: SidecarRecoveryRequest): Promise<SidecarRecoveryResponse>;
   /** 重绑本窗口并取回缓冲事件快照 + 续流；`attached:false` 时走投影/ghost 降级。 */

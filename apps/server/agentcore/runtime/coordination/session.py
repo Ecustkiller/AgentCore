@@ -378,6 +378,10 @@ class CoordinationSession:
     workspace_channel_dead: bool = False
     # One-shot host content_delta for CHANNEL_DEAD_USER_VISIBLE already emitted.
     channel_dead_user_notice_emitted: bool = False
+    # Sticky: code_execute/test_run family retired on exec-env hangs / probe fail.
+    exec_env_dead: bool = False
+    # One-shot host content_delta for EXEC_ENV_DEAD_USER_VISIBLE already emitted.
+    exec_env_dead_user_notice_emitted: bool = False
     # Note-wall coordination mode for this batch (``wall`` | ``none``). Used by idle
     # wait to keep the main turn open when wall + 0 completions (要等齐).
     coordination: str = "none"
@@ -1693,6 +1697,11 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
         if current is session:
             clear_active_coordination(session.execution_id)
         return
+    # ask_user soft-stop cancels the drive on purpose; resume re-drives from the
+    # journal. Arming harvest here races mid-pause (attached grace + Task destroyed
+    # pending under xdist teardown) and can seal a fake closing turn.
+    if session.soft_stop:
+        return
     if session.harvest_scheduled:
         return
     if session.all_completed_injected:
@@ -1765,6 +1774,9 @@ async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
             if current is session:
                 clear_active_coordination(session.execution_id)
             return
+        if session.soft_stop:
+            session.harvest_scheduled = False
+            return
         if session.all_completed_injected:
             logger.info(
                 "coordination.harvest_cancelled_attached_inject",
@@ -1790,7 +1802,7 @@ async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
             break
         await asyncio.sleep(_HARVEST_ATTACH_POLL_S)
 
-    if session.user_stopped or session.all_completed_injected:
+    if session.user_stopped or session.soft_stop or session.all_completed_injected:
         session.harvest_scheduled = False
         return
     _arm_harvest_now(session)

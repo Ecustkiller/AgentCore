@@ -199,9 +199,9 @@ describe("degradedFinishChipLabel", () => {
 
 describe("isEmptyResponseUserSurface", () => {
   it("detects LLM_EMPTY_RESPONSE / diagnosis / empty-response copy", () => {
-    expect(
-      isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" }),
-    ).toBe(true);
+    expect(isEmptyResponseUserSurface({ code: "LLM_EMPTY_RESPONSE" })).toBe(
+      true,
+    );
     expect(isEmptyResponseUserSurface({ emptyDiagnosis: "silent_empty" })).toBe(
       true,
     );

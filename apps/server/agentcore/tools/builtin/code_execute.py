@@ -299,10 +299,14 @@ class CodeExecuteTool:
                 contract_failure=True,
             )
 
+        from agentcore.tools.sandbox.exec_env import EXEC_IDLE_TIMEOUT_DEFAULT_S
+
         request = ExecutionRequest(
             code=code,
             language=language,
             timeout_seconds=timeout,
+            # Primary hang kill: silence; wall remains the short hard cap (≤60s).
+            idle_timeout_seconds=min(int(timeout), EXEC_IDLE_TIMEOUT_DEFAULT_S),
             on_output=_make_output_callback(context),
             network_mode=(
                 "restricted"
@@ -405,6 +409,26 @@ class CodeExecuteTool:
                 "工具 `code_execute` 因沙箱网络能力不可用已停用——"
                 "请换路径推进（勿再依赖沙箱出网），禁止原样重试。"
             )
+        else:
+            stderr_text = result.stderr or ""
+            from agentcore.runtime.loop_controller.types import (
+                EXEC_ENV_TIMEOUT_FAMILY,
+                EXEC_ENV_TIMEOUT_RETIRE_STEER,
+            )
+            from agentcore.tools.sandbox.exec_env import (
+                EXEC_TIMEOUT_CODE,
+                is_exec_env_probe_failure,
+            )
+
+            if is_exec_env_probe_failure(stderr_text):
+                meta["code"] = EXEC_TIMEOUT_CODE
+                meta["exec_env_timeout"] = True
+                meta["error_class"] = "permanent"
+                meta["retire_tools"] = sorted(EXEC_ENV_TIMEOUT_FAMILY)
+                meta["retire_message"] = EXEC_ENV_TIMEOUT_RETIRE_STEER
+            elif (not result.success) and "Timeout: execution exceeded" in stderr_text:
+                meta["code"] = EXEC_TIMEOUT_CODE
+                meta["exec_env_timeout"] = True
         return ToolResult(
             tool_call_id="",
             success=result.success,

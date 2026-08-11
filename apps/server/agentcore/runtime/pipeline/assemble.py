@@ -29,7 +29,7 @@ from agentcore.tools.registration import host_class_tool_names, register_board_c
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.protocol import WorkspaceBackend
 
-from .prepare import PreparedTurn
+from .prepare import PreparedTurn, _timed_phase
 
 
 @dataclass
@@ -183,71 +183,81 @@ async def assemble_ceo_turn(
     project_nav_stale = False
     project_profile_empty_soft = False
     if memory_enabled and folder_id:
-        from agentcore.conversation.scratch import resolve_conversation_local_binding
-        from agentcore.memory.explore_profile import (
-            compute_workspace_explore_fingerprint,
-            evaluate_explore_fingerprint_drift,
-            project_profile_explore_reason,
-            resolve_folder_workspace_key,
-            resolve_hard_explore_reason,
-        )
 
-        mem_store = run_mod.default_memory_store()
-        ctx = prepared.base_tool_context
-        injected_binding = None
-        if ctx.folder_binding_injected:
-            injected_binding = resolve_conversation_local_binding(
-                local_root_id=ctx.folder_local_root_id,
-                local_subpath=ctx.folder_local_subpath,
+        async def _run_explore_gates() -> tuple[str | None, bool, bool]:
+            from agentcore.conversation.scratch import resolve_conversation_local_binding
+            from agentcore.memory.explore_profile import (
+                compute_workspace_explore_fingerprint,
+                evaluate_explore_fingerprint_drift,
+                project_profile_explore_reason,
+                resolve_folder_workspace_key,
+                resolve_hard_explore_reason,
             )
-        # Injected → pure key (no PG). Else DB only for UUID-shaped folder_id;
-        # non-UUID memory scope → folder:<id>; connectivity/DataError → None.
-        # Unknown key: still run empty / named gates; skip rebind ("" sentinel).
-        current_key = await resolve_folder_workspace_key(
-            folder_id,
-            binding=injected_binding,
-            binding_injected=ctx.folder_binding_injected,
-        )
-        key_for_gates = current_key if current_key is not None else ""
-        explore_reason = await project_profile_explore_reason(
-            mem_store,
-            prepared.base_tool_context.user_id,
-            folder_id,
-            current_workspace_key=key_for_gates,
-        )
-        explore_reason, project_profile_empty_soft = resolve_hard_explore_reason(
-            explore_reason,
-            user_message,
-        )
-        # R2 soft hint + R1 background refresh: fingerprint drift never blocks.
-        if not explore_reason:
-            live_fp = await compute_workspace_explore_fingerprint(backend)
-            project_nav_stale = await evaluate_explore_fingerprint_drift(
+
+            reason: str | None = None
+            nav_stale = False
+            profile_empty_soft = False
+            mem_store = run_mod.default_memory_store()
+            ctx = prepared.base_tool_context
+            injected_binding = None
+            if ctx.folder_binding_injected:
+                injected_binding = resolve_conversation_local_binding(
+                    local_root_id=ctx.folder_local_root_id,
+                    local_subpath=ctx.folder_local_subpath,
+                )
+            # Injected → pure key (no PG). Else DB only for UUID-shaped folder_id;
+            # non-UUID memory scope → folder:<id>; connectivity/DataError → None.
+            # Unknown key: still run empty / named gates; skip rebind ("" sentinel).
+            current_key = await resolve_folder_workspace_key(
+                folder_id,
+                binding=injected_binding,
+                binding_injected=ctx.folder_binding_injected,
+            )
+            key_for_gates = current_key if current_key is not None else ""
+            reason = await project_profile_explore_reason(
                 mem_store,
                 prepared.base_tool_context.user_id,
                 folder_id,
-                live_fingerprint=live_fp,
-                current_workspace_key=current_key,
+                current_workspace_key=key_for_gates,
             )
-            if project_nav_stale and current_key:
-                from agentcore.memory.explore_refresh import (
-                    build_workspace_explore_snapshot,
-                    schedule_explore_refresh,
-                )
-
-                snapshot = await build_workspace_explore_snapshot(backend)
-                schedule_explore_refresh(
-                    user_id=prepared.base_tool_context.user_id,
-                    folder_id=folder_id,
-                    workspace_key=current_key,
-                    snapshot=snapshot,
+            reason, profile_empty_soft = resolve_hard_explore_reason(
+                reason,
+                user_message,
+            )
+            # R2 soft hint + R1 background refresh: fingerprint drift never blocks.
+            if not reason:
+                live_fp = await compute_workspace_explore_fingerprint(backend)
+                nav_stale = await evaluate_explore_fingerprint_drift(
+                    mem_store,
+                    prepared.base_tool_context.user_id,
+                    folder_id,
                     live_fingerprint=live_fp,
+                    current_workspace_key=current_key,
                 )
-        # Precompute close-out key so update_project_profile does not re-hit PG.
-        if current_key:
-            upd = chat_tools.get_optional("update_project_profile")
-            if upd is not None and getattr(upd, "workspace_key", None) is None:
-                upd.workspace_key = current_key
+                if nav_stale and current_key:
+                    from agentcore.memory.explore_refresh import (
+                        build_workspace_explore_snapshot,
+                        schedule_explore_refresh,
+                    )
+
+                    snapshot = await build_workspace_explore_snapshot(backend)
+                    schedule_explore_refresh(
+                        user_id=prepared.base_tool_context.user_id,
+                        folder_id=folder_id,
+                        workspace_key=current_key,
+                        snapshot=snapshot,
+                        live_fingerprint=live_fp,
+                    )
+            # Precompute close-out key so update_project_profile does not re-hit PG.
+            if current_key:
+                upd = chat_tools.get_optional("update_project_profile")
+                if upd is not None and getattr(upd, "workspace_key", None) is None:
+                    upd.workspace_key = current_key
+            return reason, nav_stale, profile_empty_soft
+
+        explore_reason, project_nav_stale, project_profile_empty_soft = await _timed_phase(
+            "explore", _run_explore_gates()
+        )
     # Sink explore-pending into ToolContext so delegate can suppress structured
     # files_written inference / require ≥2 explore workers（prompt 块 delegate 读不到）。
     # Worker write_scope=explore_memory：写工具层拦出 AgentCore/ 与 文档/项目/。
@@ -271,26 +281,49 @@ async def assemble_ceo_turn(
     # each turn from the live backend (never indexed → never stale); "" when empty /
     # unavailable. Workers don't get this — they already receive the richer per-run
     # manifest (runs/executor/context._workspace_manifest).
-    workspace_overview = await build_workspace_overview(
-        backend, shared_workspace=folder_id is not None
+    workspace_overview = await _timed_phase(
+        "workspace_overview",
+        build_workspace_overview(backend, shared_workspace=folder_id is not None),
     )
     # 跨回合同图追加的回显通道 (CEO-only): history replays no tool I/O, so the newest
     # appendable graph's execution_id must ride the prompt to stay visible next turn.
     # "" when the conversation has no team graph yet (section drops out).
     from agentcore.runtime.delegate.graph_append import build_recent_graph_context
 
-    recent_graph_context = await build_recent_graph_context(
-        conversation_id=conversation_id,
-        exclude_message_id=message_id,
+    recent_graph_context = await _timed_phase(
+        "recent_graph",
+        build_recent_graph_context(
+            conversation_id=conversation_id,
+            exclude_message_id=message_id,
+        ),
     )
-    # 跨轮空委派/无产出：上轮 journal 结构化指纹 → 一次性再派软提示（不扫用户「继续」原文）。
+    # 跨回合交付账本 one-shot：上轮 journal delivery_status partial/blocked + blocking
+    # gaps → 易变尾 `<prior_delivery_gaps>`（不 emit / 不 stamp verdict；不扫用户原文）。
+    from agentcore.runtime.delegate.prior_delivery_gaps import (
+        apply_gaps_vs_redispatch_mutex,
+        build_prior_delivery_gaps_hint,
+    )
     from agentcore.runtime.delegate.redispatch_hint import (
         build_prior_failure_redispatch_hint,
     )
 
-    prior_delegate_retry = await build_prior_failure_redispatch_hint(
+    prior_delivery_gaps = await build_prior_delivery_gaps_hint(
         conversation_id=conversation_id,
         exclude_message_id=message_id,
+    )
+    # 跨轮空委派/无产出：上轮 journal 结构化指纹 → 一次性再派软提示（不扫用户「继续」原文）。
+    # 同回合若 gaps 软块非空 → 抑制 redispatch（缺口优先；跳过再查 journal）。
+    prior_delegate_retry_raw = (
+        ""
+        if prior_delivery_gaps
+        else await build_prior_failure_redispatch_hint(
+            conversation_id=conversation_id,
+            exclude_message_id=message_id,
+        )
+    )
+    prior_delivery_gaps, prior_delegate_retry = apply_gaps_vs_redispatch_mutex(
+        prior_delivery_gaps,
+        prior_delegate_retry_raw,
     )
     # 可用性诚实性 · 甲：偏窄短问 → 复用最近 delivery_status 发卡到本回合答复面。
     from agentcore.runtime.delegate.delivery_status import (
@@ -315,6 +348,11 @@ async def assemble_ceo_turn(
             "recent_team_graph",
             recent_graph_context,
             SectionOrder.RECENT_TEAM_GRAPH,
+        )
+        .add(
+            "prior_delivery_gaps",
+            prior_delivery_gaps,
+            SectionOrder.PRIOR_DELIVERY_GAPS,
         )
         .add(
             "prior_delegate_retry",

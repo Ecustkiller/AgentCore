@@ -80,6 +80,43 @@ async def _round_trip(coro, sink: EventSink, registry: InteractionRegistry, resp
     return await task, event
 
 
+# LocalWorkspace.execute always probes once with print('ok') before the real run.
+_PROBE_OK_RESPONSE = {
+    "ok": True,
+    "value": {
+        "success": True,
+        "stdout": "ok\n",
+        "stderr": "",
+        "exit_code": 0,
+        "duration_ms": 1,
+    },
+}
+
+
+async def _round_trip_execute(
+    coro,
+    sink: EventSink,
+    registry: InteractionRegistry,
+    response: dict,
+    *,
+    probe_response: dict | None = None,
+):
+    """Drive execute: answer once-per-backend probe, then the real EXECUTE."""
+    task = asyncio.create_task(coro)
+    probe_event = await _await_request(sink)
+    assert probe_event.payload["op"] == WorkspaceOp.EXECUTE
+    assert probe_event.payload["args"]["code"] == "print('ok')"
+    assert registry.resolve(
+        probe_event.payload["request_id"],
+        probe_response if probe_response is not None else _PROBE_OK_RESPONSE,
+        conversation_id=CONV,
+    )
+    event = await _await_request(sink)
+    assert event.payload["op"] == WorkspaceOp.EXECUTE
+    assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
+    return await task, event, probe_event
+
+
 # --- LocalWorkspace read-only ops (the P2a "打通") --------------------------
 
 
@@ -213,8 +250,11 @@ async def test_execute_parses_result_and_marks_dirty():
         },
     }
     req = ExecutionRequest(code="print('hi')", language="python")
-    result, event = await _round_trip(local.execute(req), sink, registry, response)
+    result, event, _probe = await _round_trip_execute(
+        local.execute(req), sink, registry, response
+    )
     assert event.payload["op"] == WorkspaceOp.EXECUTE
+    assert event.payload["args"]["code"] == "print('hi')"
     assert result.success and result.stdout == "hi\n"
     assert local.dirty is True
 
@@ -236,7 +276,11 @@ async def test_execute_forwards_registry_env():
         language="python",
         env={"NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/", "SECRET": "no"},
     )
-    _result, event = await _round_trip(local.execute(req), sink, registry, response)
+    _result, event, probe_event = await _round_trip_execute(
+        local.execute(req), sink, registry, response
+    )
+    # Probe has no env; real execute forwards the registry pin.
+    assert "env" not in probe_event.payload["args"]
     assert event.payload["args"]["env"]["NPM_CONFIG_REGISTRY"].startswith("https://")
     assert event.payload["args"]["env"]["SECRET"] == "no"
 
@@ -658,31 +702,35 @@ async def test_local_flush_noops_when_clean():
 
 
 async def test_server_mutation_still_schedules_index(tmp_path):
-    """ServerWorkspace keeps mid-mutation schedule (no shared Local channel)."""
+    """ServerWorkspace mid-mutation schedule goes through the shared maintainer."""
     import contextlib
     from unittest.mock import AsyncMock
 
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-    from agentcore.workspace.indexing.maintainer import IndexMaintainer
-    from agentcore.workspace.indexing.manager import IndexManager
+    from agentcore.workspace.indexing.registry import (
+        clear_index_registry,
+        shared_index_manager,
+    )
     from agentcore.workspace.server import ServerWorkspace
 
-    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-    manager = IndexManager(str(tmp_path / "idx"))
-    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
-    maintainer = IndexMaintainer(manager, ws)
-    ws._index_manager = manager  # noqa: SLF001
-    ws._index_maintainer = maintainer  # noqa: SLF001
+    clear_index_registry()
+    try:
+        ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+        manager = shared_index_manager(tmp_path)
+        manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
-    await ws.write("x.py", "x = 1\n")
-    assert manager.content_dirty is True
-    assert maintainer._task is not None  # noqa: SLF001 — Server still schedules now
-    await maintainer.drain()
-    manager.ensure_index.assert_awaited()
-    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
-        maintainer._task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await maintainer._task
+        await ws.write("x.py", "x = 1\n")
+        maintainer = ws._index_maintainer  # noqa: SLF001
+        assert maintainer is not None
+        assert maintainer._task is not None  # noqa: SLF001 — write still schedules
+        await maintainer.drain()
+        manager.ensure_index.assert_awaited()
+        if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+            maintainer._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintainer._task
+    finally:
+        clear_index_registry()
 
 
 async def test_parallel_ops_one_timeout_does_not_fail_sibling():
@@ -900,8 +948,9 @@ async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch)
             "duration_ms": 1,
         },
     }
-    await _round_trip(local.execute(req), sink, registry, response)
-    # code timeout (10) + slack (15) — NOT the flat 30s file-op deadline.
+    await _round_trip_execute(local.execute(req), sink, registry, response)
+    # Probe uses timeout_seconds=5 → 5+15=20; real run 10+15=25 (not flat 30s).
+    assert captured[-2] == 20.0
     assert captured[-1] == 25.0
 
 

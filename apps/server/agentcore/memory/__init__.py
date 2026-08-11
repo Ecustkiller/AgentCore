@@ -8,6 +8,15 @@ Layers (see docs/03-AI核心/Agent记忆与知识系统.md; two-layer long-term 
 Plus auto conversation titles (a sidebar UX feature, not a memory layer).
 """
 
+from agentcore.memory.account_prepare_cache import (
+    AccountPrepareSnapshot,
+    clear_account_rules_memory_cache,
+    get_account_rules_memory_snapshot,
+    prepare_account_folder_id,
+    prepare_reads_cache_only,
+    seed_account_rules_memory_cache,
+    warm_account_rules_memory,
+)
 from agentcore.memory.conversation_title import (
     TITLE_MAX_CHARS,
     ChatMessage,
@@ -125,6 +134,13 @@ __all__ = [
     "load_injected_memory",
     "load_memory_topics",
     "MemoryTopic",
+    "AccountPrepareSnapshot",
+    "clear_account_rules_memory_cache",
+    "get_account_rules_memory_snapshot",
+    "prepare_account_folder_id",
+    "prepare_reads_cache_only",
+    "seed_account_rules_memory_cache",
+    "warm_account_rules_memory",
     "RuleFragment",
     "OnDemandUserRule",
     "assemble_injected_rules",

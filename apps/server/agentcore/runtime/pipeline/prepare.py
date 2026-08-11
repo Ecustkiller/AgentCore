@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Awaitable
 from dataclasses import dataclass
 
 import agentcore.runtime.pipeline as pipeline_pkg
 from agentcore.board.channel import BoardChannel
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.credentials import LLMCredentials
@@ -42,6 +45,21 @@ from agentcore.tools.registry import ToolRegistry
 from agentcore.vision import resolve_vision_reader_for_conversation
 from agentcore.workspace.locate import workspace_channel_for_tools
 from agentcore.workspace.protocol import WorkspaceBackend
+
+logger = get_logger(__name__)
+
+
+async def _timed_phase[T](phase: str, awaitable: Awaitable[T]) -> T:
+    """Await ``awaitable`` and emit one ``chat.prepare_phase`` line (phase + ms)."""
+    started = time.monotonic()
+    try:
+        return await awaitable
+    finally:
+        logger.info(
+            "chat.prepare_phase",
+            phase=phase,
+            ms=int((time.monotonic() - started) * 1000),
+        )
 
 
 @dataclass
@@ -103,13 +121,16 @@ async def prepare_fresh_turn(
     # the (patchable) store seam; user rules load through their own session and degrade to none
     # on failure, so this can never break a turn. With no user rules the memory body is
     # byte-identical to the prior assembly (prefix-cache safe).
-    user_rules_markdown, memory_markdown = await assemble_turn_rules(
-        memory_store,
-        user_id,
-        folder_id=folder_id,
-        enabled=memory_enabled,
-        max_docs=settings.max_instruction_docs,
-        max_chars=settings.max_instruction_chars,
+    user_rules_markdown, memory_markdown = await _timed_phase(
+        "rules",
+        assemble_turn_rules(
+            memory_store,
+            user_id,
+            folder_id=folder_id,
+            enabled=memory_enabled,
+            max_docs=settings.max_instruction_docs,
+            max_chars=settings.max_instruction_chars,
+        ),
     )
     # 记忆主题目录 (记忆文件夹化 §六 / 作用域 §5.2): the on-demand TOPIC notes (主题/<slug>.md)
     # are never injected wholesale — only their NAMES (merged across global + project)
@@ -117,13 +138,19 @@ async def prepare_fresh_turn(
     # relevant. Same master-switch gate: off ⇒ [] ⇒ no directory rendered, no tool wired.
     # Empty topics (memory on but no 主题 notes) likewise omit consult_memory — reuse this
     # list for the wire gate below so we do not re-list the store.
-    memory_topics = await load_memory_topics(
-        memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
+    memory_topics = await _timed_phase(
+        "memory_topics",
+        load_memory_topics(
+            memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
+        ),
     )
     has_memory_topics = bool(memory_topics)
     # On-demand user rules (定案 B): catalog + consult_rule; never merge with memory topics.
     # Independent of memory_enabled — user rules are the user's own instructions.
-    on_demand_rules = await load_on_demand_user_rules(user_id, folder_id=folder_id)
+    on_demand_rules = await _timed_phase(
+        "on_demand_rules",
+        load_on_demand_user_rules(user_id, folder_id=folder_id),
+    )
     has_on_demand_rules = bool(on_demand_rules)
     # Clean, stable base (base + date + workspace facts + memory): NO attachments,
     # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
@@ -142,7 +169,9 @@ async def prepare_fresh_turn(
     raise_if_backend_channel_dead(backend)
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
-    exec_languages = await resolve_exec_languages(backend)
+    exec_languages = await _timed_phase(
+        "exec_languages", resolve_exec_languages(backend)
+    )
     # Desktop channel early: MCP discovery (stdio on desktop) must complete before
     # workspace_context stamps mcp= — same ClientTool sink the turn will stream.
     desktop_channel = (
@@ -157,9 +186,12 @@ async def prepare_fresh_turn(
     )
     from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
 
-    mcp_discover = await discover_mcp_tools(desktop_channel)
+    mcp_discover = await _timed_phase(
+        "mcp",
+        discover_mcp_tools(desktop_channel, cache_scope=user_id, cache_only=True),
+    )
     mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
-    git_fact = await detect_workspace_git(backend)
+    git_fact = await _timed_phase("git", detect_workspace_git(backend))
     # exists/.git (and similar) may sticky-dead after prior timeouts — stop here.
     raise_if_backend_channel_dead(backend)
     workspace_facts = build_workspace_context(
@@ -180,8 +212,11 @@ async def prepare_fresh_turn(
     # Turn-level ``role=vision`` sink is shared by REFERENCE with ToolContext
     # (board_read + attachment reads; executor ``replace`` keeps the same list).
     vision_cost_sink: list[RunCost] = []
-    vision_reader = await resolve_vision_reader_for_conversation(
-        user_id=user_id, conversation_id=conversation_id
+    vision_reader = await _timed_phase(
+        "vision",
+        resolve_vision_reader_for_conversation(
+            user_id=user_id, conversation_id=conversation_id
+        ),
     )
     from agentcore.llm.model_metadata import model_has_curated_vision
 
@@ -189,16 +224,19 @@ async def prepare_fresh_turn(
     # Curated table only — never keyword-derived catalog tags (false vision → 400).
     main_native_vision = model_has_curated_vision(main_model)
     native_image_parts: list[dict] = []
-    attachment_context = await _build_attachment_context(
-        attachments,
-        user_id=user_id,
-        host_conversation_id=conversation_id,
-        conversation_history_access=conversation_history_access,
-        vision_reader=None if main_native_vision else vision_reader,
-        backend=backend,
-        cost_sink=None if main_native_vision else vision_cost_sink,
-        main_native_vision=main_native_vision,
-        native_image_parts=native_image_parts if main_native_vision else None,
+    attachment_context = await _timed_phase(
+        "attachments",
+        _build_attachment_context(
+            attachments,
+            user_id=user_id,
+            host_conversation_id=conversation_id,
+            conversation_history_access=conversation_history_access,
+            vision_reader=None if main_native_vision else vision_reader,
+            backend=backend,
+            cost_sink=None if main_native_vision else vision_cost_sink,
+            main_native_vision=main_native_vision,
+            native_image_parts=native_image_parts if main_native_vision else None,
+        ),
     )
     attachment_context = merge_attachment_and_mention_context(
         attachment_context, agent_mentions
@@ -252,8 +290,11 @@ async def prepare_fresh_turn(
 
     # Call-level pricing + optional user unit card (同路贯穿 calculate_cost).
     bind_credential_pricing_context(llm_credentials)
-    llm = await pipeline_pkg.build_turn_router(
-        llm_credentials, user_id=user_id, profiles=profiles
+    llm = await _timed_phase(
+        "llm",
+        pipeline_pkg.build_turn_router(
+            llm_credentials, user_id=user_id, profiles=profiles
+        ),
     )
     # AI 协作白板 (§六 M2): a board-bound turn gets a BoardChannel so ``board_ops`` can
     # reach the user's open canvas via the desktop. Bound to this board + conversation

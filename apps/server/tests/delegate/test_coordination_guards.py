@@ -1077,6 +1077,61 @@ async def test_wall_zero_completed_does_not_idle_yield(monkeypatch):
         clear_active_coordination("e-wall-hold")
 
 
+async def test_wall_zero_holds_without_busy_stamp(monkeypatch):
+    """wall+0：drive 已活但尚未 mark_worker_busy 时不得 idle_timeout 巡查。"""
+    import contextlib
+
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_MAX_S", 1.0)
+    clear_active_coordination()
+    session = CoordinationSession(
+        execution_id="e-wall-prebusy",
+        total_workers=2,
+        coordination="wall",
+    )
+    # Dispatch registered, busy stamp not yet set (scheduling / LLM-entry gap).
+    session._running_workers["a"] = "研究员"
+    session._worker_started_at["a"] = __import__("time").monotonic()
+    session.drive_task = asyncio.create_task(asyncio.sleep(30))
+    set_active_coordination(session)
+
+    async def _complete_later() -> None:
+        await asyncio.sleep(0.25)
+        from agentcore.runtime.coordination.session import (
+            CoordinationEvent,
+            CoordinationEventKind,
+        )
+
+        session.mark_worker_completed("a")
+        session.post(
+            CoordinationEvent(
+                kind=CoordinationEventKind.WORKER_COMPLETED,
+                payload={
+                    "run_id": "a",
+                    "role": "研究员",
+                    "status": "completed",
+                    "summary": "ok",
+                },
+            )
+        )
+
+    poster = asyncio.create_task(_complete_later())
+    try:
+        msgs = await asyncio.wait_for(await_coordination_injection([]), timeout=3.0)
+        text = "\n".join(m.content or "" for m in msgs)
+        assert "worker_completed" in text
+        assert "等待团队事件超时" not in text
+        assert "无需追加" not in text
+    finally:
+        poster.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await poster
+        session.drive_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await session.drive_task
+        clear_active_coordination("e-wall-prebusy")
+
+
 async def test_merge_all_skipped_returns_structured_failure():
     """整批 run_id 撞车 → success=False，结构化回执列出跳过明细，不改 live 图。"""
     from agentcore.runtime.coordination.host import _merge_into_active_coordination

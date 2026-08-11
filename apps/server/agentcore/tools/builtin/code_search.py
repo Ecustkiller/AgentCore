@@ -4,8 +4,10 @@ Complements ``grep``: ``grep`` finds exact regex matches line-by-line; ``code_se
 indexes functions/classes/methods (tree-sitter) and ranks by BM25 so the model can
 locate code by concept or keyword across files.
 
-Index build/refresh is owned by ``IndexMaintainer`` (turn start / mutations).
-This tool is query-only against the current snapshot.
+Index build/refresh is owned by ``IndexMaintainer`` (write mutations /
+``code_search`` kicks when the snapshot is not ready). This tool is
+query-only against the current snapshot and schedules background
+maintenance without awaiting ``ensure_code_index``.
 """
 
 import time
@@ -101,10 +103,6 @@ class CodeSearchTool:
         path_prefix = arguments.get("path_prefix") or "."
 
         # Query-only: never call ensure_code_index on the tool path.
-        kick = getattr(context.backend, "start_code_index_maintenance", None)
-        if callable(kick):
-            kick()
-
         try:
             result = await context.backend.code_search(
                 query,
@@ -114,6 +112,22 @@ class CodeSearchTool:
             )
         except WorkspaceError as e:
             return _fail(f"搜索失败：{e}", start)
+
+        # Kick only when ensure can help (no snapshot / content dirty).
+        # Truncated-only STALE must not re-scan — the file cap cannot heal.
+        should_kick = False
+        get_mgr = getattr(context.backend, "_get_index_manager", None)
+        if callable(get_mgr):
+            try:
+                should_kick = bool(get_mgr().needs_background_ensure())
+            except Exception:  # noqa: BLE001 — kick is best-effort
+                should_kick = result.index_status == CodeIndexStatus.BUILDING
+        else:
+            should_kick = result.index_status == CodeIndexStatus.BUILDING
+        if should_kick:
+            kick = getattr(context.backend, "start_code_index_maintenance", None)
+            if callable(kick):
+                kick()
 
         output = _render(result, query=query, path_prefix=path_prefix)
         return ToolResult(

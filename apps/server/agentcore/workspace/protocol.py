@@ -447,14 +447,19 @@ class WorkspaceBackend(Protocol):
     async def ensure_code_index(self, *, force: bool = False) -> bool:
         """Synchronously build or refresh the code-search index (incremental).
 
-        Prefer ``start_code_index_maintenance`` for turn paths — this method is
-        for tests and explicit admin refresh. May be slow on first call for large
-        workspaces (capped file count). Read-only (never sets snapshot ``dirty``).
+        Prefer ``start_code_index_maintenance`` on hot paths (write / ``code_search``)
+        — this method is for tests and explicit admin refresh. May be slow on
+        first call for large workspaces (capped file count). Read-only (never
+        sets snapshot ``dirty``). Not used on turn-prepare / TTFT paths.
         """
         ...
 
     def start_code_index_maintenance(self) -> None:
-        """Kick background index build/refresh (coalesced, non-blocking)."""
+        """Kick background index build/refresh (coalesced, non-blocking).
+
+        Scheduled from open-project / warm, write mutations, and non-ready
+        ``code_search`` — not from turn entry (prepare / assemble / ``_make_backend``).
+        """
         ...
 
     async def diagnostics(self, paths: list[str]) -> dict[str, Any]:

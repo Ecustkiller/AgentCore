@@ -120,6 +120,9 @@ class LocalWorkspace:
         self.ai_list_materials: frozenset[str] = frozenset()
         # When True, channel list/list_tree keep archive suffixes visible.
         self.ai_list_reveal_archives: bool = False
+        # Once-per-backend exec-env probe (desktop channel EXECUTE).
+        self._exec_env_probed: bool = False
+        self._exec_env_alive: bool = True
 
     @property
     def dirty(self) -> bool:
@@ -600,6 +603,32 @@ class LocalWorkspace:
         # W3: pass conversation_id + external root_ids so the desktop injects
         # ``AGENTCORE_EXTERNAL_<ALIAS>`` abs paths into the subprocess env — absolute
         # paths never enter the model prompt.
+        from agentcore.tools.sandbox.exec_env import probe_failure_result
+
+        if not self._exec_env_probed:
+            self._exec_env_probed = True
+            probe = await self._channel_execute(
+                ExecutionRequest(
+                    code="print('ok')",
+                    language="python",
+                    timeout_seconds=5,
+                )
+            )
+            self._exec_env_alive = bool(probe.success and "ok" in (probe.stdout or ""))
+            if not self._exec_env_alive:
+                from agentcore.core.logging import get_logger
+
+                get_logger(__name__).info(
+                    "sandbox.exec_env_probe_failed",
+                    location="local",
+                )
+                return probe_failure_result(duration_ms=probe.duration_ms)
+        elif not self._exec_env_alive:
+            return probe_failure_result()
+        return await self._channel_execute(req)
+
+    async def _channel_execute(self, req: ExecutionRequest) -> ExecutionResult:
+        """Raw desktop EXECUTE (no probe) — used by probe + real runs."""
         self._mark_mutated()
         external_roots = {
             alias: m.root_id
@@ -616,6 +645,8 @@ class LocalWorkspace:
             "conversation_id": self._channel.conversation_id,
             "external_roots": external_roots,
         }
+        if req.idle_timeout_seconds is not None:
+            args["idle_timeout_seconds"] = int(req.idle_timeout_seconds)
         # Registry/cache pin from test_run install — desktop whitelist-merges only.
         if req.env:
             args["env"] = dict(req.env)

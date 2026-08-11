@@ -46,6 +46,13 @@ _METADATA: dict[str, ModelMeta] = {
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=128_000,
     ),
+    # Exact row so catalog shows curated branding (not auto「· free」qualifier).
+    "deepseek-v4-flash-free": ModelMeta(
+        display_name="DeepSeek V4 Flash Free",
+        vendor="DeepSeek",
+        capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
+        context_length=128_000,
+    ),
     "deepseek-v4-pro": ModelMeta(
         display_name="DeepSeek V4 Pro",
         vendor="DeepSeek",

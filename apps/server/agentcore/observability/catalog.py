@@ -17,6 +17,46 @@ from agentcore.observability.events import EventSpec, FieldType
 EVENTS: list[EventSpec] = [
     EventSpec(name='account.cloud_read_failed'),
     EventSpec(name='account.cloud_search_failed'),
+    EventSpec(
+        name='account.rules_memory_cache_hit',
+        description='prepare rules/memory 命中进程快照缓存',
+        fields={
+            'degraded': FieldType('bool'),
+            'folder_id': FieldType('str'),
+            'topic_count': FieldType('int'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='account.rules_memory_cache_miss',
+        description='prepare rules/memory 只读缓存未命中（空注入；不 await 云）',
+        fields={
+            'folder_id': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='account.rules_memory_cache_seed',
+        description='账户 rules/memory 快照写入进程缓存（非回合暖）',
+        fields={
+            'degraded': FieldType('bool'),
+            'folder_id': FieldType('str'),
+            'memory_file_count': FieldType('int'),
+            'topic_count': FieldType('int'),
+            'ttl_seconds': FieldType('float'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='account.rules_memory_warm_failed',
+        description='warm 拉取 rules/memory 部分失败（degraded seed）',
+        fields={
+            'error': FieldType('str'),
+            'folder_id': FieldType('str'),
+            'part': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='approval.delegation_grant'),
     EventSpec(name='approval.denied_reuse'),
     EventSpec(name='approval.file_grant_refused'),
@@ -165,6 +205,14 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='chat.message_edited'),
     EventSpec(name='chat.message_recalled'),
     EventSpec(name='chat.pause_snapshot_failed'),
+    EventSpec(
+        name='chat.prepare_phase',
+        description='prepare/assemble 分段耗时（phase + ms；每 phase 一行）',
+        fields={
+            'ms': FieldType('int'),
+            'phase': FieldType('str'),
+        },
+    ),
     EventSpec(name='chat.product_notice_published'),
     EventSpec(name='chat.regenerate_error'),
     EventSpec(
@@ -320,6 +368,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.escalation_stashed'),
     EventSpec(name='coordination.escalation_stashed_after_miss'),
     EventSpec(name='coordination.event_posted'),
+    EventSpec(name='coordination.exec_env_dead_user_notice'),
+    EventSpec(name='coordination.exec_env_dead_user_notice_failed'),
     EventSpec(name='coordination.execution_adopted'),
     EventSpec(name='coordination.execution_completed_emitted'),
     EventSpec(name='coordination.execution_detached_emitted'),
@@ -671,8 +721,58 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='desktop.external_mount_timeout'),
     EventSpec(name='desktop.host_op_request'),
     EventSpec(name='desktop.host_op_timeout'),
-    EventSpec(name='desktop.mcp_list_cache_hit'),
-    EventSpec(name='desktop.mcp_list_degraded'),
+    EventSpec(
+        name='desktop.mcp_list_cache_hit',
+        description='MCP list 命中进程内缓存（含 cache_scope / duration_ms）',
+        fields={
+            'cache_scope': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'degraded': FieldType('bool'),
+            'duration_ms': FieldType('int'),
+            'tool_count': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='desktop.mcp_list_cache_miss',
+        description='MCP list 只读缓存未命中（prepare/resume；不发 ClientTool）',
+        fields={
+            'cache_scope': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'detail': FieldType('str'),
+            'duration_ms': FieldType('int'),
+            'tool_count': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='desktop.mcp_list_cache_seed',
+        description='MCP list 结果写入进程内缓存（非回合暖）',
+        fields={
+            'cache_scope': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'degraded': FieldType('bool'),
+            'tool_count': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='desktop.mcp_list_degraded',
+        description='MCP list 超时或降级（带 duration_ms）',
+        fields={
+            'detail': FieldType('str'),
+            'duration_ms': FieldType('int'),
+            'failed_servers': FieldType('int'),
+            'tool_count': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='desktop.mcp_list_ok',
+        description='MCP list 成功（duration_ms / tool_count）',
+        fields={
+            'duration_ms': FieldType('int'),
+            'failed_servers': FieldType('int'),
+            'ready_servers': FieldType('int'),
+            'tool_count': FieldType('int'),
+        },
+    ),
     EventSpec(name='desktop.mcp_op_request'),
     EventSpec(name='desktop.mcp_op_timeout'),
     EventSpec(name='desktop.mcp_server_failed'),
@@ -854,16 +954,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='llm.call_retried'),
     EventSpec(name='llm.client_error'),
-    EventSpec(
-        name='llm.empty_response',
-        description='上游空响应诊断（含 base_url / diagnosis；无 API key）',
-        fields={
-            'model': FieldType('str'),
-            'diagnosis': FieldType('str'),
-            'base_url': FieldType('str'),
-            'scenario': FieldType('str'),
-        },
-    ),
+    EventSpec(name='llm.empty_response'),
     EventSpec(name='llm.inference_unary_bypass'),
     EventSpec(name='llm.rate_limit_no_retry'),
     EventSpec(
@@ -986,6 +1077,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='memory.remember_failed'),
     EventSpec(name='memory.remember_written'),
     EventSpec(name='memory.save_failed'),
+    EventSpec(name='memory.save_skipped_prepare_cache_only'),
     EventSpec(name='memory.semantic_consolidated'),
     EventSpec(name='memory.semantic_failed'),
     EventSpec(name='memory.semantic_injection_dropped'),
@@ -1143,6 +1235,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='sandbox.artifact_payload_invalid'),
     EventSpec(name='sandbox.cloud_health_failed'),
     EventSpec(name='sandbox.cloud_health_ok'),
+    EventSpec(name='sandbox.exec_env_probe_failed'),
     EventSpec(name='sandbox.health_check_failed'),
     EventSpec(name='sandbox.slot_busy'),
     EventSpec(name='sandbox.write_back'),
@@ -1217,20 +1310,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='sidecar.run_session_persist_failed'),
     EventSpec(name='sidecar.run_session_persist_skipped'),
     EventSpec(name='sidecar.stdin_closed'),
-    EventSpec(
-        name='sidecar.turn_already_running',
-        description=(
-            '本地引擎拒二次 startTurn/resume（同键仍在 _turns）；'
-            '不进云端 sync:logs——对偶查桌面 userData/logs/desktop.jsonl'
-        ),
-        fields={
-            'conversation_id': FieldType('str'),
-            'inflight_cancelled': FieldType('bool'),
-            'inflight_done': FieldType('bool'),
-            'op': FieldType('str'),
-            'turn_id': FieldType('str'),
-        },
-    ),
+    EventSpec(name='sidecar.turn_already_running'),
     EventSpec(
         name='sidecar.turn_cancel_requested',
         description=(
@@ -1256,6 +1336,34 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='sidecar.turn_failed'),
     EventSpec(name='sidecar.turn_files_diff_failed'),
+    EventSpec(
+        name='sidecar.warm_account_rules_memory',
+        description='静默暖账户 rules/memory 进 prepare 快照缓存（warmAccountRulesMemory）',
+        fields={
+            'degraded': FieldType('bool'),
+            'folder_id': FieldType('str'),
+            'memory_file_count': FieldType('int'),
+            'topic_count': FieldType('int'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='sidecar.warm_account_rules_memory_failed',
+        description='warmAccountRulesMemory 拉取失败',
+        fields={
+            'error': FieldType('str'),
+            'folder_id': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='sidecar.warm_code_index',
+        description='静默暖代码索引（initialize / warmCodeIndex RPC schedule）',
+    ),
+    EventSpec(
+        name='sidecar.warm_mcp_discover',
+        description='静默暖 MCP 列表进进程缓存（warmMcpDiscover RPC seed）',
+    ),
     EventSpec(name='simulation.create_scripted'),
     EventSpec(name='simulation.persona_slice'),
     EventSpec(name='simulation.scripted_fallback'),

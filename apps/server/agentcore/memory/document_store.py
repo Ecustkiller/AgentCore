@@ -23,6 +23,10 @@ Sidecar dual-path (R3b): when the turn bound account narrow-ticket credentials a
 store has **no** request session, list/load/save/delete/project_scopes call cloud
 ``/v1/account/memory/*``. Bound-session DI (cloud API handlers) always stays on the
 in-process DB. Reads soft-degrade to empty + log; writes raise (no fake success).
+
+Prepare→assemble cache_only: when ``prepare_reads_cache_only`` is bound and an
+account ticket is present, list/load read only ``account_prepare_cache`` (miss →
+empty); save is a no-op so explore meta drift cannot sync-write on the TTFT path.
 """
 
 from __future__ import annotations
@@ -89,6 +93,17 @@ class DocumentMemoryStore:
 
         return get_account_credentials()
 
+    def _prepare_cache_only_snapshot(self, user_id: str):
+        """When prepare cache_only + ticket: snapshot or None (caller treats as miss)."""
+        from agentcore.memory.account_prepare_cache import (
+            prepare_reads_cache_only,
+            snapshot_for_prepare_store_read,
+        )
+
+        if not prepare_reads_cache_only.get():
+            return False, None  # not in cache_only mode
+        return True, snapshot_for_prepare_store_read(user_id)
+
     @asynccontextmanager
     async def _repo(self) -> AsyncIterator[DocumentRepository]:
         if self._session is not None:
@@ -103,6 +118,19 @@ class DocumentMemoryStore:
         # simply surfaces as「no memory」rather than raising into the pipeline.
         creds = self._account_cloud_creds()
         if creds is not None:
+            cache_only, snapshot = self._prepare_cache_only_snapshot(user_id)
+            if cache_only:
+                if snapshot is None:
+                    return []
+                sk = "" if scope is None else scope
+                out: list[MemoryFileMeta] = []
+                for (scope_key, path), body in snapshot.memory_bodies.items():
+                    if scope_key != sk or not path.endswith(".md"):
+                        continue
+                    out.append(
+                        MemoryFileMeta(path=path, version=memory_version(body))
+                    )
+                return out
             try:
                 from agentcore.account.credentials import cloud_memory_list
 
@@ -110,7 +138,7 @@ class DocumentMemoryStore:
             except Exception as e:  # noqa: BLE001 - memory read must never break a turn
                 logger.warning("memory.list_failed", user_id=user_id, error=str(e))
                 return []
-            out: list[MemoryFileMeta] = []
+            out = []
             for item in files:
                 path = str(item.get("path") or "")
                 if not path.endswith(".md"):
@@ -135,6 +163,13 @@ class DocumentMemoryStore:
     async def load(self, user_id: str, path: str, scope: MemoryScope = None) -> str:
         creds = self._account_cloud_creds()
         if creds is not None:
+            cache_only, snapshot = self._prepare_cache_only_snapshot(user_id)
+            if cache_only:
+                if snapshot is None:
+                    return ""
+                from agentcore.memory.account_prepare_cache import memory_body_from_snapshot
+
+                return memory_body_from_snapshot(snapshot, path, scope=scope)
             try:
                 from agentcore.account.credentials import cloud_memory_load
 
@@ -155,6 +190,17 @@ class DocumentMemoryStore:
     ) -> None:
         creds = self._account_cloud_creds()
         if creds is not None:
+            from agentcore.memory.account_prepare_cache import prepare_reads_cache_only
+
+            if prepare_reads_cache_only.get():
+                # Explore fingerprint drift must not sync-write meta on the TTFT path.
+                logger.info(
+                    "memory.save_skipped_prepare_cache_only",
+                    user_id=user_id,
+                    path=path,
+                    scope=scope or "global",
+                )
+                return
             from agentcore.account.credentials import cloud_memory_save
 
             # Writes must NOT soft-succeed: propagate AccountCloudError to callers.

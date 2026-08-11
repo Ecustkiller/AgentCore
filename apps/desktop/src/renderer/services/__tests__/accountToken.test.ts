@@ -11,6 +11,7 @@ vi.mock("@/services/api", () => ({
 
 import {
   clearSidecarAccountAuth,
+  looksLikeAccountTokenFailure,
   resolveSidecarAccountAuth,
 } from "../accountToken";
 
@@ -97,5 +98,20 @@ describe("accountToken", () => {
     const again = await resolveSidecarAccountAuth();
     expect(apiPost).toHaveBeenCalledTimes(2);
     expect(again?.apiKey).toBe("new");
+  });
+
+  it("looksLikeAccountTokenFailure matches unauthorized / code", () => {
+    expect(
+      looksLikeAccountTokenFailure(
+        new Error("account search unauthorized (401)"),
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeAccountTokenFailure({
+        message: "x",
+        code: "account_cloud_unauthorized",
+      }),
+    ).toBe(true);
+    expect(looksLikeAccountTokenFailure(new Error("network down"))).toBe(false);
   });
 });

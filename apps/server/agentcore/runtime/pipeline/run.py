@@ -210,57 +210,71 @@ async def run_chat_pipeline(
     llm = None
 
     try:
-        latency_probe = get_turn_latency()
-        prepare_t0 = time.monotonic()
-        prepared = await prepare_fresh_turn(
-            conversation_id=conversation_id,
-            user_id=user_id,
-            backend=backend,
-            sink=sink,
-            folder_id=folder_id,
-            board_id=board_id,
-            attachments=attachments,
-            memory_enabled=memory_enabled,
-            conversation_history_access=conversation_history_access,
-            permission_axes=permission_axes,
-            llm_credentials=llm_credentials,
-            x_client_platform=x_client_platform,
-            profiles=profiles,
-            agent_mentions=agent_mentions,
-            folder_binding_injected=folder_binding_injected,
-            folder_local_root_id=folder_local_root_id,
-            folder_local_subpath=folder_local_subpath,
+        # Ticketed prepare/assemble: DocumentMemoryStore must not sync-hit cloud
+        # (explore/meta/画像). Warm snapshot only; reset before Execute so tools
+        # can still cloud-write. See account_prepare_cache.prepare_reads_cache_only.
+        from agentcore.memory.account_prepare_cache import (
+            prepare_account_folder_id,
+            prepare_reads_cache_only,
         )
-        if latency_probe is not None:
-            latency_probe.mark_prepare(int((time.monotonic() - prepare_t0) * 1000))
-        llm = prepared.llm
-        bound_execution_id = prepared.bound_execution_id
-        execution_id_token = prepared.execution_id_token
 
-        assemble_t0 = time.monotonic()
-        assembled = await assemble_ceo_turn(
-            prepared=prepared,
-            conversation_id=conversation_id,
-            user_message=user_message,
-            history=history,
-            sink=sink,
-            backend=backend,
-            folder_id=folder_id,
-            memory_enabled=memory_enabled,
-            conversation_history_access=conversation_history_access,
-            approvals_enabled=approvals_enabled,
-            permission_axes=permission_axes,
-            profiles=profiles,
-            captain_run_id=captain_run_id,
-            message_id=message_id,
-            session_saver=session_saver,
-            session_loader=session_loader,
-            suspension_saver=suspension_saver,
-            suspension_deleter=suspension_deleter,
-            x_client_platform=x_client_platform,
-        )
-        if latency_probe is not None:
-            latency_probe.mark_assemble(int((time.monotonic() - assemble_t0) * 1000))
+        prepare_cache_only_token = prepare_reads_cache_only.set(True)
+        prepare_folder_token = prepare_account_folder_id.set(folder_id)
+        try:
+            latency_probe = get_turn_latency()
+            prepare_t0 = time.monotonic()
+            prepared = await prepare_fresh_turn(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                backend=backend,
+                sink=sink,
+                folder_id=folder_id,
+                board_id=board_id,
+                attachments=attachments,
+                memory_enabled=memory_enabled,
+                conversation_history_access=conversation_history_access,
+                permission_axes=permission_axes,
+                llm_credentials=llm_credentials,
+                x_client_platform=x_client_platform,
+                profiles=profiles,
+                agent_mentions=agent_mentions,
+                folder_binding_injected=folder_binding_injected,
+                folder_local_root_id=folder_local_root_id,
+                folder_local_subpath=folder_local_subpath,
+            )
+            if latency_probe is not None:
+                latency_probe.mark_prepare(int((time.monotonic() - prepare_t0) * 1000))
+            llm = prepared.llm
+            bound_execution_id = prepared.bound_execution_id
+            execution_id_token = prepared.execution_id_token
+
+            assemble_t0 = time.monotonic()
+            assembled = await assemble_ceo_turn(
+                prepared=prepared,
+                conversation_id=conversation_id,
+                user_message=user_message,
+                history=history,
+                sink=sink,
+                backend=backend,
+                folder_id=folder_id,
+                memory_enabled=memory_enabled,
+                conversation_history_access=conversation_history_access,
+                approvals_enabled=approvals_enabled,
+                permission_axes=permission_axes,
+                profiles=profiles,
+                captain_run_id=captain_run_id,
+                message_id=message_id,
+                session_saver=session_saver,
+                session_loader=session_loader,
+                suspension_saver=suspension_saver,
+                suspension_deleter=suspension_deleter,
+                x_client_platform=x_client_platform,
+            )
+            if latency_probe is not None:
+                latency_probe.mark_assemble(int((time.monotonic() - assemble_t0) * 1000))
+        finally:
+            prepare_reads_cache_only.reset(prepare_cache_only_token)
+            prepare_account_folder_id.reset(prepare_folder_token)
 
         # 出处诚实：hydrate 后注入「已登记来源」结构化摘要（对照台账字段，禁占位叙事）。
         from agentcore.runtime.evidence_ledger import format_registered_sources_prompt

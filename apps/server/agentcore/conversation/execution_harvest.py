@@ -50,6 +50,7 @@ from agentcore.runtime.turn_runs import turn_runs
 from agentcore.workspace.limits import (
     CHANNEL_DEAD_PREPARE_ABORT,
     CHANNEL_DEAD_USER_VISIBLE,
+    EXEC_ENV_DEAD_USER_VISIBLE,
     is_channel_dead_detail,
 )
 from agentcore.workspace.protocol import WorkspaceIOError
@@ -203,6 +204,10 @@ def build_harvest_fallback_content(
     parts: list[str] = []
     if _session_saw_channel_dead(session, body):
         parts.append(CHANNEL_DEAD_USER_VISIBLE)
+    if getattr(session, "exec_env_dead", False) or (
+        body and "本机暂时跑不了命令" in body
+    ):
+        parts.append(EXEC_ENV_DEAD_USER_VISIBLE)
     if body:
         parts.append(body)
     else:

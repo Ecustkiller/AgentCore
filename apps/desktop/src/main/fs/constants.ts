@@ -34,7 +34,7 @@ export const EXEC_LANGS: Record<string, { cmd: string[]; ext: string }> = {
   bash: { cmd: ["bash"], ext: ".sh" },
 };
 /** Workspace ``execute`` 通道墙钟上限（秒）。外环验收墙钟：≥ typecheck/build 600 + 30 slack。 */
-export const EXEC_TIMEOUT_CAP_S = 630;
+export const EXEC_TIMEOUT_CAP_S = 1230;
 // 单流捕获硬上限：防失控输出占内存/撑大通道回填；模型可见截断（8000）由服务端
 // ExecutionResult.__post_init__ 统一处理，故此处留足余量、不抢那层语义。
 export const EXEC_CAPTURE_CAP = 100_000;

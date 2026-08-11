@@ -46,12 +46,14 @@ async def record_local_turn(
         failures = [f for f in (tool_failures or ()) if isinstance(f, dict)]
         if failures:
             codes = [str(f.get("code") or "other") for f in failures]
+            tools = [str(f.get("tool") or "") for f in failures]
             logger.info(
                 "chat.local_turn_tool_failures",
                 conversation_id=conversation_id,
                 message_id=message_id,
                 count=len(failures),
                 codes=codes,
+                tools=tools,
             )
         result = await get_cloud_store().finalize(
             mode="local",

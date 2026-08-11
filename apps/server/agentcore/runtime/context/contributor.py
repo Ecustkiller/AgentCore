@@ -56,6 +56,9 @@ class SectionOrder(IntEnum):
     # CEO-only conversation state: the newest appendable team graph (跨回合同图追加's
     # cross-turn id echo — history replays no tool I/O, so it rides the volatile tail).
     RECENT_TEAM_GRAPH = 850
+    # Cross-turn soft ledger when the prior turn journal has partial/blocked delivery
+    # with blocking gaps (one-shot; mutual-excl. with PRIOR_DELEGATE_RETRY — gaps win).
+    PRIOR_DELIVERY_GAPS = 855
     # Cross-turn soft nudge when the prior turn journal fingerprints empty-delegate /
     # unproductive (history drops tool I/O — same volatile-tail reason as recent graph).
     PRIOR_DELEGATE_RETRY = 860

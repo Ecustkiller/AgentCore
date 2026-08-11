@@ -64,8 +64,10 @@ def test_family_variant_appends_qualifier_not_identical_label():
     assert dated.context_length == base.context_length
 
     free = model_metadata_for("deepseek/deepseek-v4-flash-free")
-    assert free.display_name == "DeepSeek V4 Flash · free"
+    assert free.display_name == "DeepSeek V4 Flash Free"
     assert free.vendor == "DeepSeek"
+    assert free.capabilities == base.capabilities
+    assert free.context_length == base.context_length
 
 
 def test_family_variant_doubao_seed_and_o3_mini():

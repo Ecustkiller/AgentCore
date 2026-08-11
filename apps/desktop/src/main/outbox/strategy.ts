@@ -137,6 +137,23 @@ const LOCAL_TURN_TOOL_FAILURE_CODES = new Set([
   "declaration_empty",
   "declaration_xor",
   "declaration_unknown",
+  "exec_timeout",
+  "exec_forced_stop",
+  "schema",
+  "git_timeout",
+  "no_repo",
+  "dirty_skip",
+  "already_repo",
+  "no_remote",
+  "not_github",
+  "unauthenticated",
+  "invalid_args",
+  "network_error",
+  "auth_failed",
+  "api_error",
+  "not_found",
+  "validation_failed",
+  "no_default_branch",
   "other",
 ]);
 
@@ -152,6 +169,16 @@ export function normalizeToolFailureCode(
   const rawCode = (code || "").trim();
   if (LOCAL_TURN_TOOL_FAILURE_CODES.has(rawCode)) {
     return rawCode;
+  }
+  // Legacy git wall-clock used bare ``timeout``; fact write now emits ``git_timeout``.
+  if (rawCode === "timeout") {
+    return "git_timeout";
+  }
+  if (rawCode === "verify_budget" || rawCode === "exec_env_timeout") {
+    return "exec_timeout";
+  }
+  if (rawCode === "exec_forced_stop") {
+    return "exec_forced_stop";
   }
   const raw = message || "";
   // Mirror server try_declaration_reject_gate prefixes / templates.
@@ -170,6 +197,20 @@ export function normalizeToolFailureCode(
   }
   if (raw.startsWith("未知 playbook")) {
     return "declaration_unknown";
+  }
+  if (
+    raw.includes("ExecEnvProbeFailed:") ||
+    raw.includes("Timeout: no output for") ||
+    raw.includes("Timeout: forced stop after") ||
+    raw.includes("Timeout: execution exceeded") ||
+    (raw.includes("验证未在") && raw.includes("预算内完成"))
+  ) {
+    return raw.includes("forced stop after")
+      ? "exec_forced_stop"
+      : "exec_timeout";
+  }
+  if (raw.includes("缺少必填参数")) {
+    return "schema";
   }
   const text = raw.toLowerCase();
   if (
@@ -215,13 +256,14 @@ export function toolFailuresFromJournal(
   const row = (
     tool: string,
     message: string,
+    code?: string | null,
   ): { tool: string; code: string; message: string } | null => {
     const name = (tool || "").trim();
     if (!name) return null;
     const msg = truncateToolFailureMessage(message);
     return {
       tool: name.slice(0, 128),
-      code: normalizeToolFailureCode(msg),
+      code: normalizeToolFailureCode(msg, code),
       message: msg,
     };
   };
@@ -236,7 +278,13 @@ export function toolFailuresFromJournal(
         ? (e.payload as Record<string, unknown>)
         : null;
     if (!payload || payload.success !== false) continue;
-    const built = row(String(payload.name || ""), String(payload.result || ""));
+    const rawCode =
+      typeof payload.code === "string" ? payload.code.trim() : null;
+    const built = row(
+      String(payload.name || ""),
+      String(payload.result || ""),
+      rawCode || null,
+    );
     if (built) fromFacts.push(built);
   }
   if (fromFacts.length > 0) return fromFacts;
@@ -251,9 +299,12 @@ export function toolFailuresFromJournal(
         ? (e.payload as Record<string, unknown>)
         : null;
     if (!payload || (payload.status ?? "success") === "success") continue;
+    const rawCode =
+      typeof payload.code === "string" ? payload.code.trim() : null;
     const built = row(
       String(payload.tool_name || ""),
       String(payload.result || ""),
+      rawCode || null,
     );
     if (built) fromEnds.push(built);
   }

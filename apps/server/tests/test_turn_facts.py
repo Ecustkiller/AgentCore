@@ -113,6 +113,22 @@ def test_tool_call_fact_entry_shape():
     }
 
 
+def test_tool_call_fact_omits_empty_code_writes_nonempty():
+    empty = ToolCallFact(
+        run_id="r", tool_call_id="c", name="git", success=False, result="x"
+    ).to_fact().entry()["payload"]
+    assert "code" not in empty
+    with_code = ToolCallFact(
+        run_id="r",
+        tool_call_id="c",
+        name="git",
+        success=False,
+        result="x",
+        code="git_timeout",
+    ).to_fact().entry()["payload"]
+    assert with_code["code"] == "git_timeout"
+
+
 def test_note_and_message_final_fact_shapes():
     note = (
         NoteFact(role="user", content="停止使用工具", reason="finalize", run_id="captain")

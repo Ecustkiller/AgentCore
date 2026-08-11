@@ -10,6 +10,7 @@ so executed code sees the workspace files — fixing the long-standing bug where
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import fnmatch
 import os
@@ -46,6 +47,10 @@ from agentcore.workspace.external_mounts import (
 )
 from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
+from agentcore.workspace.indexing.registry import (
+    shared_index_maintainer,
+    shared_index_manager,
+)
 from agentcore.workspace.limits import FILE_TOO_LARGE_DETAIL, WORKSPACE_READ_MAX_BYTES
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.locks import workspace_lock
@@ -103,6 +108,56 @@ _MAX_INDEX_FILES = 5000  # @ mention flat index cap (mirrors desktop LIST_FILES_
 
 def _posix(rel: str) -> str:
     return rel.replace(os.sep, "/")
+
+
+def _collect_index_files_sync(
+    root: Path, *, cap: int, recent: bool
+) -> IndexFilesResult:
+    """Synchronous ``os.walk`` scan — must run off the asyncio event-loop thread."""
+    # (posix_path, sort_mtime, mtime_ms, size_bytes)
+    collected: list[tuple[str, float, int, int]] = []
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune noise dirs in place so os.walk never descends into them.
+        rel_dir = os.path.relpath(dirpath, root)
+        parent_rel = "" if rel_dir == "." else rel_dir.replace("\\", "/")
+        dirnames[:] = sorted(
+            d for d in dirnames if not is_ignored_dir_entry(parent_rel=parent_rel, name=d)
+        )
+        for fname in sorted(filenames):
+            if is_ignored_file_name(fname):
+                continue
+            full = Path(dirpath) / fname
+            if full.is_symlink() or not full.is_file():
+                continue
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+            mtime_ms = st.st_mtime_ns // 1_000_000
+            size_bytes = int(st.st_size)
+            sort_mtime = float(st.st_mtime) if recent else 0.0
+            collected.append(
+                (_posix(os.path.relpath(full, root)), sort_mtime, mtime_ms, size_bytes)
+            )
+            if len(collected) >= cap:
+                truncated = True
+                break
+        if truncated:
+            break
+    if recent:
+        collected.sort(key=lambda row: row[1], reverse=True)  # newest first
+    else:
+        collected.sort(key=lambda row: row[0])  # alphabetical
+    entries = tuple(
+        IndexFileEntry(path=p, mtime_ms=ms, size_bytes=sz)
+        for p, _, ms, sz in collected
+    )
+    return IndexFilesResult(
+        paths=[e.path for e in entries],
+        truncated=truncated,
+        entries=entries,
+    )
 
 
 def _atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -179,6 +234,9 @@ class ServerWorkspace:
         # When True, AI list_tree / channel list keep archive suffixes visible
         # (file_list pattern targets zip/rar/…). Default False.
         self.ai_list_reveal_archives: bool = False
+        # Once-per-backend exec-env probe (sidecar SubprocessSandbox).
+        self._exec_env_probed: bool = False
+        self._exec_env_alive: bool = True
 
     def set_lock_waiting_hook(self, hook: Callable[[bool], None] | None) -> None:
         """Register UX callback for contended mutation-lock waits (不得静默等锁)."""
@@ -192,8 +250,8 @@ class ServerWorkspace:
         """Snapshot dirty + invalidate code index (schedule background refresh).
 
         Always routes through :meth:`start_code_index_maintenance` so the first
-        write on a previously empty workspace still starts indexing (turn-start
-        kick is a no-op while the tree has only internal zones / is empty).
+        write on a previously empty workspace still starts indexing (empty /
+        internal-only trees are a no-op until non-internal content exists).
         """
         self._dirty = True
         if self._index_manager is not None:
@@ -201,16 +259,17 @@ class ServerWorkspace:
         self.start_code_index_maintenance()
 
     def start_code_index_maintenance(self) -> None:
-        """Kick coalesced background ensure (turn / sidecar entry).
+        """Kick coalesced background ensure (write / ``code_search`` / warm).
 
-        Lazy B1: only when the workspace has non-internal content — empty chats
-        must not ``mkdir AgentCore/index`` (which would leak into hub has_files).
+        Uses the process-wide maintainer for this root so sidecar turn backends
+        and ``warmCodeIndex`` coalesce. Lazy B1: only when the workspace has
+        non-internal content — empty chats must not ``mkdir AgentCore/index``
+        (which would leak into hub has_files).
         """
         if not path_has_non_internal_entries(self._root):
             return
-        manager = self._get_index_manager()
-        if self._index_maintainer is None:
-            self._index_maintainer = IndexMaintainer(manager, self)
+        self._get_index_manager()
+        self._index_maintainer = shared_index_maintainer(self._root, self)
         self._index_maintainer.schedule()
 
     def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
@@ -420,7 +479,7 @@ class ServerWorkspace:
 
     def _get_index_manager(self) -> IndexManager:
         if self._index_manager is None:
-            self._index_manager = IndexManager.for_workspace_root(str(self._root.resolve()))
+            self._index_manager = shared_index_manager(self._root)
         return self._index_manager
 
     def _reject_oversized_file(self, target: Path) -> None:
@@ -865,53 +924,15 @@ class ServerWorkspace:
         ``AgentCore/{index,trash,baselines}``, and AI-tier
         suffixes (``*.db`` / media / binaries) are pruned — same rule set as
         desktop ``collectWorkspaceFiles`` / ``opIndexFiles``.
+
+        Disk walk runs in a worker thread (``asyncio.to_thread``) so a large
+        tree does not stall the event-loop turn cycle.
         """
         cap = cap or _MAX_INDEX_FILES
         recent = order == "recent"
         root = self._root.resolve()
-        # (posix_path, sort_mtime, mtime_ms, size_bytes)
-        collected: list[tuple[str, float, int, int]] = []
-        truncated = False
-        for dirpath, dirnames, filenames in os.walk(root):
-            # Prune noise dirs in place so os.walk never descends into them.
-            rel_dir = os.path.relpath(dirpath, root)
-            parent_rel = "" if rel_dir == "." else rel_dir.replace("\\", "/")
-            dirnames[:] = sorted(
-                d for d in dirnames if not is_ignored_dir_entry(parent_rel=parent_rel, name=d)
-            )
-            for fname in sorted(filenames):
-                if is_ignored_file_name(fname):
-                    continue
-                full = Path(dirpath) / fname
-                if full.is_symlink() or not full.is_file():
-                    continue
-                try:
-                    st = full.stat()
-                except OSError:
-                    continue
-                mtime_ms = st.st_mtime_ns // 1_000_000
-                size_bytes = int(st.st_size)
-                sort_mtime = float(st.st_mtime) if recent else 0.0
-                collected.append(
-                    (_posix(os.path.relpath(full, root)), sort_mtime, mtime_ms, size_bytes)
-                )
-                if len(collected) >= cap:
-                    truncated = True
-                    break
-            if truncated:
-                break
-        if recent:
-            collected.sort(key=lambda row: row[1], reverse=True)  # newest first
-        else:
-            collected.sort(key=lambda row: row[0])  # alphabetical
-        entries = tuple(
-            IndexFileEntry(path=p, mtime_ms=ms, size_bytes=sz)
-            for p, _, ms, sz in collected
-        )
-        return IndexFilesResult(
-            paths=[e.path for e in entries],
-            truncated=truncated,
-            entries=entries,
+        return await asyncio.to_thread(
+            _collect_index_files_sync, root, cap=cap, recent=recent
         )
 
     async def mkdir(self, path: str) -> None:
@@ -1191,6 +1212,31 @@ class ServerWorkspace:
         # whole sandbox run (code_execute / test_run). Whole-turn lock used to
         # cover this; without it, execute would race sibling turns' writes.
         async with self._mutation_lock("."):
+            from agentcore.tools.sandbox.exec_env import probe_failure_result
+
+            if not self._exec_env_probed:
+                self._exec_env_probed = True
+                try:
+                    self._exec_env_alive = bool(await self._sandbox.health_check())
+                except Exception:
+                    self._exec_env_alive = False
+                    from agentcore.core.logging import get_logger
+
+                    get_logger(__name__).info(
+                        "sandbox.health_check_failed",
+                        error="health_check raised",
+                        location=self.location,
+                    )
+                if not self._exec_env_alive:
+                    from agentcore.core.logging import get_logger
+
+                    get_logger(__name__).info(
+                        "sandbox.exec_env_probe_failed",
+                        location=self.location,
+                    )
+                    return probe_failure_result()
+            elif not self._exec_env_alive:
+                return probe_failure_result()
             self._mark_mutated()
             env = dict(req.env or {})
             env.update(build_external_env(self._mounts))

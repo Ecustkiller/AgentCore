@@ -56,6 +56,8 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_mint_inference_token_includes_resolved_model(monkeypatch):
+    """No conversation_id → account default (resolve_user_chat_model); JWT stays user-only."""
+
     async def _fake_resolve(_session, user_id):
         assert user_id == "u1"
         return "deepseek-v4-flash"
@@ -65,6 +67,7 @@ async def test_mint_inference_token_includes_resolved_model(monkeypatch):
         "resolve_user_chat_model",
         _fake_resolve,
     )
+
     async def _noop_rate_limit(_user_id):
         return None
 
@@ -78,6 +81,92 @@ async def test_mint_inference_token_includes_resolved_model(monkeypatch):
     assert resp.model == "deepseek-v4-flash"
     assert resp.expires_in_sec > 0
     assert resp.token
+    # JWT must not embed conversation — decode still yields only the user id.
+    assert inference.decode_inference_token(resp.token) == "u1"
+
+
+async def test_mint_inference_token_uses_conversation_main_model(monkeypatch):
+    """Valid owned conversation_id → same main slot as proxy expand."""
+
+    async def _fake_account(_session, user_id):
+        raise AssertionError("must not fall back to account default when conv is owned")
+
+    async def _fake_conv_selection(_session, conv, user_id):
+        assert user_id == "u1"
+        assert conv.id == "c-pinned"
+        return SimpleNamespace(model="deepseek-v4-flash-free", origin="platform", provider_id=None)
+
+    class _ConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id(self, cid, *, user_id):
+            assert user_id == "u1"
+            assert cid == "c-pinned"
+            return SimpleNamespace(id=cid, model_profile_id="pinned")
+
+    monkeypatch.setattr(inference.token, "resolve_user_chat_model", _fake_account)
+    monkeypatch.setattr(
+        inference.token,
+        "resolve_conversation_model_selection",
+        _fake_conv_selection,
+    )
+    monkeypatch.setattr(
+        "agentcore.db.repositories.ConversationRepository",
+        _ConvRepo,
+    )
+
+    async def _noop_rate_limit(_user_id):
+        return None
+
+    monkeypatch.setattr(
+        inference.token,
+        "enforce_inference_token_mint_rate_limit",
+        _noop_rate_limit,
+    )
+    body = inference.token.InferenceTokenRequest(conversation_id="c-pinned")
+    resp = await inference.token.mint_inference_token(
+        SimpleNamespace(user_id="u1"), session=None, body=body
+    )
+    # Honest id — do not silent-collapse flash-free → flash.
+    assert resp.model == "deepseek-v4-flash-free"
+    assert inference.decode_inference_token(resp.token) == "u1"
+
+
+async def test_mint_inference_token_unknown_conversation_falls_back(monkeypatch):
+    """Missing / foreign conversation_id → account default (unchanged path)."""
+
+    async def _fake_resolve(_session, user_id):
+        assert user_id == "u1"
+        return "deepseek-v4-flash"
+
+    class _ConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id(self, _cid, *, user_id):
+            assert user_id == "u1"
+            return None
+
+    monkeypatch.setattr(inference.token, "resolve_user_chat_model", _fake_resolve)
+    monkeypatch.setattr(
+        "agentcore.db.repositories.ConversationRepository",
+        _ConvRepo,
+    )
+
+    async def _noop_rate_limit(_user_id):
+        return None
+
+    monkeypatch.setattr(
+        inference.token,
+        "enforce_inference_token_mint_rate_limit",
+        _noop_rate_limit,
+    )
+    body = inference.token.InferenceTokenRequest(conversation_id="missing")
+    resp = await inference.token.mint_inference_token(
+        SimpleNamespace(user_id="u1"), session=None, body=body
+    )
+    assert resp.model == "deepseek-v4-flash"
 
 
 def test_inference_token_roundtrip():

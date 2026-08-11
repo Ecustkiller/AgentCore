@@ -108,7 +108,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 收尾：先对账拼图边（4b：冲突 / 缺口 / 重复）→ 核验原始目标（4a：完工判定）→ 写概览；未达成就续派 / `replan`，别假装收工。`playbook`：建站/工具台/绿场软件(`build_app`)推荐具名形状（不再硬拒 `none`/手写）；`build_website` 默认 `intensity=standard`（三串），`solo`=一人整页；`build_app` 默认 `intensity=lean`（三节点），`full`=五阶段+模块扇出——已确认 MVP /「先…以后再说」禁默升 `full`。多角摸清/讨论对齐默认 `parallel_brief`，正式长文成文专线 `research_report`（点选成文≠立刻满编；普通构想不默认学术审校），代码审计 `code_audit`（单缝只 `scope`；探路见 ≥2 可并行子面则填 `modules`，按自然缝扇出、整仓/多子系统常 4–8、能少则少，折叠顶 8；playbook **不**从 scope 自动拆、禁把多目录拼进 scope），其余自由组队（可选快捷形状）。**Agent/自动化**不靠场面账三档硬闸；缺形态信息时 `ask_user` 短问（探讨类默认推摸清对齐；糊「做个网站」须消歧展示页/工具壳/业务应用 + 本轮桌上档），由模型自洽选择交付路径 → [检查点与开工卡 · §一](/docs/03-AI核心/检查点与开工卡.md)。对抗性多视角另走 `debate` → [辩论编排设计](/docs/03-AI核心/辩论编排设计.md)。
 
-提示词分层：常驻 = 路由脊柱 + 能力目录 + 短钩子；进阶 HOW 在系统 Skill，用时 `consult_skill`。同一条知识只在唯一所有者出现。全局工作纪律分层：共享基座 `<work_authority>`（权威序 / **当前课题：工作区＞全局「正在做 X」** / 冲突通道 escalate·ask_user / 决策权限，CEO+worker）；CEO core 仅权威线索、「继续项目跟工作区」与「未定案·窄」钩；进阶 HOW → `consult_skill(work_discipline)`（设计三问、补丁绊线等）。禁止为读规则再派 worker。
+提示词分层：常驻 = 路由脊柱 + 能力目录 + 短钩子；进阶 HOW 在系统 Skill，用时 `consult_skill`。同一条知识只在唯一所有者出现。全局工作纪律分层：共享基座 `<work_authority>`（权威序 / **当前课题：工作区＞全局「正在做 X」** / 冲突通道 escalate·ask_user / 决策权限，CEO+worker）；CEO core 仅权威线索、「继续项目跟工作区」与「未定案·窄」钩；进阶 HOW → `consult_skill(work_discipline)`（设计三问、补丁绊线等）。禁止为读规则再派 worker。**跨回合交付账本 one-shot**：上轮 journal 的 `delivery_status` 为 `partial`/`blocked` 且含 blocking gaps 时，下轮 CEO 易变尾注入一次性可忽略 `<prior_delivery_gaps>`（与 `<prior_delegate_retry>` 互斥、缺口优先；真源仅上一回合 journal，勿粘 conversation 全局 latest）；不 emit / 不 stamp verdict。→ 见代码: `runtime/delegate/prior_delivery_gaps.py`
 
 ## 关键字段语义（摘要）
 

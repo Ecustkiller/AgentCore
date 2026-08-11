@@ -258,8 +258,14 @@ _MODEL_404_MARKERS = re.compile(
     re.IGNORECASE,
 )
 # Structured upstream error.message only (already extracted) — not free-text hard gate.
+# Anthropic: ``temperature` is deprecated``; Moonshot: ``invalid temperature: only 1 is allowed``.
 _TEMPERATURE_DEPRECATED_MARKERS = re.compile(
-    r"`?temperature`?\s+is\s+deprecated",
+    r"("
+    r"`?temperature`?\s+is\s+deprecated"
+    r"|invalid\s+temperature"
+    r"|temperature[^.\n]{0,120}?only\s+\d+\s+is\s+allowed"
+    r"|only\s+\d+\s+is\s+allowed[^.\n]{0,120}?temperature"
+    r")",
     re.IGNORECASE,
 )
 # Context / prompt overflow (⑦A · 2026-08-08): never echo upstream walls like

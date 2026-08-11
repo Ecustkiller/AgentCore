@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.workspace.channel import index_io_mode
+from agentcore.workspace.protocol import CodeIndexStatus
 
 if TYPE_CHECKING:
     from agentcore.workspace.indexing.manager import IndexManager
@@ -62,14 +63,33 @@ class IndexMaintainer:
         self._rerun = False
         self._lock = asyncio.Lock()
 
+    def bind_backend(self, backend: WorkspaceBackend) -> None:
+        """Point ensure I/O at ``backend`` (same root; used by process-wide registry)."""
+        self._backend = backend
+
     @property
     def building(self) -> bool:
         return self._task is not None and not self._task.done()
 
     def schedule(self, *, force: bool = False) -> None:
-        """Fire-and-forget ensure; safe to call from sync mutation paths."""
+        """Fire-and-forget ensure; safe to call from sync mutation paths.
+
+        Non-``force`` no-op when a snapshot exists and content is not dirty
+        (:meth:`IndexManager.needs_background_ensure`). Truncated-only ``STALE``
+        does not re-scan (cap cannot heal). Write paths must ``mark_content_dirty``
+        before kick.
+        """
         if force:
             self._force = True
+        else:
+            needs = getattr(self._manager, "needs_background_ensure", None)
+            if callable(needs) and not needs():
+                return
+            # Legacy mocks / managers without the helper: fall back to READY check.
+            if needs is None:
+                status = getattr(self._manager, "index_status", None)
+                if callable(status) and status() == CodeIndexStatus.READY:
+                    return
         if self.building:
             self._rerun = True
             self._manager.set_building(True)

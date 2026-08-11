@@ -28,8 +28,14 @@ from agentcore.tools.builtin.test_run import (
     _python_argv_runner,
     _resolve_test_argv,
     resolve_verify_budget_seconds,
+    resolve_verify_timeouts,
 )
 from agentcore.tools.protocol import ToolContext
+from agentcore.tools.sandbox.exec_env import (
+    EXEC_DISASTER_TIMEOUT_S,
+    EXEC_IDLE_TIMEOUT_DEFAULT_S,
+    EXEC_IDLE_TIMEOUT_INSTALL_S,
+)
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace.protocol import PathNotFound
 
@@ -108,25 +114,25 @@ def test_test_run_schema_stays_grantable_execution():
     assert schema.timeout_seconds > _VERIFY_BUDGET_HEAVY_SECONDS
 
 
-def test_verify_budget_tiers_by_check_and_command_shape():
-    """Outer-loop 分档：typecheck/build(+heavy command)=600；install/test/其它=300。"""
-    assert resolve_verify_budget_seconds("typecheck") == _VERIFY_BUDGET_HEAVY_SECONDS
-    assert resolve_verify_budget_seconds("build") == _VERIFY_BUDGET_HEAVY_SECONDS
-    assert resolve_verify_budget_seconds("install") == _VERIFY_BUDGET_STANDARD_SECONDS
-    assert resolve_verify_budget_seconds("test") == _VERIFY_BUDGET_STANDARD_SECONDS
+def test_verify_timeouts_idle_and_disaster():
+    """活性为主、灾难顶为辅；废弃 300/600「验证预算」分档."""
+    disaster, idle = resolve_verify_timeouts("test")
+    assert disaster == EXEC_DISASTER_TIMEOUT_S == 1200
+    assert idle == EXEC_IDLE_TIMEOUT_DEFAULT_S == 60
+    disaster_i, idle_i = resolve_verify_timeouts("install")
+    assert disaster_i == EXEC_DISASTER_TIMEOUT_S
+    assert idle_i == EXEC_IDLE_TIMEOUT_INSTALL_S == 120
+    # Deprecated alias still returns disaster ceiling for all checks.
+    assert resolve_verify_budget_seconds("typecheck") == EXEC_DISASTER_TIMEOUT_S
+    assert resolve_verify_budget_seconds("build") == EXEC_DISASTER_TIMEOUT_S
+    assert resolve_verify_budget_seconds("install") == EXEC_DISASTER_TIMEOUT_S
+    assert resolve_verify_budget_seconds("test") == EXEC_DISASTER_TIMEOUT_S
     assert (
         resolve_verify_budget_seconds("command", ["npx", "tsc", "--noEmit"])
-        == _VERIFY_BUDGET_HEAVY_SECONDS
+        == EXEC_DISASTER_TIMEOUT_S
     )
-    assert (
-        resolve_verify_budget_seconds("command", ["npm", "run", "build"])
-        == _VERIFY_BUDGET_HEAVY_SECONDS
-    )
-    assert (
-        resolve_verify_budget_seconds("command", ["pytest", "-q"])
-        == _VERIFY_BUDGET_STANDARD_SECONDS
-    )
-    assert _VERIFY_BUDGET_SECONDS == _VERIFY_BUDGET_STANDARD_SECONDS
+    assert _VERIFY_BUDGET_SECONDS == _VERIFY_BUDGET_STANDARD_SECONDS == EXEC_DISASTER_TIMEOUT_S
+    assert _VERIFY_BUDGET_HEAVY_SECONDS == EXEC_DISASTER_TIMEOUT_S
 
 
 # --- command whitelist ---
@@ -469,15 +475,52 @@ async def test_check_build_uses_profile_build_command(
     assert result.metadata.get("check") == "build"
 
 
-async def test_verify_budget_timeout_is_contract_failure_not_tool_breakage(
+async def test_idle_timeout_is_exec_env_not_contract_failure(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """超预算 = 验证未完成 → contract_failure；不得当作「工具坏了」进熔断。"""
+    """静默挂起 → exec_timeout + exec_env_timeout；不进 contract_failure."""
     backend = _FakeBackend(
         result=ExecutionResult(
             success=False,
             stdout="",
-            stderr=f"Timeout: execution exceeded {_VERIFY_BUDGET_SECONDS}s",
+            stderr="Timeout: no output for 60s (execution stalled)",
+            exit_code=-1,
+            duration_ms=60_000,
+        )
+    )
+
+    async def _fake_profile(_backend):
+        return _make_profile()
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.test_run.detect_workspace_profile",
+        _fake_profile,
+    )
+    result = await TestRunTool().execute(
+        {"check": "command", "command": "npm run build"},
+        _ctx(backend),
+    )
+    assert result.success is False
+    assert result.contract_failure is False
+    assert result.metadata is not None
+    assert result.metadata.get("code") == "exec_timeout"
+    assert result.metadata.get("exec_env_timeout") is True
+    assert result.metadata.get("timeout_kind") == "idle"
+    assert "无输出" in (result.error or "") or "无响应" in (result.output or "")
+    assert "验证结果：未完成（执行无响应）" in result.output
+    assert backend.requests[0].idle_timeout_seconds == EXEC_IDLE_TIMEOUT_DEFAULT_S
+    assert backend.requests[0].timeout_seconds == EXEC_DISASTER_TIMEOUT_S
+
+
+async def test_disaster_timeout_is_contract_failure_not_tool_breakage(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """灾难顶强制中止 = 验证未完成 → contract_failure；不得当作「工具坏了」进熔断."""
+    backend = _FakeBackend(
+        result=ExecutionResult(
+            success=False,
+            stdout="",
+            stderr=f"Timeout: forced stop after {_VERIFY_BUDGET_SECONDS}s (forced stop)",
             exit_code=-1,
             duration_ms=_VERIFY_BUDGET_SECONDS * 1000,
         )
@@ -497,9 +540,11 @@ async def test_verify_budget_timeout_is_contract_failure_not_tool_breakage(
     assert result.success is False
     assert result.contract_failure is True
     assert result.metadata is not None
-    assert result.metadata.get("code") == "verify_budget"
-    assert "预算" in (result.error or "") or "未完成" in (result.error or "")
-    assert "验证结果：未完成" in result.output
+    assert result.metadata.get("code") == "exec_forced_stop"
+    assert result.metadata.get("exec_env_timeout") is not True
+    assert result.metadata.get("timeout_kind") == "disaster"
+    assert "灾难顶" in (result.error or "") or "强制中止" in (result.error or "")
+    assert "验证结果：未完成（强制中止）" in result.output
 
 
 async def test_check_command_missing_is_contract_failure():

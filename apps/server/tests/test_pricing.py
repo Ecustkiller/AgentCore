@@ -24,7 +24,7 @@ from agentcore.llm.pricing import (
     nano_to_yuan,
     pricing_for_model,
 )
-from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_PRO
+from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_FLASH_FREE, DEEPSEEK_V4_PRO
 from agentcore.llm.provider.protocol import TokenUsage
 
 
@@ -266,6 +266,13 @@ def test_deepseek_flash_official_cny_list_price():
         credential_source="platform",
     )
     assert hit.cached == 20_000_000  # ¥0.02
+    # Zen free SKU meters at Flash nominal (upstream free; product quota anti-abuse).
+    free = calculate_cost(DEEPSEEK_V4_FLASH_FREE, usage, credential_source="platform")
+    assert free.pricing_source == "curated"
+    assert free.input == flash.input
+    assert free.output == flash.output
+    assert free.total == flash.total
+    assert free.total > 0
     # Pro 有卡但本部署可不进 allowlist；数值钉中文官价。
     pro = calculate_cost(DEEPSEEK_V4_PRO, usage, credential_source="platform")
     assert pro.input == 3_000_000_000  # ¥3
@@ -276,6 +283,7 @@ def test_deepseek_flash_official_cny_list_price():
 def test_non_deepseek_usd_curated_still_withdrawn():
     """gpt-4o / grok / qwen-vl — still no curated CNY card (不上架)."""
     assert has_curated_pricing(DEEPSEEK_V4_FLASH)
+    assert has_curated_pricing(DEEPSEEK_V4_FLASH_FREE)
     assert has_curated_pricing(DEEPSEEK_V4_PRO)
     assert not has_curated_pricing(PLATFORM_GPT_4O)
     assert not has_curated_pricing(PLATFORM_RELAY_GROK_45)
