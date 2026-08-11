@@ -33,35 +33,34 @@ def test_prepare_injects_round_content_when_message_empty():
     assert args["message"] == "帮你分析一下选项："
 
 
-def test_prepare_rewrites_dispatch_started_framing():
-    """案 fake-dispatch C：口播已开工的卡面须改成先确认再派。"""
+def test_prepare_keeps_dispatch_started_framing_verbatim():
+    """方案 2：引擎不改卡文案；假开工话术交给提示词。"""
+    kickoff = "好，派 3 个 worker 开工高规格版："
     calls = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call()],
-        "好，派 3 个 worker 开工高规格版：",
+        kickoff,
     )
     args = json.loads(calls[0].function.arguments)
-    assert "先确认再派" in args["message"]
-    assert "尚未真正开工" in args["message"]
+    assert args["message"] == kickoff
 
 
-def test_prepare_strips_install_ready_framing():
-    """案 ac890 ⑥B：卡面禁保留「依赖已装完」再与尚未开工叠。"""
+def test_prepare_keeps_install_ready_framing_verbatim():
+    ready = "依赖已经装完，派两个队员"
     calls = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call()],
-        "依赖已经装完，派两个队员",
+        ready,
     )
     args = json.loads(calls[0].function.arguments)
-    assert "装完" not in args["message"]
-    assert "确认" in args["message"]
+    assert args["message"] == ready
 
 
-def test_prepare_rewrites_explicit_dispatch_message():
+def test_prepare_leaves_explicit_dispatch_message():
     calls = prepare_blocking_ask_user_tool_calls(
         [_ask_user_call(message="已派出团队开工")],
         "正文铺垫",
     )
     args = json.loads(calls[0].function.arguments)
-    assert args["message"].startswith("先确认再派")
+    assert args["message"] == "已派出团队开工"
 
 
 def test_prepare_leaves_explicit_message():

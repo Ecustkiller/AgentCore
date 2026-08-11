@@ -26,6 +26,9 @@ _PROCESS_DISPATCH_PREAMBLE = re.compile(
     r")"
 )
 
+# Retired engine pause fill（方案 2：不再注入）；旧 transcript 整段仍当空壳，避免冲掉实质续写。
+_LEGACY_ASK_PAUSE_HOLLOW = "等待确认后再派工；此前尚未真正开工。"
+
 
 def is_process_dispatch_preamble(content: str) -> bool:
     """True when prose is a dispatch/kickoff process note, not a deliverable half."""
@@ -35,22 +38,25 @@ def is_process_dispatch_preamble(content: str) -> bool:
     return bool(_PROCESS_DISPATCH_PREAMBLE.search(text))
 
 
+def _is_hollow_pause_text(text: str) -> bool:
+    """Empty or retired wait-confirm constant alone — not a deliverable base."""
+    stripped = (text or "").strip()
+    return (not stripped) or stripped == _LEGACY_ASK_PAUSE_HOLLOW
+
+
 def pre_pause_for_user_visible_continuity(pre_pause: str) -> str:
     """Strip process kickoff so it cannot seed bubble reinject / join as deliverable base.
 
     Ask-confirm framing is handled separately（卡片承载）；派工 kickoff 同理：过程已发生，
     终稿应另写交付说明，而非接着「方向：派团队」续写。
 
-    Hollow pause constant alone is not a deliverable base either（d4d5 / 53f08）—
-    reinjecting it would freeze the bubble on the empty template.
+    Hollow / legacy pause-only text is not a deliverable base either —
+    reinjecting it would freeze the bubble on empty confirm copy.
     """
     text = pre_pause or ""
     if is_process_dispatch_preamble(text):
         return ""
-    # Local import: ask_user_pause_visible imports closing_posture at module load.
-    from agentcore.runtime.engine.ask_user_pause_visible import is_hollow_ask_pause
-
-    if is_hollow_ask_pause(text):
+    if _is_hollow_pause_text(text):
         return ""
     return text
 
@@ -110,23 +116,20 @@ def reconcile_resume_closing(pre_pause: str, new: str) -> str:
     content, keep only the post-resume segment — kickoff must not become the opening
     of the user-visible交付说明（ce1ecfc2 过程流水账）.
 
-    When post-resume is only the hollow ask pause constant and pre-pause still has
-    structured confirm substance, keep pre-pause（d4d5 / 53f08：禁空模板冲掉上轮选项）.
+    When post-resume is only hollow / legacy pause fill and pre-pause still has
+    structured confirm substance, keep pre-pause（禁空确认壳冲掉上轮选项）.
     """
-    # Local import: ask_user_pause_visible imports closing_posture at module load.
-    from agentcore.runtime.engine.ask_user_pause_visible import is_hollow_ask_pause
-
     left = pre_pause or ""
     right = new or ""
     # Hollow-only pre_pause is not substance — treat as empty so later content wins.
-    if is_hollow_ask_pause(left):
+    if _is_hollow_pause_text(left):
         left = ""
     if not left.strip():
         return rewrite_stale_ask_after_dispatch(right)
     if not right.strip():
         return left
-    # d4d5 / 53f08：空 pause 模板不得冲掉上轮已写好的确认/选项正文.
-    if is_hollow_ask_pause(right):
+    # Empty / legacy pause shell must not wipe structured confirm substance.
+    if _is_hollow_pause_text(right):
         return left
     if claims_posture_c(left) and claims_posture_a(right):
         return rewrite_stale_ask_after_dispatch(right)
@@ -155,8 +158,7 @@ def resume_continuity_steer(*, prior_deliverable: str) -> str:
             "若卡上有预填 default 且用户空 continue = 确认该 default："
             "派工/正文须用该 default 并标「按确认默认」。"
             "新建仓库/本地路径类：卡上 default 须带目标路径；空 continue 即确认该路径。"
-            "上轮已给出确认选项时须复述或沿用，【禁止】冲成空模板"
-            "「等待确认后再派工；此前尚未真正开工。」。"
+            "上轮已给出确认选项时须复述或沿用，【禁止】空转确认、不承接选项。"
             "【禁止】重复「请确认 / 关键缺口 / 先问你」话术；"
             "【禁止】借继续另拟一套还叠「先问你 / 请选择 / 方向：先问你」；"
             "【禁止】在同一条收口里既要确认又宣称完整交付 / 收卷收齐。"

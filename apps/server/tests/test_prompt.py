@@ -311,7 +311,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "短确认·只补缺口" in hint
     assert "prior_delivery_gaps" in hint
     assert "整锅重派" in hint
-    assert "等待确认后再派工" in hint
+    assert "空转确认" in hint or "不承接选项" in hint
     assert "默认路径" in hint
     assert "一人包办" in hint or "自搜+成文" in hint
     assert "角 prose" in hint and "仅主笔落盘" in hint

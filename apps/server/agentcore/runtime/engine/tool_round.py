@@ -144,12 +144,9 @@ async def handle_tool_calls_round(
             terminal_effect=terminal.effect,
             emit_reset=emit_reset,
         ):
-            from agentcore.runtime.engine.ask_user_pause_visible import (
-                ensure_ask_user_pause_body,
-            )
-
-            # C: pause bubble must stay user-visible (forbid silent empty / kickoff).
-            final_content = ensure_ask_user_pause_body(content_before_round)
+            # Prose folded into the ask_user card; roll bubble back (may be empty).
+            # Do not engine-inject wait-confirm copy — the card is the pause face.
+            final_content = content_before_round
         usage_meta = terminal.metadata or {}
         total_usage = total_usage + TokenUsage(
             input_tokens=usage_meta.get("input_tokens", 0),

@@ -984,7 +984,7 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "先问你" in body
     # 午后巡 d4d5/53f0：继续须承接上轮确认项；新建仓库/本地目录须 default 路径
     assert "继续·承接确认项" in body
-    assert "等待确认后再派工" in body
+    assert "空转确认" in body or "不承接选项" in body
     assert "默认路径" in body
     # 交付档：桌上结果 label → intensity/playbook；禁编制/意图分类器
     assert "交付档" in body

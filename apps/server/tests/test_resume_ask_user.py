@@ -142,7 +142,7 @@ def test_result_continue_empty_restates_options_without_default():
     )
     assert "复述" in res.output
     assert "重新打开/授权" in res.output
-    assert "等待确认后再派工" in res.output  # 禁表出现在注入文案里
+    assert "空转确认" in res.output or "不承接选项" in res.output
     assert "按你提出的方向继续" not in res.output
 
 

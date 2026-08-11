@@ -304,14 +304,10 @@ async def test_loop_finalizes_ask_user_to_paused():
         current_fact_log.reset(fl_token)
 
     # The loop ended ON PAUSED — the single signal the pipeline maps to a paused
-    # message_end + a parked persist tail. Pause honesty (案 fake-dispatch C) fills
-    # a wait-confirm bubble instead of silent empty.
-    from agentcore.runtime.engine.ask_user_pause_visible import (
-        ASK_USER_PAUSE_USER_VISIBLE,
-    )
-
+    # message_end + a parked persist tail. Prose folded into the card; bubble may
+    # be empty (方案 2：不再引擎注入 wait-confirm 文案).
     assert finish_override == [FinishReason.PAUSED]
-    assert content == ASK_USER_PAUSE_USER_VISIBLE
+    assert content == ""
 
     # The suspended call is pending: the live transcript ends at the assistant issuing
     # ask_user, with NO tool result message (the bridge was never touched).
@@ -478,13 +474,9 @@ async def test_loop_absorbs_content_into_blocking_ask_user():
         captain_transcript.reset(ct_token)
         current_fact_log.reset(fl_token)
 
-    from agentcore.runtime.engine.ask_user_pause_visible import (
-        ASK_USER_PAUSE_USER_VISIBLE,
-    )
-
     assert finish_override == [FinishReason.PAUSED]
-    # Prose still folds into the card; bubble gets wait-confirm honesty (not silent empty).
-    assert ASK_USER_PAUSE_USER_VISIBLE in content
+    # Prose folds into the card; bubble rolls back (no engine wait-confirm fill).
+    assert content == ""
     assert messages[-1].content is None
     args = json.loads(messages[-1].tool_calls[0].function.arguments)
     assert args["message"] == preamble
