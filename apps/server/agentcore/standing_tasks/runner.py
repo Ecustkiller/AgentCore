@@ -75,7 +75,11 @@ async def _ensure_pinned_conversation(
     name: str,
     permission_axes: dict,
 ) -> str:
-    """Return the pinned conversation id, creating one on first fire."""
+    """Return the pinned conversation id, creating one on first fire.
+
+    Create + attach share one unit-of-work (caller ``session.commit()``) so a
+    mid-path failure cannot leave a committed orphan conversation.
+    """
     async with async_session_factory() as session:
         tasks = StandingTaskRepository(session)
         task = await tasks.get_by_id(task_id)
@@ -90,8 +94,12 @@ async def _ensure_pinned_conversation(
             folder_id=folder_id,
             mode="standing",
             permission_axes=axes,
+            commit=False,
         )
-        await tasks.attach_conversation(task_id, conversation_id=conv.id)
+        await tasks.attach_conversation(
+            task_id, conversation_id=conv.id, commit=False
+        )
+        await session.commit()
         return conv.id
 
 

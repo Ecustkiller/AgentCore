@@ -1,0 +1,104 @@
+"""Builtin surface roster (``ToolSurface.BUILTIN``).
+
+Append platform / capability-face tools here. Order is part of the public
+surface; keep relative order when inserting.
+"""
+
+from __future__ import annotations
+
+
+def load_roster() -> tuple[type, ...]:
+    from agentcore.tools.builtin.archive_extract import ArchiveExtractTool
+    from agentcore.tools.builtin.browser import (
+        BrowserClickTool,
+        BrowserConsoleTool,
+        BrowserNavigateTool,
+        BrowserScrollTool,
+        BrowserSnapshotTool,
+        BrowserTypeTool,
+    )
+    from agentcore.tools.builtin.code_diagnostics import CodeDiagnosticsTool
+    from agentcore.tools.builtin.code_execute import CodeExecuteTool
+    from agentcore.tools.builtin.code_search import CodeSearchTool
+    from agentcore.tools.builtin.external_mount_readonly import ExternalMountReadonlyTool
+    from agentcore.tools.builtin.file_ops import (
+        FileAppendTool,
+        FileBatchTool,
+        FileCopyTool,
+        FileDeleteTool,
+        FileListTool,
+        FileMoveTool,
+        FileReadTool,
+        FileWriteTool,
+        MkdirTool,
+        StrReplaceTool,
+        WriteSectionTool,
+    )
+    from agentcore.tools.builtin.git_ops import GitTool
+    from agentcore.tools.builtin.grep import GrepTool
+    from agentcore.tools.builtin.host import (
+        HostAppsTool,
+        HostAudioDevicesTool,
+        HostInfoTool,
+        HostNetworkSummaryTool,
+        HostOsLogSummaryTool,
+        HostPingTool,
+        HostPowerTool,
+        HostShellTool,
+        HostStorageTool,
+    )
+    from agentcore.tools.builtin.md_to_docx import MdToDocxTool
+    from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
+    from agentcore.tools.builtin.terminal import TerminalTool
+    from agentcore.tools.builtin.test_run import TestRunTool
+    from agentcore.tools.builtin.web.download_url import DownloadUrlTool
+    from agentcore.tools.builtin.web.read_url import ReadUrlTool
+    from agentcore.tools.builtin.web.search import WebSearchTool
+
+    return (
+        # platform base
+        WebSearchTool,
+        ReadUrlTool,
+        FileReadTool,
+        FileWriteTool,
+        FileAppendTool,
+        StrReplaceTool,
+        WriteSectionTool,
+        FileListTool,
+        FileDeleteTool,
+        FileMoveTool,
+        FileCopyTool,
+        MkdirTool,
+        FileBatchTool,
+        MdToDocxTool,
+        MdToPdfTool,
+        ArchiveExtractTool,
+        DownloadUrlTool,
+        GrepTool,
+        CodeSearchTool,
+        CodeDiagnosticsTool,
+        GitTool,
+        TestRunTool,
+        CodeExecuteTool,
+        # Long-running process face (CEO+worker · local_only · start 运行时升审批)
+        TerminalTool,
+        # L3 团队浏览器：CEO+worker（screenshot 仍 worker-only，见 worker_only 册）
+        BrowserNavigateTool,
+        BrowserClickTool,
+        BrowserTypeTool,
+        BrowserScrollTool,
+        BrowserSnapshotTool,
+        BrowserConsoleTool,
+        # Host 第三能力面 P0–P3 (L1 NEVER · CEO+worker；P3 host_shell GRANTABLE 例外)
+        HostPingTool,
+        HostInfoTool,
+        HostAudioDevicesTool,
+        HostStorageTool,
+        HostPowerTool,
+        HostNetworkSummaryTool,
+        HostAppsTool,
+        HostOsLogSummaryTool,
+        HostShellTool,
+        # C1 silent read-only external mount (CEO+worker · desktop_online only)
+        ExternalMountReadonlyTool,
+    )

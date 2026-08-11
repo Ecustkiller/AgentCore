@@ -59,7 +59,8 @@ class ConversationRepository:
         # ``model_profile_id``: HTTP create snapshots account default (or client
         # pick). Internal callers may omit (NULL) — expand still falls back.
         #
-        # Pass ``commit=False`` when pairing with HandoffJobRepository.create.
+        # Pass ``commit=False`` when pairing with HandoffJobRepository.create or
+        # StandingTaskRepository.attach_conversation.
         conv = Conversation(id=new_id(), user_id=user_id)
         if title is not None:
             conv.title = title

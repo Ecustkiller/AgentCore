@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.core.types import new_id
 from agentcore.db.models.standing_tasks import StandingTask, StandingTaskRun
 
-from ._base import strip_nul
+from ._base import commit_or_flush, strip_nul
 
 
 def is_lease_free(*, lease_until: datetime | None, now: datetime) -> bool:
@@ -164,9 +164,17 @@ class StandingTaskRepository:
         return True
 
     async def attach_conversation(
-        self, task_id: str, *, conversation_id: str
+        self,
+        task_id: str,
+        *,
+        conversation_id: str,
+        commit: bool = True,
     ) -> StandingTask | None:
-        """Bind the pinned conversation (first fire). Idempotent if already set."""
+        """Bind the pinned conversation (first fire). Idempotent if already set.
+
+        Pass ``commit=False`` when pairing with ``ConversationRepository.create``
+        in one unit-of-work (standing pin path).
+        """
         result = await self._session.execute(
             update(StandingTask)
             .where(
@@ -177,7 +185,7 @@ class StandingTaskRepository:
             .returning(StandingTask)
         )
         row = result.scalar_one_or_none()
-        await self._session.commit()
+        await commit_or_flush(self._session, commit=commit)
         if row is not None:
             return row
         return await self.get_by_id(task_id)
