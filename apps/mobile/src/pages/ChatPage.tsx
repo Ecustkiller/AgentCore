@@ -868,6 +868,8 @@ function HistoryAssistant({
       durationMs: null as number | null,
       finishReason: null as string | null,
       emptyDiagnosis: undefined as string | undefined,
+      bodyKind: undefined as string | undefined,
+      baseUrl: undefined as string | undefined,
       errorCode: undefined as string | undefined,
       errorMessage: undefined as string | undefined,
       credentialSource: undefined as string | null | undefined,
