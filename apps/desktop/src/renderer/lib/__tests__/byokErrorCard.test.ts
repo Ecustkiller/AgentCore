@@ -142,7 +142,8 @@ describe("syntheticErrorForHardFailure", () => {
     expect(
       syntheticErrorForHardFailure("error", {
         code: "LLM_KEY_INVALID",
-        message: "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+        message:
+          "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
       }),
     ).toEqual({
       code: "LLM_KEY_INVALID",

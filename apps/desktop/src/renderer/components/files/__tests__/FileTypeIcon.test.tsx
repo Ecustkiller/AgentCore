@@ -57,9 +57,7 @@ describe("FileTypeIcon", () => {
 
 describe("DirTypeIcon", () => {
   it("renders folder icon", () => {
-    const { container } = render(
-      <DirTypeIcon name="src" isOpen size={13} />,
-    );
+    const { container } = render(<DirTypeIcon name="src" isOpen size={13} />);
     expect(container.firstChild).toBeTruthy();
   });
 });

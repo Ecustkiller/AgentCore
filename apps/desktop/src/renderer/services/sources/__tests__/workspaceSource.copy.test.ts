@@ -64,7 +64,7 @@ describe("cloud FileSource.copy", () => {
     const source = createWorkspaceSource("c1");
     expect(source.caps.edit).toBe(true);
     expect(source.copy).toBeTypeOf("function");
-    await source.copy!("a.txt", "a 副本.txt");
+    await source.copy?.("a.txt", "a 副本.txt");
     expect(copyWorkspaceFile).toHaveBeenCalledWith("c1", "a.txt", "a 副本.txt");
   });
 
@@ -72,7 +72,7 @@ describe("cloud FileSource.copy", () => {
     const source = createCloudWorkspaceSource("conv:c1");
     expect(source.caps.edit).toBe(true);
     expect(source.copy).toBeTypeOf("function");
-    await source.copy!("tree", "tree2");
+    await source.copy?.("tree", "tree2");
     expect(wsCopyFile).toHaveBeenCalledWith("conv:c1", "tree", "tree2");
   });
 

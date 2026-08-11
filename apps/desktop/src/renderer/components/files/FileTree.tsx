@@ -259,7 +259,9 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           : source.caps.watch
             ? "可从系统回收站或软删区还原。"
             : "此操作不可撤销。";
-        if (!window.confirm(`确定删除${what}「${node.name}」？${restoreHint}`)) {
+        if (
+          !window.confirm(`确定删除${what}「${node.name}」？${restoreHint}`)
+        ) {
           return;
         }
         try {

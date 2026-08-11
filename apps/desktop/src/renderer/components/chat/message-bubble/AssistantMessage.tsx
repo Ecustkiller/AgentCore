@@ -132,10 +132,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     message.error ??
     (!message.isStreaming
       ? !(message.content ?? "").trim()
-        ? syntheticErrorForEmptyFailure(
-            finishReason,
-            message.runs?.error?.code,
-          )
+        ? syntheticErrorForEmptyFailure(finishReason, message.runs?.error?.code)
         : syntheticErrorForHardFailure(finishReason, message.runs?.error)
       : null);
   const errorAction = displayError

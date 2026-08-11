@@ -855,4 +855,3 @@ function ContentTabChip({
     </div>
   );
 }
-

@@ -1,10 +1,7 @@
 import { bucketTree } from "@/components/files/useFileTreeData";
 import type { FileNode } from "@/lib/fileSource";
 import { describe, expect, it } from "vitest";
-import {
-  computeFileTreeFilter,
-  matchesFileTreeQuery,
-} from "../fileTreeFilter";
+import { computeFileTreeFilter, matchesFileTreeQuery } from "../fileTreeFilter";
 
 function childrenFrom(nodes: FileNode[]) {
   const map = bucketTree(nodes);
@@ -13,38 +10,32 @@ function childrenFrom(nodes: FileNode[]) {
 
 describe("matchesFileTreeQuery", () => {
   it("空 query 全匹配", () => {
-    expect(
-      matchesFileTreeQuery({ name: "a.txt", path: "a.txt" }, "  "),
-    ).toBe(true);
+    expect(matchesFileTreeQuery({ name: "a.txt", path: "a.txt" }, "  ")).toBe(
+      true,
+    );
   });
 
   it("大小写不敏感匹配文件名", () => {
     expect(
-      matchesFileTreeQuery({ name: "ReadMe.md", path: "docs/ReadMe.md" }, "readme"),
+      matchesFileTreeQuery(
+        { name: "ReadMe.md", path: "docs/ReadMe.md" },
+        "readme",
+      ),
     ).toBe(true);
   });
 
   it("匹配相对路径片段", () => {
     expect(
-      matchesFileTreeQuery(
-        { name: "a.ts", path: "src/utils/a.ts" },
-        "utils/a",
-      ),
+      matchesFileTreeQuery({ name: "a.ts", path: "src/utils/a.ts" }, "utils/a"),
     ).toBe(true);
   });
 
   it("中文路径可用", () => {
     expect(
-      matchesFileTreeQuery(
-        { name: "说明.md", path: "文档/说明.md" },
-        "说明",
-      ),
+      matchesFileTreeQuery({ name: "说明.md", path: "文档/说明.md" }, "说明"),
     ).toBe(true);
     expect(
-      matchesFileTreeQuery(
-        { name: "说明.md", path: "文档/说明.md" },
-        "文档",
-      ),
+      matchesFileTreeQuery({ name: "说明.md", path: "文档/说明.md" }, "文档"),
     ).toBe(true);
   });
 });

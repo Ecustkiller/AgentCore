@@ -41,7 +41,8 @@ export function computeFileTreeFilter(
   const stack: string[] = [""];
   const seen = new Set<string>([""]);
   while (stack.length > 0) {
-    const dir = stack.pop()!;
+    const dir = stack.pop();
+    if (dir === undefined) break;
     const kids = childrenOf(dir);
     if (!kids) continue;
     for (const node of kids) {

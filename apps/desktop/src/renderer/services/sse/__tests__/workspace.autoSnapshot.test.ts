@@ -66,7 +66,9 @@ describe("handleWorkspaceEvent auto-snapshot", () => {
       { conversationId: "c1", source: "live" } as never,
     );
     expect(handled).toBe(true);
-    expect(useAutoSnapshotStore.getState().failedByConversation.c1).toBeUndefined();
+    expect(
+      useAutoSnapshotStore.getState().failedByConversation.c1,
+    ).toBeUndefined();
     expect(notifyWarning).not.toHaveBeenCalled();
   });
 });

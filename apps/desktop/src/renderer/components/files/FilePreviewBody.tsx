@@ -2,7 +2,7 @@ import { IconButton } from "@/components/ui";
 import type { FilePreviewResult } from "@/lib/fileSource";
 import { formatBytes } from "@/lib/format";
 import { FileText, Minus, Plus, X } from "lucide-react";
-import { useCallback, useEffect, useState, type WheelEvent } from "react";
+import { type WheelEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
 const ZOOM_MIN = 0.25;
@@ -82,8 +82,7 @@ export function FilePreviewBody({
       <p className="text-xs text-muted-foreground/70">
         {result.kind === "too-large"
           ? "文件过大，不在面板内预览，请下载或用系统默认程序打开。"
-          : (result.reason ??
-            "无法在面板内预览，请下载或用系统默认程序打开。")}
+          : (result.reason ?? "无法在面板内预览，请下载或用系统默认程序打开。")}
       </p>
       {meta && <p className="text-xs text-muted-foreground/60">{meta}</p>}
     </div>
@@ -133,7 +132,10 @@ function ImagePreviewBody({
               src={dataUrl}
               alt={name}
               className="max-h-full max-w-full object-contain transition-transform"
-              style={{ transform: `scale(${scale})`, transformOrigin: "center" }}
+              style={{
+                transform: `scale(${scale})`,
+                transformOrigin: "center",
+              }}
               draggable={false}
             />
           </button>
@@ -216,6 +218,7 @@ function ImageLightbox({
           alt={name}
           className="max-h-full max-w-full object-contain"
           onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
         />
       </button>
     </div>,

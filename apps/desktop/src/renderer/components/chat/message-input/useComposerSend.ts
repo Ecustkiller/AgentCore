@@ -262,8 +262,7 @@ export function useComposerSend({
             folderId: targetFolderId,
             localContainerRootId,
             permissionAxes: conv.permission_axes ?? permissionAxes,
-            modelProfileId:
-              conv.model_profile_id ?? inheritedProfileId ?? null,
+            modelProfileId: conv.model_profile_id ?? inheritedProfileId ?? null,
           });
           // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
           // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在

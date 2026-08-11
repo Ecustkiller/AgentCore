@@ -159,9 +159,7 @@ export function WorkspaceMode() {
                   </IconButton>
                   <IconButton
                     title={
-                      autoSnapshotFailed
-                        ? "快照（最近自动备份失败）"
-                        : "快照"
+                      autoSnapshotFailed ? "快照（最近自动备份失败）" : "快照"
                     }
                     onClick={() => {
                       setTrashOpen(false);

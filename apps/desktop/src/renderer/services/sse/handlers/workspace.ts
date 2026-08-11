@@ -54,7 +54,9 @@ export function handleWorkspaceEvent(
           label: "查看快照",
           onClick: () => {
             useSidePanelStore.getState().showWorkspace();
-            useAutoSnapshotStore.getState().requestOpenSnapshots(conversationId);
+            useAutoSnapshotStore
+              .getState()
+              .requestOpenSnapshots(conversationId);
           },
         },
       });

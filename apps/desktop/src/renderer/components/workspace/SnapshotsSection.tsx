@@ -1,12 +1,12 @@
 import { Centered, EmptyHint, InlineError } from "@/components/files/parts";
+import { Button, IconButton } from "@/components/ui";
+import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   classifySnapshotLabel,
   groupSnapshotsByKind,
   snapshotDisplayHint,
   snapshotDisplayTitle,
 } from "@/components/workspace/snapshotDisplay";
-import { Button, IconButton } from "@/components/ui";
-import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatBytes } from "@/lib/format";
 import { notifyActionError, notifyError } from "@/lib/toast";
 import {
@@ -146,19 +146,19 @@ export function SnapshotsSection({
           <div className="space-y-3">
             <SnapshotGroup
               title="留存版本"
-              snaps={grouped!.kept}
+              snaps={grouped?.kept ?? []}
               conversationId={conversationId}
               onRestored={() => void reload()}
             />
             <SnapshotGroup
               title="自动备份"
-              snaps={grouped!.auto}
+              snaps={grouped?.auto ?? []}
               conversationId={conversationId}
               onRestored={() => void reload()}
             />
             <SnapshotGroup
               title="系统快照"
-              snaps={grouped!.system}
+              snaps={grouped?.system ?? []}
               conversationId={conversationId}
               onRestored={() => void reload()}
             />

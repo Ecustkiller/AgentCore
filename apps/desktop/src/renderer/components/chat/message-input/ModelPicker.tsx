@@ -13,10 +13,7 @@ import {
   profileSlotSummary,
   resolveDefaultProfile,
 } from "@/services/llmModelProfiles";
-import {
-  getLastUsedProfileId,
-  setLastUsedProfileId,
-} from "@/services/models";
+import { getLastUsedProfileId, setLastUsedProfileId } from "@/services/models";
 import type { Conversation } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
 import {
