@@ -58,4 +58,11 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
       expect(allowsSseEvent(phase, "host_op_required")).toBe(false);
     }
   });
+
+  it("allows post-turn auto-snapshot signals on terminal", () => {
+    for (const phase of ["completed", "failed", "stopped"] as const) {
+      expect(allowsSseEvent(phase, "workspace_snapshot_done")).toBe(true);
+      expect(allowsSseEvent(phase, "workspace_snapshot_failed")).toBe(true);
+    }
+  });
 });

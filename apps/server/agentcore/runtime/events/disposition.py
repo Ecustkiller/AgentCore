@@ -245,6 +245,14 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.HANDOFF_SNAPSHOT_DONE: (Disposition.EPHEMERAL, "接管快照控制帧——传输态"),
     EventType.HANDOFF_JOB_STARTED: (Disposition.EPHEMERAL, "接管任务启动控制帧——传输态"),
     EventType.HANDOFF_APPLY_DONE: (Disposition.EPHEMERAL, "接管应用完成控制帧——传输态"),
+    EventType.WORKSPACE_SNAPSHOT_DONE: (
+        Disposition.EPHEMERAL,
+        "回合后自动备份成功——传输态，清失败横幅",
+    ),
+    EventType.WORKSPACE_SNAPSHOT_FAILED: (
+        Disposition.EPHEMERAL,
+        "回合后自动备份失败——传输态 toast/横幅，不挡回合",
+    ),
     EventType.SIM_TICK_STARTED: (
         Disposition.EPHEMERAL,
         "模拟 tick 开始——持久化走 sim_event 表，不进 turn_journal",

@@ -443,13 +443,43 @@ def build_workspace_context(
             "netns）——`test_run` check=install 可装依赖；≠通用 HTTPS 出网"
             "（对照「出站网络」行）；任意 URL 落盘用 download_url。"
         )
-    else:
+    elif exec_on:
         package_guide_line = (
             "装包指引：package_install=未装配（云端能跑代码 ≠ 能装依赖；"
             "另需 netns/registry_egress chokepoint）——"
             "勿空转声称可 npm/pip/uv install；走结构自检 / export_to_local / 本机命令；"
             "【禁止】把仅结构自检说成外环验绿。"
         )
+    else:
+        package_guide_line = (
+            "装包指引：package_install=未装配（云端执行沙箱亦未开；"
+            "装包腿随执行类一并不可用）——"
+            "勿空转声称可装依赖；对照执行指引；勿再引导「导入到云」当修复；"
+            "【禁止】把仅结构自检说成外环验绿。"
+        )
+    if exec_on:
+        exec_guide_line = None
+    elif is_local:
+        exec_guide_line = (
+            "执行指引：code_execute=未装配（本机执行类未开）——"
+            "勿空转声称可跑码；可引导 Composer「导入到云 / 连接 Git」或诚实标缺口；"
+            "本机传统 open/bind 合法非默认（≠离线）。"
+        )
+    else:
+        from agentcore.runtime.delegate.exec_env_remediation import (
+            cloud_sandbox_failure_hint,
+        )
+
+        failure = cloud_sandbox_failure_hint()
+        failure_clause = f"探测={failure}；" if failure else ""
+        exec_guide_line = (
+            "执行指引：code_execute=未装配（已是云端会话，沙箱不可用；"
+            f"{failure_clause}"
+            "【禁止】再引导「导入到云 / 连接 Git」当修复）——"
+            "可选稍后重试 / export_to_local 本机跑 / 本机传统（合法非默认）；"
+            "禁止假跑、禁止把结构自检说成验绿。"
+        )
+
     if not desktop_online:
         mcp_guide_line = (
             "本机 MCP 指引：mcp=未装配（无桌面回填通道）——"
@@ -667,6 +697,7 @@ def build_workspace_context(
         mounts_line,
         capability_line,
         package_guide_line,
+        *([exec_guide_line] if exec_guide_line else []),
         host_guide_line,
         mcp_guide_line,
         browser_guide_line,

@@ -134,8 +134,11 @@ export function emptyFailureVisibleNotice(
 }
 
 /**
- * ChatPage live/history gate: empty content → {@link emptyFailureVisibleNotice};
- * non-empty content or `skip` (streaming / live mid-turn) → null.
+ * ChatPage live/history gate for the hard-failure red card (对齐桌面 displayError).
+ * - Prefer structured `errorMessage` even when content is non-empty (半成品 + 挂掉).
+ * - Empty body → {@link emptyFailureNotice} (`error` / `unproductive`).
+ * - Body + `finishReason=error` + no payload → synthesize (砍顶栏灰标后禁止静默).
+ * - `skip` (streaming / live mid-turn) → null.
  */
 export function resolveEmptyFailureNotice(opts: {
   content: string | null | undefined;
@@ -145,8 +148,14 @@ export function resolveEmptyFailureNotice(opts: {
   skip?: boolean;
 }): string | null {
   if (opts.skip) return null;
-  if ((opts.content ?? "").trim()) return null;
-  return emptyFailureVisibleNotice(opts.finishReason, opts.errorMessage);
+  const specific = opts.errorMessage?.trim();
+  if (specific) return specific;
+  if (!(opts.content ?? "").trim()) {
+    return emptyFailureNotice(opts.finishReason);
+  }
+  // Seam: error finish with body but lost error payload — red card, not gray chip.
+  if (opts.finishReason === "error") return emptyFailureNotice("error");
+  return null;
 }
 
 /** Short diagnosis labels for degraded empty-response finishes (mirrors backend / desktop). */
@@ -191,12 +200,22 @@ export function degradedFinishChipLabel(
 }
 
 /**
- * Abnormal finish reasons that warrant a bubble chip.
+ * Soft abnormal finishes that warrant a bubble-top chip.
+ * Hard `error` is red-card only (永不画顶栏「调用失败」灰标).
  * `cancelled` / `interrupted` omitted — partial body / 已停止 is the terminal signal.
  */
 export const FINISH_REASON_META: Record<string, { label: string }> = {
   max_rounds: { label: "已达最大轮次 · 提前收尾" },
   degraded: { label: "空响应收尾" },
   unproductive: { label: "无有效进展 · 提前收尾" },
-  error: { label: "调用失败" },
+};
+
+/**
+ * Footer「收尾原因」等非 chip 入口——含硬失败文案（可留「调用失败」）.
+ */
+export const FINISH_REASON_LABELS: Record<string, string> = {
+  max_rounds: FINISH_REASON_META.max_rounds.label,
+  degraded: FINISH_REASON_META.degraded.label,
+  unproductive: FINISH_REASON_META.unproductive.label,
+  error: "调用失败",
 };

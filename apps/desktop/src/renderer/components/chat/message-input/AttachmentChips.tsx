@@ -1,6 +1,7 @@
+import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { Folder, MessageSquare, Paperclip, Users, X } from "lucide-react";
+import { MessageSquare, Users, X } from "lucide-react";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -54,11 +55,11 @@ export function AttachmentChips({
           className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
         >
           {a.kind === "dir" ? (
-            <Folder size={12} className="shrink-0" />
+            <DirTypeIcon name={a.name} path={a.path} size={12} />
           ) : a.kind === "conversation" ? (
             <MessageSquare size={12} className="shrink-0" />
           ) : (
-            <Paperclip size={12} className="shrink-0" />
+            <FileTypeIcon name={a.name} path={a.path} size={12} />
           )}
           <span className="shrink-0 text-muted-foreground">
             {KIND_LABEL[a.kind]}

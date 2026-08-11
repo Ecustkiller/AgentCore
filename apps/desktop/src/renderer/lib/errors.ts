@@ -319,6 +319,30 @@ export function syntheticErrorForEmptyFailure(
 }
 
 /**
+ * Hard-fail red card when `finishReason=error` but `message.error` is missing.
+ * Covers the body-present seam formerly only signaled by FinishReasonChip
+ * 「调用失败」— after the chip is removed, this must not stay silent.
+ * Prefer `runs.error` copy when present; else the empty-failure synthetic.
+ */
+export function syntheticErrorForHardFailure(
+  finishReason: string | undefined,
+  runsError?: { code?: string | null; message?: string | null } | null,
+): {
+  code: string;
+  message: string;
+} | null {
+  if (finishReason !== "error") return null;
+  const msg = runsError?.message?.trim();
+  if (msg) {
+    return {
+      code: (runsError?.code ?? "").trim() || "LLM_ERROR",
+      message: msg,
+    };
+  }
+  return syntheticErrorForEmptyFailure("error", runsError?.code);
+}
+
+/**
  * A one-click remedy that fixes the *cause* of an error by routing the user
  * somewhere (e.g. the model-config page to add a BYOK key), rather than retrying
  * the same operation. `href` is a hash-router path.

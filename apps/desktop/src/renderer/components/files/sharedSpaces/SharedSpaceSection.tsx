@@ -61,6 +61,7 @@ export function SharedSpaceSection({
   onOpenFile,
   flashing,
   offlineUnavailable = false,
+  filterQuery = "",
 }: {
   space: SharedSpaceSummary;
   source: FileSource | null;
@@ -71,6 +72,8 @@ export function SharedSpaceSection({
   flashing: boolean;
   /** N4-A: grey + hint while read-only offline (shared spaces are cloud-only). */
   offlineUnavailable?: boolean;
+  /** Forwarded to {@link FileTree} for path/name filter (hub search box). */
+  filterQuery?: string;
 }) {
   const meId = useAuthStore((s) => s.user?.id ?? null);
   const canWrite = canWriteSharedSpace(space.my_role);
@@ -278,6 +281,7 @@ export function SharedSpaceSection({
       chrome={false}
       indent={14}
       activePath={activePath}
+      filterQuery={filterQuery}
       onOpenFile={onOpenFile}
       emptyText={
         canWrite

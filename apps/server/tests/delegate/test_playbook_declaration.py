@@ -127,12 +127,13 @@ def test_resolve_empty_delegate_rejected():
     assert name is None and reason is None
     assert err == _EMPTY_DELEGATE_MSG
     assert "tasks" in err
+    assert "默认" in err
     assert HANDWRITTEN_TASKS_SKELETON in err
     assert '"role"' in err and '"task"' in err
     assert "deliverable" in err
-    # 空失败弱化嵌套 arguments / 长纠错叙事；具名 playbook 仍一等提示。
+    # 空失败弱化嵌套 arguments / 长纠错叙事；playbook 仅次选一句。
     assert "arguments" not in err
-    assert "playbook" in err
+    assert "次选" in err and "playbook" in err
     # Must not dump the full playbook catalog into every empty reject.
     assert available_playbooks() not in err
     assert "build_toolshed" not in err

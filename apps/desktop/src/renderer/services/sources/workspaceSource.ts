@@ -9,6 +9,7 @@ import {
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
+  copyWorkspaceFile,
   createWorkspaceDir,
   deleteWorkspaceFile,
   downloadWorkspaceFile,
@@ -30,6 +31,7 @@ import type {
 import type { WorkspaceInfo } from "@/services/workspaces";
 import {
   openCloudWorkspaceInBrowser,
+  wsCopyFile,
   wsCreateDir,
   wsDeleteFile,
   wsDownloadFile,
@@ -52,6 +54,14 @@ function adaptPreview(p: WorkspacePreview): FilePreviewResult {
   if (p.kind === "image") {
     return {
       kind: "image",
+      dataUrl: p.dataUrl,
+      mime: p.mime,
+      size: p.size,
+    };
+  }
+  if (p.kind === "pdf") {
+    return {
+      kind: "pdf",
       dataUrl: p.dataUrl,
       mime: p.mime,
       size: p.size,
@@ -150,6 +160,7 @@ interface CloudFileClient {
   upload(path: string, body: Blob): Promise<void>;
   createDir(path: string): Promise<void>;
   move(src: string, dst: string): Promise<void>;
+  copy(src: string, dst: string): Promise<void>;
   delete(path: string): Promise<void>;
   download(path: string, filename: string): Promise<void>;
   exportMdToDocx(path: string): Promise<{ path: string; warnings: string[] }>;
@@ -247,8 +258,10 @@ function makeCloudSource(
     delete: (path) => client.delete(path),
     writeBytes: (path, body) => client.upload(path, body),
     download: (path, filename) => client.download(path, filename),
+    // 写能力跟 caps.edit：无 edit 时不挂 copy / export（菜单与快捷键都靠「方法是否存在」+ canMutate）
     ...(caps.edit
       ? {
+          copy: (src: string, dst: string) => client.copy(src, dst),
           exportMdToDocx: (path: string) => client.exportMdToDocx(path),
         }
       : {}),
@@ -273,6 +286,7 @@ export function createWorkspaceSource(
     upload: (path, body) => uploadWorkspaceFile(conversationId, path, body),
     createDir: (path) => createWorkspaceDir(conversationId, path),
     move: (src, dst) => moveWorkspaceFile(conversationId, src, dst),
+    copy: (src, dst) => copyWorkspaceFile(conversationId, src, dst),
     delete: (path) => deleteWorkspaceFile(conversationId, path),
     download: (path, filename) =>
       downloadWorkspaceFile(conversationId, path, filename),
@@ -309,6 +323,7 @@ export function createCloudWorkspaceSource(
       upload: (path, body) => wsUploadFile(wsId, path, body),
       createDir: (path) => wsCreateDir(wsId, path),
       move: (src, dst) => wsMoveFile(wsId, src, dst),
+      copy: (src, dst) => wsCopyFile(wsId, src, dst),
       delete: (path) => wsDeleteFile(wsId, path),
       download: (path, filename) => wsDownloadFile(wsId, path, filename),
       exportMdToDocx: (path) => wsExportMdToDocx(wsId, path),

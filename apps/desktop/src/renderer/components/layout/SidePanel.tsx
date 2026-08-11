@@ -1,6 +1,7 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { RunDetailScroll } from "@/components/chat/detail/RunDetailScroll";
 import { FileDetail } from "@/components/files/FileDetail";
+import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { EmptyHint } from "@/components/files/parts";
 import {
   CommandPanelBody,
@@ -810,7 +811,7 @@ function ContentTabChip({
     ) : tab.kind === "terminal" ? (
       <Terminal size={14} className="shrink-0" />
     ) : tab.kind === "file" ? (
-      <FileText size={14} className="shrink-0" />
+      <FileTypeIcon name={tab.name} path={tab.path} size={14} />
     ) : tab.kind === "browser" ? (
       <Radio size={14} className="shrink-0" />
     ) : null;
@@ -854,3 +855,4 @@ function ContentTabChip({
     </div>
   );
 }
+

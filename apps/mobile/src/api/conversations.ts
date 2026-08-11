@@ -116,8 +116,9 @@ export async function renameConversation(
   return (await res.json()) as ConversationSummary;
 }
 
-/** Switch this conversation's model combination. Pass a profile id to override the account
- *  default, or null to follow the account default. Returns the updated summary
+/** Switch this conversation's model combination (定案 B · 拍快照).
+ *  Pass a concrete profile id to re-snapshot, or null to re-pin the then-current
+ *  account default (not live follow). Returns the updated summary
  *  (`model_profile_id` is authoritative). */
 export async function setConversationModelProfile(
   id: string,
@@ -164,10 +165,15 @@ export async function deleteConversation(id: string): Promise<void> {
 }
 
 /** Create a fresh cloud conversation and return its id (skeleton: no folder/mode).
- *  Optional ``permission_axes`` seeds this session (else account default recipe). */
+ *  Optional ``permission_axes`` seeds this session (else account default recipe).
+ *  Optional ``model_profile_id`` snapshots that combination at create (定案 B);
+ *  omit to let the server write the then-current account default. */
 export async function createConversation(
   title?: string,
-  opts?: { permission_axes?: Schemas["PermissionAxesModel"] | null },
+  opts?: {
+    permission_axes?: Schemas["PermissionAxesModel"] | null;
+    model_profile_id?: string | null;
+  },
 ): Promise<string> {
   const res = await apiFetch("/v1/conversations", {
     method: "POST",
@@ -176,6 +182,9 @@ export async function createConversation(
       title: title ?? null,
       ...(opts?.permission_axes
         ? { permission_axes: opts.permission_axes }
+        : {}),
+      ...(opts?.model_profile_id
+        ? { model_profile_id: opts.model_profile_id }
         : {}),
     }),
   });

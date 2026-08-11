@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 辩论完成态 StatusStrip：meta（Agent 数 / 子任务 / 用时 / ¥）不得因 isDebate 整段隐藏，
+ * 辩论完成态 StatusStrip：meta（子任务 / 用时 / ¥）不得因 isDebate 整段隐藏，
  * 与多 Agent「¥ 归状态条」口径对齐（前端成本呈现）。
  */
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -137,14 +137,14 @@ beforeEach(() => {
 });
 
 describe("StatusStrip · 辩论完成态 meta", () => {
-  it("isDebate 完成态仍展示 Agent 数 / 子任务 / 费用", () => {
+  it("isDebate 完成态仍展示子任务 / 费用（不含 Agent 数）", () => {
     useExecutionStore.getState().startExecution(debatePlan, MID);
     const exec = projectExecution(debatePlan, doneFrames, "completed");
     expect(isDebate(exec)).toBe(true);
 
     renderStrip(exec);
 
-    expect(screen.getByText(/2 个 Agent/)).toBeTruthy();
+    expect(screen.queryByText(/个 Agent/)).toBeNull();
     expect(screen.getByText(/2\/2 子任务/)).toBeTruthy();
     // ¥ 归状态条：有真实花费时费用段可见（非「团队完成」独占）。
     expect(screen.getByText(/¥/)).toBeTruthy();

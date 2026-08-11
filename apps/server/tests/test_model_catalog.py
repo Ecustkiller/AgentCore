@@ -693,7 +693,7 @@ async def test_patch_conversation_persists_model_profile_id(monkeypatch):
     assert result.model_profile_id == "prof-1"
 
 
-async def test_patch_conversation_clears_model_profile_id(monkeypatch):
+async def test_patch_conversation_null_repins_account_default(monkeypatch):
     from datetime import datetime
 
     from agentcore.api.routes.conversations import crud
@@ -713,6 +713,7 @@ async def test_patch_conversation_clears_model_profile_id(monkeypatch):
         deep_research_auto=False,
         model_profile_id="prof-1",
     )
+    written: dict = {}
 
     class _Repo:
         _session = None
@@ -721,16 +722,70 @@ async def test_patch_conversation_clears_model_profile_id(monkeypatch):
             return conv
 
         async def set_model_profile(self, _cid, model_profile_id, *, user_id):
+            written["model_profile_id"] = model_profile_id
             conv.model_profile_id = model_profile_id
             return conv
 
+    monkeypatch.setattr(
+        "agentcore.llm.model_profiles.LlmModelProfileService.snapshot_default_profile_id",
+        AsyncMock(return_value="sys-default"),
+    )
     body = UpdateConversationRequest(model_profile_id=None)
     # Explicit null is in model_fields_set.
     assert "model_profile_id" in body.model_fields_set
     result = await crud.update_conversation(
         "c1", body, SimpleNamespace(user_id="u1"), repo=_Repo()
     )
-    assert result.model_profile_id is None
+    assert written == {"model_profile_id": "sys-default"}
+    assert result.model_profile_id == "sys-default"
+
+
+async def test_create_conversation_snapshots_account_default(monkeypatch):
+    from datetime import datetime
+
+    from agentcore.api.routes.conversations import crud
+    from agentcore.api.schemas import CreateConversationRequest
+
+    written: dict = {}
+    conv = SimpleNamespace(
+        id="c-new",
+        title="",
+        updated_at=datetime.now(),
+        created_at=datetime.now(),
+        message_count=0,
+        folder_id=None,
+        local_container_root_id=None,
+        pinned=False,
+        archived=False,
+        permission_axes={},
+        deep_research_auto=False,
+        model_profile_id="sys-default",
+        compaction_summary=None,
+        compacted_through=None,
+    )
+
+    class _Repo:
+        _session = object()
+
+        async def create(self, **kwargs):
+            written.update(kwargs)
+            conv.model_profile_id = kwargs.get("model_profile_id")
+            return conv
+
+    monkeypatch.setattr(
+        "agentcore.api.routes.conversations.crud.default_permission_axes_for_user",
+        AsyncMock(return_value=SimpleNamespace(to_dict=lambda: {})),
+    )
+    monkeypatch.setattr(
+        "agentcore.llm.model_profiles.LlmModelProfileService.snapshot_default_profile_id",
+        AsyncMock(return_value="sys-default"),
+    )
+    body = CreateConversationRequest()
+    result = await crud.create_conversation(
+        body, SimpleNamespace(user_id="u1"), repo=_Repo(), folder_repo=SimpleNamespace()
+    )
+    assert written["model_profile_id"] == "sys-default"
+    assert result.model_profile_id == "sys-default"
 
 
 # --- inference proxy authoritative re-resolution ------------------------------

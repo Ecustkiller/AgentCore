@@ -97,4 +97,6 @@ export type SSEEventType =
   | "turn_warning"
   | "user_interjection"
   | "workspace_lock_wait"
-  | "workspace_op_required";
+  | "workspace_op_required"
+  | "workspace_snapshot_done"
+  | "workspace_snapshot_failed";

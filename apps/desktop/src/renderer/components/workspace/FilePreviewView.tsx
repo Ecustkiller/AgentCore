@@ -1,6 +1,7 @@
 import { FileAuditSection } from "@/components/audit/FileAuditTrail";
 import { Markdown } from "@/components/chat/Markdown";
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
+import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Centered, InlineError } from "@/components/files/parts";
 import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
@@ -19,7 +20,6 @@ import {
   ChevronLeft,
   Download,
   ExternalLink,
-  FileText,
   FolderSearch,
   Globe,
   Loader2,
@@ -214,7 +214,7 @@ export function FilePreviewView({
             <ChevronLeft size={16} />
           </IconButton>
         </SimpleTooltip>
-        <FileText size={13} className="shrink-0 text-muted-foreground" />
+        <FileTypeIcon name={name} path={path} size={13} />
         <SimpleTooltip label={path}>
           <span className="min-w-0 flex-1 truncate text-xs font-medium">
             {dirty && <span className="text-primary">● </span>}

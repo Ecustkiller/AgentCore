@@ -215,6 +215,11 @@ describe("AssistantContent", () => {
     );
   });
 
+  it("does not paint error as a top chip (hard failure = red card only)", () => {
+    render(<AssistantContent content="半成品" finishReason="error" />);
+    expect(screen.queryByTestId("finish-reason-chip")).toBeNull();
+  });
+
   it("hides finishReason chip when failureNotice already owns the surface", () => {
     render(
       <AssistantContent

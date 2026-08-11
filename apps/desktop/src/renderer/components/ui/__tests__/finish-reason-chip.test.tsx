@@ -31,4 +31,12 @@ describe("FinishReasonChip", () => {
     expect(screen.queryByText(/降级完成/)).toBeNull();
     expect(screen.queryByText("空响应收尾")).toBeNull();
   });
+
+  it("error finish never paints bubble chip (红条唯一用户面)", () => {
+    const { container } = render(<FinishReasonChip reason="error" />);
+    expect(container.firstChild).toBeNull();
+    expect(screen.queryByText("调用失败")).toBeNull();
+    // Meta label kept for footer「收尾原因」.
+    expect(FINISH_REASON_META.error.label).toBe("调用失败");
+  });
 });

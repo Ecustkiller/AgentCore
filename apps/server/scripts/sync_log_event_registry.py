@@ -276,6 +276,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     "cost.ledger_drain_before_reconcile_failed": {},
     "workspace.snapshot_created": {},
     "workspace.snapshot_failed": {"error": "str"},
+    "workspace.system_snapshot_prune_failed": {"error": "str"},
     "workspace.index_build_start": {
         "force": "bool",
     },

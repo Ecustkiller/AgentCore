@@ -8,11 +8,14 @@ import {
 } from "lucide-react";
 
 /**
- * Abnormal finish reasons that still warrant a bubble chip.
+ * Abnormal finish-reason labels (bubble chip + footer「收尾原因」).
  * `cancelled` / `interrupted` intentionally omitted — partial body (or team
  * StatusStrip「已停止」) is the terminal signal; chat timeline does not paint a
  * standalone「已停止」row (P1). No “saved” reassurance chip
  * (对齐主流对话 AI · 前端UX设计.md §三).
+ *
+ * `error` stays in the map for footer / export copy («调用失败»), but
+ * {@link FinishReasonChip} never paints it — hard failures use the red bar only.
  */
 export const FINISH_REASON_META: Record<
   string,
@@ -40,7 +43,7 @@ export const FINISH_REASON_META: Record<
   },
 };
 
-/** Top-of-bubble chip for abnormal turn endings (前端UX设计.md §一B finishReasonChip). */
+/** Top-of-bubble chip for soft abnormal endings (前端UX设计.md §一B finishReasonChip). */
 export function FinishReasonChip({
   reason,
   diagnosisLabel,
@@ -51,7 +54,9 @@ export function FinishReasonChip({
   diagnosisLabel?: string;
   className?: string;
 }) {
-  const meta = reason ? FINISH_REASON_META[reason] : undefined;
+  // Hard fail → red error bar only; never stack a muted「调用失败」chip.
+  if (!reason || reason === "error") return null;
+  const meta = FINISH_REASON_META[reason];
   if (!meta) return null;
   const { Icon } = meta;
   const label =

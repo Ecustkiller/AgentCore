@@ -203,8 +203,8 @@ export async function setConversationArchived(
 }
 
 /**
- * 切换会话使用的模型组合。传 profile id 固定本会话组合（活引用）；
- * 传 `null` 清除覆盖、跟随账号默认。不可用 / 越权时后端返 422（由调用方 toast 呈现）。
+ * 切换会话使用的模型组合。传 profile id 固定本会话组合（活引用定义）；
+ * 传 `null` = 再钉当时账号默认（不是活跟随）。不可用 / 越权时后端返 422（由调用方 toast 呈现）。
  */
 export async function setConversationModelProfile(
   id: string,

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   MODEL_CONFIG_PATH,
   StreamHttpError,
+  FINISH_REASON_LABELS,
+  FINISH_REASON_META,
   degradedFinishChipLabel,
   describeStreamHttpError,
   emptyChatCopy,
@@ -143,12 +145,30 @@ describe("resolveEmptyFailureNotice (ChatPage gate)", () => {
     ).toBe("模型调用失败，请重试。");
   });
 
-  it("keeps non-empty content (half reply) — no failure line", () => {
+  it("surfaces structured error on half-reply (body + error payload)", () => {
     expect(
       resolveEmptyFailureNotice({
         content: "半成品答复",
         finishReason: "error",
         errorMessage: "后面又挂了",
+      }),
+    ).toBe("后面又挂了");
+  });
+
+  it("synthesizes red-card copy for body + error finish without payload", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "半成品答复",
+        finishReason: "error",
+      }),
+    ).toBe("模型调用失败，请重试。");
+  });
+
+  it("keeps soft finishes with body silent (chip owns soft surface)", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "降级后的短答",
+        finishReason: "degraded",
       }),
     ).toBeNull();
   });
@@ -209,5 +229,13 @@ describe("isEmptyResponseUserSurface", () => {
       isEmptyResponseUserSurface({ message: "模型多次空响应后收尾" }),
     ).toBe(true);
     expect(isEmptyResponseUserSurface({ code: "LLM_TIMEOUT" })).toBe(false);
+  });
+});
+
+describe("FINISH_REASON_META / LABELS", () => {
+  it("chip meta omits hard error; footer labels keep 调用失败", () => {
+    expect(FINISH_REASON_META.error).toBeUndefined();
+    expect(FINISH_REASON_META.degraded.label).toBe("空响应收尾");
+    expect(FINISH_REASON_LABELS.error).toBe("调用失败");
   });
 });

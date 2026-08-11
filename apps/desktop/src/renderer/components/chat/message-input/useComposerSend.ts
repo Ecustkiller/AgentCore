@@ -14,7 +14,6 @@ import { api } from "@/services/api";
 import {
   provisionalConversationTitle,
   requestAutoTitle,
-  setConversationModelProfile,
 } from "@/services/conversations";
 import { loadLatestWindow } from "@/services/messages";
 import { getLastUsedProfileId } from "@/services/models";
@@ -234,18 +233,23 @@ export function useComposerSend({
             .getState()
             .setDraftWorkspaceIntent({ kind: "quick_cloud" });
         }
-        // 新会话继承上次在聊天里选的组合 id（会话级组合引用）：last_profile_id 作默认建议。
-        const inheritedProfileId = getLastUsedProfileId();
+        // 新建拍快照：POST 带 last-used（或草稿所选，已写入 last_profile_id）；
+        // 省略则服务端写入当时账号默认。勿再 create 后 PATCH。
+        const inheritedProfileId = getLastUsedProfileId()?.trim() || null;
         try {
           const permissionAxes = await resolveDefaultPermissionAxes();
           const conv = await api.post<{
             id: string;
             permission_axes?: PermissionAxes;
+            model_profile_id?: string | null;
           }>("/v1/conversations", {
             title: null,
             folder_id: targetFolderId,
             local_container_root_id: localContainerRootId,
             permission_axes: permissionAxes,
+            ...(inheritedProfileId
+              ? { model_profile_id: inheritedProfileId }
+              : {}),
           });
           conversationId = conv.id;
           setComposerDraftAxes(null);
@@ -258,24 +262,9 @@ export function useComposerSend({
             folderId: targetFolderId,
             localContainerRootId,
             permissionAxes: conv.permission_axes ?? permissionAxes,
-            modelProfileId: inheritedProfileId,
+            modelProfileId:
+              conv.model_profile_id ?? inheritedProfileId ?? null,
           });
-          // Persist the inherited profile onto the new conversation BEFORE the first
-          // turn so it actually runs on it. Best-effort: stale id 422s → clear and
-          // follow account default; never block the send.
-          if (inheritedProfileId) {
-            try {
-              const updated = await setConversationModelProfile(
-                conv.id,
-                inheritedProfileId,
-              );
-              patchConversationCache(conv.id, {
-                modelProfileId: updated.modelProfileId ?? null,
-              });
-            } catch {
-              patchConversationCache(conv.id, { modelProfileId: null });
-            }
-          }
           // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
           // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在
           // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号。

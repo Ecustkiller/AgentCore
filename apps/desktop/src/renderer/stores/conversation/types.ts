@@ -158,9 +158,11 @@ export interface Conversation {
     host: "off" | "ask" | "session";
   };
   /**
-   * 会话级模型组合引用：非空即「本会话固定用这个组合」（活引用，改组合定义下一 turn 生效）；
-   * null/缺省 = 跟随账号默认组合。源自 `ConversationSummary.model_profile_id`，
-   * 由输入框的 {@link import("@/components/chat/message-input/ModelPicker").ModelPicker} 写入。
+   * 会话级模型组合 id：非空即本会话使用的组合（新建拍快照；改组合定义下一 turn 生效）。
+   * null = 存量未钉死记录（展开时按账号默认）；勿再解释为「活跟随」。
+   * 源自 `ConversationSummary.model_profile_id`，由
+   * {@link import("@/components/chat/message-input/ModelPicker").ModelPicker} /
+   * 建会话 POST 写入。
    */
   modelProfileId?: string | null;
   /**

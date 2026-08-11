@@ -16,6 +16,13 @@ class WorkspaceSettings(BaseModel):
 
     workspace_snapshot_enabled: bool = True
     workspace_auto_snapshot_max: int = 10
+    # System snapshots (turn-baseline / handoff / export·merge labels): D+C —
+    # keep newest N AND within TTL; user-named kept versions are never pruned here.
+    # Open handoff Diff base + turn baseline_snapshot_id refs are pinned (skipped).
+    # TTL defaults align with workspace_retention_days (soft-delete grace).
+    workspace_system_baseline_snapshot_max: int = 5
+    workspace_system_other_snapshot_max: int = 10
+    workspace_system_snapshot_retention_days: int = 30
 
     workspace_retention_enabled: bool = True
     # Soft-deleted workspace grace before hard purge. Also the open-handoff Diff

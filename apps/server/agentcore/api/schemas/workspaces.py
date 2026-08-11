@@ -107,8 +107,9 @@ class WorkspaceListResponse(BaseModel):
 class CreateSnapshotRequest(BaseModel):
     """Take a manual snapshot of a conversation's workspace.
 
-    A non-empty ``label`` marks a kept version (手动留版本) — a name the user
-    pins — vs. the automatic post-turn backups.
+    A non-empty ``label`` is a user-pinned kept version when it is not a system
+    label (turn-baseline / handoff / export·merge). Automatic post-turn backups
+    use ``label=null``.
     """
 
     label: str | None = Field(None, max_length=200)

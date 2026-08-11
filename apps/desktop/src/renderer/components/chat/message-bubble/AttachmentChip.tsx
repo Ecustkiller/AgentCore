@@ -1,8 +1,9 @@
+import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { downloadWorkspaceFile } from "@/services/workspace";
 import type { MessageAttachmentMeta } from "@/stores/conversation";
-import { Download, Folder, MessageSquare, Paperclip } from "lucide-react";
+import { Download, MessageSquare } from "lucide-react";
 import { useState } from "react";
 
 export function AttachmentChip({
@@ -20,11 +21,11 @@ export function AttachmentChip({
     "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground";
   const icon =
     att.kind === "dir" ? (
-      <Folder size={12} className="shrink-0" />
+      <DirTypeIcon name={att.name} path={att.path} size={12} />
     ) : att.kind === "conversation" ? (
       <MessageSquare size={12} className="shrink-0" />
     ) : (
-      <Paperclip size={12} className="shrink-0" />
+      <FileTypeIcon name={att.name} path={att.path} size={12} />
     );
   const label = (
     <>

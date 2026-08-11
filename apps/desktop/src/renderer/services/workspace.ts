@@ -87,6 +87,18 @@ export async function moveWorkspaceFile(
   });
 }
 
+/** Copy a workspace file or directory tree (`AlreadyExists` → 422). */
+export async function copyWorkspaceFile(
+  conversationId: string,
+  src: string,
+  dst: string,
+): Promise<void> {
+  await api.post(`/v1/conversations/${conversationId}/workspace/copy`, {
+    src,
+    dst,
+  });
+}
+
 /** Create a workspace directory (parents created; `AlreadyExists` → 422). */
 export async function createWorkspaceDir(
   conversationId: string,

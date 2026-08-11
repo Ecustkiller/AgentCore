@@ -200,6 +200,7 @@ def test_plan_cutoff_skip_suppressed_when_replaces_ran():
 
 def test_blocked_with_criteria_gap_and_bind_action_on_cloud():
     # 「验收」批次级缺口 + 云端无执行环境 → bind_local_folder 行动项（复用单一真相源判定）。
+    # 已是云会话：文案须诚实「沙箱未装配」，禁止再推「导入到云」。
     plan = _plan(RunSpec(run_id="w1", task="运行脚本生成 course.pptx", role="课件工程师"))
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="只有文字")}
     payload = build_delivery_status(
@@ -214,15 +215,15 @@ def test_blocked_with_criteria_gap_and_bind_action_on_cloud():
     assert payload["delivered_files"] == []
     assert payload["gaps"][0]["role"] == "验收"
     assert payload["actions"] and payload["actions"][0]["kind"] == "bind_local_folder"
-    assert "导入到云" in payload["actions"][0]["description"] or "连接 Git" in payload[
-        "actions"
-    ][0]["description"]
-    assert "绑定本机执行环境" not in payload["actions"][0]["description"]
-    assert "合法非默认" in payload["actions"][0]["description"] or "本机传统" in payload[
-        "actions"
-    ][0]["description"]
-    assert "改导" not in payload["actions"][0]["description"]
-    assert "勿再绑" not in payload["actions"][0]["description"]
+    desc = payload["actions"][0]["description"]
+    assert "沙箱" in desc or "未装配" in desc
+    assert "不要" in desc or "勿" in desc or "禁止" in desc
+    assert "导入到云" in desc  # 出现在「不要再引导」语境
+    assert "推荐** Composer「导入到云" not in desc
+    assert "**推荐** Composer「导入到云" not in desc
+    assert "合法非默认" in desc or "本机传统" in desc or "export_to_local" in desc
+    assert "改导" not in desc
+    assert "勿再绑" not in desc
 
 
 def test_zero_landing_worker_keeps_role_soft_gap():
@@ -576,7 +577,8 @@ def test_unresolved_write_ownership_forces_partial_delivery_status(monkeypatch):
     clear_unresolved_write_ownership()
     current_delivery_verdict.set(None)
 
-def test_soft_notes_only_are_notes_state_not_partial():
+def test_soft_unverified_note_only_is_delivered_not_notes():
+    """轻 B：仅 unverified_note + 已落盘 → delivered（gaps 仍保留 soft 行）。"""
     plan = _plan(RunSpec(run_id="w1", task="写调研", role="调研员"))
     results = {
         "w1": RunState(
@@ -585,14 +587,14 @@ def test_soft_notes_only_are_notes_state_not_partial():
             files_touched=["findings.md"],
             file_acceptance=_accepted("findings.md"),
             warnings=[
-                "含待核实/示例自注（2 处）：`findings.md` · 待核实 · 「示例」；"
-                "`findings.md` · 示例数据 · 「估算」。"
+                "含示例/虚构自注（2 处）：`findings.md` · 示例数据 · 「示例」；"
+                "`findings.md` · 虚构/示意 · 「估算」。"
             ],
         )
     }
     payload = build_delivery_status(plan, results, execution_id="e-notes")
     assert payload is not None
-    assert payload["state"] == "notes"
+    assert payload["state"] == "delivered"
     assert payload["gaps"][0]["severity"] == "warning"
     assert payload["gaps"][0]["reason"] == "unverified_note"
     assert "findings.md" in (payload["gaps"][0].get("paths") or [])
@@ -600,8 +602,40 @@ def test_soft_notes_only_are_notes_state_not_partial():
     assert payload["actions"] == []
 
 
-def test_overlay_soft_criteria_gaps_are_notes_not_partial():
-    """D2 / auto-graph soft notes via criteria_gaps → notes, never partial/blocked."""
+def test_unverified_note_mixed_with_path_hint_stays_notes():
+    """轻 B 不解耦路径对账：unverified_note + path_hint → 仍 notes。"""
+    plan = _plan(RunSpec(run_id="w1", task="写调研", role="调研员"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["findings.md"],
+            file_acceptance=_accepted("findings.md"),
+            warnings=[
+                "含示例/虚构自注（1 处）：`findings.md` · 示例数据 · 「示例」。"
+            ],
+            delivery_gaps=[
+                {
+                    "description": (
+                        "产物未写入约定文档目录 `docs/research/`"
+                        "（建议落在此目录下，勿写到工作区根）"
+                    ),
+                    "severity": "warning",
+                    "reason": "path_hint",
+                }
+            ],
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-mix-soft")
+    assert payload is not None
+    assert payload["state"] == "notes"
+    reasons = {g.get("reason") for g in payload["gaps"]}
+    assert "unverified_note" in reasons
+    assert "path_hint" in reasons
+
+
+def test_overlay_soft_criteria_gaps_are_delivered_not_partial():
+    """D2 / auto-graph soft notes via criteria_gaps → delivered（轻 B；非 partial/blocked）。"""
     plan = _plan(RunSpec(run_id="w1", task="写组件", role="前端"))
     results = {
         "w1": RunState(
@@ -622,8 +656,9 @@ def test_overlay_soft_criteria_gaps_are_notes_not_partial():
         ],
     )
     assert payload is not None
-    assert payload["state"] == "notes"
+    assert payload["state"] == "delivered"
     assert payload["gaps"][0]["severity"] == "warning"
+    assert payload["gaps"][0]["reason"] == "unverified_note"
     assert "partial" not in payload["state"]
     assert "blocked" not in payload["state"]
     assert payload["actions"] == []
@@ -714,7 +749,7 @@ def test_partial_writing_cutoff_summary_without_continue_writing():
                 }
             ],
             warnings=[
-                "含待核实/示例自注（1 处）：`报告.md` · 待核实 · 「待补」。"
+                "含示例/虚构自注（1 处）：`报告.md` · 示例数据 · 「待补」。"
             ],
         )
     }

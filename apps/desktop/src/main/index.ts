@@ -14,6 +14,7 @@ import {
   apiOriginForCsp,
   connectSrcForCsp,
   decodeAppRelativePath,
+  frameSrcForCsp,
 } from "./app-protocol-csp";
 import { registerBrowserIpc, startDesktopBrowserBridge } from "./browser";
 import { WORKSPACE_SCHEME } from "./browser/workspace-paths";
@@ -161,6 +162,8 @@ const CONTENT_SECURITY_POLICY = [
   `img-src 'self' data: blob:${API_ORIGIN ? ` ${API_ORIGIN}` : ""}`,
   "font-src 'self' data:",
   CONNECT_SRC,
+  // PDF 面板预览：iframe + blob:/data:（见 FilePreviewBody）；不含 https:，勿与 workspace CSP 混用。
+  frameSrcForCsp(),
   "object-src 'none'",
   "base-uri 'none'",
   "frame-ancestors 'none'",

@@ -485,10 +485,11 @@ function CompletedStrip({
                 ? debatePreviewSubtitle(execution)
                 : "团队完成"}
           </span>
-          {/* 完成态 meta（Agent 数 / 子任务 / 用时 / ¥）辩论与多 Agent 同口径：
-              ¥ 归状态条（前端成本呈现）；标题仍走辩论预告片文案。 */}
+          {/* 完成态 meta（子任务 / 用时 / ¥）辩论与多 Agent 同口径：
+              ¥ 归状态条（前端成本呈现）；标题仍走辩论预告片文案。
+              「N 个 Agent」已删——与图上节点重复。 */}
           <span className="text-muted-foreground">
-            {` · ${execution.agents.length} 个 Agent · ${completed}/${total} 子任务${
+            {` · ${completed}/${total} 子任务${
               duration ? ` · 用时 ${duration}` : ""
             }${costSegment}`}
           </span>

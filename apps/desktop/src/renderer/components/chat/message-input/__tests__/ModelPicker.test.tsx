@@ -2,7 +2,7 @@
 /**
  * Tests for the input-box model profile picker (模型组合).
  *
- * Lists system + user combinations, follows account default, PATCHes
+ * Lists system + user combinations (no live-follow row), PATCHes
  * `model_profile_id`, inherits last-used profile on a fresh chat, and links to
  * settings for management.
  */
@@ -223,11 +223,11 @@ describe("ModelPicker", () => {
     expect(screen.getByText("研究")).toBeTruthy();
   });
 
-  it("lists system + user profiles and a manage link", () => {
+  it("lists system + user profiles and a manage link without follow-default", () => {
     mockProfiles(profiles());
     renderPicker();
     fireEvent.click(screen.getByRole("button", { name: /模型组合：/ }));
-    expect(screen.getByText("跟随账号默认")).toBeTruthy();
+    expect(screen.queryByText("跟随账号默认")).toBeNull();
     expect(screen.getByText("系统预置")).toBeTruthy();
     expect(screen.getByText("我的组合")).toBeTruthy();
     expect(screen.getByText("管理组合…")).toBeTruthy();
@@ -255,23 +255,6 @@ describe("ModelPicker", () => {
     expect(patchConversationCache).toHaveBeenCalledWith("c1", {
       modelProfileId: "user-mine",
     });
-  });
-
-  it("clears the override when following account default", async () => {
-    useConversationStore.setState({ currentConversationId: "c1", byId: {} });
-    useConversationsMock.mockReturnValue([
-      conv({ id: "c1", modelProfileId: "user-mine" }),
-    ]);
-    mockProfiles(profiles());
-    setProfileMock.mockResolvedValue(conv({ id: "c1", modelProfileId: null }));
-
-    renderPicker();
-    fireEvent.click(screen.getByRole("button", { name: /模型组合：/ }));
-    fireEvent.click(screen.getByText("跟随账号默认"));
-
-    await waitFor(() =>
-      expect(setProfileMock).toHaveBeenCalledWith("c1", null),
-    );
   });
 
   it("inherits the last-used profile id as the suggestion on a new chat", () => {

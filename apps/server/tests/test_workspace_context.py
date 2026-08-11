@@ -173,6 +173,9 @@ def test_cloud_scratch_facts():
     assert "terminal=未装配" in out
     assert "browser=未装配" in out
     assert "local_open=未装配" in out
+    assert "执行指引" in out
+    assert "禁止" in out and "导入到云" in out
+    assert "沙箱不可用" in out or "已是云端会话" in out
     assert "host=已装配" in out
     # 产物出口纠偏：文件在云端、「完整预览」进右坞浏览器；禁止本机「双击打开」
     assert "产物出口" in out

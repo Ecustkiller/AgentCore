@@ -1139,6 +1139,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
+      case "workspace_snapshot_done":
+      case "workspace_snapshot_failed":
       case "execution_detached":
         break;
       case "execution_completed": {

@@ -36,8 +36,11 @@ class SnapshotRef:
     """A persisted point-in-time snapshot of one workspace.
 
     ``snapshot_id`` is time-sortable (UTC compact + short random suffix). A
-    non-empty ``label`` marks a **kept version** (手动留版本) — a name the user
-    pinned — vs. an automatic backup.
+    non-empty ``label`` is either a **kept version** (user-pinned name, never
+    auto-pruned) or a **system** label (turn-baseline / handoff / export·merge —
+    D+C capped + TTL'd; ids still referenced by open handoff Diff /
+    ``baseline_snapshot_id`` stay pinned). ``label is None`` marks an automatic
+    post-turn backup.
     """
 
     snapshot_id: str

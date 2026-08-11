@@ -89,6 +89,10 @@ class EventType(StrEnum):
     HANDOFF_SNAPSHOT_DONE = "handoff_snapshot_done"
     HANDOFF_JOB_STARTED = "handoff_job_started"
     HANDOFF_APPLY_DONE = "handoff_apply_done"
+    # Post-turn cloud auto-backup (axis-3): EPHEMERAL UX signal after message_end.
+    # Success clears the failure banner; failure never blocks the turn.
+    WORKSPACE_SNAPSHOT_DONE = "workspace_snapshot_done"
+    WORKSPACE_SNAPSHOT_FAILED = "workspace_snapshot_failed"
     RUN_PLAN = "run_plan"
     # 跨回合同图追加：新回合声明「已往上方协作图追加 N 名成员」锚点（落追加回合 journal）；
     # 生长帧（run_plan/run_*）带 host_message_id 并续写宿主 turn_id journal。

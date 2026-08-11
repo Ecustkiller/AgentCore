@@ -72,10 +72,11 @@ class Conversation(Base):
     deep_research_auto_debate_count: Mapped[int] = mapped_column(
         Integer, server_default=text("0")
     )
-    # Session-level model combination pin (模型组合). NULL = follow account
-    # ``users.default_model_profile_id``. Live reference into ``llm_model_profiles``
-    # (or a virtual system preset id). Expanded at turn time via
-    # ``llm/model_profiles.py`` → main / worker / background slots.
+    # Session-level model combination pin (模型组合). New chats snapshot a profile
+    # id at create time. NULL remains valid for legacy rows and expands via
+    # account ``users.default_model_profile_id`` (live) — not the new-chat path.
+    # Live reference into ``llm_model_profiles`` (or a virtual system preset id);
+    # expanded at turn time via ``llm/model_profiles.py``.
     model_profile_id: Mapped[str | None] = mapped_column(
         PG_UUID(as_uuid=False), nullable=True
     )

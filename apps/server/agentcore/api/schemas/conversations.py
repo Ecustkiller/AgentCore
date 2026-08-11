@@ -64,6 +64,8 @@ class CreateConversationRequest(BaseModel):
     # Session permission axes. Omit → seed from the user's autonomy recipe
     # (default recipe = less_interrupt → session/auto/rules/session).
     permission_axes: PermissionAxesModel | None = None
+    # 新建拍快照：显式 uuid = 钉该组合；省略 = 服务端写入当时账号默认（非活跟随）。
+    model_profile_id: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -84,7 +86,7 @@ class ConversationSummary(BaseModel):
     )
     # 深度研究自治（会话级旗标；托管配方蕴含同效，见 runtime.deep_research_auto）。
     deep_research_auto: bool = False
-    # 会话级模型组合（模型组合配置）。None = 跟随账号默认组合。
+    # 会话级模型组合钉（拍快照）。新建应非 null；存量 null = 仍按账号默认展开（兼容）。
     model_profile_id: str | None = None
     # True iff ORM has both compaction_summary and compacted_through.
     # Flag only — never expose rolling-summary text to clients.
@@ -132,7 +134,7 @@ class UpdateConversationRequest(BaseModel):
     archived: bool | None = None
     # 深度研究自治：省略 = 不变；显式 true/false 切换会话旗标（设置页 UI 另批）。
     deep_research_auto: bool | None = None
-    # 会话级模型组合：省略 = 不变；显式 uuid = 挂组合；显式 null = 清除，跟随账号默认。
+    # 会话级模型组合：省略 = 不变；显式 uuid = 钉组合；显式 null = 再钉当时账号默认（非活跟随）。
     model_profile_id: str | None = None
 
 

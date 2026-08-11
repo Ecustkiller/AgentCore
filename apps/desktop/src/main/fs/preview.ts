@@ -13,6 +13,7 @@ import {
   EDIT_READ_MAX,
   IMAGE_MIME,
   IMAGE_PREVIEW_CAP,
+  PDF_PREVIEW_CAP,
   TEXT_PREVIEW_CAP,
 } from "./constants";
 import {
@@ -108,7 +109,7 @@ export async function readFile(
             kind: "binary",
             mime: imgMime,
             size: st.size,
-            reason: "图片过大，暂不预览",
+            reason: "图片过大（超过 10MB），请下载或用系统默认程序打开",
           },
         };
       }
@@ -117,6 +118,27 @@ export async function readFile(
       return {
         ok: true,
         data: { kind: "image", dataUrl, mime: imgMime, size: st.size },
+      };
+    }
+
+    if (ext === ".pdf") {
+      const pdfMime = "application/pdf";
+      if (st.size > PDF_PREVIEW_CAP) {
+        return {
+          ok: true,
+          data: {
+            kind: "binary",
+            mime: pdfMime,
+            size: st.size,
+            reason: "PDF 过大（超过 15MB），请下载或用系统默认程序打开",
+          },
+        };
+      }
+      const buf = await fs.readFile(real.path);
+      const dataUrl = `data:${pdfMime};base64,${buf.toString("base64")}`;
+      return {
+        ok: true,
+        data: { kind: "pdf", dataUrl, mime: pdfMime, size: st.size },
       };
     }
 
@@ -133,7 +155,7 @@ export async function readFile(
             kind: "binary",
             mime: "application/octet-stream",
             size: st.size,
-            reason: "二进制文件，无法预览",
+            reason: "无法在面板内预览，请下载或用系统默认程序打开",
           },
         };
       }

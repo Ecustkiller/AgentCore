@@ -58,18 +58,64 @@ describe("decodePreviewResponse — cloud image / text", () => {
       kind: "binary",
       mime: "image/png",
       size: 11 * 1024 * 1024,
-      reason: "图片过大，暂不预览",
+      reason: "图片过大（超过 10MB），请下载或用系统默认程序打开",
     });
   });
 
-  it("NUL text bytes without image MIME → binary", async () => {
+  it("NUL text bytes without image MIME → binary with open/download reason", async () => {
     const result = await decodePreviewResponse(
       fakeResponse(new Uint8Array([0x00, 0x01, 0x02]), {
         contentType: "application/octet-stream",
       }),
       { path: "blob.bin" },
     );
-    expect(result).toEqual({ kind: "binary" });
+    expect(result).toEqual({
+      kind: "binary",
+      reason: "无法在面板内预览，请下载或用系统默认程序打开",
+    });
+  });
+
+  it("application/pdf → kind pdf data URL", async () => {
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d]); // %PDF-
+    const result = await decodePreviewResponse(
+      fakeResponse(pdf, { contentType: "application/pdf" }),
+      { path: "docs/a.pdf" },
+    );
+    expect(result.kind).toBe("pdf");
+    if (result.kind === "pdf") {
+      expect(result.mime).toBe("application/pdf");
+      expect(result.size).toBe(pdf.length);
+      expect(result.dataUrl.startsWith("data:application/pdf;base64,")).toBe(
+        true,
+      );
+    }
+  });
+
+  it("octet-stream + .pdf path → still pdf", async () => {
+    const pdf = new Uint8Array([0x25, 0x50, 0x44, 0x46]);
+    const result = await decodePreviewResponse(
+      fakeResponse(pdf, { contentType: "application/octet-stream" }),
+      { path: "report.pdf" },
+    );
+    expect(result.kind).toBe("pdf");
+    if (result.kind === "pdf") {
+      expect(result.mime).toBe("application/pdf");
+    }
+  });
+
+  it("oversized PDF (content-length) → binary with reason", async () => {
+    const result = await decodePreviewResponse(
+      fakeResponse(new Uint8Array([1]), {
+        contentType: "application/pdf",
+        contentLength: 16 * 1024 * 1024,
+      }),
+    );
+    expect(result).toEqual({
+      kind: "binary",
+      mime: "application/pdf",
+      size: 16 * 1024 * 1024,
+      reason: "PDF 过大（超过 15MB），请下载或用系统默认程序打开",
+    });
   });
 
   it("plain UTF-8 → text", async () => {

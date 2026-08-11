@@ -39,6 +39,7 @@ class ConversationRepository:
         local_container_root_id: str | None = None,
         permission_axes: dict | None = None,
         deep_research_auto: bool | None = None,
+        model_profile_id: str | None = None,
         commit: bool = True,
     ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
@@ -54,6 +55,9 @@ class ConversationRepository:
         # ``mode`` is "chat" for a normal conversation; a "handoff" conversation is
         # the hidden host for a local→云 cloud job's team run (双模式工作区 P2e /
         # e2), kept out of the sidebar by the list filters below.
+        #
+        # ``model_profile_id``: HTTP create snapshots account default (or client
+        # pick). Internal callers may omit (NULL) — expand still falls back.
         #
         # Pass ``commit=False`` when pairing with HandoffJobRepository.create.
         conv = Conversation(id=new_id(), user_id=user_id)
@@ -72,6 +76,8 @@ class ConversationRepository:
             conv.permission_axes = permission_axes
         if deep_research_auto is not None:
             conv.deep_research_auto = bool(deep_research_auto)
+        if model_profile_id is not None:
+            conv.model_profile_id = model_profile_id
         self._session.add(conv)
         await commit_or_flush(self._session, commit=commit)
         await self._session.refresh(conv)
@@ -96,11 +102,11 @@ class ConversationRepository:
         *,
         user_id: str,
     ) -> Conversation | None:
-        """Owner-scoped set/clear of the session model combination pin.
+        """Owner-scoped set of the session model combination pin.
 
-        ``None`` clears the pin so the conversation follows the account default
-        profile. A non-null id is validated by the caller (crud PATCH) before it
-        reaches here.
+        Callers should pass a concrete profile id (new-chat snapshot / user pick).
+        ``None`` is allowed only for legacy clear paths; HTTP PATCH null re-pins
+        to the account default before reaching here.
         """
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if not conv:
@@ -110,8 +116,10 @@ class ConversationRepository:
         await self._session.refresh(conv)
         return conv
 
-    async def clear_model_profile_refs(self, user_id: str, profile_id: str) -> int:
-        """Null out conversation pins that reference a deleted profile."""
+    async def reassign_model_profile_refs(
+        self, user_id: str, profile_id: str, *, to_profile_id: str | None
+    ) -> int:
+        """Point conversations pinned to ``profile_id`` at ``to_profile_id`` (or NULL)."""
         from sqlalchemy import update as sa_update
 
         result = await self._session.execute(
@@ -120,10 +128,16 @@ class ConversationRepository:
                 Conversation.user_id == user_id,
                 Conversation.model_profile_id == profile_id,
             )
-            .values(model_profile_id=None)
+            .values(model_profile_id=to_profile_id)
         )
         await self._session.commit()
         return int(result.rowcount or 0)
+
+    async def clear_model_profile_refs(self, user_id: str, profile_id: str) -> int:
+        """Deprecated alias: null out pins (prefer ``reassign_model_profile_refs``)."""
+        return await self.reassign_model_profile_refs(
+            user_id, profile_id, to_profile_id=None
+        )
 
     async def set_deep_research_auto(
         self, conversation_id: str, enabled: bool, *, user_id: str

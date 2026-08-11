@@ -4854,6 +4854,17 @@
             ],
             "title": "Local Container Root Id"
           },
+          "model_profile_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Profile Id"
+          },
           "permission_axes": {
             "anyOf": [
               {
@@ -5331,7 +5342,7 @@
         "type": "object"
       },
       "CreateSnapshotRequest": {
-        "description": "Take a manual snapshot of a conversation's workspace.\n\nA non-empty ``label`` marks a kept version (手动留版本) — a name the user\npins — vs. the automatic post-turn backups.",
+        "description": "Take a manual snapshot of a conversation's workspace.\n\nA non-empty ``label`` is a user-pinned kept version when it is not a system\nlabel (turn-baseline / handoff / export·merge). Automatic post-turn backups\nuse ``label=null``.",
         "properties": {
           "label": {
             "anyOf": [
@@ -26291,6 +26302,91 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/workspace/copy": {
+      "post": {
+        "description": "Copy a file or directory within the conversation's scratch workspace.",
+        "operationId": "copy_workspace_file_v1_conversations__conversation_id__workspace_copy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Copy Workspace File",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/workspace/dirs": {
       "post": {
         "description": "Create a directory in the conversation's scratch workspace.",
@@ -39204,6 +39300,91 @@
           }
         },
         "summary": "Clone Repo Into Workspace",
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{ws_id}/copy": {
+      "post": {
+        "description": "Copy a file or directory within a cloud workspace (recursive; no clobber).",
+        "operationId": "copy_workspace_file_v1_workspaces__ws_id__copy_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "ws_id",
+            "required": true,
+            "schema": {
+              "title": "Ws Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MoveFileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Copy Workspace File",
         "tags": [
           "workspaces"
         ]

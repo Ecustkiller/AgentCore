@@ -233,4 +233,44 @@ describe("AssistantMessage empty-response single surface", () => {
     expect(screen.getByText("空响应收尾")).toBeTruthy();
     expect(screen.queryByText(/降级完成/)).toBeNull();
   });
+
+  it("有正文 + finishReason=error + 无 message.error：红条不静默，无灰标调用失败", () => {
+    renderBubble(
+      settledMessage({
+        id: "hard-body-1",
+        content: "部分已生成正文",
+        finishReason: "error",
+        runs: {
+          events: [],
+          finishReason: "error",
+          error: {
+            code: "LLM_KEY_INVALID",
+            message:
+              "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+          },
+        } as Message["runs"],
+      }),
+    );
+    expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
+    expect(screen.getByText("部分已生成正文")).toBeTruthy();
+    // Chip must not stack on the red bar.
+    expect(screen.queryByText("调用失败")).toBeNull();
+  });
+
+  it("空正文硬失败：只红卡，不叠灰标调用失败", () => {
+    renderBubble(
+      settledMessage({
+        id: "hard-empty-1",
+        content: "",
+        finishReason: "error",
+        error: {
+          code: "LLM_KEY_INVALID",
+          message:
+            "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+        },
+      }),
+    );
+    expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
+    expect(screen.queryByText("调用失败")).toBeNull();
+  });
 });

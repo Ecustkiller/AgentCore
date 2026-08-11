@@ -1,15 +1,17 @@
 """Deterministic placeholder / unverified-content scan for file deliverables.
 
 Catches shipping placeholders that slipped past human acceptance (GEO-style accidents:
-``400-XXX-XXXX``, self-notes like「示例数据（发布前核实）」). Pure functions — no I/O.
+``400-XXX-XXXX``, self-notes like「示例数据」「虚构」). Pure functions — no I/O.
 
 **Skeleton signals** (warn only — never fail the contract gate; 定案乙):
 phone-style ``XXX`` segments, ``PLACEHOLDER``, ``TODO`` / ``FIXME`` as body markers,
 ``[占位]``, lorem ipsum, etc. Surfaced as soft ``warnings`` so they do not burn
 ``contract.retry`` or hard-fail the run.
 
-**Self-note soft signals** (also warn only):「示例数据」「待核实」「仅供参考的估算」.
-Worker / CEO decide whether to fix or accept.
+**Self-note soft signals** (also warn only):「示例数据」「示例证言」「虚构」「示意」
+「仅供参考」——更像假数据 / 示意发货。诚实标注「待核实」「发布前核实」「上线前核实」
+**不再**进 soft（提示词鼓励的保留语，误伤主因）。Worker / CEO decide whether to
+fix or accept remaining soft hits.
 
 **Code files** (``.py`` / ``.ts`` / …): TODO / XXX / PLACEHOLDER-style patterns are
 exempt (normal coding habit). Soft / skeleton signals are skipped in code to prefer
@@ -129,11 +131,11 @@ _SKELETON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ),
 )
 
-# Author self-notes that content is illustrative / unverified — warn only.
+# Author self-notes that content looks fabricated / illustrative — warn only.
+# 「待核实」类诚实标注 intentionally omitted（提示词鼓励，勿误伤）.
 _SOFT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("示例数据", re.compile(r"示例数据")),
     ("示例证言", re.compile(r"示例(?:客户)?证言|客户证言为示例")),
-    ("待核实", re.compile(r"待核实|发布前核实|上线前核实")),
     ("仅供参考", re.compile(r"仅供参考(?:的估算)?|估算[，,]?\s*仅供参考")),
     ("虚构/示意", re.compile(r"虚构(?:数据|指标|内容)?|示意(?:性)?(?:数据|内容)?")),
 )
@@ -328,8 +330,8 @@ def scan_placeholder_signals(
     present. Code files are skipped entirely (防误报).
 
     定案乙：skeleton markers (PLACEHOLDER / TODO / ``[占位]`` / lorem / 占位电话段)
-    are soft ``warnings`` only — never ``failures``. Self-notes (「待核实」等) stay
-    soft as before.
+    are soft ``warnings`` only — never ``failures``. Self-notes（「示例数据」/
+    「虚构」等）stay soft；「待核实」诚实标注不进 soft。
 
     ``hard_exempt_paths`` — workspace-relative paths (or patterns) whose skeleton
     hits are skipped (coordination docs may carry TODO). Self-note soft warnings
@@ -374,7 +376,7 @@ def scan_placeholder_signals(
         # Soft only — delivery_status marks severity=warning; keep copy short (no
         # repeated「请核实后删除…」boilerplate on the acceptance card).
         warnings.append(
-            f"含待核实/示例自注（{len(soft_hits)} 处）：{detail}。"
+            f"含示例/虚构自注（{len(soft_hits)} 处）：{detail}。"
         )
     return PlaceholderScanResult(
         failures=[],

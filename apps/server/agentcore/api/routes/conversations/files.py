@@ -30,6 +30,7 @@ from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.repositories import ConversationRepository
 from agentcore.docs_export.workspace_export import ExportMarkdownError, export_markdown_path
 from agentcore.workspace.files import (
+    copy_file,
     create_dir,
     delete_file,
     list_files,
@@ -297,6 +298,34 @@ async def move_workspace_file(
         raise NotFoundError("文件不存在") from e
     except AlreadyExists as e:
         raise ValidationError("已存在同名文件") from e
+    return StatusResponse()
+
+
+@router.post("/{conversation_id}/workspace/copy", response_model=StatusResponse)
+async def copy_workspace_file(
+    conversation_id: str,
+    body: MoveFileRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+):
+    """Copy a file or directory within the conversation's scratch workspace."""
+    conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    try:
+        await copy_file(
+            user_id=user.user_id,
+            folder_id=conv.folder_id,
+            conversation_id=conv.id,
+            src=body.src,
+            dst=body.dst,
+        )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except PathNotFound as e:
+        raise NotFoundError("文件不存在") from e
+    except AlreadyExists as e:
+        raise ValidationError("已存在同名文件") from e
+    except WorkspaceIOError as e:
+        raise ValidationError(str(e) or "复制失败") from e
     return StatusResponse()
 
 

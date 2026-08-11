@@ -119,6 +119,20 @@ class HandoffSnapshotDonePayload(WirePayload):
     size_bytes: int
 
 
+class WorkspaceSnapshotDonePayload(WirePayload):
+    """Post-turn auto-backup succeeded (EPHEMERAL — clears failure UX)."""
+
+    snapshot_id: str
+    conversation_id: str
+    size_bytes: int
+
+
+class WorkspaceSnapshotFailedPayload(WirePayload):
+    """Post-turn auto-backup failed (EPHEMERAL — toast / panel banner; no error detail)."""
+
+    conversation_id: str
+
+
 class HandoffJobStartedPayload(WirePayload):
     job_id: str
     conversation_id: str

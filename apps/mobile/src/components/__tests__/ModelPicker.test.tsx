@@ -201,7 +201,7 @@ describe("ModelPicker (mobile profiles)", () => {
     expect(screen.queryByText("跟随账号默认")).toBeNull();
   });
 
-  it("highlights the account default when the conversation has no override", () => {
+  it("highlights the account default when no profile is selected yet", () => {
     render(
       <ModelPicker
         conversationProfileId={null}
@@ -228,7 +228,7 @@ describe("ModelPicker (mobile profiles)", () => {
     expect(onSelect).toHaveBeenCalledWith("prof-user-1");
   });
 
-  it("offers 跟随账号默认 to clear an override", () => {
+  it("does not offer 跟随账号默认 even when a profile is already selected", () => {
     const onSelect = vi.fn();
     render(
       <ModelPicker
@@ -240,8 +240,8 @@ describe("ModelPicker (mobile profiles)", () => {
     expect(screen.getByTestId("profile-row-prof-user-1").className).toContain(
       "model-row-selected",
     );
-    fireEvent.click(screen.getByTestId("profile-row-follow-default"));
-    expect(onSelect).toHaveBeenCalledWith(null);
+    expect(screen.queryByText("跟随账号默认")).toBeNull();
+    expect(screen.queryByTestId("profile-row-follow-default")).toBeNull();
   });
 
   it("routes 管理组合 to 模型配置", () => {

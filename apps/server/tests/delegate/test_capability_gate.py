@@ -36,6 +36,10 @@ def test_soft_warning_office_without_execution():
     warn = execution_capability_warning(plan, _CloudBackend())
     assert warn is not None
     assert "Office" in warn or "docx" in warn or "pptx" in warn
+    assert "禁止" in warn or "不要" in warn
+    # Already on cloud: must not prescribe re-import as the fix.
+    assert "推荐**引导 Composer「导入到云" not in warn
+    assert "**推荐**引导 Composer「导入到云" not in warn
 
 
 def test_soft_warning_silent_when_no_run_smell():

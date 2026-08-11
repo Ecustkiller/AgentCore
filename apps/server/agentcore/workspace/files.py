@@ -144,6 +144,16 @@ async def move_file(
     await backend.move(src, dst)
 
 
+async def copy_file(
+    *, user_id: str, folder_id: str | None, conversation_id: str, src: str, dst: str
+) -> None:
+    """Copy ``src`` to ``dst`` (file or directory tree) in the conversation's workspace."""
+    backend = build_server_workspace(
+        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    )
+    await backend.copy(src, dst)
+
+
 async def read_file_for_edit(
     *, user_id: str, folder_id: str | None, conversation_id: str, path: str
 ) -> tuple[str, int, Literal["lf", "crlf"]]:

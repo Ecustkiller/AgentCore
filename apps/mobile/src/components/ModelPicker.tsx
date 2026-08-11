@@ -9,9 +9,9 @@ import {
 import { useModels } from "@/api/models";
 import { Modal } from "@/components/Modal";
 import { MODEL_CONFIG_PATH } from "@/lib/errors";
-// 会话级模型组合选择 (touch-native bottom sheet).
+// 会话级模型组合选择 (touch-native bottom sheet) · 定案 B「新建拍快照」.
 //
-// Lists account combinations; selection is a profile id (or null = 跟随账号默认).
+// Lists account combinations; selection is a concrete profile id only（无「跟随账号默认」）.
 // 「管理组合」routes to 设置·模型配置. No bare model list.
 import { Check, ChevronRight } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -22,10 +22,10 @@ export function ModelPicker({
   onSelect,
   onClose,
 }: {
-  /** Conversation override profile id (null = following the account default). */
+  /** Conversation snapshotted profile id (null = draft / not yet chosen). */
   conversationProfileId: string | null;
-  /** A concrete profile id, or null to clear back to the account default. */
-  onSelect: (profileId: string | null) => void;
+  /** Concrete profile id to apply (create snapshot or PATCH). */
+  onSelect: (profileId: string) => void;
   onClose: () => void;
 }) {
   const navigate = useNavigate();
@@ -47,7 +47,6 @@ export function ModelPicker({
     };
   }, []);
 
-  const hasOverride = conversationProfileId !== null;
   const accountDefault = defaultProfile(data);
   const effectiveId = conversationProfileId ?? accountDefault?.id ?? null;
 
@@ -66,23 +65,6 @@ export function ModelPicker({
 
         {data && (
           <>
-            {hasOverride && (
-              <button
-                type="button"
-                className="model-row"
-                data-testid="profile-row-follow-default"
-                onClick={() => onSelect(null)}
-              >
-                <div className="model-row-main">
-                  <span className="model-name">跟随账号默认</span>
-                  <span className="model-sub muted">
-                    清除本会话的组合选择
-                    {accountDefault ? ` · 当前 ${accountDefault.name}` : ""}
-                  </span>
-                </div>
-              </button>
-            )}
-
             <ProfileRows
               list={data}
               effectiveId={effectiveId}
@@ -133,7 +115,7 @@ function ProfileRows({
   effectiveId: string | null;
   catalog: ReturnType<typeof useModels>["data"];
   platformAvailable: boolean;
-  onSelect: (profileId: string | null) => void;
+  onSelect: (profileId: string) => void;
   onOpenManage: () => void;
 }) {
   // Hide migration-only implicit profiles from the picker unless currently selected.
@@ -192,7 +174,7 @@ function ProfileRow({
   profile: LlmModelProfileView;
   selected: boolean;
   summary: string;
-  onSelect: (profileId: string | null) => void;
+  onSelect: (profileId: string) => void;
 }) {
   return (
     <button

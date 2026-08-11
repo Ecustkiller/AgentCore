@@ -472,6 +472,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "handoff_snapshot_done":
       case "handoff_job_started":
       case "handoff_apply_done":
+      case "workspace_snapshot_done":
+      case "workspace_snapshot_failed":
       case "execution_detached":
       case "execution_completed": {
         // DURABLE：execution 终态权威 → 投影到 projectExecution 的 status（缺省 completed）。

@@ -1,4 +1,5 @@
 import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
+import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button, IconButton } from "@/components/ui";
 import {
   type StatusTone,
@@ -34,6 +35,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import type { ReactNode } from "react";
 
 /**
  * 「本回合产出文件」卡 —— 主清单只认路径验收态（delivery_status.artifacts），挂在
@@ -80,7 +82,7 @@ const OP_META: Record<
 };
 
 function rowVisual(artifact: FileArtifact): {
-  Icon: LucideIcon;
+  icon: ReactNode;
   tone: StatusTone;
   badge: string | null;
   preview: boolean;
@@ -88,7 +90,9 @@ function rowVisual(artifact: FileArtifact): {
 } {
   if (artifact.acceptance === "accepted") {
     return {
-      Icon: Check,
+      icon: (
+        <Check size={14} className={`shrink-0 ${statusAccentText.success}`} />
+      ),
       tone: "success",
       badge: "已验收",
       preview: true,
@@ -98,7 +102,9 @@ function rowVisual(artifact: FileArtifact): {
     const detail =
       artifact.acceptanceDetail || artifact.acceptanceReason || undefined;
     return {
-      Icon: X,
+      icon: (
+        <X size={14} className={`shrink-0 ${statusAccentText.destructive}`} />
+      ),
       tone: "destructive",
       badge: "未通过",
       preview: true,
@@ -108,15 +114,21 @@ function rowVisual(artifact: FileArtifact): {
   // 无验收态时：删除/移动仍标操作；写入/编辑不显示（勿用工具名冒充交付成功）。
   if (artifact.op === "delete" || artifact.op === "move") {
     const meta = OP_META[artifact.op];
+    const OpIcon = meta.Icon;
     return {
-      Icon: meta.Icon,
+      icon: (
+        <OpIcon
+          size={14}
+          className={`shrink-0 ${statusAccentText[meta.tone]}`}
+        />
+      ),
       tone: meta.tone,
       badge: meta.label,
       preview: meta.preview,
     };
   }
   return {
-    Icon: FilePlus,
+    icon: <FileTypeIcon name={artifact.name} size={14} />,
     tone: "muted",
     badge: null,
     preview: true,
@@ -155,10 +167,7 @@ function FileRow({
   const stageLabel = stageFileLabel(artifact.path);
   const body = (
     <>
-      <visual.Icon
-        size={14}
-        className={`shrink-0 ${statusAccentText[visual.tone]}`}
-      />
+      {visual.icon}
       <span className="min-w-0 flex-1 truncate text-sm text-foreground">
         {artifact.op === "move" && artifact.fromPath ? (
           <span className="text-muted-foreground/70">

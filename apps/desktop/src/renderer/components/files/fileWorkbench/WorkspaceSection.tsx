@@ -80,6 +80,7 @@ export function WorkspaceSection({
   flashing,
   projectRail,
   offlineCloud = false,
+  filterQuery = "",
 }: {
   ws: WorkspaceInfo;
   source: FileSource | null;
@@ -92,6 +93,8 @@ export function WorkspaceSection({
   projectRail?: ReactNode;
   /** N4-A: cloud workspace while read-only offline — grey + hint, keep visible. */
   offlineCloud?: boolean;
+  /** Forwarded to {@link FileTree} for path/name filter (hub search box). */
+  filterQuery?: string;
 }) {
   const conversationId = conversationIdOf(ws.wsId);
   const folderId = folderIdOf(ws.wsId);
@@ -404,6 +407,7 @@ export function WorkspaceSection({
       chrome={false}
       indent={14}
       activePath={activePath}
+      filterQuery={filterQuery}
       onOpenFile={onOpenFile}
       emptyText="还没有文件——对话里 AI 产出的文件会落在这里"
     />

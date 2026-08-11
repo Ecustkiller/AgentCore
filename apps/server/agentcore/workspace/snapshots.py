@@ -12,16 +12,74 @@ A′: ``create_snapshot`` / ``restore_snapshot`` / ``restore_into_workspace`` ho
 
 from __future__ import annotations
 
+from datetime import timedelta
+
+from sqlalchemy import select
+
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.storage import SnapshotRef, StorageProvider, build_storage_provider
 from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
+from agentcore.workspace.snapshot_kinds import system_prune_ids
+
+logger = get_logger(__name__)
+
+# Open handoff jobs still need Diff (§7.6): not applied / not discarded.
+# Includes ``succeeded`` — Diff window must keep ``base_snapshot_id`` (do not unpin on succeed).
+_OPEN_HANDOFF_STATUSES = ("pending", "running", "succeeded", "failed")
+
+
+async def collect_pinned_system_snapshot_ids(
+    *, user_id: str, folder_id: str | None, conversation_id: str
+) -> set[str]:
+    """Snapshot ids still referenced under this workspace storage key.
+
+    Folder conversations share one key — collect across all members of the folder.
+    Pins: open ``handoff_jobs.base_snapshot_id`` + non-null ``messages.baseline_snapshot_id``.
+    """
+    from agentcore.db.base import async_session_factory
+    from agentcore.db.models import Conversation, HandoffJob, Message
+
+    async with async_session_factory() as session:
+        if folder_id:
+            conv_rows = await session.execute(
+                select(Conversation.id).where(
+                    Conversation.user_id == user_id,
+                    Conversation.folder_id == folder_id,
+                )
+            )
+            conv_ids = list(conv_rows.scalars().all())
+        else:
+            conv_ids = [conversation_id]
+        if not conv_ids:
+            return set()
+
+        pinned: set[str] = set()
+        handoff_rows = await session.execute(
+            select(HandoffJob.base_snapshot_id).where(
+                HandoffJob.user_id == user_id,
+                HandoffJob.source_conversation_id.in_(conv_ids),
+                HandoffJob.status.in_(_OPEN_HANDOFF_STATUSES),
+            )
+        )
+        pinned.update(handoff_rows.scalars().all())
+
+        baseline_rows = await session.execute(
+            select(Message.baseline_snapshot_id).where(
+                Message.conversation_id.in_(conv_ids),
+                Message.baseline_snapshot_id.is_not(None),
+            )
+        )
+        pinned.update(sid for sid in baseline_rows.scalars().all() if sid)
+        return pinned
 
 
 async def _enforce_auto_cap(provider: StorageProvider, key: str, keep: int) -> None:
     """Prune the oldest automatic (unlabeled) snapshots beyond ``keep`` (决策⑥).
 
-    Only auto backups are capped; labeled snapshots (手动留版本) are kept forever.
+    Only auto backups are capped here; system labels use :func:`_enforce_system_caps`,
+    and user-named kept versions are never pruned by either path.
     ``list_snapshots`` returns newest-first, so the autos past ``keep`` are the
     tail. Best-effort: a prune failure must never fail the snapshot it follows.
     """
@@ -30,6 +88,41 @@ async def _enforce_auto_cap(provider: StorageProvider, key: str, keep: int) -> N
     autos = [s for s in await provider.list_snapshots(key) if not s.label]
     for stale in autos[keep:]:
         await provider.delete_snapshot(key, stale.snapshot_id)
+
+
+async def _enforce_system_caps(
+    provider: StorageProvider,
+    key: str,
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+) -> None:
+    """Prune system snapshots by count cap ∧ TTL (D+C); never touch user pins.
+
+    Skips ids still referenced by open handoff Diff / turn baselines (storage-key
+    scoped). Best-effort: failures log and must not fail the create that triggered prune.
+    """
+    try:
+        pinned = await collect_pinned_system_snapshot_ids(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        )
+        refs = await provider.list_snapshots(key)
+        stale_ids = system_prune_ids(
+            refs,
+            baseline_max=settings.workspace_system_baseline_snapshot_max,
+            other_max=settings.workspace_system_other_snapshot_max,
+            max_age=timedelta(days=settings.workspace_system_snapshot_retention_days),
+            pinned_ids=pinned,
+        )
+        for snapshot_id in stale_ids:
+            await provider.delete_snapshot(key, snapshot_id)
+    except Exception as e:
+        logger.warning(
+            "workspace.system_snapshot_prune_failed",
+            storage_key=key,
+            error=str(e),
+        )
 
 
 async def create_snapshot(
@@ -41,9 +134,10 @@ async def create_snapshot(
 ) -> SnapshotRef:
     """Snapshot a conversation's workspace. A ``label`` marks a kept version.
 
-    Auto snapshots (no ``label``) are capped to ``workspace_auto_snapshot_max``:
-    the oldest auto backups beyond the cap are pruned so they don't grow without
-    bound (决策⑥). Kept versions (labeled) are never pruned.
+    Auto snapshots (no ``label``) are capped to ``workspace_auto_snapshot_max``
+    (决策⑥). User-named kept versions are never pruned. System labels
+    (turn-baseline / handoff / export·merge) are capped + TTL'd (D+C), except
+    ids still pinned by open handoff Diff / turn baselines.
 
     Holds ``workspace_lock`` for the manifest RMW (A′ sink).
     """
@@ -58,6 +152,13 @@ async def create_snapshot(
         ref = await provider.snapshot(root, key, label=label)
         if label is None:
             await _enforce_auto_cap(provider, key, settings.workspace_auto_snapshot_max)
+        await _enforce_system_caps(
+            provider,
+            key,
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+        )
         return ref
 
 

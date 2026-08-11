@@ -197,15 +197,23 @@ def test_schema_exposes_form_enum():
     from agentcore.runtime.delegate.playbook_declaration import HANDWRITTEN_TASKS_SKELETON
 
     assert HANDWRITTEN_TASKS_SKELETON in DELEGATE_DESCRIPTION
+    assert "默认" in DELEGATE_DESCRIPTION
+    assert "手写顶层 tasks" in DELEGATE_DESCRIPTION or "默认手写" in DELEGATE_DESCRIPTION
+    assert "快捷进阶" in DELEGATE_DESCRIPTION or "固化流水线" in DELEGATE_DESCRIPTION
     tasks_desc = DELEGATE_PARAMETERS["properties"]["tasks"]["description"]
     assert HANDWRITTEN_TASKS_SKELETON in tasks_desc
+    assert "默认主路" in tasks_desc
     assert "手写" in tasks_desc and "互斥" in tasks_desc
     playbook_desc = DELEGATE_PARAMETERS["properties"]["playbook"]["description"]
     assert "不要传 tasks" in playbook_desc
+    assert "非默认" in playbook_desc or "进阶" in playbook_desc or "快捷" in playbook_desc
+    playbook_id_desc = DELEGATE_PARAMETERS["properties"]["playbook_id"]["description"]
+    assert "非默认" in playbook_id_desc or "进阶" in playbook_id_desc or "快捷" in playbook_id_desc
     pa = DELEGATE_PARAMETERS["properties"]["playbook_args"]["description"]
     assert "build_website" in pa and "topic" in pa
     assert "建站必填 topic" in pa
     assert "勿空对象" in pa
+    assert "快捷" in pa or "手写" in pa
     deps = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]["depends_on"][
         "description"
     ]

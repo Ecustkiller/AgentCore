@@ -322,15 +322,13 @@ function teamStripFace(args: {
 }
 
 function teamStripMeta(args: {
-  agents: readonly ProjectedAgent[];
   workers: readonly ProjectedRun[];
   progress: { completed: number; total: number };
   status: TurnStatus | null | undefined;
 }): string {
-  const { agents, workers, progress, status } = args;
+  const { workers, progress, status } = args;
   const bits: string[] = [];
-  const agentN = agents.length > 0 ? agents.length : workers.length;
-  if (agentN > 0) bits.push(`${agentN} 个 Agent`);
+  // 「N 个 Agent」已删——与图/列表上成员重复；保留子任务 n/m。
   bits.push(`${progress.completed}/${progress.total} 子任务`);
   const failed = workers.filter((r) => r.status === "failed").length;
   if (failed > 0) bits.push(`${failed} 失败`);
@@ -434,7 +432,7 @@ export function TeamView({
     workers,
     progress,
   });
-  const stripMeta = teamStripMeta({ agents, workers, progress, status });
+  const stripMeta = teamStripMeta({ workers, progress, status });
   const showDebateEntry = isDebate;
   const synthesisBlurbs = workers
     .filter((r) => r.status === "completed" && !!r.outputSummary)

@@ -97,6 +97,9 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
     eventType === "followups_unavailable" ||
     eventType === "citations" ||
     eventType === "evidence_ledger" ||
+    // Post-turn auto-backup (after message_end): toast / clear failure banner.
+    eventType === "workspace_snapshot_done" ||
+    eventType === "workspace_snapshot_failed" ||
     // 排队按项取消：Stop 过程中仍可清 UI（Stop ≠ 取消排队，但 cancel 事件须入折）。
     eventType === "turn_queue_cancelled" ||
     // FIFO 出队开跑：常紧挨上一回合 terminal 之后、message_start 之前到达。

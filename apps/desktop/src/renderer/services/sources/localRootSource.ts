@@ -22,6 +22,9 @@ function adaptPreview(p: LocalPreview): FilePreviewResult {
   if (p.kind === "image") {
     return { kind: "image", dataUrl: p.dataUrl, mime: p.mime, size: p.size };
   }
+  if (p.kind === "pdf") {
+    return { kind: "pdf", dataUrl: p.dataUrl, mime: p.mime, size: p.size };
+  }
   return { kind: "binary", mime: p.mime, size: p.size, reason: p.reason };
 }
 

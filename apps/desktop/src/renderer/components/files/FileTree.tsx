@@ -23,6 +23,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -31,6 +32,7 @@ import { FileTreeRow } from "./FileTreeRow";
 import { dedupeName } from "./dedupeName";
 import { DRAG_MIME, parseDragPayload } from "./fileTreeDrag";
 import { loadExpanded, saveExpanded } from "./fileTreeExpanded";
+import { computeFileTreeFilter } from "./fileTreeFilter";
 import type {
   ClipboardEntry,
   FileTreeChromeState,
@@ -72,6 +74,11 @@ interface FileTreeProps {
   indent?: number;
   /** 嵌入模式（chrome=false）下根为空时的提示文案（默认「空文件夹」）。 */
   emptyText?: string;
+  /**
+   * 可选：按文件/文件夹名与相对路径做客户端即时过滤（大小写不敏感子串；
+   * 匹配项可见并自动展开祖先；空串不过滤）。不下探文件内容、不发搜索 API。
+   */
+  filterQuery?: string;
 }
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
@@ -86,6 +93,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       onChromeState,
       indent = 0,
       emptyText = "空文件夹",
+      filterQuery = "",
     },
     ref,
   ) {
@@ -93,6 +101,24 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     const [expanded, setExpanded] = useState<Set<string>>(() =>
       loadExpanded(source.id),
     );
+    const filterActive = filterQuery.trim().length > 0;
+    // childrenOf reads live refs; this component re-renders on data bumps, so
+    // recompute each render (no stale memo over unloaded dirs).
+    const filterResult = filterActive
+      ? computeFileTreeFilter(data.childrenOf, filterQuery)
+      : null;
+    const filterVisible = filterResult?.visible ?? null;
+    const forceExpandKey = filterResult
+      ? [...filterResult.forceExpand].sort().join("\0")
+      : "";
+    const effectiveExpanded = useMemo(() => {
+      if (!forceExpandKey) return expanded;
+      const next = new Set(expanded);
+      for (const dir of forceExpandKey.split("\0")) {
+        if (dir) next.add(dir);
+      }
+      return next;
+    }, [expanded, forceExpandKey]);
     const [creating, setCreating] = useState<{
       dir: string;
       kind: "file" | "dir";
@@ -119,13 +145,13 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     useEffect(() => {
       const watch = source.watch;
       if (!watch || !source.caps.watch) return;
-      const offs = ["", ...expanded].map((dir) =>
+      const offs = ["", ...effectiveExpanded].map((dir) =>
         watch(dir, () => data.reload(dir)),
       );
       return () => {
         for (const off of offs) off();
       };
-    }, [source, expanded, data]);
+    }, [source, effectiveExpanded, data]);
 
     // Cloud / no-watch sources never push mutations — re-pull when the window
     // regains focus so AI writes land in the panel without a manual refresh
@@ -134,11 +160,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       if (source.caps.watch) return;
       const onFocus = () => {
         data.reload("");
-        for (const dir of expanded) data.reload(dir);
+        for (const dir of effectiveExpanded) data.reload(dir);
       };
       window.addEventListener("focus", onFocus);
       return () => window.removeEventListener("focus", onFocus);
-    }, [source.caps.watch, data, expanded]);
+    }, [source.caps.watch, data, effectiveExpanded]);
 
     const toggle = useCallback(
       (dir: string) => {
@@ -163,8 +189,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
 
     const refresh = useCallback(() => {
       data.reload("");
-      for (const dir of expanded) data.reload(dir);
-    }, [data, expanded]);
+      for (const dir of effectiveExpanded) data.reload(dir);
+    }, [data, effectiveExpanded]);
 
     const openCreate = useCallback(
       (dir: string, kind: "file" | "dir") => {
@@ -225,9 +251,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     const remove = useCallback(
       async (node: FileNode) => {
         const what = node.isDir ? "文件夹及其全部内容" : "文件";
-        if (
-          !window.confirm(`确定删除${what}「${node.name}」？此操作不可撤销。`)
-        ) {
+        // Soft-delete honesty: cloud → AgentCore/trash（软删区）；local → OS
+        // recycle bin / LocalTrash fallback. Caps already encode the source
+        // (snapshots=cloud restore UI; watch=local FS) — no intent heuristics.
+        const restoreHint = source.caps.snapshots
+          ? "可从软删区还原。"
+          : source.caps.watch
+            ? "可从系统回收站或软删区还原。"
+            : "此操作不可撤销。";
+        if (!window.confirm(`确定删除${what}「${node.name}」？${restoreHint}`)) {
           return;
         }
         try {
@@ -280,16 +312,24 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       setSelected({ path: node.path, isDir: node.isDir });
     }, []);
 
+    // 与右键菜单一致：无 caps.edit 时不进剪贴板/粘贴（只读源菜单也不挂这些项）。
+    const canMutate = source.caps.edit;
+
     const doCopy = useCallback(
       (path: string) => {
-        if (source.copy) setClipboard({ op: "copy", path });
+        if (!canMutate || !source.copy) return;
+        setClipboard({ op: "copy", path });
       },
-      [source],
+      [canMutate, source],
     );
 
-    const doCut = useCallback((path: string) => {
-      setClipboard({ op: "cut", path });
-    }, []);
+    const doCut = useCallback(
+      (path: string) => {
+        if (!canMutate) return;
+        setClipboard({ op: "cut", path });
+      },
+      [canMutate],
+    );
 
     // 把目标目录展开（若折叠），让粘贴结果立即可见；随后由调用方 reload。
     const revealDir = useCallback(
@@ -307,9 +347,10 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     );
 
     // 把剪贴板内容粘贴进 destDir（""=根）。剪切走必备的 move（全源可用，一次性）；复制走可选
-    // copy（本地源），名字按目标目录现有项去重（副本 / 副本 2…），可重复粘贴。
+    // copy（本地 IPC / 云端 REST），名字按目标目录现有项去重（副本 / 副本 2…），可重复粘贴。
     const doPaste = useCallback(
       async (destDir: string) => {
+        if (!canMutate) return;
         const clip = clipboard;
         if (!clip) return;
         if (destDir === clip.path || destDir.startsWith(`${clip.path}/`)) {
@@ -343,11 +384,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           notifyActionError("粘贴失败", e);
         }
       },
-      [clipboard, source, data, revealDir],
+      [canMutate, clipboard, source, data, revealDir],
     );
 
     // Delete/Backspace 删选中项；Ctrl/Cmd + C/X/V 剪贴板。仅当焦点在树内（行按钮）时
     // 触发；输入框 / 创建·重命名态让出；有选区时让出原生文本复制。
+    // 与菜单一致：无 caps.edit 时快捷键也不做复制/剪切/粘贴/删除。
     const onTreeKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (creating || renaming) return;
@@ -359,7 +401,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           !e.metaKey &&
           !e.altKey
         ) {
-          if (selected) {
+          if (selected && canMutate) {
             e.preventDefault();
             void remove({
               path: selected.path,
@@ -371,6 +413,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         }
         if (!(e.ctrlKey || e.metaKey)) return;
         if (window.getSelection()?.toString()) return;
+        if (!canMutate) return;
         const key = e.key.toLowerCase();
         if (key === "c") {
           if (selected && source.copy) {
@@ -397,6 +440,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         renaming,
         selected,
         clipboard,
+        canMutate,
         source,
         remove,
         doCopy,
@@ -407,6 +451,14 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
 
     const rootStatus = data.statusOf("");
     const rootChildren = data.childrenOf("");
+    const visibleRootChildren = filterVisible
+      ? (rootChildren ?? []).filter((n) => filterVisible.has(n.path))
+      : (rootChildren ?? []);
+    const filterEmpty =
+      filterActive &&
+      rootChildren !== undefined &&
+      rootChildren.length > 0 &&
+      visibleRootChildren.length === 0;
 
     useImperativeHandle(
       ref,
@@ -430,7 +482,6 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       });
     }, [onChromeState, uploading, expanded, rootStatus]);
 
-    const canMutate = source.caps.edit;
     const canUpload = source.caps.transfer && canMutate;
 
     const onDragOverRoot = (e: React.DragEvent) => {
@@ -533,6 +584,22 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         loadingEl
       ) : rootChildren.length === 0 && !creating ? (
         emptyEl
+      ) : filterEmpty && !creating ? (
+        chrome ? (
+          <EmptyHint
+            inline
+            icon={<FileText size={22} className="text-muted-foreground/40" />}
+            title="无匹配文件"
+            hint="试试其它关键词，或清空筛选。"
+          />
+        ) : (
+          <div
+            className="py-1 text-xs text-muted-foreground/60"
+            style={{ paddingLeft: indent + 8 }}
+          >
+            无匹配文件
+          </div>
+        )
       ) : (
         <ul>
           {creating?.dir === "" && (
@@ -544,7 +611,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               onCancel={() => setCreating(null)}
             />
           )}
-          {(rootChildren ?? []).map((node) => (
+          {visibleRootChildren.map((node) => (
             <FileTreeRow
               key={node.path}
               node={node}
@@ -552,7 +619,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               indentBase={indent}
               source={source}
               data={data}
-              expanded={expanded}
+              expanded={effectiveExpanded}
+              filterVisible={filterVisible}
               activePath={activePath}
               creating={creating}
               renaming={renaming}

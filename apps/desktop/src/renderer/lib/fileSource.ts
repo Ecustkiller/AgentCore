@@ -24,6 +24,7 @@ export interface FileNode {
 export type FilePreviewResult =
   | { kind: "text"; text: string; truncated: boolean }
   | { kind: "image"; dataUrl: string; mime: string; size: number }
+  | { kind: "pdf"; dataUrl: string; mime: string; size: number }
   | { kind: "binary"; mime?: string; size?: number; reason?: string }
   | { kind: "too-large" };
 
@@ -106,8 +107,8 @@ export interface FileSource {
   /**
    * 把 `src`（文件或目录，目录递归）复制到完整目标路径 `dst`（含最终名）。失败抛异常。
    *
-   * 可选能力：本地源经 IPC 实现；云端源暂无（服务端尚无 copy 端点）。共用 UI 据
-   * 「方法是否存在」门控「复制」入口与复制-粘贴——剪切-粘贴走必备的 `move`，故云端仍可用。
+   * 可选能力：本地源经 IPC；云端源经 REST `/copy`（与本地同语义：递归目录、拒覆盖）。
+   * 共用 UI 据「方法是否存在」门控「复制」入口与复制-粘贴——剪切-粘贴走必备的 `move`。
    * 调用方传**完整目标路径**（去重后的新名由 UI 在粘贴前算好），以表达「同目录另存为副本」。
    */
   copy?(src: string, dst: string): Promise<void>;

@@ -1638,6 +1638,12 @@ EVENTS: list[EventSpec] = [
             'error': FieldType('str'),
         },
     ),
+    EventSpec(
+        name='workspace.system_snapshot_prune_failed',
+        fields={
+            'error': FieldType('str'),
+        },
+    ),
     EventSpec(name='write_section.collision'),
 ]
 

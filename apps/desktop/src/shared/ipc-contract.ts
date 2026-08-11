@@ -29,10 +29,11 @@ export interface FsEntry {
   modifiedMs: number | null;
 }
 
-/** 文件预览结果：文本 / 图片（data URL）/ 二进制（仅元信息）。 */
+/** 文件预览结果：文本 / 图片 / PDF（data URL）/ 二进制（仅元信息）。 */
 export type FilePreview =
   | { kind: "text"; content: string; truncated: boolean }
   | { kind: "image"; dataUrl: string; mime: string; size: number }
+  | { kind: "pdf"; dataUrl: string; mime: string; size: number }
   | { kind: "binary"; mime: string; size: number; reason: string };
 
 /** 扁平文件条目（用于 @ 提及检索；只含文件，不含目录）。 */

@@ -268,35 +268,20 @@ def execution_capability_warning(
         return None
     from agentcore.tools.builtin import execution_class_enabled_for
 
+    from agentcore.runtime.delegate.exec_env_remediation import exec_env_remediation_zh
+
     if execution_class_enabled_for(backend, permission_axes):
         if (
             plan_suggests_runtime_ready(plan)
             and getattr(backend, "location", None) != "local"
         ):
-            return (
-                "[能力提示] 本批任务像「启动长驻进程 / 开发服务器」，但当前无本机 "
-                "terminal：worker 无法真正托管服务。**推荐**引导 Composer「导入到云 / 连接 Git」"
-                "或云侧具备 terminal 后再启服，或改为启动步骤说明并标「未在本回合启动」。"
-                "本机传统 open/bind 合法非默认（≠离线），勿与云平级主推。"
+            return exec_env_remediation_zh(
+                backend=backend, kind="capability_runtime_ready"
             )
         return None
     if plan_suggests_office_deliverable(plan):
-        return (
-            "[能力提示] 本回合执行环境未装配（无 code_execute / test_run / terminal），"
-            "Office/文档目标（.docx/.pptx/.xlsx 等）无法在本回合生成。"
-            "【禁止】再派「写脚本 / 跑脚本」空转，也【禁止】再 claim code_execute=已装配；"
-            "请立即发 ask_user 卡说明缺口，并**推荐**引导 Composer「导入到云 / 连接 Git」"
-            "或诚实收口并标缺口（脚本仅备本机运行，目标 Office 文件未生成）。"
-            "本机传统三件套合法可教、非默认（≠离线）。"
-        )
-    return (
-        "[能力提示] 本回合执行环境未装配（云端沙箱，无 code_execute / test_run / terminal）："
-        "任务文案涉及「运行 / 启动 / 生成二进制或可播放产物」，worker 只能写脚本 / 文件，"
-        "无法真正运行或生成此类产物。收尾时请把交付缺口如实标给用户"
-        "（如「脚本已落盘、未运行验证」），或立即发 ask_user 卡说明缺口并**推荐**引导 "
-        "Composer「导入到云 / 连接 Git」后重派。"
-        "本机传统三件套合法可教、非默认（≠离线）。"
-    )
+        return exec_env_remediation_zh(backend=backend, kind="capability_office")
+    return exec_env_remediation_zh(backend=backend, kind="capability_run")
 
 def node_holds_execution_tools(spec: Any) -> bool:
     """真纯丙：不再用 ``spec.tools`` 白名单判断执行类工具；默认视为具备。

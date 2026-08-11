@@ -1,14 +1,20 @@
-import { FileText, Folder } from "lucide-react";
 import type React from "react";
 import { useEffect, useRef, useState } from "react";
+import { FileTypeIcon } from "./FileTypeIcon";
 
+/**
+ * 内联编辑行：与树行单列对齐。
+ * - 文件：icon = 类型图标（占 chevron/类型 那一列）
+ * - 目录：icon = null → 13px 空占位（对齐 chevron，无第二 Folder 图标）
+ */
 export function InlineRow({
   indent,
   icon,
   children,
 }: {
   indent: number;
-  icon: React.ReactNode;
+  /** 文件传类型图标；目录传 null（仅 chevron 列占位）。 */
+  icon: React.ReactNode | null;
   children: React.ReactNode;
 }) {
   return (
@@ -16,8 +22,11 @@ export function InlineRow({
       className="flex items-center gap-1.5 rounded-lg pr-1 text-xs"
       style={{ paddingLeft: indent }}
     >
-      <span className="w-[13px] shrink-0" aria-hidden="true" />
-      <span className="shrink-0 text-muted-foreground">{icon}</span>
+      {icon != null ? (
+        <span className="shrink-0">{icon}</span>
+      ) : (
+        <span className="w-[13px] shrink-0" aria-hidden="true" />
+      )}
       {children}
     </div>
   );
@@ -40,7 +49,7 @@ export function InlineCreateRow({
     <li>
       <InlineRow
         indent={depth * 14 + 8 + indentBase}
-        icon={kind === "dir" ? <Folder size={13} /> : <FileText size={13} />}
+        icon={kind === "dir" ? null : <FileTypeIcon size={13} />}
       >
         <InlineInput initial="" onSubmit={onSubmit} onCancel={onCancel} />
       </InlineRow>

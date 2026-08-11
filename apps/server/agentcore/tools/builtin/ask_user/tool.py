@@ -126,8 +126,10 @@ class AskUserTool:
             "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；"
             "blocking=false 非阻塞按默认继续。"
             "浏览器需用户登录时设 browser_login=true（强制阻塞；无 escalate）。"
-            "通用短澄清：信息不够时短问，可与检索/读文件等穿插、可连续多次；"
-            "Agent 自主决定何时问。详见 consult_skill"
+            "挡路拍板：无答复则不能负责任推进时短问；"
+            "能续聊/按默认推进则不当检查点。"
+            "可与检索/读文件等穿插、可连续多次；Agent 自主决定何时问。"
+            "详见 consult_skill"
             "（ask_user_kickoff / ask_user_midtask）。"
         )
         if self.advertise_bind_local_folder:

@@ -13,7 +13,7 @@ so a non-owner (or a bad id) gets 404 — never another user's data.
 
 Cloud vs local (§五 边界): a **local** workspace's files live on the user's
 machine and are reached over desktop IPC, not here; its server-side dir is not the
-truth. So file/dir/move/clone and snapshot create/restore reject local ids with
+truth. So file/dir/move/copy/clone and snapshot create/restore reject local ids with
 409 — the hub routes those to the desktop. Read-only snapshot list/download stay
 open (snapshots are object-store backed, keyed by ws, even for local).
 """
@@ -85,6 +85,7 @@ from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.shared_spaces.types import can_write
 from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.files import (
+    copy_file,
     create_dir,
     delete_file,
     list_file_index,
@@ -304,6 +305,11 @@ async def _shared_delete(space_id: str, path: str) -> None:
 async def _shared_move(space_id: str, src: str, dst: str) -> None:
     backend = build_shared_workspace(space_id)
     await backend.move(src, dst)
+
+
+async def _shared_copy(space_id: str, src: str, dst: str) -> None:
+    backend = build_shared_workspace(space_id)
+    await backend.copy(src, dst)
 
 
 async def _shared_index(space_id: str) -> tuple[list[str], bool]:
@@ -875,6 +881,51 @@ async def move_workspace_file(
         raise NotFoundError("文件不存在") from e
     except AlreadyExists as e:
         raise ValidationError("已存在同名文件") from e
+    return StatusResponse()
+
+
+@router.post("/{ws_id}/copy", response_model=StatusResponse)
+async def copy_workspace_file(
+    ws_id: str,
+    body: MoveFileRequest,
+    user: AuthUser,
+    conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    folder_repo: FolderRepository = Depends(get_folder_repo),
+    shared_svc: SharedSpaceService = Depends(get_shared_space_service),
+):
+    """Copy a file or directory within a cloud workspace (recursive; no clobber)."""
+    target = await _resolve_owned_workspace(
+        ws_id, user.user_id, conv_repo, folder_repo, shared_svc
+    )
+    _require_cloud(target)
+    _require_shared_write(target)
+    try:
+        if target.space_id:
+            await _shared_copy(target.space_id, body.src, body.dst)
+            await shared_svc.record_file_change(
+                space_id=target.space_id,
+                actor_user_id=user.user_id,
+                actor_via="user",
+                action="file_written",
+                path=body.dst,
+                detail={"src": body.src, "op": "copy"},
+            )
+        else:
+            await copy_file(
+                user_id=user.user_id,
+                folder_id=target.folder_id,
+                conversation_id=target.conversation_id,
+                src=body.src,
+                dst=body.dst,
+            )
+    except OutsideWorkspace as e:
+        raise ValidationError("路径非法：超出工作区范围") from e
+    except PathNotFound as e:
+        raise NotFoundError("文件不存在") from e
+    except AlreadyExists as e:
+        raise ValidationError("已存在同名文件") from e
+    except WorkspaceIOError as e:
+        raise ValidationError(str(e) or "复制失败") from e
     return StatusResponse()
 
 

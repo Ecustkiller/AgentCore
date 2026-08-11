@@ -357,6 +357,8 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(workspace.HandoffJobStartedPayload),
     TsInterface(workspace.HandoffApplyResult),
     TsInterface(workspace.HandoffApplyDonePayload),
+    TsInterface(workspace.WorkspaceSnapshotDonePayload),
+    TsInterface(workspace.WorkspaceSnapshotFailedPayload),
 )
 
 # ── EventType → payload wire model (exhaustive; asserted by tests) ─────────────────────
@@ -464,6 +466,8 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.HANDOFF_SNAPSHOT_DONE: workspace.HandoffSnapshotDonePayload,
     EventType.HANDOFF_JOB_STARTED: workspace.HandoffJobStartedPayload,
     EventType.HANDOFF_APPLY_DONE: workspace.HandoffApplyDonePayload,
+    EventType.WORKSPACE_SNAPSHOT_DONE: workspace.WorkspaceSnapshotDonePayload,
+    EventType.WORKSPACE_SNAPSHOT_FAILED: workspace.WorkspaceSnapshotFailedPayload,
 }
 
 __all__ = [

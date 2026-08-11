@@ -1,5 +1,7 @@
 export const TEXT_PREVIEW_CAP = 256 * 1024; // 文本预览最多读取/展示 256KB
 export const IMAGE_PREVIEW_CAP = 10 * 1024 * 1024; // 图片超过 10MB 退化为元信息
+/** PDF 面板内预览上限：略高于图帽（15 MiB），常见文档可 iframe 内嵌；更大请下载/系统打开。 */
+export const PDF_PREVIEW_CAP = 15 * 1024 * 1024;
 export const EDIT_READ_MAX = 5 * 1024 * 1024; // 「读以编辑」整文入内存上限 5 MiB（超出不在面板内编辑）
 
 export const LIST_FILES_CAP = 5000; // @ 提及检索：单根最多返回文件数

@@ -93,6 +93,48 @@ async def test_conv_scratch_file_crud_by_ws_id(client, _fs_data_dir):
     assert (await client.delete(f"/v1/workspaces/{ws}/files/out/a.bin")).status_code == 200
 
 
+async def test_conv_scratch_copy_by_ws_id(client, _fs_data_dir):
+    await register_and_login(client, "wsxcopy1")
+    conv_id = await _new_conversation(client, "Proj")
+    ws = f"conv:{conv_id}"
+
+    await client.put(f"/v1/workspaces/{ws}/files/src.txt", content=b"payload")
+    await client.post(f"/v1/workspaces/{ws}/dirs", json={"path": "tree/nested"})
+    await client.put(f"/v1/workspaces/{ws}/files/tree/nested/leaf.txt", content=b"leaf")
+
+    r = await client.post(
+        f"/v1/workspaces/{ws}/copy", json={"src": "src.txt", "dst": "copy.txt"}
+    )
+    assert r.status_code == 200, r.text
+    assert (await client.get(f"/v1/workspaces/{ws}/files/src.txt")).content == b"payload"
+    assert (await client.get(f"/v1/workspaces/{ws}/files/copy.txt")).content == b"payload"
+
+    r = await client.post(
+        f"/v1/workspaces/{ws}/copy", json={"src": "tree", "dst": "tree2"}
+    )
+    assert r.status_code == 200, r.text
+    assert (
+        await client.get(f"/v1/workspaces/{ws}/files/tree2/nested/leaf.txt")
+    ).content == b"leaf"
+
+    # Refuse clobber / missing src / self-recursion.
+    assert (
+        await client.post(
+            f"/v1/workspaces/{ws}/copy", json={"src": "src.txt", "dst": "copy.txt"}
+        )
+    ).status_code == 422
+    assert (
+        await client.post(
+            f"/v1/workspaces/{ws}/copy", json={"src": "ghost", "dst": "z.txt"}
+        )
+    ).status_code == 404
+    assert (
+        await client.post(
+            f"/v1/workspaces/{ws}/copy", json={"src": "tree", "dst": "tree/nested/x"}
+        )
+    ).status_code == 422
+
+
 async def test_enumeration_lists_projects_and_conv_scratch(client, _fs_data_dir):
     await register_and_login(client, "wsxenum")
     folder_id = await _new_folder(client, "Alpha")
@@ -155,6 +197,9 @@ async def test_local_workspace_rejects_server_side_ops(client, _fs_data_dir):
     assert (await client.post(f"/v1/workspaces/{ws}/dirs", json={"path": "d"})).status_code == 409
     assert (
         await client.post(f"/v1/workspaces/{ws}/move", json={"src": "a", "dst": "b"})
+    ).status_code == 409
+    assert (
+        await client.post(f"/v1/workspaces/{ws}/copy", json={"src": "a", "dst": "b"})
     ).status_code == 409
     assert (await client.post(f"/v1/workspaces/{ws}/snapshots", json={})).status_code == 409
     assert (await client.post(f"/v1/workspaces/{ws}/snapshots/x/restore")).status_code == 409

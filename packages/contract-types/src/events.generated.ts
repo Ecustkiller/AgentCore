@@ -763,7 +763,7 @@ export type DeliveryState =
  * Optional ``reason`` is a machine-readable cutoff / shortfall code when the gap
  * comes from a structured engine signal — known:
  * ``token_budget`` / ``worker_timeout`` / ``degraded_handoff`` /
- * ``unverified_note`` (soft 待核实/示例自注) /
+ * ``unverified_note`` (soft 示例/虚构自注；不单独把 state 打成 notes) /
  * ``files_not_landed`` (零落盘 soft tip：per-worker「本队员本波未交卷」/
  * 批次「本批未见落盘」；甲⁺ 起不挡收工) /
  * ``verify_failed`` (验证形工具失败：browser_navigate / test_run /
@@ -787,7 +787,9 @@ export interface DeliveryGap {
 
 /** One user action that would close a delivery gap. ``kind`` is a widened string
  * on the wire (like ``ToolPhase``) so the backend can add kinds without a client
- * bump — known: ``bind_local_folder`` (wire kind；产品文案优先云协作「导入到云 / 连接 Git」；
+ * bump — known: ``bind_local_folder`` (wire kind；产品文案按会话分流：
+ * 工程尚在本机 → 云协作「导入到云 / 连接 Git」优先；**已是云端会话但沙箱未装配** →
+ * 禁止再导「导入到云」，改稍后重试 / export_to_local / 本机传统；
  * 本机传统合法非默认，≠离线)；
  * ``export_to_local`` (云端已有 delivered_files → 导出到本机文件夹后即可 npm install / 本地运行；
  * 与 bind_local_folder 可并存但语义不同);
@@ -826,7 +828,7 @@ export interface DeliveryArtifact {
  * LATEST per ``execution_id`` (reflects the most recent batch's reconciliation).
  * ``state``: delivered = 无 blocking 缺口且有落盘产物; partial = 有产物也有
  * blocking 缺口; blocked = 有 blocking 缺口且无落盘产物;
- * notes = 仅有 soft 待核实提醒（轻提醒，非「部分未满足」）。
+ * notes = 仍有 soft 提醒且非「仅 unverified_note」（如 path_hint；轻提醒，非「部分未满足」）。
  * ``artifacts``: path-level acceptance (accepted+rejected); ``delivered_files``
  * remains accepted-only for older clients. */
 export interface DeliveryStatusPayload {
@@ -1874,6 +1876,18 @@ export interface HandoffApplyDonePayload {
   errors: number;
 }
 
+/** Post-turn auto-backup succeeded (EPHEMERAL — clears failure UX). */
+export interface WorkspaceSnapshotDonePayload {
+  snapshot_id: string;
+  conversation_id: string;
+  size_bytes: number;
+}
+
+/** Post-turn auto-backup failed (EPHEMERAL — toast / panel banner; no error detail). */
+export interface WorkspaceSnapshotFailedPayload {
+  conversation_id: string;
+}
+
 export type SSEPayloadMap = {
   message_start: MessageStartPayload;
   content_delta: ContentDeltaPayload;
@@ -1971,4 +1985,6 @@ export type SSEPayloadMap = {
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;
+  workspace_snapshot_done: WorkspaceSnapshotDonePayload;
+  workspace_snapshot_failed: WorkspaceSnapshotFailedPayload;
 };

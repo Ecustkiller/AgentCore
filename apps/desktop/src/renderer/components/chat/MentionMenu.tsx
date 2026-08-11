@@ -1,7 +1,8 @@
+import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button, SearchField } from "@/components/ui";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { IndexedEntry } from "@/lib/fileIndex";
-import { File, Folder, FolderPlus, MessageSquare, Users } from "lucide-react";
+import { FolderPlus, MessageSquare, Users } from "lucide-react";
 import { useEffect, useRef } from "react";
 import type { MentionSectionId } from "./message-input/composerAttachments";
 
@@ -186,9 +187,10 @@ export function MentionMenu({
                               className="shrink-0 text-muted-foreground"
                             />
                           ) : item.kind === "dir" ? (
-                            <Folder
+                            <DirTypeIcon
+                              name={item.name}
+                              path={item.relPath}
                               size={14}
-                              className="shrink-0 text-muted-foreground"
                             />
                           ) : item.kind === "conversation" ? (
                             <MessageSquare
@@ -196,9 +198,10 @@ export function MentionMenu({
                               className="shrink-0 text-muted-foreground"
                             />
                           ) : (
-                            <File
+                            <FileTypeIcon
+                              name={item.name}
+                              path={item.relPath}
                               size={14}
-                              className="shrink-0 text-muted-foreground"
                             />
                           )}
                           <span className="shrink-0 truncate">

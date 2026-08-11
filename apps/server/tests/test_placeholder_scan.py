@@ -39,17 +39,18 @@ def test_skeleton_placeholder_phone_soft_warns_with_location():
     assert any("占位" in w or "400" in w or "骨架" in w for w in v.warnings)
 
 
-def test_soft_unverified_self_note_warns_only():
-    # Author self-note: 示例数据 / 发布前核实 — warn, do not fail acceptance.
+def test_soft_fabricated_self_note_warns_only():
+    # 示例数据 / 虚构 → soft warn；「待核实」诚实标注不再进 soft。
     md = (
         "# 增长报告\n\n"
-        "本页客户证言为示例，关键指标为示例数据（发布前核实）。\n\n"
+        "本页客户证言为示例，关键指标为示例数据（虚构示意）。\n\n"
         "转化率提升 37%。\n"
     )
     result = scan_placeholder_signals({"report.md": md})
     assert result.failures == []
     assert result.warnings
-    assert any("示例" in w or "核实" in w for w in result.warnings)
+    assert any("示例" in w or "虚构" in w for w in result.warnings)
+    assert all("待核实" not in (h.label or "") for h in result.hits)
 
     v = check_contract(
         "报告已写入",
@@ -63,7 +64,31 @@ def test_soft_unverified_self_note_warns_only():
     assert v.warnings
     reminder = format_soft_reminders(v)
     assert "未阻断" in reminder
-    assert "示例" in reminder or "核实" in reminder
+    assert "示例" in reminder or "虚构" in reminder
+
+
+def test_honest_pending_verify_note_not_soft():
+    """「待核实」「发布前核实」「上线前核实」不再命中 soft（提示词鼓励的诚实语）。"""
+    md = (
+        "# 调研摘要\n\n"
+        "市场规模约 12 亿（待核实）。发布前核实口径；上线前核实联系方式。\n"
+    )
+    result = scan_placeholder_signals({"notes.md": md})
+    assert result.failures == []
+    assert result.warnings == []
+    assert result.hits == []
+
+
+def test_example_data_and_fiction_still_soft():
+    md = "以下为示例数据；部分指标为虚构，仅供参考。\n"
+    result = scan_placeholder_signals({"data.md": md})
+    assert result.failures == []
+    assert result.warnings
+    labels = {h.label for h in result.hits if h.kind == "soft"}
+    assert "示例数据" in labels
+    assert "虚构/示意" in labels
+    assert "仅供参考" in labels
+    assert "待核实" not in labels
 
 
 def test_code_file_todo_xxx_exempt_from_skeleton():

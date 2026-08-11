@@ -15,6 +15,8 @@ logger = get_logger(__name__)
 
 # None = never probed → predicate keeps config-only semantics (status quo).
 _cloud_sandbox_healthy: bool | None = None
+# Last unhealthy probe reason (cleared when healthy / reset).
+_cloud_sandbox_health_failure: tuple[str, str | None] | None = None
 
 
 def cloud_sandbox_health() -> bool | None:
@@ -22,16 +24,34 @@ def cloud_sandbox_health() -> bool | None:
     return _cloud_sandbox_healthy
 
 
+def cloud_sandbox_health_failure() -> tuple[str, str | None] | None:
+    """``(reason, detail)`` from the last unhealthy probe; else ``None``."""
+    return _cloud_sandbox_health_failure
+
+
 def reset_cloud_sandbox_health_for_tests() -> None:
     """Clear the process-wide cache so tests cannot leak health across cases."""
-    global _cloud_sandbox_healthy
+    global _cloud_sandbox_healthy, _cloud_sandbox_health_failure
     _cloud_sandbox_healthy = None
+    _cloud_sandbox_health_failure = None
 
 
-def set_cloud_sandbox_health_for_tests(healthy: bool | None) -> None:
+def set_cloud_sandbox_health_for_tests(
+    healthy: bool | None,
+    *,
+    failure: tuple[str, str | None] | None = None,
+) -> None:
     """Inject a probe result for unit tests (``None`` = unprobed)."""
-    global _cloud_sandbox_healthy
+    global _cloud_sandbox_healthy, _cloud_sandbox_health_failure
     _cloud_sandbox_healthy = healthy
+    if healthy is True:
+        _cloud_sandbox_health_failure = None
+    elif failure is not None:
+        _cloud_sandbox_health_failure = failure
+    elif healthy is False and _cloud_sandbox_health_failure is None:
+        _cloud_sandbox_health_failure = ("unhealthy", None)
+    elif healthy is None:
+        _cloud_sandbox_health_failure = None
 
 
 def cloud_execution_config_enabled() -> bool:
@@ -45,7 +65,7 @@ async def probe_cloud_sandbox_at_startup() -> None:
     Uses the same default server sandbox as workspace construction. Missing
     ``health_check``, a false result, or any exception → unhealthy (tools withheld).
     """
-    global _cloud_sandbox_healthy
+    global _cloud_sandbox_healthy, _cloud_sandbox_health_failure
     if not cloud_execution_config_enabled():
         return
 
@@ -81,9 +101,11 @@ async def probe_cloud_sandbox_at_startup() -> None:
 
     _cloud_sandbox_healthy = ok
     if ok:
+        _cloud_sandbox_health_failure = None
         logger.debug("sandbox.cloud_health_ok")
         return
 
+    _cloud_sandbox_health_failure = (reason, detail or None)
     logger.warning(
         "sandbox.cloud_health_failed",
         reason=reason,

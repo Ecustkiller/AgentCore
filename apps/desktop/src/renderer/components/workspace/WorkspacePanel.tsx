@@ -8,6 +8,7 @@ import {
   exportWorkspaceToLocal,
   exportWorkspaceZip,
 } from "@/services/workspace";
+import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { useConversationStore } from "@/stores/conversation";
 import {
   Download,
@@ -46,6 +47,17 @@ export function WorkspaceMode() {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const openSnapshotsFor = useAutoSnapshotStore((s) => s.openSnapshotsFor);
+  const autoSnapshotFailed = useAutoSnapshotStore((s) =>
+    conversationId ? Boolean(s.failedByConversation[conversationId]) : false,
+  );
+
+  useEffect(() => {
+    if (!conversationId || openSnapshotsFor !== conversationId) return;
+    setTrashOpen(false);
+    setSnapshotsOpen(true);
+    useAutoSnapshotStore.getState().consumeOpenSnapshots(conversationId);
+  }, [conversationId, openSnapshotsFor]);
 
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
@@ -146,13 +158,22 @@ export function WorkspaceMode() {
                     )}
                   </IconButton>
                   <IconButton
-                    title="快照"
+                    title={
+                      autoSnapshotFailed
+                        ? "快照（最近自动备份失败）"
+                        : "快照"
+                    }
                     onClick={() => {
                       setTrashOpen(false);
                       setSnapshotsOpen(true);
                     }}
                   >
-                    <History size={14} />
+                    <History
+                      size={14}
+                      className={
+                        autoSnapshotFailed ? "text-warning" : undefined
+                      }
+                    />
                   </IconButton>
                   <IconButton
                     title="软删区"

@@ -63,6 +63,7 @@
     "jszip": "^3.10.1",
     "node-pty": "^1.1.0",
     "perfect-freehand": "^1.2.3",
+    "react-material-icon-theme": "1.2.0",
     "recharts": "^3.9.2"
   },
   "devDependencies": {

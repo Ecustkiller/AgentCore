@@ -26,6 +26,14 @@ export function connectSrcForCsp(apiOrigin: string): string {
 }
 
 /**
+ * frame-src：面板内 PDF 用 iframe 加载 blob:/data:（字节已在页内，不引入网络取框面）。
+ * 刻意不含 https: / * —— 禁随意放宽；object-src 仍保持 none。
+ */
+export function frameSrcForCsp(): string {
+  return "frame-src 'self' blob: data:";
+}
+
+/**
  * 把 app:// pathname 解成相对 RENDERER_ROOT 的路径。
  * `/` → `index.html`；畸形百分号编码 → `null`（调用方应回 400，禁止 URIError 冒泡）。
  */

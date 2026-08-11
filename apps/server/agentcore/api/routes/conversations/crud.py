@@ -91,6 +91,15 @@ async def create_conversation(
         axes = body.permission_axes.to_axes().to_dict()
     else:
         axes = (await default_permission_axes_for_user(repo._session, user.user_id)).to_dict()
+    # 新建拍快照：显式 profile 钉住；省略则写入当时账号默认（非活跟随）。
+    from agentcore.llm.model_profiles import LlmModelProfileService
+
+    profile_svc = LlmModelProfileService(repo._session)
+    if "model_profile_id" in body.model_fields_set and body.model_profile_id is not None:
+        await profile_svc.ensure_profile_usable(user.user_id, body.model_profile_id)
+        pin = body.model_profile_id
+    else:
+        pin = await profile_svc.snapshot_default_profile_id(user.user_id)
     conv = await repo.create(
         user_id=user.user_id,
         title=body.title,
@@ -99,6 +108,7 @@ async def create_conversation(
         # local_* / container columns. 裸聊 keeps desktop local-first intent.
         local_container_root_id=(body.local_container_root_id if body.folder_id is None else None),
         permission_axes=axes,
+        model_profile_id=pin,
     )
     return conversation_summary_from_orm(conv)
 
@@ -124,6 +134,14 @@ async def duplicate_conversation(
         raise NotFoundError("对话不存在")
     base = (src.title or "").strip()
     title = (f"{base} 副本" if base else "副本")[:500]
+    # 克隆：有源钉则拷贝；源为存量 null 则拍当时账号默认。
+    from agentcore.llm.model_profiles import LlmModelProfileService
+
+    src_pin = getattr(src, "model_profile_id", None) or None
+    if src_pin is None:
+        src_pin = await LlmModelProfileService(conv_repo._session).snapshot_default_profile_id(
+            user.user_id
+        )
     new_conv = await conv_repo.create(
         user_id=user.user_id,
         title=title,
@@ -131,6 +149,7 @@ async def duplicate_conversation(
         local_container_root_id=src.local_container_root_id,
         permission_axes=dict(src.permission_axes or {}),
         deep_research_auto=bool(getattr(src, "deep_research_auto", False)),
+        model_profile_id=src_pin,
     )
     count = await msg_repo.copy_all(conversation_id, new_conv.id)
     return conversation_summary_from_orm(new_conv, message_count=count)
@@ -323,15 +342,16 @@ async def update_conversation(
         )
         if updated:
             conv = updated
-    # 会话级模型组合: explicit profile_id pins a combination; null clears → account default.
+    # 会话级模型组合: explicit profile_id pins; null re-pins to account default snapshot.
     if "model_profile_id" in fields:
-        profile_id = body.model_profile_id
-        if profile_id is not None:
-            from agentcore.llm.model_profiles import LlmModelProfileService
+        from agentcore.llm.model_profiles import LlmModelProfileService
 
-            await LlmModelProfileService(repo._session).ensure_profile_usable(
-                user.user_id, profile_id
-            )
+        profile_svc = LlmModelProfileService(repo._session)
+        profile_id = body.model_profile_id
+        if profile_id is None:
+            profile_id = await profile_svc.snapshot_default_profile_id(user.user_id)
+        else:
+            await profile_svc.ensure_profile_usable(user.user_id, profile_id)
         updated = await repo.set_model_profile(
             conversation_id, profile_id, user_id=user.user_id
         )

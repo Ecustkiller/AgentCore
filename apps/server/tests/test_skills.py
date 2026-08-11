@@ -385,11 +385,14 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
 def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
     """开场桌上结果 + 成文后梯度 + 审校不默认（与 CEO 常驻对齐的 HOW）。"""
     body = _body("team_orchestration_advanced")
-    # 讨论类 ask_user：默认摸清对齐；成文次选；选项不写编制
+    # 讨论类 ask_user：仅挡编制时摸清/成文/先聊；对话本身不发卡；选项不写编制
     assert "讨论类开场" in body
+    assert "ask·挡路" in body or "挡路" in body
     assert "先多角度摸清" in body
     assert "对话对齐" in body
     assert "写成文档并保存" in body
+    assert "对话本身" in body
+    assert "催收敛" in body or "候选菜单" in body
     assert "内部编制" in body
     assert "几人几步" in body
     # 成文后轻→标准→重；满编 research_report 仅档 3
@@ -960,6 +963,10 @@ def test_ask_user_kickoff_skill_teaches_short_clarify():
     assert "assumptions" in body
     assert "questions" in body
     assert "短问" in body or "短澄清" in body
+    assert "挡路" in body
+    assert "催收敛" in body or "候选菜单" in body
+    assert "讨论开场" in body
+    assert "对话本身" in body
     assert "开工提案卡" not in body
     assert "提案体硬闸" not in body
     assert "一键开做" not in body or "禁止" in body

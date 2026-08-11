@@ -1,7 +1,7 @@
 import { InteractionSheet } from "@/components/InteractionSheet";
 import { Modal } from "@/components/Modal";
 import { CONTEXT_CHANNEL_LABEL } from "@/components/assistantLabels";
-import { FINISH_REASON_META } from "@/lib/errors";
+import { FINISH_REASON_LABELS, FINISH_REASON_META } from "@/lib/errors";
 import {
   type MessageCopyMode,
   copyText,
@@ -213,7 +213,7 @@ export function AssistantMessageFooter({
     !!failureNotice?.trim();
   const hasProcess = (process?.length ?? 0) > 0;
   const finishLabel = finishReason
-    ? FINISH_REASON_META[finishReason]?.label
+    ? (FINISH_REASON_LABELS[finishReason] ?? null)
     : null;
   const contextBlocks = captainContext ?? [];
   const hasContext = contextBlocks.length > 0;

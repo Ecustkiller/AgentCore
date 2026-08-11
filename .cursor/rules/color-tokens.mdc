@@ -20,3 +20,7 @@ OKLCH 语义色单源：**`packages/design-tokens/`**（`tokens.css` 桌面 / `m
 - **`hsl(var(--…))` 包裹**：token 已是 OKLCH，`hsl()` 会产出非法值。
 - **拿 `accent` 当成功色**：`accent` 是中性 hover 表面。成功一律 `success`。
 - **绕过 token 新建散色变量**：先评估能否复用，必须新增则进 `packages/design-tokens/tokens.css`。
+
+## 登记例外
+
+- **文件类型图标**（`react-material-icon-theme` via `FileTypeIcon` / `DirTypeIcon`）：SVG 内嵌品牌色（npm/git/md…），勿再包 `text-*` 染色；禁借此例外在业务 UI 散写 hex。

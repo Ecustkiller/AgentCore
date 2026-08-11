@@ -15,9 +15,9 @@ Anthropic-style ``<parameter>`` / ``<object>`` fragments into OpenAI JSON args, 
 would otherwise hard-fail as ``args_parse_failed``.
 
 After a successful ``json.loads``, :func:`unwrap_nested_delegate_arguments` eats one
-known protocol fumble: double-wrapping the payload as ``{"arguments": "<json>"}``
-(wire field name collision) — same family as ``coerce_list_arg`` / hoist, not generic
-JSON repair.
+known protocol fumble: double-wrapping the payload as ``{"arguments"|"parameters"|"input":
+"<json>"}`` (wire field name collision / mistaken nesting) — same family as
+``coerce_list_arg`` / hoist, not generic JSON repair.
 
 :func:`salvage_handoff_raw_arguments` is a second, **handoff-only** narrow pass after
 sanitize when ``json.loads`` still fails: quote known bare string fields and close
@@ -58,9 +58,10 @@ _HANDOFF_BARE_KEY_RE = re.compile(
     r'"(summary|assumptions|next_steps)"\s*:\s*',
 )
 
-# Delegate payload carriers — used to decide whether nested ``arguments`` is the
+# Delegate payload carriers — used to decide whether a nested wrapper is the
 # sole top-level payload key (narrow unwrap; do not guess other fields).
-_DELEGATE_PAYLOAD_KEYS = frozenset({"tasks", "playbook", "playbook_id", "arguments"})
+_DELEGATE_WRAPPER_KEYS = frozenset({"arguments", "parameters", "input"})
+_DELEGATE_PAYLOAD_KEYS = frozenset({"tasks", "playbook", "playbook_id"}) | _DELEGATE_WRAPPER_KEYS
 
 # Hybrid leak: ``<parameter name="role":`` (XML open tag broken into JSON key colon).
 _PARAMETER_NAME_COLON_RE = re.compile(
@@ -130,10 +131,12 @@ def _delegate_payload_keys_present(args: dict[str, Any]) -> set[str]:
         value = args.get(key)
         if isinstance(value, str) and value.strip():
             present.add(key)
-    if "arguments" in _DELEGATE_PAYLOAD_KEYS and "arguments" in args:
-        raw = args.get("arguments")
+    for key in _DELEGATE_WRAPPER_KEYS:
+        if key not in args:
+            continue
+        raw = args.get(key)
         if (isinstance(raw, str) and raw.strip()) or (isinstance(raw, dict) and raw):
-            present.add("arguments")
+            present.add(key)
     return present
 
 
@@ -152,17 +155,20 @@ def unwrap_nested_delegate_arguments(args: Any) -> dict[str, Any] | None:
     """Narrow unwrap of double-wrapped delegate payload.
 
     Only when the top-level dict's sole meaningful payload key (among
-    ``tasks`` / ``playbook`` / ``playbook_id`` / ``arguments``) is ``arguments``,
-    and that value is a JSON object string or dict whose inner body carries
-    non-empty ``tasks`` or a named ``playbook`` / ``playbook_id``. Returns the
-    inner dict to use as replacement, or ``None`` when the shape does not match
-    (including real top-level ``tasks`` plus an unrelated ``arguments`` key).
+    ``tasks`` / ``playbook`` / ``playbook_id`` / ``arguments`` / ``parameters`` /
+    ``input``) is exactly one wrapper among ``arguments`` / ``parameters`` /
+    ``input``, and that value is a JSON object string or dict whose inner body
+    carries non-empty ``tasks`` or a named ``playbook`` / ``playbook_id``.
+    Returns the inner dict to use as replacement, or ``None`` when the shape
+    does not match (including real top-level ``tasks`` plus an unrelated wrapper).
     """
     if not isinstance(args, dict):
         return None
-    if _delegate_payload_keys_present(args) != {"arguments"}:
+    present = _delegate_payload_keys_present(args)
+    if present not in ({"arguments"}, {"parameters"}, {"input"}):
         return None
-    raw = args.get("arguments")
+    wrapper_key = next(iter(present))
+    raw = args.get(wrapper_key)
     if isinstance(raw, str):
         try:
             inner: Any = json.loads(raw)

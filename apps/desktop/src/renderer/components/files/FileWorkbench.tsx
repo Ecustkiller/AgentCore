@@ -112,10 +112,11 @@ const RULES_WS = "__rules__";
  * Workspace lifecycle (new file·folder / upload / reveal in OS / open chat /
  * clear cloud-scratch artifacts / delete conversation or delete project / rename)
  * lives on each root's **right-click menu** to keep the rail clean; the rail
- * header is a **name filter** only (real-time, case-insensitive substring over
- * workspace names; session-only, not persisted — it's a search, not a preference).
- * Reuses {@link FileTree} in its headerless `chrome={false}` form so per-source
- * CRUD / drag / fold all come for free.
+ * header is a **name + path filter** (real-time, case-insensitive substring over
+ * workspace names and, for expanded trees, file/folder names + relative paths;
+ * session-only, not persisted — it's a search, not a preference). No content
+ * full-text search. Reuses {@link FileTree} in its headerless `chrome={false}`
+ * form so per-source CRUD / drag / fold all come for free.
  *
  * No longer the lens onto a *single* project's home — that page (`/folders/:id`) is
  * gone (双模式工作区 决策 #9, 端态 I): this is purely the file lens, and chats live
@@ -165,7 +166,7 @@ export function FileWorkbench({
   const [expandedWs, setExpandedWs] = useState<Set<string>>(() =>
     loadExpandedWs(),
   );
-  // 按名称实时过滤工作区（会话级瞬态，不持久化——它是搜索而非偏好）。
+  // 按名称/路径实时过滤（会话级瞬态，不持久化——它是搜索而非偏好）。
   const [filter, setFilter] = useState("");
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
@@ -396,18 +397,26 @@ export function FileWorkbench({
   // 规则叶子的路径感知单一源（tab path 即文档 id；与记忆源同构，故复用 FileDetail/编辑器）。
   const documentSource = useMemo(() => createDocumentSource(), []);
 
-  // 过滤只按工作区名（大小写不敏感子串）——本次只做工作区级筛选，不下探文件名。
+  // 工作区名匹配保留；已展开段也保留（否则按文件名筛时段落被名过滤藏掉，树内过滤无法露出）。
+  // 树内路径/文件名过滤由各段 FileTree 的 filterQuery 完成。
   const visiblePersonal = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return personalWorkspaces;
-    return personalWorkspaces.filter((w) => w.name.toLowerCase().includes(q));
-  }, [personalWorkspaces, filter]);
+    return personalWorkspaces.filter(
+      (w) => w.name.toLowerCase().includes(q) || expandedWs.has(w.wsId),
+    );
+  }, [personalWorkspaces, filter, expandedWs]);
 
   const visibleShared = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return sharedSpaces;
-    return sharedSpaces.filter((s) => s.name.toLowerCase().includes(q));
-  }, [sharedSpaces, filter]);
+    return sharedSpaces.filter((s) => {
+      const wsId = s.ws_id || sharedWsId(s.id);
+      return s.name.toLowerCase().includes(q) || expandedWs.has(wsId);
+    });
+  }, [sharedSpaces, filter, expandedWs]);
+
+  const treeFilterQuery = filter.trim();
 
   /** folder: + shared: 混排进「项目」段（按最近活跃降序）。 */
   const projectItems = useMemo(() => {
@@ -500,14 +509,14 @@ export function FileWorkbench({
         style={{ width: railWidth }}
         className="flex shrink-0 flex-col border-r border-border"
       >
-        {/* Rail header: workspace name filter only (新建走项目区 + 菜单；
+        {/* Rail header: workspace name + in-tree path filter（新建走项目区 + 菜单；
             段级 CRUD 在各 WorkspaceSection / SharedSpaceSection 右键菜单). */}
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
           <SearchField
             value={filter}
             onValueChange={setFilter}
-            placeholder="筛选工作区…"
-            aria-label="按名称筛选工作区"
+            placeholder="筛选工作区或文件…"
+            aria-label="按名称筛选工作区或文件"
             className="min-w-0 flex-1"
           />
         </div>
@@ -581,7 +590,7 @@ export function FileWorkbench({
             projectItems.length === 0 &&
             scratches.length === 0 ? (
               <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                没有名称匹配「{filter.trim()}」的工作区
+                没有匹配「{filter.trim()}」的工作区或已展开树中的文件
               </p>
             ) : (
               <>
@@ -619,6 +628,7 @@ export function FileWorkbench({
                             openFile(wsId, path, name)
                           }
                           flashing={wsId === flashWsId}
+                          filterQuery={treeFilterQuery}
                         />
                       );
                     }
@@ -639,6 +649,7 @@ export function FileWorkbench({
                           openFile(ws.wsId, path, name)
                         }
                         flashing={ws.wsId === flashWsId}
+                        filterQuery={treeFilterQuery}
                         projectRail={
                           showMemory && folderId ? (
                             <AgentCoreSection
@@ -719,6 +730,7 @@ export function FileWorkbench({
                       onToggle={() => toggleWs(ws.wsId)}
                       onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
                       flashing={ws.wsId === flashWsId}
+                      filterQuery={treeFilterQuery}
                     />
                   ))
                 )}

@@ -190,6 +190,38 @@ async def test_delete_and_move_workspace_files(client, _fs_data_dir):
     ).status_code == 404
 
 
+async def test_copy_workspace_files(client, _fs_data_dir):
+    await register_and_login(client, "wscopy")
+    conv_id = await _new_conversation(client)
+    base = f"/v1/conversations/{conv_id}/workspace"
+
+    await client.put(f"{base}/files/a.txt", content=b"A")
+    await client.put(f"{base}/files/keep.txt", content=b"K")
+    await client.post(f"{base}/dirs", json={"path": "tree/nested"})
+    await client.put(f"{base}/files/tree/nested/leaf.txt", content=b"leaf")
+
+    r = await client.post(f"{base}/copy", json={"src": "a.txt", "dst": "docs/b.txt"})
+    assert r.status_code == 200, r.text
+    assert (await client.get(f"{base}/files/a.txt")).content == b"A"
+    assert (await client.get(f"{base}/files/docs/b.txt")).content == b"A"
+
+    r = await client.post(f"{base}/copy", json={"src": "tree", "dst": "tree2"})
+    assert r.status_code == 200, r.text
+    assert (await client.get(f"{base}/files/tree2/nested/leaf.txt")).content == b"leaf"
+
+    # Clobber / missing / self-recursion.
+    assert (
+        await client.post(f"{base}/copy", json={"src": "a.txt", "dst": "keep.txt"})
+    ).status_code == 422
+    assert (await client.get(f"{base}/files/keep.txt")).content == b"K"
+    assert (
+        await client.post(f"{base}/copy", json={"src": "ghost", "dst": "z.txt"})
+    ).status_code == 404
+    assert (
+        await client.post(f"{base}/copy", json={"src": "tree", "dst": "tree/nested/x"})
+    ).status_code == 422
+
+
 async def test_create_workspace_dir(client, _fs_data_dir):
     await register_and_login(client, "wsmkdir")
     conv_id = await _new_conversation(client)
@@ -306,13 +338,19 @@ async def test_other_user_cannot_touch_workspace(client, new_client, _fs_data_di
             await other.get(f"/v1/conversations/{conv_id}/workspace/files/secret.txt")
         ).status_code == 404
         assert (await other.get(f"/v1/conversations/{conv_id}/snapshots")).status_code == 404
-        # Mutating routes are owner-scoped too (404, not a silent delete/move).
+        # Mutating routes are owner-scoped too (404, not a silent delete/move/copy).
         assert (
             await other.delete(f"/v1/conversations/{conv_id}/workspace/files/secret.txt")
         ).status_code == 404
         assert (
             await other.post(
                 f"/v1/conversations/{conv_id}/workspace/move",
+                json={"src": "secret.txt", "dst": "stolen.txt"},
+            )
+        ).status_code == 404
+        assert (
+            await other.post(
+                f"/v1/conversations/{conv_id}/workspace/copy",
                 json={"src": "secret.txt", "dst": "stolen.txt"},
             )
         ).status_code == 404

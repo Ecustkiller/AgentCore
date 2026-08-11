@@ -1,9 +1,9 @@
 """Delegate playbook declaration gate（结构校验）.
 
-自由组队：可不传 playbook，直接手写 ``tasks``。
-建站 / 工具台 / 绿场软件：推荐具名 ``build_website``（工具台气质用
-``style=toolshed``）/ ``build_app``（软引导见 skill / schema）；
-``none`` / 手写不再因意图硬拒。
+默认主路：手写顶层 ``tasks``（可省略 playbook）。
+具名 playbook = 固化流水线快捷进阶（建站 / 工具台 / 绿场等）；与 tasks XOR。
+建站快捷：``build_website``（工具台气质用 ``style=toolshed``）；绿场快捷：``build_app``
+（软引导见 skill / schema）；``none`` / 手写不再因意图硬拒。
 
 场面账（automation delivery / website style / presentation format）已拆除：
 具名 playbook 不再因交付形态记账硬拒。
@@ -25,8 +25,8 @@ DeclarationRejectGate = Literal[
 
 PLAYBOOK_TASKS_XOR_MSG = (
     "playbook 与 tasks 二选一，不可同时传。"
-    "手写 tasks：去掉具名 playbook/playbook_id，只传 tasks；"
-    "用可选形状：只传 playbook（+playbook_args 槽位），不要传 tasks。"
+    "默认手写 tasks：去掉具名 playbook/playbook_id，只传 tasks；"
+    "快捷固化流水线：只传 playbook（+playbook_args 槽位），不要传 tasks。"
     "已有调查批要按结论修码：去掉 playbook，手写 tasks 并设 continue_from_run_id。"
 )
 
@@ -46,10 +46,10 @@ HANDWRITTEN_TASKS_SKELETON = (
 )
 
 _EMPTY_DELEGATE_MSG = (
-    "delegate 缺 tasks/playbook：顶层放非空 `tasks`，"
-    "或具名 `playbook`/`playbook_id`（+ playbook_args）。"
-    f"手写可抄：{HANDWRITTEN_TASKS_SKELETON}"
-    "（deliverable 可选）。"
+    "delegate 缺 tasks/playbook：默认顶层放非空 `tasks`，"
+    f"可抄：{HANDWRITTEN_TASKS_SKELETON}"
+    "（deliverable 可选）；"
+    "固化流水线时次选具名 `playbook`/`playbook_id`（+ playbook_args）。"
 )
 
 
@@ -96,9 +96,9 @@ def resolve_playbook_declaration(
     (legacy slot retained for call-site compat; field removed from CEO schema).
     ``error`` set ⇒ reject the call.
 
-    Free teaming may omit playbook entirely and pass ``tasks`` only. Named playbooks
-    still expand when declared. ``automation_delivery`` retained for call-site
-    compatibility (ignored — scene ledger removed).
+    Free teaming defaults to handwritten ``tasks`` (playbook may be omitted). Named
+    playbooks remain a shortcut when declared. ``automation_delivery`` retained for
+    call-site compatibility (ignored — scene ledger removed).
     ``user_message`` retained for call-site compatibility (no intent hard-lock).
     """
     _ = user_message  # call-site compat; soft guidance only (no intent hard-lock)

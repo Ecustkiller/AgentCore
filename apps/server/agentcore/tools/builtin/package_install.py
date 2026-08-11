@@ -318,8 +318,8 @@ def network_unavailable_message() -> str:
         "装包不会在无授权 / 无 chokepoint 时空转。\n"
         "可选降级：① 将命令执行轴设为 auto 后重试 test_run check=install "
         "→ build；② 走结构自检（graph_consistent / import 图）；"
-        "③ 本地绑定工作区后在本机 npm/pnpm/yarn 或 uv/pip/poetry install，"
-        "或 export_to_local。"
+        "③ export_to_local 或本机传统打开本地文件夹后 npm/pnpm/yarn / uv/pip/poetry "
+        "install（已是云端会话时【勿】再引导「导入到云」当修复）。"
     )
 
 

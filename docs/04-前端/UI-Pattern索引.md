@@ -67,6 +67,7 @@ node scripts/check-ui-tokens.mjs --src apps/mobile/src
 | StatusStrip Recovery 文字链 | 故意弱操作 |
 | 辩论赛事页 / 白板工具条 | 长期域例外，另一 IA/密度 |
 | StageCard | 推进 ≠ 裁决，独立 L3 |
+| 文件类型图标（Material） | SVG 内嵌扩展名品牌色；入口 `FileTypeIcon` / `DirTypeIcon` |
 
 ## 桌面 UI 统一
 

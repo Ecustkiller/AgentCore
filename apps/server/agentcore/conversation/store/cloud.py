@@ -38,7 +38,12 @@ from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 from agentcore.memory.consolidation import schedule_consolidation
-from agentcore.runtime.events import EventSink, FinishReason
+from agentcore.runtime.events import (
+    EventSink,
+    FinishReason,
+    workspace_snapshot_done,
+    workspace_snapshot_failed,
+)
 from agentcore.runtime.journal import (
     KIND_TURN_END,
     journal_entries_from_display_runs,
@@ -687,12 +692,20 @@ class CloudStore:
                     snapshot_id=ref.snapshot_id,
                     size_bytes=ref.size_bytes,
                 )
+                sink.emit(
+                    workspace_snapshot_done(
+                        snapshot_id=ref.snapshot_id,
+                        conversation_id=conversation_id,
+                        size_bytes=ref.size_bytes,
+                    )
+                )
             except Exception as e:
                 logger.warning(
                     "workspace.snapshot_failed",
                     conversation_id=conversation_id,
                     error=str(e),
                 )
+                sink.emit(workspace_snapshot_failed(conversation_id=conversation_id))
 
     async def _finalize_local(
         self,

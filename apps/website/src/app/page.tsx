@@ -23,11 +23,7 @@ import {
   THESIS,
   USECASES,
 } from "@/content/home";
-import {
-  DOWNLOAD_PAGE_PATH,
-  MOBILE_WEB_URL,
-  WEB_APP_URL,
-} from "@/lib/download";
+import { DOWNLOAD_PAGE_PATH, WEB_APP_URL } from "@/lib/download";
 
 /* 分区小标：等宽大写 + 一段短横线。白纸与暗纸各一套配色。 */
 function Kicker({
@@ -151,14 +147,6 @@ export default function Home() {
                   }}
                 >
                   {t(CTA.desktop)}
-                </a>
-                <a
-                  href={MOBILE_WEB_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-quiet max-sm:min-h-[3.25rem]"
-                >
-                  {t(CTA.mobileWeb)}
                 </a>
               </div>
               <p
@@ -612,14 +600,6 @@ export default function Home() {
                   }}
                 >
                   {t(CTA.desktop)}
-                </a>
-                <a
-                  href={MOBILE_WEB_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn btn-quiet px-7 py-4 max-sm:min-h-[3.25rem]"
-                >
-                  {t(CTA.mobileWeb)}
                 </a>
               </div>
             </Reveal>

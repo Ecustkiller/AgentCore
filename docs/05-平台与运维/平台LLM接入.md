@@ -24,7 +24,7 @@ skip_if:
 
 ## 二、模型与凭据解析
 
-**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（null = 账号默认；**活引用**）。**元数据事实源** = `llm/catalog.py`（上架集）+ `llm/model_metadata.py`（展示 enrichment）；`model_profiles` 只做组合 CRUD / expand，系统预置 = 对 catalog 可见上架集的 uuid5 投影（`uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID）。逻辑默认 = `PLATFORM_MODEL` 对应预置（须在上架集内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交——定案权威 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
+**模型组合**：CRUD `/v1/users/me/llm-model-profiles`；会话只认 `model_profile_id`（**新建拍快照**：create 写入当时账号默认或客户端所选 uuid；改账号默认不改旧会话）。存量 `null` 仍按账号默认展开（兼容活跟随）。PATCH 显式 `null` = 再钉当时默认（非清成活跟随）。设默认只在设置 / `PUT …/default`；输入框 picker 只选具体组合。**元数据事实源** = `llm/catalog.py`（上架集）+ `llm/model_metadata.py`（展示 enrichment）；`model_profiles` 只做组合 CRUD / expand，系统预置 = 对 catalog 可见上架集的 uuid5 投影（`uuid5(…, agentcore:platform-preset:{model_id})`，无硬编码产品 UUID）。逻辑默认 = `PLATFORM_MODEL` 对应预置（须在上架集内）否则 allowlist 首个。明确不做：质量档矩阵、账号级角色→模型矩阵、输入框双 picker /「跟随账号默认」行。✅ **Per-worker 节点显式覆盖**（执行链 + sidecar proxy；确认面不提供人改模）与组合槽正交——定案权威 → [编排器 · Per-worker 模型覆盖](/docs/03-AI核心/编排器与CEO主Agent.md#per-worker-模型覆盖abc-同一功能)。
 
 **识图槽 `vision`（可选）**：与 main **独立**，空 **不** follow main。有槽 → 用该槽凭据建独立 `VisionReader`（BYOK 填槽即可，不因 `billing_mode=byok` 关死）。槽空 → 仅当 `billing_mode=platform` 且 `VISION_API_KEY`/`VISION_BASE_URL` 齐全时走运维兜底（默认 `kimi-k2.5`，不上架 `PLATFORM_MODELS`）。
 

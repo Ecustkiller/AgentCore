@@ -68,8 +68,9 @@ async def snapshot_local(
 
     Issues a single ``ARCHIVE`` op over the channel (wide deadline — packing a repo
     is slow), unpacks the returned zip into a temp staging dir, and snapshots that
-    dir under the conversation's storage key with a ``handoff:<ts>`` label so it is
-    a kept version (never auto-pruned, alongside the cloud-mode manual versions).
+    dir under the conversation's storage key with a ``handoff:<ts>`` label (system
+    label: D+C capped + TTL'd, but pinned while an open handoff job still
+    references it as ``base_snapshot_id``).
 
     Reuses the channel transport and the snapshot machinery untouched. Raises a
     ``WorkspaceError`` if the desktop fails or drops (the channel maps it to a typed

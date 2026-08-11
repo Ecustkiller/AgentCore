@@ -362,6 +362,14 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     verdict: "impossible",
     reason: "同上 · 把云端改动合并回本地磁盘，手机无本地",
   },
+  workspace_snapshot_done: {
+    verdict: "simplified",
+    reason: "云回合后自动备份成功信号；手机暂无快照面板，fold no-op",
+  },
+  workspace_snapshot_failed: {
+    verdict: "simplified",
+    reason: "云回合后自动备份失败信号；手机暂无 toast/快照面板，fold no-op",
+  },
 
   // —— AI 小镇模拟（桌面 MVP，手机无模拟面）——
   "sim.agent_action": {

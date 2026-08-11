@@ -288,6 +288,13 @@ class LlmModelProfileService:
             views.append(self._view_row(row, is_default=False))
         return self._mark_default(views, default_id)
 
+    async def snapshot_default_profile_id(self, user_id: str) -> str | None:
+        """Profile id to pin on a new conversation (account default / logical preset)."""
+        for view in await self.list_profiles(user_id):
+            if view.is_default:
+                return view.id
+        return None
+
     async def get_profile(self, user_id: str, profile_id: str) -> ModelProfileView:
         if is_system_profile_id(profile_id):
             if not _system_preset_available(profile_id):
@@ -464,11 +471,12 @@ class LlmModelProfileService:
         row = await self._repo.get(profile_id, user_id=user_id)
         if row is None:
             raise NotFoundError("模型组合不存在")
-        # Conversations pointing here fall back to account default (NULL the pin).
+        # Conversations pinned here re-pin to account default (snapshot), not live NULL.
         from agentcore.db.repositories import ConversationRepository
 
-        await ConversationRepository(self._session).clear_model_profile_refs(
-            user_id, profile_id
+        fallback = default_id or system_profile_default_id()
+        await ConversationRepository(self._session).reassign_model_profile_refs(
+            user_id, profile_id, to_profile_id=fallback
         )
         deleted = await self._repo.delete(profile_id, user_id=user_id)
         if not deleted:

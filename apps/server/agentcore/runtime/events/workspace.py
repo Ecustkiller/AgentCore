@@ -42,6 +42,26 @@ def handoff_snapshot_done(*, snapshot_id: str, conversation_id: str, size_bytes:
     )
 
 
+def workspace_snapshot_done(
+    *, snapshot_id: str, conversation_id: str, size_bytes: int
+) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.WORKSPACE_SNAPSHOT_DONE,
+        payload={
+            "snapshot_id": snapshot_id,
+            "conversation_id": conversation_id,
+            "size_bytes": size_bytes,
+        },
+    )
+
+
+def workspace_snapshot_failed(*, conversation_id: str) -> SSEEvent:
+    return SSEEvent(
+        type=EventType.WORKSPACE_SNAPSHOT_FAILED,
+        payload={"conversation_id": conversation_id},
+    )
+
+
 def handoff_job_started(*, job_id: str, conversation_id: str, job_conversation_id: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.HANDOFF_JOB_STARTED,

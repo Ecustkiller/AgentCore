@@ -76,9 +76,7 @@ function Section({
   );
 }
 
-/** 头像: preview + pick-a-file upload + remove. The backend re-encodes any image to
- *  a square WebP, so we only pre-check type + size (mirroring the server) to fail
- *  fast; on success the refreshed user (cache-busted avatarUrl) syncs the store. */
+/** 头像: upload a square image or remove; backend re-encodes to square WebP. */
 function AvatarSection() {
   const user = useAuthStore((s) => s.user);
   const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
@@ -128,10 +126,7 @@ function AvatarSection() {
   };
 
   return (
-    <Section
-      title="头像"
-      description="点击上传新头像，建议使用清晰的正方形图片。"
-    >
+    <Section title="头像" description="上传清晰的正方形图片效果最佳。">
       <div className="flex items-center gap-4">
         <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xl font-medium text-muted-foreground">
           {user?.avatarUrl ? (

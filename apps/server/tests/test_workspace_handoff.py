@@ -109,7 +109,7 @@ async def test_snapshot_local_archives_and_snapshots(monkeypatch):
 
     assert ref.snapshot_id == "snap-1"
     assert provider.captured is not None
-    # A handoff snapshot is a kept version (手动留版本 semantics): never auto-pruned.
+    # Handoff uses a system label (D+C); open-job base_snapshot_id pins it from prune.
     assert provider.captured["label"].startswith("handoff:")
     # The staged dir mirrors the cloud workspace storage key (same list/restore).
     assert provider.captured["key"] == workspace_storage_key(

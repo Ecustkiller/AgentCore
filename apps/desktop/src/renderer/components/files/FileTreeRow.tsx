@@ -8,17 +8,11 @@ import {
   stageDirCaption,
   stageDirMeta,
 } from "@/lib/stageDirs";
-import {
-  ChevronDown,
-  ChevronRight,
-  FileText,
-  Folder,
-  FolderOpen,
-  Loader2,
-} from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type React from "react";
 import { InlineCreateRow, InlineInput, InlineRow } from "./FileTreeInline";
 import { FileTreeRowMenu } from "./FileTreeRowMenu";
+import { FileTypeIcon } from "./FileTypeIcon";
 import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
 import type { useFileTreeData } from "./useFileTreeData";
 
@@ -30,6 +24,8 @@ export interface FileTreeRowProps {
   source: FileSource;
   data: ReturnType<typeof useFileTreeData>;
   expanded: Set<string>;
+  /** When non-null, only render children whose path is in the set. */
+  filterVisible?: Set<string> | null;
   activePath: string | null;
   creating: { dir: string; kind: "file" | "dir" } | null;
   renaming: string | null;
@@ -78,7 +74,10 @@ export function FileTreeRow(props: FileTreeRowProps) {
     return (
       <li>
         {props.renaming === node.path ? (
-          <InlineRow indent={indent} icon={<FileText size={13} />}>
+          <InlineRow
+            indent={indent}
+            icon={<FileTypeIcon name={node.name} size={13} />}
+          >
             <InlineInput
               initial={node.name}
               onSubmit={(v) => props.onSubmitRename(node.path, v)}
@@ -106,11 +105,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                     }}
                     className="h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal"
                   >
-                    <span className="w-[13px] shrink-0" aria-hidden="true" />
-                    <FileText
-                      size={13}
-                      className="shrink-0 text-muted-foreground"
-                    />
+                    <FileTypeIcon name={node.name} size={13} />
                     <span className="min-w-0 flex-1 truncate">{node.name}</span>
                   </Button>
                 </SimpleTooltip>
@@ -138,7 +133,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
   return (
     <li>
       {props.renaming === node.path ? (
-        <InlineRow indent={indent} icon={<Folder size={13} />}>
+        <InlineRow indent={indent} icon={null}>
           <InlineInput
             initial={node.name}
             onSubmit={(v) => props.onSubmitRename(node.path, v)}
@@ -202,17 +197,6 @@ export function FileTreeRow(props: FileTreeRowProps) {
                       className="shrink-0 text-muted-foreground"
                     />
                   )}
-                  {open ? (
-                    <FolderOpen
-                      size={13}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                  ) : (
-                    <Folder
-                      size={13}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                  )}
                   <span className="min-w-0 flex-1 truncate">{node.name}</span>
                   {stageCaption && (
                     <span
@@ -243,7 +227,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
           {status === "loading" && children === undefined && (
             <li
               className="flex items-center gap-1.5 py-1 text-xs text-muted-foreground"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + indentBase }}
             >
               <Loader2 size={12} className="animate-spin" />
               加载中…
@@ -252,7 +236,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
           {status === "error" && (
             <li
               className="py-1 text-xs text-destructive/80"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + indentBase }}
             >
               加载失败
             </li>
@@ -260,19 +244,24 @@ export function FileTreeRow(props: FileTreeRowProps) {
           {children?.length === 0 && !props.creating && (
             <li
               className="py-1 text-xs text-muted-foreground/60"
-              style={{ paddingLeft: (depth + 1) * 14 + 8 + 18 + indentBase }}
+              style={{ paddingLeft: (depth + 1) * 14 + 8 + indentBase }}
             >
               空文件夹
             </li>
           )}
-          {children?.map((child) => (
-            <FileTreeRow
-              key={child.path}
-              {...props}
-              node={child}
-              depth={depth + 1}
-            />
-          ))}
+          {children
+            ?.filter(
+              (child) =>
+                !props.filterVisible || props.filterVisible.has(child.path),
+            )
+            .map((child) => (
+              <FileTreeRow
+                key={child.path}
+                {...props}
+                node={child}
+                depth={depth + 1}
+              />
+            ))}
         </ul>
       )}
     </li>

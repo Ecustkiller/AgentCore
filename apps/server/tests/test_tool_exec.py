@@ -504,16 +504,40 @@ def test_unwrap_nested_delegate_arguments_success_and_no_false_positive():
     assert out2 is not None
     assert out2["playbook"] == "build_website"
 
+    # Narrow wrappers: parameters / input sole payload key (same salvage family).
+    via_params = {"parameters": {"tasks": inner_tasks}}
+    out_p = unwrap_nested_delegate_arguments(via_params)
+    assert out_p is not None and out_p["tasks"] == inner_tasks
+    via_input = {"input": json.dumps({"tasks": inner_tasks}, ensure_ascii=False)}
+    out_i = unwrap_nested_delegate_arguments(via_input)
+    assert out_i is not None and out_i["tasks"] == inner_tasks
+
     # Real top-level tasks + unrelated arguments → do not unwrap.
     mixed = {
         "tasks": inner_tasks,
         "arguments": json.dumps({"tasks": [{"role": "B", "task": "其他"}]}, ensure_ascii=False),
     }
     assert unwrap_nested_delegate_arguments(mixed) is None
+    # Top-level tasks + parameters wrapper → no unwrap.
+    assert (
+        unwrap_nested_delegate_arguments(
+            {"tasks": inner_tasks, "parameters": {"tasks": [{"role": "B", "task": "x"}]}}
+        )
+        is None
+    )
 
     # Empty / garbage inner → no unwrap.
     assert unwrap_nested_delegate_arguments({"arguments": "{not-json"}) is None
     assert unwrap_nested_delegate_arguments({"arguments": {"coordinate": True}}) is None
+    assert unwrap_nested_delegate_arguments({"parameters": {"coordinate": True}}) is None
+    assert unwrap_nested_delegate_arguments({"input": {"coordinate": True}}) is None
+    # Two wrappers at once → no unwrap (ambiguous).
+    assert (
+        unwrap_nested_delegate_arguments(
+            {"arguments": {"tasks": inner_tasks}, "parameters": {"tasks": inner_tasks}}
+        )
+        is None
+    )
 
 
 async def test_execute_tools_salvages_handoff_bare_next_steps():

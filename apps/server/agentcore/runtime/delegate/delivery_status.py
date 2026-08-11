@@ -42,9 +42,11 @@ handoff 不硬降档。``requires_draft_ack`` 扩至 ``evidence_deficit`` /
 折叠语义：同 ``execution_id`` 保最新——反映最近一批委派的对账（多批场景下 FileArtifactsCard
 仍是全量文件清单，本事件承载「诚实对账」而非全量枚举）。
 
-严重度：``severity=warning``（待核实/示例自注/交接备注等）不单独撑起 partial/blocked，
-仅有 warning 时 state=``notes``（用户面静默）；blocking 缺口才标「部分未满足 / 未满足」。
-成篇未写完改由对话框接着说——不再发 ``continue_writing`` 一键按钮。
+严重度：``severity=warning``（示例/虚构自注 / 路径建议 / 交接备注等）不单独撑起
+partial/blocked。轻 B：无 blocking 且 warnings **除去** ``unverified_note`` 后为空、
+且已有 ``delivered_files`` → state=``delivered``（gaps 仍可保留 soft 行）；若还有
+``path_hint`` 或其他 soft reason → 仍 ``notes``。blocking 缺口才标「部分未满足 /
+未满足」。成篇未写完改由对话框接着说——不再发 ``continue_writing`` 一键按钮。
 """
 
 from __future__ import annotations
@@ -156,6 +158,7 @@ _SOFT_REMINDER_MARKERS = (
     "不阻断验收",
     "未核实/示例自注",
     "待核实/示例自注",
+    "示例/虚构自注",
     "含未替换骨架占位",
     "篇幅提醒（软）",
     "素材覆盖提醒（软）",
@@ -978,8 +981,8 @@ def build_delivery_status(
     blocking = [g for g in gaps if _is_blocking(g)]
     warnings = [g for g in gaps if not _is_blocking(g)]
 
-    # 待用户操作：① 无执行环境 → 优先引导导入/连 Git（wire kind 仍可 bind_local_folder；
-    #    本机传统合法非默认）；
+    # 待用户操作：① 无执行环境 → 按会话 location 诚实分流（已在云≠再导入到云；
+    #    wire kind 仍可 bind_local_folder；本机传统合法非默认）；
     # ② 整页 QA 预算 defer → 一键续派验收；
     # ③ 额度 SKIPPED 未跑节点 → 续跑入口。
     # 成篇未写完不再挂 continue_writing——改由对话框接着说。
@@ -1002,6 +1005,9 @@ def build_delivery_status(
     if skipped_roles_unique:
         actions.append(_continue_skipped_runs_action(skipped_roles_unique))
     if backend is not None and blocking:
+        from agentcore.runtime.delegate.exec_env_remediation import (
+            cloud_exec_unavailable_delivery_action,
+        )
         from agentcore.tools.builtin import code_execution_enabled_for
 
         needs_execution = (
@@ -1011,15 +1017,8 @@ def build_delivery_status(
             or any("code_execute" in str(g.get("description") or "") for g in blocking)
         )
         if needs_execution and not code_execution_enabled_for(backend):
-            actions.append(
-                {
-                    "kind": "bind_local_folder",
-                    "description": (
-                        "本回合为云端会话、未装配执行环境：**推荐** Composer「导入到云 / 连接 Git」"
-                        "把工程进云后再跑；本机传统（打开本地文件夹）合法非默认，≠离线。"
-                    ),
-                }
-            )
+            actions.append(cloud_exec_unavailable_delivery_action(backend))
+
 
     # 云端已交付文件：即使用户面 state=delivered，也提示导出到本机（找不到文件夹）。
     # 与 bind_local_folder 可并存但语义不同（导出产物 ≠ 绑定执行环境）。
@@ -1044,7 +1043,14 @@ def build_delivery_status(
     if not blocking and not warnings:
         state = "delivered"
     elif not blocking and warnings:
-        state = "notes"
+        # 轻 B：仅 soft 自注（unverified_note）不降档；path_hint 等仍 notes。
+        non_self_note = [
+            g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE
+        ]
+        if not non_self_note and delivered:
+            state = "delivered"
+        else:
+            state = "notes"
     elif delivered:
         state = "partial"
     else:

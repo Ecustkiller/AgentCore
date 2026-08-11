@@ -23,6 +23,7 @@ import {
   formatAssistantErrorMessage,
   isEmptyResponseUserSurface,
   syntheticErrorForEmptyFailure,
+  syntheticErrorForHardFailure,
   visibleMessageText,
 } from "@/lib/errors";
 import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
@@ -124,10 +125,18 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   const finishReason = !message.isStreaming
     ? (message.finishReason ?? message.runs?.finishReason)
     : undefined;
+  // Hard fail unique surface = red bar. Empty failures keep empty synthetic;
+  // body + finishReason=error without message.error must still synthesize
+  // (chip no longer paints「调用失败」).
   const displayError =
     message.error ??
-    (!message.isStreaming && !(message.content ?? "").trim()
-      ? syntheticErrorForEmptyFailure(finishReason, message.runs?.error?.code)
+    (!message.isStreaming
+      ? !(message.content ?? "").trim()
+        ? syntheticErrorForEmptyFailure(
+            finishReason,
+            message.runs?.error?.code,
+          )
+        : syntheticErrorForHardFailure(finishReason, message.runs?.error)
       : null);
   const errorAction = displayError
     ? errorActionForCode(displayError.code, {

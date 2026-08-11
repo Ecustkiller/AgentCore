@@ -11,6 +11,7 @@ import {
   isEmptyResponseUserSurface,
   resetSessionConnectivityFailures,
   syntheticErrorForEmptyFailure,
+  syntheticErrorForHardFailure,
   visibleMessageText,
 } from "@/lib/errors";
 import { afterEach, describe, expect, it } from "vitest";
@@ -119,13 +120,41 @@ describe("LLM_RATE_LIMIT connectivity", () => {
 });
 
 describe("FinishReasonChip error meta", () => {
-  it("includes an error entry", () => {
+  it("keeps error label for footer; chip itself must not paint it", () => {
     expect(FINISH_REASON_META.error).toMatchObject({ label: "调用失败" });
   });
 
   it("degraded default is 空响应收尾 (no 降级完成)", () => {
     expect(FINISH_REASON_META.degraded.label).toBe("空响应收尾");
     expect(FINISH_REASON_META.degraded.label).not.toContain("降级完成");
+  });
+});
+
+describe("syntheticErrorForHardFailure", () => {
+  it("synthesizes when finishReason=error even if body exists", () => {
+    expect(syntheticErrorForHardFailure("error")).toEqual({
+      code: "LLM_ERROR",
+      message: "模型调用失败，请重试。",
+    });
+  });
+
+  it("prefers runs.error message when present", () => {
+    expect(
+      syntheticErrorForHardFailure("error", {
+        code: "LLM_KEY_INVALID",
+        message: "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+      }),
+    ).toEqual({
+      code: "LLM_KEY_INVALID",
+      message:
+        "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+    });
+  });
+
+  it("returns null for soft finishes", () => {
+    expect(syntheticErrorForHardFailure("degraded")).toBeNull();
+    expect(syntheticErrorForHardFailure("max_rounds")).toBeNull();
+    expect(syntheticErrorForHardFailure(undefined)).toBeNull();
   });
 });
 

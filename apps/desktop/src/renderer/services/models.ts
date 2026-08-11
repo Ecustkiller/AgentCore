@@ -104,7 +104,7 @@ export function setLastUsedProfileId(profileId: string): void {
   uiSet(LAST_USED_PROFILE_LEAF, id);
 }
 
-/** Clear last-used profile (e.g. new chat explicitly chose「跟随账号默认」). */
+/** Clear last-used profile preference (local UI storage). */
 export function clearLastUsedProfileId(): void {
   uiRemove(LAST_USED_PROFILE_LEAF);
 }

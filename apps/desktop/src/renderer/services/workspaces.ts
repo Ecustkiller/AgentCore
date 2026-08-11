@@ -145,6 +145,15 @@ export async function wsMoveFile(
   await api.post(`${wsPath(wsId)}/move`, { src, dst });
 }
 
+/** Copy a workspace file or directory tree (`AlreadyExists` → 422). */
+export async function wsCopyFile(
+  wsId: string,
+  src: string,
+  dst: string,
+): Promise<void> {
+  await api.post(`${wsPath(wsId)}/copy`, { src, dst });
+}
+
 /** Create a workspace directory (parents created; `AlreadyExists` → 422). */
 export async function wsCreateDir(wsId: string, path: string): Promise<void> {
   await api.post(`${wsPath(wsId)}/dirs`, { path });

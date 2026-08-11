@@ -109,12 +109,16 @@ export interface WorkspaceFile {
  */
 const PREVIEW_MAX_BYTES = 256 * 1024;
 /**
- * Cloud-only network hard cap for non-image preview (no Range; whole-body fetch).
+ * Cloud-only network hard cap for non-image / non-PDF preview (no Range; whole-body fetch).
  * Local IPC has no peer — intentional asymmetry.
  */
 const PREVIEW_HARD_BYTES = 5 * 1024 * 1024;
 /** Inline image preview cap — aligned with desktop IPC `IMAGE_PREVIEW_CAP`. */
 const IMAGE_PREVIEW_CAP = 10 * 1024 * 1024;
+/**
+ * Inline PDF preview cap — aligned with desktop IPC `PDF_PREVIEW_CAP`（15 MiB，略高于图帽）。
+ */
+const PDF_PREVIEW_CAP = 15 * 1024 * 1024;
 
 /** Ext → MIME for when the server falls back to `application/octet-stream`. */
 const IMAGE_MIME_BY_EXT: Record<string, string> = {
@@ -129,13 +133,23 @@ const IMAGE_MIME_BY_EXT: Record<string, string> = {
   ".avif": "image/avif",
 };
 
+const PDF_MIME = "application/pdf";
+
+const OVERSIZE_IMAGE_REASON =
+  "图片过大（超过 10MB），请下载或用系统默认程序打开";
+const OVERSIZE_PDF_REASON =
+  "PDF 过大（超过 15MB），请下载或用系统默认程序打开";
+const BINARY_PREVIEW_REASON =
+  "无法在面板内预览，请下载或用系统默认程序打开";
+
 /**
  * The outcome of a preview read: decodable text (possibly truncated), an inline
- * image, or a reason it can't be shown inline (binary / too big → download).
+ * image / PDF, or a reason it can't be shown inline (binary / too big → download).
  */
 export type FilePreview =
   | { kind: "text"; text: string; truncated: boolean }
   | { kind: "image"; dataUrl: string; mime: string; size: number }
+  | { kind: "pdf"; dataUrl: string; mime: string; size: number }
   | { kind: "binary"; mime?: string; size?: number; reason?: string }
   | { kind: "too-large" };
 
@@ -156,6 +170,17 @@ function resolveImageMime(
   return IMAGE_MIME_BY_EXT[extOfPath(path)] ?? null;
 }
 
+/** Prefer `Content-Type: application/pdf`; else `.pdf` path extension. */
+function resolvePdfMime(
+  contentType: string | null,
+  path?: string,
+): string | null {
+  const ct = (contentType ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+  if (ct === PDF_MIME || ct === "application/x-pdf") return PDF_MIME;
+  if (extOfPath(path) === ".pdf") return PDF_MIME;
+  return null;
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
   const chunk = 0x8000;
@@ -168,8 +193,8 @@ function bytesToBase64(bytes: Uint8Array): string {
 /**
  * Decode a raw file response into an in-panel preview result.
  *
- * Images use `Content-Type` / path extension → `kind:"image"` (data URL), matching
- * local IPC + mobile. Other bodies are UTF-8–probed; NUL / high replacement ratio
+ * Images / PDFs use `Content-Type` / path extension → inline data URL, matching
+ * local IPC. Other bodies are UTF-8–probed; NUL / high replacement ratio
  * → binary. Shared by conversation-scoped and ws-id-scoped preview reads.
  */
 export async function decodePreviewResponse(
@@ -177,10 +202,8 @@ export async function decodePreviewResponse(
   opts?: { path?: string },
 ): Promise<FilePreview> {
   const declared = Number(res.headers.get("content-length") ?? "0");
-  const imageMime = resolveImageMime(
-    res.headers.get("content-type"),
-    opts?.path,
-  );
+  const contentType = res.headers.get("content-type");
+  const imageMime = resolveImageMime(contentType, opts?.path);
 
   if (imageMime) {
     if (declared > IMAGE_PREVIEW_CAP) {
@@ -188,7 +211,7 @@ export async function decodePreviewResponse(
         kind: "binary",
         mime: imageMime,
         size: declared,
-        reason: "图片过大，暂不预览",
+        reason: OVERSIZE_IMAGE_REASON,
       };
     }
     const bytes = new Uint8Array(await res.arrayBuffer());
@@ -197,13 +220,40 @@ export async function decodePreviewResponse(
         kind: "binary",
         mime: imageMime,
         size: bytes.length,
-        reason: "图片过大，暂不预览",
+        reason: OVERSIZE_IMAGE_REASON,
       };
     }
     return {
       kind: "image",
       dataUrl: `data:${imageMime};base64,${bytesToBase64(bytes)}`,
       mime: imageMime,
+      size: bytes.length,
+    };
+  }
+
+  const pdfMime = resolvePdfMime(contentType, opts?.path);
+  if (pdfMime) {
+    if (declared > PDF_PREVIEW_CAP) {
+      return {
+        kind: "binary",
+        mime: pdfMime,
+        size: declared,
+        reason: OVERSIZE_PDF_REASON,
+      };
+    }
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    if (bytes.length > PDF_PREVIEW_CAP) {
+      return {
+        kind: "binary",
+        mime: pdfMime,
+        size: bytes.length,
+        reason: OVERSIZE_PDF_REASON,
+      };
+    }
+    return {
+      kind: "pdf",
+      dataUrl: `data:${pdfMime};base64,${bytesToBase64(bytes)}`,
+      mime: pdfMime,
       size: bytes.length,
     };
   }
@@ -218,7 +268,9 @@ export async function decodePreviewResponse(
 
   const probe = Math.min(slice.length, 8192);
   for (let i = 0; i < probe; i++) {
-    if (slice[i] === 0) return { kind: "binary" };
+    if (slice[i] === 0) {
+      return { kind: "binary", reason: BINARY_PREVIEW_REASON };
+    }
   }
 
   const text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
@@ -227,7 +279,9 @@ export async function decodePreviewResponse(
   for (let i = 0; i < scan; i++) {
     if (text.charCodeAt(i) === 0xfffd) replacements++;
   }
-  if (scan > 0 && replacements / scan > 0.1) return { kind: "binary" };
+  if (scan > 0 && replacements / scan > 0.1) {
+    return { kind: "binary", reason: BINARY_PREVIEW_REASON };
+  }
 
   return { kind: "text", text, truncated };
 }

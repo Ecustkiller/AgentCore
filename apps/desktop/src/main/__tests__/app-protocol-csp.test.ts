@@ -3,6 +3,7 @@ import {
   apiOriginForCsp,
   connectSrcForCsp,
   decodeAppRelativePath,
+  frameSrcForCsp,
 } from "../app-protocol-csp";
 
 describe("decodeAppRelativePath（app:// pathname）", () => {
@@ -38,6 +39,17 @@ describe("connectSrcForCsp（失败收紧）", () => {
     expect(directive).not.toMatch(/\bhttp:/);
     expect(directive).not.toMatch(/\bws:/);
     expect(directive).not.toMatch(/\bwss:/);
+  });
+});
+
+describe("frameSrcForCsp（PDF iframe，勿过度放宽）", () => {
+  it("放行 self + blob: + data:，不含 https: / *", () => {
+    const directive = frameSrcForCsp();
+    expect(directive).toBe("frame-src 'self' blob: data:");
+    expect(directive).toMatch(/\bblob:/);
+    expect(directive).toMatch(/\bdata:/);
+    expect(directive).not.toMatch(/\bhttps:/);
+    expect(directive).not.toMatch(/\*/);
   });
 });
 

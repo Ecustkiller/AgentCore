@@ -1,7 +1,15 @@
 import { logEvent } from "@/lib/log";
+import { notifyWarning } from "@/lib/toast";
 import { performWorkspaceOp } from "@/services/workspaceOps";
+import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
-import type { SSEEvent, WorkspaceOpRequiredPayload } from "@/types/events";
+import { useSidePanelStore } from "@/stores/sidePanel";
+import type {
+  SSEEvent,
+  WorkspaceOpRequiredPayload,
+  WorkspaceSnapshotDonePayload,
+  WorkspaceSnapshotFailedPayload,
+} from "@/types/events";
 import type { DispatchContext } from "../types";
 
 export function handleWorkspaceEvent(
@@ -28,6 +36,28 @@ export function handleWorkspaceEvent(
         args_keys: Object.keys(args).sort(),
       });
       void performWorkspaceOp(payload, ctx.conversationId);
+      return true;
+    }
+    case "workspace_snapshot_done": {
+      const payload = event.payload as WorkspaceSnapshotDonePayload;
+      const conversationId = payload.conversation_id || ctx.conversationId;
+      useAutoSnapshotStore.getState().clearFailed(conversationId);
+      return true;
+    }
+    case "workspace_snapshot_failed": {
+      const payload = event.payload as WorkspaceSnapshotFailedPayload;
+      const conversationId = payload.conversation_id || ctx.conversationId;
+      useAutoSnapshotStore.getState().markFailed(conversationId);
+      notifyWarning("本回合自动备份失败", {
+        description: "回合已完成；重要节点请手动留版本。",
+        action: {
+          label: "查看快照",
+          onClick: () => {
+            useSidePanelStore.getState().showWorkspace();
+            useAutoSnapshotStore.getState().requestOpenSnapshots(conversationId);
+          },
+        },
+      });
       return true;
     }
     default:

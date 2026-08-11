@@ -14,7 +14,6 @@ import {
   resolveDefaultProfile,
 } from "@/services/llmModelProfiles";
 import {
-  clearLastUsedProfileId,
   getLastUsedProfileId,
   setLastUsedProfileId,
 } from "@/services/models";
@@ -26,19 +25,18 @@ import {
   ChevronDown,
   Layers,
   Loader2,
-  RotateCcw,
   Settings2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 /**
- * 输入框「模型组合」选择器 — 只选组合 +「跟随账号默认」，不做裸模型列表。
+ * 输入框「模型组合」选择器 — 只选具体组合，不做裸模型列表。
  *
  * 数据源：`GET /v1/users/me/llm-model-profiles`。选择即写：已有会话
- * `PATCH … model_profile_id`；新会话先记草稿 + last_profile_id，首发建会话时继承。
- * 传「跟随账号默认」清除覆盖（`null`）。触发器单行只显示组合名（与同排徽章等高），
- * 主 · Worker 摘要在 tooltip 与下拉每一行里。
+ * `PATCH … model_profile_id`；新会话先记草稿 + last_profile_id，首发
+ * `POST /v1/conversations` 带 `model_profile_id` 拍快照。触发器单行只显示组合名
+ * （与同排徽章等高），主 · Worker 摘要在 tooltip 与下拉每一行里。
  */
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
@@ -125,9 +123,9 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
 
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
-  /** New-chat draft: unset → fall back to last-used; follow → explicit account default; profile → pick. */
+  /** New-chat draft: unset → fall back to last-used / account default display; profile → pick. */
   const [draft, setDraft] = useState<
-    { kind: "unset" } | { kind: "follow" } | { kind: "profile"; id: string }
+    { kind: "unset" } | { kind: "profile"; id: string }
   >({ kind: "unset" });
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -170,14 +168,13 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
   const suggestionId = isNewChat
     ? draft.kind === "profile"
       ? draft.id
-      : draft.kind === "follow"
-        ? null
-        : (validLastUsed ?? null)
+      : (validLastUsed ?? null)
     : null;
 
-  /** Explicit pick (override / draft / last-used); null = follow account default. */
+  /** Session / draft profile id; null → show account default name (no live-follow entry). */
   const selectedId = overrideId ?? suggestionId;
-  const followingDefault = !selectedId;
+  /** Highlight which row is active; fall back to account default when none chosen yet. */
+  const highlightId = selectedId ?? accountDefault?.id ?? null;
 
   const displayProfile = useMemo(() => {
     if (selectedId) {
@@ -226,28 +223,6 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
     }
   };
 
-  const clearOverride = async () => {
-    if (disabled || pending) return;
-    setOpen(false);
-    if (!conversationId) {
-      setDraft({ kind: "follow" });
-      clearLastUsedProfileId();
-      return;
-    }
-    setPending(true);
-    try {
-      const saved = await setConversationModelProfile(conversationId, null);
-      patchConversationCache(conversationId, {
-        modelProfileId: saved.modelProfileId ?? null,
-      });
-      notifySuccess("已跟随账号默认组合");
-    } catch (e) {
-      notifyError(e, "重置模型组合失败");
-    } finally {
-      setPending(false);
-    }
-  };
-
   if (isLoading && !displayProfile) {
     return (
       <span className="inline-flex h-8 items-center gap-1 px-2 text-xs text-muted-foreground">
@@ -257,9 +232,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
   }
 
   const label = displayProfile?.name ?? "选择组合";
-  const hint = followingDefault
-    ? "跟随账号默认组合（当前回合起生效）"
-    : "切换本会话使用的模型组合（当前回合起生效）";
+  const hint = "切换本会话使用的模型组合（当前回合起生效）";
   // 单行 chip 与同排徽章对齐，主·Worker 摘要退到 tooltip（下拉每行仍常驻）。
   const tooltip = summary ? (
     <span className="flex flex-col gap-0.5">
@@ -346,28 +319,6 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
               </div>
             ) : (
               <>
-                <button
-                  type="button"
-                  onClick={() => void clearOverride()}
-                  aria-current={followingDefault ? "true" : undefined}
-                  className={`mb-1 flex w-full items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left text-sm ${
-                    followingDefault
-                      ? "bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-accent/50"
-                  }`}
-                >
-                  <RotateCcw size={13} className="shrink-0" />
-                  <span className="min-w-0 flex-1 truncate">跟随账号默认</span>
-                  {accountDefault && (
-                    <span className="truncate text-xs opacity-70">
-                      {accountDefault.name}
-                    </span>
-                  )}
-                  {followingDefault && (
-                    <Check size={14} className="shrink-0 text-primary" />
-                  )}
-                </button>
-
                 {systemProfiles.length > 0 && (
                   <div>
                     <GroupLabel>系统预置</GroupLabel>
@@ -375,7 +326,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
                       <ProfileRow
                         key={p.id}
                         profile={p}
-                        selected={selectedId === p.id}
+                        selected={highlightId === p.id}
                         summary={profileSlotSummary(p, catalogModels)}
                         onPick={applyProfile}
                       />
@@ -390,7 +341,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
                       <ProfileRow
                         key={p.id}
                         profile={p}
-                        selected={selectedId === p.id}
+                        selected={highlightId === p.id}
                         summary={profileSlotSummary(p, catalogModels)}
                         onPick={applyProfile}
                       />

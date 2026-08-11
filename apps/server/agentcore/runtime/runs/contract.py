@@ -18,8 +18,8 @@ A worker's product is accepted only if it satisfies its node's delivery spec
 
 占位符 / 未核实内容扫描（定案乙）：内容类落盘（HTML / Markdown / …）检出骨架标记
 （``400-XXX-XXXX``、``PLACEHOLDER``、``[占位]``、lorem ipsum 等）与自注（「示例数据」
-「待核实」等）一律写入 :class:`ContractVerdict` 的 ``warnings``（不阻断验收、不占满
-``contract.retry``）。已删字数/必含词字段不再被运行时消费。
+「虚构」等；「待核实」诚实标注不进 soft）一律写入 :class:`ContractVerdict` 的
+``warnings``（不阻断验收、不占满 ``contract.retry``）。已删字数/必含词字段不再被运行时消费。
 代码文件豁免 TODO/XXX 习惯。建站链 ``web_quality`` / ``web_seam`` 硬闸与引用/书目硬闸不变。
 
 引用 / 书目质量（台账接通时）：对内容类 ``artifact_contents`` 复用
@@ -77,7 +77,7 @@ class ContractVerdict:
 
     ok: bool
     failures: list[str] = field(default_factory=list)
-    # Soft signals (e.g.「示例数据」「待核实」) — never flip ``ok`` by themselves.
+    # Soft signals (e.g.「示例数据」「虚构」) — never flip ``ok`` by themselves.
     warnings: list[str] = field(default_factory=list)
     # Anti-slop / soft web-quality hits — flip ``ok`` for one rework shot, then the
     # executor demotes them to ``warnings`` (never hard-fail the run).

@@ -265,13 +265,16 @@ def test_core_teaches_split_criterion_over_count():
     assert "拿不准先少派" in hint
     assert "可分解" in hint and "质量面" in hint
     assert "finalize=true" in hint and "机械单步" in hint
-    # 结局分层：讨论开场 ask 摸清对齐；未明示成文宜 A parallel_brief；
+    # 结局分层：挡路才讨论开场 ask；未明示成文宜 A parallel_brief；
     # 明示成文可 research_report，但须成文梯度（档 2 轻成文勿满编；档 3 才满编）
     assert "结局分层" in hint
+    assert "ask·挡路" in hint or "挡路" in hint
     assert "讨论开场" in hint
     assert "先多角度摸清" in hint
     assert "写成文档" in hint
     assert "暂不派队" in hint
+    assert "对话本身" in hint  # 共创/审美等桌上结果已是对话 → 不发卡
+    assert "催收敛" in hint or "候选菜单" in hint
     assert "内部编制" in hint
     assert "明示成文不拦" in hint
     assert "parallel_brief" in hint

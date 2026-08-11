@@ -67,6 +67,12 @@ describe("FinishReasonChip", () => {
     const { container } = render(<FinishReasonChip reason="end_turn" />);
     expect(container.textContent).toBe("");
   });
+
+  it("never paints hard-failure error as a top chip", () => {
+    const { container } = render(<FinishReasonChip reason="error" />);
+    expect(container.textContent).toBe("");
+    expect(screen.queryByTestId("finish-reason-chip")).toBeNull();
+  });
 });
 
 describe("DeliveryShortfallHint", () => {

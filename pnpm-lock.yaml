@@ -120,6 +120,9 @@ importers:
       perfect-freehand:
         specifier: ^1.2.3
         version: 1.2.3
+      react-material-icon-theme:
+        specifier: 1.2.0
+        version: 1.2.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       recharts:
         specifier: ^3.9.2
         version: 3.9.2(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react-is@17.0.2)(react@19.2.7)(redux@5.0.1)
@@ -4103,6 +4106,13 @@ packages:
     peerDependencies:
       '@types/react': '>=18'
       react: '>=18'
+
+  react-material-icon-theme@1.2.0:
+    resolution: {integrity: sha512-nagDJHXw/nn+7K4HhasyH8yr3C3hJb6kBFHPnR5QIui4dySAHjTJP8u13rI42smS8PHQBhL+/TOZJfG4YYOGgw==}
+    engines: {node: '>=18.0.0', npm: '>=9.0.0'}
+    peerDependencies:
+      react: ^17.0.0 || ^18.0.0 || ^19.0.0
+      react-dom: ^17.0.0 || ^18.0.0 || ^19.0.0
 
   react-redux@9.3.0:
     resolution: {integrity: sha512-KQopgqFo/p/fgmAs5qz6p5RWaNAzq40WAu7fJIXnQpYxFPbJYtsJPWvGeF2rOBaY/kEuV77AVsX8TsQzKm+A/g==}
@@ -9295,6 +9305,11 @@ snapshots:
       vfile: 6.0.3
     transitivePeerDependencies:
       - supports-color
+
+  react-material-icon-theme@1.2.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+    dependencies:
+      react: 19.2.7
+      react-dom: 19.2.7(react@19.2.7)
 
   react-redux@9.3.0(@types/react@19.2.17)(react@19.2.7)(redux@5.0.1):
     dependencies:

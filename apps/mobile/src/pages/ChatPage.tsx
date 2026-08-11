@@ -11,7 +11,6 @@ import {
 } from "@/api/conversations";
 import { sendMidFlightMessage } from "@/api/midFlight";
 import {
-  clearLastModelProfileId,
   getLastModelProfileId,
   profileDisplayLabel,
   setLastModelProfileId,
@@ -1116,8 +1115,8 @@ export function ChatPage() {
     DEFAULT_PERMISSION_AXES,
   );
   const [permissionDraftTouched, setPermissionDraftTouched] = useState(false);
-  // 会话级模型组合 (对齐桌面): conversation override profile id (null = follow account default).
-  // A draft seeds from last-used profile；「＋」菜单打开 ModelPicker。
+  // 会话级模型组合 (定案 B · 拍快照): snapshotted profile id (null = draft / not yet chosen).
+  // A draft seeds from last-used profile；「＋」菜单打开 ModelPicker（只选具体组合）。
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -1531,7 +1530,7 @@ export function ChatPage() {
       setMoreOpen(false);
       setPermissionSheetOpen(false);
       // 新对话继承上次选择: seed the draft's profile from last-used (localStorage);
-      // applied to the conversation on first send (startDraft).
+      // passed as POST model_profile_id on first send (startDraft · 定案 B).
       setCurrentProfileId(getLastModelProfileId());
       setActiveTurn(null);
       // Seed draft axes from account default recipe (best-effort).
@@ -1876,13 +1875,12 @@ export function ChatPage() {
     composerInputRef.current?.focus();
   }
 
-  // 会话级模型组合: apply a profile from the ModelPicker. A concrete id is remembered as
-  // last-used; clearing (跟随账号默认) forgets it. An open conversation is PATCHed now;
-  // a draft just holds it locally until startDraft applies it.
-  async function onSelectProfile(profileId: string | null) {
+  // 会话级模型组合 (定案 B): apply a concrete profile from the ModelPicker. Remembered as
+  // last-used. An open conversation is PATCHed now; a draft holds it until startDraft
+  // snapshots it via POST model_profile_id.
+  async function onSelectProfile(profileId: string) {
     setPickerOpen(false);
-    if (profileId) setLastModelProfileId(profileId);
-    else clearLastModelProfileId();
+    setLastModelProfileId(profileId);
     if (!conversationId) {
       setCurrentProfileId(profileId);
       return;
@@ -1911,21 +1909,13 @@ export function ChatPage() {
     setError(null);
     setSending(true);
     try {
-      const id = await createConversation(
-        undefined,
-        permissionDraftTouched
+      // 定案 B: snapshot chosen / last-used profile at create (omit → server writes then-default).
+      const id = await createConversation(undefined, {
+        ...(permissionDraftTouched
           ? { permission_axes: permissionAxes }
-          : undefined,
-      );
-      // 新对话继承上次选择: apply the draft's chosen profile before its first turn streams
-      // (best-effort — a failure just falls back to the account default).
-      if (currentProfileId) {
-        try {
-          await setConversationModelProfile(id, currentProfileId);
-        } catch {
-          /* non-fatal: the first turn runs on the account default */
-        }
-      }
+          : {}),
+        ...(currentProfileId ? { model_profile_id: currentProfileId } : {}),
+      });
       pendingFirstSend = { id, text, attachments: outgoing };
       setInput("");
       setAttachments([]);
@@ -2541,7 +2531,7 @@ export function ChatPage() {
     }
   }
 
-  // 当前组合：conversation override → account default → placeholder（「＋」菜单展示）。
+  // 当前组合：会话快照 → account default 展示名 → placeholder（「＋」菜单展示）。
   const modelLabel =
     profileDisplayLabel(modelProfiles, currentProfileId) ?? "默认组合";
   const permissionLabel = axesShortLabel(permissionAxes);

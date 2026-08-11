@@ -1,7 +1,7 @@
 // 模型组合（llm-model-profiles）REST + shared cache for the mobile client.
 //
-// Chat picks a combination (or follows the account default); 设置·模型配置 manages CRUD
-// + default. Slot models still come from GET /v1/users/me/models.
+// Chat picks a concrete combination (定案 B · 新建拍快照；无「跟随账号默认」);
+// 设置·模型配置 manages CRUD + default. Slot models still come from GET /v1/users/me/models.
 import { apiFetch } from "@/api/client";
 import type { ModelCatalog } from "@/api/models";
 import type { components } from "@/types/api.generated";
@@ -129,7 +129,7 @@ export function defaultProfile(
   return list.data.find((p) => p.is_default) ?? list.data[0] ?? null;
 }
 
-/** Badge label: conversation override name, else account default name. */
+/** Badge label: conversation snapshot name, else account default name. */
 export function profileDisplayLabel(
   list: LlmModelProfileListResponse | null,
   conversationProfileId: string | null | undefined,

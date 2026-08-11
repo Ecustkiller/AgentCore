@@ -105,6 +105,8 @@ from agentcore.runtime.events.workspace import (
     handoff_job_started,
     handoff_snapshot_done,
     workspace_op_required,
+    workspace_snapshot_done,
+    workspace_snapshot_failed,
 )
 
 __all__ = [
@@ -149,6 +151,8 @@ __all__ = [
     "handoff_snapshot_done",
     "handoff_job_started",
     "handoff_apply_done",
+    "workspace_snapshot_done",
+    "workspace_snapshot_failed",
     "message_end",
     "error_event",
     "title_generated",

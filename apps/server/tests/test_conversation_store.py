@@ -672,6 +672,7 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
     from agentcore.storage import SnapshotRef
 
     captured: dict[str, Any] = {}
+    emitted: list[Any] = []
 
     class MsgRepo:
         def __init__(self, _s):
@@ -736,7 +737,7 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
         user_id="u1",
         folder_id="folder-42",
         backend=SimpleNamespace(location="server", dirty=True),
-        sink=SimpleNamespace(emit=lambda *_a, **_k: None),
+        sink=SimpleNamespace(emit=lambda event: emitted.append(event)),
         user_message="hi",
         llm_credentials=None,
         trace_id="d" * 32,
@@ -747,6 +748,82 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
     assert captured["user_id"] == "u1"
     assert captured["folder_id"] == "folder-42"
     assert captured["conversation_id"] == "c-folder"
+    assert [e.type.value for e in emitted] == ["workspace_snapshot_done"]
+    assert emitted[0].payload["snapshot_id"] == "snap-folder"
+
+
+async def test_finalize_cloud_auto_snapshot_failure_emits_sse(monkeypatch):
+    """Dirty cloud finalize still completes the turn and emits workspace_snapshot_failed."""
+    from agentcore.config import settings
+
+    emitted: list[Any] = []
+
+    class MsgRepo:
+        def __init__(self, _s):
+            pass
+
+        async def get_by_id(self, *_a, **_k):
+            return None
+
+        async def upsert_assistant(self, **kw):
+            return SimpleNamespace(id=kw["message_id"])
+
+        async def set_followups(self, *_a, **_k):
+            return None
+
+    class MetricsRepo:
+        def __init__(self, _s):
+            pass
+
+        async def record(self, **_kw):
+            return None
+
+    class CM:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_a):
+            return False
+
+    async def _boom_create_snapshot(**_kw):
+        raise RuntimeError("oss down")
+
+    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
+    monkeypatch.setattr(cloud_mod, "MessageRepository", MsgRepo)
+    monkeypatch.setattr(
+        "agentcore.billing.turn_ledger.reconcile_turn_cost_ledger",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(cloud_mod, "TurnMetricsRepository", MetricsRepo)
+    monkeypatch.setattr(cloud_mod, "persist_turn_journal", AsyncMock())
+    monkeypatch.setattr(cloud_mod, "schedule_consolidation", lambda _c: None)
+    monkeypatch.setattr(cloud_mod, "schedule_compaction_if_due", AsyncMock(return_value=None))
+    monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
+    monkeypatch.setattr(settings, "workspace_snapshot_enabled", True)
+    monkeypatch.setattr(cloud_mod, "create_snapshot", _boom_create_snapshot)
+
+    await CloudStore().finalize(
+        mode="cloud",
+        result={
+            "message_id": "m-snap-fail",
+            "content": "done",
+            "finish_reason": FinishReason.END_TURN,
+            "rounds": 1,
+        },
+        conversation_id="c-fail",
+        user_id="u1",
+        folder_id=None,
+        backend=SimpleNamespace(location="server", dirty=True),
+        sink=SimpleNamespace(emit=lambda event: emitted.append(event)),
+        user_message="hi",
+        llm_credentials=None,
+        trace_id="e" * 32,
+        turn_id="turn-snap-fail",
+        duration_ms=10,
+    )
+
+    assert [e.type.value for e in emitted] == ["workspace_snapshot_failed"]
+    assert emitted[0].payload["conversation_id"] == "c-fail"
 
 
 async def test_finalize_local_settles_empty_error_with_error_code(monkeypatch):

@@ -28,6 +28,14 @@ def fs_storage(tmp_path: Path, monkeypatch):
     """Redirect data_dir + force the filesystem backend, with a clean factory cache."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     monkeypatch.setattr(settings, "storage_backend", "filesystem")
+    # Unit FS tests have no DB pin rows; empty pins keep D+C prune assertions valid.
+    async def _no_pins(**_kwargs):
+        return set()
+
+    monkeypatch.setattr(
+        "agentcore.workspace.snapshots.collect_pinned_system_snapshot_ids",
+        _no_pins,
+    )
     build_storage_provider.cache_clear()
     try:
         yield
@@ -118,6 +126,104 @@ async def test_labeled_snapshots_survive_cap(fs_storage, monkeypatch):
     autos = [r for r in listed if not r.label]
     assert kept.snapshot_id in labels  # the kept version is never pruned
     assert len(autos) == 1  # autos still capped
+
+
+async def test_system_baseline_cap_prunes_oldest(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 2)
+    monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_system_snapshot_retention_days", 30)
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="base")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    refs = [
+        await create_snapshot(
+            user_id="u1",
+            folder_id=None,
+            conversation_id="base",
+            label=f"turn-baseline:m{i}",
+        )
+        for i in range(4)
+    ]
+    pin = await create_snapshot(
+        user_id="u1", folder_id=None, conversation_id="base", label="发版前"
+    )
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="base")
+    ids = {r.snapshot_id for r in listed}
+    assert pin.snapshot_id in ids
+    assert refs[-1].snapshot_id in ids
+    assert refs[-2].snapshot_id in ids
+    assert refs[0].snapshot_id not in ids
+    assert refs[1].snapshot_id not in ids
+
+
+async def test_system_export_cap_prunes_oldest(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 5)
+    monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 2)
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="exp")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    a = await create_snapshot(
+        user_id="u1", folder_id=None, conversation_id="exp", label="导出"
+    )
+    b = await create_snapshot(
+        user_id="u1", folder_id=None, conversation_id="exp", label="导出到本地"
+    )
+    c = await create_snapshot(
+        user_id="u1", folder_id=None, conversation_id="exp", label="合回到本机"
+    )
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="exp")
+    ids = {r.snapshot_id for r in listed}
+    assert b.snapshot_id in ids
+    assert c.snapshot_id in ids
+    assert a.snapshot_id not in ids
+
+
+async def test_system_prune_keeps_pinned_over_cap(fs_storage, monkeypatch):
+    """Pinned baseline / handoff ids survive D+C even when past the count cap."""
+    monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 1)
+    monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 1)
+
+    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="pin")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    old_base = await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="pin",
+        label="turn-baseline:old",
+    )
+    old_handoff = await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="pin",
+        label="handoff:2026-01-01T00:00:00Z",
+    )
+
+    async def _pins(**_kwargs):
+        return {old_base.snapshot_id, old_handoff.snapshot_id}
+
+    monkeypatch.setattr(
+        "agentcore.workspace.snapshots.collect_pinned_system_snapshot_ids",
+        _pins,
+    )
+
+    await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="pin",
+        label="turn-baseline:new",
+    )
+    await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="pin",
+        label="handoff:2026-01-02T00:00:00Z",
+    )
+
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="pin")
+    ids = {r.snapshot_id for r in listed}
+    assert old_base.snapshot_id in ids
+    assert old_handoff.snapshot_id in ids
 
 
 async def test_purge_snapshots_clears_history(fs_storage):

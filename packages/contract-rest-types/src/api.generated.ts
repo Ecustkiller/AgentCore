@@ -2581,6 +2581,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/{conversation_id}/workspace/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Workspace File
+         * @description Copy a file or directory within the conversation's scratch workspace.
+         */
+        post: operations["copy_workspace_file_v1_conversations__conversation_id__workspace_copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}/workspace/dirs": {
         parameters: {
             query?: never;
@@ -5213,6 +5233,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{ws_id}/copy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Copy Workspace File
+         * @description Copy a file or directory within a cloud workspace (recursive; no clobber).
+         */
+        post: operations["copy_workspace_file_v1_workspaces__ws_id__copy_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{ws_id}/dirs": {
         parameters: {
             query?: never;
@@ -7595,6 +7635,8 @@ export interface components {
             folder_id?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
+            /** Model Profile Id */
+            model_profile_id?: string | null;
             permission_axes?: components["schemas"]["PermissionAxesModel"] | null;
             /** Title */
             title?: string | null;
@@ -7770,8 +7812,9 @@ export interface components {
          * CreateSnapshotRequest
          * @description Take a manual snapshot of a conversation's workspace.
          *
-         *     A non-empty ``label`` marks a kept version (手动留版本) — a name the user
-         *     pins — vs. the automatic post-turn backups.
+         *     A non-empty ``label`` is a user-pinned kept version when it is not a system
+         *     label (turn-baseline / handoff / export·merge). Automatic post-turn backups
+         *     use ``label=null``.
          */
         CreateSnapshotRequest: {
             /** Label */
@@ -17123,6 +17166,45 @@ export interface operations {
             };
         };
     };
+    copy_workspace_file_v1_conversations__conversation_id__workspace_copy_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_workspace_dir_v1_conversations__conversation_id__workspace_dirs_post: {
         parameters: {
             query?: never;
@@ -23124,6 +23206,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CloneRepoResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    copy_workspace_file_v1_workspaces__ws_id__copy_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                ws_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MoveFileRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */

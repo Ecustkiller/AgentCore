@@ -47,6 +47,7 @@ AgentCore = 面向大众的 Multi-Agent AI 工作台，核心差异是**真正�
 
 ## 产品 AI 日志查询
 
-用户给出 32 位 hex ID / UUID → **先读 `conversation-logs.mdc`** 再动手，禁止在文件系统（含 `agent-transcripts/`）搜索这类 ID。
+用户给出 32 位 hex ID / UUID → **只读 `conversation-logs.mdc`** 再动手（勿整篇读分析指南、勿为单次查询派探子），禁止在文件系统（含 `agent-transcripts/`）搜索这类 ID。
+
 
 文档治理规范见 `doc-governance.mdc`。

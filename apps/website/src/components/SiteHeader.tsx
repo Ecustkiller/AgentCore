@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import BrandMark from "@/components/BrandMark";
 import { useLang } from "@/components/LangProvider";
 import { BRAND, CTA, NAV } from "@/content/home";
-import { DOWNLOAD_PAGE_PATH, MOBILE_WEB_URL, WEB_APP_URL } from "@/lib/download";
+import { DOWNLOAD_PAGE_PATH, WEB_APP_URL } from "@/lib/download";
 
 /**
  * 通栏 sticky 顶栏（适配旧站结构，不是照搬）。
@@ -135,17 +135,6 @@ export default function SiteHeader({ home = true }: { home?: boolean }) {
               {t(home ? CTA.desktop : CTA.backHome)}
             </a>
 
-            {home && (
-              <a
-                href={MOBILE_WEB_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="site-nav-link hidden md:inline-flex"
-              >
-                {t(CTA.mobileWeb)}
-              </a>
-            )}
-
             <a
               href={WEB_APP_URL}
               target="_blank"
@@ -214,18 +203,6 @@ export default function SiteHeader({ home = true }: { home?: boolean }) {
           {t(CTA.desktop)}
           <span className="font-mono text-[0.6875rem] text-ghost">
             {String(NAV.length + 1).padStart(2, "0")}
-          </span>
-        </a>
-        <a
-          href={MOBILE_WEB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={() => setMenuOpen(false)}
-          className="flex min-h-14 items-center justify-between border-b border-border-soft text-[1.25rem] font-medium text-foreground"
-        >
-          {t(CTA.mobileWeb)}
-          <span className="font-mono text-[0.6875rem] text-ghost">
-            {String(NAV.length + 2).padStart(2, "0")}
           </span>
         </a>
         <a
