@@ -1047,10 +1047,7 @@ def build_delivery_status(
         non_self_note = [
             g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE
         ]
-        if not non_self_note and delivered:
-            state = "delivered"
-        else:
-            state = "notes"
+        state = "delivered" if not non_self_note and delivered else "notes"
     elif delivered:
         state = "partial"
     else:

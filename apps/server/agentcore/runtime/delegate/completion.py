@@ -266,9 +266,8 @@ def execution_capability_warning(
     """
     if not (plan_suggests_code_verification(plan) or plan_mentions_binary_artifact(plan)):
         return None
-    from agentcore.tools.builtin import execution_class_enabled_for
-
     from agentcore.runtime.delegate.exec_env_remediation import exec_env_remediation_zh
+    from agentcore.tools.builtin import execution_class_enabled_for
 
     if execution_class_enabled_for(backend, permission_axes):
         if (

@@ -571,7 +571,8 @@ def delivery_status(
     already has — path-level ``file_acceptance`` / ``artifacts``, contract /
     handoff gaps (含 degraded 交接、artifacts 对账缺口、soft overlay notes),
     and derived user actions (如云端无执行环境 → ``bind_local_folder``). ``state`` ∈
-    delivered / partial / blocked / notes（软自注 unverified_note 不单独 → notes；path_hint 等仍 notes）.
+    delivered / partial / blocked / notes（软自注 unverified_note 不单独 → notes；
+    path_hint 等仍 notes）.
     ``artifacts`` = path acceptance rows；``delivered_files`` = accepted only.
     ``gaps`` items are ``{role, description}`` plus optional ``reason`` /
     ``severity`` / ``paths``；``actions`` 已知 kind 含 ``bind_local_folder`` /
