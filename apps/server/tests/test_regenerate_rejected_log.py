@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import UTC
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -124,7 +125,7 @@ class _ExpireBomb:
 @pytest.mark.asyncio
 async def test_regenerate_does_not_touch_orm_after_expire(monkeypatch):
     """回归：commit/expire 后再读 target.content → 线上 chat.regenerate_error。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     errors: list[tuple[str, dict]] = []
     expire_calls = {"n": 0}
@@ -157,7 +158,7 @@ async def test_regenerate_does_not_touch_orm_after_expire(monkeypatch):
         async def __aexit__(self, *_a):
             return False
 
-    created = datetime(2026, 8, 11, 1, 54, tzinfo=timezone.utc)
+    created = datetime(2026, 8, 11, 1, 54, tzinfo=UTC)
     conv = None
     target = None
 

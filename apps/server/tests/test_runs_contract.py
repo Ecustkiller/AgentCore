@@ -21,7 +21,8 @@ from agentcore.runtime.runs.contract import (
     needs_file_contents,
     node_has_dependents,
     strip_invalid_ledger_refs_from_surfaces,
-    synthesize_debrief)
+    synthesize_debrief,
+)
 from agentcore.runtime.runs.types import Deliverable, RunContract
 
 
@@ -252,7 +253,8 @@ def test_force_finalize_salvage_accepts_tool_inventory_without_widening_half_pro
     from agentcore.runtime.runs.contract import (
         has_salvageable_half_product,
         should_attempt_force_finalize_salvage,
-        transcript_has_tool_inventory)
+        transcript_has_tool_inventory,
+    )
 
     msgs = [
         LLMMessage(role="user", content="go"),
@@ -688,7 +690,8 @@ def test_leaf_did_substantial_work_and_worker_expects_handoff():
         LEAF_SUBSTANTIAL_BODY_CHARS,
         handoff_expectation_met,
         leaf_did_substantial_work,
-        worker_expects_handoff)
+        worker_expects_handoff,
+    )
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.runs.types import RunSpec
 

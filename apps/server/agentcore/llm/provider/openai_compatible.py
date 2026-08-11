@@ -1024,7 +1024,10 @@ class OpenAICompatibleProvider:
 
     def _require_chat_completions_body(self, content: bytes | str | None) -> None:
         """Reject 2xx HTML / non-JSON / non-chat shells that used to soft-green probe."""
-        text = (content.decode("utf-8", errors="replace") if isinstance(content, bytes) else (content or "")).strip()
+        if isinstance(content, bytes):
+            text = content.decode("utf-8", errors="replace").strip()
+        else:
+            text = (content or "").strip()
         if not text:
             raise LLMError(
                 f"{self._name} 连通测试返回空响应。"

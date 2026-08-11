@@ -9,11 +9,11 @@ import pytest
 
 from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 from agentcore.runtime.delegate.delivery_status import build_delivery_status
-from agentcore.runtime.delegate.playbook_declaration import (
-    resolve_playbook_declaration)
+from agentcore.runtime.delegate.playbook_declaration import resolve_playbook_declaration
 from agentcore.runtime.engine.governance import (
     maybe_inject_audit_hard_block,
-    should_audit_hard_block)
+    should_audit_hard_block,
+)
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.research_quality import (
@@ -29,7 +29,8 @@ from agentcore.runtime.runs.research_quality import (
     plan_is_literature_report_delivery,
     plan_signals_long_form_audit,
     promote_brief_to_deliverable,
-    upstream_body_floor_satisfied)
+    upstream_body_floor_satisfied,
+)
 from agentcore.runtime.runs.types import Deliverable, RunPhase, RunSpec, RunState
 from agentcore.tools.builtin.file_ops import FileDeleteTool, FileWriteTool
 from agentcore.tools.builtin.handoff import HandoffTool
@@ -43,10 +44,7 @@ _SKELETON_BODY = "# 报告\n\n## 一\n\n## 二\n\n<!-- OUTLINE -->\n"
 
 def test_deliverable_is_report_delivery_structured_or():
     """Report-post predicate: gates / citation / dossier paths; not bare form=files."""
-    from agentcore.workspace.stage_dirs import (
-        DEBATE_DIR,
-        RESEARCH_DIR,
-        REVIEWS_DIR)
+    from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
 
     assert deliverable_is_report_delivery(
         Deliverable(code_audit_gate=True, form="files", artifacts=["x.audit.json"])
@@ -121,7 +119,8 @@ def test_paper_parallel_merge_discipline_constant():
     from agentcore.runtime.runs.research_quality import (
         DEFAULT_RESEARCH_REPORT_ARTIFACT,
         PAPER_PARALLEL_MERGE_DISCIPLINE,
-        research_report_main_artifact)
+        research_report_main_artifact,
+    )
 
     assert "单主文件" in PAPER_PARALLEL_MERGE_DISCIPLINE
     assert "合并责任" in PAPER_PARALLEL_MERGE_DISCIPLINE
@@ -842,7 +841,8 @@ def test_named_review_without_files_not_elevated_playbook_review_lands():
     from agentcore.runtime.runs.playbooks import expand_playbook
     from agentcore.runtime.runs.research_quality import (
         INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
-        batch_declares_review_files)
+        batch_declares_review_files,
+    )
     from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
     assert not batch_declares_review_files(
