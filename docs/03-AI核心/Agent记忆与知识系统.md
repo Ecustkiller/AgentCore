@@ -14,6 +14,14 @@ skip_if:
 >
 > → 见代码：`apps/server/agentcore/memory/`、`workspace/indexing/`
 
+### Cursor 从哪进
+
+| 要改… | 去哪 | 勿当记忆入口 |
+|---|---|---|
+| 记忆/规则内容、落盘、巩固、探索画像、`remember` | `agentcore/memory/`（包 facade 已 re-export） | — |
+| 注入段序 / `ContextAssembler` / 工作区概览 | `runtime/context/` + 回合拼装 `runtime/resolve/`（含 `prompt/memory_rules.py`） | 勿在 assembler 写记忆策略或落盘 |
+| Run / delegate 执行 | `runtime/runs/` → [执行引擎](/docs/03-AI核心/执行引擎架构设计.md) | **不是**记忆域 |
+
 ---
 
 ## 一、分层
