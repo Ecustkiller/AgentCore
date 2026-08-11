@@ -120,7 +120,9 @@ export function DeleteMessageAction({
  * Assistant footer regenerate — always confirm (定案：对齐删除；截断历史+新贵回合).
  * Does not cover edit-and-resend on the user bubble (intentional edit path).
  */
-export function RegenerateMessageAction({ onRegenerate }: { onRegenerate: () => void }) {
+export function RegenerateMessageAction({
+  onRegenerate,
+}: { onRegenerate: () => void }) {
   const [confirming, setConfirming] = useState(false);
 
   if (confirming) {

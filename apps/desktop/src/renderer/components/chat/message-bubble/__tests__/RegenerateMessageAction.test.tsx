@@ -25,9 +25,7 @@ describe("RegenerateMessageAction", () => {
     const onRegenerate = renderAction();
     fireEvent.click(screen.getByRole("button", { name: "重新生成" }));
     expect(onRegenerate).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("button", { name: "确认重新生成" }),
-    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "确认重新生成" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
   });
 
@@ -44,8 +42,6 @@ describe("RegenerateMessageAction", () => {
     fireEvent.click(screen.getByRole("button", { name: "取消" }));
     expect(onRegenerate).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "重新生成" })).toBeTruthy();
-    expect(
-      screen.queryByRole("button", { name: "确认重新生成" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "确认重新生成" })).toBeNull();
   });
 });
