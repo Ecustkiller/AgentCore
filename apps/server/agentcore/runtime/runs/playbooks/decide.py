@@ -40,7 +40,10 @@ def compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
 
     eval_ids = [f"eval_{i}" for i in range(len(options))]
     tasks: list[dict[str, Any]] = []
-    for eid, opt in zip(eval_ids, options, strict=True):
+    for i, (eid, opt) in enumerate(zip(eval_ids, options, strict=True)):
+        # Distinct artifact scope so same-role parallel fan-out passes sibling_role
+        # (empty prose-only deliverable = whole-seat claim → hard reject).
+        artifact = f"evals/option-{i}.md"
         tasks.append(
             {
                 "id": eid,
@@ -48,8 +51,11 @@ def compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 "task": (
                     f"针对决策问题【{question}】，深入评估这一个选项：{opt}{crit_eval}。"
                     "给出它的优点 / 缺点 / 适用与不适用场景，只评这一个、保持客观。"
+                    f"完整评估须用 file_write 落盘到 `{artifact}`"
+                    "（内容=本选项完整评估，不是 handoff 摘要的复制）；"
+                    "handoff 结构化简报照旧，落盘是叠加、不得替代 handoff。"
                 ),
-                "deliverable": {"form": "prose"},
+                "deliverable": {"form": "files", "artifacts": [artifact]},
             }
         )
     tasks.append(
@@ -57,7 +63,8 @@ def compare_options(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
             "id": "summary",
             "role": "汇总分析师",
             "task": (
-                f"对照上游对各选项的评估，针对【{question}】给出横向对比{crit_sum}："
+                f"对照上游对各选项的评估（含 `evals/option-*.md` 落盘），"
+                f"针对【{question}】给出横向对比{crit_sum}："
                 "一张对比表 + 明确推荐及理由；若各选项各有适用场景，说清分别何时选谁。"
             ),
             "depends_on": eval_ids,
