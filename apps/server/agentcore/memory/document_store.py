@@ -4,10 +4,11 @@ The MVP long-term memory lived in per-user markdown files (:class:`FileMemorySto
 Document subsystem lands the terminal form: memory is now ``ai_maintained=true`` ``rule`` nodes
 in the single ``documents`` tree, addressed exactly as before through the ``MemoryStore`` seam —
 ``(user_id, path, scope)`` where ``path`` is a note's store-relative name ("画像.md",
-"主题/部署.md", "情景/<id>.md", "_memory_meta.json") and ``scope`` is the layer (``None`` =
-global, a ``folder_id`` = that project). Because every memory consumer (injection, the two-layer
-consolidation, the editor routes, ``remember`` / ``consult_memory``) depends only on this
-Protocol, swapping the backing here changes the base for the whole chain — 换底, not a rewrite.
+"主题/部署.md") and ``scope`` is the layer (``None`` = global, a ``folder_id`` = that
+project). Episodic digests and per-scope consolidation sidecar live in dedicated tables
+(``memory_episodes`` / ``memory_scope_states``), not this store. Because every semantic
+memory consumer depends only on this Protocol, swapping the backing here changes the base
+for the injectable chain — 换底, not a rewrite.
 
 Session strategy: when constructed with a bound ``session`` (the request DI path — routes) all
 ops use it, so they run in the caller's transaction / test schema. With no session (the default
@@ -26,7 +27,8 @@ in-process DB. Reads soft-degrade to empty + log; writes raise (no fake success)
 
 Prepare→assemble cache_only: when ``prepare_reads_cache_only`` is bound and an
 account ticket is present, list/load read only ``account_prepare_cache`` (miss →
-empty); save is a no-op so explore meta drift cannot sync-write on the TTFT path.
+empty); save is a no-op so explore fingerprint drift cannot sync-write semantic
+notes on the TTFT path (scope-state writes go through :class:`EpisodeStore`).
 """
 
 from __future__ import annotations
@@ -45,12 +47,10 @@ from agentcore.memory.always_quota import (
     notify_always_quota_exceeded,
 )
 from agentcore.memory.store import (
-    MEMORY_META_FILE,
     FileMemoryStore,
     MemoryFileMeta,
     MemoryScope,
     default_file_memory_store,
-    is_episodic_path,
     is_topic_path,
     memory_version,
 )
@@ -76,13 +76,11 @@ def _classify(path: str) -> tuple[str, str]:
 
     The always-injected core (偏好.md / 画像.md) and on-demand topics (主题/*.md) are ``rule``
     docs so they are the injectable / consultable memory (§5.2); topics are ``on_demand`` (name
-    rides the directory, not ``<rules>``). Episodic digests (情景/*.md) and the meta sidecar are
-    ``general`` — internal consolidation state, never injected, so they stay out of the rule set.
+    rides the directory, not ``<rules>``). Episodic digests and the meta sidecar no longer
+    live in the documents tree — they have dedicated tables.
     """
     if is_topic_path(path):
         return "rule", "on_demand"
-    if is_episodic_path(path) or path == MEMORY_META_FILE or not path.endswith(".md"):
-        return "general", "always"
     return "rule", "always"
 
 

@@ -16,8 +16,8 @@ Properties (照 §1.4 迁移先例):
 
 It reads the on-disk layout directly (``<base>/<user>/…`` global, ``<base>/<user>/_folders/
 <folder_id>/…`` project) rather than the store API so it can enumerate every user + scope,
-including project scopes whose only content is episodic digests / the meta sidecar (which the
-store's ``list`` deliberately hides).
+including project scopes whose only content is leftover episodic digests (which the
+store's ``list`` deliberately skips — those move via ``migrate_episodes``).
 """
 
 from __future__ import annotations
@@ -49,8 +49,16 @@ class DocumentMigrationStats:
 
 
 def _is_memory_note(rel: str) -> bool:
-    """Whether a scope-relative file is a memory note worth migrating (note or meta sidecar)."""
-    return rel.endswith(".md") or rel == MEMORY_META_FILE
+    """Whether a scope-relative file is a semantic memory note worth migrating.
+
+    Episodic digests and ``_memory_meta.json`` are consolidation-pipeline state —
+    migrated by ``migrate_episodes``, not into the documents tree.
+    """
+    from agentcore.memory.store import is_episodic_path
+
+    if is_episodic_path(rel) or rel == MEMORY_META_FILE:
+        return False
+    return rel.endswith(".md")
 
 
 def _scope_notes(scope_dir: Path, *, is_global: bool) -> list[tuple[str, str]]:

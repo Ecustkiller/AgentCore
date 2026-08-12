@@ -87,13 +87,19 @@ async def test_schedule_explore_refresh_noop_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refresh_from_snapshot_writes_nav_profile_and_clears_dirty(tmp_path):
+async def test_refresh_from_snapshot_writes_nav_profile_and_clears_dirty(tmp_path, monkeypatch):
+    from agentcore.memory.episode_store import InMemoryEpisodeStore
+
     store = FileMemoryStore(tmp_path)
+    ep_store = InMemoryEpisodeStore()
+    monkeypatch.setattr(
+        "agentcore.memory.episode_store.default_episode_store", lambda: ep_store
+    )
     uid = str(uuid4())
     folder = str(uuid4())
     await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- OldStack\n", scope=folder)
     await record_explore_closeout(
-        store,
+        ep_store,
         uid,
         folder,
         workspace_key=f"folder:{folder}",
@@ -102,12 +108,12 @@ async def test_refresh_from_snapshot_writes_nav_profile_and_clears_dirty(tmp_pat
     from agentcore.memory.episodic import load_scope_meta, save_scope_meta
 
     async def _mark_dirty() -> None:
-        meta = await load_scope_meta(store, uid, scope=folder)
+        meta = await load_scope_meta(ep_store, uid, scope=folder)
         meta.explore_fingerprint_dirty = True
-        await save_scope_meta(store, uid, meta, scope=folder)
+        await save_scope_meta(ep_store, uid, meta, scope=folder)
 
     await _mark_dirty()
-    meta = await load_scope_meta(store, uid, scope=folder)
+    meta = await load_scope_meta(ep_store, uid, scope=folder)
     assert meta.explore_fingerprint_dirty is True
 
     provider = _FakeProvider(
@@ -133,25 +139,31 @@ async def test_refresh_from_snapshot_writes_nav_profile_and_clears_dirty(tmp_pat
     assert "NewStack" in profile
     nav = await store.load(uid, NAVIGATION_MEMORY_FILE, scope=folder)
     assert "测试仓" in nav
-    meta = await load_scope_meta(store, uid, scope=folder)
+    meta = await load_scope_meta(ep_store, uid, scope=folder)
     assert meta.explore_fingerprint == "fp-new"
     assert meta.explore_fingerprint_dirty is False
 
 
 @pytest.mark.asyncio
-async def test_refresh_parse_failure_leaves_dirty(tmp_path):
+async def test_refresh_parse_failure_leaves_dirty(tmp_path, monkeypatch):
+    from agentcore.memory.episode_store import InMemoryEpisodeStore
+
     store = FileMemoryStore(tmp_path)
+    ep_store = InMemoryEpisodeStore()
+    monkeypatch.setattr(
+        "agentcore.memory.episode_store.default_episode_store", lambda: ep_store
+    )
     uid = str(uuid4())
     folder = str(uuid4())
     await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Go\n", scope=folder)
     await record_explore_closeout(
-        store, uid, folder, workspace_key=f"folder:{folder}", fingerprint="fp-old"
+        ep_store, uid, folder, workspace_key=f"folder:{folder}", fingerprint="fp-old"
     )
     from agentcore.memory.episodic import save_scope_meta
 
-    meta = await load_scope_meta(store, uid, scope=folder)
+    meta = await load_scope_meta(ep_store, uid, scope=folder)
     meta.explore_fingerprint_dirty = True
-    await save_scope_meta(store, uid, meta, scope=folder)
+    await save_scope_meta(ep_store, uid, meta, scope=folder)
 
     provider = _FakeProvider(content="not-json")
     ok = await refresh_project_explore_from_snapshot(
@@ -165,7 +177,7 @@ async def test_refresh_parse_failure_leaves_dirty(tmp_path):
         store=store,
     )
     assert ok is False
-    meta = await load_scope_meta(store, uid, scope=folder)
+    meta = await load_scope_meta(ep_store, uid, scope=folder)
     assert meta.explore_fingerprint_dirty is True
     assert meta.explore_fingerprint == "fp-old"
 

@@ -254,33 +254,6 @@ def _validate_production_security() -> None:
         )
 
 
-async def _run_document_memory_migration() -> None:
-    """Best-effort one-shot: copy file-backed long-term memory into the documents tree,
-    then hoist bare ``记忆/`` + top-level user rules into ``AgentCore/`` (§5.0 / §5.7).
-
-    Idempotent, per-note / per-scope best-effort, source files/nodes untouched on failure
-    (never loses data). A no-op once done or on a fresh deploy; fire-and-forget so a slow
-    scan never blocks readiness.
-    """
-    try:
-        from agentcore.memory.migrate_documents import migrate_file_memory_to_documents
-
-        await migrate_file_memory_to_documents()
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:  # noqa: BLE001 - never let the one-shot migration break boot
-        get_logger(__name__).warning("memory.migrate_documents_failed", error=str(e))
-
-    try:
-        from agentcore.memory.migrate_agentcore import migrate_agentcore_layout
-
-        await migrate_agentcore_layout()
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:  # noqa: BLE001 - layout migration is best-effort too
-        get_logger(__name__).warning("memory.migrate_agentcore_failed", error=str(e))
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
@@ -315,12 +288,8 @@ async def lifespan(app: FastAPI):
     if settings.memory_consolidation_enabled:
         consolidation_task = asyncio.create_task(consolidation_loop())
 
-    # One-time file→document memory migration (Agent记忆与知识系统 §5.7 换底): fold any
-    # file-backed long-term memory into the documents tree. Idempotent + best-effort; a no-op
-    # once done or on a fresh deploy. Fire-and-forget so the scan never blocks readiness.
-    document_migration_task: asyncio.Task | None = None
-    if settings.memory_documents_migration_enabled:
-        document_migration_task = asyncio.create_task(_run_document_memory_migration())
+    # Memory layout / documents→tables backfill runs in deploy (stop-api window),
+    # not at lifespan — see scripts/migrate_memory_pipeline.py.
 
     # Dev-only demo-tape recorder (录制层): tap every live turn's SSE stream into
     # demos/recordings/ so a satisfying run can be exported as a tape verbatim.
@@ -430,11 +399,6 @@ async def lifespan(app: FastAPI):
         searxng_probe_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await searxng_probe_task
-        # Stop the one-shot memory migration if shutdown races it (no-op once done).
-        if document_migration_task is not None:
-            document_migration_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await document_migration_task
         if retention_task is not None:
             retention_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

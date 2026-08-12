@@ -422,3 +422,211 @@ async def list_account_memory_project_scopes(
     store = DocumentMemoryStore(session)
     scopes = await store.project_scopes(user.user_id)
     return AccountMemoryProjectScopesResponse(scopes=scopes)
+
+
+# --- Consolidation pipeline state (episodes + scope sidecar; not Document-tree) ---
+
+
+class AccountEpisodeAppendRequest(BaseModel):
+    scope: str | None = None
+    conversation_id: str
+    summary: str
+    actions_json: str = ""
+    episode_id: str | None = None
+    created_at: str | None = None
+
+
+class AccountEpisodeRecord(BaseModel):
+    id: str
+    conversation_id: str
+    summary: str
+    created_at: str
+    actions_json: str = ""
+
+
+@router.post("/memory/episodes/append", response_model=AccountEpisodeRecord)
+async def append_account_memory_episode(
+    body: AccountEpisodeAppendRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountEpisodeRecord:
+    """Append one episodic digest into ``memory_episodes``."""
+    from datetime import datetime
+
+    from agentcore.memory.episode_store import DbEpisodeStore
+
+    created: datetime | None = None
+    if body.created_at:
+        try:
+            created = datetime.fromisoformat(body.created_at.replace("Z", "+00:00"))
+        except ValueError:
+            created = None
+    store = DbEpisodeStore(session)
+    rec = await store.append_episode(
+        user.user_id,
+        conversation_id=body.conversation_id,
+        summary=body.summary,
+        scope=body.scope,
+        actions_json=body.actions_json or "",
+        episode_id=body.episode_id,
+        created_at=created,
+    )
+    return AccountEpisodeRecord(
+        id=rec.id,
+        conversation_id=rec.conversation_id,
+        summary=rec.summary,
+        created_at=rec.created_at,
+        actions_json=rec.actions_json,
+    )
+
+
+class AccountEpisodesListResponse(BaseModel):
+    episodes: list[AccountEpisodeRecord]
+
+
+@router.post("/memory/episodes/list-undigested", response_model=AccountEpisodesListResponse)
+async def list_account_undigested_episodes(
+    body: AccountMemoryScopeRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountEpisodesListResponse:
+    from agentcore.memory.episode_store import DbEpisodeStore
+
+    store = DbEpisodeStore(session)
+    rows = await store.list_undigested(user.user_id, scope=body.scope)
+    return AccountEpisodesListResponse(
+        episodes=[
+            AccountEpisodeRecord(
+                id=r.id,
+                conversation_id=r.conversation_id,
+                summary=r.summary,
+                created_at=r.created_at,
+                actions_json=r.actions_json,
+            )
+            for r in rows
+        ]
+    )
+
+
+class AccountEpisodesMarkDigestedRequest(BaseModel):
+    scope: str | None = None
+    episode_ids: list[str] = []
+    consolidated_at: str | None = None
+
+
+@router.post("/memory/episodes/mark-digested", response_model=AccountMemoryOkResponse)
+async def mark_account_episodes_digested(
+    body: AccountEpisodesMarkDigestedRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountMemoryOkResponse:
+    from datetime import UTC, datetime
+
+    from agentcore.memory.episode_store import DbEpisodeStore
+
+    stamp: datetime | None = None
+    if body.consolidated_at:
+        try:
+            stamp = datetime.fromisoformat(body.consolidated_at.replace("Z", "+00:00"))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=UTC)
+        except ValueError:
+            stamp = None
+    store = DbEpisodeStore(session)
+    await store.mark_digested(
+        user.user_id,
+        list(body.episode_ids or []),
+        scope=body.scope,
+        consolidated_at=stamp,
+    )
+    return AccountMemoryOkResponse(ok=True)
+
+
+class AccountEpisodesPurgeRequest(BaseModel):
+    older_than_days: int = 30
+
+
+class AccountEpisodesPurgeResponse(BaseModel):
+    deleted: int
+
+
+@router.post("/memory/episodes/purge", response_model=AccountEpisodesPurgeResponse)
+async def purge_account_digested_episodes(
+    body: AccountEpisodesPurgeRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountEpisodesPurgeResponse:
+    from agentcore.memory.episode_store import DbEpisodeStore
+
+    store = DbEpisodeStore(session)
+    deleted = await store.purge_digested(
+        older_than_days=body.older_than_days, user_id=user.user_id
+    )
+    return AccountEpisodesPurgeResponse(deleted=deleted)
+
+
+class AccountScopeStateResponse(BaseModel):
+    last_semantic_at: str | None = None
+    explore_workspace_key: str | None = None
+    explore_fingerprint: str | None = None
+    explore_fingerprint_dirty: bool = False
+
+
+@router.post("/memory/scope-state/get", response_model=AccountScopeStateResponse)
+async def get_account_scope_state(
+    body: AccountMemoryScopeRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountScopeStateResponse:
+    from agentcore.memory.episode_store import DbEpisodeStore
+
+    store = DbEpisodeStore(session)
+    meta = await store.load_scope_meta(user.user_id, scope=body.scope)
+    return AccountScopeStateResponse(
+        last_semantic_at=(
+            meta.last_semantic_at.isoformat() if meta.last_semantic_at else None
+        ),
+        explore_workspace_key=meta.explore_workspace_key,
+        explore_fingerprint=meta.explore_fingerprint,
+        explore_fingerprint_dirty=meta.explore_fingerprint_dirty,
+    )
+
+
+class AccountScopeStateSaveRequest(BaseModel):
+    scope: str | None = None
+    last_semantic_at: str | None = None
+    explore_workspace_key: str | None = None
+    explore_fingerprint: str | None = None
+    explore_fingerprint_dirty: bool = False
+
+
+@router.post("/memory/scope-state/save", response_model=AccountMemoryOkResponse)
+async def save_account_scope_state(
+    body: AccountScopeStateSaveRequest,
+    user: AccountApiUser,
+    session: AsyncSession = Depends(get_db),
+) -> AccountMemoryOkResponse:
+    from datetime import UTC, datetime
+
+    from agentcore.memory.episode_store import DbEpisodeStore, ScopeMemoryMeta
+
+    last: datetime | None = None
+    if body.last_semantic_at:
+        try:
+            last = datetime.fromisoformat(body.last_semantic_at.replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+        except ValueError:
+            last = None
+    store = DbEpisodeStore(session)
+    await store.save_scope_meta(
+        user.user_id,
+        ScopeMemoryMeta(
+            last_semantic_at=last,
+            explore_workspace_key=body.explore_workspace_key,
+            explore_fingerprint=body.explore_fingerprint,
+            explore_fingerprint_dirty=body.explore_fingerprint_dirty,
+        ),
+        scope=body.scope,
+    )
+    return AccountMemoryOkResponse(ok=True)

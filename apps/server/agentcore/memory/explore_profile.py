@@ -267,17 +267,19 @@ async def resolve_folder_workspace_key(
 
 
 async def load_explore_workspace_key(
-    store: MemoryStore, user_id: str, folder_id: str
+    store, user_id: str, folder_id: str
 ) -> str | None:
-    """Stored key from last explore-act write (``_memory_meta.json``), if any."""
+    """Stored key from last explore-act write (``memory_scope_states``), if any."""
+    from agentcore.memory.episode_store import default_episode_store
     from agentcore.memory.episodic import load_scope_meta
 
-    meta = await load_scope_meta(store, user_id, scope=folder_id)
+    ep = store if hasattr(store, "load_scope_meta") else default_episode_store()
+    meta = await load_scope_meta(ep, user_id, scope=folder_id)
     return meta.explore_workspace_key
 
 
 async def record_explore_workspace_key(
-    store: MemoryStore,
+    store,
     user_id: str,
     folder_id: str,
     workspace_key: str,
@@ -289,7 +291,7 @@ async def record_explore_workspace_key(
 
 
 async def record_explore_closeout(
-    store: MemoryStore,
+    store,
     user_id: str,
     folder_id: str,
     *,
@@ -297,14 +299,16 @@ async def record_explore_closeout(
     fingerprint: str | None = None,
 ) -> None:
     """Persist workspace key + optional fingerprint; clear R2 dirty on successful explore."""
+    from agentcore.memory.episode_store import default_episode_store
     from agentcore.memory.episodic import load_scope_meta, save_scope_meta
 
+    ep = store if hasattr(store, "load_scope_meta") else default_episode_store()
     key = (workspace_key or "").strip()
     fp = (fingerprint or "").strip() or None
     if not key and not fp:
         return
     async with user_memory_lock(user_id):
-        meta = await load_scope_meta(store, user_id, scope=folder_id)
+        meta = await load_scope_meta(ep, user_id, scope=folder_id)
         changed = False
         if key and meta.explore_workspace_key != key:
             meta.explore_workspace_key = key
@@ -317,7 +321,7 @@ async def record_explore_closeout(
             changed = True
         if not changed:
             return
-        await save_scope_meta(store, user_id, meta, scope=folder_id)
+        await save_scope_meta(ep, user_id, meta, scope=folder_id)
         logger.info(
             "memory.explore_closeout_meta_written",
             user_id=user_id,
@@ -364,7 +368,7 @@ async def compute_workspace_explore_fingerprint(
 
 
 async def evaluate_explore_fingerprint_drift(
-    store: MemoryStore,
+    store,
     user_id: str,
     folder_id: str,
     *,
@@ -376,9 +380,11 @@ async def evaluate_explore_fingerprint_drift(
     Same-binding fingerprint change → dirty. Rebind is owned by explore_reason; skipped here.
     Matching fingerprint clears dirty. No stored fingerprint → no soft hint (legacy).
     """
+    from agentcore.memory.episode_store import default_episode_store
     from agentcore.memory.episodic import load_scope_meta, save_scope_meta
 
-    meta = await load_scope_meta(store, user_id, scope=folder_id)
+    ep = store if hasattr(store, "load_scope_meta") else default_episode_store()
+    meta = await load_scope_meta(ep, user_id, scope=folder_id)
     stored_key = meta.explore_workspace_key
     if stored_key and current_workspace_key and stored_key != current_workspace_key:
         return False
@@ -393,10 +399,10 @@ async def evaluate_explore_fingerprint_drift(
         return drifted
 
     async with user_memory_lock(user_id):
-        meta = await load_scope_meta(store, user_id, scope=folder_id)
+        meta = await load_scope_meta(ep, user_id, scope=folder_id)
         if meta.explore_fingerprint_dirty != drifted:
             meta.explore_fingerprint_dirty = drifted
-            await save_scope_meta(store, user_id, meta, scope=folder_id)
+            await save_scope_meta(ep, user_id, meta, scope=folder_id)
             logger.info(
                 "memory.explore_fingerprint_dirty",
                 user_id=user_id,
@@ -407,11 +413,13 @@ async def evaluate_explore_fingerprint_drift(
 
 
 async def load_explore_fingerprint(
-    store: MemoryStore, user_id: str, folder_id: str
+    store, user_id: str, folder_id: str
 ) -> str | None:
+    from agentcore.memory.episode_store import default_episode_store
     from agentcore.memory.episodic import load_scope_meta
 
-    meta = await load_scope_meta(store, user_id, scope=folder_id)
+    ep = store if hasattr(store, "load_scope_meta") else default_episode_store()
+    meta = await load_scope_meta(ep, user_id, scope=folder_id)
     return meta.explore_fingerprint
 
 

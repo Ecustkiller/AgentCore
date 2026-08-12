@@ -75,6 +75,171 @@
         "title": "AcceptRunOutcomeResponse",
         "type": "object"
       },
+      "AccountEpisodeAppendRequest": {
+        "properties": {
+          "actions_json": {
+            "default": "",
+            "title": "Actions Json",
+            "type": "string"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "episode_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Episode Id"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "conversation_id",
+          "summary"
+        ],
+        "title": "AccountEpisodeAppendRequest",
+        "type": "object"
+      },
+      "AccountEpisodeRecord": {
+        "properties": {
+          "actions_json": {
+            "default": "",
+            "title": "Actions Json",
+            "type": "string"
+          },
+          "conversation_id": {
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "summary",
+          "created_at"
+        ],
+        "title": "AccountEpisodeRecord",
+        "type": "object"
+      },
+      "AccountEpisodesListResponse": {
+        "properties": {
+          "episodes": {
+            "items": {
+              "$ref": "#/components/schemas/AccountEpisodeRecord"
+            },
+            "title": "Episodes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "episodes"
+        ],
+        "title": "AccountEpisodesListResponse",
+        "type": "object"
+      },
+      "AccountEpisodesMarkDigestedRequest": {
+        "properties": {
+          "consolidated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consolidated At"
+          },
+          "episode_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Episode Ids",
+            "type": "array"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "title": "AccountEpisodesMarkDigestedRequest",
+        "type": "object"
+      },
+      "AccountEpisodesPurgeRequest": {
+        "properties": {
+          "older_than_days": {
+            "default": 30,
+            "title": "Older Than Days",
+            "type": "integer"
+          }
+        },
+        "title": "AccountEpisodesPurgeRequest",
+        "type": "object"
+      },
+      "AccountEpisodesPurgeResponse": {
+        "properties": {
+          "deleted": {
+            "title": "Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "deleted"
+        ],
+        "title": "AccountEpisodesPurgeResponse",
+        "type": "object"
+      },
       "AccountMemoryDeleteRequest": {
         "properties": {
           "path": {
@@ -400,6 +565,105 @@
           "project_rules"
         ],
         "title": "AccountRulesListResponse",
+        "type": "object"
+      },
+      "AccountScopeStateResponse": {
+        "properties": {
+          "explore_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explore Fingerprint"
+          },
+          "explore_fingerprint_dirty": {
+            "default": false,
+            "title": "Explore Fingerprint Dirty",
+            "type": "boolean"
+          },
+          "explore_workspace_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explore Workspace Key"
+          },
+          "last_semantic_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Semantic At"
+          }
+        },
+        "title": "AccountScopeStateResponse",
+        "type": "object"
+      },
+      "AccountScopeStateSaveRequest": {
+        "properties": {
+          "explore_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explore Fingerprint"
+          },
+          "explore_fingerprint_dirty": {
+            "default": false,
+            "title": "Explore Fingerprint Dirty",
+            "type": "boolean"
+          },
+          "explore_workspace_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explore Workspace Key"
+          },
+          "last_semantic_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Semantic At"
+          },
+          "scope": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope"
+          }
+        },
+        "title": "AccountScopeStateSaveRequest",
         "type": "object"
       },
       "AccountTokenResponse": {
@@ -16503,6 +16767,307 @@
         ]
       }
     },
+    "/v1/account/memory/episodes/append": {
+      "post": {
+        "description": "Append one episodic digest into ``memory_episodes``.",
+        "operationId": "append_account_memory_episode_v1_account_memory_episodes_append_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountEpisodeAppendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountEpisodeRecord"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Append Account Memory Episode",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/episodes/list-undigested": {
+      "post": {
+        "operationId": "list_account_undigested_episodes_v1_account_memory_episodes_list_undigested_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemoryScopeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountEpisodesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Account Undigested Episodes",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/episodes/mark-digested": {
+      "post": {
+        "operationId": "mark_account_episodes_digested_v1_account_memory_episodes_mark_digested_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountEpisodesMarkDigestedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryOkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Account Episodes Digested",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/episodes/purge": {
+      "post": {
+        "operationId": "purge_account_digested_episodes_v1_account_memory_episodes_purge_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountEpisodesPurgeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountEpisodesPurgeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Purge Account Digested Episodes",
+        "tags": [
+          "account"
+        ]
+      }
+    },
     "/v1/account/memory/list": {
       "post": {
         "description": "List memory note paths under one scope (global when ``scope`` is null).",
@@ -16792,6 +17357,156 @@
           }
         },
         "summary": "Save Account Memory",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/scope-state/get": {
+      "post": {
+        "operationId": "get_account_scope_state_v1_account_memory_scope_state_get_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountMemoryScopeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountScopeStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Account Scope State",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/v1/account/memory/scope-state/save": {
+      "post": {
+        "operationId": "save_account_scope_state_v1_account_memory_scope_state_save_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountScopeStateSaveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountMemoryOkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Account Scope State",
         "tags": [
           "account"
         ]
@@ -29444,7 +30159,7 @@
     },
     "/v1/documents/{document_id}": {
       "delete": {
-        "description": "Soft-delete a node and (for a folder) its whole subtree.",
+        "description": "Soft-delete a node and (for a folder) its whole subtree.\n\nAI-maintained core leaves (偏好 / 画像 / 导航) are undeletable; on-demand\nAI topics and user-owned entries remain deletable.",
         "operationId": "delete_document_v1_documents__document_id__delete",
         "parameters": [
           {

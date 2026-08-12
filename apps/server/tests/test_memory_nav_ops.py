@@ -108,8 +108,10 @@ def test_compose_episode_keeps_verified_facts_outside_char_budget():
     assert "本场证实的项目事实" in summary
 
 
-async def test_append_episode_persists_actions_json(tmp_path):
-    store = FileMemoryStore(tmp_path)
+async def test_append_episode_persists_actions_json():
+    from agentcore.memory.episode_store import InMemoryEpisodeStore
+
+    store = InMemoryEpisodeStore()
     inv = TurnActionInventory(
         files_read=["apps/server/README.md"],
         commands=["pnpm test"],
@@ -131,7 +133,6 @@ async def test_append_episode_persists_actions_json(tmp_path):
     loaded = episode_actions(ep)
     assert "apps/server/README.md" in loaded.files_read
     assert "pnpm test" in loaded.commands
-    # Round-trip via store list.
     from agentcore.memory.episodic import list_undigested_episodes
 
     undigested = await list_undigested_episodes(store, "u1", scope="folder-1")

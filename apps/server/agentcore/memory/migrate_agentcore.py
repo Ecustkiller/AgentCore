@@ -5,7 +5,8 @@ Runs alongside the file→documents migration (``migrate_documents``). Propertie
 - **idempotent**: a second run is a no-op once every scope's convention tree holds its
   memory root and user rules.
 - **loses no data on failure**: per-scope best-effort — failures are logged and the SOURCE
-  nodes are left in place (never deleted), so a failed scope retries next boot.
+  nodes are left in place (never deleted), so a failed scope retries on the next deploy-window
+  run of ``scripts/migrate_memory_pipeline.py``.
 - **coexists** with file→documents: that pass writes via ``save_memory_note``, which now
   ensures ``AgentCore/记忆/``; this pass cleans up any pre-§5.0 bare roots / top-level rules
   that already lived in the tree. Dual-root fold soft-deletes an empty bare ``记忆/``

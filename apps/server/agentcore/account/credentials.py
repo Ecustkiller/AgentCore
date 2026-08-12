@@ -313,3 +313,128 @@ async def cloud_memory_project_scopes(creds: AccountCredentials) -> list[str]:
     if not isinstance(scopes, list):
         raise AccountCloudError("account memory project-scopes missing scopes[]")
     return [str(s) for s in scopes if s]
+
+
+async def cloud_memory_episode_append(
+    creds: AccountCredentials,
+    *,
+    scope: str | None,
+    conversation_id: str,
+    summary: str,
+    actions_json: str = "",
+    episode_id: str | None = None,
+    created_at: str | None = None,
+) -> dict[str, Any]:
+    """POST ``…/account/memory/episodes/append`` → episode record dict."""
+    payload: dict[str, Any] = {
+        "scope": scope,
+        "conversation_id": conversation_id,
+        "summary": summary,
+        "actions_json": actions_json or "",
+    }
+    if episode_id:
+        payload["episode_id"] = episode_id
+    if created_at:
+        payload["created_at"] = created_at
+    data = await _post_json(
+        creds, path="/memory/episodes/append", payload=payload, op="memory_episode_append"
+    )
+    if not isinstance(data, dict):
+        raise AccountCloudError("account episode append response is not an object")
+    return data
+
+
+async def cloud_memory_episodes_list_undigested(
+    creds: AccountCredentials,
+    *,
+    scope: str | None,
+) -> list[dict[str, Any]]:
+    """POST ``…/account/memory/episodes/list-undigested`` → episode dicts."""
+    data = await _post_json(
+        creds,
+        path="/memory/episodes/list-undigested",
+        payload={"scope": scope},
+        op="memory_episodes_list_undigested",
+    )
+    episodes = data.get("episodes")
+    if not isinstance(episodes, list):
+        raise AccountCloudError("account episodes list missing episodes[]")
+    return [e for e in episodes if isinstance(e, dict)]
+
+
+async def cloud_memory_episodes_mark_digested(
+    creds: AccountCredentials,
+    *,
+    scope: str | None,
+    episode_ids: list[str],
+    consolidated_at: str | None = None,
+) -> None:
+    """POST ``…/account/memory/episodes/mark-digested``."""
+    payload: dict[str, Any] = {
+        "scope": scope,
+        "episode_ids": list(episode_ids),
+    }
+    if consolidated_at:
+        payload["consolidated_at"] = consolidated_at
+    await _post_json(
+        creds,
+        path="/memory/episodes/mark-digested",
+        payload=payload,
+        op="memory_episodes_mark_digested",
+    )
+
+
+async def cloud_memory_episodes_purge(
+    creds: AccountCredentials,
+    *,
+    older_than_days: int = 30,
+) -> int:
+    """POST ``…/account/memory/episodes/purge`` → deleted count."""
+    data = await _post_json(
+        creds,
+        path="/memory/episodes/purge",
+        payload={"older_than_days": older_than_days},
+        op="memory_episodes_purge",
+    )
+    return int(data.get("deleted") or 0)
+
+
+async def cloud_memory_scope_state_get(
+    creds: AccountCredentials,
+    *,
+    scope: str | None,
+) -> dict[str, Any]:
+    """POST ``…/account/memory/scope-state/get`` → state fields."""
+    data = await _post_json(
+        creds,
+        path="/memory/scope-state/get",
+        payload={"scope": scope},
+        op="memory_scope_state_get",
+    )
+    if not isinstance(data, dict):
+        raise AccountCloudError("account scope-state get response is not an object")
+    return data
+
+
+async def cloud_memory_scope_state_save(
+    creds: AccountCredentials,
+    *,
+    scope: str | None,
+    last_semantic_at: str | None = None,
+    explore_workspace_key: str | None = None,
+    explore_fingerprint: str | None = None,
+    explore_fingerprint_dirty: bool = False,
+) -> None:
+    """POST ``…/account/memory/scope-state/save``."""
+    await _post_json(
+        creds,
+        path="/memory/scope-state/save",
+        payload={
+            "scope": scope,
+            "last_semantic_at": last_semantic_at,
+            "explore_workspace_key": explore_workspace_key,
+            "explore_fingerprint": explore_fingerprint,
+            "explore_fingerprint_dirty": explore_fingerprint_dirty,
+        },
+        op="memory_scope_state_save",
+    )

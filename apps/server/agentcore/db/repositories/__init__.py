@@ -47,6 +47,7 @@ from .feedback import FeedbackRepository
 from .folders import FolderRepository
 from .friends import FriendRepository
 from .llm_profiles import LlmModelProfileRepository
+from .memory_pipeline import MemoryPipelineRepository
 from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
 from .notices import ProductNoticeRepository
@@ -88,6 +89,7 @@ __all__ = [
     "FolderRepository",
     "HandoffJobRepository",
     "LlmModelProfileRepository",
+    "MemoryPipelineRepository",
     "MemoryUpdateRepository",
     "MessageRepository",
     "PausedTurnRepository",

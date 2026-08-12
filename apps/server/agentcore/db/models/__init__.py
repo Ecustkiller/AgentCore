@@ -35,6 +35,7 @@ from .devices import PushDeviceRow
 from .documents import Document
 from .feedback import FeedbackRow
 from .llm_profiles import LlmModelProfile
+from .memory_pipeline import MemoryEpisode, MemoryScopeState
 from .notices import ProductNoticeDismissalRow, ProductNoticeRow
 from .runs import (
     HandoffJob,
@@ -78,6 +79,8 @@ __all__ = [
     "Folder",
     "HandoffJob",
     "LlmModelProfile",
+    "MemoryEpisode",
+    "MemoryScopeState",
     "MemoryUpdateRow",
     "Message",
     "MessageBookmark",

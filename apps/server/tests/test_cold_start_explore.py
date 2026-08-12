@@ -104,8 +104,20 @@ async def test_explore_reason_empty_keeps_gate_when_workspace_key_unknown(tmp_pa
     assert reason == "empty"
 
 
+@pytest.fixture
+def ep_store(monkeypatch):
+    """In-memory episode/scope-state store; also becomes process default for explore helpers."""
+    from agentcore.memory.episode_store import InMemoryEpisodeStore
+
+    store = InMemoryEpisodeStore()
+    monkeypatch.setattr(
+        "agentcore.memory.episode_store.default_episode_store", lambda: store
+    )
+    return store
+
+
 @pytest.mark.asyncio
-async def test_explore_reason_no_false_rebind_when_workspace_key_unknown(tmp_path):
+async def test_explore_reason_no_false_rebind_when_workspace_key_unknown(tmp_path, ep_store):
     """Unknown live key must not forge rebind against a stored local key."""
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
@@ -116,7 +128,7 @@ async def test_explore_reason_no_false_rebind_when_workspace_key_unknown(tmp_pat
         "## 技术栈与工具\n- Python\n",
         scope=folder,
     )
-    await record_explore_workspace_key(store, uid, folder, "local:root-a:")
+    await record_explore_workspace_key(ep_store, uid, folder, "local:root-a:")
     reason = await project_profile_explore_reason(
         store, uid, folder, current_workspace_key=""
     )
@@ -124,12 +136,12 @@ async def test_explore_reason_no_false_rebind_when_workspace_key_unknown(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_explore_reason_rebind_when_workspace_key_mismatches(tmp_path):
+async def test_explore_reason_rebind_when_workspace_key_mismatches(tmp_path, ep_store):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
     await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Go\n", scope=folder)
-    await record_explore_workspace_key(store, uid, folder, "local:root-a:")
+    await record_explore_workspace_key(ep_store, uid, folder, "local:root-a:")
     assert (
         await project_profile_explore_reason(
             store, uid, folder, current_workspace_key="local:root-a:"
@@ -343,7 +355,7 @@ async def test_update_project_profile_refuses_bare_chat(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_update_project_profile_writes_and_hot_refreshes(tmp_path):
+async def test_update_project_profile_writes_and_hot_refreshes(tmp_path, ep_store):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -365,7 +377,7 @@ async def test_update_project_profile_writes_and_hot_refreshes(tmp_path):
     assert "TypeScript" in holder._system_prompt
     loaded = await store.load(uid, CORE_MEMORY_FILE, scope=folder)
     assert "TypeScript" in loaded
-    assert await load_explore_workspace_key(store, uid, folder) == f"folder:{folder}"
+    assert await load_explore_workspace_key(ep_store, uid, folder) == f"folder:{folder}"
 
 
 @pytest.mark.asyncio
@@ -604,7 +616,7 @@ async def test_update_project_profile_soft_top_five_topics(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_update_project_profile_writes_navigation_and_fingerprint(tmp_path):
+async def test_update_project_profile_writes_navigation_and_fingerprint(tmp_path, ep_store):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
@@ -629,21 +641,21 @@ async def test_update_project_profile_writes_navigation_and_fingerprint(tmp_path
     assert res.display["navigation"] == NAVIGATION_MEMORY_FILE
     nav = await store.load(uid, NAVIGATION_MEMORY_FILE, scope=folder)
     assert "示例仓" in nav
-    assert await load_explore_workspace_key(store, uid, folder) == f"folder:{folder}"
-    fp = await load_explore_fingerprint(store, uid, folder)
+    assert await load_explore_workspace_key(ep_store, uid, folder) == f"folder:{folder}"
+    fp = await load_explore_fingerprint(ep_store, uid, folder)
     assert fp
     live = await compute_workspace_explore_fingerprint(backend)
     assert fp == live
 
 
 @pytest.mark.asyncio
-async def test_fingerprint_drift_marks_dirty_without_explore_reason(tmp_path):
+async def test_fingerprint_drift_marks_dirty_without_explore_reason(tmp_path, ep_store):
     store = FileMemoryStore(tmp_path)
     uid = str(uuid4())
     folder = str(uuid4())
     await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Go\n", scope=folder)
     await record_explore_closeout(
-        store,
+        ep_store,
         uid,
         folder,
         workspace_key="local:root-a:",
@@ -653,7 +665,7 @@ async def test_fingerprint_drift_marks_dirty_without_explore_reason(tmp_path):
         store, uid, folder, current_workspace_key="local:root-a:"
     ) is None
     stale = await evaluate_explore_fingerprint_drift(
-        store,
+        ep_store,
         uid,
         folder,
         live_fingerprint="fp-new",
@@ -662,9 +674,8 @@ async def test_fingerprint_drift_marks_dirty_without_explore_reason(tmp_path):
     assert stale is True
     from agentcore.memory.episodic import load_scope_meta
 
-    meta = await load_scope_meta(store, uid, scope=folder)
+    meta = await load_scope_meta(ep_store, uid, scope=folder)
     assert meta.explore_fingerprint_dirty is True
-    # Still not a blocking explore reason.
     assert await project_profile_explore_reason(
         store, uid, folder, current_workspace_key="local:root-a:"
     ) is None

@@ -62,11 +62,12 @@ ALWAYS_MEMORY_FILES = (PREFERENCES_MEMORY_FILE, CORE_MEMORY_FILE)
 # project knowledge the agent pulls only when relevant (vs the always-injected core).
 TOPIC_DIR = "主题"
 
-# Session-summary (episodic) layer: append-only digests under ``情景/<id>.md``.
-# Never injected into prompts — consolidation input only. Per-scope, same as topics.
+# Session-summary (episodic) layer historically lived under ``情景/<id>.md`` in the
+# memory folder; it now uses ``memory_episodes`` (see ``memory/episode_store.py``).
+# Path helpers remain for backfill of leftover document rows.
 EPISODIC_DIR = "情景"
 
-# Per-scope JSON sidecar tracking digested episode ids + last successful semantic pass.
+# Legacy per-scope JSON sidecar filename (now ``memory_scope_states`` table).
 MEMORY_META_FILE = "_memory_meta.json"
 
 

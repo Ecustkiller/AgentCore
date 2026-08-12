@@ -172,6 +172,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/account/memory/episodes/append": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Append Account Memory Episode
+         * @description Append one episodic digest into ``memory_episodes``.
+         */
+        post: operations["append_account_memory_episode_v1_account_memory_episodes_append_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/episodes/list-undigested": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** List Account Undigested Episodes */
+        post: operations["list_account_undigested_episodes_v1_account_memory_episodes_list_undigested_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/episodes/mark-digested": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark Account Episodes Digested */
+        post: operations["mark_account_episodes_digested_v1_account_memory_episodes_mark_digested_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/episodes/purge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Purge Account Digested Episodes */
+        post: operations["purge_account_digested_episodes_v1_account_memory_episodes_purge_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/account/memory/list": {
         parameters: {
             query?: never;
@@ -246,6 +317,40 @@ export interface paths {
          * @description Upsert one memory note (画像/导航/主题/…). Write failures raise HTTP errors.
          */
         post: operations["save_account_memory_v1_account_memory_save_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/scope-state/get": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Get Account Scope State */
+        post: operations["get_account_scope_state_v1_account_memory_scope_state_get_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/account/memory/scope-state/save": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Save Account Scope State */
+        post: operations["save_account_scope_state_v1_account_memory_scope_state_save_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3194,6 +3299,9 @@ export interface paths {
         /**
          * Delete Document
          * @description Soft-delete a node and (for a folder) its whole subtree.
+         *
+         *     AI-maintained core leaves (偏好 / 画像 / 导航) are undeletable; on-demand
+         *     AI topics and user-owned entries remain deletable.
          */
         delete: operations["delete_document_v1_documents__document_id__delete"];
         options?: never;
@@ -5703,6 +5811,70 @@ export interface components {
              */
             recorded: boolean;
         };
+        /** AccountEpisodeAppendRequest */
+        AccountEpisodeAppendRequest: {
+            /**
+             * Actions Json
+             * @default
+             */
+            actions_json: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Episode Id */
+            episode_id?: string | null;
+            /** Scope */
+            scope?: string | null;
+            /** Summary */
+            summary: string;
+        };
+        /** AccountEpisodeRecord */
+        AccountEpisodeRecord: {
+            /**
+             * Actions Json
+             * @default
+             */
+            actions_json: string;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Summary */
+            summary: string;
+        };
+        /** AccountEpisodesListResponse */
+        AccountEpisodesListResponse: {
+            /** Episodes */
+            episodes: components["schemas"]["AccountEpisodeRecord"][];
+        };
+        /** AccountEpisodesMarkDigestedRequest */
+        AccountEpisodesMarkDigestedRequest: {
+            /** Consolidated At */
+            consolidated_at?: string | null;
+            /**
+             * Episode Ids
+             * @default []
+             */
+            episode_ids: string[];
+            /** Scope */
+            scope?: string | null;
+        };
+        /** AccountEpisodesPurgeRequest */
+        AccountEpisodesPurgeRequest: {
+            /**
+             * Older Than Days
+             * @default 30
+             */
+            older_than_days: number;
+        };
+        /** AccountEpisodesPurgeResponse */
+        AccountEpisodesPurgeResponse: {
+            /** Deleted */
+            deleted: number;
+        };
         /** AccountMemoryDeleteRequest */
         AccountMemoryDeleteRequest: {
             /** Path */
@@ -5815,6 +5987,36 @@ export interface components {
             project_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Project Rules */
             project_rules: components["schemas"]["AccountRuleDoc"][];
+        };
+        /** AccountScopeStateResponse */
+        AccountScopeStateResponse: {
+            /** Explore Fingerprint */
+            explore_fingerprint?: string | null;
+            /**
+             * Explore Fingerprint Dirty
+             * @default false
+             */
+            explore_fingerprint_dirty: boolean;
+            /** Explore Workspace Key */
+            explore_workspace_key?: string | null;
+            /** Last Semantic At */
+            last_semantic_at?: string | null;
+        };
+        /** AccountScopeStateSaveRequest */
+        AccountScopeStateSaveRequest: {
+            /** Explore Fingerprint */
+            explore_fingerprint?: string | null;
+            /**
+             * Explore Fingerprint Dirty
+             * @default false
+             */
+            explore_fingerprint_dirty: boolean;
+            /** Explore Workspace Key */
+            explore_workspace_key?: string | null;
+            /** Last Semantic At */
+            last_semantic_at?: string | null;
+            /** Scope */
+            scope?: string | null;
         };
         /**
          * AccountTokenResponse
@@ -12933,6 +13135,154 @@ export interface operations {
             };
         };
     };
+    append_account_memory_episode_v1_account_memory_episodes_append_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountEpisodeAppendRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountEpisodeRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_account_undigested_episodes_v1_account_memory_episodes_list_undigested_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountEpisodesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_account_episodes_digested_v1_account_memory_episodes_mark_digested_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountEpisodesMarkDigestedRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_account_digested_episodes_v1_account_memory_episodes_purge_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountEpisodesPurgeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountEpisodesPurgeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_account_memory_v1_account_memory_list_post: {
         parameters: {
             query?: never;
@@ -13054,6 +13404,80 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["AccountMemorySaveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMemoryOkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_account_scope_state_v1_account_memory_scope_state_get_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMemoryScopeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountScopeStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    save_account_scope_state_v1_account_memory_scope_state_save_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountScopeStateSaveRequest"];
             };
         };
         responses: {

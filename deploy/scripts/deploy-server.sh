@@ -3,7 +3,8 @@
 # AgentCore 一键部署 / 回退脚本（部署与运维.md §三 CI/CD）。
 #
 #   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 →
-#   停 api → alembic upgrade head → schema gate → compose up → /readyz → 记 SHA
+#   停 api → alembic upgrade head → schema gate → memory pipeline migrate
+#   (contract self-lags one deploy) → compose up → /readyz → 记 SHA
 #
 # 用法：
 #   deploy-server.sh [<sha>|<tag>|latest]    # 缺省 latest（= origin/<branch> HEAD）
@@ -146,6 +147,9 @@ if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   stage "alembic upgrade head"
   dc run --rm api python scripts/check_schema_gate.py --live
   stage "schema gate (live)"
+  # Memory migrate + self-lagged contract (sources cleared on the *next* deploy).
+  dc run --rm api python scripts/migrate_memory_pipeline.py
+  stage "memory pipeline migrate/contract (lagged)"
 else
   warn "回退：跳过 alembic（如 schema 不一致，从 $BACKUP_DIR 手动恢复对齐）"
 fi

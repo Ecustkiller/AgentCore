@@ -2,14 +2,14 @@
 
 Episodic (live path): each finished turn arms a per-conversation idle debounce /
 turn-cap. When it fires, a ≤200-char session summary (plus optional verified project
-facts; action inventory from turn_journal) is appended under ``情景/`` and a light
+facts; action inventory from turn_journal) is appended to ``memory_episodes`` and a light
 ``memory_updated`` tip is pushed — never a direct preference/profile write.
 
 Semantic (batch): after an episodic write (and on the periodic sweeper), if undigested
 episodes ≥ ``memory_semantic_min_episodes`` OR age since last success ≥
 ``memory_semantic_max_age_hours``, one consolidator pass rewrites always-files
 (including project ``导航.md`` incremental merge) and applies topic ops, then pushes a
-diff card.
+diff card. Digested episodes older than 30 days are purged on each sweeper pass.
 
 Open-turn deferral, per-user locks, and ``memory_synced_at`` watermarks are unchanged.
 """
@@ -51,6 +51,7 @@ from agentcore.memory.action_inventory import (
     inventory_from_journal_entries,
     merge_inventories,
 )
+from agentcore.memory.episode_store import EpisodeStore, default_episode_store
 from agentcore.memory.episodic import (
     LLMEpisodicSummarizer,
     append_episode,
@@ -58,6 +59,7 @@ from agentcore.memory.episodic import (
     list_undigested_episodes,
     load_scope_meta,
     mark_episodes_digested,
+    purge_digested_episodes,
     should_run_semantic,
 )
 from agentcore.memory.locks import user_memory_lock
@@ -258,11 +260,13 @@ async def run_semantic_for_scope(
     folder_id: str | None,
     store: MemoryStore,
     credentials,
+    episode_store: EpisodeStore | None = None,
 ) -> bool:
     """Run one semantic consolidation for a (user, scope) when trigger conditions hold."""
     scope = folder_id
-    undigested = await list_undigested_episodes(store, user_id, scope=scope)
-    meta = await load_scope_meta(store, user_id, scope=scope)
+    ep_store = episode_store or default_episode_store()
+    undigested = await list_undigested_episodes(ep_store, user_id, scope=scope)
+    meta = await load_scope_meta(ep_store, user_id, scope=scope)
     oldest: datetime | None = None
     if undigested:
         try:
@@ -315,7 +319,7 @@ async def run_semantic_for_scope(
 
     # Success (changed or noop): mark digested so the same summaries are not re-merged.
     await mark_episodes_digested(
-        store,
+        ep_store,
         user_id,
         [ep.id for ep in undigested],
         scope=scope,
@@ -468,6 +472,7 @@ async def consolidate_conversation(
     if _in_shared_failure_cooldown() or _in_conversation_failure_cooldown(conversation_id):
         return False
     store = store or default_memory_store()
+    ep_store = default_episode_store()
     # Captured so the failure path can advance the sweeper watermark without re-query.
     latest: datetime | None = None
     try:
@@ -551,7 +556,7 @@ async def consolidate_conversation(
                     return False
                 credentials = bg.credentials
                 episode = await append_episode(
-                    store,
+                    ep_store,
                     user_id=user_id,
                     conversation_id=conversation_id,
                     summary=bg.value,
@@ -579,6 +584,7 @@ async def consolidate_conversation(
                         folder_id=folder_id,
                         store=store,
                         credentials=credentials,
+                        episode_store=ep_store,
                     )
 
             _clear_conversation_failure_cooldown(conversation_id)
@@ -762,7 +768,14 @@ async def consolidation_sweep_once() -> int:
 
     Shared-upstream cooldown aborts the rest of the batch (and skips the sweep when
     already armed). Per-conversation cooldown skips that id without stopping others.
+    Also purges digested episodes past the retention window (no separate GC loop).
     """
+    with contextlib.suppress(Exception):
+        purged = await purge_digested_episodes(
+            older_than_days=settings.memory_episode_retention_days
+        )
+        if purged:
+            logger.info("memory.episodes_purged", count=purged)
     if _in_shared_failure_cooldown():
         return 0
     cutoff = datetime.now(UTC) - timedelta(seconds=settings.memory_consolidation_idle_seconds)

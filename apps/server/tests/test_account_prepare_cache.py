@@ -200,6 +200,14 @@ async def test_warm_rules_list_once_and_seeds(
     async def _mem_load(creds, *, path, scope):
         return f"# {path}\n- body for {scope}\n"
 
+    async def _scope_state(creds, *, scope):
+        return {
+            "last_semantic_at": None,
+            "explore_workspace_key": None,
+            "explore_fingerprint": None,
+            "explore_fingerprint_dirty": False,
+        }
+
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
     )
@@ -208,6 +216,10 @@ async def test_warm_rules_list_once_and_seeds(
     )
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_memory_load", _mem_load
+    )
+    monkeypatch.setattr(
+        "agentcore.memory.account_prepare_cache.cloud_memory_scope_state_get",
+        _scope_state,
     )
 
     snap = await warm_account_rules_memory(
@@ -381,12 +393,12 @@ def test_warm_account_rules_memory_seeds_cache(
     assert "warm" in str(hit.rules_payload)
 
 
-async def test_warm_includes_memory_meta_even_when_unlistable(
+async def test_warm_includes_scope_state_alongside_memory_bodies(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    """``_memory_meta.json`` is not a ``*.md`` list entry — warm must still load it."""
+    """Scope state is warmed via ``/scope-state/get``, not as a document-tree meta file."""
     clear_account_rules_memory_cache()
-    loaded: list[tuple[str | None, str]] = []
+    state_scopes: list[str | None] = []
 
     async def _rules(*_a, **_k):
         return {
@@ -399,14 +411,19 @@ async def test_warm_includes_memory_meta_even_when_unlistable(
     async def _mem_list(creds, *, scope):
         if scope is None:
             return [{"path": "偏好.md", "version": "1"}]
-        # Project list has 画像 but omits meta (json sidecar).
         return [{"path": "画像.md", "version": "1"}, {"path": "导航.md", "version": "1"}]
 
     async def _mem_load(creds, *, path, scope):
-        loaded.append((scope, path))
-        if path == "_memory_meta.json":
-            return '{"explore_workspace_key": "ws:1"}\n'
         return f"# {path}\n"
+
+    async def _scope_state(creds, *, scope):
+        state_scopes.append(scope)
+        return {
+            "last_semantic_at": None,
+            "explore_workspace_key": "ws:1",
+            "explore_fingerprint": "fp1",
+            "explore_fingerprint_dirty": False,
+        }
 
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_list_user_rules", _rules
@@ -417,14 +434,18 @@ async def test_warm_includes_memory_meta_even_when_unlistable(
     monkeypatch.setattr(
         "agentcore.memory.account_prepare_cache.cloud_memory_load", _mem_load
     )
+    monkeypatch.setattr(
+        "agentcore.memory.account_prepare_cache.cloud_memory_scope_state_get",
+        _scope_state,
+    )
 
     snap = await warm_account_rules_memory(
         account_creds, user_id="u1", folder_id="F1"
     )
-    assert ("F1", "_memory_meta.json") in loaded
-    assert (None, "_memory_meta.json") in loaded
-    assert snap.memory_bodies[("F1", "_memory_meta.json")].startswith("{")
+    assert None in state_scopes and "F1" in state_scopes
+    assert snap.scope_states["F1"].explore_workspace_key == "ws:1"
     assert snap.memory_bodies[("F1", "画像.md")].startswith("#")
+    assert all(path != "_memory_meta.json" for (_, path) in snap.memory_bodies)
 
 
 async def test_document_store_cache_only_miss_skips_cloud(
@@ -458,11 +479,12 @@ async def test_document_store_cache_only_miss_skips_cloud(
 async def test_document_store_cache_only_seed_serves_explore_profile(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
+    from agentcore.memory.episode_store import ScopeMemoryMeta
     from agentcore.memory.explore_profile import (
         load_project_profile,
         project_profile_explore_reason,
     )
-    from agentcore.memory.store import CORE_MEMORY_FILE, MEMORY_META_FILE
+    from agentcore.memory.store import CORE_MEMORY_FILE
 
     clear_account_rules_memory_cache()
     seed_account_rules_memory_cache(
@@ -471,10 +493,14 @@ async def test_document_store_cache_only_seed_serves_explore_profile(
         AccountPrepareSnapshot(
             memory_bodies={
                 ("F1", CORE_MEMORY_FILE): "## 技术栈与工具\n- Go\n",
-                (
-                    "F1",
-                    MEMORY_META_FILE,
-                ): '{"explore_workspace_key": "ws:abc", "digested_ids": []}\n',
+            },
+            scope_states={
+                "F1": ScopeMemoryMeta(
+                    last_semantic_at=None,
+                    explore_workspace_key="ws:abc",
+                    explore_fingerprint=None,
+                    explore_fingerprint_dirty=False,
+                ),
             },
         ),
     )
@@ -484,6 +510,12 @@ async def test_document_store_cache_only_seed_serves_explore_profile(
 
     monkeypatch.setattr("agentcore.account.credentials.cloud_memory_load", _boom)
     monkeypatch.setattr("agentcore.account.credentials.cloud_memory_save", _boom)
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_memory_scope_state_get", _boom
+    )
+    monkeypatch.setattr(
+        "agentcore.account.credentials.cloud_memory_scope_state_save", _boom
+    )
 
     store = DocumentMemoryStore()
     token = prepare_reads_cache_only.set(True)

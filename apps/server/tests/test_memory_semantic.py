@@ -266,14 +266,20 @@ async def test_explicit_remember_writes_immediately(tmp_path):
 
 async def test_episodic_then_semantic_count_path(tmp_path):
     """Three undigested episodes + fake consolidator → semantic apply."""
-    store = FileMemoryStore(tmp_path)
+    from agentcore.memory.episode_store import InMemoryEpisodeStore
+
+    ep_store = InMemoryEpisodeStore()
     for i in range(3):
         await append_episode(
-            store, user_id="u1", conversation_id=f"c{i}", summary=f"摘要{i}", max_chars=200
+            ep_store,
+            user_id="u1",
+            conversation_id=f"c{i}",
+            summary=f"摘要{i}",
+            max_chars=200,
         )
     from agentcore.memory.episodic import list_undigested_episodes, should_run_semantic
 
-    undigested = await list_undigested_episodes(store, "u1")
+    undigested = await list_undigested_episodes(ep_store, "u1")
     assert len(undigested) == 3
     assert should_run_semantic(
         undigested_count=len(undigested),

@@ -1,19 +1,20 @@
 """Episodic (session-summary) memory layer.
 
 Each settled conversation writes one ≤N-char dialogue digest (plus optional verified
-project-fact bullets) into the user's memory folder under ``情景/<id>.md``. Digests are
-append-only, never deduped, never injected into prompts — they only feed the later
-semantic consolidation pass. When turn_journal shows real tool activity, the digest
-input includes a secret-redacted action inventory so verified paths/commands can land.
+project-fact bullets) into ``memory_episodes``. Digests are append-only, never deduped,
+never injected into prompts — they only feed the later semantic consolidation pass.
+When turn_journal shows real tool activity, the digest input includes a secret-redacted
+action inventory so verified paths/commands can land.
+
+Per-scope sidecar (last_semantic_at / explore fingerprint) lives in ``memory_scope_states``,
+not the documents tree.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -27,147 +28,41 @@ from agentcore.memory.action_inventory import (
     render_action_inventory_for_prompt,
 )
 from agentcore.memory.conversation_title import ChatMessage
-from agentcore.memory.store import (
-    EPISODIC_DIR,
-    MEMORY_META_FILE,
-    MemoryScope,
-    MemoryStore,
-    episodic_path,
-    is_episodic_path,
+from agentcore.memory.episode_store import (
+    EpisodeRecord,
+    EpisodeStore,
+    ScopeMemoryMeta,
+    default_episode_store,
 )
+from agentcore.memory.store import MemoryScope
 
 logger = get_logger(__name__)
 
 _FACTS_HEADING = "## 本场证实的项目事实"
 _MAX_VERIFIED_FACTS_CHARS = 600
 
-
-@dataclass(frozen=True)
-class EpisodeRecord:
-    """One undigested (or any) episodic session summary."""
-
-    id: str
-    conversation_id: str
-    summary: str
-    created_at: str  # ISO
-    # Secret-redacted action inventory JSON (files/commands/searches); empty when absent.
-    actions_json: str = ""
-
-
-@dataclass
-class ScopeMemoryMeta:
-    """Per-(user, scope) sidecar: digested episode ids + last semantic success time.
-
-    ``explore_workspace_key`` records the workspace identity last written by the
-    cold-start explore act (过期再探); absent on legacy scopes.
-    ``explore_fingerprint`` is the top-tree + key-manifest fingerprint at last explore
-    close-out; ``explore_fingerprint_dirty`` is the R2 soft-stale mark (does not block).
-    """
-
-    digested_ids: set[str]
-    last_semantic_at: datetime | None
-    explore_workspace_key: str | None = None
-    explore_fingerprint: str | None = None
-    explore_fingerprint_dirty: bool = False
-
-    def to_json(self) -> str:
-        payload: dict = {
-            "digested_ids": sorted(self.digested_ids),
-            "last_semantic_at": (
-                self.last_semantic_at.astimezone(UTC).isoformat()
-                if self.last_semantic_at
-                else None
-            ),
-        }
-        if self.explore_workspace_key:
-            payload["explore_workspace_key"] = self.explore_workspace_key
-        if self.explore_fingerprint:
-            payload["explore_fingerprint"] = self.explore_fingerprint
-        if self.explore_fingerprint_dirty:
-            payload["explore_fingerprint_dirty"] = True
-        return json.dumps(payload, ensure_ascii=False)
-
-
-def _parse_meta(raw: str) -> ScopeMemoryMeta:
-    if not raw.strip():
-        return ScopeMemoryMeta(digested_ids=set(), last_semantic_at=None)
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, ValueError):
-        return ScopeMemoryMeta(digested_ids=set(), last_semantic_at=None)
-    digested = {str(x) for x in (data.get("digested_ids") or []) if str(x).strip()}
-    last_raw = data.get("last_semantic_at")
-    last: datetime | None = None
-    if isinstance(last_raw, str) and last_raw.strip():
-        try:
-            last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
-            if last.tzinfo is None:
-                last = last.replace(tzinfo=UTC)
-        except ValueError:
-            last = None
-    key_raw = data.get("explore_workspace_key")
-    key = str(key_raw).strip() if isinstance(key_raw, str) and key_raw.strip() else None
-    fp_raw = data.get("explore_fingerprint")
-    fingerprint = (
-        str(fp_raw).strip() if isinstance(fp_raw, str) and fp_raw.strip() else None
-    )
-    dirty = bool(data.get("explore_fingerprint_dirty"))
-    return ScopeMemoryMeta(
-        digested_ids=digested,
-        last_semantic_at=last,
-        explore_workspace_key=key,
-        explore_fingerprint=fingerprint,
-        explore_fingerprint_dirty=dirty,
-    )
-
-
-def _render_episode_body(
-    *,
-    conversation_id: str,
-    summary: str,
-    created_at: str,
-    actions_json: str = "",
-) -> str:
-    """Markdown body with a tiny machine header; human-readable summary below."""
-    header = (
-        f"<!-- conversation_id: {conversation_id} -->\n"
-        f"<!-- created_at: {created_at} -->\n"
-    )
-    if actions_json.strip():
-        # Single-line comment so parsers stay simple.
-        compact = " ".join(actions_json.split())
-        header += f"<!-- actions: {compact} -->\n"
-    return f"{header}\n{summary.strip()}\n"
-
-
-def _parse_episode_body(episode_id: str, body: str) -> EpisodeRecord | None:
-    conversation_id = ""
-    created_at = ""
-    actions_json = ""
-    lines = body.splitlines()
-    text_lines: list[str] = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("<!-- conversation_id:") and stripped.endswith("-->"):
-            conversation_id = stripped[len("<!-- conversation_id:") : -3].strip()
-            continue
-        if stripped.startswith("<!-- created_at:") and stripped.endswith("-->"):
-            created_at = stripped[len("<!-- created_at:") : -3].strip()
-            continue
-        if stripped.startswith("<!-- actions:") and stripped.endswith("-->"):
-            actions_json = stripped[len("<!-- actions:") : -3].strip()
-            continue
-        text_lines.append(line)
-    summary = "\n".join(text_lines).strip()
-    if not summary:
-        return None
-    return EpisodeRecord(
-        id=episode_id,
-        conversation_id=conversation_id,
-        summary=summary,
-        created_at=created_at or datetime.now(UTC).isoformat(),
-        actions_json=actions_json,
-    )
+# Re-export for callers that imported these from episodic.
+__all__ = [
+    "EpisodeRecord",
+    "ScopeMemoryMeta",
+    "EpisodicSummarizer",
+    "LLMEpisodicSummarizer",
+    "append_episode",
+    "clamp_summary",
+    "compose_episode_summary",
+    "episode_actions",
+    "fallback_episode_summary",
+    "list_undigested_episodes",
+    "load_scope_meta",
+    "mark_episodes_digested",
+    "merge_episode_actions",
+    "parse_legacy_episode_body",
+    "parse_legacy_scope_meta_json",
+    "purge_digested_episodes",
+    "save_scope_meta",
+    "should_run_semantic",
+    "split_summary_and_facts",
+]
 
 
 def episode_actions(ep: EpisodeRecord) -> TurnActionInventory:
@@ -217,23 +112,6 @@ def compose_episode_summary(
     return f"{clamped}\n\n{_FACTS_HEADING}\n{facts_md}"
 
 
-async def load_scope_meta(
-    store: MemoryStore, user_id: str, *, scope: MemoryScope = None
-) -> ScopeMemoryMeta:
-    raw = await store.load(user_id, MEMORY_META_FILE, scope=scope)
-    return _parse_meta(raw)
-
-
-async def save_scope_meta(
-    store: MemoryStore,
-    user_id: str,
-    meta: ScopeMemoryMeta,
-    *,
-    scope: MemoryScope = None,
-) -> None:
-    await store.save(user_id, MEMORY_META_FILE, meta.to_json() + "\n", scope=scope)
-
-
 def clamp_summary(text: str, max_chars: int) -> str:
     """Hard-cap an episodic summary (whitespace-normalized)."""
     cleaned = " ".join(text.split()).strip()
@@ -242,8 +120,131 @@ def clamp_summary(text: str, max_chars: int) -> str:
     return cleaned[: max_chars - 1].rstrip() + "…"
 
 
+def parse_legacy_episode_body(episode_id: str, body: str) -> EpisodeRecord | None:
+    """Parse a former ``情景/<id>.md`` document body (backfill only)."""
+    conversation_id = ""
+    created_at = ""
+    actions_json = ""
+    lines = body.splitlines()
+    text_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("<!-- conversation_id:") and stripped.endswith("-->"):
+            conversation_id = stripped[len("<!-- conversation_id:") : -3].strip()
+            continue
+        if stripped.startswith("<!-- created_at:") and stripped.endswith("-->"):
+            created_at = stripped[len("<!-- created_at:") : -3].strip()
+            continue
+        if stripped.startswith("<!-- actions:") and stripped.endswith("-->"):
+            actions_json = stripped[len("<!-- actions:") : -3].strip()
+            continue
+        text_lines.append(line)
+    summary = "\n".join(text_lines).strip()
+    if not summary:
+        return None
+    return EpisodeRecord(
+        id=episode_id,
+        conversation_id=conversation_id,
+        summary=summary,
+        created_at=created_at or datetime.now(UTC).isoformat(),
+        actions_json=actions_json,
+    )
+
+
+def parse_legacy_scope_meta_json(raw: str) -> ScopeMemoryMeta:
+    """Parse a former ``_memory_meta.json`` body, stripping polluted frontmatter if needed.
+
+    ``ensure_apply_key`` once wrapped the sidecar in YAML frontmatter so ``json.loads``
+    failed forever — backfill must recover digested_ids / explore fields from that shape.
+    Digested ids are returned separately via :func:`legacy_digested_ids_from_meta_json`.
+    """
+    data = _loads_meta_json(raw)
+    if data is None:
+        return ScopeMemoryMeta(last_semantic_at=None)
+    last_raw = data.get("last_semantic_at")
+    last: datetime | None = None
+    if isinstance(last_raw, str) and last_raw.strip():
+        try:
+            last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+        except ValueError:
+            last = None
+    key_raw = data.get("explore_workspace_key")
+    key = str(key_raw).strip() if isinstance(key_raw, str) and key_raw.strip() else None
+    fp_raw = data.get("explore_fingerprint")
+    fingerprint = (
+        str(fp_raw).strip() if isinstance(fp_raw, str) and fp_raw.strip() else None
+    )
+    return ScopeMemoryMeta(
+        last_semantic_at=last,
+        explore_workspace_key=key,
+        explore_fingerprint=fingerprint,
+        explore_fingerprint_dirty=bool(data.get("explore_fingerprint_dirty")),
+    )
+
+
+def legacy_digested_ids_from_meta_json(raw: str) -> set[str]:
+    """Extract ``digested_ids`` from a legacy meta sidecar (after frontmatter strip)."""
+    data = _loads_meta_json(raw)
+    if data is None:
+        return set()
+    return {str(x) for x in (data.get("digested_ids") or []) if str(x).strip()}
+
+
+def _loads_meta_json(raw: str) -> dict | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, ValueError):
+        pass
+    # Contaminated by ensure_apply_key frontmatter — strip then retry.
+    try:
+        from agentcore.documents.frontmatter import strip_entry_frontmatter
+
+        stripped = strip_entry_frontmatter(text)
+        if stripped is None or stripped == text:
+            # Unclosed / unparseable FM: try dropping a leading ---…--- block heuristically.
+            if text.startswith("---"):
+                end = text.find("\n---", 3)
+                if end >= 0:
+                    stripped = text[end + 4 :].lstrip("\r\n")
+                else:
+                    return None
+            else:
+                return None
+        data = json.loads(stripped.strip())
+        return data if isinstance(data, dict) else None
+    except (json.JSONDecodeError, ValueError, Exception):  # noqa: BLE001
+        return None
+
+
+async def load_scope_meta(
+    store: EpisodeStore | None = None,
+    user_id: str = "",
+    *,
+    scope: MemoryScope = None,
+) -> ScopeMemoryMeta:
+    ep = store or default_episode_store()
+    return await ep.load_scope_meta(user_id, scope=scope)
+
+
+async def save_scope_meta(
+    store: EpisodeStore | None,
+    user_id: str,
+    meta: ScopeMemoryMeta,
+    *,
+    scope: MemoryScope = None,
+) -> None:
+    ep = store or default_episode_store()
+    await ep.save_scope_meta(user_id, meta, scope=scope)
+
+
 async def append_episode(
-    store: MemoryStore,
+    store: EpisodeStore | None = None,
     *,
     user_id: str,
     conversation_id: str,
@@ -257,59 +258,43 @@ async def append_episode(
     ``summary`` may already include a ``## 本场证实的项目事实`` section; only the
     dialogue paragraph is hard-capped to ``max_chars``.
     """
-    episode_id = uuid.uuid4().hex
-    created_at = datetime.now(UTC).isoformat()
+    ep_store = store or default_episode_store()
     dialogue, facts = split_summary_and_facts(summary)
     stored = compose_episode_summary(dialogue, facts, max_chars=max_chars)
     actions_json = ""
     if actions is not None and not actions.is_empty():
         actions_json = actions.to_json()
-    body = _render_episode_body(
+    record = await ep_store.append_episode(
+        user_id,
         conversation_id=conversation_id,
         summary=stored,
-        created_at=created_at,
+        scope=scope,
         actions_json=actions_json,
     )
-    await store.save(user_id, episodic_path(episode_id), body, scope=scope)
     logger.info(
         "memory.episodic_written",
         user_id=user_id,
         conversation_id=conversation_id,
-        episode_id=episode_id,
+        episode_id=record.id,
         chars=len(stored),
         scope=scope or "global",
     )
-    return EpisodeRecord(
-        id=episode_id,
-        conversation_id=conversation_id,
-        summary=stored,
-        created_at=created_at,
-        actions_json=actions_json,
-    )
+    return record
 
 
 async def list_undigested_episodes(
-    store: MemoryStore, user_id: str, *, scope: MemoryScope = None
+    store: EpisodeStore | None = None,
+    user_id: str = "",
+    *,
+    scope: MemoryScope = None,
 ) -> list[EpisodeRecord]:
     """Episodes not yet consumed by a successful semantic consolidation (oldest first)."""
-    meta = await load_scope_meta(store, user_id, scope=scope)
-    out: list[EpisodeRecord] = []
-    for m in await store.list(user_id, scope=scope):
-        if not is_episodic_path(m.path):
-            continue
-        episode_id = m.path[len(EPISODIC_DIR) + 1 :].removesuffix(".md")
-        if episode_id in meta.digested_ids:
-            continue
-        body = await store.load(user_id, m.path, scope=scope)
-        rec = _parse_episode_body(episode_id, body)
-        if rec is not None:
-            out.append(rec)
-    out.sort(key=lambda r: r.created_at)
-    return out
+    ep = store or default_episode_store()
+    return await ep.list_undigested(user_id, scope=scope)
 
 
 async def mark_episodes_digested(
-    store: MemoryStore,
+    store: EpisodeStore | None,
     user_id: str,
     episode_ids: list[str],
     *,
@@ -319,10 +304,21 @@ async def mark_episodes_digested(
     """Mark episodes as digested and stamp last successful semantic consolidation time."""
     if not episode_ids and consolidated_at is None:
         return
-    meta = await load_scope_meta(store, user_id, scope=scope)
-    meta.digested_ids.update(episode_ids)
-    meta.last_semantic_at = consolidated_at or datetime.now(UTC)
-    await save_scope_meta(store, user_id, meta, scope=scope)
+    ep = store or default_episode_store()
+    await ep.mark_digested(
+        user_id, episode_ids, scope=scope, consolidated_at=consolidated_at
+    )
+
+
+async def purge_digested_episodes(
+    store: EpisodeStore | None = None,
+    *,
+    older_than_days: int = 30,
+    user_id: str | None = None,
+) -> int:
+    """Hard-delete digested episodes past the retention window (default 30 days)."""
+    ep = store or default_episode_store()
+    return await ep.purge_digested(older_than_days=older_than_days, user_id=user_id)
 
 
 _EPISODIC_SYSTEM = """\

@@ -25,13 +25,14 @@ from agentcore.account.credentials import (
     cloud_list_user_rules,
     cloud_memory_list,
     cloud_memory_load,
+    cloud_memory_scope_state_get,
 )
 from agentcore.core.logging import get_logger
+from agentcore.memory.episode_store import ScopeMemoryMeta
 from agentcore.memory.injection import MemoryTopic
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
     CORE_MEMORY_FILE,
-    MEMORY_META_FILE,
     NAVIGATION_MEMORY_FILE,
     is_topic_path,
     topic_slug,
@@ -63,6 +64,8 @@ class AccountPrepareSnapshot:
     rules_payload: Mapping[str, Any] = field(default_factory=dict)
     # (scope_key, path) → markdown; scope_key "" = global, else folder_id.
     memory_bodies: Mapping[tuple[str, str], str] = field(default_factory=dict)
+    # scope_key → consolidation/explore sidecar (replaces ``_memory_meta.json`` warm).
+    scope_states: Mapping[str, ScopeMemoryMeta] = field(default_factory=dict)
     memory_topics: tuple[MemoryTopic, ...] = ()
     degraded: bool = False
 
@@ -144,11 +147,7 @@ def _scope_key(scope: str | None) -> str:
 
 
 def _wanted_paths(files: list[dict[str, Any]], *, scope: str | None) -> list[str]:
-    """Always-injected + topic paths + meta sidecar for explore/fingerprint.
-
-    ``MEMORY_META_FILE`` is forced even when cloud ``memory/list`` omits it
-    (json sidecar, not ``*.md``). Project always already includes ``画像.md``.
-    """
+    """Always-injected + topic paths for injection. Scope state is warmed separately."""
     wanted: list[str] = []
     seen: set[str] = set()
     always = (
@@ -160,12 +159,43 @@ def _wanted_paths(files: list[dict[str, Any]], *, scope: str | None) -> list[str
         path = str(item.get("path") or "")
         if not path or path in seen:
             continue
-        if path in always or path == MEMORY_META_FILE or is_topic_path(path):
+        if path in always or is_topic_path(path):
             seen.add(path)
             wanted.append(path)
-    if MEMORY_META_FILE not in seen:
-        wanted.append(MEMORY_META_FILE)
     return wanted
+
+
+def _parse_scope_state(data: dict[str, Any]) -> ScopeMemoryMeta:
+    from datetime import UTC, datetime
+
+    last_raw = data.get("last_semantic_at")
+    last = None
+    if isinstance(last_raw, str) and last_raw.strip():
+        try:
+            last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=UTC)
+        except ValueError:
+            last = None
+    key_raw = data.get("explore_workspace_key")
+    key = str(key_raw).strip() if isinstance(key_raw, str) and key_raw.strip() else None
+    fp_raw = data.get("explore_fingerprint")
+    fingerprint = (
+        str(fp_raw).strip() if isinstance(fp_raw, str) and fp_raw.strip() else None
+    )
+    return ScopeMemoryMeta(
+        last_semantic_at=last,
+        explore_workspace_key=key,
+        explore_fingerprint=fingerprint,
+        explore_fingerprint_dirty=bool(data.get("explore_fingerprint_dirty")),
+    )
+
+
+async def _fetch_scope_state(
+    creds: AccountCredentials, scope: str | None
+) -> ScopeMemoryMeta:
+    data = await cloud_memory_scope_state_get(creds, scope=scope)
+    return _parse_scope_state(data)
 
 
 async def _fetch_scope_bodies(
@@ -224,16 +254,26 @@ async def warm_account_rules_memory(
 
     rules_coro = cloud_list_user_rules(creds, folder_id=folder_id)
     global_coro = _fetch_scope_bodies(creds, None)
+    global_state_coro = _fetch_scope_state(creds, None)
     if folder_id:
         project_coro = _fetch_scope_bodies(creds, folder_id)
-        rules_res, global_res, project_res = await asyncio.gather(
-            rules_coro, global_coro, project_coro, return_exceptions=True
+        project_state_coro = _fetch_scope_state(creds, folder_id)
+        rules_res, global_res, project_res, global_state_res, project_state_res = (
+            await asyncio.gather(
+                rules_coro,
+                global_coro,
+                project_coro,
+                global_state_coro,
+                project_state_coro,
+                return_exceptions=True,
+            )
         )
     else:
-        rules_res, global_res = await asyncio.gather(
-            rules_coro, global_coro, return_exceptions=True
+        rules_res, global_res, global_state_res = await asyncio.gather(
+            rules_coro, global_coro, global_state_coro, return_exceptions=True
         )
         project_res = ({}, [])
+        project_state_res = ScopeMemoryMeta(last_semantic_at=None)
 
     degraded = False
     rules_payload: dict[str, Any] = {}
@@ -284,9 +324,38 @@ async def warm_account_rules_memory(
             memory_bodies.update(bodies)
             project_topics = topics
 
+    scope_states: dict[str, ScopeMemoryMeta] = {}
+    if isinstance(global_state_res, BaseException):
+        degraded = True
+        logger.warning(
+            "account.rules_memory_warm_failed",
+            user_id=uid,
+            folder_id=folder_id,
+            part="scope_state_global",
+            error=str(global_state_res),
+        )
+        scope_states[""] = ScopeMemoryMeta(last_semantic_at=None)
+    else:
+        scope_states[""] = global_state_res  # type: ignore[assignment]
+
+    if folder_id:
+        if isinstance(project_state_res, BaseException):
+            degraded = True
+            logger.warning(
+                "account.rules_memory_warm_failed",
+                user_id=uid,
+                folder_id=folder_id,
+                part="scope_state_project",
+                error=str(project_state_res),
+            )
+            scope_states[folder_id] = ScopeMemoryMeta(last_semantic_at=None)
+        else:
+            scope_states[folder_id] = project_state_res  # type: ignore[assignment]
+
     snapshot = AccountPrepareSnapshot(
         rules_payload=rules_payload,
         memory_bodies=memory_bodies,
+        scope_states=scope_states,
         memory_topics=_merge_topics(global_topics, project_topics),
         degraded=degraded,
     )
@@ -302,6 +371,17 @@ def memory_body_from_snapshot(
 ) -> str:
     """Look up one memory file body from a warm snapshot (missing → \"\")."""
     return snapshot.memory_bodies.get((_scope_key(scope), path), "")
+
+
+def scope_meta_from_snapshot(
+    snapshot: AccountPrepareSnapshot,
+    *,
+    scope: str | None,
+) -> ScopeMemoryMeta:
+    """Look up one scope sidecar from a warm snapshot (missing → empty meta)."""
+    return snapshot.scope_states.get(
+        _scope_key(scope), ScopeMemoryMeta(last_semantic_at=None)
+    )
 
 
 def snapshot_for_prepare_store_read(
@@ -325,6 +405,7 @@ __all__ = [
     "memory_body_from_snapshot",
     "prepare_account_folder_id",
     "prepare_reads_cache_only",
+    "scope_meta_from_snapshot",
     "seed_account_rules_memory_cache",
     "snapshot_for_prepare_store_read",
     "warm_account_rules_memory",

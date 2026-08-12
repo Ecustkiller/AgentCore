@@ -38,6 +38,9 @@ class PersistenceSettings(BaseModel):
     memory_consolidation_shared_failure_cooldown_max_seconds: int = 1800
     # Episodic session summary hard cap (chars); LLM output is truncated to this.
     memory_episodic_summary_max_chars: int = 200
+    # Digested episodes have no reader left (semantic already merged them); the sweeper
+    # hard-deletes them past this window. 0 disables the purge (keeps them forever).
+    memory_episode_retention_days: int = 30
     # Semantic consolidation triggers (either condition): undigested episodic count, or
     # hours since the last successful semantic pass for that (user, scope).
     memory_semantic_min_episodes: int = 3
