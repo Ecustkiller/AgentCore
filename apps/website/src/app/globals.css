@@ -212,17 +212,16 @@
   --cg-done: oklch(0.7 0.11 195);
   --cg-done-ink: oklch(0.54 0.1 195);
 
-  /* 协作图 Agent 身份色：仅协作图内联 var() 使用，非状态语义。
-     八个身份在 hue 195–285 里摆动、明度错开——同一套家族里的八个位置，
-     不是八种颜色。 */
-  --agent-1: oklch(0.66 0.14 272);
-  --agent-2: oklch(0.72 0.13 252);
-  --agent-3: oklch(0.78 0.12 232);
-  --agent-4: oklch(0.84 0.1 210);
-  --agent-5: oklch(0.74 0.11 195);
-  --agent-6: oklch(0.7 0.13 262);
-  --agent-7: oklch(0.8 0.11 220);
-  --agent-8: oklch(0.62 0.15 285);
+  /* 协作图 Agent 身份色（亮色，画布落在白纸上）：数值真源
+     packages/design-tokens/src/tokens.css（:root）；仅协作图内联 var()，非状态语义。 */
+  --agent-1: oklch(0.58 0.07 95);
+  --agent-2: oklch(0.58 0.07 120);
+  --agent-3: oklch(0.58 0.07 180);
+  --agent-4: oklch(0.58 0.07 205);
+  --agent-5: oklch(0.58 0.07 230);
+  --agent-6: oklch(0.58 0.07 285);
+  --agent-7: oklch(0.58 0.07 310);
+  --agent-8: oklch(0.58 0.07 335);
 }
 
 /* 白纸分区里的点缀反向。

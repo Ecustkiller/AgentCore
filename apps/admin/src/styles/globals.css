@@ -3,10 +3,10 @@
 @custom-variant dark (&:is(.dark *));
 
 /*
- * Shared OKLCH token system, mirrored from the desktop renderer (hue 255 brand
- * blue; semantic status colors are first-class — never reuse `accent` for
- * success). Kept in sync by hand during the 过渡期 (no shared design-tokens
- * package yet); see .cursor/rules/color-tokens.mdc.
+ * Shared OKLCH token system, mirrored from packages/design-tokens/src/tokens.css
+ * (hue 255 brand blue; semantic status colors are first-class — never reuse
+ * `accent` for success). Hand-copied values until design-tokens is wired as a
+ * package dep; see .cursor/rules/color-tokens.mdc.
  */
 @theme inline {
   --color-background: var(--background);
@@ -66,16 +66,16 @@
   --overlay: oklch(0 0 0 / 0.45);
   --scrollbar-thumb: oklch(0.8 0.012 255 / 0.8);
   --scrollbar-thumb-hover: oklch(0.62 0.02 255 / 0.9);
-  /* 角色身份色板 (color-tokens.mdc 角色身份)，镜像桌面 design-tokens：按角色名 hash 取一格，
-   * 供「各角色花销」工资单的身份圆点内联使用 (var(--agent-N))。身份 ≠ 状态。 */
-  --agent-1: oklch(0.58 0.14 20);
-  --agent-2: oklch(0.58 0.14 65);
-  --agent-3: oklch(0.58 0.14 110);
-  --agent-4: oklch(0.58 0.14 155);
-  --agent-5: oklch(0.58 0.14 200);
-  --agent-6: oklch(0.58 0.14 245);
-  --agent-7: oklch(0.58 0.14 290);
-  --agent-8: oklch(0.58 0.14 335);
+  /* 角色身份色板：数值真源 packages/design-tokens/src/tokens.css（:root）；
+   * 按角色名 hash 取一格，供工资单身份圆点 var(--agent-N)。身份 ≠ 状态。 */
+  --agent-1: oklch(0.58 0.07 95);
+  --agent-2: oklch(0.58 0.07 120);
+  --agent-3: oklch(0.58 0.07 180);
+  --agent-4: oklch(0.58 0.07 205);
+  --agent-5: oklch(0.58 0.07 230);
+  --agent-6: oklch(0.58 0.07 285);
+  --agent-7: oklch(0.58 0.07 310);
+  --agent-8: oklch(0.58 0.07 335);
 }
 
 .dark {
@@ -107,15 +107,15 @@
   --overlay: oklch(0 0 0 / 0.6);
   --scrollbar-thumb: oklch(0.42 0.015 255 / 0.75);
   --scrollbar-thumb-hover: oklch(0.58 0.02 255 / 0.9);
-  /* 角色身份色板（暗色），镜像桌面 design-tokens .dark。 */
-  --agent-1: oklch(0.72 0.14 20);
-  --agent-2: oklch(0.72 0.14 65);
-  --agent-3: oklch(0.72 0.14 110);
-  --agent-4: oklch(0.72 0.14 155);
-  --agent-5: oklch(0.72 0.14 200);
-  --agent-6: oklch(0.72 0.14 245);
-  --agent-7: oklch(0.72 0.14 290);
-  --agent-8: oklch(0.72 0.14 335);
+  /* 角色身份色板（暗色）：数值真源 packages/design-tokens/src/tokens.css（.dark）。 */
+  --agent-1: oklch(0.72 0.07 95);
+  --agent-2: oklch(0.72 0.07 120);
+  --agent-3: oklch(0.72 0.07 180);
+  --agent-4: oklch(0.72 0.07 205);
+  --agent-5: oklch(0.72 0.07 230);
+  --agent-6: oklch(0.72 0.07 285);
+  --agent-7: oklch(0.72 0.07 310);
+  --agent-8: oklch(0.72 0.07 335);
 }
 
 * {

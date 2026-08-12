@@ -54,9 +54,10 @@ skip_if:
 
 - **传输**：`GET /v1/realtime` 每用户一条长连 SSE firehose（server→client），发送走上面的 POST。鉴权复用 Cookie；此流自带 401→刷新→重连（[认证与会话 §六](/docs/05-平台与运维/认证与会话.md)），前端客户端见 `renderer/services/realtime.ts`（§六）。
 - **fan-out**：A 发 → 落库 `chat_messages` → 经 `HubChatEventPublisher`（`messaging/hub.py` 进程内 pub/sub）推送给在线成员的 firehose。
-- **多载事件**：这条 firehose 不止 IM 消息——是该用户通用的「跨端 server→client」管线。除 `chat_message` 外，还载 `presence`（用户 `/v1/realtime` 连接数 0↔≥1 时推给**有共同会话**的对端；不入库）、`memory_updated`（记忆整合后由 `memory/consolidation.py` 广播，前端 `realtime.ts` 据此实时补「记忆已更新」卡 / toast）。原 `workspace_promoted` 已随 auto-promote 链路移除（现为「项目即工作区」，见 [双模式工作区 §六](/docs/02-架构/双模式工作区.md)）。**扩展性**：新事件类型只需 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
+- **多载事件**：这条 firehose 不止 IM 消息——是该用户通用的「跨端 server→client」管线。除 `chat_message` 外，还载 `presence`（用户 `/v1/realtime` 连接数 0↔≥1 时推给**有共同会话**的对端；不入库）、`chat_changed`（会话/成员变更，见下）、`memory_updated`（记忆整合后由 `memory/consolidation.py` 广播，前端 `realtime.ts` 据此实时补「记忆已更新」卡 / toast）。原 `workspace_promoted` 已随 auto-promote 链路移除（现为「项目即工作区」，见 [双模式工作区 §六](/docs/02-架构/双模式工作区.md)）。**扩展性**：新事件类型只需 `_format_event` 透传 + 前端 `handleFrame` 加一分支，无需新通道。
 - **在线态（✅ 基本功能）**：在线 = ChatHub 上该用户 ≥1 条活着的 `/v1/realtime` 订阅（与 admin 同源）。REST 快照：`ChatParticipant.online`（会话列表 dm peer / 群成员面板）；实时：`presence` 事件。桌面呈现：单聊列表绿点 + 头「在线/离线」；群成员绿点 + 头「N 人在线」。不做：正在输入、last_seen、隐身、Redis TTL、手机端。
-- **离线补偿**：不另建表，上线时按 `last_read_message_id` 拉 `chat_messages` 增量。
+- **会话/成员变更（`chat_changed`）**：载荷 `{ type, chat_id, reason }`，`reason ∈ created | member_added | activated`，推给**受影响成员**——对方建 DM 推给 peer、加入群推给新成员、`pending → accepted` 激活推给双方。**薄事件**：不带 `ChatView`（unread / peer / 成员状态按查看者算，一个载荷服务不了两个成员），客户端收到自行重拉会话列表。**为何需要**：在此之前只有消息才驱动对端刷新，于是「对方建了会话但没发消息」「被拉进群」「消息请求被激活」都要等重启或断线重连才可见——被添加方看不到、添加方看得到。
+- **离线补偿**：不另建表，上线时按 `last_read_message_id` 拉 `chat_messages` 增量。`chat_changed` 同样不入库，靠重连时的整表重拉兜底。
 - **多 worker（⏳）**：换 Redis / NATS pub-sub——`ChatEventPublisher` Protocol 已抽象（`events.py`），届时为 seam 局部替换，不动业务逻辑（同限流 / 审批门的多机化路径）。
 
 ## 五、隐私与反滥用（✅ 护栏；好友门见 §九）
@@ -152,10 +153,10 @@ skip_if:
 | 消息请求 vs 好友申请 | **分轨**：好友申请是主路径；`pending` DM 仅服务 `who_can_dm=anyone` 宽松档 | 合并两套状态机易糊；主路径不引导陌生人先发消息 |
 | 谁可加我 | `who_can_friend`：`anyone`（默认）/ `group_members`（须有共同 `type=group` 会话）/ `nobody` | 默认开放与现搜人一致；可收紧 |
 | 同群可见 | `discoverable=false` **不掩盖**已在群内身份（与 §七 群内隐私一致）；资料卡仍可从群打开 | 群 roster 已暴露显示名 |
-| 同意好友 | 接受申请后：建 `friendships`；若已有 pending DM 则双方 `accepted`；可直接「发消息」 | 免二次门 |
+| 同意好友 | 接受申请后：建 `friendships`；DM 不存在则建（双方 `accepted`）、已存在则激活；发一条 `system_card`（`kind=friend_accepted`）「我通过了你的朋友验证请求…」 | 对齐微信：同意后消息列表两边都立刻出现会话，不必再找入口开聊 |
 | 删除好友 | 删 `friendships`；**不**自动删 DM 历史；再私信按当前 `who_can_dm` 门 | 历史会话保留 |
 | 拉黑 | 对称拉黑 + 解除好友 + 取消双方 pending 申请 + 既有断 DM/搜隐 | 一处收口 |
-| 实时 | firehose 增 `friend_request`（新申请/对方处理结果）；不入库补偿——上线拉申请列表 | 与 presence 同通道 |
+| 实时 | firehose 增 `friend_request`（新申请/对方处理结果）；同意后另发 `chat_changed`（§四）让两端会话列表即时出现该会话；不入库补偿——上线拉申请列表 | 与 presence 同通道 |
 | 搜人入口文案 | 「发起会话」可保留搜人，结果进资料卡（加好友/发消息按关系），禁止暗示「无好友即可自由私信」为唯一路径 | 产品诚实 |
 
 ### 9.2 数据（语义）
@@ -172,7 +173,7 @@ skip_if:
 | `GET` | `/friends` | 通讯录（已同意好友列表） |
 | `GET` | `/friends/requests` | 申请箱：`incoming` + `outgoing`（仅 `pending` 为主；实现可附带近期已处理） |
 | `POST` | `/friends/requests` | 发起申请（`user_id` + 可选 `message`）；校验 `who_can_friend`、拉黑、非自加、非已好友；限流 |
-| `POST` | `/friends/requests/{id}/accept` | 仅 `to_user`；建友谊；清该对 pending；可选激活已有 DM |
+| `POST` | `/friends/requests/{id}/accept` | 仅 `to_user`；建友谊；清该对 pending；建或激活 DM 并发 `friend_accepted` 系统卡 |
 | `POST` | `/friends/requests/{id}/reject` | 仅 `to_user` |
 | `DELETE` | `/friends/requests/{id}` | 仅 `from_user` 取消 pending |
 | `DELETE` | `/friends/{user_id}` | 删除好友 |
@@ -180,7 +181,7 @@ skip_if:
 | `GET`/`PATCH` | `/directory` | 扩展 `who_can_friend`；`who_can_dm` 枚举 `anyone`\|`friends`（旧 `contacts` 读兼容已退役） |
 | 既有 | `/blocks*` | 拉黑时级联解好友 + 取消 pending 申请 |
 
-Firehose：`{ type: "friend_request", action: "created"|"accepted"|"rejected"|"cancelled", request: {...} }` 推给相关方。
+Firehose：`{ type: "friend_request", action: "created"|"accepted"|"rejected"|"cancelled", request: {...} }` 推给相关方；同意时另发 `chat_changed`（§四）给会话双方。
 
 ### 9.4 桌面 UX（验收）
 

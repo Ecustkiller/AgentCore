@@ -126,4 +126,4 @@ Cmd+K：搜索；页内：筛选；Cmd+F：查找。Tier 3 语义搜索 ⏳（�
 
 ## 十五、待定与收藏
 
-移动端图简化 ✅：竖排 TeamView 有意简化（非待做画布；→ 见代码 `TeamView` · parity `InlineTeamGraph`）。移动端辩论 ✅：`DebateView` / `LiveDebateNarrative` 双产物精简复盘（无赛事页、站队、掌舵卡；介入靠主 composer 插话/排队；parity `debate_*` = simplified）。跨会话多任务总览、无障碍、流式字级动画 ⏳。**断线只读 / 完全离线** → [双模式工作区](/docs/02-架构/双模式工作区.md)（本文不复述）。消息收藏 ✅：命令面板「已收藏」facet；**否决**侧栏独立列表。
+移动端图简化 ✅：竖排 TeamView 有意简化（非待做画布；→ 见代码 `TeamView` · parity `InlineTeamGraph`）。移动端辩论 ✅：`DebateView` / `LiveDebateNarrative` 双产物精简复盘（无赛事页、站队、掌舵卡；介入靠主 composer 插话/排队；parity `debate_*` = simplified）。跨会话多任务总览、无障碍、流式字级动画 ⏳。**断线只读 / 完全离线** → [双模式工作区](/docs/02-架构/双模式工作区.md)（本文不复述）。消息收藏 ✅：命令面板「已收藏」facet；**否决**侧栏独立列表。**否决逐条消息删除**（曾在助手底栏 / 用户气泡各挂一个「删除」，已下线）：单行硬删只删半个回合（配对消息成孤儿）、连带销毁 journal 重放与审计而用量账单仍留、手机端本就没有；「这答案我不要」走**重新生成**，其余走**对话级删除**。对齐行业（ChatGPT / Claude / Gemini 助手底栏均无逐条删除）。后端 `DELETE .../messages/{id}` 保留但前端不再调用。

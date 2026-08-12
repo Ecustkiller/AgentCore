@@ -24,13 +24,14 @@ pnpm dev            # http://localhost:5174
 
 ## 类型
 
-REST 类型从后端 OpenAPI 生成（单一真相源），勿手写：
+REST 类型从后端 OpenAPI 生成（单一真相源），勿手写。真源在仓库根：
 
 ```bash
-pnpm gen:api        # openapi-typescript ../server/openapi.json -> src/types/api.generated.ts
+# 在仓库根执行（会 dump OpenAPI + 生成 packages/contract-rest-types，并过契约门禁）
+pnpm gen:types
 ```
 
-改了后端 schema 后，先在 `apps/server` 跑 `uv run python scripts/dump_openapi.py`，再回此处 `pnpm gen:api`。
+`apps/admin/src/types/api.generated.ts` 只是对 `@agentcore/contract-rest-types` 的透传，admin 包内没有独立的 `gen:api`。改 schema 后务必走根 `pnpm gen:types`，不要在 admin 目录本地另生成。
 
 ## 命令
 
@@ -39,4 +40,4 @@ pnpm gen:api        # openapi-typescript ../server/openapi.json -> src/types/api
 | `pnpm dev` | 开发服务器（5174）|
 | `pnpm build` | 类型检查 + 生产构建 |
 | `pnpm typecheck` | 仅 `tsc --noEmit` |
-| `pnpm gen:api` | 重生成 API 类型 |
+| （仓库根）`pnpm gen:types` | 重生成契约类型（含 admin 透传源） |
