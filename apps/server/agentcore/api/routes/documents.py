@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from agentcore.api.dependencies import AuthUser, get_document_repo
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.description import maybe_schedule_description_fill
 from agentcore.documents.frontmatter import (
     FrontmatterEditError,
     FrontmatterError,
@@ -29,6 +30,7 @@ from agentcore.documents.frontmatter import (
     parse_entry_frontmatter,
     set_entry_frontmatter,
 )
+from agentcore.documents.write_guards import is_ai_core_memory_leaf
 from agentcore.memory import memory_version
 from agentcore.memory.always_quota import check_always_write, measure_always_usage
 
@@ -263,6 +265,14 @@ async def create_document(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # Async empty-description fill — never blocks / fails the save (定案).
+    maybe_schedule_description_fill(
+        document_id=doc.id,
+        user_id=user.user_id,
+        kind=doc.kind,
+        description=doc.description or "",
+        content=doc.content or "",
+    )
     return _detail(doc)
 
 
@@ -325,6 +335,14 @@ async def update_document_content(
 
     updated = await repo.update_content(document_id, user_id=user.user_id, content=body.content)
     assert updated is not None
+    # Clear → regenerate; non-empty description never auto-overwritten (定案).
+    maybe_schedule_description_fill(
+        document_id=updated.id,
+        user_id=user.user_id,
+        kind=updated.kind,
+        description=updated.description or "",
+        content=updated.content or "",
+    )
     return DocumentWriteResult(
         ok=True,
         version=memory_version(body.content),
@@ -408,7 +426,19 @@ async def delete_document(
     user: AuthUser,
     repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentWriteResult:
-    """Soft-delete a node and (for a folder) its whole subtree."""
+    """Soft-delete a node and (for a folder) its whole subtree.
+
+    AI-maintained core leaves (偏好 / 画像 / 导航) are undeletable; on-demand
+    AI topics and user-owned entries remain deletable.
+    """
+    doc = await repo.get(document_id, user_id=user.user_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="document not found")
+    if is_ai_core_memory_leaf(name=doc.name, ai_maintained=doc.ai_maintained):
+        raise HTTPException(
+            status_code=400,
+            detail="cannot delete AI-maintained core memory leaves",
+        )
     ok = await repo.soft_delete(document_id, user_id=user.user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="document not found")

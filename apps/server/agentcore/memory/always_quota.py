@@ -180,8 +180,11 @@ def evaluate_always_write(
             usage=projected,
         )
 
-    # AI: refuse net growth past the cap. Shrink / same-size while already over is OK.
-    if writer == "ai" and projected.used_chars <= current_used:
+    # Refuse net growth past the cap; shrink / same-size while already over is fine.
+    # Writer-agnostic: denying a write that adds nothing stops no growth, and it blocks
+    # the remedy itself — an empty new entry is how content moves out of a bloated
+    # always entry into an on_demand one.
+    if projected.used_chars <= current_used:
         return AlwaysQuotaDecision(allowed=True, usage=projected)
 
     msg = _AI_DENIED_MESSAGE.format(used=projected.used_chars, max=max_chars)

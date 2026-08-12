@@ -16,9 +16,10 @@ share the same rows:
 - **Generic tree CRUD**: the ``/documents`` API creates / reads / renames / moves / deletes any
   node (user rules are just ``role='rule', ai_maintained=false`` documents, §5.2).
 
-**Frontmatter is the sole writable source** for ``apply`` / ``description``; DB
-``apply_mode`` / ``description`` are derived indexes recomputed only via
-``_set_content_and_derive`` (no column-only bypass). ``ai_maintained`` stays DB-only.
+**Frontmatter is the sole writable source** for ``apply``; DB ``apply_mode`` is a
+derived index recomputed only via ``_set_content_and_derive``. ``description`` is
+mirrored from frontmatter on body writes; async AI fill may set the column alone
+when frontmatter has none (never mutates ``content``). ``ai_maintained`` stays DB-only.
 
 All reads filter ``deleted_at IS NULL`` explicitly (this codebase has no global soft-delete
 event listener — 照 boards.py / folders.py). Owner scoping is the structural default: mutations
@@ -127,7 +128,9 @@ class DocumentRepository:
         """Sole body-write path: persist markdown and recompute derived index columns.
 
         Folders keep empty body / empty description; ``apply_mode`` is irrelevant for them
-        (left untouched). Document nodes never set ``apply_mode`` / ``description`` except here.
+        (left untouched). Document ``apply_mode`` is only set here. ``description`` is
+        re-derived from frontmatter here too — clearing a prior AI column-only fill when
+        the body still has no frontmatter ``description`` (stale → regenerate).
         """
         doc.content = content
         if doc.kind != "document":
@@ -411,9 +414,9 @@ class DocumentRepository:
         """``folder_id``s whose PROJECT memory layer holds a semantic (non-episodic) note.
 
         Mirrors ``FileMemoryStore.project_scopes``: a project surfaces a「本项目记忆」node
-        only where there is a real note to edit — episodic digests / meta sidecars alone do
-        not count. Notes carry ``role='rule'`` for the 偏好/画像/主题 core (episodic + meta are
-        ``role='general'``), so a rule-role project note is the「has semantic memory」signal.
+        only where there is a real note to edit — consolidation-pipeline rows
+        (``memory_episodes`` / scope state) do not count. Notes carry ``role='rule'`` for
+        the 偏好/画像/主题 core, so a rule-role project note is the「has semantic memory」signal.
         """
         result = await self._session.execute(
             select(Document.folder_id)
@@ -718,6 +721,42 @@ class DocumentRepository:
         except FrontmatterEditError:
             raise
         self._set_content_and_derive(doc, body)
+        await self._session.commit()
+        await self._session.refresh(doc)
+        return doc
+
+    async def apply_description_if_empty(
+        self,
+        document_id: str,
+        *,
+        user_id: str,
+        description: str,
+        expected_content: str | None = None,
+    ) -> Document | None:
+        """Write AI ``description`` to the column only — never mutate ``content``.
+
+        Used by async fill after user saves leave the field blank. User-written
+        frontmatter ``description`` wins and is never overwritten. A prior non-empty
+        column value is also left alone. When ``expected_content`` is set, skip if the
+        body changed since generation (stale fill after a later save). Empty
+        ``description`` arg is a no-op.
+        """
+        doc = await self.get(document_id, user_id=user_id)
+        if doc is None or doc.kind != "document":
+            return None
+        text = (description or "").strip()
+        if not text:
+            return doc
+        if expected_content is not None and doc.content != expected_content:
+            return None
+        parsed = parse_entry_frontmatter(doc.content)
+        if isinstance(parsed, FrontmatterError):
+            return None
+        if parsed.description.strip():
+            return doc
+        if (doc.description or "").strip():
+            return doc
+        doc.description = text
         await self._session.commit()
         await self._session.refresh(doc)
         return doc

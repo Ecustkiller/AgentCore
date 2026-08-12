@@ -10,11 +10,11 @@ import uuid
 from pathlib import Path
 
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.frontmatter import set_entry_frontmatter
 from agentcore.memory import DocumentMemoryStore, assemble_injected_rules
 from agentcore.memory.migrate_documents import migrate_file_memory_to_documents
 from agentcore.memory.store import (
     CORE_MEMORY_FILE,
-    MEMORY_META_FILE,
     PREFERENCES_MEMORY_FILE,
     FileMemoryStore,
     topic_path,
@@ -244,27 +244,25 @@ async def test_file_to_document_migration_idempotent_and_non_clobbering(
     await fs.save(uid, PREFERENCES_MEMORY_FILE, "## 沟通偏好\n- 用中文")
     await fs.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python")
     await fs.save(uid, topic_path("部署"), "## 要点\n- 先构建")
-    await fs.save(uid, MEMORY_META_FILE, '{"digested_ids": [], "last_semantic_at": null}')
     await fs.save(uid, CORE_MEMORY_FILE, "## 关于用户的事实\n- 本项目用 Rust", scope=proj)
 
     stats = await migrate_file_memory_to_documents(
         base_dir=tmp_path, session_factory=session_factory
     )
-    assert stats.notes_migrated == 5 and stats.notes_failed == 0
+    assert stats.notes_migrated == 4 and stats.notes_failed == 0
 
     async with session_factory() as session:
         store = DocumentMemoryStore(session=session)
         assert "用中文" in await store.load(uid, PREFERENCES_MEMORY_FILE)
         assert "Python" in await store.load(uid, CORE_MEMORY_FILE)
         assert "先构建" in await store.load(uid, topic_path("部署"))
-        assert (await store.load(uid, MEMORY_META_FILE)).strip() != ""
         assert "本项目用 Rust" in await store.load(uid, CORE_MEMORY_FILE, scope=proj)
 
     # Idempotent: a second run migrates nothing (all already present).
     stats2 = await migrate_file_memory_to_documents(
         base_dir=tmp_path, session_factory=session_factory
     )
-    assert stats2.notes_migrated == 0 and stats2.notes_skipped_existing == 5
+    assert stats2.notes_migrated == 0 and stats2.notes_skipped_existing == 4
 
     # A post-migration edit is NOT clobbered by a later run (skip-if-exists).
     async with session_factory() as session:
@@ -634,4 +632,164 @@ async def test_user_rule_apply_mode_always_on_demand_and_reject_conditional(
         assert "合规附录.md" not in names
         on_demand_docs = await repo.list_on_demand_user_rules(uid, None)
         assert {d.name for d in on_demand_docs} == {"合规附录.md"}
+
+
+async def test_apply_description_if_empty_column_only_preserves_content(session_factory):
+    """AI fill writes the column only; content (CAS) and user FM description stay intact."""
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        doc = await repo.create(
+            uid,
+            name="条目.md",
+            role="rule",
+            apply_mode="on_demand",
+            content="- 部署约定与回滚步骤",
+        )
+        assert (doc.description or "") == ""
+        content_before = doc.content
+        filled = await repo.apply_description_if_empty(
+            doc.id, user_id=uid, description="部署与回滚"
+        )
+        assert filled is not None
+        assert filled.description == "部署与回滚"
+        assert filled.content == content_before
+        assert "description:" not in filled.content
+
+        again = await repo.apply_description_if_empty(
+            doc.id, user_id=uid, description="不该覆盖"
+        )
+        assert again is not None
+        assert again.description == "部署与回滚"
+        assert again.content == content_before
+
+        # Body write with empty FM description clears stale AI column → fill again.
+        refreshed = await repo.update_content(
+            doc.id, user_id=uid, content="---\napply: on_demand\n---\n新正文\n"
+        )
+        assert refreshed is not None
+        assert (refreshed.description or "") == ""
+        content_after_edit = refreshed.content
+        regen = await repo.apply_description_if_empty(
+            doc.id, user_id=uid, description="清空后新摘要"
+        )
+        assert regen is not None
+        assert regen.description == "清空后新摘要"
+        assert regen.content == content_after_edit
+
+
+async def test_apply_description_if_empty_respects_user_frontmatter(session_factory):
+    """User-written frontmatter description is never overwritten by AI fill."""
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        body = set_entry_frontmatter(
+            "---\napply: on_demand\n---\n手写条目\n", description="用户手写摘要"
+        )
+        doc = await repo.create(
+            uid,
+            name="手写.md",
+            role="rule",
+            apply_mode="on_demand",
+            content=body,
+        )
+        assert doc.description == "用户手写摘要"
+        content_before = doc.content
+        skipped = await repo.apply_description_if_empty(
+            doc.id, user_id=uid, description="AI不该覆盖"
+        )
+        assert skipped is not None
+        assert skipped.description == "用户手写摘要"
+        assert skipped.content == content_before
+        assert "description: 用户手写摘要" in skipped.content
+
+
+async def test_apply_description_if_empty_skips_stale_content(session_factory):
+    """Fill generated against an older body must not land after a later save."""
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        doc = await repo.create(
+            uid,
+            name="竞态.md",
+            role="rule",
+            apply_mode="on_demand",
+            content="- v1 正文",
+        )
+        old_content = doc.content
+        updated = await repo.update_content(
+            doc.id, user_id=uid, content="---\napply: on_demand\n---\n- v2 正文\n"
+        )
+        assert updated is not None
+        assert (updated.description or "") == ""
+        stale = await repo.apply_description_if_empty(
+            doc.id,
+            user_id=uid,
+            description="针对 v1 的摘要",
+            expected_content=old_content,
+        )
+        assert stale is None
+        fresh = await repo.get(doc.id, user_id=uid)
+        assert fresh is not None
+        assert (fresh.description or "") == ""
+        assert "v2" in fresh.content
+
+# --- AI memory write guards (API) ------------------------------------------------------------
+
+
+async def test_delete_ai_core_memory_leaf_rejected(client, session_factory):
+    """DELETE of AI-maintained 画像/偏好/导航 is refused; topic leaves stay deletable."""
+    uid = await register_and_login(client, "aicoredel")
+
+    async with session_factory() as session:
+        store = DocumentMemoryStore(session=session)
+        await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python", scope=None)
+        await store.save(uid, topic_path("部署"), "## 要点\n- 先构建", scope=None)
+        core = await DocumentRepository(session).get_memory_note(
+            uid, CORE_MEMORY_FILE, None
+        )
+        topic = await DocumentRepository(session).get_memory_note(
+            uid, topic_path("部署"), None
+        )
+        assert core is not None and topic is not None
+        core_id, topic_id = core.id, topic.id
+
+    r = await client.delete(f"/v1/documents/{core_id}")
+    assert r.status_code == 400, r.text
+    assert "core memory" in r.json()["detail"]
+
+    r = await client.get(f"/v1/documents/{core_id}")
+    assert r.status_code == 200
+
+    r = await client.delete(f"/v1/documents/{topic_id}")
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+    r = await client.get(f"/v1/documents/{topic_id}")
+    assert r.status_code == 404
+
+
+async def test_patch_apply_mode_ai_maintained_rejected(client, session_factory):
+    """PATCH apply_mode on any AI-maintained entry is refused (cores + topics)."""
+    uid = await register_and_login(client, "aiapply")
+
+    async with session_factory() as session:
+        store = DocumentMemoryStore(session=session)
+        await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- Python", scope=None)
+        await store.save(uid, topic_path("部署"), "## 要点\n- 先构建", scope=None)
+        core = await DocumentRepository(session).get_memory_note(
+            uid, CORE_MEMORY_FILE, None
+        )
+        topic = await DocumentRepository(session).get_memory_note(
+            uid, topic_path("部署"), None
+        )
+        assert core is not None and topic is not None
+        core_id, topic_id = core.id, topic.id
+
+    for doc_id in (core_id, topic_id):
+        r = await client.patch(
+            f"/v1/documents/{doc_id}", json={"apply_mode": "on_demand"}
+        )
+        assert r.status_code == 400, r.text
+        assert "AI-maintained" in r.json()["detail"]
 

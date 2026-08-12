@@ -44,6 +44,19 @@ def test_user_create_over_limit_denied():
     assert decision.message is not None
 
 
+def test_user_create_adding_nothing_while_over_allowed():
+    """An empty new entry is how content moves out of a bloated always entry."""
+    projected = AlwaysUsage(used_chars=30_000, max_chars=24_000, fingerprint="fp1")
+    decision = evaluate_always_write(
+        writer="user",
+        editing_existing_always=False,
+        current_used=30_000,
+        projected=projected,
+    )
+    assert decision.allowed is True
+    assert decision.warning is None
+
+
 def test_ai_growth_over_limit_denied():
     projected = AlwaysUsage(used_chars=25_000, max_chars=24_000, fingerprint="fp1")
     decision = evaluate_always_write(
