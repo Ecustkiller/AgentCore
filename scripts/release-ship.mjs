@@ -5,7 +5,7 @@
  *   pnpm release:ship                 # 全端 full（默认）
  *   pnpm release:ship -- --track api  # 仅后端热修轨
  *   pnpm release:ship -- --sha abc1234
- *   pnpm release:ship -- --check      # 额外探测：git / 桌面·Android draft 资产（需 gh）
+ *   pnpm release:ship -- --check      # 额外探测：git / 桌面·Android draft 资产（需 gh）/ updater feed
  *
  * 公告两段式（定案 D · 工作流 A）：
  *   预告 = 人定「今天发 + 约时」后立刻 → pnpm release:notice -- --phase preview …
@@ -16,8 +16,19 @@
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  cdnUrl,
+  desktopChannelPrefix,
+  desktopLegacyFlatPrefix,
+} from "../apps/website/functions/_lib/downloadsCdn.mjs";
+import {
+  closeConnections,
+  formatCertLine,
+  formatDnsLine,
+  pinnedRequest,
+} from "../deploy/scripts/public-dns-https.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -97,8 +108,7 @@ function checkDesktopDraft(desktopVer) {
     ];
     const missing = need.filter((n) => !names.includes(n));
     console.log(
-      `   · ${tag} draft=${j.isDraft} assets=${names.length}` +
-        (missing.length ? ` 缺: ${missing.join(", ")}` : " （Win+Mac 线索齐）"),
+      `   · ${tag} draft=${j.isDraft} assets=${names.length}${missing.length ? ` 缺: ${missing.join(", ")}` : " （Win+Mac 线索齐）"}`,
     );
     if (!j.isDraft) {
       console.log("   · 已非 draft → 可 deploy:pages");
@@ -108,7 +118,7 @@ function checkDesktopDraft(desktopVer) {
       );
     }
   } catch {
-    console.log(`   · 无法解析 gh JSON`);
+    console.log("   · 无法解析 gh JSON");
   }
 }
 
@@ -133,8 +143,7 @@ function checkAndroidDraft(mobileVer) {
     const need = [`AgentCore-${mobileVer}-android.apk`];
     const missing = need.filter((n) => !names.includes(n));
     console.log(
-      `   · ${tag} draft=${j.isDraft} assets=${names.length}` +
-        (missing.length ? ` 缺: ${missing.join(", ")}` : " （APK 齐）"),
+      `   · ${tag} draft=${j.isDraft} assets=${names.length}${missing.length ? ` 缺: ${missing.join(", ")}` : " （APK 齐）"}`,
     );
     if (!j.isDraft) {
       console.log("   · 已非 draft → 官网 /download 可露 Android 链");
@@ -144,11 +153,72 @@ function checkAndroidDraft(mobileVer) {
       );
     }
   } catch {
-    console.log(`   · 无法解析 gh JSON`);
+    console.log("   · 无法解析 gh JSON");
   }
 }
 
-function main() {
+/**
+ * 轻量 updater feed 健康检查：只看可达性 / TLS 到期 / feed 里的 version。
+ *
+ * 刻意不测速（现有 probe-updater-cdn 才拉 Range，近 9MB），也刻意**不断言**
+ * feed version == 待发版本——`--check` 在部署前跑，feed 本就还是上一版。
+ * 解析走公开 DoH（本机 resolver 会指到 Tunnel 源站 IP，报假的证书过期）。
+ */
+async function checkUpdaterFeed() {
+  const feeds = [
+    {
+      label: "desktop/stable",
+      url: `${cdnUrl(desktopChannelPrefix("stable"))}/latest.yml`,
+    },
+    {
+      label: "desktop/（扁平·旧客户端）",
+      url: `${cdnUrl(desktopLegacyFlatPrefix())}/latest.yml`,
+    },
+  ];
+  let shownHost = false;
+  /** @type {string[]} */
+  const versions = [];
+  for (const feed of feeds) {
+    try {
+      const res = await pinnedRequest(feed.url, {
+        idleTimeoutMs: 15_000,
+        deadlineMs: 15_000,
+      });
+      const { text } = await res.text();
+      if (!shownHost) {
+        shownHost = true;
+        console.log(`   · ${formatDnsLine(res.dns)}`);
+        console.log(`   · ${formatCertLine(res.tls)} · 连到 ${res.ip}`);
+        if (res.tls && res.tls.daysLeft <= 30) {
+          console.log(
+            "   · ⚠ 下载域证书临近到期 → 确认 Cloudflare 边缘证书自动续期未失效",
+          );
+        }
+      }
+      const version = text.match(/^version:\s*['"]?([^\s'"]+)/m)?.[1] ?? "?";
+      versions.push(version);
+      const ok = res.status === 200;
+      console.log(
+        `   · ${feed.label}/latest.yml: HTTP ${res.status}${ok ? "" : " ✗"}` +
+          ` version=${version} ttfb=${Math.round(res.ttfbMs)}ms cf=${res.header("cf-cache-status") ?? "-"}`,
+      );
+    } catch (err) {
+      console.log(
+        `   · ${feed.label}/latest.yml: 探测失败 — ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  if (versions.length === 2 && versions[0] !== versions[1]) {
+    console.log(
+      `   · ⚠ stable 与扁平镜像版本不一致（${versions[0]} vs ${versions[1]}）→ 老客户端可能停更，检查 sync:release-cdn`,
+    );
+  }
+  console.log(
+    "   · 上面是 feed 当前实际值；部署前它仍是上一版属正常，本探针不做版本断言",
+  );
+}
+
+async function main() {
   const track = (arg("track", "full").trim() || "full").toLowerCase();
   if (track !== "full" && track !== "api") {
     console.error("ERROR: --track must be full|api");
@@ -186,8 +256,8 @@ function main() {
 
   printStep(n++, "版本 bump（按轨）", [
     track === "full"
-      ? `pnpm bump-version api patch && pnpm bump-version desktop patch && pnpm bump-version mobile patch`
-      : `pnpm bump-version api patch`,
+      ? "pnpm bump-version api patch && pnpm bump-version desktop patch && pnpm bump-version mobile patch"
+      : "pnpm bump-version api patch",
     "确认 apps/server/uv.lock 中 agentcore version 已同步（bump api 会写）",
   ]);
 
@@ -249,9 +319,19 @@ function main() {
       checkDesktopDraft(v.desktop);
       checkAndroidDraft(v.mobile);
     }
+    try {
+      await checkUpdaterFeed();
+    } finally {
+      closeConnections();
+    }
   }
 
-  console.log("\n✓ 清单打印完毕。关键节点（Publish / 公告）须人确认后再执行。\n");
+  console.log(
+    "\n✓ 清单打印完毕。关键节点（Publish / 公告）须人确认后再执行。\n",
+  );
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

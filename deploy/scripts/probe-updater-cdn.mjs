@@ -11,8 +11,17 @@
  *
  * 测：latest.yml / blockmap 首包延迟、大块单 Range、串行小 Range（模拟差分）、
  * multipart 多 Range 是否被接受。可选对比 GitHub Releases 同名资产。
+ *
+ * 解析走公开 DoH + IP pin（见 public-dns-https.mjs）：本机 resolver 可能指到
+ * Tunnel 后的源站 IP，那张内部证书早过期，会让探针报假的 CERT_HAS_EXPIRED。
  */
 import { gunzipSync } from "node:zlib";
+import {
+  closeConnections,
+  formatCertLine,
+  formatDnsLine,
+  pinnedRequest,
+} from "./public-dns-https.mjs";
 
 const args = process.argv.slice(2);
 function flag(name) {
@@ -48,65 +57,51 @@ function fmtRate(bytes, ms) {
   return `${kbps.toFixed(1)} KiB/s (${mbps.toFixed(2)} MiB/s)`;
 }
 
-function header(res, name) {
-  return res.headers.get(name) ?? res.headers.get(name.toLowerCase()) ?? null;
-}
-
-async function fetchTimed(url, init = {}) {
-  const t0 = performance.now();
-  const res = await fetch(url, {
-    ...init,
-    redirect: "follow",
-  });
-  const ttfb = performance.now() - t0;
-  return { res, ttfb };
-}
-
-async function readAll(res) {
-  const t0 = performance.now();
-  const buf = Buffer.from(await res.arrayBuffer());
-  const readMs = performance.now() - t0;
-  return { buf, readMs };
-}
-
 async function rangeGet(url, start, endInclusive) {
-  const { res, ttfb } = await fetchTimed(url, {
-    headers: { Range: `bytes=${start}-${endInclusive}`, Accept: "*/*" },
+  const res = await pinnedRequest(url, {
+    headers: { range: `bytes=${start}-${endInclusive}`, accept: "*/*" },
   });
-  const { buf, readMs } = await readAll(res);
+  const { buf, readMs } = await res.body();
   return {
     status: res.status,
-    ttfbMs: Math.round(ttfb),
+    ttfbMs: Math.round(res.ttfbMs),
     readMs: Math.round(readMs),
-    totalMs: Math.round(ttfb + readMs),
+    totalMs: Math.round(res.ttfbMs + readMs),
     bytes: buf.length,
-    cfCache: header(res, "cf-cache-status"),
-    acceptRanges: header(res, "accept-ranges"),
-    contentType: header(res, "content-type"),
-    contentRange: header(res, "content-range"),
+    cfCache: res.header("cf-cache-status"),
+    acceptRanges: res.header("accept-ranges"),
+    contentType: res.header("content-type"),
+    contentRange: res.header("content-range"),
   };
 }
 
 async function headMeta(url) {
-  const { res, ttfb } = await fetchTimed(url, { method: "HEAD" });
+  const res = await pinnedRequest(url, { method: "HEAD" });
+  res.discard();
   return {
     status: res.status,
-    ttfbMs: Math.round(ttfb),
-    contentLength: Number(header(res, "content-length") || 0),
-    cfCache: header(res, "cf-cache-status"),
-    acceptRanges: header(res, "accept-ranges"),
+    ttfbMs: Math.round(res.ttfbMs),
+    contentLength: Number(res.header("content-length") || 0),
+    cfCache: res.header("cf-cache-status"),
+    acceptRanges: res.header("accept-ranges"),
+    dns: res.dns,
+    tls: res.tls,
+    ip: res.ip,
   };
 }
 
 async function getText(url) {
-  const { res, ttfb } = await fetchTimed(url);
-  const text = await res.text();
+  const res = await pinnedRequest(url);
+  const { text } = await res.text();
   return {
     status: res.status,
-    ttfbMs: Math.round(ttfb),
+    ttfbMs: Math.round(res.ttfbMs),
     bytes: Buffer.byteLength(text),
     text,
-    cfCache: header(res, "cf-cache-status"),
+    cfCache: res.header("cf-cache-status"),
+    dns: res.dns,
+    tls: res.tls,
+    ip: res.ip,
   };
 }
 
@@ -145,6 +140,8 @@ async function probeHost(label, exeUrl, meta = {}) {
   console.log(`exe: ${exeUrl}`);
 
   const head = await headMeta(exeUrl);
+  console.log(formatDnsLine(head.dns));
+  console.log(`${formatCertLine(head.tls)} · 连到 ${head.ip}`);
   console.log(
     `HEAD: status=${head.status} ttfb=${head.ttfbMs}ms len=${fmtBytes(head.contentLength)} accept-ranges=${head.acceptRanges} cf=${head.cfCache}`,
   );
@@ -209,13 +206,13 @@ async function probeHost(label, exeUrl, meta = {}) {
   const multiB0 = Math.min(2 * 1024 * 1024, fileSize - 1);
   const multiB1 = Math.min(multiB0 + 64 * 1024, fileSize) - 1;
   const multiHdr = `bytes=${multiStart}-${multiA}, ${multiB0}-${multiB1}`;
-  const { res: multiRes, ttfb: multiTtfb } = await fetchTimed(exeUrl, {
-    headers: { Range: multiHdr, Accept: "*/*" },
+  const multiRes = await pinnedRequest(exeUrl, {
+    headers: { range: multiHdr, accept: "*/*" },
   });
-  const multiCt = header(multiRes, "content-type");
-  const multiBody = await multiRes.arrayBuffer();
+  const multiCt = multiRes.header("content-type");
+  const { buf: multiBody } = await multiRes.body();
   console.log(
-    `MULTIPART Range "${multiHdr}": status=${multiRes.status} ttfb=${Math.round(multiTtfb)}ms ct=${multiCt} body=${fmtBytes(multiBody.byteLength)} (updater needs multipart/byteranges)`,
+    `MULTIPART Range "${multiHdr}": status=${multiRes.status} ttfb=${Math.round(multiRes.ttfbMs)}ms ct=${multiCt} body=${fmtBytes(multiBody.length)} (updater needs multipart/byteranges)`,
   );
 
   return {
@@ -234,7 +231,7 @@ async function probeHost(label, exeUrl, meta = {}) {
     multipart: {
       status: multiRes.status,
       contentType: multiCt,
-      ttfbMs: Math.round(multiTtfb),
+      ttfbMs: Math.round(multiRes.ttfbMs),
     },
     meta,
   };
@@ -247,8 +244,10 @@ async function main() {
   );
 
   const yml = await getText(`${CDN_BASE}/latest.yml`);
+  console.log(`\n${formatDnsLine(yml.dns)}`);
+  console.log(`${formatCertLine(yml.tls)} · 连到 ${yml.ip}`);
   console.log(
-    `\nlatest.yml: status=${yml.status} ttfb=${yml.ttfbMs}ms bytes=${yml.bytes} cf=${yml.cfCache}`,
+    `latest.yml: status=${yml.status} ttfb=${yml.ttfbMs}ms bytes=${yml.bytes} cf=${yml.cfCache}`,
   );
   const parsed = parseLatestYml(yml.text);
   console.log(
@@ -260,10 +259,10 @@ async function main() {
 
   const exeCdn = `${CDN_BASE}/${parsed.path}`;
   const blockmapUrl = `${exeCdn}.blockmap`;
-  const bm = await fetchTimed(blockmapUrl);
-  const bmBody = await readAll(bm.res);
+  const bm = await pinnedRequest(blockmapUrl);
+  const bmBody = await bm.body();
   console.log(
-    `blockmap: status=${bm.res.status} ttfb=${Math.round(bm.ttfb)}ms bytes=${fmtBytes(bmBody.buf.length)} cf=${header(bm.res, "cf-cache-status")}`,
+    `blockmap: status=${bm.status} ttfb=${Math.round(bm.ttfbMs)}ms bytes=${fmtBytes(bmBody.buf.length)} cf=${bm.header("cf-cache-status")}`,
   );
   try {
     const bmInfo = summarizeBlockmap(bmBody.buf);
@@ -274,7 +273,9 @@ async function main() {
     console.log(`blockmap parse skip: ${e instanceof Error ? e.message : e}`);
   }
 
-  const cdn = await probeHost("downloads CDN", exeCdn, { version: parsed.version });
+  const cdn = await probeHost("downloads CDN", exeCdn, {
+    version: parsed.version,
+  });
 
   let gh = null;
   if (ALSO_GITHUB) {
@@ -313,14 +314,18 @@ async function main() {
       `CDN small Range:    ${cdn.small.rate} (wall ${cdn.small.wallMs}ms, ${cdn.small.ranges} ranges)`,
     );
   } else if (ALSO_GITHUB) {
-    console.log("GitHub probe unavailable (timeout/network) — CDN-only verdict stands.");
+    console.log(
+      "GitHub probe unavailable (timeout/network) — CDN-only verdict stands.",
+    );
   }
   console.log(
     "\nTip: 本机真实差分日志在 %APPDATA%/agentcore-desktop/logs/desktop.jsonl （event=updater.download_*）",
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  })
+  .finally(closeConnections);
