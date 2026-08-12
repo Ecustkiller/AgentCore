@@ -143,6 +143,7 @@ const DESKTOP_FALLBACK_FILES = [
 ];
 
 const UV_LOCK = join(ROOT, "apps/server/uv.lock");
+const OPENAPI_JSON = join(ROOT, "apps/server/openapi.json");
 
 /** Keep uv.lock [[package]] name=agentcore version in lockstep with pyproject. */
 function syncUvLockVersion(version, { dryRun = false } = {}) {
@@ -161,6 +162,30 @@ function syncUvLockVersion(version, { dryRun = false } = {}) {
   }
   writeFileSync(UV_LOCK, next, "utf8");
   console.log(`✓ Synced uv.lock agentcore → ${version}`);
+}
+
+/**
+ * The committed OpenAPI carries pyproject's version in `info`, so a bump that stops at
+ * pyproject leaves the artifact behind and CI's drift gate rejects the push. Same reason
+ * uv.lock is synced here: whoever bumps must leave every generated copy consistent.
+ */
+function syncOpenapiVersion(version, { dryRun = false } = {}) {
+  const text = readFileSync(OPENAPI_JSON, "utf8");
+  const anchor = /("title":\s*"AgentCore",\s*"version":\s*")[^"]+(")/;
+  if (!anchor.test(text)) {
+    throw new Error(`No info.version anchor in ${OPENAPI_JSON}`);
+  }
+  const next = text.replace(anchor, `$1${version}$2`);
+  if (next === text) {
+    console.log(`  openapi.json info.version already ${version}`);
+    return;
+  }
+  if (dryRun) {
+    console.log(`  would sync openapi.json info.version → ${version}`);
+    return;
+  }
+  writeFileSync(OPENAPI_JSON, next, "utf8");
+  console.log(`✓ Synced openapi.json info.version → ${version}`);
 }
 
 function syncDesktopFallbackVersion(version, { dryRun = false } = {}) {
@@ -194,7 +219,10 @@ function main() {
   console.log(`${trackConfig.label}: ${current} → ${next}${dryRun ? " (dry-run)" : ""}`);
 
   if (dryRun) {
-    if (track === "api") syncUvLockVersion(next, { dryRun: true });
+    if (track === "api") {
+      syncUvLockVersion(next, { dryRun: true });
+      syncOpenapiVersion(next, { dryRun: true });
+    }
     if (track === "desktop") syncDesktopFallbackVersion(next, { dryRun: true });
     if (track === "mobile") {
       console.log(`  would sync android versionName/versionCode → ${next}`);
@@ -207,6 +235,7 @@ function main() {
 
   if (track === "api") {
     syncUvLockVersion(next);
+    syncOpenapiVersion(next);
   }
 
   if (track === "desktop") {

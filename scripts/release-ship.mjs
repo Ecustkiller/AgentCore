@@ -258,12 +258,17 @@ async function main() {
     track === "full"
       ? "pnpm bump-version api patch && pnpm bump-version desktop patch && pnpm bump-version mobile patch"
       : "pnpm bump-version api patch",
-    "确认 apps/server/uv.lock 中 agentcore version 已同步（bump api 会写）",
+    "bump api 会连带同步 uv.lock 与 openapi info.version（两者漏改都会撞 CI 漂移门禁）",
   ]);
 
   printStep(n++, "提交 + push", [
     `git add -A && git commit  # 信息示例: release: api ${v.api} / desktop ${v.desktop} / …`,
     "git push origin HEAD",
+  ]);
+
+  printStep(n++, "等云端 CI 全绿（本地门禁跑 Windows，抓不到 Linux 面）", [
+    "gh run list --workflow CI --branch master --limit 1",
+    "gh run watch <id> --exit-status   # 红灯或未跑完不得上后端",
   ]);
 
   printStep(n++, "后端上线（必须先于客户端）", [
