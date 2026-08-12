@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import re
-from os.path import isabs
 from typing import Any
+
+from agentcore.core.paths import is_absolute_os_path
 
 # Caps so a runaway prompt can't bloat the card / event. The free-form note on the
 # card always lets the user steer beyond these.
@@ -185,8 +186,10 @@ def normalize_options(
                 if target_name and "/" not in target_name and "\\" not in target_name:
                     opt["target_name"] = target_name[:_MAX_TARGET_NAME]
                 # Absolute only — matches desktop resolveGrantAbsPath (no CWD-relative).
+                # Absoluteness is the client's, not this host's: the API runs on Linux
+                # and most desks are Windows.
                 grant_path = str(it.get("path") or "").strip()
-                if grant_path and isabs(grant_path):
+                if grant_path and is_absolute_os_path(grant_path):
                     opt["path"] = grant_path[:512]
             # organize_plan structured fields (passed through for plan binding).
             op = str(it.get("op") or "").strip()

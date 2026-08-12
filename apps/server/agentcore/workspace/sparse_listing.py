@@ -16,9 +16,9 @@ Project mode optionally surfaces a few newest non-attachment paths as
 
 from __future__ import annotations
 
-from pathlib import PureWindowsPath
 from typing import Any
 
+from agentcore.core.paths import is_absolute_os_path
 from agentcore.workspace._paths import (
     is_ai_archive_file_name,
     is_ai_noise_file_name,
@@ -46,24 +46,14 @@ def is_external_ns_path(path: str) -> bool:
     return p == EXTERNAL_PREFIX.rstrip("/") or p.startswith(EXTERNAL_PREFIX)
 
 
-def _is_absolute_os_path(raw: str) -> bool:
-    """True for drive-letter / UNC / leading-slash absolute OS paths."""
-    s = raw.strip()
-    if not s:
-        return False
-    if PureWindowsPath(s).is_absolute():
-        return True
-    return s.replace("\\", "/").startswith("/")
-
-
 def _normalize_material_rel(raw: str) -> str | None:
     """Return a workspace-relative POSIX path, or None if unusable / absolute."""
-    if _is_absolute_os_path(raw):
+    if is_absolute_os_path(raw):
         return None
     p = raw.replace("\\", "/").strip().lstrip("./")
     if not p or p == ".":
         return None
-    if _is_absolute_os_path(p):
+    if is_absolute_os_path(p):
         return None
     return p
 
