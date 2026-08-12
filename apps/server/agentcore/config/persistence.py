@@ -52,17 +52,11 @@ class PersistenceSettings(BaseModel):
     # R1 fingerprint-dirty explore refresh (旁路): per-folder debounce; never blocks the turn.
     memory_explore_refresh_enabled: bool = True
     memory_explore_refresh_idle_seconds: float = 45.0
-    # Read-side backstop to the write-side ``memory_section_bullet_cap`` (项目审计-成本性能
-    # 专项 COST-001): each always-injected memory file (偏好.md / 画像.md / 项目画像) is
-    # DETERMINISTICALLY capped to this many chars before it rides the turn's <rules>. Memory
-    # sits at SectionOrder.MEMORY in the assembler; the cap MUST be deterministic — same
-    # body → same truncation → assembly-layer prefix stays byte-stable (cost optimization for
-    # provider exact-prefix cache hits; see runtime/context). Generous: only
-    # fires on abnormal bloat (a normal 偏好/画像 is far smaller). 0/negative = no cap.
-    memory_injected_file_char_cap: int = 4_000
     # Write-side always-entry quota (闸在写侧，读侧全量). Caps the sum of frontmatter-stripped
     # always rule bodies in an injection context (global + optional project). Anchored to the
     # retired read-side ``max_instruction_chars`` (24_000) so behaviour does not jump. 0 = off.
+    # Sole bound on the always pool — no read-side per-file char cap (COST-001 read-side
+    # backstop retired with 读侧全量定案).
     memory_always_max_chars: int = 24_000
 
     # CEO-only derived project catalog (跨项目找项目): max Folder rows injected as

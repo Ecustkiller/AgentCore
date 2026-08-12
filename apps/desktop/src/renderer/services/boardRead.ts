@@ -1,5 +1,5 @@
-import { ApiError } from "@/services/api";
-import { resolveInteraction } from "@/services/interaction";
+import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { BoardReadRequiredPayload } from "@/types/events";
 
 /**
@@ -10,7 +10,7 @@ import type { BoardReadRequiredPayload } from "@/types/events";
  * `board_read_required` event; the open `WhiteboardCanvasPage` registers a reader (keyed by
  * board id) that rasterizes those elements through the self-built engine
  * (`engine.rasterizeElements`) to a PNG. We settle the paused read over the unified
- * interaction bridge (kind `client_tool`), so the live SSE turn resumes.
+ * interaction bridge (kind `client_tool`), so the live turn resumes.
  *
  * Read-only: no CAS save (unlike `boardOps`, which mutates + persists) and no toast (nothing
  * visibly changes on the canvas). Failure policy mirrors `boardOps`: the channel must always
@@ -47,17 +47,15 @@ export function registerBoardReader(
 export async function performBoardRead(
   payload: BoardReadRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
-  const result = await runBoardRead(payload);
-  try {
-    await resolveInteraction(conversationId, payload.request_id, {
-      kind: "client_tool",
-      ...result,
-    });
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return; // stale — no-op
-    console.error("[boardRead] 回填失败", err);
-  }
+  await fulfillClientToolOnce({
+    requestId: payload.request_id,
+    conversationId,
+    origin,
+    logLabel: "boardRead",
+    perform: async () => runBoardRead(payload),
+  });
 }
 
 type ClientToolResult =

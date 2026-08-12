@@ -34,7 +34,7 @@ from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.memory.store import FileMemoryStore
 from agentcore.runtime import pipeline
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.facts import TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.suspension import (
@@ -220,7 +220,7 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
             tool_context=_ctx(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )
@@ -318,7 +318,7 @@ async def _finalize_plan_review(monkeypatch) -> tuple[PlanReviewSuspension, list
             tool_context=_ctx(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )

@@ -132,6 +132,7 @@ from .feedback import (
     UpdateFeedbackStatusRequest,
 )
 from .files import RewriteRequest, RewriteResponse
+from .fulfill import UpdateFulfillRootsRequest
 from .git_credentials import (
     GitCredentialView,
     UpsertGitCredentialRequest,
@@ -584,6 +585,8 @@ __all__ = [
     "DeviceRegistration",
     "DeviceSummary",
     "DeviceListResponse",
+    # fulfill
+    "UpdateFulfillRootsRequest",
     # feedback
     "CreateFeedbackRequest",
     "FeedbackSummary",

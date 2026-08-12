@@ -115,7 +115,8 @@ async def test_channel_discrimination_builds_correct_event_types():
         registry.discard(rid)
 
 
-async def test_attach_resends_open_client_tool(monkeypatch):
+async def test_attach_does_not_resend_client_tool(monkeypatch):
+    """Display-stream attach no longer re-hangs CLIENT_TOOL (moved to fulfill)."""
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     registry = default_interaction_registry()
     _clear_pending(registry)
@@ -132,6 +133,7 @@ async def test_attach_resends_open_client_tool(monkeypatch):
             CHANNEL_WORKSPACE,
             EventType.WORKSPACE_OP_REQUIRED.value,
             params={"root_id": "root-1", "op": "read", "args": {"path": "x.txt"}},
+            user_id="u-reattach",
         ),
     )
     assert not fut.done()
@@ -139,30 +141,53 @@ async def test_attach_resends_open_client_tool(monkeypatch):
     gen = sse._attach_generator(sink)
     frames: list[str] = []
     try:
-        for _ in range(8):
-            chunk = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
-            frames.append(chunk)
-            if "workspace_op_required" in chunk:
-                break
-        else:
-            pytest.fail("workspace_op_required not re-emitted on attach")
+        chunk = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+        frames.append(chunk)
+        with contextlib.suppress(TimeoutError):
+            frames.append(await asyncio.wait_for(gen.__anext__(), timeout=0.05))
     finally:
         await gen.aclose()
         registry.discard("req-open")
 
     types = _parse_sse_types(frames)
     assert EventType.CONTENT_DELTA.value in types
-    assert EventType.WORKSPACE_OP_REQUIRED.value in types
-    # Re-hang lands after history replay.
-    assert types.index(EventType.CONTENT_DELTA.value) < types.index(
-        EventType.WORKSPACE_OP_REQUIRED.value
+    assert EventType.WORKSPACE_OP_REQUIRED.value not in types
+
+
+async def test_fulfill_rehang_redelivers_open_client_tool(monkeypatch):
+    from agentcore.fulfill.dispatch import DeliverResult
+    from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
+
+    registry = default_interaction_registry()
+    _clear_pending(registry)
+    captured: list = []
+
+    def fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+        captured.append(event)
+        return DeliverResult.DELIVERED
+
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool", fake_deliver
     )
-    payloads = _parse_sse_payloads(frames)
-    op = next(p for p in payloads if p["type"] == EventType.WORKSPACE_OP_REQUIRED.value)
-    assert op["payload"]["request_id"] == "req-open"
-    assert op["payload"]["root_id"] == "root-1"
-    assert op["payload"]["op"] == "read"
-    assert op["payload"]["args"] == {"path": "x.txt"}
+
+    fut = registry.create(
+        "req-open",
+        CONV,
+        kind=InteractionKind.CLIENT_TOOL,
+        payload=client_tool_payload(
+            CHANNEL_WORKSPACE,
+            EventType.WORKSPACE_OP_REQUIRED.value,
+            params={"root_id": "root-1", "op": "read", "args": {"path": "x.txt"}},
+            user_id="u-reattach",
+        ),
+    )
+    assert not fut.done()
+    assert rehang_pending_client_tools("u-reattach") == 1
+    assert len(captured) == 1
+    assert captured[0].type == EventType.WORKSPACE_OP_REQUIRED
+    assert captured[0].payload["request_id"] == "req-open"
+    assert captured[0].payload["root_id"] == "root-1"
+    registry.discard("req-open")
 
 
 async def test_attach_skips_discarded_client_tool(monkeypatch):

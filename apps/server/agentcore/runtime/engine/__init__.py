@@ -9,11 +9,12 @@ Single-agent ReAct loop for MVP:
 All intermediate events are emitted to an EventSink for SSE delivery.
 """
 
-from .loop import react_loop
+from .loop import ReactLoopOut, react_loop
 from .segments import deliverable_continuity_instruction, join_segments
 from .timeout import resolve_tool_timeout
 
 __all__ = [
+    "ReactLoopOut",
     "deliverable_continuity_instruction",
     "join_segments",
     "react_loop",

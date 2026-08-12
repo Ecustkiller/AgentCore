@@ -1,5 +1,6 @@
 import { logEvent } from "@/lib/log";
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
@@ -94,37 +95,35 @@ export function resetWorkspaceOpIpcInflightForTests(): void {
 export async function performWorkspaceOp(
   payload: WorkspaceOpRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
-  await fulfillClientToolOnce({
-    requestId: payload.request_id,
-    conversationId,
-    logLabel: "workspaceOps",
-    perform: () => runLocalOp(payload, conversationId),
+  const args = payload.args ?? {};
+  // L3：落 args 里的路径键（无正文）；便于对照 NotADirectory / channel-dead。
+  logEvent("info", "workspace_op.received", {
+    conversation_id: conversationId,
+    request_id: payload.request_id,
+    op: payload.op,
+    root_id: payload.root_id,
+    timeout_ms: payload.timeout_ms,
+    origin,
+    args_directory: typeof args.directory === "string" ? args.directory : null,
+    args_path: typeof args.path === "string" ? args.path : null,
+    args_pattern: typeof args.pattern === "string" ? args.pattern : null,
+    args_keys: Object.keys(args).sort(),
   });
-}
-
-/**
- * turnPhase gate 挡掉 `workspace_op_required` 时立刻走现有 fulfill 失败信封 settle，
- * 避免静默 drop 导致服务端 TimeoutError 冲 sticky channel-dead。
- * 不跑 IPC / 不假装 ok。
- */
-export async function rejectWorkspaceOpForTurnPhase(
-  payload: WorkspaceOpRequiredPayload,
-  conversationId: string,
-  turnPhase: string,
-): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "workspaceOps",
-    perform: async () =>
-      ioError(`回合 phase=${turnPhase}，工作区 op 未执行（turn_phase_gate）`),
+    perform: (signal) => runLocalOp(payload, conversationId, signal),
   });
 }
 
 async function runLocalOp(
   payload: WorkspaceOpRequiredPayload,
   conversationId: string,
+  cancelSignal: AbortSignal,
 ): Promise<WorkspaceOpResult> {
   const fsApi = typeof window !== "undefined" ? window.fsApi : undefined;
   if (!fsApi?.workspaceOp) {
@@ -168,9 +167,16 @@ async function runLocalOp(
     typeof payload.timeout_ms === "number" && payload.timeout_ms > 0
       ? payload.timeout_ms
       : undefined;
-  const ac = timeoutMs != null ? new AbortController() : null;
+  // Merge server deadline + fulfill-stream cancel into one abort signal.
+  const ac = new AbortController();
+  const onCancel = (): void => ac.abort();
+  if (cancelSignal.aborted) {
+    ac.abort();
+  } else {
+    cancelSignal.addEventListener("abort", onCancel, { once: true });
+  }
   const timer =
-    ac && timeoutMs != null ? setTimeout(() => ac.abort(), timeoutMs) : null;
+    timeoutMs != null ? setTimeout(() => ac.abort(), timeoutMs) : null;
   const t0 = Date.now();
   const enter = enterIpcInflight(conversationId);
   const corr = {
@@ -213,23 +219,20 @@ async function runLocalOp(
         )
   ).finally(leaveOnce);
   try {
-    const result = !ac
-      ? await opPromise
-      : await Promise.race([
-          opPromise,
-          new Promise<WorkspaceOpResult>((_, reject) => {
-            if (ac.signal.aborted) {
-              reject(new DOMException("workspace op aborted", "AbortError"));
-              return;
-            }
-            ac.signal.addEventListener(
-              "abort",
-              () =>
-                reject(new DOMException("workspace op aborted", "AbortError")),
-              { once: true },
-            );
-          }),
-        ]);
+    const result = await Promise.race([
+      opPromise,
+      new Promise<WorkspaceOpResult>((_, reject) => {
+        if (ac.signal.aborted) {
+          reject(new DOMException("workspace op aborted", "AbortError"));
+          return;
+        }
+        ac.signal.addEventListener(
+          "abort",
+          () => reject(new DOMException("workspace op aborted", "AbortError")),
+          { once: true },
+        );
+      }),
+    ]);
     const endLevel = result.ok ? "debug" : "warn";
     logEvent(endLevel, "workspace_op.ipc_end", {
       ...corr,
@@ -273,6 +276,7 @@ async function runLocalOp(
     return ioError(e instanceof Error ? e.message : String(e));
   } finally {
     if (timer != null) clearTimeout(timer);
+    cancelSignal.removeEventListener("abort", onCancel);
   }
 }
 

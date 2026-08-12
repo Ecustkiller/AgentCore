@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.facts import TurnPausedFact
@@ -63,7 +63,7 @@ async def _run_worker(
         tool_context=_context(),
         profile=make_profile_params(max_rounds=max_rounds),
         turn_model="m",
-        citation_sink=[],
+        out=ReactLoopOut(citations=[]),
         annotate_citations=False,
         turn_evidence_ledger=ledger,
         on_reset=resets.append,
@@ -225,7 +225,7 @@ async def test_worker_search_only_rn_auto_deep_read_passes_without_reset():
         tool_context=_context(),
         profile=make_profile_params(max_rounds=10),
         turn_model="m",
-        citation_sink=[],
+        out=ReactLoopOut(citations=[]),
         annotate_citations=False,
         turn_evidence_ledger=led,
         on_reset=resets.append,
@@ -276,7 +276,7 @@ async def test_worker_search_only_rn_deep_read_fail_strips_without_rework():
         tool_context=_context(),
         profile=make_profile_params(max_rounds=10),
         turn_model="m",
-        citation_sink=[],
+        out=ReactLoopOut(citations=[]),
         annotate_citations=False,
         turn_evidence_ledger=led,
         on_reset=resets.append,
@@ -487,7 +487,7 @@ async def test_ceo_forged_ledger_ref_strips_without_rework():
         tool_context=_context(),
         profile=make_profile_params(max_rounds=10),
         turn_model="m",
-        citation_sink=[],
+        out=ReactLoopOut(citations=[]),
         annotate_citations=True,
         turn_evidence_ledger=led,
     )
@@ -512,7 +512,7 @@ async def test_ceo_bracket_still_uses_config_max_reworks():
         tool_context=_context(),
         profile=make_profile_params(max_rounds=10),
         turn_model="m",
-        citation_sink=[],
+        out=ReactLoopOut(citations=[]),
         annotate_citations=True,
         turn_evidence_ledger=None,
     )

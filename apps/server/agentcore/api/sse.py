@@ -197,19 +197,17 @@ async def _attach_generator(
             yield _format_sse(event)
         # Hot re-hang: after journal/history replay (DURABLE-only for cursor path)
         # and after take_over cleared the live queue (no double delivery), re-emit
-        # still-open CLIENT_TOOL + answerable hot cards (approval / delegation /
-        # user escalation) so a refresh cannot drop an in-process pending Future.
+        # still-open answerable hot cards (approval / delegation / user escalation)
+        # so a refresh cannot drop an in-process pending Future.
         conv_id = sink.conversation_id
         if conv_id:
-            from agentcore.runtime.events.client_tool_reattach import (
-                pending_client_tool_events,
-            )
+            # CLIENT_TOOL ``*_required`` re-hang moved to the fulfill channel
+            # (device connect / reconnect) — display attach only re-hangs hot
+            # user-facing cards (approval / delegation / escalation).
             from agentcore.runtime.events.hot_interaction_reattach import (
                 pending_hot_interaction_events,
             )
 
-            for event in pending_client_tool_events(conv_id):
-                yield _format_sse(event)
             for event in pending_hot_interaction_events(conv_id):
                 yield _format_sse(event)
         # Boundary: everything above is catch-up; clients one-shot fold then live.

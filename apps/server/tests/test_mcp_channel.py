@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -154,7 +153,7 @@ async def test_discover_mcp_tools_degrades_without_channel():
 @pytest.mark.asyncio
 async def test_discover_mcp_tools_parses_ready_and_failed():
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c1",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -199,7 +198,7 @@ async def test_discover_mcp_tools_parses_ready_and_failed():
 @pytest.mark.asyncio
 async def test_discover_mcp_tools_cache_hit_skips_request():
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c-cache",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -235,7 +234,7 @@ async def test_discover_mcp_tools_cache_only_miss_skips_channel(monkeypatch):
 
     monkeypatch.setattr("agentcore.tools.mcp.wire.logger.info", _capture)
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c-cache-only-miss",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -274,7 +273,7 @@ async def test_seed_then_cache_only_prepare_path_hits():
     seed_mcp_discover_cache("conv-seed", seeded, cache_scope="user-seed")
 
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-seed",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -291,7 +290,7 @@ async def test_seed_then_cache_only_prepare_path_hits():
 
     # Same user, new conversation → scope hit still works under cache_only.
     other = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-other",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -320,14 +319,14 @@ async def test_discover_mcp_tools_cache_scope_hits_across_conversations():
         ]
     }
     c1 = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-a",
         registry=AsyncMock(),
         timeout_seconds=5,
     )
     c1.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
     c2 = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-b",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -357,14 +356,14 @@ async def test_discover_mcp_tools_cache_scope_isolated_per_user():
         ]
     }
     c1 = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-a",
         registry=AsyncMock(),
         timeout_seconds=5,
     )
     c1.request_mcp = AsyncMock(return_value=payload)  # type: ignore[method-assign]
     c2 = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="conv-b",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -380,7 +379,7 @@ async def test_discover_mcp_tools_cache_scope_isolated_per_user():
 @pytest.mark.asyncio
 async def test_discover_mcp_tools_degrades_on_timeout():
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c1",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -398,7 +397,7 @@ async def test_discover_mcp_tools_degrades_on_timeout():
 @pytest.mark.asyncio
 async def test_discover_mcp_tools_negative_cache_skips_request():
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c-neg",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -427,7 +426,7 @@ async def test_discover_mcp_tools_ok_logs_duration_and_tool_count(monkeypatch):
         _capture,
     )
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c-ok-log",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -465,7 +464,7 @@ async def test_discover_mcp_tools_degraded_logs_duration(monkeypatch):
         _capture,
     )
     channel = DesktopClientChannel(
-        sink=AsyncMock(),
+        user_id="u-test",
         conversation_id="c-deg-log",
         registry=AsyncMock(),
         timeout_seconds=5,
@@ -484,11 +483,9 @@ async def test_discover_mcp_tools_degraded_logs_duration(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_request_mcp_emits_mcp_op_required():
-    emitted: list[Any] = []
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
 
-    class _Sink:
-        def emit(self, event: Any) -> None:
-            emitted.append(event)
+    DELIVERED_EVENTS.clear()
 
     async def _suspend(*_a, **kwargs):
         on_suspended = kwargs.get("on_suspended")
@@ -499,16 +496,16 @@ async def test_request_mcp_emits_mcp_op_required():
     registry = AsyncMock()
     registry.suspend = AsyncMock(side_effect=_suspend)
     channel = DesktopClientChannel(
-        sink=_Sink(),  # type: ignore[arg-type]
+        user_id="u-test",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=5,
     )
     value = await channel.request_mcp(McpOp.LIST_TOOLS, {})
     assert value == {"servers": []}
-    assert len(emitted) == 1
-    assert emitted[0].type.value == "mcp_op_required"
-    assert emitted[0].payload["op"] == "list_tools"
+    assert len(DELIVERED_EVENTS) == 1
+    assert DELIVERED_EVENTS[0].type.value == "mcp_op_required"
+    assert DELIVERED_EVENTS[0].payload["op"] == "list_tools"
 
 
 @pytest.mark.asyncio

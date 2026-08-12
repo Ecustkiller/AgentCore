@@ -72,6 +72,15 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "phase": "str",
         "ms": "int",
     },
+    "chat.local_presence_gate": {
+        "reason": "str",
+        "root_id": "str",
+        "user": "str",
+    },
+    "chat.prepare_local_io_abort": {
+        "reason": "str",
+        "detail": "str",
+    },
     "desktop.mcp_list_ok": {
         "duration_ms": "int",
         "tool_count": "int",

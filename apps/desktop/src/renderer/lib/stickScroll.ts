@@ -3,7 +3,7 @@
  * ({@link useStickToBottom}).
  *
  * Position alone is not enough while a stream is appending: a user trying to
- * leave the bottom band loses the race to the next layout-effect `scrollTo`.
+ * leave the bottom band loses the race to the next follow `scrollTop` write.
  * Callers therefore also detach on upward wheel/touch intent, and use hysteresis
  * so re-attach requires a tighter band than detach.
  */

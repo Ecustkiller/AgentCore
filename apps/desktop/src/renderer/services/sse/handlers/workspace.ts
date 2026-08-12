@@ -1,43 +1,23 @@
-import { logEvent } from "@/lib/log";
 import { notifyWarning } from "@/lib/toast";
-import { performWorkspaceOp } from "@/services/workspaceOps";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
-import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type {
   SSEEvent,
-  WorkspaceOpRequiredPayload,
   WorkspaceSnapshotDonePayload,
   WorkspaceSnapshotFailedPayload,
 } from "@/types/events";
 import type { DispatchContext } from "../types";
 
+/**
+ * Conversation-bus workspace events that are **not** CLIENT_TOOL fulfill.
+ * `workspace_op_required` is handled in `dispatchSSEEvent` (sidecar only) /
+ * device fulfill ingress (cloud) — not here.
+ */
 export function handleWorkspaceEvent(
   event: SSEEvent,
   ctx: DispatchContext,
 ): boolean {
   switch (event.type) {
-    case "workspace_op_required": {
-      const payload = event.payload as WorkspaceOpRequiredPayload;
-      const args = payload.args ?? {};
-      // L3：落 args 里的路径键（无正文）；便于对照 NotADirectory / channel-dead。
-      logEvent("info", "workspace_op.received", {
-        conversation_id: ctx.conversationId,
-        request_id: payload.request_id,
-        op: payload.op,
-        root_id: payload.root_id,
-        timeout_ms: payload.timeout_ms,
-        turn_phase: getTurnPhase(ctx.conversationId),
-        source: ctx.source,
-        args_directory:
-          typeof args.directory === "string" ? args.directory : null,
-        args_path: typeof args.path === "string" ? args.path : null,
-        args_pattern: typeof args.pattern === "string" ? args.pattern : null,
-        args_keys: Object.keys(args).sort(),
-      });
-      void performWorkspaceOp(payload, ctx.conversationId);
-      return true;
-    }
     case "workspace_snapshot_done": {
       const payload = event.payload as WorkspaceSnapshotDonePayload;
       const conversationId = payload.conversation_id || ctx.conversationId;

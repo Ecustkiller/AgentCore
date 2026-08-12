@@ -5,6 +5,7 @@ affordances that only exist in the Electron shell (native notifications + Host o
 
 Wired whenever the desktop client is online (local workspace **or** cloud +
 ``desktop_online``) — never by pinging ``127.0.0.1`` from the cloud API process.
+Delivery goes through the device-level fulfill hub (not the turn display sink).
 """
 
 from __future__ import annotations
@@ -15,19 +16,19 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.runtime.events import (
-    EventSink,
-    desktop_notify_required,
-    external_mount_readonly_required,
-    host_op_required,
-    mcp_op_required,
-)
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_EXTERNAL_MOUNT,
     CHANNEL_HOST,
     CHANNEL_MCP,
     CHANNEL_NOTIFY,
     client_tool_payload,
+    push_client_tool_required,
+)
+from agentcore.runtime.events.desktop import (
+    desktop_notify_required,
+    external_mount_readonly_required,
+    host_op_required,
+    mcp_op_required,
 )
 from agentcore.runtime.events.types import EventType
 from agentcore.runtime.interaction import InteractionKind
@@ -93,7 +94,7 @@ class McpOp(StrEnum):
 class DesktopClientChannel:
     """Suspends until the bound desktop fulfils a Client Tool request."""
 
-    sink: EventSink
+    user_id: str
     conversation_id: str
     registry: ClientRequestBridge
     timeout_seconds: float
@@ -115,15 +116,24 @@ class DesktopClientChannel:
                     CHANNEL_NOTIFY,
                     EventType.DESKTOP_NOTIFY_REQUIRED.value,
                     params={"title": title, "body": body},
+                    user_id=self.user_id,
                 ),
                 timeout=self.timeout_seconds,
-                on_suspended=lambda: self.sink.emit(
-                    desktop_notify_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_NOTIFY,
+                    root_id=None,
+                    event=desktop_notify_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         title=title,
                         body=body,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="DesktopNotifyError",
+                    error_detail="桌面通知失败: no fulfiller（无履约方）",
                 ),
             )
         except TimeoutError as e:
@@ -173,16 +183,25 @@ class DesktopClientChannel:
                     CHANNEL_EXTERNAL_MOUNT,
                     EventType.EXTERNAL_MOUNT_READONLY_REQUIRED.value,
                     params=params,
+                    user_id=self.user_id,
                 ),
                 timeout=deadline,
-                on_suspended=lambda: self.sink.emit(
-                    external_mount_readonly_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_EXTERNAL_MOUNT,
+                    root_id=None,
+                    event=external_mount_readonly_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         path=path,
                         well_known=well_known,
                         target_name=target_name,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="ExternalMountError",
+                    error_detail="挂载本机目录失败: no fulfiller（无履约方）",
                 ),
             )
         except TimeoutError as e:
@@ -233,15 +252,26 @@ class DesktopClientChannel:
                     CHANNEL_HOST,
                     EventType.HOST_OP_REQUIRED.value,
                     params={"op": op_name, "args": payload_args},
+                    user_id=self.user_id,
                 ),
                 timeout=deadline,
-                on_suspended=lambda: self.sink.emit(
-                    host_op_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_HOST,
+                    root_id=None,
+                    event=host_op_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         op=op_name,
                         args=payload_args,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="HostOpError",
+                    error_detail=(
+                        f"本机 Host 操作失败（{op_name}）: no fulfiller（无履约方）"
+                    ),
                 ),
             )
         except TimeoutError as e:
@@ -286,15 +316,26 @@ class DesktopClientChannel:
                     CHANNEL_MCP,
                     EventType.MCP_OP_REQUIRED.value,
                     params={"op": op_name, "args": payload_args},
+                    user_id=self.user_id,
                 ),
                 timeout=deadline,
-                on_suspended=lambda: self.sink.emit(
-                    mcp_op_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_MCP,
+                    root_id=None,
+                    event=mcp_op_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         op=op_name,
                         args=payload_args,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="McpOpError",
+                    error_detail=(
+                        f"本机 MCP 操作失败（{op_name}）: no fulfiller（无履约方）"
+                    ),
                 ),
             )
         except TimeoutError as e:

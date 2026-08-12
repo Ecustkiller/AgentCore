@@ -5,22 +5,26 @@ for local mode, without an actual desktop:
 
   * ``InteractionRegistry`` — the in-process bridge: unknown / double / wrong-
     conversation resolves are refused; a matching resolve settles the Future.
-  * ``WorkspaceChannel`` — suspends an op on a Future, emits a
-    ``workspace_op_required`` event carrying the *full* args, and returns the
-    desktop's value or re-raises the typed ``WorkspaceError`` (timeout → IO error).
+  * ``WorkspaceChannel`` — suspends an op on a Future, delivers a
+    ``workspace_op_required`` frame via the fulfill hub carrying the *full* args,
+    and returns the desktop's value or re-raises the typed ``WorkspaceError``
+    (timeout → IO error).
   * ``LocalWorkspace`` — read/list/grep round-trip through the channel and parse
     back into the same typed shapes ``ServerWorkspace`` returns, and a mutating op
     flips ``dirty`` while a read-only op does not.
 
-A fake "desktop" drives each round trip: it reads the emitted op event off the
-sink to learn the ``request_id``, then settles the registry with a canned result.
+A fake "desktop" drives each round trip: it reads the delivered op event (captured
+from fulfill dispatch) to learn the ``request_id``, then settles the registry.
 """
+
+from __future__ import annotations
 
 import asyncio
 
 import pytest
 
-from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.fulfill.dispatch import DeliverResult
+from agentcore.runtime.events import EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp, index_io_mode
@@ -36,21 +40,33 @@ from agentcore.workspace.protocol import (
 pytestmark = pytest.mark.anyio
 
 CONV = "conv-1"
-
-
-# --- helpers ---------------------------------------------------------------
-
-
+USER = "user-ws-channel"
 ROOT_ID = "root-abc"
+
+# Capture list filled by the autouse deliver patch (SSEEvent instances).
+_CAPTURE: list[SSEEvent] = []
+
+
+@pytest.fixture(autouse=True)
+def _patch_deliver(monkeypatch: pytest.MonkeyPatch):
+    """Default: every CLIENT_TOOL deliver succeeds and is captured for tests."""
+    _CAPTURE.clear()
+
+    def fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+        _CAPTURE.append(event)
+        return DeliverResult.DELIVERED
+
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool", fake_deliver
+    )
 
 
 def _make(
     timeout: float = 5.0, *, execute_slack: float = 15.0
-) -> tuple[LocalWorkspace, InteractionRegistry, EventSink]:
-    sink = EventSink()
+) -> tuple[LocalWorkspace, InteractionRegistry]:
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=timeout,
@@ -59,23 +75,22 @@ def _make(
     return (
         LocalWorkspace(channel, execute_timeout_slack=execute_slack),
         registry,
-        sink,
     )
 
 
-async def _await_request(sink: EventSink) -> SSEEvent:
-    """Return the op event the channel just emitted (yielding so the op runs)."""
+async def _await_request() -> SSEEvent:
+    """Return the op event the channel just delivered (yielding so the op runs)."""
     for _ in range(2000):
-        if not sink._queue.empty():  # noqa: SLF001 - test-only inspection
-            return sink._queue.get_nowait()
+        if _CAPTURE:
+            return _CAPTURE.pop(0)
         await asyncio.sleep(0)
-    raise AssertionError("no workspace_op_required event emitted")
+    raise AssertionError("no workspace_op_required event delivered")
 
 
-async def _round_trip(coro, sink: EventSink, registry: InteractionRegistry, response: dict):
+async def _round_trip(coro, registry: InteractionRegistry, response: dict):
     """Drive one op: start it, answer it as the desktop would, return (result, event)."""
     task = asyncio.create_task(coro)
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
 
@@ -95,7 +110,6 @@ _PROBE_OK_RESPONSE = {
 
 async def _round_trip_execute(
     coro,
-    sink: EventSink,
     registry: InteractionRegistry,
     response: dict,
     *,
@@ -103,7 +117,7 @@ async def _round_trip_execute(
 ):
     """Drive execute: answer once-per-backend probe, then the real EXECUTE."""
     task = asyncio.create_task(coro)
-    probe_event = await _await_request(sink)
+    probe_event = await _await_request()
     assert probe_event.payload["op"] == WorkspaceOp.EXECUTE
     assert probe_event.payload["args"]["code"] == "print('ok')"
     assert registry.resolve(
@@ -111,7 +125,7 @@ async def _round_trip_execute(
         probe_response if probe_response is not None else _PROBE_OK_RESPONSE,
         conversation_id=CONV,
     )
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == WorkspaceOp.EXECUTE
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event, probe_event
@@ -121,9 +135,9 @@ async def _round_trip_execute(
 
 
 async def test_read_round_trips_through_channel():
-    local, registry, sink = _make()
+    local, registry = _make()
     result, event = await _round_trip(
-        local.read("a.txt"), sink, registry, {"ok": True, "value": "hello"}
+        local.read("a.txt"), registry, {"ok": True, "value": "hello"}
     )
     assert result == "hello"
     assert event.type == EventType.WORKSPACE_OP_REQUIRED
@@ -136,7 +150,7 @@ async def test_read_round_trips_through_channel():
 
 
 async def test_list_parses_dir_entries():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {
         "ok": True,
         "value": [
@@ -150,7 +164,7 @@ async def test_list_parses_dir_entries():
             {"path": "readme.md", "is_dir": False},  # optional meta absent → None
         ],
     }
-    entries, _ = await _round_trip(local.list(".", "*"), sink, registry, response)
+    entries, _ = await _round_trip(local.list(".", "*"), registry, response)
     assert [(e.path, e.is_dir, e.size_bytes, e.mtime_ms) for e in entries] == [
         ("src", True, None, 1000),
         ("src/main.py", False, 42, 2000),
@@ -159,10 +173,10 @@ async def test_list_parses_dir_entries():
 
 
 async def test_index_files_parses_paths_and_truncation():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {"ok": True, "value": {"paths": ["a.txt", "sub/b.md"], "truncated": True}}
     (paths, truncated), event = await _round_trip(
-        local.index_files(order="recent"), sink, registry, response
+        local.index_files(order="recent"), registry, response
     )
     assert event.payload["op"] == WorkspaceOp.INDEX_FILES
     assert event.payload["args"]["order"] == "recent"  # sort preference reaches desktop
@@ -174,7 +188,7 @@ async def test_index_files_parses_paths_and_truncation():
 
 async def test_index_files_parses_entries_fingerprints():
     """Desktop contract: entries with mtime_ms/size_bytes (paths optional dual)."""
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {
         "ok": True,
         "value": {
@@ -186,7 +200,7 @@ async def test_index_files_parses_entries_fingerprints():
             "truncated": False,
         },
     }
-    result, _ = await _round_trip(local.index_files(), sink, registry, response)
+    result, _ = await _round_trip(local.index_files(), registry, response)
     assert result.paths == ["a.txt", "sub/b.md"]
     assert result.truncated is False
     assert result.fingerprints() == {
@@ -196,14 +210,14 @@ async def test_index_files_parses_entries_fingerprints():
 
 
 async def test_index_files_tolerates_empty_envelope():
-    local, registry, sink = _make()
+    local, registry = _make()
     # A not-yet-promoted / empty workspace answers with a bare ok — degrade to ([], False).
-    (paths, truncated), _ = await _round_trip(local.index_files(), sink, registry, {"ok": True})
+    (paths, truncated), _ = await _round_trip(local.index_files(), registry, {"ok": True})
     assert paths == [] and truncated is False
 
 
 async def test_grep_parses_result():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {
         "ok": True,
         "value": {
@@ -214,7 +228,7 @@ async def test_grep_parses_result():
         },
     }
     result, event = await _round_trip(
-        local.grep(GrepQuery(pattern="import")), sink, registry, response
+        local.grep(GrepQuery(pattern="import")), registry, response
     )
     assert event.payload["op"] == WorkspaceOp.GREP
     assert result.total_matches == 1
@@ -227,10 +241,10 @@ async def test_grep_parses_result():
 
 
 async def test_write_marks_dirty_and_sends_full_content():
-    local, registry, sink = _make()
+    local, registry = _make()
     big = "x" * 5000  # full payload, NOT a bounded preview like approvals
     result, event = await _round_trip(
-        local.write("out.txt", big), sink, registry, {"ok": True, "value": 5000}
+        local.write("out.txt", big), registry, {"ok": True, "value": 5000}
     )
     assert result == 5000
     assert event.payload["args"]["content"] == big
@@ -238,7 +252,7 @@ async def test_write_marks_dirty_and_sends_full_content():
 
 
 async def test_execute_parses_result_and_marks_dirty():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {
         "ok": True,
         "value": {
@@ -251,7 +265,7 @@ async def test_execute_parses_result_and_marks_dirty():
     }
     req = ExecutionRequest(code="print('hi')", language="python")
     result, event, _probe = await _round_trip_execute(
-        local.execute(req), sink, registry, response
+        local.execute(req), registry, response
     )
     assert event.payload["op"] == WorkspaceOp.EXECUTE
     assert event.payload["args"]["code"] == "print('hi')"
@@ -260,7 +274,7 @@ async def test_execute_parses_result_and_marks_dirty():
 
 
 async def test_execute_forwards_registry_env():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {
         "ok": True,
         "value": {
@@ -277,7 +291,7 @@ async def test_execute_forwards_registry_env():
         env={"NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/", "SECRET": "no"},
     )
     _result, event, probe_event = await _round_trip_execute(
-        local.execute(req), sink, registry, response
+        local.execute(req), registry, response
     )
     # Probe has no env; real execute forwards the registry pin.
     assert "env" not in probe_event.payload["args"]
@@ -298,31 +312,31 @@ async def test_execute_forwards_registry_env():
     ],
 )
 async def test_error_kind_maps_to_typed_exception(kind: str, expected: type):
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {"ok": False, "error": {"kind": kind, "detail": "boom"}}
     with pytest.raises(expected):
-        await _round_trip(local.read("x"), sink, registry, response)
+        await _round_trip(local.read("x"), registry, response)
 
 
 async def test_ambiguous_match_carries_count():
-    local, registry, sink = _make()
+    local, registry = _make()
     response = {"ok": False, "error": {"kind": "AmbiguousMatch", "count": 4}}
     with pytest.raises(AmbiguousMatch) as ei:
-        await _round_trip(local.replace("a.py", "x", "y", all_=False), sink, registry, response)
+        await _round_trip(local.replace("a.py", "x", "y", all_=False), registry, response)
     assert ei.value.count == 4
 
 
 async def test_malformed_envelope_raises_io_error():
-    local, registry, sink = _make()
+    local, registry = _make()
     with pytest.raises(WorkspaceIOError):
-        await _round_trip(local.read("x"), sink, registry, {"unexpected": True})
+        await _round_trip(local.read("x"), registry, {"unexpected": True})
 
 
 # --- timeout (a dropped desktop never hangs the turn) ----------------------
 
 
 async def test_timeout_raises_io_error():
-    local, _registry, _sink = _make(timeout=0.05)
+    local, _registry = _make(timeout=0.05)
     # No desktop answers, so the op times out and surfaces as a WorkspaceIOError.
     with pytest.raises(WorkspaceIOError, match="活性挂起"):
         await local.read("never-answered.txt")
@@ -330,10 +344,9 @@ async def test_timeout_raises_io_error():
 
 async def test_single_timeout_keeps_channel_alive_for_next_op():
     """One settle timeout fails that op only — next op can still succeed."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=0.05,
@@ -344,11 +357,11 @@ async def test_single_timeout_keeps_channel_alive_for_next_op():
     assert channel._dead is False  # noqa: SLF001
     assert channel._consecutive_settle_timeouts == 1  # noqa: SLF001
 
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    while _CAPTURE:
+        _CAPTURE.pop(0)
 
     task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == "read"
     assert registry.resolve(
         event.payload["request_id"],
@@ -361,7 +374,7 @@ async def test_single_timeout_keeps_channel_alive_for_next_op():
 
 async def test_after_two_timeouts_third_request_fail_fast():
     """Sticky channel-dead only after consecutive N=2 settle timeouts."""
-    local, _registry, _sink = _make(timeout=2.0)
+    local, _registry = _make(timeout=2.0)
     with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
         await local.read("never-answered-1.txt")
     with pytest.raises(WorkspaceIOError, match=r"timed out; channel dead"):
@@ -377,10 +390,9 @@ async def test_after_two_timeouts_third_request_fail_fast():
 
 async def test_probe_exec_timeout_does_not_sticky_dead_channel():
     """A1: language probe hang fail-closes advertise only — file channel stays alive."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=0.05,
@@ -391,12 +403,12 @@ async def test_probe_exec_timeout_does_not_sticky_dead_channel():
 
     assert channel._dead is False  # noqa: SLF001
     # Drain the unanswered probe SSE so the next await sees the file op.
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    while _CAPTURE:
+        _CAPTURE.pop(0)
 
     # A real file op must still emit SSE (not reject as channel dead).
     task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == "read"
     assert registry.resolve(
         event.payload["request_id"],
@@ -415,7 +427,7 @@ async def test_op_timeout_log_includes_path(monkeypatch):
     monkeypatch.setattr(channel_mod, "logger", spy)
 
     channel = WorkspaceChannel(
-        sink=EventSink(),
+        user_id=USER,
         conversation_id=CONV,
         registry=InteractionRegistry(),
         timeout_seconds=0.05,
@@ -436,7 +448,7 @@ async def test_op_timeout_log_includes_path(monkeypatch):
 
     spy.events.clear()
     channel2 = WorkspaceChannel(
-        sink=EventSink(),
+        user_id=USER,
         conversation_id=CONV,
         registry=InteractionRegistry(),
         timeout_seconds=0.05,
@@ -454,20 +466,22 @@ async def test_op_timeout_log_includes_path(monkeypatch):
     assert grep_fields["timeout_ms"] == 1000
 
 
-async def test_sink_closed_fail_fast_without_wall_clock_wait():
-    """Closed sink: emit does not enqueue — settle immediately, no full timeout wait."""
-    sink = EventSink()
-    sink.close()
+async def test_no_fulfiller_fail_fast_without_wall_clock_wait(monkeypatch):
+    """No online fulfiller: settle immediately, no full timeout wait."""
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool",
+        lambda *a, **k: DeliverResult.NO_FULFILLER,
+    )
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=5.0,
         root_id=ROOT_ID,
     )
     t0 = asyncio.get_running_loop().time()
-    with pytest.raises(WorkspaceIOError, match="sink closed（未入队）"):
+    with pytest.raises(WorkspaceIOError, match="无履约方"):
         await channel.request(WorkspaceOp.READ, {"path": "after-close.txt"})
     elapsed = asyncio.get_running_loop().time() - t0
     # Must not burn the 5s channel deadline awaiting a desktop that never saw the op.
@@ -477,30 +491,17 @@ async def test_sink_closed_fail_fast_without_wall_clock_wait():
     assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
 
 
-async def test_sink_detached_does_not_fail_fast_keeps_delivery_path():
-    """SSE detach ≠ bridge dead: keep Future open for attach / resolve (协调期 Local op).
-
-    After CEO end_turn the primary observer may detach while coordination workers
-    still issue workspace ops. Conflating detach with closed caused collective
-    ``sink closed（未入队）``. Detach skips the live queue; registry + reattach
-    (or a direct resolve) remains the delivery path.
-    """
+async def test_delivered_op_stays_open_until_resolve():
+    """Fulfill delivery keeps the Future open until resolve (rehang / desktop settle)."""
     from agentcore.runtime.events.client_tool_reattach import pending_client_tool_events
     from agentcore.runtime.interaction import default_interaction_registry
 
-    sink = EventSink()
-    sink.detach()
-    assert sink.is_detached is True
-    assert sink.is_closed is False
-
-    # Use the process-wide registry so pending_client_tool_events can see the op
-    # (same path attach uses). Isolate leftovers from other tests.
     registry = default_interaction_registry()
     for leftover in list(registry.list_pending(CONV)):
         registry.discard(leftover.id)
 
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=5.0,
@@ -509,16 +510,15 @@ async def test_sink_detached_does_not_fail_fast_keeps_delivery_path():
     task = asyncio.create_task(
         channel.request(WorkspaceOp.READ, {"path": "after-detach.txt"})
     )
-    # Detach must not settle immediately as sink-closed.
-    await asyncio.sleep(0)
+    event = await _await_request()
     assert not task.done()
-    assert sink._queue.empty()  # noqa: SLF001 — not live-queued while detached
+    assert event.payload["op"] == "read"
 
     pending = [r for r in registry.list_pending(CONV) if not r.future.done()]
     assert len(pending) == 1
     request_id = pending[0].id
 
-    # Attach re-hang path can rebuild the EPHEMERAL frame from the registry.
+    # Registry can rebuild the EPHEMERAL frame for fulfiller rehang.
     rehung = pending_client_tool_events(CONV)
     assert any(
         e.type == EventType.WORKSPACE_OP_REQUIRED
@@ -539,10 +539,9 @@ async def test_sink_detached_does_not_fail_fast_keeps_delivery_path():
 
 async def test_index_io_timeout_does_not_sticky_dead_channel():
     """Background index read hang must not drag tool-family siblings into channel-dead."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=0.05,
@@ -555,12 +554,12 @@ async def test_index_io_timeout_does_not_sticky_dead_channel():
         )
 
     assert channel._dead is False  # noqa: SLF001
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    while _CAPTURE:
+        _CAPTURE.pop(0)
 
     # Next tool read must still emit SSE (not reject as channel dead).
     task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == "read"
     assert registry.resolve(
         event.payload["request_id"],
@@ -641,34 +640,41 @@ async def test_local_mutation_defers_index_schedule_until_flush(tmp_path):
     import contextlib
     from unittest.mock import AsyncMock
 
-    from agentcore.workspace.indexing.maintainer import IndexMaintainer
-    from agentcore.workspace.indexing.manager import IndexManager
-
-    local, registry, sink = _make()
-    manager = IndexManager(str(tmp_path / "idx"))
-    maintainer = IndexMaintainer(manager, local)
-    local._index_manager = manager  # noqa: SLF001
-    local._index_maintainer = maintainer  # noqa: SLF001
-
-    await _round_trip(
-        local.write("out.txt", "hello"),
-        sink,
-        registry,
-        {"ok": True, "value": 5},
+    from agentcore.workspace.indexing.registry import (
+        clear_index_registry,
+        shared_index_maintainer_for_dir,
+        shared_index_manager_for_dir,
     )
-    assert local.dirty is True
-    assert manager.content_dirty is True
-    assert maintainer.building is False
-    assert maintainer._task is None  # noqa: SLF001 — mutation must not schedule
 
-    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
-    await local.flush_code_index_maintenance()
-    manager.ensure_index.assert_awaited()
-    assert maintainer.building is False
-    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
-        maintainer._task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await maintainer._task
+    clear_index_registry()
+    try:
+        local, registry = _make()
+        idx = local._index_cache_dir()  # noqa: SLF001
+        manager = shared_index_manager_for_dir(idx)
+        maintainer = shared_index_maintainer_for_dir(idx, local)
+        local._index_manager = manager  # noqa: SLF001
+        local._index_maintainer = maintainer  # noqa: SLF001
+
+        await _round_trip(
+            local.write("out.txt", "hello"),
+            registry,
+            {"ok": True, "value": 5},
+        )
+        assert local.dirty is True
+        assert manager.content_dirty is True
+        assert maintainer.building is False
+        assert maintainer._task is None  # noqa: SLF001 — mutation must not schedule
+
+        manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        await local.flush_code_index_maintenance()
+        manager.ensure_index.assert_awaited()
+        assert maintainer.building is False
+        if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+            maintainer._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintainer._task
+    finally:
+        clear_index_registry()
 
 
 async def test_local_start_code_index_maintenance_still_schedules(tmp_path):
@@ -676,28 +682,35 @@ async def test_local_start_code_index_maintenance_still_schedules(tmp_path):
     import contextlib
     from unittest.mock import AsyncMock
 
-    from agentcore.workspace.indexing.manager import IndexManager
+    from agentcore.workspace.indexing.registry import (
+        clear_index_registry,
+        shared_index_manager_for_dir,
+    )
 
-    local, _registry, _sink = _make()
-    manager = IndexManager(str(tmp_path / "idx"))
-    manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
-    local._index_manager = manager  # noqa: SLF001
+    clear_index_registry()
+    try:
+        local, _registry = _make()
+        manager = shared_index_manager_for_dir(local._index_cache_dir())  # noqa: SLF001
+        manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        local._index_manager = manager  # noqa: SLF001
 
-    local.start_code_index_maintenance()
-    maintainer = local._index_maintainer  # noqa: SLF001
-    assert maintainer is not None
-    assert maintainer.building or maintainer._task is not None  # noqa: SLF001
-    await maintainer.drain()
-    manager.ensure_index.assert_awaited()
-    if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
-        maintainer._task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await maintainer._task
+        local.start_code_index_maintenance()
+        maintainer = local._index_maintainer  # noqa: SLF001
+        assert maintainer is not None
+        assert maintainer.building or maintainer._task is not None  # noqa: SLF001
+        await maintainer.drain()
+        manager.ensure_index.assert_awaited()
+        if maintainer._task is not None and not maintainer._task.done():  # noqa: SLF001
+            maintainer._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await maintainer._task
+    finally:
+        clear_index_registry()
 
 
 async def test_local_flush_noops_when_clean():
     """flush is a no-op when nothing is dirty and no maintainer is running."""
-    local, _registry, _sink = _make()
+    local, _registry = _make()
     await local.flush_code_index_maintenance()  # no manager / maintainer
 
 
@@ -735,10 +748,9 @@ async def test_server_mutation_still_schedules_index(tmp_path):
 
 async def test_parallel_ops_one_timeout_does_not_fail_sibling():
     """Single settle timeout must not cancel same-channel inflight siblings."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=0.2,
@@ -750,7 +762,7 @@ async def test_parallel_ops_one_timeout_does_not_fail_sibling():
     )
     events: dict[str, SSEEvent] = {}
     for _ in range(2):
-        ev = await _await_request(sink)
+        ev = await _await_request()
         events[ev.payload["args"]["path"]] = ev
     with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
         await t_a
@@ -765,10 +777,9 @@ async def test_parallel_ops_one_timeout_does_not_fail_sibling():
 
 async def test_parallel_ops_second_timeout_sticky_fails_sibling():
     """Second consecutive hang sticky-deads and settles remaining inflight."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         # Floor is max(1.0, …) in derive_channel_timeout — use 1s vs 5s contrast.
@@ -778,15 +789,15 @@ async def test_parallel_ops_second_timeout_sticky_fails_sibling():
     # Seed one prior real-op timeout so the next hang reaches N=2 sticky.
     with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
         await channel.request(WorkspaceOp.READ, {"path": "seed.txt"})
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    while _CAPTURE:
+        _CAPTURE.pop(0)
 
     t_a = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
     t_b = asyncio.create_task(
         channel.request(WorkspaceOp.READ, {"path": "b.txt"}, timeout=5.0)
     )
-    await _await_request(sink)
-    await _await_request(sink)
+    await _await_request()
+    await _await_request()
 
     t0 = asyncio.get_running_loop().time()
     results = await asyncio.gather(t_a, t_b, return_exceptions=True)
@@ -803,11 +814,10 @@ async def test_parallel_ops_second_timeout_sticky_fails_sibling():
 
 async def test_channel_caps_concurrent_suspends():
     """At most max_inflight ops may be suspended; extras wait for a slot."""
-    sink = EventSink()
     registry = InteractionRegistry()
     cap = 2
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=5.0,
@@ -821,28 +831,28 @@ async def test_channel_caps_concurrent_suspends():
     # Pump until the first wave emits; the overflow must not emit yet.
     events: list[SSEEvent] = []
     for _ in range(200):
-        while not sink._queue.empty():  # noqa: SLF001
-            events.append(sink._queue.get_nowait())
+        while _CAPTURE:
+            events.append(_CAPTURE.pop(0))
         if len(events) >= cap:
             break
         await asyncio.sleep(0)
     assert len(events) == cap
     assert len(channel._inflight) == cap  # noqa: SLF001
     await asyncio.sleep(0)
-    assert sink._queue.empty()  # noqa: SLF001
+    assert not _CAPTURE
 
     # Release one slot → a parked waiter suspends and emits.
     assert registry.resolve(
         events[0].payload["request_id"], {"ok": True, "value": "a"}, conversation_id=CONV
     )
-    third = await _await_request(sink)
+    third = await _await_request()
     assert third.payload["args"]["path"] in {f"{i}.txt" for i in range(cap + 2)}
 
     # Settle every remaining suspended op (wave 1 leftover + newly admitted).
     to_settle = [events[1], third]
     for _ in range(100):
-        while not sink._queue.empty():  # noqa: SLF001
-            to_settle.append(sink._queue.get_nowait())
+        while _CAPTURE:
+            to_settle.append(_CAPTURE.pop(0))
         progressed = False
         for ev in list(to_settle):
             if registry.resolve(
@@ -861,10 +871,9 @@ async def test_channel_caps_concurrent_suspends():
 
 async def test_queued_waiter_fail_fast_after_channel_dead():
     """After sticky-dead (N=2), a queued waiter that obtains a slot fail-fasts (no SSE)."""
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=1.0,
@@ -874,17 +883,17 @@ async def test_queued_waiter_fail_fast_after_channel_dead():
     # Seed streak so the hold timeout is the sticky trigger (N=2).
     with pytest.raises(WorkspaceIOError, match=r"timed out（活性挂起）"):
         await channel.request(WorkspaceOp.READ, {"path": "seed.txt"})
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    while _CAPTURE:
+        _CAPTURE.pop(0)
 
     # Fill the only slot; leave it hanging so the next caller queues.
     t_hold = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "hold.txt"}))
-    await _await_request(sink)
+    await _await_request()
     t_queued = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "queued.txt"}))
     # Queued task parks on the semaphore — no second SSE while hold is open.
     for _ in range(50):
         await asyncio.sleep(0)
-    assert sink._queue.empty()  # noqa: SLF001
+    assert not _CAPTURE
 
     t0 = asyncio.get_running_loop().time()
     results = await asyncio.gather(t_hold, t_queued, return_exceptions=True)
@@ -898,7 +907,7 @@ async def test_queued_waiter_fail_fast_after_channel_dead():
     # Queued waiter fail-fasts after hold's ~1s hang — not another full deadline.
     assert elapsed < 2.0
     # No workspace_op_required for the queued op.
-    assert sink._queue.empty()  # noqa: SLF001
+    assert not _CAPTURE
 
 
 # --- per-op transport deadline (执行门 timeout policy) ----------------------
@@ -928,15 +937,15 @@ def _spy_wait_for(monkeypatch) -> list[float]:
 
 async def test_file_op_uses_flat_transport_deadline(monkeypatch):
     captured = _spy_wait_for(monkeypatch)
-    local, registry, sink = _make(timeout=30.0, execute_slack=15.0)
-    await _round_trip(local.read("a.txt"), sink, registry, {"ok": True, "value": "x"})
+    local, registry = _make(timeout=30.0, execute_slack=15.0)
+    await _round_trip(local.read("a.txt"), registry, {"ok": True, "value": "x"})
     # A read rides the channel-wide deadline, untouched by the execute slack.
     assert captured[-1] == 30.0
 
 
 async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch):
     captured = _spy_wait_for(monkeypatch)
-    local, registry, sink = _make(timeout=30.0, execute_slack=15.0)
+    local, registry = _make(timeout=30.0, execute_slack=15.0)
     req = ExecutionRequest(code="print(1)", language="python", timeout_seconds=10)
     response = {
         "ok": True,
@@ -948,7 +957,7 @@ async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch)
             "duration_ms": 1,
         },
     }
-    await _round_trip_execute(local.execute(req), sink, registry, response)
+    await _round_trip_execute(local.execute(req), registry, response)
     # Probe uses timeout_seconds=5 → 5+15=20; real run 10+15=25 (not flat 30s).
     assert captured[-2] == 20.0
     assert captured[-1] == 25.0

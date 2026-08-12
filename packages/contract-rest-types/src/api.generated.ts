@@ -3498,6 +3498,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/fulfill": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fulfill Stream
+         * @description Open this device's fulfillment channel (server→client SSE).
+         *
+         *     Query params: ``device_id`` (required), ``caps`` (comma-separated channel
+         *     names), ``roots`` (comma-separated root ids, may be empty). Platform comes
+         *     from ``X-Client-Platform``.
+         */
+        get: operations["fulfill_stream_v1_fulfill_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/fulfill/roots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Update Fulfill Roots
+         * @description Update the root set declared by an online fulfiller without reconnecting.
+         */
+        post: operations["update_fulfill_roots_v1_fulfill_roots_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/hooks/standing/{webhook_id}": {
         parameters: {
             query?: never;
@@ -6739,10 +6783,14 @@ export interface components {
          * @description Always-pool usage for the UI meter (percentage + absolute chars).
          */
         AlwaysQuotaView: {
+            /** Global Chars */
+            global_chars: number;
             /** Max Chars */
             max_chars: number;
             /** Percent */
             percent: number;
+            /** Project Chars */
+            project_chars: number;
             /** Used Chars */
             used_chars: number;
         };
@@ -8490,6 +8538,8 @@ export interface components {
         DocumentDetailView: {
             /** Ai Maintained */
             ai_maintained: boolean;
+            /** Always Chars */
+            always_chars?: number | null;
             /** Apply Mode */
             apply_mode: string;
             /** Content */
@@ -8532,6 +8582,8 @@ export interface components {
         DocumentNodeView: {
             /** Ai Maintained */
             ai_maintained: boolean;
+            /** Always Chars */
+            always_chars?: number | null;
             /** Apply Mode */
             apply_mode: string;
             /**
@@ -12280,6 +12332,16 @@ export interface components {
         UpdateFolderRequest: {
             /** Name */
             name?: string | null;
+        };
+        /**
+         * UpdateFulfillRootsRequest
+         * @description ``POST /v1/fulfill/roots`` — refresh roots without reconnecting the SSE.
+         */
+        UpdateFulfillRootsRequest: {
+            /** Device Id */
+            device_id: string;
+            /** Roots */
+            roots?: string[];
         };
         /**
          * UpdateLlmModelProfileRequest
@@ -19653,6 +19715,81 @@ export interface operations {
             };
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    fulfill_stream_v1_fulfill_get: {
+        parameters: {
+            query: {
+                device_id: string;
+                caps?: string;
+                roots?: string;
+            };
+            header?: {
+                "X-Client-Platform"?: string | null;
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_fulfill_roots_v1_fulfill_roots_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateFulfillRootsRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

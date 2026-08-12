@@ -12,6 +12,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
+from tests.client_tool_fulfill_testutil import await_captured_event
 from tests.runs_executor.conftest import (
     _WS_ROOT,
     _ContentProvider,
@@ -171,7 +172,6 @@ async def test_safe_index_files_timeout_does_not_sticky_dead_channel():
 
     import pytest
 
-    from agentcore.runtime.events import EventSink
     from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
     from agentcore.workspace.local import LocalWorkspace
@@ -180,18 +180,13 @@ async def test_safe_index_files_timeout_does_not_sticky_dead_channel():
     conv = "conv-ambient-index"
     root_id = "root-ambient"
 
-    async def _await_request(sink: EventSink):
-        for _ in range(2000):
-            if not sink._queue.empty():  # noqa: SLF001
-                return sink._queue.get_nowait()
-            await asyncio.sleep(0)
-        raise AssertionError("no workspace_op_required event emitted")
+    async def _await_request():
+        return await await_captured_event()
 
     # Control: bare INDEX_FILES timeouts still sticky at N=2 (not permanently exempt).
-    sink_bare = EventSink()
     registry_bare = InteractionRegistry()
     channel_bare = WorkspaceChannel(
-        sink=sink_bare,
+        user_id="u-test",
         conversation_id=conv,
         registry=registry_bare,
         timeout_seconds=0.05,
@@ -203,10 +198,9 @@ async def test_safe_index_files_timeout_does_not_sticky_dead_channel():
     assert channel_bare._dead is True  # noqa: SLF001
 
     # Ambient path: two unanswered index hangs via ``_safe_index_files`` must not sticky.
-    sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id=conv,
         registry=registry,
         timeout_seconds=0.05,
@@ -216,11 +210,12 @@ async def test_safe_index_files_timeout_does_not_sticky_dead_channel():
     assert await _safe_index_files(backend) == []
     assert await _safe_index_files(backend) == []
     assert channel._dead is False  # noqa: SLF001
-    while not sink._queue.empty():  # noqa: SLF001
-        sink._queue.get_nowait()
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
+
+    DELIVERED_EVENTS.clear()
 
     task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "a.txt"}))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == "read"
     assert registry.resolve(
         event.payload["request_id"],

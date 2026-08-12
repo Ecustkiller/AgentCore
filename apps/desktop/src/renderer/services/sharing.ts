@@ -1,7 +1,7 @@
 import { BASE_URL, api } from "@/services/api";
 import type { components } from "@/types/api.generated";
 
-// REST DTOs generated from the backend OpenAPI spec (`pnpm gen:api`).
+// REST DTOs generated from the backend OpenAPI spec (root `pnpm gen:types`).
 type Schemas = components["schemas"];
 
 /** One public, read-only share link for a conversation (分享链接). `url` is a

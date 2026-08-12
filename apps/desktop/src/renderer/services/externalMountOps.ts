@@ -3,6 +3,7 @@ import {
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { ExternalMountReadonlyRequiredPayload } from "@/types/events";
 import type { GrantSessionWellKnown } from "@shared/ipc-contract";
 
@@ -18,12 +19,14 @@ import type { GrantSessionWellKnown } from "@shared/ipc-contract";
 export async function performExternalMountReadonly(
   payload: ExternalMountReadonlyRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "externalMountOps",
-    perform: () => runExternalMount(payload, conversationId),
+    perform: async () => runExternalMount(payload, conversationId),
   });
 }
 

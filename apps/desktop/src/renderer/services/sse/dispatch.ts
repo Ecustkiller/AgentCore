@@ -1,16 +1,11 @@
 import { assertNever } from "@/lib/assertNever";
 import { logEvent } from "@/lib/log";
-import { rejectHostOpForTurnPhase } from "@/services/hostOps";
+import { isClientToolRequiredType } from "@/services/clientToolFrames";
 import { traceSSEEvent } from "@/services/sseTrace";
 import { traceTurnFirstSSE } from "@/services/turnTrace";
-import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
 import { allowsSseEvent } from "@/stores/conversation/turnPhase";
 import { getTurnPhase } from "@/stores/conversation/turnPhaseActions";
-import type {
-  HostOpRequiredPayload,
-  SSEEvent,
-  WorkspaceOpRequiredPayload,
-} from "@/types/events";
+import type { SSEEvent } from "@/types/events";
 import { handleBoardEvent } from "./handlers/board";
 import { handleDesktopEvent } from "./handlers/desktop";
 import { handleExecutionEvent } from "./handlers/execution";
@@ -49,41 +44,36 @@ const HANDLERS = [
  * `run_*` and tool events feed the execution store — they no-op while no
  * execution exists, so the multi-agent UI lights up automatically once the
  * backend starts emitting them, with zero further frontend wiring.
+ *
+ * CLIENT_TOOL `*_required` frames never ride this bus in either mode: cloud
+ * delivers them on the device fulfill stream, and a sidecar turn delivers them
+ * from its own in-process fulfill hub over the `sidecar:fulfill` push. Both land
+ * in `services/clientToolIngress`, which owns perform + settle origin.
  */
 export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
+  // A CLIENT_TOOL frame on the conversation bus is stale (pre-fulfill-hub
+  // server): ignore it rather than guess a settle origin — the turnPhase
+  // fail-settle below was a conversation-SSE assumption that no longer holds.
+  if (isClientToolRequiredType(event.type)) {
+    logEvent("warn", "client_tool.ignored_on_conversation_sse", {
+      conversation_id: ctx.conversationId,
+      event_type: event.type,
+      source: ctx.source,
+      reason: "fulfill_channel_owns_client_tool",
+    });
+    return;
+  }
+
   // 停止生命周期事件门：stopping 仍消费 run_*，挡正文突变；terminal 只放行终态/meta。
   const turnPhase = getTurnPhase(ctx.conversationId);
   if (!allowsSseEvent(turnPhase, event.type)) {
     // 可观测丢点：勿扫用户长文；只记 event_type / phase（钉门闩 vs 传输丢包）。
-    const dropFields: Record<string, unknown> = {
+    logEvent("warn", "sse.event_dropped", {
       conversation_id: ctx.conversationId,
       event_type: event.type,
       turn_phase: turnPhase,
       reason: "turn_phase_gate",
-    };
-    // L3：workspace/host_op 另带 request_id/op，便于对上服务端超时。
-    // 静默 drop 会让服务端等超时 → sticky channel-dead；改为立刻失败 settle。
-    if (event.type === "workspace_op_required") {
-      const payload = event.payload as WorkspaceOpRequiredPayload;
-      dropFields.request_id = payload?.request_id;
-      dropFields.op = payload?.op;
-      dropFields.settle = "fail_envelope";
-      logEvent("warn", "workspace_op.dropped", dropFields);
-      void rejectWorkspaceOpForTurnPhase(
-        payload,
-        ctx.conversationId,
-        turnPhase,
-      );
-    } else if (event.type === "host_op_required") {
-      const payload = event.payload as HostOpRequiredPayload;
-      dropFields.request_id = payload?.request_id;
-      dropFields.op = payload?.op;
-      dropFields.settle = "fail_envelope";
-      logEvent("warn", "host_op.dropped", dropFields);
-      void rejectHostOpForTurnPhase(payload, ctx.conversationId, turnPhase);
-    } else {
-      logEvent("warn", "sse.event_dropped", dropFields);
-    }
+    });
     return;
   }
 

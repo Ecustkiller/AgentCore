@@ -11,7 +11,7 @@ type Schemas = components["schemas"];
  * The 消息 page is human↔human, a domain separate from the 对话 page's AI
  * conversations, so this is its own service with its own types. The REST types
  * below are GENERATED from the backend OpenAPI spec (`types/api.generated.ts`,
- * via `pnpm gen:api`) and aliased here, so they track `api/schemas.py` with zero
+ * via root `pnpm gen:types`) and aliased here, so they track `api/schemas.py` with zero
  * hand-written drift. Wire fields stay snake_case verbatim. Fields the backend
  * gives a default (e.g. `unread`, `avatar_url`, `attachments`) are optional in
  * the generated type; read sites coalesce where a concrete value is needed.

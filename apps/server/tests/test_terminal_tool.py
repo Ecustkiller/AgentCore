@@ -13,7 +13,7 @@ from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import tool_call_requires_approval
 from agentcore.runtime.engine import resolve_tool_timeout
-from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.runtime.events import EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.tools.builtin import (
     build_builtin_registry,
@@ -32,6 +32,7 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.server import ServerWorkspace
+from tests.client_tool_fulfill_testutil import await_captured_event
 
 pytestmark = pytest.mark.anyio
 
@@ -39,26 +40,22 @@ CONV = "conv-terminal-1"
 ROOT_ID = "root-terminal"
 
 
-def _drain(sink: EventSink) -> list[SSEEvent]:
-    events: list[SSEEvent] = []
-    while not sink._queue.empty():  # noqa: SLF001
-        events.append(sink._queue.get_nowait())
-    return events
+def _drain() -> None:
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
+
+    DELIVERED_EVENTS.clear()
 
 
-async def _await_request(sink: EventSink) -> SSEEvent:
-    for _ in range(2000):
-        if not sink._queue.empty():  # noqa: SLF001
-            return sink._queue.get_nowait()
-        await asyncio.sleep(0)
-    raise AssertionError("no workspace_op_required event emitted")
+async def _await_request():
+    """Return the CLIENT_TOOL event just delivered via fulfill."""
+    return await await_captured_event()
 
 
 async def _round_trip(
-    coro: Any, sink: EventSink, registry: InteractionRegistry, response: dict[str, Any]
+    coro: Any, registry: InteractionRegistry, response: dict[str, Any]
 ):
     task = asyncio.create_task(coro)
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
 
@@ -75,17 +72,16 @@ def _ctx(channel: WorkspaceChannel | None) -> ToolContext:
     )
 
 
-def _channel(timeout: float = 5.0) -> tuple[WorkspaceChannel, InteractionRegistry, EventSink]:
-    sink = EventSink()
+def _channel(timeout: float = 5.0) -> tuple[WorkspaceChannel, InteractionRegistry]:
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=timeout,
         root_id=ROOT_ID,
     )
-    return channel, registry, sink
+    return channel, registry
 
 
 # --- schema / approval / registry ------------------------------------------
@@ -167,7 +163,7 @@ def test_clamp_wait_timeout_bounds():
 
 
 async def test_start_emits_process_start_op_and_formats_result():
-    channel, registry, sink = _channel()
+    channel, registry = _channel()
     tool = TerminalTool()
     response = {
         "ok": True,
@@ -190,7 +186,6 @@ async def test_start_emits_process_start_op_and_formats_result():
             },
             _ctx(channel),
         ),
-        sink,
         registry,
         response,
     )
@@ -216,7 +211,7 @@ async def test_start_emits_process_start_op_and_formats_result():
 
 
 async def test_start_long_running_requires_wait_for():
-    channel, registry, sink = _channel()
+    channel, registry = _channel()
     tool = TerminalTool()
     result = await tool.execute(
         {"subcommand": "start", "command": "npm run dev"},
@@ -226,11 +221,12 @@ async def test_start_long_running_requires_wait_for():
     assert result.contract_failure is True
     assert result.metadata.get("code") == "wait_for_required"
     assert "wait_for" in (result.error or "")
-    assert sink._queue.empty()  # noqa: SLF001 — must not open the channel
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
+    assert not DELIVERED_EVENTS  # must not open the channel
 
 
 async def test_start_matched_false_forbids_ready_claim():
-    channel, registry, sink = _channel()
+    channel, registry = _channel()
     tool = TerminalTool()
     response = {
         "ok": True,
@@ -250,7 +246,6 @@ async def test_start_matched_false_forbids_ready_claim():
             },
             _ctx(channel),
         ),
-        sink,
         registry,
         response,
     )
@@ -259,7 +254,7 @@ async def test_start_matched_false_forbids_ready_claim():
 
 
 async def test_read_stop_list_op_shapes():
-    channel, registry, sink = _channel()
+    channel, registry = _channel()
     tool = TerminalTool()
 
     read_resp = {
@@ -276,14 +271,13 @@ async def test_read_stop_list_op_shapes():
             {"subcommand": "read", "process_id": "p1", "tail_lines": 40},
             _ctx(channel),
         ),
-        sink,
         registry,
         read_resp,
     )
     assert event.payload["op"] == WorkspaceOp.PROCESS_READ
     assert event.payload["args"] == {"process_id": "p1", "tail_lines": 40}
     assert result.success and result.display["subcommand"] == "read"
-    _drain(sink)
+    _drain()
 
     stop_resp = {
         "ok": True,
@@ -291,14 +285,13 @@ async def test_read_stop_list_op_shapes():
     }
     result, event = await _round_trip(
         tool.execute({"subcommand": "stop", "process_id": "p1"}, _ctx(channel)),
-        sink,
         registry,
         stop_resp,
     )
     assert event.payload["op"] == WorkspaceOp.PROCESS_STOP
     assert event.payload["args"] == {"process_id": "p1"}
     assert "exit_code: 0" in result.output
-    _drain(sink)
+    _drain()
 
     list_resp = {
         "ok": True,
@@ -317,7 +310,6 @@ async def test_read_stop_list_op_shapes():
     }
     result, event = await _round_trip(
         tool.execute({"subcommand": "list"}, _ctx(channel)),
-        sink,
         registry,
         list_resp,
     )
@@ -337,7 +329,7 @@ async def test_start_with_wait_for_extends_channel_timeout(monkeypatch):
 
     monkeypatch.setattr("agentcore.runtime.interaction.asyncio.wait_for", spy)
 
-    channel, registry, sink = _channel(timeout=30.0)
+    channel, registry = _channel(timeout=30.0)
     tool = TerminalTool()
     response = {
         "ok": True,
@@ -353,7 +345,6 @@ async def test_start_with_wait_for_extends_channel_timeout(monkeypatch):
             },
             _ctx(channel),
         ),
-        sink,
         registry,
         response,
     )
@@ -371,9 +362,10 @@ async def test_local_workspace_reuses_channel_for_tools():
     """workspace_channel_for_tools must reuse LocalWorkspace._channel (same root_id)."""
     from agentcore.workspace.locate import workspace_channel_for_tools
 
-    channel, _registry, sink = _channel()
+    channel, _registry = _channel()
     local = LocalWorkspace(channel)
     resolved = workspace_channel_for_tools(
-        local, sink=sink, conversation_id=CONV
+        local,
+        user_id="u-test", conversation_id=CONV
     )
     assert resolved is channel

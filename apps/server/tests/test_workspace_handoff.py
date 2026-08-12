@@ -20,13 +20,14 @@ from pathlib import Path
 
 import pytest
 
-from agentcore.runtime.events import EventSink, SSEEvent
+from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.storage import SnapshotRef
 from agentcore.workspace.channel import WorkspaceOp
 from agentcore.workspace.handoff import snapshot_local
 from agentcore.workspace.locate import LocalBinding, workspace_storage_key
 from agentcore.workspace.protocol import WorkspaceIOError
+from tests.client_tool_fulfill_testutil import await_captured_event
 
 pytestmark = pytest.mark.anyio
 
@@ -63,20 +64,16 @@ class _FakeProvider:
         )
 
 
-async def _await_request(sink: EventSink) -> SSEEvent:
-    """Return the op event the channel just emitted (yielding so the op runs)."""
-    for _ in range(2000):
-        if not sink._queue.empty():  # noqa: SLF001 - test-only inspection
-            return sink._queue.get_nowait()
-        await asyncio.sleep(0)
-    raise AssertionError("no workspace_op_required event emitted")
+async def _await_request():
+    """Return the op event the channel just delivered."""
+    return await await_captured_event()
 
 
 async def _drive(monkeypatch, archive_value: dict) -> tuple[asyncio.Task, _FakeProvider]:
     """Start a handoff and answer its ARCHIVE op as the desktop would."""
     provider = _FakeProvider()
     monkeypatch.setattr("agentcore.workspace.handoff.build_storage_provider", lambda: provider)
-    sink = EventSink()
+    sink = EventSink()  # display sink for handoff_snapshot_done; CLIENT_TOOL via fulfill
     task = asyncio.create_task(
         snapshot_local(
             user_id="u1",
@@ -86,7 +83,7 @@ async def _drive(monkeypatch, archive_value: dict) -> tuple[asyncio.Task, _FakeP
             sink=sink,
         )
     )
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == WorkspaceOp.ARCHIVE
     assert event.payload["args"] == {"ignore": True}
     assert event.payload["root_id"] == "root-1"
@@ -156,7 +153,7 @@ async def test_snapshot_local_passes_subpath_directory(monkeypatch):
             sink=sink,
         )
     )
-    event = await _await_request(sink)
+    event = await _await_request()
     assert event.payload["op"] == WorkspaceOp.ARCHIVE
     assert event.payload["args"] == {
         "ignore": True,

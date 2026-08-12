@@ -66,6 +66,9 @@ class HandlerMixin:
         # Same DEMO_TAPE_RECORD_ENABLED gate as cloud lifespan; land under
         # ``<dataDir>/recordings`` (sibling of paused/outbox) — never repo demos/.
         self._install_recorder_if_enabled(data_dir)
+        # Own a CLIENT_TOOL 履约方 before any turn: the local engine's channels
+        # deliver through this process's fulfill hub, not the turn EventSink.
+        self._bind_fulfiller()
         self._initialized = True
         logger.info(
             "sidecar.initialized",
@@ -457,11 +460,16 @@ class HandlerMixin:
         the desktop re-sends the account id on every startTurn / resume so
         ``ToolContext.user_id`` / baseline / log_context follow the logged-in principal.
         Absent key ⇒ keep the initialize-time value.
+
+        The fulfiller session is keyed by the same id, so it re-registers here too
+        (no-op when unchanged) — else the channels would look for a 履约方 under the
+        new principal while the hub still holds the old one.
         """
         if "userId" not in params:
             return
         raw = params.get("userId")
         self._user_id = resolve_sidecar_user_id(None if raw is None else str(raw))
+        self._bind_fulfiller()
 
     async def _on_start_turn(self, request_id: Any, params: dict[str, Any]) -> None:
         if not self._initialized or self._root is None:
@@ -497,6 +505,7 @@ class HandlerMixin:
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
         self._refresh_user_id(params)
+        self._declare_fulfill_root(params)
 
         # The response to startTurn is DEFERRED until the turn completes (it carries
         # the final result); the live events flow as ``turn/event`` notifications in
@@ -642,6 +651,7 @@ class HandlerMixin:
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
         self._refresh_user_id(params)
+        self._declare_fulfill_root(params)
         if await self._reject_if_missing_inference(request_id, op="resume"):
             return
 
@@ -861,6 +871,7 @@ class HandlerMixin:
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
         self._refresh_user_id(params)
+        self._declare_fulfill_root(params)
         if await self._reject_if_missing_inference(request_id, op="resume"):
             return
         peeked.user_id = self._user_id
@@ -1060,12 +1071,20 @@ class HandlerMixin:
         cid_from_params = str(params.get("conversationId") or "").strip()
         conversation_id = cid_from_params or self._turn_conversations.get(turn_id, "")
         cascaded = False
+        client_tools_cancelled = 0
         if conversation_id:
             from agentcore.runtime.coordination.session import (
                 cancel_coordination_on_user_stop,
             )
+            from agentcore.runtime.events.client_tool_reattach import (
+                cancel_pending_client_tools,
+            )
 
             cascaded = cancel_coordination_on_user_stop(conversation_id)
+            # Before ``task.cancel()``: unwinding discards the registry entries, so
+            # an op already dispatched to the desktop (host_shell…) would keep
+            # running on the user's machine with nobody awaiting it.
+            client_tools_cancelled = cancel_pending_client_tools(conversation_id)
         task = self._turns.get(turn_id)
         task_found = task is not None
         task_done = bool(task is not None and task.done())
@@ -1090,6 +1109,7 @@ class HandlerMixin:
             task_found=task_found,
             task_done=task_done,
             task_cancelled=task_cancelled,
+            client_tools_cancelled=client_tools_cancelled,
         )
 
     async def _on_run_redirect(self, request_id: Any, params: dict[str, Any]) -> None:

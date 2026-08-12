@@ -12,7 +12,7 @@ from typing import Any
 
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.engine.tool_exec import execute_tools
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -131,7 +131,11 @@ async def _run_loop(
         tool_context=_context(),
         profile=make_profile_params(max_rounds=8),
         turn_model="primary",
-        finish_override_sink=finish_override_sink,
+        out=(
+            None
+            if finish_override_sink is None
+            else ReactLoopOut(finish_override=finish_override_sink)
+        ),
         role=role,
         run_id="run-1",
     )

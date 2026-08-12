@@ -143,36 +143,49 @@ async def prepare_fresh_turn(
     desktop_online = channel.desktop_online
     # Sticky channel-dead (e.g. baseline already hung the desktop): abort before
     # probe / MCP / exists burn more wall clock and before assemble + LLM.
+    # Presence gate + prepare local IO budget. The span adopts turn_runner's
+    # turn-wide deadline (baseline already spent part of it) and starts its own
+    # when prepare is invoked alone, e.g. tests / stage-card / workflow entries.
+    from agentcore.runtime.pipeline.errors import (
+        await_prepare_local_io,
+        prepare_local_io_span,
+        raise_if_local_workspace_fulfiller_absent,
+    )
     from agentcore.workspace.channel import raise_if_backend_channel_dead
 
+    raise_if_local_workspace_fulfiller_absent(user_id=user_id, backend=backend)
     raise_if_backend_channel_dead(backend)
-    from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
+    with prepare_local_io_span(backend):
+        from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
-    exec_languages = await _timed_phase(
-        "exec_languages", resolve_exec_languages(backend)
-    )
-    # Desktop channel early: MCP discovery (stdio on desktop) must complete before
-    # workspace_context stamps mcp= — same ClientTool sink the turn will stream.
-    desktop_channel = (
-        DesktopClientChannel(
-            sink=sink,
-            conversation_id=conversation_id,
-            registry=default_interaction_registry(),
-            timeout_seconds=settings.board_op_timeout_seconds,
+        exec_languages = await _timed_phase(
+            "exec_languages",
+            await_prepare_local_io(resolve_exec_languages(backend)),
         )
-        if desktop_online
-        else None
-    )
-    from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
+        # Desktop channel early: MCP discovery (stdio on desktop) must complete before
+        # workspace_context stamps mcp= — same ClientTool sink the turn will stream.
+        desktop_channel = (
+            DesktopClientChannel(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                registry=default_interaction_registry(),
+                timeout_seconds=settings.board_op_timeout_seconds,
+            )
+            if desktop_online
+            else None
+        )
+        from agentcore.tools.mcp import discover_mcp_tools, mcp_capability_label, register_mcp_tools
 
-    mcp_discover = await _timed_phase(
-        "mcp",
-        discover_mcp_tools(desktop_channel, cache_scope=user_id, cache_only=True),
-    )
-    mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
-    git_fact = await _timed_phase("git", detect_workspace_git(backend))
-    # exists/.git (and similar) may sticky-dead after prior timeouts — stop here.
-    raise_if_backend_channel_dead(backend)
+        mcp_discover = await _timed_phase(
+            "mcp",
+            discover_mcp_tools(desktop_channel, cache_scope=user_id, cache_only=True),
+        )
+        mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
+        git_fact = await _timed_phase(
+            "git", await_prepare_local_io(detect_workspace_git(backend))
+        )
+        # exists/.git (and similar) may sticky-dead after prior timeouts — stop here.
+        raise_if_backend_channel_dead(backend)
     workspace_facts = build_workspace_context(
         backend,
         desktop_online=desktop_online,
@@ -279,7 +292,7 @@ async def prepare_fresh_turn(
     # ``None`` for an ordinary chat — then the tool below is never wired either.
     board_channel = (
         BoardChannel(
-            sink=sink,
+            user_id=user_id,
             conversation_id=conversation_id,
             board_id=board_id,
             registry=default_interaction_registry(),
@@ -291,7 +304,7 @@ async def prepare_fresh_turn(
     # desktop_channel created earlier (MCP discovery); reuse the same instance.
     workspace_channel = workspace_channel_for_tools(
         backend,
-        sink=sink,
+        user_id=user_id,
         conversation_id=conversation_id,
     )
 

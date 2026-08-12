@@ -44,7 +44,7 @@ describe("performExternalMountReadonly", () => {
       displayLabel: "咨询",
     });
 
-    await performExternalMountReadonly(payload(), "conv-1");
+    await performExternalMountReadonly(payload(), "conv-1", "cloud");
 
     expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith("conv-1", {
       wellKnown: "desktop",
@@ -64,6 +64,7 @@ describe("performExternalMountReadonly", () => {
           namespace: "external/咨询",
         },
       }),
+      "cloud",
     );
     const posted = resolveInteraction.mock.calls[0][2] as {
       value: Record<string, unknown>;
@@ -87,6 +88,7 @@ describe("performExternalMountReadonly", () => {
         target_name: undefined,
       }),
       "conv-1",
+      "cloud",
     );
 
     expect(pickAndGrantReadonlyFolder).toHaveBeenCalledWith("conv-1", {
@@ -104,6 +106,7 @@ describe("performExternalMountReadonly", () => {
           reason: "not_found",
         },
       }),
+      "cloud",
     );
   });
 
@@ -114,7 +117,7 @@ describe("performExternalMountReadonly", () => {
       message: "匹配到多个目录，请说得更具体",
     });
 
-    await performExternalMountReadonly(payload(), "conv-1");
+    await performExternalMountReadonly(payload(), "conv-1", "cloud");
 
     expect(resolveInteraction).toHaveBeenCalledWith(
       "conv-1",
@@ -127,6 +130,7 @@ describe("performExternalMountReadonly", () => {
           reason: "ambiguous",
         },
       }),
+      "cloud",
     );
   });
 
@@ -136,7 +140,7 @@ describe("performExternalMountReadonly", () => {
       reason: "unavailable",
     });
 
-    await performExternalMountReadonly(payload(), "conv-1");
+    await performExternalMountReadonly(payload(), "conv-1", "cloud");
 
     expect(resolveInteraction).toHaveBeenCalledWith(
       "conv-1",
@@ -149,6 +153,7 @@ describe("performExternalMountReadonly", () => {
           reason: "unavailable",
         },
       }),
+      "cloud",
     );
   });
 
@@ -160,8 +165,8 @@ describe("performExternalMountReadonly", () => {
       namespace: "external/咨询",
     });
 
-    await performExternalMountReadonly(payload(), "conv-1");
-    await performExternalMountReadonly(payload(), "conv-1");
+    await performExternalMountReadonly(payload(), "conv-1", "cloud");
+    await performExternalMountReadonly(payload(), "conv-1", "cloud");
 
     expect(pickAndGrantReadonlyFolder).toHaveBeenCalledTimes(1);
     expect(resolveInteraction).toHaveBeenCalledTimes(1);

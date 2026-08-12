@@ -164,6 +164,10 @@ timeout_method = "thread"
 markers = [
     # Opt-in: integration/conftest disables CSRF unless this mark (or test_csrf*) is present.
     "csrf: exercise CSRF synchronizer-token enforcement on cookie-session flows",
+    # Opt-out: tests/conftest.py patches fulfill delivery to always succeed (channel round
+    # trips need it); a test asserting the unpatched outcome would otherwise wait out the
+    # channel timeout instead of getting NO_FULFILLER.
+    "real_fulfill_dispatch: run against the unpatched agentcore.fulfill.dispatch",
 ]
 
 # Coverage baseline (P4-3): report-only — no fail-under ratchet yet.

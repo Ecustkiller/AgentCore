@@ -6,7 +6,7 @@ import { authedFetch, saveBlob } from "@/services/workspaceHttp";
 import type { Conversation } from "@/stores/conversation";
 import type { components } from "@/types/api.generated";
 
-// REST DTOs generated from the backend OpenAPI spec (`pnpm gen:api`), aliased to
+// REST DTOs generated from the backend OpenAPI spec (root `pnpm gen:types`), aliased to
 // the local names so the mappers below read unchanged (API 开发规范, 渐进迁移).
 type Schemas = components["schemas"];
 

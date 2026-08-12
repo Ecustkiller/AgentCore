@@ -10,8 +10,9 @@ a ``Path``.
 Flow (one op):
 
 1. ``LocalWorkspace`` calls ``WorkspaceChannel.request(op, args)``.
-2. The channel registers a Future, emits a ``workspace_op_required`` SSE event,
-   and awaits the Future (bounded by ``timeout_seconds``).
+2. The channel registers a Future, delivers a ``workspace_op_required`` frame on
+   the device-level fulfill hub, and awaits the Future (bounded by
+   ``timeout_seconds``).
 3. The bound desktop client runs the op against the local directory and POSTs the
    structured result to the ops resolve endpoint, which settles the Future.
 4. The channel returns the op's ``value`` on success, or re-raises the original
@@ -25,7 +26,8 @@ timeout fails only that op; **consecutive** real-op settle timeouts (N=2) mark t
 channel sticky-dead for the turn (sibling inflight settle + later ops fail-fast),
 so a dropped desktop never hangs the turn on cascaded deadlines. Concurrent
 desktop round-trips are capped (``max_inflight``, default 16); extras queue before
-suspend, and queue wait rides the outer tool wall clock.
+suspend, and queue wait rides the outer tool wall clock. No online fulfiller →
+immediate typed failure (no deadline wait).
 """
 
 from __future__ import annotations
@@ -40,12 +42,13 @@ from typing import Any, NoReturn
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.runtime.events import EventSink, workspace_op_required
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_WORKSPACE,
     client_tool_payload,
+    push_client_tool_required,
 )
 from agentcore.runtime.events.types import EventType
+from agentcore.runtime.events.workspace import workspace_op_required
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.runtime.tool_deadline import derive_channel_timeout
@@ -191,16 +194,15 @@ _STICKY_AFTER_CONSECUTIVE_TIMEOUTS = 2
 class WorkspaceChannel:
     """Suspends one LocalWorkspace op until the bound desktop runs it.
 
-    One channel per local-mode turn (constructed where the sink is available),
+    One channel per local-mode turn (constructed where ``user_id`` is available),
     bound to one desktop FS ``root_id``. ``request`` is the only entry point;
     ``LocalWorkspace`` builds the JSON-safe ``args`` and interprets the returned
-    ``value`` per op. SSE detach (no live observer) does **not** kill the bridge —
-    CLIENT_TOOL Futures stay open for attach re-hang; only a closed sink
-    fail-fasts with ``sink closed（未入队）``.
+    ``value`` per op. Delivery goes through the fulfill hub — no online fulfiller
+    fails immediately with a typed ``WorkspaceIOError`` (no deadline wait).
 
     Sticky dead: **consecutive** transport ``TimeoutError``s on **real** workspace
     ops (desktop liveness hang, N=2) mark the channel dead for the rest of the turn —
-    subsequent ``request``s fail-fast without SSE, and same-channel inflight ops
+    subsequent ``request``s fail-fast without delivery, and same-channel inflight ops
     are settled with a failure envelope so they do not burn the remaining deadline.
     A single settle timeout fails only that op (no sibling cancel, no sticky).
     A successful settle clears the consecutive-timeout streak.
@@ -214,7 +216,7 @@ class WorkspaceChannel:
     rides the outer tool wall clock (no separate channel timeout stretch).
     """
 
-    sink: EventSink
+    user_id: str
     conversation_id: str
     registry: ClientRequestBridge
     timeout_seconds: float
@@ -296,7 +298,7 @@ class WorkspaceChannel:
 
         When called inside ``tool_exec``, the effective deadline is **derived from
         the outer tool liveness budget** (minus settle slack) — never a second
-        independent 60s clock. ``timeout_ms`` is echoed on the SSE payload so the
+        independent 60s clock. ``timeout_ms`` is echoed on the payload so the
         desktop can AbortSignal the in-flight IPC op; late settle after discard
         remains a stale 404 no-op.
 
@@ -305,13 +307,13 @@ class WorkspaceChannel:
         binding root. Does not change the conversation workspace binding contract.
 
         After consecutive real-op liveness timeouts (N=2) the channel stays
-        sticky-dead: new requests raise immediately (no SSE) so a hung desktop
+        sticky-dead: new requests raise immediately (no delivery) so a hung desktop
         cannot cascade into more 60s waits. A single timeout fails only that op.
         ``probe_exec`` and background index-IO timeouts do not enter that sticky
         state (and do not advance the consecutive-timeout streak).
 
         Concurrency order: dead-check → acquire slot → dead-check → suspend. A
-        waiter that obtains a slot after the channel died fail-fasts without SSE.
+        waiter that obtains a slot after the channel died fail-fasts without delivery.
         """
         op_name = str(op)
         self._reject_if_dead(op_name)
@@ -332,42 +334,29 @@ class WorkspaceChannel:
             )
             timeout_ms = max(1, int(deadline * 1000))
             rid = self.root_id if root_id is None else root_id
+            deliver_root: str | None = rid if rid else None
 
             def _emit_op_required() -> None:
-                """Emit SSE; fail-fast only when the turn sink is truly closed.
-
-                ``emit`` returns False for both closed and detached. Detach is
-                temporary (SSE observer dropped while coordination may still
-                drive Local ops): the CLIENT_TOOL Future stays open and attach
-                re-hangs via ``pending_client_tool_events``. Closed means this
-                sink will never accept a live consumer again — settle now so we
-                do not burn the channel deadline for an op no desktop can see.
-                """
-                live = self.sink.emit(
-                    workspace_op_required(
+                """Push to fulfill hub; settle immediately when no fulfiller."""
+                push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_WORKSPACE,
+                    root_id=deliver_root,
+                    event=workspace_op_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         root_id=rid,
                         op=op_name,
                         args=args,
                         timeout_ms=timeout_ms,
-                    )
-                )
-                if live or not self.sink.is_closed:
-                    return
-                self.registry.resolve(
-                    request_id,
-                    {
-                        "ok": False,
-                        "error": {
-                            "kind": "WorkspaceIOError",
-                            "detail": (
-                                f"local workspace op '{op_name}' failed: "
-                                "sink closed（未入队）"
-                            ),
-                        },
-                    },
-                    conversation_id=self.conversation_id,
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="WorkspaceIOError",
+                    error_detail=(
+                        f"local workspace op '{op_name}' failed: no fulfiller（无履约方）"
+                    ),
                 )
 
             self._inflight.add(request_id)
@@ -386,6 +375,7 @@ class WorkspaceChannel:
                                 "args": args,
                                 "timeout_ms": timeout_ms,
                             },
+                            user_id=self.user_id,
                         ),
                         timeout=deadline,
                         on_suspended=_emit_op_required,

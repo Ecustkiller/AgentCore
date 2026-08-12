@@ -94,12 +94,11 @@ def test_allows_files_when_channel_alive():
 
 
 def test_rejects_when_backend_channel_is_dead():
-    from agentcore.runtime.events import EventSink
     from agentcore.runtime.interaction import InteractionRegistry
     from agentcore.workspace.channel import WorkspaceChannel
 
     channel = WorkspaceChannel(
-        sink=EventSink(),
+        user_id="u-test",
         conversation_id="conv-cd",
         registry=InteractionRegistry(),
         timeout_seconds=1.0,

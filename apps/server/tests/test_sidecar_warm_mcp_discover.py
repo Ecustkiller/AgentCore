@@ -95,7 +95,7 @@ def test_warm_mcp_discover_seeds_scope_cache(tmp_path: Path) -> None:
 
     async def hit_cache() -> None:
         channel = DesktopClientChannel(
-            sink=AsyncMock(),
+        user_id="u-test",
             conversation_id="conv-after-warm",
             registry=AsyncMock(),
             timeout_seconds=1,
@@ -143,7 +143,7 @@ def test_initialize_advertises_warm_mcp_without_seeding(tmp_path: Path) -> None:
 
     async def miss() -> None:
         channel = DesktopClientChannel(
-            sink=AsyncMock(),
+        user_id="u-test",
             conversation_id="c-miss",
             registry=AsyncMock(),
             timeout_seconds=1,
@@ -205,7 +205,7 @@ def test_warm_mcp_login_uuid_warm_then_prepare_hits(tmp_path: Path) -> None:
 
     async def hit() -> None:
         channel = DesktopClientChannel(
-            sink=AsyncMock(),
+        user_id="u-test",
             conversation_id="conv-uuid-prepare",
             registry=AsyncMock(),
             timeout_seconds=1,
@@ -271,7 +271,7 @@ def test_warm_mcp_refresh_user_id_no_local_dual_write(tmp_path: Path) -> None:
 
     async def assert_scopes() -> None:
         channel = DesktopClientChannel(
-            sink=AsyncMock(),
+        user_id="u-test",
             conversation_id="conv-cross-key",
             registry=AsyncMock(),
             timeout_seconds=1,

@@ -37,8 +37,8 @@ describe("performBoardOp", () => {
     });
     const unregister = registerBoardApplier("b1", applier);
 
-    await performBoardOp(payload(), "conv-1");
-    await performBoardOp(payload(), "conv-1");
+    await performBoardOp(payload(), "conv-1", "cloud");
+    await performBoardOp(payload(), "conv-1", "cloud");
 
     expect(applier).toHaveBeenCalledTimes(1);
     expect(resolveInteraction).toHaveBeenCalledTimes(1);

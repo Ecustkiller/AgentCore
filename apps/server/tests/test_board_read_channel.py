@@ -22,11 +22,12 @@ import pytest
 from agentcore.board.channel import BoardChannel, BoardReadError
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.costing import ROLE_VISION, RunCost
-from agentcore.runtime.events import EventSink, EventType, SSEEvent
+from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.tools.builtin.board_read import BoardReadTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.vision.protocol import VisionReading
+from tests.client_tool_fulfill_testutil import await_captured_event
 
 pytestmark = pytest.mark.anyio
 
@@ -71,7 +72,7 @@ def _make(timeout: float = 5.0) -> tuple[BoardChannel, InteractionRegistry, Even
     sink = EventSink()
     registry = InteractionRegistry()
     channel = BoardChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id=CONV,
         board_id=BOARD,
         registry=registry,
@@ -99,19 +100,15 @@ def _ctx(
     )
 
 
-async def _await_request(sink: EventSink) -> SSEEvent:
-    """Return the read event the channel just emitted (yielding so the read runs)."""
-    for _ in range(2000):
-        if not sink._queue.empty():  # noqa: SLF001 - test-only inspection
-            return sink._queue.get_nowait()
-        await asyncio.sleep(0)
-    raise AssertionError("no board_read_required event emitted")
+async def _await_request():
+    """Return the CLIENT_TOOL event just delivered via fulfill."""
+    return await await_captured_event()
 
 
 async def _round_trip(coro, sink: EventSink, registry: InteractionRegistry, response: dict):
     """Drive one read: start it, answer it as the desktop would, return (result, event)."""
     task = asyncio.create_task(coro)
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
 
@@ -187,7 +184,7 @@ async def test_tool_reads_and_returns_vision_text():
     reader = _FakeReader()
     tool = BoardReadTool()
     task = asyncio.create_task(tool.execute({"ids": ["el-1"]}, _ctx(channel, reader)))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(
         event.payload["request_id"],
         {"ok": True, "value": {"pngBase64": PNG, "w": 100, "h": 80}},
@@ -205,7 +202,7 @@ async def test_tool_empty_png_value_errors():
     channel, registry, sink = _make()
     tool = BoardReadTool()
     task = asyncio.create_task(tool.execute({"ids": ["el-1"]}, _ctx(channel, _FakeReader())))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(
         event.payload["request_id"],
         {"ok": True, "value": {"w": 100, "h": 80}},
@@ -228,7 +225,7 @@ async def test_tool_maps_vision_failure_to_failed_result():
     channel, registry, sink = _make()
     tool = BoardReadTool()
     task = asyncio.create_task(tool.execute({"ids": ["el-1"]}, _ctx(channel, _BoomReader())))
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(
         event.payload["request_id"],
         {"ok": True, "value": {"pngBase64": PNG, "w": 100, "h": 80}},
@@ -249,7 +246,7 @@ async def _read_with_sink(reader: object, sink_list: list[RunCost] | None) -> No
     task = asyncio.create_task(
         tool.execute({"ids": ["el-1"]}, _ctx(channel, reader, cost_sink=sink_list))
     )
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(
         event.payload["request_id"],
         {"ok": True, "value": {"pngBase64": PNG, "w": 100, "h": 80}},

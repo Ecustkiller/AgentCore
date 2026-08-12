@@ -77,7 +77,15 @@ async def detect_workspace_git(backend: WorkspaceBackend | None) -> WorkspaceGit
     try:
         if not await exists(".git"):
             return WorkspaceGitFact(present=False)
-    except Exception:
+    except Exception as exc:
+        # Prepare-phase: first channel hang aborts (do not swallow into present=None).
+        from agentcore.runtime.pipeline.errors import (
+            prepare_local_io_budget_active,
+            reraise_prepare_liveness_timeout,
+        )
+
+        if prepare_local_io_budget_active():
+            reraise_prepare_liveness_timeout(exc)
         return WorkspaceGitFact(present=None)
     branch: str | None = None
     read = getattr(backend, "read", None)

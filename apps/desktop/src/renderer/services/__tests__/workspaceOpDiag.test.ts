@@ -12,6 +12,10 @@ vi.mock("@/services/sidecarRouting", () => ({
 
 import { BASE_URL } from "@/services/api";
 import { resetClientToolFulfillmentForTests } from "@/services/clientToolFulfill";
+import {
+  installClientToolIngress,
+  resetClientToolIngressForTests,
+} from "@/services/clientToolIngress";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import {
   performWorkspaceOp,
@@ -21,6 +25,7 @@ import { useConversationStore } from "@/stores/conversation/store";
 import { enterTurnStreaming } from "@/stores/conversation/turnPhaseActions";
 import { useWorkspaceChannelStore } from "@/stores/workspaceChannel";
 import type { WorkspaceOpRequiredPayload } from "@/types/events";
+import type { SidecarFulfillPush } from "@shared/sidecar-contract";
 
 const CID = "c-l3";
 
@@ -57,6 +62,7 @@ describe("workspace_op L3 diagnostics", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    resetClientToolIngressForTests();
     resetClientToolFulfillmentForTests();
     resetWorkspaceOpIpcInflightForTests();
     useWorkspaceChannelStore.setState({ notReady: false });
@@ -68,6 +74,7 @@ describe("workspace_op L3 diagnostics", () => {
   });
 
   afterEach(() => {
+    resetClientToolIngressForTests();
     resetClientToolFulfillmentForTests();
     resetWorkspaceOpIpcInflightForTests();
     useWorkspaceChannelStore.setState({ notReady: false });
@@ -75,21 +82,11 @@ describe("workspace_op L3 diagnostics", () => {
     vi.unstubAllGlobals();
   });
 
-  it("logs received → ipc → resolve on happy path via SSE dispatch", async () => {
+  it("logs received → ipc → resolve on happy path", async () => {
     const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "hi" });
     stubFsApi(workspaceOp);
 
-    dispatchSSEEvent(
-      {
-        type: "workspace_op_required",
-        payload: payload(),
-        timestamp: "t0",
-      },
-      { conversationId: CID, source: "server" },
-    );
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
+    await performWorkspaceOp(payload(), CID, "cloud");
 
     const events = logEvent.mock.calls.map((c) => c[1]);
     expect(events).toContain("workspace_op.received");
@@ -101,7 +98,58 @@ describe("workspace_op L3 diagnostics", () => {
     ).toMatchObject({ outcome: "ok" });
   });
 
-  it("logs dropped + fail-settles when turnPhase gate blocks workspace_op_required", async () => {
+  it("sidecar fulfill push fulfills with origin sidecar (HTTP not used)", async () => {
+    const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "hi" });
+    const respond = vi.fn().mockResolvedValue({ resolved: true });
+    const bridge: { push: ((e: SidecarFulfillPush) => void) | null } = {
+      push: null,
+    };
+    vi.stubGlobal("window", {
+      fsApi: { workspaceOp },
+      sidecarApi: {
+        respond,
+        onFulfillFrame: (cb: (e: SidecarFulfillPush) => void) => {
+          bridge.push = cb;
+          return () => {
+            bridge.push = null;
+          };
+        },
+      },
+    });
+    const { getActiveSidecarTarget } = await import(
+      "@/services/sidecarRouting"
+    );
+    vi.mocked(getActiveSidecarTarget).mockReturnValue({
+      rootId: "root-1",
+      subpath: "",
+      turnId: "t1",
+    });
+
+    installClientToolIngress();
+    expect(bridge.push).not.toBeNull();
+    bridge.push?.({
+      conversationId: CID,
+      frame: {
+        type: "workspace_op_required",
+        timestamp: "t0",
+        payload: payload(),
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(respond).toHaveBeenCalled();
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: "r-l3",
+        conversationId: CID,
+        result: expect.objectContaining({ kind: "client_tool", ok: true }),
+      }),
+    );
+  });
+
+  it("ignores conversation-SSE workspace_op (fulfill channel owns CLIENT_TOOL)", async () => {
     useConversationStore.getState().setTurnPhase("stopping", CID);
     dispatchSSEEvent(
       {
@@ -113,35 +161,16 @@ describe("workspace_op L3 diagnostics", () => {
     );
     expect(logEvent).toHaveBeenCalledWith(
       "warn",
-      "workspace_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.objectContaining({
-        request_id: "r-l3",
-        turn_phase: "stopping",
-        reason: "turn_phase_gate",
-        settle: "fail_envelope",
+        event_type: "workspace_op_required",
+        reason: "fulfill_channel_owns_client_tool",
       }),
     );
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
-    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
-    const body = JSON.parse(String(init.body)) as {
-      kind: string;
-      ok: boolean;
-      error: { kind: string; detail: string };
-    };
-    expect(body).toMatchObject({
-      kind: "client_tool",
-      ok: false,
-      error: { kind: "WorkspaceIOError" },
-    });
-    expect(body.error.detail).toContain("turn_phase_gate");
-    expect(
-      logEvent.mock.calls.find((c) => c[1] === "workspace_op.resolve")?.[2],
-    ).toMatchObject({ outcome: "ok", result_ok: false });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("terminal phase also fail-settles dropped workspace_op_required", async () => {
+  it("ignores stray cloud conversation-SSE workspace_op in terminal phase", async () => {
     useConversationStore.getState().setTurnPhase("completed", CID);
     dispatchSSEEvent(
       {
@@ -151,23 +180,15 @@ describe("workspace_op L3 diagnostics", () => {
       },
       { conversationId: CID, source: "server" },
     );
-    await vi.waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
     expect(logEvent).toHaveBeenCalledWith(
       "warn",
-      "workspace_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.objectContaining({
-        request_id: "r-term",
-        turn_phase: "completed",
-        settle: "fail_envelope",
+        event_type: "workspace_op_required",
+        reason: "fulfill_channel_owns_client_tool",
       }),
     );
-    const [, init] = fetchMock.mock.calls[0] as [string, { body?: string }];
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      kind: "client_tool",
-      ok: false,
-    });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("logs resolve fail when POST is non-404 error", async () => {
@@ -175,7 +196,7 @@ describe("workspace_op L3 diagnostics", () => {
     stubFsApi(workspaceOp);
     fetchMock.mockResolvedValue(errResponse(500));
 
-    await performWorkspaceOp(payload({ request_id: "r-fail" }), CID);
+    await performWorkspaceOp(payload({ request_id: "r-fail" }), CID, "cloud");
 
     expect(
       logEvent.mock.calls.find((c) => c[1] === "workspace_op.resolve")?.[2],
@@ -194,6 +215,7 @@ describe("workspace_op L3 diagnostics", () => {
     await performWorkspaceOp(
       payload({ request_id: "r-abort", timeout_ms: 30 }),
       CID,
+      "cloud",
     );
 
     expect(logEvent).toHaveBeenCalledWith(
@@ -238,6 +260,7 @@ describe("workspace_op L3 diagnostics", () => {
         timeout_ms: 5_000,
       }),
       "cid-a",
+      "cloud",
     );
     await aReady;
     await performWorkspaceOp(
@@ -247,6 +270,7 @@ describe("workspace_op L3 diagnostics", () => {
         timeout_ms: 30,
       }),
       "cid-b",
+      "cloud",
     );
 
     expect(logEvent).toHaveBeenCalledWith(
@@ -266,7 +290,7 @@ describe("workspace_op L3 diagnostics", () => {
   it("posts resolve to the interaction URL (sanity)", async () => {
     const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: 1 });
     stubFsApi(workspaceOp);
-    await performWorkspaceOp(payload({ request_id: "r-url" }), CID);
+    await performWorkspaceOp(payload({ request_id: "r-url" }), CID, "cloud");
     expect(fetchMock.mock.calls[0][0]).toBe(
       `${BASE_URL}/v1/conversations/${CID}/interactions/r-url`,
     );

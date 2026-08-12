@@ -95,7 +95,7 @@ def _server_ctx() -> ToolContext:
 
 def _dead_local_backend() -> LocalWorkspace:
     channel = WorkspaceChannel(
-        sink=EventSink(),
+        user_id="u-test",
         conversation_id="conv-dead-retire",
         registry=InteractionRegistry(),
         timeout_seconds=5.0,
@@ -258,7 +258,7 @@ async def test_react_loop_round_poll_channel_is_dead_strips_file_family():
     """Alive at entry; mid-team channel sticky → next LLM round drops file family."""
     clear_active_coordination()
     channel = WorkspaceChannel(
-        sink=EventSink(),
+        user_id="u-test",
         conversation_id="conv-round-poll",
         registry=InteractionRegistry(),
         timeout_seconds=5.0,

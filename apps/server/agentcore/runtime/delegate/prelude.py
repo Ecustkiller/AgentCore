@@ -1,0 +1,366 @@
+"""委派前奏：`delegate` 入参的零 await 校验 + 规范化。
+
+从 `DelegateTool.execute` 抽出（纯搬运）。这一段只读 `arguments` 与回合环境
+（token 硬顶 / 鉴权死 / 工具表 / 深度），不碰协作图、不碰 DB、不写 `self`：
+要么产出一份「规范化后的委派请求」，要么产出一条硬拒。
+
+`_active_playbook` / `_active_playbook_args` / `_delegate_force` 三个 per-call 标记
+原来在这里直接写 `self`，现在改由 :class:`DelegateCallFlags` 带回、`execute` 赋值。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from agentcore.core.logging import get_logger
+from agentcore.llm.turn_auth_dead import (
+    is_turn_auth_dead,
+    turn_auth_dead_reject_message,
+)
+from agentcore.runtime.delegate.consumer_deps import check_consumer_missing_depends
+from agentcore.runtime.delegate.design_impl_slice import check_design_impl_same_grant
+from agentcore.runtime.delegate.playbook_declaration import (
+    PLAYBOOK_TASKS_XOR_MSG,
+    declaration_reject_gate,
+    resolve_playbook_declaration,
+)
+from agentcore.runtime.delegate.root_slice_honesty import check_root_slice_honesty
+from agentcore.runtime.runs.constants import MAX_WORKER_SUBDELEGATIONS
+from agentcore.runtime.runs.playbooks import collect_playbook_notes, expand_playbook
+from agentcore.runtime.turn.token_budget import (
+    current_turn_tokens,
+    is_turn_token_ceiling_hit,
+    resolve_turn_token_ceiling,
+    turn_token_ceiling_reject_message,
+)
+from agentcore.tools.protocol import ToolResult
+
+if TYPE_CHECKING:
+    from agentcore.tools.registry import ToolRegistry
+
+logger = get_logger(__name__)
+
+
+def _has_wave_boundary_features(tasks_raw: list[Any]) -> bool:
+    """True when any task needs BIND / CHECKPOINT / DAG wave-boundary machinery."""
+    for task in tasks_raw:
+        if not isinstance(task, dict):
+            continue
+        if task.get("depends_on") or task.get("checkpoint_after") or task.get("bind_after_deps"):
+            return True
+    return False
+
+
+def _has_deep_deliverable_signal(tasks_raw: list[Any]) -> bool:
+    """True when any task declares ``form=files`` / non-empty ``artifacts``.
+
+    Orchestration shape (single worker, no DAG) is orthogonal to output weight —
+    file-shaped deliverable must not be collapsed into auto-light.
+    Retired fields (``min_length`` / ``requires_files``) are not consulted.
+    """
+    for task in tasks_raw:
+        if not isinstance(task, dict):
+            continue
+        raw = task.get("deliverable")
+        if not isinstance(raw, dict):
+            continue
+        if raw.get("form") == "files":
+            return True
+        arts = raw.get("artifacts")
+        if isinstance(arts, list) and any(
+            isinstance(a, str) and a.strip() for a in arts
+        ):
+            return True
+    return False
+
+
+def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
+    """True when a single dependency-free worker needs no multi-agent coordination.
+
+    Skips auto-light when deliverable is file-shaped (``form=files`` / artifacts)
+    so budget mapping can still promote standard → deep.
+    ``complexity_hint=light`` no longer stamps short ``max_rounds``; browser tool
+    surfaces are not excluded from auto-light for round-budget reasons.
+    """
+    if len(tasks_raw) != 1:
+        return False
+    task = tasks_raw[0]
+    if not isinstance(task, dict):
+        return False
+    if _has_wave_boundary_features([task]):
+        return False
+    return not _has_deep_deliverable_signal([task])
+
+
+@dataclass(frozen=True)
+class DelegateCallFlags:
+    """本次调用的 per-call 标记，由 `execute` 镜像到工具实例上。
+
+    ``force`` 为 ``None`` 表示这次拒绝发生在原内联代码读 ``arguments['force']`` 之前，
+    实例上的旧值保持不变（拒绝路径逐字等价）。
+    """
+
+    playbook: str | None
+    playbook_args: dict[str, Any] | None
+    force: bool | None = None
+
+
+@dataclass(frozen=True)
+class DelegatePreludeReject:
+    """前奏硬拒：`execute` 镜像 ``flags``（若有）后原样返回 ``result``。
+
+    ``flags`` 为 ``None`` = 原内联代码走到这道拒绝时还没写过那几个 per-call 标记。
+    """
+
+    result: ToolResult
+    flags: DelegateCallFlags | None = None
+
+
+@dataclass(frozen=True)
+class DelegateBatchRequest:
+    """规范化后的委派请求：前奏全绿时 `execute` 后续要用的全部输入。"""
+
+    flags: DelegateCallFlags
+    tasks_raw: list[Any]
+    playbook_notes: list[str]
+    valid_tools: set[str]
+    # CEO 可传任意值；下游按需 isinstance 收窄（build_run_plan / resolve_parallelism）。
+    complexity_hint: Any
+    consumer_deps_warn: str | None
+    design_impl_warn: str | None
+    root_slice_warn: str | None
+    # 场面账（format / delivery）已拆除，两条恒 None；保留槽位对齐委派结果尾部的软告警。
+    presentation_format_warning: str | None
+    automation_delivery_warning: str | None
+
+    @property
+    def playbook(self) -> str | None:
+        """本批展开的 playbook 名（手写 tasks 为 ``None``）。"""
+        return self.flags.playbook
+
+
+def resolve_delegate_prelude(
+    arguments: dict[str, Any],
+    *,
+    tools: ToolRegistry,
+    user_message: str,
+    conversation_id: str | None,
+    depth: int,
+    sub_workers_spawned: int,
+) -> DelegateBatchRequest | DelegatePreludeReject:
+    """校验并规范化一次 `delegate` 调用（零 await；6 道硬拒 + 3 条软告警）。"""
+    # Turn 级硬顶：禁新派（在飞不 cancel）；与 per-worker ceiling 正交。
+    if is_turn_token_ceiling_hit():
+        msg = turn_token_ceiling_reject_message()
+        logger.info(
+            "delegate.turn_token_ceiling_rejected",
+            spent=current_turn_tokens(),
+            ceiling=resolve_turn_token_ceiling(),
+        )
+        return DelegatePreludeReject(
+            ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=msg,
+                contract_failure=True,
+            )
+        )
+
+    # 甲+乙：本回合 API Key 已鉴权死后禁再 delegate 烧调用。
+    if is_turn_auth_dead():
+        msg = turn_auth_dead_reject_message()
+        logger.info("delegate.turn_auth_dead_rejected")
+        return DelegatePreludeReject(
+            ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=msg,
+                contract_failure=True,
+            )
+        )
+
+    # Playbook 声明闸：结构校验；建站/绿场 none 不硬拒。场面账（style/format/delivery）已拆除。
+    automation_delivery_warning: str | None = None
+    declared_playbook, _none_reason, decl_error = resolve_playbook_declaration(
+        arguments,
+        user_message=user_message or "",
+    )
+    if decl_error:
+        gate = declaration_reject_gate(decl_error)
+        logger.info(
+            "delegate.playbook_declaration_rejected",
+            playbook_id=arguments.get("playbook_id") or arguments.get("playbook"),
+            has_tasks=bool(arguments.get("tasks")),
+            gate=gate,
+        )
+        return DelegatePreludeReject(
+            ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=decl_error,
+                contract_failure=True,
+            )
+        )
+    logger.info(
+        "delegate.playbook_declaration",
+        playbook_id=declared_playbook or "none",
+    )
+
+    # 拆·playbook 固化 (§2.1): a固化形状 instantiates the whole tasks array, then flows through
+    # the SAME pipeline below as a hand-written one (纯加法). playbook XOR tasks is enforced
+    # in resolve_playbook_declaration (and re-checked here as defense in depth).
+    playbook = declared_playbook
+    if playbook is not None:
+        if arguments.get("tasks"):
+            return DelegatePreludeReject(
+                ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=PLAYBOOK_TASKS_XOR_MSG,
+                    # 契约自纠拒绝——勿进熔断（CEO 连试换 none/去掉 tasks 会误禁用）。
+                    contract_failure=True,
+                )
+            )
+        # Mechanism: pass turn user line so playbooks (e.g. multi_lens synthesizer)
+        # can inject proposition-fidelity anchors without relying on CEO-filled topic.
+        tasks_raw, pb_errors = expand_playbook(
+            playbook,
+            arguments.get("playbook_args"),
+            user_message=user_message,
+            conversation_id=conversation_id or "",
+        )
+        if pb_errors:
+            msg = "playbook 实例化失败：" + "；".join(pb_errors)
+            logger.info("delegate.playbook_rejected", playbook=playbook, errors=pb_errors)
+            return DelegatePreludeReject(
+                ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=msg,
+                    contract_failure=True,
+                )
+            )
+        active_playbook: str | None = playbook
+        raw_args = arguments.get("playbook_args")
+        active_playbook_args = dict(raw_args) if isinstance(raw_args, dict) else None
+        playbook_notes = collect_playbook_notes(tasks_raw)
+        logger.info(
+            "delegate.playbook",
+            playbook=playbook,
+            nodes=len(tasks_raw),
+            notes=len(playbook_notes),
+        )
+        # MLR keep 标记延后到真正开跑（team_preview CONTINUE / pre-auth 跳过），
+        # 避免 STOP / 调度失败仍挡住回合收尾 orphan。
+    else:
+        active_playbook = None
+        active_playbook_args = None
+        playbook_notes = []
+        raw_tasks = arguments.get("tasks")
+        if not isinstance(raw_tasks, list) or not raw_tasks:
+            msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
+            return DelegatePreludeReject(
+                ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=msg,
+                    contract_failure=True,
+                ),
+                DelegateCallFlags(playbook=None, playbook_args=None),
+            )
+        tasks_raw = raw_tasks
+
+    # 演讲/PPT 场面账已拆除：不再因 format ledger 硬拒 pptx→md。
+    presentation_format_warning: str | None = None
+
+    valid_tools = {s.name for s in tools.list_all()}
+    complexity_hint = arguments.get("complexity_hint", "standard")
+    flags = DelegateCallFlags(
+        playbook=active_playbook,
+        playbook_args=active_playbook_args,
+        force=bool(arguments.get("force")),
+    )
+    if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
+        complexity_hint = "light"
+        # info 级：档位归责的关键决策事件，debug 级曾导致线上排查只能靠 demo_tape 反推。
+        logger.info("delegate.complexity_hint_inferred", hint="light")
+    elif complexity_hint == "light" and _has_wave_boundary_features(tasks_raw):
+        # 显式 light 与 DAG/波边界并存时忽略 light（避免关掉 on_boundary）。
+        # 已删字数字段 / form=files / artifacts alone 不挡 light（修码快修）。
+        complexity_hint = "standard"
+        logger.info(
+            "delegate.complexity_hint_ignored",
+            reason="wave_boundary_features",
+        )
+
+    if depth >= 1:
+        new_nodes = len(tasks_raw)
+        if sub_workers_spawned + new_nodes > MAX_WORKER_SUBDELEGATIONS:
+            msg = (
+                f"子团队扇出已达上限（已派出 {sub_workers_spawned} 个 sub-worker，"
+                f"本次 {new_nodes} 个，上限 {MAX_WORKER_SUBDELEGATIONS}）——请合并任务或分批。"
+            )
+            logger.info(
+                "delegate.sub_fanout_rejected",
+                spawned=sub_workers_spawned,
+                requested=new_nodes,
+                cap=MAX_WORKER_SUBDELEGATIONS,
+            )
+            return DelegatePreludeReject(
+                ToolResult(tool_call_id="", success=False, output="", error=msg),
+                flags,
+            )
+    # 消费者漏边：task 写明吃同批队友产出但 depends_on 为空 → 软告警一次，不拒收入图。
+    # playbook 展开后的 tasks 也过闸；有边则无告警。引擎不猜边改图。
+    consumer_deps_warn = check_consumer_missing_depends(tasks_raw)
+    if consumer_deps_warn:
+        logger.info(
+            "delegate.consumer_deps_soft_warn",
+            task_count=len(tasks_raw),
+            hint=consumer_deps_warn[:200],
+        )
+
+    # 设计+实现同 grant：单 task artifacts/文案同时含设计与实现且未结构拆开 → 软告警一次。
+    # 不拒收、不自动拆波改图。
+    design_impl_warn = check_design_impl_same_grant(tasks_raw)
+    if design_impl_warn:
+        logger.info(
+            "delegate.design_impl_same_grant_soft_warn",
+            task_count=len(tasks_raw),
+            hint=design_impl_warn[:200],
+        )
+
+    # 根委派切片诚实：单节点手写写工程且无结构钉 → 软告警一次。
+    # 不拒收、不改图；嵌套扇出为合法等价路径（文案明示）。
+    root_slice_warn = check_root_slice_honesty(
+        tasks_raw,
+        depth=depth,
+        playbook=playbook if isinstance(playbook, str) else None,
+        finalize=bool(arguments.get("finalize")),
+    )
+    if root_slice_warn:
+        logger.info(
+            "delegate.root_slice_honesty_soft_warn",
+            task_count=len(tasks_raw) if isinstance(tasks_raw, list) else 0,
+            hint=root_slice_warn[:200],
+        )
+
+    return DelegateBatchRequest(
+        flags=flags,
+        tasks_raw=tasks_raw,
+        playbook_notes=playbook_notes,
+        valid_tools=valid_tools,
+        complexity_hint=complexity_hint,
+        consumer_deps_warn=consumer_deps_warn,
+        design_impl_warn=design_impl_warn,
+        root_slice_warn=root_slice_warn,
+        presentation_format_warning=presentation_format_warning,
+        automation_delivery_warning=automation_delivery_warning,
+    )

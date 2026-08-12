@@ -51,7 +51,7 @@ from agentcore.llm.pricing import NANO_PER_CNY, calculate_cost
 from agentcore.llm.profiles import ProfileParams, TurnProfiles
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
 from agentcore.runtime.costing import aggregate_cost
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.pipeline import run_chat_pipeline
 from agentcore.runtime.plan_only import PLAN_ONLY_CEO_MAX_ROUNDS, use_plan_only
@@ -211,7 +211,7 @@ def single_outcome(
     """把 ``react_loop`` 的返回值 + sink 截获的事实归一化成 :class:`TurnOutcome`.
 
     ``react_loop`` 的四元组不带 finish_reason，但 B2 收敛治理会把非默认终态经
-    ``finish_override_sink`` 抬出来（取最后一次：如 ``UNPRODUCTIVE`` 后收尾轮
+    ``ReactLoopOut.finish_override`` 抬出来（取最后一次：如 ``UNPRODUCTIVE`` 后收尾轮
     ``ask_user`` → ``PAUSED``）。有 ``finish_override`` 就用它（评估据此能断言降级 /
     早停 / 挂起、与 team 路径口径一致），否则镜像 pipeline 按轮数推导（rounds 达上限即
     ``max_rounds``，否则 ``end_turn``）。成本用 ``runtime/costing`` 的定价按 usage+model
@@ -469,8 +469,7 @@ class EvalHarness:
             tool_context=ctx,
             profile=profile,
             turn_model=profiles.model,
-            citation_sink=citations,
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(citations=citations, finish_override=finish_override),
             # 交付正文只留最终交付 (Fork-B, 全队对称): score the SAME deliverable a real
             # single-agent turn persists — the executor.captain path is deliverable_only,
             # so an eval must be too, else it grades process narration users never see.

@@ -34,7 +34,7 @@ describe("performDesktopNotify", () => {
   });
 
   it("shows notification and posts client_tool result", async () => {
-    await performDesktopNotify(payload(), "conv-1");
+    await performDesktopNotify(payload(), "conv-1", "cloud");
     expect(window.notificationApi?.show).toHaveBeenCalledWith({
       title: "任务完成",
       body: "请查看",
@@ -48,22 +48,24 @@ describe("performDesktopNotify", () => {
         ok: true,
         value: { shown: true },
       }),
+      "cloud",
     );
   });
 
   it("returns error envelope when notificationApi missing", async () => {
     vi.stubGlobal("window", {});
-    await performDesktopNotify(payload(), "conv-1");
+    await performDesktopNotify(payload(), "conv-1", "cloud");
     expect(resolveInteraction).toHaveBeenCalledWith(
       "conv-1",
       "req-1",
       expect.objectContaining({ ok: false }),
+      "cloud",
     );
   });
 
   it("does not re-show on a second perform with the same request_id", async () => {
-    await performDesktopNotify(payload(), "conv-1");
-    await performDesktopNotify(payload(), "conv-1");
+    await performDesktopNotify(payload(), "conv-1", "cloud");
+    await performDesktopNotify(payload(), "conv-1", "cloud");
     expect(window.notificationApi?.show).toHaveBeenCalledTimes(1);
     expect(resolveInteraction).toHaveBeenCalledTimes(1);
   });

@@ -1,47 +1,40 @@
 import { AgentCoreSection } from "@/components/files/fileWorkbench/AgentCoreSection";
 import { queryClient } from "@/lib/queryClient";
 import {
+  FILES_PREVIEW_PROJECT_FOLDER_ID,
   FILES_PREVIEW_SCENES,
-  buildAlwaysQuotaMock,
-  buildGlobalEntriesMock,
-  buildProjectEntriesMock,
+  type FilesPreviewSceneId,
+  alwaysQuotaForScene,
+  entriesForScene,
 } from "@/preview/filesScenes";
 import { FlaskConical } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 
-const PROJECT_FOLDER_ID = "folder-demo";
+const PROJECT_FOLDER_ID = FILES_PREVIEW_PROJECT_FOLDER_ID;
 
-function seedFilesPreviewCaches() {
-  queryClient.setQueryData(
-    ["scope-entries", "global"],
-    buildGlobalEntriesMock(),
-  );
+function seedFilesPreviewCaches(sceneId: FilesPreviewSceneId) {
+  const quotas = alwaysQuotaForScene(sceneId);
+  const entries = entriesForScene(sceneId);
+  queryClient.setQueryData(["scope-entries", "global"], entries.global);
   queryClient.setQueryData(
     ["scope-entries", PROJECT_FOLDER_ID],
-    buildProjectEntriesMock(PROJECT_FOLDER_ID),
+    entries.project,
   );
-  queryClient.setQueryData(
-    ["always-quota", "global"],
-    buildAlwaysQuotaMock(4200, 12000),
-  );
-  queryClient.setQueryData(
-    ["always-quota", PROJECT_FOLDER_ID],
-    buildAlwaysQuotaMock(9800, 12000),
-  );
+  queryClient.setQueryData(["always-quota", "global"], quotas.global);
+  queryClient.setQueryData(["always-quota", PROJECT_FOLDER_ID], quotas.project);
 }
 
 /**
  * Offline UI preview for the AgentCore flat entries rail (`#/preview/files`).
- * Seeds React Query caches — no backend. Deep-link: `#/preview/files?s=files-entries-rail`.
+ * Seeds React Query caches — no backend. Deep-link: `#/preview/files?s=files-quota-normal`.
  */
 export function FilesPreviewPage() {
-  seedFilesPreviewCaches();
-
   const [searchParams, setSearchParams] = useSearchParams();
   const scenes = FILES_PREVIEW_SCENES;
   const requested = searchParams.get("s");
   const current = scenes.find((s) => s.id === requested) ?? scenes[0] ?? null;
   const selected = current?.id ?? null;
+  if (selected) seedFilesPreviewCaches(selected);
   const select = (id: string) => setSearchParams({ s: id }, { replace: true });
 
   return (
@@ -94,7 +87,9 @@ export function FilesPreviewPage() {
           <AgentCoreSection
             scope={{ kind: "global" }}
             memoryActivePath={null}
-            documentActivePath="g-rule"
+            documentActivePath={
+              selected === "files-quota-empty" ? null : "g-rule"
+            }
             onOpenEntry={() => undefined}
             onEntryDeleted={() => undefined}
             onEntryRenamed={() => undefined}

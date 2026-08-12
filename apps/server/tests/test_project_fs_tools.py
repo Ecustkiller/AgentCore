@@ -13,7 +13,6 @@ from agentcore.runtime.delegate.target_desktop import (
     TargetDesktopError,
     TargetFolderBinding,
 )
-from agentcore.runtime.events import EventSink
 from agentcore.tools.builtin.project_fs import (
     ListProjectDirTool,
     ReadProjectFileTool,
@@ -139,7 +138,6 @@ async def test_list_and_read_registered_local_folder(tmp_path: Path):
     """CEO can list/read an owned local Folder without touching birth desk."""
     birth_backend = _birth_backend(tmp_path)
     target_backend = _target_backend(tmp_path)
-    sink = EventSink()
     ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
@@ -147,7 +145,7 @@ async def test_list_and_read_registered_local_folder(tmp_path: Path):
         backend=birth_backend,
         user_id="u1",
         conversation_id="conv-birth",
-        desktop_channel=SimpleNamespace(sink=sink),
+        desktop_channel=SimpleNamespace(user_id="u1"),
     )
     binding = _local_binding()
 
@@ -228,8 +226,9 @@ async def test_target_desktop_error_surfaces(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_local_folder_without_channel_fails(tmp_path: Path):
-    """Local binding needs turn sink/channel; no silent forge."""
+@pytest.mark.real_fulfill_dispatch
+async def test_local_folder_without_fulfiller_fails(tmp_path: Path):
+    """Local binding with no online fulfiller fails immediately (honest reject)."""
     ctx = _ctx(tmp_path)  # no desktop_channel / workspace_channel
     with patch(
         "agentcore.tools.builtin.project_fs.load_target_folder_binding",
@@ -240,8 +239,7 @@ async def test_local_folder_without_channel_fails(tmp_path: Path):
             ctx,
         )
     assert result.success is False
-    assert result.error == "workspace_channel_unavailable"
-    assert "通道" in result.output or "桌面" in result.output
+    assert "无履约方" in (result.output or "") or "无履约方" in (result.error or "")
 
 
 @pytest.mark.asyncio
@@ -256,7 +254,6 @@ async def test_missing_folder_id(tmp_path: Path):
 async def test_does_not_call_apply_target_desktop(tmp_path: Path):
     """Read-only cross-desk must not rewrite target-desk memory via apply_*."""
     target_backend = _target_backend(tmp_path)
-    sink = EventSink()
     ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
@@ -264,7 +261,7 @@ async def test_does_not_call_apply_target_desktop(tmp_path: Path):
         backend=_birth_backend(tmp_path),
         user_id="u1",
         conversation_id="conv-birth",
-        desktop_channel=SimpleNamespace(sink=sink),
+        desktop_channel=SimpleNamespace(user_id="u1"),
     )
     with (
         patch(

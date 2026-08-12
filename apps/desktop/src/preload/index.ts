@@ -9,6 +9,10 @@ import {
   type BrowserOpenTabRequest,
 } from "@shared/browser-contract";
 import {
+  DEVICE_IDENTITY_CHANNELS,
+  type DeviceIdentityApi,
+} from "@shared/device-identity-contract";
+import {
   FLOAT_WINDOW_CHANNELS,
   type FloatWindowApi,
   type FloatWindowClosedPayload,
@@ -53,6 +57,7 @@ import {
   SIDECAR_CHANNELS,
   type SidecarApi,
   type SidecarEventPush,
+  type SidecarFulfillPush,
   type SidecarStatusPush,
 } from "@shared/sidecar-contract";
 import { TERMINAL_CHANNELS, type TerminalApi } from "@shared/terminal-contract";
@@ -75,6 +80,10 @@ const agentTownApi: AgentTownApi = {
   launch: (opts) => ipcRenderer.invoke(AGENTTOWN_CHANNELS.launch, opts),
 };
 
+const deviceIdentityApi: DeviceIdentityApi = {
+  getDeviceId: () => ipcRenderer.invoke(DEVICE_IDENTITY_CHANNELS.getDeviceId),
+};
+
 const fsApi: FsApi = {
   addRoot: () => ipcRenderer.invoke(FS_CHANNELS.addRoot),
   ensureDefaultRoot: () => ipcRenderer.invoke(FS_CHANNELS.ensureDefaultRoot),
@@ -90,6 +99,11 @@ const fsApi: FsApi = {
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
+  onRootsChanged: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on(FS_CHANNELS.rootsChanged, listener);
+    return () => ipcRenderer.removeListener(FS_CHANNELS.rootsChanged, listener);
+  },
   grantSessionReadonlyRoot: (conversationIdOrParams, mode) => {
     const params =
       typeof conversationIdOrParams === "string"
@@ -257,6 +271,11 @@ const sidecarApi: SidecarApi = {
     const listener = (_e: unknown, payload: SidecarEventPush) => cb(payload);
     ipcRenderer.on(SIDECAR_CHANNELS.event, listener);
     return () => ipcRenderer.removeListener(SIDECAR_CHANNELS.event, listener);
+  },
+  onFulfillFrame: (cb) => {
+    const listener = (_e: unknown, payload: SidecarFulfillPush) => cb(payload);
+    ipcRenderer.on(SIDECAR_CHANNELS.fulfill, listener);
+    return () => ipcRenderer.removeListener(SIDECAR_CHANNELS.fulfill, listener);
   },
   onStatus: (cb) => {
     const listener = (_e: unknown, payload: SidecarStatusPush) => cb(payload);
@@ -428,6 +447,7 @@ if (!process.contextIsolated) {
 
 try {
   contextBridge.exposeInMainWorld("agentTownApi", agentTownApi);
+  contextBridge.exposeInMainWorld("deviceIdentityApi", deviceIdentityApi);
   contextBridge.exposeInMainWorld("fsApi", fsApi);
   contextBridge.exposeInMainWorld("sidecarApi", sidecarApi);
   contextBridge.exposeInMainWorld("outboxApi", outboxApi);

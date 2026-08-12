@@ -24,7 +24,7 @@ from pathlib import Path
 
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.runtime.facts import FactKind, TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.journal import runs_from_entries, window_from_journal
@@ -295,7 +295,7 @@ async def test_loop_finalizes_ask_user_to_paused():
             tool_context=_ctx(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )
@@ -466,7 +466,7 @@ async def test_loop_absorbs_content_into_blocking_ask_user():
             tool_context=_ctx(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )
@@ -562,7 +562,7 @@ async def test_unproductive_then_finalize_ask_user_stamps_paused_last():
             tool_context=_ctx(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )

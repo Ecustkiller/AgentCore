@@ -1,4 +1,5 @@
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { DesktopNotifyRequiredPayload } from "@/types/events";
 
 /**
@@ -12,12 +13,14 @@ import type { DesktopNotifyRequiredPayload } from "@/types/events";
 export async function performDesktopNotify(
   payload: DesktopNotifyRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "desktopNotify",
-    perform: () => runDesktopNotify(payload, conversationId),
+    perform: async () => runDesktopNotify(payload, conversationId),
   });
 }
 

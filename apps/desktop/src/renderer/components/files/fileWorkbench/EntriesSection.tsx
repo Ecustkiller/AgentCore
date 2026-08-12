@@ -55,9 +55,12 @@ const APPLY_LABEL: Record<DocumentApplyMode, string> = {
 };
 
 const APPLY_HINT: Record<DocumentApplyMode, string> = {
-  always: "每回合注入",
-  on_demand: "目录可见，按需查阅",
+  always: "每次对话都会带上",
+  on_demand: "需要时再查阅",
 };
+
+/** Near-full threshold for consequence copy (not just color). */
+const NEAR_FULL_PERCENT = 80;
 
 /** Fixed AI core leaf names (aligned with server ``memory.store`` / write_guards). */
 const AI_CORE_NAMES = new Set(["偏好.md", "画像.md", "导航.md"]);
@@ -177,8 +180,62 @@ function memoryPathForDocument(doc: DocumentNode): string | null {
   return null;
 }
 
-function formatQuota(q: AlwaysQuota): string {
-  return `常驻 ${q.percent}%（${q.usedChars} / ${q.maxChars}）`;
+/**
+ * Coarsen char counts for humans: 千字 / 万字 buckets, never exact ones.
+ * 0 and「不足千」are distinct — empty is not "almost a thousand".
+ * Exported for unit tests.
+ */
+export function formatRoughChars(n: number): string {
+  const chars = Math.max(0, Math.round(n));
+  if (chars === 0) return "0 字";
+  if (chars < 1000) return "不足千字";
+  if (chars < 9500) return `约 ${Math.max(1, Math.round(chars / 1000))} 千字`;
+  const wan = Math.round(chars / 1000) / 10;
+  const label = Number.isInteger(wan) ? String(wan) : wan.toFixed(1);
+  return `约 ${label} 万字`;
+}
+
+/** Per-entry always size (same coarsening as the meter). */
+export function formatAlwaysChars(n: number): string {
+  return formatRoughChars(n);
+}
+
+export type AlwaysMeterTone = "ok" | "near" | "over";
+
+export function alwaysMeterTone(q: AlwaysQuota): AlwaysMeterTone {
+  if (q.maxChars > 0 && q.usedChars > q.maxChars) return "over";
+  if (q.usedChars <= 0) return "ok";
+  if (q.percent >= NEAR_FULL_PERCENT) return "near";
+  return "ok";
+}
+
+/** `还剩约 8 千字` / `还剩不足千字` / `超出约 2 千字`. */
+function glueCapacity(verb: "还剩" | "超出", amount: string): string {
+  if (amount.startsWith("约 ")) return `${verb}${amount}`;
+  if (amount === "0 字") return `${verb} ${amount}`;
+  return `${verb}${amount}`;
+}
+
+/**
+ * Meter primary line: remaining (or over-by) in one unit — no 千/万 mix, no subtraction.
+ * Exported for unit tests.
+ */
+export function formatMeterHeadline(
+  q: AlwaysQuota,
+  variant: "global" | "project",
+): string {
+  const tone = alwaysMeterTone(q);
+  const subject = variant === "project" ? "常驻（含全局）" : "常驻";
+  if (tone === "over") {
+    const overBy = Math.max(0, q.usedChars - q.maxChars);
+    return `${subject} · 已满，${glueCapacity("超出", formatRoughChars(overBy))}`;
+  }
+  const remain = glueCapacity(
+    "还剩",
+    formatRoughChars(Math.max(0, q.maxChars - q.usedChars)),
+  );
+  if (tone === "near") return `${subject} · 快满了，${remain}`;
+  return `${subject} · ${remain}`;
 }
 
 /**
@@ -312,6 +369,7 @@ export function EntriesSection({
             active={isActive(target)}
             onOpen={() => onOpen(target)}
             applyMode={mode}
+            alwaysChars={doc.alwaysChars}
             onToggleApplyMode={
               canToggleApply ? () => void setApplyMode(doc, other) : undefined
             }
@@ -382,14 +440,17 @@ export function EntriesSection({
       >
         <div className="min-w-0 flex-1">
           {quota.isSuccess ? (
-            <AlwaysQuotaMeter quota={quota.data} />
+            <AlwaysQuotaMeter
+              quota={quota.data}
+              variant={scope.kind === "global" ? "global" : "project"}
+            />
           ) : quota.isError && !isFeatureUnavailable(quota.error) ? (
             <button
               type="button"
               onClick={() => void quota.refetch()}
               className="text-left text-xs text-destructive/80 hover:underline"
             >
-              常驻用量加载失败，点此重试
+              用量加载失败，点此重试
             </button>
           ) : null}
         </div>
@@ -462,27 +523,107 @@ export function EntriesSection({
   );
 }
 
-function AlwaysQuotaMeter({ quota }: { quota: AlwaysQuota }) {
-  const over = quota.maxChars > 0 && quota.usedChars > quota.maxChars;
-  const pct = Math.min(100, Math.max(0, quota.percent));
+function AlwaysQuotaMeter({
+  quota,
+  variant,
+}: {
+  quota: AlwaysQuota;
+  variant: "global" | "project";
+}) {
+  const tone = alwaysMeterTone(quota);
+  const headline = formatMeterHeadline(quota, variant);
+  const caption =
+    tone === "over"
+      ? "AI 暂时记不下新东西，去整理"
+      : tone === "near"
+        ? "AI 快记不下新东西了，去整理"
+        : "每次对话都会带上";
+
+  const max = Math.max(1, quota.maxChars);
+  // When over the cap, scale segments against used so both tones stay visible
+  // (max-based math would clamp global to 100% and hide the project slice).
+  const over = quota.usedChars > quota.maxChars;
+  const barBase = over ? Math.max(1, quota.usedChars) : max;
+  const globalPct = Math.min(
+    100,
+    Math.max(0, (100 * quota.globalChars) / barBase),
+  );
+  const projectPct = Math.min(
+    100 - globalPct,
+    Math.max(0, (100 * quota.projectChars) / barBase),
+  );
+  const usedPct = over
+    ? 100
+    : Math.min(100, Math.max(0, (100 * quota.usedChars) / max));
+  const warn = tone !== "ok";
+
+  const titleParts = [
+    variant === "project" ? "浅色是全局，深色是本项目" : null,
+    tone === "over"
+      ? "已满：AI 暂时记不下新东西，去整理"
+      : tone === "near"
+        ? "快满了：AI 快记不下新东西了，去整理"
+        : "每次对话都会带上",
+  ].filter(Boolean);
+
   return (
-    <div className="min-w-0" title="常驻条目占用的注入配额（写侧闸；读侧全量）">
+    <div
+      className={cn(
+        "min-w-0",
+        warn ? "rounded-lg bg-destructive/5 px-1.5 py-1.5" : "py-0.5",
+      )}
+      title={titleParts.join(" · ")}
+    >
       <div
         className={cn(
-          "truncate text-xs",
-          over ? "text-destructive" : "text-muted-foreground",
+          "truncate text-sm",
+          warn ? "font-medium text-destructive" : "text-muted-foreground",
         )}
       >
-        {formatQuota(quota)}
+        {headline}
       </div>
-      <div className="mt-0.5 h-1 w-full overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn(
-            "h-full rounded-full transition-[width]",
-            over ? "bg-destructive" : "bg-primary/70",
-          )}
-          style={{ width: `${pct}%` }}
-        />
+      <div
+        className={cn(
+          "mt-1.5 truncate text-xs leading-snug",
+          warn ? "text-destructive" : "text-muted-foreground/70",
+        )}
+      >
+        {caption}
+      </div>
+      <div
+        className={cn(
+          "flex h-1.5 w-full overflow-hidden rounded-full bg-muted",
+          warn ? "mt-2" : "mt-1.5",
+        )}
+      >
+        {variant === "project" ? (
+          <>
+            <div
+              className={cn(
+                "h-full transition-[width]",
+                warn ? "bg-destructive/45" : "bg-primary/35",
+              )}
+              style={{ width: `${globalPct}%` }}
+              title="全局"
+            />
+            <div
+              className={cn(
+                "h-full transition-[width]",
+                warn ? "bg-destructive" : "bg-primary/80",
+              )}
+              style={{ width: `${projectPct}%` }}
+              title="本项目"
+            />
+          </>
+        ) : (
+          <div
+            className={cn(
+              "h-full rounded-full transition-[width]",
+              warn ? "bg-destructive" : "bg-primary/70",
+            )}
+            style={{ width: `${usedPct}%` }}
+          />
+        )}
       </div>
     </div>
   );
@@ -499,6 +640,8 @@ const EntryLeafRow = forwardRef<
     active: boolean;
     onOpen: () => void;
     applyMode?: DocumentApplyMode;
+    /** Always-pool chars for this row; only shown when always + non-null. */
+    alwaysChars?: number | null;
     onToggleApplyMode?: () => void;
   }
 >(function EntryLeafRow(
@@ -511,12 +654,17 @@ const EntryLeafRow = forwardRef<
     active,
     onOpen,
     applyMode,
+    alwaysChars,
     onToggleApplyMode,
     ...rest
   },
   ref,
 ) {
   const hasMeta = Boolean(description || frontmatterError);
+  const showAlwaysChars =
+    applyMode === "always" &&
+    typeof alwaysChars === "number" &&
+    Number.isFinite(alwaysChars);
   return (
     <div
       ref={ref}
@@ -560,6 +708,17 @@ const EntryLeafRow = forwardRef<
           ) : null}
         </span>
       </button>
+      {showAlwaysChars ? (
+        <span
+          title="每次对话都会带上"
+          className={cn(
+            "shrink-0 text-xs text-muted-foreground",
+            hasMeta ? "mt-0.5" : "",
+          )}
+        >
+          {formatAlwaysChars(alwaysChars)}
+        </span>
+      ) : null}
       {applyMode && onToggleApplyMode ? (
         <button
           type="button"

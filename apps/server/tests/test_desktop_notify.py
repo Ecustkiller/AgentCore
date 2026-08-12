@@ -56,9 +56,8 @@ async def test_desktop_notify_shows_via_channel():
 async def test_channel_maps_desktop_failure():
     registry = MagicMock()
     registry.suspend = AsyncMock(return_value={"ok": False, "error": {"detail": "nope"}})
-    sink = MagicMock()
     channel = DesktopClientChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=1.0,

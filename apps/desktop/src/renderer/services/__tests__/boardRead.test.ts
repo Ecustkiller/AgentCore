@@ -9,6 +9,7 @@ import {
   performBoardRead,
   registerBoardReader,
 } from "@/services/boardRead";
+import { resetClientToolFulfillmentForTests } from "@/services/clientToolFulfill";
 import type { BoardReadRequiredPayload } from "@/types/events";
 
 const BOARD = "board-1";
@@ -49,10 +50,12 @@ let fetchMock: ReturnType<typeof vi.fn>;
 const cleanups: Array<() => void> = [];
 
 beforeEach(() => {
+  resetClientToolFulfillmentForTests();
   fetchMock = vi.fn().mockResolvedValue(okResponse());
   vi.stubGlobal("fetch", fetchMock);
 });
 afterEach(() => {
+  resetClientToolFulfillmentForTests();
   vi.unstubAllGlobals();
   for (const off of cleanups.splice(0)) off();
 });
@@ -69,7 +72,7 @@ describe("performBoardRead (白板读图回填)", () => {
     const reader = vi.fn().mockResolvedValue({ pngBase64: "abc", w: 10, h: 8 });
     register(reader);
 
-    await performBoardRead(payload(), "c1");
+    await performBoardRead(payload(), "c1", "cloud");
 
     expect(reader).toHaveBeenCalledWith(["el-1"]);
     expect(fetchMock.mock.calls[0][0]).toBe(READ_URL);
@@ -81,7 +84,7 @@ describe("performBoardRead (白板读图回填)", () => {
   });
 
   it("answers a clean error when the board's canvas is not open (no reader)", async () => {
-    await performBoardRead(payload({ board_id: "not-open" }), "c1");
+    await performBoardRead(payload({ board_id: "not-open" }), "c1", "cloud");
 
     const body = postedBody(fetchMock) as {
       ok: boolean;
@@ -95,7 +98,7 @@ describe("performBoardRead (白板读图回填)", () => {
   it("maps a thrown rasterize error to a clean error envelope (never unanswered)", async () => {
     register(vi.fn().mockRejectedValue(new Error("没有可读取的元素")));
 
-    await performBoardRead(payload(), "c1");
+    await performBoardRead(payload(), "c1", "cloud");
 
     const body = postedBody(fetchMock) as {
       ok: boolean;
@@ -109,7 +112,9 @@ describe("performBoardRead (白板读图回填)", () => {
     register(vi.fn().mockResolvedValue({ pngBase64: "x", w: 1, h: 1 }));
     fetchMock.mockResolvedValue(errResponse(404, "gone"));
 
-    await expect(performBoardRead(payload(), "c1")).resolves.toBeUndefined();
+    await expect(
+      performBoardRead(payload(), "c1", "cloud"),
+    ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

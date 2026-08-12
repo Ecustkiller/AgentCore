@@ -15,7 +15,7 @@ import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import { useConversationStore } from "@/stores/conversation/store";
 import type { HostOpRequiredPayload } from "@/types/events";
 import { resetClientToolFulfillmentForTests } from "../clientToolFulfill";
-import { performHostOp, rejectHostOpForTurnPhase } from "../hostOps";
+import { performHostOp } from "../hostOps";
 
 const CID = "conv-1";
 
@@ -44,7 +44,7 @@ describe("performHostOp", () => {
   });
 
   it("runs host op and posts client_tool result", async () => {
-    await performHostOp(payload(), CID);
+    await performHostOp(payload(), CID, "cloud");
     expect(window.hostApi?.runOp).toHaveBeenCalledWith({
       op: "shell",
       args: { command: "echo hi" },
@@ -57,66 +57,19 @@ describe("performHostOp", () => {
         ok: true,
         value: { code: 0 },
       }),
+      "cloud",
     );
   });
 
   it("does not re-run host side effect on the same request_id", async () => {
-    await performHostOp(payload(), CID);
-    await performHostOp(payload(), CID);
+    await performHostOp(payload(), CID, "cloud");
+    await performHostOp(payload(), CID, "cloud");
     expect(window.hostApi?.runOp).toHaveBeenCalledTimes(1);
     expect(resolveInteraction).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("rejectHostOpForTurnPhase", () => {
-  beforeEach(() => {
-    resetClientToolFulfillmentForTests();
-    resolveInteraction.mockClear();
-    logEvent.mockClear();
-    vi.stubGlobal("window", {
-      hostApi: {
-        runOp: vi.fn().mockResolvedValue({ ok: true, value: { code: 0 } }),
-      },
-    });
-  });
-
-  it("POSTs fail_envelope without running host IPC (stopping)", async () => {
-    await rejectHostOpForTurnPhase(payload(), CID, "stopping");
-    expect(window.hostApi?.runOp).not.toHaveBeenCalled();
-    expect(resolveInteraction).toHaveBeenCalledWith(
-      CID,
-      "host-1",
-      expect.objectContaining({
-        kind: "client_tool",
-        ok: false,
-        error: expect.objectContaining({
-          kind: "HostOpError",
-          detail: expect.stringContaining("turn_phase_gate"),
-        }),
-      }),
-    );
-  });
-
-  it("POSTs fail_envelope without running host IPC (terminal)", async () => {
-    await rejectHostOpForTurnPhase(
-      payload({ request_id: "host-term" }),
-      CID,
-      "completed",
-    );
-    expect(window.hostApi?.runOp).not.toHaveBeenCalled();
-    expect(resolveInteraction).toHaveBeenCalledWith(
-      CID,
-      "host-term",
-      expect.objectContaining({
-        kind: "client_tool",
-        ok: false,
-        error: expect.objectContaining({ kind: "HostOpError" }),
-      }),
-    );
-  });
-});
-
-describe("dispatch drop host_op_required → fail settle", () => {
+describe("dispatch ignores cloud conversation-SSE host_op_required", () => {
   beforeEach(() => {
     resetClientToolFulfillmentForTests();
     resolveInteraction.mockClear();
@@ -130,7 +83,7 @@ describe("dispatch drop host_op_required → fail settle", () => {
     });
   });
 
-  it("stopping: logs dropped + POSTs fail settle without host IPC", async () => {
+  it("stopping: does not settle or run host IPC", () => {
     useConversationStore.getState().setTurnPhase("stopping", CID);
     const p = payload({ request_id: "h-stop" });
     dispatchSSEEvent(
@@ -139,49 +92,24 @@ describe("dispatch drop host_op_required → fail settle", () => {
     );
     expect(logEvent).toHaveBeenCalledWith(
       "warn",
-      "host_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.objectContaining({
-        request_id: "h-stop",
-        turn_phase: "stopping",
-        settle: "fail_envelope",
+        event_type: "host_op_required",
+        reason: "fulfill_channel_owns_client_tool",
       }),
     );
-    await vi.waitFor(() => {
-      expect(resolveInteraction).toHaveBeenCalled();
-    });
     expect(window.hostApi?.runOp).not.toHaveBeenCalled();
-    expect(resolveInteraction).toHaveBeenCalledWith(
-      CID,
-      "h-stop",
-      expect.objectContaining({
-        kind: "client_tool",
-        ok: false,
-        error: expect.objectContaining({
-          kind: "HostOpError",
-          detail: expect.stringContaining("turn_phase_gate"),
-        }),
-      }),
-    );
+    expect(resolveInteraction).not.toHaveBeenCalled();
   });
 
-  it("terminal: POSTs fail settle without host IPC", async () => {
+  it("terminal: does not settle or run host IPC", () => {
     useConversationStore.getState().setTurnPhase("completed", CID);
     const p = payload({ request_id: "h-term-dispatch" });
     dispatchSSEEvent(
       { type: "host_op_required", payload: p, timestamp: "t0" } as never,
       { conversationId: CID, source: "server" },
     );
-    await vi.waitFor(() => {
-      expect(resolveInteraction).toHaveBeenCalled();
-    });
+    expect(resolveInteraction).not.toHaveBeenCalled();
     expect(window.hostApi?.runOp).not.toHaveBeenCalled();
-    expect(resolveInteraction).toHaveBeenCalledWith(
-      CID,
-      "h-term-dispatch",
-      expect.objectContaining({
-        kind: "client_tool",
-        ok: false,
-      }),
-    );
   });
 });

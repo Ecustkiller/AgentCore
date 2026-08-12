@@ -518,6 +518,27 @@ export interface SidecarEventPush {
   };
 }
 
+/**
+ * 主进程 → renderer 的**本机履约帧**推送（与回合事件流分开的第二条链路）。
+ *
+ * 本机引擎的 CLIENT_TOOL（host / mcp / notify / board / board_read /
+ * external_mount / terminal）不再经回合 EventSink 下发：sidecar 在自己进程内的
+ * 履约中枢注册一个会话，帧经 `fulfill/frame` JSON-RPC 通知过来，主进程按
+ * `payload.conversation_id` 投给持有该活回合的窗口。形状与云端设备级履约流
+ * （`GET /v1/fulfill`）的帧一致，故 renderer 用同一套 ingress 消费，只是结算
+ * 走 `respond`（`origin: "sidecar"`）而非云 HTTP。
+ */
+export interface SidecarFulfillPush {
+  conversationId: string;
+  frame: {
+    /** `*_required` 之一，或 `client_tool_cancelled`（中断在飞 op）。 */
+    type: string;
+    /** `*_required` 帧带；取消帧不带。 */
+    timestamp?: string;
+    payload?: unknown;
+  };
+}
+
 /** 主进程 → renderer 的 sidecar 生命周期/诊断推送（拉起失败、退出等）。 */
 export interface SidecarStatusPush {
   rootId: string;
@@ -675,6 +696,7 @@ export const SIDECAR_CHANNELS = {
   restoreTurnBaseline: "sidecar:restoreTurnBaseline",
   listBrowserSessions: "sidecar:listBrowserSessions",
   event: "sidecar:event",
+  fulfill: "sidecar:fulfill",
   status: "sidecar:status",
 } as const;
 
@@ -738,6 +760,13 @@ export interface SidecarApi {
    * 再 `claimSidecarTurnSink`——禁止每 turn 直接 `onEvent`（可叠 listener → live 叠字）。
    */
   onEvent(cb: (e: SidecarEventPush) => void): () => void;
+  /**
+   * 订阅本机履约帧（CLIENT_TOOL `*_required` / `client_tool_cancelled`）；返回取消订阅函数。
+   *
+   * 与 {@link onEvent} 分流：履约不是显示态，不进回合缓冲、不喂 `dispatchSSEEvent`。
+   * 业务侧只在 `clientToolIngress` 单例订阅一次（多订阅 = 同一 op 重复执行）。
+   */
+  onFulfillFrame(cb: (e: SidecarFulfillPush) => void): () => void;
   /** 订阅 sidecar 生命周期/诊断事件；返回取消订阅函数。 */
   onStatus(cb: (e: SidecarStatusPush) => void): () => void;
 }

@@ -10,12 +10,13 @@ import asyncio
 
 import pytest
 
-from agentcore.runtime.events import EventSink, SSEEvent
+from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.workspace.channel import WorkspaceChannel
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import GrepQuery
+from tests.client_tool_fulfill_testutil import await_captured_event
 
 pytestmark = pytest.mark.anyio
 
@@ -27,7 +28,7 @@ def _make(base: str = "") -> tuple[LocalWorkspace, InteractionRegistry, EventSin
     sink = EventSink()
     registry = InteractionRegistry()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id=CONV,
         registry=registry,
         timeout_seconds=5.0,
@@ -36,17 +37,14 @@ def _make(base: str = "") -> tuple[LocalWorkspace, InteractionRegistry, EventSin
     return LocalWorkspace(channel, base_subpath=base), registry, sink
 
 
-async def _await_request(sink: EventSink) -> SSEEvent:
-    for _ in range(2000):
-        if not sink._queue.empty():  # noqa: SLF001 - test-only inspection
-            return sink._queue.get_nowait()
-        await asyncio.sleep(0)
-    raise AssertionError("no workspace_op_required event emitted")
+async def _await_request():
+    """Return the CLIENT_TOOL event just delivered via fulfill."""
+    return await await_captured_event()
 
 
 async def _round_trip(coro, sink, registry, response: dict):
     task = asyncio.create_task(coro)
-    event = await _await_request(sink)
+    event = await _await_request()
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
     return await task, event
 

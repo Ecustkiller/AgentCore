@@ -1,7 +1,7 @@
 /**
  * Electron 42+ no longer runs install.js on postinstall. We invoke it explicitly
- * after `pnpm gen:api`. If the default GitHub download fails (common in CN),
- * retry via npmmirror.
+ * from this package's `postinstall`. If the default GitHub download fails
+ * (common in CN), retry via npmmirror.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";

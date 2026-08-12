@@ -42,7 +42,7 @@ def _ensure_external_channel(
         from agentcore.workspace.channel import WorkspaceChannel
 
         ch = WorkspaceChannel(
-            sink=desktop_channel.sink,
+            user_id=desktop_channel.user_id,
             conversation_id=conversation_id,
             registry=desktop_channel.registry,
             timeout_seconds=settings.workspace_op_timeout_seconds,

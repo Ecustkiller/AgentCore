@@ -28,6 +28,7 @@ const fsApi: FsApi = {
   ensureDefaultRoot: async () => ({ id: "web-preview", name: "Web 预览" }),
   listRoots: async () => [],
   removeRoot: async () => {},
+  onRootsChanged: () => () => {},
   grantSessionReadonlyRoot: async () => ({
     ok: false as const,
     reason: "not_found" as const,
@@ -126,6 +127,7 @@ const sidecarApi: SidecarApi = {
     active_session_id: null,
   }),
   onEvent: () => noop,
+  onFulfillFrame: () => noop,
   onStatus: () => noop,
 };
 

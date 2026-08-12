@@ -20,6 +20,7 @@ from agentcore.llm.credentials import (
 )
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
+from agentcore.sidecar.fulfill_bridge import SidecarFulfillBridge
 from agentcore.sidecar.paused_store import LocalPausedTurnStore
 from agentcore.sidecar.run_session_store import LocalRunSessionStore
 from agentcore.sidecar.server_pkg.handlers import HandlerMixin
@@ -88,6 +89,10 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # Fire-and-forget sends spawned during cancellation; kept referenced so
         # they are not garbage-collected before they flush.
         self._pending_sends: set[asyncio.Task[None]] = set()
+        # This process's CLIENT_TOOL 履约方 on the in-process fulfill hub. Built on
+        # ``initialize`` (needs a running loop + the account id); without it every
+        # host / mcp / notify / board / terminal op would fail「无履约方」.
+        self._fulfill_bridge: SidecarFulfillBridge | None = None
         # Flipped by ``shutdown`` so the process loop can exit cleanly.
         self.shutdown_requested = asyncio.Event()
 
@@ -245,6 +250,7 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             from agentcore.demo_tape.recorder import uninstall_recorder
 
             uninstall_recorder()
+            self._close_fulfiller()
             self.shutdown_requested.set()
             await self._reply(request_id, {"ok": True})
         else:
@@ -253,6 +259,36 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
                     request_id, protocol.METHOD_NOT_FOUND, f"unknown method: {method}"
                 )
             )
+
+    def _bind_fulfiller(self) -> None:
+        """Point this process's fulfill-hub session at the current account id.
+
+        Called from ``initialize`` and from every per-turn ``userId`` refresh: the
+        hub selects a fulfiller by ``user_id``, so a probe-spawned sidecar that
+        initialized as the ``local`` alias must re-register once the real account
+        arrives — otherwise the channels look for a fulfiller nobody holds.
+        """
+        if self._fulfill_bridge is None:
+            self._fulfill_bridge = SidecarFulfillBridge(self._send)
+        self._fulfill_bridge.bind_user(self._user_id)
+
+    def _declare_fulfill_root(self, params: dict[str, Any]) -> None:
+        """Declare this turn's ``localRootId`` on the fulfiller session.
+
+        Root-scoped ``workspace`` frames (a worker desk bound to the turn's local
+        root) are only routed to a session that declares the root — the same rule
+        the cloud desktop satisfies with ``POST /v1/fulfill/roots``. The sidecar's
+        own file ops never take this path (direct ``Path`` I/O).
+        """
+        raw = params.get("localRootId")
+        root = str(raw).strip() if isinstance(raw, str) else ""
+        if root and self._fulfill_bridge is not None:
+            self._fulfill_bridge.declare_root(root)
+
+    def _close_fulfiller(self) -> None:
+        """Unregister this process's fulfiller (shutdown). Idempotent."""
+        if self._fulfill_bridge is not None:
+            self._fulfill_bridge.close()
 
     def _make_backend(
         self, *, external_mounts: list | dict | None = None

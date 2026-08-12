@@ -50,6 +50,11 @@ export interface DocumentNode {
   name: string;
   /** Structural frontmatter failure — entry does not inject; UI must report it. */
   frontmatterError: string | null;
+  /**
+   * Chars this entry contributes to the always pool (`null` when not always).
+   * Matches server `always_entry_chars` so row totals == meter `usedChars`.
+   */
+  alwaysChars: number | null;
 }
 
 /** A node plus its markdown body + content-hash CAS tag (the editor's load payload). */
@@ -69,11 +74,18 @@ export interface DocumentWriteResult {
   quotaWarning: string | null;
 }
 
-/** Always-pool usage for the UI meter (percentage + absolute chars). */
+/**
+ * Always-pool usage for the UI meter.
+ * `usedChars == globalChars + projectChars` (project scope includes global).
+ */
 export interface AlwaysQuota {
   usedChars: number;
   maxChars: number;
   percent: number;
+  /** Global-scope always chars in this meter context. */
+  globalChars: number;
+  /** Project-scope always chars (0 when the meter is global-only). */
+  projectChars: number;
 }
 
 interface DocumentNodeWire {
@@ -87,6 +99,7 @@ interface DocumentNodeWire {
   description?: string | null;
   name: string;
   frontmatter_error?: string | null;
+  always_chars?: number | null;
 }
 
 interface DocumentDetailWire extends DocumentNodeWire {
@@ -107,6 +120,8 @@ interface AlwaysQuotaWire {
   used_chars: number;
   max_chars: number;
   percent: number;
+  global_chars?: number;
+  project_chars?: number;
 }
 
 const toNode = (w: DocumentNodeWire): DocumentNode => ({
@@ -120,6 +135,10 @@ const toNode = (w: DocumentNodeWire): DocumentNode => ({
   description: (w.description ?? "").trim(),
   name: w.name,
   frontmatterError: w.frontmatter_error?.trim() || null,
+  alwaysChars:
+    typeof w.always_chars === "number" && Number.isFinite(w.always_chars)
+      ? w.always_chars
+      : null,
 });
 
 const toDetail = (w: DocumentDetailWire): DocumentDetail => ({
@@ -248,11 +267,27 @@ export function getAlwaysQuota(
     folderId != null ? `?folder_id=${encodeURIComponent(folderId)}` : "";
   return api
     .get<AlwaysQuotaWire>(`/v1/documents/always-quota${q}`)
-    .then((w) => ({
-      usedChars: w.used_chars,
-      maxChars: w.max_chars,
-      percent: w.percent,
-    }));
+    .then((w) => {
+      const globalChars =
+        typeof w.global_chars === "number" && Number.isFinite(w.global_chars)
+          ? w.global_chars
+          : folderId == null
+            ? w.used_chars
+            : 0;
+      const projectChars =
+        typeof w.project_chars === "number" && Number.isFinite(w.project_chars)
+          ? w.project_chars
+          : folderId != null
+            ? Math.max(0, w.used_chars - globalChars)
+            : 0;
+      return {
+        usedChars: w.used_chars,
+        maxChars: w.max_chars,
+        percent: w.percent,
+        globalChars,
+        projectChars,
+      };
+    });
 }
 
 /** Load one document's body + CAS version (the editor's load). */

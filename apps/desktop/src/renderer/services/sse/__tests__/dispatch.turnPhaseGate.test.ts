@@ -22,39 +22,13 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
-vi.mock("@/services/workspaceOps", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/services/workspaceOps")>();
-  return {
-    ...actual,
-    rejectWorkspaceOpForTurnPhase: vi.fn().mockResolvedValue(undefined),
-  };
-});
-
-vi.mock("@/services/hostOps", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/services/hostOps")>();
-  return {
-    ...actual,
-    rejectHostOpForTurnPhase: vi.fn().mockResolvedValue(undefined),
-  };
-});
-
-import { rejectHostOpForTurnPhase } from "@/services/hostOps";
-import { rejectWorkspaceOpForTurnPhase } from "@/services/workspaceOps";
-
 const CID = "conv-turn-phase-gate";
 const logEventMock = vi.mocked(logEvent);
-const rejectWorkspaceMock = vi.mocked(rejectWorkspaceOpForTurnPhase);
-const rejectHostMock = vi.mocked(rejectHostOpForTurnPhase);
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: CID, byId: {} });
   useConversationStore.getState().switchConversation(CID);
   logEventMock.mockReset();
-  rejectWorkspaceMock.mockReset();
-  rejectWorkspaceMock.mockResolvedValue(undefined);
-  rejectHostMock.mockReset();
-  rejectHostMock.mockResolvedValue(undefined);
 });
 
 describe("dispatchSSEEvent turn-phase gate logging", () => {
@@ -82,28 +56,25 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
         reason: "turn_phase_gate",
       }),
     );
-    expect(rejectWorkspaceMock).not.toHaveBeenCalled();
-    expect(rejectHostMock).not.toHaveBeenCalled();
   });
 
-  it("fail-settles workspace_op_required when gated in stopping", () => {
+  it("ignores cloud conversation-SSE workspace_op_required (no turnPhase fail-settle)", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     useConversationStore.getState().createAssistantMessage(CID);
     useConversationStore.getState().stopGeneration();
 
-    const payload = {
-      request_id: "r-gate",
-      conversation_id: CID,
-      root_id: "root-1",
-      op: "read",
-      args: { path: "a.txt" },
-      timeout_ms: 5_000,
-    };
     dispatchSSEEvent(
       {
         type: "workspace_op_required",
-        payload,
+        payload: {
+          request_id: "r-gate",
+          conversation_id: CID,
+          root_id: "root-1",
+          op: "read",
+          args: { path: "a.txt" },
+          timeout_ms: 5_000,
+        },
         timestamp: "t0",
       } as never,
       { conversationId: CID, source: "server" },
@@ -111,34 +82,35 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
 
     expect(logEventMock).toHaveBeenCalledWith(
       "warn",
-      "workspace_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.objectContaining({
-        request_id: "r-gate",
-        turn_phase: "stopping",
-        reason: "turn_phase_gate",
-        settle: "fail_envelope",
+        conversation_id: CID,
+        event_type: "workspace_op_required",
+        reason: "fulfill_channel_owns_client_tool",
       }),
     );
-    expect(rejectWorkspaceMock).toHaveBeenCalledWith(payload, CID, "stopping");
-    expect(rejectHostMock).not.toHaveBeenCalled();
+    expect(logEventMock).not.toHaveBeenCalledWith(
+      "warn",
+      "workspace_op.dropped",
+      expect.anything(),
+    );
   });
 
-  it("fail-settles host_op_required when gated in stopping", () => {
+  it("ignores cloud conversation-SSE host_op_required (no turnPhase fail-settle)", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);
     useConversationStore.getState().createAssistantMessage(CID);
     useConversationStore.getState().stopGeneration();
 
-    const payload = {
-      request_id: "h-gate",
-      conversation_id: CID,
-      op: "host_shell",
-      args: { command: "echo hi" },
-    };
     dispatchSSEEvent(
       {
         type: "host_op_required",
-        payload,
+        payload: {
+          request_id: "h-gate",
+          conversation_id: CID,
+          op: "host_shell",
+          args: { command: "echo hi" },
+        },
         timestamp: "t0",
       } as never,
       { conversationId: CID, source: "server" },
@@ -146,49 +118,17 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
 
     expect(logEventMock).toHaveBeenCalledWith(
       "warn",
-      "host_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.objectContaining({
-        request_id: "h-gate",
-        turn_phase: "stopping",
-        reason: "turn_phase_gate",
-        settle: "fail_envelope",
+        event_type: "host_op_required",
+        reason: "fulfill_channel_owns_client_tool",
       }),
     );
-    expect(rejectHostMock).toHaveBeenCalledWith(payload, CID, "stopping");
-    expect(rejectWorkspaceMock).not.toHaveBeenCalled();
-  });
-
-  it("fail-settles host_op_required when gated in terminal", () => {
-    beginTurnPreflight(CID);
-    enterTurnStreaming(CID);
-    useConversationStore.getState().createAssistantMessage(CID);
-    useConversationStore.getState().setTurnPhase("completed", CID);
-
-    const payload = {
-      request_id: "h-term",
-      conversation_id: CID,
-      op: "host_ping",
-      args: {},
-    };
-    dispatchSSEEvent(
-      {
-        type: "host_op_required",
-        payload,
-        timestamp: "t0",
-      } as never,
-      { conversationId: CID, source: "server" },
-    );
-
-    expect(logEventMock).toHaveBeenCalledWith(
+    expect(logEventMock).not.toHaveBeenCalledWith(
       "warn",
       "host_op.dropped",
-      expect.objectContaining({
-        request_id: "h-term",
-        turn_phase: "completed",
-        settle: "fail_envelope",
-      }),
+      expect.anything(),
     );
-    expect(rejectHostMock).toHaveBeenCalledWith(payload, CID, "completed");
   });
 
   it("does not drop-log when checkpoint_required is allowed in terminal", () => {
@@ -215,12 +155,7 @@ describe("dispatchSSEEvent turn-phase gate logging", () => {
     );
     expect(logEventMock).not.toHaveBeenCalledWith(
       "warn",
-      "workspace_op.dropped",
-      expect.anything(),
-    );
-    expect(logEventMock).not.toHaveBeenCalledWith(
-      "warn",
-      "host_op.dropped",
+      "client_tool.ignored_on_conversation_sse",
       expect.anything(),
     );
   });

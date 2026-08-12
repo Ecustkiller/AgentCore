@@ -13,6 +13,7 @@ vi.mock("@/services/streamConversation", () => ({
 
 import { ApiError, NetworkError } from "@/services/api";
 import {
+  abortClientToolRequest,
   fulfillClientToolOnce,
   resetClientToolFulfillmentForTests,
 } from "../clientToolFulfill";
@@ -36,16 +37,22 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
 
     expect(perform).toHaveBeenCalledTimes(1);
-    expect(resolveInteraction).toHaveBeenCalledWith("c1", "r1", {
-      kind: "client_tool",
-      ok: true,
-      value: { x: 1 },
-    });
+    expect(resolveInteraction).toHaveBeenCalledWith(
+      "c1",
+      "r1",
+      {
+        kind: "client_tool",
+        ok: true,
+        value: { x: 1 },
+      },
+      "cloud",
+    );
   });
 
   it("skips side effect on a second call with the same request_id after success", async () => {
@@ -54,12 +61,14 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
@@ -80,12 +89,14 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     const a = fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
     const b = fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
@@ -108,12 +119,14 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
@@ -132,6 +145,7 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     const done = fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "workspaceOps",
       perform,
     });
@@ -152,6 +166,7 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     const done = fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "workspaceOps",
       perform,
     });
@@ -169,12 +184,14 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
@@ -195,17 +212,47 @@ describe("fulfillClientToolOnce (request_id 在飞/成功去重)", () => {
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
     await fulfillClientToolOnce({
       requestId: "r1",
       conversationId: "c1",
+      origin: "cloud",
       logLabel: "test",
       perform,
     });
 
     expect(perform).toHaveBeenCalledTimes(2);
     expect(resolveInteraction).toHaveBeenCalledTimes(2);
+  });
+
+  it("client_tool_cancelled aborts in-flight perform and skips settle", async () => {
+    let signal!: AbortSignal;
+    const perform = vi.fn(
+      (s: AbortSignal) =>
+        new Promise<{ ok: true; value: string }>((_resolve, reject) => {
+          signal = s;
+          s.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+
+    const done = fulfillClientToolOnce({
+      requestId: "r-cancel",
+      conversationId: "c1",
+      origin: "cloud",
+      logLabel: "workspaceOps",
+      perform,
+    });
+    await vi.waitFor(() => expect(perform).toHaveBeenCalled());
+    abortClientToolRequest("r-cancel");
+    await expect(done).resolves.toBeUndefined();
+    expect(signal.aborted).toBe(true);
+    expect(resolveInteraction).not.toHaveBeenCalled();
   });
 });

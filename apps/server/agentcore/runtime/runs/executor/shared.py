@@ -11,7 +11,7 @@ from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -414,15 +414,22 @@ async def _react_and_capture(
         on_tool_progress=_on_tool_progress,
         on_reset=lambda reason: sink.emit(run_output_reset(run_id, agent_id, reason)),
         raise_on_error=True,
-        citation_sink=citation_sink,
         # [n] 造引用查仍关；#rN id 存在闸由 turn_evidence_ledger + 正文标记启用（Q5）。
         annotate_citations=False,
         turn_evidence_ledger=turn_evidence_ledger,  # type: ignore[arg-type]
         ledger_registrant=ledger_registrant,
         approval_gate=approval_gate,
-        usage_sink=usage_sink,
+        out=ReactLoopOut(
+            rounds=round_sink,
+            citations=citation_sink,
+            usage=usage_sink,
+            finish_override=finish_override_sink,
+            gate_escalations=gate_escalation_sink,
+            cutoff_reasons=cutoff_reason_sink,
+            tool_failures=tool_failure_sink,
+            controller_seed_out=controller_seed_sink,
+        ),
         on_round_begin=on_round_begin,
-        round_sink=round_sink,
         run_id=run_id,
         agent_id=agent_id,
         role="worker",
@@ -433,13 +440,8 @@ async def _react_and_capture(
         # deliverable channel, react_loop also emits run_output_reset (via on_reset above)
         # so 直播==重载 — keeping the conformance invariant while cleaning the product.
         deliverable_only=True,
-        gate_escalation_sink=gate_escalation_sink,
         token_budget=token_budget,
-        finish_override_sink=finish_override_sink,
-        cutoff_reason_sink=cutoff_reason_sink,
-        tool_failure_sink=tool_failure_sink,
         controller_seed=controller_seed,
-        controller_seed_sink=controller_seed_sink,
         files_expected=files_expected,
         report_delivery=report_delivery,
         short_write_posture=short_write_posture,

@@ -40,21 +40,6 @@ _MISSING_FOLDER_ID = "缺少 folder_id（目标项目 id；先 list_projects / r
 _DENIED_MSG = (
     "目标项目 `{folder_id}` 不存在或无权访问；请重新列/解析项目后再读。"
 )
-_LOCAL_CHANNEL_MSG = (
-    "目标项目为本地目录，但本回合无可用桌面工作区通道；"
-    "请确认桌面在线后再用只读跨桌，或改用 delegate(target_folder_id=…) 派工。"
-)
-
-
-def _event_sink_from_context(context: ToolContext) -> EventSink | None:
-    """Reuse the turn's SSE sink so local WorkspaceChannel ops share the bridge."""
-    for holder in (context.workspace_channel, context.desktop_channel):
-        if holder is None:
-            continue
-        sink = getattr(holder, "sink", None)
-        if isinstance(sink, EventSink):
-            return sink
-    return None
 
 
 async def _open_target_desk(
@@ -103,17 +88,8 @@ async def _open_target_desk(
             error="folder_denied",
         )
 
-    sink = _event_sink_from_context(context)
-    if binding.local_binding is not None and sink is None:
-        return None, ToolResult(
-            tool_call_id="",
-            success=False,
-            output=_LOCAL_CHANNEL_MSG,
-            error="workspace_channel_unavailable",
-        )
-    if sink is None:
-        # Cloud Folder: ServerWorkspace ignores sink; keep a throwaway for the API.
-        sink = EventSink()
+    # build_workspace still accepts a display sink; CLIENT_TOOL no longer uses it.
+    sink = EventSink()
 
     backend = build_target_backend(
         user_id=context.user_id,
@@ -124,7 +100,7 @@ async def _open_target_desk(
     )
     workspace_channel = workspace_channel_for_tools(
         backend,
-        sink=sink,
+        user_id=context.user_id,
         conversation_id=context.conversation_id,
     )
     # Ephemeral desk: do not share birth-desk file_read ceilings / materials;

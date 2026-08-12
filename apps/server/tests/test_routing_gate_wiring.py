@@ -11,7 +11,7 @@ from typing import Any
 
 from agentcore.core.types import ToolCategory
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.engine.escalation_gate import apply_escalation_gate
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.loop_controller import ToolAttempt
@@ -206,7 +206,7 @@ async def test_worker_react_loop_scheme_output_does_not_fill_gate_sink():
         turn_model="primary",
         role="worker",
         run_id="run-w",
-        gate_escalation_sink=gate_sink,
+        out=ReactLoopOut(gate_escalations=gate_sink),
     )
 
     assert tool.calls == 1
@@ -239,7 +239,7 @@ async def test_worker_react_loop_execution_failure_does_not_escalate():
         turn_model="primary",
         role="worker",
         run_id="run-w",
-        gate_escalation_sink=gate_sink,
+        out=ReactLoopOut(gate_escalations=gate_sink),
     )
 
     assert content == "改用别的方式"
@@ -272,7 +272,7 @@ async def test_captain_role_does_not_wire_escalation_gate():
         turn_model="primary",
         role="captain",
         run_id="run-c",
-        gate_escalation_sink=gate_sink,
+        out=ReactLoopOut(gate_escalations=gate_sink),
     )
 
     assert gate_sink == []
@@ -302,6 +302,5 @@ async def test_worker_without_gate_sink_is_noop_even_on_scheme():
         turn_model="primary",
         role="worker",
         run_id="run-w",
-        gate_escalation_sink=None,
     )
     assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)

@@ -47,6 +47,11 @@ class WorkspaceSettings(BaseModel):
     # 16: enough for a multi-worker local file wave without pretending the
     # desktop bridge is unbounded; still a backpressure valve, not a product cap.
     workspace_channel_max_inflight: int = 16
+    # Prepare-phase wall-clock budget for local desktop channel IO (baseline +
+    # probe_exec + exists/.git + …). Caps the sum of per-op timeouts so a silent
+    # fulfiller cannot burn 60s×N before the turn aborts. Execution-phase tool
+    # IO is unaffected.
+    prepare_local_io_budget_seconds: float = 20.0
     workspace_execute_timeout_slack_seconds: float = 30.0
     workspace_handoff_timeout_seconds: float = 300.0
     # AI 协作白板 (AI协作白板.md §六 M2): how long the BoardChannel waits for the bound

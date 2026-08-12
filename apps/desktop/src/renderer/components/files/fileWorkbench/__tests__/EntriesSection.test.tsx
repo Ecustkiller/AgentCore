@@ -38,7 +38,10 @@ import {
 } from "@/services/documents";
 import {
   EntriesSection,
+  alwaysMeterTone,
   entryOpenTarget,
+  formatAlwaysChars,
+  formatMeterHeadline,
   isAiCoreMemoryLeaf,
 } from "../EntriesSection";
 
@@ -53,6 +56,7 @@ const entry = (over: Partial<DocumentNode> = {}): DocumentNode => ({
   description: "",
   name: "e.md",
   frontmatterError: null,
+  alwaysChars: over.applyMode === "on_demand" ? null : 1200,
   ...over,
 });
 
@@ -100,11 +104,115 @@ beforeEach(() => {
     usedChars: 100,
     maxChars: 1000,
     percent: 10,
+    globalChars: 100,
+    projectChars: 0,
   });
 });
 
 afterEach(() => {
   cleanup();
+});
+
+describe("always usage copy helpers", () => {
+  it("distinguishes 0 from under-a-thousand and coarsens to 千/万", () => {
+    expect(formatAlwaysChars(0)).toBe("0 字");
+    expect(formatAlwaysChars(450)).toBe("不足千字");
+    expect(formatAlwaysChars(4200)).toBe("约 4 千字");
+    expect(formatAlwaysChars(12000)).toBe("约 1.2 万字");
+  });
+
+  it("leads with remaining capacity so users need no subtraction", () => {
+    expect(
+      formatMeterHeadline(
+        {
+          usedChars: 0,
+          maxChars: 24000,
+          percent: 0,
+          globalChars: 0,
+          projectChars: 0,
+        },
+        "global",
+      ),
+    ).toBe("常驻 · 还剩约 2.4 万字");
+    expect(
+      formatMeterHeadline(
+        {
+          usedChars: 4200,
+          maxChars: 24000,
+          percent: 17.5,
+          globalChars: 4200,
+          projectChars: 0,
+        },
+        "global",
+      ),
+    ).toBe("常驻 · 还剩约 2 万字");
+    expect(
+      formatMeterHeadline(
+        {
+          usedChars: 5600,
+          maxChars: 24000,
+          percent: 23.3,
+          globalChars: 4200,
+          projectChars: 1400,
+        },
+        "project",
+      ),
+    ).toBe("常驻（含全局） · 还剩约 1.8 万字");
+    expect(
+      formatMeterHeadline(
+        {
+          usedChars: 20000,
+          maxChars: 24000,
+          percent: 83.3,
+          globalChars: 20000,
+          projectChars: 0,
+        },
+        "global",
+      ),
+    ).toBe("常驻 · 快满了，还剩约 4 千字");
+    expect(
+      formatMeterHeadline(
+        {
+          usedChars: 28000,
+          maxChars: 24000,
+          percent: 116.7,
+          globalChars: 28000,
+          projectChars: 0,
+        },
+        "global",
+      ),
+    ).toBe("常驻 · 已满，超出约 4 千字");
+  });
+
+  it("tones near-full and over for consequence copy", () => {
+    expect(
+      alwaysMeterTone({
+        usedChars: 4200,
+        maxChars: 24000,
+        percent: 17.5,
+        globalChars: 4200,
+        projectChars: 0,
+      }),
+    ).toBe("ok");
+    expect(
+      alwaysMeterTone({
+        usedChars: 20000,
+        maxChars: 24000,
+        percent: 83.3,
+        globalChars: 20000,
+        projectChars: 0,
+      }),
+    ).toBe("near");
+    expect(
+      alwaysMeterTone({
+        usedChars: 28000,
+        maxChars: 24000,
+        percent: 116.7,
+        globalChars: 28000,
+        projectChars: 0,
+      }),
+    ).toBe("over");
+  });
 });
 
 describe("entryOpenTarget", () => {
@@ -181,6 +289,7 @@ describe("EntriesSection (global)", () => {
         name: "语气.md",
         applyMode: "always",
         description: "回复语气",
+        alwaysChars: 1200,
       }),
       entry({
         id: "g2",
@@ -188,12 +297,14 @@ describe("EntriesSection (global)", () => {
         aiMaintained: true,
         applyMode: "always",
         description: "用户画像",
+        alwaysChars: 800,
       }),
       entry({
         id: "g3",
         name: "偶发.md",
         applyMode: "on_demand",
         description: "",
+        alwaysChars: null,
       }),
     ]);
     renderScope("global");
@@ -209,7 +320,8 @@ describe("EntriesSection (global)", () => {
     expect(screen.queryByText("记忆")).toBeNull();
     expect(screen.queryByText("规则")).toBeNull();
     expect(screen.queryByText(/^文档$/)).toBeNull();
-    expect(screen.getByText(/常驻 10%/)).toBeTruthy();
+    expect(screen.getByText(/还剩不足千字/)).toBeTruthy();
+    expect(screen.getByText("约 1 千字")).toBeTruthy();
     expect(screen.getByText("最近更新")).toBeTruthy();
   });
 
@@ -303,8 +415,16 @@ describe("EntriesSection (project)", () => {
         name: "导航.md",
         aiMaintained: true,
         description: "项目路由",
+        alwaysChars: 2400,
       }),
     ]);
+    vi.mocked(getAlwaysQuota).mockResolvedValue({
+      usedChars: 9800,
+      maxChars: 12000,
+      percent: 81.7,
+      globalChars: 4200,
+      projectChars: 5600,
+    });
     const { onOpenUpdates } = renderScope("project");
     expect(await screen.findByText("导航.md")).toBeTruthy();
     expect(screen.getByText("项目路由")).toBeTruthy();
@@ -314,5 +434,9 @@ describe("EntriesSection (project)", () => {
     expect(onOpenUpdates).not.toHaveBeenCalled();
     expect(listScopeEntries).toHaveBeenCalledWith("F1");
     expect(getAlwaysQuota).toHaveBeenCalledWith("F1");
+    expect(
+      screen.getByText(/常驻（含全局） · 快满了，还剩约 2 千字/),
+    ).toBeTruthy();
+    expect(screen.getByText("约 2 千字")).toBeTruthy();
   });
 });

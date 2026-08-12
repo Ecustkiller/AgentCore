@@ -1,16 +1,24 @@
-"""Re-emit open CLIENT_TOOL ``*_required`` frames on SSE attach.
+"""CLIENT_TOOL ``*_required`` frames: registry payload + fulfill-side re-hang.
 
-``*_op_required`` / notify / board_read stay EPHEMERAL (not journaled). On refresh,
-attach replays DURABLE journal (or sink history), then re-sends still-open client_tool
-requests from the in-process registry so the desktop can fulfil them. Done /
-cancelled / discarded entries are absent from ``list_pending`` and are not re-sent.
-Process restart / no live turn (204) does not promise reattach.
+``*_op_required`` / notify / board_read stay EPHEMERAL (not journaled). Delivery
+goes through the device-level fulfill hub (:func:`push_client_tool_required`),
+not the turn display EventSink. On fulfiller connect / reconnect / roots update,
+:func:`rehang_pending_client_tools` re-pushes still-open registry entries so an
+in-flight op is not lost when the desktop briefly drops. Done / cancelled /
+discarded entries are absent from ``list_pending`` and are not re-sent.
+Process restart does not promise reattach.
+
+The reverse direction is :func:`cancel_pending_client_tools`: an explicit user
+stop drops the awaiter, so the device must be told to abort the op it is still
+running (otherwise a dispatched ``host_shell`` finishes on the user's machine
+long after the turn is gone).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.desktop import (
     desktop_notify_required,
@@ -21,6 +29,9 @@ from agentcore.runtime.events.desktop import (
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.events.workspace import workspace_op_required
 from agentcore.runtime.interaction import InteractionKind, InteractionRequest
+from agentcore.runtime.ports import ClientRequestBridge
+
+logger = get_logger(__name__)
 
 # Stable channel tags written into ``InteractionRequest.payload`` at suspend.
 CHANNEL_HOST = "host"
@@ -32,7 +43,7 @@ CHANNEL_NOTIFY = "notify"
 CHANNEL_EXTERNAL_MOUNT = "external_mount"
 
 # Meta keys on the registry payload (not forwarded into the SSE wire body).
-_META_KEYS = frozenset({"channel", "event_type"})
+_META_KEYS = frozenset({"channel", "event_type", "user_id"})
 
 
 def client_tool_payload(
@@ -40,9 +51,13 @@ def client_tool_payload(
     event_type: str,
     *,
     params: dict[str, Any],
+    user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Registry payload: stable channel/event_type + original op params."""
-    return {"channel": channel, "event_type": event_type, **params}
+    """Registry payload: stable channel/event_type + original op params (+ user)."""
+    out: dict[str, Any] = {"channel": channel, "event_type": event_type, **params}
+    if user_id:
+        out["user_id"] = user_id
+    return out
 
 
 def build_client_tool_required(req: InteractionRequest) -> SSEEvent | None:
@@ -137,8 +152,113 @@ def build_client_tool_required(req: InteractionRequest) -> SSEEvent | None:
     return None
 
 
+def push_client_tool_required(
+    *,
+    user_id: str,
+    conversation_id: str,
+    channel: str,
+    root_id: str | None,
+    event: SSEEvent,
+    registry: ClientRequestBridge,
+    request_id: str,
+    error_kind: str,
+    error_detail: str,
+) -> bool:
+    """Deliver via the fulfill hub; on ``NO_FULFILLER``, settle the pending op now.
+
+    Returns ``True`` when a fulfiller received the frame. ``False`` means the
+    registry Future was settled with a typed failure envelope (caller awaits it).
+    """
+    from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
+
+    status = deliver_client_tool(user_id, conversation_id, channel, root_id, event)
+    if status is DeliverResult.DELIVERED:
+        return True
+    registry.resolve(
+        request_id,
+        {
+            "ok": False,
+            "error": {"kind": error_kind, "detail": error_detail},
+        },
+        conversation_id=conversation_id,
+    )
+    return False
+
+
+def _pending_client_tool_route(req: InteractionRequest) -> tuple[str, str, str | None] | None:
+    """``(user_id, channel, root_id)`` for an open CLIENT_TOOL request, else ``None``."""
+    if req.kind != InteractionKind.CLIENT_TOOL or req.future.done():
+        return None
+    user_id = req.payload.get("user_id")
+    if not isinstance(user_id, str) or not user_id:
+        return None
+    channel = req.payload.get("channel")
+    if not isinstance(channel, str) or not channel:
+        channel = _channel_from_event_type(req.payload.get("event_type"))
+    if not channel:
+        return None
+    raw_root = req.payload.get("root_id")
+    root_id = raw_root.strip() if isinstance(raw_root, str) else None
+    return user_id, channel, (root_id or None)
+
+
+def client_tool_cancelled_frame(*, request_id: str, conversation_id: str) -> dict[str, Any]:
+    """The fulfill-channel frame that tells a device to abort one in-flight op.
+
+    Deliberately **not** an ``SSEEvent``: it never rides the conversation display
+    stream (no journal, no fold) — only the device fulfill channel, whose wire
+    body is ``{type, payload}`` (see ``fulfill.dispatch``).
+    """
+    return {
+        "type": "client_tool_cancelled",
+        "payload": {"request_id": request_id, "conversation_id": conversation_id},
+    }
+
+
+def cancel_pending_client_tools(conversation_id: str) -> int:
+    """Abort this conversation's in-flight CLIENT_TOOL ops on their fulfiller.
+
+    Call BEFORE cancelling the turn task: once the awaiting task unwinds,
+    ``InteractionRegistry.suspend``'s ``finally`` discards the entries and there is
+    nothing left to address, so the device would keep running an op nobody awaits.
+    Best-effort — a device that is offline simply never hears about it. Returns how
+    many cancel frames were enqueued.
+    """
+    from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
+    from agentcore.runtime.interaction import default_interaction_registry
+
+    cancelled = 0
+    for req in default_interaction_registry().list_pending(conversation_id):
+        route = _pending_client_tool_route(req)
+        if route is None:
+            continue
+        user_id, channel, root_id = route
+        status = deliver_client_tool(
+            user_id,
+            conversation_id,
+            channel,
+            root_id,
+            client_tool_cancelled_frame(
+                request_id=req.id, conversation_id=conversation_id
+            ),
+        )
+        if status is DeliverResult.DELIVERED:
+            cancelled += 1
+    if cancelled:
+        logger.info(
+            "client_tool.cancel_pushed",
+            conversation_id=conversation_id,
+            count=cancelled,
+        )
+    return cancelled
+
+
 def pending_client_tool_events(conversation_id: str) -> list[SSEEvent]:
-    """Open CLIENT_TOOL ``*_required`` frames for one conversation (attach re-hang)."""
+    """Open CLIENT_TOOL ``*_required`` frames for one conversation (rebuild only).
+
+    Prefer :func:`rehang_pending_client_tools` on fulfiller connect — display-stream
+    attach no longer re-hangs CLIENT_TOOL.
+    """
     from agentcore.runtime.interaction import default_interaction_registry
 
     out: list[SSEEvent] = []
@@ -147,6 +267,40 @@ def pending_client_tool_events(conversation_id: str) -> list[SSEEvent]:
         if event is not None:
             out.append(event)
     return out
+
+
+def rehang_pending_client_tools(user_id: str) -> int:
+    """Re-deliver this user's open CLIENT_TOOL frames to a live fulfiller.
+
+    Called when a fulfiller connects / reconnects or updates roots. Does **not**
+    settle on ``NO_FULFILLER`` — the Future stays open until a capable device
+    appears, the channel times out, or the op is discarded. Returns how many
+    frames were successfully enqueued.
+    """
+    from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
+    from agentcore.runtime.interaction import default_interaction_registry
+
+    delivered = 0
+    for req in default_interaction_registry().list_pending():
+        route = _pending_client_tool_route(req)
+        if route is None or route[0] != user_id:
+            continue
+        _, channel, root_id = route
+        event = build_client_tool_required(req)
+        if event is None:
+            continue
+        status = deliver_client_tool(
+            user_id, req.conversation_id, channel, root_id, event
+        )
+        if status is DeliverResult.DELIVERED:
+            delivered += 1
+    if delivered:
+        logger.info(
+            "client_tool.rehang",
+            user=user_id,
+            delivered=delivered,
+        )
+    return delivered
 
 
 def _channel_from_event_type(event_type: Any) -> str | None:

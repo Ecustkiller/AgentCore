@@ -658,9 +658,14 @@ async def stop_message(
     ``POST …/queued-turns/{queue_id}/cancel``.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
+    from agentcore.runtime.events.client_tool_reattach import cancel_pending_client_tools
     from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
 
     await orphan_live_turn_hot_pending(conversation_id)
+    # Before the task cancel below: the awaiter's ``finally`` discards these
+    # entries, and an already-dispatched op (host_shell…) would otherwise run to
+    # completion on the user's machine with nobody left to receive it.
+    cancel_pending_client_tools(conversation_id)
 
     stopped = turn_runs.stop(conversation_id)
     if not stopped:

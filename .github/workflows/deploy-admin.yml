@@ -31,12 +31,10 @@ jobs:
           node-version: 22
 
       - name: Install admin dependencies
-        working-directory: apps/admin
-        run: pnpm install --no-frozen-lockfile --ignore-workspace
-
-      - name: Generate API types
-        working-directory: apps/admin
-        run: pnpm gen:api
+        # admin 依赖 @agentcore/contract-rest-types（workspace:*），故走仓库根的
+        # workspace-filtered install，**不能** --ignore-workspace（那只对有独立
+        # lockfile 的 apps/website 成立）。与 ci.yml 的 admin job 同写法。
+        run: pnpm install --frozen-lockfile --filter agentcore-admin...
 
       - name: Build admin SPA
         working-directory: apps/admin

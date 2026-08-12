@@ -163,17 +163,81 @@ async def test_always_quota_endpoint(client, tiny_always_cap):
     body = r.json()
     assert body["max_chars"] == 80
     assert body["used_chars"] == 0
+    assert body["global_chars"] == 0
+    assert body["project_chars"] == 0
     assert body["percent"] == 0.0
+
+    created = (
+        await client.post(
+            "/v1/documents",
+            json={
+                "name": "一.md",
+                "role": "rule",
+                "apply_mode": "always",
+                "content": "hello",
+            },
+        )
+    ).json()
+    assert created["always_chars"] == len("hello")
+
+    body = (await client.get("/v1/documents/always-quota")).json()
+    assert body["used_chars"] == len("hello")
+    assert body["global_chars"] == len("hello")
+    assert body["project_chars"] == 0
+    assert body["used_chars"] == body["global_chars"] + body["project_chars"]
+    assert body["percent"] > 0
+
+    listed = (await client.get("/v1/documents", params={"parent_id": created["parent_id"]})).json()
+    always_rows = [n for n in listed if n["id"] == created["id"]]
+    assert always_rows and always_rows[0]["always_chars"] == len("hello")
+    on_demand = (
+        await client.post(
+            "/v1/documents",
+            json={
+                "name": "按需.md",
+                "role": "rule",
+                "apply_mode": "on_demand",
+                "content": "skip-me",
+            },
+        )
+    ).json()
+    assert on_demand["always_chars"] is None
+
+
+async def test_always_quota_project_split_sums_to_used(client, tiny_always_cap):
+    """Project meter = global ∪ project; used_chars == global_chars + project_chars."""
+    await register_and_login(client, "aq_split")
+    proj = str(uuid.uuid4())
 
     await client.post(
         "/v1/documents",
         json={
-            "name": "一.md",
+            "name": "全局.md",
             "role": "rule",
             "apply_mode": "always",
-            "content": "hello",
+            "content": "GLO",
         },
     )
-    body = (await client.get("/v1/documents/always-quota")).json()
-    assert body["used_chars"] == len("hello")
-    assert body["percent"] > 0
+    await client.post(
+        "/v1/documents",
+        json={
+            "name": "项目.md",
+            "role": "rule",
+            "apply_mode": "always",
+            "folder_id": proj,
+            "content": "PRO",
+        },
+    )
+
+    global_body = (await client.get("/v1/documents/always-quota")).json()
+    assert global_body["used_chars"] == len("GLO")
+    assert global_body["global_chars"] == len("GLO")
+    assert global_body["project_chars"] == 0
+
+    proj_body = (
+        await client.get("/v1/documents/always-quota", params={"folder_id": proj})
+    ).json()
+    assert proj_body["global_chars"] == len("GLO")
+    assert proj_body["project_chars"] == len("PRO")
+    assert proj_body["used_chars"] == proj_body["global_chars"] + proj_body["project_chars"]
+    assert proj_body["used_chars"] == len("GLO") + len("PRO")

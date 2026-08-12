@@ -19,7 +19,13 @@ from agentcore.llm.profiles import default_turn_profiles as default_profile_set
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.delegate.drive import drive
+from agentcore.runtime.delegate.graph_identity import resolve_graph_identity
 from agentcore.runtime.delegate.plan_events import plan_event
+from agentcore.runtime.delegate.prelude import (
+    DelegateCallFlags,
+    DelegatePreludeReject,
+    resolve_delegate_prelude,
+)
 from agentcore.runtime.delegate.steer import apply_steer, record_plan_snapshot
 from agentcore.runtime.delegate.supervised import (
     SupervisedRun,
@@ -54,86 +60,10 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-def _has_wave_boundary_features(tasks_raw: list[Any]) -> bool:
-    """True when any task needs BIND / CHECKPOINT / DAG wave-boundary machinery."""
-    for task in tasks_raw:
-        if not isinstance(task, dict):
-            continue
-        if task.get("depends_on") or task.get("checkpoint_after") or task.get("bind_after_deps"):
-            return True
-    return False
-
-
-def _has_deep_deliverable_signal(tasks_raw: list[Any]) -> bool:
-    """True when any task declares ``form=files`` / non-empty ``artifacts``.
-
-    Orchestration shape (single worker, no DAG) is orthogonal to output weight —
-    file-shaped deliverable must not be collapsed into auto-light.
-    Retired fields (``min_length`` / ``requires_files``) are not consulted.
-    """
-    for task in tasks_raw:
-        if not isinstance(task, dict):
-            continue
-        raw = task.get("deliverable")
-        if not isinstance(raw, dict):
-            continue
-        if raw.get("form") == "files":
-            return True
-        arts = raw.get("artifacts")
-        if isinstance(arts, list) and any(
-            isinstance(a, str) and a.strip() for a in arts
-        ):
-            return True
-    return False
-
-
-def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
-    """True when a single dependency-free worker needs no multi-agent coordination.
-
-    Skips auto-light when deliverable is file-shaped (``form=files`` / artifacts)
-    so budget mapping can still promote standard → deep.
-    ``complexity_hint=light`` no longer stamps short ``max_rounds``; browser tool
-    surfaces are not excluded from auto-light for round-budget reasons.
-    """
-    if len(tasks_raw) != 1:
-        return False
-    task = tasks_raw[0]
-    if not isinstance(task, dict):
-        return False
-    if _has_wave_boundary_features([task]):
-        return False
-    return not _has_deep_deliverable_signal([task])
-
-
 # Cap on how many nodes `delegate.started` lists by name/task — a big fan-out shouldn't
 # balloon one log line; `nodes` still carries the true total.
 _DELEGATE_LOG_AGENTS_CAP = 12
 
-
-def _is_same_host_turn_append(active: Any, message_id: str | None) -> bool:
-    """True only for same-turn secondary delegate (message_id ≡ host_turn_id).
-
-    Cross-turn adopt keeps the host eid active but this turn's message_id differs
-    from ``host_turn_id`` — that path uses live session merge (no divert), not
-    ``prev_execution_id``. Empty / unbound ``host_turn_id`` is not same-turn.
-    """
-    host_tid = (getattr(active, "host_turn_id", None) or "").strip()
-    cur_tid = (message_id or "").strip()
-    return bool(host_tid) and host_tid == cur_tid
-
-
-def _is_live_execution_merge(active: Any, append_to: str | None) -> bool:
-    """True when ``append_to`` targets a still-active coordination session (合入热图).
-
-    Covers same-turn secondary delegate and adopt mid-flight (新回合接上仍在跑的后台图).
-    Finished cross-turn graphs are not live → caller mints a new eid + prev chain.
-    """
-    if active is None or not getattr(active, "active", False):
-        return False
-    eid = (append_to or "").strip()
-    if not eid:
-        return False
-    return eid == (getattr(active, "execution_id", None) or "").strip()
 
 def _waves_ids_for_log(
     plan: RunPlan,
@@ -350,227 +280,39 @@ class DelegateTool:
             approval=ToolApproval.NEVER,
         )
 
+    def _apply_call_flags(self, flags: DelegateCallFlags | None) -> None:
+        """把前奏解析出的 per-call 标记镜像到实例上（抽出前这几行内联在 execute 里）。"""
+        if flags is None:
+            return
+        self._active_playbook = flags.playbook
+        self._active_playbook_args = flags.playbook_args
+        if flags.force is not None:
+            self._delegate_force = flags.force
+
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-        from agentcore.llm.turn_auth_dead import (
-            is_turn_auth_dead,
-            turn_auth_dead_reject_message,
-        )
-        from agentcore.runtime.delegate.playbook_declaration import (
-            declaration_reject_gate,
-            resolve_playbook_declaration,
-        )
         from agentcore.runtime.runs import build_run_plan
-        from agentcore.runtime.turn.token_budget import (
-            current_turn_tokens,
-            is_turn_token_ceiling_hit,
-            resolve_turn_token_ceiling,
-            turn_token_ceiling_reject_message,
-        )
 
-        # Turn 级硬顶：禁新派（在飞不 cancel）；与 per-worker ceiling 正交。
-        if is_turn_token_ceiling_hit():
-            msg = turn_token_ceiling_reject_message()
-            logger.info(
-                "delegate.turn_token_ceiling_rejected",
-                spent=current_turn_tokens(),
-                ceiling=resolve_turn_token_ceiling(),
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=msg,
-                contract_failure=True,
-            )
-
-        # 甲+乙：本回合 API Key 已鉴权死后禁再 delegate 烧调用。
-        if is_turn_auth_dead():
-            msg = turn_auth_dead_reject_message()
-            logger.info("delegate.turn_auth_dead_rejected")
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=msg,
-                contract_failure=True,
-            )
-
-        # Playbook 声明闸：结构校验；建站/绿场 none 不硬拒。场面账（style/format/delivery）已拆除。
-        automation_delivery_warning: str | None = None
-        declared_playbook, _none_reason, decl_error = resolve_playbook_declaration(
+        prelude = resolve_delegate_prelude(
             arguments,
-            user_message=self._user_message or "",
+            tools=self._tools,
+            user_message=self._user_message,
+            conversation_id=self._conversation_id,
+            depth=self._depth,
+            sub_workers_spawned=self._sub_workers_spawned,
         )
-        if decl_error:
-            gate = declaration_reject_gate(decl_error)
-            logger.info(
-                "delegate.playbook_declaration_rejected",
-                playbook_id=arguments.get("playbook_id") or arguments.get("playbook"),
-                has_tasks=bool(arguments.get("tasks")),
-                gate=gate,
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=decl_error,
-                contract_failure=True,
-            )
-        logger.info(
-            "delegate.playbook_declaration",
-            playbook_id=declared_playbook or "none",
-        )
-
-        # 拆·playbook 固化 (§2.1): a固化形状 instantiates the whole tasks array, then flows through
-        # the SAME pipeline below as a hand-written one (纯加法). playbook XOR tasks is enforced
-        # in resolve_playbook_declaration (and re-checked here as defense in depth).
-        playbook = declared_playbook
-        if playbook is not None:
-            from agentcore.runtime.delegate.playbook_declaration import (
-                PLAYBOOK_TASKS_XOR_MSG,
-            )
-            from agentcore.runtime.runs.playbooks import (
-                collect_playbook_notes,
-                expand_playbook,
-            )
-
-            if arguments.get("tasks"):
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=PLAYBOOK_TASKS_XOR_MSG,
-                    # 契约自纠拒绝——勿进熔断（CEO 连试换 none/去掉 tasks 会误禁用）。
-                    contract_failure=True,
-                )
-            # Mechanism: pass turn user line so playbooks (e.g. multi_lens synthesizer)
-            # can inject proposition-fidelity anchors without relying on CEO-filled topic.
-            tasks_raw, pb_errors = expand_playbook(
-                playbook,
-                arguments.get("playbook_args"),
-                user_message=self._user_message,
-                conversation_id=self._conversation_id or "",
-            )
-            if pb_errors:
-                msg = "playbook 实例化失败：" + "；".join(pb_errors)
-                logger.info("delegate.playbook_rejected", playbook=playbook, errors=pb_errors)
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-            self._active_playbook = playbook
-            raw_args = arguments.get("playbook_args")
-            self._active_playbook_args = (
-                dict(raw_args) if isinstance(raw_args, dict) else None
-            )
-            playbook_notes = collect_playbook_notes(tasks_raw)
-            logger.info(
-                "delegate.playbook",
-                playbook=playbook,
-                nodes=len(tasks_raw),
-                notes=len(playbook_notes),
-            )
-            # MLR keep 标记延后到真正开跑（team_preview CONTINUE / pre-auth 跳过），
-            # 避免 STOP / 调度失败仍挡住回合收尾 orphan。
-        else:
-            self._active_playbook = None
-            self._active_playbook_args = None
-            playbook_notes = []
-            tasks_raw = arguments.get("tasks")
-            if not isinstance(tasks_raw, list) or not tasks_raw:
-                msg = "'tasks' 必须是非空数组：每个元素至少包含 role 和 task。"
-                return ToolResult(
-                    tool_call_id="",
-                    success=False,
-                    output="",
-                    error=msg,
-                    contract_failure=True,
-                )
-
-        # 演讲/PPT 场面账已拆除：不再因 format ledger 硬拒 pptx→md。
-        presentation_format_warning: str | None = None
-
-        valid_tools = {s.name for s in self._tools.list_all()}
-        complexity_hint = arguments.get("complexity_hint", "standard")
-        self._delegate_force = bool(arguments.get("force"))
-        if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
-            complexity_hint = "light"
-            # info 级：档位归责的关键决策事件，debug 级曾导致线上排查只能靠 demo_tape 反推。
-            logger.info("delegate.complexity_hint_inferred", hint="light")
-        elif complexity_hint == "light" and _has_wave_boundary_features(tasks_raw):
-            # 显式 light 与 DAG/波边界并存时忽略 light（避免关掉 on_boundary）。
-            # 已删字数字段 / form=files / artifacts alone 不挡 light（修码快修）。
-            complexity_hint = "standard"
-            logger.info(
-                "delegate.complexity_hint_ignored",
-                reason="wave_boundary_features",
-            )
-
-        if self._depth >= 1:
-            from agentcore.runtime.runs.constants import MAX_WORKER_SUBDELEGATIONS
-
-            new_nodes = len(tasks_raw)
-            if self._sub_workers_spawned + new_nodes > MAX_WORKER_SUBDELEGATIONS:
-                msg = (
-                    f"子团队扇出已达上限（已派出 {self._sub_workers_spawned} 个 sub-worker，"
-                    f"本次 {new_nodes} 个，上限 {MAX_WORKER_SUBDELEGATIONS}）——请合并任务或分批。"
-                )
-                logger.info(
-                    "delegate.sub_fanout_rejected",
-                    spawned=self._sub_workers_spawned,
-                    requested=new_nodes,
-                    cap=MAX_WORKER_SUBDELEGATIONS,
-                )
-                return ToolResult(tool_call_id="", success=False, output="", error=msg)
-        # 消费者漏边：task 写明吃同批队友产出但 depends_on 为空 → 软告警一次，不拒收入图。
-        # playbook 展开后的 tasks 也过闸；有边则无告警。引擎不猜边改图。
-        from agentcore.runtime.delegate.consumer_deps import (
-            check_consumer_missing_depends,
-        )
-
-        consumer_deps_warn = check_consumer_missing_depends(tasks_raw)
-        if consumer_deps_warn:
-            logger.info(
-                "delegate.consumer_deps_soft_warn",
-                task_count=len(tasks_raw),
-                hint=consumer_deps_warn[:200],
-            )
-
-        # 设计+实现同 grant：单 task artifacts/文案同时含设计与实现且未结构拆开 → 软告警一次。
-        # 不拒收、不自动拆波改图。
-        from agentcore.runtime.delegate.design_impl_slice import (
-            check_design_impl_same_grant,
-        )
-
-        design_impl_warn = check_design_impl_same_grant(tasks_raw)
-        if design_impl_warn:
-            logger.info(
-                "delegate.design_impl_same_grant_soft_warn",
-                task_count=len(tasks_raw),
-                hint=design_impl_warn[:200],
-            )
-
-        # 根委派切片诚实：单节点手写写工程且无结构钉 → 软告警一次。
-        # 不拒收、不改图；嵌套扇出为合法等价路径（文案明示）。
-        from agentcore.runtime.delegate.root_slice_honesty import (
-            check_root_slice_honesty,
-        )
-
-        root_slice_warn = check_root_slice_honesty(
-            tasks_raw,
-            depth=int(getattr(self, "_depth", 0) or 0),
-            playbook=playbook if isinstance(playbook, str) else None,
-            finalize=bool(arguments.get("finalize")),
-        )
-        if root_slice_warn:
-            logger.info(
-                "delegate.root_slice_honesty_soft_warn",
-                task_count=len(tasks_raw) if isinstance(tasks_raw, list) else 0,
-                hint=root_slice_warn[:200],
-            )
+        self._apply_call_flags(prelude.flags)
+        if isinstance(prelude, DelegatePreludeReject):
+            return prelude.result
+        playbook = prelude.playbook
+        tasks_raw = prelude.tasks_raw
+        playbook_notes = prelude.playbook_notes
+        valid_tools = prelude.valid_tools
+        complexity_hint = prelude.complexity_hint
+        consumer_deps_warn = prelude.consumer_deps_warn
+        design_impl_warn = prelude.design_impl_warn
+        root_slice_warn = prelude.root_slice_warn
+        presentation_format_warning = prelude.presentation_format_warning
+        automation_delivery_warning = prelude.automation_delivery_warning
 
         # §4.2b·2b / 改法④A：无出生且写盘缺目标 → 先静默建云桌，再闸。
         # 裸聊同回合唯一 create/resolve / auto 可经 turn_target_desk 继承缺省目标。
@@ -622,220 +364,27 @@ class DelegateTool:
                 folder_id=default_target,
             )
 
-        # 协作图身份：同回合 / adopt 热图 → 合入同一 execution_id；
-        # 跨回合已收口图 → 新 execution_id + prev_execution_id（不 divert）。
-        append_raw = arguments.get("append_to_execution_id")
-        append_to = (
-            append_raw.strip()
-            if isinstance(append_raw, str) and append_raw.strip()
-            else None
+        identity = await resolve_graph_identity(
+            arguments,
+            depth=self._depth,
+            context_execution_id=self._base_tool_context.execution_id,
+            message_id=self._message_id,
+            conversation_id=self._conversation_id,
+            captain_run_id=self._captain_run_id,
+            calls=self._calls,
+            last_graph_execution_id=self._last_graph_execution_id,
+            last_graph_plan=self._last_graph_plan,
+            last_graph_seed=self._last_graph_seed,
         )
-        prev_execution_id: str | None = None
-        append_seed: dict | None = None
-        host_plan_for_append = None
-        latest_miss_degraded_note: str | None = None
-        if append_to and self._depth > 0:
-            msg = (
-                "append_to_execution_id 仅根协调者可用：嵌套 lead 不能跨回合追加协作图。"
-                "请去掉该参数，直接在本子团队内委派。"
-            )
-            return ToolResult(
-                tool_call_id="",
-                success=False,
-                output="",
-                error=msg,
-                contract_failure=True,
-            )
-        if append_to and append_to.lower() == "latest":
-            from agentcore.runtime.coordination.session import active_coordination
+        if isinstance(identity, ToolResult):
+            return identity
+        append_to = identity.append_to
+        prev_execution_id = identity.prev_execution_id
+        append_seed = identity.append_seed
+        host_plan_for_append = identity.host_plan_for_append
+        host_captain_run_id = identity.host_captain_run_id
+        latest_miss_degraded_note = identity.latest_miss_degraded_note
 
-            # 真同回合二次 / adopt 热图：吞 latest，走 live merge（不 prev）。
-            active = active_coordination(self._base_tool_context.execution_id)
-            if active is not None and active.active and (
-                _is_same_host_turn_append(active, self._message_id)
-                or _is_live_execution_merge(active, active.execution_id)
-            ):
-                append_to = None
-            else:
-                # 同回合第一波已收口：内存宿主优先于跨 message DB latest，禁静默挂旧图。
-                last_eid = getattr(self, "_last_graph_execution_id", None)
-                if (
-                    self._calls >= 1
-                    and isinstance(last_eid, str)
-                    and last_eid.strip()
-                ):
-                    append_to = last_eid.strip()
-                    last_plan = getattr(self, "_last_graph_plan", None)
-                    if last_plan is not None:
-                        host_plan_for_append = last_plan
-                        last_seed = getattr(self, "_last_graph_seed", None)
-                        if last_seed is not None and append_seed is None:
-                            append_seed = last_seed
-                    logger.info(
-                        "delegate.graph_append_latest",
-                        conversation_id=self._conversation_id or "",
-                        resolved=append_to,
-                        prefer_message_id=self._message_id,
-                        exclude_message_id=None,
-                        via="same_turn_memory",
-                    )
-                else:
-                    from agentcore.runtime.delegate.graph_append import (
-                        resolve_latest_appendable_execution,
-                    )
-
-                    resolved = await resolve_latest_appendable_execution(
-                        conversation_id=self._conversation_id or "",
-                        prefer_message_id=self._message_id,
-                    )
-                    if not resolved:
-                        # 无图可追加：自动降级为不带 append 新建（勿 success=False 空转）。
-                        latest_miss_degraded_note = (
-                            '【latest 未命中·已自动新建】append_to_execution_id="latest" '
-                            "未解析到可追加协作图（旧图已收口或本对话尚无图）；"
-                            "已自动不带 append 新开团队。"
-                            "向用户如实告知：本次是新组建团队、未在旧图上追加。"
-                        )
-                        append_to = None
-                    else:
-                        append_to = resolved
-        # 同回合显式 append_to / adopt 热图命中当前活跃协作图 ≡ 不传 append。
-        if append_to:
-            from agentcore.runtime.coordination.session import active_coordination
-
-            active = active_coordination(self._base_tool_context.execution_id)
-            # Keep nested: outer = live-merge eligibility; inner = soft-clear predicate
-            # (comments below belong to the clear, not the eligibility gate).
-            if (  # noqa: SIM102
-                active is not None
-                and active.active
-                and _is_live_execution_merge(active, append_to)
-                and (
-                    _is_same_host_turn_append(active, self._message_id)
-                    or append_to == active.execution_id
-                )
-            ):
-                # Soft-clear：热图合入由 drive merging_into_active / live_plan 承担。
-                # 同回合仍可走下方 _last_graph / live_plan 注入；adopt 则已绑 eid。
-                if _is_same_host_turn_append(active, self._message_id) or (
-                    active.execution_id == (self._base_tool_context.execution_id or "")
-                ):
-                    append_to = None
-
-        # 同回合注入 existing_plan：append 已加载则保持；否则活跃 live_plan；
-        # 再否则本 tool 实例二次+ 自动合入上一张图（与显式 append 同路径）。
-        # 跨回合无 append 仍默认新图——仅同回合（活跃 session / _calls≥1）自动合入。
-        if host_plan_for_append is None and not append_to:
-            from agentcore.runtime.coordination.session import active_coordination
-
-            active = active_coordination(self._base_tool_context.execution_id)
-            bound_eid = (self._base_tool_context.execution_id or "").strip()
-            if (
-                active is not None
-                and active.active
-                and getattr(active, "live_plan", None) is not None
-                and (
-                    _is_same_host_turn_append(active, self._message_id)
-                    or self._calls >= 1
-                    # adopt 中途续聊：本回合已绑宿主 eid，首派也应合入热图。
-                    or bound_eid == (active.execution_id or "").strip()
-                )
-            ):
-                host_plan_for_append = active.live_plan
-            elif self._calls >= 1:
-                last_eid = getattr(self, "_last_graph_execution_id", None)
-                last_plan = getattr(self, "_last_graph_plan", None)
-                if isinstance(last_eid, str) and last_eid.strip():
-                    append_to = last_eid.strip()
-                    # 同回合内存宿主：无 journal 亦可合入（阻塞单人跑完常见）。
-                    if last_plan is not None:
-                        host_plan_for_append = last_plan
-                        last_seed = getattr(self, "_last_graph_seed", None)
-                        if last_seed is not None and append_seed is None:
-                            append_seed = last_seed
-
-        # append_to 仍在：区分热图合入 vs 跨回合已收口 → prev 链。
-        host_captain_run_id: str | None = None
-        if append_to:
-            from agentcore.runtime.coordination.session import active_coordination
-            from agentcore.runtime.delegate.graph_append import (
-                load_host_journal_entries,
-                parse_host_captain_run_id,
-                resolve_host_message_id,
-            )
-
-            memory_host = host_plan_for_append is not None
-            active = active_coordination(append_to) or active_coordination(
-                self._base_tool_context.execution_id
-            )
-            live_merge = _is_live_execution_merge(active, append_to) or memory_host
-
-            if live_merge:
-                # 同回合内存 / adopt 热图：合入同一 eid（不写 prev、不 divert）。
-                if host_plan_for_append is None and active is not None:
-                    host_plan_for_append = getattr(active, "live_plan", None)
-                if host_plan_for_append is not None and getattr(
-                    host_plan_for_append, "topology_lock", False
-                ):
-                    msg = (
-                        "当前协作图处于工作流拓扑锁：禁止追加步骤。"
-                        "可用 replan(steers=…) 改未跑步骤说明，或 stop 收口。"
-                    )
-                    return ToolResult(
-                        tool_call_id="",
-                        success=False,
-                        output="",
-                        error=msg,
-                        contract_failure=True,
-                    )
-                if host_plan_for_append is None:
-                    msg = (
-                        f"既有协作图 `{append_to}` 缺少可合并的计划快照（plan_snapshot），"
-                        "无法合入。请新建团队执行。"
-                    )
-                    return ToolResult(
-                        tool_call_id="",
-                        success=False,
-                        output="",
-                        error=msg,
-                        contract_failure=True,
-                    )
-                host_captain_run_id = parse_host_captain_run_id(
-                    await load_host_journal_entries(
-                        (getattr(active, "host_turn_id", None) or "")
-                        if active is not None
-                        else ""
-                    )
-                ) or getattr(self, "_captain_run_id", None)
-            else:
-                # 跨回合已收口图：验证存在 → 转为 prev，本回合新图。
-                host_mid = await resolve_host_message_id(
-                    conversation_id=self._conversation_id or "",
-                    execution_id=append_to,
-                )
-                if not host_mid:
-                    msg = (
-                        f"找不到 execution_id=`{append_to}` 对应的既有协作图。"
-                        "请确认 id 来自本对话上一张团队执行的 run_plan，或改为不传 "
-                        "append_to_execution_id 以新建图。"
-                    )
-                    return ToolResult(
-                        tool_call_id="",
-                        success=False,
-                        output="",
-                        error=msg,
-                        contract_failure=True,
-                    )
-                prev_execution_id = append_to
-                append_to = None
-                host_plan_for_append = None
-                append_seed = None
-                logger.info(
-                    "delegate.graph_prev",
-                    conversation_id=self._conversation_id or "",
-                    prev_execution_id=prev_execution_id,
-                    host_message_id=host_mid,
-                )
         self._calls += 1
         # 冻结本次委派调用的序号：同回合并发的多个 delegate 调用共享 self._calls，若在完成侧
         # 惰性读取会把每个批次的 completed / synthesis 日志都错记到「最后自增到的序号」。这里

@@ -1289,7 +1289,7 @@ async def test_captain_silent_listen_rounds_do_not_trip_empty_ladder(monkeypatch
         current_execution_id,
         set_active_coordination,
     )
-    from agentcore.runtime.engine import react_loop
+    from agentcore.runtime.engine import ReactLoopOut, react_loop
     from agentcore.runtime.events import FinishReason
     from agentcore.tools.protocol import ToolContext
     from agentcore.tools.registry import ToolRegistry
@@ -1365,7 +1365,7 @@ async def test_captain_silent_listen_rounds_do_not_trip_empty_ladder(monkeypatch
             turn_model="m",
             run_id="cap",
             role="captain",
-            finish_override_sink=finish,
+            out=ReactLoopOut(finish_override=finish),
         )
     finally:
         clear_active_coordination("e-silent")

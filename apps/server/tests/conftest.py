@@ -127,6 +127,32 @@ def _reset_browser_netns_health():
 
 
 @pytest.fixture(autouse=True)
+def _capture_client_tool_deliveries(monkeypatch, request):
+    """Make every CLIENT_TOOL fulfill delivery report DELIVERED and record the frame.
+
+    Channel tests (workspace / host / mcp / board / terminal / …) drive a round trip by
+    reading the delivered frame's ``request_id`` and settling the interaction registry,
+    so they need ``deliver_client_tool`` to succeed without a real device attached.
+    Owned here rather than copied per file: the capture buffer is a module global, and a
+    single autouse owner is what guarantees it is cleared before every test. Read it via
+    ``tests.client_tool_fulfill_testutil.await_captured_event``.
+
+    A test that asserts the REAL dispatch outcome either wins on its own (a module- or
+    test-level patch applies after this one; a directly imported function object is
+    unreachable by ``setattr``) or opts out with ``@pytest.mark.real_fulfill_dispatch``.
+    Opting out matters for the NO_FULFILLER path specifically: under this default the
+    channel believes the frame landed and waits out its full timeout instead.
+    """
+    if "real_fulfill_dispatch" in request.keywords:
+        yield
+        return
+    from tests.client_tool_fulfill_testutil import install_deliver_capture
+
+    install_deliver_capture(monkeypatch)
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _disarm_demo_tape_recorder():
     """Clear the process-wide EventSink emit tap after every test.
 

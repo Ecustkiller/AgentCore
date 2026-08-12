@@ -2,6 +2,10 @@ import { useGroupedConversations } from "@/hooks/useConversations";
 import { isWebClient } from "@/lib/capabilities";
 import { GLOBAL_SHORTCUTS, shouldRunGlobalShortcut } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
+import {
+  startFulfillStream,
+  stopFulfillStream,
+} from "@/services/fulfillStream";
 import { startRealtime, stopRealtime } from "@/services/realtime";
 import { startServerHealthMonitor } from "@/services/serverHealth";
 import {
@@ -51,9 +55,15 @@ export function AppShell() {
   // (消息IM.md §四). It lives at the shell — not the 消息 page — so unread badges
   // and incoming messages update even while the user is elsewhere; it
   // self-manages 401→refresh→reconnect and re-syncs on each (re)connect.
+  // Device-level fulfill firehose (`GET /v1/fulfill`) co-lives here: CLIENT_TOOL
+  // ops must reach this install even when no conversation SSE is open.
   useEffect(() => {
     startRealtime();
-    return () => stopRealtime();
+    startFulfillStream();
+    return () => {
+      stopRealtime();
+      stopFulfillStream();
+    };
   }, []);
 
   // Standing-task inbox badge (awaiting_user + unacked failed) — soft-poll so

@@ -64,7 +64,12 @@ class IndexMaintainer:
         self._lock = asyncio.Lock()
 
     def bind_backend(self, backend: WorkspaceBackend) -> None:
-        """Point ensure I/O at ``backend`` (same root; used by process-wide registry)."""
+        """Point ensure I/O at ``backend`` (same root; used by process-wide registry).
+
+        Takes effect from the next run: an in-flight :meth:`_run` snapshots the
+        backend it started with, so its channel-quiet check and its ensure always
+        refer to the same workspace.
+        """
         self._backend = backend
 
     @property
@@ -181,7 +186,10 @@ class IndexMaintainer:
             force = False
             started = time.perf_counter()
             try:
-                channel = getattr(self._backend, "_channel", None)
+                # Snapshot once: a registry rebind mid-run must not let the quiet
+                # check and the ensure land on two different channels.
+                backend = self._backend
+                channel = getattr(backend, "_channel", None)
                 if (
                     channel is not None
                     and getattr(channel, "_inflight", None) is not None
@@ -203,7 +211,7 @@ class IndexMaintainer:
                 logger.info("workspace.index_build_start", force=force)
                 started = time.perf_counter()
                 with index_io_mode():
-                    updated = await self._manager.ensure_index(self._backend, force=force)
+                    updated = await self._manager.ensure_index(backend, force=force)
                 duration_ms = int((time.perf_counter() - started) * 1000)
                 logger.info(
                     "workspace.index_build_complete",

@@ -409,6 +409,9 @@ async def test_host_shell_forwards_with_timeout():
 
 @pytest.mark.asyncio
 async def test_channel_request_host_emits_and_returns():
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
+
+    DELIVERED_EVENTS.clear()
     registry = MagicMock()
 
     async def _suspend(*_a, **kwargs):
@@ -418,17 +421,16 @@ async def test_channel_request_host_emits_and_returns():
         return {"ok": True, "value": {"ok": True, "platform": "win32"}}
 
     registry.suspend = AsyncMock(side_effect=_suspend)
-    sink = MagicMock()
     channel = DesktopClientChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=1.0,
     )
     value = await channel.request_host(HostOp.PING)
     assert value["ok"] is True
-    sink.emit.assert_called_once()
-    event = sink.emit.call_args[0][0]
+    assert len(DELIVERED_EVENTS) == 1
+    event = DELIVERED_EVENTS[0]
     assert event.type.value == "host_op_required"
     assert event.payload["op"] == "host_ping"
 
@@ -439,9 +441,8 @@ async def test_channel_maps_host_failure():
     registry.suspend = AsyncMock(
         return_value={"ok": False, "error": {"detail": "desktop gone"}}
     )
-    sink = MagicMock()
     channel = DesktopClientChannel(
-        sink=sink,
+        user_id="u-test",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=1.0,

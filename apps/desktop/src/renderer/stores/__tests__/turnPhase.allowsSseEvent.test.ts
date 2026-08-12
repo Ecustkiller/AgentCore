@@ -55,13 +55,16 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
     expect(allowsSseEvent("completed", "question_posted")).toBe(false);
   });
 
-  it("keeps workspace_op_required gated (fail-settle lives in dispatch, not allowlist)", () => {
+  it("keeps workspace_op_required gated on conversation SSE allowlist", () => {
+    // Cloud CLIENT_TOOL rides the device fulfill stream (no turnPhase). Sidecar
+    // fulfills before the gate in dispatchSSEEvent. Allowlist still excludes these
+    // so a stray conversation-bus frame does not pass as a normal SSE mutation.
     for (const phase of TERMINAL_OR_STOPPING) {
       expect(allowsSseEvent(phase, "workspace_op_required")).toBe(false);
     }
   });
 
-  it("keeps host_op_required gated (fail-settle lives in dispatch, not allowlist)", () => {
+  it("keeps host_op_required gated on conversation SSE allowlist", () => {
     for (const phase of TERMINAL_OR_STOPPING) {
       expect(allowsSseEvent(phase, "host_op_required")).toBe(false);
     }

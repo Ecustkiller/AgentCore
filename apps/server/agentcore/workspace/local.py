@@ -31,7 +31,7 @@ import base64
 import hashlib
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -45,8 +45,11 @@ from agentcore.workspace.external_mounts import (
     is_external_namespace,
     route_external,
 )
-from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
+from agentcore.workspace.indexing.registry import (
+    shared_index_maintainer_for_dir,
+    shared_index_manager_for_dir,
+)
 from agentcore.workspace.protocol import (
     CodeSearchResult,
     DirEntry,
@@ -62,6 +65,9 @@ from agentcore.workspace.protocol import (
     TreeEntry,
     TreeResult,
 )
+
+if TYPE_CHECKING:
+    from agentcore.workspace.indexing.maintainer import IndexMaintainer
 
 logger = get_logger(__name__)
 
@@ -168,9 +174,11 @@ class LocalWorkspace:
             self._index_manager.mark_content_dirty()
 
     def start_code_index_maintenance(self) -> None:
-        manager = self._get_index_manager()
-        if self._index_maintainer is None:
-            self._index_maintainer = IndexMaintainer(manager, self)
+        """Kick coalesced background ensure via the process-wide index-dir registry."""
+        self._get_index_manager()
+        self._index_maintainer = shared_index_maintainer_for_dir(
+            self._index_cache_dir(), self
+        )
         self._index_maintainer.schedule()
 
     async def flush_code_index_maintenance(self) -> None:
@@ -191,16 +199,17 @@ class LocalWorkspace:
                 if not building:
                     return
             else:
-                if maintainer is None:
-                    maintainer = IndexMaintainer(manager, self)
-                    self._index_maintainer = maintainer
+                maintainer = shared_index_maintainer_for_dir(
+                    self._index_cache_dir(), self
+                )
+                self._index_maintainer = maintainer
                 maintainer.schedule()
         if maintainer is not None:
             await maintainer.drain()
 
     def _get_index_manager(self) -> IndexManager:
         if self._index_manager is None:
-            self._index_manager = IndexManager(str(self._index_cache_dir()))
+            self._index_manager = shared_index_manager_for_dir(self._index_cache_dir())
         return self._index_manager
 
     def _index_cache_dir(self) -> Path:

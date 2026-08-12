@@ -128,7 +128,7 @@ async def test_channel_preserves_error_reason():
         }
     )
     channel = DesktopClientChannel(
-        sink=MagicMock(),
+        user_id="u-test",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=1.0,

@@ -112,7 +112,7 @@ async def build_turn_backend(
         not m.abs_path for m in grants.values()
     ):
         bootstrap_ch = WorkspaceChannel(
-            sink=sink,
+            user_id=user_id,
             conversation_id=conversation_id,
             registry=default_interaction_registry(),
             timeout_seconds=settings.workspace_op_timeout_seconds,

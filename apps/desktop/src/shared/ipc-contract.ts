@@ -222,6 +222,8 @@ export const FS_CHANNELS = {
   ensureDefaultRoot: "fs:ensureDefaultRoot",
   listRoots: "fs:listRoots",
   removeRoot: "fs:removeRoot",
+  /** 主进程 → renderer：永久授权根集合已变更（新增 / 移除后持久化成功）。 */
+  rootsChanged: "fs:rootsChanged",
   /** W3: session-scoped read-only root for one conversation. */
   grantSessionReadonlyRoot: "fs:grantSessionReadonlyRoot",
   listSessionReadonlyRoots: "fs:listSessionReadonlyRoots",
@@ -413,6 +415,13 @@ export interface FsApi {
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<SaveFileResult>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
+  /**
+   * 订阅永久授权根集合变更；返回取消订阅函数。
+   *
+   * 履约通道据此把最新 root 集合重新声明给服务端（在场闸按 root 判断能否执行本机
+   * 操作），无需轮询 {@link listRoots}。
+   */
+  onRootsChanged(cb: () => void): () => void;
   /**
    * W3/P1: session root (readonly | organize) bound to conversation.
    * Accepts legacy `(conversationId, mode?)` or a params object with optional

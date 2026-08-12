@@ -133,7 +133,12 @@ export async function submitInteraction(args: {
         store.reopen(args.id);
         throw new Error("缺少热路提交体");
       }
-      await resolveInteraction(args.conversationId, args.id, args.hotBody);
+      await resolveInteraction(
+        args.conversationId,
+        args.id,
+        args.hotBody,
+        store.get(args.id)?.origin === "sidecar" ? "sidecar" : "cloud",
+      );
       // Optimistic resolved; matching *_resolved SSE is idempotent.
       // Keep hotBody as resolution so grant_delegation / decision UI can read it
       // before the resolved SSE arrives.

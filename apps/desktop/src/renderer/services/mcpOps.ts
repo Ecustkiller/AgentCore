@@ -1,4 +1,5 @@
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { McpOpRequiredPayload } from "@/types/events";
 import type { McpOpResult } from "@shared/mcp-contract";
 
@@ -11,12 +12,14 @@ import type { McpOpResult } from "@shared/mcp-contract";
 export async function performMcpOp(
   payload: McpOpRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "mcpOps",
-    perform: () => runMcpOp(payload),
+    perform: async () => runMcpOp(payload),
   });
 }
 

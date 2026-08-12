@@ -6,6 +6,7 @@ import pytest
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
+from agentcore.fulfill.hub import default_fulfiller_hub
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.pipeline.prepare import prepare_fresh_turn
@@ -20,19 +21,33 @@ from agentcore.workspace.protocol import WorkspaceIOError
 pytestmark = pytest.mark.anyio
 
 CONV = "conv-channel-dead-prepare"
+USER = "u1"
+ROOT = "root-dead"
 
 
 def _dead_local() -> LocalWorkspace:
-    sink = EventSink()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=InteractionRegistry(),
         timeout_seconds=5.0,
-        root_id="root-dead",
+        root_id=ROOT,
     )
     channel._dead = True  # noqa: SLF001 — sticky-dead latch for the gate under test
     return LocalWorkspace(channel)
+
+
+@pytest.fixture
+def workspace_fulfiller():
+    """Presence gate requires a live workspace fulfiller for this root."""
+    hub = default_fulfiller_hub()
+    session = hub.register(
+        USER, "dev-channel-dead", caps=["workspace"], roots=[ROOT]
+    )
+    try:
+        yield session
+    finally:
+        hub.unregister(session)
 
 
 def test_raise_if_backend_channel_dead_raises_honest_io_error():
@@ -43,9 +58,8 @@ def test_raise_if_backend_channel_dead_raises_honest_io_error():
 
 
 def test_raise_if_backend_channel_dead_noop_when_alive():
-    sink = EventSink()
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=USER,
         conversation_id=CONV,
         registry=InteractionRegistry(),
         timeout_seconds=5.0,
@@ -66,7 +80,9 @@ def test_error_fields_for_surfaces_channel_dead_prepare_abort():
     assert "服务出错了" not in message
 
 
-async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(monkeypatch):
+async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(
+    monkeypatch, workspace_fulfiller
+):
     """Sticky-dead before prepare → WorkspaceIOError; build_turn_router never runs."""
     backend = _dead_local()
     llm_calls: list[str] = []
@@ -97,7 +113,7 @@ async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(monkeypatch
     with pytest.raises(WorkspaceIOError, match="本机工作区通道无响应"):
         await prepare_fresh_turn(
             conversation_id=CONV,
-            user_id="u1",
+            user_id=USER,
             backend=backend,
             sink=EventSink(),
             folder_id=None,

@@ -14,7 +14,7 @@ import pytest
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
 from agentcore.runtime.citations import annotate_ledger_ids, normalize_citation_url
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
@@ -212,7 +212,7 @@ async def test_worker_loop_annotates_stable_ids_not_pool_numbers():
         ),
         profile=make_profile_params(max_rounds=20),
         turn_model="m",
-        citation_sink=sink,
+        out=ReactLoopOut(citations=sink),
         annotate_citations=False,
         turn_evidence_ledger=led,
         ledger_registrant="worker:w1",
@@ -260,7 +260,7 @@ async def test_ceo_loop_annotates_stable_ids_when_ledger_present():
         ),
         profile=make_profile_params(max_rounds=20),
         turn_model="m",
-        citation_sink=sink,
+        out=ReactLoopOut(citations=sink),
         annotate_citations=True,
         turn_evidence_ledger=led,
         ledger_registrant="ceo",

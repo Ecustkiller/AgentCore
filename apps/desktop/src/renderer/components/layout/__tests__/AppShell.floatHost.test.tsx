@@ -16,6 +16,10 @@ vi.mock("@/services/realtime", () => ({
   startRealtime: vi.fn(),
   stopRealtime: vi.fn(),
 }));
+vi.mock("@/services/fulfillStream", () => ({
+  startFulfillStream: vi.fn(),
+  stopFulfillStream: vi.fn(),
+}));
 vi.mock("@/services/serverHealth", () => ({
   startServerHealthMonitor: () => () => undefined,
 }));

@@ -2,6 +2,7 @@
 
 import asyncio
 
+import agentcore.runtime.delegate.prelude as delegate_prelude_mod
 import agentcore.tools.builtin.delegate.tool as delegate_tool_mod
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import TokenUsage
@@ -113,23 +114,23 @@ async def test_finalize_falls_back_to_synthesis_when_worker_fails():
 
 
 def test_should_auto_light_delegate():
-    assert delegate_tool_mod._should_auto_light_delegate(
+    assert delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "工程师", "task": "做A"}]
     )
-    assert not delegate_tool_mod._should_auto_light_delegate(
+    assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}]
     )
-    assert not delegate_tool_mod._should_auto_light_delegate(
+    assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "depends_on": ["x"]}]
     )
-    assert not delegate_tool_mod._should_auto_light_delegate(
+    assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "checkpoint_after": True}]
     )
-    assert not delegate_tool_mod._should_auto_light_delegate(
+    assert not delegate_prelude_mod._should_auto_light_delegate(
         [{"role": "A", "task": "a", "bind_after_deps": True}]
     )
     # 深度交付与编排结构正交：单 worker 无波边界也不 auto-light
-    assert not delegate_tool_mod._should_auto_light_delegate(
+    assert not delegate_prelude_mod._should_auto_light_delegate(
         [
             {
                 "role": "工程师",
@@ -139,7 +140,7 @@ def test_should_auto_light_delegate():
         ]
     )
     # light 不再盖短轮：browser_* 工具面可走 auto-light（coordination=none 等）
-    assert delegate_tool_mod._should_auto_light_delegate(
+    assert delegate_prelude_mod._should_auto_light_delegate(
         [
             {
                 "role": "浏览器操作员",
@@ -162,6 +163,8 @@ async def test_single_worker_deep_deliverable_skips_auto_light(monkeypatch):
     """单 worker 无波边界，但 deep deliverable 时不推断 light，保持 standard。"""
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    # 档位推断日志出自前奏模块；同一个 spy 挂两处，负向断言才仍盯着真实发射点。
+    monkeypatch.setattr(delegate_prelude_mod, "logger", spy)
     t = tool(Provider(["OUT"]))
     await t.execute(
         {
@@ -185,6 +188,7 @@ async def test_explicit_light_with_file_deliverable_kept_for_repair(monkeypatch)
 
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    monkeypatch.setattr(delegate_prelude_mod, "logger", spy)
     captured: dict = {}
     real_build = runs_mod.build_run_plan
 
@@ -219,6 +223,7 @@ async def test_explicit_light_with_retired_min_length_kept(monkeypatch):
     """显式 light + 已删 min_length 不再忽略 → 保留 light。"""
     spy = LogSpy()
     monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    monkeypatch.setattr(delegate_prelude_mod, "logger", spy)
     t = tool(Provider(["OUT"]))
     await t.execute(
         {

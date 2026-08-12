@@ -46,6 +46,12 @@ import { entryKey } from "./workspace";
 const SIDECAR_APPROVALS_ENABLED = true;
 
 /**
+ * 本机履约帧的 JSON-RPC 通知名（Python `sidecar/fulfill_bridge.py` 同名常量）。
+ * 与回合事件 `turn/event` 分开：履约走设备级中枢，不是回合显示流。
+ */
+const SIDECAR_FULFILL_NOTIFICATION = "fulfill/frame";
+
+/**
  * DesktopBrowserBridge 本回合句柄（B-Arch · 与 inference 同构）。
  * 主进程签发；经 initialize / startTurn / resume 下发，不再依赖 spawn env。
  */
@@ -803,6 +809,10 @@ export class SidecarManager {
     method: string,
     params: Record<string, unknown>,
   ): void {
+    if (method === SIDECAR_FULFILL_NOTIFICATION) {
+      this.onFulfillFrame(params);
+      return;
+    }
     if (method !== "turn/event") return;
     const turnId = String(params.turnId ?? "");
     const turn = this.turns.get(turnId);
@@ -836,6 +846,53 @@ export class SidecarManager {
       conversationId: turn.conversationId,
       turnId,
       event: buffered,
+    });
+  }
+
+  /**
+   * 本机履约帧（`fulfill/frame`）→ 持有该会话活回合的窗口。
+   *
+   * 与回合事件分流：履约不是显示态，不入 `SidecarEventBuffer`（attach 重放会让
+   * 同一 op 再执行一次），也不喂 `dispatchSSEEvent`。会话 id 取自帧 payload——
+   * 本机引擎只在回合内发这类帧，故必有活回合；找不到只记日志丢弃（op 随后按通道
+   * 超时诚实失败，不猜窗口）。
+   */
+  private onFulfillFrame(params: Record<string, unknown>): void {
+    const raw = params.event;
+    const frame =
+      raw && typeof raw === "object"
+        ? (raw as { type?: string; timestamp?: string; payload?: unknown })
+        : null;
+    if (!frame?.type) return;
+
+    const payload = frame.payload;
+    const conversationId =
+      payload && typeof payload === "object"
+        ? String(
+            (payload as { conversation_id?: unknown }).conversation_id ?? "",
+          )
+        : "";
+    const live = conversationId ? this.findLiveTurn(conversationId) : null;
+    if (!live) {
+      logDesktop({
+        level: "warn",
+        event: "sidecar.fulfill_unrouted",
+        fields: {
+          conversation_id: conversationId || null,
+          frame_type: frame.type,
+        },
+      });
+      return;
+    }
+    safeWcSend(live.turn.wc, SIDECAR_CHANNELS.fulfill, {
+      conversationId,
+      frame: {
+        type: String(frame.type),
+        ...(typeof frame.timestamp === "string"
+          ? { timestamp: frame.timestamp }
+          : {}),
+        payload: frame.payload,
+      },
     });
   }
 

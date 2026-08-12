@@ -169,7 +169,7 @@ async def bind_tool_context_to_landing_desk(
     context.backend = backend
     context.workspace_channel = workspace_channel_for_tools(
         backend,
-        sink=sink,
+        user_id=context.user_id,
         conversation_id=context.conversation_id,
     )
     context.auto_desk_folder_id = binding.folder_id
@@ -395,7 +395,7 @@ async def apply_target_desktop(
 
     workspace_channel = workspace_channel_for_tools(
         backend,
-        sink=sink,
+        user_id=base_tool_context.user_id,
         conversation_id=base_tool_context.conversation_id,
     )
     # Intentional other-desk: fresh slot so this worker does not follow a later

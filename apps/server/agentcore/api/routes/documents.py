@@ -32,7 +32,11 @@ from agentcore.documents.frontmatter import (
 )
 from agentcore.documents.write_guards import is_ai_core_memory_leaf
 from agentcore.memory import memory_version
-from agentcore.memory.always_quota import check_always_write, measure_always_usage
+from agentcore.memory.always_quota import (
+    always_entry_chars,
+    check_always_write,
+    measure_always_usage,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -54,6 +58,8 @@ class DocumentNodeView(BaseModel):
     description: str
     name: str
     frontmatter_error: str | None = None
+    # Chars counting toward the always pool (same meter as write-side gate); null if not always.
+    always_chars: int | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -105,12 +111,22 @@ class AlwaysQuotaView(BaseModel):
     used_chars: int
     max_chars: int
     percent: float
+    # ``used_chars == global_chars + project_chars`` (project context = global ∪ this project).
+    global_chars: int
+    project_chars: int
 
 
 def _fm_error(doc: Document) -> str | None:
     if doc.kind != "document":
         return None
     return frontmatter_error_message(doc.content)
+
+
+def _always_chars(doc: Document) -> int | None:
+    """Pool chars for always-injected rule docs; null for everything else."""
+    if doc.kind != "document" or doc.role != "rule" or doc.apply_mode != "always":
+        return None
+    return always_entry_chars(doc.content)
 
 
 def _node(doc: Document) -> DocumentNodeView:
@@ -125,6 +141,7 @@ def _node(doc: Document) -> DocumentNodeView:
         description=doc.description,
         name=doc.name,
         frontmatter_error=_fm_error(doc),
+        always_chars=_always_chars(doc),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -142,6 +159,7 @@ def _detail(doc: Document, *, quota_warning: str | None = None) -> DocumentDetai
         description=doc.description,
         name=doc.name,
         frontmatter_error=_fm_error(doc),
+        always_chars=_always_chars(doc),
         content=doc.content,
         version=memory_version(doc.content),
         created_at=doc.created_at,
@@ -193,6 +211,8 @@ async def get_always_quota(
         used_chars=usage.used_chars,
         max_chars=usage.max_chars,
         percent=usage.percent,
+        global_chars=usage.global_chars,
+        project_chars=usage.project_chars,
     )
 
 

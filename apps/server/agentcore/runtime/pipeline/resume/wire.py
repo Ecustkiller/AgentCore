@@ -122,7 +122,7 @@ async def _wire_continuation_toolset(
     desktop_online = channel.desktop_online
     desktop_channel = (
         DesktopClientChannel(
-            sink=sink,
+            user_id=user_id,
             conversation_id=conversation_id,
             registry=default_interaction_registry(),
             timeout_seconds=settings.board_op_timeout_seconds,
@@ -168,7 +168,7 @@ async def _wire_continuation_toolset(
     # ``board_id`` + this continuation's sink. ``None`` ⇒ ordinary chat.
     board_channel = (
         BoardChannel(
-            sink=sink,
+            user_id=user_id,
             conversation_id=conversation_id,
             board_id=board_id,
             registry=default_interaction_registry(),
@@ -180,7 +180,7 @@ async def _wire_continuation_toolset(
     # desktop_channel created earlier (MCP discovery); reuse.
     workspace_channel = workspace_channel_for_tools(
         backend,
-        sink=sink,
+        user_id=user_id,
         conversation_id=conversation_id,
     )
     # AI 协作白板 §九.4 Gap ②: vision cost sink shared by reference across derived

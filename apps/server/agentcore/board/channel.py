@@ -3,16 +3,17 @@
 The board counterpart of ``workspace/channel.py``. ``board_ops`` (the server tool)
 can't touch the user's whiteboard canvas directly — the canvas lives in the desktop
 renderer — so it hands a structured op batch to this channel, which suspends the run
-on the unified interaction bridge, emits a ``board_op_required`` SSE event, and awaits
-the desktop's reply. The bound desktop converts ops → scene elements, applies them to
-the open board, autosaves (CAS), and POSTs the result to the ops-resolve endpoint,
-which settles the future.
+on the unified interaction bridge, delivers a ``board_op_required`` frame via the
+fulfill hub, and awaits the desktop's reply. The bound desktop converts ops → scene
+elements, applies them to the open board, autosaves (CAS), and POSTs the result to
+the ops-resolve endpoint, which settles the future.
 
 State is in-process (single-worker posture, same as the approval gate / workspace
 channel); front with Redis to scale to multiple workers. A reply the desktop never
 delivers fails as a :class:`BoardOpError` after the timeout, so a dropped / closed
 canvas never hangs the turn — the tool maps that to an error result the model can
-recover from (tell the user, retry, or proceed).
+recover from (tell the user, retry, or proceed). No online fulfiller → immediate
+typed failure.
 """
 
 from __future__ import annotations
@@ -22,11 +23,12 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.runtime.events import EventSink, board_op_required, board_read_required
+from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_BOARD,
     CHANNEL_BOARD_READ,
     client_tool_payload,
+    push_client_tool_required,
 )
 from agentcore.runtime.events.types import EventType
 from agentcore.runtime.interaction import InteractionKind
@@ -57,14 +59,15 @@ class BoardReadError(Exception):
 class BoardChannel:
     """Suspends one board-op batch until the bound desktop applies it.
 
-    One channel per board-bound turn, constructed where the sink + interaction bridge
-    are available and bound to one ``board_id``. ``request`` applies an op batch (used by
-    ``BoardOpsTool``); ``read`` rasterizes a subset of elements to a PNG (used by
-    ``BoardReadTool``, §九). Both ride the same suspend / emit / await mechanism on the
-    shared bridge — the tool layer only builds the JSON-safe input and reads the value.
+    One channel per board-bound turn, constructed where ``user_id`` + the interaction
+    bridge are available and bound to one ``board_id``. ``request`` applies an op batch
+    (used by ``BoardOpsTool``); ``read`` rasterizes a subset of elements to a PNG (used
+    by ``BoardReadTool``, §九). Both ride the same suspend / deliver / await mechanism
+    on the shared bridge — the tool layer only builds the JSON-safe input and reads
+    the value.
     """
 
-    sink: EventSink
+    user_id: str
     conversation_id: str
     board_id: str
     registry: ClientRequestBridge
@@ -92,16 +95,25 @@ class BoardChannel:
                         "ops": ops,
                         "summary": summary,
                     },
+                    user_id=self.user_id,
                 ),
                 timeout=self.timeout_seconds,
-                on_suspended=lambda: self.sink.emit(
-                    board_op_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_BOARD,
+                    root_id=None,
+                    event=board_op_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         board_id=self.board_id,
                         ops=ops,
                         summary=summary,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="BoardOpError",
+                    error_detail="board op batch failed: no fulfiller（无履约方）",
                 ),
             )
         except TimeoutError as e:
@@ -138,15 +150,24 @@ class BoardChannel:
                     CHANNEL_BOARD_READ,
                     EventType.BOARD_READ_REQUIRED.value,
                     params={"board_id": self.board_id, "ids": ids},
+                    user_id=self.user_id,
                 ),
                 timeout=self.timeout_seconds,
-                on_suspended=lambda: self.sink.emit(
-                    board_read_required(
+                on_suspended=lambda: push_client_tool_required(
+                    user_id=self.user_id,
+                    conversation_id=self.conversation_id,
+                    channel=CHANNEL_BOARD_READ,
+                    root_id=None,
+                    event=board_read_required(
                         request_id=request_id,
                         conversation_id=self.conversation_id,
                         board_id=self.board_id,
                         ids=ids,
-                    )
+                    ),
+                    registry=self.registry,
+                    request_id=request_id,
+                    error_kind="BoardReadError",
+                    error_detail="board read failed: no fulfiller（无履约方）",
                 ),
             )
         except TimeoutError as e:

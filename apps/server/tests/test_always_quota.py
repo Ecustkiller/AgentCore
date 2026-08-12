@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from agentcore.api.routes.documents import _always_chars
 from agentcore.memory.always_quota import (
     AlwaysUsage,
     always_entry_chars,
     evaluate_always_write,
+    measure_always_usage,
     project_usage_after,
 )
 
@@ -17,6 +19,35 @@ def test_always_entry_chars_strips_frontmatter():
 
 def test_always_entry_chars_unclosed_is_zero():
     assert always_entry_chars("---\napply: always\nno close") == 0
+
+
+def test_always_chars_null_for_non_always_rows():
+    class _Row:
+        def __init__(self, *, kind: str, role: str, apply_mode: str, content: str) -> None:
+            self.kind = kind
+            self.role = role
+            self.apply_mode = apply_mode
+            self.content = content
+
+    always = _Row(
+        kind="document",
+        role="rule",
+        apply_mode="always",
+        content="---\napply: always\n---\nhello",
+    )
+    assert _always_chars(always) == len("hello")  # type: ignore[arg-type]
+    assert (
+        _always_chars(
+            _Row(kind="document", role="rule", apply_mode="on_demand", content="x")  # type: ignore[arg-type]
+        )
+        is None
+    )
+    assert (
+        _always_chars(
+            _Row(kind="folder", role="general", apply_mode="always", content="")  # type: ignore[arg-type]
+        )
+        is None
+    )
 
 
 def test_user_edit_existing_always_over_limit_allows_with_warning():
@@ -130,3 +161,68 @@ def test_project_usage_after_replaces_excluded():
         new_is_always=True,
     )
     assert projected.used_chars == 250
+
+
+async def test_measure_usage_entry_sum_equals_used_and_split():
+    """各常驻条目 always_entry_chars 之和 == used_chars == global_chars + project_chars."""
+    global_body = "---\napply: always\n---\nglobal-hi"
+    project_body = "---\napply: always\n---\nproj-hi"
+    g = _Doc("g1", global_body)
+    p = _Doc("p1", project_body)
+    g_chars = always_entry_chars(global_body)
+    p_chars = always_entry_chars(project_body)
+
+    class FakeRepo:
+        async def list_injectable_rules(self, user_id, folder_id, *, ai_maintained):
+            # Merged authorship (ai_maintained=None); bool filters kept for other callers.
+            if folder_id is None:
+                docs = [g]
+            elif folder_id == "F1":
+                docs = [p]
+            else:
+                docs = []
+            if ai_maintained is True:
+                return []
+            if ai_maintained is False:
+                return docs
+            return docs  # None → both (here only user docs)
+
+    usage_global = await measure_always_usage(FakeRepo(), "u", folder_id=None)  # type: ignore[arg-type]
+    assert usage_global.used_chars == g_chars
+    assert usage_global.global_chars == g_chars
+    assert usage_global.project_chars == 0
+    assert usage_global.used_chars == usage_global.global_chars + usage_global.project_chars
+
+    usage_proj = await measure_always_usage(FakeRepo(), "u", folder_id="F1")  # type: ignore[arg-type]
+    assert usage_proj.used_chars == g_chars + p_chars
+    assert usage_proj.global_chars == g_chars
+    assert usage_proj.project_chars == p_chars
+    assert usage_proj.used_chars == usage_proj.global_chars + usage_proj.project_chars
+
+
+async def test_measure_usage_merges_ai_maintained_keeps_scope_split():
+    """One list_injectable_rules per scope (ai_maintained=None); global/project split intact."""
+    global_user = _Doc("gu", "---\napply: always\n---\ngu")
+    global_ai = _Doc("ga", "---\napply: always\n---\nga")
+    project_user = _Doc("pu", "---\napply: always\n---\npu")
+    project_ai = _Doc("pa", "---\napply: always\n---\npa")
+    calls: list[tuple[str | None, bool | None]] = []
+
+    class FakeRepo:
+        async def list_injectable_rules(self, user_id, folder_id, *, ai_maintained):
+            calls.append((folder_id, ai_maintained))
+            if ai_maintained is not None:
+                raise AssertionError("quota path must merge authorship into one call")
+            if folder_id is None:
+                return [global_user, global_ai]
+            if folder_id == "F1":
+                return [project_user, project_ai]
+            return []
+
+    usage = await measure_always_usage(FakeRepo(), "u", folder_id="F1")  # type: ignore[arg-type]
+    assert calls == [(None, None), ("F1", None)]
+    g_chars = always_entry_chars(global_user.content) + always_entry_chars(global_ai.content)
+    p_chars = always_entry_chars(project_user.content) + always_entry_chars(project_ai.content)
+    assert usage.global_chars == g_chars
+    assert usage.project_chars == p_chars
+    assert usage.used_chars == g_chars + p_chars

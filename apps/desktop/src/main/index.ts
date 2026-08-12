@@ -18,6 +18,7 @@ import {
 } from "./app-protocol-csp";
 import { registerBrowserIpc, startDesktopBrowserBridge } from "./browser";
 import { WORKSPACE_SCHEME } from "./browser/workspace-paths";
+import { registerDeviceIdentityIpc } from "./device-identity";
 import {
   buildFloatHashRoute,
   destroyAllFloatWindows,
@@ -331,6 +332,7 @@ app.whenReady().then(async () => {
   }
   registerAppProtocol();
   registerLogIpc();
+  registerDeviceIdentityIpc();
   registerFsIpc();
   registerSidecarIpc();
   registerOutboxIpc();

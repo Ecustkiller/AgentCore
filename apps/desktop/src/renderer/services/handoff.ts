@@ -12,14 +12,12 @@ import {
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
-import { performWorkspaceOp } from "@/services/workspaceOps";
 import type { components } from "@/types/api.generated";
 import type {
   HandoffApplyDonePayload,
   HandoffJobStartedPayload,
   HandoffSnapshotDonePayload,
   SSEEvent,
-  WorkspaceOpRequiredPayload,
 } from "@/types/events";
 import type { WorkspaceOpName } from "@shared/ipc-contract";
 
@@ -137,9 +135,9 @@ function toChange(b: BackendFileChange): HandoffFileChange {
 /**
  * 一条工作区交接 SSE 流的通用消费器（e1 快照 / e2 派发 / e3 应用共用）。
  *
- * 三条流形状一致：服务端经通道下发若干 `workspace_op_required`（ARCHIVE / WRITE_BYTES
- * / DELETE），本端用既有 `performWorkspaceOp` 在绑定根上履行并回填；末尾发一条「完成」
- * 事件携结果。`onEvent` 只负责认出并映射那条完成事件（返回非 undefined 即为最终结果）。
+ * 完成事件仍走本流；CLIENT_TOOL `workspace_op_required` 已改投设备履约通道
+ *（`clientToolIngress`），此处不再履行——避免与履约通道双份处理同一 request_id。
+ * `onEvent` 只负责认出并映射完成事件（返回非 undefined 即为最终结果）。
  *
  * 复用 send 路径的鉴权：access token 过期则刷新一次重放，否则跳登录。这是独立于聊天流
  * 的专用消费器（聊天流改 store，交接流返回值），故不复用 `dispatchSSEEvent`。失败（内联
@@ -147,7 +145,7 @@ function toChange(b: BackendFileChange): HandoffFileChange {
  */
 async function consumeWorkspaceStream<T>(
   path: string,
-  conversationId: string,
+  _conversationId: string,
   opts: { body?: unknown; signal?: AbortSignal },
   onEvent: (event: SSEEvent) => T | undefined,
 ): Promise<T> {
@@ -213,21 +211,16 @@ async function consumeWorkspaceStream<T>(
         } catch {
           continue; // malformed event — skip
         }
-        if (event.type === "workspace_op_required") {
-          // Fulfil the op (ARCHIVE / WRITE_BYTES / DELETE) against the bound root,
-          // exactly as the chat stream does; it POSTs its result to the ops resolve
-          // endpoint, settling the paused server-side op so the flow can proceed.
-          void performWorkspaceOp(
-            event.payload as WorkspaceOpRequiredPayload,
-            conversationId,
-          );
-        } else if (event.type === "error") {
+        // Cloud CLIENT_TOOL ops ride the device fulfill stream; ignore stray
+        // frames on the handoff completion SSE so we never double-fulfill.
+        if (event.type === "workspace_op_required") continue;
+        if (event.type === "error") {
           failure =
             (event.payload as { message?: string }).message ?? "操作失败";
-        } else {
-          const mapped = onEvent(event);
-          if (mapped !== undefined) result = mapped;
+          continue;
         }
+        const mapped = onEvent(event);
+        if (mapped !== undefined) result = mapped;
       }
     }
   } catch (err) {
@@ -243,8 +236,8 @@ async function consumeWorkspaceStream<T>(
 /**
  * 本地→云交接（双模式工作区 P2e / e1）：把绑定的本地工作区快照到云端。
  *
- * POST 一个 SSE 端点：服务端下发一个 `workspace_op_required`（ARCHIVE op），本端打包
- * 绑定根并回填；服务端解包暂存、快照入 OSS，末尾发 `handoff_snapshot_done` 带新快照 id。
+ * POST 一个 SSE 端点：ARCHIVE 等 CLIENT_TOOL 经设备履约通道履行；本流末尾发
+ * `handoff_snapshot_done` 带新快照 id。
  */
 export async function runHandoff(
   conversationId: string,

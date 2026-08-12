@@ -13,6 +13,16 @@ type Schemas = components["schemas"];
 export const INTERACTION_RESOLVE_TIMEOUT_MS = 15_000;
 
 /**
+ * Where the paused interaction awaits settle.
+ *
+ * Explicit — never inferred from `activeSidecarTurns`. A conversation can have a
+ * live sidecar turn **and** cloud-bridged CLIENT_TOOL ops (device fulfill stream)
+ * at once; guessing by conversationId mis-routes cloud settles into the sidecar
+ * registry (`{resolved:false}` → server waits → false "channel dead").
+ */
+export type InteractionSettleOrigin = "cloud" | "sidecar";
+
+/**
  * Unified suspend-resume bridge (§18.2): a single endpoint settles any client-resolvable
  * paused interaction — a tool approval, a local-workspace op, a worker's blocking
  * escalation, or an interactive debate round. The body is discriminated on `kind`, so
@@ -29,29 +39,26 @@ export type ResolveInteractionBody =
   | ResolveDelegationAuthorizationBody;
 
 /**
- * Settle a paused hot-path interaction over whichever transport is running this turn.
+ * Settle a paused hot-path interaction over the transport that owns the awaiter.
  *
  * The single choke point for live resolve kinds (approval / client_tool / escalation /
  * delegation_authorization) — NOT ask_user / plan_review / team_preview (cold resume).
- * Cloud-vs-local routing lives in ONE place:
  *
- * - **Local (sidecar) turn** → the engine awaits in the user's `python -m
- *   agentcore.sidecar` process, whose in-process `InteractionRegistry` a cloud HTTP
- *   POST can never reach. Route to `window.sidecarApi.respond` instead — same wire
- *   body (the main process forwards it; the sidecar builds the kind-specific result
- *   identically, see `interaction_result_from_body`). A stale settle just resolves
- *   `{resolved:false}` and is a no-op for the caller (mirrors the cloud 404).
- * - **Cloud turn** → POST the unified resolve endpoint; the awaiter in the live
- *   `send_message` SSE stream resumes. A 404 means the interaction is stale (timed
- *   out, already settled, the turn ended, or its kind does not match).
+ * - **`origin: "sidecar"`** → `window.sidecarApi.respond` (in-process sidecar registry).
+ * - **`origin: "cloud"`** → POST the unified resolve endpoint (cloud InteractionRegistry,
+ *   including CLIENT_TOOL ops delivered on the device fulfill stream).
  */
 export async function resolveInteraction(
   conversationId: string,
   interactionId: string,
   body: ResolveInteractionBody,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
-  const sidecarTarget = getActiveSidecarTarget(conversationId);
-  if (sidecarTarget) {
+  if (origin === "sidecar") {
+    const sidecarTarget = getActiveSidecarTarget(conversationId);
+    if (!sidecarTarget) {
+      throw new Error("本地回合未激活，无法结算交互");
+    }
     const reply = await window.sidecarApi.respond({
       rootId: sidecarTarget.rootId,
       subpath: sidecarTarget.subpath,

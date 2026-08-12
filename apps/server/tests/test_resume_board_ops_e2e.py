@@ -167,6 +167,17 @@ async def _drive(
     registry = default_interaction_registry()
     captured: list[SSEEvent] = []
 
+    # Bridge fulfill delivery → turn sink so the existing fake desktop can settle.
+    from agentcore.fulfill.dispatch import DeliverResult
+
+    def _fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+        sink.emit(event)
+        return DeliverResult.DELIVERED
+
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool", _fake_deliver
+    )
+
     async def desktop() -> None:
         while True:
             ev = await sink.get()

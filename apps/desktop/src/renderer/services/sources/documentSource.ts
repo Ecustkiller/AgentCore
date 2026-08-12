@@ -19,10 +19,10 @@ const unsupported = (): Promise<never> =>
 function notifyQuotaWarning(warning: string | null | undefined): void {
   const text = warning?.trim();
   if (!text) return;
-  notifyWarning("常驻配额提醒", {
+  notifyWarning("AI 暂时记不下新东西", {
     description: text,
     action: {
-      label: "去清理常驻",
+      label: "去整理",
       onClick: () => {
         window.location.hash = "/files";
       },

@@ -18,7 +18,7 @@ import json
 from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, FinishReason
 from agentcore.runtime.facts import FactKind, TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.interaction import InteractionRegistry
@@ -157,7 +157,7 @@ async def test_loop_finalizes_plan_review_to_paused(monkeypatch):
             tool_context=_context(),
             profile=profile,
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )

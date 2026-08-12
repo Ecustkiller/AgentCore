@@ -16,7 +16,7 @@ fire on BOTH paths. On the CEO path the reset is ``content_reset``; a worker pas
 from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
@@ -72,7 +72,7 @@ async def _run(
         tool_context=_context(),
         profile=profile,
         turn_model="m",
-        citation_sink=citation_sink,
+        out=None if citation_sink is None else ReactLoopOut(citations=citation_sink),
         annotate_citations=annotate_citations,
         on_reset=on_reset,
     )

@@ -1,6 +1,11 @@
 import { logEvent } from "@/lib/log";
 import { ApiError, NetworkError } from "@/services/api";
-import { resolveInteraction } from "@/services/interaction";
+import {
+  type InteractionSettleOrigin,
+  resolveInteraction,
+} from "@/services/interaction";
+
+export type { InteractionSettleOrigin };
 
 /** Result envelope posted as `ResolveClientToolInteraction` (sans `kind`). */
 export type ClientToolResultEnvelope =
@@ -14,6 +19,7 @@ type FulfilledEntry = {
   result: ClientToolResultEnvelope;
   resolved: boolean;
   resolveGate: Promise<void> | null;
+  origin: InteractionSettleOrigin;
 };
 
 /** In-flight perform+resolve for a request_id (join waiters). */
@@ -21,6 +27,12 @@ const inFlight = new Map<string, Promise<void>>();
 
 /** Successfully performed side effects — skip re-run; may still resolve. */
 const fulfilled = new Map<string, FulfilledEntry>();
+
+/** Per-request abort controllers (timeout + `client_tool_cancelled`). */
+const abortByRequest = new Map<string, AbortController>();
+
+/** Cancel arrived before fulfill started — skip side effect + settle. */
+const cancelledBeforeStart = new Set<string>();
 
 /** Fulfill 在飞按 conversation（仅观测；不改调度）。 */
 let fulfillInflightTotal = 0;
@@ -70,8 +82,24 @@ function leaveFulfill(conversationId: string): void {
 export function resetClientToolFulfillmentForTests(): void {
   inFlight.clear();
   fulfilled.clear();
+  abortByRequest.clear();
+  cancelledBeforeStart.clear();
   fulfillInflightTotal = 0;
   fulfillInflightByCid.clear();
+}
+
+/**
+ * Abort an in-flight CLIENT_TOOL op (fulfill stream `client_tool_cancelled`).
+ * Releases join waiters without settling — the server already dropped the awaiter.
+ */
+export function abortClientToolRequest(requestId: string): void {
+  cancelledBeforeStart.add(requestId);
+  fulfilled.delete(requestId);
+  const ac = abortByRequest.get(requestId);
+  if (ac && !ac.signal.aborted) {
+    ac.abort();
+  }
+  logEvent("info", "client_tool.cancelled", { request_id: requestId });
 }
 
 function logWorkspaceResolve(
@@ -147,6 +175,7 @@ async function tryResolve(
   requestId: string,
   result: ClientToolResultEnvelope,
   logLabel: string,
+  origin: InteractionSettleOrigin,
   extra?: Record<string, unknown>,
 ): Promise<boolean> {
   const isWorkspace = logLabel === "workspaceOps";
@@ -157,14 +186,20 @@ async function tryResolve(
   while (attempt < RESOLVE_MAX_ATTEMPTS) {
     attempt += 1;
     try {
-      await resolveInteraction(conversationId, requestId, {
-        kind: "client_tool",
-        ...result,
-      });
+      await resolveInteraction(
+        conversationId,
+        requestId,
+        {
+          kind: "client_tool",
+          ...result,
+        },
+        origin,
+      );
       logWorkspaceResolve(conversationId, requestId, logLabel, "ok", {
         result_ok: result.ok,
         resolve_attempts: attempt,
         resolve_ms: Date.now() - resolveStarted,
+        origin,
         ...extra,
       });
       return true;
@@ -174,6 +209,7 @@ async function tryResolve(
         logWorkspaceResolve(conversationId, requestId, logLabel, "stale_404", {
           resolve_attempts: attempt,
           resolve_ms: Date.now() - resolveStarted,
+          origin,
           ...extra,
         });
         return true; // stale — no-op
@@ -205,10 +241,11 @@ async function tryResolve(
     error_name: lastErr instanceof Error ? lastErr.name : "unknown",
     resolve_attempts: attempt,
     resolve_ms: Date.now() - resolveStarted,
+    origin,
     ...extra,
   });
   console.error(`[${logLabel}] 回填失败`, lastErr);
-  if (isWorkspace) {
+  if (isWorkspace && origin === "cloud") {
     void nudgeStreamAfterSettleExhausted(conversationId, requestId);
   }
   return false;
@@ -220,15 +257,24 @@ async function tryResolve(
  * Same `request_id` already in-flight or successfully fulfilled in this process →
  * skip the side effect. Still retries resolve when the first settle has not landed.
  * Failed side effects are not cached, so a later delivery may re-perform.
+ *
+ * `origin` is required so settle never guesses cloud vs sidecar from conversation
+ * routing tables.
  */
 export async function fulfillClientToolOnce(opts: {
   requestId: string;
   conversationId: string;
+  origin: InteractionSettleOrigin;
   logLabel: string;
-  perform: () => Promise<ClientToolResultEnvelope>;
+  perform: (signal: AbortSignal) => Promise<ClientToolResultEnvelope>;
 }): Promise<void> {
-  const { requestId, conversationId, logLabel, perform } = opts;
+  const { requestId, conversationId, origin, logLabel, perform } = opts;
   const isWorkspace = logLabel === "workspaceOps";
+
+  if (cancelledBeforeStart.has(requestId)) {
+    cancelledBeforeStart.delete(requestId);
+    return;
+  }
 
   const pending = inFlight.get(requestId);
   if (pending) {
@@ -240,6 +286,11 @@ export async function fulfillClientToolOnce(opts: {
       });
     }
     await pending;
+  }
+
+  if (cancelledBeforeStart.has(requestId)) {
+    cancelledBeforeStart.delete(requestId);
+    return;
   }
 
   const cached = fulfilled.get(requestId);
@@ -255,6 +306,7 @@ export async function fulfillClientToolOnce(opts: {
         requestId,
         cached.result,
         logLabel,
+        cached.origin,
       );
     })();
     cached.resolveGate = gate;
@@ -281,14 +333,42 @@ export async function fulfillClientToolOnce(opts: {
     });
   }
 
+  const ac = new AbortController();
+  abortByRequest.set(requestId, ac);
+
   const run = (async () => {
     try {
-      const result = await perform();
+      if (cancelledBeforeStart.has(requestId) || ac.signal.aborted) {
+        cancelledBeforeStart.delete(requestId);
+        return;
+      }
+      let result: ClientToolResultEnvelope;
+      try {
+        result = await perform(ac.signal);
+      } catch (err) {
+        if (
+          ac.signal.aborted ||
+          cancelledBeforeStart.has(requestId) ||
+          (err instanceof DOMException && err.name === "AbortError") ||
+          (err instanceof Error && err.name === "AbortError")
+        ) {
+          cancelledBeforeStart.delete(requestId);
+          fulfilled.delete(requestId);
+          return;
+        }
+        throw err;
+      }
+      if (ac.signal.aborted || cancelledBeforeStart.has(requestId)) {
+        cancelledBeforeStart.delete(requestId);
+        fulfilled.delete(requestId);
+        return;
+      }
       if (result.ok) {
         fulfilled.set(requestId, {
           result,
           resolved: false,
           resolveGate: null,
+          origin,
         });
       }
       const settled = await tryResolve(
@@ -296,6 +376,7 @@ export async function fulfillClientToolOnce(opts: {
         requestId,
         result,
         logLabel,
+        origin,
         isWorkspace
           ? {
               duration_ms: Date.now() - t0,
@@ -317,5 +398,6 @@ export async function fulfillClientToolOnce(opts: {
     await run;
   } finally {
     inFlight.delete(requestId);
+    abortByRequest.delete(requestId);
   }
 }

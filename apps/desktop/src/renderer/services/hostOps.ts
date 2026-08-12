@@ -1,48 +1,28 @@
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { HostOpRequiredPayload } from "@/types/events";
 import type { HostOpResult } from "@shared/host-contract";
 
 /**
  * Desktop half of the Host ClientTool channel.
  *
- * After the server suspends and streams ``host_op_required``, we run the op in
- * the main process and settle over the unified interaction bridge
- * (kind ``client_tool``). Same ``request_id`` is de-duplicated in-process so
- * attach rehang does not re-run host side effects (e.g. shell).
+ * After the server suspends and streams ``host_op_required`` (device fulfill
+ * stream for cloud; sidecar pump for local turns), we run the op in the main
+ * process and settle over the unified interaction bridge (kind ``client_tool``).
+ * Same ``request_id`` is de-duplicated in-process so attach rehang does not
+ * re-run host side effects (e.g. shell).
  */
 export async function performHostOp(
   payload: HostOpRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "hostOps",
-    perform: () => runHostOp(payload),
-  });
-}
-
-/**
- * turnPhase gate 挡掉 `host_op_required` 时立刻走现有 fulfill 失败信封 settle，
- * 避免静默 drop 导致服务端 TimeoutError 冲 sticky channel-dead。
- * 不跑 IPC / 不假装 ok。对齐 `rejectWorkspaceOpForTurnPhase`。
- */
-export async function rejectHostOpForTurnPhase(
-  payload: HostOpRequiredPayload,
-  conversationId: string,
-  turnPhase: string,
-): Promise<void> {
-  await fulfillClientToolOnce({
-    requestId: payload.request_id,
-    conversationId,
-    logLabel: "hostOps",
-    perform: async (): Promise<HostOpResult> => ({
-      ok: false,
-      error: {
-        kind: "HostOpError",
-        detail: `回合 phase=${turnPhase}，本机 Host op 未执行（turn_phase_gate）`,
-      },
-    }),
+    perform: async () => runHostOp(payload),
   });
 }
 

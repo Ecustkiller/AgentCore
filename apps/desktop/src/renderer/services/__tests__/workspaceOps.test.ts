@@ -83,7 +83,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "hello" });
     stubFsApi(workspaceOp);
 
-    await performWorkspaceOp(payload(), "c1");
+    await performWorkspaceOp(payload(), "c1", "cloud");
 
     expect(workspaceOp).toHaveBeenCalledWith(
       "root-1",
@@ -107,7 +107,11 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     });
     stubFsApi(workspaceOp);
 
-    await performWorkspaceOp(payload({ op: "process_list", args: {} }), "c1");
+    await performWorkspaceOp(
+      payload({ op: "process_list", args: {} }),
+      "c1",
+      "cloud",
+    );
 
     expect(workspaceOp).toHaveBeenCalledWith(
       "root-1",
@@ -136,6 +140,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
         args: { command: "pnpm dev", cwd: "web" },
       }),
       "c1",
+      "cloud",
     );
 
     expect(workspaceOp).toHaveBeenCalledWith(
@@ -169,6 +174,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
         args: { command: "pnpm test", cwd: "apps/web" },
       }),
       "c1",
+      "cloud",
     );
 
     expect(workspaceOp).toHaveBeenCalledWith(
@@ -202,6 +208,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
         args: { command: "pnpm dev", cwd: "web" },
       }),
       "c1",
+      "cloud",
     );
 
     expect(workspaceOp).toHaveBeenCalledWith(
@@ -224,6 +231,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     await performWorkspaceOp(
       payload({ op: "process_list", root_id: "", args: {} }),
       "c1",
+      "cloud",
     );
 
     expect(workspaceOp).not.toHaveBeenCalled();
@@ -243,7 +251,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
       }),
     );
 
-    await performWorkspaceOp(payload(), "c1");
+    await performWorkspaceOp(payload(), "c1", "cloud");
 
     expect(postedBody(fetchMock)).toEqual({
       kind: "client_tool",
@@ -255,7 +263,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
   it("answers with an IO error when there is no desktop fsApi (web runtime)", async () => {
     vi.stubGlobal("window", {}); // no fsApi
 
-    await performWorkspaceOp(payload(), "c1");
+    await performWorkspaceOp(payload(), "c1", "cloud");
 
     const body = postedBody(fetchMock) as {
       ok: boolean;
@@ -268,7 +276,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
   it("turns a thrown IPC error into an IO error envelope (never leaves the op unanswered)", async () => {
     stubFsApi(vi.fn().mockRejectedValue(new Error("ipc boom")));
 
-    await performWorkspaceOp(payload(), "c1");
+    await performWorkspaceOp(payload(), "c1", "cloud");
 
     const body = postedBody(fetchMock) as {
       ok: boolean;
@@ -282,7 +290,9 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     stubFsApi(vi.fn().mockResolvedValue({ ok: true, value: "x" }));
     fetchMock.mockResolvedValue(errResponse(404, "gone"));
 
-    await expect(performWorkspaceOp(payload(), "c1")).resolves.toBeUndefined();
+    await expect(
+      performWorkspaceOp(payload(), "c1", "cloud"),
+    ).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -290,8 +300,8 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "hello" });
     stubFsApi(workspaceOp);
 
-    await performWorkspaceOp(payload(), "c1");
-    await performWorkspaceOp(payload(), "c1");
+    await performWorkspaceOp(payload(), "c1", "cloud");
+    await performWorkspaceOp(payload(), "c1", "cloud");
 
     expect(workspaceOp).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -309,6 +319,7 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     await performWorkspaceOp(
       payload({ request_id: "r-abort", timeout_ms: 20 }),
       "c1",
+      "cloud",
     );
 
     expect(workspaceOp).toHaveBeenCalledWith(
@@ -328,31 +339,32 @@ describe("performWorkspaceOp (本地工作区 op 回填)", () => {
     expect(useWorkspaceChannelStore.getState().notReady).toBe(true);
   });
 
-  it("probe_exec abort does not raise the file-channel banner", async () => {
-    const workspaceOp = vi.fn(
-      () =>
-        new Promise<{ ok: true; value: string }>((resolve) => {
-          setTimeout(() => resolve({ ok: true, value: "late" }), 500);
-        }),
+  it("regression: cloud origin settles via HTTP while a sidecar turn is active", async () => {
+    const { getActiveSidecarTarget } = await import(
+      "@/services/sidecarRouting"
     );
-    stubFsApi(workspaceOp);
+    vi.mocked(getActiveSidecarTarget).mockReturnValue({
+      rootId: "root-sidecar",
+      subpath: "scratch/c1",
+      turnId: "turn-local",
+    });
+    const respond = vi.fn().mockResolvedValue({ resolved: true });
+    const workspaceOp = vi.fn().mockResolvedValue({ ok: true, value: "x" });
+    vi.stubGlobal("window", {
+      fsApi: { workspaceOp },
+      sidecarApi: { respond },
+    });
 
-    await performWorkspaceOp(
-      payload({
-        request_id: "r-probe-abort",
-        op: "probe_exec",
-        args: {},
-        timeout_ms: 20,
-      }),
-      "c1",
+    await performWorkspaceOp(payload({ request_id: "r-cloud" }), "c1", "cloud");
+
+    expect(respond).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      `${BASE_URL}/v1/conversations/c1/interactions/r-cloud`,
     );
-
-    expect(useWorkspaceChannelStore.getState().notReady).toBe(false);
-    const body = postedBody(fetchMock) as {
-      ok: boolean;
-      error: { detail: string };
-    };
-    expect(body.ok).toBe(false);
-    expect(body.error.detail).toContain("活性挂起");
+    expect(postedBody(fetchMock)).toEqual({
+      kind: "client_tool",
+      ok: true,
+      value: "x",
+    });
   });
 });

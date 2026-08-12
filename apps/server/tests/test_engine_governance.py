@@ -20,7 +20,7 @@ import pytest
 from agentcore.config import settings
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, TokenUsage, ToolCallDelta
-from agentcore.runtime.engine import react_loop, resolve_tool_timeout
+from agentcore.runtime.engine import ReactLoopOut, react_loop, resolve_tool_timeout
 from agentcore.runtime.events import EventSink, EventType, FinishReason, SSEEvent
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -157,7 +157,7 @@ async def _run(
         tool_context=_context(),
         profile=profile,
         turn_model="m",
-        citation_sink=citation_sink,
+        out=None if citation_sink is None else ReactLoopOut(citations=citation_sink),
         annotate_citations=annotate_citations,
         deliverable_only=deliverable_only,
         on_reset=on_reset,
@@ -617,13 +617,13 @@ async def test_worker_deliverable_only_no_reset_when_no_pre_tool_content():
     assert resets == []  # 没有旁白 → 不清卡片
 
 
-# --- usage_sink: partial usage survives a mid-loop raise (B-deep 失败计费) ----
+# --- ReactLoopOut.usage: partial usage survives a mid-loop raise (B-deep 失败计费) ----
 
 
 class _MeterThenBoom:
     """Round 0 meters usage (a tool call so the loop continues + a usage chunk);
     round 1 raises. With raise_on_error=True the loop re-raises — but the round
-    that completed must still be readable via usage_sink so the caller can bill it."""
+    that completed must still be readable via ``out.usage`` so the caller can bill it."""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -654,7 +654,7 @@ async def test_usage_sink_holds_completed_round_usage_on_raise():
             profile=profile,
             turn_model="m",
             raise_on_error=True,
-            usage_sink=sink_usage,
+            out=ReactLoopOut(usage=sink_usage),
         )
     # The round that completed before the crash is mirrored for the caller to bill.
     assert len(sink_usage) == 1
@@ -682,7 +682,7 @@ async def test_usage_sink_empty_when_first_round_raises():
             profile=profile,
             turn_model="m",
             raise_on_error=True,
-            usage_sink=sink_usage,
+            out=ReactLoopOut(usage=sink_usage),
         )
     assert sink_usage == []
 
@@ -808,7 +808,11 @@ async def _run_loop(  # noqa: ANN001
         tool_context=_context(),
         profile=profile,
         turn_model=turn_model,
-        finish_override_sink=finish_override_sink,
+        out=(
+            None
+            if finish_override_sink is None
+            else ReactLoopOut(finish_override=finish_override_sink)
+        ),
     )
 
 
@@ -841,7 +845,7 @@ async def test_length_empty_degrades_immediately_without_continue():
         tool_context=_context(),
         profile=profile,
         turn_model="primary",
-        finish_override_sink=finish_override,
+        out=ReactLoopOut(finish_override=finish_override),
     )
 
     assert content == ""
@@ -880,7 +884,7 @@ async def test_length_empty_not_exempted_for_captain_coordination(monkeypatch):
         tool_context=_context(),
         profile=profile,
         turn_model="primary",
-        finish_override_sink=finish_override,
+        out=ReactLoopOut(finish_override=finish_override),
         role="captain",
         run_id="cap",
     )
@@ -981,7 +985,7 @@ async def _run_with_sink(provider, profile, sink, *, turn_model: str = "primary"
         tool_context=_context(),
         profile=profile,
         turn_model=turn_model,
-        finish_override_sink=finish_override,
+        out=ReactLoopOut(finish_override=finish_override),
     )
     return content, rounds, finish_override
 

@@ -12,7 +12,7 @@ from agentcore.llm.pricing import calculate_cost
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, TokenUsage
 from agentcore.runtime.approvals import ApprovalGate
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import (
     EventSink,
     FinishReason,
@@ -211,6 +211,11 @@ async def _drive_captain_loop(
     # later stamps supersede earlier ones (e.g. unproductive early-stop then
     # force-finalize ask_user → PAUSED). resolve_finish_override takes the last.
     finish_override: list[FinishReason] = []
+    loop_out = ReactLoopOut(
+        citations=citation_sink,
+        usage=inflight,
+        finish_override=finish_override,
+    )
     try:
         with log_context(
             run_id=spec.run_id,
@@ -230,13 +235,11 @@ async def _drive_captain_loop(
                 # its tool-call ARGUMENT assembly (the big delegate 任务书, composed before
                 # run_plan exists) rides a bubble-scoped tool_progress so it isn't invisible.
                 on_tool_progress=lambda tool, chars: sink.emit(tool_progress(tool, chars)),
-                citation_sink=citation_sink,
                 annotate_citations=True,
                 turn_evidence_ledger=turn_evidence_ledger,
                 ledger_registrant="ceo",
                 approval_gate=approval_gate,
-                usage_sink=inflight,
-                finish_override_sink=finish_override,
+                out=loop_out,
                 run_id=spec.run_id,
                 role="captain",
                 # 交付正文只留最终交付、旁白入 journal (Fork-B): the CEO bubble's persisted

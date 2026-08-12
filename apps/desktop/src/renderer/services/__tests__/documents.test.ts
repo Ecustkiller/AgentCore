@@ -16,6 +16,7 @@ import {
   deleteDocument,
   getAlwaysQuota,
   getDocument,
+  listDocuments,
   listScopeEntries,
   listUserRules,
   renameDocument,
@@ -189,17 +190,35 @@ describe("documents client", () => {
     });
   });
 
-  it("getAlwaysQuota maps percent + absolute chars", async () => {
+  it("getAlwaysQuota maps percent + absolute chars + global/project split", async () => {
     vi.mocked(api.get).mockResolvedValue({
       used_chars: 12,
       max_chars: 100,
       percent: 12,
+      global_chars: 7,
+      project_chars: 5,
     });
     const q = await getAlwaysQuota("F1");
     expect(api.get).toHaveBeenCalledWith(
       "/v1/documents/always-quota?folder_id=F1",
     );
-    expect(q).toEqual({ usedChars: 12, maxChars: 100, percent: 12 });
+    expect(q).toEqual({
+      usedChars: 12,
+      maxChars: 100,
+      percent: 12,
+      globalChars: 7,
+      projectChars: 5,
+    });
+  });
+
+  it("listDocuments maps always_chars (null for on_demand)", async () => {
+    vi.mocked(api.get).mockResolvedValue([
+      node({ id: "a", apply_mode: "always", always_chars: 4200 }),
+      node({ id: "b", apply_mode: "on_demand", always_chars: null }),
+    ]);
+    const rows = await listDocuments(null);
+    expect(rows.find((r) => r.id === "a")?.alwaysChars).toBe(4200);
+    expect(rows.find((r) => r.id === "b")?.alwaysChars).toBeNull();
   });
 
   it("getDocument maps description / frontmatter_error / quota_warning", async () => {

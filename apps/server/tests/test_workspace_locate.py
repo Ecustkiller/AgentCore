@@ -73,11 +73,10 @@ def test_build_server_workspace_targets_resolved_root(tmp_path: Path, monkeypatc
 
 def test_build_local_workspace_wires_channel_to_bound_root():
     """A binding yields a LocalWorkspace whose channel carries the desktop root_id."""
-    sink = EventSink()
     registry = InteractionRegistry()
     ws = build_local_workspace(
         binding=LocalBinding(root_id="root-xyz", root_label="myproj"),
-        sink=sink,
+        user_id="u1",
         conversation_id="c1",
         registry=registry,
         timeout_seconds=12.5,
@@ -88,7 +87,7 @@ def test_build_local_workspace_wires_channel_to_bound_root():
     chan = ws._channel  # noqa: SLF001 - test-only wiring inspection
     assert chan.root_id == "root-xyz"
     assert chan.conversation_id == "c1"
-    assert chan.sink is sink
+    assert chan.user_id == "u1"
     assert chan.registry is registry
     assert chan.timeout_seconds == 12.5
 
@@ -97,7 +96,7 @@ def test_build_local_workspace_defaults_to_shared_registry_and_timeout():
     """Omitted deps fall back to the process registry + configured op timeout."""
     ws = build_local_workspace(
         binding=LocalBinding(root_id="r1"),
-        sink=EventSink(),
+        user_id="u-test",
         conversation_id="c1",
     )
     chan = ws._channel  # noqa: SLF001 - test-only wiring inspection

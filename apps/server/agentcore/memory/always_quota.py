@@ -53,6 +53,11 @@ class AlwaysUsage:
     used_chars: int
     max_chars: int
     fingerprint: str = ""
+    # Split of ``used_chars`` for the two-segment meter (global + this project).
+    # By construction ``used_chars == global_chars + project_chars``; global context
+    # leaves ``project_chars`` at 0.
+    global_chars: int = 0
+    project_chars: int = 0
 
     @property
     def percent(self) -> float:
@@ -107,6 +112,18 @@ def _fingerprint(docs: list[Document], *, used: int, max_chars: int) -> str:
     return f"{digest}:{used}:{max_chars}"
 
 
+async def _always_docs_for_scope(
+    repo: DocumentRepository, user_id: str, scope: str | None
+) -> list[Document]:
+    """Always-on rule docs of one scope (user + AI-maintained).
+
+    One ``list_injectable_rules`` call per scope (``ai_maintained=None`` merges both
+    authorships). Callers that need global vs project meters still invoke this once
+    per scope — that split cannot be collapsed into a single query.
+    """
+    return await repo.list_injectable_rules(user_id, scope, ai_maintained=None)
+
+
 async def list_always_quota_docs(
     repo: DocumentRepository, user_id: str, *, folder_id: str | None
 ) -> list[Document]:
@@ -114,10 +131,7 @@ async def list_always_quota_docs(
     scopes: list[str | None] = [None] if folder_id is None else [None, folder_id]
     out: list[Document] = []
     for scope in scopes:
-        for ai_maintained in (False, True):
-            out.extend(
-                await repo.list_injectable_rules(user_id, scope, ai_maintained=ai_maintained)
-            )
+        out.extend(await _always_docs_for_scope(repo, user_id, scope))
     return out
 
 
@@ -125,13 +139,22 @@ async def measure_always_usage(
     repo: DocumentRepository, user_id: str, *, folder_id: str | None = None
 ) -> AlwaysUsage:
     """Current always-pool usage for the injection context of ``folder_id``."""
-    docs = await list_always_quota_docs(repo, user_id, folder_id=folder_id)
-    used = sum(always_entry_chars(d.content) for d in docs)
+    global_docs = await _always_docs_for_scope(repo, user_id, None)
+    global_chars = sum(always_entry_chars(d.content) for d in global_docs)
+    project_docs: list[Document] = []
+    project_chars = 0
+    if folder_id is not None:
+        project_docs = await _always_docs_for_scope(repo, user_id, folder_id)
+        project_chars = sum(always_entry_chars(d.content) for d in project_docs)
+    docs = [*global_docs, *project_docs]
+    used = global_chars + project_chars
     max_chars = always_max_chars()
     return AlwaysUsage(
         used_chars=used,
         max_chars=max_chars,
         fingerprint=_fingerprint(docs, used=used, max_chars=max_chars),
+        global_chars=global_chars,
+        project_chars=project_chars,
     )
 
 

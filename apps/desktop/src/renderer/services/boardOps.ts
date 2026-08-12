@@ -1,5 +1,6 @@
 import { notifyInfo } from "@/lib/toast";
 import { fulfillClientToolOnce } from "@/services/clientToolFulfill";
+import type { InteractionSettleOrigin } from "@/services/interaction";
 import type { BoardOp, BoardOpRequiredPayload } from "@/types/events";
 
 /**
@@ -48,10 +49,12 @@ export function registerBoardApplier(
 export async function performBoardOp(
   payload: BoardOpRequiredPayload,
   conversationId: string,
+  origin: InteractionSettleOrigin,
 ): Promise<void> {
   await fulfillClientToolOnce({
     requestId: payload.request_id,
     conversationId,
+    origin,
     logLabel: "boardOps",
     perform: async () => {
       const result = await runBoardOps(payload);

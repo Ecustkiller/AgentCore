@@ -14,7 +14,7 @@ from pathlib import Path
 
 from agentcore.core.types import ToolCategory
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCallDelta
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.facts import (
     FactKind,
@@ -374,7 +374,7 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
             turn_model="m",
             run_id="cap",
             role="captain",
-            citation_sink=citations,
+            out=ReactLoopOut(citations=citations),
             annotate_citations=True,
         )
     finally:

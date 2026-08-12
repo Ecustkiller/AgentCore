@@ -61,7 +61,7 @@ afterEach(() => {
 });
 
 describe("dispatchHandoffJob", () => {
-  it("POSTs {task}, fulfils workspace_op_required, returns job ids from SSE", async () => {
+  it("POSTs {task}, ignores workspace_op_required on handoff SSE, returns job ids", async () => {
     const opPayload = {
       request_id: "op-1",
       conversation_id: "c1",
@@ -89,7 +89,9 @@ describe("dispatchHandoffJob", () => {
       `${BASE_URL}/v1/conversations/c1/workspace/handoff/dispatch`,
     );
     expect(postedBody(fetchMock)).toEqual({ task: "调研竞品" });
-    expect(performOp).toHaveBeenCalledWith(opPayload, "c1");
+    // CLIENT_TOOL ops ride the device fulfill stream — handoff SSE must not
+    // double-fulfill the same request_id.
+    expect(performOp).not.toHaveBeenCalled();
     expect(started).toEqual({
       jobId: "job-1",
       jobConversationId: "job-conv-1",

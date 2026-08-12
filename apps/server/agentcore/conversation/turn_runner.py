@@ -129,226 +129,255 @@ async def run_and_persist(
                 conversation_id=conversation_id,
                 message_id=message_id,
             )
-            # A1+：云端回合写盘前 best-effort 基线快照（失败不阻断）。
-            from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-            await maybe_capture_turn_baseline(
-                user_id=user_id,
-                folder_id=folder_id,
-                conversation_id=conversation_id,
-                message_id=message_id,
-                backend=backend,
+            # Presence gate: local desktop-channel turns need a workspace fulfiller
+            # before any channel IO (baseline / prepare). Millisecond honest abort.
+            from agentcore.runtime.pipeline.errors import (
+                await_prepare_local_io,
+                backend_uses_local_channel,
+                bind_prepare_local_io_deadline,
+                prepare_local_io_deadline_bound,
+                prepare_local_io_span,
+                raise_if_local_workspace_fulfiller_absent,
+                reset_prepare_local_io_deadline,
             )
-            # Baseline (and any prior channel hang) may sticky-dead the local
-            # desktop channel — fail the turn before prepare burns probe/MCP/LLM.
-            from agentcore.workspace.channel import raise_if_backend_channel_dead
 
-            raise_if_backend_channel_dead(backend)
-            # Dev-only demo tape: divert before the real pipeline when this conversation
-            # is bound under DEMO_TAPE_REPLAY_ENABLED. Optional — ImportError must not
-            # block live turns (e.g. partial deploy missing tape_frame_meta).
-            tape_result = None
+            raise_if_local_workspace_fulfiller_absent(
+                user_id=user_id, backend=backend
+            )
+            # One prepare-phase local IO wall clock shared by the baseline below and
+            # prepare's channel probes. Only the spans that opt in are capped — the
+            # pipeline's execution phase (tools, cross-desk delegate re-probes on a
+            # TARGET desk) runs unbudgeted, per 双模式工作区.md §7.7.
+            budget_token = None
+            if not prepare_local_io_deadline_bound() and backend_uses_local_channel(backend):
+                budget_token = bind_prepare_local_io_deadline()
             try:
-                from agentcore.demo_tape.hooks import run_tape_turn_if_bound
-            except ImportError as e:
-                logger.warning("demo_tape.import_failed", error=str(e), phase="turn")
-            else:
-                try:
-                    tape_result = await run_tape_turn_if_bound(
-                        conversation_id=conversation_id,
-                        sink=sink,
-                        message_id=message_id,
-                        user_id=user_id,
-                        user_message=user_message,
-                        folder_id=folder_id,
-                        trace_id=trace_id,
-                    )
-                except asyncio.CancelledError:
-                    # Same 收口 as the real pipeline below: a mid-replay disconnect / shutdown
-                    # must not leave a zombie RUNNING assistant row — salvage the streamed part.
-                    if turn_runs.is_clean_cancel(conversation_id):
-                        await close_user_stop_turn(
-                            sink=sink,
-                            conversation_id=conversation_id,
-                            trace_id=trace_id,
-                            message_id=message_id,
-                        )
-                    else:
-                        salvage_incomplete_turn(
-                            sink=sink,
-                            conversation_id=conversation_id,
-                            trace_id=trace_id,
-                            message_id=message_id,
-                        )
-                    raise
-            if tape_result is not None:
-                duration_ms = int((time.monotonic() - started) * 1000)
-                logger.info(
-                    "demo_tape.turn_complete",
-                    finish_reason=getattr(
-                        tape_result.get("finish_reason"),
-                        "value",
-                        tape_result.get("finish_reason"),
-                    ),
-                    duration_ms=duration_ms,
-                    message_id=message_id,
-                )
-                await persist_turn_result(
-                    result=tape_result,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    backend=backend,
-                    sink=sink,
-                    user_message=user_message,
-                    llm_credentials=llm_credentials,
-                    trace_id=trace_id,
-                    turn_id=attempt_id,
-                    duration_ms=duration_ms,
-                    kind="turn",
-                )
-                tape_result["message_id"] = message_id
-                return tape_result
+                # A1+：云端回合写盘前 best-effort 基线快照（失败不阻断；预算内取消则诚实收口）。
+                from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
 
-            if settings.turn_lease_enabled:
-                owner_id = await acquire_turn_lease(
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    phase="running",
-                    meta={"trace_id": trace_id, "folder_id": folder_id},
-                )
-                lease_stop = asyncio.Event()
-                heartbeat_task = asyncio.create_task(
-                    lease_heartbeat_loop(
-                        message_id,
-                        owner_id=owner_id,
-                        interval_seconds=settings.turn_lease_heartbeat_seconds,
-                        stop=lease_stop,
-                    )
-                )
-            # Process cancel must leave the lease for sweeper reclaim (not delete it).
-            release_lease_clean = True
-            try:
-                try:
-                    result = await run_chat_pipeline(
-                        conversation_id=conversation_id,
-                        user_message=user_message,
-                        history=history,
-                        sink=sink,
-                        user_id=user_id,
-                        backend=backend,
-                        folder_id=folder_id,
-                        board_id=board_id,
-                        attachments=attachments,
-                        llm_credentials=llm_credentials,
-                        memory_enabled=memory_enabled,
-                        conversation_history_access=conversation_history_access,
-                        permission_axes=permission_axes,
-                        profile_set=profile_set,
-                        session_saver=session_saver,
-                        session_loader=session_loader,
-                        suspension_saver=suspension_saver,
-                        suspension_deleter=suspension_deleter,
-                        llm_supports_tools=llm_supports_tools,
-                        message_id=message_id,
-                        x_client_platform=x_client_platform,
-                        agent_mentions=agent_mentions,
-                    )
-                except asyncio.CancelledError:
-                    # Hard cancel / lifespan → terminal incomplete + release.
-                    # True hard kill (no lifespan salvage) = orphan for sweeper.
-                    if turn_runs.is_clean_cancel(conversation_id):
-                        closed = await close_user_stop_turn(
-                            sink=sink,
+                with prepare_local_io_span(backend):
+                    await await_prepare_local_io(
+                        maybe_capture_turn_baseline(
+                            user_id=user_id,
+                            folder_id=folder_id,
                             conversation_id=conversation_id,
-                            trace_id=trace_id,
                             message_id=message_id,
+                            backend=backend,
                         )
-                        release_lease_clean = bool(closed)
-                    else:
-                        release_lease_clean = False
-                    raise
-                finish = result.get("finish_reason")
-                duration_ms = int((time.monotonic() - started) * 1000)
-                delegated, workers = turn_worker_stats(result)
-                collab = result.get("collab") or {}
-                turn_extra: dict = {}
-                turn_model = (
-                    llm_credentials.default_model if llm_credentials is not None else ""
-                )
-                if turn_model:
-                    turn_extra["model"] = turn_model
-                cred_src = get_log_value("credential_source")
-                if cred_src:
-                    turn_extra["credential_source"] = cred_src
-                provider_id = get_log_value("provider_id")
-                if provider_id:
-                    turn_extra["provider_id"] = provider_id
-                logger.info(
-                    "chat.turn_complete",
-                    finish_reason=getattr(finish, "value", finish),
-                    rounds=result.get("rounds", 0),
-                    input_tokens=result.get("input_tokens", 0),
-                    output_tokens=result.get("output_tokens", 0),
-                    reasoning_tokens=result.get("reasoning_tokens", 0),
-                    reply_chars=len(result.get("content") or ""),
-                    reply_preview=preview(result.get("content") or ""),
-                    delegated=delegated,
-                    workers=workers,
-                    # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also
-                    # persisted to turn_metrics (offline log_stats derives same from events).
-                    boundary_yields=collab.get("boundary_yields", 0),
-                    scope_signals=collab.get("scope_signals", 0),
-                    escalations=collab.get("escalations", 0),
-                    revises=collab.get("revises", 0),
-                    duration_ms=duration_ms,
-                    error=result.get("error"),
-                    **latency_probe.as_log_fields(),
-                    **turn_extra,
-                )
+                    )
+                # Baseline (and any prior channel hang) may sticky-dead the local
+                # desktop channel — fail the turn before prepare burns probe/MCP/LLM.
+                from agentcore.workspace.channel import raise_if_backend_channel_dead
 
-                # Persist INSIDE the trace scope so the post-turn tail (cost.recorded,
-                # obs.turn_spans, turn-metrics/snapshot/title warnings) inherits this turn's
-                # trace_id / attempt_id from the log context — otherwise those lines fire after
-                # the scope closes and lose the single 全链路 join key (conversation-logs.mdc).
-                await persist_turn_result(
-                    result=result,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    backend=backend,
-                    sink=sink,
-                    user_message=user_message,
-                    llm_credentials=llm_credentials,
-                    trace_id=trace_id,
-                    turn_id=attempt_id,
-                    duration_ms=duration_ms,
-                    kind="turn",
-                )
-                if isinstance(result, dict):
-                    result["message_id"] = message_id
-                    outcome = result
+                raise_if_backend_channel_dead(backend)
+                # Dev-only demo tape: divert before the real pipeline when this conversation
+                # is bound under DEMO_TAPE_REPLAY_ENABLED. Optional — ImportError must not
+                # block live turns (e.g. partial deploy missing tape_frame_meta).
+                tape_result = None
+                try:
+                    from agentcore.demo_tape.hooks import run_tape_turn_if_bound
+                except ImportError as e:
+                    logger.warning("demo_tape.import_failed", error=str(e), phase="turn")
                 else:
-                    outcome = {"message_id": message_id}
-            finally:
-                if lease_stop is not None:
-                    lease_stop.set()
-                if heartbeat_task is not None:
-                    heartbeat_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await heartbeat_task
-                # Normal terminal / pause / user-stop / lifespan shutdown: clear lease.
-                # True hard-kill CancelledError: orphan (shielded) so sweeper can recover.
-                if settings.turn_lease_enabled:
-                    if release_lease_clean:
-                        await release_turn_lease(message_id)
-                    else:
-                        with contextlib.suppress(asyncio.TimeoutError, Exception):
-                            await asyncio.wait_for(
-                                asyncio.shield(orphan_turn_lease(message_id)),
-                                timeout=2.0,
+                    try:
+                        tape_result = await run_tape_turn_if_bound(
+                            conversation_id=conversation_id,
+                            sink=sink,
+                            message_id=message_id,
+                            user_id=user_id,
+                            user_message=user_message,
+                            folder_id=folder_id,
+                            trace_id=trace_id,
+                        )
+                    except asyncio.CancelledError:
+                        # Same 收口 as the real pipeline below: a mid-replay disconnect / shutdown
+                        # must not leave a zombie RUNNING assistant row — salvage the streamed part.
+                        if turn_runs.is_clean_cancel(conversation_id):
+                            await close_user_stop_turn(
+                                sink=sink,
+                                conversation_id=conversation_id,
+                                trace_id=trace_id,
+                                message_id=message_id,
                             )
+                        else:
+                            salvage_incomplete_turn(
+                                sink=sink,
+                                conversation_id=conversation_id,
+                                trace_id=trace_id,
+                                message_id=message_id,
+                            )
+                        raise
+                if tape_result is not None:
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    logger.info(
+                        "demo_tape.turn_complete",
+                        finish_reason=getattr(
+                            tape_result.get("finish_reason"),
+                            "value",
+                            tape_result.get("finish_reason"),
+                        ),
+                        duration_ms=duration_ms,
+                        message_id=message_id,
+                    )
+                    await persist_turn_result(
+                        result=tape_result,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        folder_id=folder_id,
+                        backend=backend,
+                        sink=sink,
+                        user_message=user_message,
+                        llm_credentials=llm_credentials,
+                        trace_id=trace_id,
+                        turn_id=attempt_id,
+                        duration_ms=duration_ms,
+                        kind="turn",
+                    )
+                    tape_result["message_id"] = message_id
+                    return tape_result
+
+                if settings.turn_lease_enabled:
+                    owner_id = await acquire_turn_lease(
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        phase="running",
+                        meta={"trace_id": trace_id, "folder_id": folder_id},
+                    )
+                    lease_stop = asyncio.Event()
+                    heartbeat_task = asyncio.create_task(
+                        lease_heartbeat_loop(
+                            message_id,
+                            owner_id=owner_id,
+                            interval_seconds=settings.turn_lease_heartbeat_seconds,
+                            stop=lease_stop,
+                        )
+                    )
+                # Process cancel must leave the lease for sweeper reclaim (not delete it).
+                release_lease_clean = True
+                try:
+                    try:
+                        result = await run_chat_pipeline(
+                            conversation_id=conversation_id,
+                            user_message=user_message,
+                            history=history,
+                            sink=sink,
+                            user_id=user_id,
+                            backend=backend,
+                            folder_id=folder_id,
+                            board_id=board_id,
+                            attachments=attachments,
+                            llm_credentials=llm_credentials,
+                            memory_enabled=memory_enabled,
+                            conversation_history_access=conversation_history_access,
+                            permission_axes=permission_axes,
+                            profile_set=profile_set,
+                            session_saver=session_saver,
+                            session_loader=session_loader,
+                            suspension_saver=suspension_saver,
+                            suspension_deleter=suspension_deleter,
+                            llm_supports_tools=llm_supports_tools,
+                            message_id=message_id,
+                            x_client_platform=x_client_platform,
+                            agent_mentions=agent_mentions,
+                        )
+                    except asyncio.CancelledError:
+                        # Hard cancel / lifespan → terminal incomplete + release.
+                        # True hard kill (no lifespan salvage) = orphan for sweeper.
+                        if turn_runs.is_clean_cancel(conversation_id):
+                            closed = await close_user_stop_turn(
+                                sink=sink,
+                                conversation_id=conversation_id,
+                                trace_id=trace_id,
+                                message_id=message_id,
+                            )
+                            release_lease_clean = bool(closed)
+                        else:
+                            release_lease_clean = False
+                        raise
+                    finish = result.get("finish_reason")
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    delegated, workers = turn_worker_stats(result)
+                    collab = result.get("collab") or {}
+                    turn_extra: dict = {}
+                    turn_model = (
+                        llm_credentials.default_model if llm_credentials is not None else ""
+                    )
+                    if turn_model:
+                        turn_extra["model"] = turn_model
+                    cred_src = get_log_value("credential_source")
+                    if cred_src:
+                        turn_extra["credential_source"] = cred_src
+                    provider_id = get_log_value("provider_id")
+                    if provider_id:
+                        turn_extra["provider_id"] = provider_id
+                    logger.info(
+                        "chat.turn_complete",
+                        finish_reason=getattr(finish, "value", finish),
+                        rounds=result.get("rounds", 0),
+                        input_tokens=result.get("input_tokens", 0),
+                        output_tokens=result.get("output_tokens", 0),
+                        reasoning_tokens=result.get("reasoning_tokens", 0),
+                        reply_chars=len(result.get("content") or ""),
+                        reply_preview=preview(result.get("content") or ""),
+                        delegated=delegated,
+                        workers=workers,
+                        # 协作质量 (学·度量 §2.5): per-turn orchestration signals, also
+                        # persisted to turn_metrics (offline log_stats derives same from events).
+                        boundary_yields=collab.get("boundary_yields", 0),
+                        scope_signals=collab.get("scope_signals", 0),
+                        escalations=collab.get("escalations", 0),
+                        revises=collab.get("revises", 0),
+                        duration_ms=duration_ms,
+                        error=result.get("error"),
+                        **latency_probe.as_log_fields(),
+                        **turn_extra,
+                    )
+
+                    # Persist INSIDE the trace scope so the post-turn tail (cost.recorded,
+                    # obs.turn_spans, turn-metrics/snapshot/title warnings) inherits this turn's
+                    # trace_id / attempt_id from the log context — otherwise those lines fire after
+                    # the scope closes and lose the single 全链路 join key (conversation-logs.mdc).
+                    await persist_turn_result(
+                        result=result,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        folder_id=folder_id,
+                        backend=backend,
+                        sink=sink,
+                        user_message=user_message,
+                        llm_credentials=llm_credentials,
+                        trace_id=trace_id,
+                        turn_id=attempt_id,
+                        duration_ms=duration_ms,
+                        kind="turn",
+                    )
+                    if isinstance(result, dict):
+                        result["message_id"] = message_id
+                        outcome = result
+                    else:
+                        outcome = {"message_id": message_id}
+                finally:
+                    if lease_stop is not None:
+                        lease_stop.set()
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    # Normal terminal / pause / user-stop / lifespan shutdown: clear lease.
+                    # True hard-kill CancelledError: orphan (shielded) so sweeper can recover.
+                    if settings.turn_lease_enabled:
+                        if release_lease_clean:
+                            await release_turn_lease(message_id)
+                        else:
+                            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                                await asyncio.wait_for(
+                                    asyncio.shield(orphan_turn_lease(message_id)),
+                                    timeout=2.0,
+                                )
+            finally:
+                if budget_token is not None:
+                    reset_prepare_local_io_deadline(budget_token)
     finally:
         reset_turn_latency(latency_token)
     return outcome
@@ -428,131 +457,156 @@ async def run_mechanism_direct_and_persist(
                 conversation_id=conversation_id,
                 message_id=message_id,
             )
-            from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
-
-            await maybe_capture_turn_baseline(
-                user_id=user_id,
-                folder_id=folder_id,
-                conversation_id=conversation_id,
-                message_id=message_id,
-                backend=backend,
+            from agentcore.runtime.pipeline.errors import (
+                await_prepare_local_io,
+                backend_uses_local_channel,
+                bind_prepare_local_io_deadline,
+                prepare_local_io_deadline_bound,
+                prepare_local_io_span,
+                raise_if_local_workspace_fulfiller_absent,
+                reset_prepare_local_io_deadline,
             )
-            from agentcore.workspace.channel import raise_if_backend_channel_dead
 
-            raise_if_backend_channel_dead(backend)
-
-            if settings.turn_lease_enabled:
-                owner_id = await acquire_turn_lease(
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    phase="running",
-                    meta={
-                        "trace_id": trace_id,
-                        "folder_id": folder_id,
-                        "workflow_id": workflow_id,
-                    },
-                )
-                lease_stop = asyncio.Event()
-                heartbeat_task = asyncio.create_task(
-                    lease_heartbeat_loop(
-                        message_id,
-                        owner_id=owner_id,
-                        interval_seconds=settings.turn_lease_heartbeat_seconds,
-                        stop=lease_stop,
-                    )
-                )
-            release_lease_clean = True
+            raise_if_local_workspace_fulfiller_absent(
+                user_id=user_id, backend=backend
+            )
+            # Same posture as the chat turn: one prepare clock, in force only inside
+            # the baseline span below and in prepare — never over workflow execution.
+            budget_token = None
+            if not prepare_local_io_deadline_bound() and backend_uses_local_channel(backend):
+                budget_token = bind_prepare_local_io_deadline()
             try:
-                try:
-                    result = await run_workflow_pipeline(
+                from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
+
+                with prepare_local_io_span(backend):
+                    await await_prepare_local_io(
+                        maybe_capture_turn_baseline(
+                            user_id=user_id,
+                            folder_id=folder_id,
+                            conversation_id=conversation_id,
+                            message_id=message_id,
+                            backend=backend,
+                        )
+                    )
+                from agentcore.workspace.channel import raise_if_backend_channel_dead
+
+                raise_if_backend_channel_dead(backend)
+
+                if settings.turn_lease_enabled:
+                    owner_id = await acquire_turn_lease(
+                        message_id=message_id,
                         conversation_id=conversation_id,
                         user_id=user_id,
-                        user_message=user_message,
-                        tasks=tasks,
+                        phase="running",
+                        meta={
+                            "trace_id": trace_id,
+                            "folder_id": folder_id,
+                            "workflow_id": workflow_id,
+                        },
+                    )
+                    lease_stop = asyncio.Event()
+                    heartbeat_task = asyncio.create_task(
+                        lease_heartbeat_loop(
+                            message_id,
+                            owner_id=owner_id,
+                            interval_seconds=settings.turn_lease_heartbeat_seconds,
+                            stop=lease_stop,
+                        )
+                    )
+                release_lease_clean = True
+                try:
+                    try:
+                        result = await run_workflow_pipeline(
+                            conversation_id=conversation_id,
+                            user_id=user_id,
+                            user_message=user_message,
+                            tasks=tasks,
+                            workflow_id=workflow_id,
+                            workflow_version=workflow_version,
+                            sink=sink,
+                            backend=backend,
+                            history=history,
+                            folder_id=folder_id,
+                            board_id=board_id,
+                            memory_enabled=memory_enabled,
+                            conversation_history_access=conversation_history_access,
+                            permission_axes=permission_axes,
+                            profile_set=profile_set,
+                            llm_credentials=llm_credentials,
+                            session_saver=session_saver,
+                            session_loader=session_loader,
+                            suspension_saver=suspension_saver,
+                            suspension_deleter=suspension_deleter,
+                            message_id=message_id,
+                            x_client_platform=x_client_platform,
+                        )
+                    except asyncio.CancelledError:
+                        if turn_runs.is_clean_cancel(conversation_id):
+                            closed = await close_user_stop_turn(
+                                sink=sink,
+                                conversation_id=conversation_id,
+                                trace_id=trace_id,
+                                message_id=message_id,
+                            )
+                            release_lease_clean = bool(closed)
+                        else:
+                            release_lease_clean = False
+                        raise
+                    finish = result.get("finish_reason")
+                    duration_ms = int((time.monotonic() - started) * 1000)
+                    delegated, workers = turn_worker_stats(result)
+                    logger.info(
+                        "mechanism_direct.turn_complete",
+                        finish_reason=getattr(finish, "value", finish),
+                        rounds=result.get("rounds", 0),
+                        reply_chars=len(result.get("content") or ""),
+                        reply_preview=preview(result.get("content") or ""),
+                        delegated=delegated,
+                        workers=workers,
+                        duration_ms=duration_ms,
+                        error=result.get("error"),
                         workflow_id=workflow_id,
                         workflow_version=workflow_version,
-                        sink=sink,
-                        backend=backend,
-                        history=history,
-                        folder_id=folder_id,
-                        board_id=board_id,
-                        memory_enabled=memory_enabled,
-                        conversation_history_access=conversation_history_access,
-                        permission_axes=permission_axes,
-                        profile_set=profile_set,
-                        llm_credentials=llm_credentials,
-                        session_saver=session_saver,
-                        session_loader=session_loader,
-                        suspension_saver=suspension_saver,
-                        suspension_deleter=suspension_deleter,
-                        message_id=message_id,
-                        x_client_platform=x_client_platform,
+                        **latency_probe.as_log_fields(),
                     )
-                except asyncio.CancelledError:
-                    if turn_runs.is_clean_cancel(conversation_id):
-                        closed = await close_user_stop_turn(
-                            sink=sink,
-                            conversation_id=conversation_id,
-                            trace_id=trace_id,
-                            message_id=message_id,
-                        )
-                        release_lease_clean = bool(closed)
+                    await persist_turn_result(
+                        result=result,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        folder_id=folder_id,
+                        backend=backend,
+                        sink=sink,
+                        user_message=user_message,
+                        llm_credentials=llm_credentials,
+                        trace_id=trace_id,
+                        turn_id=attempt_id,
+                        duration_ms=duration_ms,
+                        kind="turn",
+                    )
+                    if isinstance(result, dict):
+                        result["message_id"] = message_id
+                        outcome = result
                     else:
-                        release_lease_clean = False
-                    raise
-                finish = result.get("finish_reason")
-                duration_ms = int((time.monotonic() - started) * 1000)
-                delegated, workers = turn_worker_stats(result)
-                logger.info(
-                    "mechanism_direct.turn_complete",
-                    finish_reason=getattr(finish, "value", finish),
-                    rounds=result.get("rounds", 0),
-                    reply_chars=len(result.get("content") or ""),
-                    reply_preview=preview(result.get("content") or ""),
-                    delegated=delegated,
-                    workers=workers,
-                    duration_ms=duration_ms,
-                    error=result.get("error"),
-                    workflow_id=workflow_id,
-                    workflow_version=workflow_version,
-                    **latency_probe.as_log_fields(),
-                )
-                await persist_turn_result(
-                    result=result,
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    folder_id=folder_id,
-                    backend=backend,
-                    sink=sink,
-                    user_message=user_message,
-                    llm_credentials=llm_credentials,
-                    trace_id=trace_id,
-                    turn_id=attempt_id,
-                    duration_ms=duration_ms,
-                    kind="turn",
-                )
-                if isinstance(result, dict):
-                    result["message_id"] = message_id
-                    outcome = result
-                else:
-                    outcome = {"message_id": message_id}
+                        outcome = {"message_id": message_id}
+                finally:
+                    if lease_stop is not None:
+                        lease_stop.set()
+                    if heartbeat_task is not None:
+                        heartbeat_task.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await heartbeat_task
+                    if settings.turn_lease_enabled:
+                        if release_lease_clean:
+                            await release_turn_lease(message_id)
+                        else:
+                            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                                await asyncio.wait_for(
+                                    asyncio.shield(orphan_turn_lease(message_id)),
+                                    timeout=2.0,
+                                )
             finally:
-                if lease_stop is not None:
-                    lease_stop.set()
-                if heartbeat_task is not None:
-                    heartbeat_task.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await heartbeat_task
-                if settings.turn_lease_enabled:
-                    if release_lease_clean:
-                        await release_turn_lease(message_id)
-                    else:
-                        with contextlib.suppress(asyncio.TimeoutError, Exception):
-                            await asyncio.wait_for(
-                                asyncio.shield(orphan_turn_lease(message_id)),
-                                timeout=2.0,
-                            )
+                if budget_token is not None:
+                    reset_prepare_local_io_deadline(budget_token)
     finally:
         reset_turn_latency(latency_token)
     return outcome

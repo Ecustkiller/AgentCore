@@ -109,12 +109,8 @@ export function ChatThread({ chatId }: Props) {
 
   const threadItems = useMemo(() => buildImThreadItems(messages), [messages]);
 
-  const last = messages[messages.length - 1];
-  const contentKey = last ? `${last.id}-${messages.length}` : "";
-  const { scrollRef, atBottom, jumpToBottom } = useStickToBottom(
-    contentKey,
-    chatId,
-  );
+  const { scrollRef, contentRef, atBottom, jumpToBottom } =
+    useStickToBottom(chatId);
 
   const name = chat ? chatDisplayName(chat) : "";
   const memberCount = isGroup && members.length > 0 ? members.length : null;
@@ -281,83 +277,90 @@ export function ChatThread({ chatId }: Props) {
 
       <div className="relative min-h-0 flex-1">
         <div ref={scrollRef} className="h-full overflow-y-auto">
-          {hasMessages ? (
-            <div className="flex flex-col gap-2 px-4 py-4">
-              {hasMoreOlder && (
-                <div className="flex justify-center pb-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={loadingOlder}
-                    onClick={() => void handleLoadOlder()}
-                    className="text-xs text-muted-foreground"
-                  >
-                    {loadingOlder ? "加载中…" : "加载更早消息"}
-                  </Button>
-                </div>
-              )}
-              {threadItems.map((item) => {
-                if (item.type === "date_divider") {
-                  return <ChatDateDivider key={item.key} label={item.label} />;
-                }
-                const m = item.message;
-                const mine = !!myId && m.sender_user_id === myId;
-                const peerName = name || "成员";
-                const senderName =
-                  isGroup && !mine && m.sender_user_id
-                    ? (nameById.get(m.sender_user_id) ?? "成员")
-                    : undefined;
-                const avatarName = mine
-                  ? user?.displayName || user?.username || "?"
-                  : isGroup
-                    ? (senderName ?? "成员")
-                    : peerName;
-                const senderAvatarUrl = mine
-                  ? (user?.avatarUrl ?? null)
-                  : !isGroup
-                    ? (chat?.avatar_url ?? null)
-                    : null;
-                return (
-                  <ChatBubble
-                    key={item.key}
-                    message={m}
-                    mine={mine}
-                    senderName={senderName}
-                    avatarName={avatarName}
-                    senderAvatarUrl={senderAvatarUrl}
-                    layout={item.layout}
-                    highlighted={highlightId === m.id}
-                    myUserId={myId}
-                    isAdmin={isAdmin}
-                    isGroupModerator={isGroupModerator}
-                    chatType={chat?.type}
-                    resolveMentionName={(id) => nameById.get(id)}
-                    onReply={
-                      isOfficial || m.recalled_at ? undefined : handleReply
-                    }
-                    onRecall={handleRecall}
-                    onEdit={isOfficial ? undefined : handleEdit}
-                    onScrollToReply={handleScrollToReply}
-                    replyTargetRecalled={
-                      !!m.reply_to_message_id &&
-                      recalledIds.has(m.reply_to_message_id)
-                    }
-                    onAvatarClick={isGroup ? openProfile : undefined}
-                  />
-                );
-              })}
-            </div>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-muted-foreground">
-                {loading
-                  ? "加载中…"
-                  : isOfficial
-                    ? "暂无公告"
-                    : "还没有消息，发送第一条消息吧"}
-              </p>
-            </div>
-          )}
+          {/* min-h (never h) so the empty placeholder can center against the
+              viewport while this box still GROWS with the transcript — a pinned
+              height would freeze the size ResizeObserver watches and kill stick-to-bottom. */}
+          <div ref={contentRef} className="flex min-h-full flex-col">
+            {hasMessages ? (
+              <div className="flex flex-col gap-2 px-4 py-4">
+                {hasMoreOlder && (
+                  <div className="flex justify-center pb-1">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={loadingOlder}
+                      onClick={() => void handleLoadOlder()}
+                      className="text-xs text-muted-foreground"
+                    >
+                      {loadingOlder ? "加载中…" : "加载更早消息"}
+                    </Button>
+                  </div>
+                )}
+                {threadItems.map((item) => {
+                  if (item.type === "date_divider") {
+                    return (
+                      <ChatDateDivider key={item.key} label={item.label} />
+                    );
+                  }
+                  const m = item.message;
+                  const mine = !!myId && m.sender_user_id === myId;
+                  const peerName = name || "成员";
+                  const senderName =
+                    isGroup && !mine && m.sender_user_id
+                      ? (nameById.get(m.sender_user_id) ?? "成员")
+                      : undefined;
+                  const avatarName = mine
+                    ? user?.displayName || user?.username || "?"
+                    : isGroup
+                      ? (senderName ?? "成员")
+                      : peerName;
+                  const senderAvatarUrl = mine
+                    ? (user?.avatarUrl ?? null)
+                    : !isGroup
+                      ? (chat?.avatar_url ?? null)
+                      : null;
+                  return (
+                    <ChatBubble
+                      key={item.key}
+                      message={m}
+                      mine={mine}
+                      senderName={senderName}
+                      avatarName={avatarName}
+                      senderAvatarUrl={senderAvatarUrl}
+                      layout={item.layout}
+                      highlighted={highlightId === m.id}
+                      myUserId={myId}
+                      isAdmin={isAdmin}
+                      isGroupModerator={isGroupModerator}
+                      chatType={chat?.type}
+                      resolveMentionName={(id) => nameById.get(id)}
+                      onReply={
+                        isOfficial || m.recalled_at ? undefined : handleReply
+                      }
+                      onRecall={handleRecall}
+                      onEdit={isOfficial ? undefined : handleEdit}
+                      onScrollToReply={handleScrollToReply}
+                      replyTargetRecalled={
+                        !!m.reply_to_message_id &&
+                        recalledIds.has(m.reply_to_message_id)
+                      }
+                      onAvatarClick={isGroup ? openProfile : undefined}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="flex flex-1 items-center justify-center">
+                <p className="text-sm text-muted-foreground">
+                  {loading
+                    ? "加载中…"
+                    : isOfficial
+                      ? "暂无公告"
+                      : "还没有消息，发送第一条消息吧"}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
         {hasMessages && !atBottom && (
           <SimpleTooltip label="回到底部">

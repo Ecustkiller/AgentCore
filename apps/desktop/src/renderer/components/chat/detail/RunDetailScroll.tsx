@@ -4,19 +4,17 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useStickToBottom } from "@/lib/useStickToBottom";
 import { useMessageExecution } from "@/stores/execution";
 import { ArrowDown } from "lucide-react";
-import { useMemo } from "react";
-
-function chunkChars(chunks: string[]): number {
-  let n = 0;
-  for (const c of chunks) n += c.length;
-  return n;
-}
+import type { KeyboardEvent } from "react";
 
 /**
  * Scroll shell for a SidePanel run tab: stick-to-bottom while the worker is
  * live (same semantics as the main chat / IM thread), open finished runs at the
  * top. Lives outside {@link RunDetailBody} so the panel chrome does not subscribe
  * to every streaming token — only this shell + the body do.
+ *
+ * Layout growth (async diagrams, expand/collapse, REST sections) is followed via
+ * ResizeObserver on the content wrapper — keep-alive `hidden` tabs also re-stick
+ * naturally when unhidden (0→real size) while still stuck.
  */
 export function RunDetailScroll({
   messageId,
@@ -35,40 +33,40 @@ export function RunDetailScroll({
   const live =
     ready && (agent.status === "working" || run.status === "running");
 
-  const contentKey = useMemo(() => {
-    if (!ready) return `${runId}:pending`;
-    return [
-      runId,
-      agent.status,
-      run.status,
-      chunkChars(agent.outputChunks),
-      chunkChars(agent.reasoningChunks),
-      agent.toolCalls.length,
-      agent.toolProgress?.chars ?? 0,
-      run.process.length,
-      run.debrief ? 1 : 0,
-      run.outputSummary?.length ?? 0,
-    ].join("\u0001");
-  }, [ready, runId, agent, run]);
-
   // Only fire reset once the run is projectable — avoids a false "done → top"
   // flash before execution lands, then a second reset when data arrives.
   const resetKey = ready ? `${messageId}:${runId}` : null;
 
-  const { scrollRef, atBottom, jumpToBottom } = useStickToBottom(
-    contentKey,
+  const { scrollRef, contentRef, atBottom, jumpToBottom } = useStickToBottom(
     resetKey,
     { followOnReset: live },
   );
 
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "End") return;
+    e.preventDefault();
+    jumpToBottom();
+  };
+
   return (
     <div className="absolute inset-0">
-      <div ref={scrollRef} className="h-full overflow-y-auto">
-        <RunDetailBody
-          key={`${messageId}:${runId}`}
-          messageId={messageId}
-          runId={runId}
-        />
+      <div
+        ref={scrollRef}
+        className="h-full overflow-y-auto"
+        // biome-ignore lint/a11y/useSemanticElements: scroll pane needs HTMLDivElement for overflow + hook ref typing; region role + label carry the semantics.
+        role="region"
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: scroll region must be focusable for End→bottom and keyboard scrolling; no native scroll-pane element.
+        tabIndex={0}
+        aria-label="运行详情"
+        onKeyDown={onKeyDown}
+      >
+        <div ref={contentRef}>
+          <RunDetailBody
+            key={`${messageId}:${runId}`}
+            messageId={messageId}
+            runId={runId}
+          />
+        </div>
       </div>
       {!atBottom && (
         <SimpleTooltip label="回到底部">

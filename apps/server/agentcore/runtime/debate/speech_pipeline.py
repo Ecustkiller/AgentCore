@@ -25,7 +25,7 @@ from agentcore.runtime.debate.evidence_ledger import (
     extract_ledger_ids,
     format_evidence_ledger_hint,
 )
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.engine.stream import stream_llm_round
 from agentcore.runtime.events import (
     EventSink,
@@ -162,20 +162,22 @@ async def research_then_draft(
             ),
             on_reset=None,
             raise_on_error=True,
-            citation_sink=citation_sink,
             annotate_citations=False,
             turn_evidence_ledger=research_ledger,  # type: ignore[arg-type]
             ledger_registrant=side_key or "debater",
             approval_gate=approval_gate,
-            usage_sink=usage_sink,
+            out=ReactLoopOut(
+                citations=citation_sink,
+                usage=usage_sink,
+                finish_override=finish_override_sink,
+                gate_escalations=gate_escalation_sink,
+                cutoff_reasons=cutoff_reason_sink,
+            ),
             on_round_begin=on_round_begin,
             run_id=run_id,
             role="worker",
             deliverable_only=True,
-            gate_escalation_sink=gate_escalation_sink,
             token_budget=token_budget,
-            finish_override_sink=finish_override_sink,
-            cutoff_reason_sink=cutoff_reason_sink,
         )
         total_usage = total_usage + research_usage
         total_rounds += research_rounds

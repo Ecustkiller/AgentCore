@@ -31,9 +31,9 @@ per-user memory lock, 照 api/routes/memory.py) so the repo stays db-only, no up
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
-from sqlalchemy import Select, or_, select
+from sqlalchemy import Select, and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -472,31 +472,51 @@ class DocumentRepository:
         return Document.parent_id == rules_dir.id
 
     async def list_injectable_rules(
-        self, user_id: str, folder_id: str | None, *, ai_maintained: bool
+        self, user_id: str, folder_id: str | None, *, ai_maintained: bool | None
     ) -> list[Document]:
         """Always-injected ``rule`` docs of one scope + authorship (§二 two-tier injection).
 
         ``ai_maintained=True`` → the memory core (偏好.md / 画像.md); ``False`` → the user's own
-        rule documents. ``apply_mode='on_demand'`` topics are excluded (they ride the directory,
-        not ``<rules>``). Ordered by ``name`` for a stable prefix. When convention dirs exist,
-        only nodes under those parents are returned (see ``_injectable_parent_filter``).
+        rule documents; ``None`` → both (one query; user rules first, then AI — same order as
+        two sequential calls). ``apply_mode='on_demand'`` topics are excluded (they ride the
+        directory, not ``<rules>``). Ordered by ``name`` for a stable prefix (and by
+        ``ai_maintained`` when both). When convention dirs exist, only nodes under those
+        parents are returned (see ``_injectable_parent_filter``).
         """
         conditions: list[ColumnElement[bool]] = [
             Document.user_id == user_id,
             _scope_clause(folder_id),
             Document.role == "rule",
             Document.apply_mode == "always",
-            Document.ai_maintained.is_(ai_maintained),
             Document.kind == "document",
             Document.deleted_at.is_(None),
         ]
-        parent_filter = await self._injectable_parent_filter(
-            user_id, folder_id, ai_maintained=ai_maintained
-        )
-        if parent_filter is not None:
-            conditions.append(parent_filter)
+        order: tuple[ColumnElement[Any], ...]
+        if ai_maintained is None:
+            user_pf = await self._injectable_parent_filter(
+                user_id, folder_id, ai_maintained=False
+            )
+            mem_pf = await self._injectable_parent_filter(
+                user_id, folder_id, ai_maintained=True
+            )
+            user_branch: ColumnElement[bool] = Document.ai_maintained.is_(False)
+            if user_pf is not None:
+                user_branch = and_(user_branch, user_pf)
+            mem_branch: ColumnElement[bool] = Document.ai_maintained.is_(True)
+            if mem_pf is not None:
+                mem_branch = and_(mem_branch, mem_pf)
+            conditions.append(or_(user_branch, mem_branch))
+            order = (Document.ai_maintained.asc(), Document.name.asc())
+        else:
+            conditions.append(Document.ai_maintained.is_(ai_maintained))
+            parent_filter = await self._injectable_parent_filter(
+                user_id, folder_id, ai_maintained=ai_maintained
+            )
+            if parent_filter is not None:
+                conditions.append(parent_filter)
+            order = (Document.name.asc(),)
         result = await self._session.execute(
-            select(Document).where(*conditions).order_by(Document.name.asc())
+            select(Document).where(*conditions).order_by(*order)
         )
         return list(result.scalars().all())
 
@@ -779,16 +799,28 @@ class DocumentRepository:
         return ids
 
     async def soft_delete(self, document_id: str, *, user_id: str) -> bool:
-        """Soft-delete a node and (for a folder) its whole subtree. Idempotent."""
+        """Soft-delete a node and (for a folder) its whole subtree. Idempotent.
+
+        One batch ``UPDATE`` for the root + live descendants (not per-id ``session.get``).
+        ``synchronize_session="fetch"`` keeps already-loaded ORM rows in this session in
+        sync so later same-session reads see the new ``deleted_at``. Already-deleted rows
+        are skipped via ``deleted_at IS NULL`` (idempotent).
+        """
         doc = await self.get(document_id, user_id=user_id)
         if doc is None:
             return False
         now = datetime.now()
-        doc.deleted_at = now
-        for child_id in await self._descendant_ids(user_id, document_id):
-            child = await self._session.get(Document, child_id)
-            if child is not None and child.deleted_at is None:
-                child.deleted_at = now
+        ids = [document_id, *await self._descendant_ids(user_id, document_id)]
+        await self._session.execute(
+            update(Document)
+            .where(
+                Document.user_id == user_id,
+                Document.id.in_(ids),
+                Document.deleted_at.is_(None),
+            )
+            .values(deleted_at=now)
+            .execution_options(synchronize_session="fetch")
+        )
         await self._session.commit()
         return True
 

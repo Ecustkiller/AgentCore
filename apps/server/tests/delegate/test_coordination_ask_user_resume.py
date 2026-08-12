@@ -34,7 +34,7 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.coordination.tools import CancelWorkerTool, UpdateSynthesisTool
 from agentcore.runtime.coordination.wait import await_coordination_injection
-from agentcore.runtime.engine import react_loop
+from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import EventSink, EventType, FinishReason
 from agentcore.runtime.facts import FactKind, TurnFactLog, TurnStartedFact, current_fact_log
 from agentcore.runtime.pipeline.resume import settle_resumed_suspension
@@ -265,7 +265,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
             tool_context=base_ctx,
             profile=make_profile_params(max_rounds=12),
             turn_model="m",
-            finish_override_sink=finish_override,
+            out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
         )

@@ -33,7 +33,7 @@ from agentcore.memory.episodic import (
     should_run_semantic,
 )
 from agentcore.memory.followups import select_motion_card_from_journal
-from agentcore.memory.injection import MemoryTopic, load_injected_memory, load_memory_topics
+from agentcore.memory.injection import MemoryTopic, load_memory_topics
 from agentcore.memory.maintenance import MemoryUpdateItem, maintain_user_memory
 from agentcore.memory.rules_injection import (
     OnDemandUserRule,
@@ -133,7 +133,6 @@ __all__ = [
     "EpisodeRecord",
     "clamp_summary",
     "should_run_semantic",
-    "load_injected_memory",
     "load_memory_topics",
     "MemoryTopic",
     "AccountPrepareSnapshot",

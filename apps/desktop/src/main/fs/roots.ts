@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { app } from "electron";
+import { FS_CHANNELS } from "@shared/ipc-contract";
+import { BrowserWindow, app } from "electron";
 
 export interface StoredRoot {
   id: string;
@@ -135,13 +136,32 @@ async function loadRoots(): Promise<void> {
   await loadSessionGrants();
 }
 
+/**
+ * Broadcast「永久根集合已变更」to every renderer.
+ *
+ * Emitted from {@link saveRoots} rather than each add/remove call site so a new
+ * mutation path cannot forget it — the fulfill stream re-declares its roots off
+ * this event instead of polling `listRoots`.
+ */
+function broadcastRootsChanged(): void {
+  try {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(FS_CHANNELS.rootsChanged);
+    }
+  } catch {
+    // Headless / test harness without a window layer — nothing to notify.
+  }
+}
+
 async function saveRoots(): Promise<void> {
   const arr = [...roots.values()].filter((r) => !r.sessionOnly);
   try {
     await fs.writeFile(storeFilePath(), JSON.stringify(arr, null, 2));
   } catch (e) {
     console.error("[fs-service] 持久化授权根失败:", e);
+    return;
   }
+  broadcastRootsChanged();
 }
 
 export async function ensureReady(): Promise<void> {

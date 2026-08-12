@@ -24,7 +24,7 @@ import { MessageBubble } from "./MessageBubble";
 import { PermissionChangeLine } from "./PermissionChangeLine";
 import { mergeTimeline } from "./messageTimeline";
 
-// Auto-scroll lives in ChatView's useStickToBottom: it owns the scroll container
+// Auto-scroll lives in ChatView's useChatScroll: it owns the scroll container
 // and only follows new content while the user is already at the bottom.
 export function MessageList() {
   const conversationId = useConversationStore((s) => s.currentConversationId);

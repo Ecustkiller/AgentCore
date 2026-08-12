@@ -39,7 +39,7 @@ describe("performMcpOp", () => {
   });
 
   it("runs mcp op and posts client_tool result", async () => {
-    await performMcpOp(payload(), "conv-1");
+    await performMcpOp(payload(), "conv-1", "cloud");
     expect(window.mcpApi?.runOp).toHaveBeenCalledWith({
       op: "list_tools",
       args: {},
@@ -48,8 +48,8 @@ describe("performMcpOp", () => {
   });
 
   it("dedupes the same request_id", async () => {
-    await performMcpOp(payload(), "conv-1");
-    await performMcpOp(payload(), "conv-1");
+    await performMcpOp(payload(), "conv-1", "cloud");
+    await performMcpOp(payload(), "conv-1", "cloud");
     expect(window.mcpApi?.runOp).toHaveBeenCalledTimes(1);
   });
 });

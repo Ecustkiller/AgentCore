@@ -48,10 +48,15 @@ describe("submitInteraction path table", () => {
       hotBody: { kind: "approval", decision: "approve" },
     });
     expect(result).toBe("ok");
-    expect(resolveMock).toHaveBeenCalledWith("c1", "a1", {
-      kind: "approval",
-      decision: "approve",
-    });
+    expect(resolveMock).toHaveBeenCalledWith(
+      "c1",
+      "a1",
+      {
+        kind: "approval",
+        decision: "approve",
+      },
+      "cloud",
+    );
     expect(store().get("a1")?.status).toBe("resolved");
   });
 

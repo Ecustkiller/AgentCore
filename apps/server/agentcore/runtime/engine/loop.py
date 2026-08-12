@@ -78,6 +78,27 @@ current_captain_loop: ContextVar[CaptainLoopMirror | None] = ContextVar(
 )
 
 
+@dataclass
+class ReactLoopOut:
+    """Mutable out-param bag for ``react_loop`` side channels.
+
+    Callers pass one instance with only the channels they care about set; the loop
+    mutates those lists in place. Survives ``raise_on_error`` so failure billing can
+    still read consumed ``usage`` after an exception — intentionally not folded into
+    the return tuple. Adding a new side channel is a new field here, not a new
+    ``react_loop`` parameter.
+    """
+
+    rounds: list[int] | None = None
+    citations: list[dict[str, Any]] | None = None
+    usage: list[TokenUsage] | None = None
+    finish_override: list[FinishReason] | None = None
+    gate_escalations: list[dict[str, Any]] | None = None
+    cutoff_reasons: list[str] | None = None
+    tool_failures: list[dict[str, Any]] | None = None
+    controller_seed_out: list[dict[str, Any]] | None = None
+
+
 def sync_captain_loop_mirror(
     *,
     content_before_round: str | None = None,
@@ -108,26 +129,19 @@ async def react_loop(
     on_tool_progress: Callable[[str, int], None] | None = None,
     on_reset: Callable[[str], None] | None = None,
     on_round_begin: Callable[[], list[LLMMessage]] | None = None,
-    round_sink: list[int] | None = None,
     raise_on_error: bool = False,
-    citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     ledger_registrant: str = "",
     approval_gate: ApprovalGate | None = None,
-    usage_sink: list[TokenUsage] | None = None,
-    finish_override_sink: list[FinishReason] | None = None,
+    out: ReactLoopOut | None = None,
     run_id: str = "",
     agent_id: str = "",
     role: str = "",
     deliverable_only: bool = False,
     supports_tools: bool | None = None,
-    gate_escalation_sink: list[dict[str, Any]] | None = None,
     token_budget: int = 0,
-    cutoff_reason_sink: list[str] | None = None,
     controller_seed: Mapping[str, Any] | None = None,
-    tool_failure_sink: list[dict[str, Any]] | None = None,
-    controller_seed_sink: list[dict[str, Any]] | None = None,
     files_expected: bool = False,
     report_delivery: bool = False,
     short_write_posture: bool = False,
@@ -166,9 +180,27 @@ async def react_loop(
     no-op. The engine only appends what it returns — the caller owns the semantics.
     ``allowed_tool_names`` filters which tools the model may call and execute
     (schema offer + ``execute_tools`` enforce; ``None`` = all,
-    ``[]`` = none). Tool execution events always go to the sink. When
-    ``citation_sink`` is provided, web sources consulted by research tools are
-    aggregated into it (de-duped, capped) for the caller to surface/persist.
+    ``[]`` = none). Tool execution events always go to the sink.
+    ``out`` (:class:`ReactLoopOut`) is the single mutable out-param bag for side
+    channels (rounds / citations / usage / finish_override / gate_escalations /
+    cutoff_reasons / tool_failures / controller_seed_out). Callers set only the
+    fields they care about; unset (``None``) fields stay inert — same as the old
+    per-sink ``None``. ``usage`` mirrors the running ``total_usage`` after each
+    completed round so a caller that catches an exception can still bill tokens
+    consumed before the failure (B-deep 失败计费): on ``raise_on_error`` the
+    accumulated usage is otherwise lost inside this frame when a mid-loop round
+    raises. ``usage`` / ``finish_override`` / ``cutoff_reasons`` are cleared on
+    entry and only ever hold the latest cumulative value; on a normal return the
+    caller uses the returned usage instead. ``finish_override`` (CEO captain path)
+    carries a :class:`FinishReason` the caller should stamp instead of the
+    rounds-derived default (``end_turn`` / ``max_rounds``) — ``DEGRADED`` on
+    empty-response threshold, ``UNPRODUCTIVE`` on all-tools-failed early-stop (B2);
+    left empty on a normal finish. ``citations`` aggregates web sources from
+    research tools (de-duped, capped). ``gate_escalations`` (Worker routing Phase 1)
+    collects Escalation Gate rows after ``execute_tools`` (CEO / solo leave
+    unset — gate inert). ``tool_failures`` / ``controller_seed_out`` are replaced
+    at every terminal exit (circuit-breaker facts / ``LoopController.export_seed``
+    for write_pass / light_repair / contract retry).
     ``turn_evidence_ledger`` (调研路径) registers hits into the turn-shared ledger
     and annotates tool output with stable ``#rN=url`` for CEO and workers alike
     (引用即出处 P1). ``annotate_citations`` gates finish_guard's legacy ``[n]`` check
@@ -178,21 +210,6 @@ async def react_loop(
     ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
     the model as a tool result so it can adapt.
-    ``usage_sink`` (when provided) mirrors the running ``total_usage`` after each
-    completed round, so a caller that catches an exception can still bill the
-    tokens consumed before the failure (B-deep 失败计费): on ``raise_on_error`` the
-    accumulated usage is otherwise lost inside this frame when a mid-loop round
-    raises. It is cleared on entry and only ever holds the latest cumulative total
-    (a single-element list); on a normal return the caller uses the returned usage
-    instead.
-    ``finish_override_sink`` (when provided, CEO captain path) is an out-param
-    mirroring the ``usage_sink`` idiom: it carries a single :class:`FinishReason`
-    the caller should stamp on the turn instead of the rounds-derived default
-    (``end_turn`` / ``max_rounds``). The loop sets it to ``DEGRADED`` when the model
-    keeps returning empty responses past the threshold, or ``UNPRODUCTIVE``
-    when it early-stops a run of all-tools-failed-no-content rounds (B2). Cleared on
-    entry; left empty on a normal finish (one channel, since a run takes at most one
-    such terminal path).
 
     ``run_id`` / ``role`` scope the execution-level facts (§8.3) this loop records
     into the turn's ambient :data:`~agentcore.runtime.facts.current_fact_log`
@@ -225,11 +242,6 @@ async def react_loop(
     ``ask_user_absorb``). Default ``False`` leaves the
     accumulation byte-identical to before (standalone loops / tests).
 
-    ``gate_escalation_sink`` (Worker routing Phase 1): when provided, each tool round
-    runs the Escalation Gate after ``execute_tools`` (execution-layer only; no free-text
-    scheme scan). Structured thrashing / escalate rows may still append here and emit
-    ``run_escalation_gate``. CEO / solo leave it ``None`` (gate inert).
-
     ``token_budget`` (Worker hard ceiling · loose backstop): a cumulative
     input+output token cap for the whole run, checked at the TOP of each round. Once
     ``total_usage.total_tokens`` reaches it the loop stops and force-finalizes — the
@@ -243,15 +255,17 @@ async def react_loop(
 
     ``controller_seed`` (resume path): optional JSON-safe latch snapshot from a prior
     ``turn_paused.controller``; omitted on a fresh turn (behaviour unchanged).
-
-    ``tool_failure_sink``: when given, replaced at every terminal exit with this run's
-    tool-failure fact dicts (same tally as the circuit breaker — for RunState / CEO).
-
-    ``controller_seed_sink``: when given, replaced at every terminal exit with this
-    run's :meth:`LoopController.export_seed` snapshot so a follow-up pass
-    (write_pass / light_repair / contract retry) can restore validation path-stop
-    memory across a fresh controller.
     """
+    # Bind legacy local names so the loop body stays a pure interface change.
+    round_sink = out.rounds if out is not None else None
+    citation_sink = out.citations if out is not None else None
+    usage_sink = out.usage if out is not None else None
+    finish_override_sink = out.finish_override if out is not None else None
+    gate_escalation_sink = out.gate_escalations if out is not None else None
+    cutoff_reason_sink = out.cutoff_reasons if out is not None else None
+    tool_failure_sink = out.tool_failures if out is not None else None
+    controller_seed_sink = out.controller_seed_out if out is not None else None
+
     profile = profile or get_profile("chat")
     if usage_sink is not None:
         usage_sink.clear()

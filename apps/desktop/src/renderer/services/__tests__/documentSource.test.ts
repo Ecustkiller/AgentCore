@@ -122,8 +122,11 @@ describe("documentSource", () => {
       baseline: { etag: "v1" },
     });
     expect(notifyWarning).toHaveBeenCalledWith(
-      "常驻配额提醒",
-      expect.objectContaining({ description: "常驻条目已超配额" }),
+      "AI 暂时记不下新东西",
+      expect.objectContaining({
+        description: "常驻条目已超配额",
+        action: expect.objectContaining({ label: "去整理" }),
+      }),
     );
   });
 

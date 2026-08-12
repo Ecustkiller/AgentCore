@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initScrollReveal } from "./lib/scrollReveal";
 import { applyTheme } from "./lib/theme";
+import { installClientToolIngress } from "./services/clientToolIngress";
 import { startOutboxReconcile } from "./services/outboxReconcile";
 import { installSidecarEventPump } from "./services/sidecarEventPump";
 import { installSidecarStatusListener } from "./services/sidecarStatus";
@@ -18,6 +19,9 @@ installSidecarStatusListener();
 // Single App-lifetime `sidecar:event` subscription; turns claim sinks (叠字根因：
 // 多 onEvent listener). See services/sidecarEventPump.
 installSidecarEventPump();
+// Fulfill channels (云 device stream + 本机 sidecar push) → CLIENT_TOOL
+// perform/settle; the cloud transport itself is started in AppShell.
+installClientToolIngress();
 // Main-process outbox sync acks + exit flush (as-built: 前端技术 §7.2).
 startOutboxReconcile();
 // Reap attach-staging left by earlier sessions: drafts are capped, so an evicted

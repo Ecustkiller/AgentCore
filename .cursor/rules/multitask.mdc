@@ -7,7 +7,7 @@ alwaysApply: true
 
 ## 模型约束
 
-子代理（Task tool）**必须**指定 `model: "cursor-grok-4.5-high"`，无例外；`resume` 续跑与同任务线再起新 Task 同样每次显式传，禁止漏写、禁止换模型。Task 工具自带参数说明（「resume 时勿传 model，会沿用原模型」「仅用户点名才显式传」）**与实测不符，以本规则为准**：实测 resume 不传 model 会静默回落到主对话模型，显式传才能保持；本规则即视为用户明确指定模型。违规/漏传调用由项目 `preToolUse` hook 自动补写兜底，但显式传仍是第一道防线。
+子代理（Task tool）**必须**指定 `model: "claude-opus-5-thinking-max-fast"`，无例外；`resume` 续跑与同任务线再起新 Task 同样每次显式传，禁止漏写、禁止换模型。Task 工具自带参数说明（「resume 时勿传 model，会沿用原模型」「仅用户点名才显式传」）**与实测不符，以本规则为准**：实测 resume 不传 model 会静默回落到主对话模型，显式传才能保持；本规则即视为用户明确指定模型。违规/漏传调用由项目 `preToolUse` hook 自动补写兜底，但显式传仍是第一道防线。
 
 ## 分工与 prompt 规范
 

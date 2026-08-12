@@ -6,7 +6,7 @@ import type { components } from "@/types/api.generated";
  * (§三 / §七).
  *
  * The REST types below are GENERATED from the backend OpenAPI spec
- * (`types/api.generated.ts`, via `pnpm gen:api`), so they track `api/schemas.py`
+ * (`types/api.generated.ts`, via root `pnpm gen:types`), so they track `api/schemas.py`
  * automatically with zero hand-written drift — this file is the reference slice
  * for that codegen migration (API 开发规范). Money is always integer nano-CNY
  * (1 元 = 1e9); ``CostBreakdown.cny_total`` is already yuan (no FX).

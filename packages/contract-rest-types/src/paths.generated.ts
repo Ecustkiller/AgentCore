@@ -154,6 +154,8 @@ export const REST_PATH_TEMPLATES = [
   "/v1/folders/{folder_id}",
   "/v1/folders/{folder_id}/collaboration-timeline",
   "/v1/folders/{folder_id}/permanent",
+  "/v1/fulfill",
+  "/v1/fulfill/roots",
   "/v1/hooks/standing/{webhook_id}",
   "/v1/inference/token",
   "/v1/inference/v1/chat/completions",

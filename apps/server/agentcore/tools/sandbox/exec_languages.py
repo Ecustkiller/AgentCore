@@ -92,6 +92,15 @@ async def _probe_via_desktop(channel: object) -> tuple[ExecLanguage, ...]:
     try:
         value = await request(WorkspaceOp.PROBE_EXEC, {}, timeout=5.0)
     except Exception as exc:  # noqa: BLE001 — fail closed on advertise surface
+        # Prepare-phase budget: first liveness hang aborts the turn (do not
+        # fail-closed advertise and continue into exists/baseline burns).
+        from agentcore.runtime.pipeline.errors import (
+            prepare_local_io_budget_active,
+            reraise_prepare_liveness_timeout,
+        )
+
+        if prepare_local_io_budget_active():
+            reraise_prepare_liveness_timeout(exc)
         logger.warning(
             "workspace.exec_languages_probe_failed",
             error=str(exc)[:200],

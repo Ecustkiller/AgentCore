@@ -250,7 +250,7 @@ class LocalBinding:
 def build_local_workspace(
     *,
     binding: LocalBinding,
-    sink: EventSink,
+    user_id: str,
     conversation_id: str,
     registry: ClientRequestBridge | None = None,
     timeout_seconds: float | None = None,
@@ -258,21 +258,15 @@ def build_local_workspace(
     """Construct the ``LocalWorkspace`` for a conversation bound to a desktop root.
 
     Builds the per-turn ``WorkspaceChannel`` — the generalized approval-gate
-    transport — over the turn SSE ``sink`` plus the process-wide op registry (the
-    same one the resolve endpoint settles), then wraps it. The channel carries
+    transport — over the process-wide op registry (the same one the resolve
+    endpoint settles) and the device-level fulfill hub. The channel carries
     ``binding.root_id`` so every op the engine issues runs against the right
     authorized directory on the user's machine. State (the suspended op Future)
     lives in the registry, so it must be the *shared* default unless a test injects
-    its own.
-
-    Bridge lifetime aligns with coordination, not the SSE observer: after CEO
-    ``end_turn`` the sink may :meth:`~EventSink.detach` while a background drive
-    still issues Local ops. Detach skips the live queue but keeps CLIENT_TOOL
-    Futures open; attach re-emits pending ``workspace_op_required`` frames. Only
-    :meth:`~EventSink.close` (after ``await_live_detached_drive``) ends the bridge.
+    its own. ``user_id`` selects which online device receives ``*_required`` frames.
     """
     channel = WorkspaceChannel(
-        sink=sink,
+        user_id=user_id,
         conversation_id=conversation_id,
         registry=registry or default_interaction_registry(),
         timeout_seconds=(
@@ -305,11 +299,14 @@ def build_workspace(
     back to the server-hosted ``ServerWorkspace``. Both satisfy ``WorkspaceBackend``
     (the P0 seam), so the file tools and the engine run unchanged on either — the
     caller only has to decide *which* here, never *how* downstream.
+
+    ``sink`` remains on the cloud path for lock-wait / display signals; local
+    CLIENT_TOOL delivery no longer uses it.
     """
     if local_binding is not None:
         return build_local_workspace(
             binding=local_binding,
-            sink=sink,
+            user_id=user_id,
             conversation_id=conversation_id,
         )
     return build_server_workspace(
@@ -323,7 +320,7 @@ def build_workspace(
 def workspace_channel_for_tools(
     backend: WorkspaceBackend,
     *,
-    sink: EventSink,
+    user_id: str,
     conversation_id: str,
     registry: ClientRequestBridge | None = None,
 ) -> WorkspaceChannel | None:
@@ -341,7 +338,7 @@ def workspace_channel_for_tools(
     if isinstance(existing, WorkspaceChannel):
         return existing
     return WorkspaceChannel(
-        sink=sink,
+        user_id=user_id,
         conversation_id=conversation_id,
         registry=registry or default_interaction_registry(),
         timeout_seconds=settings.workspace_op_timeout_seconds,
