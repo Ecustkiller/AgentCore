@@ -220,7 +220,7 @@ export function useDeleteConversation() {
       // Drop the files-hub rail section + refetch so open tabs close via
       // FileWorkbench's「workspace gone → close tabs」effect.
       removeConversationScratch(id);
-      // In-memory runtime buckets (pausedTurns / interactions / turnModel /
+      // In-memory runtime buckets (pausedTurns / interactions /
       // backgroundTasks / processes / terminals / toolOutput).
       purgeConversationRuntimeState(id);
       void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });

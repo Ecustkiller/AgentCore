@@ -14,7 +14,9 @@ import { api } from "@/services/api";
 import {
   createRuleDocument,
   deleteDocument,
+  getAlwaysQuota,
   getDocument,
+  listScopeEntries,
   listUserRules,
   renameDocument,
   updateDocumentApplyMode,
@@ -29,7 +31,9 @@ const node = (over: Record<string, unknown> = {}) => ({
   role: "rule",
   ai_maintained: false,
   apply_mode: "always",
+  description: "",
   name: "r.md",
+  frontmatter_error: null,
   ...over,
 });
 
@@ -119,16 +123,104 @@ describe("documents client", () => {
     });
   });
 
-  it("getDocument maps the wire body + CAS version", async () => {
+  it("listScopeEntries flattens 规则 + 记忆 leaves without role grouping", async () => {
+    vi.mocked(api.get).mockImplementation(async (url: string) => {
+      if (url === "/v1/documents") {
+        return [
+          node({
+            id: "ac",
+            kind: "folder",
+            role: "general",
+            name: "AgentCore",
+          }),
+        ];
+      }
+      if (url === "/v1/documents?parent_id=ac") {
+        return [
+          node({
+            id: "rules",
+            kind: "folder",
+            role: "general",
+            name: "规则",
+            parent_id: "ac",
+          }),
+          node({
+            id: "mem",
+            kind: "folder",
+            role: "general",
+            name: "记忆",
+            parent_id: "ac",
+          }),
+        ];
+      }
+      if (url === "/v1/documents?parent_id=rules") {
+        return [
+          node({
+            id: "r1",
+            name: "语气.md",
+            description: "短硬",
+            parent_id: "rules",
+          }),
+        ];
+      }
+      if (url === "/v1/documents?parent_id=mem") {
+        return [
+          node({
+            id: "m1",
+            name: "画像.md",
+            ai_maintained: true,
+            description: "画像摘要",
+            parent_id: "mem",
+          }),
+        ];
+      }
+      return [];
+    });
+
+    const rows = await listScopeEntries(null);
+    expect(rows.map((r) => r.id).sort()).toEqual(["m1", "r1"]);
+    expect(rows.find((r) => r.id === "r1")).toMatchObject({
+      description: "短硬",
+      applyMode: "always",
+    });
+    expect(rows.find((r) => r.id === "m1")).toMatchObject({
+      description: "画像摘要",
+      aiMaintained: true,
+    });
+  });
+
+  it("getAlwaysQuota maps percent + absolute chars", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      used_chars: 12,
+      max_chars: 100,
+      percent: 12,
+    });
+    const q = await getAlwaysQuota("F1");
+    expect(api.get).toHaveBeenCalledWith(
+      "/v1/documents/always-quota?folder_id=F1",
+    );
+    expect(q).toEqual({ usedChars: 12, maxChars: 100, percent: 12 });
+  });
+
+  it("getDocument maps description / frontmatter_error / quota_warning", async () => {
     vi.mocked(api.get).mockResolvedValue(
-      node({ id: "d1", content: "hello", version: "v9" }),
+      node({
+        id: "d1",
+        content: "hello",
+        version: "v9",
+        description: "一行",
+        frontmatter_error: "unclosed frontmatter",
+        quota_warning: "over",
+      }),
     );
     const doc = await getDocument("d1");
     expect(api.get).toHaveBeenCalledWith("/v1/documents/d1");
     expect(doc).toMatchObject({
       content: "hello",
       version: "v9",
-      role: "rule",
+      description: "一行",
+      frontmatterError: "unclosed frontmatter",
+      quotaWarning: "over",
     });
   });
 
@@ -155,17 +247,19 @@ describe("documents client", () => {
     );
   });
 
-  it("writeDocument sends the content + CAS baseline", async () => {
+  it("writeDocument sends the content + CAS baseline and maps quota_warning", async () => {
     vi.mocked(api.put).mockResolvedValue({
       ok: true,
       version: "v2",
       conflict: false,
+      quota_warning: "常驻超了",
     });
-    await writeDocument("d1", "body", "v1");
+    const r = await writeDocument("d1", "body", "v1");
     expect(api.put).toHaveBeenCalledWith("/v1/documents/d1", {
       content: "body",
       baseline: "v1",
     });
+    expect(r.quotaWarning).toBe("常驻超了");
   });
 
   it("renameDocument patches the name", async () => {
@@ -188,12 +282,12 @@ describe("documents client", () => {
     expect(r.applyMode).toBe("on_demand");
   });
 
-  it("maps wire conditional/unknown apply_mode onto always for the UI", async () => {
+  it("maps wire non-always apply_mode onto on_demand for the UI", async () => {
     vi.mocked(api.get).mockResolvedValue(
       node({ id: "d1", apply_mode: "conditional", content: "", version: "v" }),
     );
     const doc = await getDocument("d1");
-    expect(doc.applyMode).toBe("always");
+    expect(doc.applyMode).toBe("on_demand");
   });
 
   it("deleteDocument hits the delete endpoint", async () => {

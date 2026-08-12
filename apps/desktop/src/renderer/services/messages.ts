@@ -683,20 +683,6 @@ export async function jumpToMessage(
 }
 
 /**
- * Delete a single message (单条消息删除). Removes the row server-side, then drops
- * it from the conversation's live window. Server-first so a failed delete leaves
- * the message on screen; throws on failure so the caller can surface a toast.
- * Append-only cost ledger is untouched server-side (real spend is never rewritten).
- */
-export async function deleteMessage(
-  conversationId: string,
-  messageId: string,
-): Promise<void> {
-  await api.delete(`/v1/conversations/${conversationId}/messages/${messageId}`);
-  useConversationStore.getState().removeMessage(messageId, conversationId);
-}
-
-/**
  * Set / clear the user's 点赞/点踩 on an assistant reply (回复反馈). Optimistic: the
  * bubble flips immediately, then persists; a failed PATCH reverts to the prior rating
  * and rethrows so the caller can toast. `feedback` is "up" / "down" to rate, or null to

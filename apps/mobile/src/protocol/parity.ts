@@ -957,6 +957,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     reason:
       "桌面会话管理页离线预览（#/preview/conversations 开发自检），非用户产品面",
   },
+  FilesPreviewPage: {
+    verdict: "internal",
+    reason: "桌面文件条目轨离线预览（#/preview/files 开发自检），非用户产品面",
+  },
   "conversations/ConversationManageRow": {
     verdict: "internal",
     reason: "会话管理列表行渲染叶（ConversationsPage 拆件，非独立面）",

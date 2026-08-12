@@ -75,7 +75,6 @@ import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import { useAuthStore } from "@/stores/auth";
 import { useConversationStore } from "@/stores/conversation";
-import { useTurnModelStore } from "@/stores/turnModel";
 import { resetSidecarEventPumpForTests } from "../sidecarEventPump";
 import {
   resumeConversationViaSidecar,
@@ -145,7 +144,6 @@ let flushTurnMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   resetSidecarEventPumpForTests();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
-  useTurnModelStore.setState({ byConversation: {} });
   useAuthStore.setState({
     status: "unauthenticated",
     user: null,
@@ -1005,7 +1003,7 @@ describe("resumeConversationViaSidecar", () => {
     );
   });
 
-  it("records the turn's real model on success (no platform-fallback warning)", async () => {
+  it("completes a turn without platform-fallback warning", async () => {
     flushTurnMock.mockResolvedValue({
       ok: true,
       synced: {
@@ -1021,11 +1019,10 @@ describe("resumeConversationViaSidecar", () => {
 
     await resumeConversationViaSidecar(baseRequest);
 
-    expect(useTurnModelStore.getState().byConversation.c1).toBe("gpt-4o");
     expect(notifyWarningMock).not.toHaveBeenCalled();
   });
 
-  it("records the account model on a normal turn (token present)", async () => {
+  it("passes the account model on a normal turn (token present)", async () => {
     resolveSidecarInferenceMock.mockResolvedValue({
       baseUrl: "https://x/v1/inference/v1",
       apiKey: "tok",
@@ -1053,9 +1050,6 @@ describe("resumeConversationViaSidecar", () => {
       expect.objectContaining({
         inference: expect.objectContaining({ model: "deepseek-v4-flash" }),
       }),
-    );
-    expect(useTurnModelStore.getState().byConversation.c1).toBe(
-      "deepseek-v4-flash",
     );
     expect(notifyWarningMock).not.toHaveBeenCalled();
   });

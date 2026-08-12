@@ -1,29 +1,39 @@
 import type { FileNode, FilePreviewResult, FileSource } from "@/lib/fileSource";
+import { notifyWarning } from "@/lib/toast";
 import { getDocument, writeDocument } from "@/services/documents";
 
 /**
- * A {@link FileSource} over the user's rule **documents**, so the「你的规则」rail can reuse the
- * same markdown editor host ({@link MarkdownFileEditor}) the file workbench and「AI 记忆」use —
- * full-text edit + preview + AI 改写 + CAS conflict handling, all for free (Agent记忆与知识系统
- * §1.6 形态基准, §5.7 前端规则入口).
+ * A {@link FileSource} over cloud **document entries**, so the AgentCore rail can reuse the
+ * shared markdown editor host ({@link MarkdownFileEditor}) — full-text edit + preview + AI
+ * 改写 + CAS conflict handling (Agent记忆与知识系统 · 统一 md 条目基座).
  *
- * Unlike the workspace/memory surfaces, `/v1/documents` addresses nodes by **id**, so a rule
- * doc's synthetic tab PATH simply IS its document id. The source is path-aware (the editor
- * passes each tab's path — the doc id — to every call), so ONE instance serves every rule doc
- * of every scope. tree / CRUD are never reached (the rail lists + creates + deletes rules
- * directly via `services/documents`; the editor only calls `readForEdit` / `writeText`), so
- * they reject rather than pretend. `version.etag` carries the content hash — the editor sends
- * it back as the write baseline, so a concurrent edit (another device / a drafted-by-AI
- * change) surfaces as a conflict, never a silent clobber.
+ * `/v1/documents` addresses nodes by **id**, so a tab PATH simply IS its document id. The
+ * source is path-aware (one instance serves every entry). tree / CRUD reject — the rail lists
+ * via `services/documents`. Successful writes may carry `quota_warning` (user edited an
+ * existing always entry past the pool); that is toasted, not treated as failure.
  */
 
 const unsupported = (): Promise<never> =>
-  Promise.reject(new Error("规则文档不支持该操作"));
+  Promise.reject(new Error("条目文档不支持该操作"));
+
+function notifyQuotaWarning(warning: string | null | undefined): void {
+  const text = warning?.trim();
+  if (!text) return;
+  notifyWarning("常驻配额提醒", {
+    description: text,
+    action: {
+      label: "去清理常驻",
+      onClick: () => {
+        window.location.hash = "/files";
+      },
+    },
+  });
+}
 
 export function createDocumentSource(): FileSource {
   return {
     id: "documents",
-    label: "规则",
+    label: "条目",
     caps: { watch: false, transfer: false, edit: true, snapshots: false },
     listDir: (): Promise<FileNode[]> => Promise.resolve([]),
     read: async (path): Promise<FilePreviewResult> => {
@@ -49,13 +59,15 @@ export function createDocumentSource(): FileSource {
         input.content,
         input.baseline?.etag ?? null,
       );
-      return r.ok
-        ? { ok: true as const, version: { etag: r.version } }
-        : {
-            ok: false as const,
-            reason: "conflict" as const,
-            version: { etag: r.version },
-          };
+      if (r.ok) {
+        notifyQuotaWarning(r.quotaWarning);
+        return { ok: true as const, version: { etag: r.version } };
+      }
+      return {
+        ok: false as const,
+        reason: "conflict" as const,
+        version: { etag: r.version },
+      };
     },
   };
 }

@@ -31,6 +31,7 @@ export const APP_STATIC_ROUTES: readonly string[] = [
   "/preview/ask-commence",
   "/preview/onboarding",
   "/preview/conversations",
+  "/preview/files",
   "/simulation/town",
   "/more",
   APP_PATHS.more.model,

@@ -13,14 +13,27 @@ vi.mock("@/services/documents", () => ({
       role: "rule",
       aiMaintained: false,
       applyMode: "always",
+      description: "",
       name: "用户规则.md",
+      frontmatterError: null,
       content: "body",
       version: "v1",
+      quotaWarning: null,
     }),
   ),
   writeDocument: vi.fn(() =>
-    Promise.resolve({ ok: true, version: "v2", conflict: false }),
+    Promise.resolve({
+      ok: true,
+      version: "v2",
+      conflict: false,
+      frontmatterError: null,
+      quotaWarning: null,
+    }),
   ),
+}));
+
+vi.mock("@/lib/toast", () => ({
+  notifyWarning: vi.fn(),
 }));
 
 import { getDocument, writeDocument } from "@/services/documents";
@@ -77,6 +90,8 @@ describe("documentSource", () => {
       ok: false,
       version: "live",
       conflict: true,
+      frontmatterError: null,
+      quotaWarning: null,
     });
     const r = await src.writeText?.("d1", {
       content: "y",
@@ -89,6 +104,27 @@ describe("documentSource", () => {
       reason: "conflict",
       version: { etag: "live" },
     });
+  });
+
+  it("toasts quota_warning on a successful over-cap edit", async () => {
+    const { notifyWarning } = await import("@/lib/toast");
+    vi.mocked(writeDocument).mockResolvedValueOnce({
+      ok: true,
+      version: "v3",
+      conflict: false,
+      frontmatterError: null,
+      quotaWarning: "常驻条目已超配额",
+    });
+    await src.writeText?.("d1", {
+      content: "big",
+      encoding: "utf-8",
+      eol: "lf",
+      baseline: { etag: "v1" },
+    });
+    expect(notifyWarning).toHaveBeenCalledWith(
+      "常驻配额提醒",
+      expect.objectContaining({ description: "常驻条目已超配额" }),
+    );
   });
 
   it("rejects tree / CRUD ops the editor never uses (listed directly by the rail instead)", async () => {

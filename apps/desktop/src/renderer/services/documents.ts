@@ -1,60 +1,63 @@
 import { api } from "@/services/api";
 
 /**
- * Document tree REST client (`/v1/documents`) — the「一切皆文档」carrier (Agent记忆与知识系统
- * §5.7 载体). This phase's load-bearing use is **user rules**: a user rule is just a
- * `role='rule', ai_maintained=false` document (§5.2), created / edited / deleted here and
- * injected ahead of AI memory with authoritative「必须」wording (§二 两档措辞).
+ * Document tree REST client (`/v1/documents`) — unified md **entries** under the
+ * convention root (Agent记忆与知识系统 · 目标形态「统一 md 条目基座」).
  *
- * Nodes are addressed by **id** (not a source-relative path like the workspace/memory
- * surfaces), so the editor host reaches a rule doc through {@link createDocumentSource},
- * whose synthetic path IS the document id. CAS mirrors the memory editor — a content write
- * carries the content-hash `version` baseline and reports a conflict instead of clobbering.
+ * Nodes are addressed by **id**. Scope is `folderId` (`null` = GLOBAL). The file rail
+ * lists entries flat by scope (no 记忆/规则/文档 folders). `apply_mode` / `description`
+ * are derived indexes of body frontmatter; UI shows 常驻/按需 badges, never the raw
+ * `apply` key. `frontmatter_error` means the entry does not inject — surface it.
  *
- * Scope is the `folderId` column (§5.7 过渡态：项目作用域由 `documents.folder_id` 桥接，
- * 待 Folder 并入文档树后折叠为「位置即作用域」终态): `null` = the GLOBAL layer (all
- * conversations), else that project's layer (only that folder's conversations).
- *
- * Convention tree (§5.0): user rules live under cloud-documents `AgentCore/规则/` (NOT the
- * desktop local default path `~/Documents/AgentCore/`). New `role=rule` creates with
- * `parent_id=null` are auto-parented there by the API.
+ * Always-pool meter: {@link getAlwaysQuota}. Write past the cap while editing an
+ * existing always entry returns `quota_warning`; create / promote past the cap is
+ * 409 `ALWAYS_QUOTA_EXCEEDED`.
  */
 
 /** Cloud-documents convention root name (§5.0). ≠ local disk `~/Documents/AgentCore`. */
 export const AGENTCORE_ROOT_NAME = "AgentCore";
 
-/** User-rules directory under the convention root. */
+/** Legacy rules directory under the convention root (server still parents new rules here). */
 export const RULES_DIR_NAME = "规则";
 
+/** Legacy memory directory under the convention root (AI-maintained notes). */
+export const MEMORY_DIR_NAME = "记忆";
+
 /**
- * User-facing injection mode for rules (§5.4). API also stores `conditional` for
- * scene rules, but the desktop surface only offers these two (no globs / conditions UI).
+ * User-facing injection mode (§5.4 / 目标形态). API may still store other values;
+ * the desktop surface only offers these two.
  */
 export type DocumentApplyMode = "always" | "on_demand";
 
-/** Map wire `apply_mode` onto the two-state UI (unknown / conditional → always). */
+/** Map wire `apply_mode` onto the two-state UI (unknown → on_demand per frontmatter default). */
 export function toApplyMode(raw: string): DocumentApplyMode {
-  return raw === "on_demand" ? "on_demand" : "always";
+  return raw === "always" ? "always" : "on_demand";
 }
 
 /** A tree node's metadata (list rows — body omitted so a listing stays light). */
 export interface DocumentNode {
   id: string;
   parentId: string | null;
-  /** Scope: null = GLOBAL layer, else the project (folder) this rule is bound to. */
+  /** Scope: null = GLOBAL layer, else the project (folder) this entry is bound to. */
   folderId: string | null;
   kind: "folder" | "document";
   role: "rule" | "general";
-  /** true = AI-maintained memory (not user-settable here); false = a user-owned doc. */
+  /** true = AI-maintained (write-side / UI review); false = user-owned. */
   aiMaintained: boolean;
   applyMode: DocumentApplyMode;
+  /** One-line summary from frontmatter; empty is fine (not an error). */
+  description: string;
   name: string;
+  /** Structural frontmatter failure — entry does not inject; UI must report it. */
+  frontmatterError: string | null;
 }
 
 /** A node plus its markdown body + content-hash CAS tag (the editor's load payload). */
 export interface DocumentDetail extends DocumentNode {
   content: string;
   version: string;
+  /** Soft warning when a user edit of an existing always entry exceeds the pool. */
+  quotaWarning: string | null;
 }
 
 export interface DocumentWriteResult {
@@ -62,6 +65,15 @@ export interface DocumentWriteResult {
   /** Content-addressed CAS tag; sent back as the next write's baseline (stale → conflict). */
   version: string;
   conflict: boolean;
+  frontmatterError: string | null;
+  quotaWarning: string | null;
+}
+
+/** Always-pool usage for the UI meter (percentage + absolute chars). */
+export interface AlwaysQuota {
+  usedChars: number;
+  maxChars: number;
+  percent: number;
 }
 
 interface DocumentNodeWire {
@@ -72,12 +84,29 @@ interface DocumentNodeWire {
   role: string;
   ai_maintained: boolean;
   apply_mode: string;
+  description?: string | null;
   name: string;
+  frontmatter_error?: string | null;
 }
 
 interface DocumentDetailWire extends DocumentNodeWire {
   content: string;
   version: string;
+  quota_warning?: string | null;
+}
+
+interface DocumentWriteWire {
+  ok: boolean;
+  version: string;
+  conflict?: boolean;
+  frontmatter_error?: string | null;
+  quota_warning?: string | null;
+}
+
+interface AlwaysQuotaWire {
+  used_chars: number;
+  max_chars: number;
+  percent: number;
 }
 
 const toNode = (w: DocumentNodeWire): DocumentNode => ({
@@ -88,18 +117,25 @@ const toNode = (w: DocumentNodeWire): DocumentNode => ({
   role: w.role === "rule" ? "rule" : "general",
   aiMaintained: w.ai_maintained,
   applyMode: toApplyMode(w.apply_mode),
+  description: (w.description ?? "").trim(),
   name: w.name,
+  frontmatterError: w.frontmatter_error?.trim() || null,
 });
 
 const toDetail = (w: DocumentDetailWire): DocumentDetail => ({
   ...toNode(w),
   content: w.content,
   version: w.version,
+  quotaWarning: w.quota_warning?.trim() || null,
 });
 
-function isUserRuleDoc(n: DocumentNode): boolean {
-  return n.role === "rule" && !n.aiMaintained && n.kind === "document";
-}
+const toWriteResult = (w: DocumentWriteWire): DocumentWriteResult => ({
+  ok: w.ok,
+  version: w.version,
+  conflict: Boolean(w.conflict),
+  frontmatterError: w.frontmatter_error?.trim() || null,
+  quotaWarning: w.quota_warning?.trim() || null,
+});
 
 /** List a folder's direct children (`parentId` null = the user's top-level nodes). */
 export function listDocuments(
@@ -112,17 +148,76 @@ export function listDocuments(
 }
 
 /**
- * All of the user's own rule documents across scopes (§5.2 / §5.0).
- * Collects leaves under each scope's `AgentCore/规则/`, plus any leftover top-level
- * rule docs (pre-migration) so the rail stays complete across layout migration.
- * Partition by `folderId` for GLOBAL vs per-project layers.
+ * Flat list of inject-able **entries** for one scope (global when `folderId` is null).
+ * Walks `AgentCore/{规则,记忆}/` (and one nested level) plus leftover top-level docs.
+ * Does **not** group by `role` — UI partitions by scope only.
+ */
+export async function listScopeEntries(
+  folderId: string | null = null,
+): Promise<DocumentNode[]> {
+  const tops = await listDocuments(null);
+  const byId = new Map<string, DocumentNode>();
+
+  const takeDoc = (n: DocumentNode) => {
+    if (n.kind === "document" && n.folderId === folderId) byId.set(n.id, n);
+  };
+
+  for (const n of tops) takeDoc(n);
+
+  const agentcores = tops.filter(
+    (n) =>
+      n.kind === "folder" &&
+      n.name === AGENTCORE_ROOT_NAME &&
+      n.folderId === folderId,
+  );
+
+  await Promise.all(
+    agentcores.map(async (ac) => {
+      const kids = await listDocuments(ac.id);
+      await Promise.all(
+        kids.map(async (kid) => {
+          if (kid.kind === "document") {
+            takeDoc(kid);
+            return;
+          }
+          if (
+            kid.kind !== "folder" ||
+            (kid.name !== RULES_DIR_NAME && kid.name !== MEMORY_DIR_NAME)
+          ) {
+            return;
+          }
+          const leaves = await listDocuments(kid.id);
+          await Promise.all(
+            leaves.map(async (leaf) => {
+              if (leaf.kind === "document") {
+                takeDoc(leaf);
+                return;
+              }
+              if (leaf.kind !== "folder") return;
+              const nested = await listDocuments(leaf.id);
+              for (const n of nested) takeDoc(n);
+            }),
+          );
+        }),
+      );
+    }),
+  );
+
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
+}
+
+/**
+ * All user-owned rule documents across scopes (legacy helper). Prefer
+ * {@link listScopeEntries} for the flat file-rail list.
  */
 export async function listUserRules(): Promise<DocumentNode[]> {
   const tops = await listDocuments(null);
   const byId = new Map<string, DocumentNode>();
+  const isUserRule = (n: DocumentNode) =>
+    n.role === "rule" && !n.aiMaintained && n.kind === "document";
 
   for (const n of tops) {
-    if (isUserRuleDoc(n)) byId.set(n.id, n);
+    if (isUserRule(n)) byId.set(n.id, n);
   }
 
   const agentcores = tops.filter(
@@ -137,12 +232,27 @@ export async function listUserRules(): Promise<DocumentNode[]> {
       if (!rulesDir) return;
       const rules = await listDocuments(rulesDir.id);
       for (const n of rules) {
-        if (isUserRuleDoc(n)) byId.set(n.id, n);
+        if (isUserRule(n)) byId.set(n.id, n);
       }
     }),
   );
 
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
+}
+
+/** Always-pool usage for the injection context (global + optional project). */
+export function getAlwaysQuota(
+  folderId: string | null = null,
+): Promise<AlwaysQuota> {
+  const q =
+    folderId != null ? `?folder_id=${encodeURIComponent(folderId)}` : "";
+  return api
+    .get<AlwaysQuotaWire>(`/v1/documents/always-quota${q}`)
+    .then((w) => ({
+      usedChars: w.used_chars,
+      maxChars: w.max_chars,
+      percent: w.percent,
+    }));
 }
 
 /** Load one document's body + CAS version (the editor's load). */
@@ -153,9 +263,8 @@ export function getDocument(id: string): Promise<DocumentDetail> {
 }
 
 /**
- * Create a user rule document in a scope (`folderId` null = global, else that project).
- * Always `role='rule', ai_maintained=false, apply_mode='always'`. With `parent_id=null`
- * the API auto-parents under that scope's `AgentCore/规则/` (§5.0).
+ * Create a user-owned entry in a scope (`folderId` null = global).
+ * Server still parents under `AgentCore/规则/` until role 三分 is removed.
  */
 export function createRuleDocument(
   name: string,
@@ -175,7 +284,7 @@ export function createRuleDocument(
     .then(toDetail);
 }
 
-/** Switch a rule's injection mode (`always` ↔ `on_demand`; never `conditional`). */
+/** Switch an entry's injection mode (`always` ↔ `on_demand`). */
 export function updateDocumentApplyMode(
   id: string,
   applyMode: DocumentApplyMode,
@@ -189,7 +298,7 @@ export function updateDocumentApplyMode(
 
 /**
  * Overwrite a document's body (full-text, CAS-guarded). `baseline` is the version the edit
- * was based on; `null` writes unconditionally (仍然覆盖). A stale baseline returns
+ * was based on; `null` writes unconditionally. A stale baseline returns
  * `{ ok: false, conflict: true }` with the live version.
  */
 export function writeDocument(
@@ -197,10 +306,12 @@ export function writeDocument(
   content: string,
   baseline: string | null,
 ): Promise<DocumentWriteResult> {
-  return api.put<DocumentWriteResult>(
-    `/v1/documents/${encodeURIComponent(id)}`,
-    { content, baseline },
-  );
+  return api
+    .put<DocumentWriteWire>(`/v1/documents/${encodeURIComponent(id)}`, {
+      content,
+      baseline,
+    })
+    .then(toWriteResult);
 }
 
 /** Rename a document (content untouched). */
@@ -217,7 +328,7 @@ export function renameDocument(
 
 /** Soft-delete a document (and, for a folder, its subtree). */
 export function deleteDocument(id: string): Promise<DocumentWriteResult> {
-  return api.delete<DocumentWriteResult>(
-    `/v1/documents/${encodeURIComponent(id)}`,
-  );
+  return api
+    .delete<DocumentWriteWire>(`/v1/documents/${encodeURIComponent(id)}`)
+    .then(toWriteResult);
 }

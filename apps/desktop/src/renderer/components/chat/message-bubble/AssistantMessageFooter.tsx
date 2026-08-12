@@ -45,11 +45,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  DeleteMessageAction,
-  MessageTime,
-  RegenerateMessageAction,
-} from "./MessageActions";
+import { MessageTime, RegenerateMessageAction } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
 
 function cacheRatePercent(usage: UsageBreakdown): number | null {
@@ -439,7 +435,6 @@ export function AssistantMessageFooter({
         <FeedbackButtons message={message} />
         <BookmarkButton message={message} />
         <RegenerateMessageAction onRegenerate={onRegenerate} />
-        <DeleteMessageAction messageId={message.id} compact />
         <MessageMoreMenu
           message={message}
           captainContext={captainContext}

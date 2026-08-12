@@ -44,7 +44,6 @@ import {
   throwIfCannotOpenStream,
 } from "@/stores/conversation/turnPhaseActions";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
-import { useTurnModelStore } from "@/stores/turnModel";
 import type { SSEEvent } from "@/types/events";
 import type {
   SidecarHistoryEntry,
@@ -575,9 +574,6 @@ async function runSidecarTurn({
       }
       result = await invoke();
     }
-    // 记下本回合真正跑的模型（引擎侧 resolve_turn_model），供输入框徽章如实展示；纯云会话
-    // 无此信号、徽章回退账号配置。
-    useTurnModelStore.getState().setLastModel(conversationId, result.model);
     // 本机已出结果 → 标 synced_pending，冲刷主进程 outbox 并对账。
     await writeBack(result);
     return result;

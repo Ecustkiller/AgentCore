@@ -10,18 +10,13 @@ import { type ArtifactKind, artifactColorVar } from "@/lib/catalogColors";
 import { cn } from "@/lib/utils";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import {
-  AppWindow,
   BookOpen,
   Building2,
   ChevronRight,
-  FileText,
   type LucideIcon,
-  Network,
   Palette,
   Plug,
-  Presentation,
   ScrollText,
-  Table2,
   Timer,
   Workflow,
   Wrench,
@@ -48,28 +43,9 @@ const MANUAL: ToolboxEntry = {
   to: "/toolbox/manual",
 };
 
+// 只列真能点进去的创作工具。文档 / 思维导图 / 多维表格 / 幻灯片 / 可运行产物属未开工方向，
+// 不以「即将开放」占位卡形式占首屏 → docs/01-产品/产品路线图摘要.md「交付物形态扩展」。
 const CREATION_TOOLS: ToolboxEntry[] = [
-  {
-    id: "doc",
-    title: "文档",
-    description: "在线 Markdown，AI 协同写作",
-    icon: FileText,
-    color: "doc",
-  },
-  {
-    id: "mindmap",
-    title: "思维导图",
-    description: "结构化梳理想法与大纲",
-    icon: Network,
-    color: "mindmap",
-  },
-  {
-    id: "table",
-    title: "多维表格",
-    description: "结构化数据与多视图",
-    icon: Table2,
-    color: "table",
-  },
   {
     id: "canvas",
     title: "白板",
@@ -77,20 +53,6 @@ const CREATION_TOOLS: ToolboxEntry[] = [
     icon: Palette,
     color: "canvas",
     to: "/whiteboard",
-  },
-  {
-    id: "slides",
-    title: "幻灯片",
-    description: "AI 生成可编辑演示",
-    icon: Presentation,
-    color: "slides",
-  },
-  {
-    id: "app",
-    title: "可运行产物",
-    description: "HTML / React 即时预览",
-    icon: AppWindow,
-    color: "app",
   },
 ];
 

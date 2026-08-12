@@ -4,7 +4,6 @@ import { useBrowserSessionsStore } from "@/stores/browserSessions";
 import { useInteractionStore } from "@/stores/interactions";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
-import { useTurnModelStore } from "@/stores/turnModel";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const CID = "conv-del";
@@ -40,7 +39,6 @@ function resume(conversationId: string, checkpointId: string): PendingResume {
 beforeEach(() => {
   usePausedTurnStore.getState().clear();
   useInteractionStore.getState().clear();
-  useTurnModelStore.setState({ byConversation: {} });
   useQueuedTurnsStore.setState({ byConversation: {} });
   useBackgroundTasksStore.setState({
     byConversation: {},
@@ -52,7 +50,7 @@ beforeEach(() => {
 });
 
 describe("purgeConversationRuntimeState", () => {
-  it("删会话清空 pausedTurns / interactions（及 turnModel / backgroundTasks）", () => {
+  it("删会话清空 pausedTurns / interactions（及 backgroundTasks）", () => {
     usePausedTurnStore.getState().addLiveResume(resume(CID, "cp-1"));
     usePausedTurnStore.getState().addLiveResume(resume(OTHER, "cp-2"));
     useInteractionStore.getState().upsertRequired({
@@ -67,8 +65,6 @@ describe("purgeConversationRuntimeState", () => {
       messageId: "m2",
       payload: { checkpoint_id: "cp-ix-2", question: "q2" },
     });
-    useTurnModelStore.getState().setLastModel(CID, "gpt-test");
-    useTurnModelStore.getState().setLastModel(OTHER, "keep-model");
     useBackgroundTasksStore.setState({
       byConversation: {
         [CID]: [],
@@ -87,10 +83,6 @@ describe("purgeConversationRuntimeState", () => {
     expect(
       useInteractionStore.getState().listForConversation(OTHER),
     ).toHaveLength(1);
-    expect(useTurnModelStore.getState().byConversation[CID]).toBeUndefined();
-    expect(useTurnModelStore.getState().byConversation[OTHER]).toBe(
-      "keep-model",
-    );
     expect(
       useBackgroundTasksStore.getState().byConversation[CID],
     ).toBeUndefined();

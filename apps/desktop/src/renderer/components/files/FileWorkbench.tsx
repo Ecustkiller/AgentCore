@@ -3,6 +3,7 @@ import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitE
 import { MemoryUpdatesView } from "@/components/files/MemoryUpdatesView";
 import { AgentCoreSection } from "@/components/files/fileWorkbench/AgentCoreSection";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
+import type { EntryOpenTarget } from "@/components/files/fileWorkbench/EntriesSection";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
   type Tab,
@@ -41,7 +42,6 @@ import { createDocumentSource } from "@/services/sources/documentSource";
 import {
   MEMORY_UPDATES_PATH,
   createMemorySource,
-  isMemoryTopicPath,
   parseProjectMemoryFolderId,
   parseProjectProfilePath,
 } from "@/services/sources/memorySource";
@@ -100,9 +100,9 @@ const RULES_WS = "__rules__";
  * 挂载 {@link FileTree}，故云端 eager 源的「整树递归拉取」推迟到展开时才发——工作区一多时
  * 既清爽又省掉打开页面即 N 次全量请求。全部平铺、无「home / 其他项目」分区——只靠
  * cloud/local 徽标区分（用户 2026-06 决定）；多人 `shared:` 并入「项目」段、角标「共享」
- * （定案 B）。每个 `folder:` 项目展开后固定挂约定树 ``AgentCore/{规则,记忆}/``
- * （无内容也显示），再是文件树；顶层同样挂全局 ``AgentCore/``（规则 + 记忆 / 最近更新），
- * 不再双 pinned「AI 记忆 / 你的规则」rail。
+ * （定案 B）。每个 `folder:` 项目展开后固定挂约定树 ``AgentCore/`` 扁平条目
+ * （无内容也显示），再是文件树；顶层同样挂全局 ``AgentCore/``（条目 + 最近更新），
+ * 不再三分「记忆 / 规则 / 文档」夹。
  * 工作区一视同仁（工作区对称化 D1a 起不再有置顶的「我的工作区」默认壳——裸聊产文件时由服务端
  * 懒建一个 per 对话本地工作区，与云端裸聊同构）。The right pane is a **tab strip** — opening
  * files stacks tabs, each {@link FileDetail} stays mounted (hidden when inactive) so
@@ -140,7 +140,7 @@ export function FileWorkbench({
   isError: boolean;
   onRetry: () => void;
   fsAvailable: boolean;
-  /** Show the pinned ``AgentCore/`` convention tree atop the rail (规则 + 记忆).
+  /** Show the pinned ``AgentCore/`` convention tree atop the rail (flat entries).
    * Off for hosts that shouldn't surface it (e.g. side panels). */
   showMemory?: boolean;
   /** When navigated here with a target workspace (`/conversations`「浏览文件」),
@@ -170,14 +170,12 @@ export function FileWorkbench({
   const [filter, setFilter] = useState("");
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
-  // 最近更新 / 对话卡深链到项目记忆时，强制展开该项目下的「记忆」节点（一次性，展开后清除）。
+  // 最近更新 / 对话卡深链到项目条目时，强制展开该项目下的 AgentCore（一次性）。
   const [revealMemoryFolderId, setRevealMemoryFolderId] = useState<
     string | null
   >(null);
-  // 深链到主题叶时，同时展开对应作用域的「主题」子夹（folderId 或 "global"）。
-  const [revealMemoryTopicsKey, setRevealMemoryTopicsKey] = useState<
-    string | null
-  >(null);
+  // 深链到全局条目时，强制展开顶层 AgentCore（一次性）。
+  const [revealGlobalAgentCore, setRevealGlobalAgentCore] = useState(false);
   const appliedFocusRef = useRef<string | null>(null);
   const appliedMemoryLeafRef = useRef<string | null>(null);
 
@@ -246,14 +244,13 @@ export function FileWorkbench({
 
   const clearMemoryReveal = useCallback(() => {
     setRevealMemoryFolderId(null);
-    setRevealMemoryTopicsKey(null);
+    setRevealGlobalAgentCore(false);
   }, []);
 
-  /** Expand project AgentCore (+ memory / topics) for a deep-linked leaf. */
+  /** Expand project AgentCore for a deep-linked memory leaf. */
   const revealMemoryInRail = useCallback(
     (path: string, projectId?: string | null) => {
       const folderId = parseProjectMemoryFolderId(path) ?? projectId ?? null;
-      const openTopics = isMemoryTopicPath(path);
       setFilter("");
       if (folderId) {
         const wsId = `folder:${folderId}`;
@@ -264,9 +261,8 @@ export function FileWorkbench({
         setRevealMemoryFolderId(folderId);
         setFlashWsId(wsId);
         window.setTimeout(() => setFlashWsId(null), 1500);
-      }
-      if (openTopics) {
-        setRevealMemoryTopicsKey(folderId ?? "global");
+      } else {
+        setRevealGlobalAgentCore(true);
       }
     },
     [expandWs],
@@ -467,7 +463,7 @@ export function FileWorkbench({
     setActiveKey(key);
   };
 
-  /** Open a memory leaf and, for project-scoped paths, expand that project +「记忆」node. */
+  /** Open a memory leaf and, for project-scoped paths, expand that project AgentCore. */
   const openMemoryLeafInRail = (
     path: string,
     name: string,
@@ -487,6 +483,28 @@ export function FileWorkbench({
       const ni = Math.min(idx, next.length - 1);
       setActiveKey(ni >= 0 ? tabKey(next[ni].wsId, next[ni].path) : null);
     }
+  };
+
+  const openEntry = (target: EntryOpenTarget) => {
+    if (target.channel === "memory") {
+      openFile(MEMORY_WS, target.path, target.name);
+    } else {
+      openFile(RULES_WS, target.path, target.name);
+    }
+  };
+
+  const closeEntry = (target: EntryOpenTarget) => {
+    const wsId = target.channel === "memory" ? MEMORY_WS : RULES_WS;
+    closeTab(tabKey(wsId, target.path));
+  };
+
+  const renameEntryTab = (target: EntryOpenTarget, name: string) => {
+    const wsId = target.channel === "memory" ? MEMORY_WS : RULES_WS;
+    setTabs((prev) =>
+      prev.map((t) =>
+        t.wsId === wsId && t.path === target.path ? { ...t, name } : t,
+      ),
+    );
   };
 
   // 只留这一页（其余全关），并将其设为激活。
@@ -521,7 +539,7 @@ export function FileWorkbench({
           />
         </div>
 
-        {/* Pinned global ``AgentCore/{规则,记忆}/`` — replaces dual「AI 记忆 / 你的规则」rails.
+        {/* Pinned global ``AgentCore/`` flat entries + 最近更新.
             Per-project convention tree mounts under each project folder. */}
         {showMemory && (
           <div className="shrink-0 border-b border-border px-2 py-1">
@@ -530,26 +548,16 @@ export function FileWorkbench({
               memoryActivePath={
                 activeTab?.wsId === MEMORY_WS ? activeTab.path : null
               }
-              rulesActivePath={
+              documentActivePath={
                 activeTab?.wsId === RULES_WS ? activeTab.path : null
               }
-              onOpenMemory={(path, name) => openFile(MEMORY_WS, path, name)}
-              onOpenRule={(path, name) => openFile(RULES_WS, path, name)}
-              onMemoryTopicDeleted={(path) => closeTab(tabKey(MEMORY_WS, path))}
-              onRuleDeleted={(path) => closeTab(tabKey(RULES_WS, path))}
-              onRuleRenamed={(path, name) =>
-                setTabs((prev) =>
-                  prev.map((t) =>
-                    t.wsId === RULES_WS && t.path === path ? { ...t, name } : t,
-                  ),
-                )
-              }
+              onOpenEntry={openEntry}
+              onEntryDeleted={closeEntry}
+              onEntryRenamed={renameEntryTab}
               onOpenUpdates={() =>
                 openFile(MEMORY_WS, MEMORY_UPDATES_PATH, "记忆动态")
               }
-              forceOpen={revealMemoryTopicsKey === "global"}
-              forceOpenMemory={revealMemoryTopicsKey === "global"}
-              forceOpenMemoryTopics={revealMemoryTopicsKey === "global"}
+              forceOpen={revealGlobalAgentCore}
               onRevealApplied={clearMemoryReveal}
             />
           </div>
@@ -663,41 +671,16 @@ export function FileWorkbench({
                                   ? activeTab.path
                                   : null
                               }
-                              rulesActivePath={
+                              documentActivePath={
                                 activeTab?.wsId === RULES_WS
                                   ? activeTab.path
                                   : null
                               }
-                              onOpenMemory={(path, name) =>
-                                openFile(MEMORY_WS, path, name)
-                              }
-                              onOpenRule={(path, name) =>
-                                openFile(RULES_WS, path, name)
-                              }
-                              onMemoryTopicDeleted={(path) =>
-                                closeTab(tabKey(MEMORY_WS, path))
-                              }
-                              onRuleDeleted={(path) =>
-                                closeTab(tabKey(RULES_WS, path))
-                              }
-                              onRuleRenamed={(path, name) =>
-                                setTabs((prev) =>
-                                  prev.map((t) =>
-                                    t.wsId === RULES_WS && t.path === path
-                                      ? { ...t, name }
-                                      : t,
-                                  ),
-                                )
-                              }
+                              onOpenEntry={openEntry}
+                              onEntryDeleted={closeEntry}
+                              onEntryRenamed={renameEntryTab}
                               indent={14}
                               forceOpen={revealMemoryFolderId === folderId}
-                              forceOpenMemory={
-                                revealMemoryFolderId === folderId ||
-                                revealMemoryTopicsKey === folderId
-                              }
-                              forceOpenMemoryTopics={
-                                revealMemoryTopicsKey === folderId
-                              }
                               onRevealApplied={clearMemoryReveal}
                             />
                           ) : undefined

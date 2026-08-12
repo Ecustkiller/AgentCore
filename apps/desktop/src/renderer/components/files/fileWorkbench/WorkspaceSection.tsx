@@ -63,8 +63,8 @@ import { conversationIdOf, folderIdOf } from "./storage";
 /**
  * One workspace root = a **flat, collapsible section**: a header (chevron + name +
  * cloud/local badge + create buttons) with its file tree shown beneath **only when
- * expanded**. Project folders (`folder:<id>`) may also render a `projectRail` (记忆 → 规则)
- * above the file tree.
+ * expanded**. Project folders (`folder:<id>`) may also render a `projectRail`
+ * (flat AgentCore entries) above the file tree.
  *
  * - `conv:<id>` **云** scratch：右键可打开/重命名/删除对话、清空本对话产物。
  * - `conv:<id>` **本地** scratch：无根级清空（树内单删 / 删对话）。

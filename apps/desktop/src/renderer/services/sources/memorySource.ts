@@ -116,7 +116,7 @@ export function isMemoryTopicPath(path: string): boolean {
 
 /**
  * The display name (tab label) for a synthetic memory-leaf path — mirrors the rail's
- * naming so a deep-linked tab matches what {@link MemorySection} would open: 偏好.md /
+ * naming so a deep-linked tab matches what the AgentCore entry rail would open: 偏好.md /
  * 画像.md / 导航.md / <slug>.md. A project 画像 opens the 双栏 editor which resolves the
  * project name from the live workspaces, so the bare「画像.md」is enough here.
  */

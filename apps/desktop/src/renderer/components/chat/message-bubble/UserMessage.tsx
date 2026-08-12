@@ -8,11 +8,7 @@ import {
 import { Check, Copy, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { AttachmentChip } from "./AttachmentChip";
-import {
-  DeleteMessageAction,
-  MessageAction,
-  MessageTime,
-} from "./MessageActions";
+import { MessageAction, MessageTime } from "./MessageActions";
 import { SyncStatusHint } from "./SyncStatusHint";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
@@ -144,7 +140,6 @@ export function UserMessage({ message }: MessageBubbleProps) {
             label="编辑"
             onClick={startEdit}
           />
-          <DeleteMessageAction messageId={message.id} />
           <MessageTime iso={message.createdAt} />
         </div>
       )}

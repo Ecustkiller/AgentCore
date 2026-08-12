@@ -14,6 +14,7 @@
     "shoot:ask-commence": "node scripts/shoot-ask-commence.mjs",
     "shoot:onboarding": "node scripts/shoot-onboarding.mjs",
     "shoot:conversations": "node scripts/shoot-conversations.mjs",
+    "shoot:files": "node scripts/shoot-files.mjs",
     "shoot:capability-packs": "node scripts/shoot-capability-packs.mjs",
     "shoot:graph-probe": "node scripts/shoot-graph-probe.mjs",
     "shoot:graph-perf": "node scripts/shoot-graph-perf.mjs",

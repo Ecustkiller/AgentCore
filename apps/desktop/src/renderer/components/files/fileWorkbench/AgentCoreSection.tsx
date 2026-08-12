@@ -1,12 +1,8 @@
 import { BrandMarkIcon } from "@/components/brand/BrandMark";
 import {
-  type MemoryScope,
-  MemorySection,
-} from "@/components/files/fileWorkbench/MemorySection";
-import {
-  type RuleScope,
-  RuleSection,
-} from "@/components/files/fileWorkbench/RuleSection";
+  EntriesSection,
+  type EntryOpenTarget,
+} from "@/components/files/fileWorkbench/EntriesSection";
 import {
   loadAgentCoreCollapsed,
   loadAgentCoreExpanded,
@@ -24,41 +20,33 @@ export type AgentCoreScope =
   | { kind: "project"; folderId: string; projectName: string };
 
 /**
- * Unified `AgentCore/{规则,记忆}/` rail section (Agent记忆与知识系统 §5.0 / §1.6).
- * Replaces the dual pinned「AI 记忆 / 你的规则」rails and per-project twin nodes.
- * Leaves still open via the memory / document sources (CAS unchanged).
+ * Unified `AgentCore/` rail section — flat entries by scope (目标形态 · 文件页形态).
+ * No 记忆/规则/文档 subfolders; always-pool meter + 常驻/按需 badges live in
+ * {@link EntriesSection}. Leaves open via memory / document sources (CAS unchanged).
  */
 export function AgentCoreSection({
   scope,
   memoryActivePath,
-  rulesActivePath,
-  onOpenMemory,
-  onOpenRule,
-  onMemoryTopicDeleted,
-  onRuleDeleted,
-  onRuleRenamed,
+  documentActivePath,
+  onOpenEntry,
+  onEntryDeleted,
+  onEntryRenamed,
   onOpenUpdates,
   indent = 0,
   forceOpen = false,
-  forceOpenMemory = false,
-  forceOpenMemoryTopics = false,
   onRevealApplied,
 }: {
   scope: AgentCoreScope;
   memoryActivePath: string | null;
-  rulesActivePath: string | null;
-  onOpenMemory: (path: string, name: string) => void;
-  onOpenRule: (path: string, name: string) => void;
-  onMemoryTopicDeleted: (path: string) => void;
-  onRuleDeleted: (path: string) => void;
-  onRuleRenamed: (path: string, name: string) => void;
+  documentActivePath: string | null;
+  onOpenEntry: (target: EntryOpenTarget) => void;
+  onEntryDeleted: (target: EntryOpenTarget) => void;
+  onEntryRenamed: (target: EntryOpenTarget, name: string) => void;
   /** GLOBAL-only「最近更新」feed opener. */
   onOpenUpdates?: () => void;
   indent?: number;
-  /** Deep-link: expand AgentCore (and optionally memory / topics). */
+  /** Deep-link: expand AgentCore once. */
   forceOpen?: boolean;
-  forceOpenMemory?: boolean;
-  forceOpenMemoryTopics?: boolean;
   onRevealApplied?: () => void;
 }) {
   const foldKey = scope.kind === "global" ? "global" : scope.folderId;
@@ -70,41 +58,28 @@ export function AgentCoreSection({
   const revealAppliedRef = useRef(false);
 
   useEffect(() => {
-    if (!forceOpen && !forceOpenMemory && !forceOpenMemoryTopics) {
+    if (!forceOpen) {
       revealAppliedRef.current = false;
       return;
     }
     if (revealAppliedRef.current) return;
     revealAppliedRef.current = true;
 
-    if (forceOpen || forceOpenMemory || forceOpenMemoryTopics) {
-      setSectionOpen((open) => {
-        if (open) return open;
-        if (scope.kind === "global") {
-          const set = loadAgentCoreCollapsed();
-          set.delete(foldKey);
-          saveAgentCoreCollapsed(set);
-        } else {
-          const set = loadAgentCoreExpanded();
-          set.add(foldKey);
-          saveAgentCoreExpanded(set);
-        }
-        return true;
-      });
-    }
-    // MemorySection owns onRevealApplied when memory/topics are forced; only clear
-    // here when the reveal is AgentCore-only.
-    if (!forceOpenMemory && !forceOpenMemoryTopics) {
-      onRevealApplied?.();
-    }
-  }, [
-    forceOpen,
-    forceOpenMemory,
-    forceOpenMemoryTopics,
-    scope.kind,
-    foldKey,
-    onRevealApplied,
-  ]);
+    setSectionOpen((open) => {
+      if (open) return open;
+      if (scope.kind === "global") {
+        const set = loadAgentCoreCollapsed();
+        set.delete(foldKey);
+        saveAgentCoreCollapsed(set);
+      } else {
+        const set = loadAgentCoreExpanded();
+        set.add(foldKey);
+        saveAgentCoreExpanded(set);
+      }
+      return true;
+    });
+    onRevealApplied?.();
+  }, [forceOpen, scope.kind, foldKey, onRevealApplied]);
 
   const toggleSection = () =>
     setSectionOpen((open) => {
@@ -123,18 +98,10 @@ export function AgentCoreSection({
       return next;
     });
 
-  const memoryScope: MemoryScope =
+  const entryScope =
     scope.kind === "global"
-      ? { kind: "global" }
-      : {
-          kind: "project",
-          folderId: scope.folderId,
-          projectName: scope.projectName,
-        };
-  const ruleScope: RuleScope =
-    scope.kind === "global"
-      ? { kind: "global" }
-      : { kind: "project", folderId: scope.folderId };
+      ? ({ kind: "global" } as const)
+      : ({ kind: "project", folderId: scope.folderId } as const);
 
   const headerPad = indent + 8;
   const childIndent = indent + 14;
@@ -167,27 +134,16 @@ export function AgentCoreSection({
       </button>
 
       {sectionOpen && (
-        <>
-          <RuleSection
-            scope={ruleScope}
-            activePath={rulesActivePath}
-            onOpen={onOpenRule}
-            onDeleted={onRuleDeleted}
-            onRenamed={onRuleRenamed}
-            indent={childIndent}
-          />
-          <MemorySection
-            scope={memoryScope}
-            activePath={memoryActivePath}
-            onOpen={onOpenMemory}
-            onTopicDeleted={onMemoryTopicDeleted}
-            onOpenUpdates={onOpenUpdates}
-            indent={childIndent}
-            forceOpen={forceOpenMemory}
-            forceOpenTopics={forceOpenMemoryTopics}
-            onRevealApplied={onRevealApplied}
-          />
-        </>
+        <EntriesSection
+          scope={entryScope}
+          memoryActivePath={memoryActivePath}
+          documentActivePath={documentActivePath}
+          onOpen={onOpenEntry}
+          onDeleted={onEntryDeleted}
+          onRenamed={onEntryRenamed}
+          onOpenUpdates={onOpenUpdates}
+          indent={childIndent}
+        />
       )}
     </div>
   );

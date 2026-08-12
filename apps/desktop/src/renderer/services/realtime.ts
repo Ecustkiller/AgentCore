@@ -15,11 +15,12 @@ import { useMessagingStore } from "@/stores/messaging";
 /**
  * Per-user realtime firehose client for the 消息 page (消息IM.md §四).
  *
- * One long-lived `GET /v1/realtime` SSE stream carries every chat's new messages
- * and presence transitions to this user (server→client; sending stays POST). It
- * runs at the app shell for the whole authenticated session — not the 消息 page
- * — so unread badges, online dots, and incoming messages update even while the
- * user is on the 对话 page.
+ * One long-lived `GET /v1/realtime` SSE stream carries every chat's new messages,
+ * presence transitions, and chat-list membership changes (`chat_changed`) to this
+ * user (server→client; sending stays POST). It runs at the app shell for the whole
+ * authenticated session — not the 消息 page — so unread badges, online dots,
+ * incoming messages, and newly joined chats update even while the user is on the
+ * 对话 page.
  *
  * SSE can't refresh a token mid-stream, so this mirrors the POST stream's policy
  * (streamConversation.ts): on a 401, refresh once and reconnect; otherwise drop
@@ -73,6 +74,14 @@ interface FriendRequestEvent {
   type: "friend_request";
   action: FriendRequestAction;
   request: FriendRequest;
+}
+
+/** Chat list membership / activation nudge — peer created a DM, I was added to a
+ * group, or a message request became active. Sparse; full list refetch is enough. */
+interface ChatChangedEvent {
+  type: "chat_changed";
+  chat_id: string;
+  reason: "created" | "member_added" | "activated";
 }
 
 /** 记忆更新对话内可见 (§1.6): one offline-consolidation pass that changed a memory
@@ -192,6 +201,11 @@ function handleFrame(frame: string): void {
         e.request?.from_user_id === myId
       ) {
         notifyInfo("对方已同意好友申请");
+      }
+    } else if (event.type === "chat_changed") {
+      const e = event as ChatChangedEvent;
+      if (e.chat_id) {
+        void useMessagingStore.getState().fetchChats();
       }
     }
     // "ready" and any other event types: no-op here.

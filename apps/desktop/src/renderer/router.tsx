@@ -6,6 +6,7 @@ import { CapabilityPacksPreviewPage } from "@/pages/CapabilityPacksPreviewPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ConversationsPreviewPage } from "@/pages/ConversationsPreviewPage";
 import { FilesPage } from "@/pages/FilesPage";
+import { FilesPreviewPage } from "@/pages/FilesPreviewPage";
 import { FloatWindowPage } from "@/pages/FloatWindowPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
@@ -138,6 +139,8 @@ export const router = createHashRouter([
       { path: "preview/onboarding", element: <OnboardingPreviewPage /> },
       // Preview 全部对话管理页（时间线列表 · mock 数据离线自检）.
       { path: "preview/conversations", element: <ConversationsPreviewPage /> },
+      // Preview 文件页 AgentCore 扁平条目轨（常驻用量 · 徽章 · description）.
+      { path: "preview/files", element: <FilesPreviewPage /> },
       // Preview 能力包两态（工具箱 AI 提示词 · mock 数据离线自检）.
       {
         path: "preview/capability-packs",
