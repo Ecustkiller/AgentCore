@@ -1,5 +1,5 @@
 /**
- * updater：darwin 未签名 → available.manualOnly 且 download 不发起；
+ * updater：darwin 未签名 → autoInstallCapable:false 且 download 拒绝并推 error；
  * 已签名 → 常规自动下载路径不变。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +10,7 @@ const h = vi.hoisted(() => {
     isPackaged: true,
     capable: true as boolean,
     downloadUpdate: vi.fn(async () => undefined),
+    probeCalls: 0,
     listeners,
     on(event: string, cb: (...args: unknown[]) => void) {
       const list = listeners.get(event) ?? [];
@@ -51,7 +52,10 @@ vi.mock("electron-updater", () => ({
 }));
 
 vi.mock("../mac-auto-update-capable", () => ({
-  isMacAutoUpdateInstallCapable: async () => h.capable,
+  isMacAutoUpdateInstallCapable: async () => {
+    h.probeCalls += 1;
+    return h.capable;
+  },
 }));
 
 vi.mock("../log-service", () => ({ logDesktop: vi.fn() }));
@@ -59,7 +63,7 @@ vi.mock("../log-service", () => ({ logDesktop: vi.fn() }));
 type Status = {
   phase: string;
   version?: string;
-  manualOnly?: boolean;
+  autoInstallCapable?: boolean;
   message?: string;
 };
 
@@ -69,6 +73,7 @@ async function loadUpdater() {
   const { UPDATER_CHANNELS } = await import("@shared/updater-contract");
   vi.mocked(ipcMain.handle).mockClear();
   h.clearListeners();
+  h.probeCalls = 0;
 
   const sent: Status[] = [];
   const window = {
@@ -117,7 +122,7 @@ async function loadUpdater() {
   };
 }
 
-describe("updater manualOnly (unsigned mac)", () => {
+describe("updater autoInstallCapable (unsigned mac)", () => {
   beforeEach(() => {
     h.isPackaged = true;
     h.capable = true;
@@ -129,7 +134,7 @@ describe("updater manualOnly (unsigned mac)", () => {
     vi.resetModules();
   });
 
-  it("unsigned → available 带 manualOnly 且 download 不发起", async () => {
+  it("unsigned → available 带 autoInstallCapable:false 且 download 拒绝并推 error", async () => {
     h.capable = false;
     const u = await loadUpdater();
     u.emitAvailable("9.9.9");
@@ -140,31 +145,50 @@ describe("updater manualOnly (unsigned mac)", () => {
     expect(u.lastStatus()).toMatchObject({
       phase: "available",
       version: "9.9.9",
-      manualOnly: true,
+      autoInstallCapable: false,
     });
     expect(u.getStatus()).toMatchObject({
       phase: "available",
-      manualOnly: true,
+      autoInstallCapable: false,
     });
 
+    const probesBeforeDownload = h.probeCalls;
     await u.download();
     expect(h.downloadUpdate).not.toHaveBeenCalled();
-    expect(u.getStatus().phase).toBe("available");
+    // 拒绝执行必须产生状态跃迁（不得静默 return）。
+    expect(u.getStatus()).toMatchObject({
+      phase: "error",
+      autoInstallCapable: false,
+    });
+    expect(u.getStatus().message).toMatch(/手动安装/);
     expect(u.sent.every((s) => s.phase !== "downloading")).toBe(true);
+    // runDownload 不得二次跑 codesign 探测。
+    expect(h.probeCalls).toBe(probesBeforeDownload);
   });
 
-  it("unsigned → error 态重试下载（硬闸入口）同样不发起", async () => {
+  it("unsigned → error 态重试下载同样拒绝并再推 error", async () => {
     h.capable = false;
     const u = await loadUpdater();
+    // Warm capability cache the same way packaged init does.
+    await vi.waitFor(() => {
+      expect(u.getStatus().autoInstallCapable).toBe(false);
+    });
     u.emitError("network down");
     expect(u.getStatus().phase).toBe("error");
+    expect(u.getStatus().autoInstallCapable).toBe(false);
 
+    const probesBefore = h.probeCalls;
     await u.download();
     expect(h.downloadUpdate).not.toHaveBeenCalled();
-    expect(u.getStatus().phase).toBe("error");
+    expect(u.getStatus()).toMatchObject({
+      phase: "error",
+      autoInstallCapable: false,
+    });
+    expect(u.getStatus().message).toMatch(/手动安装/);
+    expect(h.probeCalls).toBe(probesBefore);
   });
 
-  it("signed → available 无 manualOnly 且 download 走 autoUpdater", async () => {
+  it("signed → available 带 autoInstallCapable:true 且 download 走 autoUpdater", async () => {
     h.capable = true;
     const u = await loadUpdater();
     u.emitAvailable("2.0.0");
@@ -174,10 +198,11 @@ describe("updater manualOnly (unsigned mac)", () => {
     const available = u.lastStatus();
     expect(available.phase).toBe("available");
     expect(available.version).toBe("2.0.0");
-    expect(available.manualOnly).toBeUndefined();
+    expect(available.autoInstallCapable).toBe(true);
 
     await u.download();
     expect(h.downloadUpdate).toHaveBeenCalledTimes(1);
     expect(u.getStatus().phase).toBe("downloading");
+    expect(u.getStatus().autoInstallCapable).toBe(true);
   });
 });

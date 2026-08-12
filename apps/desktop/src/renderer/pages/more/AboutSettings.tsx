@@ -61,7 +61,7 @@ function updateStatusText(status: UpdaterStatus): string {
     case "not-available":
       return "已是最新版本。";
     case "available":
-      return status.manualOnly
+      return !status.autoInstallCapable
         ? `发现新版本 ${status.version}，此版本需手动下载安装。`
         : `发现新版本 ${status.version}，确认后开始后台下载。`;
     case "downloading":
@@ -86,7 +86,9 @@ function UpdateSection() {
   const openUpdateDialog = useUpdatesStore((s) => s.openUpdateDialog);
 
   const busy = status.phase === "checking" || status.phase === "downloading";
-  const manualOnly = status.phase === "available" && Boolean(status.manualOnly);
+  const manualOnly = !status.autoInstallCapable;
+  const showManualDownloadLink =
+    manualOnly && (status.phase === "available" || status.phase === "error");
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   return (
@@ -118,7 +120,7 @@ function UpdateSection() {
               重启安装
             </Button>
           ) : null}
-          {manualOnly ? (
+          {showManualDownloadLink ? (
             <a
               href={downloadPageUrl}
               target="_blank"

@@ -1,4 +1,8 @@
-import { UPDATER_CHANNELS, type UpdaterStatus } from "@shared/updater-contract";
+import {
+  UPDATER_CHANNELS,
+  type UpdaterPhase,
+  type UpdaterStatus,
+} from "@shared/updater-contract";
 import { net, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
 import { type UpdateInfo, autoUpdater } from "electron-updater";
 import { logDesktop } from "./log-service";
@@ -13,10 +17,16 @@ const SPEED_SAMPLE_MIN_MS = 1500;
 /** 单样本速度上限：挡住续传首包把已有字节算进瞬时速率的离谱尖峰。 */
 const SPEED_CAP_BPS = 50 * 1024 * 1024;
 
+/** 主进程拒绝自动下载时推给 renderer 的文案（未签名 mac 等）。 */
+const MANUAL_INSTALL_REQUIRED_MESSAGE =
+  "当前安装包无法自动更新，请前往下载页手动安装";
+
 type CheckTrigger = "startup" | "interval" | "resume" | "manual";
 
 let mainWindow: BrowserWindow | null = null;
-let status: UpdaterStatus = { phase: "idle" };
+/** 与 phase 正交的本机自动安装能力；每次 push 都附带。默认 true，探测后校正。 */
+let autoInstallCapable = true;
+let status: UpdaterStatus = { phase: "idle", autoInstallCapable: true };
 // 下载中的目标版本：download-progress 事件不带版本，从 update-available 暂存补上。
 let pendingVersion = "";
 let pendingSizeBytes: number | null = null;
@@ -74,11 +84,19 @@ function recentBytesPerSecond(now: number, transferred: number): number {
   return displayBytesPerSecond;
 }
 
-function pushStatus(next: UpdaterStatus): void {
-  status = next;
+/** 推送 phase；始终附带当前 `autoInstallCapable`（能力与 phase 正交）。 */
+function pushStatus(next: UpdaterPhase): void {
+  const full: UpdaterStatus = { ...next, autoInstallCapable };
+  status = full;
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send(UPDATER_CHANNELS.status, next);
+    mainWindow.webContents.send(UPDATER_CHANNELS.status, full);
   }
+}
+
+/** 剥掉能力字段，便于在能力值变化后按当前 phase 再推一次。 */
+function currentPhase(): UpdaterPhase {
+  const { autoInstallCapable: _capable, ...phase } = status;
+  return phase;
 }
 
 function sinceCheckMs(): number | null {
@@ -214,14 +232,33 @@ async function runCheck(trigger: CheckTrigger): Promise<void> {
 
 async function runDownload(): Promise<void> {
   if (downloadInFlight) return;
-  if (status.phase !== "available" && status.phase !== "error") return;
-  // 未签名 mac：Squirrel.Mac 装不了，任何入口都不许发起下载（避免白下 ~190MB 再必然失败）。
-  // 按能力探测而非 status.manualOnly：硬闸在 error 态还有「重试下载」，那条路读不到该标记。
-  if (!(await isMacAutoUpdateInstallCapable())) {
+  // 能力字段已在每次 push 附带；此处只读缓存，禁止二次跑 codesign 探测。
+  if (!autoInstallCapable) {
     logUpdater("info", "updater.download_skipped", {
       reason: "manual_only",
       version: pendingVersion || undefined,
+      phaseBefore: status.phase,
     });
+    // 拒绝执行必须产生状态跃迁——静默 return 会让硬闸「重试下载」变成死按钮。
+    pushStatus({
+      phase: "error",
+      message: MANUAL_INSTALL_REQUIRED_MESSAGE,
+    });
+    return;
+  }
+  if (status.phase !== "available" && status.phase !== "error") {
+    logUpdater("info", "updater.download_skipped", {
+      reason: "wrong_phase",
+      phase: status.phase,
+      version: pendingVersion || undefined,
+    });
+    // 已在下载/待安装时不打断；其余拒绝同样推 error，避免 renderer 空等。
+    if (status.phase !== "downloading" && status.phase !== "downloaded") {
+      pushStatus({
+        phase: "error",
+        message: "当前无法开始下载，请重新检查更新",
+      });
+    }
     return;
   }
   downloadInFlight = true;
@@ -287,7 +324,8 @@ export function initUpdater(window: BrowserWindow): void {
   ipcMain.handle(UPDATER_CHANNELS.getStatus, () => status);
 
   if (!app.isPackaged) {
-    status = { phase: "unsupported" };
+    autoInstallCapable = false;
+    status = { phase: "unsupported", autoInstallCapable: false };
     ipcMain.handle(UPDATER_CHANNELS.configure, () => {});
     ipcMain.handle(UPDATER_CHANNELS.check, () => {});
     ipcMain.handle(UPDATER_CHANNELS.download, () => {});
@@ -295,8 +333,12 @@ export function initUpdater(window: BrowserWindow): void {
     return;
   }
 
-  // 预热 mac 签名探测缓存（仅 darwin 打包态真正跑 codesign）。
-  void isMacAutoUpdateInstallCapable();
+  // 预热 mac 签名探测缓存（仅 darwin 打包态真正跑 codesign），校正能力字段并推一次。
+  void isMacAutoUpdateInstallCapable().then((capable) => {
+    if (autoInstallCapable === capable) return;
+    autoInstallCapable = capable;
+    pushStatus(currentPhase());
+  });
 
   // 发现即说明、用户同意后再下载；安装仍须显式 quitAndInstall（§7.6）。
   autoUpdater.autoDownload = false;
@@ -319,21 +361,19 @@ export function initUpdater(window: BrowserWindow): void {
     void (async () => {
       pendingVersion = info.version;
       pendingSizeBytes = packageSizeBytes(info);
-      // darwin 未签名 → manualOnly；签名/公证落地后探测自动恢复常规自动更新。
-      const capable = await isMacAutoUpdateInstallCapable();
-      const manualOnly = !capable;
+      // 与 init 预热共用探测缓存；结果写入模块级能力字段后随 push 正交附带。
+      autoInstallCapable = await isMacAutoUpdateInstallCapable();
       pushStatus({
         phase: "available",
         version: info.version,
         releaseNotes: normalizeReleaseNotes(info),
         sizeBytes: pendingSizeBytes,
-        ...(manualOnly ? { manualOnly: true } : {}),
       });
       logUpdater("info", "updater.phase", {
         phase: "available",
         version: info.version,
         sizeBytes: pendingSizeBytes ?? undefined,
-        manualOnly: manualOnly || undefined,
+        autoInstallCapable,
         trigger: lastCheckTrigger,
         sinceCheckMs: sinceCheckMs(),
       });

@@ -47,7 +47,9 @@ function stubUpdaterApi() {
   });
   const api = {
     configure: vi.fn(() => Promise.resolve()),
-    getStatus: vi.fn(() => Promise.resolve({ phase: "idle" as const })),
+    getStatus: vi.fn(() =>
+      Promise.resolve({ phase: "idle" as const, autoInstallCapable: true }),
+    ),
     onStatus,
     check: vi.fn(() => Promise.resolve()),
     download: vi.fn(() => Promise.resolve()),
@@ -83,7 +85,7 @@ beforeEach(() => {
   });
   __resetUpdatesModuleForTests();
   useUpdatesStore.setState({
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     dialogOpen: false,
     outdatedMinVersion: null,
   });
@@ -185,13 +187,21 @@ describe("startUpdates outdated policy", () => {
   it("force gate ignores persisted skip and opens dialog", () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     useUpdatesStore.getState().skipVersion();
     expect(loadUpdatePrefs().skippedVersion).toBe("0.7.0");
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
 
     useUpdatesStore.setState({ outdatedMinVersion: "0.6.5" });
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     expect(useUpdatesStore.getState().dialogOpen).toBe(true);
   });
 });
@@ -205,6 +215,7 @@ describe("update consent dialog + prefs", () => {
       version: "0.7.0",
       releaseNotes: "notes",
       sizeBytes: 1024,
+      autoInstallCapable: true,
     });
     const state = useUpdatesStore.getState();
     expect(state.dialogOpen).toBe(true);
@@ -218,28 +229,44 @@ describe("update consent dialog + prefs", () => {
   it("remindLater closes dialog and snoozes 24h for same version", () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     useUpdatesStore.getState().remindLater();
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
     const prefs = loadUpdatePrefs();
     expect(prefs.snooze?.version).toBe("0.7.0");
     expect(prefs.snooze?.until).toBeGreaterThan(Date.now());
 
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
   });
 
   it("skipVersion persists and suppresses auto prompt after restart-like reload", () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     useUpdatesStore.getState().skipVersion();
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
     expect(loadUpdatePrefs().skippedVersion).toBe("0.7.0");
 
     // Simulate another available push (e.g. after app restart + check).
     useUpdatesStore.setState({ dialogOpen: false });
-    api._emit({ phase: "available", version: "0.7.0" });
+    api._emit({
+      phase: "available",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
   });
 
@@ -247,7 +274,11 @@ describe("update consent dialog + prefs", () => {
     useUpdatesStore.setState({
       outdatedMinVersion: "0.6.5",
       dialogOpen: true,
-      status: { phase: "available", version: "0.7.0" },
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        autoInstallCapable: true,
+      },
     });
     useUpdatesStore.getState().remindLater();
     useUpdatesStore.getState().skipVersion();
@@ -264,6 +295,7 @@ describe("update consent dialog + prefs", () => {
       phase: "available",
       version: "0.7.0",
       sizeBytes: 2048,
+      autoInstallCapable: true,
     });
     expect(useUpdatesStore.getState().dialogOpen).toBe(true);
     await useUpdatesStore.getState().download();
@@ -283,7 +315,12 @@ describe("update consent dialog + prefs", () => {
     useUpdatesStore.setState({
       outdatedMinVersion: "0.6.5",
       dialogOpen: true,
-      status: { phase: "available", version: "0.7.0", sizeBytes: 2048 },
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        sizeBytes: 2048,
+        autoInstallCapable: true,
+      },
     });
     await useUpdatesStore.getState().download();
     expect(api.download).toHaveBeenCalled();
@@ -294,7 +331,7 @@ describe("update consent dialog + prefs", () => {
     );
   });
 
-  it("download is a no-op when available status is manualOnly", async () => {
+  it("download is a no-op when autoInstallCapable is false", async () => {
     const api = stubUpdaterApi();
     startUpdates();
     useUpdatesStore.setState({
@@ -302,7 +339,7 @@ describe("update consent dialog + prefs", () => {
       status: {
         phase: "available",
         version: "0.7.0",
-        manualOnly: true,
+        autoInstallCapable: false,
         sizeBytes: 2048,
       },
     });
@@ -315,7 +352,11 @@ describe("update consent dialog + prefs", () => {
   it("toasts on downloaded without auto-install", () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "downloaded", version: "0.7.0" });
+    api._emit({
+      phase: "downloaded",
+      version: "0.7.0",
+      autoInstallCapable: true,
+    });
     expect(notifyInfoMock).toHaveBeenCalled();
     expect(api.quitAndInstall).not.toHaveBeenCalled();
   });
@@ -323,7 +364,11 @@ describe("update consent dialog + prefs", () => {
   it("soft-update error toasts without reopening dialog", () => {
     const api = stubUpdaterApi();
     startUpdates();
-    api._emit({ phase: "error", message: "network down" });
+    api._emit({
+      phase: "error",
+      message: "network down",
+      autoInstallCapable: true,
+    });
     expect(notifyActionErrorMock).toHaveBeenCalledWith(
       "更新失败",
       "network down",

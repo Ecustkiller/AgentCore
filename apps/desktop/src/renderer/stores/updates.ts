@@ -135,7 +135,7 @@ interface UpdatesState {
 let forcePromptAfterCheck = false;
 
 export const useUpdatesStore = create<UpdatesState>(() => ({
-  status: { phase: "idle" },
+  status: { phase: "idle", autoInstallCapable: true },
   dialogOpen: false,
   outdatedMinVersion: null,
   openUpdateDialog: () => {
@@ -160,8 +160,8 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
     if (!api) return;
     const force = isForceUpdateActive();
     const { status } = useUpdatesStore.getState();
-    // `manualOnly`：未签名包无法走自动安装；UI 应引导下载页，此处再挡一层。
-    if (status.phase === "available" && status.manualOnly) return;
+    // 能力字段与 phase 正交：未签名等不可自动安装时一律不调 download。
+    if (!status.autoInstallCapable) return;
     if (!force) {
       useUpdatesStore.setState({ dialogOpen: false });
       if (status.phase === "available") {
@@ -260,7 +260,9 @@ async function pollOutdatedPolicy(): Promise<void> {
 export function startUpdates(): () => void {
   const api = getUpdaterApi();
   if (!api) {
-    useUpdatesStore.setState({ status: { phase: "unsupported" } });
+    useUpdatesStore.setState({
+      status: { phase: "unsupported", autoInstallCapable: false },
+    });
     return () => {};
   }
 

@@ -25,9 +25,9 @@ import { Loader2 } from "lucide-react";
  * Consent-first update explanation dialog (发布与门禁.md §7.6).
  *
  * Soft update: only the `available` consent surface — 「立即更新」关窗并后台静默下载。
- * `manualOnly`：不调 download，主行动改为打开本通道下载页。
+ * `autoInstallCapable === false`：不调 download，主行动改为打开本通道下载页。
  * Force-update hard gate: non-dismissible multi-phase (download progress / install /
- * retry) when the dialog is opened from the gate.
+ * retry) when the dialog is opened from the gate. Force 态任意 phase 都保留下载页出口。
  */
 export function UpdateAvailableDialog() {
   const dialogOpen = useUpdatesStore((s) => s.dialogOpen);
@@ -42,6 +42,7 @@ export function UpdateAvailableDialog() {
   if (!hasAutoUpdater()) return null;
 
   const force = isForceUpdateActive({ outdatedMinVersion });
+  const manualOnly = !status.autoInstallCapable;
 
   const version =
     status.phase === "available" ||
@@ -68,7 +69,6 @@ export function UpdateAvailableDialog() {
   const sizeBytes =
     status.phase === "available" ? (status.sizeBytes ?? null) : null;
 
-  const manualOnly = status.phase === "available" && Boolean(status.manualOnly);
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   const current = clientVersion();
@@ -80,6 +80,17 @@ export function UpdateAvailableDialog() {
         : status.phase === "error"
           ? "更新失败"
           : `发现新版本 ${version ?? ""}`;
+
+  const downloadPageLink = (
+    <a
+      href={downloadPageUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+    >
+      前往下载页
+    </a>
+  );
 
   return (
     <Dialog
@@ -180,14 +191,7 @@ export function UpdateAvailableDialog() {
                   </>
                 )}
                 {manualOnly ? (
-                  <a
-                    href={downloadPageUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                  >
-                    前往下载页
-                  </a>
+                  downloadPageLink
                 ) : (
                   <Button
                     variant="primary"
@@ -201,14 +205,24 @@ export function UpdateAvailableDialog() {
             ) : null}
 
             {force && status.phase === "downloading" ? (
-              <Button
-                variant="neutral"
-                size="md"
-                disabled
-                icon={<Loader2 size={14} className="animate-spin" />}
-              >
-                下载中…
-              </Button>
+              <>
+                <Button
+                  variant="neutral"
+                  size="md"
+                  disabled
+                  icon={<Loader2 size={14} className="animate-spin" />}
+                >
+                  下载中…
+                </Button>
+                <a
+                  href={downloadPageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center justify-center rounded-lg px-3 text-xs font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  前往下载页手动安装
+                </a>
+              </>
             ) : null}
 
             {force && status.phase === "downloaded" ? (
@@ -222,13 +236,17 @@ export function UpdateAvailableDialog() {
             ) : null}
 
             {force && status.phase === "error" ? (
-              <Button
-                variant="primary"
-                size="md"
-                onClick={() => void download()}
-              >
-                重试下载
-              </Button>
+              manualOnly ? (
+                downloadPageLink
+              ) : (
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => void download()}
+                >
+                  重试下载
+                </Button>
+              )
             ) : null}
           </DialogFooter>
         </DialogContent>

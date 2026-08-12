@@ -16,8 +16,22 @@
  * 各自独立的主进程能力，刻意不混在一个契约里。
  */
 
-/** 更新状态机——主进程权威持有，经 `status` 推送给 renderer，并由 `getStatus` 同步初值。 */
-export type UpdaterStatus =
+/**
+ * 本机能否走自动下载安装 —— 与 {@link UpdaterPhase} 正交，**每次**状态推送都带。
+ *
+ * darwin 未签名 bundle 为 `false`（当前 mac 内测包即如此）：Squirrel.Mac 硬校验签名后
+ * 才肯装，未签名时下完整包也必然失败，故 renderer 必须改为引导用户去下载页手动安装、
+ * 不得调 `download`。签名 + 公证落地后主进程探测到即自动恢复常规自动更新。
+ *
+ * 禁止再把该能力嵌进某一个 phase 变体（曾挂在 `available.manualOnly` 上，硬闸 error
+ * 态的「重试下载」读不到 → 死按钮）。
+ */
+export type UpdaterCapability = {
+  autoInstallCapable: boolean;
+};
+
+/** 更新状态机 phase 联合体（不含能力字段）。 */
+export type UpdaterPhase =
   /** 空闲：尚未检查 / 检查后无更新前的初态。 */
   | { phase: "idle" }
   /** dev / 未打包：自动更新不生效（仅安装版可用）。 */
@@ -30,16 +44,12 @@ export type UpdaterStatus =
    * 发现新版本，等待用户确认后再下载。
    * `releaseNotes` 来自 feed（`latest.yml` / GitHub）；缺省时 renderer 显示兜底文案。
    * `sizeBytes` 为安装包合计（有则展示）。
-   * `manualOnly`：本机 bundle 无 Developer ID 签名（当前 mac 内测包即如此）。Squirrel.Mac
-   * 硬校验签名后才肯装，未签名时下完整包也必然失败，故 renderer 必须改为引导用户去下载页
-   * 手动安装、不得调 `download`。签名 + 公证落地后主进程探测到即自动恢复常规自动更新。
    */
   | {
       phase: "available";
       version: string;
       releaseNotes?: string | null;
       sizeBytes?: number | null;
-      manualOnly?: boolean;
     }
   /**
    * 下载中。`percent` 为 0–100 整数；`transferred` / `total` 来自 electron-updater
@@ -58,6 +68,9 @@ export type UpdaterStatus =
   | { phase: "downloaded"; version: string }
   /** 检查 / 下载出错（fail-open：出错不阻断使用，仅记录并可重试）。 */
   | { phase: "error"; message: string };
+
+/** 更新状态机——主进程权威持有，经 `status` 推送给 renderer，并由 `getStatus` 同步初值。 */
+export type UpdaterStatus = UpdaterPhase & UpdaterCapability;
 
 /** IPC 通道名 —— 主进程与 preload 共用，避免硬编码漂移（对齐 fs/sidecar 契约写法）。 */
 export const UPDATER_CHANNELS = {
@@ -79,7 +92,10 @@ export interface UpdaterApi {
   configure(apiBaseUrl: string): Promise<void>;
   /** 主动触发一次检查（发现新版本 → `available`，不自动下载）；过程经 `onStatus` 推来。dev 态为 no-op。 */
   check(): Promise<void>;
-  /** 开始下载当前 `available` 版本。仅打包态、且已发现更新时有意义；`manualOnly` 时为 no-op。 */
+  /**
+   * 开始下载当前 `available` 版本。仅打包态、且已发现更新时有意义；
+   * `autoInstallCapable === false` 时主进程拒绝并推 error（不得静默 no-op）。
+   */
   download(): Promise<void>;
   /** 安装已下载的更新：退出并安装、装毕重启。仅 `downloaded` 态有意义。 */
   quitAndInstall(): Promise<void>;

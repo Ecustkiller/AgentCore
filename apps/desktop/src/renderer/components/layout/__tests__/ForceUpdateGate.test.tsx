@@ -24,7 +24,7 @@ const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 beforeEach(() => {
   hasAutoUpdaterMock.mockReturnValue(true);
   useUpdatesStore.setState({
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     outdatedMinVersion: "0.6.5",
     dialogOpen: false,
     check: vi.fn(() => Promise.resolve()),
@@ -38,7 +38,7 @@ afterEach(() => {
   cleanup();
   useUpdatesStore.setState({
     outdatedMinVersion: null,
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     dialogOpen: false,
   });
 });
@@ -61,7 +61,11 @@ describe("ForceUpdateGate", () => {
 
   it("keeps escape hatch when update download fails", () => {
     useUpdatesStore.setState({
-      status: { phase: "error", message: "download failed" },
+      status: {
+        phase: "error",
+        message: "download failed",
+        autoInstallCapable: true,
+      },
     });
     render(<ForceUpdateGate />);
     expect(screen.getByText("download failed")).toBeTruthy();
@@ -84,7 +88,10 @@ describe("ForceUpdateGate", () => {
 
   it("triggers check on 检查更新", () => {
     const check = vi.fn(() => Promise.resolve());
-    useUpdatesStore.setState({ check, status: { phase: "idle" } });
+    useUpdatesStore.setState({
+      check,
+      status: { phase: "idle", autoInstallCapable: true },
+    });
     render(<ForceUpdateGate />);
     fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
     expect(check).toHaveBeenCalled();
@@ -96,7 +103,11 @@ describe("ForceUpdateGate", () => {
     useUpdatesStore.setState({
       download,
       openUpdateDialog,
-      status: { phase: "available", version: "0.7.0" },
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        autoInstallCapable: true,
+      },
     });
     render(<ForceUpdateGate />);
     fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
@@ -104,7 +115,7 @@ describe("ForceUpdateGate", () => {
     expect(download).toHaveBeenCalled();
   });
 
-  it("manualOnly swaps primary CTA to download page and skips download", () => {
+  it("autoInstallCapable:false swaps primary CTA to download page and skips download", () => {
     const download = vi.fn(() => Promise.resolve());
     const openUpdateDialog = vi.fn();
     useUpdatesStore.setState({
@@ -113,7 +124,7 @@ describe("ForceUpdateGate", () => {
       status: {
         phase: "available",
         version: "0.7.0",
-        manualOnly: true,
+        autoInstallCapable: false,
       },
     });
     render(<ForceUpdateGate />);
@@ -133,7 +144,11 @@ describe("ForceUpdateGate", () => {
     const install = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({
       install,
-      status: { phase: "downloaded", version: "0.7.0" },
+      status: {
+        phase: "downloaded",
+        version: "0.7.0",
+        autoInstallCapable: true,
+      },
     });
     render(<ForceUpdateGate />);
     fireEvent.click(screen.getByRole("button", { name: "重启安装" }));

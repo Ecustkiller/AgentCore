@@ -34,7 +34,7 @@ const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
 beforeEach(() => {
   useUpdatesStore.setState({
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     dialogOpen: false,
     outdatedMinVersion: null,
     openUpdateDialog: vi.fn(),
@@ -46,18 +46,18 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useUpdatesStore.setState({
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     dialogOpen: false,
   });
 });
 
-describe("AboutSettings software update (manualOnly)", () => {
+describe("AboutSettings software update (autoInstallCapable)", () => {
   it("shows manual-download copy and channel download link", async () => {
     useUpdatesStore.setState({
       status: {
         phase: "available",
         version: "0.7.0",
-        manualOnly: true,
+        autoInstallCapable: false,
       },
     });
     render(

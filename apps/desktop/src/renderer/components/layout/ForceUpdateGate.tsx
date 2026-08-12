@@ -17,8 +17,8 @@ import type { ReactNode } from "react";
  * is false). Fail-open: missing policy leaves this hidden.
  *
  * Always exposes a secondary link to this channel’s download page so users are
- * never permanently locked if in-app update cannot complete (`manualOnly` or
- * any other failure path).
+ * never permanently locked if in-app update cannot complete
+ * (`autoInstallCapable === false` or any other failure path).
  */
 export function ForceUpdateGate() {
   const minVersion = useUpdatesStore((s) => s.outdatedMinVersion);
@@ -34,7 +34,7 @@ export function ForceUpdateGate() {
   const checking = status.phase === "checking";
   const downloading = status.phase === "downloading";
   const available = status.phase === "available";
-  const manualOnly = available && Boolean(status.manualOnly);
+  const manualOnly = !status.autoInstallCapable;
   const downloaded = status.phase === "downloaded";
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
@@ -55,8 +55,8 @@ export function ForceUpdateGate() {
     ctaDisabled = true;
     ctaIcon = <Loader2 size={14} className="animate-spin" />;
     onCta = () => {};
-  } else if (manualOnly) {
-    // Primary action is the download-page <a> below; no auto download.
+  } else if (manualOnly && (available || status.phase === "error")) {
+    // Primary action is the download-page <a> below; no auto download / retry.
     onCta = null;
   } else if (available) {
     ctaLabel = "立即更新";
@@ -70,6 +70,9 @@ export function ForceUpdateGate() {
     ctaIcon = <Loader2 size={14} className="animate-spin" />;
     onCta = () => {};
   }
+
+  const primaryIsDownloadPage =
+    manualOnly && (available || status.phase === "error");
 
   return (
     <div
@@ -115,7 +118,7 @@ export function ForceUpdateGate() {
           <p className="text-sm text-destructive">{status.message}</p>
         ) : null}
 
-        {manualOnly ? (
+        {primaryIsDownloadPage ? (
           <a
             href={downloadPageUrl}
             target="_blank"

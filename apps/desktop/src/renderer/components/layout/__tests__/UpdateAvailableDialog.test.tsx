@@ -29,6 +29,7 @@ beforeEach(() => {
       version: "0.7.0",
       releaseNotes: "重要修复",
       sizeBytes: 2048,
+      autoInstallCapable: true,
     },
     dialogOpen: true,
     outdatedMinVersion: null,
@@ -43,7 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useUpdatesStore.setState({
-    status: { phase: "idle" },
+    status: { phase: "idle", autoInstallCapable: true },
     dialogOpen: false,
     outdatedMinVersion: null,
   });
@@ -62,7 +63,12 @@ describe("UpdateAvailableDialog", () => {
 
   it("falls back to default notes when feed empty", () => {
     useUpdatesStore.setState({
-      status: { phase: "available", version: "0.7.0", releaseNotes: null },
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        releaseNotes: null,
+        autoInstallCapable: true,
+      },
     });
     render(<UpdateAvailableDialog />);
     expect(screen.getByText("修复与体验改进")).toBeTruthy();
@@ -76,7 +82,7 @@ describe("UpdateAvailableDialog", () => {
     expect(download).toHaveBeenCalled();
   });
 
-  it("manualOnly replaces download CTA with channel download-page link", () => {
+  it("autoInstallCapable:false replaces download CTA with channel download-page link", () => {
     const download = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({
       download,
@@ -84,7 +90,7 @@ describe("UpdateAvailableDialog", () => {
         phase: "available",
         version: "0.7.0",
         releaseNotes: "重要修复",
-        manualOnly: true,
+        autoInstallCapable: false,
       },
     });
     render(<UpdateAvailableDialog />);
@@ -108,6 +114,7 @@ describe("UpdateAvailableDialog", () => {
         bytesPerSecond: 524_288,
         transferred: 83_886_080,
         total: 198_180_864,
+        autoInstallCapable: true,
       },
       dialogOpen: true,
       outdatedMinVersion: null,
@@ -127,6 +134,7 @@ describe("UpdateAvailableDialog", () => {
         bytesPerSecond: 524_288,
         transferred: 83_886_080,
         total: 198_180_864,
+        autoInstallCapable: true,
       },
       dialogOpen: true,
       outdatedMinVersion: "0.6.5",
