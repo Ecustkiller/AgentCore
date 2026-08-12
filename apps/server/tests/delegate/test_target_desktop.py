@@ -715,9 +715,11 @@ async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
         "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
         AsyncMock(return_value=None),
     )
+    from agentcore.runtime.delegate.target_desktop_auto_cloud import AutoDeskPersistResult
+
     monkeypatch.setattr(
         "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
-        AsyncMock(return_value="auto_desk"),
+        AsyncMock(return_value=AutoDeskPersistResult("auto_desk", "won")),
     )
     monkeypatch.setattr(
         "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
@@ -848,8 +850,10 @@ async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypat
         return {"id": "desk-1", "name": name}
 
     async def _fake_persist(*, user_id: str, conversation_id: str | None, folder_id: str):
+        from agentcore.runtime.delegate.target_desktop_auto_cloud import AutoDeskPersistResult
+
         persisted.append((conversation_id or "", folder_id))
-        return folder_id
+        return AutoDeskPersistResult(folder_id, "won")
 
     async def _fake_bind(context, *, folder_id: str) -> bool:
         context.auto_desk_folder_id = folder_id
@@ -1055,3 +1059,183 @@ def test_resolve_turn_file_workspace_keeps_birth_over_auto_desk():
     )
     assert ws2 == "auto"
     assert auto2 == "auto"
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_race_loser_reclaims_orphan_mint(monkeypatch):
+    """并发 first-write：输掉竞态的调用方回收本回合刚 mint 的 Folder。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.runtime.delegate.target_desktop_auto_cloud import AutoDeskPersistResult
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    reclaimed: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        return {"id": "mint-loser", "name": name}
+
+    async def _fake_persist(*, user_id: str, conversation_id: str | None, folder_id: str):
+        return AutoDeskPersistResult("desk-winner", "lost")
+
+    async def _fake_reclaim(*, user_id: str, folder_id: str) -> None:
+        reclaimed.append(folder_id)
+
+    async def _fake_bind(context, *, folder_id: str) -> bool:
+        context.auto_desk_folder_id = folder_id
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
+        _fake_persist,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._reclaim_orphan_auto_desk_folder",
+        _fake_reclaim,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        _fake_bind,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_conversation_title",
+        AsyncMock(return_value=None),
+    )
+
+    hint = TurnTargetDeskHint()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+    )
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-bare",
+        user_message="写文件",
+        tool_context=ctx,
+    )
+    assert out == "desk-winner"
+    assert hint.folder_id == "desk-winner"
+    assert ctx.auto_desk_folder_id == "desk-winner"
+    assert reclaimed == ["mint-loser"]
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_dead_pointer_remints_after_bind_miss(monkeypatch):
+    """指针指向已删 Folder：绑不上 → 清指针 → 本回合重新 mint。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.runtime.delegate.target_desktop_auto_cloud import AutoDeskPersistResult
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+    binds: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "desk-fresh", "name": name}
+
+    async def _fake_persist(*, user_id: str, conversation_id: str | None, folder_id: str):
+        return AutoDeskPersistResult(folder_id, "won")
+
+    async def _fake_bind(context, *, folder_id: str) -> bool:
+        binds.append(folder_id)
+        if folder_id == "desk-dead":
+            context.auto_desk_folder_id = None
+            return False
+        context.auto_desk_folder_id = folder_id
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value="desk-dead"),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
+        _fake_persist,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        _fake_bind,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_conversation_title",
+        AsyncMock(return_value=None),
+    )
+
+    hint = TurnTargetDeskHint()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+        auto_desk_folder_id="desk-dead",
+    )
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-bare",
+        user_message="写文件",
+        tool_context=ctx,
+    )
+    assert out == "desk-fresh"
+    assert creates == ["写文件"]
+    assert binds == ["desk-dead", "desk-fresh"]
+    assert hint.folder_id == "desk-fresh"
+    assert ctx.auto_desk_folder_id == "desk-fresh"
+
+
+@pytest.mark.asyncio
+async def test_bind_landing_desk_clears_stale_pointer_when_folder_missing(monkeypatch):
+    """绑不上（folder 不存在）时清掉 Conversation.auto_desk_folder_id。"""
+    from agentcore.runtime.delegate.target_desktop import bind_tool_context_to_landing_desk
+
+    cleared: list[tuple[str, str]] = []
+
+    async def _fake_clear(*, user_id: str, conversation_id: str | None, folder_id: str):
+        cleared.append((conversation_id or "", folder_id))
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.load_target_folder_binding",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._clear_stale_auto_desk_folder_id",
+        _fake_clear,
+    )
+
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+        auto_desk_folder_id="desk-dead",
+    )
+    ok = await bind_tool_context_to_landing_desk(ctx, folder_id="desk-dead")
+    assert ok is False
+    assert ctx.auto_desk_folder_id is None
+    assert cleared == [("c-bare", "desk-dead")]

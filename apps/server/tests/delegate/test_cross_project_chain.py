@@ -177,9 +177,11 @@ async def test_bare_chat_write_no_target_auto_provisions_cloud_desk(
         "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
         AsyncMock(return_value=None),
     )
+    from agentcore.runtime.delegate.target_desktop_auto_cloud import AutoDeskPersistResult
+
     monkeypatch.setattr(
         "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
-        AsyncMock(return_value="auto_cloud_1"),
+        AsyncMock(return_value=AutoDeskPersistResult("auto_cloud_1", "won")),
     )
     monkeypatch.setattr(
         "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",

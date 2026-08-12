@@ -7,7 +7,8 @@ from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Board, Conversation, Folder
+from agentcore.db.models import Conversation, Folder
+from agentcore.folders.unbind import clear_folder_session_pointers
 
 from ._base import _ilike_pattern
 
@@ -180,7 +181,8 @@ class FolderRepository:
         """Soft-delete a project; archive its conversations (keep ``folder_id``).
 
         Conversations are archived in place — not ungrouped — so project membership
-        survives soft-delete. Boards fall back to ungrouped (boards are not sessions).
+        survives soft-delete. Soft-pointers (boards, bare-chat auto desk) NULL out via
+        :func:`clear_folder_session_pointers`.
         """
         folder = await self.get_by_id(folder_id, user_id=user_id)
         if not folder:
@@ -194,10 +196,8 @@ class FolderRepository:
             )
             .values(archived=True)
         )
-        await self._session.execute(
-            update(Board)
-            .where(Board.user_id == user_id, Board.folder_id == folder_id)
-            .values(folder_id=None)
+        await clear_folder_session_pointers(
+            self._session, folder_id=folder_id, user_id=user_id
         )
         await self._session.commit()
         return True

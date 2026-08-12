@@ -29,6 +29,7 @@ from agentcore.db.repositories import (
     FolderRepository,
     HandoffJobRepository,
 )
+from agentcore.folders.unbind import clear_folder_session_pointers
 from agentcore.workspace.handoff_reclaim import soft_delete_job_host
 from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
@@ -114,12 +115,14 @@ async def run_retention_sweep() -> dict[str, int]:
             continue
         async with async_session_factory() as session:
             # Clear membership on any remaining (archived) conversations before
-            # the folder row disappears.
+            # the folder row disappears. Soft-pointers (auto desk / boards) via
+            # the shared fan-out — no user scope (global sweep).
             await session.execute(
                 update(Conversation)
                 .where(Conversation.folder_id == folder.id)
                 .values(folder_id=None)
             )
+            await clear_folder_session_pointers(session, folder_id=folder.id)
             await session.commit()
             await FolderRepository(session).hard_delete(folder.id)
         purged_folders += 1

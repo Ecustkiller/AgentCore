@@ -25,6 +25,9 @@ from agentcore.runtime.delegate.target_desktop_auto_cloud import (
     bare_chat_write_tasks_need_target as _bare_chat_write_tasks_need_target,
 )
 from agentcore.runtime.delegate.target_desktop_auto_cloud import (
+    clear_stale_auto_desk_folder_id as _clear_stale_auto_desk_folder_id,
+)
+from agentcore.runtime.delegate.target_desktop_auto_cloud import (
     load_auto_desk_folder_id as _load_auto_desk_folder_id,
 )
 from agentcore.runtime.delegate.target_desktop_auto_cloud import (
@@ -32,6 +35,9 @@ from agentcore.runtime.delegate.target_desktop_auto_cloud import (
 )
 from agentcore.runtime.delegate.target_desktop_auto_cloud import (
     persist_auto_desk_folder_id as _persist_auto_desk_folder_id,
+)
+from agentcore.runtime.delegate.target_desktop_auto_cloud import (
+    reclaim_orphan_auto_desk_folder as _reclaim_orphan_auto_desk_folder,
 )
 from agentcore.runtime.delegate.target_desktop_binding import (
     LocalRootClaimBook,
@@ -102,6 +108,7 @@ async def bind_tool_context_to_landing_desk(
     try:
         binding = await load_target_folder_binding(folder_id=cleaned, user_id=context.user_id)
     except TargetDesktopError as e:
+        # Infra / cloud failure — do not clear the pointer (folder may still exist).
         logger.warning(
             "delegate.auto_desk_bind_failed",
             folder_id=cleaned,
@@ -116,10 +123,18 @@ async def bind_tool_context_to_landing_desk(
         )
         return False
     if binding is None:
+        # Folder gone / soft-deleted / denied — clear pointer so the next turn remints.
         logger.warning(
             "delegate.auto_desk_bind_failed",
             folder_id=cleaned,
             error="folder missing or denied",
+        )
+        if getattr(context, "auto_desk_folder_id", None) == cleaned:
+            context.auto_desk_folder_id = None
+        await _clear_stale_auto_desk_folder_id(
+            user_id=context.user_id,
+            conversation_id=context.conversation_id,
+            folder_id=cleaned,
         )
         return False
 
@@ -223,16 +238,21 @@ async def ensure_bare_chat_auto_cloud_desk(
             user_id=user_id, conversation_id=conversation_id
         )
     if persisted:
-        turn_target_desk.note_folder(persisted)
+        bound = True
         if tool_context is not None:
-            await bind_tool_context_to_landing_desk(tool_context, folder_id=persisted)
-        logger.info(
-            "delegate.auto_cloud_desk_reused",
-            folder_id=persisted,
-            conversation_id=conversation_id,
-            conversation_untouched=True,
-        )
-        return persisted
+            bound = await bind_tool_context_to_landing_desk(
+                tool_context, folder_id=persisted
+            )
+        if bound:
+            turn_target_desk.note_folder(persisted)
+            logger.info(
+                "delegate.auto_cloud_desk_reused",
+                folder_id=persisted,
+                conversation_id=conversation_id,
+                conversation_untouched=True,
+            )
+            return persisted
+        # Bind cleared a dead pointer — fall through to remint this turn.
 
     if getattr(turn_target_desk, "auto_cloud_provisioned", False):
         return None
@@ -265,14 +285,24 @@ async def ensure_bare_chat_auto_cloud_desk(
         )
         return None
     folder_id = folder_id.strip()
-    effective = await _persist_auto_desk_folder_id(
+    persist = await _persist_auto_desk_folder_id(
         user_id=user_id,
         conversation_id=conversation_id,
         folder_id=folder_id,
     )
-    if effective and effective != folder_id:
-        # Race: another turn persisted first — reuse that desk, drop the orphan mint.
-        folder_id = effective
+    if persist.outcome == "lost" and persist.effective_id:
+        # Race: another turn wrote first — reuse winner, reclaim this turn's mint.
+        orphan_id = folder_id
+        folder_id = persist.effective_id
+        await _reclaim_orphan_auto_desk_folder(user_id=user_id, folder_id=orphan_id)
+    elif persist.outcome == "failed":
+        # Keep minted desk for this turn (do not block). Outcome is explicit — not a
+        # silent None — so we never confuse this with a race loss / reclaim path.
+        logger.warning(
+            "delegate.auto_desk_persist_failed_using_mint",
+            conversation_id=conversation_id,
+            folder_id=folder_id,
+        )
     turn_target_desk.note_folder(folder_id)
     if tool_context is not None:
         await bind_tool_context_to_landing_desk(tool_context, folder_id=folder_id)

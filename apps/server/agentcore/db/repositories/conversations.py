@@ -820,23 +820,78 @@ class ConversationRepository:
         folder_id: str,
         *,
         user_id: str,
-    ) -> str | None:
-        """Persist bare-chat auto cloud desk id (never touches birth ``folder_id``).
+    ) -> tuple[str | None, bool]:
+        """Atomically persist bare-chat auto cloud desk id (never touches birth ``folder_id``).
 
-        First-write wins: if a row already has ``auto_desk_folder_id``, return the
-        existing value without changing it. Returns the effective id, or ``None``
-        when the conversation is missing / not owned.
+        Conditional first-write: ``UPDATE … WHERE auto_desk_folder_id IS NULL`` so
+        concurrent mints cannot overwrite each other (no read-modify-write window).
+
+        Returns ``(effective_id, won)``:
+        - ``(folder_id, True)`` — this call wrote the pointer
+        - ``(existing_id, False)`` — pointer already set; caller lost the race
+        - ``(None, False)`` — conversation missing / not owned / empty ``folder_id``
         """
         cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
         if not cleaned:
-            return None
-        conv = await self.get_by_id(conversation_id, user_id=user_id)
-        if conv is None:
-            return None
-        existing = getattr(conv, "auto_desk_folder_id", None)
-        if isinstance(existing, str) and existing.strip():
-            return existing.strip()
-        conv.auto_desk_folder_id = cleaned
+            return None, False
+        result = await self._session.execute(
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.auto_desk_folder_id.is_(None),
+            )
+            .values(auto_desk_folder_id=cleaned)
+            .returning(Conversation.auto_desk_folder_id)
+        )
+        written = result.scalar_one_or_none()
+        if written is not None:
+            await self._session.commit()
+            return cleaned, True
+
+        # Lost race or missing row — scalar read bypasses identity-map staleness.
         await self._session.commit()
-        await self._session.refresh(conv)
-        return cleaned
+        existing = await self._session.execute(
+            select(Conversation.auto_desk_folder_id).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+        )
+        raw = existing.scalar_one_or_none()
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip(), False
+        return None, False
+
+    async def clear_auto_desk_folder_id(
+        self,
+        conversation_id: str,
+        *,
+        user_id: str,
+        expected_folder_id: str,
+    ) -> bool:
+        """Clear ``auto_desk_folder_id`` when it still matches ``expected_folder_id``.
+
+        CAS-style so a concurrent first-write of a fresh desk is not wiped. Used when
+        bind discovers the pointed Folder is missing / soft-deleted (next turn remints).
+        """
+        expected = (
+            expected_folder_id.strip()
+            if isinstance(expected_folder_id, str)
+            else ""
+        )
+        if not expected:
+            return False
+        result = await self._session.execute(
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+                Conversation.auto_desk_folder_id == expected,
+            )
+            .values(auto_desk_folder_id=None)
+        )
+        await self._session.commit()
+        return (result.rowcount or 0) > 0

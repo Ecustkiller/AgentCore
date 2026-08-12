@@ -237,11 +237,13 @@ async def _wire_continuation_toolset(
             user_id=user_id, conversation_id=conversation_id
         )
         if auto_desk:
-            base_tool_context.auto_desk_folder_id = auto_desk
-            base_tool_context.turn_target_desk.note_folder(auto_desk)
-            await bind_tool_context_to_landing_desk(
+            # Bind validates existence; on miss it clears the pointer for remint.
+            # Only note the desk after a successful bind (avoid poisoning turn hint).
+            ok = await bind_tool_context_to_landing_desk(
                 base_tool_context, folder_id=auto_desk
             )
+            if ok:
+                base_tool_context.turn_target_desk.note_folder(auto_desk)
     from agentcore.runtime.closing_posture import (
         clear_b1_closing_latches,
         clear_cloud_web_verify_gap,

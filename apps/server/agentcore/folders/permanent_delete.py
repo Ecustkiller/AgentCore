@@ -2,8 +2,8 @@
 
 Hard-deletes every member conversation (cascade messages / runs / journal / …),
 purges the shared cloud ``folder:<id>`` workspace directory + server snapshots,
-unbinds boards (same soft-delete rule: boards fall back to ungrouped, not deleted),
-then removes the folder row.
+unbinds boards + bare-chat ``auto_desk_folder_id`` soft-pointers (via
+:func:`clear_folder_session_pointers`), then removes the folder row.
 
 Local-mode projects bind a user OS directory: this path never touches that
 directory — only DB rows and server-side workspace data are cleared.
@@ -11,15 +11,13 @@ directory — only DB rows and server-side workspace data are cleared.
 
 from __future__ import annotations
 
-from sqlalchemy import update
-
 from agentcore.db.base import async_session_factory
-from agentcore.db.models import Board
 from agentcore.db.repositories import (
     ConversationRepository,
     ConversationShareRepository,
     FolderRepository,
 )
+from agentcore.folders.unbind import clear_folder_session_pointers
 from agentcore.workspace import grant_store
 from agentcore.workspace.retention import purge_folder_space
 
@@ -48,11 +46,8 @@ async def permanent_delete_folder(*, folder_id: str, user_id: str) -> bool:
             # L3 team-browser: cascade-close any live sandbox session (no-op when absent).
             await default_browser_session_registry().close(conversation_id)
             await conv_repo.hard_delete(conversation_id)
-        await session.execute(
-            update(Board)
-            .where(Board.user_id == user_id, Board.folder_id == folder_id)
-            .values(folder_id=None)
-        )
+        # Soft-pointers (boards + bare-chat auto desk); members already hard-deleted.
+        await clear_folder_session_pointers(session, folder_id=folder_id, user_id=user_id)
         await session.commit()
 
     # Server-side cloud root + snapshots (also clears any residual server mirror for
