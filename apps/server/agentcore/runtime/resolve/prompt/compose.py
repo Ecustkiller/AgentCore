@@ -3,9 +3,8 @@
 import time
 from collections.abc import Sequence
 
-from agentcore.memory.injection import MemoryTopic
-from agentcore.memory.rules_injection import OnDemandUserRule
 from agentcore.runtime.context import ContextAssembler, SectionOrder
+from agentcore.runtime.context.consultable import ConsultDirectoryEntry
 from agentcore.runtime.context.project_catalog import (
     ProjectCatalogEntry,
     render_project_catalog,
@@ -31,25 +30,25 @@ from agentcore.runtime.resolve.prompt.cold_start import (
 )
 from agentcore.runtime.resolve.prompt.memory_rules import _format_rules
 from agentcore.runtime.resolve.prompt.visualization import _CEO_VISUALIZATION_HINT
-from agentcore.runtime.skills import SkillRegistry, render_skill_directory
+from agentcore.runtime.skills.product_help import (
+    CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
+    CONSULT_PRODUCT_HELP_BY_SCENE,
+)
+from agentcore.runtime.skills.team_orchestration import CONSULT_TEAM_ORCH_BY_SCENE
 
 
 def assemble_system_prompt(
     *,
-    memory_markdown: str | None = None,
-    user_rules_markdown: str | None = None,
+    rules_markdown: str | None = None,
     extra_context: str | None = None,
     workspace_context: str | None = None,
 ) -> str:
     """Build the system prompt for a conversation.
 
-    `memory_markdown` is the user's AI-maintained long-term memory (see memory/store.py);
-    `user_rules_markdown` is the user's OWN rules (``ai_maintained=false``). When either is
-    present they are injected as ONE ``<rules>`` block — user rules first with authoritative
-    wording, memory after with soft wording (Agent记忆与知识系统 §二 两档措辞). With no user
-    rules the block is byte-identical to the prior memory-only assembly. This base prompt is
-    shared by the CEO chat agent and the delegated workers (runs/executor/), so both reach
-    every agent.
+    ``rules_markdown`` is the always-on equal-authority join of user rules + AI memory
+    core (Agent记忆与知识系统 · 取消权威档). When non-empty it becomes ONE ``<rules>``
+    block — no user-hard / AI-soft subsections. This base prompt is shared by the CEO
+    chat agent and the delegated workers (runs/executor/), so both reach every agent.
 
     ``workspace_context`` is the per-turn ``<workspace_context>`` environment-facts
     block (execution location / desktop channel / capabilities) — injected into the
@@ -78,7 +77,7 @@ def assemble_system_prompt(
         .add("workspace_facts", workspace_context, SectionOrder.WORKSPACE_FACTS)
         .add(
             "memory_rules",
-            _format_rules(memory_markdown, user_rules_markdown),
+            _format_rules(rules_markdown),
             SectionOrder.MEMORY,
         )
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
@@ -86,150 +85,110 @@ def assemble_system_prompt(
     )
 
 
-def render_worker_memory_topic_directory(topics: Sequence[MemoryTopic]) -> str:
-    """Render the worker's simplified ``<记忆主题目录>`` block (names only).
+def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
+    """Shared intro lines for ``<按需目录>`` (CEO gets summaries; worker names-only)."""
+    detail = "name＋一行摘要" if with_summaries else "name"
+    return [
+        "<按需目录>",
+        f"下列按需条目（仅列{detail}、全文未常驻）可用 `consult(name)` 拉取："
+        "系统能力指引、按需用户规则、记忆主题笔记。常驻内容已在 ``<rules>``，无需查阅。"
+        f"（{CONSULT_PRODUCT_HELP_BY_SCENE}；"
+        f"{CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE}；"
+        "提问卡直接 ask_user、不必先查；"
+        f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
+        "糊建站 /「做个网站」先 ask_user（形态+桌上档），确认后再 consult `build_website`；"
+        "规格已齐的落地页/作品集可直接 delegate(playbook=build_website, "
+        "playbook_args.topic=简述, intensity=solo|standard)，不必先查；"
+        "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
+        "绿场【推荐】build_app（手写/none 不硬拒）：MVP→lean；模块流水线→full+显式 modules；"
+        "边界未钉 → 首派轻切片/少节点或单 lead 嵌套再拆，再 replan，禁首派五波脚手架；"
+        "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature））：",
+    ]
 
-    Workers share the same on-demand TOPIC notes as the CEO but get a lighter catalog —
-    topic names without one-line summaries — to keep the delegated prefix smaller. Returns
-    "" when the user has no topic notes (caller gates on ``memory_enabled`` separately).
+
+def render_on_demand_directory(
+    entries: Sequence[ConsultDirectoryEntry],
+    *,
+    with_summaries: bool = True,
+) -> str:
+    """Render the unified ``<按需目录>`` block (CEO: name＋摘要；worker: names only).
+
+    Returns "" when empty so the caller appends nothing (directory↔tool: only when
+    ``consult`` is wired this turn). Entries must come from the same
+    :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` the tool holds.
     """
-    if not topics:
+    if not entries:
         return ""
-    lines = [
-        "<记忆主题目录>",
-        "下列记忆主题可按需查阅（`consult_memory(name)` 拉取全文；核心记忆已常驻、无需查阅）：",
-    ]
-    lines.extend(f"- {t.name}" for t in topics)
-    lines.append("</记忆主题目录>")
-    return "\n".join(lines)
-
-
-def render_worker_rule_directory(rules: Sequence[OnDemandUserRule]) -> str:
-    """Worker simplified ``<规则目录>`` (names only; mirrors memory topic worker catalog)."""
-    if not rules:
-        return ""
-    lines = [
-        "<规则目录>",
-        "下列按需用户规则可查阅（`consult_rule(name)` 拉取全文；always 规则已常驻 ``<rules>``）：",
-    ]
-    lines.extend(f"- {r.name}" for r in rules)
-    lines.append("</规则目录>")
+    lines = _on_demand_preamble(with_summaries=with_summaries)
+    if with_summaries:
+        lines.extend(
+            f"- {e.name}：{e.summary}" if e.summary else f"- {e.name}" for e in entries
+        )
+    else:
+        lines.extend(f"- {e.name}" for e in entries)
+    lines.append("</按需目录>")
     return "\n".join(lines)
 
 
 def compose_worker_base_prompt(
     shared_base: str,
     *,
-    memory_topics: Sequence[MemoryTopic] = (),
-    memory_enabled: bool = True,
-    on_demand_rules: Sequence[OnDemandUserRule] = (),
+    on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
     attachment_context: str | None = None,
+    # Deprecated kwargs kept so older call sites / tests fail loudly if still passed
+    # with old semantics — prefer ``on_demand_entries``.
+    memory_topics: Sequence[object] = (),
+    memory_enabled: bool = True,
+    on_demand_rules: Sequence[object] = (),
 ) -> str:
     """Build the delegated worker's system prompt from the shared base.
 
-    Layers the worker-only simplified 记忆主题目录 / 规则目录 when catalogs are non-empty,
-    then the per-turn attachment block last (缓存友好). ``shared_base`` is the output of
-    ``assemble_system_prompt`` — identity, runtime context, core memory.
+    Layers the worker simplified ``<按需目录>`` (names only) when ``on_demand_entries``
+    is non-empty, then the per-turn attachment block last (缓存友好).
     """
-    memory_block = (
-        render_worker_memory_topic_directory(memory_topics) if memory_enabled else ""
-    )
-    # Directory↔tool: worker prompt only lists rules when the turn will wire consult_rule
-    # (caller passes the same non-empty catalog used for the wire gate).
-    rules_block = render_worker_rule_directory(on_demand_rules)
+    del memory_enabled  # gate is has_entries at wire time; entries already filtered
+    if on_demand_entries:
+        entries = on_demand_entries
+    elif memory_topics or on_demand_rules:
+        # Legacy bridge: convert old topic/rule lists (tests mid-migration).
+        entries = [
+            ConsultDirectoryEntry(
+                name=getattr(t, "name", str(t)),
+                summary=getattr(t, "summary", "") or "",
+            )
+            for t in (*memory_topics, *on_demand_rules)
+        ]
+    else:
+        entries = ()
+    on_demand_block = render_on_demand_directory(entries, with_summaries=False)
     return (
         ContextAssembler()
         .add("shared_base", shared_base, SectionOrder.BASE)
-        .add("memory_topics", memory_block, SectionOrder.MEMORY_TOPICS)
-        .add("rule_directory", rules_block, SectionOrder.RULE_DIRECTORY)
+        .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
         .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
         .render()
     )
 
 
-def render_memory_topic_directory(topics: Sequence[MemoryTopic]) -> str:
-    """Render the CEO-only ``<记忆主题目录>`` block listing the consultable topic notes.
-
-    The user's memory is a folder (记忆文件夹化 §六): a small always-injected CORE note
-    (画像) plus on-demand TOPIC notes (主题/<slug>.md). Each topic rides the prompt as its
-    NAME plus a one-line summary (its first substantive line, 记忆系统 §1.4) — enough for the
-    model to decide WHEN to pull a note's full body via ``consult_memory(name)`` — so deep,
-    occasional knowledge stays out of the常驻 prefix. A topic with no summary (empty /
-    chrome-only note) shows just its name. Returns "" when the user has no topic notes so the
-    caller appends nothing (and the directory↔tool invariant: the caller renders this only
-    when ``consult_memory`` is wired this turn).
-    """
-    if not topics:
-        return ""
-    lines = [
-        "<记忆主题目录>",
-        "下列是该用户的「记忆主题笔记」（仅列主题名＋一行摘要、全文未常驻）；当某主题与当前任务"
-        "相关时，先用 `consult_memory(name)` 把该主题全文拉回来再据此执行（用户画像等核心记忆"
-        "已常驻、无需查阅）：",
-    ]
-    lines.extend(f"- {t.name}：{t.summary}" if t.summary else f"- {t.name}" for t in topics)
-    lines.append("</记忆主题目录>")
-    return "\n".join(lines)
-
-
-def render_rule_directory(rules: Sequence[OnDemandUserRule]) -> str:
-    """Render the CEO ``<规则目录>`` for on_demand user rules (consult_rule).
-
-    Constraint appendices — not memory topics. Returns "" when empty so the caller
-    appends nothing (directory↔tool: only when ``consult_rule`` is wired this turn).
-    """
-    if not rules:
-        return ""
-    lines = [
-        "<规则目录>",
-        "下列是该用户的「按需用户规则」（仅列规则名＋一行摘要、全文未常驻）；当某条与当前任务"
-        "相关时，先用 `consult_rule(name)` 把该规则全文拉回来再据此遵守（always 用户规则已在"
-        "``<rules>`` 常驻、无需查阅；记忆主题请用 `consult_memory`，勿与本目录混淆）：",
-    ]
-    lines.extend(f"- {r.name}：{r.summary}" if r.summary else f"- {r.name}" for r in rules)
-    lines.append("</规则目录>")
-    return "\n".join(lines)
-
-
 def compose_ceo_chat_prompt(
     base_prompt: str,
     *,
-    skill_registry: SkillRegistry,
     ceo_tool_names: set[str],
-    memory_topics: Sequence[MemoryTopic] = (),
-    on_demand_rules: Sequence[OnDemandUserRule] = (),
+    on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
     project_catalog: Sequence[ProjectCatalogEntry] = (),
     cold_start_explore: bool | str | None = False,
     project_nav_stale: bool = False,
     project_profile_empty_soft: bool = False,
+    # Deprecated: skill_registry / memory_topics / on_demand_rules — prefer on_demand_entries.
+    skill_registry: object | None = None,
+    memory_topics: Sequence[object] = (),
+    on_demand_rules: Sequence[object] = (),
 ) -> str:
     """Compose the CEO chat agent's system prompt from the clean base.
 
     Layers the entry coordinator's hint stack onto the shared base: the SLIM CEO core
-    routing hint + the always-on 能力目录 (only the skills whose required tools are in
-    ``ceo_tool_names`` — the same live-tool gate the runtime applies, e.g. the
-    ``ask_user_*`` skills show only when ``ask_user`` is wired) + the CEO-only 记忆主题目录
-    (``memory_topics``, listing the user's on-demand TOPIC notes as name＋一行摘要 — rendered
-    only when ``consult_memory`` is wired this turn, the same live-tool gate as the skill
-    directory) + the derived ``<项目清单>`` (Folder name＋画像首句; outside ``<rules>`` so it
-    never evicts always memory) + inline citation guidance + the CEO-only
-    ``<visualization>`` block (按角色 right-size: the detailed charting HOW rides only the
-    user-facing voice, not every worker — workers keep the base's one-line affordance).
-    The per-turn attachment block is appended by the caller AFTER this so the stable hint
-    stack stays prefix-cache friendly (缓存友好).
-
-    ``cold_start_explore``: ``False``/``None``/``\"\"`` off; ``True`` or ``\"empty\"`` empty-profile
-    hard gate (工程点名); ``\"rebind\"`` workspace-identity mismatch gate (过期再探);
-    ``\"refresh\"`` named-refresh hard gate (点名硬闸).
-    ``project_profile_empty_soft``: empty profile soft hint (never blocking; separate from
-    ``<cold_start_explore>``).
-    ``project_nav_stale``: R2 soft hint when fingerprint drifted (never blocking; separate
-    from ``<cold_start_explore>``).
-
-    Single source shared by the live turn (``runtime.pipeline``) and the static
-    capability catalog (``api`` 能力图鉴), so what the user sees as「AI 工作准则」never
-    drifts from what the CEO is actually given. Byte-identical to the prior inline
-    pipeline assembly (the empty-skill-directory case is dropped by ``add``).
+    + unified ``<按需目录>`` (only when ``consult`` is wired) + derived ``<项目清单>`` +
+    citation + visualization. ``on_demand_entries`` must match the tool's merged source.
     """
     ceo_core = resolve(FRAGMENT_CEO_CORE, _CEO_CORE_HINT)
     if "update_project_profile" in ceo_tool_names:
@@ -252,6 +211,27 @@ def compose_ceo_chat_prompt(
         if project_nav_stale and not explore_block
         else ""
     )
+    if on_demand_entries:
+        entries = list(on_demand_entries)
+    else:
+        entries = [
+            ConsultDirectoryEntry(
+                name=getattr(t, "name", str(t)),
+                summary=getattr(t, "summary", "") or "",
+            )
+            for t in (*memory_topics, *on_demand_rules)
+        ]
+        # Test / catalog bridge: skills from registry when no merged entries passed.
+        if skill_registry is not None and hasattr(skill_registry, "available"):
+            for skill in skill_registry.available(ceo_tool_names):  # type: ignore[union-attr]
+                entries.append(
+                    ConsultDirectoryEntry(name=skill.name, summary=skill.summary)
+                )
+    on_demand_block = (
+        render_on_demand_directory(entries, with_summaries=True)
+        if "consult" in ceo_tool_names and entries
+        else ""
+    )
     return (
         ContextAssembler()
         .add("ceo_base", base_prompt, SectionOrder.BASE)
@@ -259,33 +239,9 @@ def compose_ceo_chat_prompt(
         .add("cold_start_explore", explore_block, SectionOrder.CEO_CORE)
         .add("project_profile_empty_soft", empty_soft_block, SectionOrder.CEO_CORE)
         .add("project_nav_stale", stale_block, SectionOrder.CEO_CORE)
-        .add(
-            "skill_directory",
-            render_skill_directory(skill_registry, ceo_tool_names),
-            SectionOrder.SKILL_DIRECTORY,
-        )
-        .add(
-            "memory_topics",
-            # Directory↔tool invariant: advertise the consultable topics only when the
-            # consult_memory tool is actually wired this turn (memory master switch on),
-            # mirroring the skill directory's live-tool gate. An empty block is dropped
-            # by ``add``.
-            render_memory_topic_directory(memory_topics)
-            if "consult_memory" in ceo_tool_names
-            else "",
-            SectionOrder.MEMORY_TOPICS,
-        )
-        .add(
-            "rule_directory",
-            render_rule_directory(on_demand_rules)
-            if "consult_rule" in ceo_tool_names
-            else "",
-            SectionOrder.RULE_DIRECTORY,
-        )
+        .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
         .add(
             "project_catalog",
-            # Empty → dropped by ``add``. Own hard count cap (settings); not under
-            # max_instruction_* so always memory is never squeezed out.
             render_project_catalog(project_catalog),
             SectionOrder.PROJECT_CATALOG,
         )

@@ -102,7 +102,14 @@ def test_single_agent_tool_failure(projected):
     assert tool["id"] == "tc1"
     assert tool["tool_name"] == "web_search"
     assert tool["status"] == "error"
-    assert tool["result"] == "搜索服务暂时不可用，请稍后重试。"
+    # Model-facing technical detail stays on result (production leak shape as ratchet).
+    assert "Connection refused" in (tool["result"] or "")
+    assert "searxng.internal:8080" in (tool["result"] or "")
+    # User face is failure.message — not the technical result.
+    assert tool["failure"] == {
+        "message": "本地搜索服务不可用，请稍后重试",
+        "code": "searxng_unreachable",
+    }
     assert p["content"] == "检索失败了，我先按已有知识回答。"
 
 

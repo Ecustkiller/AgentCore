@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# Shared with能力目录 preamble — carve product UX out of「纯对话无需 consult」.
+# Shared with按需目录 preamble — carve product UX out of「纯对话无需 consult」.
 CONSULT_PRODUCT_HELP_BY_SCENE = (
     "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ"
     "（为何没组团、费用、Key、断网、.md/文件面板怎么打开、"
@@ -11,7 +11,7 @@ CONSULT_PRODUCT_HELP_BY_SCENE = (
     "非产品用法的知识问答 / 闲聊 → 直接答不必查"
 )
 
-# Shared with能力目录 preamble — product-self triage (主动触发；勿与 FAQ「必查」对打).
+# Shared with按需目录 preamble — product-self triage (主动触发；勿与 FAQ「必查」对打).
 CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
     "按场面：用户主动查/报产品本身可证伪故障"
     "（UI/运行时/工具/编排异常，像不像产品 Bug）→ 查 `product_bug_triage`；"
@@ -21,7 +21,7 @@ CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
 _PRODUCT_HELP = """\
 <product_help>
 用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再按场面短答；\
-入口/UI 点名细节 → `consult_skill(product_help_map)`；FAQ 类 → `consult_skill(product_help_faq)`。
+入口/UI 点名细节 → `consult(product_help_map)`；FAQ 类 → `consult(product_help_faq)`。
 
 【答法】
 - 聊天短答为主：一两句说清；勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
@@ -67,7 +67,7 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 深链：`#/toolbox/manual/intro?s=quickstart`
 
 【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。\
-用户主动查/报产品本身可证伪故障 → `consult_skill(product_bug_triage)`（定性+复现）；\
+用户主动查/报产品本身可证伪故障 → `consult(product_bug_triage)`（定性+复现）；\
 勿在本 skill / faq 做四类结论或复现包。\
 完整入口表与 FAQ 清单不在本 body——分别见 `product_help_map` / `product_help_faq`。
 </product_help>"""

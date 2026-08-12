@@ -1,23 +1,13 @@
-"""Two-tier rule injection + cross-file budget (Agent记忆与知识系统 §二 / §5.7 跨文件预算).
+"""Always-on rule injection (Agent记忆与知识系统 · 目标形态「读侧全量注入」).
 
-The ``<rules>`` block now carries BOTH the user's own rules (``ai_maintained=false``) and the
-AI-maintained long-term memory core (``ai_maintained=true``) — same carrier, distinguished by
-authorship (§5.2). This module assembles that block:
-
-- **两档措辞 (§二)**: user rules ride FIRST with authoritative wording (须遵守); AI memory rides
-  after with soft wording (软性偏好, 可被覆盖). Authority is carried by the WORDING, not a
-  separate structural channel.
-- **跨文件预算 (§5.3 / §5.7)**: a single ``MAX_INSTRUCTION_DOCS`` / ``MAX_INSTRUCTION_CHARS``
-  budget spans all always-injected rule docs, replacing the per-file memory cap. When the budget
-  is tight GLOBAL docs survive first (「全局优先存活」), and within a scope the user's authoritative
-  rules survive over soft AI memory.
-
-Byte-stability: with no user rules and under budget, the composed memory body is identical to the
-legacy ``load_injected_memory`` concatenation, so ``assemble_system_prompt`` takes its existing
-memory-only ``<rules>`` path verbatim — keeps the memory slice deterministic for the
-assembly-layer stable prefix (:class:`~agentcore.runtime.context.contributor.SectionOrder`)
-and the memory-only prompt tests. The new combined path only engages once a user actually
-has rules (or the budget trims), which is the new behavior this phase adds.
+The ``<rules>`` block carries BOTH the user's own rules (``ai_maintained=false``) and the
+AI-maintained long-term memory core (``ai_maintained=true``) — same carrier. Read side injects
+**every** always-on entry in display order as one equal-authority join (no greedy pack /
+keep-rank / silent drop / user-vs-AI wording split); the write-side quota gate owns
+"常驻满了". ``ai_maintained`` stays a write-side / UI flag only. Frontmatter is stripped
+before the model sees the body via the **storage-layer parser**
+(``agentcore.documents.frontmatter``) — one definition of "what is frontmatter", so read
+and write cannot drift; a parse failure omits that entry.
 """
 
 from __future__ import annotations
@@ -29,6 +19,7 @@ from typing import TYPE_CHECKING
 
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.frontmatter import strip_entry_frontmatter
 from agentcore.memory.injection import _PROJECT_MEMORY_LABEL, _PROJECT_NAV_LABEL
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
@@ -287,54 +278,33 @@ async def mutate_user_rule(
     return result
 
 
+def _injectable_body(raw: str, *, chrome: bool) -> str | None:
+    """Frontmatter-strip (+ optional human chrome); ``None`` means skip this entry."""
+    stripped = strip_entry_frontmatter(raw)
+    if stripped is None:
+        return None
+    body = strip_memory_chrome(stripped) if chrome else stripped.strip()
+    return body or None
+
+
 @dataclass(frozen=True)
 class RuleFragment:
     """One always-injected rule doc, ready to place in ``<rules>``.
 
-    ``scope`` is ``'global'`` or ``'project'`` (global survives budget first, §5.3);
-    ``authority`` is ``'user'`` (authoritative user rule) or ``'ai'`` (soft memory);
-    ``body`` is the fully-rendered text (chrome-stripped, project-labeled when project-scoped).
+    ``body`` is fully rendered (frontmatter/chrome stripped, project-labeled when
+    project-scoped). Fragments are equal on the read side — no authority tier.
     """
 
-    scope: str
-    authority: str
     body: str
 
-    @property
-    def _keep_rank(self) -> tuple[int, int]:
-        # Budget keep-priority: global before project, then user before AI within a scope —
-        # so a tight budget drops project AI memory first and global user rules last.
-        return (0 if self.scope == "global" else 1, 0 if self.authority == "user" else 1)
 
+def compose_injected_rules(fragments: Sequence[RuleFragment]) -> str:
+    """Join all always-on fragments in display order into one ``<rules>`` body.
 
-def compose_injected_rules(
-    fragments: Sequence[RuleFragment], *, max_docs: int, max_chars: int
-) -> tuple[str, str]:
-    """Budget + compose rule fragments into ``(user_rules_markdown, memory_markdown)``.
-
-    Greedily admits fragments in keep-priority order (global-first, user-before-AI) until the
-    doc-count or char budget is hit — a fragment that would overflow is skipped, lower-priority
-    ones still get a chance to fit. Survivors are then split by authorship and joined in DISPLAY
-    order (global before project within each), so the memory body matches the legacy concatenation
-    exactly when everything survives. A non-positive budget means「no limit」(admit all).
+    No doc/char budget, no keep-rank, no silent drop, no user/AI split — write side
+    owns the quota gate; prompt wording is a single equal-authority block.
     """
-    ordered = sorted(enumerate(fragments), key=lambda iv: (iv[1]._keep_rank, iv[0]))
-    doc_cap = max_docs if max_docs and max_docs > 0 else None
-    char_cap = max_chars if max_chars and max_chars > 0 else None
-    kept: set[int] = set()
-    used_chars = 0
-    for idx, frag in ordered:
-        if doc_cap is not None and len(kept) >= doc_cap:
-            break
-        length = len(frag.body)
-        if char_cap is not None and used_chars + length > char_cap:
-            continue
-        kept.add(idx)
-        used_chars += length
-    # Display order = original fragment order (built global→project within each authority tier).
-    user_bodies = [f.body for i, f in enumerate(fragments) if i in kept and f.authority == "user"]
-    memory_bodies = [f.body for i, f in enumerate(fragments) if i in kept and f.authority == "ai"]
-    return "\n\n".join(user_bodies), "\n\n".join(memory_bodies)
+    return "\n\n".join(f.body for f in fragments)
 
 
 async def _memory_fragments(
@@ -348,32 +318,21 @@ async def _memory_fragments(
     """
     frags: list[RuleFragment] = []
     for file in ALWAYS_MEMORY_FILES:
-        body = strip_memory_chrome(await store.load(user_id, file))
+        body = _injectable_body(await store.load(user_id, file), chrome=True)
         if body:
-            frags.append(RuleFragment(scope="global", authority="ai", body=body))
+            frags.append(RuleFragment(body=body))
     if folder_id:
-        project_body = strip_memory_chrome(
-            await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
+        project_body = _injectable_body(
+            await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id), chrome=True
         )
         if project_body:
-            frags.append(
-                RuleFragment(
-                    scope="project",
-                    authority="ai",
-                    body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}",
-                )
-            )
-        nav_body = strip_memory_chrome(
-            await store.load(user_id, NAVIGATION_MEMORY_FILE, scope=folder_id)
+            frags.append(RuleFragment(body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}"))
+        nav_body = _injectable_body(
+            await store.load(user_id, NAVIGATION_MEMORY_FILE, scope=folder_id),
+            chrome=True,
         )
         if nav_body:
-            frags.append(
-                RuleFragment(
-                    scope="project",
-                    authority="ai",
-                    body=f"{_PROJECT_NAV_LABEL}\n{nav_body}",
-                )
-            )
+            frags.append(RuleFragment(body=f"{_PROJECT_NAV_LABEL}\n{nav_body}"))
     return frags
 
 
@@ -383,23 +342,19 @@ async def _user_rule_fragments(
     """The user's own always-injected rule docs (``ai_maintained=false``) as fragments.
 
     GLOBAL rules first, then — for a project conversation — that project's rules, project-labeled.
-    Injected verbatim (user-authored content): only surrounding whitespace is trimmed.
+    Frontmatter stripped; unclosed fence omits the entry.
     """
     frags: list[RuleFragment] = []
     for doc in await repo.list_injectable_rules(user_id, None, ai_maintained=False):
-        body = doc.content.strip()
+        body = _injectable_body(doc.content, chrome=False)
         if body:
-            frags.append(RuleFragment(scope="global", authority="user", body=body))
+            frags.append(RuleFragment(body=body))
     if folder_id:
         for doc in await repo.list_injectable_rules(user_id, folder_id, ai_maintained=False):
-            body = doc.content.strip()
+            body = _injectable_body(doc.content, chrome=False)
             if body:
                 frags.append(
-                    RuleFragment(
-                        scope="project",
-                        authority="user",
-                        body=f"{_USER_RULE_PROJECT_LABEL}\n{body}",
-                    )
+                    RuleFragment(body=f"{_USER_RULE_PROJECT_LABEL}\n{body}")
                 )
     return frags
 
@@ -414,23 +369,19 @@ def _user_rule_fragments_from_cloud(
         for doc in global_rules:
             if not isinstance(doc, Mapping):
                 continue
-            body = str(doc.get("content") or "").strip()
+            body = _injectable_body(str(doc.get("content") or ""), chrome=False)
             if body:
-                frags.append(RuleFragment(scope="global", authority="user", body=body))
+                frags.append(RuleFragment(body=body))
     if folder_id:
         project_rules = payload.get("project_rules") or []
         if isinstance(project_rules, list):
             for doc in project_rules:
                 if not isinstance(doc, Mapping):
                     continue
-                body = str(doc.get("content") or "").strip()
+                body = _injectable_body(str(doc.get("content") or ""), chrome=False)
                 if body:
                     frags.append(
-                        RuleFragment(
-                            scope="project",
-                            authority="user",
-                            body=f"{_USER_RULE_PROJECT_LABEL}\n{body}",
-                        )
+                        RuleFragment(body=f"{_USER_RULE_PROJECT_LABEL}\n{body}")
                     )
     return frags
 
@@ -442,23 +393,20 @@ async def assemble_injected_rules(
     *,
     folder_id: str | None,
     enabled: bool,
-    max_docs: int,
-    max_chars: int,
-) -> tuple[str, str]:
-    """Load + budget + compose this turn's ``<rules>`` fragments (§二 / §5.7).
+) -> str:
+    """Load + compose this turn's ``<rules>`` body (read-side full injection).
 
-    Returns ``(user_rules_markdown, memory_markdown)`` for ``assemble_system_prompt``. AI memory
+    Returns one equal-authority markdown string for ``assemble_system_prompt``. AI memory
     is gated by the caller-supplied ``enabled`` flag (product resolve always on / 定案 A;
-    False ⇒ no memory fragments); USER rules are the user's own authoritative instructions
-    and are NOT memory, so they are injected regardless. Ordering within the fragment list
-    is global→project per authorship so the budget's display order and the legacy byte
-    layout line up.
+    False ⇒ no memory fragments); USER rules are the user's own instructions and are injected
+    regardless. Display order is global→project, user-owned entries then AI-maintained core
+    (load order only — not an authority tier).
     """
     fragments: list[RuleFragment] = []
     fragments.extend(await _user_rule_fragments(repo, user_id, folder_id=folder_id))
     if enabled:
         fragments.extend(await _memory_fragments(store, user_id, folder_id=folder_id))
-    return compose_injected_rules(fragments, max_docs=max_docs, max_chars=max_chars)
+    return compose_injected_rules(fragments)
 
 
 def _memory_fragments_from_snapshot(
@@ -469,32 +417,24 @@ def _memory_fragments_from_snapshot(
 
     frags: list[RuleFragment] = []
     for file in ALWAYS_MEMORY_FILES:
-        body = strip_memory_chrome(memory_body_from_snapshot(snapshot, file, scope=None))
+        body = _injectable_body(
+            memory_body_from_snapshot(snapshot, file, scope=None), chrome=True
+        )
         if body:
-            frags.append(RuleFragment(scope="global", authority="ai", body=body))
+            frags.append(RuleFragment(body=body))
     if folder_id:
-        project_body = strip_memory_chrome(
-            memory_body_from_snapshot(snapshot, CORE_MEMORY_FILE, scope=folder_id)
+        project_body = _injectable_body(
+            memory_body_from_snapshot(snapshot, CORE_MEMORY_FILE, scope=folder_id),
+            chrome=True,
         )
         if project_body:
-            frags.append(
-                RuleFragment(
-                    scope="project",
-                    authority="ai",
-                    body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}",
-                )
-            )
-        nav_body = strip_memory_chrome(
-            memory_body_from_snapshot(snapshot, NAVIGATION_MEMORY_FILE, scope=folder_id)
+            frags.append(RuleFragment(body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}"))
+        nav_body = _injectable_body(
+            memory_body_from_snapshot(snapshot, NAVIGATION_MEMORY_FILE, scope=folder_id),
+            chrome=True,
         )
         if nav_body:
-            frags.append(
-                RuleFragment(
-                    scope="project",
-                    authority="ai",
-                    body=f"{_PROJECT_NAV_LABEL}\n{nav_body}",
-                )
-            )
+            frags.append(RuleFragment(body=f"{_PROJECT_NAV_LABEL}\n{nav_body}"))
     return frags
 
 
@@ -504,9 +444,7 @@ async def assemble_turn_rules(
     *,
     folder_id: str | None,
     enabled: bool,
-    max_docs: int,
-    max_chars: int,
-) -> tuple[str, str]:
+) -> str:
     """Turn-time convenience over :func:`assemble_injected_rules` (the pipeline entry point).
 
     AI memory is read through the given ``store`` (the patchable pipeline seam) when no
@@ -514,8 +452,7 @@ async def assemble_turn_rules(
     cache only (warm seeds it); miss → empty injection — never await cloud HTTP on the
     turn hot path. User-rule loading degrades to「no rules」on ANY error (missing DB in a
     unit test, transient / offline failure) so memory injection can never break a turn —
-    matching the rest of the memory system's defensive posture. Byte-stability holds: with no
-    user rules the memory body is identical to the legacy concatenation.
+    matching the rest of the memory system's defensive posture.
     """
     from agentcore.account.credentials import get_account_credentials
     from agentcore.db.base import async_session_factory
@@ -550,7 +487,7 @@ async def assemble_turn_rules(
 
     fragments = list(user_fragments)
     fragments.extend(memory_frags)
-    return compose_injected_rules(fragments, max_docs=max_docs, max_chars=max_chars)
+    return compose_injected_rules(fragments)
 
 
 # --- on-demand user rules (规则目录 + consult_rule; NOT memory topics) ----------------------

@@ -292,14 +292,15 @@ class ToolAttempt:
     # the run-scoped breaker, but steers must not say「换不同的输入」(that pushes the
     # model to shorten/rewrite a DAG that only needed quote-escaping).
     parse_failure: bool = False
-    # 参数契约拒绝: a deterministic argument-contract rejection (e.g. web_search A3 query
-    # 过长/过多) whose error already tells the model exactly how to fix it. Like
-    # ``policy_failure`` it is invisible to the run-scoped circuit breaker — a same-round
-    # fan-out of over-long queries must not burn the disable threshold before the model can
-    # act on the fix tip — but unlike it, this names a self-correctable参数打回, not an
-    # upstream block. It still lands in the sliding window as an honest failure, so
-    # REPEATED_FAILURE detection, unproductive early-stop, and round recording are unchanged;
-    # only the cumulative warn/disable tally (``_tool_failures``) skips it.
+    # 参数契约拒绝: a deterministic argument/environment rejection (e.g. web_search A3
+    # query 过长/过多, or file_ops path-not-found) whose error already tells the model
+    # exactly how to fix it. Like ``policy_failure`` it is invisible to the run-scoped
+    # circuit breaker — a same-round fan-out of over-long queries / missing paths must
+    # not burn the disable threshold before the model can act on the fix tip — but unlike
+    # it, this names a self-correctable参数打回, not an upstream block. It still lands in
+    # the sliding window as an honest failure, so REPEATED_FAILURE detection, unproductive
+    # early-stop, and round recording are unchanged; only the cumulative warn/disable
+    # tally (``_tool_failures``) skips it.
     contract_failure: bool = False
     # Short error text for honest finalize / CEO synthesis (ignored on success /
     # policy_failure). Capped when recorded on the controller.

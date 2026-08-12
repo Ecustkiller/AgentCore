@@ -81,6 +81,26 @@ def test_tool_arg_non_empty():
     assert not _run(spec, _outcome(tool_calls=[])).passed
 
 
+def test_tool_arg_equals():
+    """精确参数值：命中 / 未命中 / 非法 JSON / 未调用。"""
+    spec = {
+        "name": "ToolArgEquals",
+        "args": {"tool": "consult", "arg": "name", "equals": "faq_diff"},
+    }
+    # 命中：consult 拉对了条目
+    hit = _outcome(tool_calls=[("consult", '{"name": "faq_diff"}')])
+    assert _run(spec, hit).passed
+    # 未命中：拉了别的条目（蒙对答案场景的负例）
+    miss = _outcome(tool_calls=[("consult", '{"name": "wrong_entry"}')])
+    assert not _run(spec, miss).passed
+    # 参数非 JSON → 不过
+    bad = _outcome(tool_calls=[("consult", "{not json}")])
+    assert not _run(spec, bad).passed
+    assert "bad JSON" in _run(spec, bad).detail
+    # 工具压根没调用 → 不过
+    assert not _run(spec, _outcome(tool_calls=[])).passed
+
+
 def test_has_citations():
     oc = _outcome(citations=[{"url": "a"}, {"url": "b"}])
     assert _run({"name": "HasCitations", "args": {"min": 2}}, oc).passed
@@ -222,6 +242,7 @@ def test_registry_contains_all_documented_checks():
         "ToolCalled",
         "ToolArgsValid",
         "ToolArgNonEmpty",
+        "ToolArgEquals",
         "HasCitations",
         "Delegated",
         "RosterMatches",

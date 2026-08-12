@@ -14,6 +14,8 @@ import {
 import { formatDownloadProgress } from "@/lib/format";
 import {
   clientChannelLabelZh,
+  clientReleaseChannel,
+  desktopDownloadUrlForChannel,
   otherChannelDownloadLabel,
   otherChannelDownloadUrl,
 } from "@/lib/releaseChannel";
@@ -59,7 +61,9 @@ function updateStatusText(status: UpdaterStatus): string {
     case "not-available":
       return "已是最新版本。";
     case "available":
-      return `发现新版本 ${status.version}，确认后开始后台下载。`;
+      return status.manualOnly
+        ? `发现新版本 ${status.version}，此版本需手动下载安装。`
+        : `发现新版本 ${status.version}，确认后开始后台下载。`;
     case "downloading":
       return `正在后台下载 ${status.version}…（${formatDownloadProgress({
         percent: status.percent,
@@ -82,6 +86,8 @@ function UpdateSection() {
   const openUpdateDialog = useUpdatesStore((s) => s.openUpdateDialog);
 
   const busy = status.phase === "checking" || status.phase === "downloading";
+  const manualOnly = status.phase === "available" && Boolean(status.manualOnly);
+  const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   return (
     <section className="mt-8 border-t border-border pt-6">
@@ -106,14 +112,28 @@ function UpdateSection() {
           </Button>
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {status.phase === "downloaded" ? (
             <Button size="md" onClick={() => void install()}>
               重启安装
             </Button>
           ) : null}
+          {manualOnly ? (
+            <a
+              href={downloadPageUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+            >
+              前往下载页
+            </a>
+          ) : null}
           {status.phase === "available" ? (
-            <Button size="md" onClick={() => openUpdateDialog()}>
+            <Button
+              size="md"
+              variant={manualOnly ? "neutral" : "primary"}
+              onClick={() => openUpdateDialog()}
+            >
               查看更新
             </Button>
           ) : null}

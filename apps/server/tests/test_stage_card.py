@@ -851,7 +851,7 @@ def _debate_tool_for_stage_card_finalize(sink=None):
         root=Path(tempfile.mkdtemp(prefix="stage_card_ws_")),
         sandbox=SubprocessSandbox(),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="captain",
         agent_id="CEO",

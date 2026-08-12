@@ -268,7 +268,7 @@ def _format_args_parse_error(
     """Return ``(model_facing, user_facing, parse_class)`` for illegal tool-call JSON.
 
     Write/landing tools get a segmented-write steer for the model and a short human
-    line for the process timeline — never「请修复转义后原样重发」exposed to users.
+    line for ``tool_use_end.failure`` — never「请修复转义后原样重发」exposed to users.
     Other tools keep the technical tip for both surfaces; strategy text is class-aware.
     """
     parse_class = _classify_args_parse_failure(raw, exc)

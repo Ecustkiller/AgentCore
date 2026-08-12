@@ -99,7 +99,7 @@ def test_light_gaps_clean_shell():
 
 
 def _ctx(workspace: Path) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

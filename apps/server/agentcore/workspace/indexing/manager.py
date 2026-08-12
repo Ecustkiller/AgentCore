@@ -76,6 +76,16 @@ class IndexManager:
             self._bm25 = BM25Index(db_path)
         return self._bm25
 
+    def release(self) -> None:
+        """Drop the SQLite-backed index handle (caller may delete the index dir)."""
+        self._bm25 = None
+        self._hydrated = False
+        self._has_snapshot = False
+        self._generation = 0
+        self._index_truncated = False
+        self._building = False
+        self._content_dirty = False
+
     def _hydrate_from_db(self, bm25: BM25Index) -> None:
         """Load committed snapshot flags from ``index_meta`` (or legacy rows)."""
         has_snapshot, truncated, generation, dirty = bm25.snapshot_state()

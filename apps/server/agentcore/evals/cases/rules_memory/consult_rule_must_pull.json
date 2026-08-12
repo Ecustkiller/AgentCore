@@ -1,0 +1,18 @@
+{
+  "id": "rules_memory_consult_rule_must_pull",
+  "category": "retrieval",
+  "user_message": "本周桌面端安全演练的暗号是什么？只回答暗号本身，不要编造。",
+  "path": "team",
+  "mode": "economy",
+  "documents_fixture": "docs_ondemand_rule_secret",
+  "_note": "该拉不拉（规则侧）：答案只在 on_demand 用户规则「演练暗号」；须 consult。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "args": { "tool": "consult" } },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "MARKER_RULE_Q4K" }
+    }
+  ]
+}

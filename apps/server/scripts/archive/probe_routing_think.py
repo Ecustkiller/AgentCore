@@ -550,7 +550,7 @@ async def _build_ceo_context(
         browser_enabled=browser,
     )
     base = assemble_system_prompt(workspace_context=workspace_facts)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id=new_id(), run_id=new_id(), agent_id="probe", backend=backend, user_id="probe"
     )
     _delegate, _debate, chat_tools = _assemble_ceo_toolset(

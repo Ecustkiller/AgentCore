@@ -79,7 +79,7 @@ def _registry(tool: _OutputTool) -> ToolRegistry:
 
 
 def _context(*, agent_id: str = "worker-1") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id=agent_id,

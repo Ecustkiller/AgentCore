@@ -42,7 +42,7 @@ def _make(timeout: float = 5.0) -> tuple[BoardChannel, InteractionRegistry, Even
 
 
 def _ctx(channel: BoardChannel | None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="exec-1",
         run_id="run-1",
         agent_id="agent-1",

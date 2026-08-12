@@ -567,7 +567,7 @@ async def _resolve_when_ready(
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -668,7 +668,7 @@ async def test_full_trust_auto_pass_bypassed_for_destructive_via_tool_exec():
 
     registry_tools = ToolRegistry()
     registry_tools.register(_ExecTool())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-ft",
         run_id="run-ft",
         agent_id="a",
@@ -756,7 +756,7 @@ async def test_sensitive_credential_read_forces_approval():
 
     tools = ToolRegistry()
     tools.register(_ReadTool())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-ask",
         run_id="run-ask",
         agent_id="a",
@@ -840,7 +840,7 @@ async def test_sensitive_path_read_ask_approve_always_grants_same_tool():
 
     tools = ToolRegistry()
     tools.register(_ReadTool())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-grant",
         run_id="run-grant",
         agent_id="a",
@@ -923,7 +923,7 @@ async def test_sensitive_credential_preview_soft_fail_still_asks():
 
     tools = ToolRegistry()
     tools.register(_ReadTool())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-soft",
         run_id="run-soft",
         agent_id="a",

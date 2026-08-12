@@ -692,7 +692,7 @@ async def test_worker_grantable_tool_gated_when_gate_denies():
     provider = _ToolCallThenContent("code_execute", "{}", "done")
     # Local backend: workers share the turn gate for all GRANTABLE tools.
     # (Cloud workers only gate desktop-touch tools when the gate is MCP-shared.)
-    local_ctx = ToolContext(
+    local_ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

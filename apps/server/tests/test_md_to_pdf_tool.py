@@ -11,7 +11,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(workspace: Path) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

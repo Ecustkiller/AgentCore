@@ -32,7 +32,7 @@ import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
-import { useFileTabSource } from "@/hooks/useConversationFileSource";
+import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
 import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
 import { hasLocalFiles } from "@/lib/capabilities";
@@ -656,7 +656,10 @@ function FileTabBody({
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
-  const source = useFileTabSource(currentConversationId, workspaceId);
+  const { source, pending } = useFileTabSourceState(
+    currentConversationId,
+    workspaceId,
+  );
   if (!path || !name) {
     return (
       <EmptyHint
@@ -673,7 +676,7 @@ function FileTabBody({
         inline
         icon={<FileText size={26} className="text-muted-foreground/40" />}
         title={name}
-        hint="当前会话尚无可用文件源。"
+        hint={pending ? "正在定位文件…" : "当前会话尚无可用文件源。"}
       />
     );
   }

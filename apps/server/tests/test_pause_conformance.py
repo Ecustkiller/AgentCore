@@ -95,7 +95,7 @@ class _StubTool:
 
 
 def _context() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="cap",
         agent_id="a",

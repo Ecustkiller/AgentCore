@@ -1,102 +1,96 @@
-"""Two-tier rule injection + cross-file budget (Agent记忆与知识系统 §二 / §5.7).
+"""Always-on rule injection (read-side full injection · Agent记忆与知识系统).
 
-Pure, DB-free: the budget/compose logic (``compose_injected_rules``) and the ``<rules>`` two-tier
-wording (``assemble_system_prompt``). The DB loader (``assemble_injected_rules``) is covered in
+Pure, DB-free: compose + frontmatter strip + equal-authority ``<rules>`` wording
+(``assemble_system_prompt``). The DB loader (``assemble_injected_rules``) is covered in
 ``tests/integration/test_documents.py``.
 """
 
-from agentcore.memory.rules_injection import RuleFragment, compose_injected_rules
+from agentcore.memory.rules_injection import (
+    RuleFragment,
+    compose_injected_rules,
+    strip_entry_frontmatter,
+)
 from agentcore.runtime.resolve.prompt import assemble_system_prompt
 
-_BIG = {"max_docs": 100, "max_chars": 100_000}
 
-
-def test_compose_memory_only_matches_legacy_concatenation():
-    # No user rules + under budget → user body empty, memory body = the legacy join order
-    # (偏好, 画像, then the project-labeled layer). Byte-stability with load_injected_memory.
+def test_compose_joins_all_fragments_in_order():
+    # Display order join — no user/AI split on the read side.
     frags = [
-        RuleFragment("global", "ai", "偏好体"),
-        RuleFragment("global", "ai", "画像体"),
-        RuleFragment("project", "ai", "（项目标签）\n项目体"),
+        RuleFragment(body="偏好体"),
+        RuleFragment(body="画像体"),
+        RuleFragment(body="（项目标签）\n项目体"),
     ]
-    user_md, memory_md = compose_injected_rules(frags, **_BIG)
-    assert user_md == ""
-    assert memory_md == "偏好体\n\n画像体\n\n（项目标签）\n项目体"
+    assert (
+        compose_injected_rules(frags)
+        == "偏好体\n\n画像体\n\n（项目标签）\n项目体"
+    )
 
 
-def test_compose_user_rules_first_then_memory():
+def test_compose_user_rules_then_memory_same_block():
     frags = [
-        RuleFragment("global", "user", "规则A"),
-        RuleFragment("project", "user", "（项目规则）\n规则B"),
-        RuleFragment("global", "ai", "画像体"),
+        RuleFragment(body="规则A"),
+        RuleFragment(body="（项目规则）\n规则B"),
+        RuleFragment(body="画像体"),
     ]
-    user_md, memory_md = compose_injected_rules(frags, **_BIG)
-    assert user_md == "规则A\n\n（项目规则）\n规则B"
-    assert memory_md == "画像体"
+    assert (
+        compose_injected_rules(frags)
+        == "规则A\n\n（项目规则）\n规则B\n\n画像体"
+    )
 
 
 def test_compose_empty_when_no_fragments():
-    assert compose_injected_rules([], **_BIG) == ("", "")
+    assert compose_injected_rules([]) == ""
 
 
-def test_budget_global_survives_over_project():
-    # 全局优先存活 (§5.3): with room for one doc, the GLOBAL layer survives, the project drops.
+def test_compose_admits_all_fragments_no_budget():
+    # Read side never drops — even many / large always-on entries all survive.
     frags = [
-        RuleFragment("global", "ai", "G" * 100),
-        RuleFragment("project", "ai", "（项目）\n" + "P" * 100),
+        RuleFragment(body="r1"),
+        RuleFragment(body="r2"),
+        RuleFragment(body="m1"),
+        RuleFragment(body="G" * 10_000),
+        RuleFragment(body="（项目）\n" + "P" * 10_000),
     ]
-    user_md, memory_md = compose_injected_rules(frags, max_docs=1, max_chars=100_000)
-    assert memory_md == "G" * 100
-    assert "P" * 100 not in memory_md
+    md = compose_injected_rules(frags)
+    assert md.startswith("r1\n\nr2\n\nm1\n\n")
+    assert "G" * 10_000 in md
+    assert "P" * 10_000 in md
 
 
-def test_budget_user_rule_survives_over_ai_in_same_scope():
-    # Within a scope, the user's authoritative rule outlives soft AI memory when budget is tight.
-    frags = [
-        RuleFragment("global", "ai", "画像体"),
-        RuleFragment("global", "user", "必须用中文"),
-    ]
-    user_md, memory_md = compose_injected_rules(frags, max_docs=1, max_chars=100_000)
-    assert user_md == "必须用中文"
-    assert memory_md == ""
+def test_strip_entry_frontmatter_removes_fence():
+    # Body bytes are preserved exactly (the injector trims); read and write share one parser.
+    raw = "---\napply: always\ndescription: 摘要\n---\n- 必须用中文\n"
+    assert strip_entry_frontmatter(raw) == "- 必须用中文\n"
 
 
-def test_budget_char_cap_drops_overflow_keeping_global():
-    frags = [
-        RuleFragment("global", "ai", "A" * 50),
-        RuleFragment("project", "ai", "（项目）\n" + "B" * 50),
-    ]
-    # Only the first fits under 60 chars; the project layer overflows and is dropped.
-    user_md, memory_md = compose_injected_rules(frags, max_docs=100, max_chars=60)
-    assert memory_md == "A" * 50
+def test_strip_entry_frontmatter_passthrough_without_fence():
+    raw = "- 必须用中文\n"
+    assert strip_entry_frontmatter(raw) == raw
+    assert strip_entry_frontmatter("") == ""
 
 
-def test_nonpositive_budget_admits_all():
-    frags = [RuleFragment("global", "user", "r1"), RuleFragment("project", "ai", "m1")]
-    user_md, memory_md = compose_injected_rules(frags, max_docs=0, max_chars=0)
-    assert user_md == "r1" and memory_md == "m1"
+def test_strip_entry_frontmatter_unclosed_returns_none():
+    assert strip_entry_frontmatter("---\napply: always\n- body") is None
 
 
-def test_assemble_system_prompt_two_tier_wording():
+def test_assemble_system_prompt_equal_authority_wording():
     out = assemble_system_prompt(
-        memory_markdown="- 倾向简洁回复",
-        user_rules_markdown="- 必须始终用中文",
+        rules_markdown="- 必须始终用中文\n\n- 倾向简洁回复",
     )
     assert "<rules>" in out and "</rules>" in out
-    # Both tiers present; user rules ahead of memory.
+    # Both entries present; display order preserved; no hard/soft subsections.
     assert "必须始终用中文" in out and "倾向简洁回复" in out
     assert out.index("必须始终用中文") < out.index("倾向简洁回复")
-    # Authority carried by wording: user rules framed as 须遵守, memory as 软性偏好.
-    assert "用户规则" in out and "须" in out
-    assert "软性偏好" in out
-    # The routing fence still guards memory in the combined block.
+    assert "用户规则 · 须严格遵守" not in out
+    assert "软性偏好" not in out
+    assert "以下条目请一并遵循" in out
+    # Routing fence still guards topic-preference override of this-turn routing.
     assert "不得改变本回合路由" in out
 
 
-def test_assemble_system_prompt_memory_only_uses_legacy_block():
-    # With no user rules the block stays the memory-only template (byte-stability / prefix cache):
-    # no user-rule framing, the legacy memory framing intact.
-    out = assemble_system_prompt(memory_markdown="- 倾向简洁回复")
+def test_assemble_system_prompt_single_flat_block():
+    out = assemble_system_prompt(rules_markdown="- 倾向简洁回复")
     assert "用户规则 · 须严格遵守" not in out
-    assert "长期记忆" in out and "软性偏好" in out
+    assert "软性偏好" not in out
+    assert "以下条目请一并遵循" in out
     assert "倾向简洁回复" in out

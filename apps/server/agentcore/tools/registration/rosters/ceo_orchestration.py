@@ -11,9 +11,7 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.ask_user import AskUserTool
     from agentcore.tools.builtin.board_ops import BoardOpsTool
     from agentcore.tools.builtin.board_read import BoardReadTool
-    from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
-    from agentcore.tools.builtin.consult_rule import ConsultRuleTool
-    from agentcore.tools.builtin.consult_skill import ConsultSkillTool
+    from agentcore.tools.builtin.consult import ConsultTool
     from agentcore.tools.builtin.debate import DebateTool
     from agentcore.tools.builtin.delegate import DelegateTool
     from agentcore.tools.builtin.project_fs import (
@@ -34,14 +32,12 @@ def load_roster() -> tuple[type, ...]:
         DelegateTool,
         ReplanTool,
         DebateTool,
-        ConsultSkillTool,
+        ConsultTool,
         ListProjectsTool,
         ResolveProjectTool,
         CreateProjectTool,
         ListProjectDirTool,
         ReadProjectFileTool,
-        ConsultMemoryTool,
-        ConsultRuleTool,
         RememberTool,
         UpdateProjectProfileTool,
         AskUserTool,

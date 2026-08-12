@@ -160,6 +160,8 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
     if (!api) return;
     const force = isForceUpdateActive();
     const { status } = useUpdatesStore.getState();
+    // `manualOnly`：未签名包无法走自动安装；UI 应引导下载页，此处再挡一层。
+    if (status.phase === "available" && status.manualOnly) return;
     if (!force) {
       useUpdatesStore.setState({ dialogOpen: false });
       if (status.phase === "available") {

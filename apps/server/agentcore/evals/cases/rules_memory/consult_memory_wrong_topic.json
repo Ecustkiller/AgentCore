@@ -1,0 +1,22 @@
+{
+  "id": "rules_memory_consult_wrong_topic",
+  "category": "retrieval",
+  "user_message": "华东生产入口端口是多少？只回答端口标记，不要编造。",
+  "path": "team",
+  "mode": "economy",
+  "documents_fixture": "docs_memory_two_ports",
+  "_note": "拉错条目：两条相似主题，只有华东含正确答案标记；华南是诱饵。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "args": { "tool": "consult" } },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "MARKER_PORT_EAST_9182" }
+    },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "MARKER_PORT_SOUTH_4410", "negate": true }
+    }
+  ]
+}

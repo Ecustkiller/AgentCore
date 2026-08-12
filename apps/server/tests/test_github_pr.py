@@ -252,7 +252,7 @@ def _worker_ctx(workspace: Path):
     from agentcore.workspace.server import ServerWorkspace
     from agentcore.workspace.write_claims import WriteCoordinator
 
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="worker",

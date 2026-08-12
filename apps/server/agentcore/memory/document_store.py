@@ -33,12 +33,17 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import DocumentRepository
+from agentcore.memory.always_quota import (
+    AlwaysQuotaExceededError,
+    notify_always_quota_exceeded,
+)
 from agentcore.memory.store import (
     MEMORY_META_FILE,
     FileMemoryStore,
@@ -51,6 +56,19 @@ from agentcore.memory.store import (
 )
 
 logger = get_logger(__name__)
+
+
+def memory_editor_body(raw: str) -> str:
+    """Legacy ``/users/me/memory`` editor contract: return markdown body only.
+
+    Storage keeps frontmatter (``apply`` / ``description``); this surface must not expose
+    it. Unclosed frontmatter cannot be stripped safely — return ``raw`` unchanged (no
+    guess-repair). Injection callers must use :class:`DocumentMemoryStore` directly.
+    """
+    from agentcore.documents.frontmatter import strip_entry_frontmatter
+
+    stripped = strip_entry_frontmatter(raw)
+    return raw if stripped is None else stripped
 
 
 def _classify(path: str) -> tuple[str, str]:
@@ -186,7 +204,13 @@ class DocumentMemoryStore:
         return note.content if note is not None else ""
 
     async def save(
-        self, user_id: str, path: str, markdown: str, scope: MemoryScope = None
+        self,
+        user_id: str,
+        path: str,
+        markdown: str,
+        scope: MemoryScope = None,
+        *,
+        writer: Literal["user", "ai"] = "ai",
     ) -> None:
         creds = self._account_cloud_creds()
         if creds is not None:
@@ -208,9 +232,19 @@ class DocumentMemoryStore:
             return
         role, apply_mode = _classify(path)
         async with self._repo() as repo:
-            await repo.save_memory_note(
-                user_id, path, markdown, scope, role=role, apply_mode=apply_mode
-            )
+            try:
+                await repo.save_memory_note(
+                    user_id,
+                    path,
+                    markdown,
+                    scope,
+                    role=role,
+                    apply_mode=apply_mode,
+                    writer=writer,
+                )
+            except AlwaysQuotaExceededError as exc:
+                await notify_always_quota_exceeded(user_id, exc)
+                raise
 
     async def delete(self, user_id: str, path: str, scope: MemoryScope = None) -> None:
         creds = self._account_cloud_creds()
@@ -242,3 +276,38 @@ class DocumentMemoryStore:
         except Exception as e:  # noqa: BLE001 - degrade to no project layers (照 FileMemoryStore)
             logger.warning("memory.project_scopes_failed", user_id=user_id, error=str(e))
             return []
+
+
+class EditorBodyMemoryStore:
+    """Adapter for the legacy ``/users/me/memory`` editor routes.
+
+    ``load`` returns body-only (CAS tags match the editor contract). ``save`` passes the
+    body through; ``DocumentRepository.save_memory_note`` keeps any stored frontmatter
+    block. Does **not** strip at the backing store — injection still reads raw notes.
+    """
+
+    def __init__(self, inner: DocumentMemoryStore) -> None:
+        self._inner = inner
+
+    async def list(self, user_id: str, scope: MemoryScope = None) -> list[MemoryFileMeta]:
+        return await self._inner.list(user_id, scope)
+
+    async def load(self, user_id: str, path: str, scope: MemoryScope = None) -> str:
+        return memory_editor_body(await self._inner.load(user_id, path, scope=scope))
+
+    async def save(
+        self,
+        user_id: str,
+        path: str,
+        markdown: str,
+        scope: MemoryScope = None,
+        *,
+        writer: Literal["user", "ai"] = "user",
+    ) -> None:
+        await self._inner.save(user_id, path, markdown, scope=scope, writer=writer)
+
+    async def delete(self, user_id: str, path: str, scope: MemoryScope = None) -> None:
+        await self._inner.delete(user_id, path, scope=scope)
+
+    async def project_scopes(self, user_id: str) -> list[str]:
+        return await self._inner.project_scopes(user_id)

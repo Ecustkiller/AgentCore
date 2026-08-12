@@ -17,9 +17,9 @@ from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, ToolCall, ToolCallFunction
 
 
-async def _mock_provider(handler) -> OpenAICompatibleProvider:
+async def _mock_provider(handler, *, name: str = "test") -> OpenAICompatibleProvider:
     provider = OpenAICompatibleProvider(
-        name="test", api_key="k", base_url="http://example.invalid/v1"
+        name=name, api_key="k", base_url="http://example.invalid/v1"
     )
     await provider._client.aclose()
     provider._client = httpx.AsyncClient(
@@ -54,6 +54,83 @@ async def test_stream_maps_402_to_insufficient_balance():
                 pass
     finally:
         await provider.close()
+
+
+# OpenCode Zen answers an exhausted account with 401 + CreditsError instead of 402.
+# Verbatim upstream shape (workspace id redacted) — a bare 401 must stay an auth error.
+_CREDITS_BODY = (
+    b'{"type":"error","error":{"type":"CreditsError","message":'
+    b'"Insufficient balance. Manage your billing here: '
+    b'https://opencode.ai/workspace/wrk_test/billing"}}'
+)
+
+
+@pytest.mark.parametrize("code", [401, 403])
+async def test_401_403_with_credits_body_is_balance_not_auth(code):
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_CREDITS_BODY)
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert "余额不足" in ei.value.message
+        # Never route a balance failure back to「更新 Key」.
+        assert "API Key 无效" not in ei.value.message
+        assert ei.value.details.get("upstream_status") == code
+        assert "Insufficient balance" in (ei.value.details.get("upstream_body_preview") or "")
+    finally:
+        await provider.close()
+
+
+async def test_platform_balance_copy_offers_byok_exit_not_topup():
+    """End users cannot top up the operator's account — copy must not tell them to."""
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_CREDITS_BODY), name="platform"
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert "请充值" not in ei.value.message
+        assert "自己的 API Key" in ei.value.message
+        assert ei.value.details.get("credential_source") == "platform"
+    finally:
+        await provider.close()
+
+
+async def test_probe_401_with_credits_body_is_balance():
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_CREDITS_BODY)
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert "余额不足" in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_list_models_401_with_credits_body_is_balance():
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_CREDITS_BODY)
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError):
+            await provider.list_models()
+    finally:
+        await provider.close()
+
+
+def test_balance_detection_does_not_swallow_real_auth_failures():
+    from agentcore.llm.errors import is_auth_rejection, is_balance_exhausted
+
+    auth_body = b'{"error":{"message":"invalid api key","code":"invalid_api_key"}}'
+    assert is_balance_exhausted(_CREDITS_BODY) is True
+    assert is_balance_exhausted(auth_body) is False
+    assert is_balance_exhausted(None) is False
+    assert is_auth_rejection(401, _CREDITS_BODY) is False
+    assert is_auth_rejection(401, auth_body) is True
+    assert is_auth_rejection(401, None) is True
 
 
 @pytest.mark.parametrize("code", [401, 403])
@@ -148,13 +225,65 @@ async def test_byok_auth_uses_product_copy_not_upstream_gateway_text():
         assert "CC Switch" not in ei.value.message
         assert not ei.value.message.startswith("user ")
         assert "revoked" not in ei.value.message.lower()
-        assert "当前模型" in ei.value.message
+        assert "当前模型" not in ei.value.message
+        assert "服务商" in ei.value.message
         assert "设置 · 模型配置" in ei.value.message
         assert ei.value.details.get("upstream_status") == 401
         assert "revoked" in (ei.value.details.get("upstream_body_preview") or "").lower()
         assert ei.value.details.get("credential_source") == "user"
     finally:
         await provider.close()
+
+
+async def test_byok_timeout_uses_display_name_not_log_source(monkeypatch):
+    """User-facing timeout must not leak credentials.source ``user``."""
+    from agentcore.core.errors import LLMTimeoutError
+    from agentcore.llm.call_fence import unwrap_provider
+    from agentcore.llm.credentials import LLMCredentials
+    from agentcore.llm.factory import build_provider
+
+    provider = build_provider(
+        LLMCredentials(
+            api_key="k",
+            base_url="http://example.invalid/v1",
+            default_model="m",
+            source="user",
+            label="我的网关",
+        )
+    )
+    leaf = unwrap_provider(provider)
+    assert leaf.name == "user"
+    assert leaf.display_name == "我的网关"
+
+    async def boom(*_a, **_k):
+        raise httpx.ConnectTimeout("timed out")
+
+    monkeypatch.setattr(leaf, "_can_retry_attempt", lambda *_a, **_k: False)
+    leaf._client = httpx.AsyncClient(base_url="http://example.invalid/v1")
+    monkeypatch.setattr(leaf._client, "post", boom)
+    try:
+        with pytest.raises(LLMTimeoutError) as ei:
+            await leaf.complete(_req())
+        assert "我的网关" in ei.value.message
+        assert "user" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+def test_platform_leaf_display_name_is_fixed(monkeypatch):
+    from agentcore.llm.provider.platform import PlatformProvider
+
+    monkeypatch.setattr(
+        "agentcore.llm.resolve.platform_llm_credentials",
+        lambda model=None: None,
+    )
+    leaf = PlatformProvider()
+    assert leaf.name == "platform"
+    assert leaf.display_name == "平台"
+    with pytest.raises(LLMError) as ei:
+        leaf._leaf_for("")
+    assert "平台模型" in ei.value.message
+    assert "platform" not in ei.value.message
 
 
 async def test_platform_auth_uses_product_copy_not_upstream_gateway_text():
@@ -310,7 +439,7 @@ def test_build_payload_clean_openai_for_non_deepseek_tool_turns():
                 tool_calls=[
                     ToolCall(
                         id="tooluse_abc",
-                        function=ToolCallFunction(name="consult_skill", arguments='{"name":"x"}'),
+                        function=ToolCallFunction(name="consult", arguments='{"name":"x"}'),
                     )
                 ],
             ),

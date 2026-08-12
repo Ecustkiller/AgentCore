@@ -37,7 +37,7 @@ class _ScriptedProvider:
 
 
 def _context() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

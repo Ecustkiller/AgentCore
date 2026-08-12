@@ -75,7 +75,7 @@ async def test_continue_run_final_web_seam_still_fails_over_threshold(tmp_path: 
         transcript=_file_write_transcript(),
         content="",
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="qa_1",
         agent_id="qa_1",

@@ -522,10 +522,12 @@ class LoopController(
             error_class = resolve_error_class(attempt)
             meta = attempt.meta or {}
             # ``policy_failure`` (upstream block / permission) and ``contract_failure``
-            # (self-correctable 参数契约拒绝) are honest failures for the model but must
-            # not feed the run-scoped circuit breaker: they still ride the sliding window
-            # above (REPEATED_FAILURE / round recording) and count toward per-round
-            # unproductive detection, only the cumulative warn/disable tally skips them.
+            # (self-correctable 参数/路径拒绝，含 path-not-found) are honest failures for
+            # the model but must not feed the run-scoped circuit breaker: they still ride
+            # the sliding window above (REPEATED_FAILURE / round recording) and count toward
+            # per-round unproductive detection, only the cumulative warn/disable tally
+            # skips them. Path thrash stays constrained by validation fingerprint streak /
+            # same-path file_read ceiling — not by disabling the tool.
             # Permanent failures skip the incremental tally too — retire below leaps
             # straight to disable on first hit (no warn=2 / disable=3 window).
             counts_toward_breaker = (

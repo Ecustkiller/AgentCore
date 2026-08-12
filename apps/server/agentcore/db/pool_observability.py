@@ -1,14 +1,18 @@
 """Pool checkout holder tracking — name who holds connections when the pool dies.
 
 Hot path is intentionally near-zero cost: every checkout stores only a monotonic
-timestamp plus already-bound log contextvars. Stack frames are captured only
-when pool occupancy crosses a settings threshold. Slow checkins and exhaustion
-snapshots are the only places that emit logs.
+timestamp plus already-bound log contextvars (incl. HTTP method/path/req id).
+Stack frames are captured only when pool occupancy crosses a settings threshold,
+preferring the *asyncio task* coroutine stack (the greenlet trampoline that
+fires the SQLAlchemy checkout event hides the caller from the sync stack) and
+falling back to the synchronous stack. Slow checkins and exhaustion snapshots
+are the only places that emit logs.
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 import time
 import traceback
@@ -23,7 +27,9 @@ from agentcore.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Correlation keys worth attributing a checkout to a turn / background job.
+# Correlation keys worth attributing a checkout to a turn / HTTP request /
+# background job. Bound at the boundary that first knows them; empty at
+# checkout time means that boundary never ran (do not try to recover later).
 _CTX_KEYS = (
     "trace_id",
     "conversation_id",
@@ -32,14 +38,38 @@ _CTX_KEYS = (
     "attempt_id",
     "message_id",
     "user_id",
+    # HTTP request identity (RequestAttributionMiddleware) — the only keys that
+    # are reliably present for request-scoped sessions that never start a turn.
+    "http_method",
+    "http_path",
+    "http_req_id",
 )
 
-# Frames under these path fragments are skipped when recording a checkout stack
-# (paths are normalized to ``/`` before matching).
+# Path fragments skipped when recording a checkout stack (normalized to ``/``).
 _STACK_SKIP_MARKERS = (
     "sqlalchemy",
     "greenlet",
     "agentcore/db/pool_observability.py",
+    "starlette/middleware",
+    "uvicorn/",
+)
+
+# Generic vendor roots, skipped only for frames that are *not* ours: a
+# non-editable install (``uv sync --no-editable``) puts ``agentcore/`` itself
+# under site-packages, and blanket-skipping those would leave every snapshot
+# with zero business frames while the tests (source tree) still passed.
+_VENDOR_STACK_MARKERS = ("/site-packages/", "/lib/python")
+
+# Greenlet/SQLAlchemy compile trampolines show up as ``<string>`` with these names.
+_STACK_SKIP_FILENAMES = frozenset({"<string>", "<stdin>"})
+_STACK_SKIP_NAMES = frozenset(
+    {
+        "_connection_for_bind",
+        "_connection_cls_for_bind",
+        "_do_get",
+        "_checkout",
+        "greenlet_spawn",
+    }
 )
 
 
@@ -223,24 +253,97 @@ def _current_task_name() -> str:
     return name if name else ""
 
 
-def _capture_stack(max_frames: int) -> tuple[str, ...]:
-    """Nearest app frames that requested the connection (innermost-first walk).
+def _frame_is_noise(filename: str, name: str) -> bool:
+    if filename in _STACK_SKIP_FILENAMES:
+        return True
+    if name in _STACK_SKIP_NAMES:
+        return True
+    path = filename.replace("\\", "/")
+    if any(marker in path for marker in _STACK_SKIP_MARKERS):
+        return True
+    if _frame_is_app(filename):
+        return False
+    return any(marker in path for marker in _VENDOR_STACK_MARKERS)
 
-    ``walk_stack`` avoids the source-line lookup ``extract_stack`` performs, and
-    walking inward-out keeps the frames adjacent to the checkout — those name the
-    holder, unlike the outer ASGI frames every request shares.
+
+def _frame_is_app(filename: str) -> bool:
+    return "agentcore/" in filename.replace("\\", "/")
+
+
+def _format_frame(filename: str, lineno: int, name: str) -> str:
+    return f"{filename}:{lineno}:{name}"
+
+
+def _task_stack_frames(max_frames: int) -> list[tuple[str, int, str]]:
+    """Coroutine await chain of the running task, newest-first (empty if none)."""
+    try:
+        task: asyncio.Task[Any] | None = asyncio.current_task()
+    except RuntimeError:
+        return []
+    if task is None:
+        return []
+    # Oversample then filter; get_stack is oldest→newest, reverse so we prefer
+    # frames adjacent to the await that checked out.
+    return [
+        (frame.f_code.co_filename, frame.f_lineno, frame.f_code.co_name)
+        for frame in reversed(task.get_stack(limit=max(32, max_frames * 4)))
+    ]
+
+
+def _sync_stack_frames() -> list[tuple[str, int, str]]:
+    """Synchronous caller frames, newest-first.
+
+    The start frame is explicit: ``walk_stack(None)`` drops a fixed number of
+    ``f_back`` hops sized for ``StackSummary.extract``'s call chain (four on
+    3.13), so with ``None`` the frames we actually skip would silently shift
+    with our own call depth.
     """
-    kept: list[str] = []
-    for frame, lineno in traceback.walk_stack(None):
-        filename = frame.f_code.co_filename
-        path = filename.replace("\\", "/")
-        if any(marker in path for marker in _STACK_SKIP_MARKERS):
+    return [
+        (frame.f_code.co_filename, lineno, frame.f_code.co_name)
+        for frame, lineno in traceback.walk_stack(sys._getframe())
+    ]
+
+
+def _split_frames(
+    frames: list[tuple[str, int, str]], max_frames: int
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Partition newest-first frames into (app, other), outermost-first and capped."""
+    app: list[str] = []
+    other: list[str] = []
+    for filename, lineno, name in frames:
+        if _frame_is_noise(filename, name):
             continue
-        kept.append(f"{filename}:{lineno}:{frame.f_code.co_name}")
-        if len(kept) >= max_frames:
-            break
-    kept.reverse()
-    return tuple(kept)
+        label = _format_frame(filename, lineno, name)
+        if _frame_is_app(filename):
+            app.append(label)
+            if len(app) >= max_frames:
+                break
+        elif len(other) < max_frames:
+            other.append(label)
+    app.reverse()  # outermost-first for log readability
+    other.reverse()
+    return tuple(app), tuple(other)
+
+
+def _capture_stack(max_frames: int) -> tuple[str, ...]:
+    """App frames that requested the connection (outermost-first).
+
+    Two complementary sources, tried in order — neither alone is sufficient:
+    ``asyncio.Task.get_stack`` walks the coroutine await chain (route handler →
+    service → repository), which is the *only* view of the caller when checkout
+    fires inside SQLAlchemy's greenlet trampoline and the synchronous stack
+    shows nothing but ``<string>``. That synchronous stack is in turn the only
+    source when no task is running, or when the task's coroutine frames are all
+    trampoline noise. Falling back matters: an empty ``stack`` is
+    indistinguishable from "nobody was holding it".
+    """
+    fallback: tuple[str, ...] = ()
+    for frames in (_task_stack_frames(max_frames), _sync_stack_frames()):
+        app, other = _split_frames(frames, max_frames)
+        if app:
+            return app
+        fallback = fallback or other
+    return fallback
 
 
 def install_pool_trackers(

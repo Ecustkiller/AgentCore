@@ -20,7 +20,12 @@ from agentcore.workspace.protocol import (
     WorkspaceError,
 )
 
-from .errors import _error, _maybe_channel_dead_error, _outside_workspace_msg
+from .errors import (
+    _error,
+    _maybe_channel_dead_error,
+    _outside_workspace_msg,
+    _path_missing_error,
+)
 from .integrity import (
     _claim_write_path,
     _prepare_write_relpath,
@@ -131,14 +136,14 @@ class FileDeleteTool:
         except PathNotFound:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(f"路径不存在：{rel_path}", start)
+            return _path_missing_error(f"路径不存在：{rel_path}", start)
         except WorkspaceError as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"删除失败：{e}", start)
+            return _error(f"删除失败：{e}", start, user_face=False)
 
         if permanent:
             msg = f"已永久删除 {rel_path}"
@@ -254,7 +259,7 @@ class FileMoveTool:
                     coordinator.release(source, context.run_id)
                 if release_dst:
                     coordinator.release(destination, context.run_id)
-            return _error(f"源路径不存在：{source}", start)
+            return _path_missing_error(f"源路径不存在：{source}", start)
         except AlreadyExists:
             if coordinator is not None:
                 if release_src:
@@ -274,7 +279,7 @@ class FileMoveTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"移动失败：{e}", start)
+            return _error(f"移动失败：{e}", start, user_face=False)
 
         # Successful move: drop source ownership key; destination already claimed.
         if coordinator is not None:
@@ -361,7 +366,7 @@ class FileCopyTool:
         except OutsideWorkspace as e:
             return _error(_outside_workspace_msg(str(e), location=context.backend.location), start)
         except PathNotFound:
-            return _error(f"源路径不存在：{source}", start)
+            return _path_missing_error(f"源路径不存在：{source}", start)
         except AlreadyExists:
             return _error(
                 f"目标已存在：{destination}。请换一个不存在的路径，或先删除它。",
@@ -371,7 +376,7 @@ class FileCopyTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"复制失败：{e}", start)
+            return _error(f"复制失败：{e}", start, user_face=False)
 
         output = f"已把 {source} 复制到 {destination}"
         if rename_note:
@@ -440,7 +445,7 @@ class MkdirTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"创建目录失败：{e}", start)
+            return _error(f"创建目录失败：{e}", start, user_face=False)
 
         return ToolResult(
             tool_call_id="",

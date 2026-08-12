@@ -33,7 +33,6 @@ from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.resolve.prepare import (
     _build_attachment_context,
     _wire_worker_conversation_log_tools,
-    _wire_worker_memory_tools,
     merge_attachment_and_mention_context,
 )
 from agentcore.runtime.resolve.prompt import (
@@ -42,6 +41,7 @@ from agentcore.runtime.resolve.prompt import (
 )
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin import build_worker_registry
+from agentcore.tools.ceo_toolset import wire_worker_consult as _wire_worker_consult_tools
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.vision import resolve_vision_reader_for_conversation
@@ -118,43 +118,29 @@ async def prepare_fresh_turn(
     from agentcore.runtime.pipeline import run as run_mod
 
     memory_store = run_mod.default_memory_store()
-    # 两档措辞 + 跨文件预算 (Agent记忆与知识系统 §二 / §5.7): the <rules> block now carries the
-    # user's OWN rules (authoritative) ahead of AI memory (soft), under one MAX_INSTRUCTION_*
-    # budget with global-priority survival — replacing the per-file memory cap. AI memory rides
-    # the (patchable) store seam; user rules load through their own session and degrade to none
-    # on failure, so this can never break a turn. With no user rules the memory body is
-    # byte-identical to the prior assembly (prefix-cache safe).
-    user_rules_markdown, memory_markdown = await _timed_phase(
+    # Read-side full injection (Agent记忆与知识系统 · 目标形态): every always-on entry in
+    # display order; write-side quota owns「常驻满了」. AI memory rides the (patchable) store
+    # seam; user rules degrade to none on failure so this can never break a turn.
+    rules_markdown = await _timed_phase(
         "rules",
         assemble_turn_rules(
             memory_store,
             user_id,
             folder_id=folder_id,
             enabled=memory_enabled,
-            max_docs=settings.max_instruction_docs,
-            max_chars=settings.max_instruction_chars,
         ),
     )
-    # 记忆主题目录 (记忆文件夹化 §六 / 作用域 §5.2): the on-demand TOPIC notes (主题/<slug>.md)
-    # are never injected wholesale — only their NAMES (merged across global + project)
-    # ride the CEO prompt, and the CEO pulls a note's full body via consult_memory when
-    # relevant. Same master-switch gate: off ⇒ [] ⇒ no directory rendered, no tool wired.
-    # Empty topics (memory on but no 主题 notes) likewise omit consult_memory — reuse this
-    # list for the wire gate below so we do not re-list the store.
+    # 记忆主题 / 按需规则仍加载（巩固 / 其它调用方）；按需目录改由 MergedConsultSource 统一列出。
     memory_topics = await _timed_phase(
         "memory_topics",
         load_memory_topics(
             memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
         ),
     )
-    has_memory_topics = bool(memory_topics)
-    # On-demand user rules (定案 B): catalog + consult_rule; never merge with memory topics.
-    # Independent of memory_enabled — user rules are the user's own instructions.
     on_demand_rules = await _timed_phase(
         "on_demand_rules",
         load_on_demand_user_rules(user_id, folder_id=folder_id),
     )
-    has_on_demand_rules = bool(on_demand_rules)
     # Derived cross-project roster (跨项目找项目): Folder name + 画像.md first line,
     # recent-activity ordered with a hard count cap. Outside ``<rules>`` so it never
     # evicts always memory. Empty when the user has no projects.
@@ -214,8 +200,7 @@ async def prepare_fresh_turn(
         git_fact=git_fact,
     )
     system_prompt = assemble_system_prompt(
-        memory_markdown=memory_markdown,
-        user_rules_markdown=user_rules_markdown,
+        rules_markdown=rules_markdown,
         workspace_context=workspace_facts,
     )
     # Resolve vision before attachment context so resident images can eye→text.
@@ -256,15 +241,10 @@ async def prepare_fresh_turn(
     material_paths = collect_turn_material_paths(attachments)
     backend.ai_list_materials = material_paths
     # Workers hold no CEO hints; their base is the shared base + optional simplified
-    # 记忆主题目录 + the same attachment block at the end — byte-identical to the old
-    # single-call assembly when memory is off and no topics exist.
-    worker_base_prompt = compose_worker_base_prompt(
-        system_prompt,
-        memory_topics=memory_topics,
-        memory_enabled=memory_enabled,
-        on_demand_rules=on_demand_rules,
-        attachment_context=attachment_context,
-    )
+    # ``<按需目录>`` + the same attachment block at the end.
+    from agentcore.runtime.capability_packs import enabled_packs
+
+    skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())
     worker_tools = build_worker_registry(
         backend=backend,
         permission_axes=permission_axes,
@@ -272,25 +252,29 @@ async def prepare_fresh_turn(
         desktop_online=desktop_online,
     )
     register_mcp_tools(worker_tools, mcp_discover)
-    _wire_worker_memory_tools(
+    await _wire_worker_consult_tools(
         worker_tools,
+        skill_registry=skill_registry,
         memory_enabled=memory_enabled,
         folder_id=folder_id,
-        has_memory_topics=has_memory_topics,
-        has_on_demand_rules=has_on_demand_rules,
+        user_id=user_id,
     )
     _wire_worker_conversation_log_tools(
         worker_tools,
         conversation_history_access=conversation_history_access,
         folder_id=folder_id,
     )
-    # System skills (提示词瘦身 P2): the advanced-mechanism guidance the CEO pulls
-    # on demand via consult_skill. Built once per turn; backs the tool AND the
-    # always-on 能力目录 rendered into the CEO prompt below. Capability packs
-    # (e.g. legal) layer in for every user when the deployment gate is on.
-    from agentcore.runtime.capability_packs import enabled_packs
-
-    skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())
+    on_demand_entries: list = []
+    worker_consult = worker_tools.get_optional("consult")
+    if worker_consult is not None and getattr(worker_consult, "source", None) is not None:
+        on_demand_entries = list(await worker_consult.source.list_directory(user_id))
+    worker_base_prompt = compose_worker_base_prompt(
+        system_prompt,
+        on_demand_entries=on_demand_entries,
+        attachment_context=attachment_context,
+    )
+    # System skills back the unified consult tool + ``<按需目录>`` (CEO wires later).
+    # Capability packs (e.g. legal) layer in for every user when the deployment gate is on.
     # 真·多模型辩手：回合 llm = DeepSeek 默认（``build_provider``，保留可测试打桩的 seam）
     # 外包一层 ProviderRouter。无前缀模型（CEO / 委派 / 主持人）照走默认，仅辩论辩手 side
     # 带 ``provider/model`` 前缀的调用路由到对应厂商。无厂商 key 时只是空包一层，零行为变化。
@@ -338,7 +322,7 @@ async def prepare_fresh_turn(
     # The workspace backend is resolved per conversation by the caller
     # (folder space vs. its own conversation space) and injected here. The
     # engine and tools never see a Path — they only touch ``context.backend``.
-    base_tool_context = ToolContext(
+    base_tool_context = ToolContext.create(
         execution_id=new_id(),
         run_id=new_id(),
         agent_id="default",
@@ -359,10 +343,27 @@ async def prepare_fresh_turn(
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=material_paths,
+        attachment_context=attachment_context,
         folder_binding_injected=folder_binding_injected,
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath or None,
     )
+    # Bare-chat landing desk: seed turn hint + bind CEO file tools (never birth folder_id).
+    if folder_id is None:
+        from agentcore.runtime.delegate.target_desktop import (
+            _load_auto_desk_folder_id,
+            bind_tool_context_to_landing_desk,
+        )
+
+        auto_desk = await _load_auto_desk_folder_id(
+            user_id=user_id, conversation_id=conversation_id
+        )
+        if auto_desk:
+            base_tool_context.auto_desk_folder_id = auto_desk
+            base_tool_context.turn_target_desk.note_folder(auto_desk)
+            await bind_tool_context_to_landing_desk(
+                base_tool_context, folder_id=auto_desk
+            )
     from agentcore.runtime.closing_posture import (
         clear_b1_closing_latches,
         clear_cloud_web_verify_gap,

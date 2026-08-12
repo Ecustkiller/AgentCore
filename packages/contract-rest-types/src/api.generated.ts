@@ -3156,6 +3156,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/documents/always-quota": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Always Quota
+         * @description Always-pool usage for the injection context (global + optional project).
+         */
+        get: operations["get_always_quota_v1_documents_always_quota_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/documents/{document_id}": {
         parameters: {
             query?: never;
@@ -3167,7 +3187,7 @@ export interface paths {
         get: operations["get_document_v1_documents__document_id__get"];
         /**
          * Update Document Content
-         * @description Overwrite a document's body (CAS-guarded; conflict instead of clobber, 照 memory.py).
+         * @description Overwrite a document's body (CAS-guarded; conflict instead of clobber).
          */
         put: operations["update_document_content_v1_documents__document_id__put"];
         post?: never;
@@ -3180,7 +3200,9 @@ export interface paths {
         head?: never;
         /**
          * Patch Document
-         * @description Rename, reparent, and/or set apply_mode (set ``reparent`` to apply ``parent_id``).
+         * @description Rename, reparent, and/or set apply via frontmatter.
+         *
+         *     Set ``reparent`` to apply ``parent_id``.
          */
         patch: operations["patch_document_v1_documents__document_id__patch"];
         trace?: never;
@@ -4061,6 +4083,10 @@ export interface paths {
          *     (and last disconnect) also fans a ``presence`` event to co-chat users.
          *     Heartbeat comments keep the stream warm; the subscription is released when
          *     the client disconnects.
+         *
+         *     Auth resolves the user via a request-scoped DB session; that session is
+         *     returned before the long-lived stream opens so each open desktop client does
+         *     not pin a primary-pool connection until the app closes.
          */
         get: operations["realtime_firehose_v1_realtime_get"];
         put?: never;
@@ -5778,7 +5804,7 @@ export interface components {
         };
         /**
          * AccountRulesListResponse
-         * @description Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult_rule``.
+         * @description Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.
          */
         AccountRulesListResponse: {
             /** Global On Demand Rules */
@@ -6507,6 +6533,18 @@ export interface components {
             role: string;
         };
         /**
+         * AlwaysQuotaView
+         * @description Always-pool usage for the UI meter (percentage + absolute chars).
+         */
+        AlwaysQuotaView: {
+            /** Max Chars */
+            max_chars: number;
+            /** Percent */
+            percent: number;
+            /** Used Chars */
+            used_chars: number;
+        };
+        /**
          * AnnounceRequest
          * @description Post an admin announcement into a chat as a centered system_card (官方公告).
          */
@@ -6988,7 +7026,7 @@ export interface components {
          *
          *     ``shared_base`` is the base every agent (CEO + workers) shares (identity, output
          *     style, tool-use, safety); ``ceo_addon`` is the CEO coordinator's layers on top of
-         *     that base (routing core + 能力目录 + citation guidance); ``ceo`` is the full chat
+         *     that base (routing core + 按需目录 + citation guidance); ``ceo`` is the full chat
          *     system-prompt template (shared base + ceo_addon), composed by the SAME
          *     ``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.
          */
@@ -7020,7 +7058,7 @@ export interface components {
         /**
          * CapabilitySkill
          * @description A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on
-         *     one-line trigger) plus the full ``body`` guidance the CEO pulls via consult_skill.
+         *     one-line trigger) plus the full ``body`` guidance the CEO pulls via consult.
          */
         CapabilitySkill: {
             /** Body */
@@ -7035,7 +7073,7 @@ export interface components {
          * @description A tool in the capability catalog: its public schema + who may call it.
          *
          *     The COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /
-         *     ``consult_skill`` / ``ask_user``) and the worker-only ``escalate``.
+         *     ``consult`` / ``ask_user``) and the worker-only ``escalate``.
          *     ``available_to`` is a subset of ``["ceo", "worker"]`` so the UI can show which
          *     side of the team holds each tool.
          */
@@ -8259,8 +8297,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Description */
+            description: string;
             /** Folder Id */
             folder_id: string | null;
+            /** Frontmatter Error */
+            frontmatter_error?: string | null;
             /** Id */
             id: string;
             /** Kind */
@@ -8269,6 +8311,8 @@ export interface components {
             name: string;
             /** Parent Id */
             parent_id: string | null;
+            /** Quota Warning */
+            quota_warning?: string | null;
             /** Role */
             role: string;
             /**
@@ -8293,8 +8337,12 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Description */
+            description: string;
             /** Folder Id */
             folder_id: string | null;
+            /** Frontmatter Error */
+            frontmatter_error?: string | null;
             /** Id */
             id: string;
             /** Kind */
@@ -8313,7 +8361,7 @@ export interface components {
         };
         /**
          * DocumentPatchRequest
-         * @description Rename, reparent, and/or change apply_mode (content untouched — that goes through PUT).
+         * @description Rename, reparent, and/or change apply (via frontmatter edit).
          */
         DocumentPatchRequest: {
             /** Apply Mode */
@@ -8335,8 +8383,12 @@ export interface components {
              * @default false
              */
             conflict: boolean;
+            /** Frontmatter Error */
+            frontmatter_error?: string | null;
             /** Ok */
             ok: boolean;
+            /** Quota Warning */
+            quota_warning?: string | null;
             /** Version */
             version: string;
         };
@@ -8994,6 +9046,11 @@ export interface components {
             /** Updated At */
             updated_at?: string | null;
             vision?: components["schemas"]["ModelProfileSlot"] | null;
+            /**
+             * Warnings
+             * @description Ignorable BYOK model reachability hints from the last save (empty on list/get). Save still succeeds when non-empty.
+             */
+            warnings?: string[];
             worker?: components["schemas"]["ModelProfileSlot"] | null;
         };
         /**
@@ -9269,7 +9326,7 @@ export interface components {
          * @description On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
          *
          *     Names only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via
-         *     ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult_memory``).
+         *     ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult``).
          */
         MemoryTopicsResponse: {
             /** Topics */
@@ -18571,6 +18628,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DocumentDetailView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_always_quota_v1_documents_always_quota_get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AlwaysQuotaView"];
                 };
             };
             /** @description Validation Error */

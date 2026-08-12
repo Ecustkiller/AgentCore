@@ -1221,7 +1221,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
 
     ceo_llm = _CoordCeoProvider()
     worker_llm = _SlowSecondWorker()
-    base_ctx = ToolContext(
+    base_ctx = ToolContext.create(
         execution_id="e-coord-e2e",
         run_id="cap",
         agent_id="cap",
@@ -1354,7 +1354,7 @@ async def test_captain_silent_listen_rounds_do_not_trip_empty_ladder(monkeypatch
             llm=ceo_llm,
             tools=ToolRegistry(),
             sink=EventSink(),
-            tool_context=ToolContext(
+            tool_context=ToolContext.create(
                 execution_id="e-silent",
                 run_id="cap",
                 agent_id="cap",

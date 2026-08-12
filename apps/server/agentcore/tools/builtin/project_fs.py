@@ -128,13 +128,15 @@ async def _open_target_desk(
         conversation_id=context.conversation_id,
     )
     # Ephemeral desk: do not share birth-desk file_read ceilings / materials;
-    # do not rewrite context.backend (session mount stays put).
+    # do not rewrite context.backend (session mount stays put). Fresh slot so
+    # this read does not follow (or cause) a parent rebind.
+    from agentcore.tools.protocol import fork_workspace_slot
+
     target_ctx = replace(
         context,
-        backend=backend,
+        _workspace=fork_workspace_slot(backend, material_paths=frozenset()),
         workspace_channel=workspace_channel,
         shared_workspace=True,
-        material_paths=frozenset(),
         file_read_counts={},
         file_read_reread_remaining={},
         file_read_verbatim_paths=None,

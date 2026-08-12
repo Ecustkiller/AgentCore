@@ -28,7 +28,7 @@ def _memory_grants():
 
 def _ctx(**kwargs) -> ToolContext:
     backend = kwargs.pop("backend", MagicMock())
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",

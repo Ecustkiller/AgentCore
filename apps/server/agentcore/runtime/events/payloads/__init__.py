@@ -78,6 +78,14 @@ TS_EXPORTS: tuple[TsExport, ...] = (
             "model-facing `result` text. Opaque on the wire (snake_case)."
         ),
     ),
+    TsInterface(
+        chat.ToolFailure,
+        doc=(
+            "User-facing tool failure face on `tool_use_end` when status=error.\n"
+            "`message` = Chinese product copy; `code` = stable error code.\n"
+            "Model-facing technical detail stays in `result`."
+        ),
+    ),
     TsInterface(chat.ToolUseEndPayload),
     TsInlineUnion(
         "ProcessStep",

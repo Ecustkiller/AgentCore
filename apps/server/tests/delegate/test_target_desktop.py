@@ -308,7 +308,7 @@ async def test_local_root_claim_book_allows_second_root():
 @pytest.mark.asyncio
 async def test_apply_target_desktop_same_as_session_is_noop():
     backend = SimpleNamespace(location="server")
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -335,7 +335,7 @@ async def test_apply_target_desktop_same_as_session_is_noop():
 async def test_apply_target_desktop_switches_backend_and_memory():
     session_backend = SimpleNamespace(location="server", _channel=None)
     target_backend = SimpleNamespace(location="server", _channel=None)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -351,7 +351,7 @@ async def test_apply_target_desktop_switches_backend_and_memory():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "TARGET_PROMPT", False, False
+        return "TARGET_PROMPT"
 
     with (
         patch(
@@ -389,7 +389,7 @@ async def test_apply_target_desktop_switches_backend_and_memory():
 
 @pytest.mark.asyncio
 async def test_apply_target_desktop_unknown_folder_errors():
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -469,7 +469,7 @@ async def test_apply_target_desktop_db_unreachable_surfaces_structured_error(
 
     monkeypatch.setattr(db_base, "async_session_factory", lambda: _CM())
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -572,7 +572,7 @@ async def test_apply_target_desktop_allows_second_local_root():
         location="local",
         _channel=SimpleNamespace(root_id="root_other"),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -589,7 +589,7 @@ async def test_apply_target_desktop_allows_second_local_root():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "LOCAL_B_PROMPT", False, False
+        return "LOCAL_B_PROMPT"
 
     with (
         patch(
@@ -633,7 +633,7 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
         _channel=SimpleNamespace(root_id="root_session"),
     )
     cloud_backend = SimpleNamespace(location="server", _channel=None)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -650,7 +650,7 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
     )
 
     async def _fake_rebuild(**_kwargs):
-        return "CLOUD_PROMPT", False, False
+        return "CLOUD_PROMPT"
 
     with (
         patch(
@@ -711,9 +711,21 @@ async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
         "agentcore.runtime.delegate.target_desktop._load_conversation_title",
         AsyncMock(return_value="会话标题甲"),
     )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
+        AsyncMock(return_value="auto_desk"),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        AsyncMock(return_value=True),
+    )
 
     backend = SimpleNamespace(location="server")
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",
@@ -821,3 +833,225 @@ async def test_ensure_bare_chat_auto_cloud_desk_skips_prose(monkeypatch):
     )
     assert out is None
     assert creates == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypatch):
+    """首次建桌写入 auto_desk_folder_id，且不改出生 folder_id。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    persisted: list[tuple[str, str]] = []
+    birth_writes: list[object] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        return {"id": "desk-1", "name": name}
+
+    async def _fake_persist(*, user_id: str, conversation_id: str | None, folder_id: str):
+        persisted.append((conversation_id or "", folder_id))
+        return folder_id
+
+    async def _fake_bind(context, *, folder_id: str) -> bool:
+        context.auto_desk_folder_id = folder_id
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
+        _fake_persist,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        _fake_bind,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_conversation_title",
+        AsyncMock(return_value=None),
+    )
+
+    hint = TurnTargetDeskHint()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+    )
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-bare",
+        user_message="写文件",
+        tool_context=ctx,
+    )
+    assert out == "desk-1"
+    assert hint.folder_id == "desk-1"
+    assert persisted == [("c-bare", "desk-1")]
+    assert ctx.auto_desk_folder_id == "desk-1"
+    assert birth_writes == []
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_auto_cloud_desk_reuses_persisted(monkeypatch):
+    """次轮读持久位复用，不再 create_cloud_folder。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "new", "name": name}
+
+    binds: list[str] = []
+
+    async def _fake_bind(context, *, folder_id: str) -> bool:
+        binds.append(folder_id)
+        context.auto_desk_folder_id = folder_id
+        return True
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value="desk-1"),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        _fake_bind,
+    )
+
+    hint = TurnTargetDeskHint()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=SimpleNamespace(location="server"),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-bare",
+    )
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-bare",
+        tool_context=ctx,
+    )
+    assert out == "desk-1"
+    assert creates == []
+    assert hint.folder_id == "desk-1"
+    assert binds == ["desk-1"]
+    assert hint.auto_cloud_provisioned is False
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_explicit_target_skips_persist_reuse(monkeypatch):
+    """显式 default target / 已有 hint → 不建桌、不走复用路径。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+    loads = AsyncMock(return_value="desk-1")
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "x", "name": name}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        loads,
+    )
+
+    hint = TurnTargetDeskHint()
+    hint.note_folder("explicit-target")
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id=None,
+        tasks_raw=[
+            {
+                "role": "工",
+                "deliverable": {"form": "files"},
+                "target_folder_id": "explicit-target",
+            }
+        ],
+        default_target_folder_id="explicit-target",
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-bare",
+    )
+    assert out is None
+    assert creates == []
+    assert loads.await_count == 0
+    assert hint.folder_id == "explicit-target"
+
+
+@pytest.mark.asyncio
+async def test_ensure_bare_chat_birth_session_skips_auto_desk(monkeypatch):
+    """有出生 folder_id 时不触碰 auto desk。"""
+    from agentcore.runtime.delegate.target_desktop import ensure_bare_chat_auto_cloud_desk
+    from agentcore.tools.protocol import TurnTargetDeskHint
+
+    creates: list[str] = []
+    loads = AsyncMock(return_value="desk-1")
+
+    async def _fake_create(*, user_id: str, name: str) -> dict:
+        creates.append(name)
+        return {"id": "x", "name": name}
+
+    monkeypatch.setattr(
+        "agentcore.tools.builtin.projects.create_cloud_folder",
+        _fake_create,
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        loads,
+    )
+
+    hint = TurnTargetDeskHint()
+    out = await ensure_bare_chat_auto_cloud_desk(
+        session_folder_id="birth-project",
+        tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
+        default_target_folder_id=None,
+        turn_target_desk=hint,
+        user_id="u1",
+        conversation_id="c-proj",
+    )
+    assert out is None
+    assert creates == []
+    assert loads.await_count == 0
+
+
+def test_resolve_turn_file_workspace_keeps_birth_over_auto_desk():
+    from agentcore.conversation.common import resolve_turn_file_workspace
+
+    ws, auto = resolve_turn_file_workspace(
+        birth_folder_id="birth",
+        auto_desk_folder_id="auto",
+    )
+    assert ws == "birth"
+    assert auto is None
+
+    ws2, auto2 = resolve_turn_file_workspace(
+        birth_folder_id=None,
+        auto_desk_folder_id="auto",
+    )
+    assert ws2 == "auto"
+    assert auto2 == "auto"

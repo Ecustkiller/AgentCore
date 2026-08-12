@@ -14,7 +14,7 @@ from agentcore.tools.protocol import ToolContext
 @pytest.mark.asyncio
 async def test_desktop_notify_requires_local_channel():
     tool = DesktopNotifyTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -32,7 +32,7 @@ async def test_desktop_notify_shows_via_channel():
     channel = MagicMock()
     channel.notify = AsyncMock(return_value={"shown": True})
     tool = DesktopNotifyTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",

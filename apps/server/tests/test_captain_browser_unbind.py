@@ -42,7 +42,7 @@ def _spec(run_id: str = "captain-run-1") -> RunSpec:
 
 
 def _tool_ctx(run_id: str) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="exec-1",
         run_id=run_id,
         agent_id=run_id,

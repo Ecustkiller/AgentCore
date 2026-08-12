@@ -92,6 +92,11 @@ async def _initialize(server: SidecarServer, tmp_path, *, data_dir: str) -> None
                     "workspaceRoot": str(tmp_path),
                     "approvalsEnabled": True,
                     "dataDir": data_dir,
+                    "inference": {
+                        "baseUrl": "http://test.local/v1/inference/v1",
+                        "apiKey": "test-inference-tok",
+                        "model": "test-model",
+                    },
                 },
             }
         )

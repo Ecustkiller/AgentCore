@@ -20,7 +20,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(workspace: Path) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -62,7 +62,7 @@ async def test_grep_access_permission_is_policy_retire():
         async def grep(self, query):  # noqa: ARG002
             raise WorkspaceError("没有访问权限")
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

@@ -319,7 +319,7 @@ def test_assembled_coordination_live_offers_wait_on_tool_defs():
 
 def test_always_on_tools_not_in_gated_set():
     """delegate / ask_user / debate 常驻——不得进协调闸集合。"""
-    for name in ("delegate", "ask_user", "debate", "consult_skill"):
+    for name in ("delegate", "ask_user", "debate", "consult"):
         assert name not in COORDINATION_GATED_TOOLS
 
 
@@ -358,7 +358,7 @@ def _ctx():
     from agentcore.workspace.server import ServerWorkspace
 
     # Assembly never touches the backend; a real one only satisfies the shape.
-    return ToolContext(
+    return ToolContext.create(
         execution_id="exec-assembly",
         run_id="r",
         agent_id="a",
@@ -399,9 +399,12 @@ def _assemble(*, checkpoint_enabled: bool = True) -> ToolRegistry:
 
 
 def test_assembled_idle_surface_split():
-    """闲聊态：delegate / ask_user / debate 在；replan + 协调四件套不在。"""
+    """闲聊态：delegate / ask_user / debate 在；replan + 协调四件套不在。
+
+    ``consult`` is has_entries-gated via async ``wire_ceo_consult`` (not in sync assemble).
+    """
     names = set(_assemble().names)
-    assert {"delegate", "ask_user", "debate", "consult_skill"} <= names
+    assert {"delegate", "ask_user", "debate"} <= names
     assert names.isdisjoint(COORDINATION_GATED_TOOLS)
 
 
@@ -418,7 +421,7 @@ def test_assembled_offers_create_project():
 
 
 def test_register_always_ceo_tools_declare_loop():
-    """G3：零参/轻参 ALWAYS 走声明循环；delegate/debate 不进该 helper。"""
+    """G3：零参/轻参 ALWAYS 走声明循环；delegate/debate/consult 不进该 helper。"""
     from agentcore.runtime.skills import build_system_skill_registry
     from agentcore.tools.registration import register_always_ceo_tools
 
@@ -426,7 +429,6 @@ def test_register_always_ceo_tools_declare_loop():
     register_always_ceo_tools(reg, skill_registry=build_system_skill_registry())
     names = set(reg.names)
     assert {
-        "consult_skill",
         "list_projects",
         "resolve_project",
         "create_project",
@@ -434,6 +436,7 @@ def test_register_always_ceo_tools_declare_loop():
         "read_project_file",
         "read_image",
     } <= names
+    assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
     assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})
 
 
@@ -444,7 +447,7 @@ def test_assembled_coordination_surface_split():
     try:
         _activate_coordination(eid)
         names = set(_assemble().names)
-        assert {"delegate", "ask_user", "debate", "consult_skill"} <= names
+        assert {"delegate", "ask_user", "debate"} <= names
         assert names >= COORDINATION_GATED_TOOLS
     finally:
         clear_active_coordination()
@@ -452,7 +455,7 @@ def test_assembled_coordination_surface_split():
 
 
 def test_debate_and_review_listed_in_idle_directory():
-    """debate 常驻 ⇒ debate_and_review（requires_tools=debate）闲聊态回到能力目录。"""
+    """debate 常驻 ⇒ debate_and_review（requires_tools=debate）闲聊态回到按需目录。"""
     from agentcore.runtime.skills import build_system_skill_registry, render_skill_directory
 
     idle_names = set(_assemble().names)

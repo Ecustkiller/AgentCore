@@ -46,7 +46,7 @@ from agentcore.tools.registration import execution_class_tool_names, host_class_
 @pytest.mark.asyncio
 async def test_host_ping_requires_channel():
     tool = HostPingTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -66,7 +66,7 @@ async def test_host_info_via_channel():
         return_value={"platform": "win32", "hostname": "DESKTOP-1"}
     )
     tool = HostInfoTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -84,7 +84,7 @@ async def test_host_info_via_channel():
 @pytest.mark.asyncio
 async def test_host_open_settings_rejects_unknown_panel():
     tool = HostOpenSettingsTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -105,7 +105,7 @@ async def test_host_open_settings_accepts_display():
         return_value={"opened": True, "panel": "display", "uri": "ms-settings:display"}
     )
     tool = HostOpenSettingsTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -123,7 +123,7 @@ async def test_host_open_settings_accepts_display():
 @pytest.mark.asyncio
 async def test_host_audio_set_default_requires_device():
     tool = HostAudioSetDefaultTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -143,7 +143,7 @@ async def test_host_audio_set_default_forwards():
         return_value={"set": True, "device_id": "{0.0.0.00000000}.{abc}", "name": "Speakers"}
     )
     tool = HostAudioSetDefaultTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -161,7 +161,7 @@ async def test_host_audio_set_default_forwards():
 @pytest.mark.asyncio
 async def test_host_service_restart_rejects_unknown():
     tool = HostServiceRestartTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -182,7 +182,7 @@ async def test_host_service_restart_accepts_audiosrv():
         return_value={"restarted": True, "service": "Audiosrv", "status": "Running"}
     )
     tool = HostServiceRestartTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -204,7 +204,7 @@ async def test_host_storage_via_channel():
         return_value={"platform": "win32", "volumes": [{"device_id": "C:"}]}
     )
     tool = HostStorageTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -229,7 +229,7 @@ async def test_host_network_summary_via_channel():
         }
     )
     tool = HostNetworkSummaryTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -255,7 +255,7 @@ async def test_host_os_log_summary_via_channel():
         }
     )
     tool = HostOsLogSummaryTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -294,7 +294,7 @@ def test_normalize_os_log_args_clamps():
 @pytest.mark.asyncio
 async def test_host_shell_rejects_empty_command():
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -310,7 +310,7 @@ async def test_host_shell_rejects_empty_command():
 @pytest.mark.asyncio
 async def test_host_shell_rejects_cmd_style_env():
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -330,7 +330,7 @@ async def test_host_shell_rejects_cmd_style_env():
 @pytest.mark.asyncio
 async def test_host_shell_fuse_blocks_rm_rf_root():
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -347,7 +347,7 @@ async def test_host_shell_fuse_blocks_rm_rf_root():
 @pytest.mark.asyncio
 async def test_host_shell_rejects_long_running_dev_server():
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -388,7 +388,7 @@ async def test_host_shell_forwards_with_timeout():
         }
     )
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",
@@ -540,7 +540,7 @@ def test_host_l2_is_audit_grantable():
 @pytest.mark.asyncio
 async def test_host_package_install_rejects_non_allowlisted_manager():
     tool = HostPackageInstallTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -566,7 +566,7 @@ async def test_host_package_install_forwards_winget():
         }
     )
     tool = HostPackageInstallTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -595,7 +595,7 @@ async def test_host_package_install_forwards_winget():
 @pytest.mark.asyncio
 async def test_host_shell_silent_install_fuse():
     tool = HostShellTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="ceo",

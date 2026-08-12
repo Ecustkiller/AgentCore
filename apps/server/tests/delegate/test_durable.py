@@ -100,7 +100,7 @@ async def test_durable_pause_persists_frame_on_finalize(monkeypatch):
 
 async def test_durable_pause_captures_resume_scope():
     # The turn's project scope AND the memory master switch ride the durable frame so a
-    # fresh-process resume re-wires consult_memory exactly as this turn did: same project
+    # fresh-process resume re-wires consult exactly as this turn did: same project
     # (project 主题 first, then global) and memory-off stays off — Agent记忆与知识系统 §二 /
     # resume folder_id + memory_enabled 缺口.
     from agentcore.runtime.suspension import captain_transcript

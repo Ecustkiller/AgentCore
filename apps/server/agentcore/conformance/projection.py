@@ -330,6 +330,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             call_id = p.get("tool_call_id", "")
             result = cap_process_result(p.get("result"))
             display = p.get("display")
+            failure = p.get("failure")
             if rid:
                 run = run_by_id(rid)
                 if run is not None:
@@ -339,6 +340,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                             step["status"] = p.get("status", "success")
                             if display is not None:
                                 step["display"] = display
+                            if failure is not None:
+                                step["failure"] = failure
                             break
                 continue
             if p.get("tool_name") in MARKER_STANDIN_TOOLS:
@@ -349,6 +352,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     step["status"] = p.get("status", "success")
                     if display is not None:
                         step["display"] = display
+                    if failure is not None:
+                        step["failure"] = failure
                     break
 
         elif etype == "citations":

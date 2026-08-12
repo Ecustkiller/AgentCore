@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from agentcore.api.dependencies import AuthUser, get_db
-from agentcore.api.sse import _HEARTBEAT_INTERVAL_S, _format_sse
+from agentcore.api.sse import _HEARTBEAT_INTERVAL_S, _format_sse, release_request_db_before_sse
 from agentcore.db.repositories import ConversationRepository
 from agentcore.runtime.browser.live import (
     BrowserLiveHub,
@@ -25,7 +25,7 @@ from agentcore.runtime.browser.live import (
     default_browser_live_hub,
 )
 
-from ._helpers import _require_owned_conversation, release_request_db_before_sse
+from ._helpers import _require_owned_conversation
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 

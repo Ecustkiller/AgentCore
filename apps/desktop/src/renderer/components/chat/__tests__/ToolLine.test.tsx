@@ -288,6 +288,23 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.getAllByText("部署流程")).toHaveLength(1);
   });
 
+  it("suppresses the peek for unified consult — same as consult_memory", () => {
+    render(
+      <ToolLine
+        step={step({
+          tool_name: "consult",
+          arguments: { name: "部署流程" },
+          result: "用 pnpm dev 起前端",
+          display: { name: "部署流程", kind: "memory" },
+          status: "success",
+        })}
+      />,
+    );
+    expect(screen.getByText("Consult")).toBeTruthy();
+    expect(screen.queryByText(/用 pnpm dev 起前端/)).toBeNull();
+    expect(screen.getAllByText("部署流程")).toHaveLength(1);
+  });
+
   it("suppresses the peek for read_conversation — title chip only", () => {
     render(
       <ToolLine
@@ -732,6 +749,82 @@ describe("ComposingToolLine · 中文组装心跳", () => {
     );
     expect(screen.getByText(/正在组装/)).toBeTruthy();
     expect(screen.queryByText(/字/)).toBeNull();
+  });
+});
+
+describe("ToolLine · tool_use_end.failure product face", () => {
+  it("shows failure.message on the collapsed row, not the technical result", () => {
+    renderWithTooltip(
+      <ToolLine
+        step={step({
+          tool_name: "web_search",
+          arguments: { query: "AgentCore" },
+          result:
+            "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+          status: "error",
+          failure: {
+            message: "工具执行失败，请稍后重试。",
+            code: "TOOL_ERROR",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("工具执行失败，请稍后重试。")).toBeTruthy();
+    expect(screen.queryByText(/searxng\.internal/)).toBeNull();
+    expect(screen.queryByText(/Connection refused/)).toBeNull();
+  });
+
+  it("still exposes technical result after expand", () => {
+    renderWithTooltip(
+      <ToolLine
+        step={step({
+          tool_name: "web_search",
+          arguments: { query: "AgentCore" },
+          result:
+            "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+          status: "error",
+          failure: {
+            message: "工具执行失败，请稍后重试。",
+            code: "TOOL_ERROR",
+          },
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByText("工具执行失败，请稍后重试。"));
+    expect(screen.getByText(/searxng\.internal:8080/)).toBeTruthy();
+  });
+
+  it("falls back to result peek when failure is absent", () => {
+    renderWithTooltip(
+      <ToolLine
+        step={step({
+          tool_name: "code_execute",
+          arguments: {},
+          result: "ExecEnvProbeFailed: 127.0.0.1:5432",
+          status: "error",
+        })}
+      />,
+    );
+    expect(screen.getByText("ExecEnvProbeFailed: 127.0.0.1:5432")).toBeTruthy();
+  });
+
+  it("surfaces failure.message even for peek-suppressed tools", () => {
+    renderWithTooltip(
+      <ToolLine
+        step={step({
+          tool_name: "file_read",
+          arguments: { path: "missing.md" },
+          result: "FileNotFoundError: missing.md",
+          status: "error",
+          failure: {
+            message: "读取文件失败。",
+            code: "FILE_NOT_FOUND",
+          },
+        })}
+      />,
+    );
+    expect(screen.getByText("读取文件失败。")).toBeTruthy();
+    expect(screen.queryByText(/FileNotFoundError/)).toBeNull();
   });
 });
 

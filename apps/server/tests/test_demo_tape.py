@@ -244,6 +244,11 @@ async def test_sidecar_rejects_tape_bound_local_session(tmp_path: Path, monkeypa
                     "workspaceRoot": str(tmp_path),
                     "approvalsEnabled": True,
                     "dataDir": str(tmp_path / "data"),
+                    "inference": {
+                        "baseUrl": "http://test.local/v1/inference/v1",
+                        "apiKey": "test-inference-tok",
+                        "model": "test-model",
+                    },
                 },
             }
         )
@@ -2183,8 +2188,8 @@ async def test_resume_folds_team_preview_into_resolved(monkeypatch, tmp_path: Pa
 
 
 _REAL_MEMORY_RULES = """<rules>
-以下是关于当前用户的长期记忆（由 AI 自动维护，属软性偏好）。请在不与用户当前
-指令冲突的前提下遵循；如有冲突，以用户的显式指令为准。
+以下条目请一并遵循；与本回合用户直接指令冲突时，以本回合指令为准。
+硬约束：题材/领域偏好与历史任务不得改变本回合路由（直答/委派/调研/辩论以用户当前话为准）。
 
 ## 沟通偏好
 - 倾向用中文交流 <!-- ts:2026-07-13 -->

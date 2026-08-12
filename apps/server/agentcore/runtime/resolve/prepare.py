@@ -10,12 +10,17 @@ import base64
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.memory import default_memory_store
-from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
-from agentcore.tools.builtin.consult_rule import ConsultRuleTool
+from agentcore.memory import (
+    default_memory_store,  # noqa: F401 — monkeypatch seam (ceo_toolset imports it here)
+)
 from agentcore.tools.builtin.read_conversation import ReadConversationTool
 from agentcore.tools.builtin.search_conversations import SearchConversationsTool
-from agentcore.tools.ceo_toolset import _assemble_ceo_toolset  # noqa: F401 — seam
+from agentcore.tools.ceo_toolset import (
+    _assemble_ceo_toolset,  # noqa: F401 — seam
+)
+from agentcore.tools.ceo_toolset import (
+    wire_worker_consult as _wire_worker_consult_tools,  # noqa: F401 — historical name
+)
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.attachment_parse import (
     ATTACHMENT_INLINE_MAX_CHARS,
@@ -109,28 +114,6 @@ _IMAGE_NATIVE_INDEX = (
     "此图已随当前用户消息以多模态附件发送给主模型；"
     "勿再要求 code_execute 开图，也勿假定未看见像素。"
 )
-
-
-def _wire_worker_memory_tools(
-    worker_tools: ToolRegistry,
-    *,
-    memory_enabled: bool = True,
-    folder_id: str | None = None,
-    has_memory_topics: bool = False,
-    has_on_demand_rules: bool = False,
-) -> None:
-    """Register ``consult_memory`` / ``consult_rule`` on the delegated worker toolset.
-
-    ``consult_memory``: memory on AND at least one TOPIC note (same as CEO).
-    ``consult_rule``: at least one on_demand user rule (independent of memory gate —
-    mirrors CEO; empty catalog ⇒ not wired).
-    """
-    if memory_enabled and has_memory_topics:
-        worker_tools.register(
-            ConsultMemoryTool(store=default_memory_store(), folder_id=folder_id)
-        )
-    if has_on_demand_rules:
-        worker_tools.register(ConsultRuleTool(folder_id=folder_id))
 
 
 def _wire_worker_conversation_log_tools(

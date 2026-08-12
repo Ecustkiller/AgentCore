@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from agentcore.core.errors import ValidationError
 from agentcore.llm.call_fence import observe_provider
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
@@ -10,9 +11,25 @@ from agentcore.llm.provider.protocol import LLMProvider
 from agentcore.llm.provider.router import ProviderRouter
 from agentcore.llm.resolve import ProviderPurpose
 
+# Sibling catalog-miss path (inference proxy ValidationError) guides users to
+# re-pick a model in settings. Same product semantics here when credentials are
+# absent at build_* (no silent platform key) — invariant text stays in details.
+_MISSING_LLM_CREDENTIALS_USER_MESSAGE = (
+    "当前模型不可用或凭据未就绪，请在「设置 · 模型配置」中改选可用模型后再试。"
+)
 
-class MissingLLMCredentialsError(ValueError):
-    """``build_provider`` was called without explicit credentials (no silent platform key)."""
+
+class MissingLLMCredentialsError(ValidationError):
+    """``build_*`` called without explicit credentials (no silent platform key).
+
+    User face is curated zh (settings / model change). The English invariant that
+    named the call site is stored under ``details["invariant"]`` for logs only.
+    """
+
+    def __init__(self, invariant: str = "", **kwargs):
+        if invariant:
+            kwargs.setdefault("invariant", invariant)
+        super().__init__(_MISSING_LLM_CREDENTIALS_USER_MESSAGE, **kwargs)
 
 
 _VENDOR_PROVIDERS: dict[str, tuple[str, str]] = {
@@ -45,10 +62,10 @@ def build_provider(
 
     ``purpose`` is retained for call-site clarity only.
 
-    ``display_name`` overrides the leaf's user-facing name (BYOK 测连 uses the
-    provider ``label`` so errors never show the internal credential source ``user``).
-    Does **not** change ``credentials.source`` — turn-path pricing still binds from
-    ``creds.source``.
+    Leaf ``name`` (log / pricing) stays ``credentials.source`` (``user``) or the
+    platform leaf's fixed ``platform``. ``display_name`` is user-facing only:
+    explicit arg → ``credentials.label`` → ``服务商``. Does **not** change
+    ``credentials.source`` — turn-path pricing still binds from ``creds.source``.
 
     ``source=platform`` always yields :class:`PlatformProvider` (per-model key
     resolution). Pre-resolved platform ``api_key`` on ``credentials`` is not frozen
@@ -73,12 +90,14 @@ def build_provider(
         )
     if credentials.source == "platform":
         return build_platform_provider(purpose=purpose)
-    leaf_name = (display_name or "").strip() or credentials.source
+    log_name = credentials.source
+    shown = (display_name or "").strip() or (credentials.label or "").strip() or "服务商"
     leaf: LLMProvider = OpenAICompatibleProvider(
-        name=leaf_name,
+        name=log_name,
         api_key=credentials.api_key,
         base_url=credentials.base_url,
         extra_headers=credentials.extra_headers,
+        display_name=shown,
     )
     return observe_provider(leaf)
 
@@ -149,9 +168,7 @@ async def build_turn_router(
         if agent_provider_id == PLATFORM_PROVIDER_SENTINEL:
             worker_model = profiles.model_for("agent")
             if platform_llm_credentials(model=worker_model) is not None:
-                extras[PLATFORM_PROVIDER_SENTINEL] = build_platform_provider(
-                    purpose=purpose
-                )
+                extras[PLATFORM_PROVIDER_SENTINEL] = build_platform_provider(purpose=purpose)
         elif user_id:
             async with async_session_factory() as session:
                 agent_creds = await resolve_provider_credentials(

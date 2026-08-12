@@ -69,7 +69,7 @@ def _registry(*, with_persist: bool = False) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(_StubTool("file_read", category=ToolCategory.FILESYSTEM))
     reg.register(_StubTool("delegate", category=ToolCategory.ORCHESTRATION))
-    reg.register(_StubTool("consult_skill", category=ToolCategory.ORCHESTRATION))
+    reg.register(_StubTool("consult", category=ToolCategory.ORCHESTRATION))
     reg.register(_StubTool("ask_user", category=ToolCategory.INTERACTION))
     if with_persist:
         reg.register(_StubTool("file_write", category=ToolCategory.FILESYSTEM))
@@ -96,7 +96,7 @@ def test_files_form_force_finalize_surface_keeps_file_write_and_handoff():
     assert "handoff" in names
     assert "file_read" not in names
     # prose path: file_write withheld from allow-list → coordination only
-    prose_allowed = ["delegate", "consult_skill", "ask_user", "file_read"]
+    prose_allowed = ["delegate", "consult", "ask_user", "file_read"]
     assert finalize_allows_persist(reg, prose_allowed) is False
     prose_defs = resolve_finalize_coordination_tools(reg, prose_allowed, set())
     prose_names = {d["function"]["name"] for d in (prose_defs or [])}

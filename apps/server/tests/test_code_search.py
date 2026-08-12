@@ -83,7 +83,7 @@ async def test_code_search_tool_end_to_end(sample_py: Path):
     kick = MagicMock(wraps=ws.start_code_index_maintenance)
     ws.start_code_index_maintenance = kick  # type: ignore[method-assign]
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -117,7 +117,7 @@ async def test_code_search_tool_is_query_only_when_ensure_is_slow(
 
     ws = ServerWorkspace(root=sample_py, sandbox=SubprocessSandbox())
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -164,7 +164,7 @@ async def test_code_search_kicks_when_index_not_ready(status: str):
         return_value=CodeSearchResult(index_status=index_status, index_stale=True)
     )
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -196,7 +196,7 @@ async def test_code_search_skips_kick_when_truncated_only_stale():
         )
     )
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -244,7 +244,7 @@ async def test_code_search_skips_kick_when_index_ready():
         )
     )
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -492,7 +492,7 @@ async def test_local_workspace_code_search_via_channel(sample_py: Path, tmp_path
 async def test_code_search_requires_query(sample_py: Path):
     ws = ServerWorkspace(root=sample_py, sandbox=SubprocessSandbox())
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",
@@ -509,7 +509,7 @@ async def test_code_search_empty_is_success_with_next_steps(sample_py: Path):
     ws = ServerWorkspace(root=sample_py, sandbox=SubprocessSandbox())
     await ws.ensure_code_index()
     tool = CodeSearchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",

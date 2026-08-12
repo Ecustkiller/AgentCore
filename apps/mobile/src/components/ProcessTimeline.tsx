@@ -823,6 +823,8 @@ function ToolStep({
       isVerifyBudgetExceeded(step.display));
   const diagnostics = extractCodeDiagnostics(step.display);
   const elapsed = useRunningElapsed(running);
+  // Prefer product `failure.message`; fall back to model-facing `result` when absent.
+  const faceText = step.failure?.message ?? step.result;
   const doneStatus = ceilingGuidance
     ? isVerifyBudgetExceeded(step.display)
       ? "验证未完成"
@@ -854,7 +856,7 @@ function ToolStep({
         </span>
         <span className="tool-status">{runningStatus}</span>
       </button>
-      {open && (args || step.result != null || diagnostics) && (
+      {open && (args || faceText != null || diagnostics) && (
         <div className="tool-body">
           {isVerifyBudgetExceeded(step.display) && (
             <div className="tool-incomplete">验证未完成（预算耗尽）</div>
@@ -886,8 +888,8 @@ function ToolStep({
           {args && (
             <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>
           )}
-          {step.result != null && step.result !== "" && (
-            <pre className="tool-pre">{step.result}</pre>
+          {faceText != null && faceText !== "" && (
+            <pre className="tool-pre">{faceText}</pre>
           )}
         </div>
       )}

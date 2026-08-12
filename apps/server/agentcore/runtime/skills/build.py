@@ -33,7 +33,7 @@ _BUILD_WEBSITE = f"""\
 产物目录固定 `site/`，不是文件夹槽），按桌上档填 `intensity`；\
 【禁止】空 `playbook_args` / 漏 topic；【禁止】自拟视觉施工图（配色 / 动效 / 板块清单交给 playbook）。\
 槽位拿不准再查本 skill。
-3. 短问澄清后：若尚未读过本指引再 `consult_skill(build_website)`，然后调 `delegate`：\
+3. 短问澄清后：若尚未读过本指引再 `consult(build_website)`，然后调 `delegate`：\
 `playbook="build_website"` + **必填** `playbook_args.topic` + 对应 `intensity`；其余规则同上。
 4. 控制台 / 工具台 dense：`playbook_args.style="toolshed"`；可选 `sections` / `stack` / `audience`——\
 **只传事实输入**；强制 catalog pack `tool_dense` + anti-slop `domain=tool`；\
@@ -44,7 +44,7 @@ _BUILD_WEBSITE = f"""\
 【划界】单页 / 落地页 = 一人整页（宜 solo）；**多屏 UI / 单文件大原型**勿套本「一人整页」口径——\
 走 MVP 切片（见主提示「立刻派 ≠ 立刻全量」），勿扩本 playbook 语义。
 
-组队进阶旋钮（协调墙 / deliverable 等）见 `consult_skill(team_orchestration_advanced)`。
+组队进阶旋钮（协调墙 / deliverable 等）见 `consult(team_orchestration_advanced)`。
 </build_website>"""
 
 _BUILD_APP = f"""\
@@ -84,5 +84,5 @@ MVP 主流程可点 → `intensity=lean`；模块流水线一次做完 → `inte
 **【外环验绿对账】**宣称「N/N OK / passed / PASS / 全绿」须本回合有成功的 `test_run` 或 `terminal` \
 验证证据；本轮仅 error → 【禁止】写全绿，应标工具卡未通过或「曾失败→改命令后通过（附依据）」。
 
-组队进阶旋钮见 `consult_skill(team_orchestration_advanced)`。
+组队进阶旋钮见 `consult(team_orchestration_advanced)`。
 </build_app>"""

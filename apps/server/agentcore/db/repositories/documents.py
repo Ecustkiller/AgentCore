@@ -16,6 +16,10 @@ share the same rows:
 - **Generic tree CRUD**: the ``/documents`` API creates / reads / renames / moves / deletes any
   node (user rules are just ``role='rule', ai_maintained=false`` documents, §5.2).
 
+**Frontmatter is the sole writable source** for ``apply`` / ``description``; DB
+``apply_mode`` / ``description`` are derived indexes recomputed only via
+``_set_content_and_derive`` (no column-only bypass). ``ai_maintained`` stays DB-only.
+
 All reads filter ``deleted_at IS NULL`` explicitly (this codebase has no global soft-delete
 event listener — 照 boards.py / folders.py). Owner scoping is the structural default: mutations
 resolve a node owner-scoped so a non-owner id is treated as absent (SEC-002). No DB FK — refs
@@ -26,6 +30,7 @@ per-user memory lock, 照 api/routes/memory.py) so the repo stays db-only, no up
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from sqlalchemy import Select, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +38,13 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from agentcore.core.types import new_id
 from agentcore.db.models import Document
+from agentcore.documents.frontmatter import (
+    FrontmatterEditError,
+    FrontmatterError,
+    ensure_apply_key,
+    parse_entry_frontmatter,
+    set_entry_frontmatter,
+)
 
 from ._base import _UNSET
 
@@ -60,9 +72,70 @@ def _scope_clause(folder_id: str | None) -> ColumnElement[bool]:
     return Document.folder_id == folder_id
 
 
+def _derive_indexes(content: str) -> tuple[str, str]:
+    """Recompute ``(apply_mode, description)`` from body frontmatter.
+
+    Parse failure → index as ``on_demand`` / ``""`` so always-injection queries exclude the
+    row; content is **not** repaired (猜默认值自动修复否决).
+    """
+    parsed = parse_entry_frontmatter(content)
+    if isinstance(parsed, FrontmatterError):
+        return "on_demand", ""
+    return parsed.apply, parsed.description
+
+
+def _replace_body_keeping_frontmatter(existing: str, new_body: str) -> str | None:
+    """Keep the exact frontmatter block of ``existing``; swap only the body bytes.
+
+    Returns ``None`` when ``existing`` has no well-formed frontmatter (caller seeds anew).
+    Text-level splice — never parse-then-serialize — so unknown keys / comments / order survive.
+    """
+    parsed = parse_entry_frontmatter(existing)
+    if isinstance(parsed, FrontmatterError) or not parsed.has_frontmatter:
+        return None
+    prefix_len = len(existing) - len(parsed.body)
+    return existing[:prefix_len] + new_body
+
+
+def _memory_note_body_for_write(
+    content: str, *, existing: str | None, apply_mode: str
+) -> str:
+    """Prepare memory-note markdown for upsert.
+
+    Body-only writers (legacy ``/users/me/memory`` editor) must not wipe stored
+    ``description`` / opaque FM lines: when the incoming text has no frontmatter and a
+    prior note does, keep that block and replace only the body. Incoming text that already
+    carries frontmatter is authoritative (consolidation / full-doc writers).
+    """
+    mode = apply_mode if apply_mode in ("always", "on_demand") else "on_demand"
+    incoming = parse_entry_frontmatter(content)
+    if isinstance(incoming, FrontmatterError):
+        raise FrontmatterEditError(incoming.message)
+    if not incoming.has_frontmatter and existing:
+        preserved = _replace_body_keeping_frontmatter(existing, content)
+        if preserved is not None:
+            content = preserved
+    return ensure_apply_key(content, mode)  # type: ignore[arg-type]
+
+
 class DocumentRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
+
+    @staticmethod
+    def _set_content_and_derive(doc: Document, content: str) -> None:
+        """Sole body-write path: persist markdown and recompute derived index columns.
+
+        Folders keep empty body / empty description; ``apply_mode`` is irrelevant for them
+        (left untouched). Document nodes never set ``apply_mode`` / ``description`` except here.
+        """
+        doc.content = content
+        if doc.kind != "document":
+            doc.description = ""
+            return
+        apply_mode, description = _derive_indexes(content)
+        doc.apply_mode = apply_mode
+        doc.description = description
 
     # --- AgentCore/ convention tree (§5.0) -----------------------------------------------------
 
@@ -96,7 +169,6 @@ class DocumentRepository:
             kind="folder",
             role="general",
             ai_maintained=False,
-            apply_mode="always",
             name=AGENTCORE_ROOT_NAME,
             content="",
         )
@@ -134,7 +206,6 @@ class DocumentRepository:
             kind="folder",
             role="general",
             ai_maintained=False,
-            apply_mode="always",
             name=RULES_DIR_NAME,
             content="",
         )
@@ -202,7 +273,6 @@ class DocumentRepository:
             kind="folder",
             role="general",
             ai_maintained=True,
-            apply_mode="always",
             name=MEMORY_ROOT_NAME,
             content="",
         )
@@ -246,11 +316,52 @@ class DocumentRepository:
         *,
         role: str,
         apply_mode: str,
+        writer: str = "ai",
     ) -> Document:
-        """Upsert one memory note (creating ``AgentCore/记忆/`` on first write). Unconditional —
-        CAS is the caller's job (content-hash baseline under the per-user lock)."""
+        """Upsert one memory note (creating ``AgentCore/记忆/`` on first write).
+
+        ``apply_mode`` seeds frontmatter only when the body lacks an ``apply`` key
+        (归并不改已有生效档). Body-only updates keep the stored frontmatter block
+        (see ``_memory_note_body_for_write``). Derived columns always come from the body.
+
+        ``writer`` is ``"ai"`` (default — consolidation / tools) or ``"user"`` (memory
+        editor). Always-pool quota: AI growth past the cap raises
+        :class:`~agentcore.memory.always_quota.AlwaysQuotaExceededError`; user edits of an
+        existing always entry are allowed (warning is the caller's job on the documents
+        API — this path does not surface warnings).
+        """
+        from agentcore.memory.always_quota import (
+            AlwaysQuotaExceededError,
+            check_always_write,
+        )
+
         root = await self._ensure_memory_root(user_id, folder_id)
         note = await self.get_memory_note(user_id, name, folder_id)
+        body = _memory_note_body_for_write(
+            content,
+            existing=note.content if note is not None else None,
+            apply_mode=apply_mode,
+        )
+        derived_apply, _ = _derive_indexes(body)
+        if role == "rule" and derived_apply == "always":
+            existing_always = (
+                note is not None and note.role == "rule" and note.apply_mode == "always"
+            )
+            who: Literal["user", "ai"] = "user" if writer == "user" else "ai"
+            decision = await check_always_write(
+                self,
+                user_id,
+                folder_id=folder_id,
+                writer=who,
+                editing_existing_always=existing_always,
+                exclude_id=note.id if note is not None else None,
+                new_content=body,
+                new_is_always=True,
+            )
+            if not decision.allowed:
+                usage = decision.usage
+                assert usage is not None
+                raise AlwaysQuotaExceededError(usage, decision.message)
         if note is None:
             note = Document(
                 id=new_id(),
@@ -260,15 +371,14 @@ class DocumentRepository:
                 kind="document",
                 role=role,
                 ai_maintained=True,
-                apply_mode=apply_mode,
                 name=name,
-                content=content,
+                content="",
             )
             self._session.add(note)
+            self._set_content_and_derive(note, body)
         else:
-            note.content = content
             note.role = role
-            note.apply_mode = apply_mode
+            self._set_content_and_derive(note, body)
         await self._session.commit()
         await self._session.refresh(note)
         return note
@@ -454,9 +564,13 @@ class DocumentRepository:
     async def upsert_user_rules_doc(
         self, user_id: str, folder_id: str | None, content: str
     ) -> Document:
-        """Create-or-update the canonical user-rule document under ``AgentCore/规则/``."""
+        """Create-or-update the canonical user-rule document under ``AgentCore/规则/``.
+
+        ``remember`` keeps the canonical doc on ``apply: always`` (forced into frontmatter).
+        """
         doc = await self.get_user_rules_doc(user_id, folder_id)
         rules_dir = await self.ensure_rules_dir(user_id, folder_id)
+        body = set_entry_frontmatter(content, apply="always")
         if doc is None:
             doc = Document(
                 id=new_id(),
@@ -466,17 +580,15 @@ class DocumentRepository:
                 kind="document",
                 role="rule",
                 ai_maintained=False,
-                apply_mode="always",
                 name=USER_RULES_DOC_NAME,
-                content=content,
+                content="",
             )
             self._session.add(doc)
+            self._set_content_and_derive(doc, body)
         else:
             if doc.parent_id != rules_dir.id:
                 doc.parent_id = rules_dir.id
-            doc.content = content
-            # remember path always keeps the canonical doc on always (never flips apply_mode).
-            doc.apply_mode = "always"
+            self._set_content_and_derive(doc, body)
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
@@ -512,10 +624,11 @@ class DocumentRepository:
         kind: str = "document",
         role: str = "general",
         ai_maintained: bool = False,
-        apply_mode: str = "always",
+        apply_mode: str = "on_demand",
         content: str = "",
     ) -> Document:
-        """Create one tree node (folder or document). Caller validates enum values."""
+        """Create one tree node. For documents, ``apply_mode`` is written into frontmatter
+        then derived — never stored as an independent writable copy."""
         doc = Document(
             id=new_id(),
             user_id=user_id,
@@ -524,11 +637,20 @@ class DocumentRepository:
             kind=kind,
             role=role,
             ai_maintained=ai_maintained,
-            apply_mode=apply_mode,
             name=name,
-            content=content,
+            content="",
         )
         self._session.add(doc)
+        if kind == "document":
+            mode = apply_mode if apply_mode in ("always", "on_demand") else "on_demand"
+            try:
+                body = set_entry_frontmatter(content, apply=mode)  # type: ignore[arg-type]
+            except FrontmatterEditError as exc:
+                raise ValueError(str(exc)) from exc
+            self._set_content_and_derive(doc, body)
+        else:
+            doc.content = ""
+            doc.description = ""
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
@@ -561,11 +683,11 @@ class DocumentRepository:
     async def update_content(
         self, document_id: str, *, user_id: str, content: str
     ) -> Document | None:
-        """Overwrite a document's body (unconditional; CAS is the caller's job)."""
+        """Overwrite a document's body and recompute derived indexes (CAS is the caller's job)."""
         doc = await self.get(document_id, user_id=user_id)
         if doc is None:
             return None
-        doc.content = content
+        self._set_content_and_derive(doc, content)
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
@@ -582,11 +704,20 @@ class DocumentRepository:
     async def update_apply_mode(
         self, document_id: str, *, user_id: str, apply_mode: str
     ) -> Document | None:
-        """Set ``apply_mode`` (caller validates enum / role eligibility)."""
+        """Set ``apply`` in the body's frontmatter (text-level edit) and re-derive indexes.
+
+        No direct column write — the body remains the sole writable source.
+        """
         doc = await self.get(document_id, user_id=user_id)
         if doc is None:
             return None
-        doc.apply_mode = apply_mode
+        if apply_mode not in ("always", "on_demand"):
+            raise ValueError(f"invalid apply_mode: {apply_mode!r}")
+        try:
+            body = set_entry_frontmatter(doc.content, apply=apply_mode)  # type: ignore[arg-type]
+        except FrontmatterEditError:
+            raise
+        self._set_content_and_derive(doc, body)
         await self._session.commit()
         await self._session.refresh(doc)
         return doc

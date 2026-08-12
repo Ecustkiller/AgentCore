@@ -27,7 +27,7 @@ TOOL_PROGRESS_STEP = 64
 # finalize, or the round budget is exhausted mid-tool-call).
 FINALIZE_INSTRUCTION = (
     "[系统提示] 请停止使用调查与执行类工具，基于目前已掌握的全部信息，立即给出你最好的最终答案。"
-    "若仍需委派或向用户确认，可调用 delegate / consult_skill / ask_user。"
+    "若仍需委派或向用户确认，可调用 delegate / consult / ask_user。"
     "除上述可用工具外，其余工具本轮已停用；请直接用正文写出答案，"
     "切勿在正文里书写或模拟任何工具调用格式（如 <tool_call>…</> 之类标签），那不会被执行。"
 )
@@ -49,7 +49,7 @@ FINALIZE_INSTRUCTION_FILES = (
 
 # Coordination tools still offered during a forced-finalize round; investigation and
 # execution tools are withheld so the model cannot keep spinning reads/writes.
-FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult_skill", "ask_user"})
+FINALIZE_COORDINATION_TOOLS = frozenset({"delegate", "consult", "ask_user"})
 
 # Persist tools kept on finalize when the worker's tool surface still offers
 # file_write (form=files / artifacts / wind_down) — mirrors wind_down intent.

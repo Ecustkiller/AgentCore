@@ -47,6 +47,7 @@ from agentcore.memory.rules_injection import (
     mutate_user_rule,
     mutate_user_rule_markdown,
     rule_consult_name,
+    strip_entry_frontmatter,
 )
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
@@ -146,6 +147,7 @@ __all__ = [
     "assemble_injected_rules",
     "assemble_turn_rules",
     "compose_injected_rules",
+    "strip_entry_frontmatter",
     "load_on_demand_user_rules",
     "rule_consult_name",
     "append_user_rule",

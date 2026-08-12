@@ -1,15 +1,13 @@
 """Documents API — tree CRUD; user rules expose ``always`` | ``on_demand`` apply_mode.
 
-Self-only CRUD over the single ``documents`` content tree. This is the generic tree surface a
-future「文件」page drives; in this phase its load-bearing use is **user rules** — a user rule is
-just a ``role='rule'`` document with ``ai_maintained=false`` (§5.2), created / edited / deleted
-here, then injected (always → ``<rules>``; on_demand → 规则目录 + ``consult_rule``).
+Self-only CRUD over the single ``documents`` content tree. ``apply_mode`` / ``description``
+on the wire are **derived indexes** of the body's frontmatter (sole writable source).
+Patching ``apply_mode`` edits frontmatter then re-derives — never a column-only write.
+``frontmatter_error`` surfaces structural parse failure for the UI (unclosed fence).
 
-Ownership is the structural default (every op is owner-scoped → a non-owner id 404s, SEC-002).
-Nodes created here are always ``ai_maintained=false``: AI-maintained memory is written by the
-consolidation pass / memory routes, never authored as「AI 记忆」through this user-facing API.
-CAS mirrors the memory editor — a content write carries a content-hash ``baseline`` and reports a
-conflict instead of clobbering. ``conditional`` apply_mode stays reserved (API rejects writes).
+Write-side always quota (闸在写侧): create / content edit / promote-to-always go through
+the always-pool gate. Editing an existing always entry past the cap is allowed with
+``quota_warning``; creating or promoting past the cap is refused (409).
 """
 
 from __future__ import annotations
@@ -23,11 +21,19 @@ from pydantic import BaseModel, Field
 from agentcore.api.dependencies import AuthUser, get_document_repo
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.frontmatter import (
+    FrontmatterEditError,
+    FrontmatterError,
+    ParsedFrontmatter,
+    frontmatter_error_message,
+    parse_entry_frontmatter,
+    set_entry_frontmatter,
+)
 from agentcore.memory import memory_version
+from agentcore.memory.always_quota import check_always_write, measure_always_usage
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-# User-facing apply modes (§5.4 / 定案 B). ``conditional`` is DB-reserved but not writable here.
 DocKind = Literal["folder", "document"]
 DocRole = Literal["rule", "general"]
 DocApplyMode = Literal["always", "on_demand"]
@@ -43,11 +49,11 @@ class DocumentNodeView(BaseModel):
     role: str
     ai_maintained: bool
     apply_mode: str
+    description: str
     name: str
+    frontmatter_error: str | None = None
     created_at: datetime
     updated_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class DocumentDetailView(DocumentNodeView):
@@ -55,6 +61,7 @@ class DocumentDetailView(DocumentNodeView):
 
     content: str
     version: str
+    quota_warning: str | None = None
 
 
 class DocumentCreateRequest(BaseModel):
@@ -62,19 +69,14 @@ class DocumentCreateRequest(BaseModel):
     kind: DocKind = "document"
     role: DocRole = "general"
     content: str = ""
-    # Default always; only ``role='rule'`` documents may be ``on_demand``.
+    # Default always for user rules (UI); written into frontmatter on create.
     apply_mode: DocApplyMode = "always"
-    # ``parent_id`` None = a top-level node of its scope — except ``role='rule'`` documents,
-    # which are auto-parented under ``AgentCore/规则/`` (§5.0 新写入落点). When ``parent_id``
-    # is set, the child inherits the parent's ``folder_id`` scope; ``folder_id`` is only
-    # honored at root (and for the rule auto-parent path).
     parent_id: str | None = None
     folder_id: str | None = None
 
 
 class DocumentContentRequest(BaseModel):
     content: str
-    # The version the edit was based on; None writes unconditionally (照 memory.py).
     baseline: str | None = None
 
 
@@ -82,19 +84,51 @@ class DocumentWriteResult(BaseModel):
     ok: bool
     version: str
     conflict: bool = False
+    frontmatter_error: str | None = None
+    quota_warning: str | None = None
 
 
 class DocumentPatchRequest(BaseModel):
-    """Rename, reparent, and/or change apply_mode (content untouched — that goes through PUT)."""
+    """Rename, reparent, and/or change apply (via frontmatter edit)."""
 
     name: str | None = Field(default=None, min_length=1, max_length=500)
-    # Use the string "" wrapped by the caller? No — reparent semantics: omitted = leave alone.
     parent_id: str | None = None
-    reparent: bool = False  # set True to apply parent_id (even to None = move to root)
+    reparent: bool = False
     apply_mode: DocApplyMode | None = None
 
 
-def _detail(doc: Document) -> DocumentDetailView:
+class AlwaysQuotaView(BaseModel):
+    """Always-pool usage for the UI meter (percentage + absolute chars)."""
+
+    used_chars: int
+    max_chars: int
+    percent: float
+
+
+def _fm_error(doc: Document) -> str | None:
+    if doc.kind != "document":
+        return None
+    return frontmatter_error_message(doc.content)
+
+
+def _node(doc: Document) -> DocumentNodeView:
+    return DocumentNodeView(
+        id=doc.id,
+        parent_id=doc.parent_id,
+        folder_id=doc.folder_id,
+        kind=doc.kind,
+        role=doc.role,
+        ai_maintained=doc.ai_maintained,
+        apply_mode=doc.apply_mode,
+        description=doc.description,
+        name=doc.name,
+        frontmatter_error=_fm_error(doc),
+        created_at=doc.created_at,
+        updated_at=doc.updated_at,
+    )
+
+
+def _detail(doc: Document, *, quota_warning: str | None = None) -> DocumentDetailView:
     return DocumentDetailView(
         id=doc.id,
         parent_id=doc.parent_id,
@@ -103,11 +137,14 @@ def _detail(doc: Document) -> DocumentDetailView:
         role=doc.role,
         ai_maintained=doc.ai_maintained,
         apply_mode=doc.apply_mode,
+        description=doc.description,
         name=doc.name,
+        frontmatter_error=_fm_error(doc),
         content=doc.content,
         version=memory_version(doc.content),
         created_at=doc.created_at,
         updated_at=doc.updated_at,
+        quota_warning=quota_warning,
     )
 
 
@@ -118,6 +155,45 @@ def _resolve_create_apply_mode(*, role: str, kind: str, apply_mode: DocApplyMode
     return "always"
 
 
+def _raise_quota_denied(message: str | None) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "ALWAYS_QUOTA_EXCEEDED",
+            "message": message or "常驻条目配额已满",
+        },
+    )
+
+
+async def _preview_create_body(
+    *, role: str, kind: str, apply_mode: DocApplyMode, content: str
+) -> tuple[str, bool]:
+    """Return (body_as_stored, is_always_rule) for quota projection before create."""
+    if kind != "document" or role != "rule":
+        return content, False
+    mode = _resolve_create_apply_mode(role=role, kind=kind, apply_mode=apply_mode)
+    try:
+        body = set_entry_frontmatter(content, apply=mode)  # type: ignore[arg-type]
+    except FrontmatterEditError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return body, mode == "always"
+
+
+@router.get("/always-quota", response_model=AlwaysQuotaView)
+async def get_always_quota(
+    user: AuthUser,
+    folder_id: str | None = None,
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> AlwaysQuotaView:
+    """Always-pool usage for the injection context (global + optional project)."""
+    usage = await measure_always_usage(repo, user.user_id, folder_id=folder_id)
+    return AlwaysQuotaView(
+        used_chars=usage.used_chars,
+        max_chars=usage.max_chars,
+        percent=usage.percent,
+    )
+
+
 @router.get("", response_model=list[DocumentNodeView])
 async def list_documents(
     user: AuthUser,
@@ -126,7 +202,7 @@ async def list_documents(
 ) -> list[DocumentNodeView]:
     """List a folder's direct children (``parent_id`` omitted = the user's top-level nodes)."""
     nodes = await repo.list_children(user.user_id, parent_id=parent_id)
-    return [DocumentNodeView.model_validate(n) for n in nodes]
+    return [_node(n) for n in nodes]
 
 
 @router.post("", response_model=DocumentDetailView)
@@ -150,23 +226,43 @@ async def create_document(
             raise HTTPException(status_code=400, detail="parent is not a folder")
         folder_id = parent.folder_id
     elif body.role == "rule" and body.kind == "document":
-        # Convention write path: user rules never sit bare at the scope root.
         rules_dir = await repo.ensure_rules_dir(user.user_id, folder_id)
         parent_id = rules_dir.id
         folder_id = rules_dir.folder_id
-    doc = await repo.create(
-        user.user_id,
-        name=body.name,
-        parent_id=parent_id,
-        folder_id=folder_id,
-        kind=body.kind,
-        role=body.role,
-        ai_maintained=False,
-        apply_mode=_resolve_create_apply_mode(
-            role=body.role, kind=body.kind, apply_mode=body.apply_mode
-        ),
-        content=body.content if body.kind == "document" else "",
+
+    preview_body, is_always = await _preview_create_body(
+        role=body.role, kind=body.kind, apply_mode=body.apply_mode, content=body.content
     )
+    if is_always:
+        decision = await check_always_write(
+            repo,
+            user.user_id,
+            folder_id=folder_id,
+            writer="user",
+            editing_existing_always=False,
+            exclude_id=None,
+            new_content=preview_body,
+            new_is_always=True,
+        )
+        if not decision.allowed:
+            _raise_quota_denied(decision.message)
+
+    try:
+        doc = await repo.create(
+            user.user_id,
+            name=body.name,
+            parent_id=parent_id,
+            folder_id=folder_id,
+            kind=body.kind,
+            role=body.role,
+            ai_maintained=False,
+            apply_mode=_resolve_create_apply_mode(
+                role=body.role, kind=body.kind, apply_mode=body.apply_mode
+            ),
+            content=body.content if body.kind == "document" else "",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _detail(doc)
 
 
@@ -189,15 +285,52 @@ async def update_document_content(
     user: AuthUser,
     repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentWriteResult:
-    """Overwrite a document's body (CAS-guarded; conflict instead of clobber, 照 memory.py)."""
+    """Overwrite a document's body (CAS-guarded; conflict instead of clobber)."""
     doc = await repo.get(document_id, user_id=user.user_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
     current_version = memory_version(doc.content)
     if body.baseline is not None and body.baseline != current_version:
-        return DocumentWriteResult(ok=False, version=current_version, conflict=True)
-    await repo.update_content(document_id, user_id=user.user_id, content=body.content)
-    return DocumentWriteResult(ok=True, version=memory_version(body.content))
+        return DocumentWriteResult(
+            ok=False,
+            version=current_version,
+            conflict=True,
+            frontmatter_error=_fm_error(doc),
+        )
+
+    quota_warning: str | None = None
+    if doc.kind == "document" and doc.role == "rule":
+        parsed = parse_entry_frontmatter(body.content)
+        if isinstance(parsed, FrontmatterError):
+            new_is_always = False
+        elif isinstance(parsed, ParsedFrontmatter):
+            new_is_always = parsed.apply == "always"
+        else:
+            new_is_always = False
+
+        editing_existing_always = doc.apply_mode == "always"
+        decision = await check_always_write(
+            repo,
+            user.user_id,
+            folder_id=doc.folder_id,
+            writer="user",
+            editing_existing_always=editing_existing_always,
+            exclude_id=doc.id,
+            new_content=body.content,
+            new_is_always=new_is_always,
+        )
+        if not decision.allowed:
+            _raise_quota_denied(decision.message)
+        quota_warning = decision.warning
+
+    updated = await repo.update_content(document_id, user_id=user.user_id, content=body.content)
+    assert updated is not None
+    return DocumentWriteResult(
+        ok=True,
+        version=memory_version(body.content),
+        frontmatter_error=_fm_error(updated),
+        quota_warning=quota_warning,
+    )
 
 
 @router.patch("/{document_id}", response_model=DocumentDetailView)
@@ -207,7 +340,10 @@ async def patch_document(
     user: AuthUser,
     repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentDetailView:
-    """Rename, reparent, and/or set apply_mode (set ``reparent`` to apply ``parent_id``)."""
+    """Rename, reparent, and/or set apply via frontmatter.
+
+    Set ``reparent`` to apply ``parent_id``.
+    """
     doc = await repo.get(document_id, user_id=user.user_id)
     if doc is None:
         raise HTTPException(status_code=404, detail="document not found")
@@ -225,8 +361,8 @@ async def patch_document(
         await repo.move(
             document_id, user_id=user.user_id, parent_id=body.parent_id, folder_id=new_folder
         )
+    quota_warning: str | None = None
     if body.apply_mode is not None:
-        # Refresh after rename/move so role/kind checks use current row.
         current = await repo.get(document_id, user_id=user.user_id)
         assert current is not None
         if current.ai_maintained:
@@ -237,12 +373,33 @@ async def patch_document(
             raise HTTPException(
                 status_code=400, detail="apply_mode only applies to rule documents"
             )
-        await repo.update_apply_mode(
-            document_id, user_id=user.user_id, apply_mode=body.apply_mode
-        )
+        if body.apply_mode == "always" and current.apply_mode != "always":
+            try:
+                preview = set_entry_frontmatter(current.content, apply="always")
+            except FrontmatterEditError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            decision = await check_always_write(
+                repo,
+                user.user_id,
+                folder_id=current.folder_id,
+                writer="user",
+                editing_existing_always=False,
+                exclude_id=current.id,
+                new_content=preview,
+                new_is_always=True,
+            )
+            if not decision.allowed:
+                _raise_quota_denied(decision.message)
+            quota_warning = decision.warning
+        try:
+            await repo.update_apply_mode(
+                document_id, user_id=user.user_id, apply_mode=body.apply_mode
+            )
+        except FrontmatterEditError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     refreshed = await repo.get(document_id, user_id=user.user_id)
-    assert refreshed is not None  # just fetched under the same session
-    return _detail(refreshed)
+    assert refreshed is not None
+    return _detail(refreshed, quota_warning=quota_warning)
 
 
 @router.delete("/{document_id}", response_model=DocumentWriteResult)

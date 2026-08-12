@@ -251,7 +251,7 @@ def test_format_notes_for_injection_attributes_and_frames():
 
 
 def _ctx(wall: NoteWall | None, on_note=None, *, role: str = "研究员") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r1",
         agent_id="w1",

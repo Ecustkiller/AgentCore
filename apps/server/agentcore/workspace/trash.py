@@ -20,13 +20,15 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
-from agentcore.workspace._paths import is_internal_zone_relpath
+from agentcore.workspace._paths import is_access_denied_oserror, is_internal_zone_relpath
 from agentcore.workspace.protocol import (
     AlreadyExists,
     OutsideWorkspace,
@@ -35,8 +37,30 @@ from agentcore.workspace.protocol import (
 )
 from agentcore.workspace.stage_dirs import TRASH_REL
 
+logger = get_logger(__name__)
+
 _META_NAME = "meta.json"
 _CONTENT_NAME = "content"
+
+
+def _rmtree_retry(path: Path) -> None:
+    """``shutil.rmtree`` with short retries for Windows sharing violations."""
+    delays = (0.0, 0.05, 0.2, 0.5)
+    last: OSError | None = None
+    for delay in delays:
+        if delay:
+            time.sleep(delay)
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError as e:
+            last = e
+            if not is_access_denied_oserror(e):
+                raise
+    assert last is not None
+    raise last
 
 
 def is_internal_zone_path(rel_path: str) -> bool:
@@ -169,13 +193,23 @@ def soft_delete_expanding_trash_ancestor(*, root: Path, target: Path) -> None:
         else:
             soft_children.append((child, child_rel))
 
-    for child, _rel in zone_children:
+    for child, child_rel in zone_children:
         try:
             if child.is_dir():
-                shutil.rmtree(child)
+                _rmtree_retry(child)
             elif child.exists():
                 child.unlink()
         except OSError as e:
+            # Index SQLite can stay share-locked on Windows after a just-finished
+            # ensure (or a cancelled mid-flight thread). Internal zones are
+            # regenerable derived state — don't fail soft-delete of user trees.
+            if is_access_denied_oserror(e) and is_internal_zone_relpath(child_rel):
+                logger.warning(
+                    "workspace.internal_zone_clear_skipped",
+                    path=child_rel,
+                    error=str(e),
+                )
+                continue
             raise WorkspaceIOError(str(e)) from e
 
     for child, child_rel in soft_children:

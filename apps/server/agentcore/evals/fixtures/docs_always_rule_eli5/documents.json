@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "layer": "user_rule",
+      "name": "用户规则.md",
+      "apply_mode": "always",
+      "content": "- 解释任何技术概念时，必须像对 10 岁孩子说话：只用日常比喻，禁止专业术语堆砌，禁止甩缩写而不解释。\n"
+    }
+  ]
+}

@@ -231,7 +231,7 @@ async def test_tool_navigate_via_fake_bridge_updates_registry(fake_bridge, tmp_p
         def __getattr__(self, name):
             return getattr(ws, name)
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -268,7 +268,7 @@ async def test_tool_host_unavailable_when_bridge_returns_503(fake_bridge, tmp_pa
         def __getattr__(self, name):
             return getattr(ws, name)
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",

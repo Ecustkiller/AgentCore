@@ -177,7 +177,7 @@ def test_no_persistent_delivery_means_gate_miss():
 
 
 def _ask_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

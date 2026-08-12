@@ -155,12 +155,19 @@ async def assemble_ceo_turn(
         memory_enabled=memory_enabled,
         conversation_history_access=conversation_history_access,
         folder_id=folder_id,
-        has_memory_topics=bool(prepared.memory_topics),
-        has_on_demand_rules=bool(prepared.on_demand_rules),
         permission_axes=permission_axes,
         # Same live-user gate as ask_user itself, plus desktop-only: web/mobile omit.
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
         desktop_online=channel.desktop_online,
+    )
+    from agentcore.tools.ceo_toolset import wire_ceo_consult
+
+    await wire_ceo_consult(
+        chat_tools,
+        skill_registry=prepared.skill_registry,
+        folder_id=folder_id,
+        memory_enabled=memory_enabled,
+        user_id=prepared.base_tool_context.user_id,
     )
 
     # AI 协作白板: in a 白板会话, hand the CEO the board tools so it can draw on
@@ -171,14 +178,15 @@ async def assemble_ceo_turn(
     if prepared.board_channel is not None:
         register_board_ceo_tools(chat_tools)
 
-    # The entry chat agent gets the SLIM CEO core + the always-on 能力目录 (提示词
-    # 瘦身 P2) + inline citation guidance. The directory lists only the skills whose
-    # required tools are actually wired this turn (derived from the assembled CEO
-    # toolset), so it never advertises a capability the CEO does not hold (e.g.
-    # the ask_user_* skills appear only on the live-user path, when ask_user is wired)
-    # — the same invariant the old per-hint gating enforced. The advanced「怎么做」
-    # detail no longer rides every turn; the CEO pulls it via consult_skill.
+    # The entry chat agent gets the SLIM CEO core + the unified ``<按需目录>``.
+    # Advanced HOW detail is pulled via ``consult``.
     ceo_tool_names = {schema.name for schema in chat_tools.list_all()}
+    on_demand_entries: list = []
+    consult_tool = chat_tools.get_optional("consult")
+    if consult_tool is not None and getattr(consult_tool, "source", None) is not None:
+        on_demand_entries = list(
+            await consult_tool.source.list_directory(prepared.base_tool_context.user_id)
+        )
     explore_reason: str | None = None
     project_nav_stale = False
     project_profile_empty_soft = False
@@ -269,8 +277,7 @@ async def assemble_ceo_turn(
         prepared.system_prompt,
         skill_registry=prepared.skill_registry,
         ceo_tool_names=ceo_tool_names,
-        memory_topics=prepared.memory_topics,
-        on_demand_rules=prepared.on_demand_rules,
+        on_demand_entries=on_demand_entries,
         project_catalog=prepared.project_catalog,
         cold_start_explore=explore_reason or False,
         project_nav_stale=project_nav_stale,

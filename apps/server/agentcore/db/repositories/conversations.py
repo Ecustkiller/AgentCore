@@ -813,3 +813,30 @@ class ConversationRepository:
             .values(local_root_id=root_id, local_subpath=subpath)
         )
         await self._session.commit()
+
+    async def set_auto_desk_folder_id(
+        self,
+        conversation_id: str,
+        folder_id: str,
+        *,
+        user_id: str,
+    ) -> str | None:
+        """Persist bare-chat auto cloud desk id (never touches birth ``folder_id``).
+
+        First-write wins: if a row already has ``auto_desk_folder_id``, return the
+        existing value without changing it. Returns the effective id, or ``None``
+        when the conversation is missing / not owned.
+        """
+        cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
+        if not cleaned:
+            return None
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if conv is None:
+            return None
+        existing = getattr(conv, "auto_desk_folder_id", None)
+        if isinstance(existing, str) and existing.strip():
+            return existing.strip()
+        conv.auto_desk_folder_id = cleaned
+        await self._session.commit()
+        await self._session.refresh(conv)
+        return cleaned

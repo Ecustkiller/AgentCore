@@ -46,6 +46,7 @@ from .errors import (
     _maybe_channel_dead_error,
     _office_extract_budget_error,
     _outside_workspace_msg,
+    _path_missing_error,
 )
 from .path_hints import enrich_missing_path_message
 
@@ -212,7 +213,7 @@ async def _file_not_found_error(
 ) -> ToolResult:
     """``PathNotFound`` for file_read — landmark / root-search tip (shared path_hints)."""
     base = f"文件不存在：{rel_path}"
-    return _error(
+    return _path_missing_error(
         await enrich_missing_path_message(context, rel_path, base=base),
         start,
     )
@@ -777,13 +778,13 @@ class FileListTool:
                 )
             # ServerWorkspace.list maps missing paths to NotADirectory (not PathNotFound).
             base = f"不是目录：{directory}"
-            return _error(
+            return _path_missing_error(
                 await enrich_missing_path_message(context, str(directory), base=base),
                 start,
             )
         except PathNotFound:
             if _looks_like_external_directory(str(directory)):
-                return _error(
+                return _path_missing_error(
                     f"区外路径不存在或未授权：{directory}。"
                     + _external_directory_hint(context.backend),
                     start,
@@ -796,7 +797,7 @@ class FileListTool:
                     duration_ms=int((time.monotonic() - start) * 1000),
                 )
             base = f"列目录失败：路径不存在：{directory}"
-            return _error(
+            return _path_missing_error(
                 await enrich_missing_path_message(context, str(directory), base=base),
                 start,
             )
@@ -808,8 +809,9 @@ class FileListTool:
                 return _error(
                     f"列目录失败：{e}。" + _external_directory_hint(context.backend),
                     start,
+                    user_face=False,
                 )
-            return _error(f"列目录失败：{e}", start)
+            return _error(f"列目录失败：{e}", start, user_face=False)
         finally:
             context.backend.ai_list_reveal_archives = prev_reveal
 

@@ -1159,6 +1159,7 @@ class TestRunTool:
                 EXEC_ENV_TIMEOUT_RETIRE_STEER,
             )
             from agentcore.tools.sandbox.exec_env import (
+                EXEC_ENV_PROBE_FAIL_CODE,
                 is_exec_env_probe_failure,
             )
 
@@ -1174,7 +1175,7 @@ class TestRunTool:
                     duration_ms=duration_ms,
                     metadata={
                         "check": check,
-                        "code": EXEC_TIMEOUT_CODE,
+                        "code": EXEC_ENV_PROBE_FAIL_CODE,
                         "exec_env_timeout": True,
                         "error_class": "permanent",
                         "retire_tools": sorted(EXEC_ENV_TIMEOUT_FAMILY),

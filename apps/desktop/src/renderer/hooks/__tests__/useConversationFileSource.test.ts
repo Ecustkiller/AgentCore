@@ -15,6 +15,7 @@ const { showBrowser, createPage, openWorkspaceHtml } = vi.hoisted(() => ({
 vi.mock("@/hooks/useConversations", () => ({
   useConversations: () => [],
   getConversations: () => [],
+  useGroupedConversationsSettled: () => true,
 }));
 vi.mock("@/hooks/useFolders", () => ({ useFolders: () => [] }));
 vi.mock("@/hooks/useWorkspaces", () => ({ useConversationWorkspace: vi.fn() }));

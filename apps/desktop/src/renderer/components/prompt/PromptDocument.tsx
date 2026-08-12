@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { useMemo } from "react";
 
 /** Structured prompt / skill body: tagged sections rendered as Markdown.
- * Shared by 工具箱能力图鉴, 收到的上下文, and consult_skill result cards. */
+ * Shared by 工具箱能力图鉴, 收到的上下文, and consult / consult_skill result cards. */
 export function PromptDocument({
   text,
   className,

@@ -523,7 +523,7 @@ async def test_mcp_dynamic_tool_call_and_no_channel():
         description="Echo",
         input_schema={"type": "object", "properties": {"text": {"type": "string"}}},
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -537,7 +537,7 @@ async def test_mcp_dynamic_tool_call_and_no_channel():
 
     channel = AsyncMock()
     channel.request_mcp = AsyncMock(return_value={"content": "hi", "isError": False})
-    ctx2 = ToolContext(
+    ctx2 = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

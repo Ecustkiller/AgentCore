@@ -121,6 +121,47 @@ async def resolve_local_binding(session: AsyncSession, conv: Conversation) -> Lo
     )
 
 
+async def resolve_folder_local_binding(
+    session: AsyncSession, folder_id: str
+) -> LocalBinding | None:
+    """Local binding for a registered Folder (landing / target desk), or None if cloud."""
+    from agentcore.conversation.scratch import resolve_conversation_local_binding
+    from agentcore.db.repositories import FolderRepository
+
+    cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
+    if not cleaned:
+        return None
+    folder = await FolderRepository(session).get_by_id_unscoped(cleaned)
+    if not folder:
+        return None
+    return resolve_conversation_local_binding(
+        local_root_id=folder.local_root_id,
+        local_subpath=folder.local_subpath,
+        label=folder.name or "workspace",
+    )
+
+
+def resolve_turn_file_workspace(
+    *,
+    birth_folder_id: str | None,
+    auto_desk_folder_id: str | None,
+) -> tuple[str | None, str | None]:
+    """Pick (file_folder_id, auto_desk) for CEO file tools without changing affiliation.
+
+    Birth ``folder_id`` wins. Bare chat with a persisted landing desk → that Folder.
+    Returns ``(workspace_folder_id, auto_desk_for_context)``.
+    """
+    birth = birth_folder_id.strip() if isinstance(birth_folder_id, str) else None
+    if birth:
+        return birth, None
+    auto = (
+        auto_desk_folder_id.strip()
+        if isinstance(auto_desk_folder_id, str) and auto_desk_folder_id.strip()
+        else None
+    )
+    return auto, auto
+
+
 async def generate_title(
     *,
     provider: LLMProvider,

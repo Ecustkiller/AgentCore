@@ -24,7 +24,7 @@ from tests.conftest import LogSpy
 def _ctx() -> ToolContext:
     # No escalation channel / on_escalate callback → the non-blocking escalate path, which
     # still emits worker.escalate before returning the "proceed on your assumption" ack.
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="w1",
         agent_id="a",
@@ -170,7 +170,7 @@ async def test_blocking_channel_forwards_browser_login():
         seen["awaiting"] = awaiting
         return EscalationOutcome(status="resolved", answer="已登录")
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="w1",
         agent_id="a",
@@ -221,7 +221,7 @@ async def test_browser_login_skips_ceo_arbitration_when_coordination_active(monk
         "agentcore.runtime.coordination.session.active_coordination",
         lambda _eid: _FakeCoord(),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="w1",
         agent_id="a",

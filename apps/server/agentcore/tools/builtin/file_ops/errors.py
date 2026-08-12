@@ -26,15 +26,35 @@ def _error(
     *,
     contract_failure: bool = False,
     metadata: dict[str, Any] | None = None,
+    failure_code: str | None = None,
+    user_face: bool = True,
 ) -> ToolResult:
     """Build a failed ToolResult with elapsed timing.
 
-    ``contract_failure`` marks a self-correctable argument-contract rejection (e.g. a
-    concurrent-write collision the model fixes by renaming) so the run-scoped tool
-    circuit breaker skips normal failure tallies — see
-    :class:`~agentcore.tools.protocol.ToolResult`. Explicit ``retire_tools`` in
-    ``metadata`` still hard-disables named tools (e.g. workspace channel dead).
+    ``contract_failure`` marks a self-correctable argument/environment rejection
+    (e.g. concurrent-write collision the model fixes by renaming, or path-not-found
+    the model fixes by changing ``path``) so the run-scoped tool circuit breaker
+    skips normal failure tallies — see :class:`~agentcore.tools.protocol.ToolResult`.
+    Explicit ``retire_tools`` in ``metadata`` still hard-disables named tools
+    (e.g. workspace channel dead).
+
+    User face (``tool_use_end.failure``):
+    - ``user_face=True`` (default) → product Chinese in ``error`` also fills
+      ``failure_message`` (dynamic paths with filenames, etc.).
+    - ``user_face=False`` + stable ``metadata["code"]`` / ``failure_code`` → curated
+      table only (no lift of ``str(exc)`` / internal tokens).
     """
+    meta = dict(metadata or {})
+    code = failure_code
+    if isinstance(code, str) and code.strip():
+        meta.setdefault("code", code.strip())
+    elif code is None:
+        raw = meta.get("code")
+        code = raw.strip() if isinstance(raw, str) and raw.strip() else None
+    # Prefer curated-by-code when a stable code is present; only pass through
+    # ``error`` as failure_message when the call site opts into dynamic product copy
+    # without a code (filenames / paths).
+    face_message = error if (user_face and not code) else None
     return ToolResult(
         tool_call_id="",
         success=False,
@@ -42,7 +62,9 @@ def _error(
         error=error,
         duration_ms=int((time.monotonic() - start) * 1000),
         contract_failure=contract_failure,
-        metadata=dict(metadata or {}),
+        metadata=meta,
+        failure_message=face_message,
+        failure_code=code,
     )
 
 
@@ -83,6 +105,8 @@ def _liveness_workspace_error(detail: str, start: float) -> ToolResult:
         channel_dead_error_message(detail),
         start,
         metadata=channel_dead_retire_metadata(),
+        # Model-facing text may embed channel detail; user face uses curated code.
+        user_face=False,
     )
 
 
@@ -95,6 +119,7 @@ def _op_liveness_timeout_error(detail: str, start: float) -> ToolResult:
         ),
         start,
         metadata=op_liveness_timeout_metadata(),
+        user_face=False,
     )
 
 
@@ -116,7 +141,7 @@ def _map_workspace_read_error(exc: WorkspaceError, *, path: str, start: float) -
     dead = _maybe_channel_dead_error(exc, start)
     if dead is not None:
         return dead
-    return _error(f"读取文件失败：{exc}", start)
+    return _error(f"读取文件失败：{exc}", start, user_face=False)
 
 
 def _file_read_path_ceiling_error(error: str, start: float) -> ToolResult:
@@ -126,6 +151,17 @@ def _file_read_path_ceiling_error(error: str, start: float) -> ToolResult:
         start,
         contract_failure=True,
     )
+
+
+def _path_missing_error(error: str, start: float) -> ToolResult:
+    """Path / entry does not exist — fix by changing args; skip breaker tally.
+
+    Platform bugs (missing attachment in a delegated workspace) and model path
+    mistakes share this marker: neither should disable ``file_read`` / mutate tools.
+    Same-path thrash is constrained elsewhere (validation fingerprint streak /
+    ``FILE_READ_SAME_PATH_MAX``), not by burning the run-scoped tool fuse.
+    """
+    return _error(error, start, contract_failure=True)
 
 
 def _outside_workspace_msg(path: str, *, location: str | None = None) -> str:

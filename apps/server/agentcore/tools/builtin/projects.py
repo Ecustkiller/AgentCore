@@ -233,6 +233,7 @@ class ListProjectsTool:
                     success=False,
                     output=f"列出项目失败。{DATABASE_UNAVAILABLE_MESSAGE}",
                     error=DATABASE_UNAVAILABLE_CODE,
+                    failure_code=DATABASE_UNAVAILABLE_CODE,
                 )
             if cloud_fail:
                 return ToolResult(
@@ -335,6 +336,7 @@ class ResolveProjectTool:
                     success=False,
                     output=f"解析项目失败。{DATABASE_UNAVAILABLE_MESSAGE}",
                     error=DATABASE_UNAVAILABLE_CODE,
+                    failure_code=DATABASE_UNAVAILABLE_CODE,
                 )
             if cloud_fail:
                 return ToolResult(

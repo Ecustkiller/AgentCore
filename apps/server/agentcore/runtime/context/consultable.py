@@ -1,13 +1,8 @@
 """Small shared shape for「目录 + 按名取文」consult sources (上下文工程 · 扳机 A).
 
-Third true consult source (``consult_rule``) lands this milestone → extract a *small*
-:class:`Consultable` for directory listing + fetch-by-name. This is NOT a mega
-``ContextProvider`` / Tool+Skill unifier; skills / memory / rules stay separate
-implementations that may adopt the shape over time.
-
-``consult_memory`` / ``consult_skill`` keep their existing behaviour; they are not
-forced through this Protocol yet (待收敛 — prefer copying a third tool that fits
-the shape over a behaviour-changing rewrite).
+步 1 已落地：skill / rule / memory 均适配本 Protocol，经
+:class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` 聚合成单一源，
+供 ``consult`` 工具与提示词 ``<按需目录>`` 共用（目录与按名拉取不可漂移）。
 """
 
 from __future__ import annotations

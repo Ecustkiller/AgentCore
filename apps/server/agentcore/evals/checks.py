@@ -81,30 +81,49 @@ class ToolArgsValidCheck:
         return CheckOutcome(self.name, True, f"{len(matched)} call(s) valid")
 
 
+# ``equals`` 未设置的哨兵：与合法期望值 ``None`` 区分（``ToolArgEquals`` 可断言参数为 null）。
+_EQUALS_UNSET: Any = object()
+
+
 @dataclass
 class ToolArgNonEmptyCheck:
-    """指定工具的某次调用，入参 ``arg`` 存在且**非空**（非空 list/str/dict 等真值）。
+    """指定工具的某次调用，入参 ``arg`` 的存在性 / 取值断言（两种模式共用本类）。
 
-    比 ``ToolArgsValid.required``（仅查键是否存在）更强：断言「模型不仅填了这个参数、还真
-    带了内容」。典型用途是验证 escalate 的结构化 ``questions``——worker 真把【只有用户能定】
-    的岔路拆成了选项（而非把键留空 / 给空数组）。任一匹配调用满足即通过。
+    - **非空**（默认，注册名 ``ToolArgNonEmpty``）：``arg`` 存在且**非空**（非空 list/str/dict
+      等真值）。比 ``ToolArgsValid.required``（仅查键是否存在）更强——典型用途是验证 escalate
+      的结构化 ``questions``。非法 JSON 跳过该次调用。
+    - **精确相等**（``equals`` 已设，注册名 ``ToolArgEquals``）：``arg`` 存在且 ``== equals``。
+      用途是精确量「consult 拉的是哪一条」——区分拉对 vs 拉错但蒙对答案。非法 JSON 直接失败。
+
+    任一匹配调用满足即通过。
     """
 
     tool: str = ""
     arg: str = ""
+    equals: Any = field(default=_EQUALS_UNSET)
     name: str = "ToolArgNonEmpty"
 
     def run(self, case: EvalCase, outcome: TurnOutcome) -> CheckOutcome:
+        want_equals = self.equals is not _EQUALS_UNSET
         matched = [(n, a) for (n, a) in outcome.tool_calls if n == self.tool]
         if not matched:
             return CheckOutcome(self.name, False, f"no call to {self.tool!r}")
         for n, raw in matched:
             try:
                 args = json.loads(raw) if raw else {}
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                if want_equals:
+                    return CheckOutcome(self.name, False, f"{n}: bad JSON ({e})")
                 continue
-            if args.get(self.arg):  # truthy ⇒ present & non-empty (空 list/str/dict 为假)
+            if want_equals:
+                if self.arg in args and args[self.arg] == self.equals:
+                    return CheckOutcome(self.name, True, f"{n}.{self.arg}=={self.equals!r}")
+            elif args.get(self.arg):  # truthy ⇒ present & non-empty (空 list/str/dict 为假)
                 return CheckOutcome(self.name, True, f"{n}.{self.arg} non-empty")
+        if want_equals:
+            return CheckOutcome(
+                self.name, False, f"{self.tool}.{self.arg}!={self.equals!r} in all calls"
+            )
         return CheckOutcome(self.name, False, f"{self.tool}.{self.arg} empty/missing in all calls")
 
 
@@ -532,6 +551,12 @@ _REGISTRY: dict[str, Callable[[dict[str, Any]], Any]] = {
     ),
     "ToolArgNonEmpty": lambda a: ToolArgNonEmptyCheck(
         tool=a.get("tool", ""), arg=a.get("arg", "")
+    ),
+    "ToolArgEquals": lambda a: ToolArgNonEmptyCheck(
+        tool=a.get("tool", ""),
+        arg=a.get("arg", ""),
+        equals=a.get("equals"),
+        name="ToolArgEquals",
     ),
     "HasCitations": lambda a: HasCitationsCheck(min_count=int(a.get("min", 1))),
     "Delegated": lambda a: DelegatedCheck(),

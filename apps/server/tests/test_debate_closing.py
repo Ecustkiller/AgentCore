@@ -247,7 +247,7 @@ class _SequenceDraftLLM:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r1",
         agent_id="r1",

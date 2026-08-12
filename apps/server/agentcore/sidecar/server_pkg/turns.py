@@ -7,18 +7,50 @@ import contextlib
 from typing import Any
 
 from agentcore.conversation.common import preview
+from agentcore.core.errors import InferenceTokenExpiredError
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.resolve import resolve_turn_model
 from agentcore.runtime.checkpoints import CheckpointDecision
-from agentcore.runtime.events import EventSink, FinishReason, message_end
-from agentcore.runtime.journal import runs_from_entries
+from agentcore.runtime.events import EventSink, FinishReason, error_event, message_end
+from agentcore.runtime.journal import KIND_TURN_END, runs_from_entries
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.sidecar import protocol
 from agentcore.sidecar.server_pkg.result import trim_result
 
 logger = get_logger(__name__)
+
+
+def structured_missing_inference_error() -> dict[str, str]:
+    """``{code, message}`` for sidecar turns that lack inference credentials.
+
+    Same shape local finalize already persists into ``usage.error`` / ``turn_end.error``.
+    """
+    err = InferenceTokenExpiredError()
+    return {"code": str(err.code), "message": err.message}
+
+
+def missing_inference_turn_result(message_id: str) -> dict[str, Any]:
+    """Synthetic failed-turn result when startTurn/resume has no inference creds."""
+    structured = structured_missing_inference_error()
+    return {
+        "message_id": message_id,
+        "content": "",
+        "error": structured,
+        "error_code": structured["code"],
+        "finish_reason": FinishReason.ERROR,
+        "journal_entries": [
+            {
+                "kind": KIND_TURN_END,
+                "payload": {
+                    "finish_reason": FinishReason.ERROR.value,
+                    "error": structured,
+                },
+                "ts": None,
+            }
+        ],
+    }
 
 
 def normalize_folder_id_param(raw: Any) -> str | None:
@@ -223,6 +255,53 @@ class TurnExecutionMixin:
         # stick forever when DB is down on the legacy fallback path (方案一 · 诚实失败).
         pump: asyncio.Task[None] | None = None
         try:
+            # No inference JWT (probe-spawned sidecar / mint omitted) → fail before
+            # prepare/build_turn_router with structured INFERENCE_TOKEN_EXPIRED so
+            # outbox → local finalize can land usage.error (no English internal leak).
+            if turn_creds is None:
+                result = missing_inference_turn_result(message_id)
+                structured = result["error"]
+                assert isinstance(structured, dict)
+                logger.warning(
+                    "sidecar.inference_credentials_missing",
+                    op="startTurn",
+                    turn_id=turn_id,
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                )
+                pump = asyncio.create_task(self._pump(turn_id, sink))
+                try:
+                    sink.emit(
+                        error_event(
+                            str(structured["code"]),
+                            str(structured["message"]),
+                        )
+                    )
+                    sink.emit(message_end(FinishReason.ERROR))
+                finally:
+                    sink.close(reason="sidecar_missing_inference")
+                await pump
+                if outbox is not None:
+                    await self._outbox_finalize(
+                        outbox,
+                        conversation_id=conversation_id,
+                        user_message=user_message,
+                        user_message_id=user_message_id,
+                        trace_id=trace_id,
+                        result=result,
+                    )
+                await self._send(
+                    protocol.make_result(
+                        request_id,
+                        trim_result(
+                            turn_id,
+                            result,
+                            model=resolve_turn_model(None),
+                        ),
+                    )
+                )
+                return
+
             # Prefer params.folderId (desktop inject); key absent → DB load (old desktop).
             # Explicit null/"" = bare chat — do not open local PG just to learn that.
             folder_id = await resolve_start_turn_folder_id(params, conversation_id)
@@ -337,8 +416,7 @@ class TurnExecutionMixin:
                     trace_id=trace_id,
                     result=result,
                 )
-            # Surface the model this turn actually ran on: creds present ⇒ the
-            # cloud-proxy/account model; None (dev fallback) ⇒ settings.platform_model.
+            # Surface the model this turn actually ran on (cloud-proxy / account model).
             await self._send(
                 protocol.make_result(
                     request_id,
@@ -491,6 +569,31 @@ class TurnExecutionMixin:
         models = dict(model_overrides or {})
         # Resolved once so the pipeline runs on it AND the reply surfaces the same model.
         resume_creds = self._creds_for(conversation_id, trace_id, turn_id)
+        if resume_creds is None:
+            # Belt-and-suspenders: handler should have refused before claim. Roll back
+            # so the pause card stays retryable after a remint.
+            structured = structured_missing_inference_error()
+            logger.warning(
+                "sidecar.inference_credentials_missing",
+                op="resume",
+                turn_id=turn_id,
+                conversation_id=conversation_id,
+            )
+            if self._paused_store is not None and not settlement_prewritten:
+                await self._paused_store.rollback_claim(turn_id)
+            await self._send_to_request_ids(
+                reply_ids,
+                request_id,
+                lambda rid: protocol.make_error(
+                    rid,
+                    protocol.RESUME_RETRYABLE,
+                    structured["message"],
+                    data=structured,
+                ),
+            )
+            self._unregister_turn(turn_id)
+            return
+
         sink = EventSink()
         backend = self._make_backend(external_mounts=external_mounts)
         saver, deleter = self._suspension_hooks()

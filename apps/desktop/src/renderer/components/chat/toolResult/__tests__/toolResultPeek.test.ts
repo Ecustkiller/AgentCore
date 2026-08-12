@@ -101,6 +101,30 @@ describe("toolResultPeek", () => {
     ).toBe("部署流程");
   });
 
+  it("names the entry for unified consult (display.name)", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "consult",
+          display: { name: "部署流程" },
+          result: "## 笔记\n- x",
+        }),
+      ),
+    ).toBe("部署流程");
+  });
+
+  it("names the rule for historical consult_rule", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "consult_rule",
+          display: { rule: "合规附录" },
+          result: "…",
+        }),
+      ),
+    ).toBe("合规附录");
+  });
+
   it("summarizes search_conversations by result_count", () => {
     expect(
       toolResultPeek(
@@ -133,6 +157,35 @@ describe("toolResultPeek", () => {
     expect(
       toolResultPeek(data({ toolName: "grep", result: "match line\nmore" })),
     ).toBe("match line");
+  });
+
+  it("prefers failure.message over model-facing result on error", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "web_search",
+          status: "error",
+          result:
+            "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+          failure: {
+            message: "工具执行失败，请稍后重试。",
+            code: "TOOL_ERROR",
+          },
+        }),
+      ),
+    ).toBe("工具执行失败，请稍后重试。");
+  });
+
+  it("keeps result-first-line peek when failure is absent on error", () => {
+    expect(
+      toolResultPeek(
+        data({
+          toolName: "host_shell",
+          status: "error",
+          result: "ExecEnvProbeFailed: 127.0.0.1:5432",
+        }),
+      ),
+    ).toBe("ExecEnvProbeFailed: 127.0.0.1:5432");
   });
 
   it("summarizes code_diagnostics as N 个类型错误", () => {

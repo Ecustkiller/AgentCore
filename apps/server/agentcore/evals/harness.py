@@ -35,6 +35,7 @@ from agentcore.config import settings
 from agentcore.core.log_context import log_context, new_trace_id
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.evals.documents_fixture import apply_documents_fixture, purge_user_documents
 from agentcore.evals.eval_modes import KNOWN_MODELS, resolve_profile_set
 from agentcore.evals.prompt_profiles import resolve_prompt_profile
 from agentcore.evals.recording_sink import RecordingSink
@@ -349,14 +350,26 @@ class EvalHarness:
         # turn_id (already used as the failure-log key below). Evals never emit
         # chat.turn_complete, so these traces stay correctly excluded from the 空转率 turn set.
         ws = str(ws_root)
-        with (
-            log_context(trace_id=new_trace_id(), user_id=_EVAL_USER_ID, case=case.id),
-            use_profile(prompt_profile),
-            use_plan_only(self._plan_only),
-        ):
-            try:
-                if case.path == "single":
-                    return await self._run_single(
+        # 固定 ``_EVAL_USER_ID`` 共享 documents 表：每例先清再预置，结束再清，防用例间污染。
+        await self._reset_eval_documents(case)
+        try:
+            with (
+                log_context(trace_id=new_trace_id(), user_id=_EVAL_USER_ID, case=case.id),
+                use_profile(prompt_profile),
+                use_plan_only(self._plan_only),
+            ):
+                try:
+                    if case.path == "single":
+                        return await self._run_single(
+                            case,
+                            backend,
+                            profiles,
+                            sink,
+                            t0,
+                            workspace_root=ws,
+                            llm_credentials=llm_credentials,
+                        )
+                    return await self._run_team(
                         case,
                         backend,
                         profiles,
@@ -365,31 +378,49 @@ class EvalHarness:
                         workspace_root=ws,
                         llm_credentials=llm_credentials,
                     )
-                return await self._run_team(
-                    case,
-                    backend,
-                    profiles,
-                    sink,
-                    t0,
-                    workspace_root=ws,
-                    llm_credentials=llm_credentials,
-                )
-            except Exception as e:  # react_loop/pipeline 失败 → error 态（不让一例炸掉整套）
-                logger.error("evals.run_case_failed", case=case.id, error=str(e), exc_info=True)
-                tool_calls = list(sink.tool_calls)
-                return TurnOutcome(
-                    content="",
-                    finish_reason="error",
-                    rounds=0,
-                    tool_calls=tool_calls,
-                    latency_ms=_ms(t0),
-                    error=str(e),
-                    plan_runs=list(sink.plan_runs),
-                    plan_type=sink.plan_type,
-                    collab_interactions=dict(sink.collab_interactions),
-                    artifacts=artifacts_from_tool_calls(tool_calls),
-                    workspace_root=ws,
-                )
+                except Exception as e:  # react_loop/pipeline 失败 → error 态（不让一例炸掉整套）
+                    logger.error(
+                        "evals.run_case_failed", case=case.id, error=str(e), exc_info=True
+                    )
+                    tool_calls = list(sink.tool_calls)
+                    return TurnOutcome(
+                        content="",
+                        finish_reason="error",
+                        rounds=0,
+                        tool_calls=tool_calls,
+                        latency_ms=_ms(t0),
+                        error=str(e),
+                        plan_runs=list(sink.plan_runs),
+                        plan_type=sink.plan_type,
+                        collab_interactions=dict(sink.collab_interactions),
+                        artifacts=artifacts_from_tool_calls(tool_calls),
+                        workspace_root=ws,
+                    )
+        finally:
+            try:
+                await purge_user_documents(_EVAL_USER_ID)
+            except Exception as e:  # noqa: BLE001 - 清理失败不得淹没本例 outcome
+                logger.warning("evals.documents_purge_failed", case=case.id, error=str(e))
+
+    async def _reset_eval_documents(self, case: EvalCase) -> None:
+        """清空 eval 用户 documents，并按需写入本例 ``documents_fixture``。
+
+        无 ``documents_fixture`` 时 purge 失败软降级（脚本化假 provider 冒烟可不连 DB）；
+        声明了夹具则 purge/apply 硬失败——预置是本例的契约。
+        """
+        try:
+            await purge_user_documents(_EVAL_USER_ID)
+        except Exception as e:  # noqa: BLE001
+            if case.documents_fixture:
+                raise
+            logger.warning("evals.documents_purge_skipped", case=case.id, error=str(e))
+            return
+        if not case.documents_fixture:
+            return
+        root = self._fixtures_dir / case.documents_fixture
+        if not root.is_dir():
+            raise EvalConfigError(f"[{case.id}] documents_fixture 目录不存在: {root}")
+        await apply_documents_fixture(root, _EVAL_USER_ID)
 
     async def _run_single(
         self,
@@ -415,7 +446,7 @@ class EvalHarness:
         )
         profile = profiles.get("chat")
         citations: list[dict] = []
-        ctx = ToolContext(
+        ctx = ToolContext.create(
             execution_id=new_id(),
             run_id=new_id(),
             agent_id=_EVAL_USER_ID,

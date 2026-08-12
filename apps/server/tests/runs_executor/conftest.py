@@ -56,7 +56,7 @@ _WS_ROOT = Path(tempfile.mkdtemp(prefix="exec-ws-"))
 def _ctx() -> ToolContext:
     # These fake-provider runs never invoke a real tool, so the backend is inert — it
     # only has to satisfy the ToolContext contract and answer index_files() (empty).
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

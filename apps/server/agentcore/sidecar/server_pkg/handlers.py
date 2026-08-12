@@ -71,7 +71,7 @@ class HandlerMixin:
             "sidecar.initialized",
             user_id=self._user_id,
             root_label=self._root.name,
-            inference="cloud-proxy" if self._creds else "platform-fallback",
+            inference="cloud-proxy" if self._creds else "missing",
             approvals=self._approvals_enabled,
             permission_axes=self._permission_axes.to_dict(),
             durable_pause=self._paused_store is not None,
@@ -294,8 +294,9 @@ class HandlerMixin:
         the cloud inference proxy (so the platform key never lands on the user's
         machine). ``model`` is server-resolved at token mint and echoed here so the
         local engine logs / profiles match the proxy's upstream model.
-        ``None`` / missing falls back to the sidecar's own server config
-        (a dev convenience — never the production posture).
+        ``None`` / missing / incomplete → no credentials; startTurn / resume refuse
+        with structured ``INFERENCE_TOKEN_EXPIRED`` (dev also BYOK — no silent
+        platform-key fallback).
         """
         if not isinstance(raw, dict):
             return None
@@ -368,8 +369,9 @@ class HandlerMixin:
         A sidecar is long-lived (one per root, until app quit) but the cloud-proxy
         token rotates (2h TTL), so the desktop re-sends the current ``inference`` on
         every startTurn / resume — this keeps a day-long session from 401-ing once the
-        initialize-time token expires. Absent ⇒ keep the initialize-time creds (e.g.
-        the dev platform-fallback).
+        initialize-time token expires. Absent key ⇒ keep the initialize-time creds.
+        Explicit null / incomplete clears them; the next turn then early-rejects with
+        ``INFERENCE_TOKEN_EXPIRED`` (no platform-key fallback).
         """
         if "inference" in params:
             self._creds = self._parse_inference(params.get("inference"))
@@ -380,6 +382,32 @@ class HandlerMixin:
         # Bridge creds: always apply when key present (including explicit null → clear).
         if "browserBridge" in params:
             self._apply_browser_bridge(params)
+
+    async def _reject_if_missing_inference(self, request_id: Any, *, op: str) -> bool:
+        """Refuse startTurn/resume when no inference JWT is bound. True ⇒ caller returns.
+
+        Product code rides JSON-RPC ``error.data`` so callers / writeback adapters can
+        map to ``INFERENCE_TOKEN_EXPIRED`` without scraping English internals.
+        """
+        if self._creds is not None:
+            return False
+        from agentcore.sidecar.server_pkg.turns import structured_missing_inference_error
+
+        structured = structured_missing_inference_error()
+        logger.warning(
+            "sidecar.inference_credentials_missing",
+            op=op,
+            request_id=request_id,
+        )
+        await self._send(
+            protocol.make_error(
+                request_id,
+                protocol.INVALID_REQUEST,
+                structured["message"],
+                data=structured,
+            )
+        )
+        return True
 
     @staticmethod
     def _apply_browser_bridge(params: dict[str, Any]) -> None:
@@ -473,7 +501,8 @@ class HandlerMixin:
         # The response to startTurn is DEFERRED until the turn completes (it carries
         # the final result); the live events flow as ``turn/event`` notifications in
         # the meantime. Spawning a task lets ``respond`` / ``cancel`` be serviced by
-        # the read loop while the turn runs.
+        # the read loop while the turn runs. Missing inference is refused inside
+        # ``_run_turn`` (structured result + outbox) before prepare/build_turn_router.
         task = asyncio.create_task(self._run_turn(request_id, turn_id, params))
         self._register_turn(turn_id, task, conversation_id=conversation_id)
 
@@ -608,6 +637,14 @@ class HandlerMixin:
             )
             return
 
+        # Refresh + gate BEFORE claim so a missing JWT never consumes the pause frame
+        # (desktop remints and retries; RESUME_RETRYABLE-class keep-card semantics).
+        self._refresh_creds(params)
+        self._refresh_permission_axes(params)
+        self._refresh_user_id(params)
+        if await self._reject_if_missing_inference(request_id, op="resume"):
+            return
+
         suspension = await self._paused_store.claim(message_id, conversation_id=conversation_id)
         if suspension is None:
             await self._send(
@@ -626,10 +663,6 @@ class HandlerMixin:
         model_overrides = parsed["model_overrides"]
         trace_id = parsed["trace_id"]
         user_message_id = parsed["user_message_id"]
-        # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
-        self._refresh_creds(params)
-        self._refresh_permission_axes(params)
-        self._refresh_user_id(params)
         # Per-turn account id wins over the freeze-in-frame value (probe may have
         # initialized as local; login mid-session must not leave ToolContext on the
         # alias UUID).
@@ -828,6 +861,8 @@ class HandlerMixin:
         self._refresh_creds(params)
         self._refresh_permission_axes(params)
         self._refresh_user_id(params)
+        if await self._reject_if_missing_inference(request_id, op="resume"):
+            return
         peeked.user_id = self._user_id
         apply_rpc_folder_binding_to_suspension(peeked, params)
 

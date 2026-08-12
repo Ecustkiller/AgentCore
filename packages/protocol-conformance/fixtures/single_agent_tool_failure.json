@@ -34,7 +34,11 @@
         "tool_call_id": "tc1",
         "tool_name": "web_search",
         "status": "error",
-        "result": "搜索服务暂时不可用，请稍后重试。"
+        "result": "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+        "failure": {
+          "message": "本地搜索服务不可用，请稍后重试",
+          "code": "searxng_unreachable"
+        }
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
@@ -95,8 +99,12 @@
         "arguments": {
           "query": "AgentCore"
         },
-        "result": "搜索服务暂时不可用，请稍后重试。",
-        "status": "error"
+        "result": "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+        "status": "error",
+        "failure": {
+          "message": "本地搜索服务不可用，请稍后重试",
+          "code": "searxng_unreachable"
+        }
       },
       {
         "kind": "content",

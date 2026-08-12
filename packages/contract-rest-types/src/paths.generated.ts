@@ -138,6 +138,7 @@ export const REST_PATH_TEMPLATES = [
   "/v1/demo-tape/start",
   "/v1/devices",
   "/v1/documents",
+  "/v1/documents/always-quota",
   "/v1/documents/{document_id}",
   "/v1/favicon",
   "/v1/feedback",

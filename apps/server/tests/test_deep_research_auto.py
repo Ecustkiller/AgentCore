@@ -187,7 +187,7 @@ def test_format_for_ceo_full_trust_auto_guidance_no_regression_under_cap():
 
 
 def _ctx(**kwargs) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

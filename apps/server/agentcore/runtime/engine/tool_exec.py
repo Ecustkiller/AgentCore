@@ -4,7 +4,8 @@ Thin facade: implementation is split by axis —
 
 * ``tool_exec_gates`` — approval / destructive baseline
 * ``tool_exec_args`` — args sanitize / miss feedback / failure markers
-* ``tool_exec_parallel`` — parallel execute orchestration
+* ``tool_exec_call`` — single tool-call lifecycle (parse → gates → execute → end)
+* ``tool_exec_parallel`` — parallel round orchestration (gather / terminal / facts)
 * ``tool_exec_coalesce`` — same-round file_read path coalesce helpers
 * ``tool_exec_citations`` — citation sink / ledger side-effects
 

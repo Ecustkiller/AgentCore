@@ -57,6 +57,8 @@ const TOOL_LABEL: Record<string, string> = {
   ask_user: "Ask you",
   consult_skill: "Consult skill",
   consult_memory: "Consult memory",
+  consult_rule: "Consult rule",
+  consult: "Consult",
   revise: "Revise",
   escalate: "Escalate",
 };
@@ -106,6 +108,7 @@ const TOOL_DETAIL_KEYS = [
   "command",
   "code",
   "q",
+  "name", // consult / consult_*
   "text",
 ];
 

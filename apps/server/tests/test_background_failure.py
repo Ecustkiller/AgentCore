@@ -3,6 +3,7 @@
 from agentcore.core.errors import (
     LLMAuthError,
     LLMInvalidResponseError,
+    LLMRateLimitError,
     LLMTimeoutError,
     LLMUpstreamError,
 )
@@ -11,6 +12,10 @@ from agentcore.llm.background_failure import classify_background_llm_failure
 
 def test_classify_auth():
     assert classify_background_llm_failure(LLMAuthError()) == "auth"
+
+
+def test_classify_rate_limit():
+    assert classify_background_llm_failure(LLMRateLimitError()) == "rate_limit"
 
 
 def test_classify_timeout():
@@ -45,3 +50,17 @@ def test_classify_other():
     from agentcore.core.errors import LLMError
 
     assert classify_background_llm_failure(LLMError("响应格式无效")) == "other"
+
+
+def test_balance_exhaustion_is_not_broken_config():
+    """An upstream out of credit must not flag the user's provider as misconfigured.
+
+    Upstreams that answer 401 for an empty balance (OpenCode Zen) used to land on
+    ``LLMAuthError`` and mark ``status=error``, hiding a provider whose key is fine.
+    """
+    from agentcore.core.errors import LLMInsufficientBalanceError
+    from agentcore.llm.background_failure import is_config_shaped_background_failure
+
+    exhausted = LLMInsufficientBalanceError(upstream_status=401)
+    assert is_config_shaped_background_failure(exhausted) is False
+    assert is_config_shaped_background_failure(LLMAuthError()) is True

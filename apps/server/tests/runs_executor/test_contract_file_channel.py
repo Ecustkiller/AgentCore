@@ -90,7 +90,7 @@ class _WriteThenTerseProse:
 
 
 def _ctx_over(root) -> ToolContext:  # noqa: ANN001
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

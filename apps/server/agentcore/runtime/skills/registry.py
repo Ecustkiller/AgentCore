@@ -11,7 +11,7 @@ class SystemSkill:
 
     ``summary`` is the one-line trigger description shown in the always-on catalog
     (tells the model WHEN to pull it); ``body`` is the full HOW guidance, returned
-    only when ``consult_skill(name)`` is called. ``requires_tools`` gates the
+    only when ``consult(name)`` is called. ``requires_tools`` gates the
     catalog entry: the skill appears only when every named tool is wired this turn
     (e.g. the ``ask_user_*`` skills need the ``ask_user`` tool, which is live-user
     only), so the prompt never advertises a capability the CEO cannot act on.
@@ -36,7 +36,7 @@ class SkillRegistry:
         self._skills[skill.name] = skill
 
     def get(self, name: str) -> SystemSkill | None:
-        """Resolve a skill by name, or None if unknown (consult_skill degrades on miss)."""
+        """Resolve a skill by name, or None if unknown (consult degrades on miss)."""
         return self._skills.get(name)
 
     def list_all(self) -> list[SystemSkill]:

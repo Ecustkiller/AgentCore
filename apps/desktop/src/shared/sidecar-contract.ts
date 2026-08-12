@@ -106,7 +106,10 @@ export interface SidecarStartTurnRequest {
    * （Slice 1 的 `ConversationStore` 为 no-op），故由 renderer 从本地会话切片喂入。
    */
   history?: SidecarHistoryEntry[];
-  /** 云代理凭据；缺省则 sidecar 回退到其自身 server 配置（dev 便利，非生产姿态）。 */
+  /**
+   * 云代理凭据。桌面侧开跑前必须已铸票；缺省时引擎 `build_turn_router` 硬拒空凭据
+   * （无本机平台模型 / sidecar 自身配置回退）。
+   */
   inference?: SidecarInference;
   /**
    * folders 窄票凭据（与 inference 并列）。缺省 / 铸票失败 = 不传键或 undefined，
@@ -200,9 +203,8 @@ export interface SidecarTurnResult {
   content: string;
   reasoningContent: string | null;
   finishReason: string;
-  /** The chat model this turn ACTUALLY ran on (`resolve_turn_model` inside the sidecar): the
-   *  cloud-proxy/account model when an inference token was present, else the local platform
-   *  model on the dev fallback. The renderer surfaces it on the model badge. */
+  /** The chat model this turn ACTUALLY ran on (`resolve_turn_model` inside the sidecar).
+   *  The renderer surfaces it on the model badge. */
   model: string;
   rounds: number;
   /** 全量 token 快照（引擎记账的五项）——原样回写落 `Message.usage`，使 sidecar 回合重载后
@@ -297,7 +299,10 @@ export interface SidecarResumeRequest {
     capability: "text_only";
   }>;
   /** Structured website style pick (s0/s1/…). */
-  /** 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。 */
+  /**
+   * 云代理凭据（同 `startTurn`）——续跑要跑 LLM；重启后续跑会新拉起引擎，故须随带。
+   * 桌面侧开跑前必须已铸票；缺省则引擎硬拒空凭据（无本机平台模型回退）。
+   */
   inference?: SidecarInference;
   /** folders 窄票凭据（同 `startTurn.foldersAuth`）。 */
   foldersAuth?: SidecarFoldersAuth;

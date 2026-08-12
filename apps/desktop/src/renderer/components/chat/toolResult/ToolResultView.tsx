@@ -10,8 +10,11 @@ import type {
   ConversationLogDisplay,
   MemoryConsultDisplay,
   ReadUrlDisplay,
+  RuleConsultDisplay,
   SkillConsultDisplay,
   ToolDisplay,
+  ToolFailure,
+  UnifiedConsultDisplay,
   WebSearchDisplay,
 } from "@/types/events";
 import {
@@ -35,12 +38,15 @@ import { isVerifyBudgetExceeded } from "./verifyBudget";
 
 /** Normalized data a tool result renders from, shared by the single-agent process
  * panel (ProcessToolRow) and the multi-agent run detail (RunDetailBody): the call
- * `args`, the model-facing `result` text, and the optional rich `display`. */
+ * `args`, the model-facing `result` text, optional rich `display`, and optional
+ * product `failure` face (折叠行用；展开详情仍可读 model-facing `result`). */
 export interface ToolResultData {
   toolName: string;
   args: Record<string, unknown>;
   result: string | null;
   display?: ToolDisplay | null;
+  /** Present on status=error when the server sent `tool_use_end.failure`. */
+  failure?: ToolFailure | null;
   status: "running" | "success" | "error";
   /** Conversation the call belongs to — only the browser result uses it, to lazy-fetch
    * its key-frame from that conversation's workspace. Absent everywhere else. */
@@ -79,6 +85,32 @@ function isMemoryConsultDisplay(d: unknown): d is MemoryConsultDisplay {
   return !!d && typeof (d as { topic?: unknown }).topic === "string";
 }
 
+function isRuleConsultDisplay(d: unknown): d is RuleConsultDisplay {
+  return !!d && typeof (d as { rule?: unknown }).rule === "string";
+}
+
+/** Unified `consult` display: `{name}` (+ optional `reused`). */
+function isUnifiedConsultDisplay(d: unknown): d is UnifiedConsultDisplay {
+  if (!d || typeof d !== "object") return false;
+  const x = d as Record<string, unknown>;
+  if (typeof x.name !== "string") return false;
+  // Exclude sibling rich displays that share open-dict `display`.
+  if (
+    "topic" in x ||
+    "skill_name" in x ||
+    "rule" in x ||
+    "results" in x ||
+    "url" in x ||
+    "stdout" in x ||
+    "conversation_id" in x ||
+    "result_count" in x
+  ) {
+    return false;
+  }
+  if (x.kind === "browser") return false;
+  return true;
+}
+
 /** `search_conversations` / `read_conversation` display — metadata only (body in result). */
 function isConversationLogDisplay(d: unknown): d is ConversationLogDisplay {
   if (!d || typeof d !== "object") return false;
@@ -87,6 +119,8 @@ function isConversationLogDisplay(d: unknown): d is ConversationLogDisplay {
   if (
     "topic" in x ||
     "skill_name" in x ||
+    "rule" in x ||
+    "name" in x ||
     "results" in x ||
     "url" in x ||
     "stdout" in x ||
@@ -127,8 +161,16 @@ function isFileWrite(d: ToolResultData): boolean {
 }
 
 /** A compact one-line peek for the collapsed row — display-aware so it reads as
- * 「3 results」/「exit 1」rather than the first line of a JSON / "stdout:" blob. */
+ * 「3 results」/「exit 1」rather than the first line of a JSON / "stdout:" blob.
+ * On status=error, prefer `failure.message` (产品句) so the timeline never leaks
+ * model-facing internals (host:port / exception class) by default; expand still
+ * shows technical `result`. Absent `failure` (旧服务端 / 历史 journal) keeps the
+ * legacy result-first-line fallback. */
 export function toolResultPeek(d: ToolResultData): string {
+  if (d.status === "error") {
+    const product = d.failure?.message?.trim();
+    if (product) return clampLine(product);
+  }
   if (isWebSearchDisplay(d.display)) {
     const n = d.display.results.length;
     return n > 0 ? `${n} result${n === 1 ? "" : "s"}` : "No results";
@@ -153,6 +195,12 @@ export function toolResultPeek(d: ToolResultData): string {
   }
   if (isMemoryConsultDisplay(d.display)) {
     return clampLine(d.display.topic || "已查阅记忆");
+  }
+  if (isRuleConsultDisplay(d.display)) {
+    return clampLine(d.display.rule || "已查阅规则");
+  }
+  if (isUnifiedConsultDisplay(d.display)) {
+    return clampLine(d.display.name || "已查阅");
   }
   if (isConversationLogDisplay(d.display)) {
     if (typeof d.display.conversation_id === "string") {
@@ -644,6 +692,24 @@ export function ToolResultView({ data }: { data: ToolResultData }) {
   if (isMemoryConsultDisplay(data.display)) {
     return (
       <MemoryConsultResult display={data.display} result={data.result ?? ""} />
+    );
+  }
+  if (isRuleConsultDisplay(data.display)) {
+    // Historical consult_rule: same card as consult_memory / unified consult.
+    return (
+      <MemoryConsultResult
+        display={{ topic: data.display.rule }}
+        result={data.result ?? ""}
+      />
+    );
+  }
+  if (isUnifiedConsultDisplay(data.display)) {
+    // Unified consult: same card as consult_memory (条目名 + 正文).
+    return (
+      <MemoryConsultResult
+        display={{ topic: data.display.name }}
+        result={data.result ?? ""}
+      />
     );
   }
   if (isConversationLogDisplay(data.display)) {

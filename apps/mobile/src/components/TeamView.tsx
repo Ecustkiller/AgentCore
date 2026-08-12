@@ -1355,7 +1355,9 @@ function RunToolRow({ call }: { call: RunToolCall }) {
         : call.status === "error"
           ? "Failed"
           : "Done";
-  const hasBody = !!args || (call.result != null && call.result !== "");
+  // Prefer product `failure.message`; fall back to model-facing `result` when absent.
+  const faceText = call.failure?.message ?? call.result;
+  const hasBody = !!args || (faceText != null && faceText !== "");
   const shellClass = ceilingGuidance
     ? "tool tool-guidance"
     : `tool tool-${call.status}`;
@@ -1377,8 +1379,8 @@ function RunToolRow({ call }: { call: RunToolCall }) {
           {args && (
             <pre className="tool-pre">{JSON.stringify(args, null, 2)}</pre>
           )}
-          {call.result != null && call.result !== "" && (
-            <pre className="tool-pre">{call.result}</pre>
+          {faceText != null && faceText !== "" && (
+            <pre className="tool-pre">{faceText}</pre>
           )}
         </div>
       )}

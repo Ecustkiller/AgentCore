@@ -60,7 +60,7 @@ def _last_consulted_skill(transcript: list[LLMMessage]) -> str | None:
         if msg.role != "assistant" or not msg.tool_calls:
             continue
         for tc in msg.tool_calls:
-            if tc.function.name != "consult_skill":
+            if tc.function.name not in ("consult", "consult_skill"):
                 continue
             try:
                 args = json.loads(tc.function.arguments or "{}")

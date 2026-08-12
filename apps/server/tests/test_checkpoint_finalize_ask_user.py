@@ -53,7 +53,7 @@ class _ScriptedProvider:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="cap",
         agent_id="a",

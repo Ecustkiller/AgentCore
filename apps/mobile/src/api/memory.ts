@@ -97,7 +97,7 @@ export function writeMemoryFile(
   );
 }
 
-/** GLOBAL 主题 note slugs (on-demand notes the agent pulls via consult_memory). */
+/** GLOBAL 主题 note slugs (on-demand notes the agent pulls via consult). */
 export function listMemoryTopics(): Promise<string[]> {
   return getJson<Schemas["MemoryTopicsResponse"]>(
     "/v1/users/me/memory/topics",

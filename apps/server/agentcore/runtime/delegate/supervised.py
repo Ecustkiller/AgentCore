@@ -151,6 +151,7 @@ async def apply_replan(
             conversation_id=getattr(tool, "_conversation_id", None)
             or (getattr(ctx, "conversation_id", None) if ctx else None),
             user_message=getattr(tool, "_user_message", None),
+            tool_context=ctx,
         )
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=getattr(tool, "_folder_id", None),

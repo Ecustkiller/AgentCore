@@ -28,7 +28,7 @@ def _ctx(
     escalation: EscalationChannel | None = None,
     run_id: str = "r1",
 ) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id=execution_id,
         run_id=run_id,
         agent_id="w1",

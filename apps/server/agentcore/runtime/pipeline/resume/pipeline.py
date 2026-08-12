@@ -300,7 +300,7 @@ async def resume_chat_pipeline(
         settled = recovered.settled
         messages = recovered.messages
 
-        # 记忆复用：帧内已查主题 + 窗口里历史 consult_memory 对 → 同 key 不再打 store。
+        # 记忆复用：帧内已查主题 + 窗口里历史 consult 对 → 同 key 不再打 store。
         from agentcore.runtime.memory_consult_cache import (
             consulted_memory_cache,
             get_consult_cache,
@@ -313,7 +313,7 @@ async def resume_chat_pipeline(
         seeded = seed_consult_cache_from_window(messages)
         if seeded or get_consult_cache():
             logger.info(
-                "consult_memory.cache_seeded",
+                "consult.cache_seeded",
                 from_frame=len(getattr(suspension, "consulted_memory", None) or {}),
                 from_window=seeded,
                 total=len(get_consult_cache()),

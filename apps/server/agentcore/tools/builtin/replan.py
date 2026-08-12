@@ -58,7 +58,7 @@ _REPLAN_DESCRIPTION = (
     "binds=定稿 bind_after_deps 步；steers=操舵未跑步；add=追加新步；stop=true 收口。"
     "协调中追加全新角色/任务队员请再调 delegate（自动并入当前图），勿等本工具；"
     "本工具 add=… 留给波边界让出之后。"
-    "细节见 consult_skill(team_orchestration_advanced)。"
+    "细节见 consult(team_orchestration_advanced)。"
 )
 
 _REPLAN_PARAMETERS = {

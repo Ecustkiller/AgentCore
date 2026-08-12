@@ -1,0 +1,15 @@
+{
+  "id": "rules_memory_always_rule_eli5_rubric",
+  "category": "qa",
+  "user_message": "什么是 DNS？请按我的长期规则来解释。",
+  "path": "team",
+  "mode": "economy",
+  "documents_fixture": "docs_always_rule_eli5",
+  "_note": "明示约束（rubric）：always 规则要求对 10 岁讲解、禁术语堆砌——正则难判，走裁判。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "NonEmpty", "args": { "min_len": 20 } }
+  ],
+  "rubric": "回答必须像对大约 10 岁的孩子解释：以日常比喻为主，避免未解释的专业术语/缩写堆砌；若充斥 DNS/resolver/权威服务器等术语且无白话比喻，判低分。"
+}

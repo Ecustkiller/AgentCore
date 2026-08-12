@@ -92,6 +92,14 @@ export interface ToolUseStartPayload {
  * model-facing `result` text. Opaque on the wire (snake_case). */
 export type ToolDisplay = Record<string, unknown>;
 
+/** User-facing tool failure face on `tool_use_end` when status=error.
+ * `message` = Chinese product copy; `code` = stable error code.
+ * Model-facing technical detail stays in `result`. */
+export interface ToolFailure {
+  message: string;
+  code: string;
+}
+
 export interface ToolUseEndPayload {
   tool_call_id: string;
   tool_name: string;
@@ -99,6 +107,8 @@ export interface ToolUseEndPayload {
   status: "success" | "error";
   /** A tool's OPTIONAL render-oriented payload (工具结果富渲染), distinct from the model-facing `result` text. */
   display?: ToolDisplay | null;
+  /** Present only when status=error: Chinese product message + stable code. Model-facing technical text stays in result. */
+  failure?: ToolFailure;
   /** Worker-call tag; absent for the captain's own calls. */
   run_id?: string;
 }
@@ -111,7 +121,7 @@ export type ProcessStep =
   | { kind: "reasoning"; text: string }
   | { kind: "content"; text: string }
   | { kind: "rework" }
-  | { kind: "tool"; id: string; tool_name: string; arguments: Record<string, unknown>; result: string | null; status: "running" | "success" | "error"; display?: ToolDisplay | null; phase?: ToolPhase }
+  | { kind: "tool"; id: string; tool_name: string; arguments: Record<string, unknown>; result: string | null; status: "running" | "success" | "error"; display?: ToolDisplay | null; failure?: ToolFailure; phase?: ToolPhase }
   | { kind: "team"; execution_id: string }
   | { kind: "graph_append"; execution_id: string; host_message_id: string; added_count: number }
   | { kind: "checkpoint"; checkpoint_id: string }

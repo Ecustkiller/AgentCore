@@ -25,7 +25,7 @@ from agentcore.tools.protocol import ToolContext
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",

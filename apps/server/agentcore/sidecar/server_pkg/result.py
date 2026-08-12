@@ -30,9 +30,9 @@ def trim_result(turn_id: str, result: dict[str, Any], *, model: str) -> dict[str
     client. ``finish_reason`` is a ``FinishReason`` enum, coerced to its string value here.
 
     ``model`` is the chat model this turn ACTUALLY ran on (``resolve_turn_model`` over the
-    turn's creds — the cloud-proxy/account model when a token was present, else the local
-    ``settings.platform_model`` on the dev fallback). Surfaced so the desktop badge shows
-    the honest per-turn model and can warn when a fallback diverged from the account model.
+    turn's creds — the cloud-proxy/account model when a token was present). Surfaced so
+    the desktop badge shows the honest per-turn model. Turns without inference are
+    refused before the engine runs (``INFERENCE_TOKEN_EXPIRED``).
     """
     finish = result.get("finish_reason")
     finish_str = finish.value if hasattr(finish, "value") else (str(finish) if finish else "error")

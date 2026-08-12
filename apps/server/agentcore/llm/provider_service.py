@@ -20,9 +20,6 @@ from agentcore.config import settings
 from agentcore.core.errors import (
     BYOKKeyMissingError,
     KeyStorageUnavailableError,
-    LLMAuthError,
-    LLMError,
-    LLMInsufficientBalanceError,
     NotFoundError,
     ValidationError,
 )
@@ -35,6 +32,11 @@ from agentcore.db.repositories import (
 )
 from agentcore.llm.factory import build_provider
 from agentcore.llm.model_profiles import ProfileSlot
+from agentcore.llm.model_reachability import (
+    CONNECTIVITY_POLICY,
+    check_model_reachable,
+    fetch_model_list,
+)
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.resolve import resolve_provider_credentials
 from agentcore.security.keys import KeyEncryptor
@@ -281,9 +283,8 @@ class LlmProviderService:
                 enc=enc,
                 message="无法解密已保存的 Key（服务端密钥变更或数据损坏），请重新填写",
             )
-        # User-facing errors use label (never internal credential source ``user``).
-        display_name = (row.label or "").strip() or "服务商"
-        provider = build_provider(credentials, display_name=display_name)
+        # User-facing errors use credentials.label (never internal source ``user``).
+        provider = build_provider(credentials)
         model = (credentials.default_model or "").strip()
         base_url = credentials.base_url
         supports_tools: bool | None = None
@@ -297,7 +298,11 @@ class LlmProviderService:
         )
         try:
             status, message, supports_tools = await self._run_connectivity_test(
-                provider, model=model
+                provider,
+                model=model,
+                profile_models=await self._profile_models_for_provider(
+                    user_id, provider_id
+                ),
             )
             if status == "error":
                 logger.warning(
@@ -338,11 +343,39 @@ class LlmProviderService:
         assert fresh is not None
         return self._view(fresh, enc=enc, message=message)
 
+    async def _profile_models_for_provider(
+        self, user_id: str, provider_id: str
+    ) -> list[str]:
+        """Distinct model ids from profile slots that point at this BYOK provider."""
+        rows = await self._profiles.list_for_user(user_id, include_implicit=True)
+        found: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            for origin, pid, model in (
+                (row.main_origin, row.main_provider_id, row.main_model),
+                (row.worker_origin, row.worker_provider_id, row.worker_model),
+                (
+                    row.background_origin,
+                    row.background_provider_id,
+                    row.background_model,
+                ),
+                (row.vision_origin, row.vision_provider_id, row.vision_model),
+            ):
+                if origin != "byok" or pid != provider_id:
+                    continue
+                model_s = (model or "").strip()
+                if not model_s or model_s in seen:
+                    continue
+                seen.add(model_s)
+                found.append(model_s)
+        return found
+
     async def _run_connectivity_test(
         self,
         provider: object,
         *,
         model: str,
+        profile_models: list[str] | None = None,
     ) -> tuple[str, str | None, bool | None]:
         """Prefer ``list_models`` (connection OK); fall back to ``probe(default_model)``.
 
@@ -352,33 +385,44 @@ class LlmProviderService:
         non-empty upstream list, also fall through to ``probe`` (e.g. Ark
         ``ep-`` endpoints that chat but are omitted from ``/models``). An
         **empty** upstream list also falls through to ``probe`` — a JSON
-        ``data: []`` must not soft-green without a chat body check. Tools
-        probing is best-effort and never flips an otherwise-active result to
-        error.
+        ``data: []`` must not soft-green without a chat body check. After the
+        provider ``default_model`` passes, also check models referenced by the
+        user's 模型组合 slots for this provider — failure names the bad model.
+        Tools probing is best-effort and never flips an otherwise-active result
+        to error.
         """
-        list_fn = getattr(provider, "list_models", None)
-        if callable(list_fn):
-            try:
-                model_ids = await list_fn()
-            except (LLMAuthError, LLMInsufficientBalanceError) as e:
-                return "error", str(e), None
-            except LLMError:
-                # Non-auth discovery failure → fall back to chat probe.
-                pass
-            else:
-                # Empty discovery → probe chat (body-checked). Non-empty list
-                # missing default model → probe. Otherwise trust list_models.
-                if model_ids and not (model and model not in model_ids):
-                    supports_tools = await self._best_effort_probe_tools(
-                        provider, model=model
-                    )
-                    return "active", None, supports_tools
+        model_list = await fetch_model_list(provider)
+        reach, message = await check_model_reachable(
+            provider,
+            model=model,
+            model_list=model_list,
+            policy=CONNECTIVITY_POLICY,
+        )
+        if reach == "error":
+            return "error", message, None
 
-        try:
-            await provider.probe(model=model)  # type: ignore[attr-defined]
-        except LLMError as e:
-            return "error", str(e), None
         supports_tools = await self._best_effort_probe_tools(provider, model=model)
+
+        checked = {(model or "").strip()} if (model or "").strip() else set()
+        for extra in profile_models or ():
+            extra_s = (extra or "").strip()
+            if not extra_s or extra_s in checked:
+                continue
+            checked.add(extra_s)
+            extra_reach, extra_msg = await check_model_reachable(
+                provider,
+                model=extra_s,
+                model_list=model_list,
+                policy=CONNECTIVITY_POLICY,
+            )
+            if extra_reach == "error":
+                detail = extra_msg or "连接失败"
+                return (
+                    "error",
+                    f"模型组合引用的模型「{extra_s}」不可用：{detail}",
+                    None,
+                )
+
         return "active", None, supports_tools
 
     @staticmethod

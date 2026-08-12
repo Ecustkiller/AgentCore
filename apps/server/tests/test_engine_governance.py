@@ -128,7 +128,7 @@ def _registry(tool: _StubTool) -> ToolRegistry:
 
 
 def _context() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -1146,7 +1146,7 @@ async def test_read_url_disable_survives_react_loop_restart():
 
     run_id = "read-url-survive-restart"
     clear_read_url_retired(run_id)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id=run_id,
         agent_id="a",

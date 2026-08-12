@@ -1,8 +1,9 @@
 """Document 子系统第一期 integration tests (Agent记忆与知识系统 §5.7).
 
-Against a real PG schema: the tree CRUD API, owner-scoping, user-rule injection (two-tier +
-budget), the ``remember`` directive→user-rule path, and the one-time file→document migration
-(idempotent, non-clobbering). Auto-skips when PostgreSQL is unavailable (integration conftest).
+Against a real PG schema: the tree CRUD API, owner-scoping, user-rule injection (two-tier,
+read-side full injection), the ``remember`` directive→user-rule path, and the one-time
+file→document migration (idempotent, non-clobbering). Auto-skips when PostgreSQL is
+unavailable (integration conftest).
 """
 
 import uuid
@@ -23,9 +24,6 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 from tests.integration.conftest import register_and_login
-
-_BUDGET = {"max_docs": 32, "max_chars": 24_000}
-
 
 # --- Tree CRUD API ---------------------------------------------------------------------------
 
@@ -59,8 +57,10 @@ async def test_document_tree_crud_roundtrip(client):
     r = await client.get(f"/v1/documents?parent_id={folder['id']}")
     assert [n["id"] for n in r.json()] == [doc["id"]]
 
-    # Body reads back; a stale CAS baseline is rejected, a matching one writes.
-    assert (await client.get(f"/v1/documents/{doc['id']}")).json()["content"] == "- 必须用中文"
+    # Body reads back carrying its frontmatter (the entry's sole writable source).
+    fetched = (await client.get(f"/v1/documents/{doc['id']}")).json()
+    assert fetched["content"] == "---\napply: always\n---\n- 必须用中文"
+    assert fetched["apply_mode"] == "always"
     r = await client.put(
         f"/v1/documents/{doc['id']}", json={"content": "clobber", "baseline": "stale"}
     )
@@ -97,7 +97,7 @@ async def test_documents_require_auth(client):
     assert (await client.post("/v1/documents", json={"name": "x"})).status_code == 401
 
 
-# --- User-rule injection (two-tier + budget) -------------------------------------------------
+# --- User-rule injection (equal-authority always-on join) ------------------------------------
 
 
 async def test_on_demand_user_rule_excluded_from_injected_rules(session_factory):
@@ -122,12 +122,12 @@ async def test_on_demand_user_rule_excluded_from_injected_rules(session_factory)
             apply_mode="on_demand",
             content="- on_demand 规则",
         )
-        user_md, _ = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=True, **_BUDGET
+        rules_md = await assemble_injected_rules(
+            store, repo, uid, folder_id=None, enabled=True
         )
         on_demand = await repo.list_on_demand_user_rules(uid, None)
-    assert "always 规则" in user_md
-    assert "on_demand 规则" not in user_md
+    assert "always 规则" in rules_md
+    assert "on_demand 规则" not in rules_md
     assert {d.name for d in on_demand} == {"按需.md"}
 
 
@@ -146,11 +146,12 @@ async def test_user_rule_injected_ahead_of_memory(session_factory):
         )
         await store.save(uid, PREFERENCES_MEMORY_FILE, "## 沟通偏好\n- 倾向简洁", scope=None)
         await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
-        user_md, memory_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=True, **_BUDGET
+        rules_md = await assemble_injected_rules(
+            store, repo, uid, folder_id=None, enabled=True
         )
-    assert "必须始终用中文" in user_md
-    assert "用 Python" in memory_md and "倾向简洁" in memory_md
+    assert "必须始终用中文" in rules_md
+    assert "用 Python" in rules_md and "倾向简洁" in rules_md
+    assert rules_md.index("必须始终用中文") < rules_md.index("倾向简洁")
 
 
 async def test_user_rule_survives_when_memory_disabled(session_factory):
@@ -159,38 +160,47 @@ async def test_user_rule_survives_when_memory_disabled(session_factory):
     async with session_factory() as session:
         repo = DocumentRepository(session)
         store = DocumentMemoryStore(session=session)
-        await repo.create(uid, name="用户规则.md", role="rule", content="- 必须用中文")
-        await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
-        user_md, memory_md = await assemble_injected_rules(
-            store, repo, uid, folder_id=None, enabled=False, **_BUDGET
+        await repo.create(
+            uid, name="用户规则.md", role="rule", apply_mode="always", content="- 必须用中文"
         )
-    assert "必须用中文" in user_md
-    assert memory_md == ""
+        await store.save(uid, CORE_MEMORY_FILE, "## 技术栈与工具\n- 用 Python", scope=None)
+        rules_md = await assemble_injected_rules(
+            store, repo, uid, folder_id=None, enabled=False
+        )
+    assert "必须用中文" in rules_md
+    assert "用 Python" not in rules_md
 
 
-async def test_injection_budget_drops_project_before_global(session_factory):
-    # 全局优先存活: with room for one doc, the global user rule survives, the project one drops.
+async def test_injection_admits_global_and_project_rules(session_factory):
+    # Read-side full injection: both global and project always rules survive.
     uid = str(uuid.uuid4())
     proj = str(uuid.uuid4())
     async with session_factory() as session:
         repo = DocumentRepository(session)
         store = DocumentMemoryStore(session=session)
-        await repo.create(uid, name="用户规则.md", role="rule", content="全局规则")
         await repo.create(
-            uid, name="用户规则.md", role="rule", folder_id=proj, content="项目规则"
+            uid, name="用户规则.md", role="rule", apply_mode="always", content="全局规则"
         )
-        user_md, _ = await assemble_injected_rules(
-            store, repo, uid, folder_id=proj, enabled=True, max_docs=1, max_chars=100_000
+        await repo.create(
+            uid,
+            name="用户规则.md",
+            role="rule",
+            folder_id=proj,
+            apply_mode="always",
+            content="项目规则",
         )
-    assert "全局规则" in user_md
-    assert "项目规则" not in user_md
+        rules_md = await assemble_injected_rules(
+            store, repo, uid, folder_id=proj, enabled=True
+        )
+    assert "全局规则" in rules_md
+    assert "项目规则" in rules_md
 
 
 # --- remember directive → user rule ----------------------------------------------------------
 
 
 def _ctx(user_id: str) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

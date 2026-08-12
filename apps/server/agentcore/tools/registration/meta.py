@@ -29,8 +29,8 @@ class CeoWire(StrEnum):
 
     ALWAYS = "always"
     MEMORY = "memory"
-    # On-demand user rules catalog non-empty → ``consult_rule`` (independent of memory gate).
-    RULES = "rules"
+    # Unified on-demand catalog non-empty → ``consult`` (技能 ∪ 规则 ∪ 记忆主题).
+    CONSULT = "consult"
     CHECKPOINT = "checkpoint"
     BOARD = "board"
     # Advertised in catalog; runtime inject via ``ceo_surface`` (idle/coord gate).

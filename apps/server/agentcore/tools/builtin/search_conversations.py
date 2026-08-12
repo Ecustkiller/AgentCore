@@ -196,7 +196,7 @@ class SearchConversationsTool:
                 "检索当前用户账号下的历史对话目录（标题匹配；query 为空则按最近更新列出）。"
                 "用于查阅「上次 / 以前」某场讨论的原文与过程——先搜到 conversation_id，再"
                 "用 read_conversation 打开。不含本回合正在进行的宿主会话；不含已软删 / handoff"
-                "宿主。偏好与巩固后的事实请用记忆主题（consult_memory），不要用本工具代替。"
+                "宿主。偏好与巩固后的事实请用记忆主题（consult），不要用本工具代替。"
             ),
             parameters={
                 "type": "object",

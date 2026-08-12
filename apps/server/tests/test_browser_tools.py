@@ -315,7 +315,7 @@ class _FakeRegistry:
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -785,7 +785,7 @@ async def test_local_relative_path_rewritten_to_workspace(tmp_path, monkeypatch)
         def __getattr__(self, name):
             return getattr(ws, name)
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",
@@ -822,7 +822,7 @@ async def test_bridge_session_sandbox_relative_path_fails_honestly(tmp_path, mon
         def __getattr__(self, name):
             return getattr(ws, name)
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",

@@ -9,10 +9,12 @@ from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
     preview,
     resolve_conversation_history_access,
+    resolve_folder_local_binding,
     resolve_local_binding,
     resolve_memory_enabled,
     resolve_permission_axes,
     resolve_profile_set,
+    resolve_turn_file_workspace,
     schedule_title_generation,
 )
 from agentcore.conversation.compaction import maybe_compact_near_ceiling
@@ -117,7 +119,17 @@ async def stream_chat(
                 sink.emit(message_end(FinishReason.ERROR))
                 return
             folder_id = conv.folder_id
-            local_binding = await resolve_local_binding(session, conv)
+            auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
+            ws_folder_id, _auto_desk_folder_id = resolve_turn_file_workspace(
+                birth_folder_id=folder_id,
+                auto_desk_folder_id=auto_desk_raw
+                if isinstance(auto_desk_raw, str)
+                else None,
+            )
+            if ws_folder_id and not folder_id:
+                local_binding = await resolve_folder_local_binding(session, ws_folder_id)
+            else:
+                local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
             conversation_history_access = await resolve_conversation_history_access(
@@ -135,7 +147,7 @@ async def stream_chat(
         backend = await build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
-            folder_id=folder_id,
+            folder_id=ws_folder_id,
             sink=sink,
             local_binding=local_binding,
         )
@@ -268,7 +280,17 @@ async def regenerate_chat(
             )
             target_created_at = target.created_at
             folder_id = conv.folder_id
-            local_binding = await resolve_local_binding(session, conv)
+            auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
+            ws_folder_id, _auto_desk_folder_id = resolve_turn_file_workspace(
+                birth_folder_id=folder_id,
+                auto_desk_folder_id=auto_desk_raw
+                if isinstance(auto_desk_raw, str)
+                else None,
+            )
+            if ws_folder_id and not folder_id:
+                local_binding = await resolve_folder_local_binding(session, ws_folder_id)
+            else:
+                local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             memory_enabled = await resolve_memory_enabled(session, user_id)
             conversation_history_access = await resolve_conversation_history_access(
@@ -299,7 +321,7 @@ async def regenerate_chat(
         backend = await build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
-            folder_id=folder_id,
+            folder_id=ws_folder_id,
             sink=sink,
             local_binding=local_binding,
         )
@@ -388,7 +410,17 @@ async def resume_chat(
                 return
             folder_id = conv.folder_id
             conversation_mode = conv.mode
-            local_binding = await resolve_local_binding(session, conv)
+            auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
+            ws_folder_id, _auto_desk_folder_id = resolve_turn_file_workspace(
+                birth_folder_id=folder_id,
+                auto_desk_folder_id=auto_desk_raw
+                if isinstance(auto_desk_raw, str)
+                else None,
+            )
+            if ws_folder_id and not folder_id:
+                local_binding = await resolve_folder_local_binding(session, ws_folder_id)
+            else:
+                local_binding = await resolve_local_binding(session, conv)
             profile_set = await resolve_profile_set(session, conv, user_id)
             # Conversation permission mode (not frozen into the frame): a mid-pause
             # switch applies to the resumed continuation.
@@ -412,7 +444,7 @@ async def resume_chat(
         backend = await build_turn_backend(
             user_id=user_id,
             conversation_id=conversation_id,
-            folder_id=folder_id,
+            folder_id=ws_folder_id,
             sink=sink,
             local_binding=local_binding,
         )

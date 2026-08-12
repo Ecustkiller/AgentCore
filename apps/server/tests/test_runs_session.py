@@ -83,7 +83,7 @@ class _StubSearchTool:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

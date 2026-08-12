@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "layer": "user_rule",
+      "name": "演练暗号.md",
+      "apply_mode": "on_demand",
+      "file": "bodies/演练暗号.md"
+    }
+  ]
+}

@@ -290,6 +290,13 @@ async def _initialize(server: SidecarServer, tmp_path, *, data_dir: str | None) 
         "userId": "u",
         "workspaceRoot": str(tmp_path),
         "approvalsEnabled": True,
+        # Unit tests mock the pipeline; still need inference so the early-reject
+        # gate does not fire (production always mints a cloud-proxy JWT).
+        "inference": {
+            "baseUrl": "http://test.local/v1/inference/v1",
+            "apiKey": "test-inference-tok",
+            "model": "test-model",
+        },
     }
     if data_dir is not None:
         params["dataDir"] = data_dir

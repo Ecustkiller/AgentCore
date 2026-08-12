@@ -250,6 +250,7 @@ def _provider_row(**kw):
     defaults = {
         "id": "prov-1",
         "user_id": "u1",
+        "label": "DeepSeek",
         "base_url": "https://byok.example/v1",
         "default_model": "byok-flash",
     }
@@ -276,9 +277,17 @@ async def test_resolve_provider_credentials_decrypts_row(monkeypatch):
     assert creds.default_model == "byok-flash"
     assert creds.provider_id == "prov-1"
     assert creds.source == "user"
+    assert creds.label == "DeepSeek"
 
 
-async def test_resolve_provider_credentials_missing_row_returns_none(monkeypatch):
+async def test_resolve_provider_credentials_empty_label_is_none(monkeypatch):
+    monkeypatch.setattr(settings, "encryption_key", _MASTER_KEY)
+    enc = KeyEncryptor(_MASTER_KEY)
+    cipher = enc.encrypt(b"sk-user-secret")
+    _mock_provider_get(monkeypatch, _provider_row(api_key_enc=cipher, label="  "))
+    creds = await resolve_user_llm_credentials(MagicMock(), "u1", provider_id="prov-1")
+    assert creds is not None
+    assert creds.label is None
     monkeypatch.setattr(settings, "encryption_key", _MASTER_KEY)
     _mock_provider_get(monkeypatch, None)
     assert await resolve_user_llm_credentials(MagicMock(), "u1", provider_id="p") is None

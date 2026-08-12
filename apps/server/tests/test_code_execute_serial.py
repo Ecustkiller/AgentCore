@@ -39,7 +39,7 @@ class _SlowBackend:
 
 
 def _ctx(backend: _SlowBackend, conversation_id: str = "") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

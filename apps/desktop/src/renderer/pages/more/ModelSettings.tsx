@@ -30,11 +30,27 @@ import {
 import type { LlmProviderView } from "@/services/llmProviders";
 import { type ModelCatalogItem, findCatalogItem } from "@/services/models";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Copy, Loader2, Plus, Star, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  Copy,
+  Loader2,
+  Plus,
+  Star,
+  Trash2,
+} from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ProfileModelSelect, canChooseFromGroups } from "./ProfileModelSelect";
 import { SettingsHeader } from "./SettingsHeader";
+
+/** 保存响应当次 reminders；列表/详情不带回，仅会话内按组合 id 挂住。 */
+function normalizeSaveWarnings(
+  warnings: string[] | null | undefined,
+): string[] {
+  if (!warnings?.length) return [];
+  return warnings.map((w) => w.trim()).filter(Boolean);
+}
 
 /** 草稿主模型是否在 curated 目录标有 vision（贴图可直送主模型）。 */
 function mainHasCuratedVision(
@@ -304,6 +320,31 @@ function ModelProfilesSection({
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<ReactNode>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  /** 仅来自 create/update 响应；列表 refetch 后仍靠此 map 留住可读提醒。 */
+  const [saveWarningsById, setSaveWarningsById] = useState<
+    Record<string, string[]>
+  >({});
+  const [lastSaveWarnings, setLastSaveWarnings] = useState<string[]>([]);
+  const [lastWarnedProfileId, setLastWarnedProfileId] = useState<string | null>(
+    null,
+  );
+
+  const rememberSaveWarnings = (
+    profileId: string,
+    warnings: string[] | null | undefined,
+  ) => {
+    const next = normalizeSaveWarnings(warnings);
+    setLastSaveWarnings(next);
+    setLastWarnedProfileId(next.length > 0 ? profileId : null);
+    setSaveWarningsById((prev) => {
+      if (next.length === 0) {
+        if (!(profileId in prev)) return prev;
+        const { [profileId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      return { ...prev, [profileId]: next };
+    });
+  };
 
   const catalogModels = catalog?.models ?? [];
   const manageable = useMemo(
@@ -341,6 +382,8 @@ function ModelProfilesSection({
     setPending(true);
     setActionError(null);
     setSaveSuccess(null);
+    setLastSaveWarnings([]);
+    setLastWarnedProfileId(null);
     try {
       await fn();
       onChanged();
@@ -368,6 +411,11 @@ function ModelProfilesSection({
     void withPending(async () => {
       await deleteLlmModelProfile(profile.id);
       if (editingId === profile.id) setEditingId(null);
+      setSaveWarningsById((prev) => {
+        if (!(profile.id in prev)) return prev;
+        const { [profile.id]: _removed, ...rest } = prev;
+        return rest;
+      });
       setSaveSuccess(`已删除「${profile.name}」`);
     });
   };
@@ -382,6 +430,7 @@ function ModelProfilesSection({
         vision: profile.vision ?? null,
         set_as_default: false,
       });
+      rememberSaveWarnings(created.id, created.warnings);
       setEditingId(created.id);
       setCreating(false);
       setSaveSuccess(`已复制为「${created.name}」`);
@@ -398,6 +447,8 @@ function ModelProfilesSection({
     }
     setActionError(null);
     setSaveSuccess(null);
+    setLastSaveWarnings([]);
+    setLastWarnedProfileId(null);
     setCreating(true);
     setEditingId(null);
   };
@@ -406,7 +457,7 @@ function ModelProfilesSection({
     if (!draft.main) throw new Error("主模型必填");
     setPending(true);
     try {
-      await createLlmModelProfile({
+      const created = await createLlmModelProfile({
         name: draft.name.trim() || "未命名组合",
         main: draft.main,
         worker: draft.worker,
@@ -414,6 +465,7 @@ function ModelProfilesSection({
         vision: draft.vision,
         set_as_default: false,
       } satisfies CreateLlmModelProfileInput);
+      rememberSaveWarnings(created.id, created.warnings);
       setCreating(false);
       setEditingId(null);
       setSaveSuccess("组合已保存");
@@ -432,13 +484,14 @@ function ModelProfilesSection({
     setPending(true);
     try {
       const name = draft.name.trim() || profile.name;
-      await updateLlmModelProfile(profile.id, {
+      const updated = await updateLlmModelProfile(profile.id, {
         name,
         main: draft.main,
         worker: draft.worker,
         background: draft.background,
         vision: draft.vision,
       });
+      rememberSaveWarnings(updated.id, updated.warnings);
       setEditingId(null);
       setSaveSuccess(`「${name}」已保存`);
       onChanged();
@@ -519,6 +572,7 @@ function ModelProfilesSection({
                   background: profile.background ?? null,
                   vision: profile.vision ?? null,
                 }}
+                saveWarnings={saveWarningsById[profile.id]}
                 pending={pending}
                 onCancel={() => setEditingId(null)}
                 onSave={(draft) => onSaveEdit(profile, draft)}
@@ -528,11 +582,14 @@ function ModelProfilesSection({
                 key={profile.id}
                 profile={profile}
                 summary={profileSlotSummary(profile, catalogModels)}
+                saveWarnings={saveWarningsById[profile.id]}
                 pending={pending}
                 onEdit={() => {
                   setCreating(false);
                   setEditingId(profile.id);
                   setSaveSuccess(null);
+                  setLastSaveWarnings([]);
+                  setLastWarnedProfileId(null);
                 }}
                 onSetDefault={() => void onSetDefault(profile)}
                 onCopy={() => void onCopy(profile)}
@@ -554,6 +611,14 @@ function ModelProfilesSection({
           {saveSuccess}
         </output>
       )}
+
+      {lastSaveWarnings.length > 0 &&
+      !(
+        lastWarnedProfileId != null &&
+        manageable.some((p) => p.id === lastWarnedProfileId)
+      ) ? (
+        <ProfileSaveWarnings className="mt-2" warnings={lastSaveWarnings} />
+      ) : null}
 
       {actionError &&
         (typeof actionError === "string" ? (
@@ -594,9 +659,42 @@ function advancedSlotsSummary(
   return `组队：${workerLabel} · 后台：${backgroundLabel} · 识图：${visionLabel}`;
 }
 
+function ProfileSaveWarnings({
+  warnings,
+  className,
+}: {
+  warnings: string[];
+  className?: string;
+}) {
+  if (warnings.length === 0) return null;
+  return (
+    <output
+      className={cn(
+        "block rounded-lg border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-warning",
+        className,
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
+        <div className="min-w-0 space-y-1">
+          <p className="font-medium text-warning-foreground">
+            已保存，但请留意模型可达性
+          </p>
+          <ul className="list-disc space-y-0.5 pl-4 text-warning">
+            {warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </output>
+  );
+}
+
 function ProfileListRow({
   profile,
   summary,
+  saveWarnings,
   pending,
   onEdit,
   onSetDefault,
@@ -605,6 +703,7 @@ function ProfileListRow({
 }: {
   profile: LlmModelProfileView;
   summary: string;
+  saveWarnings?: string[];
   pending: boolean;
   onEdit: () => void;
   onSetDefault: () => void;
@@ -612,6 +711,7 @@ function ProfileListRow({
   onDelete: () => void;
 }) {
   const isUser = profile.kind === "user";
+  const warnings = saveWarnings ?? [];
   return (
     <div
       className={cn(
@@ -633,6 +733,11 @@ function ProfileListRow({
                 预置
               </span>
             )}
+            {warnings.length > 0 ? (
+              <span className="rounded bg-warning/10 px-1 py-0.5 text-xs text-warning">
+                模型提醒
+              </span>
+            ) : null}
           </div>
           <p className="mt-0.5 truncate text-xs text-muted-foreground">
             {summary}
@@ -685,6 +790,9 @@ function ProfileListRow({
           ) : null}
         </div>
       </div>
+      {warnings.length > 0 ? (
+        <ProfileSaveWarnings className="mt-2" warnings={warnings} />
+      ) : null}
     </div>
   );
 }
@@ -745,6 +853,7 @@ function ProfileEditor({
   catalogModels,
   platformAvailable,
   initial,
+  saveWarnings,
   pending,
   onCancel,
   onSave,
@@ -755,6 +864,8 @@ function ProfileEditor({
   catalogModels: ModelCatalogItem[];
   platformAvailable: boolean;
   initial: ProfileDraft;
+  /** 上次保存响应当次提醒（如复制后立刻打开编辑器）。 */
+  saveWarnings?: string[];
   pending: boolean;
   onCancel: () => void;
   onSave: (draft: ProfileDraft) => Promise<void>;
@@ -955,6 +1066,10 @@ function ProfileEditor({
         <p className="text-xs text-destructive" role="alert">
           {saveError}
         </p>
+      ) : null}
+
+      {!saveError && saveWarnings && saveWarnings.length > 0 ? (
+        <ProfileSaveWarnings warnings={saveWarnings} />
       ) : null}
 
       <div className="flex justify-end gap-2 border-t border-border pt-3">

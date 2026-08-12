@@ -158,7 +158,7 @@ export function listMemoryProjects(): Promise<string[]> {
 
 /**
  * On-demand TOPIC notes (``主题/<slug>.md``) live alongside the always-injected core: the
- * agent pulls them via `consult_memory`, and the「文件」rail's 主题/ folder browses them.
+ * agent pulls them via `consult`, and the「文件」rail's 主题/ folder browses them.
  * `folderId` null = the GLOBAL 主题/ folder, else that project's (same scope convention as
  * the per-leaf surface). Names only ride the listing; a note's body is pulled per-open.
  */

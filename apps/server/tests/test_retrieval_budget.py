@@ -162,7 +162,7 @@ def test_budget_line_describes_limit_without_ceo_override_hint():
 
 
 def _ctx(*, budget: RetrievalBudgetState | None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r1",
         agent_id="a",

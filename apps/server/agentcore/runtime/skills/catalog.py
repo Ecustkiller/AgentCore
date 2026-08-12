@@ -1,4 +1,4 @@
-"""Thin registry assembly + 能力目录 rendering for system skills."""
+"""Thin registry assembly + 按需目录 rendering for system skills."""
 
 from __future__ import annotations
 
@@ -18,14 +18,11 @@ from agentcore.runtime.skills.product_help import (
     _PRODUCT_HELP,
     _PRODUCT_HELP_FAQ,
     _PRODUCT_HELP_MAP,
-    CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
-    CONSULT_PRODUCT_HELP_BY_SCENE,
 )
 from agentcore.runtime.skills.registry import SkillRegistry, SystemSkill
 from agentcore.runtime.skills.revising_a_product import _REVISING_A_PRODUCT
 from agentcore.runtime.skills.team_orchestration import (
     _TEAM_ORCHESTRATION_ADVANCED,
-    CONSULT_TEAM_ORCH_BY_SCENE,
 )
 from agentcore.runtime.skills.verify_and_fix import _VERIFY_AND_FIX
 from agentcore.runtime.skills.work_discipline import _WORK_DISCIPLINE
@@ -160,7 +157,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         # Gated on ``delegate``, not ``test_run``: this skill guides the DELEGATED dev
         # loop (a worker runs test_run + str_replace), and test_run is now a worker-only
         # code-execution tool (GRANTABLE), so it never appears in the CEO's tool set.
-        # Since consult_skill is CEO-only, gating on the worker-only test_run would make
+        # Since consult is CEO-only, gating on the worker-only test_run would make
         # the skill un-advertisable (dead). ``delegate`` is the CEO's real precondition —
         # it can act on this guidance by delegating — mirroring long_form_writing.
         requires_tools=("delegate",),
@@ -196,7 +193,7 @@ def build_system_skill_registry(
     """Register the platform's built-in (system) skills — the single source of truth.
 
     Mirrors ``build_builtin_registry`` for tools: code-defined, always available to
-    the CEO via ``consult_skill``. Future market skills register into the SAME
+    the CEO via ``consult``. Future market skills register into the SAME
     registry shape (单一机制、多类来源).
 
     ``enabled_packs`` layers deployment-gated capability packs (e.g. ``\"legal\"``)
@@ -221,33 +218,19 @@ def build_system_skill_registry(
 
 
 def render_skill_directory(registry: SkillRegistry, tool_names: set[str]) -> str:
-    """Render the always-on ``<能力目录>`` block listing the consultable skills.
+    """Backward-compat wrapper → unified ``<按需目录>`` (skills only).
 
-    Only skills whose ``requires_tools`` are all wired this turn appear (so the
-    catalog never advertises a capability the CEO cannot act on — same invariant as
-    the live-user gate on ask_user). Each line is ``- name：summary`` —
-    enough for the model to decide WHEN to pull the full guidance via
-    ``consult_skill(name)``. Returns "" when nothing is available so the caller can
-    append nothing.
+    Prefer building entries via :class:`MergedConsultSource` so directory and
+    ``consult`` fetch cannot drift. Kept for tests / capability catalog that only
+    need the skill slice.
     """
+    from agentcore.runtime.context.consultable import ConsultDirectoryEntry
+    from agentcore.runtime.resolve.prompt.compose import render_on_demand_directory
+
     skills = registry.available(tool_names)
     if not skills:
         return ""
-    lines = [
-        "<能力目录>",
-        "下列进阶能力的完整指引未常驻；要用到时，先用 `consult_skill(name)` 把指引拉回来再执行"
-        f"（{CONSULT_PRODUCT_HELP_BY_SCENE}；"
-        f"{CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE}；"
-        "提问卡直接 ask_user、不必先查；"
-        f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
-        "糊建站 /「做个网站」先 ask_user（形态+桌上档），确认后再 consult `build_website`；"
-        "规格已齐的落地页/作品集可直接 delegate(playbook=build_website, "
-        "playbook_args.topic=简述, intensity=solo|standard)，不必先查；"
-        "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
-        "绿场【推荐】build_app（手写/none 不硬拒）：MVP→lean；模块流水线→full+显式 modules；"
-        "边界未钉 → 首派轻切片/少节点或单 lead 嵌套再拆，再 replan，禁首派五波脚手架；"
-        "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature）：",
+    entries = [
+        ConsultDirectoryEntry(name=skill.name, summary=skill.summary) for skill in skills
     ]
-    lines.extend(f"- {skill.name}：{skill.summary}" for skill in skills)
-    lines.append("</能力目录>")
-    return "\n".join(lines)
+    return render_on_demand_directory(entries, with_summaries=True)

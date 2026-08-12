@@ -41,6 +41,7 @@ _CASE_FIELDS = frozenset(
         "mode",
         "toolset",
         "workspace_fixture",
+        "documents_fixture",
         "history",
         "checks",
         "rubric",

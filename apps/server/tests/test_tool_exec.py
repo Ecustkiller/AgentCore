@@ -22,7 +22,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(backend=None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -204,7 +204,65 @@ async def test_crash_emits_failed_tool_use_end(registry: tuple[ToolRegistry, _Ok
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
     assert ends[0].payload["status"] == "error"
-    assert "内部错误" in (ends[0].payload.get("result") or "")
+    # Model face keeps exception detail; user face is curated Chinese.
+    assert "SandboxError: sandbox blew up" in (ends[0].payload.get("result") or "")
+    assert ends[0].payload.get("failure") == {
+        "message": "代码执行环境暂时不可用，请稍后重试。",
+        "code": "SANDBOX_ERROR",
+    }
+
+
+async def test_tool_result_error_keeps_model_detail_and_curated_failure():
+    """Join path: model ``result`` keeps error+output; ``failure`` never lifts them."""
+
+    class _LeakyTool:
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="projects",
+                description="x",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.SEARCH,
+            )
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="列出项目失败。",
+                error="FoldersCloudError: folders list unreachable: ConnectError host:5432",
+            )
+
+    reg = ToolRegistry()
+    reg.register(_LeakyTool())
+    sink = EventSink()
+    messages, _terminal, _attempts = await execute_tools(
+        [_call("c1", "projects", "{}")],
+        reg,
+        _ctx(),
+        sink,
+        run_id="r1",
+    )
+    body = messages[0].content or ""
+    assert "FoldersCloudError" in body
+    assert "host:5432" in body
+    ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
+    assert ends[0].payload["result"]
+    assert "FoldersCloudError" in ends[0].payload["result"]
+    assert ends[0].payload["failure"] == {
+        "message": "工具执行失败，请稍后重试。",
+        "code": "TOOL_ERROR",
+    }
+
+
+async def test_success_tool_use_end_omits_failure(registry: tuple[ToolRegistry, _OkTool]):
+    reg, _ok_b = registry
+    sink = EventSink()
+    await execute_tools([_call("c1", "ok_a")], reg, _ctx(), sink, run_id="r1")
+    ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
+    assert len(ends) == 1
+    assert ends[0].payload["status"] == "success"
+    assert "failure" not in ends[0].payload
 
 
 async def test_crash_message_carries_exception_type(registry: tuple[ToolRegistry, _OkTool]):
@@ -631,7 +689,7 @@ async def test_execute_tools_does_not_unwrap_when_top_level_tasks_present():
 
 
 async def test_write_tool_parse_failure_splits_user_and_model_copy():
-    """Write-tool JSON parse: UI 人话；模型回执强制分段（勿教用户修转义）。"""
+    """Write-tool JSON parse: ``failure.message`` 人话；模型面 ``result`` 强制分段。"""
     tracked = _OkTool("file_write", output="written")
     reg = ToolRegistry()
     reg.register(tracked)
@@ -653,11 +711,14 @@ async def test_write_tool_parse_failure_splits_user_and_model_copy():
     assert "原样重发全部参数" not in model
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
-    ui = ends[0].payload.get("result") or ""
-    assert "长文保存失败" in ui
-    assert "分段" in ui
-    assert "原样重发" not in ui
-    assert "失败位置" not in ui
+    # Model-facing result keeps technical tip (same as transcript, sans marker).
+    wire_result = ends[0].payload.get("result") or ""
+    assert "不是合法 JSON" in wire_result
+    assert "分段" in wire_result or "短骨架" in wire_result
+    failure = ends[0].payload.get("failure") or {}
+    assert failure.get("message") == "长文保存失败，改成分段写入继续。"
+    assert failure.get("code") == "args_parse_failed"
+    assert "失败位置" not in (failure.get("message") or "")
 
 
 async def test_code_execute_maps_sandbox_error_to_failed_result():
@@ -962,7 +1023,7 @@ async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
     reg = ToolRegistry()
     reg.register(_SlowWrite())
     reg.register(_OrderHandoff())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

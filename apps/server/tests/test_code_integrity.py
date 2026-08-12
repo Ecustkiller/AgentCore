@@ -13,7 +13,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(tmp_path: Path) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

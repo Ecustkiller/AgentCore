@@ -80,7 +80,7 @@ async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(monkeypatch
     monkeypatch.setattr(pipeline_pkg, "build_turn_router", _should_not_build)
 
     async def _empty_rules(*_a, **_k):
-        return "", ""
+        return ""
 
     async def _empty_topics(*_a, **_k):
         return []

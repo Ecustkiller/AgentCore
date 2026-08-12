@@ -416,12 +416,13 @@ class CodeExecuteTool:
                 EXEC_ENV_TIMEOUT_RETIRE_STEER,
             )
             from agentcore.tools.sandbox.exec_env import (
+                EXEC_ENV_PROBE_FAIL_CODE,
                 EXEC_TIMEOUT_CODE,
                 is_exec_env_probe_failure,
             )
 
             if is_exec_env_probe_failure(stderr_text):
-                meta["code"] = EXEC_TIMEOUT_CODE
+                meta["code"] = EXEC_ENV_PROBE_FAIL_CODE
                 meta["exec_env_timeout"] = True
                 meta["error_class"] = "permanent"
                 meta["retire_tools"] = sorted(EXEC_ENV_TIMEOUT_FAMILY)

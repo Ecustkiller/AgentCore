@@ -39,6 +39,10 @@ class LLMCredentials:
     # The BYOK provider these credentials came from (user_llm_providers.id), when a
     # specific 服务商 was resolved. None for the platform key / unspecified.
     provider_id: str | None = None
+    # User-facing 服务商 label from ``user_llm_providers.label`` (BYOK only).
+    # Carried so ``build_provider`` can set leaf display names without re-querying DB.
+    # Never used as the log ``provider`` field — that stays ``source`` / vendor prefix.
+    label: str | None = None
 
 
 def bind_credential_pricing_context(creds: LLMCredentials | None) -> None:

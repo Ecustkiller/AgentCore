@@ -51,7 +51,7 @@ class _RecordingGate:
 
 
 def _ask_frame() -> AskUserSuspension:
-    """最小 ask_user 挂起帧（同 test_resume_consult_memory_e2e 的载体形状）。"""
+    """最小 ask_user 挂起帧（同 test_resume_consult_e2e 的载体形状）。"""
     susp = AskUserSuspension(
         message_id="m1",
         conversation_id="c1",

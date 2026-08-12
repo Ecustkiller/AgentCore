@@ -588,7 +588,7 @@ async def test_wind_down_breach_journals_denied_tool(monkeypatch):
         llm=_Scripted(),
         tools=reg,
         sink=sink,
-        tool_context=ToolContext(
+        tool_context=ToolContext.create(
             execution_id="e",
             run_id="w1",
             agent_id="a",
@@ -697,7 +697,7 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
         llm=provider,
         tools=reg,
         sink=EventSink(),
-        tool_context=ToolContext(
+        tool_context=ToolContext.create(
             execution_id="e",
             run_id="w1",
             agent_id="a",

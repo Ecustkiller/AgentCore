@@ -731,12 +731,17 @@ class WebSearchTool:
             finish_phases()
             reason = describe_search_error(e, backend)
             logger.warning("tool.web_search_error", query=query, error=reason, error_repr=repr(e))
+            # Local SearXNG product copy → stable code for curated user face (never lift
+            # ``: detail`` / host tokens from describe_net_error onto failure.message).
+            searxng_face = reason.startswith("本地搜索服务")
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
                 error=f"搜索失败：{reason}",
                 duration_ms=int((time.monotonic() - start) * 1000),
+                failure_code="searxng_unreachable" if searxng_face else None,
+                metadata={"code": "searxng_unreachable"} if searxng_face else {},
             )
         if not results:
             # Observability (D5): a LIVE search returned zero results — the passive signal

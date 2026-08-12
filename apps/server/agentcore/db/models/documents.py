@@ -4,27 +4,19 @@ The Document subsystem is a single content tree that holds every AI-context arti
 user rules, AI-maintained long-term memory, and ordinary documents — as rows in ONE
 ``documents`` table (Agent记忆与知识系统 §五 / 核心接口定义 §6.2「文件模型单表设计」). It is
 not three tables: rule / memory / knowledge are the SAME entity (a markdown document) taking
-different values on three orthogonal metadata axes:
+different values on orthogonal metadata axes:
 
 - ``ai_maintained`` (§5.2 谁写): ``false`` = a user-owned rule the AI may draft but never
-  silently rewrite; ``true`` = AI-maintained long-term memory. A ``rule``-role document is a
-  「用户规则」when ``ai_maintained=false`` and「AI 记忆」when ``true`` — same carrier, same
-  injection, distinguished only by this flag (the code-level safety branch for「谁可静默改写」).
-- scope (§5.3 位置即作用域): carried by ``folder_id`` for this phase — ``NULL`` = the user's
-  global root (injected into every conversation), a workspace ``Folder`` id = that project's
-  layer (injected only for conversations bound to it). The workspace ``Folder`` is not yet a
-  node in this tree (that unification is a later cut), so ``folder_id`` bridges「位置」the same
-  way ``boards``/``conversations`` carry it — an app-level ref, no DB FK (§6.2).
-- ``apply_mode`` (§5.4 注入策略): ``always`` (full body rides ``<rules>``), ``on_demand`` (only
-  the name rides the prompt; the body is pulled by a consult tool), ``conditional`` (reserved —
-  not driven this phase, §5.7「第一期不做」).
+  silently rewrite; ``true`` = AI-maintained long-term memory. Stays a **DB-only** column
+  (never frontmatter) — it is writer identity, not entry content.
+- scope (§5.3 位置即作用域): carried by ``folder_id`` — ``NULL`` = global root; a workspace
+  ``Folder`` id = that project's layer. App-level ref, no DB FK (§6.2).
+- ``apply_mode`` / ``description``: **derived indexes** of the md body's frontmatter
+  (``apply`` / ``description``). Frontmatter is the sole writable source of truth; these
+  columns are recomputed on every body write and must never be set by a bypass path.
 
-``parent_id`` is the intra-tree parent (a folder node's children); ``kind`` is the node type
-(folder / document; ``upload`` / ``base`` reserved by the CheckConstraint for forward-compat).
-Every node also denormalizes its ``folder_id`` scope so a scope query is a flat column filter,
-never a tree walk. Soft-deleted (``deleted_at``) and content-addressed for CAS via a SHA-256 of
-the body (``memory.memory_version``) — no version counter, so the tag is store-agnostic and
-survives the file→document migration (Agent记忆与知识系统 §1.4「每文件 CAS」).
+``parent_id`` is the intra-tree parent; ``kind`` is the node type (folder / document;
+``upload`` / ``base`` reserved). Soft-deleted (``deleted_at``); CAS via SHA-256 of the body.
 """
 
 from datetime import datetime
@@ -43,8 +35,9 @@ DOCUMENT_KINDS = ("folder", "document", "upload", "base")
 # AI-context roles (§5.2). ``rule`` (user rule XOR AI memory, split by ``ai_maintained``),
 # ``general`` (ordinary document / memory sidecar), ``attachment`` reserved.
 DOCUMENT_ROLES = ("rule", "general", "attachment")
-# Injection strategies (§5.4). ``conditional`` reserved (no trigger substrate this phase, §5.7).
-DOCUMENT_APPLY_MODES = ("always", "conditional", "on_demand")
+# Injection strategies — two live values only (``conditional`` removed; was a dead reserved
+# value with zero rows). Missing frontmatter ``apply`` defaults to ``on_demand``.
+DOCUMENT_APPLY_MODES = ("always", "on_demand")
 
 
 class Document(Base):
@@ -67,7 +60,7 @@ class Document(Base):
             name="ck_documents_role",
         ),
         CheckConstraint(
-            "apply_mode in ('always', 'conditional', 'on_demand')",
+            "apply_mode in ('always', 'on_demand')",
             name="ck_documents_apply_mode",
         ),
         # Tree navigation ("children of a folder") + the memory store's per-scope note
@@ -94,20 +87,24 @@ class Document(Base):
         String(20), nullable=False, server_default=text("'general'")
     )
     # §5.2 谁写：false = user-owned rule (AI may draft, never silently rewrite); true = AI
-    # long-term memory. The load-bearing safety flag — memory maintenance ONLY ever writes
-    # ai_maintained=true nodes, never a user's rule.
+    # long-term memory. DB-only — never mirrored into frontmatter.
     ai_maintained: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Derived index of frontmatter ``apply`` (缺席 → on_demand). Never write directly —
+    # only via DocumentRepository body writes that recompute both derived columns.
     apply_mode: Mapped[str] = mapped_column(
-        String(20), nullable=False, server_default=text("'always'")
+        String(20), nullable=False, server_default=text("'on_demand'")
+    )
+    # Derived index of frontmatter ``description`` (缺席 / empty → "").
+    description: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("''")
     )
     # Node name within its parent. For memory notes this is the store-relative path
     # (e.g. "画像.md", "主题/部署.md") so the (user, path, scope) seam maps 1:1 to a row.
     name: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
-    # Markdown body ("" for folder nodes). CAS is a SHA-256 of these bytes computed on read
-    # (memory.memory_version) — store-agnostic, so a manual edit and an offline pass conflict
-    # exactly as they did on the file store.
+    # Markdown body ("" for folder nodes). Sole writable source for apply / description
+    # via frontmatter. CAS is a SHA-256 of these bytes (memory.memory_version).
     content: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

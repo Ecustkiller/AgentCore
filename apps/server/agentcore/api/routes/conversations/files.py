@@ -26,7 +26,9 @@ from agentcore.api.schemas import (
     WorkspaceWriteResult,
 )
 from agentcore.config import settings
+from agentcore.conversation.common import resolve_turn_file_workspace
 from agentcore.core.errors import NotFoundError, ValidationError
+from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
 from agentcore.docs_export.workspace_export import ExportMarkdownError, export_markdown_path
 from agentcore.workspace.files import (
@@ -57,6 +59,19 @@ from ._helpers import _get_owned_conversation
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
+def _file_workspace_folder_id(conv: Conversation) -> str | None:
+    """Same physical root as AI turn tools (birth folder, else auto desk, else scratch).
+
+    Reuses :func:`resolve_turn_file_workspace` — never a second judgment. Does not
+    change affiliation / sidebar / memory scope (``conv.folder_id`` stays birth).
+    """
+    ws_folder_id, _ = resolve_turn_file_workspace(
+        birth_folder_id=conv.folder_id,
+        auto_desk_folder_id=getattr(conv, "auto_desk_folder_id", None),
+    )
+    return ws_folder_id
+
+
 @router.get("/{conversation_id}/workspace/files", response_model=WorkspaceFileListResponse)
 async def list_workspace_files(
     conversation_id: str,
@@ -68,7 +83,7 @@ async def list_workspace_files(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     entries = await list_files(
         user_id=user.user_id,
-        folder_id=conv.folder_id,
+        folder_id=_file_workspace_folder_id(conv),
         conversation_id=conv.id,
         recursive=recursive,
     )
@@ -105,7 +120,7 @@ async def upload_workspace_file(
     try:
         written = await upload_file(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=path,
             data=data,
@@ -130,7 +145,7 @@ async def export_conversation_workspace_docx(
     try:
         backend = build_server_workspace(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
         )
         result = await export_markdown_path(backend, body.path)
@@ -163,7 +178,7 @@ async def read_workspace_file_for_edit(
     try:
         text, mtime_ms, eol = await read_file_for_edit(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=path,
         )
@@ -201,7 +216,7 @@ async def write_workspace_file(
     try:
         ok, mtime_ms = await write_file_text(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=path,
             content=body.content,
@@ -231,7 +246,7 @@ async def download_workspace_file(
     try:
         file_path = await resolve_download_file(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=path,
             max_bytes=settings.workspace_upload_max_bytes,
@@ -264,7 +279,7 @@ async def delete_workspace_file(
     try:
         await delete_file(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=path,
         )
@@ -287,7 +302,7 @@ async def move_workspace_file(
     try:
         await move_file(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             src=body.src,
             dst=body.dst,
@@ -313,7 +328,7 @@ async def copy_workspace_file(
     try:
         await copy_file(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             src=body.src,
             dst=body.dst,
@@ -341,7 +356,7 @@ async def create_workspace_dir(
     try:
         await create_dir(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             path=body.path,
         )
@@ -373,7 +388,7 @@ async def clone_repo_into_workspace(
     try:
         dest = await clone_repo(
             user_id=user.user_id,
-            folder_id=conv.folder_id,
+            folder_id=_file_workspace_folder_id(conv),
             conversation_id=conv.id,
             repo_url=body.repo_url,
             dest=body.dest,

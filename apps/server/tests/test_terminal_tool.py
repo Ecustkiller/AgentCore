@@ -64,7 +64,7 @@ async def _round_trip(
 
 
 def _ctx(channel: WorkspaceChannel | None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="w1",

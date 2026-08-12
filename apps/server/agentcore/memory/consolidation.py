@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -71,6 +72,12 @@ from agentcore.runtime.events.types import FinishReason
 from agentcore.runtime.leases import TurnLeaseRepository
 
 logger = get_logger(__name__)
+
+# In-process failure cooldowns (compaction posture): conversation-local dict + one
+# shared-upstream sweep gate. Multi-worker skew is acceptable; no DB column.
+_failure_cooldown_until: dict[str, float] = {}
+_shared_failure_cooldown_until: float = 0.0
+_shared_failure_streak: int = 0
 
 # Terminal states that must not feed episodic/semantic memory (失败/中断回合跳过沉淀).
 _ABNORMAL_FINISH_REASONS = frozenset(
@@ -283,6 +290,9 @@ async def run_semantic_for_scope(
     model = resolve_user_model(credentials)
     provider = build_provider(credentials, purpose="platform_internal")
     collected: list[MemoryUpdateItem] = []
+    from agentcore.memory.always_quota import memory_write_conversation_id
+
+    token = memory_write_conversation_id.set(conversation_id)
     try:
         outcome = await consolidate_semantic_memory(
             user_id=user_id,
@@ -296,6 +306,7 @@ async def run_semantic_for_scope(
             collect_items=collected,
         )
     finally:
+        memory_write_conversation_id.reset(token)
         await provider.close()
 
     if outcome is None:
@@ -355,6 +366,97 @@ def _consolidation_failure_retryable(exc: BaseException) -> bool:
     return isinstance(exc, AgentCoreError) and bool(exc.retryable)
 
 
+# Side-path failure buckets where retrying a *different* conversation against the
+# same upstream is futile — the whole sweep must back off, not just this id.
+# Conversation-local buckets (timeout, 4xx upstream, invalid_response, auth) stay
+# on the per-conversation cooldown. Membership is decided by
+# ``classify_background_llm_failure``, the single source for these buckets.
+_SHARED_UPSTREAM_REASONS = frozenset(
+    {"rate_limit", "quota_skip", "provider_unavailable", "upstream_unstable"}
+)
+
+
+def _mark_conversation_failure_cooldown(conversation_id: str, *, reason: str) -> None:
+    """Arm in-process per-conversation cooldown (no-op if disabled)."""
+    secs = settings.memory_consolidation_failure_cooldown_seconds
+    if secs <= 0:
+        return
+    until = time.monotonic() + secs
+    _failure_cooldown_until[conversation_id] = until
+    logger.warning(
+        "memory.consolidation_backoff",
+        scope="conversation",
+        reason=reason,
+        cooldown_seconds=float(secs),
+        resume_at_monotonic=until,
+        conversation_id=conversation_id,
+        streak=0,
+    )
+
+
+def _clear_conversation_failure_cooldown(conversation_id: str) -> None:
+    _failure_cooldown_until.pop(conversation_id, None)
+
+
+def _in_conversation_failure_cooldown(conversation_id: str) -> bool:
+    """True while a prior conversation cooldown is still active; expires lazily."""
+    until = _failure_cooldown_until.get(conversation_id)
+    if until is None:
+        return False
+    if time.monotonic() >= until:
+        _failure_cooldown_until.pop(conversation_id, None)
+        return False
+    return True
+
+
+def _mark_shared_failure_cooldown(*, reason: str) -> None:
+    """Arm exponential shared-upstream cooldown (capped); abort further consolidations."""
+    global _shared_failure_cooldown_until, _shared_failure_streak
+    base = settings.memory_consolidation_shared_failure_cooldown_base_seconds
+    max_s = settings.memory_consolidation_shared_failure_cooldown_max_seconds
+    if base <= 0 or max_s <= 0:
+        return
+    secs = float(min(base * (2**_shared_failure_streak), max_s))
+    _shared_failure_streak += 1
+    until = time.monotonic() + secs
+    _shared_failure_cooldown_until = until
+    logger.warning(
+        "memory.consolidation_backoff",
+        scope="sweep",
+        reason=reason,
+        cooldown_seconds=secs,
+        resume_at_monotonic=until,
+        conversation_id="",
+        streak=_shared_failure_streak,
+    )
+
+
+def _clear_shared_failure_cooldown() -> None:
+    """Reset shared gate after a successful consolidation (recovery path)."""
+    global _shared_failure_cooldown_until, _shared_failure_streak
+    _shared_failure_cooldown_until = 0.0
+    _shared_failure_streak = 0
+
+
+def _in_shared_failure_cooldown() -> bool:
+    """True while shared-upstream cooldown is active; expires lazily (recovery)."""
+    global _shared_failure_cooldown_until
+    if _shared_failure_cooldown_until <= 0:
+        return False
+    if time.monotonic() >= _shared_failure_cooldown_until:
+        _shared_failure_cooldown_until = 0.0
+        return False
+    return True
+
+
+def _reset_failure_cooldowns_for_tests() -> None:
+    """Clear in-process cooldown state between unit tests."""
+    global _shared_failure_cooldown_until, _shared_failure_streak
+    _failure_cooldown_until.clear()
+    _shared_failure_cooldown_until = 0.0
+    _shared_failure_streak = 0
+
+
 async def consolidate_conversation(
     conversation_id: str, *, store: MemoryStore | None = None
 ) -> bool:
@@ -363,6 +465,8 @@ async def consolidate_conversation(
     Returns True when an episodic summary was written (semantic may or may not follow).
     Never raises.
     """
+    if _in_shared_failure_cooldown() or _in_conversation_failure_cooldown(conversation_id):
+        return False
     store = store or default_memory_store()
     # Captured so the failure path can advance the sweeper watermark without re-query.
     latest: datetime | None = None
@@ -477,6 +581,11 @@ async def consolidate_conversation(
                         credentials=credentials,
                     )
 
+            _clear_conversation_failure_cooldown(conversation_id)
+            # Only an actual LLM success proves shared upstream is healthy again.
+            # Empty-window watermark advances must not lift a rate-limit sweep gate.
+            if credentials is not None:
+                _clear_shared_failure_cooldown()
             logger.info(
                 "memory.consolidated",
                 conversation_id=conversation_id,
@@ -521,6 +630,14 @@ async def consolidate_conversation(
                 error=str(e),
                 reason=reason,
             )
+            # Layered backoff (retryable path only — watermark already handles
+            # deterministic drops). Shared upstream → whole-sweep gate; else
+            # conversation-local cooldown so the sweeper skips this id briefly.
+            if _consolidation_failure_retryable(e):
+                if reason in _SHARED_UPSTREAM_REASONS:
+                    _mark_shared_failure_cooldown(reason=reason)
+                else:
+                    _mark_conversation_failure_cooldown(conversation_id, reason=reason)
         return False
 
 
@@ -641,17 +758,29 @@ async def shutdown_scheduler() -> None:
 
 
 async def consolidation_sweep_once() -> int:
-    """One backstop sweep: episodic-write settled chats with un-synced messages."""
+    """One backstop sweep: episodic-write settled chats with un-synced messages.
+
+    Shared-upstream cooldown aborts the rest of the batch (and skips the sweep when
+    already armed). Per-conversation cooldown skips that id without stopping others.
+    """
+    if _in_shared_failure_cooldown():
+        return 0
     cutoff = datetime.now(UTC) - timedelta(seconds=settings.memory_consolidation_idle_seconds)
     async with async_session_factory() as session:
         pending = await ConversationRepository(session).list_pending_memory_consolidation(
             idle_before=cutoff,
             limit=settings.memory_consolidation_sweep_batch_limit,
         )
+    attempted = 0
     for conversation_id in pending:
+        if _in_shared_failure_cooldown():
+            break
+        if _in_conversation_failure_cooldown(conversation_id):
+            continue
         with log_context(conversation_id=conversation_id):
             await consolidate_conversation(conversation_id)
-    return len(pending)
+            attempted += 1
+    return attempted
 
 
 async def consolidation_loop() -> None:

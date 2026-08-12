@@ -355,9 +355,9 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         rows that intentionally leave message_id NULL).
 
         Per-turn (one sidecar serves many conversations), so the session creds get a
-        fresh per-turn copy. None creds (dev platform-fallback, no proxy) stay None.
-        ``trace_id`` / ``message_id`` empty (untraced caller) ⇒ the header is omitted,
-        not blank.
+        fresh per-turn copy. None creds (no inference JWT) stay None — startTurn /
+        resume refuse before prepare. ``trace_id`` / ``message_id`` empty (untraced
+        caller) ⇒ the header is omitted, not blank.
         """
         if self._creds is None:
             return None

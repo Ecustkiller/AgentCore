@@ -49,7 +49,7 @@ def _target_backend(tmp_path: Path) -> ServerWorkspace:
 
 
 def _ctx(tmp_path: Path, *, user_id: str = "u1") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",
@@ -140,7 +140,7 @@ async def test_list_and_read_registered_local_folder(tmp_path: Path):
     birth_backend = _birth_backend(tmp_path)
     target_backend = _target_backend(tmp_path)
     sink = EventSink()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",
@@ -257,7 +257,7 @@ async def test_does_not_call_apply_target_desktop(tmp_path: Path):
     """Read-only cross-desk must not rewrite target-desk memory via apply_*."""
     target_backend = _target_backend(tmp_path)
     sink = EventSink()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",

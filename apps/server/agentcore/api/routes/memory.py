@@ -12,6 +12,11 @@ All endpoints are self-only (``AuthUser``): memory is private per-user data. Wri
 hold the per-user memory lock (``memory/locks.py``) so a manual save and the offline
 consolidation pass can never interleave and lose each other's change.
 
+This legacy surface exposes **body only**: stored notes may carry frontmatter
+(``apply`` / ``description``), but responses and CAS tags strip it; writes are body-only
+and ``save_memory_note`` keeps the existing frontmatter block. Injection still reads the
+raw store (not this adapter).
+
 Memory injection and cross-session conversation-log access are product-always-on
 (定案 A); there is no user toggle endpoint.
 
@@ -30,7 +35,7 @@ Two editor surfaces sit on top, both reusing the workspace markdown editor (CAS 
   lists the folder_ids that have project memory so the rail only surfaces a node where
   there is one.
 - **On-demand topic surface** (``GET /users/me/memory/topics`` + ``GET/PUT …/topics/{slug}``):
-  lists / reads / writes the ``主题/<slug>.md`` notes the agent pulls via ``consult_memory``,
+  lists / reads / writes the ``主题/<slug>.md`` notes the agent pulls via ``consult``,
   so the rail's 主题/ folder can finally browse·edit·delete them (Agent记忆与知识系统 §1.6).
   Same ``folder_id`` scope convention as the per-leaf surface (None = global); an empty PUT
   body deletes a note (mirrors clearing a leaf), which drops it from the 记忆主题目录.
@@ -62,6 +67,7 @@ from agentcore.memory import (
     topic_path,
     topic_slug,
 )
+from agentcore.memory.document_store import EditorBodyMemoryStore
 from agentcore.memory.locks import user_memory_lock
 from agentcore.memory.move_bullet import (
     MoveBulletConflict,
@@ -71,6 +77,13 @@ from agentcore.memory.move_bullet import (
 )
 
 router = APIRouter(prefix="/users/me/memory", tags=["memory"])
+
+
+def _editor_memory_store(
+    store: DocumentMemoryStore = Depends(get_memory_store),
+) -> EditorBodyMemoryStore:
+    """Body-only view of memory for this legacy editor surface (no frontmatter leak)."""
+    return EditorBodyMemoryStore(store)
 
 
 class MemoryKind(StrEnum):
@@ -150,7 +163,7 @@ class MemoryTopicsResponse(BaseModel):
     """On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
 
     Names only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via
-    ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult_memory``).
+    ``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult``).
     """
 
     topics: list[str]
@@ -213,7 +226,7 @@ class MemoryMoveBulletResult(BaseModel):
 
 @router.get("", response_model=MemoryResponse)
 async def get_my_memory(
-    user: AuthUser, store: DocumentMemoryStore = Depends(get_memory_store)
+    user: AuthUser, store: EditorBodyMemoryStore = Depends(_editor_memory_store)
 ) -> MemoryResponse:
     """Load the signed-in user's long-term memory (``enabled`` is always true)."""
     content = merge_global_core(
@@ -229,7 +242,7 @@ async def get_my_memory(
 async def put_my_memory(
     body: MemoryWriteRequest,
     user: AuthUser,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryWriteResult:
     """Write the user's long-term memory back (full-document edit, CAS-guarded).
 
@@ -264,7 +277,7 @@ async def put_my_memory(
 
 @router.get("/projects", response_model=MemoryProjectsResponse)
 async def list_my_memory_projects(
-    user: AuthUser, store: DocumentMemoryStore = Depends(get_memory_store)
+    user: AuthUser, store: EditorBodyMemoryStore = Depends(_editor_memory_store)
 ) -> MemoryProjectsResponse:
     """List folder_ids that have project-scoped memory (so the「文件」rail can surface them).
 
@@ -277,7 +290,7 @@ async def list_my_memory_projects(
 async def move_my_memory_bullet(
     body: MemoryMoveBulletRequest,
     user: AuthUser,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryMoveBulletResult:
     """Move one memory bullet between global and the current project (P2-b 搬层纠错).
 
@@ -341,7 +354,7 @@ async def list_my_memory_updates(
 async def list_my_memory_topics(
     user: AuthUser,
     folder_id: str | None = None,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryTopicsResponse:
     """List on-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).
 
@@ -360,7 +373,7 @@ async def get_my_memory_topic(
     slug: str,
     user: AuthUser,
     folder_id: str | None = None,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryFileResponse:
     """Load ONE on-demand TOPIC note's body — global (``folder_id`` None) or a project's."""
     content = await store.load(user.user_id, topic_path(slug), scope=folder_id)
@@ -373,7 +386,7 @@ async def put_my_memory_topic(
     body: MemoryWriteRequest,
     user: AuthUser,
     folder_id: str | None = None,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryWriteResult:
     """Write ONE TOPIC note back (CAS-guarded; an empty body deletes — mirrors ``/files/{kind}``).
 
@@ -400,7 +413,7 @@ async def get_my_memory_file(
     kind: MemoryKind,
     user: AuthUser,
     folder_id: str | None = None,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryFileResponse:
     """Load ONE memory leaf — 偏好/画像 (global), a project's 画像, or a project's 导航."""
     file, scope = _resolve_file_scope(kind, folder_id)
@@ -414,7 +427,7 @@ async def put_my_memory_file(
     body: MemoryWriteRequest,
     user: AuthUser,
     folder_id: str | None = None,
-    store: DocumentMemoryStore = Depends(get_memory_store),
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
 ) -> MemoryWriteResult:
     """Write ONE memory leaf back (CAS-guarded; an empty body drops the file).
 

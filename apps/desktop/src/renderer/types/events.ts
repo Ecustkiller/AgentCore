@@ -54,18 +54,31 @@ export interface CodeExecDisplay {
 /** `consult_skill` rich result (渐进披露 可视化): which system「能力」the CEO pulled
  * — its catalog `skill_name` + the one-line `summary`. The full guidance body rides
  * the `result` text (shown verbatim under this header), so the user sees exactly what
- * the model consulted. */
+ * the model consulted. Kept for historical journal replay after the unified `consult`
+ * tool landed. */
 export interface SkillConsultDisplay {
   skill_name: string;
   summary: string;
 }
 
 /** `consult_memory` rich result (记忆文件夹化 §六 · 渐进披露 可视化): which 记忆主题笔记
- * the CEO pulled — its `topic` name. The full note body rides the `result` text (shown
- * verbatim under this header), so the user sees exactly which memory the model reached
- * for and what it read. */
+ * the CEO pulled — its `topic` name. Kept for historical journal replay. */
 export interface MemoryConsultDisplay {
   topic: string;
+}
+
+/** `consult_rule` rich result (historical journal): on-demand user-rule name.
+ * Rendered with the same memory-style card (条目名 + 正文). */
+export interface RuleConsultDisplay {
+  rule: string;
+}
+
+/** Unified `consult` rich result (按需三合一): entry `name` only.
+ * 条目来源（skill / rule / memory）只进服务端日志，不进 display——读侧不向用户暴露三分。
+ * UI reuses the consult_memory card (条目名 + 正文) — do not invent a separate card. */
+export interface UnifiedConsultDisplay {
+  name: string;
+  reused?: boolean;
 }
 
 /**

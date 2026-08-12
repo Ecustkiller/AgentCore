@@ -5,7 +5,7 @@ Increment 3 keystone. Two existing guarantees BRACKET this one:
   (test_pause_conformance + test_checkpoint_finalize_*): ``window_from_journal(journal)``
   == the captain transcript, with the suspended call left pending.
 - ``resume_chat_pipeline`` rebuilds + continues a HAND-BUILT frame
-  (test_resume_consult_memory_e2e).
+  (test_resume_consult_e2e).
 
 This test CLOSES the loop between them. It drives the REAL captain loop to the finalize
 pause under the flag (the ② producer), serializes the captured frame through the REAL
@@ -92,7 +92,7 @@ class _ExplodingBridge:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="cap",
         agent_id="a",

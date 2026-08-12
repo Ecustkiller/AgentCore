@@ -6,11 +6,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from agentcore.evals.checks import CHECK_NAMES
+from agentcore.evals.documents_fixture import lint_documents_fixture_dir
 from agentcore.evals.mast import MAST_CODES
 from agentcore.evals.prompt_profiles import PROFILE_NAMES
+
+_DEFAULT_FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 _CATEGORIES = {"qa", "retrieval", "team", "tool_use", "no_fabrication", "routing"}
 _PATHS = {"single", "team"}
@@ -77,7 +81,9 @@ def _lint_milestones(cid: str, raw: dict[str, Any]) -> list[str]:
     return errors
 
 
-def lint_case(raw: dict[str, Any]) -> list[str]:
+def lint_case(
+    raw: dict[str, Any], *, fixtures_dir: Path | None = None
+) -> list[str]:
     """返回一条用例的所有结构错误（空列表 = 合法）。"""
     errors: list[str] = []
     cid = raw.get("id") or "<no-id>"
@@ -161,15 +167,26 @@ def lint_case(raw: dict[str, Any]) -> list[str]:
             if "plan_types" in shape and not isinstance(shape["plan_types"], list):
                 errors.append(f"[{cid}] expected_shape.plan_types 须为列表")
 
+    # documents_fixture：夹具目录 + documents.json（对齐 workspace_fixture 心智）。
+    docs_fx = raw.get("documents_fixture")
+    if docs_fx is not None:
+        if not isinstance(docs_fx, str) or not docs_fx.strip():
+            errors.append(f"[{cid}] documents_fixture 须为非空字符串")
+        else:
+            root = (fixtures_dir or _DEFAULT_FIXTURES_DIR) / docs_fx
+            errors.extend(lint_documents_fixture_dir(cid, root))
+
     return errors
 
 
-def lint_suite(cases: list[dict[str, Any]]) -> list[str]:
+def lint_suite(
+    cases: list[dict[str, Any]], *, fixtures_dir: Path | None = None
+) -> list[str]:
     """校验整套用例：逐例结构 + 全局 id 唯一。"""
     errors: list[str] = []
     seen: set[str] = set()
     for raw in cases:
-        errors.extend(lint_case(raw))
+        errors.extend(lint_case(raw, fixtures_dir=fixtures_dir))
         cid = raw.get("id")
         if cid:
             if cid in seen:

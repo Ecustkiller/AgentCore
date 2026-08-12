@@ -7,17 +7,18 @@ three guards apply to each:
    ``include_legal=True`` / ``enabled_packs={"legal"}`` (so generic deployments
    never see legal content; the platform system-skill set in test_skills.py
    stays exactly the 7). Production wiring is deployment-listed ∧ user-bound.
-2. consult_skill resolves it (CEO can pull the full guidance) when registered, and
-   the 能力目录 lists it when its required tools are wired.
+2. consult resolves it (CEO can pull the full guidance) when registered, and
+   the 按需目录 lists it when its required tools are wired.
 3. The body still teaches its mechanism — the orchestration (delegate + debate) and
    the anti-hallucination floor — so it can't silently rot into a generic prompt.
 """
 
 from pathlib import Path
 
+from agentcore.runtime.context.consult_sources import MergedConsultSource, SkillConsultSource
 from agentcore.runtime.legal_skills import LEGAL_SKILLS
 from agentcore.runtime.skills import build_system_skill_registry, render_skill_directory
-from agentcore.tools.builtin.consult_skill import ConsultSkillTool
+from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -27,7 +28,7 @@ _FULL_TOOLS = {"delegate", "ask_user", "debate", "test_run"}
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -71,7 +72,7 @@ def test_directory_lists_legal_skill_when_enabled_and_tools_wired():
 
 async def test_consult_resolves_legal_skill_when_enabled():
     reg = build_system_skill_registry(include_legal=True)
-    tool = ConsultSkillTool(registry=reg)
+    tool = ConsultTool(source=MergedConsultSource(skill=SkillConsultSource(registry=reg, tool_names={"delegate","debate","ask_user"})))
     result = await tool.execute({"name": "legal_answer_brief"}, _ctx())
     assert result.success
     assert result.output == reg.get("legal_answer_brief").body
@@ -141,7 +142,7 @@ def test_directory_lists_case_analysis_when_enabled_and_tools_wired():
 
 async def test_consult_resolves_case_analysis_when_enabled():
     reg = build_system_skill_registry(include_legal=True)
-    tool = ConsultSkillTool(registry=reg)
+    tool = ConsultTool(source=MergedConsultSource(skill=SkillConsultSource(registry=reg, tool_names={"delegate","debate","ask_user"})))
     result = await tool.execute({"name": "legal_case_analysis"}, _ctx())
     assert result.success
     assert result.output == reg.get("legal_case_analysis").body

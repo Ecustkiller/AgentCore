@@ -32,7 +32,7 @@ def _ws(root: Path) -> ServerWorkspace:
 
 
 def _ctx(ws: ServerWorkspace) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a1",

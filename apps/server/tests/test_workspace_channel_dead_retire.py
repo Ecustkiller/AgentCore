@@ -84,7 +84,7 @@ class _ToolsRecordingProvider:
 
 
 def _server_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -147,7 +147,7 @@ def test_apply_retire_from_backend_channel_is_dead():
     """Worker backend channel sticky-dead seeds retire without a session flag."""
     clear_active_coordination()
     backend = _dead_local_backend()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -265,7 +265,7 @@ async def test_react_loop_round_poll_channel_is_dead_strips_file_family():
         root_id="root-poll",
     )
     backend = LocalWorkspace(channel)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="poll",
         agent_id="a",

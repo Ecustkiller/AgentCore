@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.memory.store import FileMemoryStore, topic_path
+from agentcore.runtime.context.consult_sources import MemoryConsultSource, MergedConsultSource
 from agentcore.runtime.delegate.ceo_review import deterministic_ceo_review, run_ceo_review
 from agentcore.runtime.delegate.parallelism import (
     resolve_parallelism,
@@ -29,14 +30,14 @@ from agentcore.runtime.memory_consult_cache import (
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
-from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(user_id: str = "u") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -645,11 +646,11 @@ def test_landed_status_echo_gets_one_strike_stop():
 # ── 4. 记忆复用 ──────────────────────────────────────────────────────────────
 
 
-async def test_consult_memory_reuses_turn_cache(tmp_path):
+async def test_consult_reuses_turn_cache(tmp_path):
     store = FileMemoryStore(tmp_path)
     body = "## 审美\n- 简约商务\n"
     await store.save("u", topic_path("设计审美"), body)
-    tool = ConsultMemoryTool(store=store)
+    tool = ConsultTool(source=MergedConsultSource(memory=MemoryConsultSource(store=store)))
     token = consulted_memory_cache.set({})
     try:
         first = await tool.execute({"name": "设计审美"}, _ctx())
@@ -672,7 +673,7 @@ def test_seed_consult_cache_from_window():
                     ToolCall(
                         id="c1",
                         function=ToolCallFunction(
-                            name="consult_memory",
+                            name="consult",
                             arguments=json.dumps({"name": "设计审美"}),
                         ),
                     )

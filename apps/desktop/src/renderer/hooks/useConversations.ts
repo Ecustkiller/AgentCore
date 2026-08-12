@@ -171,6 +171,20 @@ export function useConversations(): Conversation[] {
   return useGroupedConversations().data?.conversations ?? EMPTY_CONVERSATIONS;
 }
 
+/**
+ * Whether the grouped query has settled (landed or failed).
+ *
+ * {@link useConversations} / {@link useFolders} both collapse "still loading" to
+ * an empty list, which callers cannot distinguish from "this conversation has no
+ * folder". Anything that must know a conversation's 归属（本机 / 云端）before
+ * acting reads this and waits. Errors count as settled so a failed fetch degrades
+ * to the previous behaviour instead of hanging.
+ */
+export function useGroupedConversationsSettled(): boolean {
+  const q = useGroupedConversations();
+  return q.data !== undefined || q.isError;
+}
+
 /** Persist a title rename, optimistic with rollback on failure. */
 export function useRenameConversation() {
   return useMutation({

@@ -123,7 +123,7 @@ async def _build_ceo_context(mode: str):
     skill_registry = build_system_skill_registry()
 
     backend = ServerWorkspace(root=Path(tempfile.mkdtemp(prefix="probe-")), sandbox=SubprocessSandbox())
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id=new_id(), run_id=new_id(), agent_id="probe", backend=backend, user_id="probe"
     )
     _delegate, _debate, chat_tools = _assemble_ceo_toolset(

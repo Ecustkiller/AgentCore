@@ -735,12 +735,15 @@ class EventSink:
             call_id = payload.get("tool_call_id", "")
             result = cap_process_result(payload.get("result"))
             display = payload.get("display")
+            failure = payload.get("failure")
             for step in reversed(self._run_process(run_id)):
                 if step.get("kind") == "tool" and step.get("id") == call_id:
                     step["result"] = result
                     step["status"] = payload.get("status", "success")
                     if display is not None:
                         step["display"] = display
+                    if failure is not None:
+                        step["failure"] = failure
                     break
             seeded = self._seeded_run_processes.get(run_id) or []
             live = self._run_process(run_id)
@@ -859,12 +862,15 @@ class EventSink:
             call_id = payload.get("tool_call_id", "")
             result = cap_process_result(payload.get("result"))
             display = payload.get("display")
+            failure = payload.get("failure")
             for step in reversed(self._process):
                 if step.get("kind") == "tool" and step.get("id") == call_id:
                     step["result"] = result
                     step["status"] = payload.get("status", "success")
                     if display is not None:
                         step["display"] = display
+                    if failure is not None:
+                        step["failure"] = failure
                     break
             # Terminal tool persist (holds open tools on flush; compensates if cursor
             # already advanced past a stale running row).

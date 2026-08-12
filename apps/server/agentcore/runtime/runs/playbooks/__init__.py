@@ -237,7 +237,7 @@ def playbook_args_schema_description() -> str:
         "建站必填 topic（简述；亦接受 purpose/brief/description；不接受旧键 site）、"
         "绿场必填 app——勿空对象。"
         f"必填槽：{required_cues}。"
-        "可选槽与细节→consult_skill(team_orchestration_advanced)。"
+        "可选槽与细节→consult(team_orchestration_advanced)。"
     )
 
 

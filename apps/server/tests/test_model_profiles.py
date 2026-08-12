@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -468,3 +469,179 @@ async def test_validate_slot_platform_requires_catalog_visible(monkeypatch):
             ProfileSlot(origin="platform", model="glm-5.2", provider_id=None),
             label="main",
         )
+
+
+def _prov_row(**kwargs):
+    defaults = {
+        "id": "prov-1",
+        "label": "OpenAI",
+        "default_model": "gpt-4o",
+    }
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+def _profile_db_row(**kwargs):
+    defaults = {
+        "id": "prof-1",
+        "name": "combo",
+        "kind": "user",
+        "main_origin": "byok",
+        "main_provider_id": "prov-1",
+        "main_model": "gpt-4o",
+        "worker_origin": None,
+        "worker_provider_id": None,
+        "worker_model": None,
+        "background_origin": "byok",
+        "background_provider_id": "prov-1",
+        "background_model": "gpt5.6",
+        "vision_origin": None,
+        "vision_provider_id": None,
+        "vision_model": None,
+    }
+    defaults.update(kwargs)
+    return SimpleNamespace(**defaults)
+
+
+class _ReachFake:
+    def __init__(
+        self,
+        *,
+        model_ids: list[str] | None = None,
+        list_error: Exception | None = None,
+        fail_models: set[str] | None = None,
+    ) -> None:
+        self._model_ids = model_ids
+        self._list_error = list_error
+        self._fail_models = fail_models or set()
+        self.probe_models: list[str] = []
+
+    async def list_models(self) -> list[str]:
+        if self._list_error is not None:
+            raise self._list_error
+        assert self._model_ids is not None
+        return list(self._model_ids)
+
+    async def probe(self, *, model: str) -> None:
+        from agentcore.core.errors import LLMError
+
+        self.probe_models.append(model)
+        if model in self._fail_models:
+            raise LLMError(f"model {model} not found")
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.asyncio
+async def test_create_profile_warns_on_unreachable_byok_model_but_saves():
+    from agentcore.llm.credentials import LLMCredentials
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    svc = LlmModelProfileService(MagicMock())
+    svc._providers = MagicMock()
+    svc._providers.get = AsyncMock(return_value=_prov_row())
+    svc._users = MagicMock()
+    svc._users.set_default_model_profile = AsyncMock()
+    created = _profile_db_row()
+    svc._repo = MagicMock()
+    svc._repo.create = AsyncMock(return_value=created)
+
+    fake = _ReachFake(model_ids=["gpt-4o"], fail_models={"gpt5.6"})
+    creds = LLMCredentials(
+        api_key="sk", base_url="https://x", default_model="gpt-4o", provider_id="prov-1"
+    )
+    with (
+        patch(
+            "agentcore.llm.resolve.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.factory.build_provider", return_value=fake),
+    ):
+        view = await svc.create_profile(
+            "u1",
+            name="combo",
+            main=ProfileSlot(origin="byok", model="gpt-4o", provider_id="prov-1"),
+            background=ProfileSlot(
+                origin="byok", model="gpt5.6", provider_id="prov-1"
+            ),
+        )
+    assert view.id == "prof-1"
+    assert view.background is not None
+    assert view.background.model == "gpt5.6"
+    assert len(view.warnings) == 1
+    assert "gpt5.6" in view.warnings[0]
+    assert "gpt5.6" in fake.probe_models
+
+
+@pytest.mark.asyncio
+async def test_create_profile_ark_ep_not_in_list_no_warning():
+    from agentcore.llm.credentials import LLMCredentials
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    ep = "ep-20240101000000-abcde"
+    svc = LlmModelProfileService(MagicMock())
+    svc._providers = MagicMock()
+    svc._providers.get = AsyncMock(return_value=_prov_row())
+    svc._users = MagicMock()
+    created = _profile_db_row(background_model=ep)
+    svc._repo = MagicMock()
+    svc._repo.create = AsyncMock(return_value=created)
+
+    fake = _ReachFake(model_ids=["gpt-4o", "doubao-pro"], fail_models=set())
+    creds = LLMCredentials(
+        api_key="sk", base_url="https://ark", default_model="gpt-4o", provider_id="prov-1"
+    )
+    with (
+        patch(
+            "agentcore.llm.resolve.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.factory.build_provider", return_value=fake),
+    ):
+        view = await svc.create_profile(
+            "u1",
+            name="combo",
+            main=ProfileSlot(origin="byok", model="gpt-4o", provider_id="prov-1"),
+            background=ProfileSlot(origin="byok", model=ep, provider_id="prov-1"),
+        )
+    assert view.warnings == ()
+    assert ep in fake.probe_models
+
+
+@pytest.mark.asyncio
+async def test_create_profile_list_fetch_failure_saves_without_warning():
+    from agentcore.core.errors import LLMError
+    from agentcore.llm.credentials import LLMCredentials
+    from agentcore.llm.model_profiles import ProfileSlot
+
+    svc = LlmModelProfileService(MagicMock())
+    svc._providers = MagicMock()
+    svc._providers.get = AsyncMock(return_value=_prov_row())
+    svc._users = MagicMock()
+    created = _profile_db_row(background_model="gpt5.6")
+    svc._repo = MagicMock()
+    svc._repo.create = AsyncMock(return_value=created)
+
+    fake = _ReachFake(list_error=LLMError("upstream /models 500"), fail_models={"gpt5.6"})
+    creds = LLMCredentials(
+        api_key="sk", base_url="https://x", default_model="gpt-4o", provider_id="prov-1"
+    )
+    with (
+        patch(
+            "agentcore.llm.resolve.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.factory.build_provider", return_value=fake),
+    ):
+        view = await svc.create_profile(
+            "u1",
+            name="combo",
+            main=ProfileSlot(origin="byok", model="gpt-4o", provider_id="prov-1"),
+            background=ProfileSlot(
+                origin="byok", model="gpt5.6", provider_id="prov-1"
+            ),
+        )
+    assert view.id == "prof-1"
+    assert view.warnings == ()
+    assert fake.probe_models == []

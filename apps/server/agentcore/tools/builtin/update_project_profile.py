@@ -308,7 +308,7 @@ class UpdateProjectProfileTool:
             extra_lines.append(f"已写入导航（always）：{nav_path}。")
         if topic_paths:
             names = "、".join(topic_paths)
-            extra_lines.append(f"已写入主题（on_demand，按需 consult_memory）：{names}。")
+            extra_lines.append(f"已写入主题（on_demand，按需 consult）：{names}。")
         topic_line = ("\n" + "\n".join(extra_lines)) if extra_lines else ""
         warn_line = ""
         if topic_warnings:
@@ -348,7 +348,7 @@ class UpdateProjectProfileTool:
             notes.append(
                 "另已写入项目主题 "
                 + "、".join(topic_paths)
-                + "，worker 一般不必读；CEO 可 consult_memory"
+                + "，worker 一般不必读；CEO 可 consult"
             )
         topic_note = ("\n（" + "；".join(notes) + "）\n") if notes else ""
         block = (

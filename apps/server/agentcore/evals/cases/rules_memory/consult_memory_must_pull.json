@@ -1,0 +1,18 @@
+{
+  "id": "rules_memory_consult_memory_must_pull",
+  "category": "retrieval",
+  "user_message": "我们项目夜间演练的发射口令是什么？只回答口令本身，不要编造。",
+  "path": "team",
+  "mode": "economy",
+  "documents_fixture": "docs_memory_launch_code",
+  "_note": "该拉不拉：答案只在按需记忆主题「发射口令」；须 consult 后写出 MARKER_LAUNCH_7F3A。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "ToolCalled", "args": { "tool": "consult" } },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "MARKER_LAUNCH_7F3A" }
+    }
+  ]
+}

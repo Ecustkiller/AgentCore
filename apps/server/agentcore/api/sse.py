@@ -1,6 +1,8 @@
 """SSE StreamingResponse wrapper.
 
 Consumes an EventSink and serializes events as text/event-stream lines.
+Also hosts the shared pre-stream DB release so long-lived SSE routes do not
+pin a pooled primary connection for the whole stream lifetime.
 """
 
 import asyncio
@@ -8,9 +10,22 @@ import json
 from collections.abc import AsyncIterator
 from typing import Literal
 
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
 from agentcore.runtime.events import EventSink, SSEEvent
+
+
+async def release_request_db_before_sse(session: AsyncSession) -> None:
+    """Return the request-scoped session before a long-lived ``StreamingResponse``.
+
+    FastAPI keeps ``Depends(get_db)`` / yield deps open until the response body
+    finishes. For SSE that is the whole stream — often minutes (chat) or until
+    the app closes (realtime). Callers must close explicitly after any preflight
+    that needed the session, and before returning ``StreamingResponse``, so the
+    pooled connection is not held for the stream lifetime.
+    """
+    await session.close()
 
 # Idle keep-alive cadence. When the producer is mid-thought (no events queued),
 # the generator emits a comment frame this often so the connection keeps flowing

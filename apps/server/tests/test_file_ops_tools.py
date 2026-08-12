@@ -28,7 +28,7 @@ from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
 
 def _ctx(workspace: Path, *, agent_id: str = "a") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id=agent_id,
@@ -649,6 +649,35 @@ async def test_file_read_ceiling_does_not_retire_tool(tmp_path: Path):
     assert other.success is True
     assert "SPEC" in (other.output or "")
 
+
+async def test_file_read_missing_does_not_trip_circuit_breaker(tmp_path: Path):
+    """PathNotFound (env / wrong path) must not warn or disable file_read."""
+    from agentcore.runtime.loop_controller import LoopController, ToolAttempt
+
+    tool = FileReadTool()
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    for i in range(6):
+        result = await tool.execute({"path": f"ghost/missing-{i}.md"}, _ctx(tmp_path))
+        assert result.success is False
+        assert result.contract_failure is True
+        c.record(
+            [
+                ToolAttempt(
+                    f"miss-{i}",
+                    "file_read",
+                    success=False,
+                    error_summary=result.error or "",
+                    contract_failure=result.contract_failure,
+                    meta=dict(result.metadata or {}),
+                )
+            ]
+        )
+    cb = c.tool_circuit_breaker()
+    assert cb.disabled == ()
+    assert cb.warned == ()
+    assert c.tool_failure_count("file_read") == 0
+
+
 # --- file_append ---
 
 
@@ -1126,6 +1155,7 @@ async def test_delete_not_found(tmp_path: Path):
     result = await FileDeleteTool().execute({"path": "nope.txt"}, _ctx(tmp_path))
     assert result.success is False
     assert "路径不存在" in result.error
+    assert result.contract_failure is True
 
 
 async def test_delete_rejects_path_outside_workspace(tmp_path: Path):
@@ -1209,6 +1239,7 @@ async def test_move_source_not_found(tmp_path: Path):
     )
     assert result.success is False
     assert "源路径不存在" in result.error
+    assert result.contract_failure is True
 
 
 async def test_move_rejects_path_outside_workspace(tmp_path: Path):
@@ -1433,6 +1464,7 @@ async def test_file_read_missing_with_parent_gives_landmark(tmp_path: Path):
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("文件不存在：apps/desktop/package.json")
+    assert result.contract_failure is True
     assert "父目录" in result.error
     assert "apps/desktop/" in result.error
     assert "可见同层示例" in result.error
@@ -1455,6 +1487,7 @@ async def test_file_list_missing_with_parent_gives_landmark(tmp_path: Path):
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("不是目录：apps/server/src")
+    assert result.contract_failure is True
     assert "父目录" in result.error
     assert "apps/server/" in result.error
     assert "agentcore" in result.error or "README.md" in result.error
@@ -1470,6 +1503,7 @@ async def test_file_read_missing_parent_gives_root_tip(tmp_path: Path):
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("文件不存在：apps/ghost/package.json")
+    assert result.contract_failure is True
     assert "上级目录也找不到" in result.error
     assert "禁止凭通用目录名" not in result.error
     assert "反复重试" in result.error
@@ -1509,6 +1543,7 @@ async def test_file_list_guessed_missing_path_still_errors(tmp_path: Path):
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("不是目录：apps/server/src")
+    assert result.contract_failure is True
     assert "写入时会自动创建" not in result.error
 
 
@@ -1520,6 +1555,7 @@ async def test_file_read_missing_top_level_uses_root_landmark(tmp_path: Path):
     assert result.success is False
     assert result.error is not None
     assert result.error.startswith("文件不存在：package.json")
+    assert result.contract_failure is True
     assert "父目录 ./" in result.error
     assert "可见同层示例" in result.error
     assert "README.md" in result.error or "src" in result.error

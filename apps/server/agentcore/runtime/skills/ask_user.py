@@ -7,7 +7,7 @@ _ASK_USER_KICKOFF = """\
 通用短澄清（原「开场引导」skill 名保留）：**挡路拍板**——无答复则不能负责任推进、选错会返工时，\
 用 `ask_user` **短问**——可只带 `message`，或配少量 `questions` / `assumptions`；\
 可与检索、读文件、探路穿插，可连续多次。\
-**勿先** `consult_skill(ask_user_kickoff)` 再问——本段供字段拿不准时查阅。
+**勿先** `consult(ask_user_kickoff)` 再问——本段供字段拿不准时查阅。
 
 【何时问】关键高杠杆没说清、明显会做错/返工 → 短问。能按合理默认续聊或推进 → 不当检查点\
 （`end_turn`，偏好留给用户下一条）；小事或有稳妥默认 → 直接干 / `delegate`，可在正文标注假设。\
@@ -139,7 +139,7 @@ _ASK_USER_MIDTASK = """\
   裸聊写盘缺桌由运行时自动建云桌）→ `create_project`（只建云；禁改写本会话 folder_id）。
   多项目整条（跨已登记→同次 `delegate`+`target_folder_id`，读写通吃；\
   CEO 只读跨桌仅派前认桌；先建齐再派；拒后禁塌缩窄例外）→
-  `consult_skill(team_orchestration_advanced)`「跨项目并行指挥」。
+  `consult(team_orchestration_advanced)`「跨项目并行指挥」。
   【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；跨项目须派工换桌。
 - 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
   勿再弹 `open_local_project` 建新；换工程优先导入/连 Git，或本机传统换开\

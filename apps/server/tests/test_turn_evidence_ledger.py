@@ -203,7 +203,7 @@ async def test_worker_loop_annotates_stable_ids_not_pool_numbers():
         llm=provider,
         tools=reg,
         sink=EventSink(),
-        tool_context=ToolContext(
+        tool_context=ToolContext.create(
             execution_id="e",
             run_id="s",
             agent_id="w1",
@@ -251,7 +251,7 @@ async def test_ceo_loop_annotates_stable_ids_when_ledger_present():
         llm=provider,
         tools=reg,
         sink=EventSink(),
-        tool_context=ToolContext(
+        tool_context=ToolContext.create(
             execution_id="e",
             run_id="s",
             agent_id="ceo",

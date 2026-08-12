@@ -91,6 +91,7 @@ def is_channel_dead_detail(detail: str | None) -> bool:
 def op_liveness_timeout_metadata() -> dict[str, object]:
     """ToolResult.metadata for a single-op channel settle timeout (no family sticky)."""
     return {
+        "code": "liveness_timeout",
         "liveness_timeout": True,
         "timeout_layer": "channel_op",
     }
@@ -99,6 +100,7 @@ def op_liveness_timeout_metadata() -> dict[str, object]:
 def channel_dead_retire_metadata() -> dict[str, object]:
     """ToolResult.metadata for sticky channel-dead (family retire + steer)."""
     return {
+        "code": "workspace_channel_dead",
         "liveness_timeout": True,
         "timeout_layer": "channel",
         "error_class": "permanent",

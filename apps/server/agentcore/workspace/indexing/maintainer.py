@@ -101,6 +101,25 @@ class IndexMaintainer:
         self._manager.set_building(True)
         self._task = loop.create_task(self._run(), name="code-index-maintain")
 
+    def abort(self):
+        """Cancel in-flight ensure and clear coalesced follow-ups (sync).
+
+        Returns the cancelled task (if any) so callers can ``await`` it and let
+        SQLite close before deleting ``AgentCore/index`` (Windows WinError 32).
+        Prefer :meth:`drain` when the index must finish; prefer this when the
+        index directory is about to vanish.
+        """
+        self._rerun = False
+        self._force = False
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            task.cancel()
+            self._manager.set_building(False)
+            return task
+        self._manager.set_building(False)
+        return None
+
     async def drain(self) -> None:
         """Await until maintenance (including coalesced follow-ups) has settled."""
         while True:

@@ -67,7 +67,7 @@ async def get_capabilities(_user: AuthUser) -> CapabilitiesResponse:
         for pack in listed_packs()
     ]
 
-    # The CEO prompt template: composed with the catalog's CEO tool names so the 能力目录
+    # The CEO prompt template: composed with the catalog's CEO tool names so the 按需目录
     # reflects the full repertoire (e.g. ask_user_kickoff shows because ask_user is a CEO
     # tool). Memory / attachments stay out — this is the deployment-wide blueprint.
     ceo_tool_names = {

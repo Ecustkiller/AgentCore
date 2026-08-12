@@ -74,13 +74,11 @@ async def test_ticketed_miss_skips_cloud(monkeypatch: pytest.MonkeyPatch, accoun
     )
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
@@ -90,8 +88,7 @@ async def test_ticketed_miss_skips_cloud(monkeypatch: pytest.MonkeyPatch, accoun
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
-    assert user_md == ""
-    assert mem_md == ""
+    assert rules_md == ""
     assert topics == []
     assert on_demand == []
     assert calls == []
@@ -124,13 +121,11 @@ async def test_seed_then_hit(account_creds):
     )
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
@@ -140,11 +135,11 @@ async def test_seed_then_hit(account_creds):
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
-    assert "全局规则" in user_md
-    assert "项目规则" in user_md
-    assert "沟通偏好" in mem_md
-    assert "项目画像" in mem_md
-    assert "项目导航" in mem_md
+    assert "全局规则" in rules_md
+    assert "项目规则" in rules_md
+    assert "沟通偏好" in rules_md
+    assert "项目画像" in rules_md
+    assert "项目导航" in rules_md
     assert topics == [MemoryTopic(name="api", summary="API 约定")]
     assert len(on_demand) == 1
     assert on_demand[0].name == "合规"
@@ -225,13 +220,11 @@ async def test_warm_rules_list_once_and_seeds(
     )
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id="F1",
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
         topics = await load_memory_topics(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
@@ -241,8 +234,8 @@ async def test_warm_rules_list_once_and_seeds(
         )
         on_demand = await load_on_demand_user_rules("u1", folder_id="F1")
 
-    assert " - r" in user_md or "r" in user_md
-    assert "偏好" in mem_md or "body" in mem_md
+    assert " - r" in rules_md or "r" in rules_md
+    assert "偏好" in rules_md or "body" in rules_md
     assert any(t.name == "foo" for t in topics)
     assert len(on_demand) == 1
     assert rules_calls["n"] == 1  # prepare did not re-hit cloud

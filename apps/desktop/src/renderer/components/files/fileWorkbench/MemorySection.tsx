@@ -323,7 +323,7 @@ export function MemorySection({
                 <div
                   className="group flex items-center rounded-lg text-sm"
                   style={{ paddingLeft: leafPad }}
-                  title="按需查阅的记忆主题（consult_memory 拉取）"
+                  title="按需查阅的记忆主题（consult 拉取）"
                 >
                   <button
                     type="button"
@@ -377,7 +377,7 @@ export function MemorySection({
               type="button"
               onClick={toggleTopics}
               aria-expanded={topicsOpen}
-              title="按需查阅的记忆主题（consult_memory 拉取）"
+              title="按需查阅的记忆主题（consult 拉取）"
               style={{ paddingLeft: leafPad }}
               className="flex h-7 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-sm text-foreground transition-colors hover:bg-accent/60"
             >

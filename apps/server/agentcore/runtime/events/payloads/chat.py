@@ -95,6 +95,17 @@ class ToolUseStartPayload(WirePayload):
     )
 
 
+class ToolFailure(WirePayload):
+    """User-facing tool failure face — only on ``tool_use_end`` when ``status=error``.
+
+    ``message`` is Chinese product copy for the process timeline; ``code`` is a stable
+    error code. Model-facing technical detail stays in ``result`` (unchanged).
+    """
+
+    message: str
+    code: str
+
+
 class ToolUseEndPayload(WirePayload):
     tool_call_id: str
     tool_name: str
@@ -107,6 +118,10 @@ class ToolUseEndPayload(WirePayload):
             "model-facing `result` text."
         ),
         json_schema_extra={"ts_type": "ToolDisplay"},
+    )
+    failure: ToolFailure | None = absent(
+        "Present only when status=error: Chinese product message + stable code. "
+        "Model-facing technical text stays in result."
     )
     run_id: str | None = absent("Worker-call tag; absent for the captain's own calls.")
 

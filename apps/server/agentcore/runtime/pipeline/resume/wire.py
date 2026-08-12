@@ -22,7 +22,6 @@ from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.resolve.prepare import (
     _wire_worker_conversation_log_tools,
-    _wire_worker_memory_tools,
 )
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
 from agentcore.runtime.skills import build_system_skill_registry
@@ -33,6 +32,7 @@ from agentcore.tools.builtin import (
     delegation_grantable_tool_names,
     per_call_tool_names,
 )
+from agentcore.tools.ceo_toolset import wire_worker_consult as _wire_worker_consult_tools
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registration import host_class_tool_names, register_board_ceo_tools
 from agentcore.tools.registry import ToolRegistry
@@ -104,41 +104,12 @@ async def _wire_continuation_toolset(
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
     x_client_platform: str | None,
-    has_memory_topics: bool | None = None,
-    has_on_demand_rules: bool | None = None,
     folder_binding_injected: bool = False,
     folder_local_root_id: str | None = None,
     folder_local_subpath: str | None = None,
 ) -> ResumedWiring:
     """Shared CEO/worker toolset rebuild for resume and crash redrive (no parallel path)."""
     from agentcore.runtime.pipeline.resume import pipeline as resume_pipeline_mod
-
-    # Reuse a caller-supplied topic signal when the continuation already listed topics
-    # (crash redrive); otherwise list once here for the consult_memory wire gate.
-    # Resolve store via ``resolve.prepare.default_memory_store`` so resume e2e / governance
-    # patches on that seam still apply (same binding ConsultMemoryTool uses).
-    topics_present = has_memory_topics
-    if topics_present is None and memory_enabled:
-        from agentcore.memory import load_memory_topics
-        from agentcore.runtime.resolve.prepare import default_memory_store
-
-        topics_present = bool(
-            await load_memory_topics(
-                default_memory_store(),
-                user_id,
-                folder_id=folder_id,
-                enabled=True,
-            )
-        )
-    elif topics_present is None:
-        topics_present = False
-
-    rules_present = has_on_demand_rules
-    if rules_present is None:
-        from agentcore.memory import load_on_demand_user_rules
-
-        rules_present = bool(await load_on_demand_user_rules(user_id, folder_id=folder_id))
-
     from agentcore.tools.sandbox.exec_languages import resolve_exec_languages
 
     # Sticky channel-dead: abort before probe / MCP burn more wall clock.
@@ -165,6 +136,9 @@ async def _wire_continuation_toolset(
         desktop_channel, cache_scope=user_id, cache_only=True
     )
     mcp_label = mcp_capability_label(mcp_discover, desktop_online=desktop_online)
+    from agentcore.runtime.capability_packs import enabled_packs
+
+    skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())
     worker_tools = build_worker_registry(
         backend=backend,
         permission_axes=permission_axes,
@@ -172,12 +146,12 @@ async def _wire_continuation_toolset(
         desktop_online=desktop_online,
     )
     register_mcp_tools(worker_tools, mcp_discover)
-    _wire_worker_memory_tools(
+    await _wire_worker_consult_tools(
         worker_tools,
+        skill_registry=skill_registry,
         memory_enabled=memory_enabled,
         folder_id=folder_id,
-        has_memory_topics=topics_present,
-        has_on_demand_rules=rules_present,
+        user_id=user_id,
     )
     _wire_worker_conversation_log_tools(
         worker_tools,
@@ -185,12 +159,9 @@ async def _wire_continuation_toolset(
         folder_id=folder_id,
     )
     # Same system-skill registry as a fresh turn so the continued CEO loop can
-    # still consult_skill (提示词瘦身 P2), including deployment-gated capability
-    # packs. The CEO prompt itself is replayed from the stored transcript
-    # (already slim + 能力目录), so no directory re-render.
-    from agentcore.runtime.capability_packs import enabled_packs
-
-    skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())
+    # still consult (提示词瘦身 P2), including deployment-gated capability packs.
+    # The CEO prompt itself is replayed from the stored transcript
+    # (already slim + 按需目录), so no directory re-render.
     # AI 协作白板 (§六 M2): a board-bound turn regains its BoardChannel so the
     # continued CEO loop can still reach the user's open canvas via ``board_ops``.
     # Rebuilt fresh (channels aren't serializable) from the caller's re-derived
@@ -229,7 +200,7 @@ async def _wire_continuation_toolset(
     # Resume has no turn attachments carrier — materials empty; attachments/
     # path exemption on the list helpers still applies.
     backend.ai_list_materials = frozenset()
-    base_tool_context = ToolContext(
+    base_tool_context = ToolContext.create(
         execution_id=resume_execution_id,
         run_id=new_id(),
         agent_id="default",
@@ -251,10 +222,26 @@ async def _wire_continuation_toolset(
         cost_sink=vision_cost_sink,
         shared_workspace=folder_id is not None,
         material_paths=frozenset(),
+        attachment_context="",
         folder_binding_injected=folder_binding_injected,
         folder_local_root_id=folder_local_root_id,
         folder_local_subpath=folder_local_subpath,
     )
+    if folder_id is None:
+        from agentcore.runtime.delegate.target_desktop import (
+            _load_auto_desk_folder_id,
+            bind_tool_context_to_landing_desk,
+        )
+
+        auto_desk = await _load_auto_desk_folder_id(
+            user_id=user_id, conversation_id=conversation_id
+        )
+        if auto_desk:
+            base_tool_context.auto_desk_folder_id = auto_desk
+            base_tool_context.turn_target_desk.note_folder(auto_desk)
+            await bind_tool_context_to_landing_desk(
+                base_tool_context, folder_id=auto_desk
+            )
     from agentcore.runtime.closing_posture import (
         clear_b1_closing_latches,
         clear_cloud_web_verify_gap,
@@ -335,11 +322,18 @@ async def _wire_continuation_toolset(
         folder_id=folder_id,
         memory_enabled=memory_enabled,
         conversation_history_access=conversation_history_access,
-        has_memory_topics=topics_present,
-        has_on_demand_rules=rules_present,
         permission_axes=permission_axes,
         advertise_bind_local_folder=checkpoint_enabled and channel.can_bind_folder,
         desktop_online=desktop_online,
+    )
+    from agentcore.tools.ceo_toolset import wire_ceo_consult
+
+    await wire_ceo_consult(
+        chat_tools,
+        skill_registry=skill_registry,
+        folder_id=folder_id,
+        memory_enabled=memory_enabled,
+        user_id=user_id,
     )
 
     # AI 协作白板: re-give the CEO board tools (``board_ops`` §六 M2 + ``board_read``
@@ -473,8 +467,6 @@ async def wire_crash_turn(
     session_loader: SessionLoader | None,
     suspension_saver: SuspensionSaver | None,
     suspension_deleter: SuspensionDeleter | None,
-    has_memory_topics: bool | None = None,
-    has_on_demand_rules: bool | None = None,
 ) -> ResumedWiring:
     """Crash-lease sibling of :func:`wire_resume_turn` — same assembly, no suspension.
 
@@ -505,6 +497,4 @@ async def wire_crash_turn(
         suspension_saver=suspension_saver,
         suspension_deleter=suspension_deleter,
         x_client_platform=None,
-        has_memory_topics=has_memory_topics,
-        has_on_demand_rules=has_on_demand_rules,
     )

@@ -172,7 +172,7 @@ Domain split (write-side — 偏好.md vs 主题/*.md):
   interaction cadence, review style, etc.).
 - Topic / domain / genre preferences (preference for a field, play-style, content type,
   e.g. "偏好法律分析", "喜欢模拟法庭", "偏好多透镜调研") must NOT stay in 偏好.md —
-  move them into the matching 主题/<slug>.md via ops (on_demand; consult_memory only).
+  move them into the matching 主题/<slug>.md via ops (on_demand; consult only).
 - When CURRENT preferences still contain such genre/domain bullets, REWRITE preferences
   without them and ADD/UPDATE the durable bits into the appropriate 主题/*.md op(s).
 

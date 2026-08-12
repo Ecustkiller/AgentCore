@@ -4722,7 +4722,7 @@ dialog.viewer::backdrop {
 }
 
 /* 「记忆已更新」卡 (③ Agent记忆与知识系统 §1.6): offline-consolidation results pinned at the
-   thread tail — the WRITE side of memory made visible (读侧 consult_memory 本就内联可见)。
+   thread tail — the WRITE side of memory made visible (读侧 consult 本就内联可见)。
    中性 chrome：记忆是被动后台行为，不是「需要你」的面（品牌/状态色留给待裁决类），故卡身走
    neutral border + panel 底，仅动作标用语义状态色。 */
 .mem-updates {

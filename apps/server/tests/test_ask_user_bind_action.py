@@ -290,7 +290,7 @@ async def test_ask_user_rejects_unparseable_questions_string():
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
     from agentcore.workspace.server import ServerWorkspace
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -342,7 +342,7 @@ async def test_ask_user_rejects_recommendation_in_label():
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
     from agentcore.workspace.server import ServerWorkspace
 
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

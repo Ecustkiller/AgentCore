@@ -58,6 +58,7 @@ from agentcore.middleware.client_version import DesktopMinVersionMiddleware
 from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.errors import JSONErrorMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
+from agentcore.middleware.request_attribution import RequestAttributionMiddleware
 from agentcore.runtime.audit_retention import audit_retention_loop
 from agentcore.runtime.session_retention import session_retention_loop
 from agentcore.runtime.suspension.retention import paused_turn_retention_loop
@@ -491,6 +492,9 @@ app = FastAPI(
 
 # Middleware runs outermost-last-added: register the rate limiter first so CORS
 # wraps it and even a 429 response carries the CORS headers the browser needs.
+# Innermost: stamp http_method/path/req_id onto the same task that checkouts use
+# (must sit inside BaseHTTPMiddleware so contextvars are not stranded on a parent).
+app.add_middleware(RequestAttributionMiddleware)
 app.add_middleware(CsrfMiddleware)
 app.add_middleware(AuthRateLimitMiddleware)
 # Desktop floor (426 CLIENT_TOO_OLD) before CSRF/rate-limit work; still inside

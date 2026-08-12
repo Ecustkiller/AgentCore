@@ -8,7 +8,7 @@ Desktop convention (parallel desktop inject):
 - Cloud calls (account ticket **or** access):
   ``POST {baseUrl}/conversations/search|read``,
   ``POST {baseUrl}/rules/list|remember`` (list = always + on_demand bodies for
-  规则目录 / ``consult_rule``),
+  规则目录 / ``consult``),
   ``POST {baseUrl}/memory/{list,load,save,delete,project-scopes}``.
 - Does **not** open UI conversation / documents / memory-editor CRUD to the
   narrow ticket — engine-minimal surface only.
@@ -229,7 +229,7 @@ class AccountRuleDoc(BaseModel):
 
 
 class AccountRulesListResponse(BaseModel):
-    """Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult_rule``."""
+    """Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``."""
 
     global_rules: list[AccountRuleDoc]
     project_rules: list[AccountRuleDoc]

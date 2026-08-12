@@ -25,6 +25,32 @@ if TYPE_CHECKING:
     from agentcore.workspace.write_claims import WriteCoordinator
 
 
+@dataclass
+class WorkspaceSlot:
+    """Shared mutable workspace root for one conversation turn.
+
+    ``dataclasses.replace`` on :class:`ToolContext` copies this object by
+    reference, so a mid-turn rebind (``ctx.backend = new``) is visible to every
+    snapshot that still shares the slot. Callers that deliberately sit on another
+    desk (``apply_target_desktop`` / ``project_fs``) must pass a fresh slot.
+    """
+
+    backend: WorkspaceBackend
+    material_paths: frozenset[str] = field(default_factory=frozenset)
+
+
+def fork_workspace_slot(
+    backend: WorkspaceBackend,
+    *,
+    material_paths: frozenset[str] | None = None,
+) -> WorkspaceSlot:
+    """Build a new slot that does not follow a parent rebind."""
+    return WorkspaceSlot(
+        backend=backend,
+        material_paths=frozenset() if material_paths is None else material_paths,
+    )
+
+
 @dataclass(frozen=True)
 class EscalationOutcome:
     """The result of a worker's blocking escalate (阻塞式求决策 §4.4).
@@ -100,6 +126,7 @@ class TurnTargetDeskHint:
 
     ``auto_cloud_provisioned``: runtime silently created a cloud desk this turn for
     bare-chat write tasks — at most once; never rewrites conversation ``folder_id``.
+    Cross-turn reuse persists on ``Conversation.auto_desk_folder_id`` (orthogonal).
     """
 
     folder_id: str | None = None
@@ -202,8 +229,12 @@ class ToolContext:
     execution_id: str
     run_id: str
     agent_id: str
-    backend: WorkspaceBackend
     user_id: str
+    # Shared workspace root behind the ``backend`` / ``material_paths`` properties.
+    # ``replace`` without ``_workspace=`` keeps following mid-turn rebinds; fork
+    # paths pass a fresh :class:`WorkspaceSlot`. Build via :meth:`create` to seed it
+    # from plain ``backend`` / ``material_paths`` arguments.
+    _workspace: WorkspaceSlot = field(repr=False, compare=False)
     # The owning conversation, used by conversation-scoped tool state (e.g. the
     # read_url fetch cache, web/url_cache.py). Set once on the pipeline's base
     # context and inherited by every worker via ``dataclasses.replace``. Defaults
@@ -296,10 +327,9 @@ class ToolContext:
     # Set on the pipeline base context from ``folder_id``; inherited by workers via
     # ``dataclasses.replace``. Defaults False for tests / evals / 裸聊.
     shared_workspace: bool = False
-    # 本回合附件给出的工作区相对路径（``collect_turn_material_paths``）。``file_list``
-    # 对其中 AI_NOISE 后缀不隐藏（∪ ``attachments/`` 豁免）。默认空；workers 经
-    # ``replace`` 继承同一 frozenset。
-    material_paths: frozenset[str] = frozenset()
+    # Turn attachment block (prepare bake). ``apply_target_desktop`` reuses it when
+    # rebuilding a worker prompt for another desk. Empty on resume / tests.
+    attachment_context: str = ""
     # 工具执行阶段进度 (联网搜索前端展示优化): a narrow callback a long-running tool fires to report
     # a coarse EXECUTION phase (web_search → "querying" 正在检索 / "queued" 排队中 / "fallback"
     # 改用备用引擎) so the waiting UI shows a live, honest state instead of a dead spinner. Called
@@ -395,6 +425,43 @@ class ToolContext:
     # 裸聊同回合先建/解析后的软默认目标桌（共享可变；``replace`` 浅拷贝同引用）。
     # 仅缺省 ``delegate`` 目标时消费；多 id 同回合清空。≠ 会话出生 ``folder_id``。
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
+    # Bare-chat landing write desk (``Conversation.auto_desk_folder_id``). Orthogonal
+    # to birth ``folder_id`` / sidebar / memory. When set, CEO file tools + overview
+    # sit on this Folder while affiliation stays 裸聊. Never auto-promote.
+    auto_desk_folder_id: str | None = None
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        backend: WorkspaceBackend,
+        material_paths: frozenset[str] | None = None,
+        **fields: Any,
+    ) -> ToolContext:
+        """Build a context owning a fresh :class:`WorkspaceSlot`."""
+        return cls(
+            _workspace=WorkspaceSlot(
+                backend=backend,
+                material_paths=frozenset() if material_paths is None else material_paths,
+            ),
+            **fields,
+        )
+
+    @property
+    def backend(self) -> WorkspaceBackend:
+        return self._workspace.backend
+
+    @backend.setter
+    def backend(self, value: WorkspaceBackend) -> None:
+        self._workspace.backend = value
+
+    @property
+    def material_paths(self) -> frozenset[str]:
+        return self._workspace.material_paths
+
+    @material_paths.setter
+    def material_paths(self, value: frozenset[str]) -> None:
+        self._workspace.material_paths = value
 
 
 @dataclass
@@ -454,6 +521,12 @@ class ToolResult:
     output_limit: int | None = None
     citations: list[dict[str, Any]] | None = None
     display: dict[str, Any] | None = None
+    # Optional user-facing failure face (``tool_use_end.failure``). Most tools leave these
+    # None — the engine's central mapper emits curated Chinese by stable code. Only set when
+    # a tool truly needs product copy distinct from the model-facing ``error``/``output``.
+    # Never put ``str(exc)`` / internal tokens here.
+    failure_message: str | None = None
+    failure_code: str | None = None
     # 参数契约拒绝 (零成本可修正的参数打回): a deterministic argument-contract rejection at
     # the tool boundary (e.g. web_search A3 query 过长/过多) whose ``error`` already carries a
     # concrete fix hint. It is an honest failed call for the model, but must NOT feed the

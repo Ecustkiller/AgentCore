@@ -51,7 +51,7 @@ def _ctx(
     if backend is None:
         backend = MagicMock()
         backend.read_bytes = AsyncMock(return_value=PNG_BYTES)
-    return ToolContext(
+    return ToolContext.create(
         execution_id="exec-1",
         run_id="run-1",
         agent_id="agent-1",

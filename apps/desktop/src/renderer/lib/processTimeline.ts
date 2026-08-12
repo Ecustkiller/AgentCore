@@ -141,10 +141,11 @@ export function appendToolStep(
  * Resolve a tool step (result + status) on its matching `tool_use_end`; returns the
  * same array reference when no step matches (id absent) so callers can no-op.
  *
- * `display` is written ONLY when the payload carries one — a value-less display
- * leaves the field ABSENT (not null), matching the backend oracle's golden +
- * EventSink (无富渲染 → 字段不出现). The renderer treats absent/null identically
- * (ToolResultView gates on `if (d.display)`), so production loses nothing.
+ * `display` / `failure` are written ONLY when the payload carries them — a
+ * value-less field leaves the key ABSENT (not null), matching the backend
+ * oracle's golden + EventSink (无富渲染 / 无产品失败面 → 字段不出现). The
+ * renderer treats absent/null display identically; `failure` absent keeps the
+ * legacy peek fallback onto model-facing `result`.
  */
 export function resolveToolStep(
   process: ProcessStep[] | undefined,
@@ -160,6 +161,7 @@ export function resolveToolStep(
       changed = true;
       const resolved = { ...s, result: payload.result, status: payload.status };
       if (payload.display != null) resolved.display = payload.display;
+      if (payload.failure != null) resolved.failure = payload.failure;
       return resolved;
     }
     return s;

@@ -75,6 +75,7 @@ class ModelProfileView:
     background: ProfileSlot | None = None
     vision: ProfileSlot | None = None
     is_default: bool = False
+    warnings: tuple[str, ...] = ()
 
 
 def platform_preset_id(model_id: str) -> str:
@@ -274,6 +275,7 @@ class LlmModelProfileService:
                 background=v.background,
                 vision=v.vision,
                 is_default=(v.id == effective),
+                warnings=v.warnings,
             )
             for v in views
         ]
@@ -330,6 +332,69 @@ class LlmModelProfileService:
         if row is None:
             raise ValidationError(f"{label} 所选服务商不存在")
 
+    async def _byok_reachability_warnings(
+        self,
+        user_id: str,
+        slots: list[tuple[str, ProfileSlot]],
+    ) -> tuple[str, ...]:
+        """Best-effort BYOK model warnings for save responses (never raises / blocks).
+
+        Uses the same reachability ladder as connectivity test, with
+        :data:`SAVE_WARN_POLICY` so list fetch failures stay silent.
+        """
+        by_provider: dict[str, list[tuple[str, str]]] = {}
+        for label, slot in slots:
+            if slot.origin != "byok" or not slot.provider_id:
+                continue
+            model_s = (slot.model or "").strip()
+            if not model_s:
+                continue
+            by_provider.setdefault(slot.provider_id, []).append((label, model_s))
+        if not by_provider:
+            return ()
+
+        from agentcore.llm.factory import build_provider
+        from agentcore.llm.model_reachability import (
+            SAVE_WARN_POLICY,
+            check_model_reachable,
+            fetch_model_list,
+        )
+        from agentcore.llm.resolve import resolve_provider_credentials
+
+        warnings: list[str] = []
+        try:
+            for provider_id, items in by_provider.items():
+                credentials = await resolve_provider_credentials(
+                    self._session, user_id, provider_id
+                )
+                if credentials is None:
+                    continue
+                provider = build_provider(credentials)
+                try:
+                    model_list = await fetch_model_list(provider)
+                    seen: set[str] = set()
+                    for label, model_s in items:
+                        if model_s in seen:
+                            continue
+                        seen.add(model_s)
+                        reach, detail = await check_model_reachable(
+                            provider,
+                            model=model_s,
+                            model_list=model_list,
+                            policy=SAVE_WARN_POLICY,
+                        )
+                        if reach != "error":
+                            continue
+                        suffix = f"：{detail}" if detail else ""
+                        warnings.append(
+                            f"{label} 模型「{model_s}」可能不可用{suffix}"
+                        )
+                finally:
+                    await provider.close()
+        except Exception:  # noqa: BLE001 — save must not fail on warn checks
+            return tuple(warnings)
+        return tuple(warnings)
+
     async def create_profile(
         self,
         user_id: str,
@@ -380,7 +445,28 @@ class LlmModelProfileService:
         )
         if set_as_default:
             await self._users.set_default_model_profile(user_id, row.id)
-        return self._view_row(row, is_default=set_as_default)
+        warn_slots: list[tuple[str, ProfileSlot]] = [("main", main)]
+        if worker is not None:
+            warn_slots.append(("worker", worker))
+        if background is not None:
+            warn_slots.append(("background", background))
+        if vision is not None:
+            warn_slots.append(("vision", vision))
+        warnings = await self._byok_reachability_warnings(user_id, warn_slots)
+        view = self._view_row(row, is_default=set_as_default)
+        if not warnings:
+            return view
+        return ModelProfileView(
+            id=view.id,
+            name=view.name,
+            kind=view.kind,
+            main=view.main,
+            worker=view.worker,
+            background=view.background,
+            vision=view.vision,
+            is_default=view.is_default,
+            warnings=warnings,
+        )
 
     async def update_profile(
         self,
@@ -460,7 +546,32 @@ class LlmModelProfileService:
         updated = await self._repo.update(profile_id, user_id=user_id, **kwargs)
         assert updated is not None
         default_id = await self._default_id(user_id)
-        return self._view_row(updated, is_default=(updated.id == default_id))
+        view = self._view_row(updated, is_default=(updated.id == default_id))
+
+        slot_touched = bool(fields_set & {"main", "worker", "background", "vision"})
+        if not slot_touched:
+            return view
+        warn_slots: list[tuple[str, ProfileSlot]] = [("main", view.main)]
+        if view.worker is not None:
+            warn_slots.append(("worker", view.worker))
+        if view.background is not None:
+            warn_slots.append(("background", view.background))
+        if view.vision is not None:
+            warn_slots.append(("vision", view.vision))
+        warnings = await self._byok_reachability_warnings(user_id, warn_slots)
+        if not warnings:
+            return view
+        return ModelProfileView(
+            id=view.id,
+            name=view.name,
+            kind=view.kind,
+            main=view.main,
+            worker=view.worker,
+            background=view.background,
+            vision=view.vision,
+            is_default=view.is_default,
+            warnings=warnings,
+        )
 
     async def delete_profile(self, user_id: str, profile_id: str) -> None:
         if is_system_profile_id(profile_id):

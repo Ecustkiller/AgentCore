@@ -33,7 +33,7 @@ from agentcore.workspace.server import ServerWorkspace
 
 
 def _ctx(user_id: str = "u1", *, conversation_id: str = "") -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

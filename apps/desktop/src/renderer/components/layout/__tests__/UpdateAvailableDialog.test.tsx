@@ -10,10 +10,16 @@ vi.mock("@/lib/clientBuildInfo", () => ({
 }));
 
 import { hasAutoUpdater } from "@/lib/capabilities";
+import {
+  clientReleaseChannel,
+  desktopDownloadUrlForChannel,
+} from "@/lib/releaseChannel";
 import { useUpdatesStore } from "@/stores/updates";
 import { UpdateAvailableDialog } from "../UpdateAvailableDialog";
 
 const hasAutoUpdaterMock = vi.mocked(hasAutoUpdater);
+
+const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
 beforeEach(() => {
   hasAutoUpdaterMock.mockReturnValue(true);
@@ -68,6 +74,29 @@ describe("UpdateAvailableDialog", () => {
     render(<UpdateAvailableDialog />);
     fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
     expect(download).toHaveBeenCalled();
+  });
+
+  it("manualOnly replaces download CTA with channel download-page link", () => {
+    const download = vi.fn(() => Promise.resolve());
+    useUpdatesStore.setState({
+      download,
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        releaseNotes: "重要修复",
+        manualOnly: true,
+      },
+    });
+    render(<UpdateAvailableDialog />);
+    expect(screen.getByText(/此版本需手动下载安装/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
+    const link = screen.getByRole("link", { name: "前往下载页" });
+    expect(link.getAttribute("href")).toBe(downloadPageUrl);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(download).not.toHaveBeenCalled();
+    // Soft dismiss actions remain.
+    expect(screen.getByRole("button", { name: "稍后提醒" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "跳过此版本" })).toBeTruthy();
   });
 
   it("soft update does not keep a download-progress dialog", () => {

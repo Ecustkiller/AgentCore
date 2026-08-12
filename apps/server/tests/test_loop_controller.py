@@ -1049,6 +1049,52 @@ def test_circuit_breaker_contract_failures_across_rounds_still_ignored():
     assert c.tool_failure_count("web_search") == 0
 
 
+def test_circuit_breaker_ignores_path_not_found_env_failures():
+    """Environment / wrong-path missing files must not disable file_read.
+
+    Accident shape: platform left an attachment out of a delegated workspace →
+    repeated file_read PathNotFound must not warn/disable the tool. Distinct
+    missing paths stay free of the fuse; same-fingerprint thrash still hits
+    validation path-stop (tool remains available).
+    """
+    c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
+    for i in range(6):
+        c.record(
+            [
+                ToolAttempt(
+                    f"missing-{i}",
+                    "file_read",
+                    success=False,
+                    contract_failure=True,
+                    error_summary=f"文件不存在：ghost/{i}.md",
+                )
+            ]
+        )
+    cb = c.tool_circuit_breaker()
+    assert cb.disabled == ()
+    assert cb.warned == ()
+    assert c.tool_failure_count("file_read") == 0
+    assert cb.validation_stop is None
+
+    # Same call fingerprint ×2 → validation path-stop; still no disable.
+    same = ToolAttempt(
+        "same-missing",
+        "file_read",
+        success=False,
+        contract_failure=True,
+        error_summary="文件不存在：ghost/same.md",
+    )
+    c.record([same])
+    assert not c.tool_circuit_breaker()
+    c.record([same])
+    stop = c.tool_circuit_breaker()
+    assert stop.disabled == ()
+    assert stop.warned == ()
+    assert stop.validation_stop is not None
+    assert "file_read" in (stop.validation_stop or "")
+    assert c.tool_failure_count("file_read") == 0
+
+
 def test_circuit_breaker_counts_only_real_failures_when_mixed_with_contract():
     # 契约拒绝与真实失败（网络错误等）混合时：只有真实失败计入 warn/disable。
     c = LoopController(tool_failure_warn=2, tool_failure_disable=3)
@@ -1587,7 +1633,7 @@ def test_safety_net_ignores_non_investigation_tools():
     # asking the user / consulting a skill is making progress, not over-investigating.
     c = _worker(finalize_rounds=6)
     c.record([_ok("a", "file_write"), _ok("b", "ask_user")])
-    c.record([_ok("c", "consult_skill")])
+    c.record([_ok("c", "consult")])
     assert c.investigation_rounds == 0
     assert c.convergence_action() is Intervention.CONTINUE
 

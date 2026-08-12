@@ -7,7 +7,11 @@ from dataclasses import asdict
 from typing import Any
 
 from agentcore.core.error_codes import ErrorCode
-from agentcore.core.errors import error_fields_for
+from agentcore.core.errors import (
+    UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
+    AgentCoreError,
+    error_fields_for,
+)
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations, reconcile_citations
@@ -281,12 +285,22 @@ async def salvage_pipeline_exception(
     roster_writer: Any,
 ) -> dict:
     """Salvage journal + streamed text when the pipeline raises."""
-    logger.error("pipeline.error", error=str(e), exc_info=True)
+    # Original exception text + typed details stay in logs only (product face below).
+    log_fields: dict[str, Any] = {
+        "error": str(e),
+        "error_type": type(e).__name__,
+    }
+    if isinstance(e, AgentCoreError) and e.details:
+        log_fields["error_details"] = e.details
+    logger.error("pipeline.error", **log_fields, exc_info=True)
     # Preserve a structured AgentCoreError.code that escaped to the pipeline
     # boundary (e.g. LLM_KEY_INVALID) instead of flattening every crash to
     # PIPELINE_ERROR — the client only acts on specific codes (统一错误码).
+    # Unclassified exceptions: curated product fallback — never str(e) on the face.
     code, message, err_ctx = error_fields_for(
-        e, fallback_code=ErrorCode.PIPELINE_ERROR, fallback_message=str(e)
+        e,
+        fallback_code=ErrorCode.PIPELINE_ERROR,
+        fallback_message=UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
     )
     sink.emit(error_event(code, message, context=err_ctx))
     sink.emit(message_end(FinishReason.ERROR))
@@ -326,7 +340,7 @@ async def salvage_pipeline_exception(
         "message_id": message_id,
         "content": salvaged_content,
         "reasoning_content": salvaged_reasoning or None,
-        "error": str(e),
+        "error": message,
         "error_code": code,
         "finish_reason": FinishReason.ERROR,
         "journal_entries": crash_journal,

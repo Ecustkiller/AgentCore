@@ -149,7 +149,7 @@ def test_turn_suspension_full_frame_round_trips():
         "source": "llm",
     }
     assert frame.to_json()["ceo_review"]["source"] == "llm"
-    # The project scope survives the frame so resume re-wires consult_memory to it.
+    # The project scope survives the frame so resume re-wires consult to it.
     assert restored.folder_id == "F1"
     assert frame.to_json()["folder_id"] == "F1"
     # The memory master switch survives too: a memory-off turn resumes memory-off.

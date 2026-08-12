@@ -1,4 +1,7 @@
-import { useConversations } from "@/hooks/useConversations";
+import {
+  useConversations,
+  useGroupedConversationsSettled,
+} from "@/hooks/useConversations";
 import { getFolders, useFolders } from "@/hooks/useFolders";
 import { useConversationWorkspace, useWorkspaces } from "@/hooks/useWorkspaces";
 import { hasInAppPreview, hasLocalFiles } from "@/lib/capabilities";
@@ -18,6 +21,22 @@ import type { WorkspaceInfo } from "@/services/workspaces";
 import { useEffect, useMemo, useState } from "react";
 
 type LocalFallback = "idle" | "pending" | FileSource | null;
+
+/**
+ * 文件源解析态。`pending` = 归属（本机 / 云端）**尚不可知**——与「已知没有可用源」
+ * 是两回事：前者必须等，后者才该显示空态。
+ *
+ * 二者曾被合并成一个 `null`：元数据（grouped / workspaces）没回来时按云端裸聊猜，
+ * 本机模式项目的首个读就打到服务端空目录 → 404「文件不存在」。真 OS 浮窗是新渲染
+ * 进程、缓存全空，跨窗投影又比 HTTP 快，必然踩中。
+ */
+export interface FileSourceState {
+  source: FileSource | null;
+  pending: boolean;
+}
+
+const UNAVAILABLE: FileSourceState = { source: null, pending: false };
+const PENDING: FileSourceState = { source: null, pending: true };
 
 /**
  * 给云端会话工作区源挂上 HTML「完整预览」（右坞 BrowserPanel + workspace://）。
@@ -52,17 +71,18 @@ function withCloudPreviewEntries(
 }
 
 /**
- * FileSource for a conversation's side-panel file browser.
- * Project local chats inherit folder root+subpath; bare local use container.
+ * FileSource for a conversation's side-panel file browser, with its resolution
+ * state. Project local chats inherit folder root+subpath; bare local use container.
  */
-export function useConversationFileSource(
+export function useConversationFileSourceState(
   conversationId: string | null,
-): FileSource | null {
+): FileSourceState {
   const offline = useReadOnlyOffline();
   const ws = useConversationWorkspace(conversationId);
   const fsAvailable = hasLocalFiles();
   const conversations = useConversations();
   const folders = useFolders();
+  const metaSettled = useGroupedConversationsSettled();
   const conv = conversations.find((c) => c.id === conversationId) ?? null;
   const folder = conv?.folderId
     ? (folders.find((f) => f.id === conv.folderId) ?? null)
@@ -95,6 +115,18 @@ export function useConversationFileSource(
   }, [ws, conversationId, fsAvailable, needsLocalFallback]);
 
   return useMemo(() => {
+    // 归属未知：工作区行没到、grouped 也没落定。此时 `folder` / `localContainerRootId`
+    // 都还是空，「本机项目」与「云端裸聊」长得一模一样——不能猜，只能等（离线例外：
+    // 元数据本就取不到，维持既有降级）。
+    const ownershipUnknown =
+      !!conversationId && !ws && !metaSettled && !offline;
+    const awaitingLocal =
+      !ws &&
+      !!conversationId &&
+      fsAvailable &&
+      needsLocalFallback &&
+      (localFallback === "pending" || localFallback === "idle");
+
     const base = ((): FileSource | null => {
       if (ws) {
         // N4-A: cloud workspaces unavailable offline (hub greys them; side panel too).
@@ -106,11 +138,7 @@ export function useConversationFileSource(
         return src;
       }
       if (!conversationId) return null;
-
-      const awaitingLocal =
-        fsAvailable &&
-        needsLocalFallback &&
-        (localFallback === "pending" || localFallback === "idle");
+      if (ownershipUnknown) return null;
       if (awaitingLocal) return null;
 
       if (localFallback && typeof localFallback !== "string") {
@@ -142,7 +170,9 @@ export function useConversationFileSource(
           : null);
 
     // 对话侧栏专属：给云端源挂「完整预览」+「在浏览器打开」出口（预览跟当前源 desk）。
-    return withCloudPreviewEntries(base, conversationId, landingWsId);
+    const source = withCloudPreviewEntries(base, conversationId, landingWsId);
+    if (source) return { source, pending: false };
+    return ownershipUnknown || awaitingLocal ? PENDING : UNAVAILABLE;
   }, [
     ws,
     conversationId,
@@ -151,7 +181,19 @@ export function useConversationFileSource(
     localFallback,
     folder,
     offline,
+    metaSettled,
   ]);
+}
+
+/**
+ * FileSource for a conversation's side-panel file browser (source only).
+ * Callers that render an empty state should prefer
+ * {@link useConversationFileSourceState} so "还在定位" isn't shown as "没有源".
+ */
+export function useConversationFileSource(
+  conversationId: string | null,
+): FileSource | null {
+  return useConversationFileSourceState(conversationId).source;
 }
 
 /**
@@ -191,54 +233,79 @@ export function workspaceInfoForDesk(
 }
 
 /**
- * FileSource for a side-panel File content tab (主坞 + 浮窗共用).
+ * FileSource + resolution state for a side-panel File content tab (主坞 + 浮窗共用).
  *
- * - 无 `workspaceId` → 会话出生桌（{@link useConversationFileSource}）。
+ * - 无 `workspaceId` → 会话出生桌（{@link useConversationFileSourceState}）。
  * - 有 `workspaceId` → 该落地桌：复用 {@link resolveWorkspaceSource}；
- *   查不到工作区行时回退云 REST（{@link createCloudWorkspaceSource}）。
+ *   工作区名册**已到位**却查不到该行时才回退云 REST（{@link createCloudWorkspaceSource}）。
+ *   名册未到位不得回退——本机桌走云 REST 必 404。
  * - 与会话桌同一 desk 时复用会话源（保留本地 fallback / 预览挂载）。
  */
-export function useFileTabSource(
+export function useFileTabSourceState(
   conversationId: string | null,
   workspaceId?: string | null,
-): FileSource | null {
-  const sessionSource = useConversationFileSource(conversationId);
+): FileSourceState {
+  const session = useConversationFileSourceState(conversationId);
   const sessionWs = useConversationWorkspace(conversationId);
-  const { data: workspaces } = useWorkspaces();
+  const { data: workspaces, isError: workspacesFailed } = useWorkspaces();
   // folders 进依赖：本机传统合成随 folder cache 更新。
   const folders = useFolders();
+  const metaSettled = useGroupedConversationsSettled();
   const offline = useReadOnlyOffline();
   const fsAvailable = hasLocalFiles();
   const desk = workspaceId?.trim() || null;
 
   return useMemo(() => {
-    if (!desk) return sessionSource;
-    if (sessionWs?.wsId === desk) return sessionSource;
+    if (!desk) return session;
+    if (sessionWs?.wsId === desk) return session;
 
     const info = workspaceInfoForDesk(desk, workspaces, folders);
     if (info) {
-      if (offline && info.location === "cloud") return null;
+      if (offline && info.location === "cloud") return UNAVAILABLE;
       const src = resolveWorkspaceSource(info, fsAvailable);
-      if (!src) return null;
+      if (!src) return UNAVAILABLE;
       if (offline && info.location === "local") {
-        return asReadOnlyFileSource(src);
+        return { source: asReadOnlyFileSource(src), pending: false };
       }
-      return withCloudPreviewEntries(src, conversationId, desk);
+      return {
+        source: withCloudPreviewEntries(src, conversationId, desk),
+        pending: false,
+      };
     }
-    if (offline) return null;
-    return withCloudPreviewEntries(
-      createCloudWorkspaceSource(desk),
-      conversationId,
-      desk,
-    );
+    if (offline) return UNAVAILABLE;
+    // 名册 / folders 还没落定：该桌是本机还是云端未知，等到位再解析。
+    const rosterSettled =
+      (workspaces !== undefined || workspacesFailed) && metaSettled;
+    if (!rosterSettled) return PENDING;
+    return {
+      source: withCloudPreviewEntries(
+        createCloudWorkspaceSource(desk),
+        conversationId,
+        desk,
+      ),
+      pending: false,
+    };
   }, [
     desk,
-    sessionSource,
+    session,
     sessionWs?.wsId,
     workspaces,
+    workspacesFailed,
     folders,
+    metaSettled,
     offline,
     fsAvailable,
     conversationId,
   ]);
+}
+
+/**
+ * FileSource for a side-panel File content tab (source only).
+ * Callers that render an empty state should prefer {@link useFileTabSourceState}.
+ */
+export function useFileTabSource(
+  conversationId: string | null,
+  workspaceId?: string | null,
+): FileSource | null {
+  return useFileTabSourceState(conversationId, workspaceId).source;
 }

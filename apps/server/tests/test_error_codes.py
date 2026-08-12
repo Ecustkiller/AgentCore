@@ -12,6 +12,7 @@ import inspect
 from agentcore.core import errors as errors_module
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
+    UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
     AgentCoreError,
     LLMAuthError,
     LLMInsufficientBalanceError,
@@ -63,14 +64,40 @@ def test_error_fields_for_fills_empty_coded_message_from_fallback():
     assert message == "服务出错了"
 
 
-def test_error_fields_for_collapses_unknown_exception_to_fallback():
+def test_error_fields_for_collapses_unknown_exception_to_product_fallback():
     code, message, err_ctx = error_fields_for(
         ValueError("raw technical boom"),
         fallback_code=ErrorCode.PIPELINE_ERROR,
-        fallback_message="raw technical boom",
+        fallback_message="管线执行失败，请稍后重试。",
     )
     assert code == ErrorCode.PIPELINE_ERROR
-    assert message == "raw technical boom"
+    assert message == "管线执行失败，请稍后重试。"
+    assert "raw technical" not in message
+
+
+def test_error_fields_for_empty_fallback_degrades_to_product_default():
+    """A caller with no curated copy still owes the user a sentence, not silence."""
+    boom = ValueError("PIPELINE_ERROR: build_turn_router requires explicit credentials")
+    code, message, err_ctx = error_fields_for(
+        boom,
+        fallback_code=ErrorCode.PIPELINE_ERROR,
+        fallback_message="",
+    )
+    assert code == ErrorCode.PIPELINE_ERROR
+    assert message == UNCLASSIFIED_EXCEPTION_USER_MESSAGE
+    assert "build_turn_router" not in message
+
+
+def test_error_fields_for_preserves_agentcore_over_unclassified_fallback():
+    """Curated AgentCoreError copy must not be overwritten by the unclassified default."""
+    code, message, err_ctx = error_fields_for(
+        LLMAuthError(),
+        fallback_code=ErrorCode.PIPELINE_ERROR,
+        fallback_message=UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
+    )
+    assert code == ErrorCode.LLM_KEY_INVALID
+    assert "无效" in message
+    assert message != UNCLASSIFIED_EXCEPTION_USER_MESSAGE
 
 
 def test_insufficient_balance_backend_flag_matches_frontend_policy():

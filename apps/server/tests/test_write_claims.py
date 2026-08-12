@@ -27,7 +27,7 @@ def _ctx(
     coordinator: WriteCoordinator | None = None,
     ancestors: frozenset[str] = frozenset(),
 ) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id=run_id,
         agent_id="a",

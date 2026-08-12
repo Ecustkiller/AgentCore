@@ -1,0 +1,10 @@
+{
+  "entries": [
+    {
+      "layer": "user_rule",
+      "name": "用户规则.md",
+      "apply_mode": "always",
+      "content": "- 无论用户用什么语言提问，你的整段最终回答必须只用英文。\n- 最终回答的最后一个词必须是 RULE_TOKEN_Z9（紧挨句号或单独成词均可，但必须出现）。\n"
+    }
+  ]
+}

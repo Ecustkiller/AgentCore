@@ -29,7 +29,7 @@ def _ceo() -> str:
     return compose_ceo_chat_prompt(
         assemble_system_prompt(),
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
 
 

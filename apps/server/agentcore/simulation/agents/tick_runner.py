@@ -227,7 +227,7 @@ async def run_agent_tick(
         root=workspace_root or Path(tempfile.mkdtemp(prefix="sim-run-")),
         sandbox=SubprocessSandbox(),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id=new_id(),
         run_id=run_id,
         agent_id=persona.agent_id,

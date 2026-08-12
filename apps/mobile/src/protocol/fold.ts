@@ -59,6 +59,7 @@ import type {
   TeamNotePostedPayload,
   TeamPreviewRequiredPayload,
   TeamSynthesisPreviewPayload,
+  ToolFailure,
   ToolPhase,
   ToolUseEndPayload,
   ToolUseProgressPayload,
@@ -575,6 +576,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
                 step.result = p.result;
                 step.status = p.status;
                 if (p.display != null) step.display = p.display;
+                // User-facing face only when present (status=error); keep field absent otherwise.
+                if (p.failure != null) step.failure = p.failure;
                 break;
               }
             }
@@ -586,6 +589,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
               step.result = p.result;
               step.status = p.status;
               if (p.display != null) step.display = p.display;
+              if (p.failure != null) step.failure = p.failure;
               break;
             }
           }
@@ -1762,6 +1766,8 @@ export interface RunToolCall {
   arguments: Record<string, unknown>;
   result: string | null;
   status: "running" | "success" | "error";
+  /** User-facing face from `tool_use_end.failure` when status=error; absent on old journals. */
+  failure?: ToolFailure;
 }
 
 /**
@@ -1779,7 +1785,7 @@ export interface RunToolCall {
  * status=pending) — not a parallel extract map (P3).
  *
  * A `tool_use_start` opens a `running` call (null result) appended to its run; the matching
- * `tool_use_end` folds in its `result`/`status`. Orchestration tools (delegate/debate) are skipped
+ * `tool_use_end` folds in its `result`/`status`/`failure`. Orchestration tools (delegate/debate) are skipped
  * — they are the team STRUCTURE (rendered as sub-tasks / the graph), not a worker tool, mirroring
  * the fold's ORCHESTRATION_TOOLS skip. Both LIVE turns and MULTI-agent history (`runs.events`)
  * carry these events, so the panel works live AND on replay; a single-agent turn yields an empty
@@ -1812,6 +1818,7 @@ export function extractRunToolCalls(
       if (call) {
         call.result = p.result;
         call.status = p.status;
+        if (p.failure != null) call.failure = p.failure;
       }
     }
   }

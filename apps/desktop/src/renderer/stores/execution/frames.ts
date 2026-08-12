@@ -231,6 +231,8 @@ export type RunFrame =
       result: string;
       display?: ToolDisplay | null;
       status: "success" | "error";
+      /** Product failure face (`tool_use_end.failure`); absent on success / old journals. */
+      failure?: import("@/types/events").ToolFailure;
     }
   | {
       t: number;
@@ -551,6 +553,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         result: p.result,
         display: p.display ?? null,
         status: p.status,
+        ...(p.failure != null ? { failure: p.failure } : {}),
       };
     }
     case "plan_review_required": {

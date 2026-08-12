@@ -76,14 +76,14 @@ def test_derived_rename_and_profile_update_reflected_immediately():
 
 
 def test_compose_ceo_includes_catalog_outside_rules():
-    base = assemble_system_prompt(memory_markdown="## 偏好\n- 用中文\n")
+    base = assemble_system_prompt(rules_markdown="## 偏好\n- 用中文\n")
     catalog = [
         ProjectCatalogEntry("f1", "支付网关", "结算服务"),
     ]
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
         project_catalog=catalog,
     )
     assert "<项目清单>" in ceo

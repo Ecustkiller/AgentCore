@@ -33,10 +33,9 @@ vi.mock("@/lib/toast", () => ({
   notifyWarning: vi.fn(),
   notifySuccess: vi.fn(),
 }));
-// Deterministically control whether a cloud-proxy token is mintable: null ⇒ the turn
-// falls back to the sidecar's local platform model (the divergence the badge/warning
-// exist for); an object ⇒ a normal account-model turn. (The real resolver would attempt
-// a live token mint, which has no server in the unit env.)
+// Deterministically control whether a cloud-proxy token is mintable. Default in
+// beforeEach is a valid token (turns require one). Cases that assert the no-token
+// gate mock `null` and expect INFERENCE_TOKEN_EXPIRED without startTurn/resume RPC.
 vi.mock("@/services/inferenceToken", () => ({
   resolveSidecarInference: vi.fn(),
   clearSidecarInference: vi.fn(),
@@ -68,6 +67,7 @@ import {
   resolveSidecarFoldersAuth,
 } from "@/services/foldersToken";
 import {
+  clearSidecarInference,
   looksLikeInferenceTokenFailure,
   resolveSidecarInference,
 } from "@/services/inferenceToken";
@@ -85,6 +85,7 @@ import {
 const dispatchSSEEventMock = vi.mocked(dispatchSSEEvent);
 const takeRecentSidecarFailureMock = vi.mocked(takeRecentSidecarFailure);
 const resolveSidecarInferenceMock = vi.mocked(resolveSidecarInference);
+const clearSidecarInferenceMock = vi.mocked(clearSidecarInference);
 const looksLikeInferenceTokenFailureMock = vi.mocked(
   looksLikeInferenceTokenFailure,
 );
@@ -157,10 +158,15 @@ beforeEach(() => {
   getFoldersMock.mockReset();
   getFoldersMock.mockReturnValue([]);
   takeRecentSidecarFailureMock.mockReturnValue(null);
-  // Default: no token mintable → the fallback path (what most existing cases assert with
-  // `inference: undefined`). Cases that need a normal turn override this per-test.
+  // Default: mintable token — turns require one before startTurn/resume RPC.
+  // No-token / remint cases override per-test.
   resolveSidecarInferenceMock.mockReset();
-  resolveSidecarInferenceMock.mockResolvedValue(null);
+  resolveSidecarInferenceMock.mockResolvedValue({
+    baseUrl: "https://x/v1/inference/v1",
+    apiKey: "tok",
+    model: "deepseek-v4-flash",
+  });
+  clearSidecarInferenceMock.mockReset();
   looksLikeInferenceTokenFailureMock.mockReset();
   looksLikeInferenceTokenFailureMock.mockReturnValue(false);
   resolveSidecarFoldersAuthMock.mockReset();
@@ -290,6 +296,66 @@ describe("streamConversationViaSidecar", () => {
       conversationId: "c1",
     });
     expect(startTurnMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not startTurn when no inference token even after force remint (INFERENCE_TOKEN_EXPIRED)", async () => {
+    resolveSidecarInferenceMock.mockResolvedValue(null);
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+
+    const err = await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).code).toBe("INFERENCE_TOKEN_EXPIRED");
+    expect((err as StreamError).recoverable).toBe(false);
+    expect(clearSidecarInferenceMock).toHaveBeenCalled();
+    expect(resolveSidecarInferenceMock).toHaveBeenCalledWith({
+      force: true,
+      conversationId: "c1",
+    });
+    expect(startTurnMock).not.toHaveBeenCalled();
+    expect(flushTurnMock).not.toHaveBeenCalled();
+  });
+
+  it("force-remints once then startTurn when initial inference mint returns null", async () => {
+    resolveSidecarInferenceMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        baseUrl: "https://x/v1/inference/v1",
+        apiKey: "fresh-after-remint",
+        model: "m1",
+      });
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+    });
+
+    expect(clearSidecarInferenceMock).toHaveBeenCalled();
+    expect(resolveSidecarInferenceMock).toHaveBeenNthCalledWith(2, {
+      force: true,
+      conversationId: "c1",
+    });
+    expect(startTurnMock).toHaveBeenCalledTimes(1);
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inference: {
+          baseUrl: "https://x/v1/inference/v1",
+          apiKey: "fresh-after-remint",
+          model: "m1",
+        },
+      }),
+    );
   });
 
   it("remints folders with force when pre-event token fails", async () => {
@@ -722,6 +788,26 @@ describe("resumeConversationViaSidecar", () => {
     expect(resumeMock).toHaveBeenCalledTimes(2);
   });
 
+  it("does not resume when no inference token even after force remint (INFERENCE_TOKEN_EXPIRED)", async () => {
+    resolveSidecarInferenceMock.mockResolvedValue(null);
+    seedOriginalUserBubble("c1", "u-orig", "原始问题");
+
+    const err = await resumeConversationViaSidecar(baseRequest).catch(
+      (e: unknown) => e,
+    );
+
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).code).toBe("INFERENCE_TOKEN_EXPIRED");
+    expect((err as StreamError).recoverable).toBe(false);
+    expect(clearSidecarInferenceMock).toHaveBeenCalled();
+    expect(resolveSidecarInferenceMock).toHaveBeenCalledWith({
+      force: true,
+      conversationId: "c1",
+    });
+    expect(resumeMock).not.toHaveBeenCalled();
+    expect(flushTurnMock).not.toHaveBeenCalled();
+  });
+
   it("remints folders with force when pre-event token fails on resume", async () => {
     resolveSidecarFoldersAuthMock
       .mockResolvedValueOnce({
@@ -875,7 +961,10 @@ describe("resumeConversationViaSidecar", () => {
         note: "",
         selected: [],
         subpath: undefined,
-        inference: undefined,
+        inference: expect.objectContaining({
+          apiKey: "tok",
+          model: "deepseek-v4-flash",
+        }),
         userId: "local",
         traceId: expect.any(String),
       }),
@@ -916,8 +1005,7 @@ describe("resumeConversationViaSidecar", () => {
     );
   });
 
-  it("records the turn's real model and warns (naming it) when it fell back to the local platform model (no token)", async () => {
-    resolveSidecarInferenceMock.mockResolvedValue(null); // no token → platform fallback
+  it("records the turn's real model on success (no platform-fallback warning)", async () => {
     flushTurnMock.mockResolvedValue({
       ok: true,
       synced: {
@@ -929,21 +1017,15 @@ describe("resumeConversationViaSidecar", () => {
       },
     });
     seedOriginalUserBubble("c1", "u-orig", "原始问题");
-    // The sidecar reports the model it actually ran on — here the local platform model.
     resumeMock.mockResolvedValue({ ...turnResult(), model: "gpt-4o" });
 
     await resumeConversationViaSidecar(baseRequest);
 
-    // The badge store now knows this conversation's last turn actually ran on gpt-4o.
     expect(useTurnModelStore.getState().byConversation.c1).toBe("gpt-4o");
-    // Non-blocking heads-up was raised, naming the fallback model.
-    expect(notifyWarningMock).toHaveBeenCalledTimes(1);
-    expect(notifyWarningMock.mock.calls[0]?.[1]?.description).toContain(
-      "gpt-4o",
-    );
+    expect(notifyWarningMock).not.toHaveBeenCalled();
   });
 
-  it("records the account model and does NOT warn on a normal turn (token present)", async () => {
+  it("records the account model on a normal turn (token present)", async () => {
     resolveSidecarInferenceMock.mockResolvedValue({
       baseUrl: "https://x/v1/inference/v1",
       apiKey: "tok",
@@ -967,7 +1049,6 @@ describe("resumeConversationViaSidecar", () => {
 
     await resumeConversationViaSidecar(baseRequest);
 
-    // A token was present, so the resume carried it and no fallback warning was raised.
     expect(resumeMock).toHaveBeenCalledWith(
       expect.objectContaining({
         inference: expect.objectContaining({ model: "deepseek-v4-flash" }),
@@ -980,13 +1061,6 @@ describe("resumeConversationViaSidecar", () => {
   });
 
   it("keeps synced_pending when outbox flush is still pending", async () => {
-    // Token present so platform-fallback warning does not fire — we only assert
-    // the writeback path leaves synced_pending without a sync-retry toast.
-    resolveSidecarInferenceMock.mockResolvedValue({
-      baseUrl: "https://x/v1/inference/v1",
-      apiKey: "tok",
-      model: "deepseek-v4-flash",
-    });
     flushTurnMock.mockResolvedValue({
       ok: false,
       error: "writeback_pending",

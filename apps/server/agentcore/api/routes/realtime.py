@@ -19,10 +19,12 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from agentcore.api.dependencies import AuthUser
+from agentcore.api.dependencies import AuthUser, get_db
+from agentcore.api.sse import release_request_db_before_sse
 from agentcore.core.logging import get_logger
 from agentcore.messaging.hub import ChatHub, Subscription, default_chat_hub
 from agentcore.messaging.presence import broadcast_presence
@@ -102,7 +104,10 @@ async def _firehose(
 
 
 @router.get("")
-async def realtime_firehose(user: AuthUser) -> StreamingResponse:
+async def realtime_firehose(
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
     """Open this user's realtime firehose (server→client SSE).
 
     Subscribes the connection to the in-process hub; a new message in any chat the
@@ -110,7 +115,14 @@ async def realtime_firehose(user: AuthUser) -> StreamingResponse:
     (and last disconnect) also fans a ``presence`` event to co-chat users.
     Heartbeat comments keep the stream warm; the subscription is released when
     the client disconnects.
+
+    Auth resolves the user via a request-scoped DB session; that session is
+    returned before the long-lived stream opens so each open desktop client does
+    not pin a primary-pool connection until the app closes.
     """
+    # AuthUser already used the session; release before the indefinite SSE.
+    await release_request_db_before_sse(session)
+
     hub = default_chat_hub()
     became_online = not hub.is_online(user.user_id)
     sub = hub.subscribe(user.user_id)

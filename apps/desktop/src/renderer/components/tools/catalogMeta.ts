@@ -12,8 +12,9 @@ import {
 
 /** Per-category display label + icon for the tool catalog. `skill` is kept for type
  * completeness (the backend enum still defines it) but is intentionally absent from
- * CATEGORY_ORDER below: no tool carries it anymore (consult_skill is编排/orchestration),
- * and 技能 indications now live in the「AI 提示词」page, not as a tool group. */
+ * CATEGORY_ORDER below: no tool carries it anymore (`consult` / legacy consult_skill
+ * are 编排/orchestration), and 技能 indications now live in the「AI 提示词」page, not
+ * as a tool group. */
 export const CATEGORY_META: Record<
   ToolCategory,
   { label: string; icon: LucideIcon }

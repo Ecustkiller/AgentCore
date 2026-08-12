@@ -6,10 +6,10 @@ import { create } from "zustand";
  * 使其如实反映**这一回合真的跑在哪个模型上**，而非仅账号配置（账号默认聊天服务商的
  * `default_model`，见 `GET /v1/users/me/llm-providers`）。
  *
- * 为什么需要它：云回合恒用账号模型（徽章读账号配置就已正确），唯一会分叉的是本机 sidecar 的
- * dev 回退——取不到云推理令牌时回合会静默跑在本机 `.env` 平台模型（如 deepseek-v4-flash）而非账号模型
- * （如 deepseek-…）。sidecar 回合结果里带回它真正解析出的模型（`SidecarTurnResult.model` =
- * 引擎内 `resolve_turn_model`），本 store 按会话记下，徽章据此显示真实模型。
+ * 为什么需要它：云回合恒用账号模型（徽章读账号配置就已正确）；本机 sidecar 回合经云推理代理
+ * 跑账号/会话模型，结果里带回引擎真正解析出的模型（`SidecarTurnResult.model` =
+ * `resolve_turn_model`），本 store 按会话记下，徽章据此显示。开跑前无推理票则回合根本不发
+ * RPC（`INFERENCE_TOKEN_EXPIRED`），不再存在「静默回落本机平台模型」分叉。
  *
  * 仅本地回合写入（`streamConversationViaSidecar` / `resumeConversationViaSidecar` 收到结果后）。
  * 没有记录的会话（全新会话、纯云会话）→ 徽章回退到既有的账号配置文案。刻意与庞大的会话 store

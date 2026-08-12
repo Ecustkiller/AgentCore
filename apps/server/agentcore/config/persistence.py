@@ -25,6 +25,17 @@ class PersistenceSettings(BaseModel):
     memory_consolidation_window_messages: int = 40
     memory_consolidation_sweep_interval_seconds: int = 300
     memory_consolidation_sweep_batch_limit: int = 100
+    # After a retryable consolidation failure that is conversation-local (not shared
+    # upstream), the sweeper / live debounce skip that conversation until this
+    # cooldown elapses. 0 = no per-conversation cooldown. In-process only (same
+    # posture as compaction_failure_cooldown_seconds); multi-worker skew is OK.
+    memory_consolidation_failure_cooldown_seconds: int = 600
+    # Shared-upstream failures (rate limit / quota / upstream unavailable): abort the
+    # rest of the current sweep batch and refuse new consolidations until cooldown
+    # elapses. Base grows exponentially with consecutive shared failures, capped at
+    # max — expiry is the recovery path (never permanent). 0 base or max = disabled.
+    memory_consolidation_shared_failure_cooldown_base_seconds: int = 300
+    memory_consolidation_shared_failure_cooldown_max_seconds: int = 1800
     # Episodic session summary hard cap (chars); LLM output is truncated to this.
     memory_episodic_summary_max_chars: int = 200
     # Semantic consolidation triggers (either condition): undigested episodic count, or
@@ -46,18 +57,16 @@ class PersistenceSettings(BaseModel):
     # provider exact-prefix cache hits; see runtime/context). Generous: only
     # fires on abnormal bloat (a normal 偏好/画像 is far smaller). 0/negative = no cap.
     memory_injected_file_char_cap: int = 4_000
+    # Write-side always-entry quota (闸在写侧，读侧全量). Caps the sum of frontmatter-stripped
+    # always rule bodies in an injection context (global + optional project). Anchored to the
+    # retired read-side ``max_instruction_chars`` (24_000) so behaviour does not jump. 0 = off.
+    memory_always_max_chars: int = 24_000
 
-    # Document 子系统第一期 (Agent记忆与知识系统 §5.7). Cross-file rule injection budget: the
-    # ``<rules>`` block admits at most this many always-injected rule docs (user rules + AI
-    # memory core), totalling at most this many chars, with GLOBAL surviving first when tight
-    # (兑现 §5.3「全局优先存活」, replaces the per-file memory cap 单轨). Generous — normal memory
-    # is far under, so it only trims abnormal bloat.
-    max_instruction_docs: int = 32
-    max_instruction_chars: int = 24_000
     # CEO-only derived project catalog (跨项目找项目): max Folder rows injected as
-    # name＋画像首句. Separate from ``max_instruction_*`` so the list never evicts
-    # always memory / user rules from ``<rules>``. 0 = disable injection.
+    # name＋画像首句. Orthogonal to always-on ``<rules>`` (read side injects all always
+    # entries; write-side quota owns 常驻满了). 0 = disable catalog injection.
     project_catalog_max_entries: int = 12
+
     # One-time file→document memory migration (§5.7 换底): copy file-backed memory into the
     # documents tree at startup. Idempotent + best-effort; safe to leave on (a no-op once done).
     memory_documents_migration_enabled: bool = True

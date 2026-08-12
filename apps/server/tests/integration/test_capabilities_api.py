@@ -21,15 +21,13 @@ async def test_capabilities_returns_full_catalog(client):
 
     tools = {t["name"]: t for t in body["tools"]}
     # The complete repertoire — CEO orchestration the old /v1/tools never served…
-    for name in ("delegate", "replan", "debate", "consult_skill", "ask_user"):
+    for name in ("delegate", "replan", "debate", "ask_user"):
         assert name in tools
         assert tools[name]["available_to"] == ["ceo"]
     assert "revise" not in tools
-    # consult_memory / consult_rule are wired for CEO and workers when catalogs exist.
-    assert "consult_memory" in tools
-    assert set(tools["consult_memory"]["available_to"]) == {"ceo", "worker"}
-    assert "consult_rule" in tools
-    assert set(tools["consult_rule"]["available_to"]) == {"ceo", "worker"}
+    # consult is AUDIENCE_BOTH (步 1 · Skill 对 worker 放开).
+    assert "consult" in tools
+    assert set(tools["consult"]["available_to"]) == {"ceo", "worker"}
     # …worker-only mutation + execution + escalate (test_run runs project code through
     # the same sandbox chain as code_execute, so it is worker-only, not a CEO read tool)…
     for name in ("file_write", "code_execute", "test_run", "escalate"):
@@ -66,9 +64,9 @@ async def test_capabilities_exposes_prompt_template(client):
     assert guidelines["shared_base"]
     ceo = guidelines["ceo"]
     addon = guidelines["ceo_addon"]
-    # The CEO template carries the routing core + the always-on 能力目录.
+    # The CEO template carries the routing core + the always-on 按需目录.
     assert "CEO" in ceo
-    assert "能力目录" in ceo
+    assert "按需目录" in ceo
     # The shared base is a prefix of the CEO prompt (it layers hints onto the base).
     assert ceo.startswith(guidelines["shared_base"])
     # ceo_addon is the catalog delta (no repeated shared-base sections).

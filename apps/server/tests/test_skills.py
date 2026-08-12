@@ -1,12 +1,12 @@
-"""Tests for system Skills + consult_skill (提示词瘦身 P2 — 渐进披露).
+"""Tests for system Skills + consult (提示词瘦身 P2 — 渐进披露).
 
 Covers the three moving parts of the prompt-slimming slice:
 
 1. ``SkillRegistry`` / ``build_system_skill_registry`` — name lookup (hit/miss) and
    the ``requires_tools`` visibility filter.
-2. ``render_skill_directory`` — the always-on 能力目录 lists only skills whose required
+2. ``render_skill_directory`` — the always-on 按需目录 lists only skills whose required
    tools are wired this turn (so it never advertises a capability the CEO lacks).
-3. ``ConsultSkillTool`` — returns a skill's full body (CONTINUE) on a hit, and
+3. ``ConsultTool`` — returns a skill's full body (CONTINUE) on a hit, and
    degrades gracefully (non-fatal, lists names) on an unknown name.
 
 Plus a guard that each skill BODY still teaches the mechanism it owns — the
@@ -18,13 +18,14 @@ from pathlib import Path
 
 from agentcore.config import settings
 from agentcore.core.types import ToolCategory
+from agentcore.runtime.context.consult_sources import MergedConsultSource, SkillConsultSource
 from agentcore.runtime.skills import (
     SkillRegistry,
     SystemSkill,
     build_system_skill_registry,
     render_skill_directory,
 )
-from agentcore.tools.builtin.consult_skill import ConsultSkillTool
+from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
@@ -35,9 +36,21 @@ _FULL_TOOLS = {"delegate", "ask_user", "debate"}
 _NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user
 
 
+def _skill_consult(
+    registry: SkillRegistry | None = None, tool_names: set[str] | None = None
+) -> ConsultTool:
+    reg = registry or build_system_skill_registry()
+    names = tool_names if tool_names is not None else set(_FULL_TOOLS)
+    return ConsultTool(
+        source=MergedConsultSource(
+            skill=SkillConsultSource(registry=reg, tool_names=names)
+        )
+    )
+
+
 def _ctx() -> ToolContext:
-    # consult_skill never touches the backend; a real one only satisfies the shape.
-    return ToolContext(
+    # consult never touches the backend; a real one only satisfies the shape.
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -127,8 +140,8 @@ def test_available_shows_gated_skills_when_tools_wired():
 def test_directory_lists_only_available_skills_with_names_and_summaries():
     reg = build_system_skill_registry()
     out = render_skill_directory(reg, _FULL_TOOLS)
-    assert "<能力目录>" in out and "</能力目录>" in out
-    assert "consult_skill" in out  # the soft push to pull a skill
+    assert "<按需目录>" in out and "</按需目录>" in out
+    assert "consult" in out  # the soft push to pull a skill
     for skill in reg.list_all():
         assert skill.name in out
         assert skill.summary in out
@@ -164,7 +177,7 @@ def test_directory_preamble_carves_out_product_help_consult():
 
 
 def test_directory_preamble_recommends_build_app_not_hard_forbid_none():
-    """能力目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；边界未钉≠绿场 SPA。"""
+    """按需目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；边界未钉≠绿场 SPA。"""
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
     assert "推荐" in out and "build_app" in out
     assert "不硬拒" in out or "手写/none 不硬拒" in out
@@ -193,39 +206,39 @@ def test_directory_omits_gated_skills_on_autonomous_path():
 
 def test_directory_empty_when_nothing_available():
     # A registry whose every skill is gated behind an un-wired tool renders nothing,
-    # so the caller appends nothing (no empty <能力目录> block).
+    # so the caller appends nothing (no empty <按需目录> block).
     reg = SkillRegistry()
     reg.register(SystemSkill(name="x", summary="s", body="b", requires_tools=("missing_tool",)))
     assert render_skill_directory(reg, set()) == ""
 
 
-# --- consult_skill tool ------------------------------------------------------
+# --- consult tool ------------------------------------------------------
 
 
-def test_consult_skill_schema_is_ceo_orchestration_primitive():
-    # consult_skill is a CEO orchestration primitive (not a「技能」-category tool):
+def test_consult_schema_is_ceo_orchestration_primitive():
+    # consult is a CEO orchestration primitive (not a「技能」-category tool):
     # 技能 are Prompt injection shown in the「AI 提示词」catalog, never a tool group.
-    tool = ConsultSkillTool(registry=build_system_skill_registry())
+    tool = _skill_consult()
     schema = tool.schema
-    assert schema.name == "consult_skill"
+    assert schema.name == "consult"
     assert schema.category is ToolCategory.ORCHESTRATION
 
 
-async def test_consult_skill_returns_body_on_hit():
+async def test_consult_returns_body_on_hit():
     reg = build_system_skill_registry()
-    tool = ConsultSkillTool(registry=reg)
+    tool = _skill_consult(reg)
     result = await tool.execute({"name": "debate_and_review"}, _ctx())
     assert result.success
     assert result.output == reg.get("debate_and_review").body
 
 
-async def test_consult_skill_product_help_hit():
-    """验收：consult_skill('product_help') 命中；目录可列出三级披露。"""
+async def test_consult_product_help_hit():
+    """验收：consult('product_help') 命中；目录可列出三级披露。"""
     reg = build_system_skill_registry()
     skill = reg.get("product_help")
     assert skill is not None
     assert skill.requires_tools == ()
-    tool = ConsultSkillTool(registry=reg)
+    tool = _skill_consult(reg)
     result = await tool.execute({"name": "product_help"}, _ctx())
     assert result.success
     assert result.output == skill.body
@@ -243,11 +256,11 @@ async def test_consult_skill_product_help_hit():
         assert hit.output == sibling.body
 
 
-async def test_consult_skill_build_website_hit():
-    """能力目录对齐：consult_skill('build_website') 可命中（回归 miss→none 旁路）。"""
+async def test_consult_build_website_hit():
+    """按需目录对齐：consult('build_website') 可命中（回归 miss→none 旁路）。"""
     reg = build_system_skill_registry()
     assert reg.get("build_website") is not None
-    tool = ConsultSkillTool(registry=reg)
+    tool = _skill_consult(reg)
     result = await tool.execute({"name": "build_website"}, _ctx())
     assert result.success
     assert "playbook=\"build_website\"" in result.output
@@ -264,13 +277,14 @@ async def test_consult_skill_build_website_hit():
     assert "style=\"toolshed\"" in result.output or "style=toolshed" in result.output
 
 
-async def test_consult_skill_build_toolshed_removed():
+async def test_consult_build_toolshed_removed():
     """旧独立 skill 名 miss；目录不再教独立 build_toolshed playbook。"""
     reg = build_system_skill_registry()
     assert reg.get("build_toolshed") is None
-    tool = ConsultSkillTool(registry=reg)
+    tool = _skill_consult(reg)
     result = await tool.execute({"name": "build_toolshed"}, _ctx())
-    assert not result.success
+    assert result.success  # soft miss
+    assert "没有名为" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- build_toolshed：" not in directory
     website = reg.get("build_website")
@@ -279,40 +293,39 @@ async def test_consult_skill_build_toolshed_removed():
     assert 'playbook="build_toolshed"' not in website.body
 
 
-async def test_consult_skill_degrades_on_unknown_name():
-    tool = ConsultSkillTool(registry=build_system_skill_registry())
+async def test_consult_degrades_on_unknown_name():
+    tool = _skill_consult()
     result = await tool.execute({"name": "bogus"}, _ctx())
-    assert not result.success
-    # Graceful: lists the available names so the model can retry (no turn-breaking).
+    # Soft miss: success=True, lists available names (no turn-breaking).
+    assert result.success
+    assert result.error is None
+    assert "没有名为" in result.output
     assert "team_orchestration_advanced" in result.output
 
 
-async def test_consult_skill_playbook_name_miss_hints_delegate():
-    """Known playbook mistaken for skill → point at delegate(playbook=…); no new skill."""
-    tool = ConsultSkillTool(registry=build_system_skill_registry())
+async def test_consult_playbook_name_is_plain_soft_miss():
+    """Playbook-name special-case removed — unknown name is a plain soft miss."""
+    tool = _skill_consult()
     result = await tool.execute({"name": "build_feature"}, _ctx())
-    assert not result.success
-    assert "playbook" in result.output
-    assert 'delegate(playbook="build_feature"' in result.output
-    # Must not invent a build_feature skill body.
-    assert result.output.count("build_feature") >= 1
+    assert result.success
+    assert "playbook" not in result.output.lower() or "delegate(playbook=" not in result.output
+    assert "没有名为" in result.output
 
 
-async def test_consult_skill_repair_code_miss_hints_continue_from_when_investigated():
-    """repair_code 误当 skill → 分流：无调查批用 playbook；已有调查批 → 手写+continue_from。"""
-    tool = ConsultSkillTool(registry=build_system_skill_registry())
+async def test_consult_repair_code_is_plain_soft_miss():
+    """repair_code playbook hint removed with 步 1 soft-miss unify."""
+    tool = _skill_consult()
     result = await tool.execute({"name": "repair_code"}, _ctx())
-    assert not result.success
-    assert "playbook" in result.output
-    assert "continue_from_run_id" in result.output
-    assert "调查" in result.output
-    assert "revising_a_product" in result.output
+    assert result.success
+    assert "continue_from_run_id" not in result.output
+    assert "没有名为" in result.output
 
 
-async def test_consult_skill_handles_missing_name_arg():
-    tool = ConsultSkillTool(registry=build_system_skill_registry())
+async def test_consult_handles_missing_name_arg():
+    tool = _skill_consult()
     result = await tool.execute({}, _ctx())
-    assert not result.success
+    assert result.success
+    assert "缺少 name" in result.output
 
 
 # --- skill bodies still teach their mechanisms (relocated from the CEO hint) --
@@ -1159,7 +1172,7 @@ def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
 def test_verify_and_fix_skill_teaches_test_run_loop():
     skill = build_system_skill_registry().get("verify_and_fix")
     # Gated on delegate (the delegated dev loop), not test_run — test_run is now a
-    # worker-only execution tool and consult_skill is CEO-only, so gating on it would
+    # worker-only execution tool and consult is CEO-only, so gating on it would
     # make the skill un-advertisable. The body still teaches the test_run → fix loop.
     assert skill.requires_tools == ("delegate",)
     body = skill.body

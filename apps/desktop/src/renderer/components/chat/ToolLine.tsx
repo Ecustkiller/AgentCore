@@ -69,6 +69,8 @@ function isToolCeilingGuidance(
 const PEEK_SUPPRESSED = new Set([
   "consult_skill",
   "consult_memory",
+  "consult_rule",
+  "consult",
   // 跨会话对话日志：标题已自解释（query / conversation_id），正文在展开卡。
   "search_conversations",
   "read_conversation",
@@ -240,6 +242,7 @@ export function ToolLine({
     args: step.arguments,
     result: step.result,
     display: step.display,
+    failure: step.failure,
     status: step.status,
     conversationId,
   };
@@ -247,7 +250,11 @@ export function ToolLine({
   const running = step.status === "running";
   const ceilingGuidance = isToolCeilingGuidance(step);
   const isWebSearch = step.tool_name === "web_search";
-  const suppressesPeek = PEEK_SUPPRESSED.has(step.tool_name);
+  // Product failure face must stay visible on the collapsed row even for tools
+  // whose success peek is suppressed (title already self-explanatory).
+  const suppressesPeek =
+    PEEK_SUPPRESSED.has(step.tool_name) &&
+    !(step.status === "error" && !!step.failure?.message?.trim());
   // Real backend-ish start anchor (stamped at tool_use_start) keyed by tool_call_id (= step.id),
   // so the running timer survives this row remounting. Undefined on a reloaded turn (tool done).
   const startedAt = useConversationStore(

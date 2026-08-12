@@ -2,6 +2,10 @@ import { Button } from "@/components/ui";
 import { hasAutoUpdater } from "@/lib/capabilities";
 import { clientVersion } from "@/lib/clientBuildInfo";
 import { formatDownloadProgress } from "@/lib/format";
+import {
+  clientReleaseChannel,
+  desktopDownloadUrlForChannel,
+} from "@/lib/releaseChannel";
 import { useUpdatesStore } from "@/stores/updates";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -11,6 +15,10 @@ import type { ReactNode } from "react";
  * Shown when local Electron build < policy.min_desktop_version. Blocks AppShell
  * until the client is updated; web clients never render ({@link hasAutoUpdater}
  * is false). Fail-open: missing policy leaves this hidden.
+ *
+ * Always exposes a secondary link to this channel’s download page so users are
+ * never permanently locked if in-app update cannot complete (`manualOnly` or
+ * any other failure path).
  */
 export function ForceUpdateGate() {
   const minVersion = useUpdatesStore((s) => s.outdatedMinVersion);
@@ -26,12 +34,14 @@ export function ForceUpdateGate() {
   const checking = status.phase === "checking";
   const downloading = status.phase === "downloading";
   const available = status.phase === "available";
+  const manualOnly = available && Boolean(status.manualOnly);
   const downloaded = status.phase === "downloaded";
+  const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   let ctaLabel = "检查更新";
   let ctaDisabled = false;
   let ctaIcon: ReactNode = null;
-  let onCta: () => void = () => {
+  let onCta: (() => void) | null = () => {
     void check();
   };
 
@@ -45,6 +55,9 @@ export function ForceUpdateGate() {
     ctaDisabled = true;
     ctaIcon = <Loader2 size={14} className="animate-spin" />;
     onCta = () => {};
+  } else if (manualOnly) {
+    // Primary action is the download-page <a> below; no auto download.
+    onCta = null;
   } else if (available) {
     ctaLabel = "立即更新";
     onCta = () => {
@@ -76,6 +89,7 @@ export function ForceUpdateGate() {
         </h1>
         <p id="force-update-desc" className="text-sm text-muted-foreground">
           当前版本 {current} · 最低要求 {minVersion}
+          {manualOnly ? "。此版本需手动下载安装。" : null}
         </p>
 
         {downloading ? (
@@ -101,15 +115,38 @@ export function ForceUpdateGate() {
           <p className="text-sm text-destructive">{status.message}</p>
         ) : null}
 
-        <Button
-          variant="primary"
-          size="md"
-          disabled={ctaDisabled}
-          icon={ctaIcon}
-          onClick={onCta}
-        >
-          {ctaLabel}
-        </Button>
+        {manualOnly ? (
+          <a
+            href={downloadPageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+          >
+            前往下载页
+          </a>
+        ) : (
+          <Button
+            variant="primary"
+            size="md"
+            disabled={ctaDisabled}
+            icon={ctaIcon}
+            onClick={onCta ?? undefined}
+          >
+            {ctaLabel}
+          </Button>
+        )}
+
+        <p className="text-sm text-muted-foreground">
+          若无法完成更新，可
+          <a
+            href={downloadPageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground underline-offset-2 hover:underline"
+          >
+            前往下载页手动安装
+          </a>
+        </p>
       </div>
     </div>
   );

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import get_cost_event_repo, get_db
 from agentcore.api.routes.inference.token import inference_user
+from agentcore.api.sse import release_request_db_before_sse
 from agentcore.billing.call_meter import PROXY_LLM_SCENARIO
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.conversation.inference_rate_limit import enforce_inference_proxy_rate_limit
@@ -84,6 +85,8 @@ def _credentials_from_config(cfg: ModelConfig, *, conversation_id: str | None, t
         extra_headers=extra or None,
         source="platform" if cfg.source == "platform" else "user",
         background_model=cfg.background_model,
+        provider_id=cfg.provider_id,
+        label=cfg.label,
     )
 
 
@@ -188,6 +191,7 @@ async def _resolve_inference_credentials(
             purpose="chat",
             background_model=credentials.background_model,
             provider_id=credentials.provider_id,
+            label=credentials.label,
         )
     else:
         # Per-model platform credential (运营中转「一 key 一模型」): the selected model's
@@ -392,6 +396,13 @@ async def inference_chat_completions(
         bind_credential_pricing_context(creds)
         provider = build_provider(creds)
         llm_request = _llm_request_from_payload(payload, cfg)
+
+        # Credentials + gate are done and spend recording goes through the proxy
+        # queue, so nothing below needs this session. Release it before waiting on
+        # upstream: every in-flight LLM call — streamed turns and unary background
+        # jobs alike — would otherwise pin a primary-pool connection for the whole
+        # generation, and this is the hottest route in the product.
+        await release_request_db_before_sse(session)
 
         if stream:
             return await _forward_stream(

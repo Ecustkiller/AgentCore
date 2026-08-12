@@ -613,6 +613,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
                 result: f.result,
                 status: f.status,
                 ...(f.display != null ? { display: f.display } : {}),
+                ...(f.failure != null ? { failure: f.failure } : {}),
               },
               ...run.process.slice(i + 1),
             ];

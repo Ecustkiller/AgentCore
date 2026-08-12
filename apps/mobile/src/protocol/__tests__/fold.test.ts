@@ -341,6 +341,65 @@ describe("fold · replaces_run_id", () => {
   });
 });
 
+describe("fold · tool_use_end.failure", () => {
+  it("folds failure onto the matching tool step when status=error", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("tool_use_start", {
+        tool_call_id: "tc1",
+        tool_name: "web_search",
+        arguments: { query: "x" },
+      }),
+      ev("tool_use_end", {
+        tool_call_id: "tc1",
+        tool_name: "web_search",
+        status: "error",
+        result: "ConnectError: refused searxng.internal:8080",
+        failure: {
+          message: "工具执行失败，请稍后重试。",
+          code: "TOOL_ERROR",
+        },
+      }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    const tool = turn.process.find((s) => s.kind === "tool");
+    expect(tool).toMatchObject({
+      kind: "tool",
+      id: "tc1",
+      status: "error",
+      result: "ConnectError: refused searxng.internal:8080",
+      failure: {
+        message: "工具执行失败，请稍后重试。",
+        code: "TOOL_ERROR",
+      },
+    });
+  });
+
+  it("leaves failure absent when tool_use_end omits it", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("tool_use_start", {
+        tool_call_id: "tc1",
+        tool_name: "web_search",
+        arguments: { query: "x" },
+      }),
+      ev("tool_use_end", {
+        tool_call_id: "tc1",
+        tool_name: "web_search",
+        status: "error",
+        result: "legacy technical text",
+      }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    const tool = turn.process.find((s) => s.kind === "tool");
+    expect(tool?.kind).toBe("tool");
+    if (tool?.kind === "tool") {
+      expect(tool.failure).toBeUndefined();
+      expect(tool.result).toBe("legacy technical text");
+    }
+  });
+});
+
 describe("extractToolPhases", () => {
   it("keeps the LATEST phase per running tool_call_id", () => {
     const phases = extractToolPhases([

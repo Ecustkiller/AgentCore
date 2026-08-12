@@ -364,7 +364,7 @@
         "type": "object"
       },
       "AccountRulesListResponse": {
-        "description": "Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult_rule``.",
+        "description": "Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.",
         "properties": {
           "global_on_demand_rules": {
             "items": {
@@ -2198,6 +2198,30 @@
         "title": "AgentMention",
         "type": "object"
       },
+      "AlwaysQuotaView": {
+        "description": "Always-pool usage for the UI meter (percentage + absolute chars).",
+        "properties": {
+          "max_chars": {
+            "title": "Max Chars",
+            "type": "integer"
+          },
+          "percent": {
+            "title": "Percent",
+            "type": "number"
+          },
+          "used_chars": {
+            "title": "Used Chars",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "used_chars",
+          "max_chars",
+          "percent"
+        ],
+        "title": "AlwaysQuotaView",
+        "type": "object"
+      },
       "AnnounceRequest": {
         "description": "Post an admin announcement into a chat as a centered system_card (官方公告).",
         "properties": {
@@ -3284,7 +3308,7 @@
         "type": "object"
       },
       "CapabilityGuidelines": {
-        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``ceo_addon`` is the CEO coordinator's layers on top of\nthat base (routing core + 能力目录 + citation guidance); ``ceo`` is the full chat\nsystem-prompt template (shared base + ceo_addon), composed by the SAME\n``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
+        "description": "The system-prompt TEMPLATE the agents follow (静态 蓝图; the per-turn verbatim\nprompt is served separately, see the message prompt endpoint).\n\n``shared_base`` is the base every agent (CEO + workers) shares (identity, output\nstyle, tool-use, safety); ``ceo_addon`` is the CEO coordinator's layers on top of\nthat base (routing core + 按需目录 + citation guidance); ``ceo`` is the full chat\nsystem-prompt template (shared base + ceo_addon), composed by the SAME\n``compose_ceo_chat_prompt`` the live turn uses, so it never drifts.",
         "properties": {
           "ceo": {
             "title": "Ceo",
@@ -3340,7 +3364,7 @@
         "type": "object"
       },
       "CapabilitySkill": {
-        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult_skill.",
+        "description": "A system Skill in the catalog (渐进披露): its catalog ``summary`` (the always-on\none-line trigger) plus the full ``body`` guidance the CEO pulls via consult.",
         "properties": {
           "body": {
             "title": "Body",
@@ -3364,7 +3388,7 @@
         "type": "object"
       },
       "CapabilityTool": {
-        "description": "A tool in the capability catalog: its public schema + who may call it.\n\nThe COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /\n``consult_skill`` / ``ask_user``) and the worker-only ``escalate``.\n``available_to`` is a subset of ``[\"ceo\", \"worker\"]`` so the UI can show which\nside of the team holds each tool.",
+        "description": "A tool in the capability catalog: its public schema + who may call it.\n\nThe COMPLETE catalog — CEO orchestration primitives (``delegate`` / ``revise`` /\n``consult`` / ``ask_user``) and the worker-only ``escalate``.\n``available_to`` is a subset of ``[\"ceo\", \"worker\"]`` so the UI can show which\nside of the team holds each tool.",
         "properties": {
           "approval": {
             "$ref": "#/components/schemas/ToolApproval"
@@ -6240,6 +6264,10 @@
             "title": "Created At",
             "type": "string"
           },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
           "folder_id": {
             "anyOf": [
               {
@@ -6250,6 +6278,17 @@
               }
             ],
             "title": "Folder Id"
+          },
+          "frontmatter_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frontmatter Error"
           },
           "id": {
             "title": "Id",
@@ -6274,6 +6313,17 @@
             ],
             "title": "Parent Id"
           },
+          "quota_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Warning"
+          },
           "role": {
             "title": "Role",
             "type": "string"
@@ -6296,6 +6346,7 @@
           "role",
           "ai_maintained",
           "apply_mode",
+          "description",
           "name",
           "created_at",
           "updated_at",
@@ -6321,6 +6372,10 @@
             "title": "Created At",
             "type": "string"
           },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
           "folder_id": {
             "anyOf": [
               {
@@ -6331,6 +6386,17 @@
               }
             ],
             "title": "Folder Id"
+          },
+          "frontmatter_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frontmatter Error"
           },
           "id": {
             "title": "Id",
@@ -6373,6 +6439,7 @@
           "role",
           "ai_maintained",
           "apply_mode",
+          "description",
           "name",
           "created_at",
           "updated_at"
@@ -6381,7 +6448,7 @@
         "type": "object"
       },
       "DocumentPatchRequest": {
-        "description": "Rename, reparent, and/or change apply_mode (content untouched — that goes through PUT).",
+        "description": "Rename, reparent, and/or change apply (via frontmatter edit).",
         "properties": {
           "apply_mode": {
             "anyOf": [
@@ -6438,9 +6505,31 @@
             "title": "Conflict",
             "type": "boolean"
           },
+          "frontmatter_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Frontmatter Error"
+          },
           "ok": {
             "title": "Ok",
             "type": "boolean"
+          },
+          "quota_warning": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quota Warning"
           },
           "version": {
             "title": "Version",
@@ -7945,6 +8034,14 @@
               }
             ]
           },
+          "warnings": {
+            "description": "Ignorable BYOK model reachability hints from the last save (empty on list/get). Save still succeeds when non-empty.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          },
           "worker": {
             "anyOf": [
               {
@@ -8570,7 +8667,7 @@
         "type": "object"
       },
       "MemoryTopicsResponse": {
-        "description": "On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).\n\nNames only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via\n``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult_memory``).",
+        "description": "On-demand TOPIC note slugs in one scope (the rail's 主题/ folder listing).\n\nNames only (``主题/<slug>.md`` → ``slug``), sorted; the body is pulled per-note via\n``GET …/topics/{slug}`` when the user opens one (渐进披露, mirrors ``consult``).",
         "properties": {
           "topics": {
             "items": {
@@ -29263,6 +29360,88 @@
         ]
       }
     },
+    "/v1/documents/always-quota": {
+      "get": {
+        "description": "Always-pool usage for the injection context (global + optional project).",
+        "operationId": "get_always_quota_v1_documents_always_quota_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "folder_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Folder Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AlwaysQuotaView"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Always Quota",
+        "tags": [
+          "documents"
+        ]
+      }
+    },
     "/v1/documents/{document_id}": {
       "delete": {
         "description": "Soft-delete a node and (for a folder) its whole subtree.",
@@ -29410,7 +29589,7 @@
         ]
       },
       "patch": {
-        "description": "Rename, reparent, and/or set apply_mode (set ``reparent`` to apply ``parent_id``).",
+        "description": "Rename, reparent, and/or set apply via frontmatter.\n\nSet ``reparent`` to apply ``parent_id``.",
         "operationId": "patch_document_v1_documents__document_id__patch",
         "parameters": [
           {
@@ -29493,7 +29672,7 @@
         ]
       },
       "put": {
-        "description": "Overwrite a document's body (CAS-guarded; conflict instead of clobber, 照 memory.py).",
+        "description": "Overwrite a document's body (CAS-guarded; conflict instead of clobber).",
         "operationId": "update_document_content_v1_documents__document_id__put",
         "parameters": [
           {
@@ -33227,7 +33406,7 @@
     },
     "/v1/realtime": {
       "get": {
-        "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. The first subscription\n(and last disconnect) also fans a ``presence`` event to co-chat users.\nHeartbeat comments keep the stream warm; the subscription is released when\nthe client disconnects.",
+        "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. The first subscription\n(and last disconnect) also fans a ``presence`` event to co-chat users.\nHeartbeat comments keep the stream warm; the subscription is released when\nthe client disconnects.\n\nAuth resolves the user via a request-scoped DB session; that session is\nreturned before the long-lived stream opens so each open desktop client does\nnot pin a primary-pool connection until the app closes.",
         "operationId": "realtime_firehose_v1_realtime_get",
         "parameters": [
           {

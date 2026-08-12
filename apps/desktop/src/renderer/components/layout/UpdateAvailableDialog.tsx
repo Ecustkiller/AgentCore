@@ -11,6 +11,10 @@ import { hasAutoUpdater } from "@/lib/capabilities";
 import { clientVersion } from "@/lib/clientBuildInfo";
 import { formatBytes, formatDownloadProgress } from "@/lib/format";
 import {
+  clientReleaseChannel,
+  desktopDownloadUrlForChannel,
+} from "@/lib/releaseChannel";
+import {
   UPDATE_NOTES_FALLBACK,
   isForceUpdateActive,
   useUpdatesStore,
@@ -21,6 +25,7 @@ import { Loader2 } from "lucide-react";
  * Consent-first update explanation dialog (发布与门禁.md §7.6).
  *
  * Soft update: only the `available` consent surface — 「立即更新」关窗并后台静默下载。
+ * `manualOnly`：不调 download，主行动改为打开本通道下载页。
  * Force-update hard gate: non-dismissible multi-phase (download progress / install /
  * retry) when the dialog is opened from the gate.
  */
@@ -62,6 +67,9 @@ export function UpdateAvailableDialog() {
 
   const sizeBytes =
     status.phase === "available" ? (status.sizeBytes ?? null) : null;
+
+  const manualOnly = status.phase === "available" && Boolean(status.manualOnly);
+  const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   const current = clientVersion();
   const title =
@@ -108,6 +116,11 @@ export function UpdateAvailableDialog() {
                       ? ` · 安装包约 ${formatBytes(sizeBytes)}`
                       : null}
                   </p>
+                  {manualOnly ? (
+                    <p className="text-sm text-muted-foreground">
+                      此版本需手动下载安装。请前往下载页获取安装包并完成安装。
+                    </p>
+                  ) : null}
                   <p className="whitespace-pre-wrap text-sm text-foreground">
                     {releaseNotes}
                   </p>
@@ -166,13 +179,24 @@ export function UpdateAvailableDialog() {
                     </Button>
                   </>
                 )}
-                <Button
-                  variant="primary"
-                  size="md"
-                  onClick={() => void download()}
-                >
-                  立即更新
-                </Button>
+                {manualOnly ? (
+                  <a
+                    href={downloadPageUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
+                  >
+                    前往下载页
+                  </a>
+                ) : (
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => void download()}
+                  >
+                    立即更新
+                  </Button>
+                )}
               </>
             ) : null}
 

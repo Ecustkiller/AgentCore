@@ -184,7 +184,7 @@ class DepProvider:
 
 
 def ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -194,7 +194,7 @@ def ctx() -> ToolContext:
 
 
 def local_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

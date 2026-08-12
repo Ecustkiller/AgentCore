@@ -1,0 +1,25 @@
+{
+  "id": "rules_memory_always_rule_format_token",
+  "category": "qa",
+  "user_message": "用一句话解释什么是哈希表。",
+  "path": "team",
+  "mode": "economy",
+  "documents_fixture": "docs_always_rule_token",
+  "_note": "明示约束（确定性）：always 规则要求全英文且含 RULE_TOKEN_Z9。",
+  "checks": [
+    { "name": "FinishReason" },
+    { "name": "NotDelegated" },
+    { "name": "NonEmpty", "args": { "min_len": 8 } },
+    {
+      "name": "ContentMatches",
+      "args": { "pattern": "RULE_TOKEN_Z9" }
+    },
+    {
+      "name": "ContentMatches",
+      "args": {
+        "pattern": "[\\u4e00-\\u9fff]",
+        "negate": true
+      }
+    }
+  ]
+}

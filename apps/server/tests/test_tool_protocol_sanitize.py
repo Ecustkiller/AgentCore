@@ -173,7 +173,7 @@ async def test_execute_tools_sanitizes_name_and_runs():
             arguments=json.dumps({"query": "茉莉奶白 LV</longcat_arg_value>"}, ensure_ascii=False),
         ),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -196,7 +196,7 @@ async def test_execute_tools_not_found_mentions_protocol_strip():
         id="c1",
         function=ToolCallFunction(name="web_query</longcat_arg_key>", arguments="{}"),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -217,7 +217,7 @@ async def test_execute_tools_worker_only_miss_is_actionable_policy():
         id="c1",
         function=ToolCallFunction(name="code_execute", arguments="{}"),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="ceo",
@@ -238,7 +238,7 @@ async def test_execute_tools_file_write_miss_points_to_delegate():
         id="c1",
         function=ToolCallFunction(name="file_write", arguments="{}"),
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="ceo",

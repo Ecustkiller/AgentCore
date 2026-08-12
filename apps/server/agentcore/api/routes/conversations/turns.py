@@ -18,7 +18,11 @@ from agentcore.api.schemas import (
     ResumeTurnRequest,
     TurnRecoveryResponse,
 )
-from agentcore.api.sse import sse_response, sse_resume_deferred_response
+from agentcore.api.sse import (
+    release_request_db_before_sse,
+    sse_response,
+    sse_resume_deferred_response,
+)
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import regenerate_chat, resume_chat
 from agentcore.core.errors import NotFoundError
@@ -50,7 +54,6 @@ from ._helpers import (
     _preflight_owned_chat_turn,
     _require_owned_conversation,
     emit_preflight_warnings,
-    release_request_db_before_sse,
 )
 
 logger = get_logger(__name__)

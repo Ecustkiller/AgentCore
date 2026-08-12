@@ -6,6 +6,7 @@ from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
 from agentcore.workspace.indexing.registry import (
     clear_index_registry,
+    drop_index_registry,
     shared_index_maintainer,
     shared_index_manager,
 )
@@ -17,6 +18,7 @@ __all__ = [
     "RawChunk",
     "chunk_file",
     "clear_index_registry",
+    "drop_index_registry",
     "shared_index_maintainer",
     "shared_index_manager",
 ]

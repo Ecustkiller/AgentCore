@@ -10,10 +10,16 @@ vi.mock("@/lib/clientBuildInfo", () => ({
 }));
 
 import { hasAutoUpdater } from "@/lib/capabilities";
+import {
+  clientReleaseChannel,
+  desktopDownloadUrlForChannel,
+} from "@/lib/releaseChannel";
 import { useUpdatesStore } from "@/stores/updates";
 import { ForceUpdateGate } from "../ForceUpdateGate";
 
 const hasAutoUpdaterMock = vi.mocked(hasAutoUpdater);
+
+const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
 beforeEach(() => {
   hasAutoUpdaterMock.mockReturnValue(true);
@@ -44,6 +50,24 @@ describe("ForceUpdateGate", () => {
     expect(screen.getByText(/最低要求 0\.6\.5/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();
+  });
+
+  it("always exposes a secondary download-page escape hatch", () => {
+    render(<ForceUpdateGate />);
+    const link = screen.getByRole("link", { name: "前往下载页手动安装" });
+    expect(link.getAttribute("href")).toBe(downloadPageUrl);
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("keeps escape hatch when update download fails", () => {
+    useUpdatesStore.setState({
+      status: { phase: "error", message: "download failed" },
+    });
+    render(<ForceUpdateGate />);
+    expect(screen.getByText("download failed")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "前往下载页手动安装" }),
+    ).toBeTruthy();
   });
 
   it("hides on web clients", () => {
@@ -78,6 +102,31 @@ describe("ForceUpdateGate", () => {
     fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
     expect(openUpdateDialog).toHaveBeenCalled();
     expect(download).toHaveBeenCalled();
+  });
+
+  it("manualOnly swaps primary CTA to download page and skips download", () => {
+    const download = vi.fn(() => Promise.resolve());
+    const openUpdateDialog = vi.fn();
+    useUpdatesStore.setState({
+      download,
+      openUpdateDialog,
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        manualOnly: true,
+      },
+    });
+    render(<ForceUpdateGate />);
+    expect(screen.getByText(/此版本需手动下载安装/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
+    const primary = screen.getByRole("link", { name: "前往下载页" });
+    expect(primary.getAttribute("href")).toBe(downloadPageUrl);
+    expect(download).not.toHaveBeenCalled();
+    expect(openUpdateDialog).not.toHaveBeenCalled();
+    // Secondary escape remains available.
+    expect(
+      screen.getByRole("link", { name: "前往下载页手动安装" }),
+    ).toBeTruthy();
   });
 
   it("shows 重启安装 when downloaded", () => {

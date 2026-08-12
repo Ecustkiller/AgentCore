@@ -19,7 +19,6 @@ from typing import Any
 
 import pytest
 
-from agentcore.config import settings
 from agentcore.llm.credentials import (
     INFERENCE_CONVERSATION_HEADER,
     INFERENCE_MESSAGE_HEADER,
@@ -91,6 +90,15 @@ def _recorder() -> tuple[list[dict[str, Any]], Any]:
         sent.append(json.loads(line))
 
     return sent, write_line
+
+
+# Present on initialize / startTurn so the missing-inference gate does not fire;
+# pipelines are mocked in these unit tests.
+_FAKE_INFERENCE = {
+    "baseUrl": "http://test.local/v1/inference/v1",
+    "apiKey": "test-inference-tok",
+    "model": "test-model",
+}
 
 
 def _response(sent: list[dict[str, Any]], request_id: Any) -> dict[str, Any]:
@@ -227,6 +235,7 @@ def test_sidecar_runs_a_turn_on_the_local_dir(tmp_path, monkeypatch):
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": False,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -274,10 +283,8 @@ def test_sidecar_runs_a_turn_on_the_local_dir(tmp_path, monkeypatch):
     assert done["result"]["content"] == "已列出本地文件。"
     assert done["result"]["finishReason"] == "end_turn"
     assert done["result"]["turnId"] == "t1"
-    # No inference at initialize ⇒ the turn ran on the dev platform-model fallback, and the
-    # result honestly reports it (resolve_turn_model over None creds). The desktop badge
-    # reads this to show the model the turn ACTUALLY ran on, not just the account config.
-    assert done["result"]["model"] == settings.platform_model
+    # initialize 传入了 inference ⇒ 结果如实回报该档模型（非 platform 回退）。
+    assert done["result"]["model"] == _FAKE_INFERENCE["model"]
 
 
 # --- respond (审批 / 交互结算回 sidecar) -------------------------------------
@@ -413,6 +420,7 @@ def test_sidecar_binds_local_backend_with_approvals(tmp_path, monkeypatch):
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -501,6 +509,7 @@ def test_sidecar_start_turn_passes_conversation_folder_id(tmp_path, monkeypatch)
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -654,6 +663,7 @@ def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -726,6 +736,7 @@ def test_sidecar_start_turn_folder_id_param_skips_db(tmp_path, monkeypatch):
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -788,6 +799,7 @@ def test_sidecar_start_turn_explicit_null_folder_id_skips_db(tmp_path, monkeypat
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -848,6 +860,7 @@ def test_sidecar_start_turn_absent_folder_id_still_loads_db(tmp_path, monkeypatc
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -976,6 +989,7 @@ def test_sidecar_start_turn_db_unavailable_seals_outbox(tmp_path, monkeypatch):
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
                         "dataDir": str(data_dir),
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -1042,6 +1056,7 @@ def test_sidecar_start_turn_passes_desktop_client_platform(tmp_path, monkeypatch
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -1117,6 +1132,7 @@ def test_sidecar_threads_permission_axes_per_turn(tmp_path, monkeypatch):
                         "userId": "u",
                         "workspaceRoot": str(tmp_path),
                         "permissionAxes": managed.to_dict(),
+                        "inference": _FAKE_INFERENCE,
                     },
                 }
             )
@@ -1149,7 +1165,7 @@ def test_creds_for_stamps_conversation_and_trace_headers():
 
 
 def test_creds_for_none_when_no_session_creds():
-    """No session creds (dev platform-fallback, no proxy) ⇒ no per-turn creds to stamp."""
+    """No session inference JWT ⇒ no per-turn creds to stamp (startTurn will refuse)."""
     server = SidecarServer(_recorder()[1])
     assert server._creds is None
     assert server._creds_for("conv-1", "trace-1") is None
@@ -1170,12 +1186,10 @@ def test_parse_inference_carries_server_resolved_model():
 
 def test_start_turn_result_reports_cloud_proxy_model(tmp_path, monkeypatch):
     """With inference creds (cloud proxy present), the turn result reports the
-    server-resolved account model (resolve_turn_model over the creds), NOT the platform
-    fallback — this is the signal the desktop badge shows so it reflects the model the
-    turn ACTUALLY ran on. Pairs with the no-inference fallback assertion above."""
+    server-resolved account model (resolve_turn_model over the creds)."""
 
     async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
-        # The turn must run on the cloud-proxy creds, not the dev platform fallback.
+        # The turn must run on the cloud-proxy creds (no silent platform key).
         assert kwargs["llm_credentials"] is not None
         kwargs["sink"].close()  # let the pump drain so the turn finishes
         return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}

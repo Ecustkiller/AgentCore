@@ -62,7 +62,7 @@ export function GuidelinesPage() {
                   这些不是独立能力，而是几个内置工具（delegate / debate / revise
                   / ask_user）的进阶
                   用法——把「怎么用好它」从常驻工具描述里拆出来、按需注入：CEO
-                  的「能力目录」平时只挂 一行触发说明，要用时才 consult_skill
+                  的「按需目录」平时只挂 一行触发说明，要用时才 consult
                   把完整指引拉回循环。等真正跨多工具的域级技能
                   （如合同审查）出现，再单独归类。
                 </p>

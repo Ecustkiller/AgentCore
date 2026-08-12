@@ -23,12 +23,13 @@ from agentcore.demo_tape.schema import event_type
 # after the memory preamble (never real ``<!-- ts:… -->`` bullets).
 DEMO_MEMORY_PLACEHOLDER = "（演示占位 · 非真实用户记忆）"
 
-# Keep the real preamble so the UI still reads as a system「长期记忆」block; only the
-# body bullets are synthetic. Shape mirrors ``runtime/resolve/prompt._MEMORY_RULES_TEMPLATE``.
+# Keep the real preamble so the UI still reads as a system「常驻约定」block; only the
+# body bullets are synthetic. Shape mirrors ``runtime/resolve/prompt._RULES_TEMPLATE``.
 SYNTHETIC_MEMORY_RULES = (
     "<rules>\n"
-    "以下是关于当前用户的长期记忆（由 AI 自动维护，属软性偏好）。请在不与用户当前\n"
-    "指令冲突的前提下遵循；如有冲突，以用户的显式指令为准。\n"
+    "以下条目请一并遵循；与本回合用户直接指令冲突时，以本回合指令为准。\n"
+    "硬约束：题材/领域偏好与历史任务不得改变本回合路由"
+    "（直答/委派/调研/辩论以用户当前话为准）。\n"
     "\n"
     "## 沟通偏好\n"
     f"- {DEMO_MEMORY_PLACEHOLDER}\n"
@@ -38,8 +39,8 @@ SYNTHETIC_MEMORY_RULES = (
     "</rules>"
 )
 
-# Real injection preamble (prompt.py); used to locate the memory <rules> block.
-_MEMORY_PREAMBLE = "以下是关于当前用户的长期记忆"
+# Real injection preamble (memory_rules.py); used to locate the always-on <rules> block.
+_MEMORY_PREAMBLE = "以下条目请一并遵循"
 
 _RULES_BLOCK_RE = re.compile(
     r"<rules>\s*" + re.escape(_MEMORY_PREAMBLE) + r".*?</rules>",

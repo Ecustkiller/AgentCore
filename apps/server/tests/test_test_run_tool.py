@@ -78,7 +78,7 @@ class _FakeBackend:
 
 
 def _ctx(backend: _FakeBackend) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -582,7 +582,7 @@ async def test_default_check_test_still_parses_pytest(
 
 
 def _auto_permission_ctx(backend: _FakeBackend) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -679,7 +679,7 @@ async def test_check_install_omits_cache_bucket_without_user_id(
         "agentcore.tools.sandbox.egress.registry_egress_available",
         lambda: True,
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -901,7 +901,7 @@ async def test_verify_policy_inner_refuses_typecheck(monkeypatch: pytest.MonkeyP
         "agentcore.tools.builtin.test_run.detect_workspace_profile",
         _fake_profile,
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -1038,7 +1038,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
         t1 = asyncio.create_task(
             tool.execute(
                 {"check": "typecheck"},
-                ToolContext(
+                ToolContext.create(
                     execution_id="e-coalesce",
                     run_id="w1",
                     agent_id="w1",
@@ -1051,7 +1051,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
         t2 = asyncio.create_task(
             tool.execute(
                 {"check": "typecheck"},
-                ToolContext(
+                ToolContext.create(
                     execution_id="e-coalesce",
                     run_id="w2",
                     agent_id="w2",
@@ -1075,7 +1075,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
         # Cache hit on a third call (no new sandbox execute).
         r3 = await tool.execute(
             {"check": "typecheck"},
-            ToolContext(
+            ToolContext.create(
                 execution_id="e-coalesce",
                 run_id="w1",
                 agent_id="w1",
@@ -1089,7 +1089,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
         from agentcore.tools.builtin.file_ops import _mark_landed_files
 
         _mark_landed_files(
-            ToolContext(
+            ToolContext.create(
                 execution_id="e-coalesce",
                 run_id="w1",
                 agent_id="w1",
@@ -1102,7 +1102,7 @@ async def test_sibling_verify_inflight_coalesce(monkeypatch: pytest.MonkeyPatch)
         assert session._verify_cache == {}
         r4 = await tool.execute(
             {"check": "typecheck"},
-            ToolContext(
+            ToolContext.create(
                 execution_id="e-coalesce",
                 run_id="w2",
                 agent_id="w2",

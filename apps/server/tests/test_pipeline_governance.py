@@ -113,7 +113,7 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
             return ""
 
         async def list(self, _user_id: str, scope: str | None = None) -> list:
-            # No topic notes ⇒ no 记忆主题目录 / consult_memory on this single-agent path.
+            # No topic notes ⇒ no 按需目录 / consult on this single-agent path.
             return []
 
     monkeypatch.setattr("agentcore.runtime.pipeline.run.default_memory_store", lambda: _FakeStore())

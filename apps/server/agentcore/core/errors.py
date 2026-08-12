@@ -26,13 +26,27 @@ class AgentCoreError(Exception):
 class LLMError(AgentCoreError):
     """LLM provider call failure."""
 
-    code = ErrorCode.LLM_ERROR
+    code: str = ErrorCode.LLM_ERROR
     status_code = 502
 
 
 class LLMUpstreamError(LLMError):
     """Upstream provider returned 5xx (transient server error). Retryable."""
 
+    retryable = True
+
+
+class OurServiceUnavailableError(LLMError):
+    """Our own cloud hop (inference proxy / gateway) failed — not the model vendor.
+
+    Stays inside the LLM error family so the provider keeps its retry budget and
+    its「already committed partial content」handling, while ``code`` names the real
+    fault so the bubble never blames the user's Base URL / API Key. ``code`` and
+    ``retryable`` are stamped per instance from the wire envelope.
+    """
+
+    code: str = ErrorCode.INTERNAL_ERROR
+    status_code = 503
     retryable = True
 
 
@@ -46,9 +60,7 @@ class LLMRateLimitError(LLMError):
         self.retry_after = retry_after
         # 工程侧不睡满 >30s 的 Retry-After；文案也不承诺「等一小时」。
         if retry_after is not None and 0 < retry_after <= 30:
-            message = (
-                f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试，或点重试。"
-            )
+            message = f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试，或点重试。"
         else:
             message = "上游限流，暂时无法继续本回合。请稍后再试或点重试。"
         # retry_after 进 details，供 SSE ErrorContext / history 复用。
@@ -77,17 +89,33 @@ class LLMInsufficientBalanceError(LLMError):
     code = ErrorCode.LLM_INSUFFICIENT_BALANCE
     retryable = False
 
+    # Platform keys are operator-owned: the end user cannot top them up, so the
+    # copy offers the BYOK exit instead of a 充值 instruction they cannot act on.
+    _PLATFORM_MESSAGE = (
+        "平台模型暂时不可用（上游账户余额不足）。请改用自己的 API Key，或联系管理员。"
+    )
+
     def __init__(
         self,
         message: str | None = None,
         *,
         provider_name: str | None = None,
+        display_name: str | None = None,
         **kwargs,
     ):
         if message is None:
             name = (provider_name or "").strip()
-            label = name if name and name not in {"user", "platform"} else "当前模型"
-            message = f"{label} API Key 有效，但账户余额不足，请充值后重试。"
+            shown = (display_name or "").strip()
+            if name == "platform":
+                message = self._PLATFORM_MESSAGE
+            else:
+                if shown:
+                    label = shown
+                elif name and name != "user":
+                    label = name
+                else:
+                    label = "服务商"
+                message = f"{label} API Key 有效，但账户余额不足，请充值后重试。"
         if provider_name is not None and "provider_name" not in kwargs:
             kwargs["provider_name"] = provider_name
         if "credential_source" not in kwargs:
@@ -113,26 +141,29 @@ class LLMAuthError(LLMError):
     code = ErrorCode.LLM_KEY_INVALID
     retryable = False
 
-    _PLATFORM_MESSAGE = (
-        "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。"
-    )
+    _PLATFORM_MESSAGE = "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。"
 
     def __init__(
         self,
         message: str | None = None,
         *,
         provider_name: str | None = None,
+        display_name: str | None = None,
         **kwargs,
     ):
         name = (provider_name or "").strip()
+        shown = (display_name or "").strip()
         if message is None:
             if name == "platform":
                 message = self._PLATFORM_MESSAGE
             else:
-                label = name if name and name != "user" else "当前模型"
-                message = (
-                    f"{label} API Key 无效或无权限，请在「设置 · 模型配置」中更新后重试。"
-                )
+                if shown:
+                    label = shown
+                elif name and name != "user":
+                    label = name
+                else:
+                    label = "服务商"
+                message = f"{label} API Key 无效或无权限，请在「设置 · 模型配置」中更新后重试。"
         # Wire CTA 分流：platform → 接入自己的 Key；user/BYOK → 去设置换 Key。
         if "credential_source" not in kwargs:
             kwargs["credential_source"] = "platform" if name == "platform" else "user"
@@ -153,8 +184,7 @@ class InferenceTokenExpiredError(LLMAuthError):
     retryable = True
 
     _DEFAULT_MESSAGE = (
-        "本地与云端的推理凭证已失效或过期。请点击重试（将自动换新凭证）；"
-        "仍失败请重新登录后再试。"
+        "本地与云端的推理凭证已失效或过期。请点击重试（将自动换新凭证）；仍失败请重新登录后再试。"
     )
 
     def __init__(self, message: str | None = None, **kwargs):
@@ -445,13 +475,29 @@ class ClientTooOldError(AgentCoreError):
         super().__init__(message, min_version=min_version, **kwargs)
 
 
+# Product-face fallback when an unclassified exception hits a user-facing boundary.
+# Same sentence as ``message_merge.DEFAULT_FAILED_ERROR_MESSAGE`` (settle / usage).
+UNCLASSIFIED_EXCEPTION_USER_MESSAGE = "模型调用失败，请稍后重试。"
+
+
 def error_fields_for(
     exc: BaseException,
     *,
     fallback_code: str,
     fallback_message: str,
 ) -> tuple[str, str, dict | None]:
-    """Decide the ``(code, message, context)`` an SSE ``error`` event should carry."""
+    """Decide the ``(code, message, context)`` a product-facing error should carry.
+
+    Category gate (not string matching):
+    - :class:`AgentCoreError` — pass through coded product copy on the type.
+    - Sticky-dead :class:`~agentcore.workspace.protocol.WorkspaceIOError` — honest
+      channel-down zh already on the exception (product text by construction).
+    - Everything else (dev invariants, third-party, unclassified) — the caller's
+      curated ``fallback_message``, never ``str(exc)``. Callers own that copy and
+      must pass product text (an empty one degrades to
+      :data:`UNCLASSIFIED_EXCEPTION_USER_MESSAGE`); the exception's own text is
+      for logs.
+    """
     if isinstance(exc, AgentCoreError):
         from agentcore.llm.errors import error_context_from
 
@@ -477,4 +523,5 @@ def error_fields_for(
                 detail or CHANNEL_DEAD_PREPARE_ABORT,
                 None,
             )
-    return fallback_code, fallback_message, None
+    product = (fallback_message or "").strip()
+    return fallback_code, product or UNCLASSIFIED_EXCEPTION_USER_MESSAGE, None

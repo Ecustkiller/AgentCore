@@ -84,6 +84,12 @@ class Conversation(Base):
     # (no DB constraint, per repo convention). Soft-deleting a project archives members
     # in place (keeps ``folder_id``); permanent wipe hard-deletes member rows.
     folder_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), index=True, nullable=True)
+    # Bare-chat silent auto cloud desk (写盘自动建云桌). Orthogonal to ``folder_id`` —
+    # never auto-promotes affiliation / sidebar / memory scope. NULL until first
+    # provision; reused across turns via ``ensure_bare_chat_auto_cloud_desk``.
+    auto_desk_folder_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), nullable=True
+    )
     # Desktop's intended local container root for a 裸聊, captured at creation
     # (NULL = cloud intent: web / mobile /「云端临时对话」). Used when resolving
     # effective local binding for ungrouped chats; ignored once ``folder_id`` is set

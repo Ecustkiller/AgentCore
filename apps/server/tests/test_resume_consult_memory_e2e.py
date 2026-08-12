@@ -1,19 +1,19 @@
-"""End-to-end: a durable resume re-wires consult_memory to the SAME scope the turn
+"""End-to-end: a durable resume re-wires consult to the SAME scope the turn
 paused in, so the resumed CEO loop actually reaches the PROJECT topic (project 主题 first),
 and a memory-OFF turn cannot reach memory at all even if the model tries.
 
 Where the unit tests pin the pieces in isolation —
-- ``consult_memory`` resolves project-then-global (``test_consult_memory``),
+- ``consult`` resolves project-then-global (``test_consult``),
 - the durable frame carries ``folder_id`` + ``memory_enabled`` (``test_durable`` /
   ``test_sidecar_paused``),
-- ``_assemble_ceo_toolset`` maps ``folder_id`` → ``consult_memory.folder_id`` and leaves
-  it UNwired when memory is off (``test_consult_memory``) —
+- ``_assemble_ceo_toolset`` maps ``folder_id`` → ``consult.folder_id`` and leaves
+  it UNwired when memory is off (``test_consult``) —
 this drives the REAL :func:`resume_chat_pipeline` (the same entry the cloud
 ``POST .../resume`` route and the Sidecar both call) end to end, folding the whole chain
-``frame → assemble → CEO loop → consult_memory → project store`` so a regression ANYWHERE
+``frame → assemble → CEO loop → consult → project store`` so a regression ANYWHERE
 along it surfaces here, not just in an isolated seam.
 
-The consult_memory wiring is kind-AGNOSTIC: ``resume_chat_pipeline`` assembles the CEO
+The consult wiring is kind-AGNOSTIC: ``resume_chat_pipeline`` assembles the CEO
 toolset ONCE (with the frame's ``folder_id`` + ``memory_enabled``) BEFORE the kind-specific
 settle, so the ask_user frame used here exercises the exact same wiring a plan_review frame
 would — ask_user is chosen because it has no plan tail to rebuild from the journal.
@@ -62,7 +62,7 @@ def _content_chunk(text: str) -> LLMChunk:
 class _ScriptedProvider:
     """Fake LLM: one scripted round of chunks per ``stream`` call, recording each request.
 
-    The recorded requests are how the test observes what ``consult_memory`` fed back into
+    The recorded requests are how the test observes what ``consult`` fed back into
     the loop — the topic note's body rides the NEXT round as a ``tool`` message.
     """
 
@@ -86,7 +86,7 @@ class _ScriptedProvider:
 def _patch_seams(monkeypatch, provider: _ScriptedProvider, store: FileMemoryStore) -> None:
     """Swap ONLY the LLM provider and the memory store; keep the REAL toolset assembly.
 
-    The point of an e2e is that ``_assemble_ceo_toolset`` (which wires consult_memory to the
+    The point of an e2e is that ``_assemble_ceo_toolset`` (which wires consult to the
     frame's project scope) stays REAL — so patch each seam WHERE IT IS LOOKED UP:
     ``resume_chat_pipeline`` reads ``build_turn_router`` off the package facade
     (``pipeline_pkg.X``), and the real assembly in ``resolve.prepare`` calls
@@ -152,7 +152,7 @@ async def _seed_topics(store: FileMemoryStore) -> None:
 
 
 def _backend() -> ServerWorkspace:
-    # consult_memory never touches the backend; a plain "." root keeps it inert + hermetic.
+    # consult never touches the backend; a plain "." root keeps it inert + hermetic.
     return ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox())
 
 
@@ -160,15 +160,15 @@ def _tool_messages(request) -> list[str]:
     return [m.content or "" for m in request.messages if m.role == "tool"]
 
 
-async def test_resume_consult_memory_hits_project_topic(monkeypatch, tmp_path):
-    # Resume a project turn (memory ON): the CEO loop calls consult_memory(部署流程) and the
+async def test_resume_consult_hits_project_topic(monkeypatch, tmp_path):
+    # Resume a project turn (memory ON): the CEO loop calls consult(部署流程) and the
     # REAL re-wired tool resolves it in PROJECT scope first → the project note's body is what
     # rides back into the loop, NOT the same-named global note.
     store = FileMemoryStore(tmp_path / "memory")
     await _seed_topics(store)
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("consult_memory", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
+            [_tool_chunk("consult", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
             [_content_chunk("已读取本项目部署流程，开始执行。")],
         ]
     )
@@ -185,7 +185,7 @@ async def test_resume_consult_memory_hits_project_topic(monkeypatch, tmp_path):
 
     assert result["finish_reason"] == FinishReason.END_TURN
     assert "本项目部署流程" in result["content"]
-    # The consult_memory result rides the 2nd round as a tool message: it MUST be the
+    # The consult result rides the 2nd round as a tool message: it MUST be the
     # project body (more specific), and the global body of the same name must NOT leak.
     fed_back = _tool_messages(provider.requests[1])
     assert PROJECT_BODY in fed_back
@@ -193,14 +193,14 @@ async def test_resume_consult_memory_hits_project_topic(monkeypatch, tmp_path):
 
 
 async def test_resume_with_memory_off_cannot_reach_topic(monkeypatch, tmp_path):
-    # Resume a memory-OFF turn: even though the model TRIES consult_memory, the tool is not
+    # Resume a memory-OFF turn: even though the model TRIES consult, the tool is not
     # wired (the privacy off-ramp), so the project note never reaches the loop — yet the turn
     # still finishes cleanly (a model typo / stale call must never break a resume).
     store = FileMemoryStore(tmp_path / "memory")
     await _seed_topics(store)
     provider = _ScriptedProvider(
         [
-            [_tool_chunk("consult_memory", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
+            [_tool_chunk("consult", f'{{"name": "{TOPIC}"}}', call_id="cm1")],
             [_content_chunk("无法查阅记忆，按现有信息继续。")],
         ]
     )
@@ -222,7 +222,7 @@ async def test_resume_with_memory_off_cannot_reach_topic(monkeypatch, tmp_path):
         for req in provider.requests
         for m in req.messages
     )
-    # The loop DID continue past the (rebuffed) consult_memory attempt and finalize, proving
+    # The loop DID continue past the (rebuffed) consult attempt and finalize, proving
     # the unknown-tool result degraded gracefully instead of breaking the resumed turn.
     assert len(provider.requests) >= 2
     assert result["content"]

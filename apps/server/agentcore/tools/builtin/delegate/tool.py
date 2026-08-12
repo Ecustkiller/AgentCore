@@ -594,6 +594,7 @@ class DelegateTool:
             conversation_id=self._conversation_id
             or getattr(self._base_tool_context, "conversation_id", None),
             user_message=self._user_message,
+            tool_context=self._base_tool_context,
         )
         default_target = self.effective_default_target_folder_id()
         bare_gate = gate_bare_chat_requires_target(

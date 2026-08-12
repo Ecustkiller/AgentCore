@@ -72,7 +72,7 @@ DEBATE_DESCRIPTION = (
     "form：debate=正反；red_team=红队压测（被审方 is_subject）；roundtable=圆桌。"
     "必填 motion+form+sides（≥2）；轮数/收敛主持人自调。"
     "独立并行调研用 delegate；无对立面/单点事实勿用。"
-    "HOW→consult_skill(debate_and_review)。"
+    "HOW→consult(debate_and_review)。"
 )
 
 DEBATE_PARAMETERS = {

@@ -32,7 +32,12 @@ from agentcore.workspace.protocol import (
     WorkspaceError,
 )
 
-from .errors import _error, _maybe_channel_dead_error, _outside_workspace_msg
+from .errors import (
+    _error,
+    _maybe_channel_dead_error,
+    _outside_workspace_msg,
+    _path_missing_error,
+)
 from .integrity import (
     _SUBSTANTIAL_FILE_CHARS,
     _claim_write_path,
@@ -457,7 +462,7 @@ class FileWriteTool:
                     "请改用更短的文件名（建议 ≤80 个汉字或英文词组）后重试。",
                     start,
                 )
-            return _error(f"读取既有文件失败：{e}", start)
+            return _error(f"读取既有文件失败：{e}", start, user_face=False)
 
         # 代码落盘完整性闸 (D1)：括号截断 / 省略标记硬拒；SECTION 骨架豁免结构闸。
         if is_brace_code_path(rel_path):
@@ -544,7 +549,7 @@ class FileWriteTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"写入文件失败：{e}", start)
+            return _error(f"写入文件失败：{e}", start, user_face=False)
         except OSError as e:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
@@ -554,7 +559,7 @@ class FileWriteTool:
                     "请改用更短的文件名（建议 ≤80 个汉字或英文词组）后重试。",
                     start,
                 )
-            return _error(f"写入文件失败：{e}", start)
+            return _error(f"写入文件失败：{e}", start, user_face=False)
 
         _promote_research_landed_refs(rel_path, write_content)
 
@@ -742,7 +747,7 @@ class FileAppendTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"追加文件失败：{e}", start)
+            return _error(f"追加文件失败：{e}", start, user_face=False)
 
         try:
             merged = await context.backend.read(rel_path)
@@ -904,7 +909,7 @@ class StrReplaceTool:
         except PathNotFound:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(f"文件不存在：{rel_path}", start)
+            return _path_missing_error(f"文件不存在：{rel_path}", start)
         except NotAFile:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
@@ -938,7 +943,7 @@ class StrReplaceTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"写入文件失败：{e}", start)
+            return _error(f"写入文件失败：{e}", start, user_face=False)
 
         loc = "" if outcome.first_line is None else f"（约第 {outcome.first_line} 行）"
         # 回显改动落点的上下文（所改即所见），免得 worker 为「确认替换落对没」再花一轮 read 回读
@@ -1107,7 +1112,7 @@ class WriteSectionTool:
             except PathNotFound:
                 if coordinator is not None and release_on_fail:
                     coordinator.release(rel_path, context.run_id)
-                return _error(f"片段文件不存在：{from_file}", start)
+                return _path_missing_error(f"片段文件不存在：{from_file}", start)
             except NotAFile:
                 if coordinator is not None and release_on_fail:
                     coordinator.release(rel_path, context.run_id)
@@ -1122,7 +1127,7 @@ class WriteSectionTool:
                 dead = _maybe_channel_dead_error(e, start)
                 if dead is not None:
                     return dead
-                return _error(f"读取片段失败：{e}", start)
+                return _error(f"读取片段失败：{e}", start, user_face=False)
         else:
             body = str(content_arg if content_arg is not None else "")
 
@@ -1138,7 +1143,7 @@ class WriteSectionTool:
         except PathNotFound:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
-            return _error(f"文件不存在：{rel_path}", start)
+            return _path_missing_error(f"文件不存在：{rel_path}", start)
         except NotAFile:
             if coordinator is not None and release_on_fail:
                 coordinator.release(rel_path, context.run_id)
@@ -1153,7 +1158,7 @@ class WriteSectionTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"读取文件失败：{e}", start)
+            return _error(f"读取文件失败：{e}", start, user_face=False)
 
         try:
             new_html = inject_section_html(old, slug, body)
@@ -1195,7 +1200,7 @@ class WriteSectionTool:
             dead = _maybe_channel_dead_error(e, start)
             if dead is not None:
                 return dead
-            return _error(f"写入文件失败：{e}", start)
+            return _error(f"写入文件失败：{e}", start, user_face=False)
 
         _mark_landed_files(context, rel_path)
         src = f"（来自 `{from_file}`）" if from_file else ""

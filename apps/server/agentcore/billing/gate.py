@@ -34,7 +34,11 @@ from agentcore.core.errors import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
-from agentcore.db.repositories import CostEventRepository, UserRepository
+from agentcore.db.repositories import CostEventRepository, UserLlmProviderRepository, UserRepository
+from agentcore.llm.background_failure import (
+    classify_background_llm_failure,
+    is_config_shaped_background_failure,
+)
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.resolve import (
     ModelConfig,
@@ -61,6 +65,48 @@ class BackgroundLlmResult[T]:
 
     value: T
     credentials: LLMCredentials
+
+
+async def maybe_mark_byok_provider_error(
+    *,
+    user_id: str,
+    purpose: str,
+    credentials: LLMCredentials,
+    exc: BaseException,
+) -> None:
+    """Best-effort: set BYOK provider ``status=error`` on config-shaped chrome failures.
+
+    Platform credentials and non-config failures are no-ops. DB write failures are
+    swallowed so background chrome never fails louder because of the badge write.
+    """
+    if credentials.source != "user":
+        return
+    provider_id = credentials.provider_id
+    if not provider_id:
+        return
+    if not is_config_shaped_background_failure(exc):
+        return
+
+    reason = classify_background_llm_failure(exc)
+    try:
+        async with async_session_factory() as session:
+            await UserLlmProviderRepository(session).update_status(provider_id, "error")
+        logger.warning(
+            "billing.background_byok_provider_error",
+            user_id=user_id,
+            purpose=purpose,
+            provider_id=provider_id,
+            reason=reason,
+        )
+    except Exception as mark_exc:
+        logger.warning(
+            "billing.background_byok_provider_error",
+            user_id=user_id,
+            purpose=purpose,
+            provider_id=provider_id,
+            reason=reason,
+            error=str(mark_exc),
+        )
 
 
 class _BillingGateUser(Protocol):
@@ -148,6 +194,7 @@ def _creds_from_cfg(cfg: ModelConfig) -> LLMCredentials:
         default_model=cfg.model,
         source="platform" if cfg.source == "platform" else "user",
         provider_id=cfg.provider_id,
+        label=cfg.label,
     )
 
 
@@ -175,9 +222,7 @@ async def resolve_and_gate_background(
 
     # Dormant / credentials gated off: same as main chat — BYOK or skip.
     if cfg.source == "platform" and not platform_catalog_visible():
-        return await resolve_and_gate_background_user_fallback(
-            session, user_id, purpose=purpose
-        )
+        return await resolve_and_gate_background_user_fallback(session, user_id, purpose=purpose)
 
     creds = _creds_from_cfg(cfg)
     if cfg.source != "platform":
@@ -262,10 +307,18 @@ async def run_background_llm[T](
     try:
         value = await runner(primary)
         return BackgroundLlmResult(value=value, credentials=primary)
-    except LLMAuthError:
+    except LLMAuthError as e:
+        await maybe_mark_byok_provider_error(
+            user_id=user_id, purpose=purpose, credentials=primary, exc=e
+        )
         if primary.source != "platform":
             # Already on user BYOK — do not bounce back to platform.
             return None
+    except Exception as e:
+        await maybe_mark_byok_provider_error(
+            user_id=user_id, purpose=purpose, credentials=primary, exc=e
+        )
+        raise
 
     logger.info(
         "billing.background_platform_auth_fallback",
@@ -282,5 +335,13 @@ async def run_background_llm[T](
     try:
         value = await runner(fallback)
         return BackgroundLlmResult(value=value, credentials=fallback)
-    except LLMAuthError:
+    except LLMAuthError as e:
+        await maybe_mark_byok_provider_error(
+            user_id=user_id, purpose=purpose, credentials=fallback, exc=e
+        )
         return None
+    except Exception as e:
+        await maybe_mark_byok_provider_error(
+            user_id=user_id, purpose=purpose, credentials=fallback, exc=e
+        )
+        raise

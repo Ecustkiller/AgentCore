@@ -5,7 +5,7 @@ the CEO-only orchestration tools' schemas off uninitialised instances (their ``s
 is a pure static descriptor). If a future schema starts touching instance state, the
 ``name``/``description``/``parameters`` assertions here fail loudly instead of the
 endpoint silently serving half-built metadata. Also pins the CEO/worker reach annotation
-and the single-source prompt composer's 能力目录 gating.
+and the single-source prompt composer's 按需目录 gating.
 """
 
 from agentcore.runtime.resolve.prompt import assemble_system_prompt, compose_ceo_chat_prompt
@@ -17,18 +17,16 @@ from agentcore.tools.catalog import (
 )
 
 # What the CEO holds beyond the read-only built-ins (mirrors pipeline._assemble_ceo_toolset).
+# ``consult`` is AUDIENCE_BOTH — asserted separately.
 _CEO_ORCHESTRATION = {
     "delegate",
     "replan",
     "debate",
-    "consult_skill",
     "list_projects",
     "resolve_project",
     "create_project",
     "ask_user",
 }
-# consult_memory / consult_rule are wired for BOTH CEO and workers when catalogs exist.
-_SHARED_ORCHESTRATION = {"consult_memory", "consult_rule"}
 # Mutation / execution built-ins the coordinator must NOT hold (they belong to workers),
 # plus the worker-only collaboration channels (escalate upward + post_note/read_notes
 # 便签墙). test_run is here too: it runs project code through the same sandbox chain as
@@ -76,26 +74,17 @@ def test_catalog_has_no_duplicate_tools():
 
 
 def test_ceo_orchestration_tools_are_present_and_ceo_only():
-    """The drift the old GET /tools had: delegate/replan/consult_skill/ask_user missing."""
+    """The drift the old GET /tools had: delegate/replan/consult/ask_user missing."""
     entries = _by_name()
     for name in _CEO_ORCHESTRATION:
         assert name in entries, f"{name} missing from catalog"
         assert entries[name].available_to == (AVAILABLE_TO_CEO,)
 
 
-def test_consult_memory_is_shared_between_ceo_and_worker():
+def test_consult_is_shared_between_ceo_and_worker():
     entries = _by_name()
-    assert "consult_memory" in entries
-    assert set(entries["consult_memory"].available_to) == {
-        AVAILABLE_TO_CEO,
-        AVAILABLE_TO_WORKER,
-    }
-
-
-def test_consult_rule_is_shared_between_ceo_and_worker():
-    entries = _by_name()
-    assert "consult_rule" in entries
-    assert set(entries["consult_rule"].available_to) == {
+    assert "consult" in entries
+    assert set(entries["consult"].available_to) == {
         AVAILABLE_TO_CEO,
         AVAILABLE_TO_WORKER,
     }
@@ -126,7 +115,7 @@ def test_mutation_and_escalate_are_worker_only():
 
 
 def test_ceo_prompt_lists_skill_directory_when_ask_user_wired():
-    """compose_ceo_chat_prompt is the single source for runtime + 能力图鉴; its 能力目录
+    """compose_ceo_chat_prompt is the single source for runtime + 能力图鉴; its 按需目录
     must gate the ask_user_* skills on ask_user being wired (the live-user invariant)."""
     registry = build_system_skill_registry()
     base = assemble_system_prompt()
@@ -136,16 +125,16 @@ def test_ceo_prompt_lists_skill_directory_when_ask_user_wired():
     with_ask = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
-        ceo_tool_names={"delegate", "consult_skill", "ask_user"},
+        ceo_tool_names={"delegate", "consult", "ask_user"},
     )
-    assert "能力目录" in with_ask
+    assert "按需目录" in with_ask
     assert "- ask_user_kickoff：" in with_ask
     assert "- team_orchestration_advanced：" in with_ask
 
     without_ask = compose_ceo_chat_prompt(
         base,
         skill_registry=registry,
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
     # ask_user_kickoff requires the ask_user tool — its directory line is gated out…
     assert "- ask_user_kickoff：" not in without_ask

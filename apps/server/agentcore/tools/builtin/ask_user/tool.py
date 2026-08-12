@@ -80,10 +80,10 @@ class AskUserTool:
     suspension_saver: SuspensionSaver | None = None
     suspension_deleter: SuspensionDeleter | None = None
     # The cloud project (= workspace folder) scope, carried so a durable ask_user pause
-    # captures it into the frame — the resumed toolset re-wires consult_memory to the same
+    # captures it into the frame — the resumed toolset re-wires consult to the same
     # project (Agent记忆与知识系统 §二). ``None`` for 裸聊 / local. Capture-only (unused live).
     folder_id: str | None = None
-    # Caller-supplied memory gate, captured so resume re-wires consult_memory as this
+    # Caller-supplied memory gate, captured so resume re-wires consult as this
     # turn did (False ⇒ stays off). Capture-only; defaults True (product always-on).
     memory_enabled: bool = True
     # Caller-supplied conversation-log access gate, captured for resume wire parity.
@@ -120,7 +120,7 @@ class AskUserTool:
         # Schema: short trigger. HOW → ask_user_kickoff / ask_user_midtask skills.
         questions_desc = (
             "可选：要用户拍板的问题（最多 5）。关键岔路通常预填或省略 default。"
-            "choice 可配 detail / recommended。用法见 consult_skill。"
+            "choice 可配 detail / recommended。用法见 consult。"
         )
         tool_desc = (
             "向用户发问（唯一问用户原语）。默认 blocking 暂停回合；"
@@ -129,7 +129,7 @@ class AskUserTool:
             "挡路拍板：无答复则不能负责任推进时短问；"
             "能续聊/按默认推进则不当检查点。"
             "可与检索/读文件等穿插、可连续多次；Agent 自主决定何时问。"
-            "详见 consult_skill"
+            "详见 consult"
             "（ask_user_kickoff / ask_user_midtask）。"
         )
         if self.advertise_bind_local_folder:

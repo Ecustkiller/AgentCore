@@ -33,8 +33,11 @@ from agentcore.llm.errors import (
     client_error_message,
     diagnose_empty_response,
     is_auth_rejection,
+    is_balance_exhausted,
     is_non_retryable_client_status,
     is_temperature_deprecated,
+    our_inference_service_5xx_error,
+    parse_agentcore_error_envelope,
     upstream_client_error,
     upstream_error,
 )
@@ -195,8 +198,20 @@ class OpenAICompatibleProvider:
         api_key: str,
         base_url: str,
         extra_headers: dict[str, str] | None = None,
+        display_name: str | None = None,
     ) -> None:
         self._name = name
+        # User-facing label for error copy. Logs / pricing keep ``_name``.
+        # Never fall back to internal credential sources ``user`` / ``platform``.
+        shown = (display_name or "").strip()
+        if shown:
+            self._display_name = shown
+        elif name == "platform":
+            self._display_name = "平台"
+        elif name == "user":
+            self._display_name = "服务商"
+        else:
+            self._display_name = name
         from agentcore.llm.credentials import require_http_header_safe_api_key
 
         self._api_key = require_http_header_safe_api_key(api_key)
@@ -229,6 +244,10 @@ class OpenAICompatibleProvider:
         return self._name
 
     @property
+    def display_name(self) -> str:
+        return self._display_name
+
+    @property
     def base_url(self) -> str:
         return self._base_url
 
@@ -239,6 +258,7 @@ class OpenAICompatibleProvider:
             api_key=self._api_key,
             base_url=self._base_url,
             extra_headers=self._extra_headers,
+            display_name=self._display_name,
         )
 
     async def complete(self, request: LLMRequest) -> LLMResponse:
@@ -562,7 +582,7 @@ class OpenAICompatibleProvider:
                 await asyncio.sleep(wait)
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+                last_error = LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")
                 if committed:
                     logger.warning(
                         "llm.stream_partial_disconnect",
@@ -631,7 +651,7 @@ class OpenAICompatibleProvider:
                     raise translated from e
                 raise
 
-        raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
+        raise last_error or LLMError(f"{self._display_name} 多次重试后仍失败，请稍后重试")
 
     def _build_payload(self, request: LLMRequest, *, stream: bool) -> dict:
         # Default wire shape is clean OpenAI Chat Completions. Dialect flags
@@ -743,21 +763,32 @@ class OpenAICompatibleProvider:
                     upstream_status=status_code,
                     upstream_body_preview=body_preview(body),
                 )
+            if is_balance_exhausted(body):
+                raise LLMInsufficientBalanceError(
+                    provider_name=self._name,
+                    display_name=self._display_name,
+                    upstream_status=status_code,
+                    upstream_body_preview=body_preview(body),
+                )
             if is_auth_rejection(status_code, body):
                 # Product copy only (platform + BYOK): never echo upstream gateway
                 # tutorials (e.g. CC Switch). Upstream text stays in preview / logs.
                 raise LLMAuthError(
                     provider_name=self._name,
+                    display_name=self._display_name,
                     upstream_status=status_code,
                     upstream_body_preview=body_preview(body),
                 )
             raise upstream_client_error(
-                client_error_message(self._name, status_code, body),
+                client_error_message(self._display_name, status_code, body),
                 status=status_code,
                 body=body,
             )
         if status_code == 402:
-            raise LLMInsufficientBalanceError(provider_name=self._name)
+            raise LLMInsufficientBalanceError(
+                provider_name=self._name,
+                display_name=self._display_name,
+            )
         if status_code >= 500:
             preview = body_preview(body)
             logger.warning(
@@ -767,10 +798,24 @@ class OpenAICompatibleProvider:
                 attempt=attempt + 1,
                 body_preview=preview,
             )
+            # Sidecar→cloud /inference/: 5xx is our cloud unless the body is our
+            # envelope with an LLM_* code (true upstream, wrapped by the proxy).
+            # Never sniff free text / vendor gateway tutorials.
+            relayed: str | None = None
+            if "/inference/" in self._base_url:
+                our_err = our_inference_service_5xx_error(status=status_code, body=body)
+                if our_err is not None:
+                    raise our_err
+                # True upstream behind the proxy: the cloud leaf already phrased the
+                # vendor's real status, while ours is only the proxy's 502 relay code.
+                # Reuse that sentence (our own copy, never vendor text) so the number
+                # on the bubble is the one the vendor actually returned.
+                envelope = parse_agentcore_error_envelope(body)
+                relayed = envelope.message if envelope else None
             # Product face (A′ · 2026-08-04): never put credential leaf names
             # (``platform`` / BYOK ``user`` / vendor) or「服务端错误」on the bubble —
             # those read as AgentCore itself failing. Upstream body stays in preview.
-            message = f"上游模型服务暂时不可用（{status_code}），请稍后再试"
+            message = relayed or f"上游模型服务暂时不可用（{status_code}），请稍后再试"
             err = upstream_error(
                 message,
                 status=status_code,
@@ -788,7 +833,7 @@ class OpenAICompatibleProvider:
                 body_preview=body_preview(body),
             )
             raise upstream_client_error(
-                client_error_message(self._name, status_code, body),
+                client_error_message(self._display_name, status_code, body),
                 status=status_code,
                 body=body,
             )
@@ -811,15 +856,15 @@ class OpenAICompatibleProvider:
     def _probe_connect_error(self, exc: httpx.HTTPError) -> LLMError:
         """User-facing connect error for settings「测试连接」/ model discovery."""
         if isinstance(exc, httpx.TimeoutException):
-            return LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+            return LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")
         if self._is_dns_failure(exc):
             return LLMError(
-                f"无法连接 {self._name}：域名无法解析。"
+                f"无法连接 {self._display_name}：域名无法解析。"
                 "请确认 Base URL 拼写正确，且为公网可达地址"
                 "（公司内网域名通常无法从云端访问）"
             )
         return LLMError(
-            f"无法连接 {self._name}：端点不可达，请确认 Base URL 可从公网访问"
+            f"无法连接 {self._display_name}：端点不可达，请确认 Base URL 可从公网访问"
         )
 
     def _network_error_to_llm(self, exc: httpx.HTTPError) -> LLMError:
@@ -940,7 +985,9 @@ class OpenAICompatibleProvider:
                 except ValueError as e:
                     # 2xx HTML / non-JSON (gateway login page, etc.): not transient —
                     # retrying the same endpoint just spins. Mirror list_models.
-                    raise LLMInvalidResponseError(f"{self._name} 响应格式无效") from e
+                    raise LLMInvalidResponseError(
+                        f"{self._display_name} 响应格式无效"
+                    ) from e
             except LLMUpstreamError as e:
                 last_error = e
                 if not e.retryable or not self._can_retry_attempt(attempt):
@@ -994,7 +1041,7 @@ class OpenAICompatibleProvider:
                     raise translated from e
                 raise
             except httpx.TimeoutException as e:
-                last_error = LLMTimeoutError(f"连接 {self._name} 超时，请检查网络后重试")
+                last_error = LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")
                 is_connect = isinstance(e, httpx.ConnectTimeout)
                 max_attempts = connect_max if is_connect else _MAX_RETRIES
                 if not self._can_retry_attempt(attempt, max_attempts=max_attempts):
@@ -1029,7 +1076,7 @@ class OpenAICompatibleProvider:
                     connect_backoff = next_backoff
                 else:
                     backoff = next_backoff
-        raise last_error or LLMError(f"{self._name} 多次重试后仍失败，请稍后重试")
+        raise last_error or LLMError(f"{self._display_name} 多次重试后仍失败，请稍后重试")
 
     async def probe(self, *, model: str) -> None:
         payload = {
@@ -1050,16 +1097,26 @@ class OpenAICompatibleProvider:
             self._require_chat_completions_body(response.content)
             return
         if code in (401, 403):
-            raise LLMError(f"{self._name} API Key 无效或无权限（鉴权失败），请检查后重试")
+            if is_balance_exhausted(response.content):
+                raise LLMInsufficientBalanceError(
+                    provider_name=self._name,
+                    display_name=self._display_name,
+                )
+            raise LLMError(
+                f"{self._display_name} API Key 无效或无权限（鉴权失败），请检查后重试"
+            )
         if code == 402:
-            raise LLMInsufficientBalanceError(provider_name=self._name)
+            raise LLMInsufficientBalanceError(
+                provider_name=self._name,
+                display_name=self._display_name,
+            )
         if code == 404:
             # Must read body: model-id 404s (Not found the model / resource_not_found)
             # must not be mislabelled as a bad base_url.
-            raise LLMError(client_error_message(self._name, code, response.content))
+            raise LLMError(client_error_message(self._display_name, code, response.content))
         if code >= 500:
             raise LLMError(f"上游模型服务暂时不可用（{code}），请稍后再试")
-        raise LLMError(f"{self._name} 连通测试失败（HTTP {code}）")
+        raise LLMError(f"{self._display_name} 连通测试失败（HTTP {code}）")
 
     def _require_chat_completions_body(self, content: bytes | str | None) -> None:
         """Reject 2xx HTML / non-JSON / non-chat shells that used to soft-green probe."""
@@ -1069,13 +1126,13 @@ class OpenAICompatibleProvider:
             text = (content or "").strip()
         if not text:
             raise LLMError(
-                f"{self._name} 连通测试返回空响应。"
+                f"{self._display_name} 连通测试返回空响应。"
                 "请检查 Base URL（自定义地址通常需含 /v1）与 API Key。"
             )
         lowered = text[:2000].lower()
         if "<html" in lowered or "<!doctype" in lowered or '<div id="root"' in lowered:
             raise LLMError(
-                f"{self._name} 连通测试返回了网页而非模型接口。"
+                f"{self._display_name} 连通测试返回了网页而非模型接口。"
                 "请检查 Base URL（自定义地址通常需含 /v1，"
                 "例如 https://api.example.com/v1）。"
             )
@@ -1083,19 +1140,21 @@ class OpenAICompatibleProvider:
             data = json.loads(text)
         except json.JSONDecodeError as e:
             raise LLMError(
-                f"{self._name} 连通测试响应不是合法 JSON。"
+                f"{self._display_name} 连通测试响应不是合法 JSON。"
                 "请检查 Base URL（自定义地址通常需含 /v1）。"
             ) from e
         if not isinstance(data, dict):
-            raise LLMError(f"{self._name} 连通测试响应格式无效（非对象）")
+            raise LLMError(f"{self._display_name} 连通测试响应格式无效（非对象）")
         if data.get("error"):
             err = data["error"]
             err_text = err if isinstance(err, str) else json.dumps(err, ensure_ascii=False)
-            raise LLMError(f"{self._name} 连通测试被上游拒绝：{err_text[:200]}")
+            raise LLMError(
+                f"{self._display_name} 连通测试被上游拒绝：{err_text[:200]}"
+            )
         choices = data.get("choices")
         if not isinstance(choices, list):
             raise LLMError(
-                f"{self._name} 连通测试响应缺少 choices，不是 chat completions。"
+                f"{self._display_name} 连通测试响应缺少 choices，不是 chat completions。"
                 "请检查 Base URL 是否指向 OpenAI 兼容接口（通常含 /v1）。"
             )
     async def probe_tools(self, *, model: str) -> bool | None:
@@ -1189,22 +1248,35 @@ class OpenAICompatibleProvider:
                     upstream_status=code,
                     upstream_body_preview=body_preview(response.content),
                 )
+            if is_balance_exhausted(response.content):
+                raise LLMInsufficientBalanceError(
+                    provider_name=self._name,
+                    display_name=self._display_name,
+                    upstream_status=code,
+                    upstream_body_preview=body_preview(response.content),
+                )
             raise LLMAuthError(
                 provider_name=self._name,
+                display_name=self._display_name,
                 upstream_status=code,
                 upstream_body_preview=body_preview(response.content),
             )
         if code == 402:
-            raise LLMInsufficientBalanceError(provider_name=self._name)
+            raise LLMInsufficientBalanceError(
+                provider_name=self._name,
+                display_name=self._display_name,
+            )
         if code >= 400:
-            raise LLMError(f"{self._name} 列出模型失败（HTTP {code}）")
+            raise LLMError(f"{self._display_name} 列出模型失败（HTTP {code}）")
         try:
             data = response.json()
         except ValueError as e:
-            raise LLMInvalidResponseError(f"{self._name} 模型列表响应格式无效") from e
+            raise LLMInvalidResponseError(
+                f"{self._display_name} 模型列表响应格式无效"
+            ) from e
         items = data.get("data") if isinstance(data, dict) else None
         if not isinstance(items, list):
-            raise LLMError(f"{self._name} 模型列表响应缺少 data 字段")
+            raise LLMError(f"{self._display_name} 模型列表响应缺少 data 字段")
         ids: list[str] = []
         seen: set[str] = set()
         for item in items:

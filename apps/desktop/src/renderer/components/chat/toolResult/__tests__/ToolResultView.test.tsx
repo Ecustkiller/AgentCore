@@ -72,6 +72,40 @@ describe("ToolResultView · consult_memory", () => {
   });
 });
 
+describe("ToolResultView · consult (unified)", () => {
+  it("reuses the consult_memory card for display.name + body", () => {
+    render(
+      <ToolResultView
+        data={data({
+          toolName: "consult",
+          display: { name: "部署流程" },
+          result: "## 笔记\n- 用 pnpm dev 起前端",
+        })}
+      />,
+    );
+    expect(screen.getByText("查阅记忆：")).toBeTruthy();
+    expect(screen.getByText("部署流程")).toBeTruthy();
+    expect(screen.getByText(/用 pnpm dev 起前端/)).toBeTruthy();
+  });
+});
+
+describe("ToolResultView · consult_rule (historical)", () => {
+  it("maps display.rule onto the same memory-style card", () => {
+    render(
+      <ToolResultView
+        data={data({
+          toolName: "consult_rule",
+          display: { rule: "合规附录" },
+          result: "不得外泄客户数据",
+        })}
+      />,
+    );
+    expect(screen.getByText("查阅记忆：")).toBeTruthy();
+    expect(screen.getByText("合规附录")).toBeTruthy();
+    expect(screen.getByText(/不得外泄客户数据/)).toBeTruthy();
+  });
+});
+
 describe("ToolResultView · search_conversations / read_conversation", () => {
   it("renders a search card with result_count and hit-list body in result", () => {
     render(
@@ -211,6 +245,25 @@ describe("ToolResultView · file_read ceiling guidance", () => {
     expect(container.querySelector("pre")?.className).toContain(
       "text-destructive",
     );
+  });
+
+  it("expanded view keeps model-facing result when failure is present", () => {
+    const { container } = render(
+      <ToolResultView
+        data={data({
+          toolName: "web_search",
+          status: "error",
+          result:
+            "搜索失败：ConnectError: [Errno 111] Connection refused to searxng.internal:8080",
+          failure: {
+            message: "工具执行失败，请稍后重试。",
+            code: "TOOL_ERROR",
+          },
+        })}
+      />,
+    );
+    expect(container.textContent).toContain("searxng.internal:8080");
+    expect(container.textContent).not.toContain("工具执行失败，请稍后重试。");
   });
 });
 

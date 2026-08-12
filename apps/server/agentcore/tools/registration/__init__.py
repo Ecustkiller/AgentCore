@@ -128,7 +128,7 @@ def worker_only_tool_names() -> frozenset[str]:
 
 # Heavy-dep ALWAYS tools stay handwritten in ``_assemble_ceo_toolset``.
 # Everything else with ``ceo_wire=ALWAYS`` is declaration-loop wired
-# (zero-arg via ``instantiate_declared``; ``consult_skill`` takes skill_registry).
+# (zero-arg via ``instantiate_declared``).
 _ALWAYS_HAND_WIRE_NAMES = frozenset({"delegate", "debate"})
 
 
@@ -141,17 +141,17 @@ def register_always_ceo_tools(
 
     Consumed only from ``tools.ceo_toolset._assemble_ceo_toolset`` so fresh turn
     and 2b resume cannot diverge. Skips ``delegate`` / ``debate`` (heavy deps).
+    ``skill_registry`` is retained for call-site compatibility (consult no longer
+    takes it here — merged consult is hand-wired with has_entries).
     """
+    del skill_registry  # consult wiring moved; keep kwarg so callers need not change
     for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION):
         if tool_registration(cls).ceo_wire is not CeoWire.ALWAYS:
             continue
         name = declared_tool_name(cls)
         if name in _ALWAYS_HAND_WIRE_NAMES:
             continue
-        if name == "consult_skill":
-            chat_tools.register(cls(registry=skill_registry))  # type: ignore[call-arg]
-        else:
-            chat_tools.register(instantiate_declared(cls))
+        chat_tools.register(instantiate_declared(cls))
 
 
 def register_board_ceo_tools(chat_tools: ToolRegistry) -> None:

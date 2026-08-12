@@ -73,6 +73,8 @@ class ModelConfig:
     purpose: str
     background_model: str | None = None
     provider_id: str | None = None
+    # BYOK ``user_llm_providers.label`` — preserved across ModelConfig ↔ credentials hops.
+    label: str | None = None
 
 
 def _encryptor():
@@ -135,12 +137,14 @@ def platform_wire_model(model: str) -> str:
 
 
 def _credentials_from_provider(row: UserLlmProvider, api_key: str) -> LLMCredentials:
+    label = (row.label or "").strip() or None
     return LLMCredentials(
         api_key=api_key,
         base_url=row.base_url or settings.platform_base_url,
         default_model=(row.default_model or "").strip() or PLATFORM_MODEL_FLASH,
         source="user",
         provider_id=row.id,
+        label=label,
     )
 
 
@@ -350,6 +354,7 @@ def _model_config_from_creds(
         source="byok" if creds.source != "platform" else "platform",
         purpose=purpose,
         provider_id=creds.provider_id,
+        label=creds.label,
     )
 
 
@@ -408,6 +413,7 @@ async def resolve_credentials(
         default_model=cfg.model,
         source="platform" if cfg.source == "platform" else "user",
         provider_id=cfg.provider_id,
+        label=cfg.label,
     )
 
 

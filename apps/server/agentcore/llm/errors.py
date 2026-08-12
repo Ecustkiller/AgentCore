@@ -8,7 +8,22 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum
 
-from agentcore.core.errors import AgentCoreError, LLMError, LLMUpstreamError
+from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import (
+    AgentCoreError,
+    LLMError,
+    LLMUpstreamError,
+    OurServiceUnavailableError,
+)
+
+# Keep in sync with ``db.errors.DATABASE_UNAVAILABLE_MESSAGE`` — do not import
+# ``db.errors`` here (llm → db → repositories → llm.profiles cycle).
+_OUR_SERVICE_UNAVAILABLE_MESSAGE = "AgentCore 服务暂时不可用，请稍后重试"
+
+# Our-cloud faults a retry cannot clear (server misconfiguration, not pressure).
+_OUR_SERVICE_PERMANENT_CODES = frozenset(
+    {ErrorCode.KEY_STORAGE_UNAVAILABLE, ErrorCode.PLATFORM_BILLING_UNAVAILABLE}
+)
 
 _BODY_PREVIEW_MAX = 500
 
@@ -226,6 +241,101 @@ def _extract_upstream_code(preview: str | None) -> str | None:
     return None
 
 
+@dataclass(frozen=True)
+class AgentCoreErrorEnvelope:
+    """Our wire envelope ``{"error":{"code","message"}}`` (catalogued code only)."""
+
+    code: str
+    message: str | None
+
+
+def parse_agentcore_error_envelope(
+    body: bytes | str | None,
+) -> AgentCoreErrorEnvelope | None:
+    """Parse our structured error envelope; None if shape/code is not ours.
+
+    Only trusts ``{"error":{"code": <ErrorCode>, "message": ...}}``. Does not
+    sniff free text or vendor gateway tutorials (CC Switch, etc.).
+    """
+    preview = body_preview(body)
+    if not preview:
+        return None
+    try:
+        data = json.loads(preview)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    if not isinstance(err, dict):
+        return None
+    raw_code = err.get("code")
+    if not isinstance(raw_code, str) or not raw_code.strip():
+        return None
+    try:
+        catalogued = ErrorCode(raw_code.strip())
+    except ValueError:
+        return None
+    raw_msg = err.get("message")
+    message = str(raw_msg).strip() if raw_msg is not None else None
+    if message == "":
+        message = None
+    return AgentCoreErrorEnvelope(code=catalogued.value, message=message)
+
+
+def is_llm_family_error_code(code: str) -> bool:
+    """True when the catalogued code is the LLM_* upstream-family prefix."""
+    return code.startswith("LLM_")
+
+
+def our_inference_service_5xx_error(
+    *,
+    status: int,
+    body: bytes | str | None,
+) -> OurServiceUnavailableError | None:
+    """Map a 5xx from our ``/inference/`` hop to a coded our-side error.
+
+    Returns ``None`` when the body is our envelope with an LLM_* code — that
+    means the problem is truly upstream and the caller should keep upstream
+    semantics. Any other 5xx on this hop (pool exhaustion, internal fault,
+    missing catalog envelope, …) is our cloud, not the vendor.
+    """
+    envelope = parse_agentcore_error_envelope(body)
+    if envelope is not None and is_llm_family_error_code(envelope.code):
+        return None
+
+    # No envelope (bare gateway page, reverse-proxy 502/503) stays INTERNAL_ERROR:
+    # naming a specific fault we cannot prove would poison the very logs used to
+    # tell our own outages apart from the vendor's.
+    err = OurServiceUnavailableError(
+        (envelope.message if envelope else None) or _OUR_SERVICE_UNAVAILABLE_MESSAGE,
+        upstream_status=status,
+        upstream_body_preview=body_preview(body),
+    )
+    if envelope is not None:
+        err.code = envelope.code
+        err.retryable = envelope.code not in _OUR_SERVICE_PERMANENT_CODES
+    err.status_code = status if status >= 500 else 503
+    return err
+
+
+def _extract_upstream_error_type(preview: str | None) -> str | None:
+    """Anthropic-style ``error.type`` — Zen carries its error class here, not ``code``."""
+    if not preview:
+        return None
+    try:
+        data = json.loads(preview)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    if isinstance(err, dict):
+        kind = err.get("type")
+        return str(kind) if kind else None
+    return None
+
+
 _AUTH_BODY_CODES = frozenset(
     {
         "key_expired",
@@ -238,6 +348,21 @@ _AUTH_BODY_CODES = frozenset(
 _AUTH_BODY_MARKERS = re.compile(
     r"(api[\s_-]?key|access[\s_-]?token|unauthorized|authentication|"
     r"key[\s_-]?expired|expired|鉴权|无效.*key|key.*无效)",
+    re.IGNORECASE,
+)
+# Balance exhaustion answered with 401/403 instead of the conventional 402
+# (OpenCode Zen: ``{"error":{"type":"CreditsError","message":"Insufficient balance…"}}``).
+# Body-proven only — a bare 401 with no balance marker stays an auth failure.
+_BALANCE_BODY_CODES = frozenset(
+    {
+        "insufficient_balance",
+        "insufficient_credits",
+        "creditserror",
+        "credits_error",
+    }
+)
+_BALANCE_MARKERS = re.compile(
+    r"(insufficient\s+(balance|credits)|out\s+of\s+credits|余额不足|账户余额)",
     re.IGNORECASE,
 )
 # Upstream 404 that names a missing / denied *model* (not a wrong base_url path).
@@ -290,8 +415,28 @@ _CONTEXT_OVERFLOW_MARKERS = re.compile(
 _CONTEXT_OVERFLOW_PRODUCT = "对话上下文过长，本轮无法继续。请压缩较早对话后重试"
 
 
+def is_balance_exhausted(body: bytes | str | None) -> bool:
+    """True when the upstream body proves an exhausted balance, whatever the status.
+
+    Vendors disagree on the status code — DeepSeek answers 402, OpenCode Zen answers
+    401 with a ``CreditsError`` body — so the body is authoritative here. A bare 401
+    carrying no balance marker stays an auth failure.
+    """
+    preview = body_preview(body)
+    if not preview:
+        return False
+    code = (_extract_upstream_code(preview) or "").strip().lower()
+    kind = (_extract_upstream_error_type(preview) or "").strip().lower()
+    if code in _BALANCE_BODY_CODES or kind in _BALANCE_BODY_CODES:
+        return True
+    extracted = _extract_upstream_message(preview) or ""
+    return bool(extracted and _BALANCE_MARKERS.search(extracted))
+
+
 def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
     """True when a 401/403 should surface as key/auth failure (not model-not-allowed)."""
+    if is_balance_exhausted(body):
+        return False
     if status_code == 401:
         return True
     if status_code != 403:
@@ -394,6 +539,10 @@ def upstream_error(
         upstream_body_preview=body_preview(body),
         retry_attempts=retry_attempts,
     )
+    # ``status_code`` deliberately stays the class default 502 (bad gateway): it is
+    # the status *we* answer with when relaying a vendor fault, and inference-proxy
+    # callers key「our 5xx vs the vendor's」off it. The real upstream status rides in
+    # ``details`` and in the message the caller composed.
     return LLMUpstreamError(
         message,
         upstream_status=ctx.upstream_status,

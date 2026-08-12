@@ -140,8 +140,15 @@ def tool_use_end(
     success: bool,
     output: str,
     display: dict[str, Any] | None = None,
+    failure: dict[str, str] | None = None,
     run_id: str = "",
 ) -> SSEEvent:
+    """Build ``tool_use_end``.
+
+    ``output`` is the model-facing result (wire field ``result``) — technical detail
+    stays intact on failure. ``failure`` is the optional user face
+    (``{message, code}``) and is attached **only** when ``success=False``.
+    """
     payload: dict[str, Any] = {
         "tool_call_id": tool_call_id,
         "tool_name": tool_name,
@@ -151,6 +158,11 @@ def tool_use_end(
     capped = _cap_display(display)
     if capped is not None:
         payload["display"] = capped
+    if not success and failure is not None:
+        msg = str(failure.get("message") or "").strip()
+        code = str(failure.get("code") or "").strip()
+        if msg and code:
+            payload["failure"] = {"message": msg, "code": code}
     if run_id:
         payload["run_id"] = run_id
     return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)

@@ -34,6 +34,10 @@ class PlatformProvider:
         return "platform"
 
     @property
+    def display_name(self) -> str:
+        return "平台"
+
+    @property
     def base_url(self) -> str | None:
         # Per-model upstream; no single leaf URL until a request picks a model.
         from agentcore.config import settings
@@ -58,7 +62,7 @@ class PlatformProvider:
         if creds is None:
             label = mid or "(empty)"
             raise LLMError(
-                f"platform 模型 {label} 无可用凭据，"
+                f"平台模型 {label} 无可用凭据，"
                 "请检查 PLATFORM_API_KEY / PLATFORM_MODEL_CREDENTIALS"
             )
         key: _LeafKey = (creds.api_key, creds.base_url)
@@ -69,6 +73,7 @@ class PlatformProvider:
                 api_key=creds.api_key,
                 base_url=creds.base_url,
                 extra_headers=creds.extra_headers,
+                display_name="平台",
             )
             self._leaves[key] = leaf
         return leaf

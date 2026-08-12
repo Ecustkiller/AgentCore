@@ -128,7 +128,7 @@ class _OutBackend:
 
 
 def _tool_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="smoke-exec",
         run_id="smoke-run",
         agent_id="smoke-agent",

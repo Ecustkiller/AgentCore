@@ -175,7 +175,7 @@ def _ctx(backend=None) -> ToolContext:  # noqa: ANN001
             root=Path(tempfile.mkdtemp(prefix="debate_ws_")),
             sandbox=SubprocessSandbox(),
         )
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

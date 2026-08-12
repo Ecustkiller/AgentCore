@@ -87,7 +87,7 @@ def _clone_from_bare(bare: Path, dest: Path) -> Path:
 
 def _ceo_ctx(workspace: Path) -> ToolContext:
     """CEO path: no worker-only coordination channels."""
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="ceo",
@@ -112,7 +112,7 @@ def _worker_ctx(
     user_id: str = "u",
 ) -> ToolContext:
     """Worker path: any coordination channel present clears the CEO write ban."""
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="worker",

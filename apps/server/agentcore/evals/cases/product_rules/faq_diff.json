@@ -9,7 +9,7 @@
   "checks": [
     { "name": "FinishReason" },
     { "name": "NotDelegated" },
-    { "name": "ToolCalled", "args": { "tool": "consult_skill" } },
+    { "name": "ToolCalled", "args": { "tool": "consult" } },
     {
       "name": "ContentMatches",
       "args": { "pattern": "AgentCore/规则" }

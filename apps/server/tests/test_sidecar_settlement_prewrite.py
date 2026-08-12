@@ -380,6 +380,11 @@ def test_resume_failure_after_prewrite_does_not_restore_frame(tmp_path, monkeypa
                         "workspaceRoot": str(tmp_path),
                         "dataDir": str(data),
                         "approvalsEnabled": True,
+                        "inference": {
+                            "baseUrl": "http://test.local/v1/inference/v1",
+                            "apiKey": "test-inference-tok",
+                            "model": "test-model",
+                        },
                     },
                 }
             )

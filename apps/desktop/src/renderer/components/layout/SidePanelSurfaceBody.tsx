@@ -5,7 +5,7 @@ import { FileDetail } from "@/components/files/FileDetail";
 import { EmptyHint } from "@/components/files/parts";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
-import { useFileTabSource } from "@/hooks/useConversationFileSource";
+import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
 import {
   useActiveMessageContent,
   useConversationStore,
@@ -134,7 +134,10 @@ function FileSurfaceBody({
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
-  const source = useFileTabSource(currentConversationId, workspaceId);
+  const { source, pending: locating } = useFileTabSourceState(
+    currentConversationId,
+    workspaceId,
+  );
   if (!path || !name) {
     return (
       <EmptyHint
@@ -151,7 +154,7 @@ function FileSurfaceBody({
         inline
         icon={<FileText size={26} className="text-muted-foreground/40" />}
         title={name}
-        hint="当前会话尚无可用文件源。"
+        hint={locating ? "正在定位文件…" : "当前会话尚无可用文件源。"}
       />
     );
   }

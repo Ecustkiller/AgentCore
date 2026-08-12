@@ -51,6 +51,7 @@ from .round import (
 )
 from .segments import join_segments
 from .soft_gates import maybe_soft_gate_no_tool_return
+from .tool_failure_face import tool_failure_fields
 from .tool_protocol_sanitize import prepare_assistant_content
 from .tool_round import handle_tool_calls_round
 
@@ -1012,6 +1013,10 @@ async def react_loop(
                                         name,
                                         success=False,
                                         output=deny,
+                                        failure=tool_failure_fields(
+                                            code="allowlist_deny",
+                                            product_message=deny,
+                                        ),
                                         run_id=run_id or "",
                                     )
                                 )

@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
-from agentcore.api.dependencies import AuthUser, get_simulation_repo
+from agentcore.api.dependencies import AuthUser, get_db, get_simulation_repo
 from agentcore.api.schemas.simulation import (
     AdvanceTickResponse,
     CreateSimulationRunRequest,
@@ -21,7 +22,7 @@ from agentcore.api.schemas.simulation import (
     SimulationRunStatusResponse,
     SimulationRunSummary,
 )
-from agentcore.api.sse import _format_sse, sse_attach_response
+from agentcore.api.sse import _format_sse, release_request_db_before_sse, sse_attach_response
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.repositories import SimulationRepository
 from agentcore.simulation.service import SimulationService, simulation_enabled
@@ -167,6 +168,7 @@ async def replay_run(
     user: AuthUser,
     from_tick: int = Query(..., alias="from", ge=1),
     to_tick: int = Query(..., alias="to", ge=1),
+    session: AsyncSession = Depends(get_db),
     repo: SimulationRepository = Depends(get_simulation_repo),
 ):
     _require_simulation_enabled()
@@ -182,6 +184,8 @@ async def replay_run(
         raise NotFoundError("模拟 run 不存在") from None
     except ValidationError as e:
         raise ValidationError(str(e)) from None
+
+    await release_request_db_before_sse(session)
 
     async def _generator() -> AsyncIterator[str]:
         for event in events:
@@ -202,6 +206,7 @@ async def replay_run(
 async def stream_run(
     run_id: str,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
     repo: SimulationRepository = Depends(get_simulation_repo),
 ):
     _require_simulation_enabled()
@@ -209,6 +214,7 @@ async def stream_run(
     if run is None:
         raise NotFoundError("模拟 run 不存在")
     sink = await default_sim_stream_registry.get_or_create(run_id)
+    await release_request_db_before_sse(session)
     return sse_attach_response(sink)
 
 

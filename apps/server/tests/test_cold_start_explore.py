@@ -47,7 +47,7 @@ class _PromptHolder:
 
 
 def _ctx(*, user_id: str | None = None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",
@@ -416,7 +416,7 @@ async def test_remember_does_not_touch_project_profile(tmp_path, monkeypatch):
 
 def test_compose_prompt_cold_start_block_only_when_flagged():
     skills = build_system_skill_registry()
-    names = {"consult_memory", "update_project_profile", "delegate"}
+    names = {"consult", "update_project_profile", "delegate"}
     without = compose_ceo_chat_prompt(
         "BASE",
         skill_registry=skills,

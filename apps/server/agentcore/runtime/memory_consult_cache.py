@@ -1,10 +1,10 @@
-"""Turn-level consult_memory reuse (kickoff → resume 同 key 不重复拉全文).
+"""Turn-level consult reuse (kickoff → resume 同 key 不重复拉全文).
 
-Kickoff 段 ``consult_memory(设计审美)`` 后 pause，resume 段模型常再调一次同一 key。
-本模块在回合内缓存已命中主题正文：同 slug 再查直接复用，并记 ``consult_memory.reuse``。
+Kickoff 段 ``consult(设计审美)`` 后 pause，resume 段模型常再调一次同一 key。
+本模块在回合内缓存已命中主题正文：同 slug 再查直接复用，并记 ``consult.reuse``。
 
 缓存挂 ContextVar，pause 帧可序列化 ``consulted_memory``；resume 优先从帧恢复，
-也可从窗口里已有的 consult_memory tool 对回填（兼容旧帧）。
+也可从窗口里已有的 consult tool 对回填（兼容旧帧）。
 """
 
 from __future__ import annotations
@@ -13,6 +13,9 @@ import json
 from contextvars import ContextVar
 
 from agentcore.llm.provider.protocol import LLMMessage, llm_content_text
+
+# Unified ``consult`` plus the pre-split names still present in older frames.
+_CONSULT_TOOL_NAMES = ("consult", "consult_memory", "consult_skill", "consult_rule")
 
 # slug → full note body (same turn)
 consulted_memory_cache: ContextVar[dict[str, str] | None] = ContextVar(
@@ -43,7 +46,7 @@ def lookup_consult(slug: str) -> str | None:
 
 
 def seed_consult_cache_from_window(messages: list[LLMMessage]) -> int:
-    """Populate cache from prior consult_memory tool pairs in the CEO window.
+    """Populate cache from prior consult tool pairs in the CEO window.
 
     Returns number of topics seeded.
     """
@@ -52,7 +55,7 @@ def seed_consult_cache_from_window(messages: list[LLMMessage]) -> int:
         if message.role != "assistant" or not message.tool_calls:
             continue
         for call in message.tool_calls:
-            if call.function.name != "consult_memory":
+            if call.function.name not in _CONSULT_TOOL_NAMES:
                 continue
             try:
                 data = json.loads(call.function.arguments or "")

@@ -227,9 +227,9 @@ def _single_agent_error() -> list[SSEEvent]:
 def _single_agent_tool_failure() -> list[SSEEvent]:
     """单聊：工具执行失败（``tool_use_end`` ``success=False`` → wire ``status=error``）。
 
-    生产 ``tool_use_end`` builder 把 ``success=False`` 写成 ``status: "error"``；CEO 仍可
-    继续作答。钉住 process 工具步终态为 error（与 success 向量对偶），避免 fold 把失败
-    当成 success 或丢结果。
+    生产 join 点把 ``error``+``output`` 的技术细节放进模型面 ``result``（可含主机/类名），
+    用户面走可选 ``failure: {message, code}``。本向量钉住**生产真实形状**（技术 result +
+    产品 failure），避免再用产品句冒充 result 让泄漏在全绿 CI 下漏网。
     """
     return [
         message_start("m1", conversation_id=_CONV),
@@ -239,7 +239,14 @@ def _single_agent_tool_failure() -> list[SSEEvent]:
             "tc1",
             "web_search",
             success=False,
-            output="搜索服务暂时不可用，请稍后重试。",
+            output=(
+                "搜索失败：ConnectError: [Errno 111] Connection refused "
+                "to searxng.internal:8080"
+            ),
+            failure={
+                "message": "本地搜索服务不可用，请稍后重试",
+                "code": "searxng_unreachable",
+            },
         ),
         content_delta("检索失败了，"),
         content_delta("我先按已有知识回答。"),

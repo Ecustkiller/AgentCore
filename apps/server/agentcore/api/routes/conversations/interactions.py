@@ -15,7 +15,7 @@ from agentcore.api.schemas import (
     StatusResponse,
     interaction_result_from_body,
 )
-from agentcore.api.sse import sse_response
+from agentcore.api.sse import release_request_db_before_sse, sse_response
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.core.errors import NotFoundError
 from agentcore.core.logging import get_logger
@@ -37,7 +37,6 @@ from ._helpers import (
     _preflight_owned_chat_turn,
     _require_owned_conversation,
     emit_preflight_warnings,
-    release_request_db_before_sse,
 )
 
 logger = get_logger(__name__)

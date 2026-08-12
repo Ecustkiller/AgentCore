@@ -5,7 +5,6 @@ import {
 import { getFolders } from "@/hooks/useFolders";
 import { StreamError } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
-import { notifyWarning } from "@/lib/toast";
 import {
   clearSidecarAccountAuth,
   looksLikeAccountTokenFailure,
@@ -244,7 +243,8 @@ export async function streamConversationViaSidecar({
   // 本回合 trace_id：贯穿云代理推理调用 + 回写落库，使推理日志↔气泡同 trace（打通气泡↔日志）。
   const traceId = newTraceId();
   // 云推理 / folders / account 窄票：TTL+skew 内复用，临近过期才 mint；三张并行。
-  // 取不到则带 undefined：dev 下 sidecar 回退其自身配置，生产则以可重试的引擎错误失败。
+  // 推理票：开跑前无票 → force remint 一次 → 仍无则 INFERENCE_TOKEN_EXPIRED、不发 RPC
+  // （引擎硬拒空凭据；无本机平台模型回退）。folders / account 缺票仍可下发，工具侧诚实失败。
   // 开跑前鉴权失败（尚无事件）可对各票 force remint 一次，不对每回合 force。
   const [inferenceRaw, foldersAuthRaw, accountAuthRaw] = await Promise.all([
     resolveSidecarInference({ conversationId }),
@@ -268,8 +268,7 @@ export async function streamConversationViaSidecar({
     turnId,
     op: "startTurn",
     signal,
-    // 无令牌 = 本回合会落到 sidecar 的本机平台模型回退（非账号模型）——据此在回合跑完后提示。
-    usedFallback: inference === undefined,
+    hasInference: inference !== undefined,
     failMessage: "本地引擎未能完成回合，请重试",
     invoke: () =>
       window.sidecarApi.startTurn({
@@ -299,7 +298,10 @@ export async function streamConversationViaSidecar({
           conversationId,
         })) ?? undefined;
       if (!inference) {
-        throw new Error("推理凭证续铸失败，请重新登录后再试");
+        throw new StreamError("sidecar", undefined, {
+          code: "INFERENCE_TOKEN_EXPIRED",
+          recoverable: false,
+        });
       }
     },
     remintFolders: async () => {
@@ -348,7 +350,7 @@ export async function resumeConversationViaSidecar({
     `[Resume] resumeConversationViaSidecar start conversationId=${conversationId} messageId=${messageId} decision=${decision} rootId=${rootId} subpath=${subpath}`,
   );
   // 续跑同 startTurn：TTL+skew 内复用三张窄票，并行解析；开跑前鉴权失败可各票 force remint 一次。
-  // inference 铸票带本会话 id，使 model 与该会话组合一致。
+  // inference 铸票带本会话 id，使 model 与该会话组合一致；无票同样 force remint → 仍无则诚实失败。
   const [inferenceRaw, foldersAuthRaw, accountAuthRaw] = await Promise.all([
     resolveSidecarInference({ conversationId }),
     resolveSidecarFoldersAuth(),
@@ -374,8 +376,7 @@ export async function resumeConversationViaSidecar({
       turnId: messageId,
       op: "resume",
       signal,
-      // 同 startTurn：无令牌 = 续跑落到本机平台模型回退，回合跑完后提示。
-      usedFallback: inference === undefined,
+      hasInference: inference !== undefined,
       failMessage: "本地引擎未能完成续跑，请重试",
       invoke: () =>
         window.sidecarApi.resume({
@@ -415,7 +416,10 @@ export async function resumeConversationViaSidecar({
             conversationId,
           })) ?? undefined;
         if (!inference) {
-          throw new Error("推理凭证续铸失败，请重新登录后再试");
+          throw new StreamError("sidecar", undefined, {
+            code: "INFERENCE_TOKEN_EXPIRED",
+            recoverable: false,
+          });
         }
       },
       remintFolders: async () => {
@@ -459,15 +463,17 @@ interface RunSidecarTurnOptions {
   /** RPC 名：拒因 `turn already running` 落 desktop.jsonl 时区分 start vs resume。 */
   op: "startTurn" | "resume";
   signal?: AbortSignal;
-  /** 本回合是否取不到云推理令牌（→ sidecar 落本机平台模型回退）：据此在回合成功跑完后弹一条
-   *  非阻断提示，告知这轮用了本机平台模型而非账号模型。 */
-  usedFallback: boolean;
+  /**
+   * 开跑时是否已有云推理票。无则先经 `remintInference` force 换票一次；仍无则
+   * `INFERENCE_TOKEN_EXPIRED`、不发 RPC（无本机平台模型回退、不改道云端）。
+   */
+  hasInference: boolean;
   /** 兜底错误文案（onStatus / RPC 真因都取不到时）。 */
   failMessage: string;
   /** 实际的 RPC 调用（startTurn / resume），Promise 在回合结束时携最终结果 resolve。
    *  可被调用多次：开跑前窄票鉴权失败时会清缓存换票后重调一次（仅 !sawAnyEvent）。 */
   invoke: () => Promise<SidecarTurnResult>;
-  /** 开跑前 inference 鉴权失败时：清缓存并换新票；失败则抛出让外层走原错误。 */
+  /** 无票 / 开跑前 inference 鉴权失败时：清缓存并换新票；仍无则抛 `INFERENCE_TOKEN_EXPIRED`。 */
   remintInference?: () => Promise<void>;
   /** 开跑前 folders 窄票鉴权失败时：清缓存并换新票（与 remintInference 同形）。 */
   remintFolders?: () => Promise<void>;
@@ -490,7 +496,7 @@ async function runSidecarTurn({
   turnId,
   op,
   signal,
-  usedFallback,
+  hasInference,
   failMessage,
   invoke,
   remintInference,
@@ -526,6 +532,20 @@ async function runSidecarTurn({
     throwIfCannotOpenStream(conversationId, signal);
     enterTurnStreaming(conversationId);
 
+    // 开跑前无云推理票 → force remint 一次；仍无则诚实失败，绝不发 RPC。
+    if (!hasInference) {
+      if (!remintInference) {
+        throw new StreamError("sidecar", undefined, {
+          code: "INFERENCE_TOKEN_EXPIRED",
+          recoverable: false,
+        });
+      }
+      console.warn(
+        "[sidecar] no inference token before turn; reminting once before RPC",
+      );
+      await remintInference();
+    }
+
     let result: SidecarTurnResult;
     try {
       result = await invoke();
@@ -556,16 +576,16 @@ async function runSidecarTurn({
       result = await invoke();
     }
     // 记下本回合真正跑的模型（引擎侧 resolve_turn_model），供输入框徽章如实展示；纯云会话
-    // 无此信号、徽章回退账号配置。回退回合（无令牌）额外弹一条非阻断提示，点破「用了本机平台
-    // 模型而非账号模型」——两个信号同源（result.model 即回退时的平台模型），避免再查一次配置。
+    // 无此信号、徽章回退账号配置。
     useTurnModelStore.getState().setLastModel(conversationId, result.model);
-    if (usedFallback) {
-      warnPlatformModelFallback(result.model);
-    }
     // 本机已出结果 → 标 synced_pending，冲刷主进程 outbox 并对账。
     await writeBack(result);
     return result;
   } catch (err) {
+    // 无票 / remint 失败：已带产品码，勿再包成通用 sidecar 文案或标 recoverable 改道云端。
+    if (err instanceof StreamError && err.code === "INFERENCE_TOKEN_EXPIRED") {
+      throw err;
+    }
     // 用户停止：与云链路一致地抛 AbortError（调用方据此不出错误横幅）。
     // 诚实停止不 abort signal，靠 phase / TURN_CANCELLED 文案识别（见 isSidecarUserCancel）。
     if (signal?.aborted || isSidecarUserCancel(conversationId, err)) {
@@ -684,20 +704,4 @@ function applyReconcile(
   if (saved.title) {
     patchConversationCache(conversationId, { title: saved.title });
   }
-}
-
-/**
- * 本机平台模型回退的可见提示（非阻断）。
- *
- * 取不到云推理令牌（如后端重启中 → inference-token 兑换失败）时，sidecar 会静默用本机 `.env`
- * 平台模型跑完这一回合，而非用户配置的账号模型。回合本身成功了（故非错误横幅、不重跑），只是
- * 用了「另一个模型」——这条 heads-up 点破它，并报出真跑的模型名（`result.model`）。
- */
-function warnPlatformModelFallback(model: string): void {
-  const named = model.trim();
-  notifyWarning("本回合用了本机平台模型", {
-    description: named
-      ? `未取到云端推理令牌，这轮用本机 ${named} 跑完，而非你配置的账号模型。`
-      : "未取到云端推理令牌，这轮用本机平台模型跑完，而非你配置的账号模型。",
-  });
 }

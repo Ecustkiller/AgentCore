@@ -1,6 +1,7 @@
 ﻿import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import {
   EMPTY_RESPONSE_CHIP_LABELS,
+  OUR_SERVICE_UNAVAILABLE_MESSAGE,
   StreamError,
   connectivityEscalationSuffix,
   degradedFinishChipLabel,
@@ -9,6 +10,7 @@ import {
   isClientSideLlmRejection,
   isConnectivityErrorCode,
   isEmptyResponseUserSurface,
+  isOurServiceErrorCode,
   resetSessionConnectivityFailures,
   resolveAssistantFailureFace,
   syntheticErrorForEmptyFailure,
@@ -391,5 +393,60 @@ describe("connectivityEscalationSuffix", () => {
         upstreamStatus: 400,
       }),
     ).toBeNull();
+  });
+});
+
+describe("our-cloud DATABASE_UNAVAILABLE face", () => {
+  afterEach(() => {
+    resetSessionConnectivityFailures();
+  });
+
+  it("is not connectivity and never escalates to Base URL / API Key", () => {
+    expect(isOurServiceErrorCode("DATABASE_UNAVAILABLE")).toBe(true);
+    expect(isConnectivityErrorCode("DATABASE_UNAVAILABLE")).toBe(false);
+    expect(
+      connectivityEscalationSuffix("DATABASE_UNAVAILABLE", "m1"),
+    ).toBeNull();
+    expect(
+      connectivityEscalationSuffix("DATABASE_UNAVAILABLE", "m2"),
+    ).toBeNull();
+    // Must not pollute the session counter used by true connectivity codes.
+    expect(connectivityEscalationSuffix("LLM_TIMEOUT", "m3")).toBeNull();
+  });
+
+  it("honest product face, no settings CTA, still retriable", () => {
+    const face = resolveAssistantFailureFace({
+      content: "",
+      finishReason: "error",
+      error: {
+        code: "DATABASE_UNAVAILABLE",
+        message: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+      },
+    });
+    expect(face).toEqual({
+      code: "DATABASE_UNAVAILABLE",
+      message: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+    });
+    expect(face?.message).not.toContain("上游模型服务");
+    expect(face?.message).not.toContain("Base URL");
+    expect(errorActionForCode("DATABASE_UNAVAILABLE")).toBeNull();
+
+    const described = describeError(
+      new StreamError("http", 503, {
+        code: "DATABASE_UNAVAILABLE",
+        serverMessage: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+      }),
+    );
+    expect(described?.message).toBe(OUR_SERVICE_UNAVAILABLE_MESSAGE);
+    expect(described?.retriable).toBe(true);
+    expect(described?.action).toBeNull();
+  });
+
+  it("true upstream LLM_ERROR still escalates connectivity from the 2nd failure", () => {
+    expect(isConnectivityErrorCode("LLM_ERROR")).toBe(true);
+    expect(connectivityEscalationSuffix("LLM_ERROR", "u1")).toBeNull();
+    expect(connectivityEscalationSuffix("LLM_ERROR", "u2")).toContain(
+      "设置 · 服务商",
+    );
   });
 });

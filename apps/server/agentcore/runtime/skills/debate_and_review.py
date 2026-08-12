@@ -7,7 +7,7 @@ _DEBATE_AND_REVIEW = """\
 【入口分流·按意图】正文分流前置：① 用户明确点名开辩 / 模拟庭审 / 终局对抗（含模拟法庭 / 庭审对抗 / \
 对簿公堂等）→ 本 skill，直调 `debate`——取证作为质量前提由辩论机制保证（约定文档桥 / 可选 Evidence Pack / \
 发言期对称有界检索入台账；**非**庭前调查员舰队、**非**开工前先拦调研），【勿】再先拦去 \
-`deep_multi_lens_research`；② 公共事件跨域研判 → `consult_skill(deep_multi_lens_research)` \
+`deep_multi_lens_research`；② 公共事件跨域研判 → `consult(deep_multi_lens_research)` \
 （MLR → 命题卡 → 推进卡）；③ 一起弄懂/多路摸清（未明示成文）→ `parallel_brief`；明示成文 → \
 `research_report`；④ 意图模糊（既像公共研判又像开辩）→ 保守缺省走 MLR，并在回复里说明\
 「也可直接开辩」。

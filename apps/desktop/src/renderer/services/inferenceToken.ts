@@ -82,9 +82,9 @@ export interface ResolveSidecarInferenceOptions {
 /**
  * 解析出一次本地回合可用的云推理凭据；取不到则返回 `null`。
  *
- * 取不到（如会话过期 / 服务端不可达）时由调用方决定降级——新回合可回退云链路，续跑则带
- * `undefined` 交由 sidecar 处理（dev 回退其自身配置；生产则以可重试的引擎错误失败，胜过把
- * 一个本机持久挂起帧误路由到必然 404 的云端续跑）。
+ * 取不到（会话过期 / 服务端不可达等）时由调用方诚实失败：开跑前 force remint 一次仍无票
+ * → `INFERENCE_TOKEN_EXPIRED`，不发 startTurn / resume RPC。引擎 `build_turn_router` 亦硬拒
+ * 空凭据——无「回落 sidecar 本机平台模型」退路；本机工作区回合亦不得改道云端链路。
  */
 export async function resolveSidecarInference(
   options?: ResolveSidecarInferenceOptions,

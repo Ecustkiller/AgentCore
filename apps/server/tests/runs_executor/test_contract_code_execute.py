@@ -99,7 +99,7 @@ async def test_requires_files_satisfied_by_code_execute_landing(tmp_path):
         ServerWorkspace(root=root, sandbox=SubprocessSandbox()),
         {"report.md": "# 报告\n扎实可信的分析正文。"},
     )
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

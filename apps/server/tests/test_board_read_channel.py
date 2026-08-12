@@ -86,7 +86,7 @@ def _ctx(
     *,
     cost_sink: list[RunCost] | None = None,
 ) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="exec-1",
         run_id="run-1",
         agent_id="agent-1",

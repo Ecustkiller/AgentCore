@@ -49,6 +49,7 @@ from agentcore.workspace.external_mounts import (
 from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
 from agentcore.workspace.indexing.registry import (
+    drop_index_registry,
     shared_index_maintainer,
     shared_index_manager,
 )
@@ -272,6 +273,16 @@ class ServerWorkspace:
         self._get_index_manager()
         self._index_maintainer = shared_index_maintainer(self._root, self)
         self._index_maintainer.schedule()
+
+    async def _release_code_index_for_tree_delete(self) -> None:
+        """Abort maintenance + drop SQLite handles before removing ``AgentCore/index``.
+
+        Windows cannot ``rmtree`` a SQLite file held open by a background ensure
+        (WinError 32).
+        """
+        await drop_index_registry(self._root)
+        self._index_manager = None
+        self._index_maintainer = None
 
     def attach_external_mounts(self, mounts: dict[str, ExternalMount]) -> None:
         """Attach session-scoped external mounts for this turn (W3 / organize)."""
@@ -1008,6 +1019,18 @@ class ServerWorkspace:
             # When target is an ancestor of trash (e.g. bare AgentCore/), expand
             # by children instead of moving the whole tree into itself.
             hard = permanent or is_internal_zone_path(path)
+            # Expanding AgentCore/ (or hard-clearing index/) must release the
+            # process-wide BM25 handle first — otherwise Windows shares-locks
+            # ``code_search.db`` and the delete returns 422 mid-flight ensure.
+            will_clear_index = hard and is_internal_zone_path(path) and (
+                path.replace("\\", "/").rstrip("/") == "AgentCore/index"
+                or path.replace("\\", "/").startswith("AgentCore/index/")
+            )
+            will_expand_agentcore = (not hard) and trash_dest_under_target(
+                root=mount_root, target=target
+            )
+            if will_clear_index or will_expand_agentcore:
+                await self._release_code_index_for_tree_delete()
             try:
                 if hard:
                     if target.is_dir():

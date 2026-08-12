@@ -294,6 +294,24 @@ describe("update consent dialog + prefs", () => {
     );
   });
 
+  it("download is a no-op when available status is manualOnly", async () => {
+    const api = stubUpdaterApi();
+    startUpdates();
+    useUpdatesStore.setState({
+      dialogOpen: true,
+      status: {
+        phase: "available",
+        version: "0.7.0",
+        manualOnly: true,
+        sizeBytes: 2048,
+      },
+    });
+    await useUpdatesStore.getState().download();
+    expect(api.download).not.toHaveBeenCalled();
+    expect(useUpdatesStore.getState().dialogOpen).toBe(true);
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
+
   it("toasts on downloaded without auto-install", () => {
     const api = stubUpdaterApi();
     startUpdates();

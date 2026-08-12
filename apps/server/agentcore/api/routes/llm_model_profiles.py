@@ -53,6 +53,7 @@ def _to_response(view: ModelProfileView) -> LlmModelProfileView:
         background=_slot_to_api(view.background),
         vision=_slot_to_api(view.vision),
         is_default=view.is_default,
+        warnings=list(view.warnings),
     )
 
 

@@ -36,7 +36,12 @@ from agentcore.api.schemas import (
     StopTurnResponse,
 )
 from agentcore.api.schemas.messages import TurnCollabMetrics
-from agentcore.api.sse import sse_attach_response, sse_queued_response, sse_response
+from agentcore.api.sse import (
+    release_request_db_before_sse,
+    sse_attach_response,
+    sse_queued_response,
+    sse_response,
+)
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
 from agentcore.conversation.service import record_local_turn, stream_chat
 from agentcore.conversation.store import get_conversation_store
@@ -61,7 +66,6 @@ from ._helpers import (
     _preflight_owned_chat_turn,
     _require_owned_conversation,
     emit_preflight_warnings,
-    release_request_db_before_sse,
 )
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -672,6 +676,7 @@ async def stop_message(
 async def attach_stream(
     conversation_id: str,
     user: AuthUser,
+    session: AsyncSession = Depends(get_db),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ):
@@ -704,6 +709,8 @@ async def attach_stream(
         raw = last_event_id.strip()
         if raw.isdigit():
             cursor = int(raw)
+    # Ownership check is done; the attach stream only observes an in-memory sink.
+    await release_request_db_before_sse(session)
     return sse_attach_response(run.sink, last_event_id=cursor)
 
 

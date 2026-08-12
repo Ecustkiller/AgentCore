@@ -110,7 +110,7 @@ async def test_file_batch_plan_scope_rejects_out_of_plan():
         operations=[{"op": "mkdir", "path": "external/d/Docs"}],
     )
     tool = FileBatchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -150,7 +150,7 @@ async def test_file_batch_conflict_skips(tmp_path: Path):
 
     ws = ServerWorkspace(primary, _Sandbox(), location="local")
     tool = FileBatchTool()
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

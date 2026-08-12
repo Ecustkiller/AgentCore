@@ -43,15 +43,15 @@ class SectionOrder(IntEnum):
     MEMORY = 300
     CEO_CORE = 400
     SKILL_DIRECTORY = 500
-    # The 记忆主题目录 (consult_memory's catalog) sits beside the skill directory:
+    # The 记忆主题目录 (consult's catalog) sits beside the skill directory:
     # both are "here is a catalog, pull the full text by name" blocks (记忆文件夹化 §六).
     # CEO gets name+summary; workers get a simplified names-only variant.
     MEMORY_TOPICS = 550
-    # On-demand user rules (consult_rule) — constraint appendices, NOT memory topics.
-    # Same live-tool gate: render only when ``consult_rule`` is wired this turn.
+    # On-demand user rules (consult) — constraint appendices, NOT memory topics.
+    # Same live-tool gate: render only when ``consult`` is wired this turn.
     RULE_DIRECTORY = 560
     # Derived cross-project roster (Folder name + 画像.md first line). CEO-only;
-    # outside ``<rules>`` so it never competes with always memory for max_instruction_*.
+    # rendered outside ``<rules>`` so it stays separate from the always-on entry block.
     PROJECT_CATALOG = 570
     CITATION = 600
     CEO_VISUALIZATION = 700

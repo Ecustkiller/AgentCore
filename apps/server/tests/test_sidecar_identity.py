@@ -148,6 +148,11 @@ def test_start_turn_refreshes_user_id_per_turn(tmp_path, monkeypatch):
                     "params": {
                         "userId": LOCAL_USER_ALIAS,
                         "workspaceRoot": str(tmp_path),
+                        "inference": {
+                            "baseUrl": "http://test.local/v1/inference/v1",
+                            "apiKey": "test-inference-tok",
+                            "model": "test-model",
+                        },
                     },
                 }
             )

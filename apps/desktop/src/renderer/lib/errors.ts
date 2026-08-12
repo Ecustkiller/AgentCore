@@ -146,6 +146,22 @@ const CONNECTIVITY_ERROR_CODES: readonly string[] = [
   "LLM_RATE_LIMIT",
 ];
 
+/**
+ * Our-cloud faults (pool / billing / key storage / internal) — never treat as
+ * vendor Base URL / API Key connectivity. Codes must stay out of
+ * {@link CONNECTIVITY_ERROR_CODES} so session escalation counters stay clean.
+ */
+const OUR_SERVICE_ERROR_CODES: readonly string[] = [
+  "DATABASE_UNAVAILABLE",
+  "KEY_STORAGE_UNAVAILABLE",
+  "PLATFORM_BILLING_UNAVAILABLE",
+  "INTERNAL_ERROR",
+];
+
+/** Product copy when our cloud (not the vendor) is busy / unavailable. */
+export const OUR_SERVICE_UNAVAILABLE_MESSAGE =
+  "AgentCore 服务暂时不可用，请稍后重试";
+
 /** Session-scoped counter for connectivity failures (resets on full page reload). */
 const _sessionConnectivityCounts = new Map<string, number>();
 /** Message ids already counted — format/render must not double-increment. */
@@ -154,7 +170,16 @@ const _countedErrorMessageIds = new Set<string>();
 export function isConnectivityErrorCode(code: string | undefined): boolean {
   return (
     code !== undefined &&
-    (CONNECTIVITY_ERROR_CODES as readonly string[]).includes(code)
+    (CONNECTIVITY_ERROR_CODES as readonly string[]).includes(code) &&
+    !(OUR_SERVICE_ERROR_CODES as readonly string[]).includes(code)
+  );
+}
+
+/** True when the failure is our cloud (not vendor Base URL / API Key). */
+export function isOurServiceErrorCode(code: string | undefined): boolean {
+  return (
+    code !== undefined &&
+    (OUR_SERVICE_ERROR_CODES as readonly string[]).includes(code)
   );
 }
 
@@ -214,6 +239,8 @@ export function connectivityEscalationSuffix(
   // future catalog slip cannot append「检查 Base URL / API Key」onto the red card.
   if (code === "LLM_EMPTY_RESPONSE") return null;
   if (opts?.emptyDiagnosis) return null;
+  // Our-cloud 5xx (pool / internal): honest retry, never「设置 · 服务商」.
+  if (isOurServiceErrorCode(code)) return null;
   if (!code || !isConnectivityErrorCode(code)) return null;
   if (isClientSideLlmRejection(opts)) return null;
   const n = noteSessionConnectivityFailure(code, messageId);
@@ -263,6 +290,10 @@ const PRODUCT_COPY_BY_CODE: Record<string, string> = {
   TURN_INTERRUPTED: TURN_INTERRUPTED_EMPTY_MESSAGE,
   TURN_CANCELLED: TURN_CANCELLED_EMPTY_MESSAGE,
   LLM_ERROR: "模型调用失败，请重试。",
+  DATABASE_UNAVAILABLE: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+  KEY_STORAGE_UNAVAILABLE: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+  PLATFORM_BILLING_UNAVAILABLE: OUR_SERVICE_UNAVAILABLE_MESSAGE,
+  INTERNAL_ERROR: OUR_SERVICE_UNAVAILABLE_MESSAGE,
 };
 
 export type AssistantFailureFace = { code: string; message: string };
@@ -510,6 +541,10 @@ export function errorActionForCode(
   if (code === "INFERENCE_TOKEN_EXPIRED") {
     return null;
   }
+  // Our cloud busy / misconfigured — retry (or wait), not vendor settings.
+  if (isOurServiceErrorCode(code)) {
+    return null;
+  }
   if (code === "LLM_KEY_INVALID") {
     const src =
       opts?.credentialSource === "platform" || opts?.credentialSource === "user"
@@ -615,6 +650,9 @@ function resolveMessage(f: ErrorFacts): string {
       f.serverMessage ??
       "本地与云端的推理凭证已失效或过期。请稍后再试（将自动换新凭证）；仍失败请重新登录后再试。"
     );
+  }
+  if (isOurServiceErrorCode(f.code)) {
+    return f.serverMessage ?? OUR_SERVICE_UNAVAILABLE_MESSAGE;
   }
   // Legacy engine builds still surface the English JWT rejection under LLM_KEY_INVALID.
   if (

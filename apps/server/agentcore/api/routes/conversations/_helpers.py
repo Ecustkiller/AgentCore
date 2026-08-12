@@ -139,18 +139,6 @@ async def _selection_supports_tools(
     return row.supports_tools if row is not None else None
 
 
-async def release_request_db_before_sse(session: AsyncSession) -> None:
-    """Return the request-scoped session before a long-lived ``StreamingResponse``.
-
-    Chat-turn SSE routes inject ``Depends(get_db)`` for preflight (ownership +
-    billing) so they share the same schema / override path as every other route.
-    FastAPI would otherwise keep that session open until the stream finishes,
-    pinning a pooled connection for the whole turn — callers must close explicitly
-    after preflight, before ``sse_response``.
-    """
-    await session.close()
-
-
 async def _preflight_owned_chat_turn(
     conversation_id: str,
     user: User,
@@ -160,8 +148,9 @@ async def _preflight_owned_chat_turn(
 ) -> TurnPreflightResult:
     """Owner check + billing gate on the request-scoped session (SSE preflight only).
 
-    Callers must invoke :func:`release_request_db_before_sse` after this returns and
-    before opening the SSE stream so the pooled connection is not held for minutes.
+    Callers must invoke :func:`agentcore.api.sse.release_request_db_before_sse`
+    after this returns and before opening the SSE stream so the pooled connection
+    is not held for minutes.
     """
     conv_repo = ConversationRepository(session)
     cost_repo = CostEventRepository(session)

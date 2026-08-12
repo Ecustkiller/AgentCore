@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import agentcore.runtime.pipeline as pipeline_pkg
-from agentcore.config import settings
 from agentcore.conversation.common import (
     resolve_conversation_history_access,
     resolve_local_binding,
@@ -134,13 +133,11 @@ async def production_crash_delegate_factory(
         # Fresh worker base (no suspension frame): same helpers as prepare_fresh_turn,
         # attachments empty — unfinished nodes carry their own task text in the plan.
         memory_store = default_memory_store()
-        user_rules_markdown, memory_markdown = await assemble_turn_rules(
+        rules_markdown = await assemble_turn_rules(
             memory_store,
             user_id,
             folder_id=folder_id,
             enabled=memory_enabled,
-            max_docs=settings.max_instruction_docs,
-            max_chars=settings.max_instruction_chars,
         )
         memory_topics = await load_memory_topics(
             memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
@@ -156,8 +153,7 @@ async def production_crash_delegate_factory(
             git_fact=await detect_workspace_git(backend),
         )
         system_prompt = assemble_system_prompt(
-            memory_markdown=memory_markdown,
-            user_rules_markdown=user_rules_markdown,
+            rules_markdown=rules_markdown,
             workspace_context=workspace_facts,
         )
         base_system_prompt = compose_worker_base_prompt(
@@ -190,8 +186,6 @@ async def production_crash_delegate_factory(
             session_loader=session_loader,
             suspension_saver=suspension_saver,
             suspension_deleter=suspension_deleter,
-            has_memory_topics=bool(memory_topics),
-            has_on_demand_rules=bool(on_demand_rules),
         )
         logger.info(
             "recover.crash_delegate_ready",

@@ -374,6 +374,13 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "conversation_id": "str",
         "error": "str",
     },
+    "billing.background_byok_provider_error": {
+        "user_id": "str",
+        "purpose": "str",
+        "provider_id": "str",
+        "reason": "str",
+        "error": "str",
+    },
     "memory.consolidation_window_dropped": {
         "conversation_id": "str",
         "error": "str",
@@ -469,6 +476,10 @@ KEY_DESC: dict[str, str] = {
     ),
     "sidecar.turn_cancelled": (
         "本地回合 CancelledError salvage；reason=cancelled_without_rpc 表示非 RPC cancel"
+    ),
+    "billing.background_byok_provider_error": (
+        "后台 chrome 因非重试配置形失败将用户 BYOK 服务商标为 error"
+        "（设置页红色徽章；error 字段表示写库失败）"
     ),
     "billing.background_platform_auth_fallback": (
         "后台 chrome 平台 key 被上游 auth 拒绝后一次回落用户 BYOK"

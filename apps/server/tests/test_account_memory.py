@@ -43,7 +43,7 @@ def account_creds() -> AccountCredentials:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",
@@ -216,16 +216,13 @@ async def test_assemble_turn_rules_ticketed_miss_skips_cloud(
     )
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
-    assert user_md == ""
-    assert mem_md == ""
+    assert rules_md == ""
     assert called["n"] == 0
 
 
@@ -263,16 +260,14 @@ async def test_assemble_turn_rules_ticketed_hit_after_seed(
     )
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
-    assert "永远用中文" in user_md
-    assert "偏好偏好" in mem_md
+    assert "永远用中文" in rules_md
+    assert "偏好偏好" in rules_md
 
 
 async def test_assemble_turn_rules_cloud_failure_soft_empty(
@@ -289,16 +284,13 @@ async def test_assemble_turn_rules_cloud_failure_soft_empty(
     monkeypatch.setattr("agentcore.account.credentials.cloud_list_user_rules", _boom)
 
     with account_credentials_scope(account_creds):
-        user_md, mem_md = await assemble_turn_rules(
+        rules_md = await assemble_turn_rules(
             _EmptyMemoryStore(),  # type: ignore[arg-type]
             "u1",
             folder_id=None,
             enabled=True,
-            max_docs=20,
-            max_chars=20000,
         )
-    assert user_md == ""
-    assert mem_md == ""
+    assert rules_md == ""
 
 
 async def test_remember_tool_cloud_success(
@@ -589,10 +581,14 @@ async def test_load_on_demand_ticketed_empty_catalog_is_honest(
         assert await load_on_demand_user_rules("u1", folder_id=None) == []
 
 
-async def test_consult_rule_cloud_hit(
+async def test_consult_cloud_hit(
     monkeypatch: pytest.MonkeyPatch, account_creds
 ):
-    from agentcore.tools.builtin.consult_rule import ConsultRuleTool
+    from agentcore.runtime.context.consult_sources import (
+        MergedConsultSource,
+        RuleConsultSource,
+    )
+    from agentcore.tools.builtin.consult import ConsultTool
 
     body = "- 对外沟通须用中文\n"
 
@@ -611,12 +607,14 @@ async def test_consult_rule_cloud_hit(
         lambda: (_ for _ in ()).throw(AssertionError("must not open local DB")),
     )
 
-    tool = ConsultRuleTool(folder_id="F1")
+    tool = ConsultTool(source=MergedConsultSource(rule=RuleConsultSource(folder_id="F1")))
     with account_credentials_scope(account_creds):
         result = await tool.execute({"name": "合规附录"}, _ctx())
     assert result.success
     assert result.output == body
-    assert result.display == {"rule": "合规附录"}
+    assert result.display.get("name") == "合规附录"
+    # 来源分类只进日志，不进 display：读侧不向用户暴露 skill/rule/memory 三分。
+    assert "kind" not in result.display
 
 
 async def test_assemble_without_ticket_uses_db_path(
@@ -637,13 +635,11 @@ async def test_assemble_without_ticket_uses_db_path(
         "agentcore.db.base.async_session_factory",
         lambda: _SessCtx(),
     )
-    user_md, _ = await assemble_turn_rules(
+    rules_md = await assemble_turn_rules(
         _EmptyMemoryStore(),  # type: ignore[arg-type]
         "u1",
         folder_id=None,
         enabled=True,
-        max_docs=20,
-        max_chars=20000,
     )
     assert opened["n"] == 1
-    assert user_md == ""
+    assert rules_md == ""

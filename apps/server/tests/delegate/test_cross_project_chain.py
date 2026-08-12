@@ -12,6 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from agentcore.llm.provider.protocol import LLMProvider
+from agentcore.runtime.context.consult_sources import MemoryConsultSource, MergedConsultSource
 from agentcore.runtime.delegate.target_desktop import (
     NO_TARGET_SCRATCH_GATE_MSG,
     LocalRootClaimBook,
@@ -19,7 +20,7 @@ from agentcore.runtime.delegate.target_desktop import (
 )
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
-from agentcore.tools.builtin.consult_memory import ConsultMemoryTool
+from agentcore.tools.builtin.consult import ConsultTool
 from agentcore.tools.builtin.delegate.tool import DelegateTool
 from agentcore.tools.builtin.projects import ListProjectsTool, ResolveProjectTool
 from agentcore.tools.protocol import ToolContext
@@ -33,7 +34,7 @@ def _birth_ctx(
     conversation_id: str = "c-cmd",
     backend: object | None = None,
 ) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="ceo",
@@ -91,10 +92,10 @@ async def test_resolve_delegate_target_desk_and_memory(
     session_backend = SimpleNamespace(location="server", _channel=None)
     target_backend = SimpleNamespace(location="server", _channel=None)
     base_ctx = _birth_ctx(user_id="owner-1", backend=session_backend)
-    # Seed birth-scoped consult_memory so rewire must replace it with target scope.
+    # Seed birth-scoped consult so rewire must replace it with target scope.
     birth_tools = ToolRegistry()
     birth_tools.register(
-        ConsultMemoryTool(store=MagicMock(), folder_id="birth_f")
+        ConsultTool(source=MergedConsultSource(memory=MemoryConsultSource(store=MagicMock(), folder_id="birth_f")))
     )
     binding = SimpleNamespace(
         folder_id="proj_alpha",
@@ -103,8 +104,7 @@ async def test_resolve_delegate_target_desk_and_memory(
     )
 
     async def _fake_rebuild(**_kwargs):
-        # has_memory_topics=True → consult_memory rewired to target folder.
-        return "PROMPT_FOR_ALPHA", True, False
+        return "PROMPT_FOR_ALPHA"
 
     with (
         patch(
@@ -139,10 +139,10 @@ async def test_resolve_delegate_target_desk_and_memory(
     assert applied.tool_ctx.backend is target_backend
     assert applied.tool_ctx.backend is not session_backend
     assert applied.system_prompt == "PROMPT_FOR_ALPHA"
-    memory_tool = applied.worker_tools.get("consult_memory")
-    assert isinstance(memory_tool, ConsultMemoryTool)
-    assert memory_tool.folder_id == "proj_alpha"
-    assert memory_tool.folder_id != "birth_f"
+    memory_tool = applied.worker_tools.get("consult")
+    assert isinstance(memory_tool, ConsultTool)
+    assert memory_tool.source.memory.folder_id == "proj_alpha"
+    assert memory_tool.source.memory.folder_id != "birth_f"
 
 
 @pytest.mark.asyncio
@@ -172,6 +172,18 @@ async def test_bare_chat_write_no_target_auto_provisions_cloud_desk(
     monkeypatch.setattr(
         "agentcore.runtime.delegate.target_desktop._load_conversation_title",
         AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._load_auto_desk_folder_id",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop._persist_auto_desk_folder_id",
+        AsyncMock(return_value="auto_cloud_1"),
+    )
+    monkeypatch.setattr(
+        "agentcore.runtime.delegate.target_desktop.bind_tool_context_to_landing_desk",
+        AsyncMock(return_value=True),
     )
 
     ctx = _birth_ctx()

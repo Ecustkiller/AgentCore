@@ -51,7 +51,7 @@ def _channel_ctx(
     base_subpath: str = "",
 ) -> tuple[ToolContext, _RecordingChannel]:
     channel = _RecordingChannel(replies)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id=agent_id,
@@ -64,7 +64,7 @@ def _channel_ctx(
 
 
 def _no_root_no_channel_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="ceo",

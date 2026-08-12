@@ -11,8 +11,8 @@ Pins two things:
    path; the worker-side presence is pinned in tests/runs_executor/test_identities.py.)
 2. The SLIM CEO core (提示词瘦身 P2): ``_CEO_CORE_HINT`` keeps only the always-on
    routing spine (tool boundary / split criterion / hidden-context rule / same-layer
-   pipeline / synthesize-don't-restate) + a pointer to ``consult_skill`` and the
-   能力目录. The rarely-used「怎么做」detail (multi-round debate / nested delegation /
+   pipeline / synthesize-don't-restate) + a pointer to ``consult`` and the
+   按需目录. The rarely-used「怎么做」detail (multi-round debate / nested delegation /
    asking the user / revise) is moved into system Skills
    (runtime/skills.py, see test_skills.py) — so it must NOT ride the core every turn.
 """
@@ -36,7 +36,7 @@ def test_derive_ceo_addon_splits_shared_prefix_from_full_ceo_prompt():
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill", "ask_user"},
+        ceo_tool_names={"delegate", "consult", "ask_user"},
     )
     addon = derive_ceo_addon(base, ceo)
     assert addon
@@ -96,7 +96,7 @@ def test_untrusted_content_guard_frames_external_and_cross_agent_text():
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
     assert "<untrusted_content>" in ceo and "队友便签" in ceo
 
@@ -116,7 +116,7 @@ def test_system_feedback_block_frames_engine_steers_as_non_user():
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
     assert "<system_feedback>" in ceo
 
@@ -134,7 +134,7 @@ def test_tool_safety_moved_out_of_shared_base_and_ceo():
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
     assert "<tool_safety>" not in ceo
 
@@ -183,7 +183,7 @@ def test_runtime_context_uses_date_granularity_for_cache_stability():
 
 def test_output_style_survives_memory_and_context_layers():
     out = assemble_system_prompt(
-        memory_markdown="- 用户偏好简洁回复",
+        rules_markdown="- 用户偏好简洁回复",
         extra_context="<attached_files>...</attached_files>",
     )
     # The shared style block is not crowded out by the optional sections.
@@ -224,7 +224,7 @@ def test_visualization_block_rides_only_the_composed_ceo_prompt():
     ceo = compose_ceo_chat_prompt(
         base,
         skill_registry=build_system_skill_registry(),
-        ceo_tool_names={"delegate", "consult_skill"},
+        ceo_tool_names={"delegate", "consult"},
     )
     assert "<visualization>" in ceo  # CEO carries the detailed charting HOW…
     assert "mermaid" in ceo
@@ -439,12 +439,12 @@ def test_core_teaches_split_criterion_over_count():
     assert "kickoff" in hint or "方向：派团队" in hint
     assert "确认后开工" in hint or "方案已备好" in hint
     assert "至少 N 人" in hint or "tasks 至少" in hint
-    # 按场面 consult：与能力目录 preamble 同强度（禁「可选 vs 必先查」对打）。
+    # 按场面 consult：与按需目录 preamble 同强度（禁「可选 vs 必先查」对打）。
     from agentcore.runtime.skills import CONSULT_TEAM_ORCH_BY_SCENE
 
     assert CONSULT_TEAM_ORCH_BY_SCENE in hint
     assert "可选，非开场必做" not in hint
-    assert "先 `consult_skill(team_orchestration_advanced)` 再规划" not in hint
+    assert "先 `consult(team_orchestration_advanced)` 再规划" not in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "形状词汇" in skill
     assert "实质任务该派就派" in skill or "自然缝" in skill
@@ -469,7 +469,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "根委派切片诚实" in skill or "嵌套扇出" in skill
 
 def test_catalog_preamble_matches_core_consult_intensity():
-    """核与能力目录 preamble 共用同一句按场面强度。"""
+    """核与按需目录 preamble 共用同一句按场面强度。"""
     from agentcore.runtime.skills import (
         CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
         CONSULT_PRODUCT_HELP_BY_SCENE,
@@ -479,7 +479,7 @@ def test_catalog_preamble_matches_core_consult_intensity():
 
     directory = render_skill_directory(
         build_system_skill_registry(),
-        {"delegate", "consult_skill", "ask_user", "debate"},
+        {"delegate", "consult", "ask_user", "debate"},
     )
     assert CONSULT_TEAM_ORCH_BY_SCENE in _CEO_CORE_HINT
     assert CONSULT_TEAM_ORCH_BY_SCENE in directory
@@ -969,11 +969,13 @@ def test_shared_base_teaches_claim_evidence_soft_constraint():
 
 
 def test_shared_base_teaches_work_authority():
-    # 全局工作纪律：权威序 + 冲突通道 + 决策权限（CEO+worker 共享，极短）。
+    # 全局工作纪律：本回合指令优先 + `<rules>` 平权 + 冲突通道 + 决策权限（CEO+worker 共享）。
     from agentcore.runtime.resolve.prompt import _DEFAULT_SYSTEM_PROMPT
 
     assert "<work_authority>" in _DEFAULT_SYSTEM_PROMPT
-    assert "用户规则硬胜" in _DEFAULT_SYSTEM_PROMPT
+    assert "读侧平权" in _DEFAULT_SYSTEM_PROMPT
+    assert "用户规则硬胜" not in _DEFAULT_SYSTEM_PROMPT
+    assert "软线索" not in _DEFAULT_SYSTEM_PROMPT
     assert "不自动升权威" in _DEFAULT_SYSTEM_PROMPT
     assert "escalate" in _DEFAULT_SYSTEM_PROMPT
     assert "ask_user" in _DEFAULT_SYSTEM_PROMPT
@@ -1094,12 +1096,12 @@ def test_core_teaches_narrowed_attachment_scope_must_start():
     assert "开工前置" in mid.body
 
 
-def test_core_points_to_consult_skill_and_directory():
-    # 提示词瘦身 P2: the slim core must point the CEO at consult_skill + the 能力目录
+def test_core_points_to_consult_and_directory():
+    # 提示词瘦身 P2: the slim core must point the CEO at consult + the 按需目录
     # so it knows the advanced「怎么做」guidance is pull-on-demand, not missing.
     hint = _CEO_CORE_HINT
-    assert "consult_skill" in hint
-    assert "能力目录" in hint
+    assert "consult" in hint
+    assert "按需目录" in hint
 
 
 def test_core_drops_advanced_mechanism_detail():
@@ -1134,16 +1136,16 @@ def test_citation_hint_teaches_claim_evidence_and_summary_inheritance():
 
 
 def test_memory_rules_fence_blocks_routing_by_topic_preference():
-    """M1 教法围栏：长期记忆不得改变本回合路由——只留记忆模板。"""
-    out = assemble_system_prompt(memory_markdown="- 用中文\n- 偏好法律分析\n")
+    """M1 教法围栏：题材偏好不得改变本回合路由——钉在平权 ``<rules>`` 模板。"""
+    out = assemble_system_prompt(rules_markdown="- 用中文\n- 偏好法律分析\n")
     assert "<rules>" in out
-    assert "沟通方式与已知事实" in out
+    assert "题材/领域偏好与历史任务" in out
     assert "不得改变本回合路由" in out
     assert "直答/委派/调研/辩论以用户当前话为准" in out
 
 
 def test_ceo_core_teaches_memory_must_not_override_routing():
-    """M1：核心不再双写记忆路由围栏（唯一所有者=记忆模板）。"""
+    """M1：核心不再双写路由围栏（唯一所有者=平权 ``<rules>`` 模板）。"""
     hint = _CEO_CORE_HINT
     assert "长期记忆与路由" not in hint
     assert "不得改变本回合" not in hint
@@ -1169,7 +1171,9 @@ def test_ceo_core_teaches_user_rules_framing():
     assert "remember" in hint
     assert "只追加却声称" in hint
     assert "文件页规则本" in hint
-    assert "硬约束清单" in hint
+    assert "硬约束清单" not in hint
+    assert "记忆偏好=软" not in hint
+    assert "平权注入" in hint
     # 对外段不堆 ENUM；action 名只在内部段
     external = hint.split("【用户规则·对外口径】", 1)[1].split("【", 1)[0]
     assert "action=" not in external
@@ -1189,12 +1193,12 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     assert "机制" in block and "架构" in block and "记忆" in block and "能力边界" in block
     assert "系统提示" in block and "workspace_context" in block
     assert "怎么用" in block or "功能介绍" in block
-    assert "consult_skill(product_help)" in block
+    assert "consult(product_help)" in block
     assert "product_help_map" in block and "product_help_faq" in block
     assert "web_search" in block
     assert "工作区" in block and ("产品说明" in block or "平台手册" in block or "平台文档" in block)
     # 产品本身 Bug 分流一句（非整份 HOW）
-    assert "consult_skill(product_bug_triage)" in block
+    assert "consult(product_bug_triage)" in block
     assert "可证伪故障" in block
     assert "四类结论" not in block
     assert "复现要点" not in block
@@ -1220,7 +1224,7 @@ def test_ceo_core_cross_product_rule_paradigm_routing_hook():
         "【决策/澄清短问·default】", 1
     )[0]
     assert "未钉死目标载体" in paradigm
-    assert "consult_skill(product_help)" in paradigm
+    assert "consult(product_help)" in paradigm
     assert "ask_user" in paradigm
     assert "至多一次窄 list `.cursor/rules`" in paradigm
     assert "多轮 list / 通读 `.mdc`" in paradigm
@@ -1254,13 +1258,13 @@ def test_ceo_prompt_with_legal_pack_keeps_intent_adversarial_routing():
     from agentcore.runtime.skills import MULTI_LENS_COURTROOM_TRIGGERS, render_skill_directory
 
     reg = build_system_skill_registry(include_legal=True)
-    tools = {"delegate", "debate", "ask_user", "consult_skill", "web_search", "consult_memory"}
+    tools = {"delegate", "debate", "ask_user", "consult", "web_search"}
     ceo = compose_ceo_chat_prompt(
         assemble_system_prompt(),
         skill_registry=reg,
         ceo_tool_names=tools,
     )
-    assert ceo.count("<能力目录>") == 1 and ceo.count("</能力目录>") == 1
+    assert ceo.count("<按需目录>") == 1 and ceo.count("</按需目录>") == 1
     assert "<role>" in ceo and "</role>" in ceo
     assert "<how_you_work>" in ceo and "</how_you_work>" in ceo
     directory = render_skill_directory(reg, tools)

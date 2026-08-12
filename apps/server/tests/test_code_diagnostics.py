@@ -35,7 +35,7 @@ class _Backend:
 
 
 def _ctx(backend: _Backend, *, landed: dict[str, str] | None = None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e1",
         run_id="r1",
         agent_id="a1",

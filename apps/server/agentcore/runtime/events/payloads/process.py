@@ -42,6 +42,11 @@ class ProcessToolStep(WirePayload):
     display: dict[str, Any] | None = Field(
         default=None, json_schema_extra={"ts_type": "ToolDisplay"}
     )
+    failure: dict[str, Any] | None = absent(
+        "User-facing failure from tool_use_end (status=error only). "
+        "Shape mirrors ToolFailure: {message, code}.",
+        ts_type="ToolFailure",
+    )
     phase: str | None = absent(
         "工具执行阶段进度: the running tool's latest coarse phase from `tool_use_progress`. "
         "LIVE-ONLY ephemeral — never journaled, never in the conformance ProjectedTurn; "

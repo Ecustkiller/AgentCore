@@ -247,6 +247,8 @@ async def run_chat_pipeline(
             llm = prepared.llm
             bound_execution_id = prepared.bound_execution_id
             execution_id_token = prepared.execution_id_token
+            # Bare+auto_desk may remount CEO onto the landing Folder inside prepare.
+            assemble_backend = prepared.base_tool_context.backend
 
             assemble_t0 = time.monotonic()
             assembled = await assemble_ceo_turn(
@@ -255,7 +257,7 @@ async def run_chat_pipeline(
                 user_message=user_message,
                 history=history,
                 sink=sink,
-                backend=backend,
+                backend=assemble_backend,
                 folder_id=folder_id,
                 memory_enabled=memory_enabled,
                 conversation_history_access=conversation_history_access,

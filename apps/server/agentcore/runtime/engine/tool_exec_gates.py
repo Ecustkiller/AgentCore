@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
@@ -13,6 +14,7 @@ from agentcore.runtime.loop_controller import ToolAttempt
 from agentcore.tools.protocol import ToolContext, ToolSchema
 
 from .tool_exec_args import _attempt_meta_with_landing_path, _failed_tool_message
+from .tool_failure_face import tool_failure_fields
 
 logger = get_logger(__name__)
 
@@ -166,7 +168,19 @@ async def _check_safety_and_approval_gates(
             f"工具 '{name}' 被安全熔断拒绝：{breaker.reason}"
             "请改用其他方案，不要原样重试该路径。"
         )
-        sink.emit(tool_use_end(tc.id, name, success=False, output=denial, run_id=event_run_id))
+        sink.emit(
+            tool_use_end(
+                tc.id,
+                name,
+                success=False,
+                output=denial,
+                failure=tool_failure_fields(
+                    code=ErrorCode.FORBIDDEN,
+                    product_message=denial,
+                ),
+                run_id=event_run_id,
+            )
+        )
         logger.info(
             "tool.execute_end",
             tool=name,
@@ -274,7 +288,17 @@ async def _check_safety_and_approval_gates(
                 "请改用其他方案。"
             )
             sink.emit(
-                tool_use_end(tc.id, name, success=False, output=denial, run_id=event_run_id)
+                tool_use_end(
+                    tc.id,
+                    name,
+                    success=False,
+                    output=denial,
+                    failure=tool_failure_fields(
+                        code=ErrorCode.FORBIDDEN,
+                        product_message=denial,
+                    ),
+                    run_id=event_run_id,
+                )
             )
             logger.info(
                 "tool.execute_end",
@@ -331,7 +355,15 @@ async def _check_safety_and_approval_gates(
                 )
                 sink.emit(
                     tool_use_end(
-                        tc.id, name, success=False, output=denial, run_id=event_run_id
+                        tc.id,
+                        name,
+                        success=False,
+                        output=denial,
+                        failure=tool_failure_fields(
+                            code=ErrorCode.FORBIDDEN,
+                            product_message=denial,
+                        ),
+                        run_id=event_run_id,
                     )
                 )
                 logger.info("tool.execute_end", tool=name, status="denied", duration_ms=0)

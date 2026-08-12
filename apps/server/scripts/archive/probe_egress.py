@@ -69,7 +69,7 @@ async def _probe_one(url: str) -> dict:
 
     # ③ 放行才真读
     if block is None:
-        ctx = ToolContext(
+        ctx = ToolContext.create(
             execution_id="probe",
             run_id="probe",
             agent_id="probe",

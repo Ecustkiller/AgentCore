@@ -25,7 +25,7 @@ from tests.delegate.conftest import Provider, tool
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e1",
         run_id="w1",
         agent_id="a1",

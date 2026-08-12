@@ -25,7 +25,7 @@ _DEEP_MULTI_LENS_RESEARCH = """\
 用户批准后再辩】。一起弄懂/学术多切口/未明示成文的多路摸清 → 【勿】用本 skill，改 \
 `playbook="parallel_brief"`；用户明示要报告/论文/落盘成文 → `research_report`。\
 用户明确点名开辩 / 模拟庭审 / 终局对抗（含【""" + _MULTI_LENS_COURTROOM_TRIGGERS_JOINED + """】等）→ \
-【勿】用本 skill 拦截，改 `consult_skill(debate_and_review)` 直调 `debate`（取证前提由辩论机制保证：约定文档桥 / Evidence Pack / 发言期台账，非调查员舰队）。\
+【勿】用本 skill 拦截，改 `consult(debate_and_review)` 直调 `debate`（取证前提由辩论机制保证：约定文档桥 / Evidence Pack / 发言期台账，非调查员舰队）。\
 意图模糊（既像公共研判又像开辩）→ 保守缺省走本 skill，并在回复里说明「也可直接开辩」。\
 这与律师作业（接案 / 文书 / 诉讼策略、先对抗后研判）不同：本域是公共事件多维取证，不是替律师打官司。
 

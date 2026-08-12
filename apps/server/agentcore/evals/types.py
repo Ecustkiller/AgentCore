@@ -39,6 +39,9 @@ class EvalCase:
     mode: str = "economy"
     toolset: ToolsetName = "ceo"
     workspace_fixture: str | None = None
+    # 用例级预置用户规则 / AI 记忆（DB documents 行）。心智对齐 workspace_fixture：
+    # fixtures/<name>/documents.json；harness 每例前后 purge ``_EVAL_USER_ID``。
+    documents_fixture: str | None = None
     history: list[dict[str, Any]] = field(default_factory=list)
     checks: list[dict[str, Any]] = field(default_factory=list)
     rubric: str | None = None

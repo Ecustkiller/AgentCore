@@ -64,7 +64,7 @@ class _Provider:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="CEO",
         agent_id="CEO",

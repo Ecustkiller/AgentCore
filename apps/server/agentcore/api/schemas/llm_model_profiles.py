@@ -44,7 +44,13 @@ class LlmModelProfileView(BaseModel):
     is_default: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
+    warnings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Ignorable BYOK model reachability hints from the last save "
+            "(empty on list/get). Save still succeeds when non-empty."
+        ),
+    )
 
 class LlmModelProfileListResponse(BaseModel):
     data: list[LlmModelProfileView]

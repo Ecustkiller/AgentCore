@@ -190,7 +190,7 @@ async def test_queue_user_message_enqueues_and_emits_queued():
     blocker = asyncio.create_task(_never())
     turn_runs.register(conversation_id="conv-inj", task=blocker, sink=live)
     tool = QueueUserMessageTool(sink=sink)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-inj",
         run_id="ceo",
         agent_id="ceo",
@@ -261,7 +261,7 @@ async def test_queue_user_message_works_after_session_closed():
 
         sink = EventSink()
         tool = QueueUserMessageTool(sink=sink)
-        ctx = ToolContext(
+        ctx = ToolContext.create(
             execution_id="exec-inj",
             run_id="ceo",
             agent_id="ceo",
@@ -396,7 +396,7 @@ async def test_update_synthesis_addresses_awaiting_interjection():
     )
     sink = EventSink()
     tool = UpdateSynthesisTool(sink=sink)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-inj",
         run_id="ceo",
         agent_id="ceo",
@@ -468,7 +468,7 @@ async def test_cancel_worker_addresses_awaiting_and_close_does_not_promote():
 
     session, sink = await _awaiting_session("inj-cancel", "别跑那个重复的检索了")
     session.arm_worker_timeout("w1", role="研究员", timeout_s=60)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-inj",
         run_id="ceo",
         agent_id="ceo",
@@ -580,7 +580,7 @@ async def test_queue_user_message_preserves_resident_attachments():
 
     sink = EventSink()
     tool = QueueUserMessageTool(sink=sink)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="exec-inj",
         run_id="ceo",
         agent_id="ceo",

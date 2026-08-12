@@ -1,16 +1,25 @@
-"""Pool holder observability: exhaustion snapshot + slow checkout."""
+"""Pool holder observability: exhaustion snapshot + slow checkout + attribution."""
 
 from __future__ import annotations
 
+import asyncio
 import time
+from types import FrameType
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import TimeoutError as SATimeoutError
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse
+from starlette.routing import Route
 
 from agentcore.config.database import DatabaseSettings
-from agentcore.core.log_context import bind_log_context, clear_log_context
+from agentcore.core.log_context import bind_log_context, clear_log_context, get_log_value
 from agentcore.db import pool_observability as pool_obs
-from agentcore.db.pool_observability import PoolCheckoutTracker
+from agentcore.db.pool_observability import PoolCheckoutTracker, _capture_stack, _frame_is_noise
+from agentcore.middleware.request_attribution import RequestAttributionMiddleware
 from tests.conftest import LogSpy
 
 
@@ -58,6 +67,9 @@ def test_exhaustion_snapshot_includes_holder_context(monkeypatch: pytest.MonkeyP
         conversation_id="conv-holder-1",
         run_id="run-holder-1",
         agent_id="agent-ceo",
+        http_method="POST",
+        http_path="/v1/conversations/c1/messages",
+        http_req_id="abc123def456",
     )
     tracker = _tracker(hold_warn_s=999.0)
     record = _FakeRecord()
@@ -75,6 +87,9 @@ def test_exhaustion_snapshot_includes_holder_context(monkeypatch: pytest.MonkeyP
     assert holder["conversation_id"] == "conv-holder-1"
     assert holder["run_id"] == "run-holder-1"
     assert holder["agent_id"] == "agent-ceo"
+    assert holder["http_method"] == "POST"
+    assert holder["http_path"] == "/v1/conversations/c1/messages"
+    assert holder["http_req_id"] == "abc123def456"
     assert isinstance(holder["held_s"], float)
     assert holder["held_s"] >= 0.0
 
@@ -83,7 +98,13 @@ def test_slow_checkout_emits_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     spy = LogSpy()
     monkeypatch.setattr(pool_obs, "logger", spy)
 
-    bind_log_context(trace_id="slowtrace000000000000000000000001", conversation_id="conv-slow")
+    bind_log_context(
+        trace_id="slowtrace000000000000000000000001",
+        conversation_id="conv-slow",
+        http_method="GET",
+        http_path="/v1/documents",
+        http_req_id="slowreq00001",
+    )
     tracker = _tracker(hold_warn_s=0.01, trace_occupancy=1.1)  # never capture stack
     record = _FakeRecord()
     tracker._on_checkout(None, record, None)
@@ -95,6 +116,9 @@ def test_slow_checkout_emits_warning(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload["held_s"] >= 0.01
     assert payload["trace_id"] == "slowtrace000000000000000000000001"
     assert payload["conversation_id"] == "conv-slow"
+    assert payload["http_method"] == "GET"
+    assert payload["http_path"] == "/v1/documents"
+    assert payload["http_req_id"] == "slowreq00001"
 
 
 def test_fast_checkout_does_not_warn(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -154,7 +178,12 @@ def test_do_get_wrapper_emits_snapshot_on_timeout(monkeypatch: pytest.MonkeyPatc
 
     tracker = _tracker(snapshot_cooldown_s=0.0)
     holder = _FakeRecord()
-    bind_log_context(trace_id="wraptrace00000000000000000000001", conversation_id="conv-wrap")
+    bind_log_context(
+        trace_id="wraptrace00000000000000000000001",
+        conversation_id="conv-wrap",
+        http_path="/v1/wrap",
+        http_req_id="wrapreq00001",
+    )
     tracker._on_checkout(None, holder, None)
     clear_log_context()
 
@@ -192,3 +221,136 @@ def test_do_get_wrapper_emits_snapshot_on_timeout(monkeypatch: pytest.MonkeyPatc
     assert len(holders) == 1
     assert holders[0]["trace_id"] == "wraptrace00000000000000000000001"
     assert holders[0]["conversation_id"] == "conv-wrap"
+    assert holders[0]["http_path"] == "/v1/wrap"
+    assert holders[0]["http_req_id"] == "wrapreq00001"
+
+
+def test_greenlet_compile_frames_are_noise() -> None:
+    assert _frame_is_noise("<string>", "_connection_for_bind")
+    assert _frame_is_noise(
+        "/venv/lib/python3.12/site-packages/sqlalchemy/orm/session.py", "execute"
+    )
+    assert not _frame_is_noise(
+        "/app/agentcore/api/routes/conversations/messages.py", "send_message"
+    )
+
+
+def test_agentcore_frames_survive_a_non_editable_install() -> None:
+    """``uv sync --no-editable`` puts our own package under site-packages."""
+    installed = "/app/.venv/lib/python3.12/site-packages/agentcore/db/repositories/messages.py"
+    assert not _frame_is_noise(installed, "create")
+    # Our own tracker stays noise wherever it is installed.
+    assert _frame_is_noise(
+        "/app/.venv/lib/python3.12/site-packages/agentcore/db/pool_observability.py",
+        "_on_checkout",
+    )
+
+
+def test_capture_stack_prefers_agentcore_task_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Greenlet trampoline frames must not crowd out agentcore business frames."""
+
+    def _fake_frame(filename: str, name: str, lineno: int = 1) -> MagicMock:
+        frame = MagicMock(spec=FrameType)
+        frame.f_code.co_filename = filename
+        frame.f_code.co_name = name
+        frame.f_lineno = lineno
+        return frame
+
+    noise = _fake_frame("<string>", "_connection_for_bind", 2)
+    sa = _fake_frame("/site-packages/sqlalchemy/engine/base.py", "connect", 10)
+    app_route = _fake_frame(
+        "/repo/apps/server/agentcore/api/routes/conversations/messages.py",
+        "send_message",
+        340,
+    )
+    app_repo = _fake_frame(
+        "/repo/apps/server/agentcore/db/repositories/messages.py",
+        "create",
+        88,
+    )
+
+    fake_task = MagicMock()
+    # get_stack is oldest→newest; include noise at the end (nearest the await).
+    fake_task.get_stack.return_value = [app_route, app_repo, sa, noise]
+    monkeypatch.setattr(asyncio, "current_task", lambda: fake_task)
+
+    stack = _capture_stack(4)
+    assert stack
+    assert all("agentcore/" in frame for frame in stack)
+    assert not any("_connection_for_bind" in frame for frame in stack)
+    assert any("send_message" in frame for frame in stack)
+
+
+@pytest.mark.parametrize("task_frames", [[], "trampoline-only"])
+def test_capture_stack_falls_back_to_sync_frames(
+    monkeypatch: pytest.MonkeyPatch, task_frames: Any
+) -> None:
+    """An unusable coroutine stack must not yield an empty (unattributable) holder."""
+    if task_frames == "trampoline-only":
+        noise = MagicMock(spec=FrameType)
+        noise.f_code.co_filename = "<string>"
+        noise.f_code.co_name = "_connection_for_bind"
+        noise.f_lineno = 2
+        task_frames = [noise]
+
+    fake_task = MagicMock()
+    fake_task.get_stack.return_value = task_frames
+    monkeypatch.setattr(asyncio, "current_task", lambda: fake_task)
+
+    stack = _capture_stack(4)
+    assert stack, "expected the synchronous caller stack as a fallback"
+    assert any("test_capture_stack_falls_back_to_sync_frames" in frame for frame in stack)
+
+
+@pytest.mark.asyncio
+async def test_request_attribution_middleware_binds_http_context() -> None:
+    seen: dict[str, Any] = {}
+
+    async def homepage(_request):  # noqa: ANN001
+        seen["method"] = get_log_value("http_method")
+        seen["path"] = get_log_value("http_path")
+        seen["req_id"] = get_log_value("http_req_id")
+        task = asyncio.current_task()
+        seen["task_name"] = task.get_name() if task else ""
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/v1/ping", homepage)])
+    app.add_middleware(RequestAttributionMiddleware)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.get("/v1/ping")
+    assert resp.status_code == 200
+    assert seen["method"] == "GET"
+    assert seen["path"] == "/v1/ping"
+    assert len(seen["req_id"]) == 12
+    assert seen["task_name"] == "http:GET /v1/ping"
+
+
+@pytest.mark.asyncio
+async def test_checkout_sees_http_context_from_same_task() -> None:
+    """Attribution must be bound before checkout — same task as the handler."""
+    tracker = _tracker(hold_warn_s=999.0, trace_occupancy=1.1)
+    record = _FakeRecord()
+    captured: dict[str, Any] = {}
+
+    async def handler(_request):  # noqa: ANN001
+        tracker._on_checkout(None, record, None)
+        snaps = tracker.holder_snapshots()
+        captured["holder"] = snaps[0]
+        captured["task_name"] = asyncio.current_task().get_name()  # type: ignore[union-attr]
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/v1/hold", handler, methods=["POST"])])
+    app.add_middleware(RequestAttributionMiddleware)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post("/v1/hold")
+    assert resp.status_code == 200
+    holder = captured["holder"]
+    assert holder["http_method"] == "POST"
+    assert holder["http_path"] == "/v1/hold"
+    assert holder["http_req_id"]
+    assert holder["task_name"] == "http:POST /v1/hold"
+    assert captured["task_name"] == "http:POST /v1/hold"

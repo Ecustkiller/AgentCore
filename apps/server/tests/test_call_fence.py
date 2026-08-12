@@ -305,9 +305,10 @@ def test_build_provider_wraps_with_fence(monkeypatch):
     assert callable(getattr(provider, "probe_tools", None))
     assert callable(getattr(provider, "list_models", None))
     assert unwrap_provider(provider)._name == "user"
+    assert unwrap_provider(provider).display_name == "服务商"
 
 
-def test_build_provider_display_name_overrides_leaf_name():
+def test_build_provider_display_name_overrides_leaf_display():
     from agentcore.llm.credentials import LLMCredentials
 
     provider = build_provider(
@@ -319,14 +320,73 @@ def test_build_provider_display_name_overrides_leaf_name():
         ),
         display_name="我的网关",
     )
-    assert unwrap_provider(provider)._name == "我的网关"
+    leaf = unwrap_provider(provider)
+    assert leaf._name == "user"
+    assert leaf.display_name == "我的网关"
+
+
+def test_build_provider_credentials_label_sets_display():
+    from agentcore.llm.credentials import LLMCredentials
+
+    provider = build_provider(
+        LLMCredentials(
+            api_key="k",
+            base_url="http://x/v1",
+            default_model="deepseek-v4-flash",
+            source="user",
+            label="DeepSeek",
+        )
+    )
+    leaf = unwrap_provider(provider)
+    assert leaf._name == "user"
+    assert leaf.display_name == "DeepSeek"
+
+
+def test_build_provider_empty_label_falls_back_to_generic():
+    from agentcore.llm.credentials import LLMCredentials
+
+    provider = build_provider(
+        LLMCredentials(
+            api_key="k",
+            base_url="http://x/v1",
+            default_model="deepseek-v4-flash",
+            source="user",
+            label="  ",
+        )
+    )
+    leaf = unwrap_provider(provider)
+    assert leaf._name == "user"
+    assert leaf.display_name == "服务商"
+
+
+def test_build_provider_clone_preserves_display_name():
+    from agentcore.llm.credentials import LLMCredentials
+
+    provider = build_provider(
+        LLMCredentials(
+            api_key="k",
+            base_url="http://x/v1",
+            default_model="deepseek-v4-flash",
+            source="user",
+            label="网关A",
+        )
+    )
+    cloned = unwrap_provider(provider.clone())
+    assert cloned._name == "user"
+    assert cloned.display_name == "网关A"
 
 
 def test_build_provider_rejects_none_credentials():
+    from agentcore.core.error_codes import ErrorCode
     from agentcore.llm.factory import MissingLLMCredentialsError
 
-    with pytest.raises(MissingLLMCredentialsError, match="explicit credentials"):
+    with pytest.raises(MissingLLMCredentialsError) as ei:
         build_provider(None)
+    err = ei.value
+    assert err.code == ErrorCode.VALIDATION_ERROR
+    assert "设置" in err.message
+    assert "explicit credentials" in (err.details.get("invariant") or "")
+    assert "silent" in (err.details.get("invariant") or "")
 
 
 @pytest.mark.asyncio

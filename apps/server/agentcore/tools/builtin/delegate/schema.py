@@ -1,7 +1,7 @@
 """Delegate tool schema and constants.
 
 Schema layer (工具面瘦身): short trigger + key param cues only. Routing judgment
-lives in the CEO core; advanced HOW lives in ``consult_skill(team_orchestration_advanced)``.
+lives in the CEO core; advanced HOW lives in ``consult(team_orchestration_advanced)``.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ DELEGATE_DESCRIPTION = (
     "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
     "建站快捷套餐必填 playbook_args.topic；绿场必填 app。"
     "勿再填已删的 completion_criteria / requires_files / name / must_contain / min_length / objective / playbook_none_reason。"
-    "HOW→consult_skill(team_orchestration_advanced)。"
+    "HOW→consult(team_orchestration_advanced)。"
 )
 
 DELEGATE_PARAMETERS = {

@@ -135,7 +135,7 @@ def test_extract_style_id_from_design():
 
 
 def _ask_ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

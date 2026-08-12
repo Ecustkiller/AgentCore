@@ -26,7 +26,7 @@ class _FakeBackend:
 
 
 def _ctx(backend: _FakeBackend, on_phase=None) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="s",
         agent_id="a",

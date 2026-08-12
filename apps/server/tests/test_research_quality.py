@@ -72,7 +72,7 @@ def test_deliverable_is_report_delivery_structured_or():
 
 
 def _ctx(tmp_path: Path, **kwargs) -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

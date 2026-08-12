@@ -299,7 +299,7 @@ async def test_browser_tool_returns_user_in_control_during_takeover():
         "c1", TakeoverMark(record_id="rec1", user_id="u1", started_at=datetime.now(UTC))
     )
     tool = BrowserNavigateTool(registry=reg)
-    ctx = ToolContext(
+    ctx = ToolContext.create(
         execution_id="",
         run_id="r1",
         agent_id="",

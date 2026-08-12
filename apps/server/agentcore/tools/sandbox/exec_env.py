@@ -13,10 +13,16 @@ from __future__ import annotations
 from agentcore.tools.sandbox.protocol import ExecutionResult
 
 EXEC_ENV_PROBE_FAIL_MARKER = "ExecEnvProbeFailed:"
-EXEC_ENV_PROBE_FAIL_STDERR = (
-    f"{EXEC_ENV_PROBE_FAIL_MARKER} 本机执行环境自检未通过"
-    "（连最短 print 都无法完成）。请检查本机 Python / 安全软件后重试。"
+# User-facing product sentence (also ``tool_use_end.failure`` via curated code).
+EXEC_ENV_PROBE_FAIL_USER_MESSAGE = (
+    "本机执行环境自检未通过（连最短 print 都无法完成）。"
+    "请检查本机 Python / 安全软件后重试。"
 )
+EXEC_ENV_PROBE_FAIL_STDERR = (
+    f"{EXEC_ENV_PROBE_FAIL_MARKER} {EXEC_ENV_PROBE_FAIL_USER_MESSAGE}"
+)
+# Stable wire code for probe fail (distinct from idle ``exec_timeout``).
+EXEC_ENV_PROBE_FAIL_CODE = "exec_env_probe_failed"
 
 # Coarse local-turn / journal failure bucket (also accepted as client ``code``).
 EXEC_TIMEOUT_CODE = "exec_timeout"

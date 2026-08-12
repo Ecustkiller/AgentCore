@@ -104,7 +104,8 @@ async def _resolve_assist_credentials(
 
     Platform origin: ``preflight_llm_credentials`` returns ``None`` after quota
     (same as chat). Resolve per-model platform credentials before ``build_provider``
-    — never pass ``None`` (that raised ``MissingLLMCredentialsError`` → unhandled 500).
+    — never pass ``None`` (``MissingLLMCredentialsError`` is now a coded
+    ``ValidationError``, but assist must still resolve platform creds explicitly).
     """
     from agentcore.core.errors import PlatformBillingUnavailableError
     from agentcore.llm.resolve import (

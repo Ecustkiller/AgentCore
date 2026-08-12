@@ -183,7 +183,7 @@ async def test_code_execute_network_mode_follows_axes(tmp_path: Path):
     backend = ServerWorkspace(root=tmp_path, sandbox=_CaptureSandbox())
     tool = CodeExecuteTool(location="server")
 
-    ctx_trust = ToolContext(
+    ctx_trust = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",
@@ -194,7 +194,7 @@ async def test_code_execute_network_mode_follows_axes(tmp_path: Path):
     await tool.execute({"code": "print(1)", "language": "python"}, ctx_trust)
     assert captured[-1].network_mode == "restricted"
 
-    ctx_ws = ToolContext(
+    ctx_ws = ToolContext.create(
         execution_id="e",
         run_id="r",
         agent_id="a",

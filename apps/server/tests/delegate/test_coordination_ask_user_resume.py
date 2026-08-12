@@ -172,7 +172,7 @@ class _CoordAskCeoProvider:
 
 
 def _ctx() -> ToolContext:
-    return ToolContext(
+    return ToolContext.create(
         execution_id=EXEC_ID,
         run_id="cap",
         agent_id="cap",

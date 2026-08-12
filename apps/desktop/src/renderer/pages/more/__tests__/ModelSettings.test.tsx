@@ -412,6 +412,65 @@ describe("ModelSettings (profiles)", () => {
     );
     expect(screen.getByText(/「办公」已保存/)).toBeTruthy();
     expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
+    expect(screen.queryByText("已保存，但请留意模型可达性")).toBeNull();
+    expect(screen.queryByText("模型提醒")).toBeNull();
+  });
+
+  it("shows save warnings as non-failure reminders after a successful save", async () => {
+    const warning = "主模型 模型「gpt5.6」可能不可用：上游目录未列出该模型";
+    vi.mocked(updateLlmModelProfile).mockResolvedValue({
+      id: "user-mine",
+      name: "办公",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p2", model: "gpt5.6" },
+      worker: null,
+      background: null,
+      warnings: [warning],
+    });
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(screen.getByText(/「办公」已保存/)).toBeTruthy(),
+    );
+    expect(screen.queryByText("编辑组合", { selector: "p" })).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    const statuses = screen.getAllByRole("status");
+    expect(statuses.some((el) => el.textContent?.includes(warning))).toBe(true);
+    expect(screen.getByText("已保存，但请留意模型可达性")).toBeTruthy();
+    expect(screen.getByText("模型提醒")).toBeTruthy();
+    expect(screen.getByText(warning)).toBeTruthy();
+    // 成功路径：绿色成功文案仍在，警告不是 destructive。
+    expect(screen.getByText(/「办公」已保存/).className).toContain(
+      "text-success",
+    );
+    const warningBox = statuses.find((el) => el.textContent?.includes(warning));
+    expect(warningBox?.className).toContain("text-warning");
+    expect(warningBox?.className).not.toContain("text-destructive");
+  });
+
+  it("does not show save-warning UI when the save response has no warnings", async () => {
+    vi.mocked(updateLlmModelProfile).mockResolvedValue({
+      id: "user-mine",
+      name: "办公",
+      kind: "user",
+      is_default: false,
+      main: { origin: "byok", provider_id: "p2", model: "gpt-4o" },
+      worker: null,
+      background: null,
+      warnings: [],
+    });
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "编辑" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(screen.getByText(/「办公」已保存/)).toBeTruthy(),
+    );
+    expect(screen.queryByText("已保存，但请留意模型可达性")).toBeNull();
+    expect(screen.queryByText("模型提醒")).toBeNull();
   });
 
   it("shows save errors inline in the editor card", async () => {

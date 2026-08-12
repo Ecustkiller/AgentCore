@@ -2,6 +2,7 @@ import { UPDATER_CHANNELS, type UpdaterStatus } from "@shared/updater-contract";
 import { net, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
 import { type UpdateInfo, autoUpdater } from "electron-updater";
 import { logDesktop } from "./log-service";
+import { isMacAutoUpdateInstallCapable } from "./mac-auto-update-capable";
 
 // 检查频率（发布与门禁.md §7.6）：启动 + 每 4h + 系统唤醒。
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
@@ -214,6 +215,15 @@ async function runCheck(trigger: CheckTrigger): Promise<void> {
 async function runDownload(): Promise<void> {
   if (downloadInFlight) return;
   if (status.phase !== "available" && status.phase !== "error") return;
+  // 未签名 mac：Squirrel.Mac 装不了，任何入口都不许发起下载（避免白下 ~190MB 再必然失败）。
+  // 按能力探测而非 status.manualOnly：硬闸在 error 态还有「重试下载」，那条路读不到该标记。
+  if (!(await isMacAutoUpdateInstallCapable())) {
+    logUpdater("info", "updater.download_skipped", {
+      reason: "manual_only",
+      version: pendingVersion || undefined,
+    });
+    return;
+  }
   downloadInFlight = true;
   downloadStartedAt = Date.now();
   lastProgressLogAt = 0;
@@ -285,6 +295,9 @@ export function initUpdater(window: BrowserWindow): void {
     return;
   }
 
+  // 预热 mac 签名探测缓存（仅 darwin 打包态真正跑 codesign）。
+  void isMacAutoUpdateInstallCapable();
+
   // 发现即说明、用户同意后再下载；安装仍须显式 quitAndInstall（§7.6）。
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
@@ -303,21 +316,28 @@ export function initUpdater(window: BrowserWindow): void {
     });
   });
   autoUpdater.on("update-available", (info) => {
-    pendingVersion = info.version;
-    pendingSizeBytes = packageSizeBytes(info);
-    pushStatus({
-      phase: "available",
-      version: info.version,
-      releaseNotes: normalizeReleaseNotes(info),
-      sizeBytes: pendingSizeBytes,
-    });
-    logUpdater("info", "updater.phase", {
-      phase: "available",
-      version: info.version,
-      sizeBytes: pendingSizeBytes ?? undefined,
-      trigger: lastCheckTrigger,
-      sinceCheckMs: sinceCheckMs(),
-    });
+    void (async () => {
+      pendingVersion = info.version;
+      pendingSizeBytes = packageSizeBytes(info);
+      // darwin 未签名 → manualOnly；签名/公证落地后探测自动恢复常规自动更新。
+      const capable = await isMacAutoUpdateInstallCapable();
+      const manualOnly = !capable;
+      pushStatus({
+        phase: "available",
+        version: info.version,
+        releaseNotes: normalizeReleaseNotes(info),
+        sizeBytes: pendingSizeBytes,
+        ...(manualOnly ? { manualOnly: true } : {}),
+      });
+      logUpdater("info", "updater.phase", {
+        phase: "available",
+        version: info.version,
+        sizeBytes: pendingSizeBytes ?? undefined,
+        manualOnly: manualOnly || undefined,
+        trigger: lastCheckTrigger,
+        sinceCheckMs: sinceCheckMs(),
+      });
+    })();
   });
   autoUpdater.on("update-not-available", () => {
     pushStatus({ phase: "not-available" });

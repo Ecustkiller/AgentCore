@@ -27,7 +27,6 @@ from agentcore.api.routes.conversations._helpers import (
     _preflight_owned_chat_turn,
     _preflight_turn_llm,
     emit_preflight_warnings,
-    release_request_db_before_sse,
 )
 from agentcore.api.schemas.demo_tape import (
     DemoTapeCatalogResponse,
@@ -43,6 +42,7 @@ from agentcore.api.schemas.demo_tape import (
     DemoTapeStartResponse,
     DemoTapeSummary,
 )
+from agentcore.api.sse import release_request_db_before_sse
 from agentcore.conversation.service import stream_chat
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import CostEventRepository, MessageRepository
