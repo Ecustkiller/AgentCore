@@ -2,7 +2,7 @@
 
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.delegate.completion import (
-    check_delegate_completion,
+    collect_completion_soft_notes,
     collect_worker_gaps,
     format_worker_gaps_block,
     plan_suggests_code_verification,
@@ -22,17 +22,13 @@ def _run(*, files: list[str] | None = None, transcript: list[LLMMessage] | None 
     )
 
 
-def test_omitted_criteria_always_ok():
-    ok, gaps, soft = check_delegate_completion({"a": _run()})
-    assert ok
-    assert gaps == []
+def test_omitted_criteria_yields_no_soft_notes():
+    soft = collect_completion_soft_notes({"a": _run()})
     assert soft == []
 
 
 def test_soft_overlay_typescript_without_verify():
-    ok, gaps, soft = check_delegate_completion({"a": _run(files=["src/App.tsx"])})
-    assert ok
-    assert gaps == []
+    soft = collect_completion_soft_notes({"a": _run(files=["src/App.tsx"])})
     assert any("不阻断验收" in n and ".ts" in n for n in soft)
 
 
@@ -51,11 +47,9 @@ def test_soft_overlay_skipped_when_test_run_passes():
         ),
         LLMMessage(role="tool", tool_call_id="1", content="## 验证结果：通过\n通过：1"),
     ]
-    ok, gaps, soft = check_delegate_completion(
+    soft = collect_completion_soft_notes(
         {"a": _run(files=["src/App.tsx"], transcript=transcript)}
     )
-    assert ok
-    assert gaps == []
     assert not any("建议补一次验证" in n for n in soft)
 
 

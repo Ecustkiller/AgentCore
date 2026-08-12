@@ -64,6 +64,8 @@ _ATTACHMENT_PREVIEW_LABELS = {
     "file": "[文件]",
     "system_card": "[系统消息]",
 }
+# WeChat-style notice posted when a friend request is accepted (NULL-sender system_card).
+_FRIEND_ACCEPTED_SYSTEM_TEXT = "我通过了你的朋友验证请求，现在我们可以开始聊天了"
 
 FriendRelation = Literal[
     "self",
@@ -74,6 +76,7 @@ FriendRelation = Literal[
     "blocked",
 ]
 FriendRequestAction = Literal["created", "accepted", "rejected", "cancelled"]
+ChatChangedReason = Literal["created", "member_added", "activated"]
 
 
 @dataclass(frozen=True)
@@ -244,17 +247,29 @@ class MessagingService:
         chat = await self._chats.create_dm(
             creator_id=requester_id, peer_id=peer_id, peer_state=peer_state
         )
+        # Peer learns of the new chat via thin firehose nudge (then pulls ChatView).
+        await self._publish_chat_changed(chat.id, reason="created", user_ids=[peer_id])
         member = await self._chats.get_member(chat.id, requester_id)
         assert member is not None
         logger.debug("dm.opened", chat=chat.id, by=requester_id, peer=peer_id)
         return ChatView(chat=chat, member=member, peer=peer, unread=0)
 
-    async def _activate_pending_dm(self, chat_id: str, *user_ids: str) -> None:
-        """Clear pending message-request gates for the given members (friend accept)."""
+    async def _activate_pending_dm(self, chat_id: str, *user_ids: str) -> bool:
+        """Clear pending message-request gates; nudge both sides when any flipped.
+
+        Returns whether at least one member transitioned ``pending → accepted``.
+        """
+        activated = False
         for uid in user_ids:
             member = await self._chats.get_member(chat_id, uid)
             if member is not None and member.state == "pending":
                 await self._chats.accept_request(chat_id, uid)
+                activated = True
+        if activated:
+            await self._publish_chat_changed(
+                chat_id, reason="activated", user_ids=list(user_ids)
+            )
+        return activated
 
     async def join_auto_join_chats(self, *, user_id: str) -> None:
         """Enroll a user into every auto-join chat (内测群 + official broadcast).
@@ -264,10 +279,17 @@ class MessagingService:
         join so the chat surfaces at the top of a brand-new user's list.
         """
         chats = await self._chats.list_auto_join_chats()
+        joined: list[str] = []
         for chat in chats:
+            if await self._chats.get_member(chat.id, user_id) is not None:
+                continue
             await self._chats.add_member(chat.id, user_id, pinned=True)
-        if chats:
-            logger.info("chat.auto_join", user=user_id, chats=[c.id for c in chats])
+            await self._publish_chat_changed(
+                chat.id, reason="member_added", user_ids=[user_id]
+            )
+            joined.append(chat.id)
+        if joined:
+            logger.info("chat.auto_join", user=user_id, chats=joined)
 
     async def ensure_official_membership(self, *, user_id: str) -> None:
         """Idempotent enrollment into the official broadcast chat.
@@ -284,6 +306,9 @@ class MessagingService:
         if await self._chats.get_member(chat.id, user_id) is not None:
             return
         await self._chats.add_member(chat.id, user_id, pinned=True)
+        await self._publish_chat_changed(
+            chat.id, reason="member_added", user_ids=[user_id]
+        )
         logger.info("chat.auto_join", user=user_id, chats=[chat.id])
 
     async def list_members(self, *, chat_id: str, user_id: str) -> list[MemberView]:
@@ -446,6 +471,9 @@ class MessagingService:
         member = await self._chats.get_member(BETA_GROUP_ID, user_id)
         if member is None:
             await self._chats.add_member(BETA_GROUP_ID, user_id, role="admin")
+            await self._publish_chat_changed(
+                BETA_GROUP_ID, reason="member_added", user_ids=[user_id]
+            )
         elif (getattr(member, "role", None) or "member") != "admin":
             await self._chats.set_member_role(BETA_GROUP_ID, user_id, role="admin")
         logger.info("chat.beta_moderator_set", chat=BETA_GROUP_ID, by=actor_id, target=user_id)
@@ -1191,9 +1219,25 @@ class MessagingService:
         assert updated is not None
         await friends.add_friendship(req.from_user_id, req.to_user_id)
 
+        # WeChat-style: ensure a mutual DM exists, then post the verification notice.
         dm = await self._chats.get_dm(req.from_user_id, req.to_user_id)
-        if dm is not None:
+        if dm is None:
+            dm = await self._chats.create_dm(
+                creator_id=user_id,
+                peer_id=req.from_user_id,
+                peer_state="accepted",
+            )
+            await self._publish_chat_changed(
+                dm.id, reason="created", user_ids=[req.from_user_id]
+            )
+        else:
             await self._activate_pending_dm(dm.id, req.from_user_id, req.to_user_id)
+
+        await self._post_system_card(
+            chat_id=dm.id,
+            content=_FRIEND_ACCEPTED_SYSTEM_TEXT,
+            payload={"kind": "friend_accepted"},
+        )
 
         await self._publish_friend_request(updated, action="accepted")
         logger.info(
@@ -1291,6 +1335,21 @@ class MessagingService:
         )
 
     # --- Realtime event payloads ---
+
+    async def _publish_chat_changed(
+        self,
+        chat_id: str,
+        *,
+        reason: ChatChangedReason,
+        user_ids: list[str],
+    ) -> None:
+        """Thin membership nudge — clients re-pull ChatView (viewer-scoped)."""
+        if not user_ids:
+            return
+        await self._events.publish(
+            user_ids,
+            {"type": "chat_changed", "chat_id": chat_id, "reason": reason},
+        )
 
     async def _publish_friend_request(
         self, req: FriendRequest, *, action: FriendRequestAction

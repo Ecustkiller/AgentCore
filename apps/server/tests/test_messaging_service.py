@@ -593,7 +593,7 @@ async def test_search_excludes_undiscoverable():
 
 
 async def test_start_dm_creates_chat_peer_pending():
-    svc, users, chats, *_ = _make()
+    svc, users, chats, _blocks, _directory, events, _friends = _make()
     alice = users.add("alice")
     bob = users.add("bob")
     view = await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)
@@ -602,6 +602,14 @@ async def test_start_dm_creates_chat_peer_pending():
     assert view.member.state == "accepted"
     peer_member = await chats.get_member(view.chat.id, bob.user_id)
     assert peer_member.state == "pending"
+    created = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "chat_changed" and ev.get("reason") == "created"
+    ]
+    assert len(created) == 1
+    assert created[0][0] == [bob.user_id]
+    assert created[0][1]["chat_id"] == view.chat.id
 
 
 async def test_start_dm_reuses_existing():
@@ -703,6 +711,7 @@ async def test_send_message_persists_and_fans_out():
     alice = users.add("alice")
     bob = users.add("bob")
     chat = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
+    events.published.clear()
     msg = await svc.send_message(chat_id=chat.id, sender_id=alice.user_id, content="hello bob")
     assert msg.content == "hello bob"
     assert msg.reply_to_message_id is None
@@ -1322,7 +1331,7 @@ async def test_update_directory_rejects_legacy_contacts():
 
 
 async def test_friend_request_lifecycle():
-    svc, users, _chats, _blocks, _directory, events, friends = _make()
+    svc, users, chats, _blocks, _directory, events, friends = _make()
     alice = users.add("alice")
     bob = users.add("bob")
     req = await svc.send_friend_request(
@@ -1338,17 +1347,45 @@ async def test_friend_request_lifecycle():
     accepted = await svc.accept_friend_request(user_id=bob.user_id, request_id=req.id)
     assert accepted.status == "accepted"
     assert await friends.are_friends(alice.user_id, bob.user_id)
-    friend_list = await svc.list_friends(user_id=alice.user_id)
-    assert [u.user_id for u in friend_list] == [bob.user_id]
+    # Both sides' address books must list each other (prior coverage only checked initiator).
+    friend_list_alice = await svc.list_friends(user_id=alice.user_id)
+    assert [u.user_id for u in friend_list_alice] == [bob.user_id]
+    friend_list_bob = await svc.list_friends(user_id=bob.user_id)
+    assert [u.user_id for u in friend_list_bob] == [alice.user_id]
     # Initiator's outgoing inbox must clear — otherwise UI keeps「等待对方处理」.
     alice_box = await svc.list_friend_requests(user_id=alice.user_id)
     assert alice_box.outgoing == []
     bob_box = await svc.list_friend_requests(user_id=bob.user_id)
     assert bob_box.incoming == []
-    assert any(
-        e[1]["type"] == "friend_request" and e[1]["action"] == "accepted"
-        for e in events.published
-    )
+
+    accepted_events = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "friend_request" and ev.get("action") == "accepted"
+    ]
+    assert len(accepted_events) == 1
+    assert set(accepted_events[0][0]) == {alice.user_id, bob.user_id}
+
+    dm = await chats.get_dm(alice.user_id, bob.user_id)
+    assert dm is not None
+    alice_m = await chats.get_member(dm.id, alice.user_id)
+    bob_m = await chats.get_member(dm.id, bob.user_id)
+    assert alice_m.state == "accepted"
+    assert bob_m.state == "accepted"
+    msgs, total = await chats.list_messages(dm.id)
+    assert total == 1
+    assert msgs[0].content_type == "system_card"
+    assert msgs[0].sender_user_id is None
+    assert msgs[0].content == "我通过了你的朋友验证请求，现在我们可以开始聊天了"
+
+    created = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "chat_changed" and ev.get("reason") == "created"
+    ]
+    assert len(created) == 1
+    assert created[0][0] == [alice.user_id]
+    assert created[0][1]["chat_id"] == dm.id
 
 
 async def test_list_friend_requests_heals_stale_pending_when_already_friends():
@@ -1378,7 +1415,7 @@ async def test_friend_request_group_members_gate():
 
 
 async def test_accept_friend_activates_pending_dm():
-    svc, users, chats, _blocks, directory, *_ = _make()
+    svc, users, chats, _blocks, directory, events, _friends = _make()
     alice = users.add("alice")
     bob = users.add("bob")
     directory.set(bob.user_id, who_can_dm="anyone")
@@ -1386,9 +1423,65 @@ async def test_accept_friend_activates_pending_dm():
     peer = await chats.get_member(dm.id, bob.user_id)
     assert peer.state == "pending"
     req = await svc.send_friend_request(from_user_id=alice.user_id, to_user_id=bob.user_id)
+    events.published.clear()
     await svc.accept_friend_request(user_id=bob.user_id, request_id=req.id)
     peer = await chats.get_member(dm.id, bob.user_id)
     assert peer.state == "accepted"
+    activated = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "chat_changed" and ev.get("reason") == "activated"
+    ]
+    assert len(activated) == 1
+    assert set(activated[0][0]) == {alice.user_id, bob.user_id}
+    assert activated[0][1]["chat_id"] == dm.id
+    # Same DM reused — no second create; system notice still lands.
+    assert await chats.get_dm(alice.user_id, bob.user_id) is dm
+    msgs, _total = await chats.list_messages(dm.id)
+    assert any(
+        m.content_type == "system_card"
+        and m.content == "我通过了你的朋友验证请求，现在我们可以开始聊天了"
+        for m in msgs
+    )
+
+
+async def test_chat_changed_member_added_on_auto_join():
+    svc, users, chats, _blocks, _directory, events, _friends = _make()
+    alice = users.add("alice")
+    group = await chats.create_group(title="内测群", auto_join=True)
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    added = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "chat_changed" and ev.get("reason") == "member_added"
+    ]
+    assert len(added) == 1
+    assert added[0][0] == [alice.user_id]
+    assert added[0][1]["chat_id"] == group.id
+    # Idempotent re-join must not re-nudge.
+    events.published.clear()
+    await svc.join_auto_join_chats(user_id=alice.user_id)
+    assert events.published == []
+
+
+async def test_chat_changed_activated_when_friends_reopen_pending_dm():
+    svc, users, chats, _blocks, directory, events, friends = _make()
+    alice = users.add("alice")
+    bob = users.add("bob")
+    directory.set(bob.user_id, who_can_dm="anyone")
+    dm = (await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)).chat
+    await friends.add_friendship(alice.user_id, bob.user_id)
+    events.published.clear()
+    await svc.start_dm(requester_id=alice.user_id, peer_id=bob.user_id)
+    peer = await chats.get_member(dm.id, bob.user_id)
+    assert peer.state == "accepted"
+    activated = [
+        (uids, ev)
+        for uids, ev in events.published
+        if ev.get("type") == "chat_changed" and ev.get("reason") == "activated"
+    ]
+    assert len(activated) == 1
+    assert set(activated[0][0]) == {alice.user_id, bob.user_id}
 
 
 async def test_block_cascades_friendship_and_requests():

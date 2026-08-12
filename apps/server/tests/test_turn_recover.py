@@ -1112,6 +1112,126 @@ async def test_production_crash_factory_returns_none_without_turn_started(monkey
     assert "turn_started" in kw["error"]
 
 
+async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypatch):
+    """Crash rebuild ``<按需目录>`` comes from MergedConsultSource (includes system skills)."""
+    from unittest.mock import AsyncMock
+
+    from agentcore.runtime import crash_delegate as crash_mod
+    from agentcore.runtime.crash_delegate import production_crash_delegate_factory
+    from agentcore.runtime.facts import FactKind
+
+    captured: dict = {}
+
+    async def _fake_wire(**kwargs):
+        captured["base_system_prompt"] = kwargs["base_system_prompt"]
+        return SimpleNamespace(delegate_tool=object())
+
+    class _FakeSession:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+    class _FakeConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(folder_id=None)
+
+    class _FakeBoardRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_conversation_id(self, *_a, **_k):
+            return None
+
+    backend = SimpleNamespace(location="server")
+    monkeypatch.setattr(crash_mod, "async_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr(crash_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(crash_mod, "BoardRepository", _FakeBoardRepo)
+    monkeypatch.setattr(
+        crash_mod, "resolve_local_binding", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_credentials", AsyncMock(return_value=object())
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_profile_set", AsyncMock(return_value=object())
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_memory_enabled", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_conversation_history_access", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_permission_axes", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(crash_mod, "turn_profiles_for_turn", lambda *_a, **_k: object())
+    monkeypatch.setattr(crash_mod, "bind_credential_pricing_context", lambda *_a: None)
+    monkeypatch.setattr(
+        crash_mod.pipeline_pkg,
+        "build_turn_router",
+        AsyncMock(return_value=object()),
+    )
+    monkeypatch.setattr(
+        crash_mod, "build_turn_backend", AsyncMock(return_value=backend)
+    )
+    monkeypatch.setattr(
+        crash_mod, "session_callbacks", lambda *_a: (AsyncMock(), AsyncMock())
+    )
+    monkeypatch.setattr(
+        crash_mod, "suspension_callbacks", lambda: (AsyncMock(), AsyncMock())
+    )
+    monkeypatch.setattr(
+        crash_mod, "assemble_turn_rules", AsyncMock(return_value="")
+    )
+    monkeypatch.setattr(
+        crash_mod, "resolve_exec_languages", AsyncMock(return_value=())
+    )
+    monkeypatch.setattr(
+        crash_mod, "detect_workspace_git", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        crash_mod, "build_workspace_context", lambda *_a, **_k: ""
+    )
+    # Rules / memory IO must not block the skill-directory assertion.
+    monkeypatch.setattr(
+        "agentcore.memory.rules_injection.load_on_demand_user_rules",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "agentcore.memory.injection.load_memory_topics",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(crash_mod, "wire_crash_turn", _fake_wire)
+
+    journal = [
+        {
+            "kind": FactKind.TURN_STARTED.value,
+            "payload": {"user_message": "继续"},
+            "ts": "t0",
+            "seq": 0,
+        },
+        *_partial_journal(),
+    ]
+    lease = SimpleNamespace(
+        message_id="m-crash-skills",
+        conversation_id="c-crash-skills",
+        user_id="u1",
+    )
+    tool = await production_crash_delegate_factory(
+        lease, TurnState.from_journal(journal), sink=EventSink()
+    )
+    assert tool is not None
+    prompt = captured["base_system_prompt"]
+    assert "<按需目录>" in prompt
+    # Empty-requires_tools system skill — listed for workers via MergedConsultSource.
+    assert "- product_help" in prompt
+
+
 async def test_orphan_turn_lease_keeps_row_for_sweeper(monkeypatch):
     """CancelledError path must mark orphaned, not delete the lease row."""
     from agentcore.runtime.leases import service as lease_svc

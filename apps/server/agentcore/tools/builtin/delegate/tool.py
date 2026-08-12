@@ -334,9 +334,6 @@ class DelegateTool:
         """Record a successful CEO-side continuation for turn_metrics.revises."""
         self._continuation_ids.append(run_id)
 
-    def clear_completion_gap_streak(self) -> None:
-        """No-op retained: same-gap streak retired with completion_criteria kind (S3)."""
-
     @property
     def collab(self) -> dict[str, int]:
         """Turn-level 协作质量 tally (学·度量 §2.5): boundary_yields / scope_signals /

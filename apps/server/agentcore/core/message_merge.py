@@ -82,25 +82,8 @@ def merge_usage_status(existing: dict[str, Any] | None, incoming: dict[str, Any]
     return merged
 
 
-def should_apply_checkpoint_content(
-    *,
-    existing_content: str | None,
-    existing_status: str | None,
-    incoming_content: str,
-) -> bool:
-    """D7 content monotonic + status gate for mid-turn checkpoints.
-
-    Reject when the row is already terminal, or when incoming is shorter than what
-    is already stored (a late/reordered checkpoint must not shorten the body).
-    """
-    if is_terminal_status(existing_status):
-        return False
-    existing = existing_content or ""
-    return len(incoming_content) >= len(existing)
-
-
 def pick_monotonic_content(existing: str | None, incoming: str | None) -> str:
-    """Prefer the longer body (salvage / incomplete / checkpoint monotonic protection)."""
+    """Prefer the longer body (salvage / incomplete monotonic protection)."""
     a = existing or ""
     b = incoming or ""
     return b if len(b) >= len(a) else a
@@ -116,7 +99,7 @@ def pick_merged_content(
 
     ``complete`` finalize is the authoritative delivery — it may replace a longer
     mid-stream draft. Salvage / incomplete / failed keep length-monotonic protection
-    so a shorter crash salvage cannot erase a fuller checkpoint.
+    so a shorter crash salvage cannot erase a fuller partial.
     """
     if incoming_status == MESSAGE_STATUS_COMPLETE:
         return incoming or ""

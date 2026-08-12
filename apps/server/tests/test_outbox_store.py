@@ -28,7 +28,7 @@ def _drive(coro):
     return asyncio.run(coro)
 
 
-def test_progressive_begin_checkpoint_finalize(tmp_path):
+def test_progressive_begin_journal_finalize(tmp_path):
     store = OutboxStore(tmp_path / "outbox")
     store.bind_turn(
         conversation_id="c1",
@@ -40,10 +40,6 @@ def test_progressive_begin_checkpoint_finalize(tmp_path):
 
     async def run() -> dict:
         await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="a" * 32)
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="Hel")
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="Hello")
-        # Shorter checkpoint must not shrink (monotonic).
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="He")
         await store.append_journal(
             turn_id="m1",
             seq=0,
@@ -96,8 +92,8 @@ def test_progressive_begin_checkpoint_finalize(tmp_path):
     assert body["input_tokens"] == 3
 
 
-def test_finalize_complete_overrides_longer_checkpoint(tmp_path):
-    """Happy-path finalize may replace a longer mid-stream checkpoint body."""
+def test_finalize_complete_overrides_longer_partial(tmp_path):
+    """Happy-path finalize may replace a longer mid-stream draft body."""
     store = OutboxStore(tmp_path / "outbox")
     store.bind_turn(
         conversation_id="c1",
@@ -106,14 +102,27 @@ def test_finalize_complete_overrides_longer_checkpoint(tmp_path):
         message_id="m1",
         trace_id="f" * 32,
     )
+    path = tmp_path / "outbox" / "u1.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "user_message_id": "u1",
+                "conversation_id": "c1",
+                "message_id": "m1",
+                "user_message": "hi",
+                "content": "a long mid-stream draft that spilled past the final",
+                "phase": PHASE_OPEN,
+                "ops": ["begin_turn"],
+                "journal": {},
+                "stream_segments": {},
+            }
+        ),
+        encoding="utf-8",
+    )
 
     async def run() -> dict:
-        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="f" * 32)
-        await store.checkpoint(
-            conversation_id="c1",
-            message_id="m1",
-            content="a long mid-stream draft that spilled past the final",
-        )
         await store.finalize(
             conversation_id="c1",
             user_message="hi",
@@ -123,7 +132,7 @@ def test_finalize_complete_overrides_longer_checkpoint(tmp_path):
             trace_id="f" * 32,
             finish_reason="end_turn",
         )
-        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8"))
 
     record = _drive(run())
     assert record["content"] == "final"
@@ -176,7 +185,6 @@ def test_salvage_seals_ready_when_settlement_has_resume_frame(tmp_path):
                 "ts": None,
             },
         )
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
         await store.salvage(
             journal=[],
             content="partial+",
@@ -260,7 +268,6 @@ def test_salvage_marks_ready(tmp_path):
 
     async def run() -> dict:
         await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="c" * 32)
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
         await store.salvage(
             journal=[{"kind": "x"}],
             content="partial+",
@@ -307,7 +314,6 @@ def test_to_record_turn_body_includes_sorted_journal(tmp_path):
             trace_id="e" * 32,
             entry={"kind": "run_started", "payload": {"id": "r1"}, "ts": "t0"},
         )
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
         await store.salvage(
             journal=[],
             content="partial",
@@ -642,7 +648,6 @@ def test_concurrent_turns_isolate_context_and_salvage_onto_umid(tmp_path):
             trace_id="a" * 32,
             entry={"kind": "run_started", "payload": {"id": "rA"}, "ts": None},
         )
-        await store.checkpoint(conversation_id="c1", message_id="mA", content="partial A")
 
         # Turn B binds while A is still live (old global _ctx would overwrite A).
         store.bind_turn(
@@ -669,7 +674,6 @@ def test_concurrent_turns_isolate_context_and_salvage_onto_umid(tmp_path):
             trace_id="a" * 32,
             entry={"kind": "tool_use_start", "payload": {"id": "t1"}, "ts": None},
         )
-        await store.checkpoint(conversation_id="c1", message_id="mA", content="partial A+")
 
         # Stop A while B is still the "latest" bind.
         await store.salvage(
@@ -681,7 +685,6 @@ def test_concurrent_turns_isolate_context_and_salvage_onto_umid(tmp_path):
         )
 
         # B keeps going then finalizes.
-        await store.checkpoint(conversation_id="c1", message_id="mB", content="B draft")
         await store.finalize(
             mode="local",
             conversation_id="c1",
@@ -735,7 +738,6 @@ def test_salvage_after_clear_turn_merges_umid_file(tmp_path):
             trace_id="c" * 32,
             entry={"kind": "run_started", "payload": {}, "ts": None},
         )
-        await store.checkpoint(conversation_id="c1", message_id="m1", content="partial")
         # Simulate host finally clearing bind before cancel salvage races.
         store.clear_turn("m1")
         await store.salvage(
@@ -792,9 +794,9 @@ def test_mutate_does_not_wipe_on_corrupt_read(tmp_path, monkeypatch):
         "conversation_id": "c1",
         "message_id": "m1",
         "user_message": "keep me",
-        "content": "precious checkpoint",
+        "content": "precious draft",
         "phase": PHASE_OPEN,
-        "ops": ["begin_turn", "checkpoint"],
+        "ops": ["begin_turn"],
         "journal": {},
         "stream_segments": {},
     }
@@ -816,10 +818,12 @@ def test_mutate_does_not_wipe_on_corrupt_read(tmp_path, monkeypatch):
     path.write_text("{not-json", encoding="utf-8")
 
     async def run() -> None:
-        await store.checkpoint(
+        await store.append_journal(
+            turn_id="m1",
+            seq=0,
             conversation_id="c1",
-            message_id="m1",
-            content="should not land",
+            trace_id="c" * 32,
+            entry={"kind": "run_started", "payload": {}},
         )
 
     _drive(run())  # must not raise into the turn
@@ -875,16 +879,18 @@ def test_mutate_recovers_after_transient_read_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(outbox_mod, "_READ_RETRY_DELAYS_S", (0.0, 0.0, 0.0))
 
     async def run() -> None:
-        await store.checkpoint(
+        await store.append_journal(
+            turn_id="m1",
+            seq=0,
             conversation_id="c1",
-            message_id="m1",
-            content="recovered",
+            trace_id="t" * 32,
+            entry={"kind": "run_started", "payload": {}},
         )
 
     _drive(run())
     assert calls["n"] == 2
     record = json.loads(path.read_text(encoding="utf-8"))
-    assert record["content"] == "recovered"
+    assert record["journal"] == {"0": {"kind": "run_started", "payload": {}}}
     assert record["user_message"] == "hi"
 
 

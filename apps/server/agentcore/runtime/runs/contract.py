@@ -783,8 +783,6 @@ def _json_artifact_failures(
 # 已删字数/必含词字段不再进 failures / soft / light_repair。
 # Placeholders, web seam, empty product, missing files, JSON parse, etc. stay on full retry.
 _FORMAT_REPAIR_SECTION_PREFIX = "缺少必备章节："
-_FORMAT_REPAIR_KEYWORD_PREFIX = "缺少必须包含的内容："  # legacy residual only
-_FORMAT_REPAIR_TOO_SHORT_MARKER = "字，少于要求的"  # legacy residual only
 
 
 def is_format_repairable(verdict: ContractVerdict) -> bool:
@@ -793,7 +791,7 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
     Used by the executor to try one cheap in-place completion before a full
     ``contract.retry`` that re-opens investigation. Mixed or non-format failures
     (网页接缝 / 网页质量 / 空产出 / JSON …) return False. 已删字数 / 必含词
-    不再出现在 ``failures``；保留 keyword/short markers 仅兼容遗留 verdict。
+    不再出现在 ``failures``。
 
     写盘形态下仅缺配套 ``*.audit.json``（:func:`is_code_audit_landing_absence_failure`）
     也走定向修复（读已落报告 + 写盘），不升格为全量调查返工。
@@ -807,10 +805,6 @@ def is_format_repairable(verdict: ContractVerdict) -> bool:
     for failure in verdict.failures:
         text = str(failure).strip()
         if text.startswith(_FORMAT_REPAIR_SECTION_PREFIX):
-            continue
-        if text.startswith(_FORMAT_REPAIR_KEYWORD_PREFIX):
-            continue
-        if _FORMAT_REPAIR_TOO_SHORT_MARKER in text:
             continue
         if is_code_audit_landing_absence_failure(text):
             continue
@@ -845,10 +839,6 @@ def is_contract_structure_failure(message: str) -> bool:
         return True
     if text.startswith(_FORMAT_REPAIR_SECTION_PREFIX):
         return True
-    if text.startswith(_FORMAT_REPAIR_KEYWORD_PREFIX):
-        return True
-    if _FORMAT_REPAIR_TOO_SHORT_MARKER in text:
-        return True
     if text in _JSON_STRUCTURE_FAILURES:
         return True
     return any(text.startswith(p) for p in _JSON_STRUCTURE_PREFIXES)
@@ -877,7 +867,7 @@ def format_light_repair_feedback(
 ) -> str:
     """Correction prompt for one format-only light repair (no re-investigation).
 
-    Carries the prior deliverable so the model backfills missing sections / length
+    Carries the prior deliverable so the model backfills missing sections
     in place instead of restarting research. Investigation tools stay withheld by
     the executor for this pass.
     """
@@ -913,7 +903,7 @@ def format_light_repair_feedback(
             "不要重新检索、不要道歉、不要附带说明。"
         )
     return (
-        "你上一次的产出只差格式补全（缺章节 / 篇幅不足 / 缺关键词），"
+        "你上一次的产出只差格式补全（缺章节），"
         f"不必重新调查：\n{items}{coverage}{prior_block}\n\n"
         "请对已落盘文件用 str_replace（或局部 file_append 填骨架空位）就地补齐后 "
         "handoff；优先以写回执 artifact manifest 验真，勿为空转反复 file_read "

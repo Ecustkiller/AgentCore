@@ -15,11 +15,7 @@ from agentcore.core.types import new_id
 from agentcore.desktop.channel import DesktopClientChannel
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles
-from agentcore.memory import (
-    assemble_turn_rules,
-    load_memory_topics,
-    load_on_demand_user_rules,
-)
+from agentcore.memory import assemble_turn_rules
 from agentcore.runtime.context import (
     ProjectCatalogEntry,
     build_workspace_context,
@@ -78,8 +74,6 @@ class PreparedTurn:
     vision_cost_sink: list[RunCost]
     attachment_context: str
     native_image_parts: list[dict]
-    memory_topics: list
-    on_demand_rules: list
     project_catalog: list[ProjectCatalogEntry]
     bound_execution_id: str
     execution_id_token: object
@@ -129,17 +123,6 @@ async def prepare_fresh_turn(
             folder_id=folder_id,
             enabled=memory_enabled,
         ),
-    )
-    # 记忆主题 / 按需规则仍加载（巩固 / 其它调用方）；按需目录改由 MergedConsultSource 统一列出。
-    memory_topics = await _timed_phase(
-        "memory_topics",
-        load_memory_topics(
-            memory_store, user_id, folder_id=folder_id, enabled=memory_enabled
-        ),
-    )
-    on_demand_rules = await _timed_phase(
-        "on_demand_rules",
-        load_on_demand_user_rules(user_id, folder_id=folder_id),
     )
     # Derived cross-project roster (跨项目找项目): Folder name + 画像.md first line,
     # recent-activity ordered with a hard count cap. Outside ``<rules>`` so it never
@@ -411,8 +394,6 @@ async def prepare_fresh_turn(
         vision_cost_sink=vision_cost_sink,
         attachment_context=attachment_context,
         native_image_parts=native_image_parts,
-        memory_topics=memory_topics,
-        on_demand_rules=on_demand_rules,
         project_catalog=project_catalog,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,

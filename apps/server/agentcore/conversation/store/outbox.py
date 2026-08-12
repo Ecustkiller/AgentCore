@@ -4,9 +4,10 @@ Each method serializes into a per-turn outbox record under ``<dataDir>/outbox/``
 (sibling of ``paused/``). The Electron main-process writebacker drains ``ready``
 records via ``POST .../local-turns`` → ``CloudStore.finalize(mode="local")``.
 
-Record lifecycle: ``open`` (begin + checkpoints + journal) → ``ready`` (finalize /
-salvage) → deleted after cloud ack. Idempotent: begin is create-once; checkpoint
-is content-monotonic; journal appends dedupe on ``seq``; finalize is once.
+Record lifecycle: ``open`` (begin + journal + stream_segments) → ``ready``
+(finalize / salvage) → deleted after cloud ack. Idempotent: begin is create-once;
+journal appends dedupe on ``seq``; finalize is once. Mid-turn prose durability is
+``upsert_stream_segments`` → ``turn_stream_state`` (not ``messages.content``).
 """
 
 from __future__ import annotations
@@ -369,33 +370,6 @@ class OutboxStore:
                 record["user_message"] = user_message
             record["phase"] = PHASE_OPEN
             record.setdefault("ops", []).append("begin_turn")
-
-        await self._mutate(user_message_id, mutate)
-
-    async def checkpoint(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        content: str,
-    ) -> None:
-        user_message_id = self._resolve_user_message_id(message_id)
-        if not user_message_id:
-            logger.warning(
-                "sidecar.outbox_checkpoint_missing_user_message_id",
-                message_id=message_id,
-            )
-            return
-
-        def mutate(record: dict[str, Any]) -> None:
-            if record.get("phase") == PHASE_READY:
-                return  # finalize already sealed
-            record["conversation_id"] = conversation_id or record.get("conversation_id")
-            record["message_id"] = message_id or record.get("message_id")
-            record["content"] = pick_monotonic_content(record.get("content"), content)
-            ops = record.setdefault("ops", [])
-            if "checkpoint" not in ops:
-                ops.append("checkpoint")
 
         await self._mutate(user_message_id, mutate)
 

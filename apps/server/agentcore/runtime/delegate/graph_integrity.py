@@ -1,7 +1,7 @@
 """Import-graph integrity for SPA / TS landings (``graph_consistent`` criteria).
 
 Scans delivered source for relative / ``@/`` imports; missing targets → gaps.
-Used by :func:`~agentcore.runtime.delegate.completion.check_delegate_completion`.
+Used by :func:`~agentcore.runtime.delegate.completion.collect_completion_soft_notes`.
 """
 
 from __future__ import annotations

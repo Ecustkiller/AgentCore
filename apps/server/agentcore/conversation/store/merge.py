@@ -18,7 +18,6 @@ from agentcore.core.message_merge import (
     pick_merged_content,
     pick_monotonic_content,
     should_advance_status,
-    should_apply_checkpoint_content,
     status_rank,
     visible_failed_assistant_content,
 )
@@ -35,7 +34,6 @@ __all__ = [
     "pick_merged_content",
     "pick_monotonic_content",
     "should_advance_status",
-    "should_apply_checkpoint_content",
     "status_rank",
     "visible_failed_assistant_content",
 ]

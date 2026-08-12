@@ -82,7 +82,7 @@ async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(monkeypatch
     async def _empty_rules(*_a, **_k):
         return ""
 
-    async def _empty_topics(*_a, **_k):
+    async def _empty_catalog(*_a, **_k):
         return []
 
     monkeypatch.setattr(
@@ -90,12 +90,8 @@ async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(monkeypatch
         _empty_rules,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.load_memory_topics",
-        _empty_topics,
-    )
-    monkeypatch.setattr(
         "agentcore.runtime.pipeline.prepare.load_project_catalog",
-        _empty_topics,
+        _empty_catalog,
     )
 
     with pytest.raises(WorkspaceIOError, match="本机工作区通道无响应"):

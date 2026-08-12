@@ -532,26 +532,21 @@ def _files_from_transcript(transcript: list[LLMMessage]) -> list[str]:
 
     return files_touched_from_transcript(transcript)
 
-def check_delegate_completion(
+def collect_completion_soft_notes(
     results: dict[str, RunState],
     *,
     backend: Any = None,
     file_map: dict[str, str] | None = None,
-    plan: RunPlan | None = None,
-) -> tuple[bool, list[str], list[str]]:
-    """Return ``(ok, binding_gaps, soft_notes)`` after all workers finish.
+) -> list[str]:
+    """Soft overlay notes after workers finish (never blocks acceptance).
 
-    S3: no ``completion_criteria`` kind binding — ``ok`` is always True and
-    ``binding_gaps`` is always empty. Soft overlays remain (D2: .ts/.tsx without
-    verify; auto import-graph scan on .ts/.tsx/.vue). Deliverable / contract /
-    landing soft lives in delivery_status + collect_worker_gaps.
-
-    ``plan`` retained for call-site compat (unused).
+    S3: no ``completion_criteria`` kind / binding gate. Remains: D2 (.ts/.tsx
+    without verify) and auto import-graph scan on .ts/.tsx/.vue. Deliverable /
+    contract / landing soft lives in delivery_status + collect_worker_gaps.
     """
-    del plan  # S3: no kind/office binding from plan
     completed = [s for s in results.values() if s.phase is RunPhase.COMPLETED]
     if not completed:
-        return True, [], []
+        return []
 
     soft_notes: list[str] = []
     if _batch_landed_typescript(completed) and not any(
@@ -569,7 +564,7 @@ def check_delegate_completion(
             if note not in soft_notes:
                 soft_notes.append(note)
 
-    return True, [], soft_notes
+    return soft_notes
 
 def collect_delivered_files(results: dict[str, RunState]) -> list[str]:
     """Ordered, deduped workspace paths COMPLETED workers wrote."""

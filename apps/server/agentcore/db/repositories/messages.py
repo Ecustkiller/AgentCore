@@ -160,8 +160,9 @@ class MessageRepository:
                 )
                 write_usage = merge_usage_status(existing.usage, metadata)
         # Final gate: strip vendor DSML / tool-protocol residue + length ceiling
-        # (complete / paused / incomplete all land here). Live checkpoints stay dirty.
-        # Incomplete / cancel salvage also truncates at the first DSML open tag.
+        # (complete / paused / incomplete all land here). Mid-turn prose stays in
+        # ``turn_stream_state`` until finalize; incomplete / cancel salvage also
+        # truncates at the first DSML open tag.
         from agentcore.core.assistant_content import prepare_assistant_content
         from agentcore.core.message_merge import MESSAGE_STATUS_INCOMPLETE
 
@@ -204,36 +205,6 @@ class MessageRepository:
         row = await self.get_by_id(mid, conversation_id=conversation_id)
         assert row is not None
         return row
-
-    async def update_assistant_content(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        content: str,
-    ) -> None:
-        """Update only the assistant row's ``content`` (progressive checkpoint).
-
-        D7: refuse to shorten the body or touch a terminal-status row.
-        """
-        from agentcore.core.message_merge import should_apply_checkpoint_content
-
-        existing = await self.get_by_id(message_id, conversation_id=conversation_id)
-        if existing is None:
-            return
-        usage = existing.usage or {}
-        if not should_apply_checkpoint_content(
-            existing_content=existing.content,
-            existing_status=usage.get("status"),
-            incoming_content=content,
-        ):
-            return
-        await self._session.execute(
-            update(Message)
-            .where(Message.id == message_id, Message.conversation_id == conversation_id)
-            .values(content=content)
-        )
-        await self._session.commit()
 
     async def set_followups(
         self, message_id: str, *, conversation_id: str, followups: list[str]

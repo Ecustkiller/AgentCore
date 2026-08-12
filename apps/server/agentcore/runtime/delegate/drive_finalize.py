@@ -268,7 +268,7 @@ async def finalize_successful_drive(
     S3: no kind-based completion binding / criteria_unmet hard path.
     """
     from agentcore.runtime.costing import usage_metadata
-    from agentcore.runtime.delegate.completion import check_delegate_completion
+    from agentcore.runtime.delegate.completion import collect_completion_soft_notes
     from agentcore.runtime.runs import RunPhase
 
     # §十一 来源卡接入 (方案①, 远期规划.md §4.5): snapshot the turn-accumulated sources
@@ -308,10 +308,9 @@ async def finalize_successful_drive(
             file_map = await load_source_file_map(
                 backend, _collect_graph_source_paths(completed)
             )
-    _ok, _binding, soft_notes = check_delegate_completion(
-        results, backend=backend, file_map=file_map or None, plan=plan
+    soft_notes = collect_completion_soft_notes(
+        results, backend=backend, file_map=file_map or None
     )
-    tool.clear_completion_gap_streak()
 
     # 交付状态（诚实对账）：正常收尾（含 finalize 单人直出）——有落盘文件或缺口才发，
     # 纯 prose 成功批次保持无声。Soft overlay notes → state=notes（不 blocking）。

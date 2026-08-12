@@ -19,7 +19,6 @@ from agentcore.conversation.store.merge import (
     pick_merged_content,
     pick_monotonic_content,
     should_advance_status,
-    should_apply_checkpoint_content,
     status_rank,
     visible_failed_assistant_content,
 )
@@ -30,32 +29,6 @@ pytestmark = pytest.mark.anyio
 
 
 # --- D7 pure helpers ---
-
-
-def test_d7_content_monotonic_rejects_shorter_checkpoint():
-    assert should_apply_checkpoint_content(
-        existing_content="hello world",
-        existing_status=MESSAGE_STATUS_RUNNING,
-        incoming_content="hello",
-    ) is False
-    assert should_apply_checkpoint_content(
-        existing_content="hello",
-        existing_status=MESSAGE_STATUS_RUNNING,
-        incoming_content="hello world",
-    ) is True
-
-
-def test_d7_content_monotonic_rejects_terminal_row():
-    for status in (
-        MESSAGE_STATUS_COMPLETE,
-        MESSAGE_STATUS_INCOMPLETE,
-        MESSAGE_STATUS_FAILED,
-    ):
-        assert should_apply_checkpoint_content(
-            existing_content="partial",
-            existing_status=status,
-            incoming_content="partial and more",
-        ) is False
 
 
 def test_d7_status_gate_only_advances():
@@ -1209,30 +1182,6 @@ async def test_finalize_local_keeps_existing_partial_on_empty_error(monkeypatch)
     assert result is not None
     assert upserted["content"] == "暂停前半成品"
     assert upserted["metadata"]["status"] == MESSAGE_STATUS_FAILED
-
-
-async def test_checkpoint_delegates_to_message_repo(monkeypatch):
-    calls: list[dict] = []
-
-    class Repo:
-        def __init__(self, _s):
-            pass
-
-        async def update_assistant_content(self, **kw):
-            calls.append(kw)
-
-    class CM:
-        async def __aenter__(self):
-            return object()
-
-        async def __aexit__(self, *_a):
-            return False
-
-    monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: CM())
-    monkeypatch.setattr(cloud_mod, "MessageRepository", Repo)
-
-    await CloudStore().checkpoint(conversation_id="c1", message_id="m1", content="hi")
-    assert calls == [{"conversation_id": "c1", "message_id": "m1", "content": "hi"}]
 
 
 async def test_append_journal_uses_telemetry_pool(monkeypatch):

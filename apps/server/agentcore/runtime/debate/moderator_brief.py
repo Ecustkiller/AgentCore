@@ -42,18 +42,6 @@ _BRIEF_SYSTEM = (
     "事实同样不得写成既定。务实、诚实，不回避不确定性。严格只输出要求的 JSON。"
 )
 
-_SEVERITY_VALUES = {"high", "medium", "low"}
-_SEVERITY_ALIASES = {
-    "高": "high",
-    "中": "medium",
-    "低": "low",
-    "critical": "high",
-    "severe": "high",
-    "major": "high",
-    "moderate": "medium",
-    "minor": "low",
-}
-
 
 def _brief_form_hint(form: DebateForm) -> str:
     """各形态「简报该产出什么」的差异指引（喂给 :func:`build_brief`）。
@@ -145,32 +133,6 @@ def _as_str_dict(value: Any) -> dict[str, str]:
     return {}
 
 
-def _as_severity_dict(value: Any) -> dict[str, str]:
-    """把 risk_severities 规整为 {side_key: high|medium|low}（容忍中文/同义词/list 变体）。
-
-    只收 high/medium/low 三档，非法档位丢弃——前端风险看板只认这三档分级。
-    """
-
-    def _norm(raw: Any) -> str:
-        token = _as_str(raw).strip().lower()
-        token = _SEVERITY_ALIASES.get(token, token)
-        return token if token in _SEVERITY_VALUES else ""
-
-    if isinstance(value, dict):
-        out = {str(k): _norm(v) for k, v in value.items()}
-        return {k: v for k, v in out.items() if v}
-    if isinstance(value, list):
-        result: dict[str, str] = {}
-        for item in value:
-            if isinstance(item, dict):
-                key = _as_str(item.get("key") or item.get("side") or item.get("side_key"))
-                sev = _norm(item.get("severity") or item.get("level") or item.get("value"))
-                if key and sev:
-                    result[key] = sev
-        return result
-    return {}
-
-
 def _as_handoffs(data: dict[str, Any]) -> list[DebateHandoff]:
     """把 LLM 三键 JSON 规整为统一 ``handoffs``（键名即分类指令 → kind）。
 
@@ -258,21 +220,7 @@ async def build_brief(
     evidence_block = format_evidence_ledger_for_brief(evidence_ledger, rounds)
     last_turns = _turns_block(rounds[-1].ok_turns, clip=_TURN_CLIP)
     sides_keys = ", ".join(s.key for s in config.sides)
-    is_red_team = config.form is DebateForm.RED_TEAM
     is_roundtable = config.form is DebateForm.ROUNDTABLE
-    # 红队专用：让简报给每条风险（红队成员，不含被审方案方）评严重度，驱动前端「风险看板」
-    # 分级 + 总览计数。其余形态不要这个字段（风险严重度对正反/圆桌无意义）。
-    severity_field = (
-        f'  "risk_severities": {{"<红队成员 side_key∈[{sides_keys}]>": "high|medium|low"}},\n'
-        if is_red_team
-        else ""
-    )
-    severity_note = (
-        "（红队：在 risk_severities 里给每个红队成员的风险按【影响后果 × 发生可能性】评"
-        "high/medium/low，让用户先看高危；被审方案方不评级。）"
-        if is_red_team
-        else ""
-    )
     if is_roundtable:
         score_align_note = (
             "若上方给了【累计记分】，仅作 momentum 参考、【不】驱动 leaning / decisive、"
@@ -339,12 +287,11 @@ async def build_brief(
         "（factual_disputes 或 open_questions，证据状态语与 tier 人话内联在条目文本）；"
         "结论文字里引用这类事实时【保留证据状态词与 tier】（如「若 X 属实——目前仅二手报道 / "
         "弱源、待一手核实——则…」）、别写成板上钉钉。"
-        f"{handoff_taxonomy}{severity_note}只输出 JSON：\n"
+        f"{handoff_taxonomy}只输出 JSON：\n"
         "{\n"
         '  "crux": "双方真正的争议焦点在哪",\n'
         f'  "strongest_points": {{"<side_key∈[{sides_keys}]>": '
         '"该方命门单句≤60字，禁分号堆叠"}},\n'
-        f"{severity_field}"
         '  "value_disputes": ["问句？ 你选 A→结论偏 X；选 B→结论偏 Y"],\n'
         '  "factual_disputes": ["可查证的事实分歧单句（证据状态语内联、勿抹平）"],\n'
         f"{decisive_field}"
@@ -365,8 +312,8 @@ async def build_brief(
     return DebateBrief(
         crux=_as_str(data.get("crux")) or config.motion,
         strongest_points=_as_str_dict(data.get("strongest_points")),
-        # 严重度仅红队形态有意义：非红队即便 LLM 误填也丢弃，保证载荷干净。
-        risk_severities=(_as_severity_dict(data.get("risk_severities")) if is_red_team else {}),
+        # 按方 risk_severities 已退役（新场次恒空）；wire 字段保留供旧载荷降级渲染。
+        risk_severities={},
         handoffs=_as_handoffs(data),
         decisive=_as_str(data.get("decisive")),
         leaning=_as_str(data.get("leaning")),

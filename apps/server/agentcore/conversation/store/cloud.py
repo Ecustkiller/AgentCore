@@ -195,7 +195,7 @@ def _usage_metadata(
 
 
 class CloudStore:
-    """Postgres ConversationStore (收编 placeholder / checkpoint / journal / finalize / salvage)."""
+    """Postgres ConversationStore (收编 placeholder / journal / finalize / salvage)."""
 
     async def begin_turn(
         self,
@@ -232,21 +232,6 @@ class CloudStore:
                 error=str(e),
             )
             raise
-
-    async def checkpoint(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        content: str,
-    ) -> None:
-        """Progressive content flush with D7 monotonic + status-gate rules."""
-        async with async_session_factory() as session:
-            await MessageRepository(session).update_assistant_content(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                content=content,
-            )
 
     async def append_journal(
         self,

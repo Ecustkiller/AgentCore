@@ -3,6 +3,7 @@
 The 消息 page's "对方" is another person's client, so the server must fan A's
 message out to B — this channel is that delivery path (server→client only;
 sending stays POST). Carries ``chat_message``, ``chat_message_updated`` (recall/edit in-place),
+``chat_changed`` (thin membership nudge: created / member_added / activated — client re-pulls),
 ``presence`` (online transitions
 to co-chat users), ``friend_request`` (created/accepted/rejected/cancelled),
 ``memory_updated``, and shared-space nudges. Typing remains

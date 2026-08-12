@@ -140,14 +140,6 @@ class ConversationStore(Protocol):
         """
         ...
 
-    async def checkpoint(
-        self,
-        *,
-        conversation_id: str,
-        message_id: str,
-        content: str,
-    ) -> None: ...
-
     async def append_journal(
         self,
         *,
