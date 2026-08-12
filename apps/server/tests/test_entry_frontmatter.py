@@ -12,6 +12,7 @@ from agentcore.documents.frontmatter import (
     frontmatter_error_message,
     parse_entry_frontmatter,
     set_entry_frontmatter,
+    set_entry_frontmatter_total,
     strip_entry_frontmatter,
 )
 
@@ -123,6 +124,46 @@ def test_set_prepends_block_when_absent():
 def test_set_raises_on_unclosed():
     with pytest.raises(FrontmatterEditError):
         set_entry_frontmatter("---\napply: always\n", apply="on_demand")
+
+
+def test_total_unclosed_preserves_column_always():
+    """Migration corpus: opening ``---`` with no close must not silently downgrade always."""
+    original = "---\nthis was never frontmatter, just prose that starts with a fence\n"
+    out, prepended = set_entry_frontmatter_total(original, apply="always")
+    assert prepended is True
+    assert out == "---\napply: always\n---\n" + original
+    parsed = parse_entry_frontmatter(out)
+    assert isinstance(parsed, ParsedFrontmatter)
+    assert parsed.apply == "always"
+    assert parsed.body == original
+    # Runtime path still rejects the same corpus.
+    with pytest.raises(FrontmatterEditError):
+        set_entry_frontmatter(original, apply="always")
+
+
+def test_total_unclosed_with_bom_demotes_whole_text():
+    original = "\ufeff---\nno close"
+    out, prepended = set_entry_frontmatter_total(original, apply="on_demand")
+    assert prepended is True
+    assert out == "\ufeff---\napply: on_demand\n---\n---\nno close"
+    parsed = parse_entry_frontmatter(out)
+    assert isinstance(parsed, ParsedFrontmatter)
+    assert parsed.apply == "on_demand"
+    assert parsed.body == "---\nno close"
+
+
+def test_total_matches_set_when_minimal_edit_works():
+    cases = [
+        ("hello\n", "always"),
+        ("---\nglobs: x\n---\nbody\n", "always"),
+        ("---\napply: on_demand\n---\n", "always"),
+        ("", "on_demand"),
+    ]
+    for content, mode in cases:
+        expected = set_entry_frontmatter(content, apply=mode)  # type: ignore[arg-type]
+        out, prepended = set_entry_frontmatter_total(content, apply=mode)  # type: ignore[arg-type]
+        assert prepended is False
+        assert out == expected
 
 
 def test_ensure_apply_key_does_not_overwrite():

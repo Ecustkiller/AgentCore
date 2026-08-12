@@ -21,7 +21,7 @@ from alembic import op
 from agentcore.documents.frontmatter import (
     FrontmatterError,
     parse_entry_frontmatter,
-    set_entry_frontmatter,
+    set_entry_frontmatter_total,
     strip_entry_frontmatter,
 )
 
@@ -55,16 +55,19 @@ def upgrade() -> None:
             "SELECT id, kind, content, apply_mode FROM documents WHERE deleted_at IS NULL"
         )
     ).mappings().all()
+    prepended_rows = 0
     for row in rows:
         if row["kind"] != "document":
             continue
         mode = row["apply_mode"]
         if mode not in ("always", "on_demand"):
             mode = "on_demand"
-        body = set_entry_frontmatter(row["content"] or "", apply=mode)
+        body, prepended = set_entry_frontmatter_total(row["content"] or "", apply=mode)
+        if prepended:
+            prepended_rows += 1
         parsed = parse_entry_frontmatter(body)
         if isinstance(parsed, FrontmatterError):
-            # Should not happen after set_entry_frontmatter; index-safe fallback.
+            # Should not happen after set_entry_frontmatter_total; index-safe fallback.
             apply_mode, description = "on_demand", ""
         else:
             apply_mode, description = parsed.apply, parsed.description
@@ -80,6 +83,9 @@ def upgrade() -> None:
                 "description": description,
             },
         )
+    print(
+        f"documents frontmatter migration: prepended_new_block={prepended_rows} (expected 0)"
+    )
 
     op.drop_constraint("ck_documents_apply_mode", "documents", type_="check")
     op.create_check_constraint(

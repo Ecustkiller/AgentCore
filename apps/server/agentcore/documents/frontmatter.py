@@ -219,6 +219,34 @@ def ensure_apply_key(content: str, apply: ApplyMode) -> str:
     return set_entry_frontmatter(content, apply=apply)
 
 
+def set_entry_frontmatter_total(content: str, *, apply: ApplyMode) -> tuple[str, bool]:
+    """Always succeed: return text that parses cleanly and carries ``apply``.
+
+    Prefer text-level minimal edit via :func:`set_entry_frontmatter` (identical
+    output for inputs that function already accepts). When that raises
+    :class:`FrontmatterEditError` (unclosed opening fence), prepend a well-formed
+    block and demote the entire original text — byte-identical, including a
+    leading BOM if present — to the body. Column truth is the sole source; this
+    does not guess user intent.
+
+    Returns ``(new_content, prepended)``. ``prepended`` is True only on the
+    demote-to-body path (not when absent FM already causes a normal new block).
+
+    Runtime write paths must keep using :func:`set_entry_frontmatter` so broken
+    fences still surface as 400; this entry is for must-succeed callers (e.g.
+    one-shot migrations).
+    """
+    try:
+        return set_entry_frontmatter(content, apply=apply), False
+    except FrontmatterEditError:
+        bom = ""
+        text = content
+        if text.startswith("\ufeff"):
+            bom = "\ufeff"
+            text = text[1:]
+        return bom + _render_new_block(apply=apply, description=None) + text, True
+
+
 def _split_frontmatter(
     content: str,
 ) -> _SplitOk | _SplitAbsent | _SplitUnclosed:
