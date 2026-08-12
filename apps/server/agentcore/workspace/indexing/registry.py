@@ -7,7 +7,6 @@ Warm RPC and write / ``code_search`` kicks share the same entries.
 
 from __future__ import annotations
 
-import contextlib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -55,21 +54,15 @@ def shared_index_maintainer(root: Path | str, backend: WorkspaceBackend) -> Inde
 async def drop_index_registry(root: Path | str) -> None:
     """Drop manager + maintainer for ``root`` so ``AgentCore/index`` can be removed.
 
-    Aborts in-flight maintenance (awaits cancel so SQLite closes) then releases
-    the handle. Required on Windows before ``rmtree`` of the index dir
-    (WinError 32 sharing violation).
+    Lets in-flight maintenance **finish** (``settle``) before releasing the handle:
+    ``ensure_index`` runs in a worker thread, so cancelling it returns while the
+    thread still holds ``code_search.db`` open. Required on Windows before ``rmtree``
+    of the index dir (WinError 32 sharing violation).
     """
-    import asyncio
-
     key = root_key(root)
     maintainer = _maintainers.pop(key, None)
     if maintainer is not None:
-        task = maintainer.abort()
-        if task is not None:
-            # CancelledError is BaseException (3.9+); must not leak into the
-            # caller's request task or Starlette returns "No response".
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+        await maintainer.settle()
     manager = _managers.pop(key, None)
     if manager is not None:
         manager.release()

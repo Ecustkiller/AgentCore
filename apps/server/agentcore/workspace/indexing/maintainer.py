@@ -120,6 +120,27 @@ class IndexMaintainer:
         self._manager.set_building(False)
         return None
 
+    async def settle(self) -> None:
+        """Stop follow-ups and await the in-flight ensure to **completion**.
+
+        Unlike :meth:`abort`, this does not cancel. ``ensure_index`` runs in a worker
+        thread, so cancelling the awaiting coroutine returns while the thread — and its
+        open SQLite handle — lives on; only completion guarantees the file is closed.
+        Used before the index directory is removed (Windows WinError 32).
+        """
+        self._rerun = False
+        self._force = False
+        task = self._task
+        self._task = None
+        if task is not None and not task.done():
+            try:
+                await task
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass  # ``_run`` already logs; we only need the handle closed.
+        self._manager.set_building(False)
+
     async def drain(self) -> None:
         """Await until maintenance (including coalesced follow-ups) has settled."""
         while True:
