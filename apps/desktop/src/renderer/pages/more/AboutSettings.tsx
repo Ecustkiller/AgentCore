@@ -1,11 +1,12 @@
-import { BrandMark } from "@/components/brand/BrandMark";
-import { Button, Card } from "@/components/ui";
-import { Switch } from "@/components/ui/Switch";
+import { BrandMarkIcon } from "@/components/brand/BrandMark";
 import {
-  hasAutoUpdater,
-  hasLocalEngine,
-  isWebRuntime,
-} from "@/lib/capabilities";
+  SettingRow,
+  SettingsAsync,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
+import { Button, Card } from "@/components/ui";
+import { hasAutoUpdater, isWebRuntime } from "@/lib/capabilities";
 import {
   clientGitSha,
   clientVersion,
@@ -20,34 +21,13 @@ import {
   otherChannelDownloadUrl,
 } from "@/lib/releaseChannel";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
-import { clearSidecarHealth } from "@/services/sidecarHealth";
 import { type VersionInfo, fetchVersion } from "@/services/system";
-import { useUIStore } from "@/stores/ui";
 import { useUpdatesStore } from "@/stores/updates";
 import type { UpdaterStatus } from "@shared/updater-contract";
 import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SettingsHeader } from "./SettingsHeader";
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <p className="flex gap-2">
-      <span className="w-20 shrink-0 text-muted-foreground">{label}</span>
-      <span className={mono ? "font-mono text-foreground" : "text-foreground"}>
-        {value}
-      </span>
-    </p>
-  );
-}
 
 /** Human-readable line for each updater phase (发布与门禁.md §7.6). */
 function updateStatusText(status: UpdaterStatus): string {
@@ -92,13 +72,13 @@ function UpdateSection() {
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   return (
-    <section className="mt-8 border-t border-border pt-6">
-      <h2 className="text-sm font-semibold text-foreground">软件更新</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        {updateStatusText(status)}
-      </p>
+    <SettingsSection
+      title="软件更新"
+      description={updateStatusText(status)}
+      divider
+    >
       {status.phase === "downloading" ? (
-        <div className="mt-3 space-y-2">
+        <div className="space-y-2">
           <progress
             className="h-2 w-full overflow-hidden rounded-full bg-muted [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-primary [&::-moz-progress-bar]:bg-primary"
             value={Math.min(100, status.percent)}
@@ -114,7 +94,7 @@ function UpdateSection() {
           </Button>
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {status.phase === "downloaded" ? (
             <Button size="md" onClick={() => void install()}>
               重启安装
@@ -168,77 +148,34 @@ function UpdateSection() {
           ) : null}
         </div>
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
 /**
- * 诊断 / 强制关：本机传统项目新开回合默认同侧 sidecar；关 = 显式强制走云。
- * 展示用 `preference !== "off"`（unset 与 on 都算允许），勿绑 `sidecarEnabled`
- *（unset→默认 false，会显示关却仍默认同侧）。
- * 仅诊断模式开启且桌面有本地引擎时可见。
+ * 品牌区 — 只留产品标记与两行 slogan。
+ *
+ * 原来这里是 `BrandMark`（含 text-xl 字标）+ 一行 text-base slogan 摞在页头之上，
+ * 与 `SettingsHeader` 的 h1 同级同字号，看上去是两个并列大标题。产品名由页头
+ * 「关于 AgentCore」承载，这里降级成一张说明卡：图标 + 定位语。
  */
-function LocalEngineToggle() {
-  const preference = useUIStore((s) => s.sidecarPreference);
-  const setEnabled = useUIStore((s) => s.setSidecarEnabled);
-  const allowed = preference !== "off";
-  const onToggle = (v: boolean): void => {
-    setEnabled(v);
-    if (v) clearSidecarHealth();
-  };
+function BrandCard() {
   return (
-    <Card className="mt-4 flex items-center justify-between gap-4 px-4 py-3">
+    <Card className="flex items-center gap-4 px-4 py-4">
+      <BrandMarkIcon size={36} title="AgentCore" />
       <div className="min-w-0">
-        <p className="text-sm text-foreground">允许本机执行</p>
-        <p className="mt-0.5 text-xs text-muted-foreground">
-          诊断用强制走云：关闭后全部走云端过桥；开启则本机传统项目默认同侧引擎（与盘同侧）。启动失败会自动改走云。云端项目始终走云。这不是离线模式：AI
-          推理仍在云端，断网时只能浏览缓存与本机文件（只读），不能发送。
+        <p className="text-sm font-medium text-foreground">
+          协作，是更高级的智能。
         </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">协作智能平台</p>
       </div>
-      <Switch
-        checked={allowed}
-        onCheckedChange={onToggle}
-        label="允许本机执行"
-      />
     </Card>
   );
 }
 
-/**
- * 开发者 / 诊断模式 (前端UX设计.md §十) — advanced, off-by-default toggle that
- * surfaces low-level execution diagnostics in run detail (裸 run / trace ids、
- * 调度埋点等)。报障出口（错误卡 / 气泡「更多」→「复制排查包」）不依赖本开关。
- * Lives on 关于 — next to build 溯源 — so this stays off 大众-facing 偏好 pages.
- * 诊断开启且桌面有本地引擎时，附带「允许本机执行」强制关开关。
- */
-function DiagnosticModeSection() {
-  const diagnosticMode = useUIStore((s) => s.diagnosticMode);
-  const setDiagnosticMode = useUIStore((s) => s.setDiagnosticMode);
-
-  return (
-    <section className="mt-8 border-t border-border pt-6">
-      <div className="flex items-center justify-between gap-4">
-        <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-foreground">
-            开发者 / 诊断模式
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            在运行详情里显示运行 / 追踪
-            ID、调度埋点等底层信息。普通使用无需开启；报障请用错误卡或消息「更多」里的「复制排查包」（无需开本开关）。
-          </p>
-        </div>
-        <Switch
-          checked={diagnosticMode}
-          onCheckedChange={setDiagnosticMode}
-          label="开发者 / 诊断模式"
-        />
-      </div>
-      {diagnosticMode && hasLocalEngine() ? <LocalEngineToggle /> : null}
-    </section>
-  );
-}
-
-export function AboutSettings() {
+/** 版本溯源表：标签左、值右。原来是固定 `w-20` 标签列，「API 构建时间」这类
+ *  四字以上标签会被挤成两行。 */
+function VersionSection() {
   const [info, setInfo] = useState<VersionInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -260,55 +197,73 @@ export function AboutSettings() {
     };
   }, []);
 
+  const gitSha = clientGitSha();
+
   return (
-    <div>
-      <div className="mb-8">
-        <BrandMark size="md" className="text-foreground" />
-        <p className="mt-4 text-base font-medium text-foreground">
-          协作，是更高级的智能。
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">协作智能平台</p>
-      </div>
-
-      <SettingsHeader
-        title="关于 AgentCore"
-        description="版本信息与构建溯源。"
-      />
-
-      <div className="mt-6 space-y-2 text-sm">
-        {loading ? (
-          <p className="text-muted-foreground">加载中…</p>
-        ) : error ? (
-          <p className="text-destructive">{error}</p>
-        ) : info ? (
-          <>
-            <Row label="客户端版本" value={clientVersion()} />
-            <Row
-              label="客户端构建"
-              value={formatGitSha(clientGitSha())}
-              mono={clientGitSha() !== "unknown"}
-            />
-            {/* 桌面双轨：构建期通道；web 无并列安装身份，不展示。 */}
-            {!isWebRuntime() ? (
-              <Row label="更新通道" value={clientChannelLabelZh()} />
-            ) : null}
-            <Row label="API 版本" value={info.version} />
-            <Row
-              label="API 构建"
-              value={formatGitSha(info.gitSha)}
-              mono={info.gitSha !== "unknown"}
-            />
-            <Row
-              label="API 构建时间"
-              value={info.builtAt === "unknown" ? "—" : info.builtAt}
-            />
-          </>
+    <SettingsSection title="版本与构建" contentClassName="space-y-3">
+      <Card>
+        <SettingRow surface="list" label="客户端版本" value={clientVersion()} />
+        <SettingRow
+          surface="list"
+          divider
+          label="客户端构建"
+          value={
+            <span className={gitSha !== "unknown" ? "font-mono" : undefined}>
+              {formatGitSha(gitSha)}
+            </span>
+          }
+        />
+        {/* 桌面双轨：构建期通道；web 无并列安装身份，不展示。 */}
+        {!isWebRuntime() ? (
+          <SettingRow
+            surface="list"
+            divider
+            label="更新通道"
+            value={clientChannelLabelZh()}
+          />
         ) : null}
-      </div>
+        <SettingsAsync
+          loading={loading}
+          error={error}
+          size="sm"
+          className="border-t border-border px-4 py-2.5"
+        >
+          {info ? (
+            <>
+              <SettingRow
+                surface="list"
+                divider
+                label="API 版本"
+                value={info.version}
+              />
+              <SettingRow
+                surface="list"
+                divider
+                label="API 构建"
+                value={
+                  <span
+                    className={
+                      info.gitSha !== "unknown" ? "font-mono" : undefined
+                    }
+                  >
+                    {formatGitSha(info.gitSha)}
+                  </span>
+                }
+              />
+              <SettingRow
+                surface="list"
+                divider
+                label="API 构建时间"
+                value={info.builtAt === "unknown" ? "—" : info.builtAt}
+              />
+            </>
+          ) : null}
+        </SettingsAsync>
+      </Card>
 
       {/* 桌面：链到另一轨官网下载页（外链；不做同装热切 feed）。 */}
       {!isWebRuntime() ? (
-        <p className="mt-3 text-sm">
+        <p className="text-sm">
           <a
             href={otherChannelDownloadUrl()}
             target="_blank"
@@ -319,32 +274,53 @@ export function AboutSettings() {
           </a>
         </p>
       ) : null}
+    </SettingsSection>
+  );
+}
 
-      {/* 自动更新仅桌面外壳；web 客户端随刷新拿到新版，故 web 不挂「软件更新」。 */}
-      {hasAutoUpdater() && <UpdateSection />}
+/**
+ * 关于（/more/about）— 品牌、版本溯源、软件更新、法律与合规。
+ *
+ * 开发者 / 诊断模式与「允许本机执行」原本挂在本页（挨着构建溯源），用户找不到，
+ * 已搬到「通用」（/more/general）的「进阶」区。
+ */
+export function AboutSettings() {
+  return (
+    <div>
+      <SettingsHeader
+        title="关于 AgentCore"
+        description="版本信息、软件更新与法律条款。"
+      />
 
-      <section className="mt-8 border-t border-border pt-6">
-        <h2 className="text-sm font-semibold text-foreground">法律与合规</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          用户协议与隐私政策。
-        </p>
-        <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm">
-          <Link
-            to={APP_PATHS.more.legal.terms}
-            className="text-foreground underline-offset-2 hover:underline"
-          >
-            用户协议
-          </Link>
-          <Link
-            to={APP_PATHS.more.legal.privacy}
-            className="text-foreground underline-offset-2 hover:underline"
-          >
-            隐私政策
-          </Link>
-        </div>
-      </section>
+      <SettingsStack>
+        <BrandCard />
 
-      <DiagnosticModeSection />
+        <VersionSection />
+
+        {/* 自动更新仅桌面外壳；web 客户端随刷新拿到新版，故 web 不挂「软件更新」。 */}
+        {hasAutoUpdater() && <UpdateSection />}
+
+        <SettingsSection
+          title="法律与合规"
+          description="用户协议与隐私政策。"
+          divider
+        >
+          <div className="flex flex-wrap gap-x-3 gap-y-1 text-sm">
+            <Link
+              to={APP_PATHS.more.legal.terms}
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              用户协议
+            </Link>
+            <Link
+              to={APP_PATHS.more.legal.privacy}
+              className="text-foreground underline-offset-2 hover:underline"
+            >
+              隐私政策
+            </Link>
+          </div>
+        </SettingsSection>
+      </SettingsStack>
     </div>
   );
 }

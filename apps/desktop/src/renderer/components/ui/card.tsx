@@ -3,7 +3,10 @@ import type { HTMLAttributes } from "react";
 
 export type CardVariant = "default" | "muted" | "interactive";
 
-const variantClass: Record<CardVariant, string> = {
+/** Exported so non-`div` surfaces that must read as a card (e.g. a clickable
+ *  settings row rendered as a `<button>`) reuse the same chrome instead of
+ *  re-typing an equivalent class string. */
+export const cardVariantClass: Record<CardVariant, string> = {
   default: "border-border bg-card",
   muted: "border-border bg-card/60",
   interactive:
@@ -18,7 +21,7 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
 export function Card({ variant = "default", className, ...props }: CardProps) {
   return (
     <div
-      className={cn("rounded-xl border", variantClass[variant], className)}
+      className={cn("rounded-xl border", cardVariantClass[variant], className)}
       {...props}
     />
   );

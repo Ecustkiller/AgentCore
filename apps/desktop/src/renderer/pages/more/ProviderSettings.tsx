@@ -3,7 +3,8 @@ import {
   modelConfigApiErrorMessage,
 } from "@/components/llm/ModelKeyForm";
 import { ToolsCapabilityBadge } from "@/components/llm/ToolsCapabilityBadge";
-import { Button, Card } from "@/components/ui";
+import { SettingsAsync } from "@/components/settings";
+import { Button, Card, ConfirmDialog } from "@/components/ui";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
 import {
   llmModelProfileKeys,
@@ -43,6 +44,10 @@ export function ProviderSettings() {
     {},
   );
   const [cardError, setCardError] = useState<Record<string, string | null>>({});
+  const [pendingDelete, setPendingDelete] = useState<LlmProviderView | null>(
+    null,
+  );
+  const [deleting, setDeleting] = useState(false);
 
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: llmProviderKeys.list });
@@ -73,14 +78,16 @@ export function ProviderSettings() {
     void runTest(view.id);
   };
 
+  /** 删除后果分两档：还有其他服务商或平台额度兜底 = 槽位自动回落；否则断供。 */
+  const deleteConsequence = (): string => {
+    const remaining = (response?.providers.length ?? 1) - 1;
+    return remaining > 0 || response?.platform_available
+      ? "组合槽位会自动回落到其他服务商或平台额度，不会中断对话。"
+      : "这是唯一的服务商，删除后将无法发起对话，直到重新接入。";
+  };
+
   const removeProvider = async (provider: LlmProviderView) => {
-    if (!response) return;
-    const remaining = response.providers.length - 1;
-    const softFallback = remaining > 0 || response.platform_available;
-    const confirmMsg = softFallback
-      ? `删除服务商「${providerName(provider)}」？组合槽位会自动回落到其他服务商或平台额度，不会中断对话。`
-      : `删除服务商「${providerName(provider)}」？这是唯一的服务商，删除后将无法发起对话，直到重新接入。`;
-    if (!window.confirm(confirmMsg)) return;
+    setDeleting(true);
     setCardError((s) => ({ ...s, [provider.id]: null }));
     try {
       await deleteLlmProvider(provider.id);
@@ -93,6 +100,9 @@ export function ProviderSettings() {
         ...s,
         [provider.id]: modelConfigApiErrorMessage(e, "删除失败，请重试"),
       }));
+    } finally {
+      setDeleting(false);
+      setPendingDelete(null);
     }
   };
 
@@ -110,15 +120,16 @@ export function ProviderSettings() {
         }
       />
 
-      {isLoading ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 size={16} className="animate-spin" />
-          加载中…
-        </div>
-      ) : isError || !response ? (
-        <p className="mt-6 text-sm text-destructive">
-          {modelConfigApiErrorMessage(error, "加载失败，请重试")}
-        </p>
+      {isLoading || isError || !response ? (
+        <SettingsAsync
+          className="mt-6"
+          loading={isLoading}
+          error={
+            isLoading
+              ? undefined
+              : modelConfigApiErrorMessage(error, "加载失败，请重试")
+          }
+        />
       ) : (
         <div className="mt-6 space-y-4">
           {response.platform_available && (
@@ -150,7 +161,7 @@ export function ProviderSettings() {
                 actionError={cardError[provider.id]}
                 onTest={() => void runTest(provider.id)}
                 onEdit={() => setForm({ mode: "edit", provider })}
-                onDelete={() => void removeProvider(provider)}
+                onDelete={() => setPendingDelete(provider)}
               />
             ),
           )}
@@ -168,7 +179,7 @@ export function ProviderSettings() {
           ) : form === null && providers.length > 0 ? (
             <Button
               variant="neutral"
-              size="sm"
+              size="md"
               icon={<Plus size={14} />}
               onClick={() => setForm({ mode: "add" })}
             >
@@ -179,6 +190,25 @@ export function ProviderSettings() {
           <InfoNote />
         </div>
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(next) => {
+          if (!next) setPendingDelete(null);
+        }}
+        tone="danger"
+        title={
+          pendingDelete
+            ? `删除服务商「${providerName(pendingDelete)}」？`
+            : "删除服务商？"
+        }
+        description={deleteConsequence()}
+        confirmLabel="删除"
+        busy={deleting}
+        onConfirm={() => {
+          if (pendingDelete) void removeProvider(pendingDelete);
+        }}
+      />
     </div>
   );
 }
@@ -278,7 +308,7 @@ function ProviderCard({
   );
 
   return (
-    <div className="rounded-lg border border-border px-3 py-2.5">
+    <Card className="px-4 py-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <div className="flex flex-wrap items-center gap-2">
@@ -321,18 +351,22 @@ function ProviderCard({
       {actionError && (
         <p className="mt-2 text-xs text-destructive">{actionError}</p>
       )}
-    </div>
+    </Card>
   );
 }
 
 function EmptyProviders({ onAdd }: { onAdd: () => void }) {
   return (
-    <Card className="flex flex-col items-center justify-center gap-3 border-dashed py-8 text-center">
-      <p className="text-sm text-muted-foreground">还没有接入服务商。</p>
-      <Button size="sm" icon={<Plus size={14} />} onClick={onAdd}>
-        添加服务商
-      </Button>
-    </Card>
+    <SettingsAsync
+      variant="card"
+      empty
+      emptyLabel="还没有接入服务商。"
+      emptyAction={
+        <Button size="md" icon={<Plus size={14} />} onClick={onAdd}>
+          添加服务商
+        </Button>
+      }
+    />
   );
 }
 

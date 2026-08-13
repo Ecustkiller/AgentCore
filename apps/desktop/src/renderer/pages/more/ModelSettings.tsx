@@ -1,5 +1,12 @@
 import { modelConfigApiErrorMessage } from "@/components/llm/ModelKeyForm";
-import { Button, Card, IconButton } from "@/components/ui";
+import {
+  SettingField,
+  SettingsAsync,
+  SettingsFormMessage,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
+import { Button, ConfirmDialog, IconButton, Input } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useLlmModelProfiles } from "@/hooks/useLlmModelProfiles";
 import { useLlmProviders } from "@/hooks/useLlmProviders";
@@ -35,10 +42,12 @@ import {
   ChevronDown,
   Copy,
   Loader2,
+  Pencil,
   Plus,
   Star,
   Trash2,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ProfileModelSelect, canChooseFromGroups } from "./ProfileModelSelect";
@@ -181,6 +190,10 @@ export function ModelSettings() {
   const providers = response?.providers ?? [];
   const platformAvailable = response?.platform_available ?? false;
   const canEditProfiles = providers.length > 0 || platformAvailable;
+  const loadError =
+    !isLoading && (isError || !response)
+      ? modelConfigApiErrorMessage(error, "加载失败，请重试")
+      : undefined;
 
   return (
     <div>
@@ -193,35 +206,30 @@ export function ModelSettings() {
         }
       />
 
-      {isLoading ? (
-        <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 size={16} className="animate-spin" />
-          加载中…
-        </div>
-      ) : isError || !response ? (
-        <p className="mt-6 text-sm text-destructive">
-          {modelConfigApiErrorMessage(error, "加载失败，请重试")}
-        </p>
-      ) : (
-        <div className="mt-6 space-y-4">
-          <PlatformStatusLine
-            platformAvailable={platformAvailable}
-            platformModel={response.platform_model ?? null}
-            hasProviders={providers.length > 0}
-          />
+      <SettingsStack>
+        <SettingsAsync loading={isLoading} error={loadError}>
+          {response && (
+            <>
+              <PlatformStatusLine
+                platformAvailable={platformAvailable}
+                platformModel={response.platform_model ?? null}
+                hasProviders={providers.length > 0}
+              />
 
-          {canEditProfiles ? (
-            <ModelProfilesSection
-              providers={providers}
-              catalog={catalog}
-              platformAvailable={platformAvailable}
-              onChanged={refresh}
-            />
-          ) : (
-            <EmptyProfilesCta />
+              {canEditProfiles ? (
+                <ModelProfilesSection
+                  providers={providers}
+                  catalog={catalog}
+                  platformAvailable={platformAvailable}
+                  onChanged={refresh}
+                />
+              ) : (
+                <EmptyProfilesCta />
+              )}
+            </>
           )}
-        </div>
-      )}
+        </SettingsAsync>
+      </SettingsStack>
     </div>
   );
 }
@@ -229,27 +237,33 @@ export function ModelSettings() {
 function EmptyProfilesCta() {
   const navigate = useNavigate();
   return (
-    <Card className="flex flex-col items-center justify-center gap-3 border-dashed py-8 text-center">
-      <p className="text-sm text-muted-foreground">
-        还没有可用模型。请到{" "}
-        <a
-          href="https://jiurelay.com/"
-          target="_blank"
-          rel="noreferrer"
-          className="text-primary underline-offset-2 hover:underline"
+    <SettingsAsync
+      variant="card"
+      empty
+      emptyLabel={
+        <>
+          还没有可用模型。请到{" "}
+          <a
+            href="https://jiurelay.com/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-primary underline-offset-2 hover:underline"
+          >
+            jiurelay
+          </a>{" "}
+          免费配额度，或接入服务商。
+        </>
+      }
+      emptyAction={
+        <Button
+          size="sm"
+          icon={<Plus size={14} />}
+          onClick={() => navigate("/more/providers")}
         >
-          jiurelay
-        </a>{" "}
-        免费配额度，或接入服务商。
-      </p>
-      <Button
-        size="sm"
-        icon={<Plus size={14} />}
-        onClick={() => navigate("/more/providers")}
-      >
-        接入服务商
-      </Button>
-    </Card>
+          接入服务商
+        </Button>
+      }
+    />
   );
 }
 
@@ -317,6 +331,8 @@ function ModelProfilesSection({
   } = useLlmModelProfiles();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [pendingDelete, setPendingDelete] =
+    useState<LlmModelProfileView | null>(null);
   const [pending, setPending] = useState(false);
   const [actionError, setActionError] = useState<ReactNode>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
@@ -400,15 +416,10 @@ function ModelProfilesSection({
       setSaveSuccess(`已将「${profile.name}」设为默认组合`);
     });
 
-  const onDelete = (profile: LlmModelProfileView) => {
-    if (profile.kind !== "user") return;
-    if (
-      !window.confirm(
-        `删除组合「${profile.name}」？引用该组合的会话将回落账号默认。`,
-      )
-    )
-      return;
-    void withPending(async () => {
+  const confirmDelete = async () => {
+    const profile = pendingDelete;
+    if (!profile) return;
+    await withPending(async () => {
       await deleteLlmModelProfile(profile.id);
       if (editingId === profile.id) setEditingId(null);
       setSaveWarningsById((prev) => {
@@ -418,6 +429,7 @@ function ModelProfilesSection({
       });
       setSaveSuccess(`已删除「${profile.name}」`);
     });
+    setPendingDelete(null);
   };
 
   const onCopy = (profile: LlmModelProfileView) =>
@@ -501,19 +513,10 @@ function ModelProfilesSection({
   };
 
   return (
-    <section>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">模型组合</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            主模型必填；组队队员 /
-            后台可留空跟随；识图可留空不配置。改定义后下一回合生效。
-          </p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            多人协作（委派）对工具调用要求较高；若失败可换更稳的主模型，或改用手写{" "}
-            <code className="text-xs">tasks</code>。
-          </p>
-        </div>
+    <SettingsSection
+      title="模型组合"
+      description="主模型必填，其余槽位可留空；改动下一回合生效。"
+      action={
         <Button
           variant="neutral"
           size="sm"
@@ -523,19 +526,20 @@ function ModelProfilesSection({
         >
           新建
         </Button>
-      </div>
-
-      {isLoading ? (
-        <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 size={14} className="animate-spin" />
-          加载组合…
-        </div>
-      ) : isError ? (
-        <p className="mt-3 text-xs text-destructive">
-          {modelConfigApiErrorMessage(error, "加载组合失败")}
-        </p>
-      ) : (
-        <div className="mt-3 space-y-2">
+      }
+      contentClassName="space-y-3"
+    >
+      <SettingsAsync
+        size="sm"
+        loading={isLoading}
+        loadingLabel="加载组合…"
+        error={
+          isError ? modelConfigApiErrorMessage(error, "加载组合失败") : null
+        }
+        empty={manageable.length === 0 && !creating}
+        emptyLabel="暂无组合"
+      >
+        <div className="space-y-2">
           {creating && (
             <ProfileEditor
               title="新建组合"
@@ -593,40 +597,42 @@ function ModelProfilesSection({
                 }}
                 onSetDefault={() => void onSetDefault(profile)}
                 onCopy={() => void onCopy(profile)}
-                onDelete={() => onDelete(profile)}
+                onDelete={() => setPendingDelete(profile)}
               />
             ),
           )}
-
-          {manageable.length === 0 && !creating && (
-            <p className="py-4 text-center text-xs text-muted-foreground">
-              暂无组合
-            </p>
-          )}
         </div>
-      )}
+      </SettingsAsync>
 
-      {saveSuccess && (
-        <output className="mt-3 block text-xs text-success">
-          {saveSuccess}
-        </output>
-      )}
+      <SettingsFormMessage tone="success">{saveSuccess}</SettingsFormMessage>
 
       {lastSaveWarnings.length > 0 &&
       !(
         lastWarnedProfileId != null &&
         manageable.some((p) => p.id === lastWarnedProfileId)
       ) ? (
-        <ProfileSaveWarnings className="mt-2" warnings={lastSaveWarnings} />
+        <ProfileSaveWarnings warnings={lastSaveWarnings} />
       ) : null}
 
-      {actionError &&
-        (typeof actionError === "string" ? (
-          <p className="mt-3 text-xs text-destructive">{actionError}</p>
-        ) : (
-          <div className="mt-3">{actionError}</div>
-        ))}
-    </section>
+      {typeof actionError === "string" ? (
+        <SettingsFormMessage>{actionError}</SettingsFormMessage>
+      ) : (
+        actionError
+      )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+        title={`删除组合「${pendingDelete?.name ?? ""}」？`}
+        description="引用该组合的会话将回落账号默认。"
+        confirmLabel="删除"
+        tone="danger"
+        busy={pending}
+        onConfirm={() => void confirmDelete()}
+      />
+    </SettingsSection>
   );
 }
 
@@ -712,6 +718,36 @@ function ProfileListRow({
 }) {
   const isUser = profile.kind === "user";
   const warnings = saveWarnings ?? [];
+  const actions: {
+    key: string;
+    label: string;
+    icon: LucideIcon;
+    show: boolean;
+    onClick: () => void;
+  }[] = [
+    {
+      key: "default",
+      label: "设为默认",
+      icon: Star,
+      show: !profile.is_default,
+      onClick: onSetDefault,
+    },
+    { key: "copy", label: "复制", icon: Copy, show: true, onClick: onCopy },
+    {
+      key: "edit",
+      label: "编辑",
+      icon: Pencil,
+      show: isUser,
+      onClick: onEdit,
+    },
+    {
+      key: "delete",
+      label: "删除",
+      icon: Trash2,
+      show: isUser,
+      onClick: onDelete,
+    },
+  ];
   return (
     <div
       className={cn(
@@ -743,51 +779,25 @@ function ProfileListRow({
             {summary}
           </p>
         </div>
+        {/* 预置行没有编辑 / 删除、默认行没有设为默认：缺席的动作留一个等宽空槽，
+            否则同一枚图标会在相邻行落到不同位置，右侧读起来参差不齐。 */}
         <div className="flex shrink-0 items-center gap-0.5">
-          {!profile.is_default && (
-            <SimpleTooltip label="设为默认">
-              <IconButton
-                size="sm"
-                aria-label="设为默认"
-                disabled={pending}
-                onClick={onSetDefault}
-              >
-                <Star size={14} />
-              </IconButton>
-            </SimpleTooltip>
-          )}
-          <SimpleTooltip label="复制">
-            <IconButton
-              size="sm"
-              aria-label="复制"
-              disabled={pending}
-              onClick={onCopy}
-            >
-              <Copy size={14} />
-            </IconButton>
-          </SimpleTooltip>
-          {isUser ? (
-            <>
-              <Button
-                variant="neutral"
-                size="sm"
-                disabled={pending}
-                onClick={onEdit}
-              >
-                编辑
-              </Button>
-              <SimpleTooltip label="删除">
+          {actions.map(({ key, label, icon: Icon, show, onClick }) =>
+            show ? (
+              <SimpleTooltip key={key} label={label}>
                 <IconButton
                   size="sm"
-                  aria-label="删除"
+                  aria-label={label}
                   disabled={pending}
-                  onClick={onDelete}
+                  onClick={onClick}
                 >
-                  <Trash2 size={14} />
+                  <Icon size={14} />
                 </IconButton>
               </SimpleTooltip>
-            </>
-          ) : null}
+            ) : (
+              <span key={key} className="size-7" aria-hidden />
+            ),
+          )}
         </div>
       </div>
       {warnings.length > 0 ? (
@@ -797,52 +807,25 @@ function ProfileListRow({
   );
 }
 
-/**
- * 槽位字段：标签与说明并排一行、清除动作靠右，控件紧随其下。
- * 说明放在控件之前，选之前就能读到用途；`id` 同时用于 aria 关联。
- */
-function SlotField({
-  id,
+/** 槽位的「清除 / 恢复跟随」——挂在 {@link SettingField} 的标签行右侧。 */
+function SlotClearAction({
   label,
-  hint,
-  clear,
-  children,
+  disabled,
+  onClear,
 }: {
-  id: string;
   label: string;
-  hint?: string;
-  clear?: { label: string; disabled: boolean; onClear: () => void };
-  children: ReactNode;
+  disabled: boolean;
+  onClear: () => void;
 }) {
   return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
-          <span
-            id={`${id}-label`}
-            className="text-xs font-medium text-foreground"
-          >
-            {label}
-          </span>
-          {hint ? (
-            <span id={`${id}-hint`} className="text-xs text-muted-foreground">
-              {hint}
-            </span>
-          ) : null}
-        </span>
-        {clear ? (
-          <button
-            type="button"
-            disabled={clear.disabled}
-            onClick={clear.onClear}
-            className="shrink-0 text-xs text-primary underline-offset-2 hover:underline disabled:opacity-60"
-          >
-            {clear.label}
-          </button>
-        ) : null}
-      </div>
-      {children}
-    </div>
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClear}
+      className="text-xs text-primary underline-offset-2 hover:underline disabled:opacity-60"
+    >
+      {label}
+    </button>
   );
 }
 
@@ -922,17 +905,20 @@ function ProfileEditor({
       <p className="text-sm font-semibold text-foreground">{title}</p>
 
       <div className="max-w-md space-y-4">
-        <label className="block" htmlFor="profile-name">
-          <span className="text-xs font-medium text-foreground">名称</span>
-          <input
+        <SettingField label="名称" htmlFor="profile-name">
+          <Input
             id="profile-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={busy}
-            className="mt-1.5 h-9 w-full rounded-lg border border-input bg-background px-2.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
           />
-        </label>
-        <SlotField id="profile-main" label="主模型" hint="必填">
+        </SettingField>
+        <SettingField
+          label="主模型"
+          htmlFor="profile-main"
+          hint="必填"
+          hintPlacement="label"
+        >
           <ProfileModelSelect
             id="profile-main"
             labelledBy="profile-main-label"
@@ -948,7 +934,12 @@ function ProfileEditor({
               platformAvailable={platformAvailable}
             />
           )}
-        </SlotField>
+          {/* 选主模型才用得上的取舍，放在决策点而不是分节抬头，列表页先见控件。 */}
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            多人协作（委派）对工具调用要求较高；失败可换更稳的主模型，或改用手写{" "}
+            <code className="text-xs">tasks</code>。
+          </p>
+        </SettingField>
       </div>
 
       <div className="border-t border-border pt-3">
@@ -979,18 +970,19 @@ function ProfileEditor({
         </button>
         {advancedOpen && (
           <div className="mt-3 max-w-md space-y-4">
-            <SlotField
-              id="profile-worker"
+            <SettingField
               label="组队队员"
+              htmlFor="profile-worker"
               hint="协作时队员使用；辩论仍用主模型"
-              clear={
-                worker
-                  ? {
-                      label: "恢复跟随",
-                      disabled: busy,
-                      onClear: () => setWorker(null),
-                    }
-                  : undefined
+              hintPlacement="label"
+              action={
+                worker ? (
+                  <SlotClearAction
+                    label="恢复跟随"
+                    disabled={busy}
+                    onClear={() => setWorker(null)}
+                  />
+                ) : undefined
               }
             >
               <ProfileModelSelect
@@ -1003,19 +995,20 @@ function ProfileEditor({
                 followLabel="跟随主模型"
                 onChange={(value) => setWorker(decodePointer(value))}
               />
-            </SlotField>
-            <SlotField
-              id="profile-background"
+            </SettingField>
+            <SettingField
               label="后台任务"
+              htmlFor="profile-background"
               hint="标题、记忆等"
-              clear={
-                background
-                  ? {
-                      label: "恢复跟随",
-                      disabled: busy,
-                      onClear: () => setBackground(null),
-                    }
-                  : undefined
+              hintPlacement="label"
+              action={
+                background ? (
+                  <SlotClearAction
+                    label="恢复跟随"
+                    disabled={busy}
+                    onClear={() => setBackground(null)}
+                  />
+                ) : undefined
               }
             >
               <ProfileModelSelect
@@ -1028,23 +1021,24 @@ function ProfileEditor({
                 followLabel="跟随主模型"
                 onChange={(value) => setBackground(decodePointer(value))}
               />
-            </SlotField>
-            <SlotField
-              id="profile-vision"
+            </SettingField>
+            <SettingField
               label="识图模型（可选）"
+              htmlFor="profile-vision"
               hint={
                 mainVisionCapable
                   ? "主模型已可看图，本槽供白板等按需深读"
                   : "主模型不能看图时再配；否则走平台识图或不可用"
               }
-              clear={
-                vision
-                  ? {
-                      label: "清除",
-                      disabled: busy,
-                      onClear: () => setVision(null),
-                    }
-                  : undefined
+              hintPlacement="label"
+              action={
+                vision ? (
+                  <SlotClearAction
+                    label="清除"
+                    disabled={busy}
+                    onClear={() => setVision(null)}
+                  />
+                ) : undefined
               }
             >
               <ProfileModelSelect
@@ -1057,16 +1051,12 @@ function ProfileEditor({
                 followLabel="不配置"
                 onChange={(value) => setVision(decodePointer(value))}
               />
-            </SlotField>
+            </SettingField>
           </div>
         )}
       </div>
 
-      {saveError ? (
-        <p className="text-xs text-destructive" role="alert">
-          {saveError}
-        </p>
-      ) : null}
+      <SettingsFormMessage>{saveError}</SettingsFormMessage>
 
       {!saveError && saveWarnings && saveWarnings.length > 0 ? (
         <ProfileSaveWarnings warnings={saveWarnings} />

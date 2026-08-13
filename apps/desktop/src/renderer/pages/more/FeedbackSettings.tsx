@@ -1,5 +1,13 @@
-import { Button, Card, Input, Textarea } from "@/components/ui";
-import { ApiError, api } from "@/services/api";
+import {
+  SettingField,
+  SettingsAsync,
+  SettingsFormMessage,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
+import { Button, Card, Input, Select, Textarea } from "@/components/ui";
+import { errMsg } from "@/lib/errMsg";
+import { api } from "@/services/api";
 import { Loader2 } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { SettingsHeader } from "./SettingsHeader";
@@ -27,13 +35,6 @@ const CATEGORY_OPTIONS = [
   { value: "improvement", label: "体验改进" },
   { value: "other", label: "其他" },
 ] as const;
-
-const SELECT_CLASS =
-  "h-8 w-full rounded-lg border border-border bg-background px-2.5 text-sm text-foreground focus:border-primary focus:outline-none focus:ring-1 focus:ring-ring";
-
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
 
 function categoryBadgeClass(category: string): string {
   switch (category) {
@@ -94,6 +95,7 @@ export function FeedbackSettings() {
   const [listError, setListError] = useState<string | null>(null);
 
   const loadFeedback = useCallback(async () => {
+    setLoading(true);
     setListError(null);
     try {
       const res = await api.get<FeedbackListResponse>("/v1/feedback");
@@ -147,119 +149,106 @@ export function FeedbackSettings() {
         description="遇到问题或有好想法？随时告诉我们。"
       />
 
-      <form onSubmit={(e) => void handleSubmit(e)} className="mt-6 space-y-4">
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">分类</span>
-          <select
-            className={SELECT_CLASS}
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
+      <SettingsStack>
+        <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+          <SettingField label="分类" htmlFor="feedback-category">
+            <Select
+              id="feedback-category"
+              value={category}
+              onChange={(e) => setCategory(e.target.value)}
+            >
+              {CATEGORY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </Select>
+          </SettingField>
+
+          <SettingField label="标题" htmlFor="feedback-title">
+            <Input
+              id="feedback-title"
+              value={title}
+              maxLength={200}
+              placeholder="简要描述问题或建议"
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </SettingField>
+
+          <SettingField label="详细描述" htmlFor="feedback-description">
+            <Textarea
+              id="feedback-description"
+              rows={4}
+              value={description}
+              maxLength={5000}
+              placeholder="请尽量详细说明，便于我们定位和跟进"
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </SettingField>
+
+          <SettingsFormMessage tone={submitError ? "error" : "success"}>
+            {submitError ?? (submitSuccess ? "提交成功" : null)}
+          </SettingsFormMessage>
+
+          <div className="flex justify-end">
+            <Button
+              type="submit"
+              size="md"
+              disabled={submitting}
+              icon={
+                submitting ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : undefined
+              }
+            >
+              提交反馈
+            </Button>
+          </div>
+        </form>
+
+        <SettingsSection title="历史反馈" divider>
+          <SettingsAsync
+            loading={loading}
+            error={listError}
+            empty={feedbackList.length === 0}
+            emptyLabel="暂无反馈记录"
+            onRetry={() => void loadFeedback()}
           >
-            {CATEGORY_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="block" htmlFor="feedback-title">
-          <span className="mb-1 block text-xs text-muted-foreground">标题</span>
-          <Input
-            id="feedback-title"
-            className="w-full"
-            value={title}
-            maxLength={200}
-            placeholder="简要描述问题或建议"
-            onChange={(e) => setTitle(e.target.value)}
-          />
-        </label>
-
-        <label className="block" htmlFor="feedback-description">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            详细描述
-          </span>
-          <Textarea
-            id="feedback-description"
-            className="w-full text-sm"
-            rows={4}
-            value={description}
-            maxLength={5000}
-            placeholder="请尽量详细说明，便于我们定位和跟进"
-            onChange={(e) => setDescription(e.target.value)}
-          />
-        </label>
-
-        {(submitError || submitSuccess) && (
-          <p
-            className={
-              submitError ? "text-xs text-destructive" : "text-xs text-success"
-            }
-          >
-            {submitError ?? "提交成功"}
-          </p>
-        )}
-
-        <div className="flex justify-end">
-          <Button
-            type="submit"
-            size="md"
-            disabled={submitting}
-            icon={
-              submitting ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : undefined
-            }
-          >
-            提交反馈
-          </Button>
-        </div>
-      </form>
-
-      <section className="mt-8 border-t border-border pt-6">
-        <h2 className="text-sm font-semibold text-foreground">历史反馈</h2>
-
-        {loading ? (
-          <p className="mt-3 text-sm text-muted-foreground">加载中…</p>
-        ) : listError ? (
-          <p className="mt-3 text-sm text-destructive">{listError}</p>
-        ) : feedbackList.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">暂无反馈记录</p>
-        ) : (
-          <ul className="mt-3 space-y-3">
-            {feedbackList.map((item) => (
-              <li key={item.id}>
-                <Card className="p-4">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`rounded-lg px-2 py-0.5 text-xs font-medium ${categoryBadgeClass(item.category)}`}
-                    >
-                      {categoryLabel(item.category)}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {statusLabel(item.status)}
-                    </span>
-                    <span className="ml-auto text-xs text-muted-foreground">
-                      {formatDate(item.created_at)}
-                    </span>
-                  </div>
-                  <p className="mt-2 text-sm font-medium text-foreground">
-                    {item.title}
-                  </p>
-                  {item.admin_reply && (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground">
-                        回复：
+            <ul className="space-y-3">
+              {feedbackList.map((item) => (
+                <li key={item.id}>
+                  <Card className="p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-lg px-2 py-0.5 text-xs font-medium ${categoryBadgeClass(item.category)}`}
+                      >
+                        {categoryLabel(item.category)}
                       </span>
-                      {item.admin_reply}
+                      <span className="text-xs text-muted-foreground">
+                        {statusLabel(item.status)}
+                      </span>
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {formatDate(item.created_at)}
+                      </span>
+                    </div>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {item.title}
                     </p>
-                  )}
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+                    {item.admin_reply && (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          回复：
+                        </span>
+                        {item.admin_reply}
+                      </p>
+                    )}
+                  </Card>
+                </li>
+              ))}
+            </ul>
+          </SettingsAsync>
+        </SettingsSection>
+      </SettingsStack>
     </div>
   );
 }

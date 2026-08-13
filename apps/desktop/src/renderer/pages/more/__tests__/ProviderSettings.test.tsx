@@ -10,6 +10,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -134,16 +135,46 @@ describe("ProviderSettings", () => {
     expect(screen.queryByText(/联系管理员/)).toBeNull();
   });
 
-  it("confirms then deletes a provider", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("confirms in an in-product dialog, then deletes a provider", async () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getAllByRole("button", { name: "删除" })[1]);
-    expect(confirmSpy).toHaveBeenCalled();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/删除服务商「OpenAI」？/)).toBeTruthy();
+    // 还剩一个服务商兜底 → 软文案，不该吓唬用户说会断供。
+    expect(within(dialog).getByText(/不会中断对话/)).toBeTruthy();
+    expect(vi.mocked(deleteLlmProvider)).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() =>
       expect(vi.mocked(deleteLlmProvider)).toHaveBeenCalledWith("p2"),
     );
-    confirmSpy.mockRestore();
+  });
+
+  it("cancelling the confirm dialog leaves the provider alone", async () => {
+    mockProviders(providersResponse());
+    renderPage();
+    fireEvent.click(screen.getAllByRole("button", { name: "删除" })[1]);
+
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(vi.mocked(deleteLlmProvider)).not.toHaveBeenCalled();
+  });
+
+  it("warns that deleting the last provider cuts off conversations", async () => {
+    mockProviders(
+      providersResponse({
+        providers: [providersResponse().providers[0]],
+        platform_available: false,
+      }),
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/这是唯一的服务商/)).toBeTruthy();
   });
 
   it("surfaces ADMIN_PRODUCT_FORBIDDEN instead of a generic load failure", () => {

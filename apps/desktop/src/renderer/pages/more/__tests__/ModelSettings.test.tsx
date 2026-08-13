@@ -220,7 +220,9 @@ describe("ModelSettings (profiles)", () => {
     mockProviders(providersResponse());
     renderPage();
     expect(screen.getByText("模型组合")).toBeTruthy();
-    expect(screen.getByText(/多人协作（委派）对工具调用要求较高/)).toBeTruthy();
+    expect(screen.getByText(/主模型必填，其余槽位可留空/)).toBeTruthy();
+    // 选主模型才用得上的取舍已下沉到编辑器内的决策点，列表页先见控件。
+    expect(screen.queryByText(/多人协作（委派）对工具调用要求较高/)).toBeNull();
     expect(screen.getByText("GLM-5.2")).toBeTruthy();
     expect(screen.getByText("办公")).toBeTruthy();
     expect(screen.getByText("默认组合")).toBeTruthy();
@@ -305,15 +307,19 @@ describe("ModelSettings (profiles)", () => {
     );
   });
 
-  it("deletes a user profile after confirm", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("deletes a user profile after confirming in the dialog", async () => {
     mockProviders(providersResponse());
     renderPage();
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/删除组合/)).toBeTruthy();
+    expect(deleteLlmModelProfile).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() =>
       expect(deleteLlmModelProfile).toHaveBeenCalledWith("user-mine"),
     );
-    confirmSpy.mockRestore();
   });
 
   it("does not offer delete on system presets", () => {

@@ -1,8 +1,13 @@
+import {
+  SettingRow,
+  SettingsAsync,
+  SettingsSection,
+} from "@/components/settings";
 import { Button, Card, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { formatCompact, formatCost, formatDisplayCost } from "@/lib/format";
 import { useUsageStore } from "@/stores/usage";
-import { KeyRound, Loader2, RefreshCw } from "lucide-react";
+import { KeyRound, RefreshCw } from "lucide-react";
 import { useEffect } from "react";
 import { SettingsHeader } from "./SettingsHeader";
 
@@ -12,8 +17,9 @@ import { SettingsHeader } from "./SettingsHeader";
  * 大众面 leads with two semantic quota meters (本月额度 / 今日 tokens) so the user
  * reads「还剩多少」at a glance without big raw numbers. Token / cost breakdown and
  * run-detail「资源消耗」default-expand are always on. All numbers come from
- * `GET /usage/summary` via the usage store; money is nano-CNY → ¥（无汇率）.
- * BYOK-with-key shows token meters + ≈¥ estimates when `estimated_cost` /
+ * `GET /usage/summary` via the usage store; money is integer nano（无汇率），符号取
+ * 自各金额自带的 `currency`——平台记账 / 额度恒 ¥，BYOK 估算走社区美元价目显 $.
+ * BYOK-with-key shows token meters + ≈ estimates when `estimated_cost` /
  * `cost_estimated_total` is present.
  */
 export function UsageSettings() {
@@ -38,7 +44,7 @@ export function UsageSettings() {
         title="用量"
         description={
           byok
-            ? "自带 Key 模式：平台不限额。有估算价时显示 ≈¥（非上游账单），并以 token 用量为主。"
+            ? "自带 Key 模式：平台不限额。有估算价时按社区美元价目显示 ≈$（非上游账单），并以 token 用量为主。"
             : "本月额度与今日用量，以人民币展示。"
         }
         action={
@@ -69,38 +75,16 @@ export function UsageSettings() {
           {error && <RefreshErrorBanner message={error} onRetry={refresh} />}
           <Dashboard summary={summary} byok={byok} />
         </>
-      ) : error ? (
-        <ErrorState message={error} onRetry={refresh} />
       ) : (
-        <LoadingState />
+        <SettingsAsync
+          className="mt-6"
+          variant="card"
+          loading={!error}
+          error={error}
+          onRetry={refresh}
+        />
       )}
     </div>
-  );
-}
-
-/** First-load spinner — distinct from the error state (P1: 加载/错误分离). */
-function LoadingState() {
-  return (
-    <div className="mt-6 flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 size={16} className="animate-spin" />
-      加载中…
-    </div>
-  );
-}
-
-/** First-load failure: no data to show, so a prominent centered retry (P1). */
-function ErrorState({
-  message,
-  onRetry,
-}: {
-  message: string;
-  onRetry: () => void;
-}) {
-  return (
-    <Card className="mt-6 flex flex-col items-center justify-center gap-3 border-dashed py-16 text-center">
-      <p className="text-sm text-muted-foreground">{message}</p>
-      <Button onClick={onRetry}>重试</Button>
-    </Card>
   );
 }
 
@@ -234,14 +218,12 @@ type Summary = NonNullable<
  */
 function ByokNote() {
   return (
-    <Card
-      variant="muted"
-      className="flex items-start gap-2.5 bg-muted/30 px-4 py-3"
-    >
+    <Card variant="muted" className="flex items-start gap-2.5 px-4 py-3">
       <KeyRound size={16} className="mt-0.5 shrink-0 text-muted-foreground" />
       <p className="text-xs text-muted-foreground">
         当前为「自带 Key」模式：对话走你配置的模型与端点，平台不设上限。下方以
-        token 为主；有估算价时显示 ≈¥（按社区价目估算，非上游账单）。
+        token 为主；有估算价时显示
+        ≈$（按社区美元价目估算，非上游账单，不折算汇率）。
       </p>
     </Card>
   );
@@ -330,14 +312,19 @@ function CostTrend({
   const max = points.reduce((m, p) => Math.max(m, p.cost_total), 0);
   const total = points.reduce((s, p) => s + p.cost_total, 0);
   return (
-    <div>
-      <div className="flex items-baseline justify-between">
-        <p className="text-sm text-foreground">近 7 日成本</p>
+    <SettingsSection
+      title="近 7 日成本"
+      action={
         <span className="text-xs text-muted-foreground">
           合计 {formatCost(total)}
         </span>
-      </div>
-      <div className="mt-3 flex h-16 items-end gap-1.5">
+      }
+    >
+      {/* 高度给在轨道自身而非整行：柱高是百分比，只有当父元素高度确定时才解析得出
+          ——挂在行上时列不被拉伸，柱子会塌成 0。轨道自带高度后周几标签也不再吃掉
+          柱子的可用高度。柱宽同样设上限，否则 `rounded-full` 的半径跟着列宽走，
+          柱子会摊成横躺的胶囊。 */}
+      <div className="flex gap-1.5">
         {points.map((p) => {
           // Min 2% so a zero / tiny day still shows a sliver baseline.
           const h = max > 0 ? Math.max((p.cost_total / max) * 100, 2) : 2;
@@ -346,10 +333,10 @@ function CostTrend({
               key={p.date}
               label={`${weekdayLabel(p.date)} · ${formatCost(p.cost_total)}`}
             >
-              <div className="flex flex-1 flex-col items-center gap-1">
-                <div className="flex w-full flex-1 items-end">
+              <div className="flex flex-1 flex-col items-center gap-1.5">
+                <div className="flex h-16 w-full items-end justify-center">
                   <div
-                    className="w-full rounded-full bg-primary"
+                    className="w-full max-w-6 rounded-full bg-primary"
                     style={{ height: `${h}%` }}
                   />
                 </div>
@@ -361,7 +348,7 @@ function CostTrend({
           );
         })}
       </div>
-    </div>
+    </SettingsSection>
   );
 }
 
@@ -389,11 +376,11 @@ function UsageDetail({
     rows.push(
       {
         label: "今日成本",
-        value: formatCost(today.cost.total),
+        value: formatCost(today.cost.total, today.cost.currency),
       },
       {
         label: "本月成本",
-        value: formatCost(month.cost.total),
+        value: formatCost(month.cost.total, month.cost.currency),
       },
     );
   } else {
@@ -401,17 +388,26 @@ function UsageDetail({
       label: "本月 tokens",
       value: `输入 ${formatCompact(month.usage.input)} · 输出 ${formatCompact(month.usage.output)}`,
     });
+    // 估算走社区价目（美元列表价），币种随金额下发——不与平台记账 ¥ 混用符号。
     const todayEst = today.estimated_cost?.total ?? 0;
     const monthEst = month.estimated_cost?.total ?? 0;
     if (todayEst > 0 || monthEst > 0) {
       rows.push(
         {
           label: "今日估算",
-          value: formatDisplayCost(todayEst, true),
+          value: formatDisplayCost(
+            todayEst,
+            true,
+            today.estimated_cost?.currency,
+          ),
         },
         {
           label: "本月估算",
-          value: formatDisplayCost(monthEst, true),
+          value: formatDisplayCost(
+            monthEst,
+            true,
+            month.estimated_cost?.currency,
+          ),
         },
       );
     }
@@ -424,15 +420,13 @@ function UsageDetail({
   return (
     <Card>
       {rows.map((row, i) => (
-        <div
+        <SettingRow
           key={row.label}
-          className={`flex items-center justify-between px-4 py-2.5 text-sm ${
-            i > 0 ? "border-t border-border" : ""
-          }`}
-        >
-          <span className="text-muted-foreground">{row.label}</span>
-          <span className="tabular-nums text-foreground">{row.value}</span>
-        </div>
+          surface="list"
+          divider={i > 0}
+          label={row.label}
+          value={row.value}
+        />
       ))}
     </Card>
   );

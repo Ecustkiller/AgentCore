@@ -14,9 +14,15 @@ export {
   CardBody,
   CardFooter,
   CardHeader,
+  cardVariantClass,
   type CardProps,
   type CardVariant,
 } from "./card";
+export {
+  ConfirmDialog,
+  type ConfirmDialogProps,
+  type ConfirmTone,
+} from "./confirm-dialog";
 export {
   DecisionCard,
   DecisionCardFooter,
@@ -45,7 +51,8 @@ export {
   type UseSortableTabIdsOptions,
 } from "./horizontal-tab-strip";
 export { FinishReasonChip } from "./finish-reason-chip";
-export { Input, Textarea } from "./input";
+export { Input, Textarea, fieldSurfaceClass } from "./input";
+export { Select } from "./select";
 export {
   SearchField,
   type SearchFieldProps,
@@ -58,6 +65,11 @@ export {
 } from "./search-trigger";
 export { PatternCardHeader } from "./pattern-card-header";
 export { SectionLabel } from "./section-label";
+export {
+  SegmentedNav,
+  type SegmentedNavItem,
+  type SegmentedNavProps,
+} from "./segmented-nav";
 export {
   SurfaceRow,
   SurfaceRowButton,

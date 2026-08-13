@@ -1,3 +1,8 @@
+import {
+  SettingRow,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
 import { Card } from "@/components/ui";
 import {
   COMMAND_CATEGORY_ORDER,
@@ -53,30 +58,34 @@ export function ShortcutsSettings() {
         }
       />
 
-      <section className="mt-6">
-        <h2 className="text-base font-medium">全局快捷键</h2>
-        <Card className="mt-3 overflow-hidden">
-          {GLOBAL_SHORTCUTS.map((s, i) => (
-            <ShortcutRow
-              key={s.id}
-              first={i === 0}
-              label={s.label}
-              chords={shortcutChords(s)}
-            />
-          ))}
-          {/* Esc is owned by the dialog (Radix), not the global handler — listed
-              here for completeness so the reference is whole. */}
-          <ShortcutRow first={false} label="关闭命令面板" chords={["Esc"]} />
-        </Card>
-      </section>
+      <SettingsStack>
+        <SettingsSection title="全局快捷键" titleSize="base">
+          <Card className="overflow-hidden">
+            {GLOBAL_SHORTCUTS.map((s, i) => (
+              <ShortcutRow
+                key={s.id}
+                divider={i > 0}
+                label={s.label}
+                chords={shortcutChords(s)}
+              />
+            ))}
+            {/* Esc is owned by the dialog (Radix), not the global handler — listed
+                here for completeness so the reference is whole. */}
+            <ShortcutRow divider label="关闭命令面板" chords={["Esc"]} />
+          </Card>
+        </SettingsSection>
 
-      <section className="mt-6">
-        <h2 className="text-base font-medium">命令面板命令</h2>
-        <p className="mt-1 text-xs text-muted-foreground">
-          按 {shortcutChords(GLOBAL_SHORTCUTS[0])[0]}{" "}
-          打开命令面板后输入即可运行。
-        </p>
-        <div className="mt-3 space-y-4">
+        <SettingsSection
+          title="命令面板命令"
+          titleSize="base"
+          description={
+            <>
+              按 {shortcutChords(GLOBAL_SHORTCUTS[0])[0]}{" "}
+              打开命令面板后输入即可运行。
+            </>
+          }
+          contentClassName="space-y-4"
+        >
           {COMMAND_CATEGORY_ORDER.map((category) => {
             const items = commands.filter((c) => c.category === category);
             if (items.length === 0) return null;
@@ -87,14 +96,14 @@ export function ShortcutsSettings() {
                 </p>
                 <Card className="overflow-hidden">
                   {items.map((c, i) => (
-                    <CommandRow key={c.id} first={i === 0} cmd={c} />
+                    <CommandRow key={c.id} divider={i > 0} cmd={c} />
                   ))}
                 </Card>
               </div>
             );
           })}
-        </div>
-      </section>
+        </SettingsSection>
+      </SettingsStack>
     </div>
   );
 }
@@ -110,55 +119,56 @@ function Kbd({ children }: { children: React.ReactNode }) {
 
 /** One global-shortcut row: action label + its chord(s) (alternates joined by 或). */
 function ShortcutRow({
-  first,
+  divider,
   label,
   chords,
 }: {
-  first: boolean;
+  divider: boolean;
   label: string;
   chords: string[];
 }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-3 px-4 py-2.5 ${
-        first ? "" : "border-t border-border"
-      }`}
-    >
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {label}
-      </span>
-      <span className="flex shrink-0 items-center gap-1">
-        {chords.map((c, i) => (
-          <span key={c} className="flex items-center gap-1">
-            {i > 0 && <span className="text-xs text-muted-foreground">或</span>}
-            <Kbd>{c}</Kbd>
-          </span>
-        ))}
-      </span>
-    </div>
+    <SettingRow
+      surface="list"
+      divider={divider}
+      label={label}
+      control={
+        <span className="flex shrink-0 items-center gap-1">
+          {chords.map((c, i) => (
+            <span key={c} className="flex items-center gap-1">
+              {i > 0 && (
+                <span className="text-xs text-muted-foreground">或</span>
+              )}
+              <Kbd>{c}</Kbd>
+            </span>
+          ))}
+        </span>
+      }
+    />
   );
 }
 
 /** One palette-command row: icon + title + its shortcut (or state hint). */
-function CommandRow({ first, cmd }: { first: boolean; cmd: PaletteCommand }) {
+function CommandRow({
+  divider,
+  cmd,
+}: { divider: boolean; cmd: PaletteCommand }) {
   const Icon = cmd.icon;
   return (
-    <div
-      className={`flex items-center gap-3 px-4 py-2.5 ${
-        first ? "" : "border-t border-border"
-      }`}
-    >
-      <Icon size={16} className="shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-        {cmd.title}
-      </span>
-      {cmd.shortcut ? (
-        <Kbd>{cmd.shortcut}</Kbd>
-      ) : cmd.hint ? (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {cmd.hint}
-        </span>
-      ) : null}
-    </div>
+    <SettingRow
+      surface="list"
+      divider={divider}
+      leading={<Icon size={16} className="shrink-0 text-muted-foreground" />}
+      label={cmd.title}
+      control={
+        cmd.shortcut ? (
+          <Kbd>{cmd.shortcut}</Kbd>
+        ) : cmd.hint ? (
+          <span className="shrink-0 text-xs text-muted-foreground">
+            {cmd.hint}
+          </span>
+        ) : undefined
+      }
+    />
   );
 }

@@ -8,8 +8,8 @@ import {
   Keyboard,
   type LucideIcon,
   MessageSquarePlus,
-  Palette,
   Shield,
+  SlidersHorizontal,
   UserCog,
 } from "lucide-react";
 import { Outlet } from "react-router-dom";
@@ -25,20 +25,16 @@ interface NavGroup {
   items: NavItem[];
 }
 
-// Settings are grouped by intent: 模型 (组合) + 服务商 (Key) adjacent; Git 凭据
-// 挂账户组（G3）；账户 / 偏好 / 关于. Opening /more 落点见 MoreIndexRedirect。
+// Settings are grouped by intent, four groups over ten items: 账户（含 Git 凭据 /
+// 用量）、模型（组合 + Key 相邻）、偏好、关于（含反馈）。之前是六组，其中三组只有
+// 一项——组标题比内容还多，扫读全是分隔线。合并时只动分组，路径不变。
+// 「外观」→「通用」（多收了原本藏在关于页的诊断类开关）；旧路径见 router 重定向。
+// Opening /more 落点见 MoreIndexRedirect。
 // 「自动化」已迁至工具箱 #/toolbox/automations。
 // AI 记忆内容管理在「文件」页，不设设置子页。
 // 新会话默认权限配方：对话内权限徽章「设为新会话默认」（无设置子页）。
 // 产品公告 inbox 已迁 IM 官方号（消息页）；顶栏 Banner 仍走 notices/active。
 const NAV_GROUPS: NavGroup[] = [
-  {
-    label: "模型",
-    items: [
-      { icon: Cpu, label: "模型", path: "/more/model" },
-      { icon: KeyRound, label: "服务商", path: "/more/providers" },
-    ],
-  },
   {
     label: "账户",
     items: [
@@ -48,23 +44,26 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "消息",
-    items: [{ icon: Shield, label: "消息隐私", path: "/more/messages" }],
+    label: "模型",
+    items: [
+      { icon: Cpu, label: "模型", path: "/more/model" },
+      { icon: KeyRound, label: "服务商", path: "/more/providers" },
+    ],
   },
   {
     label: "偏好",
     items: [
-      { icon: Palette, label: "外观", path: "/more/appearance" },
+      { icon: SlidersHorizontal, label: "通用", path: "/more/general" },
+      { icon: Shield, label: "消息隐私", path: "/more/messages" },
       { icon: Keyboard, label: "快捷键", path: "/more/shortcuts" },
     ],
   },
   {
-    label: "反馈",
-    items: [{ icon: MessageSquarePlus, label: "反馈", path: "/more/feedback" }],
-  },
-  {
     label: "关于",
-    items: [{ icon: Info, label: "关于", path: "/more/about" }],
+    items: [
+      { icon: Info, label: "关于", path: "/more/about" },
+      { icon: MessageSquarePlus, label: "反馈", path: "/more/feedback" },
+    ],
   },
 ];
 

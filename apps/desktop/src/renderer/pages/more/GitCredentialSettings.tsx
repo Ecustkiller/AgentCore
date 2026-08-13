@@ -1,6 +1,13 @@
-import { Button, Card, Input } from "@/components/ui";
+import {
+  SettingField,
+  SettingsAsync,
+  SettingsFormMessage,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
+import { Button, Card, ConfirmDialog, Input } from "@/components/ui";
+import { errMsg } from "@/lib/errMsg";
 import { gitCredentialKeys } from "@/lib/queryKeys";
-import { ApiError } from "@/services/api";
 import {
   deleteGitCredentials,
   getGitCredentials,
@@ -11,10 +18,6 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { SettingsHeader } from "./SettingsHeader";
-
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
 
 /**
  * Git 凭据 (/more/git) — G3 远程产品化。
@@ -32,6 +35,7 @@ export function GitCredentialSettings() {
   const [token, setToken] = useState("");
   const [username, setUsername] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -58,6 +62,8 @@ export function GitCredentialSettings() {
       });
     },
     onError: (e) => setFormError(errMsg(e, "清除失败，请重试")),
+    // A failure belongs on the page next to the form, not stranded in the modal.
+    onSettled: () => setConfirmClear(false),
   });
 
   const configured = data?.configured === true;
@@ -69,42 +75,32 @@ export function GitCredentialSettings() {
         title="Git 凭据"
         description="云工作区私仓用账户级 PAT；本地仓继承本机凭据。工具永不收密码参数。"
       />
-      <div className="mt-6 space-y-8">
-        <section>
-          <h2 className="text-sm font-semibold text-foreground">
-            云工作区 · PAT
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            用于云端浅克隆与 push/fetch/pull 私有 http(s)
-            仓。明文加密落库，响应仅掩码。 公网仓可不配。生成 GitHub PAT 时勾选
-            <code className="mx-1 rounded bg-muted px-1">repo</code>
-            权限即可。
-          </p>
-          <Card className="mt-3 space-y-4 p-4">
-            {isLoading ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                加载中…
-              </div>
-            ) : isError ? (
-              <p className="text-sm text-destructive">
-                {errMsg(error, "无法加载凭据状态")}
-              </p>
-            ) : (
+      <SettingsStack>
+        <SettingsSection
+          title="云工作区 · PAT"
+          description={
+            <>
+              用于云端浅克隆与 push/fetch/pull 私有 http(s)
+              仓。明文加密落库，响应仅掩码。 公网仓可不配。生成 GitHub PAT
+              时勾选
+              <code className="mx-1 rounded bg-muted px-1">repo</code>
+              权限即可。
+            </>
+          }
+        >
+          <Card className="space-y-4 p-4">
+            <SettingsAsync
+              loading={isLoading}
+              error={isError ? errMsg(error, "无法加载凭据状态") : undefined}
+            >
               <p className="text-sm text-muted-foreground">
                 {configured
                   ? `已配置${data?.username ? `（用户 ${data.username}）` : ""} · 掩码 ${data?.masked_token ?? "••••"}`
                   : "尚未配置。公网仓可直接克隆；私仓请先保存 PAT。"}
               </p>
-            )}
+            </SettingsAsync>
 
-            <div className="space-y-2">
-              <label
-                className="text-xs font-medium text-foreground"
-                htmlFor="git-pat"
-              >
-                Personal Access Token
-              </label>
+            <SettingField label="Personal Access Token" htmlFor="git-pat">
               <Input
                 id="git-pat"
                 type="password"
@@ -118,14 +114,8 @@ export function GitCredentialSettings() {
                 onChange={(e) => setToken(e.target.value)}
                 disabled={busy}
               />
-            </div>
-            <div className="space-y-2">
-              <label
-                className="text-xs font-medium text-foreground"
-                htmlFor="git-username"
-              >
-                用户名（可选）
-              </label>
+            </SettingField>
+            <SettingField label="用户名（可选）" htmlFor="git-username">
               <Input
                 id="git-username"
                 autoComplete="off"
@@ -134,56 +124,49 @@ export function GitCredentialSettings() {
                 onChange={(e) => setUsername(e.target.value)}
                 disabled={busy}
               />
-            </div>
+            </SettingField>
 
-            {formError && (
-              <p className="text-sm text-destructive" role="alert">
-                {formError}
-              </p>
-            )}
+            <SettingsFormMessage>{formError}</SettingsFormMessage>
 
             <div className="flex flex-wrap gap-2">
               <Button
                 disabled={busy || !token.trim()}
+                icon={
+                  saveMutation.isPending ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : undefined
+                }
                 onClick={() => saveMutation.mutate()}
               >
-                {saveMutation.isPending ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : null}
                 {configured ? "更新凭据" : "保存凭据"}
               </Button>
               {configured && (
                 <Button
                   variant="neutral"
                   disabled={busy}
-                  onClick={() => {
-                    if (
-                      !window.confirm(
-                        "清除账户 Git 凭据？云私仓 clone/push 将失败直至重新配置。",
-                      )
-                    )
-                      return;
-                    clearMutation.mutate();
-                  }}
+                  onClick={() => setConfirmClear(true)}
                 >
                   清除
                 </Button>
               )}
             </div>
           </Card>
-        </section>
+        </SettingsSection>
 
-        <section>
-          <h2 className="text-sm font-semibold text-foreground">本地工作区</h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            AgentCore 不代持本机密码。本地仓的 clone / push 继承操作系统 Git
-            credential helper，或你已用
-            <code className="mx-1 rounded bg-muted px-1">gh auth login</code>
-            配置的 GitHub CLI 凭据。请在本机终端先确认
-            <code className="mx-1 rounded bg-muted px-1">git push</code>
-            可用，再在产品里打开该本地仓。
-          </p>
-          <Card className="mt-3 p-4 text-sm text-muted-foreground">
+        <SettingsSection
+          title="本地工作区"
+          description={
+            <>
+              AgentCore 不代持本机密码。本地仓的 clone / push 继承操作系统 Git
+              credential helper，或你已用
+              <code className="mx-1 rounded bg-muted px-1">gh auth login</code>
+              配置的 GitHub CLI 凭据。请在本机终端先确认
+              <code className="mx-1 rounded bg-muted px-1">git push</code>
+              可用，再在产品里打开该本地仓。
+            </>
+          }
+        >
+          <Card className="p-4 text-sm text-muted-foreground">
             云端文件页可对云工作区「克隆仓库」；本地请用已认证的本机仓库目录绑定工作区。
             需要私仓云克隆时回到本页配置 PAT。也可从{" "}
             <Link
@@ -194,8 +177,19 @@ export function GitCredentialSettings() {
             </Link>{" "}
             页对云工作区右键克隆。
           </Card>
-        </section>
-      </div>
+        </SettingsSection>
+      </SettingsStack>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="清除账户 Git 凭据？"
+        description="云私仓的 clone / push 将失败，直至重新配置 PAT。"
+        confirmLabel="清除"
+        tone="danger"
+        busy={clearMutation.isPending}
+        onConfirm={() => clearMutation.mutate()}
+      />
     </div>
   );
 }

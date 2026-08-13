@@ -20,8 +20,8 @@ import { WhiteboardPreviewPage } from "@/pages/WhiteboardPreviewPage";
 import { LegalSettingsPage } from "@/pages/legal/LegalSettingsPage";
 import { AboutSettings } from "@/pages/more/AboutSettings";
 import { AccountSettings } from "@/pages/more/AccountSettings";
-import { AppearanceSettings } from "@/pages/more/AppearanceSettings";
 import { FeedbackSettings } from "@/pages/more/FeedbackSettings";
+import { GeneralSettings } from "@/pages/more/GeneralSettings";
 import { GitCredentialSettings } from "@/pages/more/GitCredentialSettings";
 import { ImPrivacySettings } from "@/pages/more/ImPrivacySettings";
 import { ModelSettings } from "@/pages/more/ModelSettings";
@@ -160,7 +160,13 @@ export const router = createHashRouter([
           { path: "account", element: <AccountSettings /> },
           { path: "messages", element: <ImPrivacySettings /> },
           { path: "usage", element: <UsageSettings /> },
-          { path: "appearance", element: <AppearanceSettings /> },
+          { path: "general", element: <GeneralSettings /> },
+          // 「外观」已改名「通用」并收编了原关于页的诊断类开关；旧路径仍是既有
+          // 书签与外部深链的目标，故留重定向。
+          {
+            path: "appearance",
+            element: <Navigate to="/more/general" replace />,
+          },
           { path: "shortcuts", element: <ShortcutsSettings /> },
           { path: "feedback", element: <FeedbackSettings /> },
           { path: "about", element: <AboutSettings /> },

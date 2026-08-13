@@ -1,14 +1,13 @@
-import { Button, Card, Input } from "@/components/ui";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  SettingField,
+  SettingRow,
+  SettingsFormMessage,
+  SettingsSection,
+  SettingsStack,
+} from "@/components/settings";
+import { Button, Card, ConfirmDialog, Input } from "@/components/ui";
+import { errMsg } from "@/lib/errMsg";
 import { notifySuccess } from "@/lib/toast";
-import { ApiError } from "@/services/api";
 import {
   changePassword,
   deleteAccount,
@@ -26,12 +25,6 @@ import { SettingsHeader } from "./SettingsHeader";
 // before a pointless round-trip.
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
-/** Prefer the backend's user-facing message (`{error:{message}}`) over a generic
- *  fallback so the form echoes exactly why a request was rejected. */
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
-
 /**
  * 账户设置 (/more/account) — self-service identity management.
  *
@@ -44,35 +37,14 @@ export function AccountSettings() {
         title="账户设置"
         description="管理你的个人资料、登录密码、登录设备与账户。"
       />
-      <div className="mt-6 space-y-8">
+      <SettingsStack>
         <AvatarSection />
         <ProfileSection />
         <PasswordSection />
         <LoginSessionsSection />
         <DangerSection />
-      </div>
+      </SettingsStack>
     </div>
-  );
-}
-
-/** A titled settings block: heading + body on the shared card surface. */
-function Section({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section>
-      <h2 className="text-sm font-semibold text-foreground">{title}</h2>
-      {description && (
-        <p className="mt-1 text-xs text-muted-foreground">{description}</p>
-      )}
-      <Card className="mt-3 p-4">{children}</Card>
-    </section>
   );
 }
 
@@ -124,8 +96,8 @@ function AvatarSection() {
   };
 
   return (
-    <Section title="头像" description="上传清晰的正方形图片效果最佳。">
-      <div className="flex items-center gap-4">
+    <SettingsSection title="头像" description="上传清晰的正方形图片效果最佳。">
+      <Card className="flex items-center gap-4 p-4">
         <div className="flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-muted text-xl font-medium text-muted-foreground">
           {user?.avatarUrl ? (
             <img
@@ -162,7 +134,7 @@ function AvatarSection() {
               </Button>
             )}
           </div>
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          <SettingsFormMessage>{error}</SettingsFormMessage>
         </div>
         <input
           ref={inputRef}
@@ -171,8 +143,8 @@ function AvatarSection() {
           className="hidden"
           onChange={(e) => void onFile(e)}
         />
-      </div>
-    </Section>
+      </Card>
+    </SettingsSection>
   );
 }
 
@@ -212,42 +184,30 @@ function ProfileSection() {
   };
 
   return (
-    <Section
+    <SettingsSection
       title="个人资料"
       description="显示名会展示给团队成员；邮箱用于后续找回密码（可选）。"
     >
-      <div className="space-y-3">
-        <label className="block" htmlFor="account-profile-username">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            用户名
-          </span>
+      <Card className="space-y-3 p-4">
+        <SettingField label="用户名" htmlFor="account-profile-username">
           <Input
             id="account-profile-username"
-            className="w-full opacity-60"
             value={user?.username ?? ""}
             disabled
           />
-        </label>
-        <label className="block" htmlFor="account-profile-display-name">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            显示名
-          </span>
+        </SettingField>
+        <SettingField label="显示名" htmlFor="account-profile-display-name">
           <Input
             id="account-profile-display-name"
-            className="w-full"
             value={displayName}
             maxLength={200}
             placeholder="你的显示名"
             onChange={(e) => setDisplayName(e.target.value)}
           />
-        </label>
-        <label className="block" htmlFor="account-profile-email">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            邮箱（可选）
-          </span>
+        </SettingField>
+        <SettingField label="邮箱（可选）" htmlFor="account-profile-email">
           <Input
             id="account-profile-email"
-            className="w-full"
             type="email"
             value={email}
             maxLength={255}
@@ -255,8 +215,8 @@ function ProfileSection() {
             autoComplete="email"
             onChange={(e) => setEmail(e.target.value)}
           />
-        </label>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        </SettingField>
+        <SettingsFormMessage>{error}</SettingsFormMessage>
         <div className="flex justify-end">
           <Button
             size="md"
@@ -271,8 +231,8 @@ function ProfileSection() {
             保存
           </Button>
         </div>
-      </div>
-    </Section>
+      </Card>
+    </SettingsSection>
   );
 }
 
@@ -291,12 +251,8 @@ function PasswordSection() {
   };
 
   // Client-side mirror of the server policy, so obvious mistakes never round-trip.
-  const localError =
-    next.length > 0 && next.length < 8
-      ? "新密码至少需要 8 个字符"
-      : confirm.length > 0 && next !== confirm
-        ? "两次输入的新密码不一致"
-        : null;
+  const tooShort = next.length > 0 && next.length < 8;
+  const mismatch = confirm.length > 0 && next !== confirm;
   const canSave =
     current.length > 0 && next.length >= 8 && next === confirm && !saving;
 
@@ -316,53 +272,47 @@ function PasswordSection() {
   };
 
   return (
-    <Section
+    <SettingsSection
       title="修改密码"
       description="修改后，除当前设备外的所有登录都会失效。"
     >
-      <div className="space-y-3">
-        <label className="block" htmlFor="account-password-current">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            当前密码
-          </span>
+      <Card className="space-y-3 p-4">
+        <SettingField label="当前密码" htmlFor="account-password-current">
           <Input
             id="account-password-current"
-            className="w-full"
             type="password"
             value={current}
             autoComplete="current-password"
             onChange={(e) => setCurrent(e.target.value)}
           />
-        </label>
-        <label className="block" htmlFor="account-password-new">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            新密码（至少 8 位）
-          </span>
+        </SettingField>
+        <SettingField
+          label="新密码（至少 8 位）"
+          htmlFor="account-password-new"
+          error={tooShort ? "新密码至少需要 8 个字符" : null}
+        >
           <Input
             id="account-password-new"
-            className="w-full"
             type="password"
             value={next}
             autoComplete="new-password"
             onChange={(e) => setNext(e.target.value)}
           />
-        </label>
-        <label className="block" htmlFor="account-password-confirm">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            确认新密码
-          </span>
+        </SettingField>
+        <SettingField
+          label="确认新密码"
+          htmlFor="account-password-confirm"
+          error={mismatch ? "两次输入的新密码不一致" : null}
+        >
           <Input
             id="account-password-confirm"
-            className="w-full"
             type="password"
             value={confirm}
             autoComplete="new-password"
             onChange={(e) => setConfirm(e.target.value)}
           />
-        </label>
-        {(localError || error) && (
-          <p className="text-xs text-destructive">{localError ?? error}</p>
-        )}
+        </SettingField>
+        <SettingsFormMessage>{error}</SettingsFormMessage>
         <div className="flex justify-end">
           <Button
             size="md"
@@ -377,8 +327,8 @@ function PasswordSection() {
             更新密码
           </Button>
         </div>
-      </div>
-    </Section>
+      </Card>
+    </SettingsSection>
   );
 }
 
@@ -387,29 +337,28 @@ function DangerSection() {
   const [open, setOpen] = useState(false);
 
   return (
-    <section>
-      <h2 className="text-sm font-semibold text-destructive">危险区域</h2>
-      <p className="mt-1 text-xs text-muted-foreground">
-        注销后账户将被停用并匿名化，且无法恢复。
-      </p>
-      <Card className="mt-3 flex items-center justify-between gap-4 border-destructive/40 bg-destructive/5 p-4">
-        <div className="min-w-0">
-          <p className="text-sm text-foreground">注销账户</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            永久停用此账户，并释放用户名以供重新注册。
-          </p>
-        </div>
-        <Button
-          variant="danger"
-          size="md"
-          className="shrink-0"
-          onClick={() => setOpen(true)}
-        >
-          注销账户
-        </Button>
-      </Card>
+    <SettingsSection
+      title="危险区域"
+      tone="danger"
+      description="注销后账户将被停用并匿名化，且无法恢复。"
+    >
+      <SettingRow
+        className="border-destructive/40 bg-destructive/5"
+        label="注销账户"
+        description="永久停用此账户，并释放用户名以供重新注册。"
+        control={
+          <Button
+            variant="danger"
+            size="md"
+            className="shrink-0"
+            onClick={() => setOpen(true)}
+          >
+            注销账户
+          </Button>
+        }
+      />
       <DeleteAccountDialog open={open} onOpenChange={setOpen} />
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -425,13 +374,6 @@ function DeleteAccountDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const close = () => {
-    if (busy) return;
-    setPassword("");
-    setError(null);
-    onOpenChange(false);
-  };
-
   const confirm = async () => {
     setBusy(true);
     setError(null);
@@ -446,56 +388,39 @@ function DeleteAccountDialog({
   };
 
   return (
-    <Dialog
+    <ConfirmDialog
       open={open}
-      onOpenChange={(o) => (o ? onOpenChange(true) : close())}
+      onOpenChange={(next) => {
+        if (!next) {
+          setPassword("");
+          setError(null);
+        }
+        onOpenChange(next);
+      }}
+      title="确认注销账户"
+      description="此操作不可撤销。账户将被永久停用并匿名化，相关对话也会被删除。请输入密码以确认。"
+      confirmLabel="确认注销"
+      tone="danger"
+      busy={busy}
+      confirmDisabled={password.length === 0}
+      onConfirm={() => void confirm()}
     >
-      <DialogContent showClose={!busy}>
-        <DialogHeader>
-          <DialogTitle>确认注销账户</DialogTitle>
-          <DialogDescription>
-            此操作不可撤销。账户将被永久停用并匿名化，相关对话也会被删除。请输入密码以确认。
-          </DialogDescription>
-        </DialogHeader>
-        <div className="px-5">
-          <Input
-            className="w-full"
-            type="password"
-            value={password}
-            placeholder="当前密码"
-            autoComplete="current-password"
-            onChange={(e) => {
-              setError(null);
-              setPassword(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && password && !busy) void confirm();
-            }}
-          />
-          {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-        </div>
-        <DialogFooter>
-          <Button
-            variant="neutral"
-            className="h-9 px-4"
-            disabled={busy}
-            onClick={close}
-          >
-            取消
-          </Button>
-          <Button
-            variant="destructive"
-            className="h-9 px-4"
-            disabled={busy || password.length === 0}
-            icon={
-              busy ? <Loader2 size={14} className="animate-spin" /> : undefined
-            }
-            onClick={() => void confirm()}
-          >
-            确认注销
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <Input
+        className="w-full"
+        type="password"
+        value={password}
+        aria-label="当前密码"
+        placeholder="当前密码"
+        autoComplete="current-password"
+        onChange={(e) => {
+          setError(null);
+          setPassword(e.target.value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && password && !busy) void confirm();
+        }}
+      />
+      <SettingsFormMessage className="mt-2">{error}</SettingsFormMessage>
+    </ConfirmDialog>
   );
 }

@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { SearchField } from "@/components/ui/search-field";
 import {
   type DefaultModelOption,
@@ -296,9 +297,9 @@ export function ProfileModelSelect({
   return (
     <div ref={rootRef} className="relative">
       {customMode && allowCustom ? (
-        <div className="mt-1.5">
+        <div>
           <div className="flex items-center gap-2">
-            <input
+            <Input
               id={id}
               value={customText}
               disabled={disabled}
@@ -310,7 +311,7 @@ export function ProfileModelSelect({
                 setCustomText(next);
                 emit(providerId, next);
               }}
-              className="h-9 min-w-0 flex-1 rounded-lg border border-input bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-60"
+              className="min-w-0 flex-1"
             />
             {channelChipLabel ? (
               <Badge tone="muted">{channelChipLabel}</Badge>
