@@ -1,6 +1,10 @@
 import { ClearScratchDialog } from "@/components/files/ClearScratchDialog";
 import { CloneRepoDialog } from "@/components/files/CloneRepoDialog";
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
+import {
+  type TreeAction,
+  runTreeAction,
+} from "@/components/files/fileTreeActions";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
 import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
@@ -54,6 +58,7 @@ import {
   FolderOpen,
   FolderPlus,
   FolderSearch,
+  FolderUp,
   GitBranch,
   HardDrive,
   History,
@@ -144,9 +149,7 @@ export function WorkspaceSection({
   const treeRef = useRef<FileTreeHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
-  const [pendingAction, setPendingAction] = useState<
-    "file" | "dir" | "upload" | null
-  >(null);
+  const [pendingAction, setPendingAction] = useState<TreeAction | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleteFolderOpen, setDeleteFolderOpen] = useState(false);
   const [clearScratchOpen, setClearScratchOpen] = useState(false);
@@ -206,8 +209,7 @@ export function WorkspaceSection({
 
   useEffect(() => {
     if (!expanded || !pendingAction) return;
-    if (pendingAction === "upload") treeRef.current?.triggerUpload();
-    else treeRef.current?.startCreate(pendingAction);
+    runTreeAction(treeRef.current, pendingAction);
     setPendingAction(null);
   }, [expanded, pendingAction]);
 
@@ -222,17 +224,13 @@ export function WorkspaceSection({
     if (!editing) setDraft(ws.name);
   }, [ws.name, editing]);
 
-  const requestTreeAction = (
-    action: "file" | "dir" | "upload",
-    anchorEl?: Element | null,
-  ) => {
+  const requestTreeAction = (action: TreeAction, anchorEl?: Element | null) => {
     if (action === "dir" && onCreateSubfolder) {
       onCreateSubfolder(anchorEl ?? rootRef.current);
       return;
     }
     if (expanded) {
-      if (action === "upload") treeRef.current?.triggerUpload();
-      else treeRef.current?.startCreate(action);
+      runTreeAction(treeRef.current, action);
     } else {
       setPendingAction(action);
       onToggle();
@@ -543,10 +541,20 @@ export function WorkspaceSection({
                   </span>
                 </ContextMenuItem>
                 {source.caps.transfer && (
-                  <ContextMenuItem onSelect={() => requestTreeAction("upload")}>
-                    <Upload size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">上传文件</span>
-                  </ContextMenuItem>
+                  <>
+                    <ContextMenuItem
+                      onSelect={() => requestTreeAction("upload")}
+                    >
+                      <Upload size={14} className="shrink-0" />
+                      <span className="flex-1 truncate">上传文件</span>
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onSelect={() => requestTreeAction("upload-folder")}
+                    >
+                      <FolderUp size={14} className="shrink-0" />
+                      <span className="flex-1 truncate">上传文件夹</span>
+                    </ContextMenuItem>
+                  </>
                 )}
                 {canClone && (
                   <ContextMenuItem onSelect={() => setCloneOpen(true)}>

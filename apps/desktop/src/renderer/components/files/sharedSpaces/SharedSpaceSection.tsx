@@ -1,4 +1,8 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
+import {
+  type TreeAction,
+  runTreeAction,
+} from "@/components/files/fileTreeActions";
 import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
 import { SharedSpaceEventsDialog } from "@/components/files/sharedSpaces/SharedSpaceEventsDialog";
@@ -31,6 +35,7 @@ import {
   FilePlus,
   FolderOpen,
   FolderPlus,
+  FolderUp,
   History,
   Pencil,
   Trash2,
@@ -78,9 +83,7 @@ export function SharedSpaceSection({
   const treeRef = useRef<FileTreeHandle>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurRef = useRef(false);
-  const [pendingAction, setPendingAction] = useState<
-    "file" | "dir" | "upload" | null
-  >(null);
+  const [pendingAction, setPendingAction] = useState<TreeAction | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(space.name);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -97,8 +100,7 @@ export function SharedSpaceSection({
 
   useEffect(() => {
     if (!expanded || !pendingAction || !canWrite) return;
-    if (pendingAction === "upload") treeRef.current?.triggerUpload();
-    else treeRef.current?.startCreate(pendingAction);
+    runTreeAction(treeRef.current, pendingAction);
     setPendingAction(null);
   }, [expanded, pendingAction, canWrite]);
 
@@ -113,11 +115,10 @@ export function SharedSpaceSection({
     if (!editing) setDraft(space.name);
   }, [space.name, editing]);
 
-  const requestTreeAction = (action: "file" | "dir" | "upload") => {
+  const requestTreeAction = (action: TreeAction) => {
     if (!canWrite) return;
     if (expanded) {
-      if (action === "upload") treeRef.current?.triggerUpload();
-      else treeRef.current?.startCreate(action);
+      runTreeAction(treeRef.current, action);
     } else {
       setPendingAction(action);
       onToggle();
@@ -312,10 +313,20 @@ export function SharedSpaceSection({
                   <span className="flex-1 truncate">新建文件夹</span>
                 </ContextMenuItem>
                 {source.caps.transfer && (
-                  <ContextMenuItem onSelect={() => requestTreeAction("upload")}>
-                    <Upload size={14} className="shrink-0" />
-                    <span className="flex-1 truncate">上传文件</span>
-                  </ContextMenuItem>
+                  <>
+                    <ContextMenuItem
+                      onSelect={() => requestTreeAction("upload")}
+                    >
+                      <Upload size={14} className="shrink-0" />
+                      <span className="flex-1 truncate">上传文件</span>
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onSelect={() => requestTreeAction("upload-folder")}
+                    >
+                      <FolderUp size={14} className="shrink-0" />
+                      <span className="flex-1 truncate">上传文件夹</span>
+                    </ContextMenuItem>
+                  </>
                 )}
                 <ContextMenuSeparator />
               </>

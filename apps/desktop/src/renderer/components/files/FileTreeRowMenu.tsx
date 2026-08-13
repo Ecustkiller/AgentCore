@@ -28,12 +28,54 @@ import {
   Trash2,
 } from "lucide-react";
 import type { FileTreeRowProps } from "./FileTreeRow";
+import type { BatchMenuActions } from "./fileTreeTypes";
+
+/**
+ * 多选选区的右键菜单：只列对**整批**说得通的动作。
+ *
+ * 不出现「重命名 / 新建 / 打开」——它们对 N 项没有意义；也不出现「移动到…」——批量移动沿用
+ * 「剪切 → 到目标文件夹粘贴」，不为它另造一套目标选择面。调用方保证至少有一项可用（否则不
+ * 传 `batch`），故这里不会渲染出空菜单。
+ */
+function BatchMenu({
+  batch,
+  source,
+}: { batch: BatchMenuActions; source: FileSource }) {
+  return (
+    <ContextMenuContent className="min-w-36">
+      {source.caps.transfer &&
+        source.download &&
+        batch.downloadableCount > 0 && (
+          <ContextMenuItem onSelect={batch.onDownload}>
+            <Download size={14} className="shrink-0" />
+            <span className="flex-1 truncate">
+              下载 {batch.downloadableCount} 个文件
+            </span>
+          </ContextMenuItem>
+        )}
+      {source.caps.edit && (
+        <>
+          <ContextMenuItem onSelect={batch.onCut}>
+            <Scissors size={14} className="shrink-0" />
+            <span className="flex-1 truncate">剪切 {batch.count} 项</span>
+          </ContextMenuItem>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="danger" onSelect={batch.onDelete}>
+            <Trash2 size={14} className="shrink-0" />
+            <span className="flex-1 truncate">删除 {batch.count} 项</span>
+          </ContextMenuItem>
+        </>
+      )}
+    </ContextMenuContent>
+  );
+}
 
 /** The shared right-click menu for a file/folder row. */
 export function FileTreeRowMenu({
   node,
   source,
   hasClipboard,
+  batch,
   onContextCreate,
   onStartRename,
   onDelete,
@@ -42,7 +84,11 @@ export function FileTreeRowMenu({
   onCut,
   onPaste,
   onReloadDir,
-}: { node: FileNode; source: FileSource } & Pick<
+}: {
+  node: FileNode;
+  source: FileSource;
+  batch: BatchMenuActions | null;
+} & Pick<
   FileTreeRowProps,
   | "hasClipboard"
   | "onContextCreate"
@@ -54,6 +100,7 @@ export function FileTreeRowMenu({
   | "onPaste"
   | "onReloadDir"
 >) {
+  if (batch) return <BatchMenu batch={batch} source={source} />;
   // 系统集成项只在源实现了对应方法时出现（reveal / 终端仅本地源有）——靠「方法是否存在」
   // 门控，组件内不按源 if 分支。「用默认程序打开」两源都有，另过源自己的谓词（云端只放行
   // 安全白名单内的类型），仅给文件（对目录而言就是再次定位，与 reveal 重复）。
@@ -195,12 +242,12 @@ export function FileTreeRowMenu({
         <>
           <ContextMenuSeparator />
           {canCopy && (
-            <ContextMenuItem onSelect={() => onCopy(node.path)}>
+            <ContextMenuItem onSelect={() => onCopy([node.path])}>
               <Copy size={14} className="shrink-0" />
               <span className="flex-1 truncate">复制</span>
             </ContextMenuItem>
           )}
-          <ContextMenuItem onSelect={() => onCut(node.path)}>
+          <ContextMenuItem onSelect={() => onCut([node.path])}>
             <Scissors size={14} className="shrink-0" />
             <span className="flex-1 truncate">剪切</span>
           </ContextMenuItem>

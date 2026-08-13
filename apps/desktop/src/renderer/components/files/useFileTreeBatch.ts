@@ -1,0 +1,215 @@
+import type { FileNode, FileSource } from "@/lib/fileSource";
+import { baseName, parentDir } from "@/lib/fileSource";
+import { notifySuccess } from "@/lib/toast";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  BatchConfirmState,
+  BatchFailureState,
+} from "./FileTreeBatchDialogs";
+import {
+  type BatchFailure,
+  type BatchOutcome,
+  batchResultTitle,
+  deleteRestoreHint,
+  runBatch,
+  withSkipped,
+} from "./fileTreeBatch";
+import {
+  EMPTY_SELECTION,
+  type RowClickIntent,
+  type SelectedItem,
+  type TreeSelection,
+  selectRow,
+  selectionForContextMenu,
+  selectionPaths,
+  topLevelSelection,
+} from "./fileTreeSelection";
+import type { FileTreeData } from "./useFileTreeData";
+
+/**
+ * 文件树的多选与批量动作。
+ *
+ * 后端没有批量端点，批量删除 / 下载 / 移动都是**客户端逐项调既有单项端点**：删除仍走既有软删
+ * （云端落 `AgentCore/trash`，逐项一条记录，故回收站里能逐项还原），下载仍是逐个文件另存，
+ * 移动仍是「剪切 → 粘贴到目标文件夹」（不新造目标选择面）。因此这里的核心职责不是"更快"，
+ * 而是把**逐项成败**如实带出来交给 {@link FileTreeBatchDialogs}。
+ */
+export interface FileTreeBatch {
+  selection: TreeSelection;
+  selectedPaths: ReadonlySet<string>;
+  count: number;
+  /** 选区里能下载的文件数（目录没有单项下载端点）。 */
+  downloadableCount: number;
+  /** 行点击（含修饰键意图）后更新选区。 */
+  selectRowAt: (node: FileNode, intent: RowClickIntent) => void;
+  /** 右键落点：点在选区内保持整批，点在选区外收敛成单选。 */
+  selectForContextMenu: (node: FileNode) => void;
+  /** 全选当前可见行（Ctrl/Cmd + A）。 */
+  selectAllVisible: () => void;
+  clear: () => void;
+  /** 打开删除确认（清单 = 选区去掉「祖先已选中」的后代）。 */
+  requestDelete: () => void;
+  runDownload: () => void;
+  runCut: () => void;
+  /** 供树内其它批量路径（多项粘贴）复用同一套结果口径。 */
+  report: (verb: string, outcome: BatchOutcome) => void;
+  /** 批量改动后刷新受影响目录（急切源一次全树，惰性源逐目录）。 */
+  reloadDirs: (dirs: Iterable<string>) => void;
+  busy: boolean;
+  confirm: BatchConfirmState | null;
+  failure: BatchFailureState | null;
+  confirmDelete: () => void;
+  cancelDelete: () => void;
+  closeFailure: () => void;
+}
+
+export function useFileTreeBatch(opts: {
+  source: FileSource;
+  data: FileTreeData;
+  /** 当前可见行（渲染顺序）——Shift 连选与全选都以它为准。 */
+  visibleRows: readonly SelectedItem[];
+  /** 把这批路径放进树内剪贴板（批量移动 = 剪切 + 粘贴到目标文件夹）。 */
+  onCut: (paths: string[]) => void;
+}): FileTreeBatch {
+  const { source, data, visibleRows, onCut } = opts;
+  const [selection, setSelection] = useState<TreeSelection>(EMPTY_SELECTION);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState<BatchConfirmState | null>(null);
+  const [failure, setFailure] = useState<BatchFailureState | null>(null);
+
+  // 可见行每渲染一次就是个新数组，放进 useCallback 依赖会让所有回调每帧换身份；用 ref 取最新
+  // 值即可（用户点击总在 effect 之后发生）。
+  const visibleRef = useRef(visibleRows);
+  useEffect(() => {
+    visibleRef.current = visibleRows;
+  });
+
+  const selectedPaths = useMemo(() => selectionPaths(selection), [selection]);
+
+  const clear = useCallback(() => setSelection(EMPTY_SELECTION), []);
+
+  const selectRowAt = useCallback((node: FileNode, intent: RowClickIntent) => {
+    setSelection((prev) => selectRow(prev, node, intent, visibleRef.current));
+  }, []);
+
+  const selectForContextMenu = useCallback((node: FileNode) => {
+    setSelection((prev) => selectionForContextMenu(prev, node));
+  }, []);
+
+  const selectAllVisible = useCallback(() => {
+    const rows = visibleRef.current;
+    if (rows.length === 0) return;
+    setSelection({
+      items: [...rows],
+      anchor: rows[rows.length - 1]?.path ?? null,
+    });
+  }, []);
+
+  const report = useCallback((verb: string, outcome: BatchOutcome) => {
+    if (outcome.failures.length === 0) {
+      if (outcome.done > 0) notifySuccess(batchResultTitle(verb, outcome));
+      return;
+    }
+    setFailure({
+      title: batchResultTitle(verb, outcome),
+      failures: outcome.failures,
+    });
+  }, []);
+
+  // 惰性源逐个目录刷；`listTree` 的急切源每次 reload 都是重拉全树，逐目录调等于拉 N 遍。
+  const reloadDirs = useCallback(
+    (dirs: Iterable<string>) => {
+      if (source.listTree) {
+        data.reload("");
+        return;
+      }
+      for (const dir of new Set(dirs)) data.reload(dir);
+    },
+    [source, data],
+  );
+
+  const requestDelete = useCallback(() => {
+    const items = topLevelSelection(selection.items);
+    if (items.length === 0) return;
+    setConfirm({ items, restoreHint: deleteRestoreHint(source), busy: false });
+  }, [selection, source]);
+
+  const cancelDelete = useCallback(() => {
+    setConfirm((prev) => (prev?.busy ? prev : null));
+  }, []);
+
+  const confirmDelete = useCallback(() => {
+    const target = confirm;
+    if (!target || target.busy) return;
+    void (async () => {
+      setConfirm({ ...target, busy: true });
+      setBusy(true);
+      const outcome = await runBatch(
+        target.items.map((i) => i.path),
+        (path) => source.delete(path),
+      );
+      reloadDirs(target.items.map((i) => parentDir(i.path)));
+      setBusy(false);
+      setConfirm(null);
+      clear();
+      report("删除", outcome);
+    })();
+  }, [confirm, source, reloadDirs, clear, report]);
+
+  const downloadable = useMemo(
+    () => selection.items.filter((i) => !i.isDir),
+    [selection],
+  );
+
+  const runDownload = useCallback(() => {
+    const download = source.download;
+    if (!download) return;
+    const items = selection.items;
+    if (items.length === 0) return;
+    void (async () => {
+      setBusy(true);
+      // 目录没有单项下载端点：说清楚而不是让它撞成一条「文件不存在」，也不是悄悄跳过。
+      const skipped: BatchFailure[] = items
+        .filter((i) => i.isDir)
+        .map((i) => ({
+          path: i.path,
+          name: baseName(i.path),
+          reason: "文件夹不能整个下载，请展开后选择其中的文件",
+        }));
+      const outcome = await runBatch(
+        items.filter((i) => !i.isDir).map((i) => i.path),
+        (path) => download(path, baseName(path)),
+      );
+      setBusy(false);
+      report("下载", withSkipped(skipped, outcome));
+    })();
+  }, [source, selection, report]);
+
+  const runCut = useCallback(() => {
+    const items = topLevelSelection(selection.items);
+    if (items.length === 0) return;
+    onCut(items.map((i) => i.path));
+  }, [selection, onCut]);
+
+  return {
+    selection,
+    selectedPaths,
+    count: selection.items.length,
+    downloadableCount: downloadable.length,
+    selectRowAt,
+    selectForContextMenu,
+    selectAllVisible,
+    clear,
+    requestDelete,
+    runDownload,
+    runCut,
+    report,
+    reloadDirs,
+    busy,
+    confirm,
+    failure,
+    confirmDelete,
+    cancelDelete,
+    closeFailure: () => setFailure(null),
+  };
+}

@@ -1,10 +1,11 @@
 """Workspace hide-rule parity ratchet (Python ↔ desktop TypeScript).
 
 Covers the ignore lists and the internal-zone names / ``AgentCore/<zone>`` path
-forms, which are hand-copied into four files (``stage_dirs.py``, ``_paths.py``,
-main ``workspaceIgnore.ts``, renderer ``workspaceSource.ts``). The drift cases
-below are the real check: each one edits a single side in memory and asserts the
-gate goes red, so forgetting one file when a zone is added cannot stay green.
+forms, which are hand-copied into five files (``stage_dirs.py``, ``_paths.py``,
+main ``workspaceIgnore.ts``, renderer ``workspaceSource.ts``, renderer
+``folderUpload.ts``). The drift cases below are the real check: each one edits a
+single side in memory and asserts the gate goes red, so forgetting one file when
+a zone is added cannot stay green.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ def _sources() -> dict[str, str]:
         "ts_src": ip.ts_ignore_file().read_text(encoding="utf-8"),
         "stage_src": ip.stage_dirs_file().read_text(encoding="utf-8"),
         "renderer_src": ip.renderer_zones_file().read_text(encoding="utf-8"),
+        "upload_src": ip.renderer_upload_file().read_text(encoding="utf-8"),
     }
 
 
@@ -32,6 +34,7 @@ def _compare(src: dict[str, str]) -> list[str]:
         src["ts_src"],
         stage_src=src["stage_src"],
         renderer_src=src["renderer_src"],
+        upload_src=src["upload_src"],
     )
 
 
@@ -130,6 +133,44 @@ def test_zone_drift_on_any_single_side_is_red(key: str, old: str, new: str, need
     _drift(src, key, old, new)
     errors = _compare(src)
     assert any(needle in e for e in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "needle"),
+    [
+        pytest.param(
+            '  "node_modules",\n',
+            "",
+            "dirs (python ↔ renderer upload)",
+            id="upload-copy-drops-a-noise-dir",
+        ),
+        pytest.param(
+            '  ".pyc",\n',
+            "",
+            "system_suffixes (python ↔ renderer upload)",
+            id="upload-copy-drops-a-system-suffix",
+        ),
+    ],
+)
+def test_renderer_upload_copy_drift_is_red(old: str, new: str, needle: str):
+    """Folder upload filters before any request, so its copy is a real hide rule."""
+    src = _sources()
+    _drift(src, "upload_src", old, new)
+    errors = _compare(src)
+    assert any(needle in e for e in errors), errors
+
+
+def test_renderer_upload_copy_omits_ai_noise_suffixes():
+    """A user uploading their own png / zip must keep it — AI noise is an AI-view rule."""
+    upload = ip.renderer_upload_file().read_text(encoding="utf-8")
+    system = ip.extract_typescript_set(
+        upload, "SYSTEM_IGNORED_FILE_SUFFIXES", kind="array"
+    )
+    ai_noise = ip.extract_python_set(
+        ip.py_paths_file().read_text(encoding="utf-8"), "AI_NOISE_FILE_SUFFIXES"
+    )
+    assert ".png" in ai_noise
+    assert not (system & ai_noise)
 
 
 def test_bare_zone_names_in_the_global_dir_set_are_red():

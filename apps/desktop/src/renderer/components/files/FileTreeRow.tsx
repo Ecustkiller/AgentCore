@@ -3,6 +3,7 @@ import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { statusPillSoft } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
+import { type DropUploadCapture, captureDropUpload } from "@/lib/folderUpload";
 import {
   AGENTCORE_ROOT_LABEL,
   AGENTCORE_ROOT_TOOLTIP,
@@ -18,6 +19,12 @@ import { InlineCreateRow, InlineInput, InlineRow } from "./FileTreeInline";
 import { FileTreeRowMenu } from "./FileTreeRowMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
+import {
+  type RowClickIntent,
+  clickIntent,
+  isSelectionOnlyClick,
+} from "./fileTreeSelection";
+import type { BatchMenuActions } from "./fileTreeTypes";
 import { FileRowMeta, TruncatedNotice } from "./parts";
 import type { useFileTreeData } from "./useFileTreeData";
 
@@ -35,15 +42,23 @@ export interface FileTreeRowProps {
   creating: { dir: string; kind: "file" | "dir" } | null;
   renaming: string | null;
   dropTarget: string | null;
-  /** 当前键盘焦点行（高亮）。 */
-  selectedPath: string | null;
+  /** 选中的行（高亮）；单选即一项。 */
+  selectedPaths: ReadonlySet<string>;
   /** 已剪切待移动的行（半透明示意）。 */
-  cutPath: string | null;
+  cutPaths: ReadonlySet<string>;
   /** 剪贴板非空（文件夹行据此显示「粘贴」）。 */
   hasClipboard: boolean;
+  /**
+   * 多选态下的批量动作（≥2 项时非空）；本行在选区内才换成批量菜单，选区外的行由
+   * {@link FileTreeRowProps.onContextSelect} 先把选区收敛成单选。
+   */
+  batchMenu: BatchMenuActions | null;
   onToggle: (dir: string) => void;
   onOpenFile: (path: string, name: string) => void;
-  onSelect: (node: FileNode) => void;
+  /** 行点击：带 Ctrl/Cmd·Shift 意图更新选区（普通点击才继续打开 / 展开）。 */
+  onSelect: (node: FileNode, intent: RowClickIntent) => void;
+  /** 右键按下时先定选区（点在选区内保持整批，点在选区外收敛成这一行）。 */
+  onContextSelect: (node: FileNode) => void;
   onContextCreate: (dir: string, kind: "file" | "dir") => void;
   onStartRename: (path: string) => void;
   onSubmitRename: (path: string, name: string) => void;
@@ -51,11 +66,16 @@ export interface FileTreeRowProps {
   onSubmitCreate: (name: string) => void;
   onCancelCreate: () => void;
   onDelete: (node: FileNode) => void;
-  onCopy: (path: string) => void;
-  onCut: (path: string) => void;
+  onCopy: (paths: string[]) => void;
+  onCut: (paths: string[]) => void;
   onPaste: (destDir: string) => void;
-  onMoveInto: (src: string, destDir: string) => void;
-  onUpload: (files: FileList | null, destDir: string) => void;
+  /**
+   * 落一个被拖来的节点到 `destDir`。收整个载荷（而非裸路径）是因为它可能来自**另一棵**
+   * 树——父子文件夹在文件中枢里就是两个源，同源/异源由接收方分派。
+   */
+  onMoveInto: (payload: DragPayload, destDir: string) => void;
+  /** 落一次外部拖入（可能是整个文件夹，故收 drop 事件里同步捕获的 entry 而非 FileList）。 */
+  onUpload: (capture: DropUploadCapture, destDir: string) => void;
   onDropTarget: (path: string | null) => void;
   /** Reload a directory after a mutation that adds siblings (e.g. export docx). */
   onReloadDir: (dir: string) => void;
@@ -72,10 +92,17 @@ export function FileTreeRow(props: FileTreeRowProps) {
     e.dataTransfer.effectAllowed = "move";
   };
 
+  // 本行在多选选区内时右键菜单对整批生效；否则（含单选）走单项菜单。
+  const rowBatch =
+    props.batchMenu && props.selectedPaths.has(node.path)
+      ? props.batchMenu
+      : null;
+  const onContextMenu = () => props.onContextSelect(node);
+
   if (!node.isDir) {
     const isActive = props.activePath === node.path;
-    const isSelected = props.selectedPath === node.path;
-    const isCut = props.cutPath === node.path;
+    const isSelected = props.selectedPaths.has(node.path);
+    const isCut = props.cutPaths.has(node.path);
     return (
       <li>
         {props.renaming === node.path ? (
@@ -99,13 +126,17 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 cut={isCut}
                 draggable
                 onDragStart={startDrag}
+                onContextMenu={onContextMenu}
                 style={rowStyle}
               >
                 <SimpleTooltip label={`预览 ${node.path}`}>
                   <Button
                     variant="ghost"
-                    onClick={() => {
-                      props.onSelect(node);
+                    onClick={(e) => {
+                      const intent = clickIntent(e);
+                      props.onSelect(node, intent);
+                      // 加减选 / 连选只动选区：否则每加选一个文件都会顺手把预览换掉。
+                      if (isSelectionOnlyClick(intent)) return;
                       props.onOpenFile(node.path, node.name);
                     }}
                     className="h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal"
@@ -117,7 +148,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 </SimpleTooltip>
               </SurfaceRow>
             </ContextMenuTrigger>
-            <FileTreeRowMenu {...props} />
+            <FileTreeRowMenu {...props} batch={rowBatch} />
           </ContextMenu>
         )}
       </li>
@@ -127,8 +158,8 @@ export function FileTreeRow(props: FileTreeRowProps) {
   // Directory row.
   const open = expanded.has(node.path);
   const isTarget = dropTarget === node.path;
-  const isSelected = props.selectedPath === node.path;
-  const isCut = props.cutPath === node.path;
+  const isSelected = props.selectedPaths.has(node.path);
+  const isCut = props.cutPaths.has(node.path);
   const status = data.statusOf(node.path);
   const children = data.childrenOf(node.path);
   const stage = stageDirMeta(node.path);
@@ -158,16 +189,15 @@ export function FileTreeRow(props: FileTreeRowProps) {
               cut={isCut}
               draggable
               onDragStart={startDrag}
+              onContextMenu={onContextMenu}
               onDragOver={(e) => {
-                if (e.dataTransfer.types.includes(DRAG_MIME)) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  props.onDropTarget(node.path);
-                } else if (source.caps.transfer) {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  props.onDropTarget(node.path);
-                }
+                // 只读源不高亮：亮了却什么都不会发生，比不亮更难懂。
+                if (!source.caps.edit) return;
+                const internal = e.dataTransfer.types.includes(DRAG_MIME);
+                if (!internal && !source.caps.transfer) return;
+                e.preventDefault();
+                e.stopPropagation();
+                props.onDropTarget(node.path);
               }}
               onDrop={(e) => {
                 e.preventDefault();
@@ -176,12 +206,14 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 const raw = e.dataTransfer.getData(DRAG_MIME);
                 if (raw) {
                   const p = parseDragPayload(raw);
-                  if (p && p.sourceId === source.id)
-                    props.onMoveInto(p.path, node.path);
+                  if (p) props.onMoveInto(p, node.path);
                   return;
                 }
-                if (source.caps.transfer && e.dataTransfer.files.length > 0)
-                  props.onUpload(e.dataTransfer.files, node.path);
+                if (!source.caps.transfer) return;
+                // entry 必须在事件里同步取走，之后 `dataTransfer.items` 就空了。
+                const capture = captureDropUpload(e.dataTransfer);
+                if (capture.entries.length > 0 || capture.looseFiles.length > 0)
+                  props.onUpload(capture, node.path);
               }}
               style={rowStyle}
             >
@@ -193,8 +225,11 @@ export function FileTreeRow(props: FileTreeRowProps) {
               >
                 <Button
                   variant="ghost"
-                  onClick={() => {
-                    props.onSelect(node);
+                  onClick={(e) => {
+                    const intent = clickIntent(e);
+                    props.onSelect(node, intent);
+                    // 加减选 / 连选只动选区：连选跨过折叠的目录时不该把它们一个个展开。
+                    if (isSelectionOnlyClick(intent)) return;
                     props.onToggle(node.path);
                   }}
                   className={cn(
@@ -229,7 +264,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
               </SimpleTooltip>
             </SurfaceRow>
           </ContextMenuTrigger>
-          <FileTreeRowMenu {...props} />
+          <FileTreeRowMenu {...props} batch={rowBatch} />
         </ContextMenu>
       )}
 

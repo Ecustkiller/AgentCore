@@ -6,7 +6,9 @@ they diverge — no codegen, minimal ratchet (same spirit as DebateForm member
 snapshot).
 
 * **Ignore sets** — ``_paths.py`` ↔ ``main/fs/workspaceIgnore.ts``: the noise
-  directory set plus the three suffix tiers.
+  directory set plus the three suffix tiers. Renderer ``lib/folderUpload.ts``
+  hand-copies the two *system* tiers (dirs + system suffixes) to filter folder
+  uploads, and is checked against the same Python source.
 * **Internal zones** — ``stage_dirs.py`` ↔ ``main/fs/workspaceIgnore.ts`` ↔ the
   inline copy inside renderer ``services/sources/workspaceSource.ts``: the zone
   name set, the ``AgentCore/<zone>`` path form behind every ``*_REL``, and the
@@ -35,6 +37,9 @@ _TS_IGNORE = _DESKTOP_SRC / "main" / "fs" / "workspaceIgnore.ts"
 # Renderer keeps its own inline zone copy (no import from the main-process
 # module), so it drifts silently unless the gate reads it too.
 _TS_RENDERER_ZONES = _DESKTOP_SRC / "renderer" / "services" / "sources" / "workspaceSource.ts"
+# Folder upload filters in the renderer (before any request), so it needs its own
+# copy of the system tiers — same no-main-import reason, same silent-drift risk.
+_TS_RENDERER_UPLOAD = _DESKTOP_SRC / "renderer" / "lib" / "folderUpload.ts"
 
 # (label, path) — printed by the CLI and existence-checked before comparing.
 _SOURCES: tuple[tuple[str, Path], ...] = (
@@ -42,6 +47,7 @@ _SOURCES: tuple[tuple[str, Path], ...] = (
     ("python (zones)", _PY_STAGE_DIRS),
     ("typescript", _TS_IGNORE),
     ("typescript (renderer zones)", _TS_RENDERER_ZONES),
+    ("typescript (renderer upload)", _TS_RENDERER_UPLOAD),
 )
 
 # (label, python name, typescript name, ts kind)
@@ -63,6 +69,18 @@ _SETS: tuple[tuple[str, str, str, str], ...] = (
         "ai_archive_suffixes",
         "AI_ARCHIVE_FILE_SUFFIXES",
         "AI_ARCHIVE_FILE_SUFFIXES",
+        "array",
+    ),
+)
+
+# The renderer upload copy only mirrors the *system* tiers: AI-noise suffixes are
+# an AI-view rule, and a user uploading their own png / zip must not lose it.
+_RENDERER_UPLOAD_SETS: tuple[tuple[str, str, str, str], ...] = (
+    ("dirs", "IGNORED_DIRS", "LIST_FILES_SKIP_DIRS", "set"),
+    (
+        "system_suffixes",
+        "SYSTEM_IGNORED_FILE_SUFFIXES",
+        "SYSTEM_IGNORED_FILE_SUFFIXES",
         "array",
     ),
 )
@@ -120,6 +138,10 @@ def renderer_zones_file() -> Path:
     return _TS_RENDERER_ZONES
 
 
+def renderer_upload_file() -> Path:
+    return _TS_RENDERER_UPLOAD
+
+
 def _quoted_strings(block: str) -> frozenset[str]:
     return frozenset(_STRING_LIT.findall(block))
 
@@ -156,7 +178,9 @@ def extract_python_set(src: str, name: str, *, where: str | None = None) -> froz
     return _quoted_strings(_python_frozenset_body(src, name, where=where or _PY_PATHS.name))
 
 
-def extract_typescript_set(src: str, name: str, *, kind: str) -> frozenset[str]:
+def extract_typescript_set(
+    src: str, name: str, *, kind: str, where: str | None = None
+) -> frozenset[str]:
     """Pull members from ``export const NAME = new Set([...])`` or ``[…] as const``."""
     if kind == "set":
         pat = rf"export const {re.escape(name)}\s*=\s*new Set\(\[(.*?)\]\)"
@@ -166,7 +190,9 @@ def extract_typescript_set(src: str, name: str, *, kind: str) -> frozenset[str]:
         raise ValueError(f"unknown ts kind {kind!r}")
     m = re.search(pat, src, flags=re.DOTALL)
     if not m:
-        raise ValueError(f"TypeScript {kind} {name!r} not found in {_TS_IGNORE.name}")
+        raise ValueError(
+            f"TypeScript {kind} {name!r} not found in {where or _TS_IGNORE.name}"
+        )
     return _quoted_strings(m.group(1))
 
 
@@ -326,12 +352,31 @@ def compare_zone_sources(
     return errors
 
 
+def compare_upload_sources(*, py_src: str, upload_src: str) -> list[str]:
+    """System-tier parity for the renderer's folder-upload filter copy."""
+    errors: list[str] = []
+    where = _TS_RENDERER_UPLOAD.name
+    for label, py_name, ts_name, ts_kind in _RENDERER_UPLOAD_SETS:
+        py_set = extract_python_set(py_src, py_name)
+        ts_set = extract_typescript_set(upload_src, ts_name, kind=ts_kind, where=where)
+        line = _diff_line(
+            f"{label} (python ↔ renderer upload)",
+            py_set - ts_set,
+            ts_set - py_set,
+            right="renderer upload",
+        )
+        if line:
+            errors.append(line)
+    return errors
+
+
 def compare_sources(
     py_src: str,
     ts_src: str,
     *,
     stage_src: str,
     renderer_src: str,
+    upload_src: str,
     simulate_drift: bool = False,
 ) -> list[str]:
     """Return human-readable mismatch lines (empty ⇒ aligned)."""
@@ -349,6 +394,7 @@ def compare_sources(
             errors.append(f"{label}: Python set is empty (parse failure?)")
         if not ts_set and not simulate_drift:
             errors.append(f"{label}: TypeScript set is empty (parse failure?)")
+    errors.extend(compare_upload_sources(py_src=py_src, upload_src=upload_src))
     errors.extend(
         compare_zone_sources(
             py_src=py_src,
@@ -371,6 +417,7 @@ def run_ignore_parity(*, simulate_drift: bool = False) -> IgnoreParityResult:
             _TS_IGNORE.read_text(encoding="utf-8"),
             stage_src=_PY_STAGE_DIRS.read_text(encoding="utf-8"),
             renderer_src=_TS_RENDERER_ZONES.read_text(encoding="utf-8"),
+            upload_src=_TS_RENDERER_UPLOAD.read_text(encoding="utf-8"),
             simulate_drift=simulate_drift,
         )
     except ValueError as e:

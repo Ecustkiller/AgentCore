@@ -12,6 +12,7 @@ import {
   ChevronsDownUp,
   FilePlus,
   FolderPlus,
+  FolderUp,
   HardDrive,
   Loader2,
   RefreshCw,
@@ -56,20 +57,31 @@ export function FileBrowser({
         {leading && <div className="mx-1 h-4 w-px shrink-0 bg-border" />}
 
         {source?.caps.transfer && (
-          <Button
-            className="shrink-0 disabled:opacity-60"
-            disabled={chrome.uploading}
-            onClick={() => treeRef.current?.triggerUpload()}
-            icon={
-              chrome.uploading ? (
-                <Loader2 size={13} className="animate-spin" />
-              ) : (
-                <Upload size={13} />
-              )
-            }
-          >
-            上传
-          </Button>
+          <>
+            <Button
+              className="shrink-0 disabled:opacity-60"
+              disabled={chrome.uploading}
+              onClick={() => treeRef.current?.triggerUpload()}
+              icon={
+                chrome.uploading ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Upload size={13} />
+                )
+              }
+            >
+              上传
+            </Button>
+            <SimpleTooltip label="上传文件夹">
+              <IconButton
+                disabled={chrome.uploading}
+                onClick={() => treeRef.current?.triggerUploadFolder()}
+                aria-label="上传文件夹"
+              >
+                <FolderUp size={14} />
+              </IconButton>
+            </SimpleTooltip>
+          </>
         )}
         {source && (
           <>

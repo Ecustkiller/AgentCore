@@ -13,6 +13,7 @@ import {
   FilePlus,
   FileText,
   FolderPlus,
+  FolderUp,
   Loader2,
   RefreshCw,
   Upload,
@@ -24,23 +25,32 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useRef,
   useState,
 } from "react";
+import { FileTreeBatchDialogs } from "./FileTreeBatchDialogs";
 import { InlineCreateRow } from "./FileTreeInline";
 import { FileTreeRow } from "./FileTreeRow";
+import { FileTreeSelectionBar } from "./FileTreeSelectionBar";
 import { dedupeName } from "./dedupeName";
-import { DRAG_MIME, parseDragPayload } from "./fileTreeDrag";
+import { setFileClipboard, useFileClipboard } from "./fileClipboard";
+import {
+  type BatchFailure,
+  deleteRestoreHint,
+  runBatch,
+  withSkipped,
+} from "./fileTreeBatch";
 import { loadExpanded, saveExpanded } from "./fileTreeExpanded";
 import { computeFileTreeFilter } from "./fileTreeFilter";
+import { flattenVisibleRows, topLevelSelection } from "./fileTreeSelection";
 import type {
-  ClipboardEntry,
   FileSortBy,
   FileTreeChromeState,
   FileTreeHandle,
 } from "./fileTreeTypes";
 import { Centered, EmptyHint, InlineError, TruncatedNotice } from "./parts";
+import { useFileTreeBatch } from "./useFileTreeBatch";
 import { useFileTreeData } from "./useFileTreeData";
+import { useFileTreeDrop } from "./useFileTreeDrop";
 
 export { dedupeName } from "./dedupeName";
 export type { FileTreeChromeState, FileTreeHandle } from "./fileTreeTypes";
@@ -137,21 +147,41 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     } | null>(null);
     const [renaming, setRenaming] = useState<string | null>(null);
     const [dropTarget, setDropTarget] = useState<string | null>(null);
-    const [uploading, setUploading] = useState(false);
-    const [dragOver, setDragOver] = useState(false);
-    // 键盘焦点节点（复制/剪切/粘贴的作用对象）与剪贴板，均限本树内（与拖拽移动同源约束一致）。
-    const [selected, setSelected] = useState<{
-      path: string;
-      isDir: boolean;
-    } | null>(null);
-    const [clipboard, setClipboard] = useState<ClipboardEntry | null>(null);
-    const uploadRef = useRef<HTMLInputElement>(null);
+    // 剪贴板是**全局**一份：中枢把每个云文件夹渲染成独立的树，「在 A 剪、到 B 粘」
+    // 是基本诉求，跟着树走就永远跨不过去（见 fileClipboard.ts）。
+    const clipboard = useFileClipboard();
 
+    // 选区（复制/剪切/删除的作用对象）与批量动作。可见行顺序即渲染顺序，Shift 连选据此取区间。
+    const visibleRows = flattenVisibleRows({
+      childrenOf: data.childrenOf,
+      expanded: effectiveExpanded,
+      filterVisible,
+      hideRootDirs,
+    });
+    const batch = useFileTreeBatch({
+      source,
+      data,
+      visibleRows,
+      onCut: (paths) =>
+        setFileClipboard({ op: "cut", sourceId: source.id, paths }),
+    });
+    const { clear: clearSelection, report: reportBatch, reloadDirs } = batch;
+    // 别的树剪走的东西不该在这棵树里画成半透明——路径可能刚好同名。
+    const cutPaths = useMemo(
+      () =>
+        new Set(
+          clipboard?.op === "cut" && clipboard.sourceId === source.id
+            ? clipboard.paths
+            : [],
+        ),
+      [clipboard, source.id],
+    );
+
+    // 换源只重置这棵树自己的东西——剪贴板是全局的，清掉就再也粘不到别的树里。
     useEffect(() => {
       setExpanded(loadExpanded(source.id));
-      setSelected(null);
-      setClipboard(null);
-    }, [source.id]);
+      clearSelection();
+    }, [source.id, clearSelection]);
 
     // Live updates: watch the root + every expanded dir (local FS only).
     useEffect(() => {
@@ -264,13 +294,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       async (node: FileNode) => {
         const what = node.isDir ? "文件夹及其全部内容" : "文件";
         // Soft-delete honesty: cloud → AgentCore/trash（软删区）；local → OS
-        // recycle bin / LocalTrash fallback. Caps already encode the source
-        // (snapshots=cloud restore UI; watch=local FS) — no intent heuristics.
-        const restoreHint = source.caps.snapshots
-          ? "可从软删区还原。"
-          : source.caps.watch
-            ? "可从系统回收站或软删区还原。"
-            : "此操作不可撤销。";
+        // recycle bin / LocalTrash fallback. Hint 与批量删除同一句（同源同承诺）。
+        const restoreHint = deleteRestoreHint(source);
         if (
           !window.confirm(`确定删除${what}「${node.name}」？${restoreHint}`)
         ) {
@@ -279,70 +304,31 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
         try {
           await source.delete(node.path);
           data.reload(parentDir(node.path));
+          clearSelection();
         } catch {
           notifyError("删除失败");
         }
       },
-      [source, data],
+      [source, data, clearSelection],
     );
-
-    // Move `src` into `destDir` (""=root), keeping its name. Guards against a no-op
-    // and against dropping a folder into its own subtree.
-    const moveInto = useCallback(
-      async (src: string, destDir: string) => {
-        const dst = joinPath(destDir, baseName(src));
-        if (dst === src) return;
-        if (destDir === src || destDir.startsWith(`${src}/`)) return;
-        try {
-          await source.move(src, dst);
-          data.reload(parentDir(src));
-          data.reload(destDir);
-        } catch {
-          notifyError("目标位置已存在同名文件，或移动失败");
-        }
-      },
-      [source, data],
-    );
-
-    const upload = useCallback(
-      async (files: FileList | null, destDir = "") => {
-        if (!files || files.length === 0 || !source.writeBytes) return;
-        setUploading(true);
-        try {
-          for (const file of Array.from(files)) {
-            await source.writeBytes(joinPath(destDir, file.name), file);
-          }
-          data.reload(destDir);
-        } catch {
-          notifyError("上传失败");
-        } finally {
-          setUploading(false);
-        }
-      },
-      [source, data],
-    );
-
-    const onSelect = useCallback((node: FileNode) => {
-      setSelected({ path: node.path, isDir: node.isDir });
-    }, []);
 
     // 与右键菜单一致：无 caps.edit 时不进剪贴板/粘贴（只读源菜单也不挂这些项）。
     const canMutate = source.caps.edit;
 
     const doCopy = useCallback(
-      (path: string) => {
-        if (!canMutate || !source.copy) return;
-        setClipboard({ op: "copy", path });
+      (paths: string[]) => {
+        if (!canMutate || !source.copy || paths.length === 0) return;
+        setFileClipboard({ op: "copy", sourceId: source.id, paths });
       },
       [canMutate, source],
     );
 
     const doCut = useCallback(
-      (path: string) => {
-        if (!canMutate) return;
-        setClipboard({ op: "cut", path });
+      (paths: string[]) => {
+        if (!canMutate || paths.length === 0) return;
+        setFileClipboard({ op: "cut", sourceId: source.id, paths });
       },
-      [canMutate],
+      [canMutate, source],
     );
 
     // 把目标目录展开（若折叠），让粘贴结果立即可见；随后由调用方 reload。
@@ -360,91 +346,161 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       [data, source.id],
     );
 
+    // 拖拽落点 / 上传入口 / 跨源搬运（见 useFileTreeDrop）——与选中态、行渲染无关，
+    // 单拆一处，免得「往树里放东西」和「在树里选东西」挤在同一段代码里。
+    const drop = useFileTreeDrop({
+      source,
+      data,
+      canMutate,
+      revealDir,
+      onDropTarget: setDropTarget,
+    });
+
     // 把剪贴板内容粘贴进 destDir（""=根）。剪切走必备的 move（全源可用，一次性）；复制走可选
     // copy（本地 IPC / 云端 REST），名字按目标目录现有项去重（副本 / 副本 2…），可重复粘贴。
+    // 多项粘贴 = 逐项调单项端点，故一项撞名不连累其余项：逐项记账，末尾一次报清哪几项没成。
     const doPaste = useCallback(
       async (destDir: string) => {
         if (!canMutate) return;
         const clip = clipboard;
-        if (!clip) return;
-        if (destDir === clip.path || destDir.startsWith(`${clip.path}/`)) {
-          notifyActionError("无法粘贴", new Error("不能粘贴到自身或其子目录"));
+        if (!clip || clip.paths.length === 0) return;
+        if (clip.op === "copy" && !source.copy) return;
+        const verb = clip.op === "cut" ? "移动" : "复制";
+        // 来自别的树：父子云文件夹在盘上本就是一棵树，借共同祖先工作区的 move/copy 搬。
+        if (clip.sourceId !== source.id) {
+          reportBatch(verb, await drop.pasteAcross(clip, destDir));
           return;
         }
+        let names: Set<string>;
         try {
           const siblings = await source.listDir(destDir);
-          const names = new Set(siblings.map((n) => n.name));
-          const origName = baseName(clip.path);
-          if (clip.op === "cut") {
-            if (parentDir(clip.path) === destDir) return; // 原地剪切粘贴 = 空操作
-            if (names.has(origName)) {
-              notifyActionError("无法粘贴", new Error("目标位置已存在同名项"));
-              return;
-            }
-            await source.move(clip.path, joinPath(destDir, origName));
-            setClipboard(null); // 剪切是一次性的
-            data.reload(parentDir(clip.path));
-          } else {
-            if (!source.copy) return;
-            await source.copy(
-              clip.path,
-              joinPath(destDir, dedupeName(origName, names)),
-            );
-            // 复制保留剪贴板，可重复粘贴（每次对最新清单去重）。
-          }
-          revealDir(destDir);
-          data.reload(destDir);
+          names = new Set(siblings.map((n) => n.name));
         } catch (e) {
           notifyActionError("粘贴失败", e);
+          return;
         }
+        const skipped: BatchFailure[] = [];
+        const pending: string[] = [];
+        for (const path of clip.paths) {
+          const name = baseName(path);
+          if (destDir === path || destDir.startsWith(`${path}/`)) {
+            skipped.push({ path, name, reason: "不能粘贴到自身或其子目录" });
+            continue;
+          }
+          if (clip.op === "cut") {
+            if (parentDir(path) === destDir) continue; // 原地剪切粘贴 = 空操作
+            if (names.has(name)) {
+              skipped.push({ path, name, reason: "目标位置已存在同名项" });
+              continue;
+            }
+            names.add(name); // 同批里后一项不能再占这个名字
+          }
+          pending.push(path);
+        }
+        const outcome = await runBatch(pending, async (path) => {
+          const name = baseName(path);
+          if (clip.op === "cut") {
+            await source.move(path, joinPath(destDir, name));
+            return;
+          }
+          const copyName = dedupeName(name, names);
+          names.add(copyName); // 连粘多项时对刚占下的名字继续去重
+          await source.copy?.(path, joinPath(destDir, copyName));
+        });
+        if (clip.op === "cut") {
+          setFileClipboard(null); // 剪切是一次性的
+          // 选区里那几行已经搬走了，留着它等于让下一次删除对着不存在的路径开火。
+          clearSelection();
+        }
+        // 复制保留剪贴板，可重复粘贴（每次对最新清单去重）。
+        revealDir(destDir);
+        reloadDirs([
+          destDir,
+          ...(clip.op === "cut" ? clip.paths.map(parentDir) : []),
+        ]);
+        const result = withSkipped(skipped, outcome);
+        // 整批都是原地粘贴：什么也没发生，不必报账。
+        if (result.done === 0 && result.failures.length === 0) return;
+        reportBatch(verb, result);
       },
-      [canMutate, clipboard, source, data, revealDir],
+      [
+        canMutate,
+        clipboard,
+        source,
+        revealDir,
+        reloadDirs,
+        reportBatch,
+        clearSelection,
+        drop,
+      ],
     );
 
-    // Delete/Backspace 删选中项；Ctrl/Cmd + C/X/V 剪贴板。仅当焦点在树内（行按钮）时
-    // 触发；输入框 / 创建·重命名态让出；有选区时让出原生文本复制。
-    // 与菜单一致：无 caps.edit 时快捷键也不做复制/剪切/粘贴/删除。
+    // Esc 清空选区；Delete/Backspace 删选中项（多选走批量确认）；Ctrl/Cmd + A 全选可见行、
+    // C/X/V 剪贴板。仅当焦点在树内（行按钮）时触发；输入框 / 创建·重命名态让出；有文本选区时
+    // 让出原生复制。与菜单一致：无 caps.edit 时快捷键也不做复制/剪切/粘贴/删除。
     const onTreeKeyDown = useCallback(
       (e: React.KeyboardEvent) => {
         if (creating || renaming) return;
         const tag = (e.target as HTMLElement).tagName;
         if (tag === "INPUT" || tag === "TEXTAREA") return;
+        const items = batch.selection.items;
+        if (e.key === "Escape") {
+          if (items.length > 0) {
+            e.preventDefault();
+            clearSelection();
+          }
+          return;
+        }
         if (
           (e.key === "Delete" || e.key === "Backspace") &&
           !e.ctrlKey &&
           !e.metaKey &&
           !e.altKey
         ) {
-          if (selected && canMutate) {
-            e.preventDefault();
-            void remove({
-              path: selected.path,
-              name: baseName(selected.path),
-              isDir: selected.isDir,
-            });
+          if (items.length === 0 || !canMutate) return;
+          e.preventDefault();
+          if (items.length > 1) {
+            batch.requestDelete();
+            return;
           }
+          const only = items[0];
+          void remove({
+            path: only.path,
+            name: baseName(only.path),
+            isDir: only.isDir,
+          });
           return;
         }
         if (!(e.ctrlKey || e.metaKey)) return;
+        const key = e.key.toLowerCase();
+        if (key === "a") {
+          e.preventDefault();
+          batch.selectAllVisible();
+          return;
+        }
         if (window.getSelection()?.toString()) return;
         if (!canMutate) return;
-        const key = e.key.toLowerCase();
+        // 祖先已选中的后代不进剪贴板：父目录一走，子项路径就不成立了。
+        const paths = topLevelSelection(items).map((i) => i.path);
         if (key === "c") {
-          if (selected && source.copy) {
+          if (paths.length > 0 && source.copy) {
             e.preventDefault();
-            doCopy(selected.path);
+            doCopy(paths);
           }
         } else if (key === "x") {
-          if (selected) {
+          if (paths.length > 0) {
             e.preventDefault();
-            doCut(selected.path);
+            doCut(paths);
           }
         } else if (key === "v" && clipboard) {
           e.preventDefault();
-          const destDir = selected
-            ? selected.isDir
-              ? selected.path
-              : parentDir(selected.path)
+          // 粘贴落点 = 锚点行（目录本身 / 文件的父目录），无选区则落根。
+          const anchor =
+            items.find((i) => i.path === batch.selection.anchor) ?? items[0];
+          const destDir = anchor
+            ? anchor.isDir
+              ? anchor.path
+              : parentDir(anchor.path)
             : "";
           void doPaste(destDir);
         }
@@ -452,7 +508,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       [
         creating,
         renaming,
-        selected,
+        batch,
+        clearSelection,
         clipboard,
         canMutate,
         source,
@@ -487,10 +544,17 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       () => ({
         startCreate: (kind) => openCreate("", kind),
         refresh,
-        triggerUpload: () => uploadRef.current?.click(),
+        triggerUpload: drop.triggerUpload,
+        triggerUploadFolder: drop.triggerUploadFolder,
         collapseAll,
       }),
-      [openCreate, refresh, collapseAll],
+      [
+        openCreate,
+        refresh,
+        collapseAll,
+        drop.triggerUpload,
+        drop.triggerUploadFolder,
+      ],
     );
 
     // Mirror toolbar-relevant state up so an external toolbar (e.g. the side
@@ -498,51 +562,13 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     // while still driving the actions through the ref.
     useEffect(() => {
       onChromeState?.({
-        uploading,
+        uploading: drop.uploading,
         hasExpanded: expanded.size > 0,
         loading: rootStatus === "loading",
       });
-    }, [onChromeState, uploading, expanded, rootStatus]);
+    }, [onChromeState, drop.uploading, expanded, rootStatus]);
 
     const canUpload = source.caps.transfer && canMutate;
-
-    const onDragOverRoot = (e: React.DragEvent) => {
-      if (e.dataTransfer.types.includes(DRAG_MIME)) setDropTarget(null);
-      else if (canUpload) {
-        e.preventDefault();
-        setDragOver(true);
-      }
-    };
-    const onDropRoot = (e: React.DragEvent) => {
-      setDragOver(false);
-      setDropTarget(null);
-      const raw = e.dataTransfer.getData(DRAG_MIME);
-      if (raw) {
-        e.preventDefault();
-        if (!canMutate) return;
-        const p = parseDragPayload(raw);
-        if (p && p.sourceId === source.id) void moveInto(p.path, "");
-        return;
-      }
-      if (canUpload && e.dataTransfer.files.length > 0) {
-        e.preventDefault();
-        void upload(e.dataTransfer.files, "");
-      }
-    };
-
-    // 隐藏的上传 input 始终渲染（即使无工具栏的嵌入模式也要能经 triggerUpload 触发）。
-    const uploadInput = canUpload ? (
-      <input
-        ref={uploadRef}
-        type="file"
-        multiple
-        className="hidden"
-        onChange={(e) => {
-          void upload(e.target.files, "");
-          e.target.value = "";
-        }}
-      />
-    ) : null;
 
     // 加载 / 错误 / 空：有 chrome（独占面板）时居中铺满；嵌入堆叠时收成左对齐小行。
     const loadingEl = chrome ? (
@@ -599,6 +625,46 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       </div>
     );
 
+    // 多选（≥2 项）才把行菜单换成批量菜单；源既不能改、也没有可下载的文件时不挂（空菜单）。
+    const canDownloadBatch = source.caps.transfer && !!source.download;
+    const multiSelected = batch.count >= 2;
+    const batchMenu =
+      multiSelected &&
+      (canMutate || (canDownloadBatch && batch.downloadableCount > 0))
+        ? {
+            count: batch.count,
+            downloadableCount: batch.downloadableCount,
+            onDownload: batch.runDownload,
+            onCut: batch.runCut,
+            onDelete: batch.requestDelete,
+          }
+        : null;
+
+    const selectionBar = multiSelected ? (
+      <FileTreeSelectionBar
+        count={batch.count}
+        downloadableCount={batch.downloadableCount}
+        canDownload={canDownloadBatch}
+        canMutate={canMutate}
+        busy={batch.busy}
+        indent={indent}
+        onDownload={batch.runDownload}
+        onCut={batch.runCut}
+        onDelete={batch.requestDelete}
+        onClear={batch.clear}
+      />
+    ) : null;
+
+    const batchDialogs = (
+      <FileTreeBatchDialogs
+        confirm={batch.confirm}
+        onConfirmDelete={batch.confirmDelete}
+        onCancelDelete={batch.cancelDelete}
+        failure={batch.failure}
+        onCloseFailure={batch.closeFailure}
+      />
+    );
+
     const body =
       rootStatus === "error" ? (
         errorEl
@@ -647,12 +713,14 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               creating={creating}
               renaming={renaming}
               dropTarget={dropTarget}
-              selectedPath={selected?.path ?? null}
-              cutPath={clipboard?.op === "cut" ? clipboard.path : null}
+              selectedPaths={batch.selectedPaths}
+              cutPaths={cutPaths}
               hasClipboard={clipboard !== null}
+              batchMenu={batchMenu}
               onToggle={toggle}
               onOpenFile={onOpenFile}
-              onSelect={onSelect}
+              onSelect={batch.selectRowAt}
+              onContextSelect={batch.selectForContextMenu}
               onContextCreate={openCreate}
               onStartRename={setRenaming}
               onSubmitRename={submitRename}
@@ -663,8 +731,8 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               onCopy={doCopy}
               onCut={doCut}
               onPaste={doPaste}
-              onMoveInto={moveInto}
-              onUpload={upload}
+              onMoveInto={drop.onMoveInto}
+              onUpload={drop.onUpload}
               onDropTarget={setDropTarget}
               onReloadDir={(dir) => data.reload(dir)}
             />
@@ -681,14 +749,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     // 嵌入模式：无工具栏、无自身高度/滚动，撑内容高度；横向内边距由外层左栏统一给。
     if (!chrome) {
       return (
-        <div
-          onKeyDown={onTreeKeyDown}
-          onDragOver={onDragOverRoot}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDropRoot}
-        >
-          {uploadInput}
+        <div onKeyDown={onTreeKeyDown} {...drop.rootDragProps}>
+          {drop.chrome}
+          {selectionBar}
           {body}
+          {batchDialogs}
         </div>
       );
     }
@@ -697,28 +762,37 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       <div
         className="flex h-full flex-col"
         onKeyDown={onTreeKeyDown}
-        onDragOver={onDragOverRoot}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDropRoot}
+        {...drop.rootDragProps}
       >
-        {uploadInput}
+        {drop.chrome}
         {!hideToolbar && (
           <div className="flex shrink-0 items-center gap-1 px-3 py-2">
             {canUpload && (
-              <Button
-                className="disabled:opacity-60"
-                disabled={uploading}
-                onClick={() => uploadRef.current?.click()}
-                icon={
-                  uploading ? (
-                    <Loader2 size={13} className="animate-spin" />
-                  ) : (
-                    <Upload size={13} />
-                  )
-                }
-              >
-                上传
-              </Button>
+              <>
+                <Button
+                  className="disabled:opacity-60"
+                  disabled={drop.uploading}
+                  onClick={drop.triggerUpload}
+                  icon={
+                    drop.uploading ? (
+                      <Loader2 size={13} className="animate-spin" />
+                    ) : (
+                      <Upload size={13} />
+                    )
+                  }
+                >
+                  上传
+                </Button>
+                <SimpleTooltip label="上传文件夹">
+                  <IconButton
+                    disabled={drop.uploading}
+                    onClick={drop.triggerUploadFolder}
+                    aria-label="上传文件夹"
+                  >
+                    <FolderUp size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+              </>
             )}
             {canMutate && (
               <>
@@ -765,13 +839,18 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           </div>
         )}
 
-        {dragOver && canUpload && (
+        {drop.dragOver && canUpload && (
           <div className="mx-3 mb-2 shrink-0 rounded-lg border border-dashed border-primary bg-primary/5 px-3 py-4 text-center text-xs text-primary">
             松开以上传到此处
           </div>
         )}
 
+        {selectionBar && (
+          <div className="mx-2 mb-1 shrink-0">{selectionBar}</div>
+        )}
+
         <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">{body}</div>
+        {batchDialogs}
       </div>
     );
   },
