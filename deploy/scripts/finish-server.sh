@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
-# memory pipeline migrate/contract（contract 自滞后一轮，本轮迁完的源下轮才删）→ 起 api → 健康检查。
+# 停 api → 迁移（DB + 盘上）→ 起 api → 健康检查。
 # 供 deploy-backend.yml SSH 调用；与 /opt/agentcore/finish.sh 同路径约定。
 # VPC ACR 的 short-sha tag 可能晚于公网端点同步，拉不到时回退 latest 并本地打 tag。
 #
 # 顺序铁律（破坏性迁移）：停旧 api → alembic upgrade → schema gate →
-# memory pipeline migrate/contract（自滞后一轮保回滚）→ 起新 api。
+# workspace tree（盘上目录搬迁）→ memory pipeline migrate/contract（自滞后一轮保回滚）
+# → project docs（读迁移后的 tree/ 落点）→ 起新 api。
 # 禁止在旧容器仍接流量时 DROP COLUMN/TABLE（2026-07-20 单日 582×500 根因）。
+#
+# 盘上迁移同样必须在窗口内、起 api 之前：resolve_workspace_root 无条件 mkdir，新 api
+# 一接流量，第一个打开云文件夹的用户就把迁移目标建成空目录；而搬迁「目标已存在就跳过、
+# 绝不合并」，事后补跑会被判 skipped，文件永久留在旧的平铺目录里。
 set -euo pipefail
 
 DEPLOY="${AGENTCORE_DEPLOY_DIR:-/opt/agentcore/repo/deploy}"
@@ -20,20 +25,20 @@ fi
 
 [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF 不存在"; exit 1; }
 
-echo "== [1/10] 切 IMAGE_TAG -> $TAG =="
+echo "== [1/12] 切 IMAGE_TAG -> $TAG =="
 sed -i "s/^IMAGE_TAG=.*/IMAGE_TAG=$TAG/" "$ENVF"
 export IMAGE_TAG="$TAG"
 export IMAGE_REGISTRY="$(grep -E '^IMAGE_REGISTRY=' "$ENVF" | head -1 | cut -d= -f2-)"
 echo "registry=$IMAGE_REGISTRY tag=$IMAGE_TAG"
 
-echo "== [2/10] 登录 ACR(VPC) =="
+echo "== [2/12] 登录 ACR(VPC) =="
 ACR_USER="$(grep -E '^ACR_USERNAME=' "$ROOT_ENV" | head -1 | cut -d= -f2-)"
 ACR_PASS="$(grep -E '^ACR_PASSWORD=' "$ROOT_ENV" | head -1 | cut -d= -f2-)"
 ACR_HOST="$(grep -E '^ACR_REGISTRY=' "$ROOT_ENV" | head -1 | cut -d= -f2-)"
 echo "$ACR_PASS" | docker login "$ACR_HOST" -u "$ACR_USER" --password-stdin
 
 IMAGE="${IMAGE_REGISTRY}/api:${IMAGE_TAG}"
-echo "== [3/10] 拉 api 镜像 ($IMAGE) =="
+echo "== [3/12] 拉 api 镜像 ($IMAGE) =="
 # 同机构建路径（remote-build-deploy.mjs 的 buildx --load）镜像已在本机：sha tag 视作
 # 不可变，直接复用、省一次 ACR 往返。浮动 latest 不享受此捷径（本机存在 ≠ 最新）。
 # 本机缺镜像时照旧 pull + 回退 latest，失败语义不变。
@@ -71,7 +76,7 @@ if [[ "$_gvisor_off" -eq 0 ]]; then
   echo "gVisor sandbox overlay: $_sandbox_yml"
 fi
 
-echo "== [4/10] 确认基础设施在线 + 等 postgres =="
+echo "== [4/12] 确认基础设施在线 + 等 postgres =="
 "${COMPOSE[@]}" up -d postgres redis searxng
 for i in $(seq 1 30); do
   "${COMPOSE[@]}" exec -T postgres pg_isready -U agentcore >/dev/null 2>&1 && break
@@ -80,22 +85,29 @@ for i in $(seq 1 30); do
 done
 echo "postgres ready"
 
-echo "== [5/10] 停 api（关闭旧代码 + 新 schema 窗口）=="
+echo "== [5/12] 停 api（关闭旧代码 + 新 schema 窗口）=="
 "${COMPOSE[@]}" stop api 2>/dev/null || true
 
-echo "== [6/10] alembic upgrade head =="
+echo "== [6/12] alembic upgrade head =="
 "${COMPOSE[@]}" run --rm api alembic upgrade head
 
-echo "== [7/10] schema gate (live) =="
+echo "== [7/12] schema gate (live) =="
 "${COMPOSE[@]}" run --rm api python scripts/check_schema_gate.py --live
 
-echo "== [8/10] memory pipeline migrate/contract (self-lagged) =="
+# 依赖 [6] 回填的 folders.rel_path；必须早于 [10]（它读迁移后的 tree/ 落点）。
+echo "== [8/12] workspace tree 迁移（平铺目录 -> tree/<rel_path>）=="
+"${COMPOSE[@]}" run --rm api python scripts/migrate_workspace_tree.py
+
+echo "== [9/12] memory pipeline migrate/contract (self-lagged) =="
 "${COMPOSE[@]}" run --rm api python scripts/migrate_memory_pipeline.py
 
-echo "== [9/10] 起 api =="
+echo "== [10/12] project docs 迁移（厚约定文档 -> 记忆条目）=="
+"${COMPOSE[@]}" run --rm api python scripts/migrate_project_docs.py
+
+echo "== [11/12] 起 api =="
 "${COMPOSE[@]}" up -d
 
-echo "== [10/10] 健康检查 /readyz =="
+echo "== [12/12] 健康检查 /readyz =="
 ok=0
 for i in $(seq 1 40); do
   code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://127.0.0.1:8000/readyz || true)"

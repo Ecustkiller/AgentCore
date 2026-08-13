@@ -59,6 +59,12 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - appdata:/data
+      # 凭据文件落点（当前仅 FCM 服务账号 JSON）：宿主 config/credentials/（与
+      # production.env 同级，内容 gitignore）→ 容器 /run/secrets 只读。开推送的三步与
+      # 文件权限见 production.env.example「原生推送 FCM」段。
+      # 挂目录而非单文件：宿主缺文件时单文件挂载会被 Docker 建成同名空目录，反坑住未配
+      # 推送的部署；挂目录空着也无害。不整挂 config/ 是为了不让 production.env 进容器。
+      - ./config/credentials:/run/secrets:ro
     depends_on:
       postgres:
         condition: service_healthy

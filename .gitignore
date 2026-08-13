@@ -133,6 +133,10 @@ deploy/config/production.env
 **/keystore.properties
 # Firebase / FCM client config (contains project identifiers; keep local)
 **/google-services.json
+# Firebase / FCM *server* credential (service-account JSON = a private key). Lives in
+# deploy/config/credentials/ on the server (that dir has its own .gitignore); this rule
+# also covers a dev copy dropped next to apps/server/.env.
+**/firebase-service-account.json
 
 # Cloudflare Wrangler local state
 .wrangler/

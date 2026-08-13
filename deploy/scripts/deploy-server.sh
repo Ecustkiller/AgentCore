@@ -3,8 +3,9 @@
 # AgentCore 一键部署 / 回退脚本（部署与运维.md §三 CI/CD）。
 #
 #   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 →
-#   停 api → alembic upgrade head → schema gate → memory pipeline migrate
-#   (contract self-lags one deploy) → compose up → /readyz → 记 SHA
+#   停 api → alembic upgrade head → schema gate → workspace tree 迁移 →
+#   memory pipeline migrate (contract self-lags one deploy) → project docs 迁移 →
+#   compose up → /readyz → 记 SHA
 #
 # 用法：
 #   deploy-server.sh [<sha>|<tag>|latest]    # 缺省 latest（= origin/<branch> HEAD）
@@ -140,6 +141,9 @@ fi
 
 # ── 7. 停 api → 迁移 → schema gate（仅正向）──
 # 破坏性迁移期间旧 api 不得继续接流量（2026-07-20 UndefinedColumn/Table 窗口）。
+# 盘上迁移同样在这个窗口内：resolve_workspace_root 无条件 mkdir，新 api 一接流量，
+# 第一个打开云文件夹的用户就把搬迁目标建成空目录，而搬迁「目标已存在就跳过、绝不合并」
+# ——事后补跑会被判 skipped，文件永久停在旧的平铺目录里。
 if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   dc stop api 2>/dev/null || true
   stage "api stopped before migrate"
@@ -147,9 +151,14 @@ if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   stage "alembic upgrade head"
   dc run --rm api python scripts/check_schema_gate.py --live
   stage "schema gate (live)"
+  # 依赖上面回填的 folders.rel_path；必须早于 project docs（它读迁移后的 tree/ 落点）。
+  dc run --rm api python scripts/migrate_workspace_tree.py
+  stage "workspace tree relocation"
   # Memory migrate + self-lagged contract (sources cleared on the *next* deploy).
   dc run --rm api python scripts/migrate_memory_pipeline.py
   stage "memory pipeline migrate/contract (lagged)"
+  dc run --rm api python scripts/migrate_project_docs.py
+  stage "project docs → memory entries"
 else
   warn "回退：跳过 alembic（如 schema 不一致，从 $BACKUP_DIR 手动恢复对齐）"
 fi

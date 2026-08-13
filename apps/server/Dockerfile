@@ -83,6 +83,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
 # ① 中文字体：文档/图表产物（pptx、matplotlib 图）没有 CJK 字体会全是豆腐块。
 # ② nodejs + npm：code_execute 声明支持 javascript；npm 供云沙箱外环验绿 /
 #    Vite build（build_app smoke 等）。随基础镜像 Debian 版本，当前 trixie ≈ node 20。
+# ⑥ git：云工作区 exec 系统 git——AI 的 git 工具（含账户级 PAT 注入）与用户「从 GitHub
+#    克隆」端点都靠它，base slim 不含。缺它两者一起 FileNotFoundError，PAT 设置项形同虚设。
+#    HTTPS 走 git 主包自带的 git-remote-http + libcurl（Depends，recommends 关掉也在）。
 # APT_MIRROR：生产机默认阿里云（fonts-noto-cjk ~57MB，官方 deb.debian.org 跨境可到几十 KB/s）；
 # GHA/境外传空字符串保留官方源。与 PYPI_INDEX 对称。
 ARG APT_MIRROR=mirrors.aliyun.com
@@ -98,7 +101,7 @@ RUN set -eux; \
       fi; \
     fi; \
     apt-get update; \
-    apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs npm; \
+    apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs npm git; \
     rm -rf /var/lib/apt/lists/*
 
 # ③ 文档/数据常用库装进【系统 site-packages】（沙箱 python3 可见；按大众文档场景选型：

@@ -26,12 +26,18 @@
  *
  * Any non-zero step fails the whole gate. Backend uses unit pytest
  * (`--ignore=tests/integration`) for local runnability; CI still runs full
- * pytest with Postgres.
+ * pytest with Postgres. Because that exclusion makes a green gate narrower than it
+ * reads, a successful run ends with an explicit "not covered" block naming the
+ * contracts that only the integration suite pins (printIntegrationCoverageGap).
  *
- * Contract drift (local): regen twice and require idempotence. Unlike CI's clean
- * checkout + `git diff` vs HEAD, a local WIP tree may already contain intentional
- * uncommitted artifact updates — those must still be committed before push; this
- * gate only proves regen is stable.
+ * Contract drift (local): snapshot the artifacts BEFORE regenerating, then fail if
+ * the regen rewrote any of them (stale = a source change shipped without its
+ * generated artifacts) or if a second regen differs (non-idempotent). On a clean
+ * tree, disk == HEAD, so "regen rewrote nothing" is exactly CI's `git diff
+ * --exit-code`; on a WIP tree it asks the same question against the tree's own
+ * sources instead of misreading intentional uncommitted regens as drift. Those
+ * uncommitted-but-in-sync artifacts still print as a note — they must ride the
+ * release commit, and CI re-checks against the pushed HEAD.
  */
 import { createHash } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
@@ -40,6 +46,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -51,12 +58,16 @@ const GATE_SCRIPT = fileURLToPath(import.meta.url);
 const ROOT = join(dirname(GATE_SCRIPT), "..");
 const SERVER = join(ROOT, "apps", "server");
 
+// Every artifact `regenContracts()` writes. A generated file missing from this list is
+// invisible to the drift gate — the same hole EVAL-A6 named, one file smaller.
 const CONTRACT_DRIFT_PATHS = [
   "apps/server/openapi.json",
   "packages/contract-rest-types/src/api.generated.ts",
   "packages/contract-rest-types/src/paths.generated.ts",
   "packages/contract-types/src/eventTypes.generated.ts",
   "packages/contract-types/src/events.generated.ts",
+  "packages/contract-types/src/interactionKinds.generated.ts",
+  "packages/contract-types/src/errorCodes.generated.ts",
   "packages/protocol-conformance/fixtures",
 ];
 
@@ -139,13 +150,34 @@ function hashFile(absPath) {
   });
 }
 
-async function fingerprintContracts() {
+/** sha256 of every committed contract artifact, keyed by absolute path. */
+async function snapshotContracts() {
   const files = CONTRACT_DRIFT_PATHS.flatMap(listFiles).sort();
-  const parts = [];
-  for (const f of files) {
-    parts.push(`${f}\0${await hashFile(f)}`);
+  const snap = new Map();
+  for (const f of files) snap.set(f, await hashFile(f));
+  return snap;
+}
+
+/** Files a regen added / removed / rewrote, relative to ROOT. */
+function snapshotDelta(before, after) {
+  const rel = (abs) => abs.slice(ROOT.length + 1).replaceAll("\\", "/");
+  const changed = [];
+  for (const [path, hash] of after) {
+    if (!before.has(path)) changed.push(`+ ${rel(path)}`);
+    else if (before.get(path) !== hash) changed.push(`M ${rel(path)}`);
   }
-  return createHash("sha256").update(parts.join("\n")).digest("hex");
+  for (const path of before.keys()) {
+    if (!after.has(path)) changed.push(`- ${rel(path)}`);
+  }
+  return changed.sort();
+}
+
+function snapshotToJson(snap) {
+  return JSON.stringify(Object.fromEntries(snap));
+}
+
+function snapshotFromJson(text) {
+  return new Map(Object.entries(JSON.parse(text)));
 }
 
 function regenContracts() {
@@ -155,16 +187,67 @@ function regenContracts() {
   });
 }
 
-async function assertContractIdempotent() {
-  console.log("\n→ contract regen idempotence");
-  const first = await fingerprintContracts();
-  regenContracts();
-  const second = await fingerprintContracts();
-  if (first !== second) {
-    console.error("\n✗ release:gate FAILED — contract regen not idempotent");
-    console.error("  First and second regen produced different artifacts.");
+/** Baseline = artifacts as they sit on disk BEFORE this run regenerates anything.
+ *
+ * Must be captured before the first `regenContracts()` — including the parent's
+ * warm-up regen on the parallel path, which passes its own baseline down to the
+ * contracts child via RELEASE_GATE_CONTRACT_BASELINE.
+ */
+async function captureContractBaseline() {
+  const handoff = process.env.RELEASE_GATE_CONTRACT_BASELINE;
+  if (handoff && existsSync(handoff)) return snapshotFromJson(readFileSync(handoff, "utf8"));
+  return snapshotContracts();
+}
+
+function writeContractBaseline(snap) {
+  const dir = join(tmpdir(), "agentcore-release-gate");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `contract-baseline-${process.pid}.json`);
+  writeFileSync(path, snapshotToJson(snap), "utf8");
+  return path;
+}
+
+/** Contract drift gate — the local half of CI's `git diff --exit-code`.
+ *
+ * Two distinct failures, both hard:
+ *  1. STALE — regen rewrote an artifact, i.e. what is on disk does not match what
+ *     the sources produce. On a clean tree (disk == HEAD) this is exactly CI's
+ *     "fail on uncommitted drift"; on a WIP tree it asks the honest local question
+ *     ("are the artifacts in sync with THIS tree's sources?") instead of flagging
+ *     every intentional uncommitted regen.
+ *  2. NON-IDEMPOTENT — a second regen differs from the first, so no commit can ever
+ *     satisfy CI.
+ *
+ * Artifacts that are in sync but still uncommitted are a note, not a failure: the
+ * gate runs before the release commit, and CI re-checks against the pushed HEAD.
+ */
+async function assertContractsInSync(baseline) {
+  console.log("\n→ contract drift (artifacts ↔ sources)");
+  const afterFirst = await snapshotContracts();
+  const stale = snapshotDelta(baseline, afterFirst);
+  if (stale.length) {
+    console.error("\n✗ release:gate FAILED — committed contract artifacts were stale");
+    console.error(`  Regen rewrote ${stale.length} file(s); the tree shipped a source change`);
+    console.error("  without its generated artifacts (CI's `git diff --exit-code` would fail):");
+    for (const line of stale.slice(0, 40)) console.error(`    ${line}`);
+    if (stale.length > 40) console.error(`    …(+${stale.length - 40} more)`);
+    console.error("  The regen above already fixed the tree — review and commit those files.");
     process.exit(1);
   }
+  console.log(`  in sync — regen rewrote nothing (${afterFirst.size} artifacts)`);
+
+  console.log("\n→ contract regen idempotence");
+  regenContracts();
+  const afterSecond = await snapshotContracts();
+  const unstable = snapshotDelta(afterFirst, afterSecond);
+  if (unstable.length) {
+    console.error("\n✗ release:gate FAILED — contract regen not idempotent");
+    console.error("  First and second regen produced different artifacts:");
+    for (const line of unstable.slice(0, 40)) console.error(`    ${line}`);
+    process.exit(1);
+  }
+  console.log("  stable across two regens");
+
   const porcelain = spawnSync(
     "git",
     ["status", "--porcelain", "--", ...CONTRACT_DRIFT_PATHS],
@@ -173,12 +256,13 @@ async function assertContractIdempotent() {
   const dirty = (porcelain.stdout || "").trim();
   if (dirty) {
     console.log(
-      "  note: contract artifacts differ from HEAD — include them in the release commit:",
+      "  note: in sync with this tree's sources but not yet committed — these must ride the",
     );
+    console.log("  release commit, or CI's drift gate goes red on the pushed HEAD:");
     console.log(
       dirty
         .split("\n")
-        .map((l) => `    ${l}`)
+        .map((l) => `    ${l.trim()}`)
         .join("\n"),
     );
   } else {
@@ -221,7 +305,7 @@ function sectionEnabled(name, { from, only }) {
 
 /** Spawn a nested `release:gate --only <section>` so contracts ∥ desktop can
  *  overlap wall-clock without blocking the parent on spawnSync. */
-function runSectionChild(only, { lite = false } = {}) {
+function runSectionChild(only, { lite = false, contractBaselinePath = null } = {}) {
   return new Promise((resolve, reject) => {
     const args = [GATE_SCRIPT, "--only", only];
     if (lite) args.push("--lite");
@@ -233,6 +317,9 @@ function runSectionChild(only, { lite = false } = {}) {
         ...process.env,
         RELEASE_GATE_SERIAL: "1",
         ...(lite ? { RELEASE_GATE_LITE: "1" } : {}),
+        ...(contractBaselinePath
+          ? { RELEASE_GATE_CONTRACT_BASELINE: contractBaselinePath }
+          : {}),
       },
       shell: false,
     });
@@ -250,12 +337,12 @@ function runSectionChild(only, { lite = false } = {}) {
   });
 }
 
-async function runContractsSection() {
+async function runContractsSection(baseline) {
   section("contracts");
   regenContracts();
   run("story-packs check", "pnpm", ["gen:story-packs:check"]);
   run("legal md check", "pnpm", ["sync:legal:check"]);
-  await assertContractIdempotent();
+  await assertContractsInSync(baseline);
 }
 
 function runDesktopSection({ lite = false } = {}) {
@@ -296,6 +383,47 @@ function runDesktopSection({ lite = false } = {}) {
   ]);
 }
 
+const INTEGRATION_TESTS = "apps/server/tests/integration";
+
+/** Print what a green gate did *not* cover, as the last thing on screen.
+ *
+ * The backend section excludes `tests/integration` (it needs a real Postgres most dev
+ * boxes lack), and that directory is the only home of a number of contracts — so an
+ * unqualified "✓ passed" reads as coverage the run never had. Naming the gap here is
+ * the honest alternative to either failing dev boxes or letting the ✓ overclaim.
+ */
+function printIntegrationCoverageGap() {
+  const count = listFiles(INTEGRATION_TESTS).filter((f) =>
+    /[\\/]test_[^\\/]*\.py$/.test(f),
+  ).length;
+  const bar = "─".repeat(78);
+  console.log(
+    [
+      "",
+      bar,
+      `⚠  未覆盖：后端 integration 套件（${count} 个测试文件）—— 本次 release:gate 未跑`,
+      bar,
+      "  backend 段的 pytest 带 --ignore=tests/integration（该套件需要真实 Postgres），",
+      "  所以「✓ release:gate passed」并不等于全覆盖。只活在 integration 里的契约面（节选）：",
+      "",
+      "    · Stop API：POST /stop 幂等（false → true → false）；二次 Stop 取消在飞 worker，",
+      "      每个 worker 发 run_cancelled(reason=stop)，且不得补派 _redir / _rev 跟进 run",
+      "    · Cookie 会话 / CSRF / 限流 / 设备注册，以及各路由的 IDOR 归属校验（非属主 404）",
+      "    · 落库与级联：turn journal（含清理）、run session 级联、stream state、paused turn",
+      "    · 计费与配额：cost ledger、usage、quota / always 配额",
+      "    · workspace / folders / 分享 / 导出 / 记忆管线 / admin 审计 的 HTTP 端到端",
+      "",
+      "  本地补跑（需要 Postgres；不跑不阻断日常开发）：",
+      "    docker compose -f deploy/docker-compose.dev.yml up -d postgres",
+      "    cd apps/server && uv run pytest tests/integration --tb=short",
+      "",
+      "  CI（ci.yml backend job）自带 Postgres 并跑全量 pytest；CI 上库不可达 = 直接失败，",
+      "  不再静默跳过（见 apps/server/tests/integration/conftest.py）。",
+      bar,
+    ].join("\n"),
+  );
+}
+
 async function main() {
   const filter = parseSectionArgs(process.argv);
   const partial = filter.from || filter.only;
@@ -311,6 +439,12 @@ async function main() {
       modeBits.length ? ` (${modeBits.join("; ")})` : ""
     }`,
   );
+
+  const doContracts = sectionEnabled("contracts", filter);
+  const doDesktop = sectionEnabled("desktop", filter);
+  // Snapshot before ANY step of this run can touch a generated artifact — the drift
+  // gate reads "did regen have to rewrite something?" off this baseline.
+  const contractBaseline = doContracts ? await captureContractBaseline() : null;
 
   if (sectionEnabled("backend", filter)) {
     section("backend");
@@ -352,8 +486,6 @@ async function main() {
     });
   }
 
-  const doContracts = sectionEnabled("contracts", filter);
-  const doDesktop = sectionEnabled("desktop", filter);
   // Win: default serial — parallel contracts∥desktop often hits UNKNOWN open() on
   // api.generated.ts (same-checkout write race). Opt into parallel with
   // RELEASE_GATE_SERIAL=0. Nested --only children already force serial.
@@ -380,13 +512,16 @@ async function main() {
     // One upfront regen so desktop typecheck rarely races the contracts child's
     // first gen-types. Idempotence still re-regens inside the contracts child —
     // if that flakes, use RELEASE_GATE_SERIAL=1 (CI uses separate checkouts).
+    // The child inherits THIS baseline: after the warm-up regen it could no longer
+    // tell a stale artifact from an up-to-date one.
+    const contractBaselinePath = writeContractBaseline(contractBaseline);
     regenContracts();
     await Promise.all([
-      runSectionChild("contracts", { lite: filter.lite }),
+      runSectionChild("contracts", { lite: filter.lite, contractBaselinePath }),
       runSectionChild("desktop", { lite: filter.lite }),
     ]);
   } else {
-    if (doContracts) await runContractsSection();
+    if (doContracts) await runContractsSection(contractBaseline);
     if (doDesktop) runDesktopSection({ lite: filter.lite });
   }
 
@@ -395,11 +530,13 @@ async function main() {
     run("mobile lint", "pnpm", ["--filter", "agentcore-mobile", "lint"]);
     run("mobile typecheck", "pnpm", ["--filter", "agentcore-mobile", "typecheck"]);
     run("mobile conformance", "pnpm", ["--filter", "agentcore-mobile", "conformance"]);
+    run("mobile test", "pnpm", ["--filter", "agentcore-mobile", "exec", "vitest", "run"]);
   }
 
   if (sectionEnabled("admin", filter)) {
     section("admin");
     run("admin typecheck", "pnpm", ["--filter", "agentcore-admin", "typecheck"]);
+    run("admin test", "pnpm", ["--filter", "agentcore-admin", "exec", "vitest", "run"]);
   }
 
   if (filter.lite || partial) {
@@ -414,6 +551,10 @@ async function main() {
   } else {
     console.log("\n✓ release:gate passed");
   }
+
+  // Last, so the coverage caveat is what stays on screen next to the ✓. Parallel
+  // `--only contracts|desktop` children never enable backend, so it prints once.
+  if (sectionEnabled("backend", filter)) printIntegrationCoverageGap();
 }
 
 main().catch((err) => {

@@ -213,7 +213,7 @@ jobs:
           if-no-files-found: ignore
 
   mobile:
-    name: Mobile (lint + typecheck + conformance)
+    name: Mobile (lint + typecheck + conformance + test)
     runs-on: ubuntu-latest
 
     steps:
@@ -246,8 +246,11 @@ jobs:
       - name: Conformance
         run: pnpm --filter agentcore-mobile conformance
 
+      - name: Test
+        run: pnpm --filter agentcore-mobile test -- --run
+
   admin:
-    name: Admin (typecheck)
+    name: Admin (typecheck + test)
     runs-on: ubuntu-latest
 
     steps:
@@ -270,3 +273,6 @@ jobs:
 
       - name: Typecheck
         run: pnpm --filter agentcore-admin typecheck
+
+      - name: Test
+        run: pnpm --filter agentcore-admin test -- --run
