@@ -40,8 +40,11 @@ export function useFileUpload(
         setUploading(true);
         try {
           const picked = await load();
+          // 只有目录也得往下走：空文件夹全靠 mkdir 落地，在这里返回等于把用户
+          // 拖进来的那棵树静默吞掉。
           if (
             picked.files.length === 0 &&
+            picked.dirs.length === 0 &&
             picked.ignored.length === 0 &&
             !picked.truncated
           ) {

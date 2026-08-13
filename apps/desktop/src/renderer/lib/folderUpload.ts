@@ -252,8 +252,15 @@ export async function expandDropUpload(
   for (const file of capture.looseFiles) {
     const relPath = normalizeUploadPath(file.name);
     if (!relPath) continue;
-    if (isIgnoredUploadPath(relPath)) ignored.push(relPath);
-    else files.push({ relPath, file });
+    if (isIgnoredUploadPath(relPath)) {
+      ignored.push(relPath);
+      continue;
+    }
+    if (files.length >= UPLOAD_MAX_FILES) {
+      truncated = true;
+      break;
+    }
+    files.push({ relPath, file });
   }
 
   const walk = async (

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { FileTree } from "@/components/files/FileTree";
-import { __resetFileClipboardForTests } from "@/components/files/fileClipboard";
+import {
+  __resetFileClipboardForTests,
+  getFileClipboard,
+} from "@/components/files/fileClipboard";
+import { DRAG_MIME } from "@/components/files/fileTreeDrag";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
 import { notifySuccess } from "@/lib/toast";
@@ -32,14 +36,18 @@ function file(name: string): FileNode {
 /** 云端工作区那一档能力：可传输（下载）、可改（删除 / 移动）、有软删区。 */
 function makeSource(
   fail: { on: string; reason: string } | null = null,
+  /** `docs/` 里已有的文件名（用来造「目标位置已存在同名项」）。 */
+  docsHas: string[] = [],
 ): FileSource & {
   deleted: string[];
   downloaded: string[];
   moved: [string, string][];
+  listed: string[];
 } {
   const deleted: string[] = [];
   const downloaded: string[] = [];
   const moved: [string, string][] = [];
+  const listed: string[] = [];
   const reject = (path: string) => {
     if (fail && path === fail.on) throw new Error(fail.reason);
   };
@@ -47,8 +55,19 @@ function makeSource(
     id: "workspace:multi",
     label: "工作区",
     caps: { watch: false, transfer: true, edit: true, snapshots: true },
-    listDir: async (dir) =>
-      dir === "" ? [dirNode(), file("a.md"), file("b.md"), file("c.md")] : [],
+    listDir: async (dir) => {
+      listed.push(dir);
+      if (dir === "")
+        return [dirNode(), file("a.md"), file("b.md"), file("c.md")];
+      if (dir === "docs") {
+        return docsHas.map((name) => ({
+          path: `docs/${name}`,
+          name,
+          isDir: false,
+        }));
+      }
+      return [];
+    },
     read: async () => ({ kind: "text", text: "", truncated: false }),
     createFile: async () => {},
     mkdir: async () => {},
@@ -67,7 +86,13 @@ function makeSource(
     deleted,
     downloaded,
     moved,
+    listed,
   };
+}
+
+/** 根被列过几次——用来等一次「什么也没发生」的粘贴真的跑完（它收尾会重拉根）。 */
+function rootListings(source: { listed: string[] }): number {
+  return source.listed.filter((dir) => dir === "").length;
 }
 
 function dirNode(): FileNode {
@@ -96,6 +121,8 @@ beforeEach(() => {
   vi.mocked(notifySuccess).mockClear();
   // 剪贴板是全局一份，别让上一条用例剪下的东西漏进下一条。
   __resetFileClipboardForTests();
+  // 展开态按源 id 落盘，同样会漏（上一条展开了 docs/，下一条一挂载就是展开的）。
+  localStorage.clear();
 });
 
 describe("文件树多选（对齐桌面文件管理器）", () => {
@@ -188,5 +215,123 @@ describe("文件树多选（对齐桌面文件管理器）", () => {
     expect(await screen.findByText("已移动 1 项，1 项失败")).toBeTruthy();
     expect(screen.getByText("文件被占用")).toBeTruthy();
     expect(source.moved).toEqual([["a.md", "docs/a.md"]]);
+  });
+
+  it("整批都粘不动时保住剪贴板：换个地方还能粘，不静默把剪切吞掉", async () => {
+    // docs/ 里已有同名项 → 两项都被挡下，一项也没搬走。
+    const source = makeSource(null, ["a.md", "b.md"]);
+    renderTree(source);
+    await select("a.md", "b.md");
+
+    fireEvent.keyDown(screen.getByText("a.md"), { key: "x", ctrlKey: true });
+    fireEvent.click(screen.getByText("docs"));
+    fireEvent.keyDown(screen.getByText("docs"), { key: "v", ctrlKey: true });
+
+    expect(await screen.findByText("2 项移动失败")).toBeTruthy();
+    expect(source.moved).toEqual([]);
+    expect(getFileClipboard()).toEqual({
+      op: "cut",
+      sourceId: "workspace:multi",
+      paths: ["a.md", "b.md"],
+    });
+  });
+
+  it("整批原地粘贴什么也没发生：不报账，剪贴板照旧留着", async () => {
+    const source = makeSource();
+    renderTree(source);
+    await select("a.md", "b.md");
+
+    fireEvent.keyDown(screen.getByText("a.md"), { key: "x", ctrlKey: true });
+    // 锚点是根下的文件 → 落点就是它们现在待的地方。
+    fireEvent.keyDown(screen.getByText("a.md"), { key: "v", ctrlKey: true });
+    // 等这一轮真的跑完：挂载列过一次根，粘贴自己再列一次（探同名）+ 收尾重拉一次。
+    await waitFor(() => expect(rootListings(source)).toBeGreaterThanOrEqual(3));
+
+    expect(source.moved).toEqual([]);
+    expect(notifySuccess).not.toHaveBeenCalled();
+    expect(getFileClipboard()).toEqual({
+      op: "cut",
+      sourceId: "workspace:multi",
+      paths: ["a.md", "b.md"],
+    });
+
+    // 剪贴板没被吞掉，所以换到 docs/ 再粘就照样搬得动。
+    fireEvent.click(screen.getByText("docs"));
+    fireEvent.keyDown(screen.getByText("docs"), { key: "v", ctrlKey: true });
+
+    await waitFor(() =>
+      expect(source.moved).toEqual([
+        ["a.md", "docs/a.md"],
+        ["b.md", "docs/b.md"],
+      ]),
+    );
+    // 原地那次没报账，只有真搬走的这次报了一条。
+    expect(notifySuccess).toHaveBeenCalledTimes(1);
+    expect(notifySuccess).toHaveBeenCalledWith("已移动 2 项");
+    expect(getFileClipboard()).toBeNull();
+  });
+});
+
+describe("拖拽多选（拖的是选区就搬整批）", () => {
+  /** 捕获 dragstart 写进 dataTransfer 的那份载荷。 */
+  function startDrag(name: string): { mime: string; raw: string } {
+    const dataTransfer = { setData: vi.fn(), effectAllowed: "" };
+    fireEvent.dragStart(screen.getByText(name), { dataTransfer });
+    const [mime, raw] = dataTransfer.setData.mock.calls[0] as [string, string];
+    return { mime, raw };
+  }
+
+  /** drop 时读的那份 dataTransfer（内部拖拽只认自定义 MIME）。 */
+  function dropData(raw: string) {
+    return {
+      types: [DRAG_MIME],
+      getData: (type: string) => (type === DRAG_MIME ? raw : ""),
+      files: [],
+      items: [],
+    };
+  }
+
+  it("拖选区内的行 = 一次搬整批，落点逐项报账", async () => {
+    const source = makeSource({ on: "b.md", reason: "文件被占用" });
+    renderTree(source);
+    await select("a.md", "b.md");
+
+    const { mime, raw } = startDrag("a.md");
+    expect(mime).toBe(DRAG_MIME);
+    expect(JSON.parse(raw)).toEqual({
+      sourceId: "workspace:multi",
+      paths: ["a.md", "b.md"],
+    });
+
+    fireEvent.drop(screen.getByText("docs"), { dataTransfer: dropData(raw) });
+
+    expect(await screen.findByText("已移动 1 项，1 项失败")).toBeTruthy();
+    expect(screen.getByText("文件被占用")).toBeTruthy();
+    expect(source.moved).toEqual([["a.md", "docs/a.md"]]);
+    // 搬走的那项不再挂在选区上（留着会让下一次删除对着空路径开火）。
+    await waitFor(() => expect(screen.queryByText(/已选择/)).toBeNull());
+  });
+
+  it("拖选区外的行只搬这一行，不牵连选区", async () => {
+    const source = makeSource();
+    renderTree(source);
+    await select("a.md", "b.md");
+
+    expect(JSON.parse(startDrag("c.md").raw)).toEqual({
+      sourceId: "workspace:multi",
+      paths: ["c.md"],
+    });
+  });
+
+  it("选中父目录又选中它里面的文件时，只搬父目录（子项跟着走）", async () => {
+    const source = makeSource(null, ["inner.md"]);
+    renderTree(source);
+    fireEvent.click(await screen.findByText("docs"));
+    fireEvent.click(await screen.findByText("inner.md"), { ctrlKey: true });
+
+    expect(JSON.parse(startDrag("docs").raw)).toEqual({
+      sourceId: "workspace:multi",
+      paths: ["docs"],
+    });
   });
 });

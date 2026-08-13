@@ -8,7 +8,12 @@ import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { UploadReportDialog } from "./UploadReportDialog";
 import { setFileClipboard } from "./fileClipboard";
-import { type BatchOutcome, runBatch } from "./fileTreeBatch";
+import {
+  type BatchFailure,
+  type BatchOutcome,
+  runBatch,
+  withSkipped,
+} from "./fileTreeBatch";
 import { notifyFileTreeChanged, subscribeFileTreeChanged } from "./fileTreeBus";
 import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
 import {
@@ -28,8 +33,8 @@ import { useFileUpload } from "./useFileUpload";
  *
  * 跨源：拖拽与粘贴都可能来自**另一棵**树（文件中枢把每个云文件夹渲染成独立源，父子亦然）。
  * 能接上的走 {@link resolveBridgedTransfer} 翻译成一次普通的工作区内 move/copy；接不上的
- * 明说 {@link CROSS_SOURCE_UNSUPPORTED}，不静默吞掉。搬完通知对面那棵树刷新
- * （本树自己 reload）。
+ * 明说 {@link CROSS_SOURCE_UNSUPPORTED}，不静默吞掉。搬完通知对面那棵树刷新 + 摘掉它选区里
+ * 已搬走的行（本树自己 reload，搬走了什么经 `onMoved` 回给调用方）。
  */
 export function useFileTreeDrop({
   source,
@@ -37,6 +42,9 @@ export function useFileTreeDrop({
   canMutate,
   revealDir,
   onDropTarget,
+  reportBatch,
+  reloadDirs,
+  onMoved,
 }: {
   source: FileSource;
   data: FileTreeData;
@@ -46,6 +54,12 @@ export function useFileTreeDrop({
   revealDir: (dir: string) => void;
   /** 清/设高亮的目录行（拖到根上时清掉）。 */
   onDropTarget: (path: string | null) => void;
+  /** 多项落地后的报账（与选区批量动作共用一套口径）。 */
+  reportBatch: (verb: string, outcome: BatchOutcome) => void;
+  /** 刷新受影响目录（急切源一次全树，惰性源逐目录）。 */
+  reloadDirs: (dirs: Iterable<string>) => void;
+  /** 本树里这几项已经搬走了——选区据此摘掉它们。 */
+  onMoved: (paths: readonly string[]) => void;
 }): {
   uploading: boolean;
   dragOver: boolean;
@@ -84,8 +98,8 @@ export function useFileTreeDrop({
   // 别的树搬走/搬来的东西也落在本树里时，本树得自己重拉那一层。
   useEffect(
     () =>
-      subscribeFileTreeChanged((sourceId, dir) => {
-        if (sourceId === source.id) data.reload(dir);
+      subscribeFileTreeChanged((change) => {
+        if (change.sourceId === source.id) data.reload(change.dir);
       }),
     [source.id, data],
   );
@@ -100,11 +114,46 @@ export function useFileTreeDrop({
         await source.move(src, dst);
         data.reload(parentDir(src));
         data.reload(destDir);
+        onMoved([src]);
       } catch {
         notifyError("目标位置已存在同名文件，或移动失败");
       }
     },
-    [source, data],
+    [source, data, onMoved],
+  );
+
+  /**
+   * 同源移动 N 项（拖的是整个选区）。没有批量端点，逐项调既有单项 move，故「部分成功」是
+   * 常态：撞名的项不连累其余项，跳过与失败都逐项记账交给调用方一次报清。
+   */
+  const moveManyWithin = useCallback(
+    async (
+      paths: readonly string[],
+      destDir: string,
+    ): Promise<BatchOutcome> => {
+      const skipped: BatchFailure[] = [];
+      const pending: string[] = [];
+      for (const src of paths) {
+        if (destDir === src || destDir.startsWith(`${src}/`)) {
+          skipped.push({
+            path: src,
+            name: baseName(src),
+            reason: "不能移动到自身或其子目录",
+          });
+          continue;
+        }
+        if (parentDir(src) === destDir) continue; // 原地：空操作
+        pending.push(src);
+      }
+      const outcome = await runBatch(pending, (src) =>
+        source.move(src, joinPath(destDir, baseName(src))),
+      );
+      reloadDirs([destDir, ...pending.map(parentDir)]);
+      const failed = new Set(outcome.failures.map((f) => f.path));
+      onMoved(pending.filter((p) => !failed.has(p)));
+      return withSkipped(skipped, outcome);
+    },
+    [source, reloadDirs, onMoved],
   );
 
   /**
@@ -124,9 +173,14 @@ export function useFileTreeDrop({
       );
       if (!bridged) throw new Error(CROSS_SOURCE_UNSUPPORTED);
       await applyBridgedTransfer(bridged, op);
-      // 移动会让**对面**那棵树少一项，而它自己不会知道（复制不动源，无需惊动）。
+      // 移动会让**对面**那棵树少一项，而它自己不会知道（复制不动源，无需惊动）：既要重拉
+      // 那一层，也要把它选区里这一行摘掉——否则那边的下一次删除对着已搬走的路径开火。
       if (op === "move") {
-        notifyFileTreeChanged(from.sourceId, parentDir(from.path));
+        notifyFileTreeChanged({
+          sourceId: from.sourceId,
+          dir: parentDir(from.path),
+          movedAway: [from.path],
+        });
       }
       revealDir(destDir);
       data.reload(destDir);
@@ -137,19 +191,43 @@ export function useFileTreeDrop({
   const onMoveInto = useCallback(
     (payload: DragPayload, destDir: string) => {
       if (!canMutate) return;
-      if (payload.sourceId === source.id) {
-        void moveWithin(payload.path, destDir);
+      const { sourceId, paths } = payload;
+      if (paths.length === 0) return;
+      const within = sourceId === source.id;
+      // 单项保持原样：搬成了树自己会变，不必再说一句；搬不动才一条 toast。
+      if (paths.length === 1) {
+        const path = paths[0];
+        if (within) {
+          void moveWithin(path, destDir);
+          return;
+        }
+        void (async () => {
+          try {
+            await transferAcross({ sourceId, path }, destDir, "move");
+          } catch (e) {
+            notifyActionError("移动失败", e);
+          }
+        })();
         return;
       }
+      // 拖的是整个选区：逐项调单项端点，部分成功是常态，按与批量删除同一套口径报账。
       void (async () => {
-        try {
-          await transferAcross(payload, destDir, "move");
-        } catch (e) {
-          notifyActionError("移动失败", e);
-        }
+        const outcome = within
+          ? await moveManyWithin(paths, destDir)
+          : await runBatch(paths, (path) =>
+              transferAcross({ sourceId, path }, destDir, "move"),
+            );
+        reportBatch("移动", outcome);
       })();
     },
-    [canMutate, source.id, moveWithin, transferAcross],
+    [
+      canMutate,
+      source.id,
+      moveWithin,
+      moveManyWithin,
+      transferAcross,
+      reportBatch,
+    ],
   );
 
   const pasteAcross = useCallback(

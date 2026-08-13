@@ -1,6 +1,7 @@
 import type { FileSource } from "@/lib/fileSource";
 import {
   UPLOAD_MAX_BYTES,
+  UPLOAD_MAX_FILES,
   captureDropUpload,
   collectPickedFiles,
   describeUploadReport,
@@ -150,6 +151,35 @@ describe("整夹上传的采集与过滤", () => {
     ]);
     expect(picked.dirs).toContain("设计/空的");
     expect(picked.ignored).toEqual(["设计/node_modules"]);
+  });
+
+  it("拿不到 entry 的裸文件同样受文件数上限约束，并如实标 truncated", async () => {
+    // 只读 name，不必真造 File；两万多个真 Blob 纯属浪费。
+    const looseFiles = Array.from(
+      { length: UPLOAD_MAX_FILES + 2 },
+      (_, i) => ({ name: `f${i}.txt` }) as unknown as File,
+    );
+
+    const picked = await expandDropUpload({ entries: [], looseFiles });
+
+    expect(picked.files).toHaveLength(UPLOAD_MAX_FILES);
+    expect(picked.files.at(-1)?.relPath).toBe(`f${UPLOAD_MAX_FILES - 1}.txt`);
+    expect(picked.truncated).toBe(true);
+  });
+
+  it("裸文件里的忽略项照记，不占上限额度", async () => {
+    const picked = await expandDropUpload({
+      entries: [],
+      looseFiles: [
+        new File(["1"], "a.md"),
+        new File(["2"], "index.db"),
+        new File(["3"], "b.md"),
+      ],
+    });
+
+    expect(picked.files.map((f) => f.relPath)).toEqual(["a.md", "b.md"]);
+    expect(picked.ignored).toEqual(["index.db"]);
+    expect(picked.truncated).toBe(false);
   });
 });
 

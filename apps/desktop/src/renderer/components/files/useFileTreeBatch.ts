@@ -14,11 +14,13 @@ import {
   runBatch,
   withSkipped,
 } from "./fileTreeBatch";
+import { subscribeFileTreeChanged } from "./fileTreeBus";
 import {
   EMPTY_SELECTION,
   type RowClickIntent,
   type SelectedItem,
   type TreeSelection,
+  dropFromSelection,
   selectRow,
   selectionForContextMenu,
   selectionPaths,
@@ -37,7 +39,13 @@ import type { FileTreeData } from "./useFileTreeData";
 export interface FileTreeBatch {
   selection: TreeSelection;
   selectedPaths: ReadonlySet<string>;
+  /**
+   * 批量动作**实际作用**的项数 = 选区去掉「祖先已选中」的后代。操作条与菜单都报这个数，
+   * 否则会出现「删除 3 项」按下去、结果说「已删除 2 项」。
+   */
   count: number;
+  /** 同一批的路径（拖拽载荷用：拖选区内的行就是搬这一批）。 */
+  topLevelPaths: readonly string[];
   /** 选区里能下载的文件数（目录没有单项下载端点）。 */
   downloadableCount: number;
   /** 行点击（含修饰键意图）后更新选区。 */
@@ -47,6 +55,8 @@ export interface FileTreeBatch {
   /** 全选当前可见行（Ctrl/Cmd + A）。 */
   selectAllVisible: () => void;
   clear: () => void;
+  /** 摘掉已经搬走的行（本树内移动完成后调；跨源移动由总线送到来源树自己调）。 */
+  deselect: (paths: readonly string[]) => void;
   /** 打开删除确认（清单 = 选区去掉「祖先已选中」的后代）。 */
   requestDelete: () => void;
   runDownload: () => void;
@@ -85,8 +95,30 @@ export function useFileTreeBatch(opts: {
   });
 
   const selectedPaths = useMemo(() => selectionPaths(selection), [selection]);
+  // 祖先已选中的后代不单独动手：父目录一走，子项路径就不成立了。删除 / 剪切 / 拖拽都
+  // 对这一批生效，计数与清单也一律以它为准。
+  const topLevel = useMemo(
+    () => topLevelSelection(selection.items),
+    [selection],
+  );
+  const topLevelPaths = useMemo(() => topLevel.map((i) => i.path), [topLevel]);
 
   const clear = useCallback(() => setSelection(EMPTY_SELECTION), []);
+
+  const deselect = useCallback((paths: readonly string[]) => {
+    setSelection((prev) => dropFromSelection(prev, paths));
+  }, []);
+
+  // 别的树把本树的东西搬走了（跨源移动）：那几行已经不在盘上，留在选区里等于让下一次
+  // 删除对着不存在的路径开火——与同源粘贴后清选区同一个理由。
+  useEffect(
+    () =>
+      subscribeFileTreeChanged((change) => {
+        if (change.sourceId !== source.id) return;
+        if (change.movedAway?.length) deselect(change.movedAway);
+      }),
+    [source.id, deselect],
+  );
 
   const selectRowAt = useCallback((node: FileNode, intent: RowClickIntent) => {
     setSelection((prev) => selectRow(prev, node, intent, visibleRef.current));
@@ -129,10 +161,13 @@ export function useFileTreeBatch(opts: {
   );
 
   const requestDelete = useCallback(() => {
-    const items = topLevelSelection(selection.items);
-    if (items.length === 0) return;
-    setConfirm({ items, restoreHint: deleteRestoreHint(source), busy: false });
-  }, [selection, source]);
+    if (topLevel.length === 0) return;
+    setConfirm({
+      items: topLevel,
+      restoreHint: deleteRestoreHint(source),
+      busy: false,
+    });
+  }, [topLevel, source]);
 
   const cancelDelete = useCallback(() => {
     setConfirm((prev) => (prev?.busy ? prev : null));
@@ -186,20 +221,21 @@ export function useFileTreeBatch(opts: {
   }, [source, selection, report]);
 
   const runCut = useCallback(() => {
-    const items = topLevelSelection(selection.items);
-    if (items.length === 0) return;
-    onCut(items.map((i) => i.path));
-  }, [selection, onCut]);
+    if (topLevelPaths.length === 0) return;
+    onCut([...topLevelPaths]);
+  }, [topLevelPaths, onCut]);
 
   return {
     selection,
     selectedPaths,
-    count: selection.items.length,
+    count: topLevel.length,
+    topLevelPaths,
     downloadableCount: downloadable.length,
     selectRowAt,
     selectForContextMenu,
     selectAllVisible,
     clear,
+    deselect,
     requestDelete,
     runDownload,
     runCut,

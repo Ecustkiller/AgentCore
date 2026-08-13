@@ -40,6 +40,7 @@ function renderDir(path: string, name: string, fileCount: number) {
     renaming: null,
     dropTarget: null,
     selectedPaths: new Set<string>(),
+    dragPaths: [],
     cutPaths: new Set<string>(),
     hasClipboard: false,
     batchMenu: null,

@@ -178,7 +178,8 @@ def test_bare_zone_names_in_the_global_dir_set_are_red():
     src = _sources()
     _drift(src, "py_src", '        ".git",\n', '        ".git",\n        "index",\n')
     _drift(src, "ts_src", '  ".git",\n', '  ".git",\n  "index",\n')
+    _drift(src, "upload_src", '  ".git",\n', '  ".git",\n  "index",\n')
     errors = _compare(src)
-    # Both dir sets still agree, so only the leak check can catch this.
-    assert not any(e.startswith("dirs:") for e in errors), errors
+    # All three dir sets still agree, so only the leak check can catch this.
+    assert not any(e.startswith("dirs") for e in errors), errors
     assert any("leaked into" in e for e in errors), errors

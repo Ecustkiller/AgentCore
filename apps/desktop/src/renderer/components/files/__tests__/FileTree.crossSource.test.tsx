@@ -111,7 +111,7 @@ describe("跨源搬运（父文件夹 ↔ 子文件夹在中枢里是两棵树�
     fireEvent.drop(await screen.findByText("线性"), {
       dataTransfer: dragData({
         sourceId: "workspace:folder:design",
-        path: "稿件/a.png",
+        paths: ["稿件/a.png"],
       }),
     });
 
@@ -138,7 +138,7 @@ describe("跨源搬运（父文件夹 ↔ 子文件夹在中枢里是两棵树�
     fireEvent.drop(container.firstChild as Element, {
       dataTransfer: dragData({
         sourceId: "workspace:folder:design",
-        path: "a.png",
+        paths: ["a.png"],
       }),
     });
 
@@ -162,7 +162,7 @@ describe("跨源搬运（父文件夹 ↔ 子文件夹在中枢里是两棵树�
     fireEvent.drop(await screen.findByText("线性"), {
       dataTransfer: dragData({
         sourceId: "workspace:folder:icon",
-        path: "a.png",
+        paths: ["a.png"],
       }),
     });
 
@@ -181,7 +181,7 @@ describe("跨源搬运（父文件夹 ↔ 子文件夹在中枢里是两棵树�
     fireEvent.drop(await screen.findByText("归档"), {
       dataTransfer: dragData({
         sourceId: "workspace:folder:design",
-        path: "a.png",
+        paths: ["a.png"],
       }),
     });
 

@@ -3,6 +3,7 @@ import {
   type SelectedItem,
   type TreeSelection,
   clickIntent,
+  dropFromSelection,
   flattenVisibleRows,
   selectRow,
   selectionForContextMenu,
@@ -139,6 +140,34 @@ describe("topLevelSelection", () => {
       "dir",
       "dir2/a.md",
     ]);
+  });
+});
+
+describe("dropFromSelection", () => {
+  const sel: TreeSelection = {
+    items: [item("dir", true), item("dir/a.md"), item("c.md")],
+    anchor: "dir/a.md",
+  };
+
+  it("搬走的行连同后代一起摘掉，锚点跟着作废", () => {
+    const next = dropFromSelection(sel, ["dir"]);
+    expect(paths(next)).toEqual(["c.md"]);
+    expect(next.anchor).toBeNull();
+  });
+
+  it("没搬走的行原样留下，锚点也不动", () => {
+    const next = dropFromSelection(sel, ["c.md"]);
+    expect(paths(next)).toEqual(["dir", "dir/a.md"]);
+    expect(next.anchor).toBe("dir/a.md");
+  });
+
+  it("同名前缀不算后代；没命中任何一行时返回原选区", () => {
+    expect(paths(dropFromSelection(sel, ["dir2"]))).toEqual([
+      "dir",
+      "dir/a.md",
+      "c.md",
+    ]);
+    expect(dropFromSelection(sel, [])).toBe(sel);
   });
 });
 

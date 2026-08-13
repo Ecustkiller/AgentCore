@@ -138,6 +138,22 @@ export function topLevelSelection(
 }
 
 /**
+ * 摘掉已经不在树里的行（自己搬走的、或被别的树搬走的），连同它们的后代——父目录一走，
+ * 子项路径就不成立了。选区留着这些路径，下一次删除就会对着不存在的东西开火。
+ */
+export function dropFromSelection(
+  sel: TreeSelection,
+  removed: readonly string[],
+): TreeSelection {
+  if (removed.length === 0) return sel;
+  const gone = (path: string) =>
+    removed.some((p) => path === p || path.startsWith(`${p}/`));
+  const items = sel.items.filter((i) => !gone(i.path));
+  if (items.length === sel.items.length) return sel;
+  return { items, anchor: sel.anchor && !gone(sel.anchor) ? sel.anchor : null };
+}
+
+/**
  * 当前**可见行**（渲染顺序）——Shift 连选与「全选」都以它为准，故必须与 {@link FileTreeRow}
  * 的渲染次序逐行一致：根层子项按序，目录展开时紧跟其子层，筛选态只留命中项。
  */

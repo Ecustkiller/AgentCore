@@ -165,7 +165,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       onCut: (paths) =>
         setFileClipboard({ op: "cut", sourceId: source.id, paths }),
     });
-    const { clear: clearSelection, report: reportBatch, reloadDirs } = batch;
+    const {
+      clear: clearSelection,
+      deselect,
+      report: reportBatch,
+      reloadDirs,
+    } = batch;
     // 别的树剪走的东西不该在这棵树里画成半透明——路径可能刚好同名。
     const cutPaths = useMemo(
       () =>
@@ -346,14 +351,17 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       [data, source.id],
     );
 
-    // 拖拽落点 / 上传入口 / 跨源搬运（见 useFileTreeDrop）——与选中态、行渲染无关，
-    // 单拆一处，免得「往树里放东西」和「在树里选东西」挤在同一段代码里。
+    // 拖拽落点 / 上传入口 / 跨源搬运（见 useFileTreeDrop）——不自己管选中态与行渲染，
+    // 只把「搬走了哪几项」回给这里摘选区，免得「往树里放东西」和「在树里选东西」挤成一段。
     const drop = useFileTreeDrop({
       source,
       data,
       canMutate,
       revealDir,
       onDropTarget: setDropTarget,
+      reportBatch,
+      reloadDirs,
+      onMoved: deselect,
     });
 
     // 把剪贴板内容粘贴进 destDir（""=根）。剪切走必备的 move（全源可用，一次性）；复制走可选
@@ -407,8 +415,10 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           names.add(copyName); // 连粘多项时对刚占下的名字继续去重
           await source.copy?.(path, joinPath(destDir, copyName));
         });
-        if (clip.op === "cut") {
-          setFileClipboard(null); // 剪切是一次性的
+        // 剪切一次性——但只在**真搬走了**东西之后：整批撞名 / 全是原地粘贴时保住剪贴板，
+        // 用户还能换个地方粘（与跨源路径 pasteAcross 同一口径）。
+        if (clip.op === "cut" && outcome.done > 0) {
+          setFileClipboard(null);
           // 选区里那几行已经搬走了，留着它等于让下一次删除对着不存在的路径开火。
           clearSelection();
         }
@@ -419,7 +429,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
           ...(clip.op === "cut" ? clip.paths.map(parentDir) : []),
         ]);
         const result = withSkipped(skipped, outcome);
-        // 整批都是原地粘贴：什么也没发生，不必报账。
+        // 整批都是原地粘贴：什么也没发生，不必报账（剪贴板照旧留着，剪切还没落地）。
         if (result.done === 0 && result.failures.length === 0) return;
         reportBatch(verb, result);
       },
@@ -714,6 +724,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               renaming={renaming}
               dropTarget={dropTarget}
               selectedPaths={batch.selectedPaths}
+              dragPaths={batch.topLevelPaths}
               cutPaths={cutPaths}
               hasClipboard={clipboard !== null}
               batchMenu={batchMenu}

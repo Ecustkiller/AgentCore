@@ -44,6 +44,11 @@ export interface FileTreeRowProps {
   dropTarget: string | null;
   /** 选中的行（高亮）；单选即一项。 */
   selectedPaths: ReadonlySet<string>;
+  /**
+   * 拖走整个选区时的清单（已剔掉「祖先也在选区里」的后代）。只有被拖的行本身在选区内才
+   * 用它——拖选区外的行搬的是那一行。
+   */
+  dragPaths: readonly string[];
   /** 已剪切待移动的行（半透明示意）。 */
   cutPaths: ReadonlySet<string>;
   /** 剪贴板非空（文件夹行据此显示「粘贴」）。 */
@@ -87,7 +92,14 @@ export function FileTreeRow(props: FileTreeRowProps) {
   const rowStyle = surfaceRowIndent(depth, indentBase);
 
   const startDrag = (e: React.DragEvent) => {
-    const payload: DragPayload = { sourceId: source.id, path: node.path };
+    // 拖的是选区里的行 → 整批一起搬（文件管理器通行做法）；拖选区外的行 → 只搬这一行，
+    // 且不动选区——用户按住的是它，不是那一批。
+    const inSelection =
+      props.selectedPaths.has(node.path) && props.dragPaths.length > 0;
+    const payload: DragPayload = {
+      sourceId: source.id,
+      paths: inSelection ? [...props.dragPaths] : [node.path],
+    };
     e.dataTransfer.setData(DRAG_MIME, JSON.stringify(payload));
     e.dataTransfer.effectAllowed = "move";
   };
