@@ -14,6 +14,7 @@ alwaysApply: false
 ## 真跑入口
 
 - 产品回合：`scripts/archive/probe_turn.py`（HTTP，与桌面同路）。
+- **多端同权 / 对话级订阅**：`scripts/archive/probe_multiend.py`——挂两条真 SSE（一条扮桌面、一条扮手机 `?follow=true`）断言帧**到没到对端**。多端类缺陷单测普遍抓不到（测里的回合是瞬时的），这条真跑就抓出过「对端晚 12.6s 才看到回合」。连跑 4 场景约十几个回合，容易打满限流窗（见下）。
 - Eval / 多数探针：`EvalHarness` → `await eval_credentials()`（已回落本地 BYOK；**异步路径必须 await**，勿在 running loop 里同步调 `_eval_credentials` 以免 DB BYOK 静默失败回落到过期 PLATFORM）。
 
 ## 优先级（勿颠倒）
@@ -21,5 +22,7 @@ alwaysApply: false
 1. `EVAL_DEEPSEEK_*`（显式覆盖）
 2. 本地库测试账号 BYOK（默认；模型跟账号默认，常为 `deepseek-v4-flash-free`）
 3. `PLATFORM_*`（最后；本地 dogfood **禁止**默认依赖）
+
+**限流窗**：连跑多个真回合会触发 `llm.rate_limit_no_retry`，回合以 `error` 帧收口、无正文——别把它误判成产品缺陷（症状：`content_delta×0` 但 `message_end` 正常）。小时级窗宜等不宜硬重试。
 
 无 key → 按上面配，**勿编造**密钥。细节 → [本地开发 · evals](/docs/02-架构/本地开发.md) · `apps/server/agentcore/evals/harness.py`。

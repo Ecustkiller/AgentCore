@@ -26,11 +26,16 @@ AgentCore：面向大众的 **Multi-Agent AI 工作台**——真正的 Agent �
 
 ## 开发 / 测试（最短）
 
-在仓库根：
+在仓库根 `pnpm install`；后端见本地开发（`uv sync`、Compose、Alembic）。
 
-- `pnpm install`；后端见本地开发（`uv sync`、Compose、Alembic）
-- 发布门禁：`pnpm release:gate`（可 `--only` / `--from` 缩小）
-- 改 OpenAPI / SSE / fold：`pnpm gen:types` 再 `pnpm conformance`
-- 后端单测：`pnpm test:server:unit`；桌面：`pnpm --filter agentcore-desktop test`
+**验证分三档，默认走最低档**——全量很贵：一次干净 `release:gate` 约 20–30 min，其中桌面截图独占 ~10 min，后端全量 pytest ~5 min。
+
+1. **改完即验（默认）**——只跑点名的测试文件 / 用例：`uv run pytest tests/x.py::test_y`、`pnpm --filter agentcore-desktop exec vitest run <文件>`
+2. **交付收尾**——只跑改动**所涉包**：`pnpm test:server:unit`、`pnpm --filter <包> test -- --run`、`pnpm --filter <包> typecheck`；不碰没改的包
+3. **发布门禁**——仅发布决策时 `pnpm release:gate`；非发布语境要跑就 `--only <段>` 或 `release:gate:lite`
+
+改 OpenAPI / SSE / fold 才需 `pnpm gen:types` + `pnpm conformance`（没动契约就别跑，`gen:types` 是全仓重生成）。
+
+窄化命令配方、门禁分段与反空转纪律 → [`verify-scope.mdc`](.cursor/rules/verify-scope.mdc)。
 
 包级命令见各 `apps/*/README`。安全漏洞 → [`SECURITY.md`](SECURITY.md)（勿开公开 Issue）。

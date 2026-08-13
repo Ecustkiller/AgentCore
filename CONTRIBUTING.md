@@ -69,8 +69,11 @@ pnpm release:gate
 # 后端单元测试（跳过 integration）
 pnpm test:server:unit
 
-# 桌面端单元测试
-pnpm --filter agentcore-desktop test
+# 桌面端单元测试（裸 vitest 会进 watch，跑一次务必带 --run）
+pnpm --filter agentcore-desktop test -- --run
+
+# 只跑单个测试文件
+pnpm --filter agentcore-desktop exec vitest run <路径>
 ```
 
 改了 OpenAPI / SSE / fold：仓库根 `pnpm gen:types`，再 `pnpm conformance`。

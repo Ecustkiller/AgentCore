@@ -47,6 +47,8 @@ skip_if:
 
 **令牌 TTL**：默认 `inference_token_expire_minutes=720`（12h）。桌面按**会话**缓存复用，仅临近过期（skew 1min）/ 换会话 / 显式 force 才重铸；开跑前若代理拒票则清缓存换票再 RPC 一次。代理 401/403 映射为 `INFERENCE_TOKEN_EXPIRED`（可重试、勿引导「去设置 · 服务商」），与 BYOK 的 `LLM_KEY_INVALID` 区分。
 
+**错误契约 = 信封优先**：代理把所有类型化错误压平到 402 / 429 / 502，故本机叶子先按 AgentCore 错误信封的 `code` 还原错误类型（`llm/errors.py::inference_envelope_error`），厂商状态码启发式退为**无信封时**的回落（网关页、裸 401 拒票）。按状态码判会三重误译：额度用尽读成上游限流（白等一分钟重试预算）、未配 Key 读成余额不足（引导去充值）、502 上的 `LLM_KEY_INVALID` 压成 `LLM_ERROR`（§二「回合内鉴权死短路」不触发，扇出里每个 worker 各撞一遍坏 key）。信封只认客户端会分流的码（key-config CTA / 重试可用性 / 换票），其余仍走状态码路径。**否决**：在叶子里按状态码逐个加 `/inference/` 特例分支。**直连厂商路径不变**——那条路上厂商状态码仍是唯一信息源。
+
 **无票 = 不开跑（无本机平台模型回退）**：铸不出票时先 force 换一次；仍无票则以 `INFERENCE_TOKEN_EXPIRED` 诚实失败、**不发** `startTurn` / `resume`。sidecar 对空凭据在两个 RPC 入口同样早拒——调用方不止当前版本桌面（旧桌面、探活拉起的长活进程都可能无票接单），服务层是文案统一的唯一保证；`build_turn_router` 硬拒空凭据是最终兜底。**已删除的承诺**：「无票回落 sidecar 自身 `.env` 平台模型」——平台 key 不下放本机，dev 亦走 BYOK（见 `local-llm-dogfood.mdc`）；该承诺失效后曾把引擎内部英文异常当文案抛给线上用户。**否决**：无票时降级回云端链路——本机工作区回合的云端链路同样依赖 workspace channel，二者常一并不可用。
 
 ## 四、多厂商 provider 路由

@@ -1,0 +1,41 @@
+---
+description: 改完代码要跑验证时读——三档验证阶梯的窄化命令配方（pytest ::/-k/--lf、vitest 点名文件/-t/--related、shoot 场景过滤）、release:gate 五段分拆与失败续跑、反空转与跨包边界。跑 release:gate / 全量 pytest / 全量 vitest / pnpm shoot 前必读。
+alwaysApply: false
+---
+
+# 验证范围与窄化配方
+
+**全量很贵（本机实测）**：一次干净 `pnpm release:gate` **20–30+ min**，其中桌面 `shoot` 约 **10 min**（486 张图）、后端全量 pytest ~5 min、桌面全量 vitest 数分钟。反过来，根 `pnpm typecheck` 只要**数秒**——别为它收窄，力气花错地方。
+
+三档阶梯（默认档 1）见 `AGENTS.md`；跳档要有具体理由（改了配置 / 依赖 / 契约），写在回复里。
+
+## 窄化命令
+
+**后端 pytest**（`cd apps/server`）：点名用例 `uv run pytest tests/test_x.py::test_y -q`；只重跑上次失败 `uv run pytest --lf -q`；按名过滤 `-k "关键词"`。包级 `pnpm test:server:unit`（~5 min，已开 xdist）只在收尾跑。
+
+**前端 vitest**（3.2.6）：点名文件 `pnpm --filter agentcore-desktop exec vitest run <路径>`；点名用例追加 `-t "<用例名>"`；按改动文件反查相关测试 `pnpm --filter <包> exec vitest related --run <改动文件...>`（`related` 是**子命令**不是 flag，且必须带 `--run`，否则进 watch 挂住）。包级 `pnpm --filter <包> test -- --run` 只在收尾跑。
+
+**桌面截图**：`pnpm -C apps/desktop shoot <场景名过滤>` —— **默认带场景过滤**，无过滤的全量 486 张只在发布门禁跑。
+
+**类型 / lint**：改动落在单包就 `pnpm --filter <包> typecheck|lint`。
+
+## release:gate 分段
+
+段序固定 `backend → contracts → desktop → mobile → admin`。`--only <段>` 只跑一段，`--from <段>` 从该段跑到底（互斥）；`release:gate:lite` 跳过 shoot + smoke，省约 10 min。
+
+**非发布语境禁止裸跑全量 `pnpm release:gate`**——要跑就 `--only` 或 `:lite`。
+
+**失败后怎么续**：修完哪段就 `--from <该段>` 续跑到底（下游段吃上游产物，故用 `--from` 而非 `--only`）；**发布前仍须一次不中断的完整 `pnpm release:gate` 全绿**作为发布依据。
+
+## 反空转
+
+- 上次验证之后**没有编辑过任何文件** → 不得重跑同一命令。要重跑须有具体理由（改了配置、装了依赖、确证 flaky）并说明。
+- 失败 → 只重跑失败面（`--lf` / 点名文件 / `-t` / `--from <段>`），不从头再来。
+- `lint → typecheck → conformance` 这串只在收尾做一次，不在每次小改后串一遍；同一命令连跑数次 = 空转。
+- 长命令（全量 pytest / gate / shoot）直接后台化 + `notify_on_output`，别前台反复 `AwaitShell` 轮询。
+
+## 跨包边界
+
+- 只改 A 包 → **不跑 B 包套件**。desktop 改动不需要后端 pytest，反之亦然。
+- 跨端 `pnpm gen:types` + `pnpm conformance` **仅当**真动了 `packages/contract-*` / OpenAPI schema / SSE 事件类型 / 两端 fold（细则见 `protocol-conformance.mdc`）；没动契约别跑。
+- `pnpm -r` 系列够不到 `apps/server`（不在 workspace），别指望它覆盖后端。

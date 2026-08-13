@@ -67,7 +67,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点）。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。**参数主路**：默认手写顶层 `tasks`；具名 `playbook` = 固化流水线快捷套餐（与 tasks XOR，禁同时有内容；建站等可点名快捷）。
 
-**跨项目（✅）**：跨已登记项目（只读摸底与写盘通吃）一律 `delegate` 各填 `target_folder_id`（=该队员坐哪张桌；写不写盘由 write_scope/grant 正交）；CEO 的 `list_project_dir` / `read_project_file` 仅派前轻量认桌/抽样，非摸底主通道；均不改会话 `folder_id`。点名：`list_projects` / `resolve_project`；**显式**新建云桌用 `create_project`（仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 静默建云桌并 `turn_target_desk` 继承；首次落 `Conversation.auto_desk_folder_id`（不改出生 `folder_id`），后续回合复用；CEO 文件视野可坐落地桌。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读（非名册目标）可不点名（scratch 禁写）；名册目标与写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
+**跨文件夹（✅）**：跨已登记文件夹（只读摸底与写盘通吃）一律 `delegate` 各填 `target_folder_id`（=该队员坐哪张桌；写不写盘由 write_scope/grant 正交）；CEO 的 `list_folder_dir` / `read_folder_file` 仅派前轻量认桌/抽样，非摸底主通道；均不改会话 `folder_id`。点名：`list_folders` / `resolve_folder`（按路径解析，同名多层返歧义候选而非静默猜）；**显式**新建云桌用 `create_folder`（可带 `parent_path` 挂到某层下；仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）；`delete_folder` **只认 id**（跨层同名合法，按名删必然误删）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 建云文件夹并 `turn_target_desk` 继承，**建成即在对话里告知落点**（`auto_folder_created`；告知非审批、不挂起、可当场改名）；首次落 `Conversation.auto_desk_folder_id`（不改出生 `folder_id`），后续回合复用；CEO 文件视野可坐落地桌。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读（非名册目标）可不点名（scratch 禁写）；名册目标与写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
 
 | 动作 | 语义 |
 |---|---|
@@ -90,11 +90,35 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `binds+steers+add` 先全量校验，任一非法 → 整批拒绝、暂停计划零改动。否决把 `delegate` 重载成「续跑旧计划」入口；带现场续派另见 [多轮编排与同人续派](/docs/03-AI核心/多轮编排与同人续派.md)。
 
+**✅ `promote_product`（成品归位）**：CEO 收口前把用户要的成品从 AI 工作间（`AgentCore/文档/*`）移进**用户工作区**的显式动作，只认 `delivery_status` 里 `accepted` 的产物。**为何独立工具而非放开 `file_move`**：后者 worker-only 且语义太宽，给 CEO 一把通用移动权会被拿去干别的；本工具语义单一，且移动本身就是可见的归位记录。**为何是收口时刻**——派单时 CEO 还不知道 worker 会产出几个文件、哪个是主的；写盘时 worker 手上只有自己的任务书（局部视角，且没有自贬动机，人人都说自己那份是成品则该字段作废）；收口是全链路唯一同时看得见用户原始请求与全部实际产出的位置。零归位合法（多幕中间幕），须在收口正文说明，**不设硬闸**。**跨回合可用**：批次收尾 → `ask_user` 问用户要不要 → 下一轮再搬，这是主流路径不是边角；回合台账取不到对账时回退本会话最近一条落盘 `delivery_status`（同 conversation、台账优先、仍只放行 accepted）——那是已落盘的对账结果，不是重算验收。归位后按同 `execution_id` 重发，结构化路径字段（`delivered_files` · `artifacts[].path` / `derived_from` · `gaps[].paths`）一并按归一化路径改写，自由文里的路径**不扫不替**；跨回合再归位时旧 `{from,to}` 行保留（旧路径唯一的回查线索）→ [执行引擎 · 可用性诚实性](/docs/03-AI核心/执行引擎架构设计.md)、[术语表 · 成品归位](/docs/01-产品/术语表.md)。
+
 协调模式（根 CEO、非 finalize；**含单 worker**）：默认后台跑、CEO 继续 ReAct；`coordinate=false` / finalize / 含 `checkpoint_after` 仍阻塞。单 worker 也进协调，是为让用户插话在派单期可达（阻塞路径下 CEO 把执行权交给了 worker，插话读到也无从响应）并让 CEO 手上有 `cancel_worker`；开工卡与团队合成预览各自的 ≥2 闸**独立保留**，单 worker 的零摩擦外观不因此变重。结构跟着证据走：调研成篇用 `depends_on` + `checkpoint_after` 把「定结构」摆到调研之后。委派后用团队产出写综述（提示强化，非硬禁只读）；根 CEO 探路成功的 list/read/grep 可摘要注入 worker 开局。worker 协作通道 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md)。协调 `wait` 在用户侧热审批/授权未决时禁止空等（勿假装推进）；用户显式停止 / regenerate 会 orphan 热交互并写入 journal（取活 turn 的 `message_id` 作 `turn_id`，非路径上的用户消息 id）。**协调期 CEO 可见面纪律**（提示/工具 schema）：图在转无新结论时可静默；禁止用用户可见 content 复述「谁还在跑」类进度（协作图是进度真相）；开口仅请示 / 报告阻塞与选项 / 宣布阶段结论；插话须先回用户句；`update_synthesis` 禁纯进度播报；协调态进度旁白经 `deliverable_only` 不进终稿 `messages.content`（过程仍进 process）。
 
 ### 批次入闸 vs 回合收敛（边界）
 
-`drive` / `replan` **开工前**的批次门控（`post_close_gate`：收口后冷开整团重派硬拒；`channel_dead_gate`：通道死且需写桌则硬拒，`force` 不逃生；`completion` / `supervised`：能力·冷启动软检与补跑合入）与 engine 回合内收敛门控**分轨**——权威总述 → [执行引擎 · 治理门控双轨](/docs/03-AI核心/执行引擎架构设计.md#治理门控双轨)。新闸：能拒整批开工的挂 delegate；只影响 ReAct 继续/丢稿的挂 engine。
+`drive` / `replan` **开工前**的批次门控（`post_close_gate`：收口后冷开整团重派硬拒；`channel_dead_gate`：通道死且需写桌则硬拒，任何 `force` scope 都不逃生；`completion` / `supervised`：能力·冷启动软检与补跑合入）与 engine 回合内收敛门控**分轨**——权威总述 → [执行引擎 · 治理门控双轨](/docs/03-AI核心/执行引擎架构设计.md#治理门控双轨)。新闸：能拒整批开工的挂 delegate；只影响 ReAct 继续/丢稿的挂 engine。
+
+#### 同队续派 = 一等入口（定案 · 审计 D3）
+
+批次一收口，协调会话不再活跃、`replan` 也不在（它只活在受监督态），「给同一支团队补跑 / 接着干」于是只剩会被冷开闸拦下的冷派——**缺的是入口，不是模型服从度**。四道闸（收口后冷开 / 通道死写桌 / 同构 / 触顶换马甲）曾各自建议「显式传 `force=true`」，而那一开同时关掉全部四道。
+
+定案：把同队续派提升为一等入口，闸从「拒绝并要求模型改写参数」改为**按结构路由**。`post_close_gate` 先把批次拆三堆（只看结构字段，**不扫 task 自由文、不做意图分类**）：
+
+| 堆 | 判据 | 入闸 |
+|---|---|---|
+| **续派** | `continue_from_run_id` 指向非缺口 run | 不进闸、**不限条数**（名册与作者链 `recall_count` 自然兜底；目标现场存不存在由续派执行层逐节点如实拒） |
+| **补缺口** | `replaces_run_id`，或 `continue_from` 指向 FAILED/SKIPPED | 仍按 `MAX_GAP_FILL_ADDS` 限流（与同图 `replan` 补跑闸同判定） |
+| **冷开** | 两者皆无 | 只对**这一堆**判 substantial 大扇出并拒 |
+
+配套：`<recent_team_graph>` 事实行补出 `run_id=`（不给 run_id，点名入口就是空头支票——这正是旧实现把模型逼向 `force` 的一环）。**否决**为此新增工具 / 新增与 `append_to_execution_id` 语义重叠的参数：入口就是 `delegate.tasks[]` 上的两个既有结构字段。→ 见代码: `runtime/delegate/team_continuation.py`
+
+#### `force` = 逐闸开关，不跨调用（ORCH-A2）
+
+`force` 收一个**闸名数组**（`post_close` / `isomorphic` / `thrash` / `seat_overlap`），每道闸只问自己那一格；**没有「全开」值**，历史布尔 `force=true` 解析成空集（记一条 info，不再放行任何闸）。各闸拒绝正文报出**自己的** scope 名，不再互相顺手打开。
+
+`force` 不再是工具实例上的长命标记：`execute` / `replan` **各自在入口无条件重解析**——旧实现里一次冷派的 `force` 会经实例状态漏进随后的 `replan`（座位重叠闸静默失守）。→ 见代码: `runtime/delegate/force_scopes.py`
+
+**触顶换马甲闸的记忆有窗**：闸给的唯一出路是对那个 run 设 `continue_from_run_id` 带现场续派，而现场活在留人名册里，所以闸的对话级记忆与名册**同寿**——按记录入册时间过 idle TTL 即失效，进程内再按对话 LRU 淘汰（此前是模块级 dict，进程内永驻，几十轮后重开同一主题的新人仍被一条谁也用不上的旧记录拦住）。回收只做减法：判据、相似度口径与拒绝文案一概不动，过期只让闸**更少**开火。→ 见代码: `runtime/coordination/thrash.py`
 
 ### 执行写路径 vs 进度读视图
 
@@ -103,7 +127,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | **`drive*`**（`drive` / `drive_coordinated` + setup/preview/finalize/terminal/redirect） | 派发与执行**写路径**：建图、跑批、收口记账 | 为「好看」改写协作图投影语义冒充执行真相 |
 | **`CoordinationSession.live_plan`** | 协调态执行真相（由 supervised / host / session 恢复写入） | 经只读投影回写 |
 | **`pipeline_view`** | 只读进度投影，注入 CEO 可见面 | 当作第二写路径 |
-| **`isomorphic`（+ thrash）** | **drive 入闸**（拒同构再派），不是 UI fold | 与前端图折叠混为一谈 |
+| **`isomorphic`（+ thrash）** | **drive 入闸**（拒同构再派 / 拒触顶换马甲），各认各的 `force` scope，不是 UI fold | 与前端图折叠混为一谈；一道闸的放行顺手开另一道 |
 | **前端协作图** | SSE → `projectExecution` 等**读投影** | 反向充当执行权威 |
 
 **定案**：本轮不把 drive 事件流合成进协作图通道（合成列观察项）。写只走 drive / session；读视图与 UI 只派生。本表是该分工的**唯一权威**（协作模式 / 协作图 UX 只留短指针）→ [协作图 UX](/docs/04-前端/协作图与双视图UX.md)
@@ -190,11 +214,11 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 一句话记住分层：软幕（仅空画像）不挡请求；硬挡三因（换绑 / 用户点名 / 空画像+工程信号）先探索再继续；指纹漂移不挡，走脏标记 + 旁路刷新。
 
-**硬挡流程**：注入 `<cold_start_explore>`（换绑 / 点名刷新 / 空画像+工程信号；指纹与「仅空画像」**不**进此块）→ 先轻量探路（≤探路硬上限，见下段；同轮并行多工具只计 1 轮）→ `delegate`（`team_preview`）组调研队（**≥2 角并行**，禁止 1 人包办整仓）→ 收尾经 `update_project_profile` 合并写项目 **画像 + 导航.md**，记录 `workspace_key` 与指纹；主题软顶 5 / 总数受 `memory_max_topic_files` → **立刻继续原请求**。pending 期间允许 `form=files`，但写盘不得出 `explore_memory` 根——**无例外**（原 `code_verified` 修码批例外已随 S3 kind 退役 ✅）；`文档/项目/` 不在本幕写。产物谁写的完整口径 → [记忆 · 产物谁写 D1](/docs/03-AI核心/Agent记忆与知识系统.md)。点名硬闸（与 pending 同级）✅。**resume 与开场同源**：空画像软降级走 `resolve_hard_explore_reason`，禁止 resume 把「仅空画像」误硬拦。
+**硬挡流程**：注入 `<cold_start_explore>`（换绑 / 点名刷新 / 空画像+工程信号；指纹与「仅空画像」**不**进此块）→ 先轻量探路（≤探路硬上限，见下段；同轮并行多工具只计 1 轮）→ `delegate`（`team_preview`）组调研队（**≥2 角并行**，禁止 1 人包办整仓）→ 收尾经 `update_folder_profile` 合并写文件夹 **画像 + 导航.md**，记录 `workspace_key` 与指纹；主题软顶 5 / 总数受 `memory_max_topic_files` → **立刻继续原请求**。pending 期间允许 `form=files`，但写盘不得出 `explore_memory` 根——**无例外**（原 `code_verified` 修码批例外已随 S3 kind 退役 ✅）；厚背景资料（`主题/` 条目）不在本幕写。产物谁写的完整口径 → [记忆 · 产物谁写 D1](/docs/03-AI核心/Agent记忆与知识系统.md)。点名硬闸（与 pending 同级）✅。**resume 与开场同源**：空画像软降级走 `resolve_hard_explore_reason`，禁止 resume 把「仅空画像」误硬拦。
 
 **强制 / 豁免**：点名强制开幕（合并更新；硬闸 ✅）。旧画像无 key → 不因缺 key 硬开。裸聊 / 纯闲聊 / 空工作区不自动开幕、不写假画像/导航。对已有工程「继续开发 / 全面摸底」亦须 ≥2 角并行（提示词纪律；冷启动闸另硬拒单 worker）。探路硬闸**不扫用户原文猜意图**分叉：统一「到限后 delegate，或短答并自报归类（闲聊/单点事实/追问）」；闸后长文一律丢稿再催一次。轮数唯一真源 = `settings.engine_team_gate_investigation_rounds`（默认 7；提示词文案与本文都跟它，禁各处硬编码）——实测触发时模型每轮并行 2–3 次调用，但 3/3 触发都有整轮花在幻觉路径上，故：**一轮内调查调用全失败不计探路轮**（那轮没换到情报，不该扣广度预算；防空转仍靠既有同目标 spin / 工具失败熔断 / unproductive 梯子，不新加兜底层）；**`delegate` 成功即归还本闸收走的只读工具**（闸的目的是逼派工，不是罚一整回合——否则 CEO 派完读不了 worker 落盘产物，收尾对账打折；只还本闸新增那批，熔断 / 通道死 / `read_url` 退役收走的不复活，`team_gate_fired` 仍锁定不重开计数）。**两处边界（已确认，勿再提案）**：① 归还只认 `delegate` 成功，`debate` 不还——闸催的出口就是派工，辩论后 CEO 消化的是辩论结论；真出现「辩后须读落盘取证才能成文」再放。② 闸后挂起（审批 / `ask_user`）→ resume 不重剥：被剥名单是 loop 局部态、不进 seed，闸标记却锁着，等于恢复后工具自动回来——**有意不堵**，堵它要改 seed 契约，而挂起点用户在场、乱查可见，收益不抵成本。成篇形状 / 修码选型 / 跑·修·打开验证终向 / 点名对比扇出靠提示词与结构验收，不靠意图分类器（`exec_verify` 用户意图硬闸、`named_entity_fanout` 用户扫硬拒已移除）。成篇审计硬门只认成文专线 `playbook=research_report`（无字数结构腿）；`parallel_brief` / 普通多角摸底不进硬门（软闸亦同）；硬门**不**扫 task/角色自由文。✅ 已删角色名扫与静默改写 deliverable（审校落盘靠 playbook/结构声明，见上节）。审后默认向用户收口，同轮 `continue_from_run_id` 修订非默认路径。
 
-**边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚约定文档另见 `文档/项目/` 且不在探索 pending 批）。**权威分层**：触发条件 / 产物谁写 / 主题上限 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)；探路轮数闸 / `delegate` 组队纪律 / 收尾 → **本文**。
+**边界**：不新建 Explore 原语；指纹 = 顶层树 + 关键清单（不以纯天数 / commit 为唯一闸）。产物只落 `AgentCore/`（记忆；厚背景资料走 `主题/` 按需条目，且不在探索 pending 批）。**权威分层**：触发条件 / 产物谁写 / 主题上限 → [记忆 · 探索触发](/docs/03-AI核心/Agent记忆与知识系统.md)；探路轮数闸 / `delegate` 组队纪律 / 收尾 → **本文**。
 
 **否决（本定案）**：pending 时按 `form=files` 拒整批；为冷启动单开 prose 版调研 playbook；delegate 入口静默改写 playbook/tasks XOR。
 
@@ -214,6 +238,8 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | `validate_criteria_kind_fit` 扫 task 拟合硬闸 | ✅ **已随 S3 退役** |
 | `host_shell` fuse 改可批可跑（B）/ 仅改文案当终案（D） | **否决** → [安全 · 熔断方案 C](/docs/05-平台与运维/安全权限与治理.md) |
 | 扫角色名静默改写 deliverable | **已删**（见上节） |
+| 扫 role·task 自由文正则决定产物落 `research` 还是 `reviews` | ⏳ **净删除**（成品归位）：意图分类器形态，且误判对用户不可见；落点只认显式来源，其余进 `工作稿/` → [工作区 §四](/docs/02-架构/双模式工作区.md#四约定文档目录约定) |
+| 产物地位（成品 vs 过程材料）靠路径推断 / 派单预判 / worker 自判 | **否决**：只有收口时刻看得见用户原始请求 + 全部实际产出 → [术语表 · 成品归位](/docs/01-产品/术语表.md) |
 | 手写 `min_length` 字数腿 / 扫自由文补成篇硬门 | **否决**（成篇硬门只认 `research_report`；见交付契约瘦身） |
 | 裸 `requires_files` 第三写盘开关 | **已删**（写盘只认 `form=files` ∪ `artifacts`） |
 | `consumer_deps` 软警告只打日志 | **已接通**（见上节） |

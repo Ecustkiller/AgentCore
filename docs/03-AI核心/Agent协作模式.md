@@ -57,6 +57,8 @@ Worker 工具后还有确定性 **Escalation Gate**：只把工具失败当执�
 
 `coordination=wall|none`（缺省 `none`）。贴事实、不要求回应；四能力：`decision` / `heads_up` / `claim` + `read_notes`；`amend_note` 改写/作废；仅推 ACTIVE。缺「还不存在」的输入走 `escalate kind=dep`，不走便签。
 
+**一批一墙，同回合续跑继承**：墙的可见域 = 一次扇出批。同一 CEO 回合内的后续批（replan 续跑 / 追加批 / 检查点复核）**继承**上一批仍 ACTIVE 的便签——续跑的队员要看见队友已广播的决定与认领，CEO 收尾对账也要拿这些便签；跨回合 / 耐久恢复是全新实例，自然从空墙起（此时才补种 CEO 预贴便签）。
+
 **否决**点对点直聊；变味信号 = 拿便签来回讨论。
 
 ### 协调态与视图（写/读分工）
@@ -71,7 +73,7 @@ CEO 唯一裁决；置信度低才 `ask_user`。资源冲突靠 DAG。
 
 ### 交接式写权（C3）
 
-协调会话内一本路径账本（`WriteCoordinator`）；内部键 = **桌 × 相对路径**（`desk_id = target_folder_id or 会话出生 desk`，跨桌同 `rel_path` 不互拦；用户可见冲突仍点名裸路径）。跨项目换桌写盘见 [双模式工作区 · 跨项目](/docs/02-架构/双模式工作区.md)。
+协调会话内一本路径账本（`WriteCoordinator`）；内部键 = **桌 × 相对路径**（`desk_id = target_folder_id or 会话出生 desk`，跨桌同 `rel_path` 不互拦；用户可见冲突仍点名裸路径）。跨文件夹换桌写盘见 [双模式工作区 · 跨文件夹](/docs/02-架构/双模式工作区.md)。
 
 | 阶段 | 行为 |
 |---|---|

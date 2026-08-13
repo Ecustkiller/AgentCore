@@ -21,7 +21,7 @@ alwaysApply: false
 
 ## 纪律
 
-- 改桌面组件/样式/布局 → `pnpm shoot` → 读 `shoot-out/*.png` 自检，形成「改→截→看→迭代」紧回路。
+- 改桌面组件/样式/布局 → `pnpm shoot <场景名过滤>` → 读 `shoot-out/*.png` 自检，形成「改→截→看→迭代」紧回路。**默认带场景过滤**：无过滤的全量 486 张约 10 分钟，只在发布门禁跑（→ `verify-scope.mdc`）。
 - 改交互相关代码（发消息 / 审批卡 / 开工·checkpoint resume / 协作图入口 / AuthGate·会话切换等用户操作链路）→ `pnpm -C apps/desktop e2e`（mock 后端 + webapp 壳 + Playwright；失败留 `e2e-results/` 截图与 trace）。与「改渲染 → `pnpm shoot`」并列，别靠跑真实 AI / 活后端验点击行为。
 - **`pnpm shoot` 是渲染冒烟门禁**（`ci.yml` frontend job **在跑**；近期风险是 CI 红如 Lint，早失败则 shoot 等后续 skipped）：任一场景渲染崩（未捕获报错 / `#/preview` 挂不上）即红。**发布前本地必跑** `pnpm shoot` / `release:gate`。
 - **滚动条占位类 bug（内容被切一截 / 行「上浮」留白）测不出**：`pnpm shoot` 与任何 headless Chromium 用 overlay 滚动条、不占位，必假绿。症状对得上就改用 `chromium.launch({ headless: false })`（或真实 Electron）复现——全局 `globals.css` 给每个滚动容器留 10px 槽，固定高的 chrome 行（tab 条）会被切。
