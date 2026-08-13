@@ -23,7 +23,7 @@ import {
   THESIS,
   USECASES,
 } from "@/content/home";
-import { DOWNLOAD_PAGE_PATH, WEB_APP_URL } from "@/lib/download";
+import { DOWNLOAD_PAGE_PATH, WEB_APP_HOST, WEB_APP_URL } from "@/lib/download";
 
 /* 分区小标：等宽大写 + 一段短横线。白纸与暗纸各一套配色。 */
 function Kicker({
@@ -80,8 +80,11 @@ export default function Home() {
           />
 
           {/* 两栏推到 xl 而不是 lg：lg（1024px）下右栏只剩 ~470px，
-              协作图会被迫退到窄几何，反而比整宽单栏更挤。 */}
-          <div className="container-x relative grid items-center gap-14 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.06fr)] xl:gap-16">
+              协作图会被迫退到窄几何，反而比整宽单栏更挤。
+              协作图要的宽度不从左栏抢（栏比留在 1.32）：首屏版心放宽到 84rem、
+              两栏间距收一档，右栏 ~740px——多出来的宽度全部消化在图内的
+              列间沟里（见 CollabGraph 宽几何注释），让连线有存在感。 */}
+          <div className="container-x relative grid items-center gap-14 xl:w-[min(84rem,100%_-_3.5rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,1.32fr)] xl:gap-10">
             <div>
               {/* 品类行：首屏必须有一句说清「这是个什么平台」。
                   改版时一度被我换成头像堆丢掉了，补回来。 */}
@@ -163,7 +166,7 @@ export default function Home() {
               className="float-in mx-auto w-full max-w-[44rem] max-sm:-mx-1 xl:max-w-none"
               style={{ animationDelay: "420ms" }}
             >
-              <BrowserFrame url="app.agentcore.dev">
+              <BrowserFrame url={WEB_APP_HOST}>
                 <CollabGraph />
               </BrowserFrame>
             </div>
