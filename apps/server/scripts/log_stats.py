@@ -41,6 +41,7 @@ from agentcore.observability.query.stats import (  # noqa: E402
     compute_stats,
     error_signature,
     new_trace,
+    prefix_cache_summary,
 )
 from agentcore.observability.query.timeutil import parse_since, parse_timestamp  # noqa: E402
 
@@ -111,6 +112,45 @@ def _print_by_worker(tool_calls: list[dict]) -> None:
             f"    {label:<28} {meta:<3} {len(calls):>4} calls  "
             f"{ok_pct:5.1f}% ok  avg {avg_ms:.0f}ms  [{tools}]  {rest}"
         )
+
+
+def _print_prefix_cache(rows: list[dict]) -> None:
+    """前缀缓存实测 (审计议题 D4): 命中率 / 击穿归因 / 随对话长度的变化.
+
+    Everything here is measured — provider-reported cache tokens paired with the structural
+    reason this request could not reuse the last one. Calls where the upstream said nothing
+    about caching are shown as excluded, never averaged in as zeros.
+    """
+    if not rows:
+        return
+    s = prefix_cache_summary(rows)
+    print(f"\n── Prefix Cache (cost.prefix_cache: {s['calls']}) ──")
+    if not s["cache_reported_calls"]:
+        print(f"  上游未报缓存字段（{s['calls']} calls）——无法判定命中率，不等于 0%")
+        return
+    print(
+        f"  命中率     {s['hit_ratio'] * 100:5.1f}%  "
+        f"({s['cache_hit_tokens']:,}/{s['input_tokens']:,} prompt tokens; "
+        f"{s['cache_reported_calls']} calls report cache, {s['cache_silent_calls']} silent)"
+    )
+    print(f"  白付前缀   {s['forfeited_tokens']:,} tokens 本可命中却按未命中计价（forfeited）")
+    if s["by_breach"]:
+        print("  击穿原因（这次为何不能全量复用上一次的前缀）:")
+        for breach, b in sorted(s["by_breach"].items(), key=lambda kv: -kv[1]["forfeited_tokens"]):
+            print(
+                f"    {breach:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
+                f"  forfeited {b['forfeited_tokens']:,}"
+            )
+    if s["by_section"]:
+        sections = "  ".join(f"{k}×{v}" for k, v in s["by_section"].items())
+        print(f"  击穿段     {sections}")
+    if s["by_length"]:
+        print("  按 prompt 规模:")
+        for label, b in s["by_length"].items():
+            print(
+                f"    {label:<16} {b['calls']:>4} calls  hit {b['hit_ratio'] * 100:5.1f}%"
+                f"  forfeited {b['forfeited_tokens']:,}"
+            )
 
 
 def _print_convergence_governance(
@@ -280,6 +320,7 @@ def _print_human(
     round_ends: list[dict] = []
     llm_calls: list[dict] = []
     cost_records: list[dict] = []
+    prefix_cache_rows: list[dict] = []
     traces: dict[str, dict] = {}
     ceiling_reasons: Counter[str] = Counter()
     read_stats = ReadStats()
@@ -305,6 +346,8 @@ def _print_human(
             llm_calls.append(obj)
         elif event == "cost.recorded":
             cost_records.append(obj)
+        elif event == "cost.prefix_cache":
+            prefix_cache_rows.append(obj)
 
     total = read_stats.total_kept
     bad_lines = read_stats.bad_lines
@@ -431,7 +474,9 @@ def _print_human(
             f"  reasoning avg={_avg(rea_tok):.0f}"
         )
         if in_sum:
-            print(f"  Cache      {hit_sum / in_sum * 100:.1f}% of input tokens hit cache")
+            # Raw ratio over every call, including providers that never report caching —
+            # the honest, breach-attributed read is the Prefix Cache section below.
+            print(f"  Cache      {hit_sum / in_sum * 100:.1f}% of input tokens hit cache (raw)")
         fr = Counter(c.get("finish_reason", "?") for c in llm_calls)
         print(f"  Finish     {'  '.join(f'{k}×{v}' for k, v in fr.most_common())}")
         if stubbed:
@@ -471,6 +516,8 @@ def _print_human(
                     f"    {label:<34} {len(calls):>3} calls  ¥{nano / 1e9:.6f}"
                     f"  ({nano:,} nano)"
                 )
+
+    _print_prefix_cache(prefix_cache_rows)
 
     if tool_calls:
         print(f"\n── Tool Calls ({len(tool_calls)} total) ──")

@@ -158,6 +158,74 @@ def _avg(xs: list[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
 
 
+# Prompt-token buckets for the prefix-cache readout (审计议题 D4 第三问: 命中率随对话
+# 长度怎么变). Short turns can hit nothing worth caching; the interesting claim is about
+# long ones, where history dwarfs the system prompt.
+PREFIX_CACHE_BUCKETS: tuple[tuple[str, int], ...] = (
+    ("<4k", 4_000),
+    ("4k-16k", 16_000),
+    ("16k-64k", 64_000),
+    ("≥64k", 2**62),
+)
+
+
+def _bucket_of(input_tokens: int) -> str:
+    for label, ceiling in PREFIX_CACHE_BUCKETS:
+        if input_tokens < ceiling:
+            return label
+    return PREFIX_CACHE_BUCKETS[-1][0]
+
+
+def _hit_block(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    prompt = sum(int(r.get("input_tokens") or 0) for r in rows)
+    hit = sum(int(r.get("cache_hit_tokens") or 0) for r in rows)
+    return {
+        "calls": len(rows),
+        "input_tokens": prompt,
+        "cache_hit_tokens": hit,
+        "hit_ratio": round(hit / prompt, 4) if prompt else 0.0,
+        "forfeited_tokens": sum(int(r.get("forfeited_tokens") or 0) for r in rows),
+    }
+
+
+def prefix_cache_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate ``cost.prefix_cache`` rows into the three questions D4 asked.
+
+    Rows where the provider said nothing about caching are counted but EXCLUDED from every
+    ratio: a silent upstream is not a 0% hit, and folding it in would manufacture a finding.
+    ``by_breach`` says what a miss cost (forfeited tokens per cause), ``by_section`` names
+    the prompt sections that broke the prefix, ``by_length`` shows how the ratio moves with
+    conversation size.
+    """
+    reported = [r for r in rows if r.get("cache_reported")]
+    by_breach: dict[str, dict[str, Any]] = {}
+    for breach in sorted({str(r.get("breach") or "?") for r in reported}):
+        by_breach[breach] = _hit_block([r for r in reported if r.get("breach") == breach])
+    by_section: Counter[str] = Counter()
+    for row in reported:
+        section = str(row.get("breach_section") or "")
+        if section:
+            by_section[section] += 1
+    by_length: dict[str, dict[str, Any]] = {}
+    for label, _ in PREFIX_CACHE_BUCKETS:
+        bucket = [r for r in reported if _bucket_of(int(r.get("input_tokens") or 0)) == label]
+        if bucket:
+            by_length[label] = _hit_block(bucket)
+    overall = _hit_block(reported)
+    return {
+        "calls": len(rows),
+        "cache_reported_calls": overall["calls"],
+        "cache_silent_calls": len(rows) - len(reported),
+        "input_tokens": overall["input_tokens"],
+        "cache_hit_tokens": overall["cache_hit_tokens"],
+        "hit_ratio": overall["hit_ratio"],
+        "forfeited_tokens": overall["forfeited_tokens"],
+        "by_breach": by_breach,
+        "by_section": dict(by_section.most_common()),
+        "by_length": by_length,
+    }
+
+
 @dataclass
 class StatsQueryResult:
     """Structured stats payload for human / JSON output."""
@@ -301,6 +369,7 @@ def compute_stats(
     round_ends: list[dict[str, Any]] = []
     llm_calls: list[dict[str, Any]] = []
     cost_records: list[dict[str, Any]] = []
+    prefix_cache_rows: list[dict[str, Any]] = []
     traces: dict[str, dict[str, Any]] = {}
     ceiling_reasons: Counter[str] = Counter()
 
@@ -324,6 +393,8 @@ def compute_stats(
             llm_calls.append(obj)
         elif event == "cost.recorded":
             cost_records.append(obj)
+        elif event == "cost.prefix_cache":
+            prefix_cache_rows.append(obj)
 
     clusters: dict[str, dict[str, Any]] = {}
     for e in errors:
@@ -382,6 +453,8 @@ def compute_stats(
             "total_usd": total_nano / 1e9,
             "by_role_nano": dict(by_role),
         }
+    if prefix_cache_rows:
+        summaries["prefix_cache"] = prefix_cache_summary(prefix_cache_rows)
 
     return StatsQueryResult(
         total=read_stats.total_kept,

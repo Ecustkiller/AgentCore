@@ -9,6 +9,15 @@ name: Evals (nightly, real model)
 # 草案：需在仓库 Secrets 配 EVAL_DEEPSEEK_API_KEY（建议指向一个**低额度** DeepSeek 账号，
 # 配合下面的 schedule 限频 + concurrency 去叠加 + timeout 兜底控成本）。未配 key 则自动跳过
 # 真跑、仅跑硬门禁，不报红。
+#
+# 软门禁的代价是「绿灯不含信息」：跳过与全过在作业页上没有区别。故本 workflow 的红绿判定
+# 之外还挂两件事——
+#   1. **诚实摘要**（scripts/eval_nightly_summary.py，`if: always()`）：无论跳过 / 降级 /
+#      全绿都写作业摘要，逐步骤写明「考了没、出数没、过没过」。绿灯 ≠ AI 行为面被考过。
+#   2. **棘轮 + 裁判校准**：回归门（--baseline）挂在既有真跑上（同一份结果既出报告又过门，
+#      零额外 LLM）；裁判校准（--calibrate）单列一步，34 条短判，量 L1 裁判与人工标注的
+#      一致度——它是夜跑 pass/fail 主轴，不校准就是拿没刻度的尺子量。
+# 两者都**不改**红绿判定：真跑仍是软门禁，硬红与否留待后续单独决策。
 on:
   workflow_dispatch:
     inputs:
@@ -81,6 +90,7 @@ jobs:
           uv run python -m agentcore.evals --compare --lint-only
 
       # ---- 真跑前置：没配 key 就跳过后续真跑步骤，不让夜跑变红 ----
+      # 跳过 ≠ 没事：下面的诚实摘要会显式写「AI 行为面本次未覆盖」，不许静默报绿。
       - name: Check eval key present
         id: key
         run: |
@@ -93,33 +103,68 @@ jobs:
 
       - name: Prepare report dir
         if: steps.key.outputs.present == 'true'
-        run: mkdir -p eval-reports
+        run: mkdir -p eval-reports eval-out
+
+      # 棘轮基线跨夜跑靠 cache 滚动：key 带 run_id 保证每跑都能写新档，restore-keys 前缀
+      # 取回最近一份。基线只由末尾 promote 步骤「只升不降」地更新（见那里的 why）。
+      - name: Restore eval baselines (ratchet)
+        if: steps.key.outputs.present == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: apps/server/eval-out
+          key: evals-baseline-${{ env.SUITE }}-${{ github.run_id }}
+          restore-keys: |
+            evals-baseline-${{ env.SUITE }}-
 
       # ---- 软门禁：真模型评测（continue-on-error，非确定回归不弄红夜跑；出数留作观测/基线） ----
-      - name: Functional suite (deterministic checks, soft)
+      #
+      # 裁判校准（gold-set 判↔人 Cohen's kappa）：夜跑的 pass/fail 主轴是 L1 LLM 裁判，而未校准
+      # 的裁判 = 没刻度的尺子——kappa 不量出来，下面所有 pass_rate（含棘轮判定）都没有可信度。
+      # 排在最前的两个理由：34 条短判是全场最便宜的一步（相对整套真跑可忽略），且能对坏凭据 /
+      # 额度耗尽快速失败，不必等 45 分钟 timeout 才发现。
+      - name: Judge calibration (gold-set kappa, soft)
+        id: calibrate
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
-        run: uv run python -m agentcore.evals --suite "$SUITE" --out eval-reports/functional.json
+        run: uv run python -m agentcore.evals --calibrate --out eval-reports/calibration.json
+
+      # --baseline 挂在**这一次**真跑上（而非另起一跑）：同一份结果既出报告又过棘轮回归门，
+      # 零额外 LLM 成本。判定同时写进报告的 ratchet 段，供摘要直接读，不在 CI 里拿 jq 重算。
+      - name: Functional suite (deterministic checks + ratchet, soft)
+        id: functional
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        run: >
+          uv run python -m agentcore.evals --suite "$SUITE"
+          --baseline "eval-out/$SUITE-baseline.json"
+          --out eval-reports/functional.json
 
       # MAST 失败标签套件（学·度量 §2.5 / §五 ①）：这是「拆·lead B / 通·便签墙 / 合·验证」
       # 默认铺开的**数据闸门**——按 MAST 14 类 / 三组聚合通过率（report 的 summary.by_mast），
       # 看「哪一类失败被压下去了」。team 路径 + milestone 裁判（layer 2 默认），故必须真模型。
-      - name: MAST failure-label suite (collab rollout gate, soft)
+      - name: MAST failure-label suite (collab rollout gate + ratchet, soft)
+        id: mast
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
-        run: uv run python -m agentcore.evals --suite mast --out eval-reports/mast.json
+        run: >
+          uv run python -m agentcore.evals --suite mast
+          --baseline eval-out/mast-baseline.json
+          --out eval-reports/mast.json
 
       - name: Routing accuracy (confusion matrix, soft)
+        id: routing
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python -m agentcore.evals --routing --out eval-reports/routing.json
 
       - name: Output-style anti-slop (violation rates, soft)
+        id: style
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python -m agentcore.evals --style --suite "$SUITE" --out eval-reports/style.json
 
       - name: Team-vs-single comparison (pairwise judge, soft)
+        id: compare
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python -m agentcore.evals --compare --out eval-reports/comparison.json
@@ -129,51 +174,71 @@ jobs:
       # ②代码必须真跑（生成→沙箱跑隐藏边界用例）。开发期实测两类均近满分（缺口不在此），故为观测性
       # 软门禁；哪天通过率抬头，即「机械轻层不够、该上重层」的触发信号。
       - name: Probe · arithmetic ground-truth (soft)
+        id: probe
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python -m agentcore.evals --suite probe --layer 1 --out eval-reports/probe.json
 
       - name: Probe · code-must-run (soft)
+        id: probe_code
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: uv run python scripts/archive/probe_code_execution.py --out eval-reports/probe_code.json
 
-      # 把关键指标写进 GitHub 作业摘要（best-effort；jq 在 ubuntu-latest 自带）。
-      - name: Write job summary
+      # 棘轮**只升不降**：仅当本次通过率高于基线才抬基线，跌了就把基线钉在原处直到修回来。
+      # 若改成「每天用昨天当基线」，每日 <容差 的慢性下滑会永远不响——那就不是棘轮了。
+      - name: Promote baselines (ratchet raises only)
         if: steps.key.outputs.present == 'true'
         continue-on-error: true
         run: |
-          {
-            echo "## AgentCore 夜跑评测"
-            if [ -f eval-reports/functional.json ]; then
-              echo "### 功能套件"
-              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/functional.json
+          promote() {
+            report="$1"
+            baseline="$2"
+            if [ ! -f "$report" ]; then
+              echo "[ratchet] 跳过 $baseline：本次无报告（该面没跑成）"
+              return 0
             fi
-            if [ -f eval-reports/mast.json ]; then
-              echo "### MAST 失败标签套件（协作铺开闸门）"
-              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/mast.json
-              jq -r '.summary.by_mast.by_group | to_entries[] | "- \(.key) \(.value.passed)/\(.value.total)（\((.value.pass_rate*100)|floor)%）"' eval-reports/mast.json
+            cur="$(jq -r '.summary.pass_rate // 0' "$report")"
+            base=0
+            if [ -f "$baseline" ]; then
+              base="$(jq -r '.summary.pass_rate // 0' "$baseline")"
             fi
-            if [ -f eval-reports/routing.json ]; then
-              echo "### 路由准确率"
-              jq -r '.routing | "准确率 \(((.accuracy//0)*100)|floor)%  过度编排 \(((.over_delegation_rate//0)*100)|floor)%  组队不足 \(((.under_delegation_rate//0)*100)|floor)%"' eval-reports/routing.json
+            # 报告坏了 / jq 挂了会给出空串——兜成 0，宁可不抬基线也别喂 awk 语法错。
+            cur="${cur:-0}"
+            base="${base:-0}"
+            if awk "BEGIN{exit !($cur > $base)}"; then
+              # 去掉本次的 ratchet 判定段再落盘：基线只该存结果，不该存对上一版基线的比较。
+              jq 'del(.ratchet)' "$report" > "$baseline.tmp" && mv "$baseline.tmp" "$baseline"
+              echo "[ratchet] 抬基线 $baseline: $base -> $cur"
+            else
+              echo "[ratchet] 保持基线 $baseline: $base（本次 $cur）"
             fi
-            if [ -f eval-reports/style.json ]; then
-              echo "### 输出风格"
-              jq -r '"干净率 \(((.clean_rate//0)*100)|floor)%（计入 \(.total) 条）"' eval-reports/style.json
-            fi
-            if [ -f eval-reports/probe.json ]; then
-              echo "### 挖坑探针·算术/单一答案"
-              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）  成本 $\(.cost_usd)"' eval-reports/probe.json
-            fi
-            if [ -f eval-reports/probe_code.json ]; then
-              echo "### 挖坑探针·代码必须真跑"
-              jq -r '.summary | "通过 \(.passed)/\(.total)（\((.pass_rate*100)|floor)%）"' eval-reports/probe_code.json
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          }
+          mkdir -p eval-out
+          promote eval-reports/functional.json "eval-out/$SUITE-baseline.json"
+          promote eval-reports/mast.json "eval-out/mast-baseline.json"
+
+      - name: Save eval baselines (ratchet)
+        if: steps.key.outputs.present == 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: apps/server/eval-out
+          key: evals-baseline-${{ env.SUITE }}-${{ github.run_id }}
+
+      # 诚实摘要（无论跳过 / 降级 / 全绿都写）：逐步骤写明「考了没、出数没、过没过」，
+      # 并在头部给出覆盖结论。脚本恒 0 退出——红绿判定不在这里，真跑仍是软门禁。
+      # 用 python3（非 uv run）：装依赖那步若挂了，摘要仍要能写出来。
+      - name: Write job summary (coverage honesty)
+        if: always()
+        continue-on-error: true
+        env:
+          EVAL_KEY_PRESENT: ${{ steps.key.outputs.present }}
+          EVAL_STEPS_JSON: ${{ toJSON(steps) }}
+        run: python3 scripts/eval_nightly_summary.py --out "$GITHUB_STEP_SUMMARY"
 
       - name: Upload eval reports
-        if: steps.key.outputs.present == 'true'
+        if: always() && steps.key.outputs.present == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: eval-reports
