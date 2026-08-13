@@ -1887,6 +1887,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='str_replace.collision'),
     EventSpec(name='suspension.claim_failed'),
     EventSpec(name='suspension.claim_hydrate_failed'),
+    EventSpec(name='suspension.claim_journal_align_failed'),
     EventSpec(name='suspension.claim_journal_degraded'),
     EventSpec(name='suspension.delete_failed'),
     EventSpec(name='suspension.list_failed'),

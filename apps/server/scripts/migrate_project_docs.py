@@ -49,10 +49,8 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def _run(args: argparse.Namespace) -> int:
-    from agentcore.core.logging import setup_logging
     from agentcore.memory.migrate_project_docs import migrate_all_project_docs
 
-    setup_logging()
     stats = await migrate_all_project_docs()
     print(
         "project-docs:"
@@ -89,7 +87,14 @@ async def _run(args: argparse.Namespace) -> int:
 
 
 def main() -> None:
-    raise SystemExit(asyncio.run(_run(_parse_args())))
+    # Process-wide logging belongs to the entry point, not to ``_run``: the exit-code
+    # tests call ``_run`` directly, and ``setup_logging`` re-points structlog for the
+    # whole pytest session (stdlib pipeline at LOG_LEVEL), silencing later tests' lines.
+    from agentcore.core.logging import setup_logging
+
+    args = _parse_args()
+    setup_logging()
+    raise SystemExit(asyncio.run(_run(args)))
 
 
 if __name__ == "__main__":

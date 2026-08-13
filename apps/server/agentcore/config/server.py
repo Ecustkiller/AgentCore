@@ -1,4 +1,4 @@
-"""HTTP server, logging, build provenance, desktop updates, push."""
+"""HTTP server, logging, build provenance, desktop updates, client floors, push."""
 
 from typing import Self
 
@@ -25,6 +25,12 @@ class ServerSettings(BaseModel):
     # Desktop floor (GET /updates/policy → min_desktop_version + HTTP 426 hard gate).
     # Empty = no banner / no API gate (dev-friendly). Production e.g. 0.6.25.
     desktop_min_version: str = ""
+    # Native mobile floor (HTTP 426 hard gate). Covers android / ios; mobile-web is a
+    # browser surface and never gated. Deliberately absent from /updates/policy — the
+    # Android shell discovers versions from the brand CDN android/latest.json, never
+    # that endpoint (发布与门禁.md §7.6a). Empty = no gate; raising it is a release-time
+    # decision, so production ships empty.
+    mobile_min_version: str = ""
 
     push_enabled: bool = False
     fcm_project_id: str = ""

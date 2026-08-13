@@ -44,6 +44,7 @@ from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepositor
 from agentcore.fulfill.user_signal import push_paused_card_settled
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.journal.writer import current_journal_writer
+from agentcore.runtime.settlement import align_cold_resume_resolved_to_winner
 from agentcore.runtime.suspension import (
     SuspensionKind,
     TurnSuspension,
@@ -359,6 +360,12 @@ async def claim_paused_turn(
     settlement it prewrote seconds earlier — telling the user their own decision took
     effect while somebody else's actually ran.
 
+    Prewrite still happens *before* this claim (the other端 must see the card as
+    spent immediately) and still dedupes without ``decision``, so the durable
+    ``*_resolved`` row can be the loser's. After hydrate succeeds, the winner
+    rewrites that row to its own decision (same-key duplicates collapse to one).
+    Already-matching journal is left untouched.
+
     Claim competition / missing row → ``None``. After a successful claim, frame parse
     or journal load failure restores the row and **raises** (route 5xx, frame kept for
     retry) — never silently drop a claimed frame.
@@ -402,7 +409,6 @@ async def claim_paused_turn(
         async with async_session_factory() as db:
             entries = await TurnJournalRepository(db).load(message_id)
         suspension = suspension_from_json(claimed["frame"])
-        suspension.journal_entries = list(entries or [])
     except Exception as e:
         logger.error(
             "suspension.claim_hydrate_failed",
@@ -417,6 +423,30 @@ async def claim_paused_turn(
             trace_id=claimed["trace_id"],
         )
         raise
+
+    aligned = align_cold_resume_resolved_to_winner(
+        list(entries or []),
+        turn_id=message_id,
+        checkpoint_id=str(suspension.checkpoint_id or ""),
+        decision=decision,
+    )
+    if aligned is not None:
+        try:
+            async with async_session_factory() as db:
+                await TurnJournalRepository(db).record(
+                    turn_id=message_id,
+                    conversation_id=claimed["conversation_id"],
+                    trace_id=claimed["trace_id"],
+                    entries=aligned,
+                )
+        except Exception as e:  # noqa: BLE001 — frame already consumed; resume still runs
+            logger.warning(
+                "suspension.claim_journal_align_failed",
+                message_id=message_id,
+                error=str(e),
+            )
+        entries = aligned
+    suspension.journal_entries = list(entries or [])
 
     if suspension.journal_degraded and not suspension.journal_entries:
         logger.warning(

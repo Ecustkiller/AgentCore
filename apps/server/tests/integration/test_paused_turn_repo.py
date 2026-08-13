@@ -225,6 +225,65 @@ async def test_two_ends_claim_at_once_and_the_loser_reads_the_winners_conclusion
     assert outcome.checkpoint_id == "ck-race"  # 落败方据它对上自己屏幕上那张卡
 
 
+async def test_claim_aligns_journal_resolved_to_the_winners_decision(
+    session_factory, monkeypatch
+):
+    """两端预写不同 decision 后赢家 claim：journal 与 outcomes 都是赢家。
+
+    预写去重键不含 decision，先落库的那条会留下；旧 claim 只删帧 + 盖 outcomes，
+    重开折 journal 会看到落败方的按钮。对齐发生在 hydrate 成功之后。
+    """
+    monkeypatch.setattr(persist_mod, "async_session_factory", session_factory)
+    mid, cid, uid = str(uuid4()), str(uuid4()), str(uuid4())
+    frame = _frame(mid, cid, uid)
+    await persist_mod.save_paused_turn(frame)
+
+    async with session_factory() as s:
+        repo = TurnJournalRepository(s)
+        entries = await repo.load(mid)
+        entries.append(
+            {
+                "kind": "plan_review_resolved",
+                "payload": {"checkpoint_id": "ck1", "decision": "stop", "note": "from-a"},
+                "ts": "t-loser",
+            }
+        )
+        entries.append(
+            {
+                "kind": "plan_review_resolved",
+                "payload": {
+                    "checkpoint_id": "ck1",
+                    "decision": "continue",
+                    "note": "from-b",
+                },
+                "ts": "t-dup",
+            }
+        )
+        await repo.record(
+            turn_id=mid,
+            conversation_id=cid,
+            trace_id=frame.trace_id,
+            entries=entries,
+        )
+
+    claimed = await persist_mod.claim_paused_turn(
+        mid, conversation_id=cid, decision="continue"
+    )
+    assert claimed is not None
+    resolved = [e for e in claimed.journal_entries if e["kind"] == "plan_review_resolved"]
+    assert len(resolved) == 1
+    assert resolved[0]["payload"]["decision"] == "continue"
+
+    async with session_factory() as s:
+        stored = await TurnJournalRepository(s).load(mid)
+        outcome = await PausedTurnRepository(s).get_outcome(mid, conversation_id=cid)
+    stored_resolved = [e for e in stored if e["kind"] == "plan_review_resolved"]
+    assert len(stored_resolved) == 1
+    assert stored_resolved[0]["payload"]["decision"] == "continue"
+    assert outcome is not None
+    assert outcome.decision == "continue"
+
+
 async def test_a_settled_card_can_never_be_stamped_without_its_checkpoint(session_factory):
     """空 checkpoint_id 的结算根本写不进去——桌面对空串是整帧丢弃，那条隐患到此为止。
 

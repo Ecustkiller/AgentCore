@@ -55,7 +55,7 @@ from agentcore.core.logging import get_logger, setup_logging
 from agentcore.db.migration_check import check_migrations
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
 from agentcore.memory.explore_refresh import shutdown_explore_refresh_scheduler
-from agentcore.middleware.client_version import DesktopMinVersionMiddleware
+from agentcore.middleware.client_version import ClientMinVersionMiddleware
 from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.errors import JSONErrorMiddleware
 from agentcore.middleware.origin_device import OriginDeviceMiddleware
@@ -498,9 +498,9 @@ app.add_middleware(RequestAttributionMiddleware)
 app.add_middleware(OriginDeviceMiddleware)
 app.add_middleware(CsrfMiddleware)
 app.add_middleware(AuthRateLimitMiddleware)
-# Desktop floor (426 CLIENT_TOO_OLD) before CSRF/rate-limit work; still inside
-# CORS so the rejection carries Access-Control-* headers.
-app.add_middleware(DesktopMinVersionMiddleware)
+# Desktop + native mobile floors (426 CLIENT_TOO_OLD) before CSRF/rate-limit work;
+# still inside CORS so the rejection carries Access-Control-* headers.
+app.add_middleware(ClientMinVersionMiddleware)
 # Added just before CORS so it sits *inside* the CORS layer: an unhandled error
 # (anything not an AgentCoreError, e.g. a raw DB error) becomes a JSON 500 that
 # still flows back out through CORSMiddleware and gets the CORS headers — instead

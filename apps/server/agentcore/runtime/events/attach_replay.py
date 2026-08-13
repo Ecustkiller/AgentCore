@@ -323,33 +323,47 @@ def _row_is_stamped(row: dict[str, Any]) -> bool:
     return kind in _DURABLE_KIND_VALUES
 
 
-def _incremental_verdict(rows: list[dict[str, Any]], *, after_seq: int) -> str | None:
+def _incremental_verdict(
+    rows: list[dict[str, Any]],
+    *,
+    after_seq: int,
+    turn_id: str,
+    cursor_turn_id: str | None,
+) -> str | None:
     """``None`` = safe to ship only the post-cursor facts; else the reason to send全量.
 
     Incremental is a pure optimization on top of a path already proven correct, so the
-    bar is「能证明这次对得上」, not「想不出反例」. Three conditions, all cheap (the rows
+    bar is「能证明这次对得上」, not「想不出反例」. Four conditions, all cheap (the rows
     are already in hand for the whole-turn judgements):
 
     1. **``after_seq >= 1``** — both clients send ``Last-Event-ID: 0`` when they have no
        cursor at all (``lastEventIds.get(id) ?? "0"``), so ``0`` cannot be read as「我有
        seq 0 之前的一切」. Seq 0 is one row anyway; refusing it costs nothing.
-    2. **The turn has no ``turn_end`` row** — a settled turn (finished / paused) has been
+    2. **The cursor names THIS turn.** Seq is numbered per turn from 0 while the clients
+       keep one cursor per CONVERSATION, so a cursor carried over from the previous turn
+       lands on a seq this turn also has — 「命中本回合某个 stamped 行」cannot separate
+       foreign from own, it only ever agreed with both. The turn id rides in the SSE
+       ``id:`` itself (``<turn_id>:<seq>``) so the cursor answers the question directly;
+       one with no turn at all (``cursor_unversioned`` — an old client, or a value minted
+       before the format carried it) is exactly as untrustworthy.
+    3. **The turn has no ``turn_end`` row** — a settled turn (finished / paused) has been
        through the wholesale ``TurnJournalRepository.record`` rewrite (delete-then-insert
        renumbers the turn from 0) or is about to be, and a resumed turn inherits that
-       prefix, so a cursor minted before the rewrite may now name a different fact. The
-       ONLY replay that matters here is the short post-completion persist window, so
-       there is nothing to win by betting.
-    3. **``after_seq`` names a fact this turn actually stamped** (:func:`_row_is_stamped`)
-       — a cursor that matches no such row is stale (renumbered), foreign (it came from
-       an earlier turn on the same conversation: seq is per-turn, the clients keep the
-       cursor per-CONVERSATION), or fabricated.
+       prefix, so a cursor minted before the rewrite may now name a different fact —
+       within the SAME turn, which is why matching turn ids cannot stand in for this.
+    4. **``after_seq`` names a fact this turn actually stamped** (:func:`_row_is_stamped`)
+       — a cursor that matches no such row is stale (renumbered) or fabricated.
 
-    Deliberately NOT built: a generation counter / journal-vs-cursor reconciliation.
-    The fallback is the whole story, so「说不准就整段重发」is both the cheap and the
-    correct answer.
+    Deliberately NOT built: a generation counter / journal-vs-cursor reconciliation, or
+    any client-version branch (the id format negotiates itself). The fallback is the
+    whole story, so「说不准就整段重发」is both the cheap and the correct answer.
     """
     if after_seq < 1:
         return "no_cursor"
+    if cursor_turn_id is None:
+        return "cursor_unversioned"
+    if cursor_turn_id != turn_id:
+        return "cursor_foreign_turn"
     stamped = False
     for row in rows:
         if str(row.get("kind") or "") == KIND_TURN_END:
@@ -644,6 +658,7 @@ async def build_cursor_replay(
     turn_id: str,
     conversation_id: str,
     after_seq: int,
+    cursor_turn_id: str | None = None,
     memory_channels: dict[str, str],
     memory_agent_ids: dict[str, str],
 ) -> list[SSEEvent]:
@@ -655,11 +670,13 @@ async def build_cursor_replay(
     The head carries ``full_replay`` on the全量 path only; on the增量 path its absence
     is the instruction「别清，接着折」。
 
-    ``after_seq`` is the client's ``Last-Event-ID``. It never narrows the **read**: the
+    ``after_seq`` / ``cursor_turn_id`` are the two halves of the client's
+    ``Last-Event-ID`` (``<turn_id>:<seq>``). The seq never narrows the **read**: the
     whole turn is loaded and judged (structured-turn test, covered-run set, ``agent_id``
     backfill, ``message_final`` splices all need every row, and a ``seq > cursor`` query
     would silently flip them). It narrows only what is **shipped**, and only when
-    :func:`_incremental_verdict` can vouch for the cursor.
+    :func:`_incremental_verdict` can vouch for the cursor — which starts with the cursor
+    naming this very turn.
     """
     from agentcore.conversation.store import get_conversation_store
     from agentcore.core.logging import get_logger
@@ -691,7 +708,9 @@ async def build_cursor_replay(
                 covered.add(str(rid))
 
     # Judgements above saw the whole turn; only shipping is narrowed from here.
-    skip_reason = _incremental_verdict(rows, after_seq=after_seq)
+    skip_reason = _incremental_verdict(
+        rows, after_seq=after_seq, turn_id=turn_id, cursor_turn_id=cursor_turn_id
+    )
     incremental = skip_reason is None
     if incremental:
         journal_events = _mark_block_replacements(
@@ -700,6 +719,7 @@ async def build_cursor_replay(
     get_logger(__name__).debug(
         "attach.cursor_replay",
         turn_id=turn_id,
+        cursor_turn_id=cursor_turn_id,
         last_event_id=after_seq,
         journal_rows=len(rows),
         incremental=incremental,

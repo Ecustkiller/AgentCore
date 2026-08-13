@@ -4,9 +4,9 @@
 事实块注入 system prompt，避免 CEO 在云端 scratch 上规划「打开本机软件」并空跑委派。
 
 **只陈述本回合事实**（位置 / 能力行 / 挂载 / 产物出口路径 / 某能力装没装配、宿主是哪种）。
-「该怎么做 / 禁止什么」的 HOW 一律不在这里：CEO 侧归 ``resolve/prompt/ceo_core.py``，
-全员侧归共享基座 ``resolve/prompt/base.py``，工具面机制归各工具 schema。同一条纪律在
-装配后的提示串里只应出现一次——往本文件加禁令前，先确认它在上述三处都没有。
+「该怎么做 / 禁止什么」的 HOW 不在这里——往本文件加禁令前，先确认它不在
+``resolve/prompt/ceo_core.py`` / ``resolve/prompt/base.py`` / 工具 schema 里。
+分层与理由 → docs/03-AI核心/上下文工程.md「分层边界」。
 """
 
 from __future__ import annotations

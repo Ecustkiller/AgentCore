@@ -746,12 +746,13 @@ class DatabaseUnavailableError(AgentCoreError):
 
 
 class ClientTooOldError(AgentCoreError):
-    """Desktop client build is below ``DESKTOP_MIN_VERSION`` (HTTP 426).
+    """Client build is below its platform floor (HTTP 426).
 
-    Global desktop floor enforced by middleware on ``/v1/*`` when
-    ``X-Client-Platform=desktop``. Empty min version / missing or ``dev`` client
-    version / compare failure all fail-open (see middleware). Not the §7.9
-    per-flag ``min_client_version`` gate.
+    Global floors enforced by middleware on ``/v1/*``: ``DESKTOP_MIN_VERSION``
+    for ``desktop``, ``MOBILE_MIN_VERSION`` for native mobile (android / ios).
+    ``mobile-web`` and admin are never gated. Empty min version / missing or
+    ``dev`` client version / compare failure all fail-open (see middleware).
+    Not the §7.9 per-flag ``min_client_version`` gate.
     """
 
     code = ErrorCode.CLIENT_TOO_OLD

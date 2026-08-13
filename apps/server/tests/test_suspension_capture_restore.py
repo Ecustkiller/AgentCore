@@ -197,6 +197,118 @@ async def test_claim_paused_turn_restores_frame_on_hydrate_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_claim_paused_turn_rewrites_loser_prewrite_to_winner_decision() -> None:
+    """两端不同决策抢帧：claim 赢家把 journal ``*_resolved`` 改成自己的。
+
+    旧行为只写 outcomes、不改 journal，重开折 journal 会看到落败方的按钮。
+    """
+    from agentcore.runtime.suspension import persistence as persist_mod
+
+    frame = {
+        "kind": "ask_user",
+        "message_id": "msg-1",
+        "conversation_id": "conv-1",
+        "user_id": "user-1",
+        "captain_run_id": "run-1",
+        "checkpoint_id": "cp-1",
+        "tool_call_id": "tc-1",
+        "base_system_prompt": "sys",
+        "user_message": "hello",
+        "question": "q",
+    }
+    row = SimpleNamespace(
+        message_id="msg-1",
+        conversation_id="conv-1",
+        user_id="user-1",
+        frame=frame,
+        trace_id="trace-1",
+    )
+    loser = {
+        "kind": "checkpoint_resolved",
+        "payload": {"checkpoint_id": "cp-1", "decision": "stop", "note": "from-a"},
+        "ts": "t1",
+    }
+
+    with (
+        patch.object(persist_mod, "async_session_factory") as factory,
+        patch.object(persist_mod, "PausedTurnRepository") as repo_cls,
+        patch.object(persist_mod, "TurnJournalRepository") as journal_cls,
+        patch.object(persist_mod, "_set_message_pause_latch", AsyncMock()),
+        patch.object(persist_mod, "_signal_frame_resolved", AsyncMock()),
+    ):
+        session = AsyncMock()
+        factory.return_value.__aenter__.return_value = session
+        repo_cls.return_value.claim = AsyncMock(return_value=row)
+        journal = journal_cls.return_value
+        journal.load = AsyncMock(return_value=[loser])
+        journal.record = AsyncMock()
+
+        claimed = await persist_mod.claim_paused_turn(
+            "msg-1", conversation_id="conv-1", decision="continue"
+        )
+
+    assert claimed is not None
+    assert claimed.journal_entries[-1]["payload"]["decision"] == "continue"
+    journal.record.assert_awaited_once()
+    written = journal.record.await_args.kwargs["entries"]
+    assert len(written) == 1
+    assert written[0]["payload"]["decision"] == "continue"
+    assert written[0]["payload"]["note"] == "from-a"
+
+
+@pytest.mark.asyncio
+async def test_claim_paused_turn_does_not_rewrite_already_matching_journal() -> None:
+    from agentcore.runtime.suspension import persistence as persist_mod
+
+    frame = {
+        "kind": "ask_user",
+        "message_id": "msg-1",
+        "conversation_id": "conv-1",
+        "user_id": "user-1",
+        "captain_run_id": "run-1",
+        "checkpoint_id": "cp-1",
+        "tool_call_id": "tc-1",
+        "base_system_prompt": "sys",
+        "user_message": "hello",
+        "question": "q",
+    }
+    row = SimpleNamespace(
+        message_id="msg-1",
+        conversation_id="conv-1",
+        user_id="user-1",
+        frame=frame,
+        trace_id="trace-1",
+    )
+    matching = {
+        "kind": "checkpoint_resolved",
+        "payload": {"checkpoint_id": "cp-1", "decision": "continue"},
+        "ts": "t1",
+    }
+
+    with (
+        patch.object(persist_mod, "async_session_factory") as factory,
+        patch.object(persist_mod, "PausedTurnRepository") as repo_cls,
+        patch.object(persist_mod, "TurnJournalRepository") as journal_cls,
+        patch.object(persist_mod, "_set_message_pause_latch", AsyncMock()),
+        patch.object(persist_mod, "_signal_frame_resolved", AsyncMock()),
+    ):
+        session = AsyncMock()
+        factory.return_value.__aenter__.return_value = session
+        repo_cls.return_value.claim = AsyncMock(return_value=row)
+        journal = journal_cls.return_value
+        journal.load = AsyncMock(return_value=[matching])
+        journal.record = AsyncMock()
+
+        claimed = await persist_mod.claim_paused_turn(
+            "msg-1", conversation_id="conv-1", decision="continue"
+        )
+
+    assert claimed is not None
+    assert claimed.journal_entries == [matching]
+    journal.record.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_restore_paused_turn_upserts_frame_without_notify() -> None:
     suspension = _ask_user_suspension()
     with patch(

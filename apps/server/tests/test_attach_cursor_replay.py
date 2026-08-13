@@ -145,7 +145,7 @@ async def test_durable_emit_stamps_sse_id_from_barrier(monkeypatch):
 
     writer = TurnJournalWriter(turn_id="m1", conversation_id="c1", trace_id="t1")
     token = current_journal_writer.set(writer)
-    sink = EventSink()
+    sink = EventSink(message_id="m1")
     try:
         sink.emit(tool_use_start("c1", "web_search", {}))
         await writer.flush()
@@ -156,7 +156,8 @@ async def test_durable_emit_stamps_sse_id_from_barrier(monkeypatch):
 
     durable = [f for f in frames if "tool_use_start" in f]
     assert len(durable) == 1
-    assert "\nid: 1\n" in durable[0]
+    # 回合身份就在 id 里：客户端原样存、原样回传，服务端下次才分得清是不是本回合的游标。
+    assert "\nid: m1:1\n" in durable[0]
 
 
 async def test_ephemeral_delta_has_no_id_line():
@@ -166,6 +167,24 @@ async def test_ephemeral_delta_has_no_id_line():
     frames = [frame async for frame in sse._event_generator(sink, None)]
     assert any("content_delta" in f for f in frames)
     assert all("\nid: " not in f for f in frames if "content_delta" in f)
+
+
+def test_parse_last_event_id_shapes():
+    """Header 原样回传：有无回合身份就是版本协商，不另按客户端版本号分叉。"""
+    assert sse.parse_last_event_id(None) is None
+    assert sse.parse_last_event_id("") is None
+    assert sse.parse_last_event_id("  ") is None
+    assert sse.parse_last_event_id("m1:4") == sse.ReplayCursor(seq=4, turn_id="m1")
+    assert sse.parse_last_event_id("  m1:4  ") == sse.ReplayCursor(seq=4, turn_id="m1")
+    assert sse.parse_last_event_id("4") == sse.ReplayCursor(seq=4, turn_id=None)
+    assert sse.parse_last_event_id("0") == sse.ReplayCursor(seq=0, turn_id=None)
+    assert sse.parse_last_event_id("m1:0") == sse.ReplayCursor(seq=0, turn_id="m1")
+    assert sse.parse_last_event_id("turn:with:colons:5") == sse.ReplayCursor(
+        seq=5, turn_id="turn:with:colons"
+    )
+    # 读不出 seq 仍是「有游标」（走 journal 全量），不是缺 header 的 sink 快照路。
+    assert sse.parse_last_event_id("garbage") == sse.ReplayCursor(seq=0)
+    assert sse.parse_last_event_id("m1:abc") == sse.ReplayCursor(seq=0)
 
 
 async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch):
@@ -234,7 +253,7 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
         lambda: {CHANNEL_CAPTAIN_CONTENT: "FROM_SEGMENT"}
     )
 
-    gen = sse._attach_generator(sink, last_event_id=4)
+    gen = sse._attach_generator(sink, cursor=sse.ReplayCursor(seq=4, turn_id="m1"))
     frames: list[str] = []
     try:
         for _ in range(4):
@@ -255,9 +274,9 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     # Pre-cursor structure must be present (full replay, not > cursor tail).
     assert "tool_use_start" in joined
     assert "tool_use_end" in joined
-    assert "\nid: 1\n" in joined
-    assert "\nid: 2\n" in joined
-    assert "\nid: 5\n" in joined
+    assert "\nid: m1:1\n" in joined
+    assert "\nid: m1:2\n" in joined
+    assert "\nid: m1:5\n" in joined
 
 
 # --- 收口事实回放：finished detached turn closes with a synthetic message_end ---
@@ -452,10 +471,11 @@ async def test_build_cursor_replay_stamp_is_identical_on_reattach(monkeypatch):
             turn_id="m1",
             conversation_id="c1",
             after_seq=cursor,
+            cursor_turn_id=cursor_turn,
             memory_channels={},
             memory_agent_ids={},
         )
-        for cursor in (-1, 1)
+        for cursor, cursor_turn in ((-1, None), (1, "m1"))
     ]
 
     assert first[0].payload["message_id"] == second[0].payload["message_id"] == "m1"
@@ -550,7 +570,7 @@ async def test_attach_with_an_empty_history_goes_straight_to_the_boundary():
     sink._message_id = "m1"
     sink._conversation_id = "c1"
 
-    gen = sse._attach_generator(sink, last_event_id=None)
+    gen = sse._attach_generator(sink, cursor=None)
     try:
         first = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
     finally:
@@ -567,7 +587,7 @@ async def test_attach_without_cursor_leads_with_the_same_reset_instruction():
     sink.emit(message_start("m1", conversation_id="c1", trace_id="tr1"))
     sink.emit(content_delta("已答一半"))
 
-    gen = sse._attach_generator(sink, last_event_id=None)
+    gen = sse._attach_generator(sink, cursor=None)
     try:
         head = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
     finally:
@@ -658,6 +678,7 @@ async def test_increment_ships_only_post_cursor_facts_but_judges_on_the_whole_tu
         turn_id="m1",
         conversation_id="c1",
         after_seq=3,
+        cursor_turn_id="m1",
         memory_channels={
             CHANNEL_CAPTAIN_CONTENT: "FROM_SEGMENT",
             run_output_channel("w1"): "FROM_SEGMENT_W1",
@@ -701,7 +722,12 @@ async def test_increment_marks_only_the_first_frame_of_each_channel(monkeypatch)
     _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
 
     events = await build_cursor_replay(
-        turn_id="m1", conversation_id="c1", after_seq=3, memory_channels={}, memory_agent_ids={}
+        turn_id="m1",
+        conversation_id="c1",
+        after_seq=3,
+        cursor_turn_id="m1",
+        memory_channels={},
+        memory_agent_ids={},
     )
 
     w1_content = [
@@ -748,8 +774,12 @@ def test_synthesized_open_blocks_always_declare_themselves_whole():
 def test_cursor_zero_is_the_no_cursor_sentinel_not_a_position():
     """两端在没有游标时都发 ``Last-Event-ID: 0``，不能读成「我有 seq 0 之前的一切」。"""
     rows = [{"seq": 0, "kind": "tool_use_start", "payload": {}, "ts": "t0"}]
-    assert _incremental_verdict(rows, after_seq=0) == "no_cursor"
-    assert _incremental_verdict(rows, after_seq=-1) == "no_cursor"
+    assert (
+        _incremental_verdict(rows, after_seq=0, turn_id="m1", cursor_turn_id="m1") == "no_cursor"
+    )
+    assert (
+        _incremental_verdict(rows, after_seq=-1, turn_id="m1", cursor_turn_id="m1") == "no_cursor"
+    )
 
 
 def test_settled_turn_falls_back_to_full_replay():
@@ -758,14 +788,15 @@ def test_settled_turn_falls_back_to_full_replay():
         {"seq": 1, "kind": "tool_use_start", "payload": {}, "ts": "t0"},
         {"seq": 2, "kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
     ]
-    assert _incremental_verdict(rows, after_seq=1) == "turn_settled"
+    assert (
+        _incremental_verdict(rows, after_seq=1, turn_id="m1", cursor_turn_id="m1") == "turn_settled"
+    )
 
 
 def test_cursor_that_names_no_stamped_fact_falls_back_to_full_replay():
     """游标必须指向本回合真的盖过 ``id:`` 的那条事实。
 
-    对不上的三种来源都在这里被挡掉：重编号后的陈旧值、上一回合留下的外来值（seq 按回合
-    计数，两端却按**会话**存游标）、以及压根没上过线的执行事实。
+    对不上的来源：重编号后的陈旧值、压根没上过线的执行事实。跨回合外来值由 turn_id 匹配另拦。
     """
     rows = [
         {"seq": 1, "kind": "llm_call", "payload": {"run_id": "r1"}, "ts": "t0"},
@@ -779,11 +810,12 @@ def test_cursor_that_names_no_stamped_fact_falls_back_to_full_replay():
         },
     ]
 
-    assert _incremental_verdict(rows, after_seq=1) == "cursor_unknown"  # 执行事实不上线
-    assert _incremental_verdict(rows, after_seq=2) == "cursor_unknown"  # 只做拼接源
-    assert _incremental_verdict(rows, after_seq=3) == "cursor_unknown"  # 结构镜像不产帧
-    assert _incremental_verdict(rows, after_seq=9) == "cursor_unknown"  # 越界 / 外来
-    assert _incremental_verdict(rows, after_seq=4) is None  # 真盖过 id 的耐久事实
+    kw = dict(turn_id="m1", cursor_turn_id="m1")
+    assert _incremental_verdict(rows, after_seq=1, **kw) == "cursor_unknown"  # 执行事实不上线
+    assert _incremental_verdict(rows, after_seq=2, **kw) == "cursor_unknown"  # 只做拼接源
+    assert _incremental_verdict(rows, after_seq=3, **kw) == "cursor_unknown"  # 结构镜像不产帧
+    assert _incremental_verdict(rows, after_seq=9, **kw) == "cursor_unknown"  # 越界 / 外来
+    assert _incremental_verdict(rows, after_seq=4, **kw) is None  # 真盖过 id 的耐久事实
 
 
 def test_process_text_rows_are_stampable_cursors():
@@ -791,7 +823,28 @@ def test_process_text_rows_are_stampable_cursors():
     rows = [
         {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "x"}},
     ]
-    assert _incremental_verdict(rows, after_seq=1) is None
+    assert (
+        _incremental_verdict(rows, after_seq=1, turn_id="m1", cursor_turn_id="m1") is None
+    )
+
+
+def test_foreign_turn_cursor_cannot_increment():
+    """seq 按回合从 0 计；会话级游标带着上一回合的号会撞上本回合同号行。"""
+    rows = [{"seq": 3, "kind": "tool_use_start", "payload": {}, "ts": "t0"}]
+    assert (
+        _incremental_verdict(rows, after_seq=3, turn_id="m1", cursor_turn_id="m0")
+        == "cursor_foreign_turn"
+    )
+    assert _incremental_verdict(rows, after_seq=3, turn_id="m1", cursor_turn_id="m1") is None
+
+
+def test_unversioned_cursor_cannot_increment():
+    """裸 seq（旧客户端回传升级前的 ``id:``）没有回合身份，与外来游标同等不可信。"""
+    rows = [{"seq": 3, "kind": "tool_use_start", "payload": {}, "ts": "t0"}]
+    assert (
+        _incremental_verdict(rows, after_seq=3, turn_id="m1", cursor_turn_id=None)
+        == "cursor_unversioned"
+    )
 
 
 async def test_conservative_fallback_replays_the_whole_turn(monkeypatch):
@@ -803,7 +856,12 @@ async def test_conservative_fallback_replays_the_whole_turn(monkeypatch):
     )
 
     events = await build_cursor_replay(
-        turn_id="m1", conversation_id="c1", after_seq=3, memory_channels={}, memory_agent_ids={}
+        turn_id="m1",
+        conversation_id="c1",
+        after_seq=3,
+        cursor_turn_id="m1",
+        memory_channels={},
+        memory_agent_ids={},
     )
 
     assert events[0].payload["full_replay"] is True
@@ -863,7 +921,7 @@ async def test_attach_stream_ships_an_incremental_segment_end_to_end(monkeypatch
     sink.emit(content_delta("FROM_HISTORY"))
     _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
 
-    gen = sse._attach_generator(sink, last_event_id=3)
+    gen = sse._attach_generator(sink, cursor=sse.ReplayCursor(seq=3, turn_id="m1"))
     frames: list[str] = []
     try:
         for _ in range(3):
@@ -878,4 +936,49 @@ async def test_attach_stream_ships_an_incremental_segment_end_to_end(monkeypatch
     assert "FROM_HISTORY" not in joined
     assert "CEO 旁白" not in joined
     assert "tool_use_end" in joined
-    assert "\nid: 4\n" in joined
+    assert "\nid: m1:4\n" in joined
+
+
+async def _attach_journal_catchup(sink: EventSink, monkeypatch, cursor: sse.ReplayCursor) -> str:
+    """取几帧 catch-up 后关掉，避免活尾巴上的 wait 把用例卡住。"""
+    _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
+    gen = sse._attach_generator(sink, cursor=cursor)
+    frames: list[str] = []
+    try:
+        for _ in range(6):
+            frames.append(await asyncio.wait_for(gen.__anext__(), timeout=2.0))
+    finally:
+        await gen.aclose()
+    return "".join(frames)
+
+
+async def test_cross_turn_cursor_replays_the_whole_journal(monkeypatch):
+    """跨回合 ``<other>:<seq>`` 即便撞上本回合同号行，也走 journal 全量，不是 sink 快照。"""
+    sink = EventSink()
+    sink._message_id = "m1"
+    sink.emit(content_delta("FROM_HISTORY"))
+
+    cursor = sse.parse_last_event_id("m0:3")
+    assert cursor is not None
+    joined = await _attach_journal_catchup(sink, monkeypatch, cursor)
+
+    assert '"full_replay": true' in joined
+    assert "FROM_HISTORY" not in joined
+    assert "CEO 旁白" in joined
+    assert "tool_use_start" in joined
+
+
+async def test_bare_seq_cursor_replays_the_whole_journal(monkeypatch):
+    """裸数字（旧 ``id: 3``）一律 journal 全量，不是 ``cursor is None`` 的 sink 内存快照。"""
+    sink = EventSink()
+    sink._message_id = "m1"
+    sink.emit(content_delta("FROM_HISTORY"))
+
+    cursor = sse.parse_last_event_id("3")
+    assert cursor is not None
+    joined = await _attach_journal_catchup(sink, monkeypatch, cursor)
+
+    assert '"full_replay": true' in joined
+    assert "FROM_HISTORY" not in joined
+    assert "CEO 旁白" in joined
+    assert "tool_use_start" in joined

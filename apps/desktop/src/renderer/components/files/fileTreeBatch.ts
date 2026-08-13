@@ -80,11 +80,11 @@ export function withSkipped(
 
 /**
  * 删除后还能不能捞回来——单项删除与批量删除共用一句，免得两条路径对同一个源给出不同承诺。
- * 按能力位成文（`snapshots` = 云端软删区；`watch` = 本地 FS，另有系统回收站），不猜源类型。
+ * 按能力位成文（`snapshots` = 云端软删区；`watch` = 本地 FS 系统回收站），不猜源类型。
  */
 export function deleteRestoreHint(source: FileSource): string {
   if (source.caps.snapshots) return "可从软删区还原。";
-  if (source.caps.watch) return "可从系统回收站或软删区还原。";
+  if (source.caps.watch) return "可从系统回收站还原。";
   return "此操作不可撤销。";
 }
 

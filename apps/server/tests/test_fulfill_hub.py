@@ -8,7 +8,8 @@ selection miss (origin offline / root not held / no fulfiller) that a log read
 has to be able to tell apart. Also the departure memory + grace window that let
 delivery tell a reconnecting desktop from an absent one, and the observer
 sessions (browser clients, no caps) that read account state off the same stream
-without ever counting as a machine an op could land on.
+without ever counting as a machine an op could land on — including on connect:
+a web tab must not rehang pending ``workspace_op`` / ``host_op`` onto the desktop.
 No DB, no HTTP — plain async tests (asyncio_mode=auto).
 """
 
@@ -16,7 +17,11 @@ from __future__ import annotations
 
 import asyncio
 
-from agentcore.api.routes.fulfill import _format_event, _fulfill_stream
+from agentcore.api.routes.fulfill import (
+    _format_event,
+    _fulfill_stream,
+    _seed_registered_session,
+)
 from agentcore.fulfill import dispatch, grace
 from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
 from agentcore.fulfill.hub import (
@@ -526,6 +531,56 @@ async def test_observer_alongside_a_desktop_leaves_delivery_untouched():
     # And the desktop's own reconnect window still opens when it drops.
     hub.unregister(desktop)
     assert hub.seen_recently("u1", device_id="d1") is True
+
+
+async def test_observer_connect_skips_rehang_but_still_gets_snapshot(monkeypatch):
+    """Web tab: zero caps. Account state yes; do not re-push pending local ops."""
+    rehangs: list[str] = []
+    snapshot = {
+        "type": "turn_queue_snapshot",
+        "payload": {"conversation_id": "c1", "items": []},
+    }
+    monkeypatch.setattr(
+        "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
+        lambda user_id: rehangs.append(user_id) or 0,
+    )
+    monkeypatch.setattr(
+        "agentcore.api.routes.fulfill.turn_queue.snapshot_frames",
+        lambda user_id: [snapshot] if user_id == "u1" else [],
+    )
+
+    hub = FulfillerHub()
+    observer = hub.register("u1", "web-1", caps=[], roots=[], platform="web")
+    assert observer.can_fulfil is False
+    _seed_registered_session(observer, hub)
+
+    assert rehangs == []
+    assert await observer.get() == snapshot
+
+
+async def test_capable_connect_rehangs_pending_ops(monkeypatch):
+    """Desktop reconnect: rehang so in-flight CLIENT_TOOL is not dropped."""
+    rehangs: list[str] = []
+    snapshot = {
+        "type": "turn_queue_snapshot",
+        "payload": {"conversation_id": "c1", "items": []},
+    }
+    monkeypatch.setattr(
+        "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
+        lambda user_id: rehangs.append(user_id) or 0,
+    )
+    monkeypatch.setattr(
+        "agentcore.api.routes.fulfill.turn_queue.snapshot_frames",
+        lambda user_id: [snapshot] if user_id == "u1" else [],
+    )
+
+    hub = FulfillerHub()
+    desktop = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+    assert desktop.can_fulfil is True
+    _seed_registered_session(desktop, hub)
+
+    assert rehangs == ["u1"]
+    assert await desktop.get() == snapshot
 
 
 def test_presence_window_outlasts_the_grace_it_authorizes():

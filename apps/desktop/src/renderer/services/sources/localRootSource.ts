@@ -227,7 +227,9 @@ export function createLocalRootSource(
       if (!res.ok) throwFs(res.reason, res.code);
     },
     async delete(path) {
-      const res = await window.fsApi.delete(rootId, inPath(path));
+      // 文件树删除走系统回收站（`shell.trashItem`）。失败如实上抛，禁止回退
+      // `fsApi.delete` / `fs.rm`——那会让确认框「可从回收站还原」变成假承诺。
+      const res = await window.fsApi.trashPath(rootId, inPath(path));
       if (!res.ok) throwFs(res.reason, res.code);
     },
     watch(dir, onChange) {

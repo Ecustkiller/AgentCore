@@ -2,7 +2,7 @@
 #
 # AgentCore 一键部署 / 回退脚本（部署与运维.md §三 CI/CD）。
 #
-#   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 →
+#   git checkout <sha> → pull 镜像 → 起基础设施 → 迁移前 DB 快照 → 迁移前 workspaces/ 快照 →
 #   停 api → alembic upgrade head → schema gate → workspace tree 迁移 →
 #   memory pipeline migrate (contract self-lags one deploy) → project docs 迁移 →
 #   compose up → /readyz → 记 SHA
@@ -20,6 +20,9 @@
 #   ACR_USERNAME/ACR_PASSWORD   ACR 登录凭据（缺省则跳过 docker login）
 #   HEALTH_URL       健康检查地址          （默认 http://127.0.0.1:8000/readyz）
 #   SKIP_SNAPSHOT=1  跳过迁移前 DB 快照（应急用）
+#   SKIP_WORKSPACE_SNAPSHOT=1  跳过迁移前 workspaces/ 快照（应急用；**独立**于 SKIP_SNAPSHOT
+#                    ——盘上迁移单向不可逆，跳过它等于放弃唯一的回退素材，必须单独按下）
+#   WORKSPACE_BACKUP_KEEP  workspaces 归档保留份数（默认 2；写新档前先轮转）
 
 set -euo pipefail
 
@@ -139,6 +142,92 @@ if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_SNAPSHOT:-0}" != "1" ]]; then
   stage "db snapshot → $(basename "$snapshot")"
 fi
 
+# ── 6b. 迁移前 workspaces/ 快照（仅正向；必须早于停 api）──
+# 步 7 的 workspace tree 搬迁是**单向**的，没有反向脚本：回退只把库和镜像退回旧版，盘停在
+# tree/ 新布局，旧代码按平铺路径找不到目录就无条件 mkdir 重建一个空的——用户看到「文件夹
+# 空了」，往空目录里写的新文件还会制造二次分叉，事后连人工归位都做不到。pg_dump 只覆盖库，
+# 盘上这一半（appdata 卷、容器内 /data/workspaces）必须自己备。
+# 排在停 api **之前**是刻意的：此时备份失败只是取消这次部署（api 照常服务），而不是把
+# 「保护数据的闸」变成新的停机源。
+if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_WORKSPACE_SNAPSHOT:-0}" != "1" ]]; then
+  mkdir -p "$BACKUP_DIR"
+  # 一次性容器读卷：不依赖 api 容器在不在跑（上次部署失败可能把它停在地上）。
+  # --no-deps：备份只用 appdata 卷，不该被 DB/Redis 的状态拖住。
+  ws_probe="$(dc run --rm --no-deps -T api sh -c \
+    'if [ -d /data/workspaces ]; then du -sk /data/workspaces | cut -f1; else echo MISSING; fi' \
+    | tr -d '\r' | tail -n1 || true)"
+  if [[ "$ws_probe" == "MISSING" ]]; then
+    warn "盘上还没有 workspaces/（首次部署）— 无云工作区数据可备份"
+  elif [[ ! "$ws_probe" =~ ^[0-9]+$ ]]; then
+    err "探不到 workspaces/ 体积（输出：${ws_probe:-<空>}）— 证不明「没有数据会丢」，终止部署"
+    exit 1
+  else
+    # 轮转放在写新档**之前**：归档是用户文件的整份拷贝（不是 §7.7 那种 MB 级、可长期堆着的
+    # pg_dump），先降到 KEEP-1 份，峰值占盘就是 KEEP 份而不是 KEEP+1；写档全程盘上仍留着
+    # 上一份完整归档，中途失败也不至于两手空空。
+    WORKSPACE_BACKUP_KEEP="${WORKSPACE_BACKUP_KEEP:-2}"
+    mapfile -t ws_old < <(ls -1 "$BACKUP_DIR"/pre-deploy-*-workspaces.tar.gz 2>/dev/null | sort)
+    ws_room=$(( WORKSPACE_BACKUP_KEEP > 0 ? WORKSPACE_BACKUP_KEEP - 1 : 0 ))
+    if ((${#ws_old[@]} > ws_room)); then
+      for ((i = 0; i < ${#ws_old[@]} - ws_room; i++)); do
+        rm -f "${ws_old[i]}" && warn "轮转删除 $(basename "${ws_old[i]}")"
+      done
+    fi
+    # 空间检查在动手之前：写到一半撑爆磁盘会同时毁掉备份和还在服务的 api。压缩率取决于用户
+    # 存的是文本还是图片/压缩包，按不可压缩的最坏情况 + 20% 余量要。
+    ws_need_kb=$((ws_probe + ws_probe / 5))
+    ws_free_kb="$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
+    if ((ws_free_kb < ws_need_kb)); then
+      err "备份盘空间不足：$BACKUP_DIR 可用 $((ws_free_kb / 1024)) MiB，需 ≥ $((ws_need_kb / 1024)) MiB"
+      err "（workspaces/ $((ws_probe / 1024)) MiB + 20% 余量）。清理或扩容后重试 — 本次部署已取消，api 未受影响。"
+      exit 1
+    fi
+    ws_snapshot="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S)-$SHORT_SHA-workspaces.tar.gz"
+    ws_rc=0
+    dc run --rm --no-deps -T api tar -czf - -C /data workspaces >"$ws_snapshot.partial" || ws_rc=$?
+    # tar 退 1 = 「读的过程中有文件被改」——api 还在服务，热备份下属常态，不是失败；2+ 才是
+    # 真出错。归档到底完不完整不看 tar 的脸色，由下面的 gzip -t 说了算。
+    if ((ws_rc == 1)); then
+      warn "tar 报告备份期间有文件变动（api 仍在服务，属预期）"
+    elif ((ws_rc != 0)); then
+      rm -f "$ws_snapshot.partial"
+      err "workspaces/ 备份失败（tar 退出 $ws_rc）— 单向盘上迁移没有备份不许开跑，终止部署。"
+      exit 1
+    fi
+    # 先写 .partial、校验过才改名：半截文件不许冒充「有备份」（同 backup.sh）。
+    if ! gzip -t "$ws_snapshot.partial" 2>/dev/null || [[ ! -s "$ws_snapshot.partial" ]]; then
+      rm -f "$ws_snapshot.partial"
+      err "workspaces/ 归档损坏或为空 — 终止部署（api 未受影响，盘上数据原样）。"
+      exit 1
+    fi
+    mv "$ws_snapshot.partial" "$ws_snapshot"
+    stage "workspace snapshot → $(basename "$ws_snapshot") ($(du -h "$ws_snapshot" | cut -f1))"
+  fi
+elif [[ "$IS_ROLLBACK" -eq 0 ]]; then
+  warn "SKIP_WORKSPACE_SNAPSHOT=1 — 跳过 workspaces/ 快照，单向盘上迁移将无回退素材"
+fi
+
+# 迁移步的退出码闸。这些脚本用非零同时表达两件事：真出错，以及「我很安全地什么都没做」
+# （tree 的 2 = 目标目录已存在、已跳过待人工确认；docs 的 3 = 一个工作区目录都没扫到的保险）。
+# set -e 一视同仁，于是后者会在 api 已停、dc up 还没跑的时刻中断部署，而且它是稳定复现的
+# ——之后每次部署都卡在同一步。所以只放行点名的「无操作」码；其余非零照旧硬停：迁移真出错
+# 时新 api 绝不能接流量。
+migrate_step() {
+  local label="$1" no_op_codes="$2"
+  shift 2
+  local rc=0
+  "$@" || rc=$?
+  if [[ "$rc" -eq 0 ]]; then
+    return 0
+  fi
+  if [[ " $no_op_codes " == *" $rc "* ]]; then
+    warn "$label 退出 $rc = 未改动任何数据（请人工确认后处理）— 部署继续"
+    return 0
+  fi
+  err "$label 失败（退出 $rc）— api 保持停机，修复后重跑本脚本"
+  return "$rc"
+}
+
 # ── 7. 停 api → 迁移 → schema gate（仅正向）──
 # 破坏性迁移期间旧 api 不得继续接流量（2026-07-20 UndefinedColumn/Table 窗口）。
 # 盘上迁移同样在这个窗口内：resolve_workspace_root 无条件 mkdir，新 api 一接流量，
@@ -152,12 +241,14 @@ if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   dc run --rm api python scripts/check_schema_gate.py --live
   stage "schema gate (live)"
   # 依赖上面回填的 folders.rel_path；必须早于 project docs（它读迁移后的 tree/ 落点）。
-  dc run --rm api python scripts/migrate_workspace_tree.py
+  migrate_step "workspace tree relocation" 2 \
+    dc run --rm api python scripts/migrate_workspace_tree.py
   stage "workspace tree relocation"
   # Memory migrate + self-lagged contract (sources cleared on the *next* deploy).
   dc run --rm api python scripts/migrate_memory_pipeline.py
   stage "memory pipeline migrate/contract (lagged)"
-  dc run --rm api python scripts/migrate_project_docs.py
+  migrate_step "project docs migration" 3 \
+    dc run --rm api python scripts/migrate_project_docs.py
   stage "project docs → memory entries"
 else
   warn "回退：跳过 alembic（如 schema 不一致，从 $BACKUP_DIR 手动恢复对齐）"

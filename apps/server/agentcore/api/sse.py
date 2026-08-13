@@ -9,6 +9,7 @@ import asyncio
 import json
 from collections import deque
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,12 +52,57 @@ _HEARTBEAT_INTERVAL_S = 15.0
 _ATTACH_CAUGHT_UP = ": attach-caught-up\n\n"
 
 
-def _format_sse(event: SSEEvent, *, seq: int | None = None) -> str:
+@dataclass(frozen=True, slots=True)
+class ReplayCursor:
+    """A parsed ``Last-Event-ID``: how far the client read, and in WHICH turn.
+
+    ``turn_id`` unset = the client named a seq we cannot attribute to a turn (an old
+    client, or a cursor minted before the id carried the turn). Only a cursor whose
+    turn matches the one being replayed can license an增量段.
+    """
+
+    seq: int
+    turn_id: str | None = None
+
+
+def parse_last_event_id(raw: str | None) -> ReplayCursor | None:
+    """Read the ``Last-Event-ID`` header. ``None`` = the client sent no cursor at all.
+
+    Journal ``seq`` is numbered per TURN (from 0) while both clients keep ONE cursor per
+    CONVERSATION and echo it on every reconnect, so a bare seq from the previous turn
+    collides with this turn's numbering and no amount of server-side checking can tell
+    the two apart. Naming the turn in the id (:func:`_format_sse`) makes the cursor
+    self-identifying — and IS the version negotiation, since clients store and return the
+    value verbatim: a cursor without a turn simply cannot be trusted for an increment.
+
+    A present header is always a cursor, never「无游标」: both fall back to the journal
+    FULL replay, which is a different path from the missing-header one (the sink's
+    in-memory history — see :func:`_catch_up_replay`). An unreadable value is treated the
+    same way rather than as absent: a client that sent something holds something, and the
+    sink snapshot can be empty when the client's screen is not.
+    """
+    if raw is None:
+        return None
+    value = raw.strip()
+    if not value:
+        return None
+    turn_id, _, seq_raw = value.rpartition(":")
+    if not seq_raw.isdigit():
+        return ReplayCursor(seq=0)
+    return ReplayCursor(seq=int(seq_raw), turn_id=turn_id or None)
+
+
+def _format_sse(
+    event: SSEEvent, *, seq: int | None = None, turn_id: str | None = None
+) -> str:
     """Serialize one SSE frame. Envelope JSON (type/timestamp/payload) is unchanged.
 
-    Optional ``seq`` (or ``event.seq``) emits a standard SSE ``id:`` line (journal seq
-    for DURABLE facts; ``Last-Event-ID`` resume). EPHEMERAL / delta events omit ``seq``
-    so they attach after the nearest durable id.
+    Optional ``seq`` (or ``event.seq``) emits a standard SSE ``id:`` line — the journal
+    seq of a DURABLE fact, stamped ``<turn_id>:<seq>`` so the cursor a client hands back
+    on reconnect says which turn it belongs to (:func:`parse_last_event_id`). A frame
+    from a sink with no bound turn ships the bare seq, which the parser then refuses to
+    trust. EPHEMERAL / delta events omit ``seq`` so they attach after the nearest
+    durable id.
     """
     id_seq = seq if seq is not None else event.seq
     data = json.dumps(
@@ -65,17 +111,22 @@ def _format_sse(event: SSEEvent, *, seq: int | None = None) -> str:
     )
     parts = [f"event: {event.type}"]
     if id_seq is not None:
-        parts.append(f"id: {id_seq}")
+        parts.append(f"id: {turn_id}:{id_seq}" if turn_id else f"id: {id_seq}")
     parts.append(f"data: {data}")
     return "\n".join(parts) + "\n\n"
 
 
 async def _live_tail(
+    sink: EventSink,
     sub: SinkSubscription,
     *,
     ambient: ConversationWatcher | None = None,
 ) -> AsyncIterator[str]:
     """Drain one subscription into SSE frames with idle ping comments.
+
+    ``sink`` is read only for the turn id every stamped frame carries; it is looked up
+    per frame because a turn binds its id (``bind_content_checkpoint``) after the POST
+    stream is already flowing.
 
     Same pattern as realtime ``_firehose``: a persistent ``get`` task is reused
     across heartbeat windows and is **never** cancelled on a mere timeout.
@@ -127,7 +178,7 @@ async def _live_tail(
             get_task = None
             if event is None:
                 return
-            yield _format_sse(event)
+            yield _format_sse(event, turn_id=sink.message_id)
     finally:
         if get_task is not None:
             get_task.cancel()
@@ -146,7 +197,7 @@ async def _event_generator(
     # ``turn_queue_started``), which nobody else has consumed.
     sub = sink.subscribe(label="turn_stream", backlog=True)
     try:
-        async for frame in _live_tail(sub):
+        async for frame in _live_tail(sink, sub):
             yield frame
         sink.unsubscribe(sub, reason="sse_stream_end")
     except (asyncio.CancelledError, GeneratorExit):
@@ -195,12 +246,14 @@ def sse_response(
     )
 
 
-async def _catch_up_replay(sink: EventSink, *, last_event_id: int | None) -> list[SSEEvent]:
+async def _catch_up_replay(sink: EventSink, *, cursor: ReplayCursor | None) -> list[SSEEvent]:
     """The replay段 a freshly subscribed观察端 needs to reach the live edge.
 
-    ``last_event_id is None`` → same-process fast path: the sink's own in-memory
-    history (plus the synthetic ``message_end`` when the turn already finished).
-    Otherwise the journal-backed replay + stream_state synthetic deltas.
+    ``cursor is None`` (no ``Last-Event-ID`` at all) → same-process fast path: the sink's
+    own in-memory history (plus the synthetic ``message_end`` when the turn already
+    finished). Otherwise the journal-backed replay + stream_state synthetic deltas —
+    including for a cursor we cannot trust, which gets the journal in FULL rather than
+    this other path's snapshot.
 
     Whether the段 is FULL or INCREMENTAL is the server's call, stated on its head: a
     ``message_start`` with ``full_replay`` orders「重置本回合本地态再折本段」, one without
@@ -221,7 +274,7 @@ async def _catch_up_replay(sink: EventSink, *, last_event_id: int | None) -> lis
     )
 
     turn_id = sink._message_id
-    if last_event_id is None:
+    if cursor is None:
         return mark_full_replay_segment(
             sink.history_snapshot(),
             turn_id=turn_id,
@@ -233,7 +286,8 @@ async def _catch_up_replay(sink: EventSink, *, last_event_id: int | None) -> lis
     return await build_cursor_replay(
         turn_id=turn_id,
         conversation_id=sink.conversation_id or "",
-        after_seq=last_event_id,
+        after_seq=cursor.seq,
+        cursor_turn_id=cursor.turn_id,
         memory_channels=sink.stream_memory_snapshot(),
         memory_agent_ids=agent_ids,
     )
@@ -243,7 +297,7 @@ async def _attach_frames(
     sink: EventSink,
     sub: SinkSubscription,
     *,
-    last_event_id: int | None = None,
+    cursor: ReplayCursor | None = None,
     ambient: ConversationWatcher | None = None,
     lead: SSEEvent | None = None,
 ) -> AsyncIterator[str]:
@@ -267,11 +321,11 @@ async def _attach_frames(
     first would hand control back to the client mid-attach, and anything the run
     emitted in that window would arrive twice — once in the snapshot, once live.
     """
-    replay = await _catch_up_replay(sink, last_event_id=last_event_id)
+    replay = await _catch_up_replay(sink, cursor=cursor)
     if lead is not None:
         yield _format_sse(lead)
     for event in replay:
-        yield _format_sse(event)
+        yield _format_sse(event, turn_id=sink.message_id)
     # Hot re-hang: after journal/history replay (DURABLE-only for cursor path),
     # re-emit still-open answerable hot cards (approval / delegation / user
     # escalation) so a refresh cannot drop an in-process pending Future.
@@ -285,17 +339,17 @@ async def _attach_frames(
         )
 
         for event in pending_hot_interaction_events(conv_id):
-            yield _format_sse(event)
+            yield _format_sse(event, turn_id=sink.message_id)
     # Boundary: everything above is catch-up; clients one-shot fold then live.
     yield _ATTACH_CAUGHT_UP
-    async for frame in _live_tail(sub, ambient=ambient):
+    async for frame in _live_tail(sink, sub, ambient=ambient):
         yield frame
 
 
 async def _attach_generator(
     sink: EventSink,
     *,
-    last_event_id: int | None = None,
+    cursor: ReplayCursor | None = None,
 ) -> AsyncIterator[str]:
     """Replay a running turn's transcript, then tail it live (实时重连续看, C1 · 1b).
 
@@ -310,7 +364,7 @@ async def _attach_generator(
     """
     sub = sink.subscribe(label="attach")
     try:
-        async for frame in _attach_frames(sink, sub, last_event_id=last_event_id):
+        async for frame in _attach_frames(sink, sub, cursor=cursor):
             yield frame
         sink.unsubscribe(sub, reason="sse_attach_end")
     except (asyncio.CancelledError, GeneratorExit):
@@ -321,7 +375,7 @@ async def _attach_generator(
 def sse_attach_response(
     sink: EventSink,
     *,
-    last_event_id: int | None = None,
+    cursor: ReplayCursor | None = None,
 ) -> StreamingResponse:
     """Stream a re-attaching client the replay-then-tail of a live detached run (1b).
 
@@ -330,7 +384,7 @@ def sse_attach_response(
     (unsubscribe, never cancel — an explicit 停止 still goes through ``POST .../stop``).
     """
     return StreamingResponse(
-        _attach_generator(sink, last_event_id=last_event_id),
+        _attach_generator(sink, cursor=cursor),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -344,7 +398,7 @@ async def _conversation_generator(
     watcher: ConversationWatcher,
     *,
     initial_sink: EventSink | None = None,
-    last_event_id: int | None = None,
+    cursor: ReplayCursor | None = None,
 ) -> AsyncIterator[str]:
     """Follow a CONVERSATION across turns: replay+tail each run, heartbeat in between.
 
@@ -360,12 +414,12 @@ async def _conversation_generator(
     are merged here in BOTH phases — idle wait and mid-run tail — so a端 sees them
     whatever it happens to be doing (验收 5).
 
-    ``last_event_id`` applies only to the run that was already live at connect; each
-    later run starts from its own sink history, which IS its whole story.
+    ``cursor`` applies only to the run that was already live at connect; each later run
+    starts from its own sink history, which IS its whole story.
     """
     sink = initial_sink
     sub: SinkSubscription | None = None
-    cursor = last_event_id
+    run_cursor = cursor
     wait_task: asyncio.Task[EventSink] | None = None
     signal_task: asyncio.Task[None] | None = None
     # A run that registers between ``watch`` and the live-run lookup arrives BOTH as
@@ -401,7 +455,7 @@ async def _conversation_generator(
                     continue
                 published = wait_task.result()
                 wait_task = None
-                cursor = None
+                run_cursor = None
                 if any(published is s for s in seen):
                     continue
                 sink = published
@@ -411,7 +465,7 @@ async def _conversation_generator(
             # Same synchronous step as subscribe: from here a signal that also rides
             # this sink must NOT be duplicated onto the ambient lane (publish_signal).
             watcher.mark_tailing(sink)
-            async for frame in _attach_frames(sink, sub, last_event_id=cursor, ambient=watcher):
+            async for frame in _attach_frames(sink, sub, cursor=run_cursor, ambient=watcher):
                 yield frame
             # The run closed its sink: unsubscribe and go back to waiting. The HTTP
             # stream stays open — the conversation, not the turn, is the subscription.
@@ -419,7 +473,7 @@ async def _conversation_generator(
             sink.unsubscribe(sub, reason="conversation_stream_turn_end")
             sub = None
             sink = None
-            cursor = None
+            run_cursor = None
     finally:
         if wait_task is not None:
             wait_task.cancel()
@@ -434,7 +488,7 @@ async def _conversation_generator(
 def sse_conversation_response(
     conversation_id: str,
     *,
-    last_event_id: int | None = None,
+    cursor: ReplayCursor | None = None,
 ) -> StreamingResponse:
     """Stream a conversation-level subscription: current run (if any), then every next.
 
@@ -451,7 +505,7 @@ def sse_conversation_response(
         _conversation_generator(
             watcher,
             initial_sink=initial_sink,
-            last_event_id=last_event_id,
+            cursor=cursor,
         ),
         media_type="text/event-stream",
         headers={

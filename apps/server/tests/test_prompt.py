@@ -23,9 +23,11 @@ from agentcore.config import settings
 from agentcore.runtime.resolve.prompt import (
     _CEO_CORE_HINT,
     _CEO_VISUALIZATION_HINT,
+    _DEFAULT_SYSTEM_PROMPT,
     CHAT_CITATION_HINT,
     assemble_system_prompt,
     compose_ceo_chat_prompt,
+    compose_worker_base_prompt,
     derive_ceo_addon,
 )
 from agentcore.runtime.skills import _TEAM_ORCHESTRATION_ADVANCED, build_system_skill_registry
@@ -799,13 +801,35 @@ def test_core_teaches_delivery_path_by_workspace_type():
     assert "系统浏览器" in hint
     assert "禁止给本机磁盘路径" in hint or "禁止给本机" in hint
     assert "真实路径" in hint
-    # 缺能力 → 同轮可开工；人手一等；禁堆装配说明书
-    assert "同轮可开工" in hint
-    assert "手脑" in hint
+    # 缺能力怎么开工 / 勿声称已用：全员基座；本核只留禁派 + 假开页底线指针
+    assert "同轮可开工" in _DEFAULT_SYSTEM_PROMPT
+    assert "手脑" in _DEFAULT_SYSTEM_PROMPT
     assert "假开页" in hint or "勿假装" in hint or "假开页底线" in hint
     assert "ask_user(browser_login=true)" in hint
     assert "escalate → 右坞接管" not in hint
     assert "仅可作标明" not in hint  # 旧：未装配只剩 read_url 摘录
+
+
+def test_shared_base_teaches_unassembled_capability_honesty():
+    """未装配不许假装用过：HOW 在共享基座，队员看得到；CEO 该段只出现一次，核只留禁派。"""
+    base = assemble_system_prompt()
+    worker = compose_worker_base_prompt(base)
+    assert "勿声称已用未装配能力" in worker
+    assert "<capability_honesty>" in worker
+    for token in ("已开页", "已查本机", "已接 MCP", "已提交 Git", "已跑绿"):
+        assert token in worker, token
+    assert "【能力未装配·统一姿势】" in _DEFAULT_SYSTEM_PROMPT
+    assert "【能力未装配·统一姿势】" not in _CEO_CORE_HINT
+    assert "把该能力的动作写进给队员的任务" in _CEO_CORE_HINT
+    assert "勿声称已用未装配能力" not in _CEO_CORE_HINT
+    ceo = compose_ceo_chat_prompt(
+        base,
+        skill_registry=build_system_skill_registry(),
+        ceo_tool_names={"delegate", "consult", "ask_user"},
+    )
+    assert ceo.count("勿声称已用未装配能力") == 1
+    assert ceo.count("【能力未装配·统一姿势】") == 1
+    assert "把该能力的动作写进给队员的任务" in ceo
 
 
 def test_core_teaches_presentation_honesty():

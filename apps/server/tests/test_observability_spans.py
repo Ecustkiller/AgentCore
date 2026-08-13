@@ -9,6 +9,9 @@ tool facts into an OTel-GenAI-semconv-aligned span tree — root ``chat`` span �
 best-effort exporter posture.
 """
 
+import json
+
+import agentcore.runtime.spans as spans_mod
 from agentcore.runtime.spans import (
     LogSpanExporter,
     NoopSpanExporter,
@@ -16,6 +19,7 @@ from agentcore.runtime.spans import (
     export_turn_spans,
     spans_from_entries,
 )
+from tests.conftest import LogSpy
 
 
 def _fact(kind: str, payload: dict, ts=None) -> dict:
@@ -322,9 +326,11 @@ def test_flatten_is_preorder_depth_first():
     assert [s.span_id for s in root.flatten()] == ["turn", "run:cap", "run:w1", "tool:c1"]
 
 
-def test_log_exporter_emits_structured_line(capsys):
-    # structlog renders to stdout (ConsoleRenderer in tests); assert the event name +
-    # the key turn-level fields make it into the emitted line.
+def test_log_exporter_emits_structured_line(monkeypatch):
+    # Asserted at the module's logger seam, not on rendered stdout: whether the line
+    # reaches stdout depends on process-wide structlog state, which any earlier
+    # ``setup_logging()`` in the session re-points at stdlib logging (level WARNING here),
+    # dropping this INFO line. The exporter's own contract is the event name + fields.
     entries = [
         _started(),
         _run_started("cap", "cap", kind="captain", ts="t0"),
@@ -332,17 +338,25 @@ def test_log_exporter_emits_structured_line(capsys):
         _fact("turn_end", {"finish_reason": "end_turn"}),
     ]
     root = spans_from_entries(entries)
+    spy = LogSpy()
+    monkeypatch.setattr(spans_mod, "logger", spy)
+
     LogSpanExporter().export(root, trace_id="tr", conversation_id="c1", message_id="m1")
-    out = capsys.readouterr().out
-    assert "obs.turn_spans" in out
-    assert "span_count" in out
-    assert "finish_reason" in out
+
+    line = spy.get("obs.turn_spans")  # exactly one line per turn
+    assert line["span_count"] == 2
+    assert line["finish_reason"] == "end_turn"
+    assert line["duration_ms"] == 1200
     # trace_id is emitted explicitly (the line's「greppable by trace_id」promise) and the
     # assistant row id is labelled message_id — not mislabelled as turn_id (which is the
     # log-context turn id, joined from the spine, not the message id).
-    assert "tr" in out
-    assert "message_id" in out
-    assert "m1" in out
+    assert line["trace_id"] == "tr"
+    assert line["message_id"] == "m1"
+    assert "turn_id" not in line
+    assert line["conversation_id"] == "c1"
+    # The file handler always renders JSON Lines (logs/dev.jsonl is parsed line by line),
+    # so the whole payload — span tree included — has to survive a JSON round trip.
+    assert json.loads(json.dumps(line))["spans"][0]["span_id"] == "turn"
 
 
 def test_export_turn_spans_uses_injected_exporter():

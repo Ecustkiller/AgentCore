@@ -299,7 +299,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       async (node: FileNode) => {
         const what = node.isDir ? "文件夹及其全部内容" : "文件";
         // Soft-delete honesty: cloud → AgentCore/trash（软删区）；local → OS
-        // recycle bin / LocalTrash fallback. Hint 与批量删除同一句（同源同承诺）。
+        // recycle bin（`trashPath` / `shell.trashItem`，失败不硬删）。Hint 与批量删除同一句。
         const restoreHint = deleteRestoreHint(source);
         if (
           !window.confirm(`确定删除${what}「${node.name}」？${restoreHint}`)

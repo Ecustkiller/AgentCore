@@ -12,6 +12,7 @@ from agentcore.runtime.events.interaction import interaction_orphaned, stage_car
 from agentcore.runtime.journal.pending_interactions import settlement_dedupe_key
 from agentcore.runtime.journal.writer import TurnJournalWriter, current_journal_writer
 from agentcore.runtime.settlement import (
+    align_cold_resume_resolved_to_winner,
     entry_from_sse,
     prewrite_cold_resume_settlement,
     prewrite_settlement,
@@ -264,6 +265,85 @@ async def test_cold_resume_pipeline_emit_dedupes_prewrite(
 
     kinds = [r["entry"]["kind"] for r in store.rows]
     assert kinds.count("checkpoint_resolved") == 1
+
+
+def test_align_rewrites_loser_decision_on_same_checkpoint() -> None:
+    """抢帧：journal 先落下败方 decision 时，对齐后必须改成赢家的。"""
+    entries = [
+        {"kind": "checkpoint_required", "payload": {"checkpoint_id": "ck1"}, "ts": "t0"},
+        {
+            "kind": "checkpoint_resolved",
+            "payload": {"checkpoint_id": "ck1", "decision": "stop", "note": "from-a"},
+            "ts": "t1",
+        },
+    ]
+    aligned = align_cold_resume_resolved_to_winner(
+        entries, turn_id="m1", checkpoint_id="ck1", decision="continue"
+    )
+    assert aligned is not None
+    assert [e["kind"] for e in aligned] == ["checkpoint_required", "checkpoint_resolved"]
+    assert aligned[-1]["payload"]["decision"] == "continue"
+    assert aligned[-1]["payload"]["note"] == "from-a"
+    assert entries[-1]["payload"]["decision"] == "stop"
+
+
+def test_align_is_noop_when_journal_already_matches_winner() -> None:
+    entries = [
+        {
+            "kind": "plan_review_resolved",
+            "payload": {"checkpoint_id": "ck1", "decision": "continue"},
+            "ts": "t1",
+        }
+    ]
+    assert (
+        align_cold_resume_resolved_to_winner(
+            entries, turn_id="m1", checkpoint_id="ck1", decision="continue"
+        )
+        is None
+    )
+
+
+def test_align_collapses_duplicate_resolved_rows_to_winner() -> None:
+    """同键双写（两端都过了 has_settlement 检查）：只留一行赢家的。"""
+    entries = [
+        {"kind": "turn_started", "payload": {}, "ts": "t0"},
+        {
+            "kind": "plan_review_resolved",
+            "payload": {"checkpoint_id": "ck1", "decision": "stop", "note": "a"},
+            "ts": "t1",
+        },
+        {
+            "kind": "plan_review_resolved",
+            "payload": {"checkpoint_id": "ck1", "decision": "continue", "note": "b"},
+            "ts": "t2",
+        },
+    ]
+    aligned = align_cold_resume_resolved_to_winner(
+        entries, turn_id="m1", checkpoint_id="ck1", decision="continue"
+    )
+    assert aligned is not None
+    resolved = [e for e in aligned if e["kind"] == "plan_review_resolved"]
+    assert len(resolved) == 1
+    assert resolved[0]["payload"]["decision"] == "continue"
+    assert resolved[0]["payload"]["note"] == "a"
+    assert aligned[0]["kind"] == "turn_started"
+
+
+def test_align_leaves_other_checkpoints_and_required_rows() -> None:
+    entries = [
+        {"kind": "checkpoint_required", "payload": {"checkpoint_id": "ck1"}, "ts": "t0"},
+        {
+            "kind": "checkpoint_resolved",
+            "payload": {"checkpoint_id": "ck-other", "decision": "stop"},
+            "ts": "t1",
+        },
+    ]
+    assert (
+        align_cold_resume_resolved_to_winner(
+            entries, turn_id="m1", checkpoint_id="ck1", decision="continue"
+        )
+        is None
+    )
 
 
 # --- 生命周期撞键回归（LV 黄金场实跑抓到的丢事实 bug）---

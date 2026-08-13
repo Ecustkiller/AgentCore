@@ -62,3 +62,46 @@ describe("createLocalRootSource lazy workspace", () => {
     });
   });
 });
+
+describe("createLocalRootSource delete uses OS trash", () => {
+  let trashPath: ReturnType<typeof vi.fn>;
+  let hardDelete: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    trashPath = vi.fn();
+    hardDelete = vi.fn();
+    (globalThis as unknown as { window: { fsApi: Partial<FsApi> } }).window = {
+      fsApi: {
+        trashPath: trashPath as FsApi["trashPath"],
+        delete: hardDelete as FsApi["delete"],
+      },
+    };
+  });
+
+  it("calls trashPath, not fsApi.delete", async () => {
+    trashPath.mockResolvedValue({ ok: true, data: undefined });
+    const src = createLocalRootSource("r1", "project", "");
+    await src.delete("notes.md");
+    expect(trashPath).toHaveBeenCalledWith("r1", "notes.md");
+    expect(hardDelete).not.toHaveBeenCalled();
+  });
+
+  it("prefixes subpath before trashPath", async () => {
+    trashPath.mockResolvedValue({ ok: true, data: undefined });
+    const src = createLocalRootSource("r1", "chat", "conversations/c1");
+    await src.delete("a.md");
+    expect(trashPath).toHaveBeenCalledWith("r1", "conversations/c1/a.md");
+    expect(hardDelete).not.toHaveBeenCalled();
+  });
+
+  it("surfaces trashPath failure without falling back to hard delete", async () => {
+    trashPath.mockResolvedValue(fail("error", "移入回收站失败"));
+    const src = createLocalRootSource("r1", "project", "");
+    await expect(src.delete("notes.md")).rejects.toMatchObject({
+      name: "LocalFsError",
+      code: "error",
+      message: "移入回收站失败",
+    });
+    expect(hardDelete).not.toHaveBeenCalled();
+  });
+});

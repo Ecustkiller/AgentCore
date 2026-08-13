@@ -1790,10 +1790,18 @@ def test_repo_lock_key_is_per_checkout(tmp_path: Path):
     assert repo_lock_key(str(left), _worker_ctx(left)) == repo_lock_key(
         str(left), _worker_ctx(left, user_id="other")
     )
-    # Windows hands out the same directory under different casing.
-    assert repo_lock_key(str(left).upper(), ctx) == repo_lock_key(
-        str(left).lower(), ctx
-    )
+    # Casing follows the platform's own path identity (``os.path.normcase``), because that
+    # is what decides whether two spellings name one ``.git``. Windows hands out the same
+    # directory under different casing, so both spellings must land on one queue or two
+    # callers would race on a single ``index.lock``. On a case-sensitive filesystem (Linux)
+    # ``/tmp/left`` and ``/TMP/LEFT`` are two different directories with two different
+    # ``.git``: folding them would queue unrelated repos behind each other on a false identity.
+    upper = repo_lock_key(str(left).upper(), ctx)
+    lower = repo_lock_key(str(left).lower(), ctx)
+    if os.path.normcase("A") == "a":
+        assert upper == lower
+    else:
+        assert upper != lower
 
 
 async def test_same_repo_index_writes_serialize(

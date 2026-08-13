@@ -1,11 +1,21 @@
-"""Desktop minimum-version hard gate (发布与门禁.md §7.6).
+"""Client minimum-version hard gates (发布与门禁.md §7.6).
 
-When ``DESKTOP_MIN_VERSION`` is set, requests with ``X-Client-Platform=desktop``
-whose ``X-Client-Version`` is strictly below the floor are rejected with HTTP
-426 ``CLIENT_TOO_OLD``. This is a **global** desktop floor — not the §7.9
-per-flag ``min_client_version`` switch.
+Two independently configured floors with identical semantics. When set, requests
+on ``/v1/*`` whose ``X-Client-Version`` is strictly below the floor are rejected
+with HTTP 426 ``CLIENT_TOO_OLD``:
 
-Fail-open: empty min / non-desktop platform / missing or ``dev`` client version /
+* ``DESKTOP_MIN_VERSION`` — the ``desktop`` surface.
+* ``MOBILE_MIN_VERSION`` — the **native** mobile surface (``android`` / ``ios`` /
+  bare ``mobile``). Native installs only update when the user installs a new
+  build, so a server floor is the only way to retire one. ``mobile-web`` is a
+  browser surface — a reload already serves the newest bundle — so it carries
+  **no** floor by design; gating it could only misfire.
+
+Surface classification defers to :func:`resolve_channel_profile`, the same alias
+map the runtime uses, instead of a parallel table. Both floors are **global** —
+neither is the §7.9 per-flag ``min_client_version`` switch.
+
+Fail-open: empty floor / ungated surface / missing or ``dev`` client version /
 semver compare failure → request proceeds. Exempt probes and
 ``GET /updates/policy`` so outdated clients can still learn the floor and update.
 """
@@ -18,11 +28,15 @@ from starlette.responses import JSONResponse, Response
 
 from agentcore.config import settings
 from agentcore.core.error_codes import ErrorCode
+from agentcore.runtime.context.workspace_context import (
+    ChannelSurface,
+    resolve_channel_profile,
+)
 
 _PLATFORM_HEADER = "x-client-platform"
 _VERSION_HEADER = "x-client-version"
 
-# Exact-path exemptions (no /v1 prefix). Outdated desktops must still reach
+# Exact-path exemptions (no /v1 prefix). Outdated clients must still reach
 # health probes and the update policy so they can self-heal.
 _EXEMPT_PATHS = frozenset(
     {
@@ -59,8 +73,8 @@ def compare_semver(a: str, b: str) -> int:
     return 0
 
 
-def is_desktop_version_outdated(client_version: str, min_version: str) -> bool:
-    """True when desktop build is strictly below the configured floor.
+def is_client_version_outdated(client_version: str, min_version: str) -> bool:
+    """True when the client build is strictly below the configured floor.
 
     Raises on unparseable versions so callers can fail-open.
     """
@@ -71,8 +85,22 @@ def is_desktop_version_outdated(client_version: str, min_version: str) -> bool:
     return compare_semver(client_version, min_version) < 0
 
 
-def _too_old_response(*, min_version: str) -> JSONResponse:
-    message = f"桌面端版本过旧，请更新后再试（最低版本 {min_version}）"
+def floor_for_surface(surface: ChannelSurface) -> tuple[str, str] | None:
+    """Configured floor + display label for a surface; ``None`` = never gated.
+
+    ``web`` absorbs ``mobile-web`` (a reload is already the newest bundle) and
+    ``unknown`` covers admin / missing platform header — neither is gateable, so
+    both stay out of the table rather than resolving to an empty floor.
+    """
+    if surface == "desktop":
+        return (settings.desktop_min_version or "").strip(), "桌面端"
+    if surface == "mobile":
+        return (settings.mobile_min_version or "").strip(), "手机端"
+    return None
+
+
+def _too_old_response(*, min_version: str, label: str) -> JSONResponse:
+    message = f"{label}版本过旧，请更新后再试（最低版本 {min_version}）"
     return JSONResponse(
         status_code=426,
         content={
@@ -85,8 +113,8 @@ def _too_old_response(*, min_version: str) -> JSONResponse:
     )
 
 
-class DesktopMinVersionMiddleware(BaseHTTPMiddleware):
-    """Reject outdated desktop clients on ``/v1/*`` with HTTP 426."""
+class ClientMinVersionMiddleware(BaseHTTPMiddleware):
+    """Reject outdated desktop / native-mobile clients on ``/v1/*`` with HTTP 426."""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         if request.method == "OPTIONS":
@@ -96,12 +124,13 @@ class DesktopMinVersionMiddleware(BaseHTTPMiddleware):
         if path in _EXEMPT_PATHS or not path.startswith("/v1/"):
             return await call_next(request)
 
-        min_version = (settings.desktop_min_version or "").strip()
-        if not min_version:
+        profile = resolve_channel_profile(request.headers.get(_PLATFORM_HEADER))
+        floor = floor_for_surface(profile.surface)
+        if floor is None:
             return await call_next(request)
 
-        platform = (request.headers.get(_PLATFORM_HEADER) or "").strip()
-        if platform != "desktop":
+        min_version, label = floor
+        if not min_version:
             return await call_next(request)
 
         client_version = (request.headers.get(_VERSION_HEADER) or "").strip()
@@ -109,10 +138,10 @@ class DesktopMinVersionMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         try:
-            outdated = is_desktop_version_outdated(client_version, min_version)
+            outdated = is_client_version_outdated(client_version, min_version)
         except ValueError:
             return await call_next(request)
 
         if outdated:
-            return _too_old_response(min_version=min_version)
+            return _too_old_response(min_version=min_version, label=label)
         return await call_next(request)

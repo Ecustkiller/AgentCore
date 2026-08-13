@@ -128,6 +128,20 @@ describe("trashPath soft-delete", () => {
     expect(res.ok).toBe(true);
     expect(shell.trashItem).not.toHaveBeenCalled();
   });
+
+  it("reports trashItem failure without hard-deleting", async () => {
+    const target = join(dir, "keep.md");
+    await writeFile(target, "stay");
+    (shell.trashItem as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error("no recycle bin"),
+    );
+    const res = await trashPath(root.id, "keep.md");
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.reason).toContain("no recycle bin");
+    }
+    expect(await readFile(target, "utf-8")).toBe("stay");
+  });
 });
 
 describe("AgentCore/trash list + restore", () => {

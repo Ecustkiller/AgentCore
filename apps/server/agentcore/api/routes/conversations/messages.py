@@ -37,6 +37,7 @@ from agentcore.api.schemas import (
 )
 from agentcore.api.schemas.messages import TurnCollabMetrics
 from agentcore.api.sse import (
+    parse_last_event_id,
     release_request_db_before_sse,
     sse_attach_response,
     sse_conversation_response,
@@ -732,8 +733,8 @@ async def attach_stream(
     - ``full_replay: true`` — RESET the local streaming state held for that
       ``message_id`` (content / reasoning / process timeline); the段 is the turn's whole
       story. Always the case without the header, and the fallback whenever the cursor
-      cannot be trusted (no cursor / turn already settled / cursor names no fact this
-      turn ever stamped).
+      cannot be trusted (no cursor / it belongs to another turn / turn already settled /
+      it names no fact this turn ever stamped).
     - no ``full_replay`` — an INCREMENTAL段: keep what you hold for this turn and fold
       the段 onto it. Only the facts after ``Last-Event-ID`` are shipped, so structural
       pairs may look「不完整」(a ``tool_use_end`` whose start was pre-cursor) — that is
@@ -743,11 +744,16 @@ async def attach_stream(
     screen: guessing wrong folds the body twice. A live first frame (and any plain
     same-id re-stamp) omits it and keeps meaning「同回合重开」.
 
-    **Cursor contract**: ``Last-Event-ID`` is the last SSE ``id:`` this client folded FOR
-    THIS TURN. A client that discards its local turn state (clear-then-fold rejoin, fresh
-    bubble) must send ``0`` / omit the header, otherwise it asks for an increment it has
-    no prefix for. Text deltas carry no ``id:``, so the cursor lags into the middle of a
-    text block; the段 therefore marks whole-block frames with ``replace`` (see the
+    **Cursor contract**: ``Last-Event-ID`` is the last SSE ``id:`` this client folded,
+    echoed back verbatim. That id reads ``<turn_id>:<seq>`` — journal seq is numbered per
+    turn from 0, so the turn it belongs to travels with it and a cursor kept per
+    CONVERSATION (both clients do) cannot be mistaken for one from the turn now being
+    replayed. The增量段 is offered only for a cursor naming this turn; one naming another
+    turn, and a bare ``<seq>`` from a client that predates the format, both get the full
+    journal replay. A client that discards its local turn state (clear-then-fold rejoin,
+    fresh bubble) should still send ``0`` / omit the header rather than an id it no longer
+    has the prefix for. Text deltas carry no ``id:``, so the cursor lags into the middle
+    of a text block; the段 therefore marks whole-block frames with ``replace`` (see the
     ``content_delta`` / ``run_output_delta`` payloads).
 
     ``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an
@@ -768,20 +774,16 @@ async def attach_stream(
     ``POST .../stop``. Owner-gated.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    cursor: int | None = None
-    if last_event_id is not None:
-        raw = last_event_id.strip()
-        if raw.isdigit():
-            cursor = int(raw)
+    cursor = parse_last_event_id(last_event_id)
     if follow:
         # Ownership check is done; the stream only observes in-memory sinks.
         await release_request_db_before_sse(session)
-        return sse_conversation_response(conversation_id, last_event_id=cursor)
+        return sse_conversation_response(conversation_id, cursor=cursor)
     run = turn_runs.get(conversation_id)
     if run is None or run.task.done():
         return Response(status_code=204)
     await release_request_db_before_sse(session)
-    return sse_attach_response(run.sink, last_event_id=cursor)
+    return sse_attach_response(run.sink, cursor=cursor)
 
 
 @router.post("/{conversation_id}/local-turns", response_model=RecordTurnResponse)

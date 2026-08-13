@@ -92,6 +92,25 @@ def _format_event(event: dict) -> str:
     return f"event: {event_type}\ndata: {data}\n\n"
 
 
+def _seed_registered_session(session: FulfillerSession, hub: FulfillerHub) -> None:
+    """Replay in-flight ops onto a capable fulfiller; always seed account state.
+
+    A reconnect must re-push CLIENT_TOOL frames the previous session already
+    saw (registry Futures stay open). Observers — web tabs, zero caps,
+    :attr:`FulfillerSession.can_fulfil` is false — share this stream for the
+    same account snapshots, but must not rehang: that would re-deliver
+    ``workspace_op`` / ``host_op`` onto the live desktop and run the side
+    effect twice. Do not paper over that with request_id dedup on the
+    desktop (a reconnect that dropped the first frame would swallow it).
+    """
+    from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
+
+    if session.can_fulfil:
+        rehang_pending_client_tools(session.user_id)
+    for frame in turn_queue.snapshot_frames(session.user_id):
+        hub.deliver(session, frame)
+
+
 async def _fulfill_stream(
     session: FulfillerSession,
     hub: FulfillerHub,
@@ -152,15 +171,7 @@ async def fulfill_stream(
         roots=root_list,
         platform=x_client_platform,
     )
-    # Re-push in-flight CLIENT_TOOL frames so a reconnect does not drop ops that
-    # were delivered to the previous session (registry Futures stay open).
-    from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
-
-    rehang_pending_client_tools(user.user_id)
-    # Account state this device may have missed while it was away. Same frames the
-    # live pushes send, so the client folds them through one code path.
-    for frame in turn_queue.snapshot_frames(user.user_id):
-        hub.deliver(fulfiller, frame)
+    _seed_registered_session(fulfiller, hub)
 
     return StreamingResponse(
         _fulfill_stream(fulfiller, hub),

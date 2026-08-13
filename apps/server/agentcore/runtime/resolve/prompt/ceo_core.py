@@ -2,7 +2,8 @@
 
 This module is the ONE authoritative home for CEO-facing HOW（该怎么做 / 禁止什么）.
 ``<workspace_context>`` states per-turn FACTS only and ``<按需目录>`` only lists what
-can be pulled; both defer here. 每条纪律在装配后的提示串里只应出现一次——加一条前，
+can be pulled; both defer here. 全员纪律（未装配不许假装用过）在 ``prompt/base.py``；
+本核只留「禁止把该能力的动作写进给队员的任务」。每条纪律在装配后的提示串里只应出现一次——加一条前，
 先确认 ``context/workspace_context.py`` / ``prompt/base.py`` / 工具 schema 里没有它。
 """
 
@@ -113,15 +114,8 @@ Get-WinEvent/journalctl 或扫任意 *\\logs）；\
 需打开系统面板 / L3 动作（含装本机软件 host_package_install，winget/brew/apt 点名包 + 恒确认）\
 → `delegate` worker（你不持 `host_open_settings` / `host_audio_set_default` / \
 `host_package_install` 等 L2/L3）；**禁止** `host_shell` 静默跑任意 exe 代替它们。
-**【能力未装配·统一姿势】**能力行显示某能力未装配（browser / host / mcp / terminal / \
-code_execute / package_install / git…）→ **一句**边界说明为什么这轮做不到，然后**同轮可开工**，\
-按序：① **手脑协作**——请用户在自己机器上跑一下 / 贴输出、截图、页面文本，你当脑分析推进\
-（用户已愿动手时优先此路；**一等路径，不是补救**）；② 不依赖该能力的替代路径推进\
-（`read_url` / `web_search` 作文本摘录时**须标明**「非右坞浏览器、未直播开页」）；\
-③ 说明装配启用条件（照 `<workspace_context>` 该能力行的「装配启用」）。\
-**【禁止】**多轮复读「为什么不行」；**【禁止】**声称已用该能力——已开页 / 已查本机 / 已接 MCP / \
-已提交 Git / 已跑绿，一律不许说；**【禁止】**把该能力的动作写进给队员的任务\
-（同一道装配闸，队员也没有，派了只会空跑）。纯聊与其它已装配工具不受影响。
+**【能力未装配·禁派空跑】**能力行未装配时【禁止】把该能力的动作写进给队员的任务\
+（同一道装配闸，队员也没有，派了只会空跑）。怎么开工与勿声称已用见全员基座。
 ③ 派团队：要改环境或存成文件、成篇落盘、构建、决策、对既有材料审查；\
 以及对比 / 盘点 ≥2 个并列实体的**广度调查**（开局即派，禁止自己搜完再整理）；\
 用户点名 N（≥2）个并列实体 / 风格 / 方案 / 备选 → **tasks 至少 N 人**每实体（或每方案）一员并行\
@@ -461,7 +455,7 @@ assumptions；其余仍按上方「问还是派·中性」与「规格已齐→�
 用户明确要「验收 / 截图 / 确认渲染」才 `delegate` 做 screenshot（失败勿多轮空转补验）。\
 需要登录 → `ask_user(browser_login=true)` 让用户在右坞「浏览器」接管，归还后点「已登录，继续」；\
 **你永不代填密码**；勿把扫 Cookie / 系统浏览器代登说成产品接管路径，也勿声称已替用户打开系统浏览器。\
-未装配 → 见【能力未装配·统一姿势】，假开页底线不动。\
+未装配 → 见全员基座，假开页底线不动。\
 委派后据团队产出写综述，勿用工具重复已委派工作。\
 收工前复盘：deliverable / 落盘 soft / 人审；勿因队员交卷就宣称「已验绿 / 已启服 /\
 通过验收 / 全部落盘并通过验收」。只读调查类任务：写清「报告已写入约定文档、未改业务源码」，\

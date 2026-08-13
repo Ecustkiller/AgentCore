@@ -2,7 +2,7 @@
 
 去重定案（一条纪律只留一个权威位置）：本块**只陈述本回合事实**——位置、能力行、挂载、
 产物出口路径、某能力装没装配。「该怎么做 / 禁止什么」的 HOW 归 ``_CEO_CORE_HINT``（CEO 侧）
-或共享基座（全员侧）。因此这里的用例成对写：事实留在 ``out``，HOW 断言指向核。
+或共享基座（全员侧）。因此这里的用例成对写：事实留在 ``out``，HOW 断言指向基座或核。
 """
 
 from agentcore.runtime.context.workspace_context import (
@@ -10,7 +10,11 @@ from agentcore.runtime.context.workspace_context import (
     desktop_client_can_bind,
     resolve_channel_profile,
 )
-from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, assemble_system_prompt
+from agentcore.runtime.resolve.prompt import (
+    _CEO_CORE_HINT,
+    _DEFAULT_SYSTEM_PROMPT,
+    assemble_system_prompt,
+)
 from agentcore.tools.builtin import build_ceo_tool_registry
 
 
@@ -369,20 +373,22 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
     assert "bind_local_folder" in out or "open_local_project" in out or "open/bind" in out
     # 禁误导：未装配时勿暗示「本机未装就可随手启用云端沙箱」旧句
     assert "或启用云端沙箱浏览器" not in out
-    # 缺能力怎么办只写一遍：核的【能力未装配·统一姿势】管所有能力，事实层不逐条复述
+    # 缺能力怎么办只写一遍：共享基座【能力未装配·统一姿势】管所有能力，事实层不逐条复述
     assert "同轮可开工" not in out
     hint = _CEO_CORE_HINT
-    assert hint.count("**【能力未装配·统一姿势】**") == 1
+    base = _DEFAULT_SYSTEM_PROMPT
+    assert base.count("【能力未装配·统一姿势】") == 1
+    assert "【能力未装配·统一姿势】" not in hint
     assert "ask_user(browser_login=true)" in hint
     assert "escalate(browser_login=true)" not in hint
     assert "已登录，继续" in hint
     assert "Cookie" in hint  # 明确否决扫 Cookie 冒充路径
     assert "用浏览器打开" in hint
-    assert "非右坞浏览器" in hint
-    assert "同轮可开工" in hint
-    assert "手脑" in hint
-    assert "一等" in hint or "非补救" in hint
-    assert "多轮复读" in hint
+    assert "非右坞浏览器" in base
+    assert "同轮可开工" in base
+    assert "手脑" in base
+    assert "一等" in base or "非补救" in base
+    assert "多轮复读" in base
     assert "补救，但不是" not in hint
     assert "不是接管流程" not in hint
 
@@ -400,13 +406,13 @@ def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
     assert "无本机 Bridge" in out
     assert "或启用云端沙箱浏览器" not in out
     assert "不可装配" in out
-    # 「装配启用条件」是事实，留在这里；「未装配怎么开工」归核，见上一用例
+    # 「装配启用条件」是事实，留在这里；「未装配怎么开工」归共享基座，见上一用例
     assert "装配启用需桌面 Local Chromium Bridge 健康" in out
     assert "同轮可开工" not in out
 
 
 def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
-    """host/mcp 未装配：事实层只写装没装配与为什么；同轮可开工姿势归核，一处即可。"""
+    """host/mcp 未装配：事实层只写装没装配与为什么；同轮可开工姿势归共享基座，核只留禁派。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -419,11 +425,12 @@ def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
     assert "无桌面回填通道" in out
     assert "同轮可开工" not in out
     hint = _CEO_CORE_HINT
-    assert "browser / host / mcp / terminal" in hint  # 统一姿势覆盖各能力
-    assert "同轮可开工" in hint
-    assert "手脑" in hint
-    assert "多轮复读" in hint
-    assert "已接 MCP" in hint  # 未装配禁称已用
+    base = _DEFAULT_SYSTEM_PROMPT
+    assert "browser / host / mcp / terminal" in base  # 统一姿势覆盖各能力
+    assert "同轮可开工" in base
+    assert "手脑" in base
+    assert "多轮复读" in base
+    assert "已接 MCP" in base  # 未装配禁称已用
     assert "把该能力的动作写进给队员的任务" in hint  # 未装配禁派空跑
 
 
@@ -549,8 +556,10 @@ def test_assemble_system_prompt_includes_workspace_facts():
     assert "<workspace_context>" in prompt
     assert "云端沙箱" in prompt
     # Without facts, no block (prefix-cache identity for catalog / bare tests).
+    # Shared HOW may mention the tag name; the injected block is the closing tag.
     bare = assemble_system_prompt()
-    assert "<workspace_context>" not in bare
+    assert "</workspace_context>" not in bare
+    assert "<workspace_context>\n" not in bare
 
 
 def test_git_fact_present_line_no_soft_init_tip(tmp_path):

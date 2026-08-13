@@ -23,7 +23,7 @@ alwaysApply: false
 
 ## 可复用配方
 
-1. 按面切分（画板/分享/admin/记忆/…）派**并行只读探子**，每子代理带「两签名 + 本铁律 + 五档置信 + 必附 `file:line` 证据」（子代理必须用 `claude-opus-5-thinking-max-fast` 模型）。与讨论并行时的主/子分相见 `multitask.mdc`「讨论 + 审计分相」。
+1. 按面切分（画板/分享/admin/记忆/…）派**并行只读探子**，每子代理带「两签名 + 本铁律 + 五档置信 + 必附 `file:line` 证据」（子代理模型见 `multitask.mdc`）。与讨论并行时的主/子分相见 `multitask.mdc`「讨论 + 审计分相」。
 2. 探子回报的 GAP **先 Read 源码复核**——别信行号（FE-004 正是复核翻的案）；复核以外禁止主侧重跑整审计。
 3. 复核为实的 GAP·DRIFT 才修，改完 `vitest`/`pytest` + `biome`/`ruff` + `tsc` 自检。
 4. RESERVED 进 `远期规划`、BY-DESIGN 记档闭案、UNSURE 留观察。

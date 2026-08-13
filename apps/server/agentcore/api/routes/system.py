@@ -42,6 +42,12 @@ router = APIRouter(tags=["system"])
 class UpdatesPolicyResponse(BaseModel):
     """Desktop update policy: kill switch + hard minimum client version."""
 
+    # Desktop-only by design. The native mobile floor (MOBILE_MIN_VERSION, 发布与门禁
+    # §7.6a) is deliberately absent: the Android shell discovers versions from the
+    # brand CDN android/latest.json and never calls this endpoint, so a field here
+    # would have no reader. Outdated native clients learn their floor from the 426
+    # body's details.min_version instead.
+
     enabled: bool
     min_desktop_version: str | None = Field(
         default=None,

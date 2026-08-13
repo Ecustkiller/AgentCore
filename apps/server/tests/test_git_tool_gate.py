@@ -139,13 +139,14 @@ def test_capability_line_git_unassembled_when_desktop_offline():
     assert "通道未连接" in out
     assert "在桌面客户端打开【本对话】" in out
     assert "文件读写与其它已装配工具不受影响" in out
-    # 「未装配怎么开工」只写在核的【能力未装配·统一姿势】里（去重定案），事实层不复述
+    # 「未装配怎么开工 / 勿声称已用」写在共享基座【能力未装配·统一姿势】，事实层不复述
     assert "同轮可开工" not in out
-    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT
+    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, _DEFAULT_SYSTEM_PROMPT
 
-    assert "同轮可开工" in _CEO_CORE_HINT
-    assert "git…）" in _CEO_CORE_HINT  # 统一姿势覆盖 git
-    assert "已提交 Git" in _CEO_CORE_HINT  # 未装配禁称已提交
+    assert "同轮可开工" in _DEFAULT_SYSTEM_PROMPT
+    assert "git…）" in _DEFAULT_SYSTEM_PROMPT  # 统一姿势覆盖 git
+    assert "已提交 Git" in _DEFAULT_SYSTEM_PROMPT  # 未装配禁称已提交
+    assert "把该能力的动作写进给队员的任务" in _CEO_CORE_HINT  # 核只留禁派
     # An unassembled turn must not advise a tool the model does not hold.
     assert "init_baseline" not in out
 

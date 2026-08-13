@@ -114,6 +114,50 @@ async def _journal_has_settlement(turn_id: str, key: tuple[str, str, str]) -> bo
     return False
 
 
+def align_cold_resume_resolved_to_winner(
+    entries: list[dict[str, Any]],
+    *,
+    turn_id: str,
+    checkpoint_id: str,
+    decision: str,
+) -> list[dict[str, Any]] | None:
+    """Rewrite cold-path ``*_resolved`` so journal matches the claim winner.
+
+    Prewrite lands before ``claim_paused_turn`` and dedupes on
+    ``(turn_id, kind, checkpoint_id)`` — not ``decision``. The first click to
+    persist can therefore be the race loser, while ``paused_turn_outcomes``
+    records whoever actually won the frame. After a successful claim, the
+    winner's decision is the authority: same-checkpoint ``*_resolved`` rows
+    whose decision differs are rewritten; same-key duplicates collapse to one
+    winner row. Returns the aligned list, or ``None`` when already consistent
+    (caller must not persist).
+    """
+    cid = (checkpoint_id or "").strip()
+    if not cid:
+        return None
+
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    changed = False
+    for entry in entries:
+        kind = str(entry.get("kind") or "")
+        payload = dict(entry.get("payload") or {})
+        key = settlement_dedupe_key(turn_id, kind, payload)
+        if key is None or not kind.endswith("_resolved") or key[2] != cid:
+            out.append(entry)
+            continue
+        if key in seen:
+            changed = True
+            continue
+        seen.add(key)
+        if str(payload.get("decision") or "") == decision:
+            out.append(entry)
+            continue
+        out.append({**entry, "payload": {**payload, "decision": decision}})
+        changed = True
+    return out if changed else None
+
+
 def already_settled_in_writer(event: SSEEvent) -> bool:
     """True if this settlement was already prewritten (idempotent resolve)."""
     writer = current_journal_writer.get()
