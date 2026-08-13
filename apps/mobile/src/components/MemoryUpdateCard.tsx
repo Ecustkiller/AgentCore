@@ -15,7 +15,7 @@ const ACTION_META: Record<string, { label: string; cls: string }> = {
 };
 
 function scopeLabel(scope: string): string {
-  return scope === "project" ? "本项目" : "全局";
+  return scope === "project" ? "本文件夹" : "全局";
 }
 
 function formatWhen(iso: string): string {

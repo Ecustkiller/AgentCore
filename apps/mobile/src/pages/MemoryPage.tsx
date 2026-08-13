@@ -211,7 +211,7 @@ function RecentUpdates({
                           <div className="mem-item-meta">
                             <span className="mem-item-leaf">{leaf}</span>
                             <span className="mem-item-scope">
-                              {it.scope === "project" ? "本项目" : "全局"}
+                              {it.scope === "project" ? "本文件夹" : "全局"}
                             </span>
                           </div>
                           {it.content && (

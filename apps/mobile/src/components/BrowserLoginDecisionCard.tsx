@@ -6,6 +6,8 @@
  * Semantic twin of desktop BrowserLoginDecisionCard — no right-dock shell on phone;
  * 「查看直播」opens {@link BrowserLiveSheet} (Sandbox cloud browser) when wired.
  */
+import { escalationWaitNote } from "@/lib/escalationWaitCopy";
+
 export type BrowserLoginSubmitKind = "logged_in" | "use_assumption" | "stop";
 
 export type OpenBrowserLiveOpts = { runId?: string };
@@ -14,6 +16,7 @@ export function BrowserLoginDecisionCard({
   roleLabel,
   question,
   assumption,
+  timeoutSeconds,
   busy,
   submitting,
   onLoggedIn,
@@ -25,6 +28,8 @@ export function BrowserLoginDecisionCard({
   roleLabel: string;
   question: string;
   assumption?: string;
+  /** 后端下发的等待上限；缺省 = 一直等（冷路挂起本就没有墙钟）。 */
+  timeoutSeconds?: number | null;
   busy: boolean;
   submitting: BrowserLoginSubmitKind | null;
   onLoggedIn: () => void;
@@ -45,7 +50,9 @@ export function BrowserLoginDecisionCard({
       </p>
       <p className="browser-login-question">{question}</p>
       {assumption ? (
-        <p className="browser-login-assumption">未答则按此继续：{assumption}</p>
+        <p className="browser-login-assumption">
+          {escalationWaitNote({ assumption, timeoutSeconds })}
+        </p>
       ) : null}
       <div className="browser-login-actions">
         {onOpenLive ? (

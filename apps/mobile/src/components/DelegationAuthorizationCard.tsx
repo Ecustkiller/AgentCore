@@ -3,6 +3,10 @@ import {
   type ResolveInteractionBody,
   resolveInteraction,
 } from "@/api/interaction";
+import {
+  markLocalSettlement,
+  noteRemoteSettlementFromReceipt,
+} from "@/lib/remoteSettlement";
 import type { ProjectedInteraction } from "@agentcore/protocol-conformance";
 import { useState } from "react";
 
@@ -57,12 +61,25 @@ function DelegationBody({
     if (busy) return;
     setBusy(true);
     setErr(null);
+    // 登记在 POST 之前：抢先回来的收口事件才认得出是自己点的（B2 · 验收 5）。
+    markLocalSettlement(pending.id);
     try {
       const body: ResolveInteractionBody = {
         kind: "delegation_authorization",
         decision,
       };
-      await resolveInteraction(conversationId, pending.id, body);
+      const outcome = await resolveInteraction(
+        conversationId,
+        pending.id,
+        body,
+      );
+      if (outcome === "already_processed") {
+        noteRemoteSettlementFromReceipt({
+          interactionId: pending.id,
+          conversationId,
+          kind: "delegation_authorization",
+        });
+      }
       onResolved?.();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "授权失败");

@@ -1,9 +1,10 @@
 /**
- * 约定文档约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
+ * 约定文档约定目录（``AgentCore/文档/{工作稿,research,debate,reviews}/``）的中性元信息——
  * 文件浏览器徽章与产物卡标签共用。与后端 ``workspace.stage_dirs`` 对齐；无匹配则零噪音。
  */
 
 export const DOCS_PREFIX = "AgentCore/文档";
+export const DRAFTS_DIR = `${DOCS_PREFIX}/工作稿`;
 export const RESEARCH_DIR = `${DOCS_PREFIX}/research`;
 export const DEBATE_DIR = `${DOCS_PREFIX}/debate`;
 export const REVIEWS_DIR = `${DOCS_PREFIX}/reviews`;
@@ -15,6 +16,11 @@ export interface StageDirMeta {
 }
 
 const STAGE_DIRS: Record<string, StageDirMeta> = {
+  [DRAFTS_DIR]: {
+    key: "工作稿",
+    label: "工作稿",
+    tooltip: "AI 干活的过程材料默认落点；成品会归位到工作区",
+  },
   [RESEARCH_DIR]: {
     key: "research",
     label: "调研约定文档",

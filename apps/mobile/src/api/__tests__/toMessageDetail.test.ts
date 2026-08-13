@@ -61,6 +61,11 @@ describe("toMessageDetail evidence_ledger", () => {
     expect(toMessageDetail(baseRow({ trace_id: tid })).trace_id).toBe(tid);
     expect(toMessageDetail(baseRow()).trace_id).toBeNull();
   });
+
+  it("carries the 曾中断恢复 marker (崩溃重驱归属原回合)", () => {
+    expect(toMessageDetail(baseRow({ recovered: true })).recovered).toBe(true);
+    expect(toMessageDetail(baseRow()).recovered).toBeNull();
+  });
 });
 
 describe("toMessageDetail runs.error (cold-load failure)", () => {

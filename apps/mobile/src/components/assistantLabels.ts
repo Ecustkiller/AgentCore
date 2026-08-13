@@ -74,6 +74,9 @@ const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
   reading: "Extracting",
   executing: "Running",
   blocked: "Network blocked",
+  git_queued: "Waiting for repo",
+  git_credentials: "Checking credentials",
+  git_remote: "Contacting remote",
 };
 
 export function toolPhaseText(phase: string | undefined): string | null {
@@ -112,12 +115,19 @@ const TOOL_DETAIL_KEYS = [
   "text",
 ];
 
+/** `id` / `*_id` 是内部标识（run_id / conversation_id / interjection_id …）：不进用户面。
+ *  用户在协作图上认的是角色名，`撤回队员 r-a3f2e1c8-…` 只会让他放弃对账。 */
+function isInternalIdArg(key: string): boolean {
+  return key === "id" || key.endsWith("_id");
+}
+
 export function toolDetail(args: Record<string, unknown>): string {
   for (const k of TOOL_DETAIL_KEYS) {
     const v = args[k];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
-  for (const v of Object.values(args)) {
+  for (const [k, v] of Object.entries(args)) {
+    if (isInternalIdArg(k)) continue;
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return "";

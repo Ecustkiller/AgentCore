@@ -877,7 +877,12 @@ describe("ResumeCard · ask_user browser_login", () => {
         onResume={onResume}
       />,
     );
-    expect(screen.getByText(/未答则按此继续：登录：用户已登录/)).toBeTruthy();
+    // 冷路挂起没有墙钟——只能说「一直等你」，不得承诺自动按假设继续。
+    expect(
+      screen.getByText(
+        /不会自动继续——这条一直等你；点「按假设继续」才按此走：登录：用户已登录/,
+      ),
+    ).toBeTruthy();
     fireEvent.click(screen.getByText("按假设继续"));
     expect(onResume).toHaveBeenCalledWith("continue", "登录：用户已登录", []);
   });

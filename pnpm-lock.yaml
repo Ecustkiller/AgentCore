@@ -349,6 +349,9 @@ importers:
       '@capacitor/android':
         specifier: ^8.4.0
         version: 8.4.0(@capacitor/core@8.4.0)
+      '@capacitor/app':
+        specifier: ^8.1.1
+        version: 8.1.1(@capacitor/core@8.4.0)
       '@capacitor/core':
         specifier: ^8.4.0
         version: 8.4.0
@@ -658,8 +661,8 @@ packages:
     peerDependencies:
       '@capacitor/core': ^8.4.0
 
-  '@capacitor/app@8.1.0':
-    resolution: {integrity: sha512-MlmttTOWHDedr/G4SrhNRxsXMqY+R75S4MM4eIgzsgCzOYhb/MpCkA5Q3nuOCfL1oHm26xjUzqZ5aupbOwdfYg==}
+  '@capacitor/app@8.1.1':
+    resolution: {integrity: sha512-xM2ZTX5jK60tFtmjsmJv+Cdj1Qsb6NcavkqmdEnCPQBeya9oKhamZJxYOnQNj1ZvcJM7sWfG6BEtSLx42pisbA==}
     peerDependencies:
       '@capacitor/core': '>=8.0.0'
 
@@ -5133,7 +5136,7 @@ snapshots:
   '@aparajita/capacitor-secure-storage@8.0.0':
     dependencies:
       '@capacitor/android': 8.4.0(@capacitor/core@8.4.0)
-      '@capacitor/app': 8.1.0(@capacitor/core@8.4.0)
+      '@capacitor/app': 8.1.1(@capacitor/core@8.4.0)
       '@capacitor/core': 8.4.0
       '@capacitor/ios': 8.4.0(@capacitor/core@8.4.0)
       '@capacitor/keyboard': 8.0.5(@capacitor/core@8.4.0)
@@ -5322,7 +5325,7 @@ snapshots:
     dependencies:
       '@capacitor/core': 8.4.0
 
-  '@capacitor/app@8.1.0(@capacitor/core@8.4.0)':
+  '@capacitor/app@8.1.1(@capacitor/core@8.4.0)':
     dependencies:
       '@capacitor/core': 8.4.0
 

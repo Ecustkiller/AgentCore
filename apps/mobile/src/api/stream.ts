@@ -15,9 +15,11 @@ import { StreamHttpError } from "@/lib/errors";
 //
 // 执行与请求解耦 (C1 · slice 1a/1b): a client disconnect no longer cancels a server
 // turn — it runs detached and persists. So there are three SSE entry points that all
-// fold through the SAME shape: `streamMessage` (fresh send), `attachStream` (rejoin a
-// still-live run after a drop / on reopen), and `resumeStream` (continue a durably
-// paused turn). An explicit 停止 is a separate JSON call (api/turn.ts).
+// fold through the SAME shape: `streamMessage` (fresh send), `resumeStream` (continue a
+// durably paused turn), and `followConversation` (对话级订阅：park on the conversation
+// itself — it both rejoins a still-live run and picks up whatever runs next, 云对话多端
+// 同权 B2；回合级 attach 已被它取代). An explicit 停止 is a separate JSON call
+// (api/turn.ts).
 import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
 
 /** Build a {@link StreamHttpError} from a non-OK response. A refused turn (e.g.
@@ -181,50 +183,48 @@ export async function streamMessage(
   await pumpSSE(response, onEvent, conversationId);
 }
 
-/** Outcome of a re-attach attempt (执行与请求解耦 C1 · slice 1b). */
-export type AttachOutcome =
-  /** A live run was found; its transcript-so-far was replayed and the stream tailed
-   *  to completion (or until the connection dropped — the caller distinguishes via the
-   *  thrown error). */
-  | "attached"
-  /** No run is live for the conversation (204) — already finished / never started /
-   *  suspended at a checkpoint. The caller falls back to the persisted transcript
-   *  (reload) or durable resume. */
-  | "none";
-
 /**
- * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).
+ * 订阅一个**对话**（而不是某个回合）并跟播它此后的每个回合（云对话多端同权 B2）。
  *
- * Always sends ``Last-Event-ID`` (last journal seq, or ``0`` when none) so the
- * backend takes the journal-backed full-turn replay path (流式回复持久化 §3.6).
- * Returns "none" on a 204 (nothing live to rejoin); throws on a transport drop
- * while attached (retriable) or on auth.
+ * 端点同回合级 attach，多带 `follow=true`：空闲不再 204，而是保持连接送心跳，
+ * 之后每个新回合（另一端发送 / 队列出队 / 冷 resume 唤醒 / 推进卡）都在同一条流上重放 +
+ * 跟播。这正是「停在空闲对话上的第二台设备自动出现另一台刚起的回合」所缺的那一环——回合级
+ * attach 拿到 204 之后就再也无从得知发生过任何事。
  *
- * Catch-up: buffer replay until ``: attach-caught-up``, then deliver in one burst
- * so already-completed workers do not re-animate on refresh. Legacy servers without
- * the comment flush the buffer when the stream ends.
+ * 帧序：`[回合重放…] : attach-caught-up [实时帧…]`，回合收口后回到 `: ping` 等下一个回合。
+ * 首个回合段照 attach 语义缓冲到边界注释再整段送出（已完工的队员不会在重开时重新动画）；
+ * 之后逐条送出——回合切分由调用方按 `message_start` 的 `message_id` 判定，因为新回合的重放段
+ * 先于它自己的边界注释到达，缓冲无从提前进入。
+ *
+ * `onIdle` = 旧 204 的对话级等价物：**任何边界注释之前**先收到心跳。重放段与它的边界注释之间
+ * 不会插心跳，所以这是结构判据、不含时序假设（慢重放也不会误报空闲）。至多回调一次。
  */
-export async function attachStream(
+export async function followConversation(
   conversationId: string,
   onEvent: (event: SSEEvent) => void,
+  onIdle: () => void,
   signal?: AbortSignal,
-): Promise<AttachOutcome> {
-  const path = `/v1/conversations/${conversationId}/stream`;
-  const response = await sseFetch(() => {
-    const headers: Record<string, string> = {
-      ...clientHeaders(),
-      Accept: "text/event-stream",
-      // Always present → journal-backed full replay (header value observational).
-      "Last-Event-ID": lastEventIds.get(conversationId) ?? "0",
-      ...authHeader(),
-    };
-    return fetch(apiUrl(path), {
+): Promise<void> {
+  const path = `/v1/conversations/${conversationId}/stream?follow=true`;
+  const response = await sseFetch(() =>
+    fetch(apiUrl(path), {
       method: "GET",
-      headers,
+      headers: {
+        ...clientHeaders(),
+        Accept: "text/event-stream",
+        // 同 attach：连上时若已有回合在跑，走 journal 全量重放（值仅供观测）。
+        "Last-Event-ID": lastEventIds.get(conversationId) ?? "0",
+        ...authHeader(),
+      },
       signal,
-    });
-  });
-  if (response.status === 204) return "none";
+    }),
+  );
+  // 老后端不认 `follow`，空闲仍按回合级语义 204 —— 降级成「连上来就空闲」而不是报错：
+  // 拿不到自动跟播，但对话本身照常可用。
+  if (response.status === 204) {
+    onIdle();
+    return;
+  }
   if (!response.ok) throw await streamErrorFromResponse(response);
 
   const catchUp: SSEEvent[] = [];
@@ -240,17 +240,23 @@ export async function attachStream(
     },
     conversationId,
     (comment) => {
-      if (!catchingUp) return;
-      if (comment !== ATTACH_CAUGHT_UP_COMMENT) return;
+      if (!catchingUp) return; // 首段之后：边界注释与心跳都无需处理
+      if (comment === ATTACH_CAUGHT_UP_COMMENT) {
+        catchingUp = false;
+        for (const e of catchUp) onEvent(e);
+        catchUp.length = 0;
+        return;
+      }
+      // 心跳且首个回合段一帧未到 → 连上来时没有回合在跑。
+      if (catchUp.length > 0) return;
       catchingUp = false;
-      for (const e of catchUp) onEvent(e);
-      catchUp.length = 0;
+      onIdle();
     },
   );
+  // 服务端关流时首段还没等到边界（老服务端 / 收口竞态）——照 attach 兜底刷出。
   if (catchingUp && catchUp.length > 0) {
     for (const e of catchUp) onEvent(e);
   }
-  return "attached";
 }
 
 /** Delegate team_preview 开工卡修正：排除岗 + 单向收紧写盘 + 人盖模型（定案 §3.3）. */

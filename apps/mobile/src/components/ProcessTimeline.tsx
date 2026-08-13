@@ -117,6 +117,8 @@ export interface TeamProjection {
   workerToolPhases?: Map<string, { phase: string; toolName: string }>;
   /** 场级证据台账（`extractEvidenceLedger`）：辩论徽章 `#eN` 解析。 */
   evidenceLedger?: EvidenceLedgerEntry[];
+  /** 回合墙钟跨度（`turnElapsedMs(events)`，与桌面同量）：条上「用时」。缺省 0 = 不显示。 */
+  elapsedMs?: number;
 }
 
 /** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,
@@ -131,6 +133,9 @@ const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
   reading: "Extracting",
   executing: "Running",
   blocked: "Network blocked",
+  git_queued: "Waiting for repo",
+  git_credentials: "Checking credentials",
+  git_remote: "Contacting remote",
 };
 const toolPhaseText = (phase: ToolPhase | undefined): string | null =>
   phase ? (TOOL_PHASE_TEXT[phase] ?? "Working") : null;

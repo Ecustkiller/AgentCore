@@ -14,6 +14,7 @@ import {
   SearchResults,
   timeLabel,
 } from "@/components/conversations";
+import { useConversationAwaitingAttention } from "@/lib/aiAttention";
 import { SquarePen } from "lucide-react";
 // 历史对话抽屉 (手机端对话页重设计 · 抽屉式直聊).
 //
@@ -347,26 +348,13 @@ export function ConversationDrawer({
               </p>
             )}
             {items?.map((c) => (
-              <div key={c.id} className="conv-row">
-                <button
-                  type="button"
-                  className={`conv${c.id === activeId ? " conv-active" : ""}`}
-                  onClick={() => openConversation(c.id)}
-                >
-                  <span className="conv-title">{c.title || "新对话"}</span>
-                  <span className="conv-meta">
-                    {c.message_count} 条 · {timeLabel(c.updated_at)}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  className="conv-actions"
-                  aria-label="更多操作"
-                  onClick={() => setMenuFor(c)}
-                >
-                  ⋯
-                </button>
-              </div>
+              <ConversationRow
+                key={c.id}
+                conv={c}
+                active={c.id === activeId}
+                onOpen={() => openConversation(c.id)}
+                onMenu={() => setMenuFor(c)}
+              />
             ))}
           </div>
         )}
@@ -412,6 +400,61 @@ export function ConversationDrawer({
           onConfirm={() => void doDelete(deleting)}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * One history row + its「等你」灯.
+ *
+ * The list itself is a snapshot (fetched on open, then static), so the light can't come from
+ * it — each row subscribes to the firehose `ai_attention` signal on its own (desktop lights the
+ * same rows from its local interaction stores; on mobile the firehose is the only source).
+ * Opening the conversation clears its entries, so entering the chat turns the light off.
+ */
+function ConversationRow({
+  conv,
+  active,
+  onOpen,
+  onMenu,
+}: {
+  conv: ConversationSummary;
+  active: boolean;
+  onOpen: () => void;
+  onMenu: () => void;
+}) {
+  const awaiting = useConversationAwaitingAttention(conv.id);
+  return (
+    <div className="conv-row">
+      <button
+        type="button"
+        className={`conv${active ? " conv-active" : ""}`}
+        onClick={onOpen}
+      >
+        <span className="conv-line">
+          <span className="conv-attention-slot">
+            {awaiting && (
+              <span
+                className="conv-attention"
+                role="img"
+                aria-label="等你决策"
+              />
+            )}
+          </span>
+          <span className="conv-title">{conv.title || "新对话"}</span>
+        </span>
+        <span className="conv-meta">
+          {conv.message_count} 条 · {timeLabel(conv.updated_at)}
+        </span>
+      </button>
+      <button
+        type="button"
+        className="conv-actions"
+        aria-label="更多操作"
+        onClick={onMenu}
+      >
+        ⋯
+      </button>
     </div>
   );
 }

@@ -119,14 +119,37 @@ node deploy/scripts/sync-release-cdn.mjs --android apps/mobile/release/<ver>/Age
 
 **无 `google-services.json` 时千万不要调用 `PushNotifications.register()`**——Android 会原生闪退（`FirebaseApp is not initialized`），JS `try/catch` 拦不住。`release:android` 仅在检测到 `android/app/google-services.json` 时注入 `VITE_PUSH_ENABLED=true`；否则推送整段 no-op，App 可正常用。
 
-客户端：把 Firebase 控制台下载的 `android/app/google-services.json` 放到工程内（**已 gitignore，勿提交**），再重新 `release:android`。
+两份凭据必须出自**同一个 Firebase 项目**，否则设备 token 与发送方对不上：
 
-服务端（`apps/server/.env`）：
+| 凭据 | 从哪拿 | 放哪 |
+|---|---|---|
+| `google-services.json` | 控制台 → 添加 Android 应用，包名逐字填 `com.agentcore.mobile` | `apps/mobile/android/app/`（已 gitignore，勿提交） |
+| 服务账号 JSON | 控制台 → 项目设置 → 服务账号 → 生成新的私钥 | 跑后端的机器上（勿入仓） |
+
+顺带在 GCP 确认 **Firebase Cloud Messaging API (V1)** 已启用——代码打的是 v1 端点，legacy API 开着没用。
+
+服务端（`apps/server/.env`；生产见 `deploy/config/production.env.example`「原生推送 FCM」段）：
 
 - `PUSH_ENABLED=true`
-- `FCM_SERVICE_ACCOUNT_PATH=/path/to/firebase-service-account.json`（服务账号 JSON，勿入仓）
+- `FCM_SERVICE_ACCOUNT_PATH=/path/to/firebase-service-account.json`
 
-真机验收要点：登录后设备出现在 `/v1/devices`；触发「需要你」暂停应收到通知；点通知应深链到对应会话。
+改完**必须重启后端**——`build_push_sender()` 带 `lru_cache`，热改不生效。配错是静默降级（api 照常起），只在日志留 `push.fcm_unconfigured` / `push.fcm_init_failed`，所以开完先查这两条。
+
+### 连本机后端验收（不必碰生产）
+
+`resolveApiUrl()` 优先读 `VITE_API_URL`，所以真机包可以指向局域网里的开发后端；后端默认已监听 `0.0.0.0:8000`、CORS 默认放行 `capacitor://localhost`，两边都不用改：
+
+```powershell
+$env:VITE_API_URL="http://<局域网IP>:8000"; $env:VITE_PUSH_ENABLED="true"
+pnpm -C apps/mobile cap:sync
+pnpm -C apps/mobile android:assemble
+```
+
+`android:assemble` 只跑 gradle、不重新 build 前端，所以 `VITE_*` 必须在上一步 `cap:sync` 时给。手机与电脑须同一 WiFi。
+
+真机验收三步：登录后 `GET /v1/devices` 能看到设备 → 触发「需要你」暂停 → 手机收到通知、点开深链到对应会话。
+
+排查顺着日志走：`push.fcm_token_minted`（服务账号本身可用）→ `push.fcm_sent`（FCM 收下了，带 message_id 可去控制台追）→ 这两条都在却没收到，问题就在设备侧而非我们。`attention.signalled` 的 `push_outcome` 分四态，其中 `skipped_mobile_online` 是**有意不推**（手机 firehose 在线，走 in-app 横幅），别误判成故障。
 
 ## 贡献
 

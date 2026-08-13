@@ -29,8 +29,15 @@ import {
   toolLabel,
   toolPhaseText,
 } from "@/components/assistantLabels";
+import { escalationWaitNote } from "@/lib/escalationWaitCopy";
 import { buildLedgerMap } from "@/lib/evidenceLedger";
 import { isFileReadCeilingGuidance } from "@/lib/fileReadCeiling";
+import {
+  markLocalSettlement,
+  noteRemoteSettlementFromReceipt,
+  unmarkLocalSettlement,
+} from "@/lib/remoteSettlement";
+import { formatDuration } from "@/lib/time";
 import type { EscalationSlotEsc, RunToolCall } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
 import type {
@@ -177,7 +184,8 @@ function runStatusLabel(
   return base;
 }
 
-function formatDuration(ms: number): string {
+/** 单个队员的耗时（卡片脚 / 详情头）——秒以下保留毫秒，看的是这一个人跑了多久。 */
+function formatRunDuration(ms: number): string {
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
@@ -324,15 +332,18 @@ function teamStripMeta(args: {
   workers: readonly ProjectedRun[];
   progress: { completed: number; total: number };
   status: TurnStatus | null | undefined;
+  elapsedMs: number;
 }): string {
-  const { workers, progress, status } = args;
+  const { workers, progress, status, elapsedMs } = args;
   const bits: string[] = [];
   // 「N 个 Agent」已删——与图/列表上成员重复；保留子任务 n/m。
   bits.push(`${progress.completed}/${progress.total} 子任务`);
   const failed = workers.filter((r) => r.status === "failed").length;
   if (failed > 0) bits.push(`${failed} 失败`);
-  const dur = workers.reduce((acc, r) => acc + (r.durationMs ?? 0), 0);
-  if (dur > 0 && status !== "running") bits.push(`用时 ${formatDuration(dur)}`);
+  // 用时 = 回合墙钟跨度（桌面同量）。曾按队员时长求和，并行越多数字越大，把省时显示成了更慢。
+  if (elapsedMs > 0 && status !== "running") {
+    bits.push(`用时 ${formatDuration(elapsedMs)}`);
+  }
   const money = aggregateWorkerCost(workers);
   if (money) {
     if (money.nano > 0) {
@@ -370,6 +381,7 @@ export function TeamView({
   runToolCalls,
   workerToolPhases,
   evidenceLedger = [],
+  elapsedMs = 0,
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -395,6 +407,9 @@ export function TeamView({
   workerToolPhases?: Map<string, { phase: string; toolName: string }>;
   /** 场级证据台账（`extractEvidenceLedger`）：辩论发言徽章 `#eN` 解析（O7）。 */
   evidenceLedger?: EvidenceLedgerEntry[];
+  /** 回合墙钟跨度（`turnElapsedMs(turn.events)`）：条上「用时」。与桌面同量——绝不用队员时长求和
+   *  顶替，那是工时，并行越多越大，会把省时显示成更慢。缺省 0 = 不显示用时。 */
+  elapsedMs?: number;
 }) {
   // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
@@ -427,7 +442,7 @@ export function TeamView({
     workers,
     progress,
   });
-  const stripMeta = teamStripMeta({ workers, progress, status });
+  const stripMeta = teamStripMeta({ workers, progress, status, elapsedMs });
   const showDebateEntry = isDebate;
   const synthesisBlurbs = workers
     .filter((r) => r.status === "completed" && !!r.outputSummary)
@@ -792,7 +807,7 @@ function RunCard({
   const footBits: string[] = [];
   if (run.model) footBits.push(run.model);
   if (run.status === "completed" && run.durationMs != null) {
-    footBits.push(formatDuration(run.durationMs));
+    footBits.push(formatRunDuration(run.durationMs));
   }
   if (run.round > 0) footBits.push(`第 ${run.round} 轮`);
 
@@ -879,8 +894,32 @@ export function EscalationAnswer({
     if (busy) return;
     setBusy(true);
     setErr(null);
+    // 登记在 POST 之前：抢先回来的 `escalation_resolved` 才认得出是自己点的（B2 · 验收 5）。
+    markLocalSettlement(escalationId);
     try {
-      await decideEscalation(conversationId, escalationId, decision);
+      const outcome = await decideEscalation(
+        conversationId,
+        escalationId,
+        decision,
+      );
+      if (outcome === "already_processed") {
+        // 这张已经结了，但回执不说是谁结的——升级卡还能由主管仲裁、按假设推进或超时兜底，
+        // 认成「另一端处理」就是替用户认领一个他没做过的动作。撤回本端登记，把归属交回带
+        // `status` / `arbitrated_by` 的 `escalation_resolved` 帧；这里只如实说结果未知。
+        unmarkLocalSettlement(escalationId);
+        const noted = noteRemoteSettlementFromReceipt({
+          interactionId: escalationId,
+          conversationId,
+          kind: "escalation",
+        });
+        if (!noted) {
+          setErr(
+            "这条已经结了——可能是另一端拍板，也可能是主管仲裁或按假设继续。",
+          );
+          setBusy(false);
+          setSubmitting(null);
+        }
+      }
       if (onResolved) {
         onResolved();
         return;
@@ -900,6 +939,7 @@ export function EscalationAnswer({
           roleLabel="队员"
           question={esc.question}
           assumption={esc.assumption || undefined}
+          timeoutSeconds={esc.timeoutSeconds}
           busy={busy}
           submitting={submitting}
           onLoggedIn={() => {
@@ -927,7 +967,11 @@ export function EscalationAnswer({
       <span className="run-escalation-q">↑ {esc.question}</span>
       {esc.assumption && (
         <span className="run-escalation-a">
-          未答则按此继续：{esc.assumption}
+          {escalationWaitNote({
+            assumption: esc.assumption,
+            timeoutSeconds: esc.timeoutSeconds,
+            awaiting: esc.awaiting,
+          })}
         </span>
       )}
       <textarea
@@ -1099,7 +1143,7 @@ function RunDetailPanel({
         <span className="rd-title">{name}</span>
         <span className={`run-badge badge-${st.tone}`}>{st.label}</span>
         {run.durationMs != null && (
-          <span className="rd-dur">{formatDuration(run.durationMs)}</span>
+          <span className="rd-dur">{formatRunDuration(run.durationMs)}</span>
         )}
         <button
           type="button"

@@ -27,7 +27,7 @@ import { resolveStageCardStream } from "@/api/stageCard";
 import {
   type ResumeTurnBody,
   type TeamPreviewAmendments,
-  attachStream,
+  followConversation,
   regenerateStream,
   resumeStream,
   streamMessage,
@@ -40,6 +40,7 @@ import {
   stopConversation,
 } from "@/api/turn";
 import { getMessageCostDisplay } from "@/api/usage";
+import { RecoveredChip } from "@/components/AssistantMessageFooter";
 import {
   AssistantContent,
   SupportDiagnosticCopyButton,
@@ -56,10 +57,13 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { PauseCard } from "@/components/PauseCard";
 import { PermissionAxesSheet } from "@/components/PermissionAxesSheet";
 import { QueuedTurnsBar } from "@/components/QueuedTurnsBar";
+import { RemoteSettledCards } from "@/components/RemoteSettledCards";
 import { ResumeCard } from "@/components/ResumeCard";
 import { StageCard } from "@/components/StageCard";
 import { EscalationAnswer } from "@/components/TeamView";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
+import { clearAiAttentionForConversation } from "@/lib/aiAttention";
+import { useAppForeground } from "@/lib/appLifecycle";
 import {
   type MessageAttachment,
   finalizeAttachmentsForSend,
@@ -100,11 +104,14 @@ import {
   resolveEmptyFailureNotice,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
+import { planFollowSegment, turnMessageId } from "@/lib/followTurns";
+import { placeMemoryUpdates } from "@/lib/memoryAnchors";
 import {
   type MessageDelivery,
   defaultDelivery,
   isLiveInterruptible,
 } from "@/lib/messageDelivery";
+import { currencySymbol } from "@/lib/money";
 import {
   type QueuedTurnEntry,
   listQueuedTurns,
@@ -115,11 +122,23 @@ import {
   QUEUE_DROPPED_HINT,
   reconcileQueuedTurns,
 } from "@/lib/reconcileQueuedTurns";
-import { clearLiveTurnEvents, removeLiveTurn } from "@/lib/reconnectLiveTurn";
+import {
+  clearLiveTurnEvents,
+  dropRunningAssistantTail,
+  removeLiveTurn,
+} from "@/lib/reconnectLiveTurn";
 import {
   createHarvestRefreshScheduler,
   dropSettledLiveTurns,
 } from "@/lib/refreshAfterExecutionCompleted";
+import {
+  isForeignSettlement,
+  markLocalSettlement,
+  noteRemoteSettlement,
+  noteRemoteSettlementFromReceipt,
+  resetRemoteSettlements,
+  settlementFromResolvedEvent,
+} from "@/lib/remoteSettlement";
 import { prepareResumePausedTurn } from "@/lib/resumePausedTurn";
 import {
   STOP_FAILED_MESSAGE,
@@ -169,6 +188,7 @@ import type {
   ProjectedInteraction,
   ProjectedTurn,
 } from "@agentcore/protocol-conformance";
+import { turnElapsedMs } from "@agentcore/protocol-fold-kit";
 import {
   ArrowDown,
   Folder,
@@ -179,6 +199,7 @@ import {
   SquarePen,
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -369,6 +390,10 @@ function historySupportIds(
 // so a transport drop reconnects (rejoins the live run), never resends.
 const RECONNECT_BANNER = "连接中断，回合仍在后台继续。点「重连」继续查看。";
 
+/** 对话级订阅正常关流后自动重挂的最短存活门槛（服务端心跳 15s；两拍以上才算「长驻过」）。
+ *  老后端不认 `follow`、空闲直接 204 —— 那是立刻结束，够不着这道门槛，不会热循环。 */
+const FOLLOW_REHANG_MIN_MS = 30_000;
+
 /** A turn-level error with an optional one-tap reconnect (a held SSE that dropped while
  *  the run lives on), or a config remedy (e.g.「去配置」→ 模型配置 for LLM_KEY_REQUIRED).
  *  /stop 失败只出诚实文案，可再点停止按钮（无「重试停止」专属路径）。 */
@@ -383,21 +408,29 @@ function isAbort(err: unknown): boolean {
   return err instanceof DOMException && err.name === "AbortError";
 }
 
-/** Format an integer nano-CNY cost as ¥ caption (1 元 = 1e9). Returns null for
- *  0 / unknown so a free turn shows nothing, never「¥0.00」(§7.5). BYOK estimates get ≈. */
+/** Format an integer nano cost as a money caption (1 unit = 1e9). Returns null for
+ *  0 / unknown so a free turn shows nothing, never「¥0.00」(§7.5). BYOK estimates get ≈.
+ *  符号取自后端随金额下发的 `currency`（平台记账 CNY / BYOK 社区估算 USD）——**无汇率换算**。 */
 function formatCost(
-  nanoCny: number | null | undefined,
+  nano: number | null | undefined,
   estimated = false,
+  currency?: string | null,
 ): string | null {
-  if (!nanoCny || nanoCny <= 0) return null;
-  const yuan = nanoCny / 1e9;
-  const body = yuan < 0.01 ? "<¥0.01" : `¥${yuan.toFixed(yuan < 0.1 ? 4 : 2)}`;
+  if (!nano || nano <= 0) return null;
+  const symbol = currencySymbol(currency);
+  const amount = nano / 1e9;
+  const body =
+    amount < 0.01
+      ? `<${symbol}0.01`
+      : `${symbol}${amount.toFixed(amount < 0.1 ? 4 : 2)}`;
   return estimated ? `≈${body} 自带密钥·估算` : body;
 }
 
 type CachedDisplayMoney = {
   nano: number;
   estimated: boolean;
+  /** 该笔金额的币种（ISO code）；渲染端据此挑符号，禁止按 pricing_source 猜。 */
+  currency?: string | null;
   /** BYOK 社区价目未命中（pricing_source=unpriced）：显式标注，金额不出数。 */
   unpriced?: boolean;
 };
@@ -579,14 +612,7 @@ function extractTurnWarning(events: SSEEvent[]): string | null {
 }
 
 /** Live / journal：``message_start.message_id``（客户端 turn.id 是本地 UUID，不能当云 messageId）。 */
-function extractMessageId(events: SSEEvent[]): string | null {
-  for (const e of events) {
-    if (e.type === "message_start") {
-      return (e.payload as MessageStartPayload).message_id;
-    }
-  }
-  return null;
-}
+const extractMessageId = turnMessageId;
 
 function AssistantBubble({
   turn,
@@ -694,6 +720,7 @@ function AssistantBubble({
         runToolCalls,
         workerToolPhases,
         evidenceLedger: debateEvidenceLedger,
+        elapsedMs: turnElapsedMs(turn.events),
       }
     : undefined;
   const empty =
@@ -715,14 +742,19 @@ function AssistantBubble({
     : null;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   // BYOK: billed total is 0; estimated_total may carry a community-catalog estimate.
+  // 币种随金额走：记账读 currency，BYOK 估算读 estimated_currency（美元社区价目）。
   const turnMoney =
     p.cost && p.cost.total > 0
-      ? { nano: p.cost.total, estimated: false }
+      ? { nano: p.cost.total, estimated: false, currency: p.cost.currency }
       : p.cost?.estimated_total && p.cost.estimated_total > 0
-        ? { nano: p.cost.estimated_total, estimated: true }
+        ? {
+            nano: p.cost.estimated_total,
+            estimated: true,
+            currency: p.cost.estimated_currency ?? p.cost.currency,
+          }
         : null;
   const cost = turnMoney
-    ? formatCost(turnMoney.nano, turnMoney.estimated)
+    ? formatCost(turnMoney.nano, turnMoney.estimated, turnMoney.currency)
     : p.cost?.pricing_source === "unpriced"
       ? COST_UNPRICED_LABEL
       : null;
@@ -907,6 +939,7 @@ function HistoryAssistant({
             runToolCalls: extractRunToolCalls(events),
             // 辩论场级 `#eN`（勿写入 Message.evidence_ledger 语义）
             evidenceLedger: extractEvidenceLedger(events),
+            elapsedMs: turnElapsedMs(events),
           }
         : undefined;
     return {
@@ -966,7 +999,11 @@ function HistoryAssistant({
   // P2：优先用 messages.cost 列（平台记账）；缺列或 BYOK 记账为 0 时 lazy-fetch 台账（含 estimated_cost）。
   const columnBilled =
     m.cost && m.cost.total > 0
-      ? { nano: m.cost.total, estimated: false as const }
+      ? {
+          nano: m.cost.total,
+          estimated: false as const,
+          currency: m.cost.currency,
+        }
       : null;
   const { ref, money: lazyMoney } = useLazyMessageCost(
     columnBilled == null ? m.id : "",
@@ -974,7 +1011,7 @@ function HistoryAssistant({
   const money = columnBilled ?? lazyMoney;
   const cost =
     money && money.nano > 0
-      ? formatCost(money.nano, money.estimated)
+      ? formatCost(money.nano, money.estimated, money.currency)
       : m.cost?.pricing_source === "unpriced" || lazyMoney?.unpriced
         ? COST_UNPRICED_LABEL
         : null;
@@ -1038,6 +1075,7 @@ function HistoryAssistant({
         className="bubble assistant"
         ref={columnBilled == null ? ref : undefined}
       >
+        {m.recovered && <RecoveredChip />}
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {streaming && !m.content && !m.reasoning_content && !process?.length ? (
           <span className="muted">…</span>
@@ -1197,8 +1235,9 @@ export function ChatPage() {
   // re-entrancy while a page is in flight (历史上翻分页).
   const [hasMoreBefore, setHasMoreBefore] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  // 「记忆已更新」卡 (③ §1.6): the latest window's offline-consolidation results, pinned at the
-  // thread tail. Only the newest window carries them, so scroll-up (loadOlder) leaves them be.
+  // 「记忆已更新」卡 (③ §1.6): the latest window's offline-consolidation results, anchored back
+  // into the thread by `anchorAt` (memoryAnchors). Only the newest window carries them, so
+  // scroll-up (loadOlder) leaves them be.
   const [memoryUpdates, setMemoryUpdates] = useState<MemoryUpdate[]>([]);
   // Offline consolidation post-dates the turn — bump this gen to cancel in-flight polls on
   // conversation switch / unmount (mobile has no memory_updated firehose).
@@ -1222,6 +1261,27 @@ export function ChatPage() {
   // The controller for the stream currently held open (send / reattach). Conversation
   // switch aborts it; 用户停止 does NOT — keep SSE until backend message_end (诚实过渡).
   const abortRef = useRef<AbortController | null>(null);
+  /** 当前会话 id 的同步读（跨 await 判身份；state 闭包会陈旧）。 */
+  const conversationIdRef = useRef<string | undefined>(conversationId);
+  conversationIdRef.current = conversationId;
+  /** 对话级订阅（`follow`）的连接槽——与本端自发流互斥，见 {@link claimLocalStream}。 */
+  const followRef = useRef<AbortController | null>(null);
+  /** 该订阅正在跟播的回合；`message_id` 变 = 另一端起了新回合，另开气泡。 */
+  const followTurnRef = useRef<{
+    messageId: string | null;
+    /** `null` = 该回合本端已折完，这一段是多余重放，静音丢到下一个 `message_id`。 */
+    turnId: string | null;
+  } | null>(null);
+  /** 下一条订阅的首个回合段该认领的既有气泡（断线重连 / 重开续看），而不是新开一个。 */
+  const followAdoptRef = useRef<string | null>(null);
+  /** 挂订阅时本端认为「有回合在跑」——空闲信号即证伪：撤空转气泡 + 回读终稿。 */
+  const expectLiveRunRef = useRef(false);
+  /** 重挂订阅的代号（回前台 / 手动重连 / 本端自发流让位后归位）。 */
+  const [followEpoch, setFollowEpoch] = useState(0);
+  /** 打开会话的定面流程（历史 + 恢复快照）是否已完成——定面前不挂订阅，免与 clear-then-fold 抢。 */
+  const [followReady, setFollowReady] = useState(false);
+  /** 订阅上有回合在跟播（本端自发流用 `sending`，两者互斥，一起合成 busy）。 */
+  const [followRunning, setFollowRunning] = useState(false);
   /** Mid-flight AC 集合（切会话一并 abort；Stop 不清队、不 abort 排队连接）。 */
   const midFlightControllersRef = useRef(new Set<AbortController>());
   /** queue_id → mid-flight AC（取消成功后再 abort，避免失败留下断连坏态）。 */
@@ -1230,6 +1290,11 @@ export function ChatPage() {
    * 排队条对账（GET 权威）。ref 避免 appendEventToTurn / reconnect 闭包陈旧。
    * 本地有项而服务端已无 → 一次轻提示再清。
    */
+  /**
+   * 此刻真摆在用户面前的卡（interaction id）。收口事件不带处理方，所以「另一端处理了」的
+   * 判据是「本端正看着这张卡 + 本端没点过」；渲染时刷新（见下方卡片选择器）。
+   */
+  const visibleCardIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const reconcileQueuedRef = useRef<(cid: string) => void>(() => {});
   reconcileQueuedRef.current = (cid: string) => {
     void reconcileQueuedTurns(cid).then((result) => {
@@ -1293,7 +1358,47 @@ export function ChatPage() {
     applyStopPhase("idle");
   };
 
-  const busy = isStopBusy(sending, stopPhase);
+  // 本端自发流（sending）与跟播另一端的回合（followRunning）都算「回合在跑」，二者互斥。
+  // 两者必须同权：另一端的回合在跑时再发，同样要走 mid-flight（排队 / 插话），不能当空闲开跑。
+  const turnInFlight = sending || followRunning;
+  const busy = isStopBusy(turnInFlight, stopPhase);
+
+  /**
+   * 认领主时间线：本端自发流（send / 出队开跑 / resume / 推进卡 / 重试）独占折叠权。
+   * 同步掐掉对话级订阅——它跟的是同一条对话，不让位就会把同一个回合再折一遍（双气泡）。
+   * 本端流收尾时经 {@link releaseLocalStream} 归还槽位，订阅随即自动归位。
+   */
+  const claimLocalStream = (ac: AbortController) => {
+    followRef.current?.abort();
+    followRef.current = null;
+    followTurnRef.current = null;
+    followAdoptRef.current = null;
+    abortRef.current = ac;
+  };
+
+  /**
+   * 本端自发流让出主时间线 → 订阅归位。返回是否真的由本流持有（沿用既有身份守卫语义：
+   * 被接管的陈旧流不许收尾）。必须显式发信号，不能只看 `sending`——冷卡可操作时它会提前落回
+   * false 解锁 composer，那时流还开着，订阅一挂上就会和它折同一个回合。
+   */
+  const releaseLocalStream = (ac: AbortController) => {
+    if (abortRef.current !== ac) return false;
+    abortRef.current = null;
+    setFollowEpoch((e) => e + 1);
+    return true;
+  };
+
+  /** 切换会话：订阅跟着对话走，连同它的回合游标与 busy 一起归零。 */
+  const resetFollowState = () => {
+    followRef.current?.abort();
+    followRef.current = null;
+    followTurnRef.current = null;
+    followAdoptRef.current = null;
+    expectLiveRunRef.current = false;
+    abortRef.current = null;
+    setFollowRunning(false);
+    setFollowReady(false);
+  };
 
   // Stick-to-bottom with upward-gesture detach + hysteresis (流式时上滑不强制贴底).
   // contentKey grows with the live tail so streaming tokens re-pin only while stuck.
@@ -1313,6 +1418,29 @@ export function ChatPage() {
     }, []),
   });
 
+  /**
+   * 收口事件的归属判定（B2 · P1 · 验收 5）：本端登记过 = 自己点的，静默收卡；另一端点的
+   * 留一张「已由另一端处理」——卡凭空消失会让用户以为是自己刚点的。
+   */
+  const noteForeignSettlement = (event: SSEEvent) => {
+    if (!conversationId) return;
+    const settled = settlementFromResolvedEvent(
+      event.type,
+      event.payload as Record<string, unknown> | undefined,
+    );
+    if (!settled) return;
+    if (
+      !isForeignSettlement(settled.interactionId, visibleCardIdsRef.current)
+    ) {
+      return;
+    }
+    noteRemoteSettlement({
+      interactionId: settled.interactionId,
+      conversationId,
+      kind: settled.kind,
+    });
+  };
+
   // Append an event to a specific turn (主路 / mid-flight 续流各写各的；勿依赖「最后一项」).
   // Lazily opens a userText-less turn when none exists yet (reattach on reopen).
   const appendEventToTurn = (turnId: string | null, event: SSEEvent) => {
@@ -1323,6 +1451,7 @@ export function ChatPage() {
     ) {
       return;
     }
+    noteForeignSettlement(event);
     // EPHEMERAL：冷 resume × live deferred — 同连接等待槽空，不是 409。
     if (event.type === "resume_deferred") {
       const p = event.payload as ResumeDeferredPayload;
@@ -1330,9 +1459,27 @@ export function ChatPage() {
         p.message_id &&
         (p.busy_reason === "wrap_up" || p.busy_reason === "live_turn")
       ) {
+        const cid = p.conversation_id || conversationId || "";
+        // 另一端放行的冷卡：settlement 已锁，这端再点也没有意义。先收成「已由另一端
+        // 处理」——留着「放行已记下…」会让用户以为是自己刚点的。
+        if (cid) {
+          for (const entry of listColdPending(cid)) {
+            if (entry.messageId !== p.message_id) continue;
+            if (!isForeignSettlement(entry.id, visibleCardIdsRef.current)) {
+              continue;
+            }
+            noteRemoteSettlement({
+              interactionId: entry.id,
+              conversationId: cid,
+              kind: entry.kind,
+            });
+            markColdResolved({ kind: entry.kind, id: entry.id });
+          }
+        }
+        // 本端自己发起的那张仍走「放行已记下…」（上面已收口的不再是 pending，自动跳过）。
         markColdDeferred({
           messageId: p.message_id,
-          conversationId: p.conversation_id || conversationId || undefined,
+          conversationId: cid || undefined,
           busyReason: p.busy_reason,
         });
       }
@@ -1348,6 +1495,8 @@ export function ChatPage() {
         midFlightByQueueRef.current.delete(p.queue_id);
         midFlightControllersRef.current.delete(ac);
       }
+      // 队列变动的权威是 GET：另一端取消掉一项后，余下各项的序号 / 深度都变了。
+      reconcileQueuedRef.current(conversationId);
       return;
     }
     // EPHEMERAL：出队开跑（sink 首帧，先于 message_start）→ 清条；用户泡由 beginTurn2 插入。
@@ -1357,6 +1506,8 @@ export function ChatPage() {
       removeQueuedTurn(conversationId, p.queue_id);
       // 已开跑：不再可按项取消；勿 abort（同连接续流 turn2）。
       midFlightByQueueRef.current.delete(p.queue_id);
+      // 出队同样挪动余下各项的序号 → 拉一次权威快照（禁轮询）。
+      reconcileQueuedRef.current(conversationId);
       return;
     }
     // turn_queued：发送路径已由 onQueued 本地即时写入；此处仅当信号缺本地项时对账
@@ -1493,9 +1644,6 @@ export function ChatPage() {
     }
   };
 
-  const appendEvent = (event: SSEEvent) =>
-    appendEventToTurn(activeTurnIdRef.current, event);
-
   // Pull the latest window's memory_updates into the thread-tail card. Best-effort; a
   // failure must never disrupt the settled turn.
   async function refreshMemoryUpdates(cid: string) {
@@ -1540,9 +1688,11 @@ export function ChatPage() {
       setError(null);
       setQueueDroppedHint(null);
       setSending(false);
+      resetFollowState();
       clearStopping();
       setPaused([]);
       clearColdInteractions();
+      resetRemoteSettlements();
       hostServerMessageIdRef.current = null;
       setHasMoreBefore(false);
       setMemoryUpdates([]);
@@ -1568,8 +1718,12 @@ export function ChatPage() {
     setError(null);
     setQueueDroppedHint(null);
     setSending(false);
+    resetFollowState();
     setPaused([]);
     clearColdInteractions();
+    resetRemoteSettlements();
+    // 人已经到场：撤掉「这个对话在等你」的全局提示条（也兜住断线期间漏收的 resolved）。
+    clearAiAttentionForConversation(conversationId);
     hostServerMessageIdRef.current = null;
     setRecoveredInteractions([]);
     setBrowserLiveOpen(false);
@@ -1627,29 +1781,33 @@ export function ChatPage() {
         if (cancelled) return;
         setHistory(messages);
         setHasMoreBefore(more);
-        // 「记忆已更新」卡 (③ §1.6): only the latest window carries them — pin at the thread
-        // tail. A (re)open/refresh loads them; after message_end we also poll (no firehose),
-        // and scroll-up (loadOlder) never overwrites them.
+        // 「记忆已更新」卡 (③ §1.6): only the latest window carries them — anchor them back into
+        // the thread. A (re)open/refresh loads them; after message_end we also poll (no
+        // firehose), and scroll-up (loadOlder) never overwrites them.
         setMemoryUpdates(memoryUpdates);
         // A draft's first message, handed off across the / → /c/:id remount: POST + stream
         // it now (the conversation exists but has no run yet, so attach would no-op).
         if (pendingFirstSend && pendingFirstSend.id === conversationId) {
           const p = pendingFirstSend;
           pendingFirstSend = null;
+          // 定面完成：这一发自己就是本端自发流，订阅等它跑完再归位。
+          setFollowReady(true);
           void send({ text: p.text, attachments: p.attachments });
           return;
         }
         const last = messages[messages.length - 1];
         if (last && last.role === "user") {
-          // 单一快照决定唯一可操作面：仅当有 detached live run 且无挂起帧时才 attach 续看。挂起即
+          // 单一快照决定唯一可操作面：仅当有 detached live run 且无挂起帧时才摆出「续看中」。挂起即
           // 收口 (②)：到达 checkpoint 的回合已 FINALIZE（run 结束、落帧），是纯 durable——「待恢复」
-          // 卡为唯一面，不再 attach（唯一的 live∩durable 重叠是 §六-1 薄网，帧没存住、paused 本就为
-          // 空，进不到这支）。liveRunning 与 attach 端点同源活性判据 → 一次读即定面，liveRunning/
+          // 卡为唯一面，不再续看（唯一的 live∩durable 重叠是 §六-1 薄网，帧没存住、paused 本就为
+          // 空，进不到这支）。liveRunning 与订阅端点同源活性判据 → 一次读即定面，liveRunning/
           // paused 不会互相矛盾（源头消除竞态，而非排序绕过）。
+          // 订阅本身无条件挂（下方 effect）：空闲对话也要停在上面等另一端起回合。
           const recovery = await recoveryLoaded;
           if (cancelled) return;
           if (recovery.liveRunning && recovery.paused.length === 0) {
-            void attachOnOpen(conversationId);
+            expectLiveRunRef.current = true;
+            setFollowRunning(true);
           }
         } else if (
           last &&
@@ -1661,7 +1819,11 @@ export function ChatPage() {
           const recovery = await recoveryLoaded;
           if (cancelled) return;
           if (recovery.liveRunning && recovery.paused.length === 0) {
-            void rejoinRunningHistory(conversationId);
+            // clear-then-fold：丢掉 running 影子行，订阅的重放段会把整段重建出来。
+            setHistory((h) => (h ? dropRunningAssistantTail(h) : h));
+            setTurns([]);
+            expectLiveRunRef.current = true;
+            setFollowRunning(true);
           } else if (!recovery.liveRunning && recovery.paused.length === 0) {
             setHistory((h) => {
               if (!h || h.length === 0) return h;
@@ -1682,6 +1844,8 @@ export function ChatPage() {
             });
           }
         }
+        // 定面完成 → 挂对话级订阅（无论是否有回合在跑：空闲对话也要停在上面等）。
+        setFollowReady(true);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -1699,6 +1863,7 @@ export function ChatPage() {
       cancelled = true;
       harvestRefreshRef.current.cancel();
       abortRef.current?.abort();
+      followRef.current?.abort();
       for (const ac of midFlightControllersRef.current) ac.abort();
       midFlightControllersRef.current.clear();
       midFlightByQueueRef.current.clear();
@@ -1706,6 +1871,211 @@ export function ChatPage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, navigate]);
+
+  // 对话级订阅（云对话多端同权 B2 · 验收 4）：会话定面后常驻，直到本端自发流来接管。
+  // 空闲时它只是挂在那儿收心跳；另一端一起回合，就在同一条连接上重放 + 跟播——「停在空闲对话
+  // 上也能自动出现新回合」就落在这里。让位与归位都走 followEpoch（本端流收尾 / 重连 / 回前台）。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: 路由/收口经 ref 取最新实现；列入依赖会让每次渲染都重挂连接
+  useEffect(() => {
+    if (!conversationId || !followReady) return;
+    // 主时间线的归属只看 abort 槽，不看 `sending`：插话 / 排队是旁路流，它也会把 `sending`
+    // 抬起来，但主路仍归订阅——跟着 `sending` 走会在插话期间把正在跟播的回合掐断。
+    if (abortRef.current) return;
+    const cid = conversationId;
+    const ac = new AbortController();
+    followRef.current = ac;
+    followTurnRef.current = null;
+    const openedAt = Date.now();
+    void (async () => {
+      try {
+        await followConversation(
+          cid,
+          (event) => {
+            if (followRef.current !== ac) return;
+            routeFollowEventRef.current(cid, event);
+          },
+          () => {
+            if (followRef.current !== ac) return;
+            settleFollowIdleRef.current(cid);
+          },
+          ac.signal,
+        );
+        // 服务端正常关流（代理空闲上限）。订阅是长驻的，重新挂上，否则「停在对话上」会静默
+        // 失效。用连接时长挡热循环：老后端不认 follow，会立刻 204 结束。
+        if (followRef.current !== ac) return;
+        if (Date.now() - openedAt >= FOLLOW_REHANG_MIN_MS) {
+          setFollowEpoch((e) => e + 1);
+        }
+      } catch (e) {
+        if (isAbort(e)) return;
+        // 已被接管（本端自发流 / 切会话 / 回前台重挂）：陈旧失败不许盖在新连接上。
+        if (followRef.current !== ac) return;
+        if (stopPhaseRef.current === "stopping") return;
+        setError({ text: RECONNECT_BANNER, reconnect: true });
+      } finally {
+        if (followRef.current === ac) followRef.current = null;
+      }
+    })();
+    return () => {
+      ac.abort();
+      if (followRef.current === ac) followRef.current = null;
+    };
+  }, [conversationId, followReady, followEpoch]);
+
+  /**
+   * 把订阅上的一帧折进正确的气泡。一条连接跨多个回合，所以回合切分只能按 `message_start` 的
+   * `message_id`：新回合的重放段先于它自己的边界注释到达，传输层无从提前分段。
+   * 同 id 重开（挂起恢复）仍是同一个气泡——契约如此，勿另开。
+   * ref 持有：连接是长驻的，闭包必须每次渲染刷新，否则折叠时读到陈旧的 history/turns。
+   */
+  const routeFollowEventRef = useRef<(cid: string, event: SSEEvent) => void>(
+    () => {},
+  );
+  routeFollowEventRef.current = (cid, event) => {
+    const plan = planFollowSegment({
+      cursor: followTurnRef.current,
+      messageId:
+        event.type === "message_start"
+          ? String((event.payload as MessageStartPayload).message_id || "")
+          : "",
+      adoptTurnId: followAdoptRef.current,
+      turns,
+      newTurnId: () => crypto.randomUUID(),
+    });
+    followTurnRef.current = plan.cursor;
+    // 本端是否「已经知道有这个回合」（打开会话 / 重连时摆的姿势）。知道 = 用户泡本就在历史里，
+    // 不必为它回读；不知道 = 另一端刚起的回合，本端快照里没有它的用户泡。
+    const expected = expectLiveRunRef.current;
+    if (plan.action !== "continue") {
+      // 收到回合就说明「有没有在跑」已有答案，续看姿势到此为止。
+      followAdoptRef.current = null;
+      expectLiveRunRef.current = false;
+    }
+    const turnId = plan.cursor.turnId;
+    if (plan.action === "adopt" && turnId) {
+      setTurns((t) => clearLiveTurnEvents(t, turnId));
+    } else if (plan.action === "open" && turnId) {
+      openFollowedTurn(cid, turnId, { reloadTranscript: !expected });
+    }
+    if (plan.action === "adopt" || plan.action === "open") {
+      setActiveTurn(turnId);
+      setFollowRunning(true);
+    }
+    if (!turnId) return; // 多余重放，已折过
+    appendEventToTurn(turnId, event);
+    // 订阅不随回合收口断流，所以 busy 只能由终态帧解除（本端自发流是靠流结束）。
+    if (event.type === "message_end") setFollowRunning(false);
+  };
+
+  /** 跟播一个回合：新开气泡；另一端起的还要回读历史，把本端快照里没有的用户泡补进来。 */
+  const openFollowedTurn = (
+    cid: string,
+    turnId: string,
+    opts: { reloadTranscript: boolean },
+  ) => {
+    setTurns((t) => [...t, { id: turnId, userText: null, events: [] }]);
+    if (!opts.reloadTranscript) return;
+    void reloadTranscript(cid, { dropRunningTail: true, dropFolded: true });
+  };
+
+  /**
+   * 订阅报「连上来时没有回合在跑」（旧 204 的对话级等价物）。本端没在等回合就是常态——
+   * 停在空闲对话上正该如此，什么都不做。本端在等（重连 / 重开续看）则说明回合在我们连上之前
+   * 就收口了：撤掉等不到终态的空转气泡，回读持久化终稿。
+   */
+  const settleFollowIdleRef = useRef<(cid: string) => void>(() => {});
+  settleFollowIdleRef.current = (cid) => {
+    const adopt = followAdoptRef.current;
+    followAdoptRef.current = null;
+    if (!expectLiveRunRef.current) return;
+    expectLiveRunRef.current = false;
+    setFollowRunning(false);
+    void reloadTranscript(cid, { staleTurnId: adopt, dropFolded: true });
+  };
+
+  /**
+   * 回读持久化窗口，history 与 turns 一起写——两者才不会各自旧一半。
+   *
+   * `dropFolded`：连同已 `message_end` 的 live turn 一起撤。它们的内容这次回读全在 REST 窗里，
+   * 留着就是双份（history 与 turns 在渲染上是简单拼接，没有去重）。
+   * `staleTurnId`：那个等不到终态的气泡（回合在我们连上之前就收口了），直接撤。
+   * `dropRunningTail`：正在跟播的那个回合的 running 影子行由 live 气泡承担，丢掉。
+   */
+  async function reloadTranscript(
+    cid: string,
+    opts: {
+      staleTurnId?: string | null;
+      dropFolded?: boolean;
+      dropRunningTail?: boolean;
+    } = {},
+  ) {
+    try {
+      const {
+        messages,
+        hasMoreBefore: more,
+        memoryUpdates: mem,
+      } = await getMessages(cid);
+      if (conversationIdRef.current !== cid) return;
+      setHistory(
+        opts.dropRunningTail ? dropRunningAssistantTail(messages) : messages,
+      );
+      setHasMoreBefore(more);
+      setMemoryUpdates(mem);
+      if (opts.dropFolded) {
+        setTurns((t) =>
+          dropSettledLiveTurns(removeLiveTurn(t, opts.staleTurnId ?? null)),
+        );
+      }
+    } catch {
+      /* 尽力而为：补不出历史也不该打断正在跟播的回合 */
+    }
+  }
+
+  // 回前台追齐（前后台生命周期）。切后台后 webview 被系统冻结——socket 早断，连空闲看门狗
+  // 的计时器都停摆；不主动探活就只能干等超时或用户手点「重连」。先 abort 那条冻着的读，让
+  // 它按 isAbort 早退（否则解冻瞬间它会补一条「连接中断」盖在新连接上）。
+  //
+  // 冻结期间回合可能已经跑完，而对话级订阅空闲不断流、不会再有 204 把状态收回来，所以这里靠
+  // 恢复快照（与打开会话同一判据）定面：还在跑就清 partial 重挂续看，没在跑就落地终稿再重新
+  // 停上去——停在空闲对话上回前台绝不该卡在 busy。
+  useAppForeground(() => {
+    if (!conversationId) return;
+    const cid = conversationId;
+    abortRef.current?.abort();
+    followRef.current?.abort();
+    const rejoinTurnId = activeTurnIdRef.current;
+    if (rejoinTurnId) {
+      // 同步摆好「续看」姿势：解冻后本端流的收尾会立刻让订阅归位，那时快照还没回来——
+      // 没有这个姿势，仍在跑的回合会被当成新回合另开气泡。
+      followAdoptRef.current = rejoinTurnId;
+      expectLiveRunRef.current = true;
+      setFollowRunning(true);
+    }
+    setFollowEpoch((e) => e + 1);
+    void refreshPaused(cid).then((recovery) => {
+      if (conversationIdRef.current !== cid) return;
+      if (!rejoinTurnId) return; // 本来就停在空闲对话上：重挂完事，别去动已有内容
+      // 快照读不到就按「可能还在跑」处理：续看着，订阅的空闲信号会兜住。
+      if (!recovery || recovery.liveRunning) return;
+      settleIdleConversation(cid);
+    });
+  });
+
+  /**
+   * 确认对话空闲（冻结期间回合已跑完）：撤掉等不到终态的空转气泡、落地终稿、清 busy。
+   * 订阅本身不用动——它停在这条对话上，等的就是下一个回合。
+   */
+  function settleIdleConversation(cid: string) {
+    setError(null);
+    expectLiveRunRef.current = false;
+    followAdoptRef.current = null;
+    followTurnRef.current = null;
+    setFollowRunning(false);
+    void reloadTranscript(cid, {
+      staleTurnId: activeTurnIdRef.current,
+      dropFolded: true,
+    });
+  }
 
   // Page strictly older messages in above the window (历史上翻分页). The oldest loaded
   // row's created_at is the cursor; we anchor the viewport (distance-from-bottom) so the
@@ -1850,6 +2220,15 @@ export function ChatPage() {
     });
   }, [conversationId, coldById, paused, coldHosts, history, turns]);
 
+  // 摆出去的卡登记进 ref，供收口事件判归属（只给用户真看得见的卡立「已由另一端处理」）。
+  visibleCardIdsRef.current = new Set<string>([
+    ...approvalCards.map((c) => c.id),
+    ...delegationCards.map((c) => c.id),
+    ...escalationCards.map((c) => c.id),
+    ...stageCards.map((c) => c.id),
+    ...visibleResumes.map((p) => p.checkpoint_id),
+  ]);
+
   // Cold actionable pending with stamp ⇒ unlock composer (desktop finalizeGenerating
   // parity). Submitting / resume_deferred wait keeps 提交中态 — do not clear sending.
   useEffect(() => {
@@ -1980,8 +2359,8 @@ export function ChatPage() {
     const outgoing = override?.attachments ?? attachments;
     if (!hasSendableDraft(text, outgoing) || !conversationId) return;
     if (stopPhaseRef.current === "stopping") return;
-    // Interactive mid-flight while a turn is already streaming.
-    if (!override && sending) {
+    // Interactive mid-flight while a turn is already streaming (本端自发或跟播另一端的都算).
+    if (!override && turnInFlight) {
       const delivery = deliveryOverride ?? defaultDelivery({ busy: true });
       void sendWhileBusy(text, delivery);
       return;
@@ -2024,7 +2403,7 @@ export function ChatPage() {
     ]);
 
     const ac = new AbortController();
-    abortRef.current = ac;
+    claimLocalStream(ac);
     try {
       await streamMessage(
         conversationId,
@@ -2050,13 +2429,12 @@ export function ChatPage() {
       if (isStoppingNow()) return;
       // A mid-stream drop no longer means the turn died (slice 1a: it runs detached) —
       // rejoin it (1b) rather than resending, which would double-run it.
-      await reconnect();
+      reconnect();
     } finally {
       signalPrimaryIdle();
       // Only settle sending if still the current op — a switch / takeover (reconnect /
       // mid-flight turn2) replaced the controller and owns the state now.
-      if (abortRef.current === ac) {
-        abortRef.current = null;
+      if (releaseLocalStream(ac)) {
         markStreamEnd();
       } else {
         inflightRef.current = Math.max(0, inflightRef.current - 1);
@@ -2145,7 +2523,7 @@ export function ChatPage() {
               ]);
             }
             setActiveTurn(queuedTurnId);
-            abortRef.current = ac;
+            claimLocalStream(ac);
           },
           onTurn2Event: (event) => {
             appendEventToTurn(queuedTurnId, event);
@@ -2170,9 +2548,7 @@ export function ChatPage() {
       if (trackedQueueId) {
         midFlightByQueueRef.current.delete(trackedQueueId);
       }
-      if (abortRef.current === ac) {
-        abortRef.current = null;
-      }
+      releaseLocalStream(ac);
       markStreamEnd();
     }
   }
@@ -2196,52 +2572,29 @@ export function ChatPage() {
   }
 
   // Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b). Resets
-  // the partial bubble (the replay re-sends the full transcript-so-far) then attaches:
-  // replay + live tail. On "none" the detached run already finished — reload the persisted
-  // transcript so the live turn is replaced by its saved reply. A second drop offers a
-  // manual 重连.
+  // the partial bubble (the replay re-sends the full transcript-so-far), marks it for the
+  // conversation subscription to 认领, and re-hangs that subscription — the replay refills
+  // the bubble and the live tail carries on. 回合真的已经收口时不再有 204 兜底，改由订阅的
+  // 空闲信号收口（settleFollowIdle：撤气泡 + 回读终稿）。一再失败就出手动「重连」。
   // 出队开跑后队尾可能是新 turn——目标须跟 activeTurnIdRef（与投影约定一致），禁 turns[-1]。
-  async function reconnect() {
+  function reconnect() {
     if (!conversationId) return;
     setError(null);
     clearStopping();
-    setSending(true);
     // SSE 重连后对账排队条（权威 GET）。
     reconcileQueuedRef.current(conversationId);
     const reconnectTurnId = activeTurnIdRef.current;
-    if (reconnectTurnId) setActiveTurn(reconnectTurnId);
-    setTurns((t) => clearLiveTurnEvents(t, reconnectTurnId));
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      const outcome = await attachStream(
-        conversationId,
-        appendEvent,
-        ac.signal,
-      );
-      if (outcome === "none" && abortRef.current === ac) {
-        setTurns((t) => removeLiveTurn(t, reconnectTurnId));
-        const {
-          messages,
-          hasMoreBefore: more,
-          memoryUpdates: mem,
-        } = await getMessages(conversationId);
-        if (abortRef.current === ac) {
-          setHistory(messages);
-          setHasMoreBefore(more);
-          setMemoryUpdates(mem);
-        }
-      }
-    } catch (e) {
-      if (isAbort(e)) return;
-      if (stopPhaseRef.current === "stopping") return;
-      setError({ text: RECONNECT_BANNER, reconnect: true });
-    } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
-      }
+    if (reconnectTurnId) {
+      setActiveTurn(reconnectTurnId);
+      setTurns((t) => clearLiveTurnEvents(t, reconnectTurnId));
+      followAdoptRef.current = reconnectTurnId;
+      expectLiveRunRef.current = true;
+      setFollowRunning(true);
     }
+    // 本端自发流让位（手点「重连」时它可能还卡着）：它的收尾会归还槽位并再促一次重挂。
+    abortRef.current?.abort();
+    followRef.current?.abort();
+    setFollowEpoch((e) => e + 1);
   }
 
   // P4: interrupted salvage → regenerate from the preceding user message (same endpoint
@@ -2273,7 +2626,7 @@ export function ChatPage() {
       },
     ]);
     const ac = new AbortController();
-    abortRef.current = ac;
+    claimLocalStream(ac);
     try {
       await regenerateStream(
         conversationId,
@@ -2293,98 +2646,16 @@ export function ChatPage() {
       }
       setError({ text: e instanceof Error ? e.message : "重试失败" });
     } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
-      }
-    }
-  }
-
-  // On reopen, rejoin a run that may still be live for the latest (reply-less) turn. Unlike
-  // reconnect there is no partial bubble to reset — the reopened transcript ends at the
-  // user message; appendEvent lazily opens the assistant bubble, so a 204 (nothing live)
-  // is a clean no-op with no flicker. Identity-guarded (`abortRef.current === ac`) so a
-  // conversation switch / takeover never lets this stale op clobber the next view.
-  async function attachOnOpen(cid: string) {
-    setSending(true);
-    // 续看 attach 亦对账（重开应用条空但队仍在 / 多端）。
-    reconcileQueuedRef.current(cid);
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      const outcome = await attachStream(cid, appendEvent, ac.signal);
-      if (outcome === "none" && abortRef.current === ac) {
-        // Finished / never ran / suspended — reload to catch a reply that landed between
-        // the history load and the attach (a suspended turn surfaces via durable resume).
-        const {
-          messages,
-          hasMoreBefore: more,
-          memoryUpdates: mem,
-        } = await getMessages(cid);
-        if (abortRef.current === ac) {
-          setHistory(messages);
-          setHasMoreBefore(more);
-          setMemoryUpdates(mem);
-        }
-      }
-    } catch (e) {
-      if (isAbort(e)) return;
-      if (stopPhaseRef.current === "stopping") return;
-      setError({ text: RECONNECT_BANNER, reconnect: true });
-    } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
-      }
-    }
-  }
-
-  // P4 clear-then-fold: history already shows a running overlay partial — drop it so the
-  // full journal replay does not double-fold tools/content, then attach live.
-  async function rejoinRunningHistory(cid: string) {
-    setError(null);
-    setSending(true);
-    reconcileQueuedRef.current(cid);
-    setHistory((h) => {
-      if (!h || h.length === 0) return h;
-      const last = h[h.length - 1];
-      if (last.role === "assistant") return h.slice(0, -1);
-      return h;
-    });
-    setTurns([]);
-    const ac = new AbortController();
-    abortRef.current = ac;
-    try {
-      const outcome = await attachStream(cid, appendEvent, ac.signal);
-      if (outcome === "none" && abortRef.current === ac) {
-        const {
-          messages,
-          hasMoreBefore: more,
-          memoryUpdates: mem,
-        } = await getMessages(cid);
-        if (abortRef.current === ac) {
-          setHistory(messages);
-          setHasMoreBefore(more);
-          setMemoryUpdates(mem);
-        }
-      }
-    } catch (e) {
-      if (isAbort(e)) return;
-      if (stopPhaseRef.current === "stopping") return;
-      setError({ text: RECONNECT_BANNER, reconnect: true });
-    } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
-      }
+      if (releaseLocalStream(ac)) setSending(false);
     }
   }
 
   // 挂起即收口 (②): re-read the conversation's recovery snapshot — used when a live stream
-  // ends at a checkpoint (appendEvent sees message_end finish_reason=paused) so the just-
-  // finalized turn's durable ResumeCard surfaces. Live paint prefers cold IX; this syncs
-  // the recovery shell. Cheap + idempotent; best-effort.
-  async function refreshPaused(cid: string) {
+  // ends at a checkpoint (message_end finish_reason=paused) so the just-finalized turn's
+  // durable ResumeCard surfaces. Live paint prefers cold IX; this syncs the recovery shell.
+  // Cheap + idempotent; best-effort. 回前台还拿它的 `liveRunning` 定「回合是否还在跑」——
+  // 对话级订阅空闲不断流，没有 204 可当那个判据了。读失败返回 null（调用方按未知处理）。
+  async function refreshPaused(cid: string): Promise<TurnRecovery | null> {
     try {
       const r = await getRecovery(cid);
       setPaused(r.paused);
@@ -2398,8 +2669,10 @@ export function ChatPage() {
           status: "pending",
         });
       }
+      return r;
     } catch {
       /* best-effort: never break the just-finished turn on a recovery refresh */
+      return null;
     }
   }
 
@@ -2421,6 +2694,8 @@ export function ChatPage() {
     );
     const resolution = { decision, note, selected };
     for (const e of coldTargets) {
+      // 登记在 POST 之前：随后回来的 `*_resolved` / `resume_deferred` 才认得出是自己点的。
+      markLocalSettlement(e.id);
       markColdSubmitting({
         kind: e.kind,
         id: e.id,
@@ -2446,7 +2721,7 @@ export function ChatPage() {
     if (prepared.history !== history) setHistory(prepared.history);
 
     const ac = new AbortController();
-    abortRef.current = ac;
+    claimLocalStream(ac);
     try {
       // stop / adjust / ask·debate：不带组队修正；delegate continue 才附写盘收紧
       //（确认面不附 excluded_run_ids / model_overrides；契约类型字段仍可保留）。
@@ -2479,6 +2754,19 @@ export function ChatPage() {
         }
       }
     } catch (err) {
+      // 挂起帧已经不在了 = 另一端先放行了这张卡（先到先得）。别复活它、更别当掉线去重连：
+      // 收口成「已由另一端处理」，否则用户只会一点再点、次次 404。
+      if (err instanceof StreamHttpError && err.status === 404) {
+        for (const entry of coldTargets) {
+          noteRemoteSettlementFromReceipt({
+            interactionId: entry.id,
+            conversationId,
+            kind: entry.kind,
+          });
+          markColdResolved({ kind: entry.kind, id: entry.id });
+        }
+        return;
+      }
       for (const entry of coldTargets) {
         const cur = getColdInteraction(entry.id);
         // Deferred 后 settlement 已锁：断连不清「已记下」；仅 claim 前失败才恢复可编辑。
@@ -2487,12 +2775,9 @@ export function ChatPage() {
       }
       if (isAbort(err)) return;
       if (stopPhaseRef.current === "stopping") return;
-      await reconnect();
+      reconnect();
     } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
-      }
+      if (releaseLocalStream(ac)) setSending(false);
     }
   }
 
@@ -2509,6 +2794,8 @@ export function ChatPage() {
     setRecoveredInteractions((prev) =>
       prev.filter((a) => a.id !== stageCardId),
     );
+    // 登记在 POST 之前：随后回来的 `stage_card_resolved` 才认得出是自己点的。
+    markLocalSettlement(stageCardId);
     setError(null);
     clearStopping();
     setSending(true);
@@ -2516,7 +2803,7 @@ export function ChatPage() {
     setActiveTurn(turnId);
     setTurns((t) => [...t, { id: turnId, userText: null, events: [] }]);
     const ac = new AbortController();
-    abortRef.current = ac;
+    claimLocalStream(ac);
     try {
       await resolveStageCardStream(
         conversationId,
@@ -2530,17 +2817,27 @@ export function ChatPage() {
       if (e instanceof StreamHttpError && e.status === 422) {
         // 检定失败：撤回本空回合（按 id，禁 slice(-1)——期间可能已插排队泡）
         setTurns((t) => removeLiveTurn(t, turnId));
+        releaseLocalStream(ac);
         setSending(false);
-        abortRef.current = null;
         throw e;
       }
-      if (stopPhaseRef.current === "stopping") return;
-      await reconnect();
-    } finally {
-      if (abortRef.current === ac) {
-        setSending(false);
-        abortRef.current = null;
+      if (
+        e instanceof StreamHttpError &&
+        (e.status === 404 || e.status === 410)
+      ) {
+        // 卡已被另一端推进过（先到先得）：撤回本空回合并如实收口，别当掉线去重连。
+        setTurns((t) => removeLiveTurn(t, turnId));
+        noteRemoteSettlementFromReceipt({
+          interactionId: stageCardId,
+          conversationId,
+          kind: "stage_card",
+        });
+        return;
       }
+      if (stopPhaseRef.current === "stopping") return;
+      reconnect();
+    } finally {
+      if (releaseLocalStream(ac)) setSending(false);
     }
   }
 
@@ -2567,6 +2864,48 @@ export function ChatPage() {
     el.style.height = "0px";
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
   }, [input]);
+
+  // 「记忆已更新」卡的落点 (③ §1.6): 按 anchorAt（固化窗口末尾）插到它所总结那一轮的末尾，
+  // 锚不到更晚回合的留在线程尾部。
+  const memoryAnchors = useMemo(
+    () => placeMemoryUpdates(history ?? [], memoryUpdates),
+    [history, memoryUpdates],
+  );
+
+  // 一条历史消息的渲染（用户气泡 / 助手回合）。抽成函数是为了在它前面插锚定的记忆卡——
+  // 被隐藏的消息（系统收口、空内容）返回 null，卡不能跟着一起消失。
+  function renderHistoryRow(m: MessageDetail, isLast: boolean) {
+    if (m.role !== "user")
+      return (
+        <HistoryAssistant
+          key={m.id}
+          m={m}
+          conversationId={conversationId ?? null}
+          onFill={fillComposer}
+          isLast={isLast}
+          onRetry={isLast ? () => void retryInterrupted() : undefined}
+        />
+      );
+    const atts = m.attachments ?? [];
+    if (!m.content && atts.length === 0) return null;
+    // 异步团队收口：识别后隐藏（不渲染用户气泡，避免露出模型提示词）
+    if (
+      m.origin === "execution_harvest" ||
+      (typeof m.content === "string" && m.content.startsWith("【系统收口】"))
+    ) {
+      return null;
+    }
+    return (
+      <div key={m.id} className="bubble user">
+        {m.content ? (
+          <CollapsibleUserText contentKey={m.content}>
+            {m.content}
+          </CollapsibleUserText>
+        ) : null}
+        <AttachmentChips items={atts} />
+      </div>
+    );
+  }
 
   return (
     <div className="screen">
@@ -2633,41 +2972,17 @@ export function ChatPage() {
             </button>
           )}
           {history?.map((m, i) => {
-            if (m.role !== "user")
-              return (
-                <HistoryAssistant
-                  key={m.id}
-                  m={m}
-                  conversationId={conversationId ?? null}
-                  onFill={fillComposer}
-                  isLast={i === history.length - 1 && turns.length === 0}
-                  onRetry={
-                    i === history.length - 1 && turns.length === 0
-                      ? () => void retryInterrupted()
-                      : undefined
-                  }
-                />
-              );
-            const atts = m.attachments ?? [];
-            if (!m.content && atts.length === 0) return null;
-            // 异步团队收口：识别后隐藏（不渲染用户气泡，避免露出模型提示词）
-            if (
-              m.role === "user" &&
-              (m.origin === "execution_harvest" ||
-                (typeof m.content === "string" &&
-                  m.content.startsWith("【系统收口】")))
-            ) {
-              return null;
-            }
+            const row = renderHistoryRow(
+              m,
+              i === history.length - 1 && turns.length === 0,
+            );
+            const anchored = memoryAnchors.before.get(m.id);
+            if (!anchored) return row;
             return (
-              <div key={m.id} className="bubble user">
-                {m.content ? (
-                  <CollapsibleUserText contentKey={m.content}>
-                    {m.content}
-                  </CollapsibleUserText>
-                ) : null}
-                <AttachmentChips items={atts} />
-              </div>
+              <Fragment key={`anchor-${m.id}`}>
+                <MemoryUpdateCard updates={anchored} />
+                {row}
+              </Fragment>
             );
           })}
           {turns.map((turn) => {
@@ -2694,10 +3009,9 @@ export function ChatPage() {
               </div>
             );
           })}
-          {/* 「记忆已更新」卡 (③ §1.6): offline-consolidation results pinned at the thread tail
-              — it post-dates every turn (consolidation folds a window of finished turns). The
-              card filters empty updates itself, so the common (none) case renders nothing. */}
-          <MemoryUpdateCard updates={memoryUpdates} />
+          {/* 锚不到更晚用户消息的记忆卡 (③ §1.6): 最近一轮的固化结果，留在线程尾部。卡自己
+              会滤掉空更新，所以最常见的「没有」情况什么也不渲染。 */}
+          <MemoryUpdateCard updates={memoryAnchors.tail} />
         </div>
         {!atBottom && (history?.length || turns.length) ? (
           <button
@@ -2711,6 +3025,9 @@ export function ChatPage() {
           </button>
         ) : null}
       </div>
+
+      {/* 另一端点掉的卡就地收口成只读条（B2 · 验收 5）：直接消失会让人以为是自己点的。 */}
+      <RemoteSettledCards conversationId={conversationId ?? null} />
 
       {approvalCards.map((pending) =>
         conversationId ? (
@@ -2755,7 +3072,9 @@ export function ChatPage() {
               setRecoveredInteractions((prev) =>
                 prev.filter((a) => a.id !== card.id),
               );
-              void attachOnOpen(conversationId);
+              // 放行可能唤醒一个回合——对话级订阅本就停在这条对话上会自动跟播，
+              // 这里只补一次排队条对账（重开应用条空但队仍在 / 多端）。
+              reconcileQueuedRef.current(conversationId);
             }}
           />
         ))}
@@ -2811,7 +3130,7 @@ export function ChatPage() {
               <button
                 type="button"
                 className="link reconnect"
-                onClick={() => void reconnect()}
+                onClick={() => reconnect()}
               >
                 重连
               </button>

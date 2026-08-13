@@ -16,8 +16,11 @@ const config: CapacitorConfig = {
     SystemBars: {
       style: "LIGHT",
     },
-    // Show the「需要你」pause push even when the app is in the foreground (iOS otherwise
-    // suppresses foreground alerts). Android shows foreground notifications regardless.
+    // iOS-only knob: without it iOS suppresses the「需要你」pause alert while the app is
+    // foregrounded. Android ignores presentationOptions entirely — a foreground message just
+    // fires the JS `pushNotificationReceived` event and posts no tray notification. That gap is
+    // covered on purpose by the in-app AiAttentionBanner (firehose `ai_attention`), so don't
+    // "fix" it by posting a local notification from JS.
     PushNotifications: {
       presentationOptions: ["badge", "sound", "alert"],
     },

@@ -2,6 +2,10 @@ import {
   type ResolveInteractionBody,
   resolveInteraction,
 } from "@/api/interaction";
+import {
+  markLocalSettlement,
+  noteRemoteSettlementFromReceipt,
+} from "@/lib/remoteSettlement";
 // The interactive pause card — the actionable surface for a turn blocked on the user
 // (前端技术与架构 §七 · 交互式暂停放行). The conformance-checked fold computes
 // `interactions[]`; this turns an approval leaf into buttons that POST the decision to
@@ -26,6 +30,7 @@ const TOOL_LABELS: Record<string, string> = {
   file_delete: "删除文件",
   file_move: "移动文件",
   code_execute: "执行代码",
+  delete_folder: "删除文件夹",
 };
 
 /** 本轮内所有文件改动 — 对齐后端 ``approval_class_tool_names()``
@@ -43,7 +48,9 @@ export const FILE_OP_TOOLS: ReadonlySet<string> = new Set([
 const PER_CALL_TOOLS: ReadonlySet<string> = new Set();
 
 function primaryArg(args: Record<string, unknown>): string | null {
-  for (const key of ["path", "file_path", "command", "code"]) {
+  // delete_folder 只带 folder_id；``folder_name`` 由后端按权威名册补，
+  // 不是模型自报——一串 UUID 用户审不了。
+  for (const key of ["folder_name", "path", "file_path", "command", "code"]) {
     const v = args[key];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
@@ -69,8 +76,21 @@ export function PauseCard({
     if (busy) return;
     setBusy(true);
     setErr(null);
+    // 登记在 POST 之前：抢先回来的 `approval_resolved` 才认得出是自己点的（B2 · 验收 5）。
+    markLocalSettlement(pending.id);
     try {
-      await resolveInteraction(conversationId, pending.id, body);
+      const outcome = await resolveInteraction(
+        conversationId,
+        pending.id,
+        body,
+      );
+      if (outcome === "already_processed") {
+        noteRemoteSettlementFromReceipt({
+          interactionId: pending.id,
+          conversationId,
+          kind: "approval",
+        });
+      }
       onResolved?.();
     } catch (e) {
       setErr(e instanceof Error ? e.message : "放行失败");

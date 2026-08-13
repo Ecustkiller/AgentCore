@@ -408,6 +408,20 @@ export function AssistantMessageFooter({
   );
 }
 
+/** 「曾中断恢复」：崩溃重驱把这条回合原地跑完了（D5 归属原回合）。诚实优先——
+ *  成果虽然完整，也不许静默假装它没断过。桌面同款文案。 */
+export function RecoveredChip() {
+  return (
+    <div
+      className="finish-chip"
+      data-testid="recovered-chip"
+      title="本回合中途中断，系统已自动接着跑完；成果就在这条消息里。"
+    >
+      曾中断恢复
+    </div>
+  );
+}
+
 /** Top-of-bubble chip for abnormal turn endings. */
 export function FinishReasonChip({
   reason,

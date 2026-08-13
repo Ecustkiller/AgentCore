@@ -34,6 +34,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Tray look for the「需要你」push. Without these, FCM falls back to the launcher icon
+             and Android 5+ silhouettes it — our adaptive color icon then renders as a white
+             square. ic_stat_agentcore is the white-on-transparent glyph; colorAccent is the
+             brand tint the system paints behind/around it. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_agentcore" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/colorAccent" />
     </application>
 
     <!-- Permissions -->

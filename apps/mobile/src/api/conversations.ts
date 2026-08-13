@@ -69,6 +69,8 @@ export interface MessageDetail {
   cost?: Schemas["CostBreakdown"] | null;
   /** 消息来源（如 execution_harvest 系统收口）；正文前缀为旧数据兜底. */
   origin?: string | null;
+  /** 曾中断恢复（``usage.recovered``）：崩溃重驱把本回合原地跑完，标记如实保留. */
+  recovered?: boolean | null;
   /** 回合日志关联 id（messages.trace_id）—「复制排查包」冷启动. */
   trace_id?: string | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON. */
@@ -205,6 +207,10 @@ export type MemoryUpdateItem = Schemas["MemoryUpdateItemView"];
 export interface MemoryUpdate {
   id: string;
   createdAt: string;
+  /** 本次固化窗口最后一条消息的 created_at = 这张卡描述的线程位置（`createdAt` 只是固化
+   *  跑起来的时刻，比它总结的那一轮晚）。语义 / 配额卡与旧数据为 null → 锚定退回
+   *  `createdAt`（lib/memoryAnchors）。 */
+  anchorAt?: string | null;
   kind: "episodic" | "semantic";
   summary?: string | null;
   items: MemoryUpdateItem[];
@@ -271,6 +277,7 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
     })),
     cost: row.cost ?? null,
     origin: row.origin ?? null,
+    recovered: row.recovered ?? null,
     trace_id: row.trace_id ?? null,
     duration_ms: row.duration_ms ?? null,
     usage: row.usage ?? null,
@@ -300,6 +307,7 @@ export async function getMessages(
     memoryUpdates: (data.memory_updates ?? []).map((u) => ({
       id: u.id,
       createdAt: u.created_at,
+      anchorAt: u.anchor_at ?? null,
       kind: u.kind === "episodic" ? "episodic" : "semantic",
       summary: u.summary ?? null,
       items: u.items ?? [],

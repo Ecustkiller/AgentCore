@@ -23,3 +23,20 @@ export function removeLiveTurn<T extends { id: string }>(
   if (!liveTurnId) return turns;
   return turns.filter((t) => t.id !== liveTurnId);
 }
+
+/**
+ * clear-then-fold：丢掉历史末尾那条 `running` 的助手影子行，让 live 回合独占它的气泡。
+ *
+ * 一条仍在跑的回合在 `getMessages` 里是一行 `status: "running"` 的部分稿；同一个回合又会经
+ * SSE 重放整段折进 live turn。两者同时在场就是同一回合渲染两遍——本端自发流如此，跟播另一端
+ * 起的回合（回读历史补用户泡）亦如此。只掐末尾且只掐 running：更早的中断回合是历史事实。
+ */
+export function dropRunningAssistantTail<
+  T extends { role: string; status?: string | null },
+>(messages: T[]): T[] {
+  const last = messages[messages.length - 1];
+  if (!last || last.role !== "assistant" || last.status !== "running") {
+    return messages;
+  }
+  return messages.slice(0, -1);
+}

@@ -1,7 +1,9 @@
 import { bootstrapAuth } from "@/api/auth";
 import { getTokens } from "@/api/client";
+import { AiAttentionBanner } from "@/components/AiAttentionBanner";
 import { OutdatedAndroidBanner } from "@/components/OutdatedAndroidBanner";
 import { PushBridge } from "@/components/PushBridge";
+import { RealtimeBridge } from "@/components/RealtimeBridge";
 import { TabLayout } from "@/components/TabLayout";
 import { startAndroidUpdates } from "@/lib/androidUpdates";
 import { ChatPage } from "@/pages/ChatPage";
@@ -103,6 +105,8 @@ function AppShell() {
 
   // PushBridge mounts the native push listeners (tap → deep-link); it lives outside the gate
   // so it's present even during the loading splash, catching a cold-start notification tap.
+  // RealtimeBridge 同样常驻：它只订阅前后台切换，firehose 本身按 token 自守（登出后回前台
+  // 不会误开），所以不必等 gate。
   const content =
     state.phase === "loading" ? (
       <Splash />
@@ -247,7 +251,9 @@ function AppShell() {
   return (
     <>
       <PushBridge />
+      <RealtimeBridge />
       <OutdatedAndroidBanner />
+      <AiAttentionBanner />
       {content}
     </>
   );

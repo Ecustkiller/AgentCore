@@ -11,7 +11,7 @@ export function workspaceFileDownloadError(
   const scope = opts?.scope ?? "conversation";
   if (status === 404) {
     return scope === "workspace"
-      ? "云端工作区没有这个文件（可能未同步、已删除，或写在别的项目桌）。"
+      ? "云端工作区没有这个文件（可能未同步、已删除，或写在别的文件夹桌）。"
       : "云端工作区没有这个文件（可能只在电脑本机、未同步，或路径不对）。";
   }
   if (status === 409) {
@@ -29,4 +29,4 @@ export const FILE_NOT_IN_CLOUD_TREE =
 
 /** 本机传统会话文件页空态 / 横幅。 */
 export const LOCAL_WORKSPACE_MOBILE_HINT =
-  "此对话绑定的是本机文件夹，文件在电脑本地。手机只能浏览云端工作区——请在桌面端打开，或改用云协作项目。";
+  "此对话绑定的是本机文件夹，文件在电脑本地。手机只能浏览云端工作区——请在桌面端打开，或改用云文件夹。";

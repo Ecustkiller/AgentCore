@@ -10,6 +10,8 @@ import {
   setTokens,
 } from "@/api/client";
 import { disablePush, enablePush } from "@/api/push";
+import { startRealtime, stopRealtime } from "@/api/realtime";
+import { clearAiAttention } from "@/lib/aiAttention";
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import type { components } from "@/types/api.generated";
 
@@ -72,6 +74,7 @@ export async function login(username: string, password: string): Promise<User> {
     refresh_token: data.refresh_token,
   });
   void enablePush();
+  startRealtime();
   return data.user ?? (await me());
 }
 
@@ -96,6 +99,8 @@ export async function logout(): Promise<void> {
       } satisfies Schemas["TokenRevokeRequest"]),
     }).catch(() => {});
   }
+  stopRealtime();
+  clearAiAttention();
   clearTokens();
 }
 
@@ -131,6 +136,7 @@ async function runBootstrap(): Promise<BootstrapResult> {
       const res = await apiFetch("/v1/auth/me");
       if (res.ok) {
         void enablePush();
+        startRealtime();
         return { kind: "authenticated" };
       }
       if (res.status !== 401) {

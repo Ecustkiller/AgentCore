@@ -10,11 +10,13 @@ import {
 } from "../queuedTurns";
 import {
   QUEUE_DROPPED_HINT,
+  __resetReconcileGenerationsForTests,
   reconcileQueuedTurns,
 } from "../reconcileQueuedTurns";
 
 afterEach(() => {
   __resetQueuedTurnsForTests();
+  __resetReconcileGenerationsForTests();
 });
 
 describe("queuedTurns store", () => {
@@ -264,5 +266,45 @@ describe("reconcileQueuedTurns", () => {
     ]);
     expect(result.droppedLocalIds).toEqual([]);
     expect(listQueuedTurns("c1")[0]?.interjectionId).toBe("inj-9");
+  });
+
+  // 多端同权后触发源变多（另一端 Queue / 取消 / 出队各来一发）——并发对账不得互相打架。
+  it("拉取期间本端新排的项不算失效（快照只对它看见的那一刻负责）", async () => {
+    const result = await reconcileQueuedTurns("c1", async () => {
+      // GET 在途时用户又发了一条：服务端这份快照里当然没有它。
+      upsertQueuedTurn({
+        queueId: "q-mine",
+        conversationId: "c1",
+        content: "刚发的",
+        position: 2,
+        queueDepth: 2,
+      });
+      return [{ queueId: "q-other", content: "另一端的", position: 1 }];
+    });
+    expect(result.droppedLocalIds).toEqual([]);
+    expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual([
+      "q-other",
+      "q-mine",
+    ]);
+  });
+
+  it("乱序回来的旧快照不许盖新的（只有最后发起的那次落地）", async () => {
+    let releaseFirst: (() => void) | null = null;
+    const first = reconcileQueuedTurns(
+      "c1",
+      () =>
+        new Promise((resolve) => {
+          releaseFirst = () =>
+            resolve([{ queueId: "stale", content: "旧的", position: 1 }]);
+        }),
+    );
+    const second = await reconcileQueuedTurns("c1", async () => [
+      { queueId: "fresh", content: "新的", position: 1 },
+    ]);
+    expect(second.superseded).toBeUndefined();
+    (releaseFirst as unknown as () => void)();
+    const firstResult = await first;
+    expect(firstResult.superseded).toBe(true);
+    expect(listQueuedTurns("c1").map((e) => e.queueId)).toEqual(["fresh"]);
   });
 });

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Tray notification small icon (referenced by com.google.firebase.messaging.default_notification_icon).
+
+  Android renders the small icon from its ALPHA CHANNEL only, so this has to be a flat white
+  glyph on transparency — anything with color or gradient collapses into a white blob. The brand
+  tint is applied by the system from default_notification_color, not from here.
+
+  The mark is BrandMarkIcon (apps/desktop/src/renderer/components/brand/BrandMark.tsx) — three
+  linked nodes — kept in its original 32-unit coordinates so drift against the brand mark stays
+  visible; the group scales it into the 24dp box with ~1.2dp of breathing room. The orbit launcher
+  icon is deliberately NOT the source: its hairline ellipses and glow are exactly what the
+  silhouette pass destroys.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <group
+        android:scaleX="0.96"
+        android:scaleY="0.96"
+        android:translateX="-3.36"
+        android:translateY="-2.88">
+
+        <!-- Nodes: circles at (16,8) / (8,23) / (24,23), r=3.25. -->
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M16,4.75 a3.25,3.25 0 1,1 0,6.5 a3.25,3.25 0 1,1 0,-6.5 Z M8,19.75 a3.25,3.25 0 1,1 0,6.5 a3.25,3.25 0 1,1 0,-6.5 Z M24,19.75 a3.25,3.25 0 1,1 0,6.5 a3.25,3.25 0 1,1 0,-6.5 Z" />
+
+        <!-- Links between the nodes. -->
+        <path
+            android:pathData="M14.2,10.6 L9.8,20.4 M17.8,10.6 L22.2,20.4 M11.2,23 L20.8,23"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2"
+            android:strokeLineCap="round" />
+
+    </group>
+
+</vector>

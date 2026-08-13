@@ -18,14 +18,21 @@ export type ResolveInteractionBody =
   | Schemas["ResolveDelegationAuthorizationInteraction"];
 
 /**
+ * 收口结果。`already_processed` = 这张卡在服务端已经结掉了——多端同权下先到先得，
+ * 后到的那端得如实说「已由另一端处理」，而不是静静地什么都不发生（B2 · 验收 5）。
+ */
+export type ResolveOutcome = "settled" | "already_processed";
+
+/**
  * POST a paused interaction's answer; the live SSE stream resumes.
- * 404 is swallowed (stale interaction — stream terminal event settles UI).
+ * 200 `{status:"already_processed"}`（后端 registry 已 settle）与 404（挂起项已不在）
+ * 都归 `already_processed`：卡是陈旧的，调用方据此收口文案。
  */
 export async function resolveInteraction(
   conversationId: string,
   interactionId: string,
   body: ResolveInteractionBody,
-): Promise<void> {
+): Promise<ResolveOutcome> {
   const res = await apiFetch(
     `/v1/conversations/${conversationId}/interactions/${interactionId}`,
     {
@@ -34,9 +41,16 @@ export async function resolveInteraction(
       body: JSON.stringify(body),
     },
   );
-  if (!res.ok && res.status !== 404) {
+  if (res.status === 404) return "already_processed";
+  if (!res.ok) {
     throw new Error(`放行失败 (${res.status})`);
   }
+  const payload = (await res.json().catch(() => null)) as {
+    status?: string;
+  } | null;
+  return payload?.status === "already_processed"
+    ? "already_processed"
+    : "settled";
 }
 
 /**
@@ -53,14 +67,14 @@ export type EscalationUserDecision =
  * POST the user's call on a worker's blocking escalate to the SAME unified resolve endpoint
  * (keyed by `escalation_id`). The suspending tool's awaiter — never this route — emits
  * `escalation_resolved` on the live stream, which folds the run's pending escalation to
- * resolved/timeout and unmounts the card. A 404 (already closed) is swallowed by
- * {@link resolveInteraction}; any other failure propagates so the card can re-enable.
+ * resolved/timeout and unmounts the card. 已被另一端结掉时返回 `already_processed`
+ * （见 {@link resolveInteraction}）；其它失败照抛，卡自己恢复可点。
  */
 export function decideEscalation(
   conversationId: string,
   escalationId: string,
   decision: EscalationUserDecision,
-): Promise<void> {
+): Promise<ResolveOutcome> {
   return resolveInteraction(conversationId, escalationId, {
     kind: "escalation",
     answer: decision.kind === "answer" ? decision.answer : "",

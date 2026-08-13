@@ -17,6 +17,7 @@ import {
   fold,
 } from "@/protocol/fold";
 import type { SSEEvent } from "@agentcore/contract-types";
+import { turnElapsedMs } from "@agentcore/protocol-fold-kit";
 import { useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -111,6 +112,7 @@ export function PreviewPage() {
         runToolCalls,
         workerToolPhases,
         evidenceLedger: debateEvidenceLedger,
+        elapsedMs: turnElapsedMs(events),
       }
     : undefined;
 

@@ -4,6 +4,7 @@
     <color name="shellBackground">#FFFFFF</color>
     <color name="colorPrimary">#FFFFFF</color>
     <color name="colorPrimaryDark">#FFFFFF</color>
-    <!-- Approximate mobile-light accent for residual AppCompat chrome. -->
+    <!-- Approximate mobile-light accent for residual AppCompat chrome, and the FCM
+         default_notification_color tint (see AndroidManifest) — keep it a real brand accent. -->
     <color name="colorAccent">#2F6FED</color>
 </resources>

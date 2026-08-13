@@ -14,6 +14,7 @@ import type {
   ApprovalResolvedPayload,
   AskAssumption,
   AskQuestion,
+  AutoFolderCreatedPayload,
   CheckpointRequiredPayload,
   CitationsPayload,
   ContentDeltaPayload,
@@ -467,6 +468,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   /** journal 内最后一条 `execution_completed.status`（若有）→ 投影到 turn/execution 终态。 */
   let fromExecutionCompleted: TurnStatus | null = null;
   let turnWarning: string | null = null;
+  let autoFolder: ProjectedTurn["autoFolder"] = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
   const teamNotes: ProjectedTeamNote[] = [];
   const userInterjections: {
@@ -1200,6 +1202,11 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         turnWarning = (ev.payload as TurnWarningPayload).message;
         break;
       }
+      case "auto_folder_created": {
+        const p = ev.payload as AutoFolderCreatedPayload;
+        autoFolder = { folderId: p.folder_id, name: p.name };
+        break;
+      }
       case "team_synthesis_preview": {
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
         break;
@@ -1325,6 +1332,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     teamSynthesisPreview,
     deliveryStatus,
     turnWarning,
+    autoFolder,
     teamNotes,
     userInterjections,
   };
@@ -1683,6 +1691,11 @@ export function extractStageCardTraces(
 export type EscalationSlotEsc = RunEscalation & {
   /** Wire `browser_login` — 登录等待 escalate；缺省 / false 不写。 */
   browserLogin?: boolean;
+  /**
+   * Wire `timeout_seconds` — 运维配置的等待上限；缺省 = 默认部署的无限期等待，
+   * 卡面据此二选一（见 `lib/escalationWaitCopy`），不得无条件承诺自动按假设继续。
+   */
+  timeoutSeconds?: number;
 };
 
 /** Timeline-slot lookup for escalations (统一时间线二期): id → card body. Transport-only
@@ -1732,6 +1745,9 @@ export function extractEscalationSlots(
           ...(p.awaiting === "ceo" ? { awaiting: "ceo" as const } : {}),
           // Transport-only: keep ProjectedRun.escalations golden-clean.
           ...(p.browser_login === true ? { browserLogin: true as const } : {}),
+          ...(typeof p.timeout_seconds === "number" && p.timeout_seconds > 0
+            ? { timeoutSeconds: p.timeout_seconds }
+            : {}),
         },
       });
     } else if (ev.type === "escalation_resolved") {

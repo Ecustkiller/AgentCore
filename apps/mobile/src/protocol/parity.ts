@@ -146,7 +146,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   escalation_resolved: {
     verdict: "ported",
-    surface: "AssistantView · 升级收束轻行",
+    surface:
+      "AssistantView · 升级收束轻行；另一端**的人**拍的 → RemoteSettledCards「已由另一端处理」（answeredByAPerson 排除主管仲裁 / 按假设 / 超时兜底，口径同桌面）",
   },
 
   // —— 辩论（事件 fold 有面；相对桌面赛事页/站队/掌舵为有意精简）——
@@ -201,22 +202,22 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   turn_queued: {
     verdict: "ported",
     surface:
-      "ChatPage · turn_queued 为变了信号（发送路径本地即时写条；缺本地 queue_id 则 GET 对账；排队期不插主时间线用户泡；degraded_from=steer 保留「· 插话暂不可用」）",
+      "ChatPage · turn_queued 为变了信号（发送路径本地即时写条；缺本地 queue_id 则 GET 对账——另一端排的即走这支；排队期不插主时间线用户泡；degraded_from=steer 保留「· 插话暂不可用」）",
   },
   turn_queue_started: {
     verdict: "ported",
     surface:
-      "ChatPage · 出队开跑：插主时间线用户泡 + 按 queue_id 清 queuedTurns 条（fold no-op）",
+      "ChatPage · 出队开跑：插主时间线用户泡 + 按 queue_id 清 queuedTurns 条，再 GET 对账余下项序号（fold no-op）",
   },
   turn_queue_cancelled: {
     verdict: "ported",
     surface:
-      "ChatPage · 按 queue_id 只清条（cancel API 成功/404 本地清；fold no-op）",
+      "ChatPage · 按 queue_id 只清条，再 GET 对账余下项序号（cancel API 成功/404 本地清；另一端取消同走这支；fold no-op）",
   },
   resume_deferred: {
     verdict: "ported",
     surface:
-      "ResumeCard ·「放行已记下…」；ChatPage appendEventToTurn 同连接等待（fold no-op）",
+      "ResumeCard ·「放行已记下…」（本端发起）／RemoteSettledCards ·「已由另一端处理」（另一端放行）；ChatPage appendEventToTurn 同连接等待（fold no-op）",
   },
   execution_detached: {
     verdict: "internal",
@@ -231,7 +232,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
 
   // —— 阻塞交互（审批热路径 PauseCard；冷恢复 ResumeCard）——
   approval_required: { verdict: "ported", surface: "PauseCard" },
-  approval_resolved: { verdict: "ported", surface: "PauseCard" },
+  approval_resolved: {
+    verdict: "ported",
+    surface:
+      "PauseCard 撤卡；另一端点掉的（本端未记账 + 卡正摆着）→ RemoteSettledCards「已由另一端处理」",
+  },
   interaction_orphaned: {
     verdict: "ported",
     surface: "静默撤卡（无 OrphanedInteractionCard 墓碑）",
@@ -244,7 +249,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   delegation_authorization_resolved: {
     verdict: "ported",
-    surface: "DelegationAuthorizationCard",
+    surface:
+      "DelegationAuthorizationCard 撤卡；另一端点掉的 → RemoteSettledCards「已由另一端处理」",
   },
   checkpoint_required: {
     verdict: "ported",
@@ -254,15 +260,24 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   checkpoint_resolved: {
     verdict: "simplified",
-    surface: "ResumeCard",
+    surface: "ResumeCard；另一端放行的 → RemoteSettledCards「已由另一端处理」",
     reason: "同上 · 冷路径痕迹；PauseCard 仅审批热路径，不承接 checkpoint",
   },
   plan_review_required: { verdict: "ported", surface: "ResumeCard" },
-  plan_review_resolved: { verdict: "ported", surface: "ResumeCard" },
+  plan_review_resolved: {
+    verdict: "ported",
+    surface: "ResumeCard；另一端放行的 → RemoteSettledCards「已由另一端处理」",
+  },
   team_preview_required: { verdict: "ported", surface: "ResumeCard" },
-  team_preview_resolved: { verdict: "ported", surface: "ResumeCard" },
+  team_preview_resolved: {
+    verdict: "ported",
+    surface: "ResumeCard；另一端放行的 → RemoteSettledCards「已由另一端处理」",
+  },
   stage_card_required: { verdict: "ported", surface: "StageCard" },
-  stage_card_resolved: { verdict: "ported", surface: "StageCard" },
+  stage_card_resolved: {
+    verdict: "ported",
+    surface: "StageCard；另一端推进的 → RemoteSettledCards「已由另一端处理」",
+  },
 
   // —— 非阻塞提问 (①) ——
   question_posted: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
@@ -360,6 +375,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   handoff_apply_done: {
     verdict: "impossible",
     reason: "同上 · 把云端改动合并回本地磁盘，手机无本地",
+  },
+  auto_folder_created: {
+    verdict: "simplified",
+    reason:
+      "裸聊写盘自动建文件夹告知（§5.4）：fold 已收进 autoFolder，手机暂无落点提示卡与改名入口",
   },
   workspace_snapshot_done: {
     verdict: "simplified",
@@ -464,6 +484,12 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     verdict: "ported",
     surface: "AssistantView · hot-trace 轻状态行（resolved 门控，D3）",
   },
+  SettledElsewhereNotices: {
+    verdict: "ported",
+    surface: "RemoteSettledCards ·「已由另一端处理」（B2 P1 · 验收 5）",
+    reason:
+      "同样只收「本端此刻正摆着」的卡（visibleCardIds 门控，排除重放）+ answeredByAPerson 同口径排除无人参与的收口；桌面 8s 自退，手机改「知道了」手动收——手机常在后台，自退会让用户回来只看到卡凭空消失",
+  },
   ResumePrompt: {
     verdict: "ported",
     surface: "ResumeCard",
@@ -527,6 +553,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   TurnWarningBanner: {
     verdict: "ported",
     surface: "ChatPage · 预检警告条",
+  },
+  AutoFolderNoticeCard: {
+    verdict: "simplified",
+    reason:
+      "裸聊写盘落点告知（§5.4）：手机 fold 已收 autoFolder，但暂无提示条与当场改名入口",
   },
   ParallelTimeline: {
     verdict: "ported",
@@ -620,6 +651,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   },
 
   // —— 有意精简 ——
+  SaveAsWorkflowButton: {
+    verdict: "simplified",
+    reason:
+      "多队员完成态「存为工作流」（固化本轮拆法 → user_workflows）；手机整组工作流面有意不接（toolbox/workflows/*），存下来无处微调 / 跑一次 / 设为定时",
+  },
   InlineTeamGraph: {
     verdict: "simplified",
     reason:
@@ -818,6 +854,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "simplified",
     reason: "同上 · 节点检查器仅桌面",
   },
+  "toolbox/workflows/WorkflowSlotsPanel": {
+    verdict: "simplified",
+    reason: "同上 · 可换参数（槽位）面板仅桌面",
+  },
   "toolbox/workflows/workflowNodes": {
     verdict: "simplified",
     reason: "同上 · 画布节点叶仅桌面",
@@ -882,9 +922,10 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     verdict: "simplified",
     reason: "产品手册内嵌预览，手册保持不做（本轮决策）",
   },
-  "more/AppearanceSettings": {
+  "more/GeneralSettings": {
     verdict: "simplified",
-    reason: "手机不提供外观/暗色切换（明确决策）",
+    reason:
+      "桌面「外观」合页为「通用」；手机不提供暗色切换，进阶开关亦无对应面（无诊断面板、无本机执行引擎）",
   },
 
   // —— 物理做不到（绑桌面画布 / 硬件）——
@@ -968,6 +1009,11 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "conversations/ArchivedConversationManageRow": {
     verdict: "internal",
     reason: "已归档会话列表行渲染叶（ConversationsPage 拆件，非独立面）",
+  },
+  "conversations/DeletedFolderManageRow": {
+    verdict: "internal",
+    reason:
+      "「最近删除」文件夹列表行渲染叶（ConversationsPage 拆件，非独立面）",
   },
   "conversations/CollaborationTimeline": {
     verdict: "simplified",

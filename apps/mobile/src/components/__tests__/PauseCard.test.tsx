@@ -14,6 +14,11 @@
 
 import { resolveInteraction } from "@/api/interaction";
 import { PauseCard } from "@/components/PauseCard";
+import {
+  __resetRemoteSettlementsForTests,
+  getRemoteSettlementSnapshot,
+  isLocalSettlement,
+} from "@/lib/remoteSettlement";
 import type { ProjectedInteraction } from "@agentcore/protocol-conformance";
 import {
   cleanup,
@@ -32,7 +37,8 @@ const CONV = "conv-1";
 afterEach(cleanup);
 beforeEach(() => {
   mockResolve.mockReset();
-  mockResolve.mockResolvedValue(undefined);
+  mockResolve.mockResolvedValue("settled");
+  __resetRemoteSettlementsForTests();
 });
 
 function approval(
@@ -181,6 +187,32 @@ describe("PauseCard · approval", () => {
     expect(screen.queryByText(/敏感路径读升格审批/)).toBeNull();
     expect(screen.getByText("本轮都允许")).toBeTruthy();
     expect(screen.getByText("本轮内所有文件改动")).toBeTruthy();
+  });
+
+  it("点之前先记账，好让随后回来的 approval_resolved 认得出是自己点的", async () => {
+    render(<PauseCard pending={approval()} conversationId={CONV} />);
+    fireEvent.click(screen.getByText("允许一次"));
+    // 记账必须早于 POST 结果——事件可能比回执先到。
+    expect(isLocalSettlement("appr-1")).toBe(true);
+    await waitFor(() => expect(mockResolve).toHaveBeenCalled());
+    expect(getRemoteSettlementSnapshot()).toEqual([]);
+  });
+
+  it("already_processed（另一端先点了）→ 留下「已由另一端处理」而不是静默无事发生", async () => {
+    mockResolve.mockResolvedValueOnce("already_processed");
+    const onResolved = vi.fn();
+    render(
+      <PauseCard
+        pending={approval()}
+        conversationId={CONV}
+        onResolved={onResolved}
+      />,
+    );
+    fireEvent.click(screen.getByText("允许一次"));
+    await waitFor(() => expect(onResolved).toHaveBeenCalledTimes(1));
+    expect(getRemoteSettlementSnapshot()).toEqual([
+      { interactionId: "appr-1", conversationId: CONV, kind: "approval" },
+    ]);
   });
 
   it("surfaces an error and re-enables the card when the POST fails", async () => {
