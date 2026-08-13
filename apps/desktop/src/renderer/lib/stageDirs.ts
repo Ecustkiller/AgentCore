@@ -1,15 +1,33 @@
 /**
- * 约定文档约定目录（``AgentCore/文档/{research,debate,reviews}/``）的中性元信息——
+ * 约定文档约定目录（``AgentCore/文档/{工作稿,research,debate,reviews}/``）的中性元信息——
  * 文件树徽章与产物卡标签共用。与后端 ``workspace.stage_dirs`` 对齐；无匹配则零噪音。
+ * 约定根本身的呈现名（「AI 工作间」）也在这里，同属「按路径给盘上目录配文案」。
  */
 
-export const DOCS_PREFIX = "AgentCore/文档";
+/** 盘上约定根目录名——与后端 ``stage_dirs.AGENTCORE_ROOT`` 对齐（磁盘真名，勿改）。 */
+export const AGENTCORE_ROOT = "AgentCore";
+export const DOCS_PREFIX = `${AGENTCORE_ROOT}/文档`;
+export const DRAFTS_DIR = `${DOCS_PREFIX}/工作稿`;
 export const RESEARCH_DIR = `${DOCS_PREFIX}/research`;
 export const DEBATE_DIR = `${DOCS_PREFIX}/debate`;
 export const REVIEWS_DIR = `${DOCS_PREFIX}/reviews`;
 
+/**
+ * 工作区根下 ``AgentCore/`` 的**呈现名**（双模式工作区 §四「呈现层的统一入口已推翻」）：
+ * 这里装的是 AI 干活留下的过程材料，用户平时不必打开——故次要呈现、排在同级最后，且与
+ * 条目区（显示名「记忆」）不再同名。仅改显示：磁盘路径 / 后端常量 / stage_dirs 一律不动。
+ */
+export const AGENTCORE_ROOT_LABEL = "AI 工作间";
+
+export const AGENTCORE_ROOT_TOOLTIP = `AI 干活留下的过程材料（${AGENTCORE_ROOT}/）；成品会归位到工作区`;
+
+/** 是否工作区根下那个 ``AgentCore/``（嵌套的同名目录不算，它不是约定根）。 */
+export function isAgentCoreRootDir(path: string): boolean {
+  return normalizePath(path) === AGENTCORE_ROOT;
+}
+
 export interface StageDirMeta {
-  /** 目录短名（research / debate / reviews） */
+  /** 目录短名（工作稿 / research / debate / reviews） */
   key: string;
   /** 徽章主文案前缀，如「调研约定文档」 */
   label: string;
@@ -19,6 +37,11 @@ export interface StageDirMeta {
 
 /** 约定目录完整相对路径 → 元信息（精确匹配）。 */
 const STAGE_DIRS: Record<string, StageDirMeta> = {
+  [DRAFTS_DIR]: {
+    key: "工作稿",
+    label: "工作稿",
+    tooltip: "AI 干活的过程材料默认落点；成品会归位到工作区",
+  },
   [RESEARCH_DIR]: {
     key: "research",
     label: "调研约定文档",

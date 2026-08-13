@@ -15,8 +15,11 @@ import { ApiError } from "@/services/api";
 import type { FolderMeta } from "@/services/folders";
 import {
   type AutonomyRecipe,
+  type PermissionAxes,
   RECIPE_LABELS,
   RECIPE_ORDER,
+  axesDetailSummary,
+  axesEqual,
   confirmAutoCommandIfNeeded,
   matchRecipe,
   recipeToAxes,
@@ -60,7 +63,12 @@ export interface StandingTaskFormState {
   cron: string;
   folderId: string;
   goal: string;
-  recipe: AutonomyRecipe;
+  /**
+   * The task's axes as stored server-side — never coerced onto a recipe.
+   * System templates ship a custom tuple on purpose; rewriting it on save
+   * would silently widen what the task may do.
+   */
+  permissionAxes: PermissionAxes;
   enabled: boolean;
   webhookUrl: string | null;
   webhookId: string | null;
@@ -76,6 +84,11 @@ export interface StandingTaskFormState {
   lookbackHours: number;
   /** Bound user workflow; empty string = unbound. */
   workflowId: string;
+  /**
+   * Denormalized name of the bound workflow — display only, so the picker can
+   * name the binding before (or without) the options request landing.
+   */
+  workflowName: string | null;
 }
 
 export function emptyStandingTaskForm(
@@ -88,7 +101,7 @@ export function emptyStandingTaskForm(
     cron: "",
     folderId: cloudFolders[0]?.id ?? "",
     goal: "",
-    recipe: "less_interrupt",
+    permissionAxes: recipeToAxes("less_interrupt"),
     enabled: true,
     webhookUrl: null,
     webhookId: null,
@@ -100,13 +113,13 @@ export function emptyStandingTaskForm(
     scopeFolderIds: [],
     lookbackHours: 24,
     workflowId: "",
+    workflowName: null,
   };
 }
 
 export function formFromStandingTask(
   task: StandingTask,
 ): StandingTaskFormState {
-  const recipe = matchRecipe(task.permissionAxes);
   const local = localHmFromUtcCron(task.cron);
   const cfg = task.templateConfig;
   return {
@@ -116,7 +129,7 @@ export function formFromStandingTask(
     cron: task.cron ?? "",
     folderId: task.folderId,
     goal: task.goal,
-    recipe: recipe === "custom" ? "less_interrupt" : recipe,
+    permissionAxes: task.permissionAxes,
     enabled: task.enabled,
     webhookUrl: task.webhookUrl,
     webhookId: task.webhookId,
@@ -128,6 +141,7 @@ export function formFromStandingTask(
     scopeFolderIds: cfg.folderIds ?? [],
     lookbackHours: cfg.lookbackHours ?? 24,
     workflowId: task.workflowId ?? "",
+    workflowName: task.workflowName,
   };
 }
 
@@ -168,6 +182,7 @@ export function StandingTaskEditorDrawer({
   initial,
   taskId,
   cloudFolders,
+  foldersError,
   onClose,
   onSaved,
 }: {
@@ -176,6 +191,8 @@ export function StandingTaskEditorDrawer({
   initial: StandingTaskFormState;
   taskId: string | null;
   cloudFolders: FolderMeta[];
+  /** Set when the folder list request failed — an empty list is not proof of "none". */
+  foldersError?: string | null;
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
@@ -191,6 +208,17 @@ export function StandingTaskEditorDrawer({
 
   const isTemplate = !!form.templateKey;
   const workflowBound = !isTemplate && !!form.workflowId;
+
+  /** The task's own custom tuple, kept selectable so it can be restored. */
+  const customAxes = useMemo(
+    () =>
+      matchRecipe(initial.permissionAxes) === "custom"
+        ? initial.permissionAxes
+        : null,
+    [initial.permissionAxes],
+  );
+  const selectedRecipe = matchRecipe(form.permissionAxes);
+  const axesChanged = !axesEqual(form.permissionAxes, initial.permissionAxes);
 
   useEffect(() => {
     if (!open) return;
@@ -234,7 +262,7 @@ export function StandingTaskEditorDrawer({
       triggerKind: form.triggerKind,
       folderId: form.folderId,
       goal: form.goal.trim(),
-      permissionAxes: recipeToAxes(form.recipe),
+      permissionAxes: form.permissionAxes,
       enabled: form.enabled,
       workflowId: form.workflowId || null,
     };
@@ -246,18 +274,29 @@ export function StandingTaskEditorDrawer({
     return base;
   };
 
-  const buildTemplatePatch = (): PatchStandingTaskInput => ({
-    folderId: form.folderId,
-    schedulePreset: "custom",
-    cron: utcCronFromLocalHm(form.localHour, form.localMinute),
-    permissionAxes: recipeToAxes(form.recipe),
-    enabled: form.enabled,
-    templateConfig: {
-      includeGlobal: form.includeGlobal,
-      folderIds: form.scopeFolderIds,
-      lookbackHours: form.lookbackHours,
-    },
-  });
+  /** Untouched axes stay off the wire, so saving can never re-grant. */
+  const buildEditPatch = (): PatchStandingTaskInput => {
+    const { permissionAxes, ...rest } = buildCreatePayload();
+    const patch: PatchStandingTaskInput = { ...rest };
+    if (axesChanged) patch.permissionAxes = permissionAxes;
+    return patch;
+  };
+
+  const buildTemplatePatch = (): PatchStandingTaskInput => {
+    const patch: PatchStandingTaskInput = {
+      folderId: form.folderId,
+      schedulePreset: "custom",
+      cron: utcCronFromLocalHm(form.localHour, form.localMinute),
+      enabled: form.enabled,
+      templateConfig: {
+        includeGlobal: form.includeGlobal,
+        folderIds: form.scopeFolderIds,
+        lookbackHours: form.lookbackHours,
+      },
+    };
+    if (axesChanged) patch.permissionAxes = form.permissionAxes;
+    return patch;
+  };
 
   const dismissAfterReveal = async () => {
     setPendingDismiss(false);
@@ -275,7 +314,11 @@ export function StandingTaskEditorDrawer({
   const submit = async () => {
     if (!canSubmit || submitting) return;
     if (noCloud) {
-      setError("请先创建一个云工作区（本地工作区无法在关机时代跑）");
+      setError(
+        foldersError
+          ? `读不到工作区列表（${foldersError}），暂时无法确认可用的云工作区，请重试后再保存。`
+          : "请先创建一个云工作区（本地工作区无法在关机时代跑）",
+      );
       return;
     }
     setSubmitting(true);
@@ -295,9 +338,7 @@ export function StandingTaskEditorDrawer({
           return;
         }
       } else if (taskId) {
-        const payload = isTemplate
-          ? buildTemplatePatch()
-          : buildCreatePayload();
+        const payload = isTemplate ? buildTemplatePatch() : buildEditPatch();
         const patched = await patchStandingTask(taskId, payload);
         if (patched.triggerKind === "webhook" && patched.webhookSecret) {
           setForm((f) => ({
@@ -383,7 +424,7 @@ export function StandingTaskEditorDrawer({
             </DialogTitle>
             <DialogDescription className="mt-1 text-xs text-muted-foreground">
               {isTemplate
-                ? "系统模板任务：目标由系统托管，可配置时间、作用域与落点。"
+                ? "系统任务：目标由系统托管，可配置时间、作用域与落点。"
                 : "定时或 Webhook 触发后自动开一轮协作。仅支持云工作区。"}
             </DialogDescription>
           </div>
@@ -397,10 +438,17 @@ export function StandingTaskEditorDrawer({
         </div>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {noCloud && (
+          {foldersError ? (
             <p className="text-xs text-destructive">
-              没有可用的云工作区。请先在「文件」页创建云项目，任务不能绑定本地工作区。
+              读不到工作区列表（{foldersError}
+              ），暂时无法确认可用的云工作区。请关闭抽屉重试。
             </p>
+          ) : (
+            noCloud && (
+              <p className="text-xs text-destructive">
+                没有可用的云工作区。请先在「文件」页的「我的文件」里新建一个，任务不能绑定本机工作区。
+              </p>
+            )
           )}
 
           <label className="block" htmlFor="st-name">
@@ -536,7 +584,7 @@ export function StandingTaskEditorDrawer({
 
           <label className="block">
             <span className="mb-1 block text-xs text-muted-foreground">
-              {isTemplate ? "报告落点项目" : "云工作区"}
+              {isTemplate ? "报告落点工作区" : "云工作区"}
             </span>
             <select
               className={SELECT_CLASS}
@@ -554,7 +602,7 @@ export function StandingTaskEditorDrawer({
             </select>
             {isTemplate && (
               <p className="mt-1 text-xs text-muted-foreground">
-                复盘报告与文档草稿写入此云项目。
+                复盘报告与文档草稿写入此工作区。
               </p>
             )}
           </label>
@@ -588,10 +636,12 @@ export function StandingTaskEditorDrawer({
                 </label>
                 <div className="space-y-1.5">
                   <p className="text-xs text-muted-foreground">
-                    一并复盘的云项目
+                    一并复盘的云工作区
                   </p>
                   {cloudFolders.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">暂无云项目</p>
+                    <p className="text-xs text-muted-foreground">
+                      {foldersError ? "工作区列表未加载成功" : "暂无云工作区"}
+                    </p>
                   ) : (
                     <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
                       {cloudFolders.map((f) => (
@@ -612,7 +662,7 @@ export function StandingTaskEditorDrawer({
                 </div>
                 {!form.includeGlobal && form.scopeFolderIds.length === 0 && (
                   <p className="text-xs text-destructive">
-                    请至少勾选「全局裸聊」或一个云项目。
+                    请至少勾选「全局裸聊」或一个云工作区。
                   </p>
                 )}
               </fieldset>
@@ -653,10 +703,23 @@ export function StandingTaskEditorDrawer({
                   value={form.workflowId}
                   disabled={pendingDismiss}
                   onChange={(e) =>
-                    setForm((f) => ({ ...f, workflowId: e.target.value }))
+                    setForm((f) => ({
+                      ...f,
+                      workflowId: e.target.value,
+                      workflowName:
+                        workflowOptions.find((w) => w.id === e.target.value)
+                          ?.name ?? null,
+                    }))
                   }
                 >
                   <option value="">不绑定 — 到点按目标文案开跑</option>
+                  {/* 选项还没到（或列表请求挂了）时，别把已绑定的工作流显示成空白 */}
+                  {form.workflowId &&
+                    !workflowOptions.some((w) => w.id === form.workflowId) && (
+                      <option value={form.workflowId}>
+                        {form.workflowName ?? "已绑定的工作流"}
+                      </option>
+                    )}
                   {workflowOptions.map((w) => (
                     <option key={w.id} value={w.id}>
                       {w.name}
@@ -707,27 +770,37 @@ export function StandingTaskEditorDrawer({
             </span>
             <select
               className={SELECT_CLASS}
-              value={form.recipe}
+              value={selectedRecipe}
               disabled={pendingDismiss}
               onChange={(e) => {
-                const next = e.target.value as AutonomyRecipe;
-                if (
-                  !confirmAutoCommandIfNeeded(
-                    recipeToAxes(form.recipe),
-                    recipeToAxes(next),
-                  )
-                ) {
+                const picked = e.target.value as AutonomyRecipe | "custom";
+                const next =
+                  picked === "custom" ? customAxes : recipeToAxes(picked);
+                if (!next) return;
+                if (!confirmAutoCommandIfNeeded(form.permissionAxes, next)) {
                   return;
                 }
-                setForm((f) => ({ ...f, recipe: next }));
+                setForm((f) => ({ ...f, permissionAxes: next }));
               }}
             >
+              {customAxes && (
+                <option value="custom">
+                  自定义 — {axesDetailSummary(customAxes)}
+                </option>
+              )}
               {RECIPE_ORDER.map((id) => (
                 <option key={id} value={id}>
                   {RECIPE_LABELS[id].short} — {RECIPE_LABELS[id].description}
                 </option>
               ))}
             </select>
+            {selectedRecipe === "custom" && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                {isTemplate
+                  ? "系统任务自带的权限组合，不改就保持原样；换成内置配方会覆盖它。"
+                  : "当前是自定义权限组合，不改就保持原样；换成内置配方会覆盖它。"}
+              </p>
+            )}
           </label>
 
           <div className="flex items-center justify-between gap-3">

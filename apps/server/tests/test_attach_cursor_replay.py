@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 
 from agentcore.api import sse
+from agentcore.core.log_context import log_context
 from agentcore.runtime.events import EventSink, content_delta, tool_use_start
 from agentcore.runtime.events.attach_replay import (
     _turn_end_close_event,
     build_cursor_replay,
     journal_rows_to_sse,
+    replay_open_event,
     synthesize_segment_deltas,
 )
 from agentcore.runtime.events.stream_checkpointer import (
@@ -164,9 +166,8 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     """
     sink = EventSink()
     sink._message_id = "m1"
-    # History would have this if take_over were used — cursor path must NOT replay it.
+    # History would have this on the no-cursor path — cursor replay must NOT.
     sink.emit(content_delta("FROM_HISTORY"))
-    sink.detach()
 
     rows = [
         {
@@ -226,13 +227,17 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     gen = sse._attach_generator(sink, last_event_id=4)
     frames: list[str] = []
     try:
-        for _ in range(3):
+        for _ in range(4):
             frames.append(await asyncio.wait_for(gen.__anext__(), timeout=2.0))
     finally:
         await gen.aclose()
 
     joined = "".join(frames)
     assert loaded_after == [-1]
+    # The stamp opens the segment (before any durable fact) and carries no ``id:``.
+    assert frames[0].startswith("event: message_start")
+    assert '"message_id": "m1"' in frames[0]
+    assert "\nid: " not in frames[0]
     assert "FROM_HISTORY" not in joined
     assert "FROM_SEGMENT" not in joined
     assert "FROM_PROCESS" in joined
@@ -319,7 +324,7 @@ async def test_build_cursor_replay_appends_message_end_for_finished_turn(monkeyp
     _patch_journal_repo(monkeypatch, rows)
 
     events = await build_cursor_replay(
-        turn_id="m1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
     )
 
     assert events[-1].type == EventType.MESSAGE_END
@@ -340,7 +345,91 @@ async def test_build_cursor_replay_no_close_for_running_turn(monkeypatch):
     _patch_journal_repo(monkeypatch, rows)
 
     events = await build_cursor_replay(
-        turn_id="m1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
     )
 
     assert all(e.type != EventType.MESSAGE_END for e in events)
+
+
+# --- 开场事实回放：耐久卡必须落在盖过章的气泡上 -----------------------------------
+# message_start is EPHEMERAL (never journaled) yet it is the only frame carrying the
+# server assistant message_id — the key a resume submit uses. Desktop always sends
+# Last-Event-ID, so without a synthetic stamp at the head of this segment the replayed
+# ask_user / plan_review / team_preview card binds to a client-only (or previous-turn)
+# id and the「继续」card cannot be painted / 404s on submit.
+
+
+def test_replay_open_event_carries_the_turn_id_without_seq():
+    # The ambient trace here is the ATTACH request's, not the turn's — stamping it would
+    # point the bubble's log link at this GET, so the stamp must stay trace-free.
+    with log_context(trace_id="attach-request-trace"):
+        ev = replay_open_event(turn_id="m1", conversation_id="c1")
+    assert ev.type == EventType.MESSAGE_START
+    assert ev.payload == {"message_id": "m1", "conversation_id": "c1"}
+    # Synthetic frame — no journal seq, so it never rewrites the client's cursor.
+    assert ev.seq is None
+
+
+async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeypatch):
+    """Paused-at-plan_review turn: the stamp leads, so the card binds to this turn's id."""
+    rows = [
+        {
+            "seq": 1,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "阶段成果如下。"},
+            "ts": "t0",
+        },
+        {
+            "seq": 2,
+            "kind": "plan_review_required",
+            "payload": {"checkpoint_id": "cp1", "conversation_id": "c1", "steps": [], "pending": []},
+            "ts": "t1",
+        },
+        {"kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert events[0].type == EventType.MESSAGE_START
+    assert events[0].payload == {"message_id": "m1", "conversation_id": "c1"}
+    types = [e.type for e in events]
+    assert types.index(EventType.MESSAGE_START) < types.index(EventType.PLAN_REVIEW_REQUIRED)
+    # paused survives to the close frame → the client routes to the durable resume card.
+    assert events[-1].type == EventType.MESSAGE_END
+    assert events[-1].payload["finish_reason"] == "paused"
+
+
+async def test_build_cursor_replay_stamps_even_with_empty_journal(monkeypatch):
+    """Bare attach (nothing journaled yet): the stamp alone opens + keys the bubble."""
+    _patch_journal_repo(monkeypatch, [])
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert [e.type for e in events] == [EventType.MESSAGE_START]
+
+
+async def test_build_cursor_replay_stamp_is_identical_on_reattach(monkeypatch):
+    """Re-attach replays the SAME message_id — folds treat it as 同回合重开, not a new bubble."""
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "进行中"}, "ts": "t0"},
+    ]
+    _patch_journal_repo(monkeypatch, rows)
+
+    first, second = [
+        await build_cursor_replay(
+            turn_id="m1",
+            conversation_id="c1",
+            after_seq=cursor,
+            memory_channels={},
+            memory_agent_ids={},
+        )
+        for cursor in (-1, 1)
+    ]
+
+    assert first[0].payload == second[0].payload == {"message_id": "m1", "conversation_id": "c1"}
+    assert [e.type for e in first] == [e.type for e in second]

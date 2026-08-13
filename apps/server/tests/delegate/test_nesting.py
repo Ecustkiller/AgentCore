@@ -92,6 +92,20 @@ async def test_finalize_stopped_absorbs_nested_children_usage():
     assert parent._children == []
 
 
+def test_absorb_children_keeps_lead_subteam_continuation_tally():
+    """turn_metrics.revises 口径: 子团队的续派计数必须走和 usage / collab 同一条 merge 路。
+    曾经它挂在子 tool 上、absorb 后随 children 一起被清空 → lead 子团队的续派系统性少计。"""
+    parent = tool(Provider([]))
+    subteam = make_lead_subteam(parent, "cap1", 1)
+    child = subteam.tools[0]
+    child.note_continuation("sub_w1")
+    assert parent.continuation_count == 1  # 折叠前经在册 child 计入
+
+    absorb_children(parent)
+    assert parent._children == []
+    assert parent.continuation_count == 1  # 折叠后仍在（不重复、也不丢）
+
+
 async def test_depth_three_subworker_cannot_delegate_further():
     """MAX=3: depth-1 and depth-2 may nest; depth-3 leaf has no CAPTAIN_MARK."""
 
@@ -428,6 +442,7 @@ async def test_worker_captain_rejects_sub_fanout_over_cap():
         captain_run_id="cap_1",
         depth=1,
         folder_id="test_birth",
+        approval_gate=None,
     )
     tasks = [{"role": f"子{i}", "task": f"任务{i}"} for i in range(5)]
     result = await t.execute({"tasks": tasks}, ctx())
@@ -448,6 +463,7 @@ async def test_worker_captain_rejects_cumulative_sub_fanout():
         captain_run_id="cap_1",
         depth=1,
         folder_id="test_birth",
+        approval_gate=None,
     )
     t._sub_workers_spawned = 4
     result = await t.execute({"tasks": [{"role": "子5", "task": "收尾"}]}, ctx())

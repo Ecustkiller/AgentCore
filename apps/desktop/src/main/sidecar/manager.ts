@@ -20,6 +20,7 @@ import {
   type SidecarTurnFilesDiffRequest,
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
+  type SidecarWarmAccountRulesMemoryResult,
   buildSidecarResumeRpcParams,
 } from "@shared/sidecar-contract";
 import { BrowserWindow, type WebContents } from "electron";
@@ -52,6 +53,46 @@ const SIDECAR_APPROVALS_ENABLED = true;
 const SIDECAR_FULFILL_NOTIFICATION = "fulfill/frame";
 
 /**
+ * 账号 rules/memory 暖的续期余量（ms）。
+ *
+ * 服务端回的 `ttlSeconds` 是那条快照**当下**的剩余寿命；扣掉这段余量再判过期，覆盖
+ * 「暖回复 → 引擎 prepare 读快照」之间的间隔与时钟抖动。宁可早一点重暖：服务端快照
+ * 过期后 prepare 只读缓存、不回落云端，注入直接变空（用户侧＝突然失忆）。
+ */
+const ACCOUNT_WARM_RENEW_MARGIN_MS = 15_000;
+
+/**
+ * 暖 RPC 本身失败时的退避（ms，取服务端降级负 TTL 同量级）。
+ * 失败不再永久锁死该键——退避过后下个回合会重试。
+ */
+const ACCOUNT_WARM_RETRY_BACKOFF_MS = 30_000;
+
+/**
+ * 服务端快照缓存键 `(user_id, folder_id)` 的桌面侧镜像（`folderId` 空白/缺省 = 裸聊，
+ * 与服务端 `normalize_folder_id_param` 同规）。暖的有效期按此键记账，故切项目 / 换账号
+ * 各自独立续期，不会因为「另一个键暖过」而漏暖。
+ */
+function accountWarmKey(
+  userId: string,
+  folderId: string | null | undefined,
+): string {
+  return `${userId}\u0000${folderId?.trim() ?? ""}`;
+}
+
+/**
+ * 暖回复 → 本地可信新鲜窗口（ms）。缺 `ttlSeconds` / 非正数 ⇒ 0（下个回合重暖）：
+ * 多暖一次只是一次 HTTP，谎报新鲜则是静默丢掉全部规则与长期记忆。
+ */
+function accountWarmFreshMs(reply: unknown): number {
+  const ttlSeconds = Number(
+    (reply as SidecarWarmAccountRulesMemoryResult | null | undefined)
+      ?.ttlSeconds,
+  );
+  if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) return 0;
+  return Math.max(0, ttlSeconds * 1000 - ACCOUNT_WARM_RENEW_MARGIN_MS);
+}
+
+/**
  * DesktopBrowserBridge 本回合句柄（B-Arch · 与 inference 同构）。
  * 主进程签发；经 initialize / startTurn / resume 下发，不再依赖 spawn env。
  */
@@ -66,12 +107,18 @@ interface SidecarEntry {
   /** initialize 的就绪 Promise（失败则该 entry 已被逐出，需重拉）。 */
   ready: Promise<void>;
   /**
-   * 本 entry 已完成一次有票的 account rules/memory 暖（成功或 RPC 失败均算完成）。
-   * 无票跳过不置位——晚登录/补票可再踢。防有票路径叠跑猛踢。
+   * 该 sidecar 进程当前生效的账号 id（initialize 值；带 `userId` 的暖/回合随之刷新，
+   * 与服务端 `_refresh_user_id` 同步）。用于拼 {@link accountWarmKey}。
    */
-  accountRulesMemoryWarmed?: boolean;
-  /** 有票暖进行中（与 {@link accountRulesMemoryWarmed} 配合防并发双踢）。 */
-  accountRulesMemoryWarmInflight?: Promise<void>;
+  userId: string;
+  /**
+   * 每个服务端快照键（{@link accountWarmKey}）的暖有效期（`Date.now()` 时间戳）。
+   * 服务端过期即空注入，故这里存的是**服务端给的**剩余寿命减去续期余量，到点重暖。
+   * 无票跳过不写入——晚登录/补票可再踢。
+   */
+  accountRulesMemoryFreshUntil: Map<string, number>;
+  /** 每键在途暖（防同键并发双踢；不同键各自独立）。 */
+  accountRulesMemoryWarmInflight: Map<string, Promise<void>>;
   /** 在途 MCP / account rules-memory 暖；startTurn/resume 发回合 RPC 前 await。 */
   inflightWarms: Set<Promise<void>>;
 }
@@ -146,8 +193,9 @@ export class SidecarManager {
    * {@link warmMcpDiscover}）。每回合 ensure（含 cache hit）再踢会与 prepare 叠跑。
    *
    * `warmAccountRulesMemory`：ensure 本身不踢；{@link startTurn} / {@link resume}（及显式
-   * {@link warmAccountRulesMemory}）在有票时暖一次（见 `accountRulesMemoryWarmed`）；
-   * 无票跳过不锁死。回合发 RPC 前 await 在途 warm（失败只记日志）。
+   * {@link warmAccountRulesMemory}）在有票且该快照键**已过期**时续暖（见
+   * `accountRulesMemoryFreshUntil`）；无票跳过不锁死。回合发 RPC 前 await 在途 warm
+   * （失败只记日志）。
    */
   private ensure(
     rootId: string,
@@ -202,6 +250,9 @@ export class SidecarManager {
     const entry: SidecarEntry = {
       client,
       ready,
+      userId: userId?.trim() || "local",
+      accountRulesMemoryFreshUntil: new Map(),
+      accountRulesMemoryWarmInflight: new Map(),
       inflightWarms: new Set(),
     };
     this.entries.set(key, entry);
@@ -258,7 +309,7 @@ export class SidecarManager {
       req.userId,
     );
     await entry.ready; // 初始化失败则在此抛出 → renderer 据此降级
-    // 有票则踢 account rules/memory 暖；随后 await 在途 warm（含打开项目踢的 MCP）。
+    // 有票且快照已过期则续暖 account rules/memory；随后 await 在途 warm（含打开项目踢的 MCP）。
     this.maybeKickAccountRulesMemoryWarm(entry, req.rootId, {
       folderId: req.folderId,
       accountAuth: req.accountAuth,
@@ -413,7 +464,7 @@ export class SidecarManager {
   /**
    * 打开/登记本机项目后：ensure + initialize → 显式踢 ``warmAccountRulesMemory``，
    * 用 account 窄票让 sidecar 自拉 rules/memory 快照进进程缓存。无票则跳过（不发 RPC、
-   * 不锁死 warmed）。不挡 UI；失败只记日志。有票完成暖后与 startTurn 共用标记。
+   * 不记有效期）。不挡 UI；失败只记日志。有效期与 startTurn/resume 的续暖共用记账。
    */
   async warmAccountRulesMemory(
     rootId: string,
@@ -433,16 +484,16 @@ export class SidecarManager {
       opts.userId,
     );
     await entry.ready;
-    this.maybeKickAccountRulesMemoryWarm(entry, rootId, opts);
-    if (entry.accountRulesMemoryWarmInflight) {
-      await entry.accountRulesMemoryWarmInflight;
-    }
+    await this.maybeKickAccountRulesMemoryWarm(entry, rootId, opts);
   }
 
   /**
-   * 有票时踢一次 ``warmAccountRulesMemory``（登记 inflightWarms）。
-   * 无票只记跳过、不置 ``accountRulesMemoryWarmed``（晚登录可再踢）。
-   * 有票完成（成功或失败）后置位，禁止叠跑猛踢。
+   * 有票且该快照键已过期时续暖 ``warmAccountRulesMemory``（登记 inflightWarms），
+   * 返回本键的在途暖（无需暖 / 无票时 undefined）。
+   *
+   * 服务端快照有 TTL，过期后 prepare 只读缓存 → 空注入（规则与长期记忆整体消失），
+   * 所以「暖过一次」不能当永久有效：按服务端回的 `ttlSeconds` 记有效期，到期重暖。
+   * 无票只记跳过、不写有效期（晚登录可再踢）；RPC 失败按短退避记，不永久锁死。
    */
   private maybeKickAccountRulesMemoryWarm(
     entry: SidecarEntry,
@@ -452,24 +503,33 @@ export class SidecarManager {
       accountAuth?: SidecarAccountAuth;
       userId?: string;
     },
-  ): void {
-    if (entry.accountRulesMemoryWarmed) return;
-    if (entry.accountRulesMemoryWarmInflight) return;
+  ): Promise<void> | undefined {
+    const userId = opts.userId?.trim();
+    // 服务端按 per-turn userId 刷新缓存 scope；键要跟着走，否则续期记在旧账号名下。
+    if (userId) entry.userId = userId;
+    const key = accountWarmKey(entry.userId, opts.folderId);
+    const inflight = entry.accountRulesMemoryWarmInflight.get(key);
+    if (inflight) return inflight;
+    if ((entry.accountRulesMemoryFreshUntil.get(key) ?? 0) > Date.now()) {
+      return undefined;
+    }
     if (!opts.accountAuth) {
       logDesktop({
         level: "info",
         event: "sidecar.warm_account_rules_memory_skipped",
         fields: { rootId, detail: "no_account_auth" },
       });
-      return;
+      return undefined;
     }
     const work = (async () => {
+      let freshMs = ACCOUNT_WARM_RETRY_BACKOFF_MS;
       try {
-        await entry.client.request("warmAccountRulesMemory", {
+        const reply = await entry.client.request("warmAccountRulesMemory", {
           folderId: opts.folderId ?? null,
           accountAuth: opts.accountAuth,
-          ...(opts.userId?.trim() ? { userId: opts.userId.trim() } : {}),
+          ...(userId ? { userId } : {}),
         });
+        freshMs = accountWarmFreshMs(reply);
       } catch (err: unknown) {
         const detail = err instanceof Error ? err.message : String(err);
         logDesktop({
@@ -478,12 +538,13 @@ export class SidecarManager {
           fields: { rootId, detail },
         });
       } finally {
-        entry.accountRulesMemoryWarmed = true;
-        entry.accountRulesMemoryWarmInflight = undefined;
+        entry.accountRulesMemoryFreshUntil.set(key, Date.now() + freshMs);
+        entry.accountRulesMemoryWarmInflight.delete(key);
       }
     })();
-    entry.accountRulesMemoryWarmInflight = work;
+    entry.accountRulesMemoryWarmInflight.set(key, work);
     this.trackWarm(entry, work);
+    return work;
   }
 
   /** A1+ 本机真 diff：ensure sidecar → `turnFilesDiff` RPC（相对本地基线 zip）。 */
@@ -563,7 +624,7 @@ export class SidecarManager {
       req.userId,
     );
     await entry.ready;
-    // 同 startTurn：有票踢暖，发 resume RPC 前 await 在途 warm。
+    // 同 startTurn：有票按 TTL 续暖，发 resume RPC 前 await 在途 warm。
     this.maybeKickAccountRulesMemoryWarm(entry, req.rootId, {
       folderId: req.folderId,
       accountAuth: req.accountAuth,
@@ -761,21 +822,27 @@ export class SidecarManager {
     }
   }
 
-  /** 辩论 ambient 掌舵（fire-and-forget，下一轮边界生效）。 */
-  async debateSteer(req: SidecarDebateSteerRequest): Promise<void> {
+  /** 辩论 ambient 掌舵（不阻塞主持人，下一轮边界生效）。
+   *
+   * `accepted=false` = 引擎没收：掌舵窗口已关（辩论没在跑 / 已过末轮边界）或 sidecar 不可达。
+   * 回执要诚实，故这里不吞——由调用方据此改口，而非照样显示「已发送」。 */
+  async debateSteer(
+    req: SidecarDebateSteerRequest,
+  ): Promise<{ accepted: boolean }> {
     const entry = this.entries.get(entryKey(req.rootId, req.subpath));
-    if (!entry) return;
+    if (!entry) return { accepted: false };
     try {
-      await entry.client.request("debateSteer", {
+      const reply = (await entry.client.request("debateSteer", {
         conversationId: req.conversationId,
         executionId: req.executionId,
         decision: req.decision,
         focus: req.focus ?? "",
         ask: req.ask ?? "",
         askTarget: req.askTarget ?? "",
-      });
+      })) as { ok?: boolean } | null;
+      return { accepted: reply?.ok === true };
     } catch {
-      // sidecar 不可达时静默——与 runRedirect 一致。
+      return { accepted: false };
     }
   }
 

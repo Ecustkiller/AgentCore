@@ -33,6 +33,7 @@ from dataclasses import replace
 from typing import Any
 
 from agentcore.core.log_context import log_context
+from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage, LLMProvider, LLMRequest, TokenUsage
 from agentcore.runtime.debate.findings import accumulate_findings, derive_gate
 from agentcore.runtime.debate.form_profile import form_profile
@@ -43,7 +44,11 @@ from agentcore.runtime.debate.moderator_agenda import (
     cross_exam_questions,
     frame_round,
 )
-from agentcore.runtime.debate.moderator_brief import _BRIEF_SYSTEM, build_brief
+from agentcore.runtime.debate.moderator_brief import (
+    _BRIEF_SYSTEM,
+    build_brief,
+    degraded_brief,
+)
 from agentcore.runtime.debate.moderator_common import (
     RoundBoundaryHook,
     RoundHook,
@@ -84,6 +89,8 @@ from agentcore.runtime.debate.types import (
     WitnessSeatInfo,
 )
 
+logger = get_logger(__name__)
+
 # 单测契约：test_debate_evidence 从本模块 import 系统 prompt 常量。
 __all__ = [
     "Moderator",
@@ -94,6 +101,34 @@ __all__ = [
     "_BRIEF_SYSTEM",
     "_CROSS_EXAM_SYSTEM",
 ]
+
+
+def _settled_closings(raw: Any) -> list[ClosingStatement]:
+    """结辩这一半的收场结算：整体抛错 → 无结辩，但简报与叙事线照常交付。
+
+    逐方失败早已在 runner 内降级成 ``ok=False`` 的 :class:`ClosingStatement`；能走到这里
+    的是整个 runner 崩了，此时结辩区留空即诚实（``to_ceo_output`` 本就不渲染结辩，前端
+    据空列表不出结辩区）。非 ``Exception``（``CancelledError`` 等）照旧传播——整轮停止
+    不得被当成结辩失败吞掉。
+    """
+    if isinstance(raw, BaseException):
+        if not isinstance(raw, Exception):
+            raise raw
+        logger.warning("debate.closing.failed", error=str(raw))
+        return []
+    return list(raw)
+
+
+def _settled_brief(
+    raw: Any, config: DebateConfig, rounds: Sequence[RoundResult]
+) -> DebateBrief:
+    """简报这一半的收场结算：抛错 → 诚实降级简报（明说缺了什么），已跑轮次照常交付。"""
+    if isinstance(raw, BaseException):
+        if not isinstance(raw, Exception):
+            raise raw
+        logger.warning("debate.brief.failed", error=str(raw), rounds=len(rounds))
+        return degraded_brief(config, rounds, reason=str(raw))
+    return raw
 
 
 class Moderator:
@@ -443,15 +478,23 @@ class Moderator:
             and stop_reason != STOP_ALL_FAILED
             and bool(rounds)
         )
+        # 收场抗抖（结辩 ∥ 简报）：二者互不依赖，任一抛错都只作废它自己那一半，绝不让
+        # 已跑完的 N 轮发言 / 质询 / 裁判 / 小结陪葬——``debate_result`` 是收场的 journal
+        # 权威，它不发辩论室就永远停在「进行中」。
         if do_closing:
             assert run_closing is not None  # 收窄 Optional，供类型检查
-            closings_raw, brief = await asyncio.gather(
+            closings_raw, brief_raw = await asyncio.gather(
                 run_closing(sides=config.sides, rounds=rounds),
                 self._brief(config, rounds, evidence_ledger=evidence_ledger),
+                return_exceptions=True,
             )
-            closings = list(closings_raw)
+            closings = _settled_closings(closings_raw)
+            brief = _settled_brief(brief_raw, config, rounds)
         else:
-            brief = await self._brief(config, rounds, evidence_ledger=evidence_ledger)
+            try:
+                brief = await self._brief(config, rounds, evidence_ledger=evidence_ledger)
+            except Exception as exc:  # noqa: BLE001 — 简报抖动不得吞掉已跑完的轮次
+                brief = _settled_brief(exc, config, rounds)
         # 红队：台账权威快照 + 门决挂 brief；圆桌：共识地图挂 brief（LLM 简报可再润色）
         if config.form is DebateForm.RED_TEAM:
             ledger = accumulate_findings(rounds)

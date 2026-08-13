@@ -7,14 +7,16 @@ processes (parallel agents / pytest-xdist workers) hit the same server at once.
 Using a dedicated *schema* (not a separate database) means no CREATEDB privilege
 is required — the app role already owns its database.
 
-Tests auto-skip when no PostgreSQL is reachable, keeping unit-only runs green.
-The target server comes from ``TEST_DATABASE_URL`` (falls back to the app's
-``DATABASE_URL``).
+When no PostgreSQL is reachable the posture depends on the environment: **locally**
+tests skip (unit-only work stays unblocked), **on CI** they fail. See
+``_integration_db_required``. The target server comes from ``TEST_DATABASE_URL``
+(falls back to the app's ``DATABASE_URL``).
 """
 
 import os
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager
+from typing import NoReturn
 
 import httpx
 import pytest
@@ -131,6 +133,42 @@ def _test_db_url() -> str:
     return os.environ.get("TEST_DATABASE_URL") or settings.database_url
 
 
+_FALSEY = {"", "0", "false", "no", "off"}
+
+
+def _integration_db_required() -> bool:
+    """Is a reachable PostgreSQL mandatory here, or may the suite skip itself away?
+
+    CI must have a database. Skipping there drops this whole directory — including
+    contracts that live nowhere else (Stop API idempotence, cookie-session IDOR,
+    repository cascades) — while the run still reports green, i.e. a dead gate.
+    A dev box legitimately has no Postgres, so local runs keep skipping.
+
+    ``REQUIRE_INTEGRATION_DB`` overrides the autodetect in both directions (``1`` to
+    demand a database anywhere, ``0`` for a CI job that deliberately runs unit-only).
+    """
+    explicit = os.environ.get("REQUIRE_INTEGRATION_DB")
+    if explicit is not None:
+        return explicit.strip().lower() not in _FALSEY
+    # ``CI`` is set by GitHub Actions and every other mainstream runner.
+    return os.environ.get("CI", "").strip().lower() not in _FALSEY
+
+
+def _no_postgres(exc: BaseException) -> NoReturn:
+    reason = f"PostgreSQL not available for integration tests: {exc}"
+    if _integration_db_required():
+        pytest.fail(
+            f"{reason}\n"
+            f"  url: {_test_db_url()}\n"
+            "  CI must provide PostgreSQL — skipping here would silently drop the entire "
+            "integration suite while still reporting green. Start a database (see the "
+            "ci.yml backend job's postgres service), or set REQUIRE_INTEGRATION_DB=0 to "
+            "deliberately run unit-only.",
+            pytrace=False,
+        )
+    pytest.skip(reason)
+
+
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker]:
     # search_path = our schema only (plus implicit pg_catalog): keeps create_all
@@ -159,7 +197,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker]:
             )
     except (OperationalError, InterfaceError, OSError) as exc:
         await engine.dispose()
-        pytest.skip(f"PostgreSQL not available for integration tests: {exc}")
+        _no_postgres(exc)
 
     factory = async_sessionmaker(engine, expire_on_commit=False)
 

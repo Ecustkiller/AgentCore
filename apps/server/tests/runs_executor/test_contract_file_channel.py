@@ -17,6 +17,7 @@ from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.types import RunPhase
 from agentcore.runtime.runs.wave import WaveScheduler
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -50,7 +51,13 @@ class _RealFileWriteTool:
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
         await context.backend.write(arguments["path"], arguments["content"])
-        return ToolResult(tool_call_id="", success=True, output="written")
+        # 自报产物: what a run landed comes off the RESULT, so even a stub must report it.
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="written",
+            file_products=[file_product(arguments["path"])],
+        )
 
 
 class _WriteThenTerseProse:
@@ -103,8 +110,8 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
     root = tmp_path / "ws"
     root.mkdir()
     ctx = _ctx_over(root)
-    # Role「研究员」→ artifact_dir defaults to RESEARCH_DIR; dossier paths count
-    # as product landing without needing declared artifacts.
+    # artifact_dir 由声明的 artifacts 反推（role 不再是输入）；约定文档路径本身
+    # 就算产品落盘，无需另行声明。
     paper_path = f"{RESEARCH_DIR}/paper.md"
     plan, _ = build_run_plan(
         [
@@ -135,6 +142,7 @@ async def test_file_deliverable_sections_and_length_read_from_written_file(tmp_p
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]

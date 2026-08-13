@@ -25,6 +25,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { startStagedAttachmentUpload } from "./attachmentUploads";
 import {
   CONV_MENTION_MSG_LIMIT,
   EMPTY_MENTION_INDEX_LIMIT,
@@ -45,7 +46,7 @@ import {
 import { resolveFolderFromIndexedEntry } from "./resolveAttachmentFolder";
 import type { MenuMode } from "./types";
 
-export type AttachmentProjectHint = {
+export type AttachmentFolderHint = {
   folderId: string;
   folderName: string;
 };
@@ -83,7 +84,7 @@ export function useMentionMenu({
   agentMentions,
   setAgentMentions,
   textareaRef,
-  onAttachmentProjectHint,
+  onAttachmentFolderHint,
 }: {
   conversationId: string | null;
   value: string;
@@ -93,8 +94,8 @@ export function useMentionMenu({
   agentMentions: PendingAgentMention[];
   setAgentMentions: Dispatch<SetStateAction<PendingAgentMention[]>>;
   textareaRef: RefObject<HTMLTextAreaElement | null>;
-  /** Draft-only: @ / browse attach from a project → suggest filing into it (B4). */
-  onAttachmentProjectHint?: (hint: AttachmentProjectHint) => void;
+  /** Draft-only: @ / browse attach from a folder → suggest filing into it (B4). */
+  onAttachmentFolderHint?: (hint: AttachmentFolderHint) => void;
 }) {
   const [menuMode, setMenuMode] = useState<MenuMode>(null);
   const [query, setQuery] = useState("");
@@ -263,6 +264,55 @@ export function useMentionMenu({
     setMenuError(null);
     mentionRangeRef.current = null;
   }, []);
+
+  /**
+   * 回形针 / @ 本机文件在云端会话下的上传也前移到附加时——主进程已经把字节暂存好了，
+   * 没道理等用户点发送才开始「读回字节 → PUT」。本机工作区下 stage 已直接写进
+   * ``attachments/``（带 workspacePath），不必再来一趟。
+   */
+  const startCloudUpload = useCallback(
+    (attachment: PendingAttachment) => {
+      if (!conversationId) return;
+      if (attachment.workspacePath || !attachment.stagingId) return;
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === attachment.id
+            ? { ...a, uploadState: "uploading" as const }
+            : a,
+        ),
+      );
+      void startStagedAttachmentUpload(conversationId, attachment).then(
+        (res) => {
+          setAttachments((prev) =>
+            prev.map((a) => {
+              if (a.id !== attachment.id) return a;
+              if (!res.ok) {
+                return {
+                  ...a,
+                  uploadState: "error" as const,
+                  uploadError: res.reason,
+                };
+              }
+              return {
+                ...a,
+                name: res.name,
+                path: res.path,
+                text: res.text,
+                truncated: res.truncated,
+                binary: res.binary,
+                workspacePath: res.workspacePath,
+                // 暂存字节已被取走，id 不再有效——留着只会让重启后的草稿发不出去。
+                stagingId: undefined,
+                uploadState: undefined,
+                uploadError: undefined,
+              };
+            }),
+          );
+        },
+      );
+    },
+    [conversationId, setAttachments],
+  );
 
   const stripMentionQuery = useCallback(() => {
     const range = mentionRangeRef.current;
@@ -454,10 +504,11 @@ export function useMentionMenu({
 
       const attachment = next;
       setAttachments((prev) => [...prev, attachment]);
+      startCloudUpload(attachment);
 
-      if (!conversationId && onAttachmentProjectHint) {
+      if (!conversationId && onAttachmentFolderHint) {
         const resolved = resolveFolderFromIndexedEntry(entry);
-        if (resolved) onAttachmentProjectHint(resolved);
+        if (resolved) onAttachmentFolderHint(resolved);
       }
 
       stripMentionQuery();
@@ -468,8 +519,9 @@ export function useMentionMenu({
       conversationId,
       fileIndex,
       closeMenu,
-      onAttachmentProjectHint,
+      onAttachmentFolderHint,
       setAttachments,
+      startCloudUpload,
       stripMentionQuery,
     ],
   );
@@ -511,21 +563,20 @@ export function useMentionMenu({
       closeMenu();
       return;
     }
-    setAttachments((prev) => [
-      ...prev,
-      {
-        id: crypto.randomUUID(),
-        key,
-        name: res.name,
-        path: res.path,
-        text: res.text,
-        truncated: res.truncated,
-        kind: "file",
-        workspacePath: res.workspacePath,
-        stagingId: res.stagingId,
-        binary: res.binary,
-      },
-    ]);
+    const attachment: PendingAttachment = {
+      id: crypto.randomUUID(),
+      key,
+      name: res.name,
+      path: res.path,
+      text: res.text,
+      truncated: res.truncated,
+      kind: "file",
+      workspacePath: res.workspacePath,
+      stagingId: res.stagingId,
+      binary: res.binary,
+    };
+    setAttachments((prev) => [...prev, attachment]);
+    startCloudUpload(attachment);
     closeMenu();
     textareaRef.current?.focus();
   }, [
@@ -534,6 +585,7 @@ export function useMentionMenu({
     conversationId,
     menuMode,
     setAttachments,
+    startCloudUpload,
     textareaRef,
   ]);
 

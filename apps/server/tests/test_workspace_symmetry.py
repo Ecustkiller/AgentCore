@@ -133,6 +133,58 @@ async def test_scoped_execute_sends_cwd_subpath():
     assert event.payload["args"]["cwd"] == "proj"
 
 
+def _exec_value(**extra) -> dict:
+    return {
+        "ok": True,
+        "value": {
+            "success": True,
+            "stdout": "ok",
+            "stderr": "",
+            "exit_code": 0,
+            "duration_ms": 1,
+            **extra,
+        },
+    }
+
+
+async def _execute_past_probe(local, registry, response: dict):
+    """Drive ``execute`` through its once-per-backend probe to the real run."""
+    task = asyncio.create_task(
+        local.execute(ExecutionRequest(code="print(1)", language="python"))
+    )
+    probe_event = await _await_request()
+    assert registry.resolve(
+        probe_event.payload["request_id"], _exec_value(), conversation_id=CONV
+    )
+    run_event = await _await_request()
+    assert registry.resolve(
+        run_event.payload["request_id"], response, conversation_id=CONV
+    )
+    return await task
+
+
+async def test_scoped_execute_strips_subpath_from_written_files():
+    """产物写回: 本机执行报的落盘路径同样要剥掉 D1a 前缀（与 list / grep 同约定）。
+
+    桌面按绑定根相对回报（它只认根），工作区相对是本侧的事——不剥，交付物台账里就会出现
+    一条模型和用户都打不开的 ``proj/…`` 路径。
+    """
+    local, registry, _sink = _make(base="proj")
+    result = await _execute_past_probe(
+        local,
+        registry,
+        _exec_value(written_files=["proj/report.md", "proj/out/chart.png"]),
+    )
+    assert result.written_files == ["report.md", "out/chart.png"]
+
+
+async def test_execute_without_written_files_stays_unmeasured():
+    """旧桌面不报这个字段 → ``None``（「没测量」不许伪装成「测了没变化」）。"""
+    local, registry, _sink = _make()
+    result = await _execute_past_probe(local, registry, _exec_value())
+    assert result.written_files is None
+
+
 async def test_scoped_exists_git_prefixes_subpath():
     """G2: ``exists(".git")`` probes project subdir, not the shared container root."""
     local, registry, sink = _make(base="projA")

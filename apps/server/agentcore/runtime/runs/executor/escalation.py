@@ -206,6 +206,11 @@ def build_escalation_channel(
         lock_owner = (lock_owner_run_id or "").strip()
         if lock_owner:
             suspend_payload["lock_owner_run_id"] = lock_owner
+        # Rides the request payload too, so an attach-time rebuild of the still-open card
+        # (hot_interaction_reattach) states the same wait policy as the original frame.
+        wait_ceiling = env.escalation_timeout
+        if isinstance(wait_ceiling, (int, float)) and wait_ceiling > 0:
+            suspend_payload["timeout_seconds"] = float(wait_ceiling)
         try:
             result = await bridge.suspend(
                 escalation_id,
@@ -226,6 +231,7 @@ def build_escalation_channel(
                         browser_login=want_browser_login or None,
                         ownership_paths=own_paths or None,
                         lock_owner_run_id=lock_owner or None,
+                        timeout_seconds=env.escalation_timeout,
                     )
                 ),
             )

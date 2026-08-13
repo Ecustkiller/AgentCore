@@ -21,9 +21,11 @@ from agentcore.tools.builtin.project_verify import (
     project_verify_command_match,
     project_verify_redirect_message,
 )
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -41,31 +43,15 @@ __all__ = [
     "long_running_redirect_message",
     "project_verify_command_match",
     "project_verify_redirect_message",
-    "render_written_files_marker",
-    "WRITTEN_FILES_MARKER_PREFIX",
-    "WRITTEN_FILES_MARKER_SUFFIX",
 ]
 
-# 结构化写回通道 (files_touched 事实口径 · 消费方见 runtime/runs/serialize.py):
-# 下面输出里的「已写回工作区：…」是给模型看的自然语言；这里再追加一行机器可读的结构化
-# 尾注，用 JSON 数组带上本次执行 EXACT 的写回路径，让本 run 的 files_touched 采集把
-# 「code_execute 落盘」计成真实的工作区写入 —— 而不必解析那行中文散文（脆弱：文件名可能
-# 含分隔符「、」、措辞会变、被截断）。追加在整段输出的最末，使 ToolResult 的 HEAD+TAIL
-# 截断把它保留在尾部。生产方与消费方靠单测护栏保持格式一致。
+# 结构化写回自报 (交付物台账事实口径 · 契约见 tools/file_products.py):
+# 输出里的「已写回工作区：…」是给模型看的自然语言；产物则在 ``ToolResult.file_products``
+# 上自报本次执行 EXACT 的写回路径，让「脚本间接落盘」与 file_write 走同一条台账通道 ——
+# 不必解析那行中文散文（脆弱：文件名可能含分隔符「、」、措辞会变、被截断）。
 #
 # C3 边界：code_execute 写回本期明确不走 WriteCoordinator 硬拦（可观测即可）；
 # file_write / append / str_replace / write_section / delete / move 才是互斥闭包。
-WRITTEN_FILES_MARKER_PREFIX = "<!--agentcore:written_files:"
-WRITTEN_FILES_MARKER_SUFFIX = "-->"
-
-
-def render_written_files_marker(paths: list[str]) -> str:
-    """Encode ``paths`` as the one-line structured write-back trailer (see module note)."""
-    return (
-        WRITTEN_FILES_MARKER_PREFIX
-        + json.dumps(list(paths), ensure_ascii=False)
-        + WRITTEN_FILES_MARKER_SUFFIX
-    )
 
 
 def _permission_allows_restricted_network(raw: str | None) -> bool:
@@ -178,6 +164,8 @@ class CodeExecuteTool:
         audience=AUDIENCE_WORKER_ONLY,
         execution_class=True,
         needs_location=True,
+        # 间接落盘（沙箱 copy-out）也是落盘：自报 copy-out 的 EXACT 路径。
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     def __init__(
@@ -364,11 +352,6 @@ class CodeExecuteTool:
                 f"\n注意：另有 {result.write_back_skipped} 个文件超出写回限额未保存"
                 "（单次执行的产物总量/文件数有限制，可分次生成）。"
             )
-        # 结构化写回尾注 (files_touched 事实口径): 见模块顶部说明。追加在输出最末，让
-        # ToolResult 的 HEAD+TAIL 截断把它保留在尾部；无写回则不加（旧夹具字节不变）。
-        if result.written_files:
-            output += "\n" + render_written_files_marker(result.written_files)
-
         # Render-oriented twin of ``output`` (工具结果富渲染): the client shows a
         # terminal-style view (stdout, stderr in red, exit-code badge) instead of
         # the flattened "stdout:\n…\nstderr:\n…" text. Kept structured so failures
@@ -439,4 +422,7 @@ class CodeExecuteTool:
             display=display,
             metadata=meta,
             contract_failure=launcher_unavailable,
+            # 结构化写回自报 (见模块顶部说明): 沙箱 copy-out 的 EXACT 路径，交付物台账据此
+            # 记账，永不解析那行「已写回工作区」中文散文（文件名可含「、」、措辞会变）。
+            file_products=[file_product(p) for p in (result.written_files or [])],
         )

@@ -1,5 +1,6 @@
 {
   "as_of": "2026-07-15",
+  "currency": "USD",
   "source": "manual snapshot from public vendor USD list prices (OpenAI/Anthropic/Google/DeepSeek/Mistral/Alibaba/Moonshot/Zhipu/Volcengine); cache_hit derived as published cached-input or ~50% of input when vendor publishes no cache tier",
   "models": {
     "gpt-4o": {

@@ -22,7 +22,7 @@ function stageFiles(paths: string[], prefix: string): string[] {
 }
 
 /**
- * 项目筛选态顶部：协作时间线（会话 + 幕摘要）+ 阶段产物并列。
+ * 文件夹筛选态顶部：协作时间线（会话 + 幕摘要）+ 阶段产物并列。
  * 约定文档引用条为路径级消费事实，非跨会话过程边。
  */
 export function CollaborationTimelinePanel({
@@ -69,7 +69,7 @@ export function CollaborationTimelinePanel({
         <div className="min-w-0 flex-1">
           <div className="mb-2 flex items-center gap-1.5">
             <Network size={14} className="shrink-0 text-muted-foreground" />
-            <SectionLabel>项目协作时间线</SectionLabel>
+            <SectionLabel>文件夹协作时间线</SectionLabel>
             {timelineQ.data != null && (
               <span className="text-xs text-muted-foreground/60 tabular-nums">
                 {timelineQ.data.total}
@@ -81,7 +81,7 @@ export function CollaborationTimelinePanel({
           )}
           {!loading && items.length === 0 && (
             <p className="text-xs text-muted-foreground">
-              此项目尚无带协作图的会话
+              此文件夹尚无带协作图的会话
             </p>
           )}
           <ul className="space-y-1.5">

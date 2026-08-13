@@ -15,6 +15,7 @@ import {
   usePersistentDisclosure,
   useStreamAwareDisclosure,
 } from "@/stores/disclosure";
+import { useMessageExecution } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import type { ProcessStep } from "@/types/events";
 import {
@@ -36,6 +37,8 @@ import {
 } from "./ReadUrlSourceCollection";
 import { ThinkingDots } from "./message-bubble/Thinking";
 import {
+  RUN_TARGET_ARG_TOOLS,
+  looksLikeInternalId,
   toolDetail,
   toolGroupSummary,
   toolMeta,
@@ -73,10 +76,11 @@ const PEEK_SUPPRESSED = new Set([
   "consult",
   // 跨会话对话日志：标题已自解释（query / conversation_id），正文在展开卡。
   "search_conversations",
-  "read_conversation",
+  // read_conversation 不在此列：标题不再拼 conversation_id，改由 peek 亮出对话标题——
+  // 用户认的是「上次那场讨论」，不是一串 id。
   "file_read",
   "file_list",
-  // CEO 协调原语：标题已自解释（+ run_id / interjection_id chip），peek 只是操作确认文案。
+  // CEO 协调原语：标题已自解释（撤队员 / 裁决求助另挂角色名），peek 只是操作确认文案。
   "update_synthesis",
   "replan",
   "cancel_worker",
@@ -137,6 +141,33 @@ function useRunningElapsed(
   }, [running]);
   if (!running || startedAt == null) return 0;
   return runningElapsedSec(startedAt);
+}
+
+/**
+ * 「撤回队员」/「裁决求助」的标题落谁头上——协作图上那个角色名。
+ *
+ * CEO 的处置动作是用户判断「这步做得对不对」的关键一行，可它的参数是 run_id。用户在图上
+ * 见过的是「调研员」「审校」，见到 `r-a3f2e1c8-…` 只能放弃对账。这里按回合的协作图把目标
+ * run 翻成角色名；翻不出来（历史回合无图 / 节点已不在）就什么都不显示，绝不退回摆 id。
+ */
+function useRunTargetRole(
+  step: Extract<ProcessStep, { kind: "tool" }>,
+  turnKey: string | undefined,
+): string {
+  const targetsRun = RUN_TARGET_ARG_TOOLS.has(step.tool_name);
+  const raw =
+    targetsRun && typeof step.arguments.run_id === "string"
+      ? step.arguments.run_id.trim()
+      : "";
+  const execution = useMessageExecution(raw ? (turnKey ?? null) : null);
+  if (!raw) return "";
+  const run = execution?.runs.find((r) => r.id === raw);
+  if (run) {
+    const role =
+      execution?.agents.find((a) => a.id === run.agentId)?.role ?? run.role;
+    if (role?.trim()) return role.trim();
+  }
+  return looksLikeInternalId(raw) ? "" : raw;
 }
 
 /** Shimmer placeholder rows shown while web_search is running — turns the bare waiting
@@ -236,7 +267,8 @@ export function ToolLine({
     false,
   );
   const { Icon, label } = toolMeta(step.tool_name);
-  const detail = toolDetail(step.arguments);
+  const targetRole = useRunTargetRole(step, turnKey);
+  const detail = targetRole || toolDetail(step.arguments);
   const data: ToolResultData = {
     toolName: step.tool_name,
     args: step.arguments,

@@ -21,6 +21,7 @@ import type {
   UserInterjectionPayload,
 } from "@/types/events";
 import {
+  beginLocalConversationStream,
   claimPrimaryStream,
   isPrimaryStreamIdle,
   onPrimaryStreamIdle,
@@ -189,6 +190,12 @@ export async function sendMidFlightMessage(
       signal,
     });
 
+  // 对话级订阅让位（B2）：本条 POST 一发出，服务端就在同一会话上排出了新回合——
+  // 若 follow 流还开着，drain 后同一回合会被折两次。primary claim 要等 drain 才拿
+  // （提前拿自锁），故这里单独占本端连接闸，由 runPump 的 finally 释放。
+  const releaseLocalStream = beginLocalConversationStream(conversationId);
+  let pumpOwnsLocalStream = false;
+
   try {
     let response = await doFetch(ac.signal);
     if (response.status === 401) {
@@ -333,11 +340,13 @@ export async function sendMidFlightMessage(
         if (abortRegistered && getRuntime(conversationId).abort === ac) {
           useConversationStore.getState().setAbort(null, conversationId);
         }
+        releaseLocalStream();
         finishAck(result);
       }
     };
 
     void runPump();
+    pumpOwnsLocalStream = true;
     return ackPromise;
   } catch (err) {
     parentAbort?.signal.removeEventListener("abort", onParentAbort);
@@ -346,5 +355,8 @@ export async function sendMidFlightMessage(
     }
     notifyError(err, "发送失败");
     return { kind: "error" };
+  } finally {
+    // 早退分支（401/409/202/!ok/抛错）没有泵可释放。
+    if (!pumpOwnsLocalStream) releaseLocalStream();
   }
 }

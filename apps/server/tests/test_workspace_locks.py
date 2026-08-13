@@ -223,8 +223,8 @@ async def test_concurrent_create_snapshot_manifest_keeps_both(
     provider = FilesystemStorageProvider(base_dir=snap_root)
     monkeypatch.setattr(snap_mod, "build_storage_provider", lambda: provider)
 
-    def _resolve(*, user_id: str, folder_id: str | None, conversation_id: str) -> Path:
-        root = tmp_path / "ws" / user_id / (folder_id or "x") / conversation_id
+    def _resolve(*, user_id: str, folder_rel_path: str | None, conversation_id: str) -> Path:
+        root = tmp_path / "ws" / user_id / (folder_rel_path or "x") / conversation_id
         root.mkdir(parents=True, exist_ok=True)
         (root / "f.txt").write_text("x", encoding="utf-8")
         return root
@@ -240,7 +240,7 @@ async def test_concurrent_create_snapshot_manifest_keeps_both(
     async def one(label: str):
         return await snap_mod.create_snapshot(
             user_id="u1",
-            folder_id="f1",
+            folder_id="f1", folder_rel_path="f1",
             conversation_id=f"c-{label}",
             label=label,
         )

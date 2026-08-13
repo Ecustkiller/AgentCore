@@ -16,6 +16,7 @@ from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.conversation.inference_rate_limit import enforce_inference_proxy_rate_limit
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
+    BYOK_KEY_REQUIRED_MESSAGE,
     BYOKKeyMissingError,
     LLMError,
     QuotaExceededError,
@@ -178,7 +179,7 @@ async def _resolve_inference_credentials(
         session=session,
         user=user,
         cost_repo=cost_repo,
-        byok_missing_message="请先在「设置 · 模型配置」中填入你的 API Key，再发起对话。",
+        byok_missing_message=BYOK_KEY_REQUIRED_MESSAGE,
         model_origin=selection.origin,
         provider_id=selection.provider_id,
     )
@@ -237,7 +238,7 @@ async def _record_proxy_spend(
     with log_context(trace_id=trace_id, conversation_id=conversation_id):
         get_proxy_spend_queue().enqueue(
             user_id=user_id,
-            conversation_id=conversation_id or "",
+            conversation_id=conversation_id,
             model=model,
             usage=usage,
             trace_id=trace_id,

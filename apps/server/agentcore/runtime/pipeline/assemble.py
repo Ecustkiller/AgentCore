@@ -16,6 +16,7 @@ from agentcore.runtime.context import (
     resolve_channel_profile,
 )
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore, format_registered_sources_prompt
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.resolve.prompt import compose_ceo_chat_prompt
 from agentcore.runtime.sessions import SessionLoader, SessionSaver, default_session_registry
@@ -44,12 +45,56 @@ class AssembledTurn:
     chat_system_prompt: str
 
 
+def build_chat_system_prompt(
+    *,
+    ceo_prompt: str,
+    workspace_overview: str,
+    recent_team_graph: str,
+    prior_delivery_gaps: str,
+    prior_delegate_retry: str,
+    attachment_context: str,
+    registered_sources: str,
+    soft_cap: int | None,
+) -> str:
+    """Render the turn's CEO system prompt from its sections — the ONE assembly point.
+
+    Variable tail AFTER the stable hint stack (workspace overview + recent graph +
+    attachments + 来源台账) so the CEO prefix (base + hints) stays byte-identical across
+    turns and rides the prefix cache even when the workspace / attachments change. Empty
+    sections are dropped, so a turn with none is byte-identical to the bare CEO prompt.
+
+    EVERY section the CEO's system prompt carries must come in through here. A fragment
+    appended to the returned string instead lands outside ``assembly_hash`` /
+    ``total_chars`` / ``section_digests``, so the prefix-drift signal and the soft cap
+    silently under-report by that whole block — and the fragments tempting enough to
+    append late (``registered_sources``: hydrated from the whole conversation) are
+    precisely the ones that grow every turn (CTX-A3).
+
+    COST-004 (仅观测起步): ``observe`` logs per-section chars + whether the soft cap is
+    exceeded, 攒据用、零行为改动。此处是「易变尾」与稳定前缀 (ceo_prompt) 同框的 choke
+    point, 正是未来「仅裁易变尾」软闸的作用点 (项目审计-成本性能专项 §九)。
+    """
+    return (
+        ContextAssembler()
+        .add("ceo_prompt", ceo_prompt, SectionOrder.BASE)
+        .add("workspace_context", workspace_overview, SectionOrder.WORKSPACE_OVERVIEW)
+        .add("recent_team_graph", recent_team_graph, SectionOrder.RECENT_TEAM_GRAPH)
+        .add("prior_delivery_gaps", prior_delivery_gaps, SectionOrder.PRIOR_DELIVERY_GAPS)
+        .add("prior_delegate_retry", prior_delegate_retry, SectionOrder.PRIOR_DELEGATE_RETRY)
+        .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
+        .add("registered_sources", registered_sources, SectionOrder.REGISTERED_SOURCES)
+        .observe(scope="ceo_turn", soft_cap=soft_cap)
+        .render()
+    )
+
+
 async def assemble_ceo_turn(
     *,
     prepared: PreparedTurn,
     conversation_id: str,
     user_message: str,
     history: list[dict],
+    evidence_ledger: EvidenceLedgerCore | None = None,
     sink: EventSink,
     backend: WorkspaceBackend,
     folder_id: str | None,
@@ -86,10 +131,12 @@ async def assemble_ceo_turn(
     # is scoped to this message and does not leak across turns). It is wired into
     # the CEO's loop, but with the coordinator boundary the CEO holds no
     # GRANTABLE tools — so approvals now bite at the WORKER layer: the SAME
-    # instance is handed to the delegate tool, which forwards it to workers ONLY
-    # in local mode (双模式工作区 P2d 执行门) — so a delegated worker can't run
-    # code / mutate files on the user's real machine without consent, while a
-    # cloud team stays un-gated (isolated sandbox).
+    # instance is handed to the delegate tool and forwarded to every worker
+    # (双模式工作区 P2d 执行门), so a delegated worker can't run code / mutate files
+    # on the user's real machine without consent. Which calls raise a card is
+    # narrowed per call in tool_exec (a cloud team stays un-gated for
+    # server-sandbox tools) — never by withholding the gate object here.
+    # ``None`` = this turn has nobody to ask (ops kill switch / unattended job).
     if permission_axes is None:
         permission_axes = DEFAULT_PERMISSION_AXES
     approval_gate = (
@@ -188,8 +235,8 @@ async def assemble_ceo_turn(
             await consult_tool.source.list_directory(prepared.base_tool_context.user_id)
         )
     explore_reason: str | None = None
-    project_nav_stale = False
-    project_profile_empty_soft = False
+    folder_nav_stale = False
+    folder_profile_empty_soft = False
     if memory_enabled and folder_id:
 
         async def _run_explore_gates() -> tuple[str | None, bool, bool]:
@@ -197,7 +244,7 @@ async def assemble_ceo_turn(
             from agentcore.memory.explore_profile import (
                 compute_workspace_explore_fingerprint,
                 evaluate_explore_fingerprint_drift,
-                project_profile_explore_reason,
+                folder_profile_explore_reason,
                 resolve_folder_workspace_key,
                 resolve_hard_explore_reason,
             )
@@ -222,7 +269,7 @@ async def assemble_ceo_turn(
                 binding_injected=ctx.folder_binding_injected,
             )
             key_for_gates = current_key if current_key is not None else ""
-            reason = await project_profile_explore_reason(
+            reason = await folder_profile_explore_reason(
                 mem_store,
                 prepared.base_tool_context.user_id,
                 folder_id,
@@ -256,20 +303,20 @@ async def assemble_ceo_turn(
                         snapshot=snapshot,
                         live_fingerprint=live_fp,
                     )
-            # Precompute close-out key so update_project_profile does not re-hit PG.
+            # Precompute close-out key so update_folder_profile does not re-hit PG.
             if current_key:
-                upd = chat_tools.get_optional("update_project_profile")
+                upd = chat_tools.get_optional("update_folder_profile")
                 if upd is not None and getattr(upd, "workspace_key", None) is None:
                     upd.workspace_key = current_key
             return reason, nav_stale, profile_empty_soft
 
-        explore_reason, project_nav_stale, project_profile_empty_soft = await _timed_phase(
+        explore_reason, folder_nav_stale, folder_profile_empty_soft = await _timed_phase(
             "explore", _run_explore_gates()
         )
     # Sink explore-pending into ToolContext so delegate can suppress structured
     # files_written inference / require ≥2 explore workers（prompt 块 delegate 读不到）。
-    # Worker write_scope=explore_memory：写工具层拦出 AgentCore/ 与 文档/项目/。
-    # Cleared in-place by update_project_profile on successful write.
+    # Worker write_scope=explore_memory：写工具层拦出 AgentCore/ 之外的写盘。
+    # Cleared in-place by update_folder_profile on successful write.
     if explore_reason:
         prepared.base_tool_context.cold_start_explore_pending = True
         prepared.base_tool_context.write_scope = "explore_memory"
@@ -278,10 +325,10 @@ async def assemble_ceo_turn(
         skill_registry=prepared.skill_registry,
         ceo_tool_names=ceo_tool_names,
         on_demand_entries=on_demand_entries,
-        project_catalog=prepared.project_catalog,
+        folder_catalog=prepared.folder_catalog,
         cold_start_explore=explore_reason or False,
-        project_nav_stale=project_nav_stale,
-        project_profile_empty_soft=project_profile_empty_soft,
+        folder_nav_stale=folder_nav_stale,
+        folder_profile_empty_soft=folder_profile_empty_soft,
     )
     # Real-time workspace overview (工作区上下文): a compact, newest-first listing of
     # the files already on disk in this conversation's workspace, so the CEO can
@@ -343,40 +390,20 @@ async def assemble_ceo_turn(
         conversation_id=conversation_id,
         user_message=user_message,
         exclude_turn_id=message_id,
+        promotion_ledger=prepared.base_tool_context.promotion_ledger,
     )
-    # Variable tail AFTER the stable hint stack (workspace overview + recent graph +
-    # attachments) so the CEO prefix (base + hints) stays byte-identical across turns
-    # and rides the prefix cache even when the workspace / attachments change. Empty
-    # sections are dropped, so a turn with none is byte-identical to the bare CEO prompt.
-    chat_system_prompt = (
-        ContextAssembler()
-        .add("ceo_prompt", chat_system_prompt, SectionOrder.BASE)
-        .add("workspace_context", workspace_overview, SectionOrder.WORKSPACE_OVERVIEW)
-        .add(
-            "recent_team_graph",
-            recent_graph_context,
-            SectionOrder.RECENT_TEAM_GRAPH,
-        )
-        .add(
-            "prior_delivery_gaps",
-            prior_delivery_gaps,
-            SectionOrder.PRIOR_DELIVERY_GAPS,
-        )
-        .add(
-            "prior_delegate_retry",
-            prior_delegate_retry,
-            SectionOrder.PRIOR_DELEGATE_RETRY,
-        )
-        .add(
-            "attachment_context",
-            prepared.attachment_context,
-            SectionOrder.ATTACHMENT,
-        )
-        # COST-004 (仅观测起步): 埋本回合 CEO 系统提示的逐段 chars + 是否越软闸, 攒据用、零行为
-        # 改动。此处是「易变尾 (workspace/attachment)」与稳定前缀 (ceo_prompt) 同框的 choke
-        # point, 正是未来「仅裁易变尾」软闸的作用点 (项目审计-成本性能专项 §九)。
-        .observe(scope="ceo_turn", soft_cap=settings.prompt_budget_char_soft_cap)
-        .render()
+    # 出处诚实：hydrate 后注入「已登记来源」结构化摘要（对照台账字段，禁占位叙事）。
+    # Tools register into the ledger only once the loop runs, so its content is settled
+    # for this turn's prompt here.
+    chat_system_prompt = build_chat_system_prompt(
+        ceo_prompt=chat_system_prompt,
+        workspace_overview=workspace_overview,
+        recent_team_graph=recent_graph_context,
+        prior_delivery_gaps=prior_delivery_gaps,
+        prior_delegate_retry=prior_delegate_retry,
+        attachment_context=prepared.attachment_context,
+        registered_sources=format_registered_sources_prompt(evidence_ledger),
+        soft_cap=settings.prompt_budget_char_soft_cap,
     )
 
     # COST-004 tools 面: 补工具 schema JSON chars / 约算 token（原先只观测系统提示，编排工具

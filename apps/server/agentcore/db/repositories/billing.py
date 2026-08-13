@@ -18,6 +18,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from agentcore.core.types import new_id
 from agentcore.costing import run_cost_from_calls
 from agentcore.db.models import CostCall, CostEvent, User
+from agentcore.llm.pricing import CURRENCY_CNY
 
 from ._base import _json_int, _sum_int
 
@@ -53,7 +54,7 @@ def _fold_call_models_and_source(
 def _run_row_values(
     *,
     user_id: str,
-    conversation_id: str,
+    conversation_id: str | None,
     message_id: str | None,
     runs: Sequence[dict],
     trace_id: str | None,
@@ -62,7 +63,7 @@ def _run_row_values(
         {
             "id": new_id(),
             "user_id": user_id,
-            "conversation_id": conversation_id,
+            "conversation_id": conversation_id or None,
             "message_id": message_id,
             "run_id": r["run_id"],
             "parent_run_id": r.get("parent_run_id"),
@@ -89,6 +90,12 @@ class CostEventRepository:
     Product reads (payroll / dashboard / quota) hit ``cost_events``. Call details
     live in ``cost_calls`` and are the authority for proxy metering; per-run rows
     may be dual-written at finalize or materialized from calls.
+
+    ``conversation_id`` is optional on every write: an account-level chrome call
+    (AI 改写 / 文档 description, ``role=assist``) belongs to no conversation and is
+    written with NULL. The account-window reads below (which is what 用量页 /
+    仪表盘 / ``enforce_quota`` use) therefore include it, while the
+    conversation-scoped and per-message reads exclude it by construction.
     """
 
     def __init__(self, session: AsyncSession):
@@ -98,7 +105,7 @@ class CostEventRepository:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str | None,
         runs: Sequence[dict],
         trace_id: str | None = None,
@@ -127,7 +134,7 @@ class CostEventRepository:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str | None,
         calls: Sequence[dict],
         trace_id: str | None = None,
@@ -145,7 +152,7 @@ class CostEventRepository:
             {
                 "id": new_id(),
                 "user_id": user_id,
-                "conversation_id": conversation_id,
+                "conversation_id": conversation_id or None,
                 "message_id": message_id,
                 "call_id": c["call_id"],
                 "run_id": c["run_id"],
@@ -183,7 +190,7 @@ class CostEventRepository:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str | None,
         run_ids: Sequence[str],
         trace_id: str | None,
@@ -281,7 +288,7 @@ class CostEventRepository:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str,
         trace_id: str | None = None,
     ) -> set[str]:
@@ -399,7 +406,8 @@ class CostEventRepository:
 
         Scoped by ``user_id`` so a non-owner gets an empty list (never another
         user's spend, and no message-existence leak). Ordered oldest-first so the
-        captain root (written first) heads the payroll.
+        captain root (written first) heads the payroll. Off-turn and account-level
+        rows carry ``message_id = NULL`` and so never land on any payroll.
         """
         result = await self._session.execute(
             select(CostEvent)
@@ -415,7 +423,9 @@ class CostEventRepository:
         and cost-breakdown components live in JSONB (summed via cast); the turn
         total uses the redundant ``cost_total_nano`` scalar column (precise, and
         index-friendly for the account window). ``turns`` counts distinct
-        ``message_id`` — the「请求/回合」proxy for the conversation total + quota.
+        ``message_id`` — the「请求/回合」proxy for the conversation total + quota;
+        NULL is ignored, so off-turn and account-level rows add their money and
+        tokens without inflating the request count.
         """
         billed = CostEvent.cost_total_nano > 0
         estimated = CostEvent.cost_estimated_nano > 0
@@ -445,6 +455,11 @@ class CostEventRepository:
                 case((estimated, _json_int(CostEvent.cost, "output")), else_=0)
             ).label("e_output"),
             _sum_int(CostEvent.cost_estimated_nano).label("c_estimated"),
+            # Each bucket's currency, read off the rows instead of assumed: billed
+            # is CNY (curated cards) while BYOK estimates are USD (community
+            # table), and the product does no FX so the two never merge.
+            func.max(case((billed, CostEvent.currency))).label("c_currency"),
+            func.max(case((estimated, CostEvent.currency))).label("e_currency"),
             _sum_int(CostEvent.rounds).label("rounds"),
             func.count(distinct(CostEvent.message_id)).label("turns"),
         ).where(*conditions)
@@ -462,6 +477,7 @@ class CostEventRepository:
                 "cached": int(row.c_cached),
                 "output": int(row.c_output),
                 "total": int(row.c_total),
+                "currency": str(row.c_currency or CURRENCY_CNY),
                 "pricing_source": "curated",
             },
             "estimated_cost": {
@@ -469,6 +485,7 @@ class CostEventRepository:
                 "cached": int(row.e_cached),
                 "output": int(row.e_output),
                 "total": int(row.c_estimated),
+                "currency": str(row.e_currency or CURRENCY_CNY),
                 "pricing_source": "estimated",
             },
             "rounds": int(row.rounds),
@@ -476,7 +493,12 @@ class CostEventRepository:
         }
 
     async def aggregate_for_conversation(self, conversation_id: str, *, user_id: str) -> dict:
-        """Cumulative spend for one conversation (对话累计)."""
+        """Cumulative spend for one conversation (对话累计).
+
+        Account-level rows (NULL conversation) are excluded by the equality
+        filter — they belong to no conversation, so no conversation may claim
+        them. Their money shows on the account windows below instead.
+        """
         return await self._aggregate(
             CostEvent.conversation_id == conversation_id,
             CostEvent.user_id == user_id,
@@ -486,6 +508,11 @@ class CostEventRepository:
         """Spend since a cutoff. ``user_id`` scopes to one account (account dashboard
         today / month window, hits ``ix_cost_events_user_created``); ``None``
         aggregates platform-wide (admin 全站用量看板 — every account).
+
+        Deliberately unfiltered on ``conversation_id``: this is the account's
+        total, so it must include account-level rows (AI 改写 / 文档 description)
+        as well as every conversation's. Same query backs ``enforce_quota``, so
+        that spend counts against the cap it was billed under.
         """
         conditions: list[ColumnElement] = [CostEvent.created_at >= since]
         if user_id is not None:
@@ -500,7 +527,8 @@ class CostEventRepository:
         **Must** scan ``cost_calls`` (``GROUP BY model``). Do **not** aggregate
         ``cost_events.model`` — that column only records the run's first call, so
         multi-model runs would mis-attribute spend. ``user_id`` scopes to one
-        account; ``None`` is platform-wide (admin 全站看板).
+        account; ``None`` is platform-wide (admin 全站看板). Account-level calls
+        are included (a window total, not a conversation one).
         """
         total = _sum_int(CostCall.cost_total_nano)
         estimated = _sum_int(CostCall.cost_estimated_nano)
@@ -573,6 +601,9 @@ class CostEventRepository:
         ordered by spend desc and capped at ``limit`` (Top spenders) — no user
         filter, this is the whole platform. Money is integer nano-CNY; clients
         format ¥ as ``cost_total / 1e9``.
+
+        The ``users`` join is on ``user_id``, which every ledger row carries, so
+        account-level rows count toward their owner's total here too.
         """
         total = _sum_int(CostEvent.cost_total_nano)
         stmt = (
@@ -684,6 +715,7 @@ class CostEventRepository:
 
         One GROUP BY over the given ids so the 对话 page enriches each row without
         an N+1. Ids with no ledger rows are absent (callers default to 0).
+        Account-level rows (NULL conversation) can never match an id in the list.
         """
         if not conversation_ids:
             return {}

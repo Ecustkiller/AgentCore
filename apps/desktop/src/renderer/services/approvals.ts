@@ -2,8 +2,8 @@ import { notifyError } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import {
   isInteractionOrphanedError,
+  notifySubmitInteractionResult,
   submitInteraction,
-  submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import {
   type ApprovalView,
@@ -157,7 +157,7 @@ async function settleOne(
       hotBody: { kind: "approval", decision },
     });
     if (result !== "ok") {
-      notifyError(submitInteractionFeedback(result));
+      notifySubmitInteractionResult(result);
     }
   } catch (err) {
     if (isInteractionOrphanedError(err)) {
@@ -165,7 +165,9 @@ async function settleOne(
       return;
     }
     if (err instanceof ApiError && err.status === 404) {
-      useInteractionStore.getState().markOrphaned(approval.approvalId);
+      useInteractionStore
+        .getState()
+        .markSettledByReceipt({ kind: "approval", id: approval.approvalId });
       return;
     }
     throw err;

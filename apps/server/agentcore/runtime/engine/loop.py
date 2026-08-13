@@ -133,7 +133,7 @@ async def react_loop(
     annotate_citations: bool = True,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     ledger_registrant: str = "",
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     out: ReactLoopOut | None = None,
     run_id: str = "",
     agent_id: str = "",
@@ -199,17 +199,22 @@ async def react_loop(
     research tools (de-duped, capped). ``gate_escalations`` (Worker routing Phase 1)
     collects Escalation Gate rows after ``execute_tools`` (CEO / solo leave
     unset — gate inert). ``tool_failures`` / ``controller_seed_out`` are replaced
-    at every terminal exit (circuit-breaker facts / ``LoopController.export_seed``
-    for write_pass / light_repair / contract retry).
+    on EVERY exit — the clean returns and the abnormal ones alike (a propagated
+    round failure under ``raise_on_error``, a hard-timeout force cancel), so a
+    FAILED / CANCELLED run reports the circuit-breaker facts it actually
+    accumulated (``LoopController.export_seed`` for write_pass / light_repair /
+    contract retry).
     ``turn_evidence_ledger`` (调研路径) registers hits into the turn-shared ledger
     and annotates tool output with stable ``#rN=url`` for CEO and workers alike
     (引用即出处 P1). ``annotate_citations`` gates finish_guard's legacy ``[n]`` check
     (CEO True / worker False)；``#rN`` id 存在闸在台账接通且正文出现约定标记时启用
     （Q5；worker 回炉 1 次 / CEO 跟配置）。without a ledger the old ``[n]=url``
     annotate path still applies. Debate speakers omit the turn ledger (场级 ``#e``).
-    ``approval_gate`` (CEO chat path only; ``None`` for delegated workers) pauses
+    ``approval_gate`` (the turn's gate — captain and delegated workers alike) pauses
     GRANTABLE tool calls until the user authorizes them — a denial is fed back to
-    the model as a tool result so it can adapt.
+    the model as a tool result so it can adapt. It is REQUIRED: pass ``None`` only
+    when this path genuinely has no user to ask, which makes any call that needs
+    approval fail closed (tool_exec denies rather than executing ungated).
 
     ``run_id`` / ``role`` scope the execution-level facts (§8.3) this loop records
     into the turn's ambient :data:`~agentcore.runtime.facts.current_fact_log`
@@ -382,6 +387,15 @@ async def react_loop(
         controller_seed_sink.append(dict(controller.export_seed()))
 
     def _export_terminal_state() -> None:
+        """Publish circuit-breaker facts + controller latches for the caller.
+
+        Called from the loop's ``finally`` so EVERY exit publishes them — not just
+        the two clean returns but also the abnormal ones (``raise_on_error``
+        propagating a round failure, hard-timeout force cancel). Those are exactly
+        the runs whose ``tool_failures`` the CEO most needs: a FAILED / CANCELLED
+        RunState used to carry an empty list, so the「工具失败」section read
+        healthier than the run was. Idempotent — each export clears its sink first.
+        """
         _export_tool_failures()
         _export_controller_seed()
 
@@ -621,10 +635,14 @@ async def react_loop(
             # grant one grace round; after grace force-cancel (no new LLM/tool).
             hard_break = _enforce_hard_timeout_entry()
             if hard_break is not None:
-                ceiling_reason = hard_break
                 import asyncio
 
-                raise asyncio.CancelledError("redirect")
+                # The cancel arg IS the wire ``run_cancelled.reason`` (executor.terminal
+                # reads ``e.args[0]``), so it must carry the real cause — a hardcoded
+                # "redirect" told the user their worker was re-tasked when it was killed
+                # on the timeout ceiling. ``ceiling_finalize`` is unreachable from here
+                # (post-grace bans new LLM work), hence no ``ceiling_reason`` stamp.
+                raise asyncio.CancelledError(hard_break)
             # B·收尾窗口必须先于硬顶：单轮 token 从软顶下方直接越过硬顶时，若先判硬顶
             # break，会整轮跳过 wind_down，随后 force_finalize 禁写 → worker 把
             # file_write 糊成正文 DSML。先武装收尾窗；若本轮刚进入，即使已过硬顶也
@@ -1021,6 +1039,9 @@ async def react_loop(
                                         tc.id, name, args, run_id=run_id or ""
                                     )
                                 )
+                                # 收尾窗口 / 白名单 / 落盘 / handoff are all engine words
+                                # aimed at the model — ``deny`` stays on ``result`` and
+                                # the user face is curated by code only.
                                 sink.emit(
                                     tool_use_end(
                                         tc.id,
@@ -1028,8 +1049,7 @@ async def react_loop(
                                         success=False,
                                         output=deny,
                                         failure=tool_failure_fields(
-                                            code="allowlist_deny",
-                                            product_message=deny,
+                                            code="wind_down_deny"
                                         ),
                                         run_id=run_id or "",
                                     )
@@ -1238,7 +1258,6 @@ async def react_loop(
                 form_prose=form_prose,
             )
             if applied.action == "return":
-                _export_terminal_state()
                 return _exit(
                     applied.content,
                     applied.reasoning,
@@ -1337,14 +1356,19 @@ async def react_loop(
             tool_context=tool_context,
             sink=sink,
             finish_override_sink=finish_override_sink,
+            approval_gate=approval_gate,
+            citation_sink=citation_sink,
+            annotate_citations=annotate_citations,
+            turn_evidence_ledger=turn_evidence_ledger,
+            ledger_registrant=ledger_registrant,
             gate_escalation_sink=gate_escalation_sink,
             cutoff_reason_sink=cutoff_reason_sink,
             files_expected=files_expected,
             form_prose=form_prose,
         )
-        _export_terminal_state()
         return _exit(*result)
     finally:
+        _export_terminal_state()
         if steer_cid:
             from agentcore.runtime.turn.runs import turn_runs
             from agentcore.runtime.turn.steer import (

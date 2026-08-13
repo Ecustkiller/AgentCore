@@ -56,6 +56,7 @@ from agentcore.tools.builtin.test_parsers import (
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -871,6 +872,8 @@ class TestRunTool:
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
         execution_class=True,
+        # 跑验证命令：构建 / 缓存副产物枚举不出，也不是本回合交付物。
+        file_products=FileProductsContract.NO_PRODUCT,
     )
 
     @property

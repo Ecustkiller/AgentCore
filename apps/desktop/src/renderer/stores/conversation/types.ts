@@ -206,12 +206,22 @@ export interface MemoryUpdateItem {
 }
 
 /** One memory-write notice on the conversation timeline (two-layer memory).
- * `kind: "episodic"` → light tip (`summary`); `kind: "semantic"` → diff card (`items`).
+ * `kind: "episodic"` → light tip (`summary`); `kind: "semantic"` → diff card (`items`);
+ * `kind: "quota"` → the always pool is full: `summary` says so and `items` name what could
+ * not be written plus the entries holding the pool (审计 CTX-A2).
  * Loaded with the latest messages window + pushed live on the firehose (`memory_updated`). */
 export interface MemoryUpdate {
   id: string;
   createdAt: string;
-  kind: "episodic" | "semantic";
+  /**
+   * 被总结的那一轮的末尾 —— 本次固化窗口最后一条消息的 `created_at`（`memory_updates.anchor_at`）。
+   * episodic 卡才有；semantic / quota 为 null。固化是回合结束后异步跑的，`createdAt`（落库时刻）
+   * 比它总结的那一轮晚一两分钟，那时用户往往已经发出下一条消息，按 `createdAt` 锚定就会把卡片
+   * 挤到后面去。时间线锚定与卡片时间戳一律走
+   * {@link import("@/components/chat/messageTimeline").memoryAnchorTime}。
+   */
+  anchorAt?: string | null;
+  kind: "episodic" | "semantic" | "quota";
   summary?: string | null;
   items: MemoryUpdateItem[];
 }
@@ -274,8 +284,6 @@ export interface Message {
       body_kind?: string;
       /** Provider endpoint root for BYOK empty-response 排查包. */
       base_url?: string;
-      sub2api_diagnosis?: string;
-      sub2api_account?: string;
       credential_source?: "user" | "platform" | string | null;
     };
   };
@@ -286,11 +294,29 @@ export interface Message {
   traceId?: string;
   /** Preflight soft gate when the configured model may lack tool calling (turn_warning SSE). */
   turnWarning?: string;
+  /** 裸聊写盘时自动建的云文件夹（auto_folder_created SSE / reload runs.auto_folder）——
+   * 告知落点用，气泡里出一条可打开、可当场改名的轻提示。 */
+  autoFolder?: AutoFolderNotice;
   /**
    * 消息归因（如 `execution_harvest` 系统收口）。REST ``MessageDetail.origin`` 已投影；
    * 缺省时由 {@link import("@/lib/executionHarvest").isExecutionHarvestMessage} 从正文前缀推断。
    */
   origin?: string | null;
+  /**
+   * 「曾中断恢复」：这条助手回合中途崩过，由租约清扫重驱跑完，成果仍归本条消息。
+   * REST ``MessageDetail.recovered`` 投影；不做正文猜测，缺字段即视为没崩过。
+   */
+  recovered?: boolean;
+}
+
+/**
+ * 裸聊写盘自动建的云文件夹（双模式工作区 §5.4 裸聊行）。
+ *
+ * `name` 是建桌那一刻的名字；渲染时按 `folderId` 查文件夹现名，改名后不必回写这里。
+ */
+export interface AutoFolderNotice {
+  folderId: string;
+  name: string;
 }
 
 export interface ConversationRuntime {

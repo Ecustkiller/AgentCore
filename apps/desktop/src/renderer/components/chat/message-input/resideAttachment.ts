@@ -1,8 +1,14 @@
 /**
  * 引用即驻留：把用户选中的文件落到对话工作区 ``attachments/``（本地直写 /
  * 云端 PUT），返回可塞进 PendingAttachment 的字段。绝对路径不进本模块状态。
+ *
+ * 云端会话的上传发生在**附加那一刻**（见 {@link residentAttachmentForFile}），不再
+ * 推迟到点发送——推迟意味着用户点发送后才开始读盘 + 跨 IPC 搬字节 + PUT，点击看起来
+ * 「毫无反应」。渲染进程手里已经有 File 时也绝不再走「主进程写盘 → consumeStagedBytes
+ * 读回 → 重新包 Blob」那条路：几 MB 会被完整拷贝好几次，全跑在主线程上。
  */
 
+import { hasLocalFiles } from "@/lib/capabilities";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { uploadWorkspaceFile } from "@/services/workspace";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
@@ -125,22 +131,24 @@ export async function stageDroppedFileAttachment(
   return fromStaged(res.data);
 }
 
-/**
- * 浏览器：回形针 / 拖贴共用。校验大小；有会话则立即云端 PUT，
- * 无会话则持 ``fileBlob`` 到发送。允许二进制（图片 / docx / pdf 等）；
- * 识图是否可用由后端与模型配置决定，此处不硬拒。
- */
-export async function prepareBrowserFileAttachment(
-  conversationId: string | null,
-  file: File,
-): Promise<ResideResult> {
-  if (file.size > ATTACH_MAX_BYTES) {
-    return {
-      ok: false,
-      reason: `文件超过 ${Math.round(ATTACH_MAX_BYTES / (1024 * 1024))}MB 上限`,
-    };
-  }
+/** 附件预览元信息（名字 / 内联正文 / 是否二进制）。 */
+export interface AttachmentMeta {
+  name: string;
+  text: string;
+  truncated: boolean;
+  binary: boolean;
+}
 
+export const OVERSIZE_REASON = `文件超过 ${Math.round(
+  ATTACH_MAX_BYTES / (1024 * 1024),
+)}MB 上限`;
+
+const LOCAL_ROOT_UNAVAILABLE = "本地工作区目录不可用，请重新打开文件夹后再附加";
+
+/** 只读头部 {@link TEXT_PREVIEW_CAP} 字节判类型 + 取内联预览，绝不整读大文件。 */
+export async function describeFileAttachment(
+  file: File,
+): Promise<AttachmentMeta> {
   const name = safeBrowserFileName(file.name);
   const head = await file.slice(0, TEXT_PREVIEW_CAP + 1).arrayBuffer();
   const bytes = new Uint8Array(head);
@@ -152,33 +160,16 @@ export async function prepareBrowserFileAttachment(
     : new TextDecoder("utf-8").decode(
         bytes.subarray(0, Math.min(bytes.length, TEXT_PREVIEW_CAP)),
       );
+  return { name, text, truncated, binary };
+}
 
-  if (!conversationId) {
-    return {
-      ok: true,
-      name,
-      path: name,
-      text,
-      truncated,
-      binary,
-      fileBlob: file,
-    };
-  }
-
-  // 有会话：立即 PUT（引用即驻留）。本地 binding 在无本机根时不可用。
-  try {
-    const binding = await getWorkspaceBinding(conversationId);
-    if (binding.mode === "local") {
-      return {
-        ok: false,
-        reason: "本地工作区目录不可用，请重新打开文件夹后再附加",
-      };
-    }
-  } catch {
-    /* binding unknown — try cloud upload */
-  }
-
-  const workspacePath = `attachments/${name}`;
+/** 云端工作区 PUT：Blob 体由浏览器直接流出，渲染进程不再自拷字节。 */
+async function putFileToCloudWorkspace(
+  conversationId: string,
+  file: Blob,
+  meta: AttachmentMeta,
+): Promise<ResideResult> {
+  const workspacePath = `attachments/${meta.name}`;
   try {
     await uploadWorkspaceFile(conversationId, workspacePath, file);
   } catch (e) {
@@ -187,33 +178,95 @@ export async function prepareBrowserFileAttachment(
       reason: e instanceof Error ? e.message : "上传附件到云端工作区失败",
     };
   }
-  return {
-    ok: true,
-    name,
-    path: workspacePath,
-    text,
-    truncated,
-    binary,
-    workspacePath,
-  };
+  return { ok: true, path: workspacePath, workspacePath, ...meta };
 }
 
 /**
- * 发送前：暂存件写入本地工作区，或上传到云端工作区。
- * 已有 ``workspacePath`` 的跳过。失败返回 reason。
+ * 浏览器：回形针 / 拖贴共用。校验大小；有会话则立即云端 PUT，
+ * 无会话则持 ``fileBlob`` 到发送。允许二进制（图片 / docx / pdf 等）；
+ * 识图是否可用由后端与模型配置决定，此处不硬拒。
  */
-export async function ensureAttachmentResident(
-  conversationId: string,
-  att: {
-    name: string;
-    stagingId?: string;
-    workspacePath?: string;
-    binary?: boolean;
-    text: string;
-    truncated: boolean;
-    fileBlob?: File;
-  },
-): Promise<
+export async function prepareBrowserFileAttachment(
+  conversationId: string | null,
+  file: File,
+  known?: AttachmentMeta,
+): Promise<ResideResult> {
+  if (file.size > ATTACH_MAX_BYTES) {
+    return { ok: false, reason: OVERSIZE_REASON };
+  }
+
+  const meta = known ?? (await describeFileAttachment(file));
+
+  if (!conversationId) {
+    return { ok: true, path: meta.name, fileBlob: file, ...meta };
+  }
+
+  // 有会话：立即 PUT（引用即驻留）。本地 binding 在无本机根时不可用。
+  try {
+    const binding = await getWorkspaceBinding(conversationId);
+    if (binding.mode === "local") {
+      return { ok: false, reason: LOCAL_ROOT_UNAVAILABLE };
+    }
+  } catch {
+    /* binding unknown — try cloud upload */
+  }
+
+  return putFileToCloudWorkspace(conversationId, file, meta);
+}
+
+/**
+ * 附加即驻留（拖 / 贴 / 浏览器选择）——调用方先把 chip 画出来，再 await 这里。
+ *
+ * - 本机工作区：交主进程从磁盘复制进 ``attachments/``，渲染进程完全不碰字节。
+ * - 云端会话：渲染进程手里就是 File，直接 PUT。
+ * - 桌面草稿（尚无会话）：主进程暂存留底（重启可恢复；建会话后若落进本机项目仍能
+ *   finalize），同时把 File 留在内存，发送时直传云端而不必跨 IPC 把字节读回来。
+ */
+export async function residentAttachmentForFile(
+  conversationId: string | null,
+  file: File,
+  known?: AttachmentMeta,
+): Promise<ResideResult> {
+  if (file.size > ATTACH_MAX_BYTES) {
+    return { ok: false, reason: OVERSIZE_REASON };
+  }
+  if (!hasLocalFiles()) {
+    return prepareBrowserFileAttachment(conversationId, file, known);
+  }
+
+  if (!conversationId) {
+    const staged = await stageDroppedFileAttachment(null, file);
+    // 暂存失败不致命：内存里的 File 仍能在建会话后直传，只是重启后不留底。
+    if (!staged.ok) return prepareBrowserFileAttachment(null, file, known);
+    return { ...staged, fileBlob: file };
+  }
+
+  let isLocalWorkspace = false;
+  try {
+    isLocalWorkspace =
+      (await getWorkspaceBinding(conversationId)).mode === "local";
+  } catch {
+    /* binding unknown — treat as cloud and try the upload */
+  }
+  if (isLocalWorkspace) {
+    return stageDroppedFileAttachment(conversationId, file);
+  }
+
+  const meta = known ?? (await describeFileAttachment(file));
+  return putFileToCloudWorkspace(conversationId, file, meta);
+}
+
+export interface ResidentAttachmentInput {
+  name: string;
+  stagingId?: string;
+  workspacePath?: string;
+  binary?: boolean;
+  text: string;
+  truncated: boolean;
+  fileBlob?: File;
+}
+
+export type ResidentAttachment =
   | {
       ok: true;
       workspacePath: string;
@@ -222,8 +275,22 @@ export async function ensureAttachmentResident(
       text: string;
       truncated: boolean;
     }
-  | { ok: false; reason: string }
-> {
+  | { ok: false; reason: string };
+
+/**
+ * 兜底驻留：把还没落地的附件写入本地工作区或上传到云端工作区。
+ * 已有 ``workspacePath`` 的跳过。失败返回 reason。
+ *
+ * 正常路径上附件在附加时就已驻留完（{@link residentAttachmentForFile}），这里只兜
+ * 三种情形：重启后从草稿恢复的暂存件、附加时上传失败后的发送重试、以及历史纯文本引用。
+ *
+ * 分支顺序有讲究：本机工作区的 finalize 必须排在内存 File 直传之前——桌面草稿两者都
+ * 有，若先看 File 就会把本该落进本机项目的附件误传到云端。
+ */
+export async function ensureAttachmentResident(
+  conversationId: string,
+  att: ResidentAttachmentInput,
+): Promise<ResidentAttachment> {
   if (att.workspacePath) {
     return {
       ok: true,
@@ -235,32 +302,52 @@ export async function ensureAttachmentResident(
     };
   }
 
-  // 浏览器草稿 File → 云端 PUT。
-  if (att.fileBlob) {
-    try {
-      const binding = await getWorkspaceBinding(conversationId);
-      if (binding.mode === "local") {
-        return {
-          ok: false,
-          reason: "本地工作区目录不可用，请重新打开文件夹后再附加",
-        };
+  if (att.stagingId && window.fsApi?.finalizeStagedAttachment) {
+    const dest = await resolveAttachDest(conversationId);
+    if (dest) {
+      const res = await window.fsApi.finalizeStagedAttachment(
+        att.stagingId,
+        dest,
+      );
+      if (!res.ok) return { ok: false, reason: res.reason };
+      const workspacePath = res.data.workspacePath;
+      if (typeof workspacePath !== "string") {
+        return { ok: false, reason: "附件落盘未返回工作区路径" };
       }
-    } catch {
-      /* binding unknown — try cloud upload */
-    }
-    const name = safeBrowserFileName(att.name);
-    const workspacePath = `attachments/${name}`;
-    try {
-      await uploadWorkspaceFile(conversationId, workspacePath, att.fileBlob);
-    } catch (e) {
       return {
-        ok: false,
-        reason: e instanceof Error ? e.message : "上传附件到云端工作区失败",
+        ok: true,
+        workspacePath,
+        name: res.data.name,
+        binary: res.data.binary,
+        text: res.data.text,
+        truncated: res.data.truncated,
       };
     }
+  }
+
+  // 本地模式但本机根不可用：勿误走云端 PUT（会 409）。
+  try {
+    const binding = await getWorkspaceBinding(conversationId);
+    if (binding.mode === "local") {
+      return { ok: false, reason: LOCAL_ROOT_UNAVAILABLE };
+    }
+  } catch {
+    /* binding unknown — try cloud upload */
+  }
+
+  // 云端：内存里还握着 File 就直接 PUT，别再去主进程读回字节。
+  if (att.fileBlob) {
+    const name = safeBrowserFileName(att.name);
+    const res = await putFileToCloudWorkspace(conversationId, att.fileBlob, {
+      name,
+      text: att.text,
+      truncated: att.truncated,
+      binary: !!att.binary,
+    });
+    if (!res.ok) return res;
     return {
       ok: true,
-      workspacePath,
+      workspacePath: res.workspacePath ?? `attachments/${name}`,
       name,
       binary: !!att.binary,
       text: att.text,
@@ -283,41 +370,7 @@ export async function ensureAttachmentResident(
     };
   }
 
-  const dest = await resolveAttachDest(conversationId);
-  if (dest && window.fsApi?.finalizeStagedAttachment) {
-    const res = await window.fsApi.finalizeStagedAttachment(
-      att.stagingId,
-      dest,
-    );
-    if (!res.ok) return { ok: false, reason: res.reason };
-    const workspacePath = res.data.workspacePath;
-    if (typeof workspacePath !== "string") {
-      return { ok: false, reason: "附件落盘未返回工作区路径" };
-    }
-    return {
-      ok: true,
-      workspacePath,
-      name: res.data.name,
-      binary: res.data.binary,
-      text: res.data.text,
-      truncated: res.data.truncated,
-    };
-  }
-
-  // 本地模式但本机根不可用：勿误走云端 PUT（会 409）。
-  try {
-    const binding = await getWorkspaceBinding(conversationId);
-    if (binding.mode === "local") {
-      return {
-        ok: false,
-        reason: "本地工作区目录不可用，请重新打开文件夹后再附加",
-      };
-    }
-  } catch {
-    /* binding unknown — try cloud upload */
-  }
-
-  // 云端工作区：取出字节 PUT。
+  // 云端工作区、且字节只在主进程暂存里（重启后恢复的草稿）：取出字节 PUT。
   if (!window.fsApi?.consumeStagedBytes) {
     return { ok: false, reason: "无法将附件上传到云端工作区" };
   }

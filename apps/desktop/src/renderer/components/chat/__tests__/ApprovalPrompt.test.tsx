@@ -306,6 +306,37 @@ describe("ApprovalCard git headline", () => {
   });
 });
 
+describe("ApprovalCard delete_folder headline", () => {
+  it("names the folder instead of showing a bare UUID", () => {
+    renderCard(
+      card({
+        toolName: "delete_folder",
+        arguments: {
+          folder_id: "11111111-2222-4333-8444-555555555555",
+          // 后端按权威名册补的实名字段（不是模型自报）。
+          folder_name: "dogfood-dup",
+        },
+      }),
+    );
+    expect(screen.getByText("删除文件夹")).toBeTruthy();
+    expect(
+      screen.getByText("dogfood-dup · 11111111-2222-4333-8444-555555555555"),
+    ).toBeTruthy();
+  });
+
+  it("falls back to the id when the roster lookup produced no name", () => {
+    renderCard(
+      card({
+        toolName: "delete_folder",
+        arguments: { folder_id: "11111111-2222-4333-8444-555555555555" },
+      }),
+    );
+    expect(
+      screen.getByText("11111111-2222-4333-8444-555555555555"),
+    ).toBeTruthy();
+  });
+});
+
 describe("ApprovalCard CTA (工具审批 A+B)", () => {
   it("execution tools put 本轮内都允许 as the primary button", () => {
     renderCard(card());

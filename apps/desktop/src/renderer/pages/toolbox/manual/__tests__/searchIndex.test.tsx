@@ -92,10 +92,14 @@ describe("searchIndex", () => {
     expect(quick?.label).toBe("5 分钟上手");
     expect(quick?.to).toBe("/toolbox/manual/intro?s=quickstart");
     expect(quick?.haystack).toContain("5 分钟");
-    expect(quick?.haystack).toContain("接入额度");
+    // BYOK 仍可被搜到（可选升级），但第一步是「说目标」——开箱即用，不先支去外部站点。
     expect(quick?.haystack).toContain("api key");
     expect(quick?.haystack).toContain("jiurelay.com");
-    expect(quick?.body).toContain("接入额度后开聊");
+    const quickBody = quick?.body ?? "";
+    expect(quickBody).toContain("说目标");
+    expect(quickBody.indexOf("说目标")).toBeLessThan(
+      quickBody.indexOf("BYOK"),
+    );
 
     const what = entries.find((e) => e.itemId === "what");
     expect(what?.haystack).toContain("协作，是更高级的智能");
@@ -105,6 +109,23 @@ describe("searchIndex", () => {
   it("matchSnippet centers around the query", () => {
     const body = "前面填充文字。填 Key 去模型配置。后面还有说明。";
     expect(matchSnippet(body, "填 key")).toMatch(/填 Key/);
+  });
+
+  it("indexes workflow / automation sections so search can reach them", () => {
+    const entries = buildContentSearchEntries();
+
+    const workflow = entries.find((e) => e.id === "collaboration-workflow");
+    expect(workflow?.label).toBe("存为工作流");
+    expect(workflow?.to).toBe("/toolbox/manual/collaboration?s=workflow");
+    expect(workflow?.haystack).toContain("官方模板");
+    expect(workflow?.haystack).toContain("等人关卡");
+
+    const automation = entries.find((e) => e.id === "collaboration-automation");
+    expect(automation?.label).toBe("自动化");
+    expect(automation?.to).toBe("/toolbox/manual/collaboration?s=automation");
+    expect(automation?.haystack).toContain("webhook");
+    expect(automation?.haystack).toContain("系统任务");
+    expect(automation?.haystack).toContain("收件箱");
   });
 
   it("content search entries cover all four chapters", () => {

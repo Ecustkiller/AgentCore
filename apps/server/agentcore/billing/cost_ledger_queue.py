@@ -188,7 +188,7 @@ class DbOutboxBackend:
                 CostLedgerOutbox(
                     id=payload["id"],
                     user_id=payload["user_id"],
-                    conversation_id=payload["conversation_id"],
+                    conversation_id=payload.get("conversation_id") or None,
                     message_id=payload.get("message_id"),
                     trace_id=payload.get("trace_id"),
                     source=payload.get("source") or "unknown",
@@ -270,7 +270,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         runs: list[dict[str, Any]],
         message_id: str | None = None,
         trace_id: str | None = None,
@@ -292,7 +292,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         calls: list[dict[str, Any]],
         message_id: str | None = None,
         trace_id: str | None = None,
@@ -315,7 +315,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         runs: list[dict[str, Any]],
         message_id: str | None = None,
         trace_id: str | None = None,
@@ -341,7 +341,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         calls: list[dict[str, Any]],
         message_id: str | None = None,
         trace_id: str | None = None,
@@ -367,7 +367,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str | None,
         trace_id: str | None,
         source: str,
@@ -375,11 +375,19 @@ class CostLedgerQueue:
         calls: list[dict[str, Any]] | None,
         materialize_runs: bool,
     ) -> dict[str, Any] | None:
-        if not conversation_id:
-            logger.warning(
-                "cost.ledger_enqueue_no_conversation",
-                user_id=user_id,
+        """Assemble one outbox payload, or ``None`` when there is nothing to bill.
+
+        ``user_id`` is the only mandatory envelope key: an account-level call
+        (AI 改写 / 文档 description) legitimately has no conversation, and the
+        ledger now carries such rows rather than dropping real spend. Empty
+        strings normalise to ``NULL`` so a caller passing ``""`` cannot fail the
+        UUID insert downstream.
+        """
+        if not user_id:
+            logger.error(
+                "cost.ledger_enqueue_failed",
                 source=source,
+                error="no_user",
             )
             return None
         if not runs and not calls:
@@ -388,7 +396,7 @@ class CostLedgerQueue:
         return {
             "id": record_id,
             "user_id": user_id,
-            "conversation_id": conversation_id,
+            "conversation_id": conversation_id or None,
             "message_id": message_id,
             "trace_id": trace_id,
             "source": source,
@@ -402,7 +410,7 @@ class CostLedgerQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         message_id: str | None,
         trace_id: str | None,
         source: str,
@@ -663,11 +671,13 @@ class CostLedgerQueue:
         Returns ``ok`` | ``retry`` | ``corrupt``.
         """
         user_id = payload.get("user_id")
-        conversation_id = payload.get("conversation_id")
+        conversation_id = payload.get("conversation_id") or None
         runs = payload.get("runs") or []
         calls = payload.get("calls") or []
         record_id = payload.get("id")
-        if not user_id or not conversation_id or (not runs and not calls):
+        # ``conversation_id`` may legitimately be NULL (account-level spend); only a
+        # missing owner or an empty batch makes a record unwritable.
+        if not user_id or (not runs and not calls):
             logger.error(
                 "cost.ledger_record_invalid",
                 record_id=record_id,

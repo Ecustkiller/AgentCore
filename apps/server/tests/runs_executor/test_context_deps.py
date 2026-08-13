@@ -195,6 +195,7 @@ async def test_dag_file_writing_upstream_passes_pointer_downstream():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_s1"].files_touched == ["data/out.csv"]

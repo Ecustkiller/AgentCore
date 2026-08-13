@@ -35,9 +35,11 @@ from agentcore.tools.registration.meta import (
     AUDIENCE_WORKER,
     AUDIENCE_WORKER_ONLY,
     CeoWire,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
     declared_tool_name,
+    declared_tool_schema,
     instantiate_declared,
     read_static_schema,
     tool_registration,
@@ -53,10 +55,12 @@ __all__ = [
     "AUDIENCE_WORKER",
     "AUDIENCE_WORKER_ONLY",
     "CeoWire",
+    "FileProductsContract",
     "ToolRegistration",
     "ToolSurface",
     "declared_tool_name",
     "declared_tool_names",
+    "declared_tool_schema",
     "declared_tools",
     "execution_class_tool_names",
     "host_class_tool_names",
@@ -128,8 +132,10 @@ def worker_only_tool_names() -> frozenset[str]:
 
 # Heavy-dep ALWAYS tools stay handwritten in ``_assemble_ceo_toolset``.
 # Everything else with ``ceo_wire=ALWAYS`` is declaration-loop wired
-# (zero-arg via ``instantiate_declared``).
-_ALWAYS_HAND_WIRE_NAMES = frozenset({"delegate", "debate"})
+# (zero-arg via ``instantiate_declared``). ``promote_product`` is here because it
+# republishes the rewritten delivery reconciliation through a caller-owned callback
+# (the turn's sink), which only assemble can supply.
+_ALWAYS_HAND_WIRE_NAMES = frozenset({"delegate", "debate", "promote_product"})
 
 
 def register_always_ceo_tools(

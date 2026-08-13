@@ -60,9 +60,9 @@ export function formatImportToCloudProgress(
     case "picking":
       return "选择本机文件夹…";
     case "archiving":
-      return "打包中（ignore）…";
+      return "正在准备文件…";
     case "creating":
-      return "创建云项目…";
+      return "创建文件夹…";
     case "uploading":
       return p.total > 0 ? `上传中 ${p.done}/${p.total}…` : "上传中…";
     case "done":
@@ -110,7 +110,7 @@ function defaultDeps(): ImportToCloudDeps {
     },
     setDraftIntent: (folderId) => {
       useFoldersStore.getState().setDraftWorkspaceIntent({
-        kind: "project",
+        kind: "folder",
         folderId,
       });
     },
@@ -131,60 +131,60 @@ export function parseArchivePayload(value: unknown): ArchivePayload | null {
 }
 
 /**
- * Honest toast after import. Always remind: new cloud project + continue there;
- * current session stays on the old local folder (no rebind).
+ * Honest toast after import. Always remind: new folder in 我的文件 + continue
+ * there; current session stays on the old local folder (no rebind).
  */
 export function formatImportToCloudToast(result: ImportToCloudResult): {
   message: string;
   description?: string;
 } {
-  const continueHint = "请在新云项目继续；本会话仍挂旧本地（归属不改挂）";
+  const continueHint = "后续请在新文件夹里继续；当前对话用的还是本机原文件夹";
   if (!result.partial) {
     const uploadBit =
       result.uploaded > 0
         ? `已上传 ${result.uploaded} 个文件。`
-        : "云项目已创建（无文件可传）。";
+        : "文件夹已创建（无文件可传）。";
     return {
-      message: `已建云项目「${result.folderName}」`,
+      message: `已在「我的文件」建好「${result.folderName}」`,
       description: `${uploadBit}${continueHint}`,
     };
   }
   const bits: string[] = [];
   if (result.archiveTruncated) {
-    bits.push("打包触达 100MiB / 2 万文件上限");
+    bits.push("内容超过 100MiB 或 2 万个文件，只导入了一部分");
   }
   if (result.skippedOversized.length > 0) {
     bits.push(`跳过 ${result.skippedOversized.length} 个超过 25MiB 的文件`);
   }
   return {
-    message: `已建云项目「${result.folderName}」（部分导入）`,
-    description: `${bits.join("；")}。已上传 ${result.uploaded} 个文件。${continueHint}。大仓较慢；MVP 无服务端 bulk。`,
+    message: `已在「我的文件」建好「${result.folderName}」（部分导入）`,
+    description: `${bits.join("；")}。已上传 ${result.uploaded} 个文件。${continueHint}。`,
   };
 }
 
-/** Cancel toast — keep cloud project when already created (may be incomplete). */
+/** Cancel toast — keep the folder when already created (may be incomplete). */
 export function formatImportToCloudCancelledToast(
   err: ImportToCloudCancelledError,
 ): { message: string; description?: string } {
   if (err.folderId && err.folderName) {
     return {
-      message: `已取消导入；云项目「${err.folderName}」已保留`,
+      message: `已取消导入；文件夹「${err.folderName}」已保留`,
       description:
-        "上传未完成，项目可能不完整。可稍后在云项目中继续或自行清理。本会话仍挂旧本地。",
+        "上传未完成，文件夹里的内容可能不全。可以稍后重新导入，或自行删除。",
     };
   }
-  return { message: "已取消导入到云" };
+  return { message: "已取消导入" };
 }
 
 /**
- * §五 导入到云：本机选夹（临时 root）→ ignore archive → 新建云项目 →
+ * §五 导入到「我的文件」：本机选夹（临时 root）→ ignore archive → 新建云文件夹 →
  * 逐文件 PUT → draft intent 落到该云桌。禁 mode=local。
  *
- * `signal` 贯穿上传循环；取消后保留已建云项目（不完整）。`ownsRoot` 为 true
+ * `signal` 贯穿上传循环；取消后保留已建文件夹（不完整）。`ownsRoot` 为 true
  *（或本函数自行 pick）时 finally `removeRoot`。
  */
 export async function runImportToCloud(opts?: {
-  projectName?: string;
+  folderName?: string;
   /** When set, skip the picker and archive this root (Dialog already picked). */
   root?: FsRoot;
   /**
@@ -232,12 +232,12 @@ export async function runImportToCloud(opts?: {
       throw new Error("打包结果无效");
     }
 
-    const projectName =
-      opts?.projectName?.trim() || root.name.trim() || "导入项目";
+    const folderName =
+      opts?.folderName?.trim() || root.name.trim() || "导入的文件夹";
 
     throwIfAborted(signal);
     onProgress?.({ phase: "creating" });
-    const { folder } = await deps.createCloudFolder(projectName);
+    const { folder } = await deps.createCloudFolder(folderName);
     createdFolder = { id: folder.id, name: folder.name };
     deps.addFolderToCache(folder);
     deps.setDraftIntent(folder.id);

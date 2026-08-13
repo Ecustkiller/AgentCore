@@ -4,6 +4,9 @@ MVP coverage: headings #–####, paragraphs, ordered/unordered lists, tables,
 fenced code, relative-path images (embedded), links. Missing images produce
 explicit warnings (never silent). Default styles target a clean Chinese
 公文-like look (黑体 headings / 宋体 body with Latin fallbacks).
+
+段落几何按 ``layout`` 档位走（见 ``docs_export.layout``）：一级标题两档都居中；
+首行缩进两字只在 ``official`` 档开——档位来自调用方入参，绝不看正文内容猜。
 """
 
 from __future__ import annotations
@@ -18,6 +21,13 @@ from urllib.parse import unquote, urlparse
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+
+from agentcore.docs_export.layout import (
+    FIRST_LINE_INDENT_CHARS,
+    LAYOUT_OFFICIAL,
+    LAYOUT_STANDARD,
+    DocLayout,
+)
 
 if TYPE_CHECKING:
     from docx.document import Document
@@ -145,16 +155,21 @@ def convert_markdown_to_docx(
     markdown: str,
     *,
     images: Mapping[str, bytes | None] | None = None,
+    layout: DocLayout = LAYOUT_STANDARD,
 ) -> MdToDocxResult:
     """Convert Markdown text to a .docx.
 
     ``images`` maps the raw ``src`` from the Markdown to image bytes, or ``None``
     when the file was looked up and missing. Remote / non-relative srcs are
     warned and rendered as alt text (+ URL when present).
+
+    ``layout`` 选排版档位：``standard``（默认）= 技术文档/报告；``official`` =
+    中文正式文书，正文首行缩进两字。
     """
     _ensure_docx()
     image_map = dict(images or {})
     warnings: list[str] = []
+    indent_body = layout == LAYOUT_OFFICIAL
     doc = _DocumentFactory()
     _apply_document_defaults(doc)
 
@@ -190,7 +205,7 @@ def convert_markdown_to_docx(
                 )
             else:
                 p = doc.add_paragraph()
-                _style_body_paragraph(p)
+                _style_body_paragraph(p, first_line_indent=indent_body)
                 if inline is not None and inline.type == "inline":
                     _render_inline(p, inline, images=image_map, warnings=warnings)
             i += 3
@@ -292,14 +307,30 @@ def _set_run_font(
         run.font.size = _Pt(size_pt)
 
 
-def _style_body_paragraph(p: Any) -> None:
+def _style_body_paragraph(p: Any, *, first_line_indent: bool = False) -> None:
     p.paragraph_format.space_after = _Pt(6)
     p.paragraph_format.line_spacing = 1.15
+    if first_line_indent:
+        _apply_first_line_indent(p)
+
+
+def _apply_first_line_indent(p: Any) -> None:
+    """首行缩进两字：``w:firstLineChars`` 为准，``w:firstLine`` 是给不认它的阅读器的兜底。
+
+    Word 的「缩进 2 字符」真身是 ``firstLineChars``（百分之一字符为单位，随字号走）；
+    只写 twips 的话换字号就不再是整两字。两个属性一起写 = Word 自己的写法。
+    """
+    p.paragraph_format.first_line_indent = _Pt(_BODY_PT * FIRST_LINE_INDENT_CHARS)
+    ind = p._element.get_or_add_pPr().get_or_add_ind()
+    ind.set(_qn("w:firstLineChars"), str(FIRST_LINE_INDENT_CHARS * 100))
 
 
 def _style_heading_paragraph(p: Any, level: int) -> None:
     p.paragraph_format.space_before = _Pt(12 if level <= 2 else 8)
     p.paragraph_format.space_after = _Pt(6)
+    if level == 1:
+        # 文档大标题居中是 Word 通例（公文与技术报告都成立），故两档默认都开。
+        p.alignment = _WD_ALIGN_PARAGRAPH.CENTER
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +480,7 @@ def _render_blockquote(
         if tokens[i].type == "paragraph_open":
             inline = tokens[i + 1] if i + 1 < len(tokens) else None
             p = doc.add_paragraph()
+            # 引用块不吃 official 档的首行缩进：整块左缩进 + 竖线已经把它和正文分开了。
             _style_body_paragraph(p)
             p.paragraph_format.left_indent = _Cm(0.75)
             run_prefix = p.add_run("｜ ")

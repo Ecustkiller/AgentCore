@@ -1,13 +1,25 @@
 import { type FileNode, type FileSource, parentDir } from "@/lib/fileSource";
+import { isAgentCoreRootDir } from "@/lib/stageDirs";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 
 export type DirStatus = "loading" | "ready" | "error";
 
+/**
+ * 兄弟排序档位：目录 → 文件 → 「AI 工作间」（盘上 ``AgentCore/``）。工作间装的是 AI
+ * 的过程材料，用户平时不必打开，故沉到同级最后，不抢用户自己文件的位置。
+ */
+function siblingRank(node: FileNode): number {
+  if (isAgentCoreRootDir(node.path)) return 2;
+  return node.isDir ? 0 : 1;
+}
+
 /** Dirs first, then by name — the canonical tree ordering (mutates + returns). */
 export function sortNodes(nodes: FileNode[]): FileNode[] {
-  return nodes.sort((a, b) =>
-    a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name),
-  );
+  return nodes.sort((a, b) => {
+    const rankA = siblingRank(a);
+    const rankB = siblingRank(b);
+    return rankA !== rankB ? rankA - rankB : a.name.localeCompare(b.name);
+  });
 }
 
 /**

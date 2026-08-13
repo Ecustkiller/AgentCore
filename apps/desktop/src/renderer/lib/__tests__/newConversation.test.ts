@@ -25,7 +25,7 @@ describe("openDraftConversation / startNewConversation", () => {
   it("openDraftConversation: project intent + close dock + draft + hash /", () => {
     openDraftConversation("folder-new");
     expect(useFoldersStore.getState().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "folder-new",
     });
     expect(useSidePanelStore.getState().open).toBe(false);
@@ -38,7 +38,7 @@ describe("openDraftConversation / startNewConversation", () => {
     window.location.hash = "#/conversations/old-conv";
     startNewConversation(navigate, "folder-nav");
     expect(useFoldersStore.getState().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "folder-nav",
     });
     expect(useSidePanelStore.getState().open).toBe(false);

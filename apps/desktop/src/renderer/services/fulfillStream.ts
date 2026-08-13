@@ -7,7 +7,10 @@ import {
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
-import { getDeviceId } from "@/services/deviceIdentity";
+import {
+  getDeviceId,
+  resetDeviceIdentityForTests,
+} from "@/services/deviceIdentity";
 
 /**
  * Device-level fulfill firehose client (`GET /v1/fulfill`).
@@ -59,9 +62,10 @@ let controller: AbortController | null = null;
 let reconnectTimer: number | null = null;
 let rootsUnsub: (() => void) | null = null;
 let attempts = 0;
-let cachedDeviceId: string | null = null;
 /** Last root ids declared to the server (sorted join for cheap compare). */
 let declaredRootsKey = "";
+/** Last root set actually read off the main process (`null` = never read one). */
+let lastKnownRoots: string[] | null = null;
 const listeners = new Set<FulfillFrameListener>();
 
 function emitFrame(frame: FulfillFrame): void {
@@ -74,22 +78,36 @@ function emitFrame(frame: FulfillFrame): void {
   }
 }
 
-async function resolveDeviceId(): Promise<string> {
-  if (cachedDeviceId) return cachedDeviceId;
-  const id = await getDeviceId();
-  cachedDeviceId = id;
-  return id;
-}
+/**
+ * Outcome of reading the local grant set. `ok: false` means **unknown**, which
+ * is not the same fact as "this device holds no root".
+ */
+type RootsRead = { ok: true; roots: string[] } | { ok: false };
 
-async function listRootIds(): Promise<string[]> {
+/**
+ * Read the authorized root ids from the main process.
+ *
+ * A rejected / unavailable read must never surface as `[]`: declaring the empty
+ * set tells the hub this device fulfils nothing rooted, and — because
+ * re-declaration is grant-event driven — that verdict stands until the user
+ * happens to touch their grants. Callers act on `ok: false` by leaving the
+ * standing declaration alone.
+ */
+async function readRootIds(): Promise<RootsRead> {
   try {
-    const roots = (await window.fsApi?.listRoots?.()) ?? [];
-    return roots
+    const fsApi = window.fsApi;
+    if (!fsApi?.listRoots) throw new Error("fsApi.listRoots 不可用");
+    const roots = await fsApi.listRoots();
+    if (!Array.isArray(roots)) throw new Error("fs:listRoots 返回了非数组");
+    const ids = roots
       .map((r) => r.id)
       .filter((id): id is string => typeof id === "string" && id.length > 0)
       .sort();
-  } catch {
-    return [];
+    lastKnownRoots = ids;
+    return { ok: true, roots: ids };
+  } catch (err) {
+    console.warn("[fulfill] 读取本地授权根失败：维持既有声明，不声明空集", err);
+    return { ok: false };
   }
 }
 
@@ -111,9 +129,10 @@ async function postRoots(deviceId: string, roots: string[]): Promise<void> {
 
 /** Re-declare only when the local root set actually drifted. */
 async function syncRootsIfChanged(deviceId: string): Promise<void> {
-  const roots = await listRootIds();
-  if (rootsKey(roots) === declaredRootsKey) return;
-  await postRoots(deviceId, roots);
+  const read = await readRootIds();
+  if (!read.ok) return;
+  if (rootsKey(read.roots) === declaredRootsKey) return;
+  await postRoots(deviceId, read.roots);
 }
 
 function unsubscribeRootsChanged(): void {
@@ -138,11 +157,16 @@ function subscribeRootsChanged(deviceId: string): void {
   });
 }
 
-/** Catch-up: force re-declare roots after (re)connect (hub dropped prior session). */
+/**
+ * Catch-up: force re-declare roots after (re)connect (hub dropped prior session),
+ * picking up a grant change that landed before the change subscription existed.
+ * An unreadable grant set leaves the connect-time declaration standing.
+ */
 function catchUp(deviceId: string): void {
   void (async () => {
-    const roots = await listRootIds();
-    await postRoots(deviceId, roots);
+    const read = await readRootIds();
+    if (!read.ok) return;
+    await postRoots(deviceId, read.roots);
   })();
 }
 
@@ -174,7 +198,12 @@ async function runStream(
   signal: AbortSignal,
   deviceId: string,
 ): Promise<StreamOutcome> {
-  const roots = await listRootIds();
+  // `hub.register` replaces this device's session with whatever `roots` carries,
+  // so an unreadable grant set re-declares the last one we actually saw rather
+  // than retracting roots the device can still fulfil. Stale ids cost nothing:
+  // the main process re-authorizes every op against the real grant store.
+  const read = await readRootIds();
+  const roots = read.ok ? read.roots : (lastKnownRoots ?? []);
   let response: Response;
   try {
     response = await fetch(buildFulfillUrl(deviceId, roots), {
@@ -241,7 +270,7 @@ async function connect(): Promise<void> {
   if (!running) return;
   let deviceId: string;
   try {
-    deviceId = await resolveDeviceId();
+    deviceId = await getDeviceId();
   } catch {
     // No durable identity (web / missing preload) — do not loop.
     running = false;
@@ -300,7 +329,8 @@ export function onFulfillFrame(cb: FulfillFrameListener): () => void {
 export function resetFulfillStreamForTests(): void {
   stopFulfillStream();
   attempts = 0;
-  cachedDeviceId = null;
+  resetDeviceIdentityForTests();
   declaredRootsKey = "";
+  lastKnownRoots = null;
   listeners.clear();
 }

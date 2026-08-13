@@ -10,10 +10,10 @@ vi.mock("@/hooks/useFolders", () => ({
 }));
 
 describe("memory scope labels", () => {
-  it("labels global and named project", () => {
+  it("labels global and named folder", () => {
     expect(memoryScopePillLabel("global")).toBe("全局");
-    expect(memoryScopePillLabel("project", "F1")).toBe("本项目 · AgentCore");
-    expect(memoryScopePillLabel("project", "missing")).toBe("本项目");
+    expect(memoryScopePillLabel("project", "F1")).toBe("本文件夹 · AgentCore");
+    expect(memoryScopePillLabel("project", "missing")).toBe("本文件夹");
   });
 
   it("builds card scope overview across layers", () => {
@@ -22,7 +22,7 @@ describe("memory scope labels", () => {
         { scope: "global" },
         { scope: "project", projectId: "F1" },
       ]),
-    ).toBe("全局 + 本项目 · AgentCore");
+    ).toBe("全局 + 本文件夹 · AgentCore");
   });
 });
 

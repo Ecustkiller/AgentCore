@@ -57,7 +57,7 @@ class AgentExecutorEnv:
     turn_evidence_ledger: EvidenceLedgerCore | Any | None = None
     # Structural cost role for log_context + model fallback (member=组队; arena=辩论).
     cost_role: str = "member"
-    # 跨项目指挥 · 会话出生 folder（不中途改挂）；与 RunSpec.target_folder_id 对照换桌。
+    # 跨文件夹指挥 · 会话出生 folder（不中途改挂）；与 RunSpec.target_folder_id 对照换桌。
     session_folder_id: str | None = None
     # 同回合多 local 根认领簿（C0 登记、不拒）；None = 不登记（测试 / 辩论）。
     local_root_claims: Any | None = None

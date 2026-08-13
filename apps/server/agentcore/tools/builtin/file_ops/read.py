@@ -10,6 +10,7 @@ from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -353,6 +354,7 @@ class FileReadTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        file_products=FileProductsContract.READ_ONLY,
     )
 
     @property
@@ -586,6 +588,7 @@ class FileListTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        file_products=FileProductsContract.READ_ONLY,
     )
 
     @property

@@ -37,9 +37,10 @@ export function MessageList() {
   const rootId = useWorkspaceRootId(conversationId);
 
   // 记忆更新对话内可见 (§1.6): offline-consolidation「记忆已更新」cards are merged into
-  // the timeline by their own `created_at` (mergeTimeline), so each sits right after the
-  // window of turns it folded and scrolls into history as the conversation continues —
-  // instead of永久钉在尾部堆叠 (which made stale cards float below every new turn).
+  // the timeline by their `anchor_at` — the end of the window of turns they folded, not the
+  // (much later) row-insert time — so each sits right after those turns and scrolls into
+  // history as the conversation continues, instead of永久钉在尾部堆叠 (which made stale
+  // cards float below every new turn).
   const memoryUpdates = useActiveMemoryUpdates();
 
   // L3 团队浏览器 M2 接管标记卡 (提案 D17): 同样按时间戳锚到回合末尾并入时间线；数据来自

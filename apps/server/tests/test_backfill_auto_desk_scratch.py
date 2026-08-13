@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from agentcore.config import settings
+from agentcore.folders.placement import FolderPlacement
+from scripts import backfill_auto_desk_scratch as backfill_mod
 from scripts.backfill_auto_desk_scratch import (
     backfill_auto_desk_scratch,
     merge_move_tree,
@@ -17,6 +19,16 @@ from scripts.backfill_auto_desk_scratch import (
 @pytest.fixture(autouse=True)
 def _redirect_data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+
+
+@pytest.fixture(autouse=True)
+def _stub_placement(monkeypatch):
+    """Auto desks sit at a visible path; here the folder id doubles as its name."""
+
+    async def _placement(folder_id, **_kw):
+        return FolderPlacement(folder_id=folder_id, rel_path=folder_id)
+
+    monkeypatch.setattr(backfill_mod, "resolve_folder_placement", _placement)
 
 
 def test_merge_move_tree_moves_attachments_into_desk(tmp_path: Path):
@@ -108,7 +120,7 @@ async def test_backfill_dry_run_does_not_move(tmp_path: Path):
     cid = "c-dry"
     desk_id = "d-dry"
     scratch = tmp_path / "workspaces" / user_id / "conv" / cid
-    desk = tmp_path / "workspaces" / user_id / desk_id
+    desk = tmp_path / "workspaces" / user_id / "tree" / desk_id
     scratch.mkdir(parents=True)
     (scratch / "att.txt").write_text("keep", encoding="utf-8")
     desk.mkdir(parents=True)
@@ -134,7 +146,7 @@ async def test_backfill_apply_moves_and_is_idempotent(tmp_path: Path):
     cid = "c-apply"
     desk_id = "d-apply"
     scratch = tmp_path / "workspaces" / user_id / "conv" / cid
-    desk = tmp_path / "workspaces" / user_id / desk_id
+    desk = tmp_path / "workspaces" / user_id / "tree" / desk_id
     scratch.mkdir(parents=True)
     (scratch / "att.txt").write_text("keep", encoding="utf-8")
     desk.mkdir(parents=True)
@@ -168,7 +180,7 @@ async def test_backfill_one_failure_does_not_stop_others(tmp_path: Path):
     scratch_good = tmp_path / "workspaces" / "u1" / "conv" / "c-good"
     scratch_good.mkdir(parents=True)
     (scratch_good / "ok.txt").write_text("ok", encoding="utf-8")
-    (tmp_path / "workspaces" / "u1" / "d1").mkdir(parents=True)
+    (tmp_path / "workspaces" / "u1" / "tree" / "d1").mkdir(parents=True)
 
     with (
         patch(
@@ -179,7 +191,7 @@ async def test_backfill_one_failure_does_not_stop_others(tmp_path: Path):
             "scripts.backfill_auto_desk_scratch.scratch_and_desk_roots",
             side_effect=[
                 RuntimeError("disk exploded"),
-                (scratch_good, tmp_path / "workspaces" / "u1" / "d1"),
+                (scratch_good, tmp_path / "workspaces" / "u1" / "tree" / "d1"),
             ],
         ),
     ):
@@ -187,4 +199,4 @@ async def test_backfill_one_failure_does_not_stop_others(tmp_path: Path):
 
     assert stats.conversations_failed == 1
     assert stats.conversations_moved == 1
-    assert (tmp_path / "workspaces" / "u1" / "d1" / "ok.txt").is_file()
+    assert (tmp_path / "workspaces" / "u1" / "tree" / "d1" / "ok.txt").is_file()

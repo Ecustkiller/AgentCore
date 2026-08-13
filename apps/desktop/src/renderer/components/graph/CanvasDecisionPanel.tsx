@@ -5,6 +5,7 @@ import { EscalationCards } from "@/components/chat/EscalationCard";
 import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { RetryBanner } from "@/components/chat/RetryBanner";
 import { StageCardDock } from "@/components/chat/StageCardDock";
+import { DecisionEntryPlacementContext } from "@/components/chat/decisionEntryPlacement";
 import {
   isTurnRecoverable,
   isUndismissedRecoverable,
@@ -274,38 +275,42 @@ export function CommandPanelBody({
   );
 
   return (
-    <div className="h-full overflow-y-auto py-3">
-      {/* Transport / channel RetryBanner only — turn failure scoreboard lives on
+    // 这里的装配顺序与聊天面相反——拍板卡（ConversationDecisionPrompts → ResumePrompt）
+    // 在最上，卡片列在其下。挂起标记的指路文案据此反向（见 decisionEntryPlacement）。
+    <DecisionEntryPlacementContext.Provider value="above">
+      <div className="h-full overflow-y-auto py-3">
+        {/* Transport / channel RetryBanner only — turn failure scoreboard lives on
           meta (n/m) + graph node chrome + run detail; no red notice here. */}
-      <RetryBanner />
-      {/* Conversation-level decisions (self-contained: own store + active
+        <RetryBanner />
+        {/* Conversation-level decisions (self-contained: own store + active
           conversation). They bring their own mx-4 mb-2 gutter, so the turn-level
           cards below match with px-4 and the mb-2 supplies the inter-group gap. */}
-      <ConversationDecisionPrompts />
-      {/* 阶段推进卡 Dock：与聊天 StageCardDock 同组件；画布卸载 ChatView 后仍可操作。 */}
-      <StageCardDock />
-      {/* Turn-level: scoped to the focused turn's message + execution. */}
-      <div className="space-y-2 px-4">
-        {checkpoints.map((cp) => (
-          <CheckpointCard key={cp.id} checkpoint={cp} />
-        ))}
-        {planReviews.map((pr) => (
-          <PlanReviewCard key={pr.id} review={pr} />
-        ))}
-        {message && (
-          <EscalationCards
-            messageId={assistantProjectionId(message)}
-            conversationId={conversationId}
-            interactive={interactive}
-          />
-        )}
-        {/* 辩论逐轮掌舵不在此渲染：它是 canvas 原生的，归 群聊 room 的 SteeringBar
+        <ConversationDecisionPrompts />
+        {/* 阶段推进卡 Dock：与聊天 StageCardDock 同组件；画布卸载 ChatView 后仍可操作。 */}
+        <StageCardDock />
+        {/* Turn-level: scoped to the focused turn's message + execution. */}
+        <div className="space-y-2 px-4">
+          {checkpoints.map((cp) => (
+            <CheckpointCard key={cp.id} checkpoint={cp} />
+          ))}
+          {planReviews.map((pr) => (
+            <PlanReviewCard key={pr.id} review={pr} />
+          ))}
+          {message && (
+            <EscalationCards
+              messageId={assistantProjectionId(message)}
+              conversationId={conversationId}
+              interactive={interactive}
+            />
+          )}
+          {/* 辩论逐轮掌舵不在此渲染：它是 canvas 原生的，归 群聊 room 的 SteeringBar
             （前端UX设计.md §4.3「群聊为唯一掌舵处」）。dock 只复活聊天面在画布态被卸载的卡。 */}
-      </div>
-      {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
+        </div>
+        {/* 后台云端任务 (handoff jobs, 非阻塞 · 跨对话的另一类): last, below every
           blocking decision. */}
-      <CanvasBackgroundTasks conversationId={conversationId} />
-    </div>
+        <CanvasBackgroundTasks conversationId={conversationId} />
+      </div>
+    </DecisionEntryPlacementContext.Provider>
   );
 }
 

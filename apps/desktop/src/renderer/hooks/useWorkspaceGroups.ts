@@ -11,12 +11,12 @@ import { useMemo } from "react";
 /** Workspaces (folders) shown in the rail before deferring to /conversations. */
 export const MAX_WORKSPACE_GROUPS = 6;
 
-/** One sidebar「项目」group: a folder plus its (recency-sorted) conversations. */
+/** One sidebar folder group: a folder plus its (recency-sorted) conversations. */
 export interface WorkspaceGroup {
   folder: FolderMeta;
   /**
    * Every live conversation in this folder (incl. pinned), newest-first.
-   * Header actions (归档全部 / 删项目) need the full set; the rail list filters
+   * Header actions (归档全部 / 删文件夹) need the full set; the rail list filters
    * pinned out so they only appear in the 置顶区.
    */
   convs: Conversation[];
@@ -29,7 +29,7 @@ function byRecency(a: Conversation, b: Conversation): number {
 }
 
 /**
- * Partition conversations into「项目」groups (前端UX §一 方案C): folder → its
+ * Partition conversations into folder groups (前端UX §一 方案C): folder → its
  * conversations (newest-first; pinned included for header/latest), groups ordered
  * by latest activity and capped at {@link MAX_WORKSPACE_GROUPS}. Pure (no React)
  * so it's unit-testable; the {@link useWorkspaceGroups} hook just memoizes it.
@@ -96,7 +96,7 @@ export function buildWorkspaceGroups(
 }
 
 /**
- * The sidebar's「项目」groups over the live grouped cache. Shared by
+ * The sidebar's folder groups over the live grouped cache. Shared by
  * `WorkspaceGroups` (renders them) and `RecentConversations` (bare-chat zone)
  * so the partition lives in one place.
  */

@@ -20,14 +20,34 @@ export function tipStorageKey(id: ContextualTipId): string {
 /** 草稿页空态两态（平台代付后无「未接入」态）。 */
 export type DraftEmptyKind = "starter_chips" | "returning";
 
-export type DraftEmptyInput = {
-  conversationCount: number;
+/** 判定只看「有没有真的跑成过一轮」，故每条对话只需要消息数。 */
+export type DraftEmptyConversation = {
+  messageCount: number;
 };
 
-/** 草稿空态（无消息）两态选择。首个对话产生后 starter chips 永久消失。 */
+export type DraftEmptyInput = {
+  conversations: readonly DraftEmptyConversation[];
+};
+
+/**
+ * 一来一回才算「跑成过」：用户发出的那条 + AI 答回来的那条。
+ *
+ * 误触新建（0 条）、发出去就没下文 / 中途放弃（1 条）都不算——这些人恰恰最需要引导。
+ */
+const ENGAGED_MESSAGE_COUNT = 2;
+
+/**
+ * 草稿空态（无消息）两态选择。
+ *
+ * 判定的是「这个人跑成过一次吗」，不是「这个账号建过对话吗」。曾经按后者判定：只要库里
+ * 有一条记录——失败的、中途放弃的、误触建的——示例任务与手册入口就一起永久消失，
+ * 第一次没成功的人第二次回来反而更没抓手。
+ */
 export function resolveDraftEmptyKind(input: DraftEmptyInput): DraftEmptyKind {
-  if (input.conversationCount === 0) return "starter_chips";
-  return "returning";
+  const engaged = input.conversations.some(
+    (c) => c.messageCount >= ENGAGED_MESSAGE_COUNT,
+  );
+  return engaged ? "returning" : "starter_chips";
 }
 
 /**

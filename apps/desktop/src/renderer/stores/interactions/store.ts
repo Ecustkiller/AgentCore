@@ -33,6 +33,18 @@ interface InteractionState {
     kind: InteractionKind;
     id: string;
     resolution?: Record<string, unknown>;
+    /** 另一端拍板的（判定见 {@link InteractionEntry.settledElsewhere}）。 */
+    settledElsewhere?: boolean;
+  }) => void;
+  /**
+   * 提交回执说这张卡已经结了（见 {@link InteractionEntry.settledByReceipt}）：
+   * 关掉操作面，但**不认领**结果与处理方——两者都等线材帧。
+   */
+  markSettledByReceipt: (input: {
+    kind: InteractionKind;
+    id: string;
+    /** 本端没登记过这张卡时（recovery 后冷路）建桩用，别留个无主条目。 */
+    conversationId?: string;
   }) => void;
   /**
    * Mark orphaned (SSE interaction_orphaned or local sidecar death).
@@ -176,7 +188,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
     });
   },
 
-  markResolved: ({ kind, id, resolution }) => {
+  markResolved: ({ kind, id, resolution, settledElsewhere }) => {
     set((state) => {
       const prev = state.byId.get(id);
       const next = mapCopy(state.byId);
@@ -186,6 +198,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
           status: "resolved",
           resolution: resolution ?? prev.resolution,
           resumeDeferred: undefined,
+          ...(settledElsewhere ? { settledElsewhere: true } : {}),
         });
       } else {
         // Resolved without a prior required (reload edge) — keep a stub so UI
@@ -200,6 +213,27 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
           resolution,
         });
       }
+      return { byId: next };
+    });
+  },
+
+  markSettledByReceipt: ({ kind, id, conversationId }) => {
+    set((state) => {
+      const prev = state.byId.get(id);
+      if (prev?.status === "resolved" || prev?.status === "orphaned") return {};
+      const next = mapCopy(state.byId);
+      next.set(id, {
+        ...(prev ?? {
+          id,
+          kind,
+          conversationId: conversationId ?? "",
+          messageId: "",
+          payload: {},
+        }),
+        status: "resolved",
+        resumeDeferred: undefined,
+        settledByReceipt: true,
+      });
       return { byId: next };
     });
   },
@@ -418,13 +452,48 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
   },
 }));
 
-/** Apply a required/resolved/orphaned wire event into the store. */
+/**
+ * 本端这一路从没结掉过它——归属才可能落在别人身上。
+ *
+ * 「回执说已经结了」也算没结掉：那一下本端并未成为处理方（服务端明说是别人先结的），而回执
+ * 证不了是谁，所以操作面虽已关掉，归属仍留给随后带线材字段的那帧去证。
+ */
+function localNeverSettled(prev: InteractionEntry | undefined): boolean {
+  if (!prev) return false;
+  if (prev.status === "pending") return true;
+  return prev.status === "resolved" && prev.settledByReceipt === true;
+}
+
+/**
+ * 这一帧的收口是**有人**答的吗？
+ *
+ * 「本端没提交过」离「另一端的人拍的」还差一步：有些收口根本没有人参与——升级卡可由 CEO
+ * 裁决，或按假设推进 / 超时兜底，线材里 `status` 与 `arbitrated_by` 说得明明白白。这类要
+ * 是也算到用户头上，就成了替他认领一个他没做过的动作。其余几类的 `*_resolved` 今天只有
+ * 「人答了」这一个生产者（冷卡的收口帧出自 resume 路，热审批出自决策路）。
+ */
+function answeredByAPerson(
+  kind: InteractionKind,
+  payload: Record<string, unknown>,
+): boolean {
+  if (kind !== "escalation") return true;
+  if (payload.status !== "resolved") return false; // assumed / timed_out = 运行时兜底
+  return !payload.arbitrated_by; // CEO 裁决（含 via_user：人答的是 CEO 的问，不是这张卡）
+}
+
+/**
+ * Apply a required/resolved/orphaned wire event into the store.
+ *
+ * ``opts.live`` = 这帧是刚发生的转折（实时 SSE，非 catch-up 重放段、非 journal 水合）。
+ * 只有它为真时，一帧落在仍 pending 条目上的 ``*_resolved`` 才判为「另一端拍板」。
+ */
 export function applyInteractionWireEvent(
   eventType: string,
   payload: Record<string, unknown>,
   conversationId: string,
   messageId: string,
   origin?: ResumeOrigin,
+  opts?: { live?: boolean },
 ): boolean {
   const store = useInteractionStore.getState();
 
@@ -458,7 +527,20 @@ export function applyInteractionWireEvent(
   const resolvedKind = kindFromResolvedEvent(eventType);
   if (resolvedKind) {
     const id = idFromResolvedPayload(resolvedKind, payload);
-    if (id) store.markResolved({ kind: resolvedKind, id, resolution: payload });
+    if (id) {
+      // 本端从没结掉过它（提交会先 beginSubmit 到 submitting，或已乐观 markResolved）
+      // ——那这一下就是另一端**的人**拍的。
+      const settledElsewhere =
+        opts?.live === true &&
+        localNeverSettled(store.get(id)) &&
+        answeredByAPerson(resolvedKind, payload);
+      store.markResolved({
+        kind: resolvedKind,
+        id,
+        resolution: payload,
+        settledElsewhere,
+      });
+    }
     return true;
   }
 

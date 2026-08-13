@@ -21,6 +21,10 @@ class TargetFolderBinding:
     folder_id: str
     name: str
     local_binding: LocalBinding | None
+    # Cloud placement (``folders.rel_path``) — where the desk's directory sits.
+    # Carried on the binding so ``build_target_backend`` stays synchronous instead
+    # of re-querying the folder it was just resolved from.
+    rel_path: str | None = None
 
 
 class LocalRootClaimBook:
@@ -77,7 +81,7 @@ async def load_target_folder_binding(
                 error=str(e),
                 code=e.code,
             )
-            raise TargetDesktopError(f"无法绑定目标项目。{e.message}") from e
+            raise TargetDesktopError(f"无法绑定目标文件夹。{e.message}") from e
         if summary is None:
             return None
         binding = resolve_conversation_local_binding(
@@ -85,10 +89,12 @@ async def load_target_folder_binding(
             local_subpath=summary.get("local_subpath"),
             label=str(summary.get("name") or "workspace"),
         )
+        rel_path = summary.get("rel_path")
         return TargetFolderBinding(
             folder_id=str(summary.get("id") or folder_id),
             name=str(summary.get("name") or ""),
             local_binding=binding,
+            rel_path=rel_path if isinstance(rel_path, str) and rel_path else None,
         )
 
     from agentcore.db.base import async_session_factory
@@ -109,6 +115,7 @@ async def load_target_folder_binding(
                 folder_id=folder.id,
                 name=folder.name or "",
                 local_binding=binding,
+                rel_path=folder.rel_path,
             )
     except Exception as e:  # noqa: BLE001 — classify connectivity vs bubble
         if is_db_connectivity_error(e):
@@ -118,7 +125,9 @@ async def load_target_folder_binding(
                 user_id=user_id,
                 error=str(e),
             )
-            raise TargetDesktopError(f"无法绑定目标项目。{DATABASE_UNAVAILABLE_MESSAGE}") from e
+            raise TargetDesktopError(
+                f"无法绑定目标文件夹。{DATABASE_UNAVAILABLE_MESSAGE}"
+            ) from e
         raise
 
 
@@ -171,11 +180,13 @@ def build_target_backend(
     conversation_id: str,
     sink: Any,
     local_binding: LocalBinding | None,
+    folder_rel_path: str | None = None,
 ) -> WorkspaceBackend:
     """Build a worker desk for ``folder_id`` without touching session binding."""
     return build_workspace(
         user_id=user_id,
         folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
         conversation_id=conversation_id,
         sink=sink,
         local_binding=local_binding,

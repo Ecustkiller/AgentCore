@@ -38,10 +38,7 @@ from agentcore.runtime.runs.executor.context import (
     load_web_seam_scope_contents,
 )
 from agentcore.runtime.runs.executor.env import AgentExecutorEnv
-from agentcore.runtime.runs.executor.hooks import (
-    _grant_citation_rework_reread,
-    _two_phase_citation,
-)
+from agentcore.runtime.runs.executor.hooks import _grant_citation_rework_reread
 from agentcore.runtime.runs.executor.retry import (
     _LIGHT_REPAIR_MAX_ROUNDS,
     _can_light_repair,
@@ -309,10 +306,6 @@ async def run_contract_loop(
         # Always classify failed landing attempts so code_audit can demote
         # absence hard-fails when the channel died mid-landing (not only zero-disk).
         landing_fail_kind = landing_write_failure_kind(messages)
-        # 自由 delegate 落盘 research/ 时与 playbook 盖戳同口径进入 A→B。
-        two_phase = _two_phase_citation(
-            deliverable, landed_paths=touched_now
-        )
         debrief_now = debrief_from_transcript(messages)
         # Re-index the live workspace only when reconciling declarative
         # artifacts — otherwise keep the once-per-turn opening snapshot

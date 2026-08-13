@@ -3,6 +3,13 @@
 Shared by built-in tools and workspace HTTP surfaces — never LLM/code_execute.
 """
 
+from agentcore.docs_export.layout import (
+    DOC_LAYOUTS,
+    LAYOUT_OFFICIAL,
+    LAYOUT_STANDARD,
+    DocLayout,
+    parse_layout,
+)
 from agentcore.docs_export.md_to_docx import (
     MdToDocxResult,
     collect_image_srcs,
@@ -21,6 +28,10 @@ from agentcore.docs_export.workspace_export import (
 )
 
 __all__ = [
+    "DOC_LAYOUTS",
+    "LAYOUT_OFFICIAL",
+    "LAYOUT_STANDARD",
+    "DocLayout",
     "ExportMarkdownResult",
     "MdToDocxResult",
     "MdToPdfResult",
@@ -30,5 +41,6 @@ __all__ = [
     "docx_path_for_markdown",
     "export_markdown_path",
     "export_markdown_to_pdf_path",
+    "parse_layout",
     "pdf_path_for_markdown",
 ]

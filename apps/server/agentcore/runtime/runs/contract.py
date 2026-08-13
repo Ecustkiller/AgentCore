@@ -182,18 +182,19 @@ def zero_files_gap_message(*, landing_failure_kind: str | None = None) -> str:
             "请在 handoff 或正文交结论，禁止再尝试落盘；"
             "可请用户恢复工作区通道后重试"
         )
-    if landing_failure_kind == "write_failed":
-        from agentcore.runtime.runs.serialize import format_file_landing_tools_slash
+    from agentcore.runtime.runs.serialize import format_file_landing_tools_slash
 
-        tools = format_file_landing_tools_slash()
+    # 落盘工具清单一律由 serialize 的格式化函数生成——手写子集正是 write_section 从这段
+    # 文案里漏掉一整个版本的原因。
+    tools = format_file_landing_tools_slash()
+    if landing_failure_kind == "write_failed":
         return (
             f"{head}未把产物写入工作区：已尝试写盘但未成功落盘（工具失败），"
             f"请用 {tools} 修复后重写——"
             "此缺口来自写盘失败，而非「粘在回复正文」"
         )
     return (
-        f"{head}未把产物写入工作区：交付物须用 file_write / str_replace / file_append "
-        "或 code_execute / file_copy 落盘，而非粘在回复正文里"
+        f"{head}未把产物写入工作区：交付物须用 {tools} 落盘，而非粘在回复正文里"
     )
 
 
@@ -218,8 +219,8 @@ def check_contract(
     predictably.
 
     ``files_written`` is the count of workspace paths the run actually landed (from
-    ``files_touched_from_transcript`` — successful file_write/append/str_replace/move/
-    copy results AND ``code_execute`` sandbox write-backs). ``form=files`` /
+    ``files_touched_from_transcript`` — the products the tools THEMSELVES reported on
+    their successful results, no tool-name whitelist). ``form=files`` /
     non-empty ``artifacts`` with zero successful landing becomes a soft ``warnings`` tip
     (甲⁺：不再契约 fail / 短写盘 pass). ``landing_failure_kind`` (optional)
     attributes the soft tip: ``channel_dead`` / ``write_failed`` vs paste framing.
@@ -1105,6 +1106,12 @@ def describe_deliverable(deliverable: Deliverable | None) -> str:
         lines.append("- 建议正文骨架（小标题须与上列一致，可在节内自由展开）：\n" + skeleton)
     # prose form never surfaces file-landing requirements (even if a stale flag slipped in).
     if deliverable.form != "prose":
+        if deliverable.workspace_native:
+            lines.append(
+                "- 产物是工作区原生文件（源码 / 项目文件）：写在工作区里它本该在的位置"
+                "（改存量用 str_replace 就地改），"
+                "不要落进 `AgentCore/文档/`——那是 AI 的过程材料抽屉，不装业务代码"
+            )
         if deliverable.artifact_dir:
             lines.append(
                 f"- 建议约定文档落盘目录：`{deliverable.artifact_dir}/`（系统约定；你只定文件名，"

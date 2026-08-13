@@ -32,6 +32,22 @@ describe("formatProcessExport", () => {
     expect(formatProcessExport([])).toBe("");
   });
 
+  it("复制出去的过程稿不摆内部标识（与工具行标题同一条纪律）", () => {
+    const coordination: ProcessStep[] = [
+      {
+        kind: "tool",
+        id: "t1",
+        tool_name: "cancel_worker",
+        arguments: { run_id: "r-a3f2e1c8-9b21", reason: "方向跑偏" },
+        result: "ok",
+        status: "success",
+      },
+    ];
+    const text = formatProcessExport(coordination);
+    expect(text).not.toContain("r-a3f2e1c8-9b21");
+    expect(text).toContain("方向跑偏");
+  });
+
   it("rework chip: in-progress while streaming with empty body after reset", () => {
     const reworking: ProcessStep[] = [
       { kind: "reasoning", text: "核验未过" },

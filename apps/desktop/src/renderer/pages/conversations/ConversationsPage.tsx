@@ -14,8 +14,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { folderAncestorNames } from "@/lib/folderTree";
 import { startNewConversation } from "@/lib/newConversation";
-import type { FolderMeta } from "@/services/folders";
+import type { DeletedFolderMeta, FolderMeta } from "@/services/folders";
 import { UNGROUPED_KEY } from "@/stores/folders";
 import {
   Archive,
@@ -35,10 +36,12 @@ import { useNavigate } from "react-router-dom";
 import { ArchivedConversationManageRow } from "./ArchivedConversationManageRow";
 import { CollaborationTimelinePanel } from "./CollaborationTimeline";
 import { ConversationManageRow } from "./ConversationManageRow";
+import { DeletedFolderManageRow } from "./DeletedFolderManageRow";
 import {
   ALL_KEY,
   ARCHIVED_KEY,
   STALE_DAYS,
+  TRASH_KEY,
   activeFilterName,
   filesFocusState,
   firstConversationInFolder,
@@ -71,6 +74,10 @@ export function ConversationsPage() {
     staleOnly,
     setStaleOnly,
     isArchivedView,
+    isTrashView,
+    trash,
+    trashList,
+    retentionDays,
   } = useConversationList(selected, folderIds);
   const bulk = useConversationBulkSelect(list, selected, isArchivedView);
 
@@ -126,12 +133,19 @@ export function ConversationsPage() {
                     selected={selected === ARCHIVED_KEY}
                     onSelect={() => setSelected(ARCHIVED_KEY)}
                   />
+                  <FilterRow
+                    icon={<Trash2 size={16} />}
+                    label="最近删除"
+                    count={trash.length}
+                    selected={selected === TRASH_KEY}
+                    onSelect={() => setSelected(TRASH_KEY)}
+                  />
                 </div>
               </div>
 
               {folders.length > 0 && (
                 <div>
-                  <SectionLabel className="mb-1.5 px-2">项目</SectionLabel>
+                  <SectionLabel className="mb-1.5 px-2">文件夹</SectionLabel>
                   <div className="space-y-0.5">
                     {folders.map((f) => (
                       <FolderFilterRow
@@ -157,7 +171,7 @@ export function ConversationsPage() {
               className="mt-2 shrink-0 justify-start gap-2 border border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground"
             >
               <FolderOpen size={16} className="shrink-0" />
-              管理项目
+              管理文件夹
             </SurfaceRowButton>
           </aside>
 
@@ -181,7 +195,7 @@ export function ConversationsPage() {
             </div>
 
             <div className="mt-2.5 flex shrink-0 flex-wrap items-center gap-1.5">
-              {!isArchivedView && (
+              {!isArchivedView && !isTrashView && (
                 <button
                   type="button"
                   onClick={() => setStaleOnly((v) => !v)}
@@ -211,23 +225,27 @@ export function ConversationsPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-              <SimpleTooltip label={bulk.selectMode ? "退出选择" : "批量选择"}>
-                <IconButton
-                  aria-label={bulk.selectMode ? "退出选择" : "批量选择"}
-                  className={`size-7 ${
-                    bulk.selectMode
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground"
-                  }`}
-                  onClick={() =>
-                    bulk.selectMode
-                      ? bulk.exitSelectMode()
-                      : bulk.setSelectMode(true)
-                  }
+              {!isTrashView && (
+                <SimpleTooltip
+                  label={bulk.selectMode ? "退出选择" : "批量选择"}
                 >
-                  <ListChecks size={14} />
-                </IconButton>
-              </SimpleTooltip>
+                  <IconButton
+                    aria-label={bulk.selectMode ? "退出选择" : "批量选择"}
+                    className={`size-7 ${
+                      bulk.selectMode
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground"
+                    }`}
+                    onClick={() =>
+                      bulk.selectMode
+                        ? bulk.exitSelectMode()
+                        : bulk.setSelectMode(true)
+                    }
+                  >
+                    <ListChecks size={14} />
+                  </IconButton>
+                </SimpleTooltip>
+              )}
               {bulk.selectMode && list.length > 0 && (
                 <button
                   type="button"
@@ -263,7 +281,13 @@ export function ConversationsPage() {
               {isFolderFilter && (
                 <CollaborationTimelinePanel folderId={selected} />
               )}
-              {list.length === 0 ? (
+              {isTrashView ? (
+                <DeletedFoldersPane
+                  items={trashList}
+                  searching={query.trim().length > 0}
+                  retentionDays={retentionDays}
+                />
+              ) : list.length === 0 ? (
                 <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
                   <MessageSquare
                     size={28}
@@ -278,7 +302,7 @@ export function ConversationsPage() {
                           ? "暂无已归档对话"
                           : conversations.length === 0
                             ? "暂无对话"
-                            : "此项目暂无对话"}
+                            : "此文件夹暂无对话"}
                   </p>
                 </div>
               ) : (
@@ -376,6 +400,48 @@ export function ConversationsPage() {
   );
 }
 
+/**
+ * 最近删除 pane — deleted projects instead of conversations, so no recency
+ * grouping (the server already returns most-recently-deleted first) and no bulk
+ * bar. 彻底删除 is deliberately absent: that lives behind the checkbox in the
+ * delete dialog, where the user asked for it.
+ */
+function DeletedFoldersPane({
+  items,
+  searching,
+  retentionDays,
+}: {
+  items: DeletedFolderMeta[];
+  searching: boolean;
+  retentionDays: number | null;
+}) {
+  if (items.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <Trash2 size={28} className="text-muted-foreground/40" />
+        <p className="text-sm text-muted-foreground">
+          {searching ? "未找到匹配的文件夹" : "最近删除中没有文件夹"}
+        </p>
+        {!searching && retentionDays !== null && (
+          <p className="text-xs text-muted-foreground/70">
+            删除的文件夹会在这里保留 {retentionDays} 天，其间随时可以恢复
+          </p>
+        )}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1 pb-4">
+      <p className="px-1 pb-1 text-xs text-muted-foreground">
+        恢复会把文件夹和它一并归档的对话带回来；白板不会回到文件夹下，裸聊的自动云桌指针也不恢复（下回合自动重建）。
+      </p>
+      {items.map((f) => (
+        <DeletedFolderManageRow key={f.id} folder={f} />
+      ))}
+    </div>
+  );
+}
+
 function SelectableRow({
   selectMode,
   selected,
@@ -462,6 +528,8 @@ function FolderFilterRow({
   const navigate = useNavigate();
   const [hovered, setHovered] = useState(false);
   const accent = folderAccentVar(folder.id);
+  /** 「设计 / 图标」— the filter list is flat, so nested folders need their path. */
+  const ancestorLabel = folderAncestorNames(folder).join(" / ");
 
   return (
     <div
@@ -483,12 +551,19 @@ function FolderFilterRow({
           style={{ backgroundColor: accent }}
           aria-hidden
         />
-        <span className="truncate text-sm">{folder.name}</span>
+        <span className="min-w-0 flex-1 truncate text-left text-sm">
+          {folder.name}
+        </span>
+        {ancestorLabel && (
+          <span className="shrink-0 truncate text-xs text-muted-foreground/60">
+            {ancestorLabel}
+          </span>
+        )}
       </SurfaceRowButton>
       {hovered ? (
         <SimpleTooltip label="浏览文件">
           <IconButton
-            aria-label="浏览此项目的文件"
+            aria-label="浏览此文件夹的文件"
             onClick={() =>
               navigate("/files", filesFocusState(firstConvId, folder.id))
             }

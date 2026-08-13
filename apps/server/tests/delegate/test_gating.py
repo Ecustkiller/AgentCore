@@ -41,13 +41,21 @@ async def test_workers_gated_in_local_mode(monkeypatch):
     assert captured["gate"] is g
 
 
-async def test_workers_ungated_in_cloud_mode(monkeypatch):
+async def test_workers_keep_gate_in_cloud_mode(monkeypatch):
+    """云端 worker 也拿到 gate 对象——「弹不弹卡」归收口点，不归上游预判。
+
+    这里曾断言 ``captured["gate"] is None``：上游按 ``location`` 预判「云端用不上逐次
+    卡」，把 gate 直接吞掉。那份预判等于在 ``sandbox_approval`` 之外另抄一张表，漏过两
+    次（恒确认曾因此失效；``file_write=ask`` 的云端实现根本执行不到）。现在一律往下
+    传，云端该免的卡仍由 ``tool_exec_gates`` 查同一张表免掉。
+    """
     clear_active_coordination()
     captured = capture_gate(monkeypatch)
-    t = tool_with_gate(ctx(), gate())
+    g = gate()
+    t = tool_with_gate(ctx(), g)
     await t.execute({"tasks": [{"role": "A", "task": "a"}]}, ctx())
     await _await_solo_drive()
-    assert captured["gate"] is None
+    assert captured["gate"] is g
 
 
 async def test_second_call_namespaces_run_ids():

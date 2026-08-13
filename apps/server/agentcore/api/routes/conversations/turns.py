@@ -29,8 +29,13 @@ from agentcore.core.errors import NotFoundError
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import ConversationRepository, TurnJournalRepository
+from agentcore.fulfill.origin import current_origin_device
 from agentcore.runtime.checkpoints import CheckpointResponse
-from agentcore.runtime.events import EventSink
+from agentcore.runtime.events import (
+    EventSink,
+    publish_conversation_signal,
+    resume_deferred,
+)
 from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
 from agentcore.runtime.journal.pending_interactions import fold_pending_interactions
 from agentcore.runtime.kickoff.team_veto import (
@@ -160,6 +165,8 @@ async def regenerate_message(
     await release_request_db_before_sse(session)
 
     # 触发点④：regenerate 前 orphan 热路 pending（活 turn 的 message_id，非目标用户消息）
+    # 停止事实先成立（同 stop 端点）：orphan 途中被取消的 pending 会让宿主提前 unwind。
+    turn_runs.mark_user_stop(conversation_id)
     await orphan_live_turn_hot_pending(conversation_id)
     await turn_runs.stop_and_drain(conversation_id)
 
@@ -223,6 +230,7 @@ async def resume_message(
     槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume
     pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状
     404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
+    同 ``message_id`` 重复提交走幂等 join：跳过第二次预写，两条 SSE 共享同一次续跑。
 
     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -240,6 +248,12 @@ async def resume_message(
     # D9: paused 不占锁，会话可另开新回合。Resume 不得 cancel 在跑回合——busy 时收下
     # 决策（deferred），槽空后再 claim + 同连接续跑（否决 409 丢意图）。
     busy_reason = turn_runs.busy_reason_for_resume(conversation_id, message_id)
+    # 同 message_id 重复提交 = 幂等 join（D1 后 settlement 已锁，改口不再收）：只把这条
+    # SSE 挂到已 park 的 waiter 上，不重复预写。
+    joining_deferred = (
+        busy_reason is not None
+        and turn_runs.resume_deferred_message_id(conversation_id) == message_id
+    )
 
     decision = body.decision.value if hasattr(body.decision, "value") else str(body.decision)
     excluded = list(body.excluded_run_ids or [])
@@ -279,26 +293,27 @@ async def resume_message(
                 debate_arguments=peeked.debate_arguments,
                 model_overrides=model_overrides,
             )
-    try:
-        await prewrite_cold_resume_settlement(
-            peeked,
-            decision=decision,
-            note=body.note or "",
-            selected=list(body.selected or []),
-            excluded_run_ids=excluded,
-            write_capability_overrides=overrides,
-            model_overrides=model_overrides,
-        )
-    except Exception as e:  # noqa: BLE001
-        logger.warning(
-            "resume.settlement_prewrite_failed",
-            message_id=message_id,
-            error=str(e),
-        )
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "settlement_write_failed"},
-        ) from e
+    if not joining_deferred:
+        try:
+            await prewrite_cold_resume_settlement(
+                peeked,
+                decision=decision,
+                note=body.note or "",
+                selected=list(body.selected or []),
+                excluded_run_ids=excluded,
+                write_capability_overrides=overrides,
+                model_overrides=model_overrides,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "resume.settlement_prewrite_failed",
+                message_id=message_id,
+                error=str(e),
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "settlement_write_failed"},
+            ) from e
 
     checkpoint_response = CheckpointResponse(
         decision=body.decision,
@@ -311,19 +326,32 @@ async def resume_message(
 
     if busy_reason is not None:
         started: asyncio.Future = asyncio.get_running_loop().create_future()
-        turn_runs.register_resume_deferred(
-            ResumeDeferredWaiter(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                busy_reason=busy_reason,
-                checkpoint_response=checkpoint_response,
-                llm_credentials=preflight.credentials,
-                llm_supports_tools=preflight.supports_tools,
-                x_client_platform=x_client_platform,
-                preflight_warnings=list(preflight.warnings),
-                started=started,
-            )
+        waiter = ResumeDeferredWaiter(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            busy_reason=busy_reason,
+            checkpoint_response=checkpoint_response,
+            llm_credentials=preflight.credentials,
+            llm_supports_tools=preflight.supports_tools,
+            x_client_platform=x_client_platform,
+            origin_device_id=current_origin_device(),
+            preflight_warnings=list(preflight.warnings),
+            started=started,
         )
+        if turn_runs.register_resume_deferred(waiter) is waiter:
+            # 「放行已记下」is conversation state, not this connection's: the other端 has
+            # the same cold card on screen and would otherwise keep offering a button that
+            # is already spent (云对话多端同权 B2 · 验收 5). This SSE emits its own copy, so
+            # the signal lane covers everyone else — a 幂等 join (same card re-submitted)
+            # changes nothing for them and stays silent.
+            publish_conversation_signal(
+                conversation_id,
+                resume_deferred(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    busy_reason=busy_reason,
+                ),
+            )
         return sse_resume_deferred_response(
             message_id=message_id,
             conversation_id=conversation_id,

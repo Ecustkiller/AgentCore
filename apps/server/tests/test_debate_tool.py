@@ -28,6 +28,7 @@ from agentcore.runtime.debate import (
     UserInterjection,
 )
 from agentcore.runtime.debate.prompt import debater_task, round_feedback
+from agentcore.runtime.debate.rounds import make_round_runner
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.types import RunPhase, RunState
@@ -74,6 +75,8 @@ class _DebateLLM:
     ``### 质询一`` 切段；``prose`` = 无标题散文，驱动段落/指针降级；``dangling`` = 冒号悬垂，
     触发一次补全续写）。
     ``cx_fail_sides`` 内的方对质询回空内容，驱动 runner 失败兜底（exchanges answer 空）。
+    ``cx_completion_tag`` = 悬垂补全稿里带的证据标签（默认合规；填未绑定的
+    ``【已核实·#eN】`` 可驱动补全的台账 id 闸回炉 / 降级）。
     """
 
     def __init__(
@@ -84,12 +87,17 @@ class _DebateLLM:
         questions: dict[str, list[str]] | None = None,
         cx_answer_style: str = "headings",
         cx_fail_sides: frozenset[str] | None = None,
+        cx_completion_tag: str = "【待核实·推断】",
+        speech_empty: bool = False,
     ) -> None:
+        # 置 True 时立论 stream 一律回空内容（含合同返工重跑）→ 该方本轮失败、不留 session。
+        self.speech_empty = speech_empty
         self.converge_at = converge_at
         self.brief = brief if brief is not None else _BRIEF
         self.questions = questions
         self.cx_answer_style = cx_answer_style
         self.cx_fail_sides = cx_fail_sides or frozenset()
+        self.cx_completion_tag = cx_completion_tag
         self.judge_calls = 0
         self.cross_exam_calls = 0
         self.stream_calls = 0
@@ -133,7 +141,7 @@ class _DebateLLM:
                 return ""
             if completing:
                 self.cx_completion_calls += 1
-                return f"补全收束·{key}：间接证据链已闭合【已核实·判决书】。"
+                return f"补全收束·{key}：间接证据链已闭合{self.cx_completion_tag}。"
             if self.cx_answer_style == "prose":
                 return f"散文答·{key}【待核实·推断】"
             if self.cx_answer_style == "dangling":
@@ -164,7 +172,8 @@ class _DebateLLM:
                 yield LLMChunk(delta_content=content)
             yield LLMChunk(usage=_USAGE)
             return
-        yield LLMChunk(delta_content=f"辩手发言#{self.stream_calls}")
+        if not self.speech_empty:
+            yield LLMChunk(delta_content=f"辩手发言#{self.stream_calls}")
         yield LLMChunk(usage=_USAGE)
 
 
@@ -302,6 +311,81 @@ async def test_ledger_three_tier_parenting():
     assert {r.run_id for r in debater_rows} == {f"{mod_run_id}_r1_pro", f"{mod_run_id}_r1_con"}
 
 
+async def test_first_speech_in_later_round_keeps_true_round_no():
+    """开场波 ≠ 第 1 轮：某方第一次开口可能在第 2/3 轮（圆桌后轮才被点名、或首次发言失败
+    后重来），run_id 与节点 ``round`` 标签必须跟真实轮号。
+
+    写死 ``r1`` 时第 2 轮的开场波会复用第 1 轮那一格 —— 同 run_id 二次 ``run_started``，
+    后一次盖掉前一次，协作图上前一轮那段发言消失。
+    """
+    llm = _DebateLLM(converge_at=1, speech_empty=True)  # 第 1 轮双方空产出 → 不留人
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    config = DebateConfig(
+        motion="该不该做 X",
+        form=DebateForm.DEBATE,
+        sides=[
+            DebateSide(key="pro", name="正方", stance="支持做 X"),
+            DebateSide(key="con", name="反方", stance="反对做 X"),
+        ],
+    )
+    runner = make_round_runner(tool, "exec1", "mod1", config)
+
+    r1 = await runner(round_no=1, focus="焦点", sides=config.sides, history=[])
+    assert [t.run_id for t in r1] == ["mod1_r1_pro", "mod1_r1_con"]
+    assert not any(t.ok for t in r1)
+    assert tool._debater_sessions == {}  # 失败不留 session → 第 2 轮仍是这两方的开场波
+
+    llm.speech_empty = False
+    r2 = await runner(round_no=2, focus="焦点", sides=config.sides, history=[])
+    assert [t.run_id for t in r2] == ["mod1_r2_pro", "mod1_r2_con"]
+    assert all(t.ok for t in r2)
+
+    sink.close()
+    events = [e async for e in sink]
+    started = [
+        e.payload["run_id"] for e in events if e.type == EventType.RUN_STARTED
+    ]
+    # 每格只开播一次：四个 run_id 互不相同（旧行为里第 2 轮会复用 _r1_ 那两个）。
+    assert sorted(started) == [
+        "mod1_r1_con",
+        "mod1_r1_pro",
+        "mod1_r2_con",
+        "mod1_r2_pro",
+    ]
+    # 节点的逐轮标签同源于真实轮号——前端按 run.round 分桶，标错就挂错轮。
+    plans = [e.payload for e in events if e.type == EventType.RUN_PLAN]
+    rounds_by_run = {
+        r["id"]: r.get("round") for p in plans for r in p.get("runs", [])
+    }
+    assert rounds_by_run["mod1_r1_pro"] == 1
+    assert rounds_by_run["mod1_r2_pro"] == 2
+
+
+async def test_later_round_beat_run_ids_stay_per_round():
+    """形态专属拍（红队 defense 等）同理：第 N 轮的开场波带 ``_r{n}_..._{beat}``。"""
+    llm = _DebateLLM(converge_at=1)
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    config = DebateConfig(
+        motion="压测方案",
+        form=DebateForm.RED_TEAM,
+        sides=[
+            DebateSide(key="plan", name="方案方", stance="推行", is_subject=True),
+            DebateSide(key="red", name="红队", stance="挑刺"),
+        ],
+    )
+    runner = make_round_runner(tool, "exec1", "mod1", config)
+    turns = await runner(
+        round_no=3,
+        focus="焦点",
+        sides=[config.sides[0]],
+        history=[],
+        beat="defense",
+    )
+    assert [t.run_id for t in turns] == ["mod1_r3_plan_defense"]
+
+
 async def test_multi_round_cross_round_memory():
     # 无最小轮门槛了：轮数由裁判逐轮自判。converge_at=3 → 裁判前两轮判未收敛、第 3 轮收敛 →
     # 跑满 3 轮（thorough 默认 max=5，收敛早于上限发生），借此验证后续轮 continue_run 续写。
@@ -405,6 +489,40 @@ async def test_cross_exam_dangling_answer_triggers_one_repair():
     assert not ans.rstrip().endswith(("：", ":"))
     ledger_ids = [r.run_id for r in tool.run_ledger]
     assert any("_complete" in rid for rid in ledger_ids)
+
+
+async def test_cross_exam_completion_passes_evidence_ledger_gate():
+    """悬垂补全走与主答同一道台账 id 闸：未绑定的 #eN 进不了并入正文的补全稿。
+
+    补全文本会被并进正式答复、并随本方 transcript 成为结辩允许集的基准；若补全绕过闸
+    （旧行为 ``continue_run`` 不传 ``check_evidence_ledger``），凭空 id 既进正文又在结辩
+    里变成合法引用。
+    """
+    llm = _DebateLLM(
+        converge_at=1,
+        questions=_CX_QUESTIONS,
+        cx_answer_style="dangling",
+        cx_completion_tag="【已核实·#e9】",  # 台账里根本没有 #e9
+    )
+    sink = EventSink()
+    tool = _tool(llm, sink=sink)
+    result = await tool.execute(
+        {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+    )
+    assert result.success is True
+    # 闸命中 → 回炉一次；假 LLM 照旧硬写 → 降级【待核实·推断】。
+    assert llm.cx_completion_calls == 4  # 双方各「首稿 + 回炉稿」
+    sink.close()
+    events = [e async for e in sink if e.type == EventType.DEBATE_RESULT]
+    cx = events[0].payload["rounds"][0]["cross_exam"]
+    pro = next(c for c in cx if c["target"] == "pro")
+    ans = pro["exchanges"][0]["answer"]
+    assert "补全收束·pro" in ans  # 补全本身仍并入答复
+    assert "#e9" not in ans
+    assert "【待核实·推断】" in ans
+    # 结辩允许集的基准是本方 transcript；凭空 id 没落进去 ⇒ 结辩也引不了它。
+    transcript = tool._debater_sessions["pro"].transcript
+    assert all("#e9" not in (m.content or "") for m in transcript)
 
 
 async def test_cross_exam_real_runner_failed_answer_leaves_empty():
@@ -698,6 +816,59 @@ def test_round_feedback_injects_targeted_user_followup():
     fb_con_all = round_feedback(config, config.sides[1], 2, "焦点", last, all_ask)
     assert "边界在哪？" in fb_pro_all and "向全场" in fb_pro_all
     assert "边界在哪？" in fb_con_all
+
+
+async def test_steer_window_closes_at_last_boundary_not_after_the_brief():
+    """末轮边界一过就关窗——那之后的结辩 + 简报可达数十秒，期间收下的掌舵永不生效。
+
+    回归：旧实现队列只随进程活着，收场后点「立即结论」照样入队、路由照回「已发送·下一轮
+    生效」，条目还常驻内存。现在窗口在最后一个边界即关，之后 :func:`enqueue_steer` 返回
+    ``None``，路由据此回诚实回执。
+    """
+    from agentcore.runtime.debate.steer_queue import (
+        close_steer_window,
+        enqueue_steer,
+        steer_window_open,
+    )
+
+    seen: list[bool] = []
+
+    class _ClosingWatchLLM(_DebateLLM):
+        """结辩那几次 LLM 调用时窗口是否还开着（收场慢动作里的真实提交时机）。"""
+
+        async def stream(self, request):  # noqa: ANN001
+            joined = "\n".join(getattr(m, "content", "") or "" for m in request.messages)
+            if "结辩" in joined:
+                seen.append(steer_window_open("e"))
+            async for chunk in super().stream(request):
+                yield chunk
+
+    llm = _ClosingWatchLLM(converge_at=1)
+    tool = DebateTool(
+        llm=llm,
+        sink=EventSink(),
+        system_prompt="SYS",
+        user_message="原始请求",
+        tools=ToolRegistry(),
+        base_tool_context=_ctx(),
+        captain_run_id="captain1",
+        conversation_id="c1",
+        ambient_armed=True,  # 有活跃用户 → 挂边界钩子 → 开窗
+        approval_gate=None,
+    )
+    try:
+        result = await tool.execute(
+            {"motion": "该不该做 X", "form": "debate", "sides": _sides()}, _ctx()
+        )
+        assert result.success is True
+        assert seen and not any(seen)  # 结辩期已关窗
+        assert steer_window_open("e") is False
+        assert (
+            enqueue_steer(execution_id="e", conversation_id="c1", decision="conclude")
+            is None
+        )
+    finally:
+        close_steer_window("e")
 
 
 def test_submit_debate_steer_body_shape():

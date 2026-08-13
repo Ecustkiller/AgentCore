@@ -187,6 +187,7 @@ export function handleExecutionEvent(
         execMessageId(conversationId, routeHintFromPayload(event.payload)) ??
           "",
         ctx.source,
+        { live: ctx.replay !== true },
       );
       if (event.type === "escalation_required") {
         const eid = (event.payload as EscalationRequiredPayload)?.escalation_id;

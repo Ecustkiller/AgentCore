@@ -7,7 +7,7 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/services/escalation";
-import { submitInteractionFeedback } from "@/services/interactionSubmit";
+import { notifySubmitInteractionResult } from "@/services/interactionSubmit";
 import { type RunEscalation, useMessageExecution } from "@/stores/execution";
 import {
   AlertTriangle,
@@ -29,6 +29,7 @@ import {
   useAskAnswer,
 } from "./ask/AskUserFields";
 import { ResolvedDecisionRecord } from "./decision";
+import { escalationWaitNote } from "./escalationWaitCopy";
 
 /** Stable disclosure key for settled / raised escalation cards (legacy null id → role+q). */
 function escalationDisclosureKey(
@@ -115,15 +116,19 @@ function useEscalationSubmit(
   const [submitting, setSubmitting] = useState<
     EscalationUserDecision["kind"] | null
   >(null);
-  const busy = submitting !== null;
+  // 回执说这条已经结了：按钮就此关掉（再点也只会 404），但不转圈——那一帧
+  // `escalation_resolved` 可能早就过去了，等不来。收口文案走提示，卡面结果等线材帧。
+  const [settled, setSettled] = useState(false);
+  const busy = submitting !== null || settled;
 
   const send = (decision: EscalationUserDecision) => {
     if (busy || !conversationId || !escalationId) return;
     setSubmitting(decision.kind);
     decideEscalation(conversationId, escalationId, decision)
       .then((result) => {
-        if (result === "orphaned" || result === "busy") {
-          notifyError(submitInteractionFeedback(result));
+        if (result === "already_settled") setSettled(true);
+        if (result !== "ok") {
+          notifySubmitInteractionResult(result);
           setSubmitting(null);
         }
         // ok: SSE escalation_resolved settles the card
@@ -164,6 +169,7 @@ function PendingBrowserLoginEscalation({
       assumption={escalation.assumption || undefined}
       conversationId={conversationId}
       revealKey={escalation.id ?? "browser-login"}
+      timeoutSeconds={escalation.timeoutSeconds}
       busy={busy}
       submitting={submitKind}
       kindTag={escalationKindTag(escalation) || undefined}
@@ -337,7 +343,10 @@ function PendingEscalation({
             {escalation.question}
           </p>
           <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-            未答则按此继续：{escalation.assumption}
+            {escalationWaitNote({
+              assumption: escalation.assumption,
+              timeoutSeconds: escalation.timeoutSeconds,
+            })}
           </p>
           <div className="mt-2 space-y-3">
             {hasStructured && (
@@ -421,7 +430,11 @@ function AwaitingCeoEscalation({
             {escalation.question}
           </p>
           <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-            未裁则按此继续：{escalation.assumption}
+            {escalationWaitNote({
+              assumption: escalation.assumption,
+              timeoutSeconds: escalation.timeoutSeconds,
+              awaiting: "ceo",
+            })}
           </p>
         </div>
       </div>

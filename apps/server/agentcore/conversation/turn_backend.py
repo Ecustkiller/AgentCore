@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.runtime.events import EventSink
 from agentcore.shared_spaces.types import SharedMountMode
 from agentcore.workspace import grant_store, shared_mount_store
@@ -93,9 +94,11 @@ async def build_turn_backend(
     Attaches W3 conversation-scoped external mounts and shared-space second roots
     when grants exist. ``shared_gate`` re-checks membership/role on each shared file op.
     """
+    placement = await resolve_folder_placement(folder_id)
     backend = build_workspace(
         user_id=user_id,
         folder_id=folder_id,
+        folder_rel_path=placement.rel_path,
         conversation_id=conversation_id,
         sink=sink,
         local_binding=local_binding,

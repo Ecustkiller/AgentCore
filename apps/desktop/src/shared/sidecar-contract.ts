@@ -487,8 +487,11 @@ export interface SidecarWarmMcpDiscoverRequest {
  * 打开/登记本机项目后静默暖 rules/memory instruction 快照：ensure + initialize 后，
  * 主进程显式踢 `warmAccountRulesMemory` JSON-RPC；sidecar 用 account 窄票自拉并 seed
  * 进进程缓存（与 prepare cache_only 同缓存）。
- * 另：`startTurn` / `resume` 在该 root+subpath entry **首次**有票成功暖（或等价完成）
- * 后标记 `accountRulesMemoryWarmed`；无票跳过不锁死，晚登录/补票可再踢。
+ *
+ * **续期是契约的一半**：服务端快照有 TTL，过期后 prepare 只读缓存 → 空注入（不回落
+ * 云端），表现为规则与长期记忆整体消失。故回复带 {@link
+ * SidecarWarmAccountRulesMemoryResult.ttlSeconds}，主进程按「账号 + folderId」记有效期，
+ * `startTurn` / `resume` 在过期后自动续暖；无票跳过不锁死，晚登录/补票可再踢。
  * open/register 可 fire-and-forget；回合发 RPC 前会 await 在途 warm。
  */
 export interface SidecarWarmAccountRulesMemoryRequest {
@@ -500,6 +503,20 @@ export interface SidecarWarmAccountRulesMemoryRequest {
   accountAuth?: SidecarAccountAuth;
   /** 登录账号 id（覆盖 initialize 时的 local）；与 startTurn.userId 同形。 */
   userId?: string;
+}
+
+/** `warmAccountRulesMemory` JSON-RPC 的回复（主进程内部消费，不过 IPC 到 renderer）。 */
+export interface SidecarWarmAccountRulesMemoryResult {
+  ok: boolean;
+  /** 本次暖出的快照是否降级（部分云拉取失败）；降级条目 TTL 更短。 */
+  degraded?: boolean;
+  topicCount?: number;
+  memoryFileCount?: number;
+  /**
+   * 该快照在服务端进程缓存里的**剩余寿命**（秒）——续期握手的权威值。
+   * 主进程据此判何时重暖；缺省 / ≤0 视为「立即过期」，下个回合重暖（宁多暖勿谎报）。
+   */
+  ttlSeconds?: number;
 }
 
 /**
@@ -713,7 +730,8 @@ export interface SidecarApi {
   respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }>;
   runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
   runStop(req: SidecarRunStopRequest): Promise<{ queued: number }>;
-  debateSteer(req: SidecarDebateSteerRequest): Promise<void>;
+  /** `accepted=false` = 引擎未收（掌舵窗口已关 / sidecar 不可达）；调用方须如实回执。 */
+  debateSteer(req: SidecarDebateSteerRequest): Promise<{ accepted: boolean }>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
    * 过程事件经 `onEvent` 推来）。 */
   resume(req: SidecarResumeRequest): Promise<SidecarTurnResult>;

@@ -40,15 +40,63 @@ function toBinding(b: BackendBinding): WorkspaceBinding {
   };
 }
 
-/** Resolve a conversation's current workspace mode (cloud vs local). */
+/**
+ * Binding lookups sit on the attachment hot path: staging a file asks "cloud or
+ * local?" on attach and again on send, so a single screenshot used to spend
+ * three serial round-trips before its first byte moved. Entries are short-lived
+ * (a burst of attaches, not a session) and the mutations below refresh eagerly,
+ * so a stale read is bounded by the TTL even when the server flips a binding on
+ * its own.
+ */
+const BINDING_TTL_MS = 5_000;
+
+interface BindingCacheEntry {
+  at: number;
+  value: Promise<WorkspaceBinding>;
+}
+
+const bindingCache = new Map<string, BindingCacheEntry>();
+
+/** Drop cached bindings — one conversation, or all of them when omitted. */
+export function invalidateWorkspaceBinding(conversationId?: string): void {
+  if (conversationId === undefined) bindingCache.clear();
+  else bindingCache.delete(conversationId);
+}
+
+function cacheBinding(conversationId: string, binding: WorkspaceBinding): void {
+  bindingCache.set(conversationId, {
+    at: Date.now(),
+    value: Promise.resolve(binding),
+  });
+}
+
+/**
+ * Resolve a conversation's current workspace mode (cloud vs local). Concurrent
+ * callers share one request; pass `fresh` to bypass the cache when the caller is
+ * an explicit refresh rather than an incidental lookup.
+ */
 export async function getWorkspaceBinding(
   conversationId: string,
+  options?: { fresh?: boolean },
 ): Promise<WorkspaceBinding> {
-  return toBinding(
-    await api.get<BackendBinding>(
+  if (!options?.fresh) {
+    const hit = bindingCache.get(conversationId);
+    if (hit && Date.now() - hit.at < BINDING_TTL_MS) return hit.value;
+  }
+  const value = api
+    .get<BackendBinding>(
       `/v1/conversations/${conversationId}/workspace/binding`,
-    ),
-  );
+    )
+    .then(toBinding);
+  const entry: BindingCacheEntry = { at: Date.now(), value };
+  bindingCache.set(conversationId, entry);
+  // A failed lookup must not stick around as a cached rejection.
+  value.catch(() => {
+    if (bindingCache.get(conversationId) === entry) {
+      bindingCache.delete(conversationId);
+    }
+  });
+  return value;
 }
 
 /** Bind the conversation's workspace to a desktop root (switch to local mode). */
@@ -56,23 +104,31 @@ export async function bindLocalWorkspace(
   conversationId: string,
   rootId: string,
 ): Promise<WorkspaceBinding> {
-  return toBinding(
+  const binding = toBinding(
     await api.put<BackendBinding>(
       `/v1/conversations/${conversationId}/workspace/binding`,
       { root_id: rootId },
     ),
   );
+  // Binding through a foldered conversation writes the folder, so every sibling
+  // flips too — no cached entry survives the mutation.
+  bindingCache.clear();
+  cacheBinding(conversationId, binding);
+  return binding;
 }
 
 /** Unbind the conversation's workspace (fall back to cloud mode). */
 export async function unbindWorkspace(
   conversationId: string,
 ): Promise<WorkspaceBinding> {
-  return toBinding(
+  const binding = toBinding(
     await api.delete<BackendBinding>(
       `/v1/conversations/${conversationId}/workspace/binding`,
     ),
   );
+  bindingCache.clear();
+  cacheBinding(conversationId, binding);
+  return binding;
 }
 
 /**

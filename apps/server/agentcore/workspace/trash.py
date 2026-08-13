@@ -7,6 +7,12 @@ Electron channels prefer ``shell.trashItem`` instead (OS recycle bin — **no**
 product one-click restore); this module is the cloud/sidecar path and the
 local no-OS-trash fallback.
 
+Where the zone sits depends on the backend (see :func:`trash_root_for`): in-tree
+under ``<root>/AgentCore/trash`` for local / sidecar / shared spaces, out of the
+tree for cloud conversation workspaces (cloud folders nest, and a parent must not
+read a child's deleted files as ordinary content). Either way a delete lands in
+the trash of **the workspace root it was executed against** — 谁执行删除落谁的。
+
 Internal zones (``AgentCore/{index,trash,baselines}``) are path-aware system
 noise — trash entries never appear in agent listings / indexes. Hard-delete
 bypass applies only to those zones, **not** the whole ``AgentCore/`` tree
@@ -35,12 +41,23 @@ from agentcore.workspace.protocol import (
     PathNotFound,
     WorkspaceIOError,
 )
-from agentcore.workspace.stage_dirs import TRASH_REL
+from agentcore.workspace.stage_dirs import TRASH_ZONE_NAME, internal_zone_path
 
 logger = get_logger(__name__)
 
 _META_NAME = "meta.json"
 _CONTENT_NAME = "content"
+
+
+def trash_root_for(root: Path, internal_root: Path | None = None) -> Path:
+    """The trash zone directory for a workspace root.
+
+    ``internal_root=None`` keeps the zone in-tree at ``<root>/AgentCore/trash``
+    (local / sidecar / shared spaces). Cloud conversation workspaces pass their
+    out-of-tree zone container so a parent folder never sees a child's deleted
+    files as ordinary content (双模式工作区 §5.4).
+    """
+    return internal_zone_path(TRASH_ZONE_NAME, root=root, internal_root=internal_root)
 
 
 def _rmtree_retry(path: Path) -> None:
@@ -103,12 +120,16 @@ class TrashExpiredError(WorkspaceIOError):
     """Entry older than the retention window."""
 
 
-def trash_dest_under_target(*, root: Path, target: Path) -> bool:
-    """True when ``AgentCore/trash`` would land inside ``target`` (self-nest risk).
+def trash_dest_under_target(
+    *, root: Path, target: Path, internal_root: Path | None = None
+) -> bool:
+    """True when the trash zone would land inside ``target`` (self-nest risk).
 
-    Lexical / resolve-based — does not require the trash dir to exist yet.
+    Lexical / resolve-based — does not require the trash dir to exist yet. Always
+    False when the zone lives outside the tree (cloud), which is precisely why the
+    "expand by children" dance below is an in-tree-only concern.
     """
-    trash_root = (root / Path(*TRASH_REL.split("/"))).resolve()
+    trash_root = trash_root_for(root, internal_root).resolve()
     try:
         trash_root.relative_to(target.resolve())
         return True
@@ -116,7 +137,13 @@ def trash_dest_under_target(*, root: Path, target: Path) -> bool:
         return False
 
 
-def soft_delete_to_trash(*, root: Path, target: Path, original_rel: str) -> str:
+def soft_delete_to_trash(
+    *,
+    root: Path,
+    target: Path,
+    original_rel: str,
+    internal_root: Path | None = None,
+) -> str:
     """Move ``target`` into the workspace trash zone; return the trash entry id.
 
     Layout::
@@ -128,8 +155,8 @@ def soft_delete_to_trash(*, root: Path, target: Path, original_rel: str) -> str:
     Raises ``WorkspaceIOError`` on I/O failure, or when the trash destination
     would nest under ``target`` (never ``shutil.move`` into self).
     """
-    trash_root = root / Path(*TRASH_REL.split("/"))
-    if trash_dest_under_target(root=root, target=target):
+    trash_root = trash_root_for(root, internal_root)
+    if trash_dest_under_target(root=root, target=target, internal_root=internal_root):
         raise WorkspaceIOError("不能软删到自身子树内的回收区（会自嵌套）")
 
     entry_id = new_id()
@@ -164,7 +191,9 @@ def soft_delete_to_trash(*, root: Path, target: Path, original_rel: str) -> str:
     return entry_id
 
 
-def soft_delete_expanding_trash_ancestor(*, root: Path, target: Path) -> None:
+def soft_delete_expanding_trash_ancestor(
+    *, root: Path, target: Path, internal_root: Path | None = None
+) -> None:
     """Soft-delete a path that contains ``AgentCore/trash`` by expanding children.
 
     Order matters: hard-clear internal zones first (so a fresh trash can receive
@@ -217,7 +246,12 @@ def soft_delete_expanding_trash_ancestor(*, root: Path, target: Path) -> None:
             raise WorkspaceIOError(str(e)) from e
 
     for child, child_rel in soft_children:
-        soft_delete_to_trash(root=root, target=child, original_rel=child_rel)
+        soft_delete_to_trash(
+            root=root,
+            target=child,
+            original_rel=child_rel,
+            internal_root=internal_root,
+        )
 
     if not target.exists():
         return
@@ -247,7 +281,10 @@ def soft_delete_expanding_trash_ancestor(*, root: Path, target: Path) -> None:
 
 
 def list_trash_entries(
-    *, root: Path, retention_days: int | None = None
+    *,
+    root: Path,
+    retention_days: int | None = None,
+    internal_root: Path | None = None,
 ) -> list[TrashEntry]:
     """List AgentCore/trash entries newest-first; purge expired as a side effect.
 
@@ -255,7 +292,7 @@ def list_trash_entries(
     entries — only on-disk ``AgentCore/trash`` payloads.
     """
     days = trash_retention_days() if retention_days is None else max(0, retention_days)
-    trash_root = root / Path(*TRASH_REL.split("/"))
+    trash_root = trash_root_for(root, internal_root)
     if not trash_root.is_dir():
         return []
 
@@ -282,7 +319,11 @@ def list_trash_entries(
 
 
 def restore_from_trash(
-    *, root: Path, entry_id: str, retention_days: int | None = None
+    *,
+    root: Path,
+    entry_id: str,
+    retention_days: int | None = None,
+    internal_root: Path | None = None,
 ) -> str:
     """Move trash ``content`` back to ``original_path``; return that relative path.
 
@@ -297,7 +338,7 @@ def restore_from_trash(
         raise TrashNotFound(entry_id or "")
 
     days = trash_retention_days() if retention_days is None else max(0, retention_days)
-    trash_root = root / Path(*TRASH_REL.split("/"))
+    trash_root = trash_root_for(root, internal_root)
     entry_dir = trash_root / entry_id
     parsed = _read_entry(entry_dir)
     if parsed is None:

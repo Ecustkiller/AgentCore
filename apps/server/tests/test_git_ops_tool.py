@@ -20,9 +20,16 @@ from agentcore.tools.builtin.git_ops import (
     _AUTH_FAILURE_HINT,
     _FORBIDDEN_PATTERNS,
     _PROTECTED_BRANCHES,
+    GIT_PHASES,
+    PHASE_CREDENTIALS,
+    PHASE_LOCAL,
+    PHASE_QUEUED,
+    PHASE_REMOTE,
     GitTool,
     _cloud_network_extra_env,
+    _git_subprocess_env,
     _looks_like_auth_failure,
+    _looks_like_unusable_repo,
     _validate_add_paths,
     git_write_subcommands,
 )
@@ -42,6 +49,56 @@ def test_auth_failure_hint_detects_common_markers():
     assert _looks_like_auth_failure("remote: HTTP Basic: Access denied")
     assert not _looks_like_auth_failure("fatal: not a git repository")
     assert "设置 → Git 凭据" in _AUTH_FAILURE_HINT
+
+
+def test_unusable_repo_markers_stay_off_ordinary_git_failures():
+    assert _looks_like_unusable_repo(
+        "fatal: not a git repository (or any of the parent directories): .git"
+    )
+    assert _looks_like_unusable_repo(
+        "fatal: this operation must be run in a work tree"
+    )
+    assert _looks_like_unusable_repo("error: object file .git/objects/ab/cd is corrupt")
+    # Everyday failures keep their own attribution — no repo-corruption claim.
+    assert not _looks_like_unusable_repo("fatal: Authentication failed")
+    assert not _looks_like_unusable_repo("CONFLICT (content): Merge conflict in a.txt")
+    assert not _looks_like_unusable_repo("fatal: bad revision 'HEAD~9'")
+
+
+def test_git_subprocess_env_disables_optional_locks(tmp_path: Path):
+    """Read-only git must not refresh the index — that is what queues on index.lock."""
+    env = _git_subprocess_env(str(tmp_path), None)
+    assert env["GIT_OPTIONAL_LOCKS"] == "0"
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_CEILING_DIRECTORIES"] == str(tmp_path.resolve())
+    merged = _git_subprocess_env(str(tmp_path), {"GIT_CONFIG_COUNT": "1"})
+    assert merged["GIT_CONFIG_COUNT"] == "1"
+    assert merged["GIT_OPTIONAL_LOCKS"] == "0"
+
+
+async def test_run_git_spawns_with_optional_locks_disabled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The env helper is the env the child actually gets (desktop gitRun parity)."""
+    import asyncio
+
+    # Aliased: this module's own ``_run_git`` helper shadows the tool's spawn.
+    from agentcore.tools.builtin.git_ops import _run_git as spawn_run_git
+
+    repo = _init_repo(tmp_path / "repo")
+    captured: list[dict[str, str]] = []
+    real_exec = asyncio.create_subprocess_exec
+
+    async def _capture(*args: Any, **kwargs: Any):
+        captured.append(dict(kwargs.get("env") or {}))
+        return await real_exec(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", _capture)
+    _stdout, _stderr, code = await spawn_run_git(["status", "-sb"], cwd=str(repo))
+    assert code == 0
+    assert captured
+    assert captured[0]["GIT_OPTIONAL_LOCKS"] == "0"
+    assert captured[0]["GIT_TERMINAL_PROMPT"] == "0"
 
 
 def _run_git(cwd: Path, *args: str) -> None:
@@ -266,10 +323,10 @@ async def test_no_git_anywhere_reports_structured_no_repo(tmp_path: Path):
         assert "无提交" not in result.output
 
 
-async def test_status_ensure_timeout_is_hard_error_not_no_repo(
+async def test_status_timeout_is_hard_error_not_no_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    """``.git`` present + rev-parse hang → error/timeout, never soft ``no_repo``."""
+    """``.git`` present + the command hangs → error/timeout, never soft ``no_repo``."""
     import agentcore.tools.builtin.git_ops as git_mod
 
     repo = _init_repo(tmp_path / "repo")
@@ -280,10 +337,11 @@ async def test_status_ensure_timeout_is_hard_error_not_no_repo(
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ) -> tuple[str, str, int]:
-        if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
-            return "", "git 操作超时（rev-parse --is-inside-work-tree）", 1
-        raise AssertionError(f"unexpected git args: {args}")
+        # No pre-flight probe may run: the primary command owns the whole budget.
+        assert args[0] == "status", f"unexpected git args: {args}"
+        return "", f"git 操作超时（{' '.join(args)}）", 1
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _fake_run)
     result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
@@ -294,7 +352,7 @@ async def test_status_ensure_timeout_is_hard_error_not_no_repo(
     assert "勿原样重试" in (result.error or "")
 
 
-async def test_status_ensure_probe_failure_not_soft_no_repo(
+async def test_status_on_unusable_repo_not_soft_no_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """``.git`` present but not a work tree → hard fail, not soft ``no_repo``."""
@@ -308,20 +366,45 @@ async def test_status_ensure_probe_failure_not_soft_no_repo(
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ) -> tuple[str, str, int]:
-        if args[:2] == ["rev-parse", "--is-inside-work-tree"]:
-            return (
-                "",
-                "fatal: not a git repository (or any of the parent directories): .git",
-                128,
-            )
-        raise AssertionError(f"unexpected git args: {args}")
+        assert args[0] == "status", f"unexpected git args: {args}"
+        return (
+            "",
+            "fatal: not a git repository (or any of the parent directories): .git",
+            128,
+        )
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _fake_run)
     result = await GitTool().execute({"subcommand": "status"}, _ceo_ctx(repo))
     assert result.success is False
-    assert result.metadata.get("code") != "no_repo"
+    assert result.metadata.get("code") == "repo_unusable"
     assert "not a git repository" in (result.error or "").lower()
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        {"subcommand": "status"},
+        {"subcommand": "add", "paths": ["README.md"]},
+    ],
+)
+async def test_broken_gitdir_pointer_fails_honestly(tmp_path: Path, args: dict[str, Any]):
+    """Real unusable repo (``.git`` file → dangling gitdir): honest error on read *and* write.
+
+    Read-only must not soft-succeed here: ``no_repo`` means "no repository", and a
+    broken one is a different, human-actionable fact.
+    """
+    ws = tmp_path / "broken"
+    ws.mkdir()
+    (ws / "README.md").write_text("x\n", encoding="utf-8")
+    (ws / ".git").write_text("gitdir: ../nowhere/.git\n", encoding="utf-8")
+
+    result = await GitTool().execute(args, _worker_ctx(ws))
+    assert result.success is False
+    assert result.metadata.get("code") == "repo_unusable"
+    assert "没有 Git 仓库" not in (result.error or "")
+    assert "工作树" in (result.error or "")
 
 
 async def test_write_without_repo_still_hard_fails(tmp_path: Path):
@@ -746,9 +829,12 @@ async def test_pull_passes_ff_only_flag(tmp_path: Path, monkeypatch: pytest.Monk
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ):
         seen.append(list(args))
-        return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
+        return await real_run(
+            args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+        )
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
@@ -836,10 +922,13 @@ async def test_network_cmds_inject_extra_env_when_cloud_pat(
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ):
         if args and args[0] == subcommand:
             seen_extra.append(extra_env)
-        return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
+        return await real_run(
+            args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+        )
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
@@ -848,6 +937,72 @@ async def test_network_cmds_inject_extra_env_when_cloud_pat(
     )
     assert seen_extra, f"expected a {subcommand} _run_git call"
     _assert_credential_helper_env(seen_extra[0], username="gh-user", token="gh-pat")
+
+
+async def test_credential_lookup_timeout_is_fail_soft(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """A hung credential store must not fail the push — it means "no PAT", nothing more.
+
+    git then authenticates on its own and fails honestly if it cannot; the tool
+    call itself never dies inside the lookup.
+    """
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+
+    async def _hang(_user_id: str) -> GitAuthMaterial:
+        await asyncio.sleep(60)
+        raise AssertionError("credential lookup was not bounded")
+
+    monkeypatch.setattr(
+        "agentcore.workspace.git_credentials.load_git_auth_for_user",
+        _hang,
+    )
+    real_load = git_mod.spawn._load_account_git_auth
+    assert await real_load("u1", timeout=0.05) is None
+
+    # The caller degrades to "no credential helper env", not to an error.
+    async def _fast_bound(user_id: str, *, timeout: float = 0.05):
+        return await real_load(user_id, timeout=timeout)
+
+    monkeypatch.setattr(git_mod.spawn, "_load_account_git_auth", _fast_bound)
+    ctx = _worker_ctx(tmp_path, location="server", user_id="u1")
+    assert await _cloud_network_extra_env(ctx) is None
+
+
+async def test_pr_token_resolve_timeout_reports_honestly(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """create_pr cannot proceed without a token, so say the lookup timed out."""
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+
+    async def _hang(*, user_id: str | None) -> str:
+        await asyncio.sleep(60)
+        raise AssertionError("token resolution was not bounded")
+
+    monkeypatch.setattr("agentcore.workspace.github_pr.resolve_github_token", _hang)
+    real_resolve = git_mod.spawn._resolve_pr_token
+    assert await real_resolve("u1", timeout=0.05) == (None, True)
+
+    repo = _init_repo(tmp_path / "repo", branch="feature/pr")
+    _run_git(repo, "remote", "add", "origin", "https://github.com/acme/demo.git")
+
+    async def _fast_bound(user_id: str | None, *, timeout: float = 0.05):
+        return await real_resolve(user_id, timeout=timeout)
+
+    monkeypatch.setattr(git_mod.cmds_remote, "_resolve_pr_token", _fast_bound)
+    result = await GitTool().execute(
+        {"subcommand": "create_pr", "title": "Hello"},
+        _worker_ctx(repo, location="server"),
+    )
+    assert result.success is False
+    assert result.metadata.get("code") == "unauthenticated"
+    assert "超时" in (result.error or "")
+    # Must not send the user configuring credentials they may already have.
+    assert "设置 → Git 凭据" not in (result.error or "")
 
 
 @pytest.mark.parametrize("subcommand", ["push", "fetch", "pull"])
@@ -878,10 +1033,13 @@ async def test_network_cmds_no_extra_env_without_pat(
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ):
         if args and args[0] == subcommand:
             seen_extra.append(extra_env)
-        return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
+        return await real_run(
+            args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+        )
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
@@ -920,10 +1078,13 @@ async def test_network_cmds_local_no_extra_env_even_with_pat(
         cwd: str,
         timeout: float = 20.0,
         extra_env: dict[str, str] | None = None,
+        phase: str = PHASE_LOCAL,
     ):
         if args and args[0] == subcommand:
             seen_extra.append(extra_env)
-        return await real_run(args, cwd=cwd, timeout=timeout, extra_env=extra_env)
+        return await real_run(
+            args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+        )
 
     monkeypatch.setattr(git_mod.spawn, "_run_git", _spy)
     await GitTool().execute(
@@ -1010,8 +1171,14 @@ async def test_blame_truncates_long_output(
 def test_git_tool_timeout_outlives_inner_ops():
     from agentcore.runtime.engine import resolve_tool_timeout
     from agentcore.tools.builtin.git_ops import (
+        _GIT_CREDENTIAL_TIMEOUT,
         _GIT_KILL_SLACK,
+        _GIT_NETWORK_TIMEOUT,
+        _GIT_REPO_LOCK_WAIT,
         _GIT_TIMEOUT,
+        _GIT_TOKEN_RESOLVE_TIMEOUT,
+        _GITHUB_API_CALLS,
+        _GITHUB_API_TIMEOUT,
         git_tool_timeout_seconds,
     )
 
@@ -1019,17 +1186,746 @@ def test_git_tool_timeout_outlives_inner_ops():
     assert schema.timeout_seconds is None
     status_ceiling = git_tool_timeout_seconds({"subcommand": "status"})
     commit_ceiling = git_tool_timeout_seconds({"subcommand": "commit"})
+    merge_ceiling = git_tool_timeout_seconds({"subcommand": "merge"})
     pull_ceiling = git_tool_timeout_seconds({"subcommand": "pull"})
     fetch_ceiling = git_tool_timeout_seconds({"subcommand": "fetch"})
-    assert status_ceiling == 2 * _GIT_TIMEOUT + _GIT_KILL_SLACK
-    assert commit_ceiling == 4 * _GIT_TIMEOUT + _GIT_KILL_SLACK
+    push_ceiling = git_tool_timeout_seconds({"subcommand": "push"})
+    pr_ceiling = git_tool_timeout_seconds({"subcommand": "create_pr"})
+    baseline_ceiling = git_tool_timeout_seconds({"subcommand": "init_baseline"})
+    # Read path spawns one git process (no repo probe) and never queues on the repo
+    # lock — one inner budget + slack, unchanged by serialization.
+    assert status_ceiling == _GIT_TIMEOUT + _GIT_KILL_SLACK
+    # branch --show-current + commit + rev-parse --short HEAD, behind the repo queue
+    assert commit_ceiling == 3 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
+    # branch --show-current (protected-branch refusal) + merge, behind the repo queue
+    assert merge_ceiling == 2 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
     assert commit_ceiling > status_ceiling
-    assert pull_ceiling == fetch_ceiling == (
-        2 * _GIT_TIMEOUT + _GIT_TIMEOUT + 60.0 + _GIT_KILL_SLACK
+    # Network subcommands also serialize on a bounded PAT lookup before the remote op;
+    # only pull touches the index, so only pull pays the queue budget.
+    assert fetch_ceiling == (
+        _GIT_TIMEOUT + _GIT_CREDENTIAL_TIMEOUT + _GIT_NETWORK_TIMEOUT + _GIT_KILL_SLACK
+    )
+    assert pull_ceiling == fetch_ceiling + _GIT_REPO_LOCK_WAIT
+    # push never takes index.lock — it stays out of the queue and off its budget.
+    assert push_ceiling == (
+        2 * _GIT_TIMEOUT
+        + _GIT_CREDENTIAL_TIMEOUT
+        + _GIT_NETWORK_TIMEOUT
+        + _GIT_KILL_SLACK
+    )
+    # create_pr spends its remote budget on token resolution + two REST calls.
+    assert pr_ceiling == (
+        3 * _GIT_TIMEOUT
+        + _GIT_TOKEN_RESOLVE_TIMEOUT
+        + _GITHUB_API_CALLS * _GITHUB_API_TIMEOUT
+        + _GIT_KILL_SLACK
+    )
+    assert baseline_ceiling == (
+        5 * _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
     )
     assert resolve_tool_timeout(schema, {"subcommand": "status"}) == status_ceiling
     assert resolve_tool_timeout(schema, {"subcommand": "commit"}) == commit_ceiling
     assert resolve_tool_timeout(schema, {"subcommand": "pull"}) == pull_ceiling
+    # Action-gated verbs must budget the queue exactly as they take it: stash push
+    # writes the index, stash list is a plain read.
+    assert git_tool_timeout_seconds({"subcommand": "stash", "action": "push"}) == (
+        _GIT_TIMEOUT + _GIT_REPO_LOCK_WAIT + _GIT_KILL_SLACK
+    )
+    assert (
+        git_tool_timeout_seconds({"subcommand": "stash", "action": "list"})
+        == status_ceiling
+    )
+
+
+def _declared_ceiling(fn: Any) -> float:
+    """The ceiling a bounded helper enforces when the caller passes none."""
+    import inspect
+
+    return float(inspect.signature(fn).parameters["timeout"].default)
+
+
+def _budget_probe(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, float]]:
+    """Ledger of the bounded I/O one git tool call serializes on, with each ceiling.
+
+    Covers the seams that consume wall clock: the per-repo queue, git subprocesses,
+    the account PAT lookup, and create_pr token resolution (GitHub REST is stubbed
+    per test and appends its client's ceiling). Each entry is the deadline
+    production code actually enforces, read off the call or the helper's own
+    default — a ratchet over known seams, so a *new* unbounded step shows up as a
+    missing entry rather than as a wrong number.
+    """
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+
+    ledger: list[tuple[str, float]] = []
+    real_run = git_mod.spawn._run_git
+    real_cred = git_mod.spawn._load_account_git_auth
+    real_token = git_mod.spawn._resolve_pr_token
+    real_lock = git_mod.repo_lock._acquire_repo_lock
+    cred_default = _declared_ceiling(real_cred)
+    token_default = _declared_ceiling(real_token)
+    lock_default = _declared_ceiling(real_lock)
+
+    async def _spy_git(
+        args: list[str],
+        *,
+        cwd: str,
+        timeout: float = 20.0,
+        extra_env: dict[str, str] | None = None,
+        phase: str = git_mod.PHASE_LOCAL,
+    ):
+        ledger.append((f"git:{' '.join(args)}", float(timeout)))
+        return await real_run(
+            args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+        )
+
+    async def _spy_cred(user_id: str, *, timeout: float = cred_default):
+        ledger.append(("credential", float(timeout)))
+        return await real_cred(user_id, timeout=timeout)
+
+    async def _spy_token(user_id: str | None, *, timeout: float = token_default):
+        ledger.append(("token_resolve", float(timeout)))
+        return await real_token(user_id, timeout=timeout)
+
+    async def _spy_lock(lock: asyncio.Lock, *, timeout: float = lock_default):
+        ledger.append(("repo_lock", float(timeout)))
+        return await real_lock(lock, timeout=timeout)
+
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy_git)
+    monkeypatch.setattr(git_mod.spawn, "_load_account_git_auth", _spy_cred)
+    monkeypatch.setattr(git_mod.repo_lock, "_acquire_repo_lock", _spy_lock)
+    # create_pr binds the helper at import time, so patch the call site too.
+    monkeypatch.setattr(git_mod.cmds_remote, "_resolve_pr_token", _spy_token)
+    return ledger
+
+
+@pytest.mark.parametrize(
+    "args,expected_argv",
+    [
+        ({"subcommand": "status"}, "status -sb --untracked-files=no"),
+        ({"subcommand": "diff"}, "diff"),
+        ({"subcommand": "log", "max_count": 5}, "log -n5 --oneline"),
+        ({"subcommand": "show"}, "show HEAD"),
+        ({"subcommand": "blame", "paths": ["README.md"]}, "blame -- README.md"),
+    ],
+)
+async def test_healthy_repo_read_spawns_one_git_process(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    args: dict[str, Any],
+    expected_argv: str,
+):
+    """No pre-flight probe: a read on a healthy repo is exactly the command itself."""
+    from agentcore.tools.builtin.git_ops import _GIT_TIMEOUT
+
+    repo = _init_repo(tmp_path / "repo")
+    ledger = _budget_probe(monkeypatch)
+    result = await GitTool().execute(args, _ceo_ctx(repo))
+    assert result.success is True, result.error
+    assert ledger == [(f"git:{expected_argv}", _GIT_TIMEOUT)]
+
+
+async def test_engine_ceiling_outlives_measured_inner_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Invariant with teeth: outer ≥ Σ(inner ceilings actually used) + kill slack.
+
+    Measures the serial steps each subcommand really performs instead of trusting
+    the hand-maintained tables next to the formula. Network subcommands must show
+    their PAT lookup here — it is DB I/O rather than a git process, and it is the
+    step the budget used to ignore entirely. The per-repo queue is on the same
+    footing: whoever waits for it must have budgeted for it, and the ledger says
+    who waits (reads and ref-only writes must not).
+    """
+    from agentcore.tools.builtin.git_ops import _GIT_KILL_SLACK, git_tool_timeout_seconds
+
+    repo = _init_repo(tmp_path / "repo", branch="feature/ship")
+    bare = tmp_path / "remote.git"
+    _run_git(tmp_path, "init", "--bare", str(bare))
+    _run_git(repo, "remote", "add", "origin", str(bare))
+    (repo / "extra.txt").write_text("x\n", encoding="utf-8")
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / "app.py").write_text("print('hi')\n", encoding="utf-8")
+
+    ledger = _budget_probe(monkeypatch)
+    cases: list[tuple[dict[str, Any], Path, bool, bool]] = [
+        ({"subcommand": "status"}, repo, False, False),
+        ({"subcommand": "add", "paths": ["extra.txt"]}, repo, False, True),
+        ({"subcommand": "commit", "message": "add extra"}, repo, False, True),
+        ({"subcommand": "merge", "ref": "feature/ship"}, repo, False, True),
+        ({"subcommand": "push", "set_upstream": True}, repo, True, False),
+        ({"subcommand": "fetch", "remote": "origin"}, repo, True, False),
+        ({"subcommand": "pull", "remote": "origin"}, repo, True, True),
+        ({"subcommand": "init_baseline"}, fresh, False, True),
+    ]
+    for args, workspace, wants_credential, wants_repo_lock in cases:
+        ledger.clear()
+        await GitTool().execute(args, _worker_ctx(workspace, location="server"))
+        assert ledger, args
+        labels = [label for label, _ in ledger]
+        assert ("credential" in labels) is wants_credential, (args, labels)
+        assert ("repo_lock" in labels) is wants_repo_lock, (args, labels)
+        inner = sum(ceiling for _, ceiling in ledger)
+        outer = git_tool_timeout_seconds(args)
+        assert inner + _GIT_KILL_SLACK <= outer, (args, ledger)
+
+
+async def test_create_pr_ceiling_outlives_measured_inner_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Same invariant for create_pr, whose remote budget is token resolve + REST."""
+    import httpx
+
+    from agentcore.tools.builtin.git_ops import (
+        _GIT_KILL_SLACK,
+        _GITHUB_API_TIMEOUT,
+        git_tool_timeout_seconds,
+    )
+
+    repo = _init_repo(tmp_path / "repo", branch="feature/pr")
+    _run_git(repo, "remote", "add", "origin", "https://github.com/acme/demo.git")
+
+    ledger = _budget_probe(monkeypatch)
+
+    def _client_ceiling(client: httpx.AsyncClient) -> float:
+        phases = [
+            client.timeout.connect,
+            client.timeout.read,
+            client.timeout.write,
+            client.timeout.pool,
+        ]
+        assert all(p is not None for p in phases), "GitHub client has no deadline"
+        return max(float(p) for p in phases)
+
+    async def _fake_get(self: httpx.AsyncClient, url: str, **_kwargs: Any):
+        ledger.append(("github_api", _client_ceiling(self)))
+        return httpx.Response(
+            200,
+            json={"default_branch": "main"},
+            request=httpx.Request("GET", url),
+        )
+
+    async def _fake_post(self: httpx.AsyncClient, url: str, **_kwargs: Any):
+        ledger.append(("github_api", _client_ceiling(self)))
+        return httpx.Response(
+            201,
+            json={
+                "html_url": "https://github.com/acme/demo/pull/1",
+                "number": 1,
+                "title": "Hello",
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    async def _token(*, user_id: str | None) -> str:
+        return "tok"
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _fake_post)
+    monkeypatch.setattr("agentcore.workspace.github_pr.resolve_github_token", _token)
+
+    args: dict[str, Any] = {"subcommand": "create_pr", "title": "Hello"}
+    result = await GitTool().execute(args, _worker_ctx(repo, location="server"))
+    assert result.success is True, result.error
+
+    labels = [label for label, _ in ledger]
+    assert "token_resolve" in labels
+    # Default-branch GET + create POST, each on an explicit client deadline equal to
+    # the number the formula budgets (never httpx's library default).
+    api = [ceiling for label, ceiling in ledger if label == "github_api"]
+    assert api == [_GITHUB_API_TIMEOUT, _GITHUB_API_TIMEOUT]
+    inner = sum(ceiling for _, ceiling in ledger)
+    assert inner + _GIT_KILL_SLACK <= git_tool_timeout_seconds(args), ledger
+
+
+# --- execution phases (工具执行阶段进度) ---
+
+
+class _PhaseWatch:
+    """Live phase feed plus the phase each bounded step actually ran under.
+
+    ``phases`` is what the desktop row would have shown, in order. ``ledger`` pairs
+    every bounded step with the phase in effect while it ran, so a test can pin the
+    thing that matters: the label never describes a leg other than the running one.
+    """
+
+    def __init__(self) -> None:
+        self.phases: list[str] = []
+        self.ledger: list[tuple[str, str | None]] = []
+
+    def on_phase(self, phase: str) -> None:
+        self.phases.append(phase)
+
+    def record(self, label: str) -> None:
+        self.ledger.append((label, self.phases[-1] if self.phases else None))
+
+    def reset(self) -> None:
+        self.phases.clear()
+        self.ledger.clear()
+
+
+# The phase each bounded step must be running under. Anything unlisted is local git
+# work: a step that is not declared remote / credential / queue must report「Running」
+# rather than inherit whatever leg ran before it.
+_PHASE_BY_OP: dict[str, str | None] = {
+    # Nothing has been reported yet when an uncontended acquire returns — the queue
+    # only speaks when it genuinely makes the caller wait.
+    "repo_lock:free": None,
+    "repo_lock:contended": PHASE_QUEUED,
+    "credential": PHASE_CREDENTIALS,
+    "token_resolve": PHASE_CREDENTIALS,
+    "github_api": PHASE_REMOTE,
+    "git:push": PHASE_REMOTE,
+    "git:pull": PHASE_REMOTE,
+    "git:fetch": PHASE_REMOTE,
+}
+
+
+def _phase_probe(monkeypatch: pytest.MonkeyPatch) -> _PhaseWatch:
+    """Watch every bounded step the git tool serializes on, with its live phase.
+
+    Phases are only ever reported at the START of a leg, so the last token emitted
+    when a step completes is the one that labelled it for the step's whole duration.
+    Reading it on completion therefore works uniformly for legs announced by the
+    caller (queue / credentials) and by ``_run_git`` itself (local / remote).
+    """
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+
+    watch = _PhaseWatch()
+    real_run = git_mod.spawn._run_git
+    real_cred = git_mod.spawn._load_account_git_auth
+    real_token = git_mod.spawn._resolve_pr_token
+    real_lock = git_mod.repo_lock._acquire_repo_lock
+
+    async def _spy_git(
+        args: list[str],
+        *,
+        cwd: str,
+        timeout: float = 20.0,
+        extra_env: dict[str, str] | None = None,
+        phase: str = git_mod.PHASE_LOCAL,
+    ):
+        try:
+            return await real_run(
+                args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+            )
+        finally:
+            watch.record(f"git:{args[0]}")
+
+    async def _spy_cred(user_id: str, **kwargs: Any):
+        try:
+            return await real_cred(user_id, **kwargs)
+        finally:
+            watch.record("credential")
+
+    async def _spy_token(user_id: str | None, **kwargs: Any):
+        try:
+            return await real_token(user_id, **kwargs)
+        finally:
+            watch.record("token_resolve")
+
+    async def _spy_lock(lock: asyncio.Lock, **kwargs: Any):
+        # Read contention before waiting — the same question production asks when it
+        # decides whether this call is allowed to say「排队中」.
+        label = "repo_lock:contended" if lock.locked() else "repo_lock:free"
+        try:
+            return await real_lock(lock, **kwargs)
+        finally:
+            watch.record(label)
+
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _spy_git)
+    monkeypatch.setattr(git_mod.spawn, "_load_account_git_auth", _spy_cred)
+    monkeypatch.setattr(git_mod.repo_lock, "_acquire_repo_lock", _spy_lock)
+    monkeypatch.setattr(git_mod.cmds_remote, "_resolve_pr_token", _spy_token)
+    return watch
+
+
+def _phase_ctx(workspace: Path, watch: _PhaseWatch) -> ToolContext:
+    """Worker ctx carrying a live phase sink, exactly as the engine injects one."""
+    from dataclasses import replace
+
+    return replace(
+        _worker_ctx(workspace, location="server"), on_phase=watch.on_phase
+    )
+
+
+def test_git_phases_are_declared_on_the_wire():
+    """Every git phase must be a known ``ToolPhase``.
+
+    The desktop keys an exhaustive text table off that union, so a token declared
+    only here would degrade to the generic「处理中」instead of naming its leg.
+    """
+    from typing import get_args
+
+    from agentcore.runtime.events.payloads.chat import ToolPhase
+
+    assert set(get_args(ToolPhase)) >= GIT_PHASES
+    # The local leg deliberately reuses the shared「Running」token; the waits git
+    # invented for itself are the ones that needed new copy.
+    assert PHASE_LOCAL == "executing"
+
+
+async def test_phases_name_the_leg_that_is_actually_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """相位诚实：报的相位 == 当时真在做的事（每个子命令的完整序列 + 每步复核）。
+
+    The sequence is the user-facing contract: a plain read says「Running」and nothing
+    else, while a network subcommand walks local → credentials → remote. The ledger
+    is the teeth — a credential lookup must never run while the row already reads
+    「Contacting remote」, which is exactly the lie this feature exists to prevent.
+    """
+    repo = _init_repo(tmp_path / "repo", branch="feature/ship")
+    bare = tmp_path / "remote.git"
+    _run_git(tmp_path, "init", "--bare", str(bare))
+    _run_git(repo, "remote", "add", "origin", str(bare))
+    (repo / "extra.txt").write_text("x\n", encoding="utf-8")
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    (fresh / "app.py").write_text("print('hi')\n", encoding="utf-8")
+
+    remote_leg = [PHASE_LOCAL, PHASE_CREDENTIALS, PHASE_REMOTE]
+    cases: list[tuple[dict[str, Any], Path, list[str]]] = [
+        ({"subcommand": "status"}, repo, [PHASE_LOCAL]),
+        ({"subcommand": "add", "paths": ["extra.txt"]}, repo, [PHASE_LOCAL]),
+        ({"subcommand": "commit", "message": "extra"}, repo, [PHASE_LOCAL]),
+        ({"subcommand": "init_baseline"}, fresh, [PHASE_LOCAL]),
+        ({"subcommand": "fetch", "remote": "origin"}, repo, remote_leg),
+        ({"subcommand": "pull", "remote": "origin"}, repo, remote_leg),
+        ({"subcommand": "push", "remote": "origin"}, repo, remote_leg),
+    ]
+    watch = _phase_probe(monkeypatch)
+    for args, workspace, expected in cases:
+        watch.reset()
+        await GitTool().execute(args, _phase_ctx(workspace, watch))
+        assert watch.phases == expected, (args, watch.phases)
+        assert watch.ledger, args
+        for label, live in watch.ledger:
+            assert live == _PHASE_BY_OP.get(label, PHASE_LOCAL), (
+                args,
+                label,
+                watch.ledger,
+            )
+
+
+async def test_create_pr_reports_credentials_then_github(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """create_pr's 18s token chain must not hide behind「Contacting remote」."""
+    import httpx
+
+    repo = _init_repo(tmp_path / "repo", branch="feature/pr")
+    _run_git(repo, "remote", "add", "origin", "https://github.com/acme/demo.git")
+    watch = _phase_probe(monkeypatch)
+
+    async def _fake_get(self: httpx.AsyncClient, url: str, **_kwargs: Any):
+        watch.record("github_api")
+        return httpx.Response(
+            200,
+            json={"default_branch": "main"},
+            request=httpx.Request("GET", url),
+        )
+
+    async def _fake_post(self: httpx.AsyncClient, url: str, **_kwargs: Any):
+        watch.record("github_api")
+        return httpx.Response(
+            201,
+            json={
+                "html_url": "https://github.com/acme/demo/pull/1",
+                "number": 1,
+                "title": "Hello",
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    async def _token(*, user_id: str | None) -> str:
+        return "tok"
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", _fake_get)
+    monkeypatch.setattr(httpx.AsyncClient, "post", _fake_post)
+    monkeypatch.setattr("agentcore.workspace.github_pr.resolve_github_token", _token)
+
+    result = await GitTool().execute(
+        {"subcommand": "create_pr", "title": "Hello"}, _phase_ctx(repo, watch)
+    )
+
+    assert result.success is True, result.error
+    assert watch.phases == [PHASE_LOCAL, PHASE_CREDENTIALS, PHASE_REMOTE]
+    for label, live in watch.ledger:
+        assert live == _PHASE_BY_OP.get(label, PHASE_LOCAL), (label, watch.ledger)
+
+
+async def test_queue_phase_fires_only_while_the_repo_is_really_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """「Waiting for repo」covers the wait and stops the moment the repo is ours."""
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+    from agentcore.tools.builtin.git_ops import repo_lock_key
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    watch = _phase_probe(monkeypatch)
+
+    # Uncontended: the acquire never suspends, so claiming a queue would be a lie.
+    first = await GitTool().execute(
+        {"subcommand": "add", "paths": ["a.txt"]}, _phase_ctx(repo, watch)
+    )
+    assert first.success is True, first.error
+    assert watch.phases == [PHASE_LOCAL]
+    assert ("repo_lock:free", None) in watch.ledger
+
+    ctx = _phase_ctx(repo, watch)
+    held = git_mod.repo_lock._get_repo_lock(repo_lock_key(str(repo.resolve()), ctx))
+    await held.acquire()
+    watch.reset()
+    queued = asyncio.create_task(
+        GitTool().execute({"subcommand": "add", "paths": ["b.txt"]}, ctx)
+    )
+    try:
+        await asyncio.sleep(0.05)
+        # Still parked behind the holder: the row says so, and says nothing else.
+        assert watch.phases == [PHASE_QUEUED]
+    finally:
+        held.release()
+    result = await queued
+
+    assert result.success is True, result.error
+    # …and flips to the real work the instant the queue clears — never the reverse.
+    assert watch.phases == [PHASE_QUEUED, PHASE_LOCAL]
+
+
+# --- per-repo serialization (repo_lock) ---
+
+
+def _concurrency_probe(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    """Track how many git subprocesses are in flight at once; returns [peak].
+
+    Each spawn is padded so genuinely parallel calls overlap in wall clock — the
+    peak is then the honest answer to "did these two run at the same time?".
+    """
+    import asyncio
+
+    from agentcore.tools.builtin import git_ops as git_mod
+
+    real_run = git_mod.spawn._run_git
+    state = {"depth": 0}
+    peak = [0]
+
+    async def _slow_git(
+        args: list[str],
+        *,
+        cwd: str,
+        timeout: float = 20.0,
+        extra_env: dict[str, str] | None = None,
+        phase: str = git_mod.PHASE_LOCAL,
+    ):
+        state["depth"] += 1
+        peak[0] = max(peak[0], state["depth"])
+        try:
+            await asyncio.sleep(0.05)
+            return await real_run(
+                args, cwd=cwd, timeout=timeout, extra_env=extra_env, phase=phase
+            )
+        finally:
+            state["depth"] -= 1
+
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _slow_git)
+    return peak
+
+
+def test_repo_lock_covers_exactly_the_index_writers():
+    """Serialization follows ``index.lock``, not「是不是写」— pin both directions."""
+    from agentcore.tools.builtin.git_ops import (
+        _INDEX_LOCK_SUBCOMMANDS,
+        git_call_needs_repo_lock,
+        git_write_subcommands,
+    )
+
+    for sub in (
+        "add",
+        "commit",
+        "checkout",
+        "merge",
+        "rebase",
+        "cherry-pick",
+        "pull",
+        "init_baseline",
+    ):
+        assert git_call_needs_repo_lock({"subcommand": sub}) is True, sub
+    # Writes that never take index.lock keep their concurrency — push's remote round
+    # trip must not park a sibling commit behind a minute of network.
+    for sub in ("push", "create_pr", "branch"):
+        assert git_call_needs_repo_lock({"subcommand": sub}) is False, sub
+    for sub in ("status", "diff", "log", "fetch", "show", "blame"):
+        assert git_call_needs_repo_lock({"subcommand": sub}) is False, sub
+    # Action-gated verbs follow the action, exactly as the approval gate does.
+    assert git_call_needs_repo_lock({"subcommand": "stash", "action": "push"}) is True
+    assert git_call_needs_repo_lock({"subcommand": "stash", "action": "pop"}) is True
+    assert git_call_needs_repo_lock({"subcommand": "stash"}) is False
+    assert git_call_needs_repo_lock({"subcommand": "tag", "action": "create"}) is False
+    assert git_call_needs_repo_lock({"subcommand": "remote", "action": "add"}) is False
+    # The queue may only ever gate writes.
+    assert git_write_subcommands() >= _INDEX_LOCK_SUBCOMMANDS
+
+
+def test_repo_lock_key_is_per_checkout(tmp_path: Path):
+    """One key per real ``.git`` — never a global lock, never two keys for one repo."""
+    from agentcore.tools.builtin.git_ops import repo_lock_key
+
+    left = tmp_path / "left"
+    right = tmp_path / "right"
+    left.mkdir()
+    right.mkdir()
+    ctx = _worker_ctx(left)
+    assert repo_lock_key(str(left), ctx) != repo_lock_key(str(right), ctx)
+    # Same checkout reached by two conversations shares one queue: they share one
+    # ``.git/index.lock`` on disk, so serializing them is the whole point.
+    assert repo_lock_key(str(left), _worker_ctx(left)) == repo_lock_key(
+        str(left), _worker_ctx(left, user_id="other")
+    )
+    # Windows hands out the same directory under different casing.
+    assert repo_lock_key(str(left).upper(), ctx) == repo_lock_key(
+        str(left).lower(), ctx
+    )
+
+
+async def test_same_repo_index_writes_serialize(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Two writes dispatched in one round must not overlap on one repo's index."""
+    import asyncio
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    (repo / "b.txt").write_text("b\n", encoding="utf-8")
+    peak = _concurrency_probe(monkeypatch)
+    ctx = _worker_ctx(repo)
+
+    results = await asyncio.gather(
+        GitTool().execute({"subcommand": "add", "paths": ["a.txt"]}, ctx),
+        GitTool().execute({"subcommand": "add", "paths": ["b.txt"]}, ctx),
+    )
+
+    assert all(r.success for r in results), [r.error for r in results]
+    assert peak[0] == 1
+    # Queued, not refused: the second write still ran.
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_GIT_ENV,
+    ).stdout
+    assert {"a.txt", "b.txt"} <= set(staged.split())
+
+
+async def test_different_repos_never_queue_behind_each_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """The lock is per repo, not global — unrelated workspaces keep full parallelism."""
+    import asyncio
+
+    left = _init_repo(tmp_path / "left")
+    right = _init_repo(tmp_path / "right")
+    (left / "a.txt").write_text("a\n", encoding="utf-8")
+    (right / "b.txt").write_text("b\n", encoding="utf-8")
+    peak = _concurrency_probe(monkeypatch)
+
+    results = await asyncio.gather(
+        GitTool().execute(
+            {"subcommand": "add", "paths": ["a.txt"]}, _worker_ctx(left)
+        ),
+        GitTool().execute(
+            {"subcommand": "add", "paths": ["b.txt"]}, _worker_ctx(right)
+        ),
+    )
+
+    assert all(r.success for r in results), [r.error for r in results]
+    assert peak[0] == 2
+
+
+async def test_reads_do_not_queue_behind_an_index_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """Reads keep their concurrency: ``GIT_OPTIONAL_LOCKS=0`` keeps them off the index."""
+    import asyncio
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    peak = _concurrency_probe(monkeypatch)
+    ctx = _worker_ctx(repo)
+
+    results = await asyncio.gather(
+        GitTool().execute({"subcommand": "add", "paths": ["a.txt"]}, ctx),
+        GitTool().execute({"subcommand": "status"}, ctx),
+    )
+
+    assert all(r.success for r in results), [r.error for r in results]
+    assert peak[0] == 2
+
+
+async def test_repo_busy_is_reported_honestly_when_the_wait_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A full queue fails as 「仓库正忙」 with nothing executed — never as a git fault."""
+    from agentcore.tools.builtin import git_ops as git_mod
+    from agentcore.tools.builtin.git_ops import _REPO_BUSY_CODE, repo_lock_key
+
+    repo = _init_repo(tmp_path / "repo")
+    (repo / "a.txt").write_text("a\n", encoding="utf-8")
+    ctx = _worker_ctx(repo)
+
+    real_acquire = git_mod.repo_lock._acquire_repo_lock
+
+    async def _short_wait(lock: Any, *, timeout: float = 0.05):
+        return await real_acquire(lock, timeout=0.05)
+
+    async def _refuse_git(args: list[str], **_kwargs: Any):
+        raise AssertionError(f"a busy repo must not spawn git: {args}")
+
+    monkeypatch.setattr(git_mod.repo_lock, "_acquire_repo_lock", _short_wait)
+    monkeypatch.setattr(git_mod.spawn, "_run_git", _refuse_git)
+
+    held = git_mod.repo_lock._get_repo_lock(repo_lock_key(str(repo.resolve()), ctx))
+    await held.acquire()
+    try:
+        result = await GitTool().execute(
+            {"subcommand": "add", "paths": ["a.txt"]}, ctx
+        )
+    finally:
+        held.release()
+
+    assert result.success is False
+    assert result.metadata.get("code") == _REPO_BUSY_CODE
+    assert result.metadata.get("subcommand") == "add"
+    assert "仓库状态未改变" in (result.error or "")
+    # Attribution must not drift into the git-failure vocabulary.
+    assert "index.lock" not in (result.error or "")
+
+
+async def test_repo_lock_wait_is_bounded_and_releases_cleanly():
+    """A timed-out waiter gives up on schedule and never strands the lock."""
+    import asyncio
+    import time as time_mod
+
+    from agentcore.tools.builtin.git_ops.repo_lock import _acquire_repo_lock
+
+    lock = asyncio.Lock()
+    await lock.acquire()
+    started = time_mod.monotonic()
+    assert await _acquire_repo_lock(lock, timeout=0.05) is False
+    assert time_mod.monotonic() - started < 5.0
+    lock.release()
+    assert await _acquire_repo_lock(lock, timeout=0.05) is True
+    lock.release()
 
 
 async def test_status_hides_untracked_by_default(tmp_path: Path):

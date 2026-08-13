@@ -85,7 +85,7 @@ interface RenderGroup {
 const SECTION_LABEL: Record<SearchSectionType, string> = {
   conversation: "对话",
   message: "消息",
-  folder: "项目",
+  folder: "文件夹",
 };
 
 const SECTION_ICON: Record<SearchSectionType, typeof MessageSquare> = {
@@ -185,14 +185,14 @@ function PaletteFilterBar({
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
-                  aria-label="按项目过滤"
+                  aria-label="按文件夹过滤"
                   className={`ml-auto flex max-w-[12rem] items-center gap-1 rounded-lg px-2 py-1 text-xs transition-colors hover:bg-accent ${
                     activeFolder ? "text-foreground" : "text-muted-foreground"
                   }`}
                 >
                   <Folder size={13} className="shrink-0" />
                   <span className="min-w-0 truncate">
-                    {activeFolder ? activeFolder.name : "全部项目"}
+                    {activeFolder ? activeFolder.name : "全部文件夹"}
                   </span>
                   <ChevronDown size={13} className="shrink-0 opacity-60" />
                 </button>
@@ -202,7 +202,7 @@ function PaletteFilterBar({
                 className="max-h-72 overflow-y-auto"
               >
                 <DropdownMenuItem onSelect={() => onFolderId(null)}>
-                  <span className="min-w-0 flex-1 truncate">全部项目</span>
+                  <span className="min-w-0 flex-1 truncate">全部文件夹</span>
                   {folderId === null && (
                     <Check size={14} className="shrink-0" />
                   )}
@@ -236,7 +236,7 @@ function PaletteFilterBar({
  *
  * Two result kinds share one list. **Commands** (新建对话 / 跳转页面 / 切换主题
  * 等) are matched client-side from a static registry, so they appear instantly
- * with no round-trip. **Entities** (对话 / 消息 / 项目) come from the debounced
+ * with no round-trip. **Entities** (对话 / 消息 / 文件夹) come from the debounced
  * backend keyword search (Tier 1) for a non-empty query, or the recent
  * conversations list (client-side, 决策④) for an empty one. **Bookmarks** (消息收藏)
  * live in a dedicated facet + a「最近收藏」teaser on empty query — no `/bookmarks` page.

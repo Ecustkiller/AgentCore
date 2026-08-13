@@ -146,7 +146,7 @@ def test_worker_rows_desk_from_node_target():
     assert rows[0]["target_folder_id"] == "fold-a"
     assert rows[1]["target_folder_id"] == "fold-b"
     # enrich 前的占位；生产路径会换成名册名
-    assert rows[0]["target_folder_name"] == "未命名项目"
+    assert rows[0]["target_folder_name"] == "未命名文件夹"
 
 
 def test_worker_rows_desk_falls_back_to_session():
@@ -165,7 +165,7 @@ async def test_enrich_worker_desk_names_resolves_and_scratch():
     from agentcore.runtime.kickoff.summary import enrich_worker_desk_names
 
     rows = [
-        {"run_id": "r1", "target_folder_id": "fold-a", "target_folder_name": "未命名项目"},
+        {"run_id": "r1", "target_folder_id": "fold-a", "target_folder_name": "未命名文件夹"},
         {"run_id": "r2", "target_folder_name": "本会话工作区"},
     ]
 

@@ -34,8 +34,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="team_orchestration_advanced",
         summary=(
-            "形状词汇组队 / 跨项目（读写通吃同次 delegate+target_folder_id；"
-            "CEO list_project_dir·read_project_file 仅派前认桌；裸聊写盘缺桌自动建云桌勿催 create；"
+            "形状词汇组队 / 跨文件夹（读写通吃同次 delegate+target_folder_id；"
+            "CEO list_folder_dir·read_folder_file 仅派前认桌；裸聊写盘缺桌自动建云文件夹勿催 create；"
             "空壳先问；显式多线先建齐再派；拒后禁塌缩窄例外；≠open/bind/mount 冒充）/ "
             "多 worker 流水线 / 契约 / 嵌套委派(depth≤3) / 摸底波与专班自判 / 协调墙的进阶用法"
         ),

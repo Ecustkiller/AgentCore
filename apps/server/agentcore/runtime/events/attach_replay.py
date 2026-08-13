@@ -1,18 +1,19 @@
 """Cursor replay for ``GET …/stream`` with ``Last-Event-ID`` (流式回复持久化 §3.6 · P3).
 
-Builds a clear-then-fold replay segment: **full** durable journal facts from the
-turn start (header value is observational only — clients clear-then-fold, so a
-``> cursor`` tail would drop pre-cursor tool/team structure) + process-lane
-synthetic deltas interleaved in journal order + single-block deltas for any
-still-open stream channels not already covered by ``process_*`` /
-``run_process_*``. No ``id:`` on synthetic deltas — they attach after the
-nearest durable seq.
+Builds a clear-then-fold replay segment: a synthetic ``message_start`` that opens +
+stamps the bubble, then **full** durable journal facts from the turn start (header
+value is observational only — clients clear-then-fold, so a ``> cursor`` tail would
+drop pre-cursor tool/team structure) + process-lane synthetic deltas interleaved in
+journal order + single-block deltas for any still-open stream channels not already
+covered by ``process_*`` / ``run_process_*``. No ``id:`` on synthetic frames — they
+attach after the nearest durable seq.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from agentcore.runtime.events.chat import message_start
 from agentcore.runtime.events.disposition import DURABLE_EVENT_TYPES
 from agentcore.runtime.events.stream_checkpointer import (
     CHANNEL_CAPTAIN_CONTENT,
@@ -339,6 +340,40 @@ def synthesize_segment_deltas(
     return extra
 
 
+def replay_open_event(*, turn_id: str, conversation_id: str) -> SSEEvent:
+    """Synthesize the ``message_start`` that opens + stamps the replayed bubble.
+
+    ``message_start`` is EPHEMERAL (never journaled, so :func:`journal_rows_to_sse`
+    cannot produce it) yet it is the ONLY frame carrying the server assistant
+    ``message_id`` — the key a durable interaction is claimed by (``POST …/messages/
+    {id}/resume``). The no-cursor path replays it out of the sink's ``_history``; the
+    journal cursor path had no source for it, and clients always send ``Last-Event-ID``,
+    so an attaching client kept its client-side bubble id (or, cross-turn, the PREVIOUS
+    turn's id). A turn that then stopped at ask_user / plan_review / team_preview painted
+    no resume card at all (the durable-card surface refuses an unstamped bubble) or one
+    bound to a stale id whose submit 404s — the user had to leave the conversation and
+    come back.
+
+    Idempotent by contract: both folds treat a repeated ``message_start`` carrying the
+    SAME ``message_id`` as「同回合重开」(keep the accumulated bubble); only a different id
+    opens a fresh one. ``trace_id=""`` suppresses the factory's ambient fill: the turn's
+    own trace is not in the journal projection, and stamping the *attach request's* trace
+    would point the bubble's log link at this GET instead of the turn; the clients'
+    truthy-guarded stamp then keeps whatever they already have.
+    """
+    return message_start(turn_id, conversation_id=conversation_id, trace_id="")
+
+
+def replay_close_event(finish_reason: FinishReason) -> SSEEvent:
+    """The minimal ``message_end`` an attach segment closes with.
+
+    Carries ``finish_reason`` and nothing else: journal ``turn_end`` has neither usage
+    nor cost (they live on the Message columns a reload rehydrates), and the clients'
+    undefined-guarded meta merge leaves any hydrated values intact.
+    """
+    return SSEEvent(type=EventType.MESSAGE_END, payload={"finish_reason": finish_reason.value})
+
+
 def _turn_end_close_event(rows: list[dict[str, Any]]) -> SSEEvent | None:
     """Synthesize the stream-close ``message_end`` the attach replay otherwise lacks.
 
@@ -351,13 +386,10 @@ def _turn_end_close_event(rows: list[dict[str, Any]]) -> SSEEvent | None:
     the reconnect-banner error salvage (spurious「重连中」+ bubble stuck streaming).
 
     When the journal carries ``turn_end`` (the turn is finished) replay a synthetic
-    ``message_end`` carrying only ``finish_reason`` so the client finalizes the bubble +
-    turn phase normally — ``paused`` still routes to the durable resume card, other
-    reasons complete the turn. Usage/cost are omitted (journal ``turn_end`` has neither;
-    they live on the Message columns a reload rehydrates) so the frontend's
-    undefined-guarded meta merge leaves any hydrated values intact. Returns ``None`` when
-    the turn is still running (no ``turn_end`` yet) so the live tail delivers the real
-    ``message_end`` unchanged.
+    :func:`replay_close_event` so the client finalizes the bubble + turn phase normally —
+    ``paused`` still routes to the durable resume card, other reasons complete the turn.
+    Returns ``None`` when the turn is still running (no ``turn_end`` yet) so the live tail
+    delivers the real ``message_end`` unchanged.
     """
     for row in reversed(rows):
         if str(row.get("kind") or "") != KIND_TURN_END:
@@ -367,18 +399,23 @@ def _turn_end_close_event(rows: list[dict[str, Any]]) -> SSEEvent | None:
             finish = FinishReason(finish_raw)
         except ValueError:
             finish = FinishReason.END_TURN
-        return SSEEvent(type=EventType.MESSAGE_END, payload={"finish_reason": finish.value})
+        return replay_close_event(finish)
     return None
 
 
 async def build_cursor_replay(
     *,
     turn_id: str,
+    conversation_id: str,
     after_seq: int,
     memory_channels: dict[str, str],
     memory_agent_ids: dict[str, str],
 ) -> list[SSEEvent]:
     """Full-turn durable journal + in-flight segment synthesis (clear-then-fold).
+
+    Leads with the synthetic ``message_start`` (:func:`replay_open_event`) so the
+    segment opens and STAMPS the bubble before any durable card lands on it —
+    everything after it binds to ``turn_id``, the id a resume/approval submit uses.
 
     ``after_seq`` is the client's ``Last-Event-ID`` — kept for observability /
     future cross-process cursors, but **not** used to filter rows. Clients reset
@@ -401,7 +438,8 @@ async def build_cursor_replay(
         # Full turn from seq 0 (``seq > -1``); header value is observational only.
         rows = await TurnJournalRepository(db).load_after(turn_id, -1)
 
-    events = journal_rows_to_sse(rows)
+    events = [replay_open_event(turn_id=turn_id, conversation_id=conversation_id)]
+    events.extend(journal_rows_to_sse(rows))
     skip_cap_content, skip_cap_reasoning = _journal_covers_captain_channels(rows)
     # Structured turns: never stitch 旁白 from flat segments (process_* is the source).
     # Prose-only keeps segment accelerate for captain content / reasoning.

@@ -21,18 +21,7 @@ export function ToolsPage() {
   );
 
   return (
-    <CapabilityPage
-      title="工具"
-      subtitle={
-        <>
-          Agent 可调用的动作工具。
-          <span className="text-muted-foreground/70">
-            「全员」CEO
-            与队员都可用，「CEO」仅协调者持有，「队员」交付时才动用。
-          </span>
-        </>
-      }
-    >
+    <CapabilityPage note="Agent 可调用的动作工具。「全员」CEO 与队员都可用，「CEO」仅协调者持有，「队员」交付时才动用。">
       {(data) => {
         const grouped = CATEGORY_ORDER.map((category) => ({
           category,

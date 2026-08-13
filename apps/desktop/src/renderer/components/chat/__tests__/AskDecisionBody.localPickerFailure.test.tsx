@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * B4：本机选择器失败须出固定结构化卡，禁静默/空转。
- * 本机传统：open_local_project 走 pickAndOpenLocalProject，不 toast 改导 Composer。
+ * 本机传统：open_local_project 走 pickAndOpenLocalFolder，不 toast 改导 Composer。
  */
 import { AskDecisionBody } from "@/components/chat/ask/AskDecisionBody";
 import type { AskUserContent } from "@/components/chat/ask/AskUserFields";
@@ -16,7 +16,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const pickAndOpenLocalProject = vi.fn();
+const pickAndOpenLocalFolder = vi.fn();
 const pickAndBindLocalFolder = vi.fn();
 
 vi.mock("@/lib/toast", () => ({
@@ -27,10 +27,10 @@ vi.mock("@/lib/capabilities", () => ({
   hasLocalFiles: vi.fn(() => true),
 }));
 
-vi.mock("@/lib/openLocalProject", () => ({
-  pickAndOpenLocalProject: (...args: unknown[]) =>
-    pickAndOpenLocalProject(...args),
-  formatOpenLocalProjectAnswer: (label: string, name: string) =>
+vi.mock("@/lib/openLocalFolder", () => ({
+  pickAndOpenLocalFolder: (...args: unknown[]) =>
+    pickAndOpenLocalFolder(...args),
+  formatOpenLocalFolderAnswer: (label: string, name: string) =>
     `${label}（${name}）`,
 }));
 
@@ -89,7 +89,7 @@ function Harness() {
 
 describe("AskDecisionBody local picker failure card", () => {
   beforeEach(() => {
-    pickAndOpenLocalProject.mockReset();
+    pickAndOpenLocalFolder.mockReset();
     pickAndBindLocalFolder.mockReset();
     vi.mocked(hasLocalFiles).mockReturnValue(true);
     window.fsApi = {} as unknown as typeof window.fsApi;
@@ -103,7 +103,7 @@ describe("AskDecisionBody local picker failure card", () => {
   });
 
   it("shows structured card for dialog_failed (未弹选择器)", async () => {
-    pickAndOpenLocalProject.mockResolvedValue({
+    pickAndOpenLocalFolder.mockResolvedValue({
       ok: false,
       reason: "dialog_failed",
       message: "系统未能打开文件夹选择器",
@@ -121,7 +121,7 @@ describe("AskDecisionBody local picker failure card", () => {
   });
 
   it("shows structured card for unauthorized", async () => {
-    pickAndOpenLocalProject.mockResolvedValue({
+    pickAndOpenLocalFolder.mockResolvedValue({
       ok: false,
       reason: "unauthorized",
       message: "所选路径无法访问",
@@ -144,7 +144,7 @@ describe("AskDecisionBody local picker failure card", () => {
   });
 
   it("cancelled stays silent — no failure card", async () => {
-    pickAndOpenLocalProject.mockResolvedValue({
+    pickAndOpenLocalFolder.mockResolvedValue({
       ok: false,
       reason: "cancelled",
     });
@@ -153,7 +153,7 @@ describe("AskDecisionBody local picker failure card", () => {
     fireEvent.click(screen.getByRole("button", { name: /打开本地项目/ }));
 
     await waitFor(() => {
-      expect(pickAndOpenLocalProject).toHaveBeenCalled();
+      expect(pickAndOpenLocalFolder).toHaveBeenCalled();
     });
     expect(screen.queryByTestId("local-picker-failure-card")).toBeNull();
   });

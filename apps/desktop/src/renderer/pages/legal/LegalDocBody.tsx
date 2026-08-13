@@ -1,7 +1,15 @@
 import { getLegalDoc } from "./content";
 import type { LegalDocId } from "./types";
 
-/** Scrollable legal document body — used by login overlay and 设置·关于. */
+/**
+ * Legal document body — the sections only, used by the login overlay and
+ * 设置·关于.
+ *
+ * The title + 更新日期 belong to whoever hosts the body: the settings route puts
+ * them in its `SettingsHeader`, the pre-auth pane in its own header. Rendering
+ * them here too is how `/more/legal/:docId` ended up with two `<h1>`s and the
+ * date printed twice.
+ */
 export function LegalDocBody({ docId }: { docId: LegalDocId }) {
   const doc = getLegalDoc(docId);
   if (!doc) {
@@ -10,13 +18,6 @@ export function LegalDocBody({ docId }: { docId: LegalDocId }) {
 
   return (
     <article className="space-y-6 text-sm text-foreground">
-      <header className="space-y-1">
-        <h1 className="text-xl font-semibold">{doc.title}</h1>
-        <p className="text-xs text-muted-foreground">
-          更新日期：{doc.updatedAt}
-        </p>
-      </header>
-
       {doc.sections.map((section) => (
         <section key={section.heading} className="space-y-2">
           <h2 className="text-sm font-semibold">{section.heading}</h2>

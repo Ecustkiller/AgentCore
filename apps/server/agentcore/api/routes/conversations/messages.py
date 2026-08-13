@@ -39,6 +39,7 @@ from agentcore.api.schemas.messages import TurnCollabMetrics
 from agentcore.api.sse import (
     release_request_db_before_sse,
     sse_attach_response,
+    sse_conversation_response,
     sse_queued_response,
     sse_response,
 )
@@ -56,6 +57,7 @@ from agentcore.db.repositories import (
     MessageRepository,
     TurnJournalRepository,
 )
+from agentcore.fulfill.origin import current_origin_device
 from agentcore.llm.resolve import resolve_user_llm_credentials
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.journal import runs_from_entries_cached
@@ -213,6 +215,9 @@ async def list_messages(
         origin = usage.get("origin")
         if isinstance(origin, str) and origin.strip():
             detail.origin = origin.strip()
+        # 曾中断恢复 (usage.recovered): crash redrive finished this turn in place.
+        if usage.get("recovered"):
+            detail.recovered = True
         # In-flight overlay: fill content / reasoning from turn_stream_state when running.
         # When journal already has process_content, skip captain:content → messages.content
         # (deliverable_only: narration lives on the process lane, not the content column).
@@ -443,6 +448,7 @@ async def send_message(
                     "agent_mentions": raw_agent_mentions,
                     "requires_tools": needs_tools,
                     "x_client_platform": x_client_platform,
+                    "origin_device_id": current_origin_device(),
                     "llm_credentials": preflight.credentials,
                     "llm_supports_tools": preflight.supports_tools,
                 },
@@ -498,6 +504,7 @@ async def send_message(
                 agent_mentions=raw_agent_mentions,
                 requires_tools=needs_tools,
                 x_client_platform=x_client_platform,
+                origin_device_id=current_origin_device(),
                 llm_credentials=preflight.credentials,
                 llm_supports_tools=preflight.supports_tools,
             )
@@ -542,6 +549,7 @@ async def send_message(
                 agent_mentions=[m.model_dump() for m in body.agent_mentions],
                 requires_tools=needs_tools,
                 x_client_platform=x_client_platform,
+                origin_device_id=current_origin_device(),
                 llm_credentials=preflight.credentials,
                 llm_supports_tools=preflight.supports_tools,
                 started=started,
@@ -624,10 +632,15 @@ async def cancel_queued_turn(
 
     Owner-gated like send. Removes the entry by ``queue_id``; already started / unknown
     → 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.
-    On success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink (multi-client).
+
+    On success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink AND signals
+    it to every端 following the conversation (云对话多端同权 B2 · 验收 5). The signal lane
+    is what makes the withdraw visible when there is no live run at all — the queue
+    outlives its host turn (drain not yet armed / deferred owns the next slot), and until
+    now cancelling in that window told the other端 nothing.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    from agentcore.runtime.events import turn_queue_cancelled
+    from agentcore.runtime.events import publish_conversation_signal, turn_queue_cancelled
     from agentcore.runtime.turn.queue import turn_queue
 
     item = turn_queue.cancel(conversation_id, queue_id)
@@ -636,11 +649,12 @@ async def cancel_queued_turn(
     fut = item.started
     if fut is not None and not fut.done():
         fut.cancel()
+    event = turn_queue_cancelled(queue_id=queue_id, conversation_id=conversation_id)
     run = turn_runs.get(conversation_id)
-    if run is not None and not run.task.done():
-        run.sink.emit(
-            turn_queue_cancelled(queue_id=queue_id, conversation_id=conversation_id)
-        )
+    live_sink = run.sink if run is not None and not run.task.done() else None
+    if live_sink is not None:
+        live_sink.emit(event)
+    publish_conversation_signal(conversation_id, event, already_on_sink=live_sink)
     return StatusResponse()
 
 
@@ -661,6 +675,11 @@ async def stop_message(
     from agentcore.runtime.events.client_tool_reattach import cancel_pending_client_tools
     from agentcore.runtime.interaction_orphan import orphan_live_turn_hot_pending
 
+    # 用户主动停止先成立，再发任何取消：the orphan pass below awaits the DB between
+    # pending cards and cancels their Futures, so the turn can already unwind inside
+    # it — with the flag unset that unwind orphans the lease (气泡「中断」+ sweeper
+    # 重驱) instead of closing as 已停止.
+    turn_runs.mark_user_stop(conversation_id)
     await orphan_live_turn_hot_pending(conversation_id)
     # Before the task cancel below: the awaiter's ``finally`` discards these
     # entries, and an already-dispatched op (host_shell…) would otherwise run to
@@ -684,6 +703,14 @@ async def attach_stream(
     session: AsyncSession = Depends(get_db),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
+    follow: bool = Query(
+        False,
+        description=(
+            "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，"
+            "此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。"
+            "缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。"
+        ),
+    ),
 ):
     """Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).
 
@@ -696,25 +723,38 @@ async def attach_stream(
 
     With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
     synthetic deltas (header value observational — clients clear-then-fold), then live
-    tail. Without the header (same-process fast path): ``EventSink.take_over`` full
-    ``_history`` replay.
+    tail. Without the header (same-process fast path): the sink's own in-memory history.
 
-    Returns ``204 No Content`` when no run is live for the conversation (already
-    finished / never started / suspended at a checkpoint) — the client then falls back
-    to the persisted transcript (reload) / durable resume. A pure observer: dropping
-    this stream detaches again (never cancels); an explicit 停止 still goes through
+    ``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an
+    idle conversation holds the connection (heartbeats) instead of 204ing, and每个新回合
+    is replayed + tailed on the same stream. That is what lets a second device parked on
+    an idle conversation see the turn another device just started — with回合级 attach it
+    took a 204 and then had no way to learn anything ever happened.
+
+    Without it (default), returns ``204 No Content`` when no run is live for the
+    conversation (already finished / never started / suspended at a checkpoint) — the
+    client then falls back to the persisted transcript (reload) / durable resume, and
+    the stream ends when that one turn does. Kept as the default because a客户端 that
+    also opens the POST turn stream would otherwise fold the next turn twice; opting in
+    is the客户端's statement that this is its ONE connection for the conversation.
+
+    Either way a pure observer: dropping this stream only unsubscribes it (never
+    cancels, and never touches the other端); an explicit 停止 still goes through
     ``POST .../stop``. Owner-gated.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    run = turn_runs.get(conversation_id)
-    if run is None or run.task.done():
-        return Response(status_code=204)
     cursor: int | None = None
     if last_event_id is not None:
         raw = last_event_id.strip()
         if raw.isdigit():
             cursor = int(raw)
-    # Ownership check is done; the attach stream only observes an in-memory sink.
+    if follow:
+        # Ownership check is done; the stream only observes in-memory sinks.
+        await release_request_db_before_sse(session)
+        return sse_conversation_response(conversation_id, last_event_id=cursor)
+    run = turn_runs.get(conversation_id)
+    if run is None or run.task.done():
+        return Response(status_code=204)
     await release_request_db_before_sse(session)
     return sse_attach_response(run.sink, last_event_id=cursor)
 

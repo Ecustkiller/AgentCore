@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.billing.gate import preflight_llm_credentials
-from agentcore.core.errors import NotFoundError
+from agentcore.core.errors import BYOK_KEY_REQUIRED_MESSAGE, NotFoundError
 from agentcore.db.models import Conversation, User
 from agentcore.db.repositories import (
     ConversationRepository,
@@ -115,7 +115,7 @@ async def _preflight_turn_llm(
         session=session,
         user=user,
         cost_repo=cost_repo,
-        byok_missing_message="请先在「设置 · 模型配置」中填入你的 API Key，再发起对话。",
+        byok_missing_message=BYOK_KEY_REQUIRED_MESSAGE,
         model_origin=selection.origin,
         provider_id=selection.provider_id,
     )

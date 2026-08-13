@@ -29,6 +29,7 @@ import {
   type ExportFormat,
   exportConversation,
 } from "@/services/conversations";
+import { useConversationAwaitingAttention } from "@/stores/aiAttention";
 import {
   type Conversation,
   useConversationGenerating,
@@ -104,9 +105,11 @@ export function ConversationManageRow({
   const awaitingResume = usePausedTurnStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );
+  // firehose `ai_attention`：另一端起的回合也亮灯（本端从未流过该对话时唯一的来源）。
+  const awaitingAttention = useConversationAwaitingAttention(conversation.id);
 
   const status: "running" | "awaiting" | null =
-    awaitingInteraction || awaitingResume
+    awaitingInteraction || awaitingResume || awaitingAttention
       ? "awaiting"
       : isGenerating
         ? "running"
@@ -120,7 +123,7 @@ export function ConversationManageRow({
   const preview = conversation.lastMessagePreview?.replace(/\s+/g, " ").trim();
   const relative = timeAgo(conversation.updatedAt);
   const deleteConfirmLabel = conversation.folderId
-    ? "确认永久删除（项目文件会保留）"
+    ? "确认永久删除（文件夹里的文件会保留）"
     : "确认永久删除（无法恢复）";
 
   useEffect(() => {

@@ -25,6 +25,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentcore.attention import (
+    attention_kind_of,
+    attention_title,
+    signal_attention_required,
+    signal_attention_resolved,
+)
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
@@ -87,10 +93,44 @@ async def save_paused_turn(suspension: TurnSuspension) -> None:
     if writer is not None:
         await writer.seal()
     # A durable pause is the canonical 需要你 (attention) event: the turn is now BLOCKED
-    # on the user and stays so until they act. Fan a native push out to their devices so
-    # they learn even with the app backgrounded (SSE gone). Best-effort + default-off
-    # (notify_user short-circuits when push is unconfigured) — never blocks the pause.
+    # on the user and stays so until they act.
+    await _signal_pause_attention(suspension)
+    # Fan a native push out to their devices so they learn even with the app
+    # backgrounded (SSE gone). Best-effort + default-off (notify_user short-circuits
+    # when push is unconfigured) — never blocks the pause.
     await _notify_pause(suspension)
+
+
+def _pause_attention_fields(suspension: TurnSuspension) -> dict[str, Any] | None:
+    """The ``ai_attention`` envelope for a durable pause; ``None`` for an unknown kind."""
+    kind = attention_kind_of(suspension.kind.value)
+    if kind is None or not suspension.user_id:
+        return None
+    return {
+        "user_id": suspension.user_id,
+        "conversation_id": suspension.conversation_id,
+        # The paused turn IS the assistant message (message_id ≡ journal turn_id).
+        "turn_id": suspension.message_id,
+        "interaction_id": suspension.checkpoint_id,
+        "kind": kind,
+        "title": attention_title(
+            kind, {"question": getattr(suspension, "question", "")}
+        ),
+    }
+
+
+async def _signal_pause_attention(suspension: TurnSuspension) -> None:
+    """Tell every live client of this user that the turn stopped on their card.
+
+    Firehose only. The durable pause already has its own push trigger
+    (:func:`_notify_pause`) with its own copy and audience; re-routing an
+    established user-visible notification is a separate decision from adding the
+    signal that was missing, so it is left exactly as it was.
+    """
+    fields = _pause_attention_fields(suspension)
+    if fields is None:
+        return
+    await signal_attention_required(**fields, push=False)
 
 
 async def _notify_pause(suspension: TurnSuspension) -> None:
@@ -127,12 +167,32 @@ async def delete_paused_turn(message_id: str) -> None:
     Best-effort: a stale frame left by a failed delete is harmless — ``claim`` would
     only resurrect a turn the user can re-decide, and the next live resolve overwrites
     it. NEVER raises into the turn.
+
+    Removing a real row means the card is gone without a cold resume, so this is the
+    other place an ``ai_attention(resolved)`` has to come from — otherwise the badge
+    on the user's other devices would stay lit forever.
     """
+    removed: dict[str, Any] | None = None
     try:
         async with async_session_factory() as db:
-            await PausedTurnRepository(db).delete(message_id)
+            row = await PausedTurnRepository(db).delete(message_id)
+            if row is not None:
+                # Materialize before the session closes (mirrors ``claim``).
+                removed = {
+                    "user_id": row.user_id,
+                    "conversation_id": row.conversation_id,
+                    "frame": dict(row.frame) if isinstance(row.frame, dict) else row.frame,
+                }
     except Exception as e:  # noqa: BLE001 — cleanup must never break the turn
         logger.warning("suspension.delete_failed", message_id=message_id, error=str(e))
+        return
+    if removed is not None:
+        await _signal_frame_resolved(
+            user_id=removed["user_id"],
+            conversation_id=removed["conversation_id"],
+            frame=removed["frame"],
+            message_id=message_id,
+        )
 
 
 async def _upsert_paused_frame(
@@ -161,6 +221,33 @@ async def _upsert_paused_frame(
         )
 
 
+async def _signal_frame_resolved(
+    *,
+    user_id: str,
+    conversation_id: str,
+    frame: Any,
+    message_id: str,
+) -> None:
+    """Clear the attention badge for a frame that is no longer pending.
+
+    Reads the kind / checkpoint straight off the stored frame so it works on the
+    delete path too, where no :class:`TurnSuspension` was rebuilt. A frame that
+    cannot be read is not worth failing over — the badge self-corrects on the
+    client's next REST re-pull.
+    """
+    data = frame if isinstance(frame, dict) else {}
+    kind = attention_kind_of(str(data.get("kind") or ""))
+    if kind is None or not user_id:
+        return
+    await signal_attention_resolved(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
+        interaction_id=str(data.get("checkpoint_id") or ""),
+        kind=kind,
+    )
+
+
 async def restore_paused_turn(suspension: TurnSuspension) -> None:
     """Re-upsert a claimed frame after a failed cloud resume so the user can retry.
 
@@ -184,6 +271,9 @@ async def restore_paused_turn(suspension: TurnSuspension) -> None:
         conversation_id=suspension.conversation_id,
         paused=True,
     )
+    # The claim already told every device the card was settled; it wasn't. Re-light
+    # the badge (firehose only — same reason this path does not re-push).
+    await _signal_pause_attention(suspension)
 
 
 async def load_paused_turn(
@@ -284,6 +374,14 @@ async def claim_paused_turn(
         message_id=claimed["message_id"],
         conversation_id=claimed["conversation_id"],
         paused=False,
+    )
+    # Exactly one caller wins the claim, so exactly one「已处理」reaches the user's
+    # other devices — whichever端 actually answered the card.
+    await _signal_frame_resolved(
+        user_id=claimed["user_id"],
+        conversation_id=claimed["conversation_id"],
+        frame=claimed["frame"],
+        message_id=claimed["message_id"],
     )
     return suspension
 

@@ -128,11 +128,156 @@ async def test_ceiling_finalize_stamps_token_budget_on_track():
             tool_context=MagicMock(agent_id="a1"),
             sink=MagicMock(),
             finish_override_sink=finish,
+            approval_gate=None,
+            citation_sink=None,
+            annotate_citations=True,
+            turn_evidence_ledger=None,
+            ledger_registrant="",
             gate_escalation_sink=[],
             cutoff_reason_sink=cutoff,
         )
     assert cutoff == [REASON_TOKEN_BUDGET]
     assert finish == []  # 正轨不标 DEGRADED
+
+
+@pytest.mark.asyncio
+async def test_ceiling_finalize_coordination_tools_pass_approval_gate():
+    """硬顶收口再执行工具：GRANTABLE 工具必须过审批闸，不得绕卡直接落盘。
+
+    force_finalize 契约允许软轮返回 coordination_tools 由调用方执行；该臂一旦漏传
+    approval_gate，``needs_approval`` 就退化成「仅安全熔断强制时才拦」——file_write
+    绕过用户授权卡写盘。与孪生履约点 directive_apply 的 Finalize 臂对齐。
+    """
+    from pathlib import Path
+    from typing import Any
+
+    from agentcore.core.types import (
+        AutonomyPolicy,
+        ToolApproval,
+        ToolCategory,
+        recipe_to_axes,
+    )
+    from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
+    from agentcore.runtime.approvals import ApprovalDecision
+    from agentcore.runtime.engine.finalize import FinalizeRoundResult
+    from agentcore.runtime.events import EventSink
+    from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
+    from agentcore.tools.registry import ToolRegistry
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+    from agentcore.workspace.server import ServerWorkspace
+
+    class _WriteTool:
+        def __init__(self) -> None:
+            self.executed = False
+
+        @property
+        def schema(self) -> ToolSchema:
+            return ToolSchema(
+                name="file_write",
+                description="stub",
+                parameters={"type": "object", "properties": {}},
+                category=ToolCategory.FILESYSTEM,
+                approval=ToolApproval.GRANTABLE,
+            )
+
+        async def execute(
+            self, arguments: dict[str, Any], context: ToolContext
+        ) -> ToolResult:
+            self.executed = True
+            return ToolResult(tool_call_id="", success=True, output="wrote")
+
+    class _SpyGate:
+        # file_write=ask（谨慎）：云端 worker 也不得免逐次卡。
+        permission_axes = recipe_to_axes(AutonomyPolicy.CAUTIOUS)
+        file_op_tools = frozenset({"file_write"})
+
+        def __init__(self) -> None:
+            self.authorized: list[str] = []
+
+        def will_prompt(self, **_kwargs) -> bool:
+            return True
+
+        async def authorize(self, *, tool_name: str, **_kwargs) -> ApprovalDecision:
+            self.authorized.append(tool_name)
+            return ApprovalDecision.APPROVE
+
+    tool = _WriteTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    gate = _SpyGate()
+    controller = MagicMock()
+    controller.is_thrashing.return_value = False
+    controller.investigation_tool_names = frozenset()
+    controller.outstanding_tool_failures.return_value = []
+
+    write_call = ToolCall(
+        id="tc-ceiling",
+        function=ToolCallFunction(
+            name="file_write", arguments='{"path":"out.md","content":"x"}'
+        ),
+    )
+
+    class _ForceFinalizeWithTools:
+        async def __call__(self, **_kwargs):
+            return (
+                "收口正文",
+                "",
+                TokenUsage(),
+                6,
+                FinalizeRoundResult(
+                    kind="coordination_tools",
+                    content="",
+                    reasoning="",
+                    usage=None,
+                    tool_calls=[write_call],
+                ),
+            )
+
+    with patch(
+        "agentcore.runtime.engine.ceiling.force_finalize",
+        new=_ForceFinalizeWithTools(),
+    ):
+        await ceiling_finalize(
+            messages=[],
+            llm=MagicMock(),
+            profile=MagicMock(max_rounds=6),
+            active_model="m",
+            base_model="m",
+            tools=registry,
+            allowed_tool_names=["file_write"],
+            disabled_tools=set(),
+            emit_content=lambda _d: None,
+            emit_reasoning=lambda _d: None,
+            emit_reset=lambda _r: None,
+            final_content="已有产出",
+            final_reasoning="",
+            total_usage=TokenUsage(input_tokens=70_000, output_tokens=15_000),
+            ceiling_reason="max_rounds",
+            round_idx=6,
+            role="worker",
+            run_id="del_w1",
+            token_budget=80_000,
+            controller=controller,
+            tool_context=ToolContext.create(
+                execution_id="e",
+                run_id="del_w1",
+                agent_id="a1",
+                backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+                user_id="u",
+            ),
+            sink=EventSink(),
+            finish_override_sink=[],
+            approval_gate=gate,  # type: ignore[arg-type]
+            citation_sink=None,
+            annotate_citations=True,
+            turn_evidence_ledger=None,
+            ledger_registrant="",
+            gate_escalation_sink=[],
+            cutoff_reason_sink=[],
+        )
+
+    assert gate.authorized == ["file_write"], "硬顶收口漏传审批闸 → GRANTABLE 绕卡落盘"
+    assert tool.executed is True
 
 
 async def _run_coordinated_worker(
@@ -280,6 +425,42 @@ def test_token_wind_down_threshold_and_tool_narrowing():
     assert "web_search" not in narrowed
     assert "code_execute" not in narrowed
     assert set(narrowed) <= (WIND_DOWN_ALLOWED_TOOLS | {"handoff"})
+
+
+def test_wind_down_allows_deterministic_md_export():
+    """收尾窗口放行 md_to_pdf / md_to_docx：导出已成篇 .md 是收口末步，不是新战线。
+
+    长文写手最容易撞收尾窗；把钦定交付主路径判成越界会触发 nudge + handoff-only，
+    交付卡在最后一步。
+    """
+    from agentcore.runtime.runs.cutoff import wind_down_breach_tool_names
+
+    assert "md_to_pdf" in WIND_DOWN_ALLOWED_TOOLS
+    assert "md_to_docx" in WIND_DOWN_ALLOWED_TOOLS
+
+    available = {
+        "web_search",
+        "handoff",
+        "file_read",
+        "file_write",
+        "md_to_pdf",
+        "md_to_docx",
+        "code_execute",
+    }
+    narrowed = narrow_tools_for_wind_down(available, allowed=sorted(available))
+    assert "md_to_pdf" in narrowed
+    assert "md_to_docx" in narrowed
+    assert "web_search" not in narrowed  # 检索类仍不放回
+    assert "code_execute" not in narrowed  # 脚本导出仍非主路径
+
+    # 导出既有 .md 不得判越界；调查/执行类仍照判。
+    assert (
+        wind_down_breach_tool_names(
+            ["md_to_pdf", "md_to_docx", "handoff"], keep_file_read=True
+        )
+        == []
+    )
+    assert wind_down_breach_tool_names(["code_execute"]) == ["code_execute"]
 
 
 def test_wind_down_keeps_file_read_for_files_deliverable():
@@ -601,6 +782,7 @@ async def test_wind_down_breach_journals_denied_tool(monkeypatch):
         run_id="w1",
         token_budget=80_000,
         allowed_tool_names=["web_search", "file_write", "handoff"],
+        approval_gate=None,
     )
 
     journal = list(sink._journal)
@@ -613,6 +795,14 @@ async def test_wind_down_breach_journals_denied_tool(monkeypatch):
     ]
     assert ends, f"expected journaled wind_down deny for web_search, got {journal!r}"
     assert any("收尾窗口" in ((e.get("payload") or {}).get("result") or "") for e in ends)
+    # 收尾窗口 / 白名单 / 落盘 / handoff steer the model; the user reads a plain sentence.
+    from agentcore.runtime.engine.tool_failure_face import _CURATED_BY_CODE
+    from tests.user_face_helpers import assert_user_face_clean
+
+    for e in ends:
+        face = ((e.get("payload") or {}).get("failure") or {}).get("message") or ""
+        assert_user_face_clean(face)
+        assert face == _CURATED_BY_CODE["wind_down_deny"]
 
 
 @pytest.mark.asyncio
@@ -710,6 +900,7 @@ async def test_single_round_jump_past_soft_still_gets_wind_down(monkeypatch):
         run_id="w1",
         token_budget=80_000,
         allowed_tool_names=["web_search", "file_write", "handoff"],
+        approval_gate=None,
     )
 
     assert usage.total_tokens >= 80_000

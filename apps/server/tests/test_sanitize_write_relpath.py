@@ -5,7 +5,7 @@ from __future__ import annotations
 from agentcore.workspace._paths import sanitize_write_relpath
 from agentcore.workspace.stage_dirs import (
     DEBATE_PREFIX,
-    PROJECT_DOCS_PREFIX,
+    DRAFTS_PREFIX,
     RESEARCH_PREFIX,
     REVIEWS_PREFIX,
 )
@@ -50,9 +50,15 @@ def test_dossier_flattens_nested_to_filename():
         sanitize_write_relpath(f"{DEBATE_PREFIX}子题\\笔记.md")
         == f"{DEBATE_PREFIX}子题_笔记.md"
     )
+    # 默认落点同样扁平（无显式路径的产物都堆这里，禁 worker 自造子树）。
     assert (
-        sanitize_write_relpath(f"{PROJECT_DOCS_PREFIX}深/层/案.md")
-        == f"{PROJECT_DOCS_PREFIX}深_层_案.md"
+        sanitize_write_relpath(f"{DRAFTS_PREFIX}某案/起诉状.md")
+        == f"{DRAFTS_PREFIX}某案_起诉状.md"
+    )
+    # 非阶段目录保留目录结构（步 3 后 ``文档/`` 下只有约定 stage 目录扁平）。
+    assert (
+        sanitize_write_relpath("AgentCore/文档/背景/深/案.md")
+        == "AgentCore/文档/背景/深/案.md"
     )
 
 

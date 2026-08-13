@@ -131,11 +131,17 @@ async def cloud_list_folders(creds: FoldersCredentials) -> list[dict[str, Any]]:
 
 
 async def cloud_create_cloud_folder(
-    creds: FoldersCredentials, *, name: str
+    creds: FoldersCredentials, *, name: str, parent_id: str | None = None
 ) -> dict[str, Any]:
-    """POST folders collection with ``mode=cloud`` → FolderSummary dict."""
+    """POST folders collection with ``mode=cloud`` → FolderSummary dict.
+
+    ``parent_id`` nests the new folder; the server turns it into the ``rel_path``
+    prefix. Omit it for the top level.
+    """
     url = _collection_url(creds.base_url)
-    payload = {"name": name, "mode": "cloud"}
+    payload: dict[str, Any] = {"name": name, "mode": "cloud"}
+    if parent_id:
+        payload["parent_id"] = parent_id
     try:
         async with outbound_async_client(timeout=_FOLDERS_HTTP_TIMEOUT) as client:
             resp = await client.post(url, json=payload, headers=_auth_headers(creds))
@@ -148,6 +154,37 @@ async def cloud_create_cloud_folder(
     if resp.status_code not in (200, 201):
         _raise_for_status(resp, op="create")
     return _summary_dict(resp.json())
+
+
+async def cloud_soft_delete_folder(
+    creds: FoldersCredentials, *, folder_id: str
+) -> bool:
+    """DELETE ``…/folders/{id}`` (软删) → True, or False on 404 (business miss).
+
+    Soft delete only — the ``/permanent`` twin is never reachable from here (it
+    stays access-session only, i.e. the desktop confirm dialog).
+    """
+    fid = (folder_id or "").strip()
+    if not fid:
+        return False
+    url = f"{_collection_url(creds.base_url)}/{fid}"
+    try:
+        async with outbound_async_client(timeout=_FOLDERS_HTTP_TIMEOUT) as client:
+            resp = await client.delete(url, headers=_auth_headers(creds))
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "folders.cloud_delete_failed",
+            folder_id=fid,
+            error=str(exc),
+        )
+        raise FoldersCloudError(
+            f"folders delete unreachable: {exc}",
+            code="folders_cloud_unreachable",
+        ) from exc
+    if resp.status_code == 404:
+        return False
+    _raise_for_status(resp, op="delete")
+    return True
 
 
 async def cloud_get_folder(

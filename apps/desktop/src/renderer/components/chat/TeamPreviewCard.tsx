@@ -58,7 +58,7 @@ export function TeamPreviewCard({
   if (preview.status === "resolved") {
     return <ResolvedTeamPreview preview={preview} />;
   }
-  // Honesty: do not claim「入口在下方拍板卡」when ResumePrompt cannot paint yet.
+  // Honesty: do not point at the 拍板卡 when ResumePrompt cannot paint yet.
   if (
     conversationId &&
     entryMessageId !== undefined &&

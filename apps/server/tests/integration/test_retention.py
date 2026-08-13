@@ -28,8 +28,10 @@ from agentcore.workspace.locate import resolve_workspace_root, workspace_root_pa
 from agentcore.workspace.snapshots import create_snapshot
 
 
-def _seed_space(uid: str, folder_id: str | None, conv_id: str) -> None:
-    root = resolve_workspace_root(user_id=uid, folder_id=folder_id, conversation_id=conv_id)
+def _seed_space(uid: str, folder_rel_path: str | None, conv_id: str) -> None:
+    root = resolve_workspace_root(
+        user_id=uid, folder_rel_path=folder_rel_path, conversation_id=conv_id
+    )
     (root / "file.txt").write_text("data", encoding="utf-8")
 
 
@@ -61,10 +63,14 @@ async def test_retention_sweep_purges_aged_soft_deletes(
         recent = await repo.create(user_id=uid, title="recent")
     gid, gaid, ugid, rid = grouped.id, grouped_alive.id, ungrouped.id, recent.id
 
-    _seed_space(uid, fb, gid)  # shared project root
+    _seed_space(uid, folder_b.rel_path, gid)  # shared project root
     _seed_space(uid, None, ugid)
-    await create_snapshot(user_id=uid, folder_id=fb, conversation_id=gid)
-    await create_snapshot(user_id=uid, folder_id=None, conversation_id=ugid)
+    await create_snapshot(
+        user_id=uid, folder_id=fb, folder_rel_path=folder_b.rel_path, conversation_id=gid
+    )
+    await create_snapshot(
+        user_id=uid, folder_id=None, folder_rel_path=None, conversation_id=ugid
+    )
 
     async with session_factory() as s:
         await FolderRepository(s).soft_delete(fa, user_id=uid)
@@ -95,7 +101,60 @@ async def test_retention_sweep_purges_aged_soft_deletes(
     assert rid in convs and gaid in convs
 
     # Soft-deleted project member did NOT rmtree the shared project space (sibling alive).
-    assert workspace_root_path(user_id=uid, folder_id=fb, conversation_id=gaid).exists()
-    assert not workspace_root_path(user_id=uid, folder_id=None, conversation_id=ugid).exists()
+    assert workspace_root_path(
+        user_id=uid, folder_rel_path=folder_b.rel_path, conversation_id=gaid
+    ).exists()
+    assert not workspace_root_path(
+        user_id=uid, folder_rel_path=None, conversation_id=ugid
+    ).exists()
+
+    build_storage_provider.cache_clear()
+
+
+async def test_purge_does_not_rmtree_the_name_a_new_folder_took_over(
+    session_factory, tmp_path: Path, monkeypatch
+):
+    """删掉「资料」再新建同名「资料」，30 天后清理旧行不能删掉新目录。
+
+    Soft-delete releases the visible slot immediately (the directory goes to the
+    tombstone area), so the purged row's stored ``rel_path`` may belong to someone
+    else by the time retention runs. The sweep must go by id, never by that slot.
+    """
+    monkeypatch.setattr(retention_mod, "async_session_factory", session_factory)
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    monkeypatch.setattr(settings, "storage_backend", "filesystem")
+    monkeypatch.setattr(settings, "workspace_retention_days", 30)
+    build_storage_provider.cache_clear()
+
+    async with session_factory() as s:
+        uid = (await UserRepository(s).create(username="retslot", display_name="r")).user_id
+
+    async with session_factory() as s:
+        old = await FolderRepository(s).create(user_id=uid, name="资料")
+    old_id, slot = old.id, old.rel_path
+
+    async with session_factory() as s:
+        await FolderRepository(s).soft_delete(old_id, user_id=uid)
+
+    async with session_factory() as s:
+        fresh = await FolderRepository(s).create(user_id=uid, name="资料")
+    # Same slot, different folder — that is the point of releasing the name.
+    assert fresh.rel_path == slot
+    _seed_space(uid, fresh.rel_path, "")
+
+    async with session_factory() as s:
+        await s.execute(
+            update(Folder)
+            .where(Folder.id == old_id)
+            .values(deleted_at=datetime.now() - timedelta(days=40))
+        )
+        await s.commit()
+
+    assert (await retention_mod.run_retention_sweep())["folders"] == 1
+
+    assert (
+        workspace_root_path(user_id=uid, folder_rel_path=slot, conversation_id="")
+        / "file.txt"
+    ).read_text(encoding="utf-8") == "data"
 
     build_storage_provider.cache_clear()

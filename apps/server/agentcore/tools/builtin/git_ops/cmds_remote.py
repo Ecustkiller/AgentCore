@@ -7,9 +7,16 @@ from typing import Any
 from agentcore.tools.protocol import ToolContext, ToolResult
 
 from . import spawn as spawn_mod
-from .policy import _PROTECTED_BRANCHES, _ref_token_error, _remote_name_error
+from .phases import PHASE_CREDENTIALS, PHASE_REMOTE, report_phase
+from .policy import (
+    _GIT_NETWORK_TIMEOUT,
+    _GITHUB_API_TIMEOUT,
+    _PROTECTED_BRANCHES,
+    _ref_token_error,
+    _remote_name_error,
+)
 from .results import _error, _git_failure, _ok
-from .spawn import _cloud_network_extra_env, _current_branch
+from .spawn import _cloud_network_extra_env, _current_branch, _resolve_pr_token
 
 
 async def cmd_push(
@@ -83,10 +90,14 @@ async def cmd_push(
         args.append("--set-upstream")
     # Remote name + current branch only — never a src:dst refspec.
     args.extend([remote, branch])
-    # Network-bound; keep under engine outer (push serial=4 × 20s).
+    # Network-bound; the engine outer budgets this via _GIT_NETWORK_TIMEOUT.
     extra = await _cloud_network_extra_env(context)
     stdout, stderr, code = await spawn_mod._run_git(
-        args, cwd=cwd, timeout=60.0, extra_env=extra
+        args,
+        cwd=cwd,
+        timeout=_GIT_NETWORK_TIMEOUT,
+        extra_env=extra,
+        phase=PHASE_REMOTE,
     )
     if code != 0:
         # Auth / network failures surface honestly (GIT_TERMINAL_PROMPT=0).
@@ -154,8 +165,9 @@ async def cmd_pull(
     stdout, stderr, code = await spawn_mod._run_git(
         ["pull", "--ff-only", remote],
         cwd=cwd,
-        timeout=60.0,
+        timeout=_GIT_NETWORK_TIMEOUT,
         extra_env=extra,
+        phase=PHASE_REMOTE,
     )
     if code != 0:
         return await _git_failure(stdout, stderr, code, start, metadata=meta)
@@ -182,7 +194,6 @@ async def cmd_create_pr(
         fetch_default_branch,
         github_auth_available_sync_hint,
         parse_github_remote_url,
-        resolve_github_token,
     )
 
     title = str(arguments.get("title") or "").strip()
@@ -239,8 +250,17 @@ async def cmd_create_pr(
     if head_err is not None:
         return head_err
 
-    token = await resolve_github_token(user_id=context.user_id)
+    # PAT → env → ``gh auth token``: up to 18s of lookup before any GitHub call.
+    report_phase(PHASE_CREDENTIALS)
+    token, token_timed_out = await _resolve_pr_token(context.user_id)
     if not token:
+        if token_timed_out:
+            return _error(
+                "查询 GitHub 凭据超时（凭据存储无响应），无法开 PR。"
+                "这不代表凭据未配置，请稍后再试。",
+                start,
+                metadata={**meta, "code": "unauthenticated"},
+            )
         return _error(
             f"未配置 GitHub 凭据，无法开 PR。\n{github_auth_available_sync_hint()}",
             start,
@@ -255,7 +275,11 @@ async def cmd_create_pr(
 
     import httpx
 
-    async with httpx.AsyncClient() as client:
+    # Explicit ceiling per REST call — the engine budget counts ``_GITHUB_API_CALLS``
+    # of these, so the client must never fall back to the library default. Both calls
+    # are one uninterrupted GitHub leg, so one report covers the block.
+    report_phase(PHASE_REMOTE)
+    async with httpx.AsyncClient(timeout=_GITHUB_API_TIMEOUT) as client:
         if not base:
             default = await fetch_default_branch(
                 client,

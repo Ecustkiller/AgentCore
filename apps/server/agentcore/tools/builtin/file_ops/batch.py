@@ -7,9 +7,11 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.file_products import FileProduct, file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -50,6 +52,8 @@ class FileBatchTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        # 一次调用可产多件（move / copy 逐件自报；mkdir / delete 没有产物）。
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -147,6 +151,7 @@ class FileBatchTool:
         lines: list[str] = [f"本次共 {len(raw)} 项："]
         ok_n = skip_n = fail_n = 0
         successes: list[dict[str, Any]] = []
+        products: list[FileProduct] = []
 
         for i, item in enumerate(raw, start=1):
             if not isinstance(item, dict):
@@ -160,18 +165,22 @@ class FileBatchTool:
                 lines.append(f"{i}. 失败 · {label}：未知 op")
                 continue
             try:
-                status, detail = await self._run_one(op, item, context)
+                status, detail, landed = await self._run_one(op, item, context)
             except Exception as e:  # noqa: BLE001 — batch must continue
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {label}：{e}")
                 continue
             if status == "fail" and is_channel_dead_detail(detail):
                 # Channel sticky-dead: stop the batch and stamp family retire.
-                return _liveness_workspace_error(detail, start)
+                dead = _liveness_workspace_error(detail, start)
+                # 中途中断不抹账：前面成功的那几件确实躺在盘上（漏账才是事故）。
+                dead.file_products = products
+                return dead
             if status == "ok":
                 ok_n += 1
                 lines.append(f"{i}. 成功 · {detail}")
                 successes.append(item)
+                products.extend(landed)
             elif status == "skip":
                 skip_n += 1
                 lines.append(f"{i}. 跳过 · {detail}")
@@ -207,6 +216,8 @@ class FileBatchTool:
                 "total": len(raw),
                 "organize_plan_id": plan_id or None,
             },
+            # 部分成功也如实记账：只报真正落地的那几件（跳过 / 失败项没有产物）。
+            file_products=products,
         )
 
     async def _undo(self, context: ToolContext, start: float) -> ToolResult:
@@ -221,10 +232,11 @@ class FileBatchTool:
         undo_ops, deletes = organize_journal.build_undo_operations(journal)
         lines: list[str] = ["撤销本次整理："]
         ok_n = skip_n = fail_n = 0
+        products: list[FileProduct] = []
         for i, item in enumerate(undo_ops, start=1):
             op = str(item.get("op", "")).strip()
             try:
-                status, detail = await self._run_one(op, item, context)
+                status, detail, landed = await self._run_one(op, item, context)
             except Exception as e:  # noqa: BLE001
                 fail_n += 1
                 lines.append(f"{i}. 失败 · {e}")
@@ -232,6 +244,7 @@ class FileBatchTool:
             if status == "ok":
                 ok_n += 1
                 lines.append(f"{i}. 成功 · {detail}")
+                products.extend(landed)
             elif status == "skip":
                 skip_n += 1
                 lines.append(f"{i}. 跳过 · {detail}")
@@ -254,18 +267,28 @@ class FileBatchTool:
             error="" if fail_n == 0 else summary,
             duration_ms=int((time.monotonic() - start) * 1000),
             metadata={"ok": ok_n, "skip": skip_n, "fail": fail_n, "undo": True},
+            # 逆回放也是搬家：文件此刻落在还原后的路径上，与正向 move 同口径自报。
+            file_products=products,
         )
 
     async def _run_one(
         self, op: str, item: dict[str, Any], context: ToolContext
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, list[FileProduct]]:
+        """Run one op → ``(status, detail, products)``.
+
+        ``products`` is what this op actually LANDED (交付物台账自报契约，见
+        ``tools/file_products.py``)：只有 move / copy 成功时才有一件，且报的是
+        sanitize 之后真正落盘的 destination——批量工具一次产多件，逐件自报。
+        搬家 / 复制不是派生（源不是中间稿），一律不填 ``derived_from``。
+        mkdir 建的是目录、delete 是删除，都没有产物；skip / fail 更没有。
+        """
         if op == "mkdir":
             requested = str(item.get("path", "")).strip()
             if not requested:
-                return "fail", "mkdir · path 不能为空"
+                return "fail", "mkdir · path 不能为空", []
             path, rename_note = _prepare_write_relpath(requested)
             if not path:
-                return "fail", "mkdir · path 不能为空"
+                return "fail", "mkdir · path 不能为空", []
             scope_err = write_scope_rejection(context, path)
             if scope_err is not None:
                 logger.info(
@@ -274,29 +297,31 @@ class FileBatchTool:
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
                 )
-                return "fail", scope_err
+                return "fail", scope_err, []
             try:
                 await context.backend.mkdir(path)
             except AlreadyExists:
-                return "skip", f"mkdir {path}（已存在）"
+                return "skip", f"mkdir {path}（已存在）", []
             except OutsideWorkspace:
-                return "fail", _outside_workspace_msg(
-                    path, location=context.backend.location
+                return (
+                    "fail",
+                    _outside_workspace_msg(path, location=context.backend.location),
+                    [],
                 )
             except WorkspaceError as e:
-                return "fail", f"mkdir {path}：{e}"
+                return "fail", f"mkdir {path}：{e}", []
             detail = f"mkdir {path}"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
-            return "ok", detail
+            return "ok", detail, []
 
         if op == "delete":
             requested = str(item.get("path", "")).strip()
             if not requested:
-                return "fail", "delete · path 不能为空"
+                return "fail", "delete · path 不能为空", []
             path, rename_note = _prepare_write_relpath(requested)
             if not path:
-                return "fail", "delete · path 不能为空"
+                return "fail", "delete · path 不能为空", []
             scope_err = write_scope_rejection(context, path)
             if scope_err is not None:
                 logger.info(
@@ -305,37 +330,40 @@ class FileBatchTool:
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
                 )
-                return "fail", scope_err
+                return "fail", scope_err, []
             permanent = bool(item.get("permanent", False))
             try:
                 await context.backend.delete(path, permanent=permanent)
             except PathNotFound:
-                return "skip", f"delete {path}（不存在）"
+                return "skip", f"delete {path}（不存在）", []
             except OutsideWorkspace:
-                return "fail", _outside_workspace_msg(
-                    path, location=context.backend.location
+                return (
+                    "fail",
+                    _outside_workspace_msg(path, location=context.backend.location),
+                    [],
                 )
             except WorkspaceError as e:
-                return "fail", f"delete {path}：{e}"
+                return "fail", f"delete {path}：{e}", []
             mode = "永久删除" if permanent else "可逆删除"
             detail = f"delete {path}（{mode}）"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
-            return "ok", detail
+            return "ok", detail, []
 
         source = str(item.get("source", "")).strip()
         requested_dest = str(item.get("destination", "")).strip()
         if not source or not requested_dest:
-            return "fail", f"{op} · source 与 destination 均为必填"
+            return "fail", f"{op} · source 与 destination 均为必填", []
         destination, rename_note = _prepare_write_relpath(requested_dest)
         if not destination:
-            return "fail", f"{op} · source 与 destination 均为必填"
+            return "fail", f"{op} · source 与 destination 均为必填", []
         if source == destination:
             # Same as cleaned dest (e.g. flat → nested dossier request): idempotent OK.
             detail = f"{op} {source} → {destination}（源与目标相同，无需操作）"
             if rename_note:
                 detail = f"{detail}。{rename_note}"
-            return "ok", detail
+            # 幂等成功也自报：文件就在 destination 上，与单支 file_move / file_copy 同口径。
+            return "ok", detail, [file_product(destination)]
         for p in (source, destination) if op == "move" else (destination,):
             scope_err = write_scope_rejection(context, p)
             if scope_err is not None:
@@ -345,25 +373,29 @@ class FileBatchTool:
                     write_scope=getattr(context, "write_scope", None),
                     op=op,
                 )
-                return "fail", scope_err
+                return "fail", scope_err, []
         try:
             if op == "move":
                 await context.backend.move(source, destination)
             else:
                 await context.backend.copy(source, destination)
         except PathNotFound:
-            return "fail", f"{op} {source} → {destination}：源不存在"
+            return "fail", f"{op} {source} → {destination}：源不存在", []
         except AlreadyExists:
             # MVP conflict policy: skip into report (提案钉死).
-            return "skip", f"{op} {source} → {destination}：目标已存在"
+            return "skip", f"{op} {source} → {destination}：目标已存在", []
         except OutsideWorkspace as e:
-            return "fail", (
-                f"{op} {source} → {destination}："
-                + _outside_workspace_msg(str(e), location=context.backend.location)
+            return (
+                "fail",
+                (
+                    f"{op} {source} → {destination}："
+                    + _outside_workspace_msg(str(e), location=context.backend.location)
+                ),
+                [],
             )
         except WorkspaceError as e:
-            return "fail", f"{op} {source} → {destination}：{e}"
+            return "fail", f"{op} {source} → {destination}：{e}", []
         detail = f"{op} {source} → {destination}"
         if rename_note:
             detail = f"{detail}。{rename_note}"
-        return "ok", detail
+        return "ok", detail, [file_product(destination)]

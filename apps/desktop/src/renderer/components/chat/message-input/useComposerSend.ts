@@ -23,24 +23,28 @@ import {
   setComposerDraftAxes,
 } from "@/services/permissionAxes";
 import { resolveSidecarRoot } from "@/services/sidecarRouting";
-import type {
-  OutgoingAgentMention,
-  OutgoingAttachment,
-} from "@/services/streamConversation";
+import type { OutgoingAgentMention } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
-import { useComposerDraftStore } from "@/stores/composer";
+import { restoreComposerDraft, useComposerDraftStore } from "@/stores/composer";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import { type Dispatch, type SetStateAction, useCallback, useRef } from "react";
+import {
+  type Dispatch,
+  type SetStateAction,
+  useCallback,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
+import { forgetAttachmentUpload } from "./attachmentUploads";
 import type {
   PendingAgentMention,
   PendingAttachment,
 } from "./composerAttachments";
 import { MAX_AGENT_MENTIONS } from "./composerAttachments";
 import { dispatchBackgroundTask } from "./dispatchBackgroundTask";
-import { ensureAttachmentResident } from "./resideAttachment";
+import { settleAttachments } from "./settleAttachments";
 
 /**
  * Local-first parallel title mint after the first user message.
@@ -93,6 +97,9 @@ export function useComposerSend({
   const navigate = useNavigate();
   /** 短时门闩：ack 前防连点重复 mid-flight 入队。 */
   const midFlightSendingRef = useRef(false);
+  /** 门闩 + 按钮 in-flight 态：附件收尾期间发送键要看得出「在发」，且不可连点。 */
+  const sendingRef = useRef(false);
+  const [isSending, setIsSending] = useState(false);
 
   const toOutgoingMentions = useCallback(
     (pending: PendingAgentMention[]): OutgoingAgentMention[] =>
@@ -109,6 +116,16 @@ export function useComposerSend({
     setAgentMentions([]);
     closeMenu();
   }, [setValue, setAttachments, setAgentMentions, closeMenu]);
+
+  /** 摘掉发不出去的 chip（主进程暂存已被清）并注销它们的在途上传。 */
+  const dropStaleAttachments = useCallback(
+    (staleIds: readonly string[]) => {
+      if (staleIds.length === 0) return;
+      for (const id of staleIds) forgetAttachmentUpload(id);
+      setAttachments((prev) => prev.filter((x) => !staleIds.includes(x.id)));
+    },
+    [setAttachments],
+  );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: closeMenu/setValue/setAgentMentions kept for stable identity when clearComposer path is not taken
   const handleSend = useCallback(
@@ -143,59 +160,32 @@ export function useComposerSend({
       if (isGenerating && activeConvId) {
         if (midFlightSendingRef.current) return;
         midFlightSendingRef.current = true;
+        setIsSending(true);
         try {
           const pending = attachments;
-          const outgoing: OutgoingAttachment[] = [];
-          for (const a of pending) {
-            if (
-              a.kind === "file" &&
-              (a.stagingId || a.workspacePath || a.binary || a.fileBlob)
-            ) {
-              const resided = await ensureAttachmentResident(activeConvId, a);
-              if (!resided.ok) {
-                notifyError(new Error(resided.reason), "附件驻留失败");
-                if (resided.reason.includes("暂存已失效") && a.stagingId) {
-                  setAttachments((prev) => prev.filter((x) => x.id !== a.id));
-                }
-                return;
-              }
-              outgoing.push({
-                name: resided.name,
-                path: resided.workspacePath || a.path,
-                text: resided.binary ? "" : resided.text,
-                truncated: resided.truncated,
-                kind: "file",
-                binary: resided.binary,
-                workspace_path: resided.workspacePath || undefined,
-              });
-            } else {
-              outgoing.push({
-                name: a.name,
-                path: a.path,
-                text: a.text,
-                truncated: a.truncated,
-                kind: a.kind,
-                conversation_id: a.conversationId,
-                binary: a.binary,
-                workspace_path: a.workspacePath,
-              });
-            }
+          const settled = await settleAttachments(activeConvId, pending);
+          if (!settled.ok) {
+            notifyError(new Error(settled.reason), "附件驻留失败");
+            dropStaleAttachments(settled.staleIds);
+            return;
           }
 
           const result = await sendMidFlightMessage(
             activeConvId,
             trimmed,
-            outgoing.length > 0 ? outgoing : undefined,
+            settled.outgoing.length > 0 ? settled.outgoing : undefined,
             delivery,
             outgoingMentions.length > 0 ? outgoingMentions : undefined,
           );
           if (result.kind === "received" || result.kind === "queued") {
+            for (const a of pending) forgetAttachmentUpload(a.id);
             clearComposer();
             // queued：条由 turn_queued → midFlight upsert；出队再插泡。
             // received：主时间线走 user_interjection SSE 投影（含经典 durable 气泡）。
           }
         } finally {
           midFlightSendingRef.current = false;
+          setIsSending(false);
         }
         return;
       }
@@ -204,167 +194,186 @@ export function useComposerSend({
 
       if (backgroundMode && isLocal && activeConvId) {
         dispatchBackgroundTask(activeConvId, trimmed);
+        // 后台任务只带正文；随草稿一起丢掉的附件也要注销，别让在途上传攥着 File。
+        for (const a of attachments) forgetAttachmentUpload(a.id);
         clearComposer();
         return;
       }
 
-      const pending = attachments;
-      const store = useConversationStore.getState();
-      const isFirstMessage = getActiveRuntime().messages.length === 0;
+      if (sendingRef.current) return;
+      sendingRef.current = true;
+      setIsSending(true);
+      try {
+        const pending = attachments;
+        const store = useConversationStore.getState();
+        const isFirstMessage = getActiveRuntime().messages.length === 0;
 
-      let conversationId = store.currentConversationId;
-      let createdNew = false;
-      if (!conversationId) {
-        const intent = useFoldersStore.getState().draftWorkspaceIntent;
-        const targetFolderId =
-          intent.kind === "project" ? intent.folderId : null;
-        // Project chats inherit workspace — never write session-level local_*.
-        // Quick cloud (default) → null container.
-        // §7.2：残留 quick_local 意图硬改导云（禁新建本机草稿）；存量会话不经此分支。
-        const localContainerRootId: string | null = null;
-        if (intent.kind === "quick_local") {
-          redirectLocalWorkspaceAskAction();
-          useFoldersStore
-            .getState()
-            .setDraftWorkspaceIntent({ kind: "quick_cloud" });
-        }
-        // 新建拍快照：POST 带 last-used（或草稿所选，已写入 last_profile_id）；
-        // 省略则服务端写入当时账号默认。勿再 create 后 PATCH。
-        const inheritedProfileId = getLastUsedProfileId()?.trim() || null;
-        try {
-          const permissionAxes = await resolveDefaultPermissionAxes();
-          const conv = await api.post<{
-            id: string;
-            permission_axes?: PermissionAxes;
-            model_profile_id?: string | null;
-          }>("/v1/conversations", {
-            title: null,
-            folder_id: targetFolderId,
-            local_container_root_id: localContainerRootId,
-            permission_axes: permissionAxes,
-            ...(inheritedProfileId
-              ? { model_profile_id: inheritedProfileId }
-              : {}),
-          });
-          conversationId = conv.id;
-          setComposerDraftAxes(null);
-          upsertConversationFront({
-            id: conv.id,
-            title: provisionalConversationTitle(trimmed),
-            updatedAt: new Date().toISOString(),
-            messageCount: 0,
-            lastMessagePreview: null,
-            folderId: targetFolderId,
-            localContainerRootId,
-            permissionAxes: conv.permission_axes ?? permissionAxes,
-            modelProfileId: conv.model_profile_id ?? inheritedProfileId ?? null,
-          });
-          // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
-          // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在
-          // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号。
-          useComposerDraftStore.getState().armDockFlip();
-          useConversationStore.getState().switchConversation(conv.id);
-          createdNew = true;
-          useFoldersStore.getState().resetDraftWorkspaceIntent();
-        } catch (err) {
-          notifyError(err, "新建对话失败");
-          return;
-        }
-      }
-
-      if (!isFirstMessage && getActiveRuntime().hasMoreAfter) {
-        try {
-          await loadLatestWindow(conversationId);
-        } catch {
-          /* best-effort */
-        }
-      }
-
-      // 引用即驻留：在乐观气泡之前完成落盘/上传，失败则保留草稿附件。
-      const outgoing: OutgoingAttachment[] = [];
-      for (const a of pending) {
-        if (
-          a.kind === "file" &&
-          (a.stagingId || a.workspacePath || a.binary || a.fileBlob)
-        ) {
-          const resided = await ensureAttachmentResident(conversationId, a);
-          if (!resided.ok) {
-            notifyError(new Error(resided.reason), "附件驻留失败");
-            if (resided.reason.includes("暂存已失效") && a.stagingId) {
-              setAttachments((prev) => prev.filter((x) => x.id !== a.id));
-            }
+        let conversationId = store.currentConversationId;
+        let createdNew = false;
+        if (!conversationId) {
+          const intent = useFoldersStore.getState().draftWorkspaceIntent;
+          const targetFolderId =
+            intent.kind === "folder" ? intent.folderId : null;
+          // Project chats inherit workspace — never write session-level local_*.
+          // Quick cloud (default) → null container.
+          // §7.2：残留 quick_local 意图硬改导云（禁新建本机草稿）；存量会话不经此分支。
+          const localContainerRootId: string | null = null;
+          if (intent.kind === "quick_local") {
+            redirectLocalWorkspaceAskAction();
+            useFoldersStore
+              .getState()
+              .setDraftWorkspaceIntent({ kind: "quick_cloud" });
+          }
+          // 新建拍快照：POST 带 last-used（或草稿所选，已写入 last_profile_id）；
+          // 省略则服务端写入当时账号默认。勿再 create 后 PATCH。
+          const inheritedProfileId = getLastUsedProfileId()?.trim() || null;
+          try {
+            const permissionAxes = await resolveDefaultPermissionAxes();
+            const conv = await api.post<{
+              id: string;
+              permission_axes?: PermissionAxes;
+              model_profile_id?: string | null;
+            }>("/v1/conversations", {
+              title: null,
+              folder_id: targetFolderId,
+              local_container_root_id: localContainerRootId,
+              permission_axes: permissionAxes,
+              ...(inheritedProfileId
+                ? { model_profile_id: inheritedProfileId }
+                : {}),
+            });
+            conversationId = conv.id;
+            setComposerDraftAxes(null);
+            upsertConversationFront({
+              id: conv.id,
+              title: provisionalConversationTitle(trimmed),
+              updatedAt: new Date().toISOString(),
+              messageCount: 0,
+              lastMessagePreview: null,
+              folderId: targetFolderId,
+              localContainerRootId,
+              permissionAxes: conv.permission_axes ?? permissionAxes,
+              modelProfileId:
+                conv.model_profile_id ?? inheritedProfileId ?? null,
+            });
+            // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
+            // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在
+            // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号。
+            useComposerDraftStore.getState().armDockFlip();
+            useConversationStore.getState().switchConversation(conv.id);
+            createdNew = true;
+            useFoldersStore.getState().resetDraftWorkspaceIntent();
+          } catch (err) {
+            notifyError(err, "新建对话失败");
             return;
           }
-          outgoing.push({
-            name: resided.name,
-            path: resided.workspacePath || a.path,
-            text: resided.binary ? "" : resided.text,
-            truncated: resided.truncated,
-            kind: "file",
-            binary: resided.binary,
-            workspace_path: resided.workspacePath || undefined,
-          });
-        } else {
-          outgoing.push({
-            name: a.name,
-            path: a.path,
-            text: a.text,
-            truncated: a.truncated,
-            kind: a.kind,
-            conversation_id: a.conversationId,
-            binary: a.binary,
-            workspace_path: a.workspacePath,
-          });
         }
-      }
 
-      const userMsgId = crypto.randomUUID();
-      addMessage({
-        id: userMsgId,
-        role: "user",
-        content: trimmed,
-        createdAt: new Date().toISOString(),
-        executionId: null,
-        isStreaming: false,
-        attachments: pending.length
-          ? pending.map((a, i) => ({
-              id: a.id,
-              name: outgoing[i]?.name ?? a.name,
-              path: outgoing[i]?.path ?? a.path,
-              truncated: a.truncated,
-              kind: a.kind,
-              conversationId: a.conversationId,
-              workspacePath: outgoing[i]?.workspace_path,
-            }))
-          : undefined,
-      });
-      clearComposer();
+        if (!isFirstMessage && getActiveRuntime().hasMoreAfter) {
+          try {
+            await loadLatestWindow(conversationId);
+          } catch {
+            /* best-effort */
+          }
+        }
 
-      if (isFirstMessage) {
-        patchConversationCache(conversationId, {
-          title: provisionalConversationTitle(trimmed),
+        // 乐观气泡与清空输入框排在等待附件之前：附件在附加时就开始上传了，点发送
+        // 只是等它收尾——没有理由让用户对着还留着文字和 chip 的输入框干等。
+        const userMsgId = crypto.randomUUID();
+        addMessage({
+          id: userMsgId,
+          role: "user",
+          content: trimmed,
+          createdAt: new Date().toISOString(),
+          executionId: null,
+          isStreaming: false,
+          attachments: pending.length
+            ? pending.map((a) => ({
+                id: a.id,
+                name: a.name,
+                path: a.path,
+                truncated: a.truncated,
+                kind: a.kind,
+                conversationId: a.conversationId,
+                workspacePath: a.workspacePath,
+              }))
+            : undefined,
         });
-        // Local sidecar has no cloud SSE title_generated — mint in parallel with
-        // the turn (same core as cloud schedule_title_generation).
-        scheduleLocalAutoTitle(conversationId, trimmed);
+        clearComposer();
+
+        if (isFirstMessage) {
+          patchConversationCache(conversationId, {
+            title: provisionalConversationTitle(trimmed),
+          });
+          // Local sidecar has no cloud SSE title_generated — mint in parallel with
+          // the turn (same core as cloud schedule_title_generation).
+          scheduleLocalAutoTitle(conversationId, trimmed);
+        }
+
+        if (createdNew) {
+          navigate(`/conversations/${conversationId}`);
+        }
+
+        // Same React batch as the optimistic bubble above, so a canvas follow effect
+        // armed here sees the new turn land.
+        onDispatch?.();
+
+        const settled = await settleAttachments(conversationId, pending);
+        if (!settled.ok) {
+          // 不留假气泡：撤掉乐观气泡，把草稿（正文 + 附件 + 点名）还给用户重试，
+          // 只摘掉主进程暂存已失效、留着也发不出去的那几条。
+          useConversationStore
+            .getState()
+            .removeMessage(userMsgId, conversationId);
+          restoreComposerDraft(conversationId, {
+            value: trimmed,
+            attachments: pending.filter(
+              (a) => !settled.staleIds.includes(a.id),
+            ),
+            agentMentions,
+          });
+          for (const id of settled.staleIds) forgetAttachmentUpload(id);
+          notifyError(new Error(settled.reason), "附件驻留失败");
+          return;
+        }
+        for (const a of pending) forgetAttachmentUpload(a.id);
+
+        if (pending.length > 0) {
+          // 驻留落地后才知道真实 ``attachments/…`` 路径：补正乐观气泡（下载链接靠它）。
+          useConversationStore.getState().updateMessage(
+            userMsgId,
+            {
+              attachments: pending.map((a, i) => ({
+                id: a.id,
+                name: settled.outgoing[i]?.name ?? a.name,
+                path: settled.outgoing[i]?.path ?? a.path,
+                truncated: a.truncated,
+                kind: a.kind,
+                conversationId: a.conversationId,
+                workspacePath: settled.outgoing[i]?.workspace_path,
+              })),
+            },
+            conversationId,
+          );
+        }
+
+        // in-flight 态只覆盖「点击 → 回合已上路」这一段。回合本身的流式由生成态接管，
+        // 否则整轮生成期间「排队 / 插队」都会被误锁。
+        sendingRef.current = false;
+        setIsSending(false);
+
+        await sendTurn({
+          conversationId,
+          content: trimmed,
+          attachments: settled.outgoing,
+          agentMentions: outgoingMentions,
+          optimisticUserId: userMsgId,
+          delivery: "steer",
+        });
+      } finally {
+        sendingRef.current = false;
+        setIsSending(false);
       }
-
-      if (createdNew) {
-        navigate(`/conversations/${conversationId}`);
-      }
-
-      // Same React batch as the optimistic bubble above, so a canvas follow effect
-      // armed here sees the new turn land.
-      onDispatch?.();
-
-      await sendTurn({
-        conversationId,
-        content: trimmed,
-        attachments: outgoing,
-        agentMentions: outgoingMentions,
-        optimisticUserId: userMsgId,
-        delivery: "steer",
-      });
     },
     [
       value,
@@ -382,8 +391,9 @@ export function useComposerSend({
       onDispatch,
       toOutgoingMentions,
       clearComposer,
+      dropStaleAttachments,
     ],
   );
 
-  return { handleSend };
+  return { handleSend, isSending };
 }

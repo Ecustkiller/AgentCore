@@ -15,13 +15,13 @@ const uiPersistStorage = createJSONStorage(() => createZustandUiStorage());
 export type DraftWorkspaceIntent =
   | { kind: "quick_local" }
   | { kind: "quick_cloud" }
-  | { kind: "project"; folderId: string };
+  | { kind: "folder"; folderId: string };
 
 export function defaultDraftWorkspaceIntent(): DraftWorkspaceIntent {
   return { kind: "quick_cloud" };
 }
 
-/** Viewport rect for anchoring the「新建项目」cascade near a trigger. */
+/** Viewport rect for anchoring the「新建文件夹」cascade near a trigger. */
 export type CreateFolderAnchorRect = {
   top: number;
   left: number;
@@ -29,12 +29,15 @@ export type CreateFolderAnchorRect = {
   height: number;
 };
 
+/** Where a new folder should land — null / absent = 我的文件 top level. */
+export type CreateFolderParent = { id: string; name: string };
+
 /** Prefill for {@link useFoldersStore}'s `openImportToCloud`. */
 export type ImportToCloudPrefill = {
   /** Existing desktop `FsRoot.id` (e.g. Folder.localRootId). */
   rootId?: string | null;
-  /** Suggested cloud project name. */
-  projectName?: string | null;
+  /** Suggested name for the folder created in 我的文件. */
+  folderName?: string | null;
 };
 
 /**
@@ -50,14 +53,16 @@ interface FoldersUiState {
   draftWorkspaceIntent: DraftWorkspaceIntent;
   /** User-pinned folders shown at the top of workspace pickers. */
   pinnedFolderIds: string[];
-  /** Canonical「新建项目」cascade (command palette / chip / rail +). */
+  /** Canonical「新建文件夹」cascade (command palette / chip / rail +). */
   createFolderOpen: boolean;
   /** Optional trigger rect; null → host centers the cascade. */
   createFolderAnchor: CreateFolderAnchorRect | null;
+  /** Nest the new folder here (rail「在此新建文件夹」); null = top level. */
+  createFolderParent: CreateFolderParent | null;
   /** Composer / palette「连接 Git」→ G3 云 clone 对话框。 */
   connectGitOpen: boolean;
   /**
-   * Target cloud wsId (`folder:…` / `conv:…`). Null = 先建云项目再 clone
+   * Target cloud wsId (`folder:…` / `conv:…`). Null = 先建云文件夹再 clone
    *（入口「连接 Git = 云 clone remote」）。
    */
   connectGitWsId: string | null;
@@ -72,7 +77,10 @@ interface FoldersUiState {
   setPendingRename: (id: string | null) => void;
   setDraftWorkspaceIntent: (intent: DraftWorkspaceIntent) => void;
   resetDraftWorkspaceIntent: () => void;
-  openCreateFolder: (anchorEl?: Element | null) => void;
+  openCreateFolder: (
+    anchorEl?: Element | null,
+    parent?: CreateFolderParent | null,
+  ) => void;
   closeCreateFolder: () => void;
   openConnectGit: (wsId?: string | null) => void;
   closeConnectGit: () => void;
@@ -97,6 +105,7 @@ export const useFoldersStore = create<FoldersUiState>()(
       pinnedFolderIds: [],
       createFolderOpen: false,
       createFolderAnchor: null,
+      createFolderParent: null,
       connectGitOpen: false,
       connectGitWsId: null,
       importToCloudOpen: false,
@@ -106,16 +115,21 @@ export const useFoldersStore = create<FoldersUiState>()(
         set({ draftWorkspaceIntent: intent }),
       resetDraftWorkspaceIntent: () =>
         set({ draftWorkspaceIntent: defaultDraftWorkspaceIntent() }),
-      openCreateFolder: (anchorEl) => {
+      openCreateFolder: (anchorEl, parent) => {
         // Capture rect before the trigger menu unmounts / reflows.
         const rect = rectFromEl(anchorEl);
         set({
           createFolderOpen: true,
           createFolderAnchor: rect,
+          createFolderParent: parent ?? null,
         });
       },
       closeCreateFolder: () =>
-        set({ createFolderOpen: false, createFolderAnchor: null }),
+        set({
+          createFolderOpen: false,
+          createFolderAnchor: null,
+          createFolderParent: null,
+        }),
       openConnectGit: (wsId) =>
         set({
           connectGitOpen: true,

@@ -1,6 +1,6 @@
 """Turn action inventory — files / commands / searches harvested from turn_journal.
 
-Feeds episodic summarization (so session digests can retain verified project ops
+Feeds episodic summarization (so session digests can retain verified folder ops
 knowledge) and the semantic navigation anti-hallucination gate. Not a retrieval
 index: compact, deterministic extraction only.
 """

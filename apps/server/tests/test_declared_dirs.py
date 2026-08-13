@@ -5,6 +5,8 @@ from agentcore.workspace.declared_dirs import is_declared_latent_dir
 from agentcore.workspace.stage_dirs import (
     AGENTCORE_ROOT,
     DOCS_PREFIX,
+    DRAFTS_DIR,
+    DRAFTS_PREFIX,
     RESEARCH_DIR,
     RESEARCH_PREFIX,
 )
@@ -15,6 +17,8 @@ def test_declared_latent_covers_stage_tree_and_attachments():
     assert is_declared_latent_dir(DOCS_PREFIX)
     assert is_declared_latent_dir(RESEARCH_DIR)
     assert is_declared_latent_dir(f"{RESEARCH_PREFIX}笔记.md")
+    assert is_declared_latent_dir(DRAFTS_DIR)
+    assert is_declared_latent_dir(f"{DRAFTS_PREFIX}起诉状.md")
     assert is_declared_latent_dir(ATTACHMENTS_DIR)
     assert is_declared_latent_dir(f"{ATTACHMENTS_DIR}/a.pdf")
 

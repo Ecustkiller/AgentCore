@@ -46,7 +46,7 @@ describe("parseArchivePayload", () => {
 });
 
 describe("formatImportToCloudToast", () => {
-  it("full success reminds continue on new cloud; session stays local", () => {
+  it("full success reminds continue in the new folder; session stays local", () => {
     const t = formatImportToCloudToast({
       folderId: "f1",
       folderName: "Demo",
@@ -56,10 +56,12 @@ describe("formatImportToCloudToast", () => {
       archiveTruncated: false,
       partial: false,
     });
-    expect(t.message).toBe("已建云项目「Demo」");
+    expect(t.message).toBe("已在「我的文件」建好「Demo」");
     expect(t.description).toContain("已上传 3 个文件");
-    expect(t.description).toContain("请在新云项目继续");
-    expect(t.description).toContain("本会话仍挂旧本地");
+    expect(t.description).toContain("请在新文件夹里继续");
+    expect(t.description).toContain("当前对话用的还是本机原文件夹");
+    // Size caps belong to the partial branch only, not the happy path.
+    expect(t.description).not.toContain("MiB");
   });
 
   it("honest partial when truncated or oversized skipped", () => {
@@ -72,11 +74,11 @@ describe("formatImportToCloudToast", () => {
       archiveTruncated: true,
       partial: true,
     });
-    expect(t.message).toBe("已建云项目「Big」（部分导入）");
+    expect(t.message).toBe("已在「我的文件」建好「Big」（部分导入）");
     expect(t.description).toContain("100MiB");
     expect(t.description).toContain("25MiB");
     expect(t.description).toContain("已上传 1 个文件");
-    expect(t.description).toContain("请在新云项目继续");
+    expect(t.description).toContain("请在新文件夹里继续");
   });
 });
 
@@ -98,7 +100,7 @@ describe("runImportToCloud", () => {
     const addFolderToCache = vi.fn();
     const setDraftIntent = vi.fn((folderId: string) => {
       useFoldersStore.getState().setDraftWorkspaceIntent({
-        kind: "project",
+        kind: "folder",
         folderId,
       });
     });
@@ -143,7 +145,7 @@ describe("runImportToCloud", () => {
     expect(result.partial).toBe(false);
     expect(setDraftIntent).toHaveBeenCalledWith("folder-99");
     expect(useFoldersStore.getState().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "folder-99",
     });
     expect(addFolderToCache).toHaveBeenCalled();
@@ -164,7 +166,7 @@ describe("runImportToCloud", () => {
     const uploadFile = vi.fn().mockResolvedValue(undefined);
 
     const result = await runImportToCloud({
-      projectName: "Partial",
+      folderName: "Partial",
       deps: {
         pickRoot: async () => ({
           ok: true,
@@ -422,9 +424,7 @@ describe("runImportToCloud", () => {
 
     expect(err).toBeInstanceOf(ImportToCloudCancelledError);
     expect(err.folderId).toBeUndefined();
-    expect(formatImportToCloudCancelledToast(err).message).toBe(
-      "已取消导入到云",
-    );
+    expect(formatImportToCloudCancelledToast(err).message).toBe("已取消导入");
   });
 
   it("does not removeRoot when ownsRoot is false", async () => {

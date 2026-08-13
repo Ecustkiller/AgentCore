@@ -28,6 +28,7 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.models import Conversation
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.workspace._paths import path_has_non_internal_entries
 from agentcore.workspace.locate import workspace_root_path
 from agentcore.workspace.migrate_tree import MergeMoveResult, merge_move_tree
@@ -59,14 +60,18 @@ def scratch_and_desk_roots(
     *,
     user_id: str,
     conversation_id: str,
-    auto_desk_folder_id: str,
+    auto_desk_rel_path: str,
 ) -> tuple[Path, Path]:
-    """Cloud paths for bare-chat scratch and its auto desk (no mkdir)."""
+    """Cloud paths for bare-chat scratch and its auto desk (no mkdir).
+
+    The desk is addressed by its visible path (``folders.rel_path``), not its id —
+    that is where the directory actually is since 双模式工作区 §5.4.
+    """
     scratch = workspace_root_path(
-        user_id=user_id, folder_id=None, conversation_id=conversation_id
+        user_id=user_id, folder_rel_path=None, conversation_id=conversation_id
     )
     desk = workspace_root_path(
-        user_id=user_id, folder_id=auto_desk_folder_id, conversation_id=conversation_id
+        user_id=user_id, folder_rel_path=auto_desk_rel_path, conversation_id=conversation_id
     )
     return scratch, desk
 
@@ -120,8 +125,12 @@ async def backfill_auto_desk_scratch(*, dry_run: bool = True) -> BackfillStats:
         uid = conv.user_id
         desk_id = (conv.auto_desk_folder_id or "").strip()
         try:
+            desk_rel = (await resolve_folder_placement(desk_id)).rel_path if desk_id else None
+            if desk_id and not desk_rel:
+                stats.conversations_skipped_empty += 1
+                continue
             scratch, desk = scratch_and_desk_roots(
-                user_id=uid, conversation_id=cid, auto_desk_folder_id=desk_id
+                user_id=uid, conversation_id=cid, auto_desk_rel_path=desk_rel or ""
             )
             if not should_backfill_conversation(
                 folder_id=conv.folder_id,

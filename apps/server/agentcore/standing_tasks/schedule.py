@@ -2,6 +2,12 @@
 
 Field order: minute hour day-of-month month day-of-week.
 Dow: 0/7 = Sunday … 6 = Saturday (cron convention).
+
+Day matching follows Vixie cron: when **both** day-of-month and day-of-week are
+restricted (neither starts with ``*``), a day matches if **either** field matches
+(OR). When at least one of them is a star field, both must match (AND, which for
+a star field is trivially true). ``0 9 1 * 1`` therefore means「每月 1 号 **或**
+每周一 09:00」, not「1 号且恰好是周一」.
 """
 
 from __future__ import annotations
@@ -59,6 +65,14 @@ class CronExpr:
     dom: _Field
     month: _Field
     dow: _Field
+    # Vixie's DOM_STAR / DOW_STAR: set when the field starts with ``*`` (``*`` or
+    # ``*/n``). They pick AND vs OR for the two day fields — see ``_day_matches``.
+    dom_star: bool = True
+    dow_star: bool = True
+
+
+def _is_star_field(raw: str) -> bool:
+    return raw.strip().startswith("*")
 
 
 def parse_cron(expr: str) -> CronExpr:
@@ -79,6 +93,8 @@ def parse_cron(expr: str) -> CronExpr:
         dom=dom,
         month=month,
         dow=_Field(frozenset(dow_vals)),
+        dom_star=_is_star_field(parts[2]),
+        dow_star=_is_star_field(parts[4]),
     )
 
 
@@ -89,15 +105,23 @@ def validate_cron(expr: str) -> str:
     return cleaned
 
 
-def _matches(expr: CronExpr, dt: datetime) -> bool:
+def _day_matches(expr: CronExpr, dt: datetime) -> bool:
+    """Vixie day rule: OR the two day fields when both are restricted, else AND."""
     # Python weekday: Mon=0 … Sun=6 → cron: Sun=0, Mon=1 … Sat=6
     cron_dow = (dt.weekday() + 1) % 7
+    dom_hit = dt.day in expr.dom.values
+    dow_hit = cron_dow in expr.dow.values
+    if expr.dom_star or expr.dow_star:
+        return dom_hit and dow_hit
+    return dom_hit or dow_hit
+
+
+def _matches(expr: CronExpr, dt: datetime) -> bool:
     return (
         dt.minute in expr.minute.values
         and dt.hour in expr.hour.values
-        and dt.day in expr.dom.values
         and dt.month in expr.month.values
-        and cron_dow in expr.dow.values
+        and _day_matches(expr, dt)
     )
 
 
@@ -122,7 +146,7 @@ def next_run_after(cron: str, after: datetime, *, max_steps: int = 366 * 24 * 60
                     break
             cursor = datetime(year, month, 1, tzinfo=cursor.tzinfo)
             continue
-        if cursor.day not in expr.dom.values or ((cursor.weekday() + 1) % 7) not in expr.dow.values:
+        if not _day_matches(expr, cursor):
             # Next day 00:00.
             nxt = (cursor + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
             # Clamp day overflow when month changes mid-skip.

@@ -740,6 +740,236 @@ async def test_recover_expired_lease_redrives_when_factory_wired(monkeypatch):
     assert released == [message_id]
 
 
+async def test_recover_expired_lease_redrive_facts_land_on_original_turn(monkeypatch):
+    """重驱期间产生的事实必须落进 ORIGINAL 回合的 journal（唯一事实源 · 重连即回放）。
+
+    裸 ``EventSink()`` + 未绑 journal writer 时，sink 三条落库回退路径全落空：恢复期
+    一条事实都不进 journal，协作图永远停在崩溃那一刻、产出只能另起一条消息。
+    """
+    from agentcore.runtime.events import run_completed, run_started
+    from agentcore.runtime.facts import current_fact_log
+    from agentcore.runtime.journal.writer import current_journal_writer
+    from agentcore.runtime.recover import recover_expired_lease
+    from agentcore.runtime.recover_hooks import set_crash_delegate_factory
+
+    message_id = "facts000-0000-0000-0000-000000000001"
+    conversation_id = "facts000-0000-0000-0000-000000000002"
+    lease = SimpleNamespace(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        user_id="u1",
+        meta={"trace_id": "tr-facts", "recover_attempts": 1},
+        trace_id=None,
+    )
+    state = TurnState.from_journal(_partial_journal())
+    appended: list[dict] = []
+    released: list[str] = []
+    observed: dict = {}
+    _patch_recover_lease_heartbeat(monkeypatch)
+
+    class _FakeStore:
+        async def append_journal(
+            self, *, turn_id, seq, conversation_id, trace_id, entry
+        ):
+            appended.append(
+                {
+                    "turn_id": turn_id,
+                    "conversation_id": conversation_id,
+                    "trace_id": trace_id,
+                    "kind": entry.get("kind"),
+                }
+            )
+            return len(appended) - 1
+
+        async def upsert_stream_segments(self, *, turn_id, segments):
+            return None
+
+    monkeypatch.setattr(
+        "agentcore.conversation.store.get_conversation_store", lambda: _FakeStore()
+    )
+
+    async def _fake_orphan(**kwargs):
+        return None
+
+    async def _factory(lease_arg, state_arg, *, sink):
+        observed["sink"] = sink
+
+        async def _resume_plan(plan, seed_completed, **kwargs):
+            writer = current_journal_writer.get()
+            observed["writer_turn_id"] = getattr(writer, "turn_id", None)
+            observed["writer_conversation_id"] = getattr(writer, "conversation_id", None)
+            observed["fact_log_bound"] = current_fact_log.get() is not None
+            sink.emit(run_started("w2", "agent-w2"))
+            sink.emit(
+                run_completed("w2", "agent-w2", output_summary="done", duration_ms=1)
+            )
+            return ToolResult(tool_call_id="t1", success=True, output="redriven")
+
+        tool = MagicMock()
+        tool.resume_plan = _resume_plan
+        return tool
+
+    async def _fake_salvage(**kwargs):
+        raise AssertionError("successful redrive must not salvage")
+
+    async def _fake_release(mid, *, owner_id=None):
+        released.append(mid)
+
+    set_crash_delegate_factory(_factory)
+    try:
+        monkeypatch.setattr(
+            "agentcore.runtime.interaction_orphan.orphan_turn_before_recover",
+            _fake_orphan,
+        )
+        monkeypatch.setattr(
+            "agentcore.runtime.leases.sweeper.salvage_interrupted_turn",
+            _fake_salvage,
+        )
+        monkeypatch.setattr(
+            "agentcore.runtime.leases.service.release_turn_lease",
+            _fake_release,
+        )
+        await recover_expired_lease(lease, state)
+    finally:
+        set_crash_delegate_factory(None)
+
+    # The redrive sink carries the crashed turn's identity (not an anonymous one).
+    assert observed["sink"].message_id == message_id
+    assert observed["sink"].conversation_id == conversation_id
+    assert observed["writer_turn_id"] == message_id
+    assert observed["writer_conversation_id"] == conversation_id
+    assert observed["fact_log_bound"] is True
+
+    kinds = [row["kind"] for row in appended]
+    assert "run_started" in kinds
+    assert "run_completed" in kinds
+    assert {row["turn_id"] for row in appended} == {message_id}
+    assert {row["conversation_id"] for row in appended} == {conversation_id}
+    assert {row["trace_id"] for row in appended} == {"tr-facts"}
+    assert released == [message_id]
+    # Turn-scoped bindings must not leak past the recovering task.
+    assert current_journal_writer.get() is None
+    assert current_fact_log.get() is None
+
+
+def _patch_recovered_badge_store(monkeypatch) -> list[dict]:
+    """Capture the 「曾中断恢复」 assistant upsert instead of touching the DB."""
+    writes: list[dict] = []
+
+    class _Repo:
+        def __init__(self, _db):
+            pass
+
+        async def upsert_assistant(self, **kwargs):
+            writes.append(kwargs)
+            return SimpleNamespace(id=kwargs.get("message_id"))
+
+    class _Db:
+        async def __aenter__(self):
+            return MagicMock()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    monkeypatch.setattr("agentcore.db.base.async_session_factory", lambda: _Db())
+    monkeypatch.setattr("agentcore.db.repositories.MessageRepository", _Repo)
+    return writes
+
+
+async def test_recover_expired_lease_marks_recovered_and_binds_closing_to_turn(
+    monkeypatch,
+):
+    """D5 归属原回合：重驱给原消息盖「曾中断恢复」，并把收口指向同一条消息。
+
+    没有 ``recovered_turn_id``，harvest 会另起一条与原回合无关的助手消息；不在
+    teardown 交还 ``turn_attached``，收口还得空等 5 秒 stale-attach 才敢开工。
+    """
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        active_coordination,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.recover import recover_expired_lease
+    from agentcore.runtime.recover_hooks import set_crash_delegate_factory
+
+    message_id = "recov000-0000-0000-0000-000000000001"
+    conversation_id = "recov000-0000-0000-0000-000000000002"
+    lease = SimpleNamespace(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        user_id="u1",
+        meta={"trace_id": "tr-recov", "recover_attempts": 1},
+        trace_id=None,
+    )
+    state = TurnState.from_journal(_partial_journal())
+    released: list[str] = []
+    _patch_recover_lease_heartbeat(monkeypatch)
+    badge_writes = _patch_recovered_badge_store(monkeypatch)
+    clear_active_coordination()
+
+    async def _fake_orphan(**kwargs):
+        return None
+
+    async def _arm(plan, seed_completed, **kwargs):
+        session = CoordinationSession(
+            execution_id=kwargs.get("execution_id") or "exec-crash-1",
+            total_workers=2,
+            conversation_id=conversation_id,
+        )
+        set_active_coordination(session)
+        # Recover binds the turn synchronously after arm — never after the drive.
+        assert session.recovered_turn_id == ""
+        return ToolResult(tool_call_id="t1", success=True, output="armed")
+
+    async def _factory(lease_arg, state_arg, *, sink):
+        tool = MagicMock()
+        tool.resume_plan = _arm
+        return tool
+
+    async def _fake_salvage(**kwargs):
+        raise AssertionError("successful redrive must not salvage")
+
+    async def _fake_release(mid, *, owner_id=None):
+        released.append(mid)
+
+    set_crash_delegate_factory(_factory)
+    try:
+        monkeypatch.setattr(
+            "agentcore.runtime.interaction_orphan.orphan_turn_before_recover",
+            _fake_orphan,
+        )
+        monkeypatch.setattr(
+            "agentcore.runtime.leases.sweeper.salvage_interrupted_turn",
+            _fake_salvage,
+        )
+        monkeypatch.setattr(
+            "agentcore.runtime.leases.service.release_turn_lease",
+            _fake_release,
+        )
+        await recover_expired_lease(lease, state)
+        session = active_coordination("exec-crash-1")
+    finally:
+        set_crash_delegate_factory(None)
+        clear_active_coordination()
+
+    assert len(badge_writes) == 1
+    badge = badge_writes[0]
+    assert badge["message_id"] == message_id
+    assert badge["conversation_id"] == conversation_id
+    assert badge["metadata"] == {"recovered": True}
+    assert badge["merge"] is True
+    # Empty body: the merge must not clobber whatever the crashed turn streamed.
+    assert badge["content"] == ""
+
+    assert session is not None
+    assert session.recovered_turn_id == message_id
+    # Ownership handed back only after the lease is gone, so the closing turn can
+    # re-acquire it instead of racing recover's release.
+    assert session.turn_attached is False
+    assert released == [message_id]
+
+
 async def test_recover_expired_lease_salvages_when_rebuild_fails(monkeypatch):
     """Factory rebuild returns None → existing salvage + lease release (no extra fallback)."""
     from agentcore.runtime.recover import recover_expired_lease

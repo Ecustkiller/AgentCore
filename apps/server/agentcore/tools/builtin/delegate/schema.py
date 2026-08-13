@@ -6,9 +6,10 @@ lives in the CEO core; advanced HOW lives in ``consult(team_orchestration_advanc
 
 from __future__ import annotations
 
+from agentcore.runtime.delegate.force_scopes import FORCE_GATES
 from agentcore.runtime.delegate.playbook_declaration import HANDWRITTEN_TASKS_SKELETON
 from agentcore.runtime.delegate.task_models import TASK_MODEL_SCHEMA_PROPS
-from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
+from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS, MAX_GAP_FILL_ADDS
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, playbook_args_schema_description
 
 # Shared task-level deliverable shape (delegate tasks + replan binds/add).
@@ -29,7 +30,27 @@ TASK_DELIVERABLE_SCHEMA: dict[str, object] = {
         "artifacts": {"type": "array", "items": {"type": "string"}},
         "artifact_dir": {
             "type": "string",
-            "description": "约定落盘目录（可选；可共享；省略走 stage_dirs 默认）。",
+            "description": (
+                "约定落盘目录（可选；可共享；省略落 AgentCore/文档/工作稿）。"
+                "写码类【勿】填这个，改用 workspace_native。"
+            ),
+        },
+        "workspace_native": {
+            "type": "boolean",
+            "description": (
+                "true=产物是用户工作区原生文件（源码 / 项目文件，就地改或新建），"
+                "不套 AI 工作间落点——实现功能 / 改代码 / 写测试类节点填 true，"
+                "路径未知也能填（worker 自己定位）。"
+                "优先级最高：与 artifacts / artifact_dir 里的 AgentCore/文档 落点冲突时以本字段为准。"
+            ),
+        },
+        "citation_mode": {
+            "type": "string",
+            "enum": ["immediate", "two_phase"],
+            "description": (
+                "调研成稿引用验收档：two_phase=A 草案不跑成稿引用闸、同 worker 升 B 再验。"
+                "手写成文同构（多角调研 + 主笔）须显式声明，省略即不进两阶段。"
+            ),
         },
         "strict": {
             "type": "boolean",
@@ -46,6 +67,8 @@ DELEGATE_DESCRIPTION = (
     "【看】→deliverable.form=prose；【用】→files。"
     "多任务先判生产者→消费者；互不依赖才平铺并行。"
     "≥1 worker 默认协调（立即返回、可同回合追加同一张图；含单 worker）。"
+    "动【同一支团队】（含批次已收口后补跑/接着干）＝ tasks[] 上填 "
+    "continue_from_run_id（续派，不限条数）/ replaces_run_id（补缺口），不是冷派整团。"
     "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
     "建站快捷套餐必填 playbook_args.topic；绿场必填 app。"
     "勿再填已删的 completion_criteria / requires_files / name / must_contain / min_length / objective / playbook_none_reason。"
@@ -97,10 +120,20 @@ DELEGATE_PARAMETERS = {
                         "type": "string",
                         "enum": ["pass_through", "summarize"],
                     },
-                    "replaces_run_id": {"type": "string"},
+                    "replaces_run_id": {
+                        "type": "string",
+                        "description": (
+                            "补缺口：接手某个失败/跳过的 run（填其 run_id）。"
+                            f"单次≤{MAX_GAP_FILL_ADDS}。"
+                        ),
+                    },
                     "continue_from_run_id": {
                         "type": "string",
-                        "description": "同人续派（调查后确认修 / 改稿）；填已完成 run_id。",
+                        "description": (
+                            "同人续派（调查后确认修 / 改稿 / 收口后接着干）；填已完成 run_id。"
+                            "这是动同一支团队的正式入口，条数不限；"
+                            "批次已收口也走这里，勿冷派整团。"
+                        ),
                     },
                     "checkpoint_after": {"type": "boolean"},
                     "bind_after_deps": {"type": "boolean"},
@@ -112,10 +145,10 @@ DELEGATE_PARAMETERS = {
                     "target_folder_id": {
                         "type": "string",
                         "description": (
-                            "已解析项目 folder id。指定该队员坐哪张桌（换桌+记忆跟桌；"
-                            "不改本会话 folder_id）。跨已登记项目（只读摸底与写盘通吃）须点名；"
+                            "已解析文件夹 id。指定该队员坐哪张桌（换桌+记忆跟桌；"
+                            "不改本会话 folder_id）。跨已登记文件夹（只读摸底与写盘通吃）须点名；"
                             "写不写盘由 write_scope/grant 正交（默认 none）；"
-                            "裸聊写盘缺桌由运行时自动建云桌，勿为过闸 create_project；"
+                            "裸聊写盘缺桌由运行时自动建云桌，勿为过闸 create_folder；"
                             "有出生省略=默认桌；子派默认继承。"
                         ),
                     },
@@ -137,7 +170,14 @@ DELEGATE_PARAMETERS = {
             "default": True,
             "description": "协调（默认 true）；false=阻塞。",
         },
-        "force": {"type": "boolean", "default": False},
+        "force": {
+            "type": "array",
+            "items": {"type": "string", "enum": list(FORCE_GATES)},
+            "description": (
+                "逐闸点名放行（只开列出的那道，没有「全开」）：见各闸拒绝正文里的 scope 名。"
+                "动同一支团队请改用 tasks[].continue_from_run_id / replaces_run_id，别用本参数。"
+            ),
+        },
         "playbook": {
             "type": "string",
             "enum": sorted(PLAYBOOKS),

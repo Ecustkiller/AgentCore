@@ -296,6 +296,7 @@ async def test_prose_worker_still_offered_write_tools():
         system_prompt="SYS",
         user_message="让每个 AI 打招呼",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.COMPLETED
@@ -317,6 +318,7 @@ async def test_prose_worker_still_offered_write_tools():
         system_prompt="SYS",
         user_message="让每个 AI 打招呼",
         execution_id="e2",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan2, id_exec)
     assert "form=prose" in id_provider.system_messages[0]
@@ -367,6 +369,7 @@ async def test_files_worker_keeps_write_tools_and_identity():
         system_prompt="SYS",
         user_message="做一个网页",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.COMPLETED
@@ -411,8 +414,8 @@ def test_cold_start_allows_artifacts():
     )
     assert errs == []
     assert plan.nodes[0].deliverable is not None
-    # 调研语义 → 裸文件名迁入约定文档目录；冷启动不再因 artifacts 非空而拒。
-    assert plan.nodes[0].deliverable.artifacts == ["AgentCore/文档/research/brief.md"]
+    # 裸文件名迁入默认落点（无显式路径 → 工作稿/）；冷启动不再因 artifacts 非空而拒。
+    assert plan.nodes[0].deliverable.artifacts == ["AgentCore/文档/工作稿/brief.md"]
     assert validate_cold_start_explore_deliverables(plan) is None
 
 def test_cold_start_allows_all_prose():

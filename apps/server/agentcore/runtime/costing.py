@@ -4,9 +4,10 @@ Value objects / ``run_cost_from_calls`` live in the leaf ``agentcore.costing``
 (so ``db`` never imports this module). This file keeps RunState reshape builders
 and re-exports the leaf symbols for the historical ``runtime.costing`` import path.
 
-Money stays integer nano-CNY throughout; pricing happens exactly once via
+Money stays integer nano throughout, in the currency each row's price card was
+written in (curated CNY / community USD — no FX); pricing happens exactly once via
 :func:`agentcore.llm.pricing.calculate_cost`. This module only *reshapes*
-priced states / usages into ledger rows — it never re-prices.
+priced states / usages into ledger rows — it never re-prices and never converts.
 Ledger routing by ``credential_source`` (on the priced ``Cost`` / cost dict):
 platform/vendor → ``cost_total_nano`` (quota / admin); user → ``cost_estimated_nano``
 (``cost_total_nano`` stays 0 so BYOK estimates never pollute ``enforce_quota``).
@@ -17,11 +18,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from typing import Any
 
+from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.costing import (
     COST_KEYS,
     PERSONA_CEO,
+    PERSONA_DESCRIPTION,
+    PERSONA_REWRITE,
     ROLE_ARENA,
+    ROLE_ASSIST,
     ROLE_CAPTAIN,
     ROLE_MEMBER,
     ROLE_MEMORY,
@@ -33,10 +38,12 @@ from agentcore.costing import (
     run_cost_from_calls,
     split_cost,
 )
-from agentcore.llm.pricing import CredentialSource, calculate_cost
+from agentcore.llm.pricing import CURRENCY_CNY, CredentialSource, calculate_cost
 from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.citations import merge_citations
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+
+logger = get_logger(__name__)
 
 # Historical private aliases (call sites / tests may still reference these names).
 _COST_KEYS = COST_KEYS
@@ -48,7 +55,10 @@ __all__ = [
     "COST_KEYS",
     "USAGE_KEYS",
     "PERSONA_CEO",
+    "PERSONA_DESCRIPTION",
+    "PERSONA_REWRITE",
     "ROLE_ARENA",
+    "ROLE_ASSIST",
     "ROLE_CAPTAIN",
     "ROLE_MEMBER",
     "ROLE_MEMORY",
@@ -59,7 +69,6 @@ __all__ = [
     "WorkerResultAccumulator",
     "aggregate_cost",
     "arena_run_cost",
-    "background_run_cost",
     "captain_run_cost_from_state",
     "member_run_cost",
     "priced_call_cost",
@@ -189,43 +198,6 @@ def captain_run_cost_from_state(run_id: str, state: RunState) -> RunCost:
         rounds=state.rounds,
         duration_ms=state.duration_ms,
     )
-def background_run_cost(
-    role: str,
-    model: str,
-    usage: TokenUsage,
-    *,
-    credential_source: CredentialSource | None = None,
-) -> RunCost:
-    """A ledger row for an off-turn background LLM call (标题生成 / 记忆整合).
-    These calls belong to no Run tree and no assistant turn, so unlike the
-    captain/member builders there is no ``RunState`` to read — the row is priced
-    straight off the call's :class:`TokenUsage` via the one ``calculate_cost``
-    (不变量 #2), under a fresh ``run_id``. The persistence layer attaches it with
-    ``message_id = NULL`` (Gap C): it then SUMs into the account/conversation
-    totals and shows as its own ``role`` line on the dashboard payroll, but never
-    lands in a single turn's per-Agent 工资单 (which is fetched by ``message_id``)
-    nor inflates the「请求数」(``COUNT(DISTINCT message_id)`` ignores NULL).
-    ``rounds`` is 1 (one LLM call); ``duration_ms`` is left 0 — these are
-    best-effort background passes, not user-visible turns whose latency matters.
-    """
-    body, billed, estimated, currency = _split_cost(
-        asdict(calculate_cost(model, usage, credential_source=credential_source))
-    )
-    return RunCost(
-        run_id=new_id(),
-        parent_run_id=None,
-        agent_id=None,
-        role=role,
-        persona=None,
-        model=model,
-        tokens=usage.as_dict(),
-        cost=body,
-        cost_total_nano=billed,
-        cost_estimated_nano=estimated,
-        currency=currency,
-        rounds=1,
-        duration_ms=0,
-    )
 def priced_call_cost(
     *,
     model: str,
@@ -277,10 +249,11 @@ def vision_run_cost(
     cannot fold into the run's usage — that would misprice it at the run's tier. Priced
     here exactly once via the one ``calculate_cost`` (不变量 #2) under the dedicated
     ``vision`` role, then routed into the turn's ``cost_runs`` via ``ToolContext.cost_sink``
-    so it lands on the turn's ``message_id`` (in-turn spend, UNLIKE ``background_run_cost``'s
-    off-turn NULL). ``parent_run_id`` is the calling captain's run id, so the spend nests
-    under the captain in the turn's run tree; ``rounds`` is 1 (one vision call). A unique
-    ``vis_`` run id keeps the ledger's idempotent upsert-by-run_id honest.
+    so it lands on the turn's ``message_id`` (in-turn spend, unlike an off-turn background
+    call whose ``message_id`` stays NULL). ``parent_run_id`` is the calling captain's run
+    id, so the spend nests under the captain in the turn's run tree; ``rounds`` is 1 (one
+    vision call). A unique ``vis_`` run id keeps the ledger's idempotent upsert-by-run_id
+    honest.
     """
     body, billed, estimated, currency = _split_cost(
         asdict(calculate_cost(model, usage, credential_source=credential_source))
@@ -302,12 +275,34 @@ def vision_run_cost(
     )
 
 
+def _row_currency(row: Mapping[str, Any]) -> str:
+    """A ledger row's currency — scalar column first, then the JSONB body."""
+    cost = row.get("cost") or {}
+    return str(row.get("currency") or cost.get("currency") or CURRENCY_CNY)
+
+
 def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
     """Sum per-run cost rows into the turn total carried on ``message_end.cost``.
+
     Takes the ``asdict(RunCost)`` rows the pipeline builds (captain + members) and
-    returns the ``{input, cached, output, total, currency, pricing_source}`` block.
-    ``total`` is billed nano (SUM of ``cost_total_nano``); ``estimated_total`` is
-    the BYOK estimate SUM. Never re-prices combined usage.
+    returns ``{input, cached, output, total, currency, estimated_total,
+    estimated_currency, pricing_source}``. Never re-prices combined usage.
+
+    Two money buckets, each self-consistent — mirroring the SQL rollup in
+    ``db.repositories.billing._aggregate`` so the live turn and the replayed
+    ledger agree:
+
+    - **billed**: ``input``/``cached``/``output`` come only from rows that
+      actually billed, so ``input + output == total`` holds. Folding every row's
+      components in (as this used to) made a pure-BYOK turn report non-zero
+      components against ``total == 0``, and — once BYOK estimates became USD —
+      would have added dollars to yuan.
+    - **estimated**: ``estimated_total`` is the BYOK SUM, labelled by
+      ``estimated_currency``. A consumer picking this number must read that
+      currency, not ``currency`` (which labels the billed side).
+
+    Per-agent components stay available in full on ``GET /messages/{id}/cost``,
+    which reads the ledger rows themselves.
     """
     agg: dict[str, int | str] = {
         "input": 0,
@@ -315,28 +310,58 @@ def aggregate_cost(cost_runs: Sequence[dict]) -> dict[str, int | str]:
         "output": 0,
         "total": 0,
         "estimated_total": 0,
-        "currency": "CNY",
+        "currency": CURRENCY_CNY,
+        "estimated_currency": CURRENCY_CNY,
         "pricing_source": "curated",
     }
     sources: set[str] = set()
+    billed_currencies: list[str] = []
+    estimated_currencies: list[str] = []
     for row in cost_runs:
         cost = row.get("cost") or {}
-        agg["input"] = int(agg["input"]) + int(cost.get("input", 0))
-        agg["cached"] = int(agg["cached"]) + int(cost.get("cached", 0))
-        agg["output"] = int(agg["output"]) + int(cost.get("output", 0))
-        # Billed vs estimated stay on scalar columns — never fall back to
-        # cost.total (user estimates live there for display but must not bill).
-        agg["total"] = int(agg["total"]) + int(row.get("cost_total_nano", 0) or 0)
-        agg["estimated_total"] = int(agg["estimated_total"]) + int(
-            row.get("cost_estimated_nano", 0) or 0
-        )
+        billed = int(row.get("cost_total_nano", 0) or 0)
+        estimated = int(row.get("cost_estimated_nano", 0) or 0)
+        currency = _row_currency(row)
+        if billed:
+            agg["input"] = int(agg["input"]) + int(cost.get("input", 0))
+            agg["cached"] = int(agg["cached"]) + int(cost.get("cached", 0))
+            agg["output"] = int(agg["output"]) + int(cost.get("output", 0))
+            agg["total"] = int(agg["total"]) + billed
+            billed_currencies.append(currency)
+        if estimated:
+            agg["estimated_total"] = int(agg["estimated_total"]) + estimated
+            estimated_currencies.append(currency)
         if cost.get("pricing_source"):
             sources.add(str(cost["pricing_source"]))
+    agg["currency"] = _bucket_currency(billed_currencies, bucket="billed")
+    agg["estimated_currency"] = _bucket_currency(estimated_currencies, bucket="estimated")
     if len(sources) == 1:
         agg["pricing_source"] = next(iter(sources))
     elif sources:
         agg["pricing_source"] = "estimated"
     return agg
+
+
+def _bucket_currency(currencies: Sequence[str], *, bucket: str) -> str:
+    """The single currency a money bucket is denominated in.
+
+    Empty bucket → ``CNY`` (a zero needs a unit, and the billed ledger is CNY).
+    Two currencies in one bucket cannot be summed without FX, which this product
+    does not do — that only happens when a platform model ships without its
+    curated CNY card (F4 漏配), so log it loudly and keep the first.
+    """
+    if not currencies:
+        return CURRENCY_CNY
+    first = currencies[0]
+    distinct = set(currencies)
+    if len(distinct) > 1:
+        logger.warning(
+            "cost.currency_mixed",
+            bucket=bucket,
+            currencies=sorted(distinct),
+            kept=first,
+        )
+    return first
 class WorkerResultAccumulator:
     """The shared「用量 + 账目 + 引用」roll-up for orchestration tools.
     ``delegate`` (cold workers) and ``revise`` (a recalled author) both spin up
@@ -364,6 +389,10 @@ class WorkerResultAccumulator:
             "scope_signals": 0,
             "escalations": 0,
         }
+        # 续派次数 (turn_metrics.revises) 的承载处，与 collab 同口径：它必须活在【会被
+        # merge 的对象】上。挂在 delegate 工具实例上时，``absorb_children`` 合并完账目就
+        # ``_children.clear()``，lead 子团队的续派随子工具一起消失，revises 系统性少计。
+        self.continuations: list[str] = []
     def add_usage(self, usage: Mapping[str, int]) -> None:
         """Fold one run's (or sub-team's) short-key token usage into the total."""
         for key in self.usage:
@@ -416,5 +445,6 @@ class WorkerResultAccumulator:
         self.add_usage(other.usage)
         self.run_ledger.extend(other.run_ledger)
         merge_citations(self.citations, other.citations)
+        self.continuations.extend(other.continuations)
         for key in self.collab:
             self.collab[key] += other.collab.get(key, 0)

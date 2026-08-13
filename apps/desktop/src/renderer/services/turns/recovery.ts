@@ -69,6 +69,20 @@ function clearAfterUserForReplay(
 }
 
 /**
+ * Clear-then-fold prep for any full-turn replay that lands on a turn we already
+ * hold a partial of (rejoin / 对话级订阅让位后重连). Without it the replay appends
+ * its transcript onto the partial and the reply reads twice.
+ *
+ * @returns whether a partial was actually reset (false = nothing to anchor on).
+ */
+export function resetPartialTurnForReplay(conversationId: string): boolean {
+  const lastUser = lastUserMessageOf(conversationId);
+  if (!lastUser) return false;
+  clearAfterUserForReplay(conversationId, lastUser.id);
+  return true;
+}
+
+/**
  * Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b).
  *
  * Post-decoupling (slice 1a) a dropped connection no longer kills a turn — it

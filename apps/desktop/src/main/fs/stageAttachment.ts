@@ -2,7 +2,8 @@
  * 引用即驻留：把用户选中的本机文件（含区外 / 二进制）复制进对话工作区 ``attachments/``。
  *
  * 绝对路径只在主进程出现；renderer 只拿到 ``name`` / ``workspacePath`` / 可选文本预览。
- * 云占位（OneDrive 按需下载等）在复制前检测，复制本身带短超时，避免 hydration 挂死。
+ * 云占位（OneDrive 按需下载等）**不做前置检测**：读/复制各带短超时，失败之后才回头诊断，
+ * 免得每附加一个文件都先为一次 powershell 探测付秒级延迟。
  */
 
 import { execFile } from "node:child_process";
@@ -11,7 +12,7 @@ import { promises as fs, createReadStream, createWriteStream } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
-import type { FsResult } from "@shared/ipc-contract";
+import type { FsErrorCode, FsResult } from "@shared/ipc-contract";
 import { BrowserWindow, app, dialog } from "electron";
 import { IMAGE_MIME, TEXT_PREVIEW_CAP } from "./constants";
 import { locate, realInside } from "./pathGuard";
@@ -105,7 +106,7 @@ export async function hydrateStagingFromDisk(): Promise<void> {
       continue;
     }
     const absPath = join(idDir, fileName);
-    const mat = await materializeSource(absPath);
+    const mat = await materializeSource(absPath, "staged");
     if (!mat.ok) {
       try {
         await fs.rm(idDir, { recursive: true, force: true });
@@ -215,6 +216,9 @@ async function listExistingAttachmentNames(
 /**
  * Windows 云占位检测：Offline / RecallOnDataAccess / RecallOnOpen。
  * 非 Windows 返回 false（仍靠复制超时兜底）。
+ *
+ * 每次调用要起一个 powershell.exe（冷启动 300ms–2s，上限 2s），所以只允许出现在
+ * 失败分支上——见 ``diagnoseCloudFailure``。
  */
 export async function isCloudPlaceholder(absPath: string): Promise<boolean> {
   if (process.platform !== "win32") return false;
@@ -239,6 +243,32 @@ export async function isCloudPlaceholder(absPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * 待读字节的来源：``user`` = 用户挑的原始路径（可能是 OneDrive 云占位）；
+ * ``staged`` = ``attach-staging/`` 下本进程写的副本，不可能是占位。
+ */
+type ByteSource = "user" | "staged";
+
+type FsFailure = { ok: false; reason: string; code: FsErrorCode };
+
+/**
+ * 读/复制失败后追问一句「是不是云占位」，把泛化 IO 错误升级成可操作的未同步提示。
+ *
+ * 只在失败分支调用：正常附件一次 powershell 都不起；超时分支本就报未同步提示，
+ * 无需再探（那条路径非 Windows 也一直靠它兜底）。
+ */
+async function diagnoseCloudFailure(
+  absPath: string,
+  source: ByteSource,
+  fallback: FsFailure,
+): Promise<FsFailure> {
+  if (source === "staged") return fallback;
+  if (await isCloudPlaceholder(absPath)) {
+    return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
+  }
+  return fallback;
 }
 
 async function withTimeout<T>(
@@ -322,6 +352,7 @@ async function resolveDestAbs(
 
 async function materializeSource(
   absPath: string,
+  source: ByteSource,
 ): Promise<FsResult<Omit<StagingEntry, "absPath"> & { absPath: string }>> {
   let st: Awaited<ReturnType<typeof fs.stat>>;
   try {
@@ -342,10 +373,6 @@ async function materializeSource(
       reason: `文件超过 ${Math.round(ATTACH_MAX_BYTES / (1024 * 1024))}MB 上限`,
       code: "invalid",
     };
-  }
-
-  if (await isCloudPlaceholder(absPath)) {
-    return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
   }
 
   const ext = extname(absPath).toLowerCase();
@@ -385,11 +412,11 @@ async function materializeSource(
     if (msg.includes("TIMEOUT")) {
       return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
     }
-    return {
+    return diagnoseCloudFailure(absPath, source, {
       ok: false,
       reason: "读取文件失败",
       code: "error",
-    };
+    });
   }
 
   const binary = sniffBinary(head);
@@ -427,6 +454,7 @@ async function materializeSource(
 async function writeToDest(
   entry: StagingEntry,
   dest: StageDest,
+  source: ByteSource,
 ): Promise<FsResult<StagedAttachmentData>> {
   const used = await listExistingAttachmentNames(
     dest.rootId,
@@ -443,11 +471,11 @@ async function writeToDest(
     if (msg.includes("TIMEOUT")) {
       return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
     }
-    return {
+    return diagnoseCloudFailure(entry.absPath, source, {
       ok: false,
       reason: "复制到工作区失败",
       code: "error",
-    };
+    });
   }
 
   return {
@@ -482,7 +510,12 @@ async function stageToTemp(
     if (msg.includes("TIMEOUT")) {
       return { ok: false, reason: UNSYNCED_HINT, code: "busy" };
     }
-    return { ok: false, reason: "暂存附件失败", code: "error" };
+    // 暂存的源恒是用户挑的原始路径（只有 stageFromAbs 走到这），值得回头诊断一次。
+    return diagnoseCloudFailure(entry.absPath, "user", {
+      ok: false,
+      reason: "暂存附件失败",
+      code: "error",
+    });
   }
 
   staging.set(id, {
@@ -513,9 +546,9 @@ async function stageFromAbs(
   } catch {
     /* keep lexical */
   }
-  const mat = await materializeSource(resolved);
+  const mat = await materializeSource(resolved, "user");
   if (!mat.ok) return mat;
-  if (dest) return writeToDest(mat.data, dest);
+  if (dest) return writeToDest(mat.data, dest, "user");
   return stageToTemp(mat.data);
 }
 
@@ -727,7 +760,7 @@ export async function finalizeStagedAttachment(
       code: "not_found",
     };
   }
-  const out = await writeToDest(entry, dest);
+  const out = await writeToDest(entry, dest, "staged");
   if (out.ok) {
     staging.delete(stagingId);
     try {

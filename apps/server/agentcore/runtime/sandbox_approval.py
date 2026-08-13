@@ -14,10 +14,11 @@ the workspace is cloud — they still share the turn ApprovalGate.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
 from agentcore.core.types import PermissionAxes
+from agentcore.runtime.always_confirm import requires_always_confirm
 
 if TYPE_CHECKING:
     from agentcore.workspace.protocol import WorkspaceBackend
@@ -40,25 +41,31 @@ def execution_approval_posture(backend: WorkspaceBackend | None) -> ExecutionApp
     # Cloud (location=server): no real sandbox → tools withheld at registry;
     # gVisor on → true isolation, execution auto-passes.
     # Dev escape hatch (CODE_EXECUTE_CLOUD_ENABLED, 安全权限与治理 §5.4): tools ARE
-    # registered despite UNAVAILABLE here — the posture only feeds auto-pass, and cloud
-    # workers carry no per-call gate anyway (worker_gate_applies is False), so the
-    # escape hatch executes ungated without touching this table.
+    # registered despite UNAVAILABLE here — the posture only feeds auto-pass, and a
+    # cloud worker's execution-class call skips the per-call card via
+    # :func:`cloud_worker_skips_per_call_gate` anyway, so the escape hatch executes
+    # ungated without touching this table.
     if settings.gvisor_enabled:
         return ExecutionApprovalPosture.AUTO_PASS
     return ExecutionApprovalPosture.UNAVAILABLE
 
 
 def worker_gate_applies(backend: WorkspaceBackend | None) -> bool:
-    """Whether delegated workers share the turn ApprovalGate for *all* GRANTABLE tools.
+    """Whether delegated workers need a per-call card for *all* GRANTABLE tools.
 
     Local subprocess: yes (real machine). Cloud: not for the full GRANTABLE set —
     either tools are withheld (no sandbox) or gVisor isolates execution (AUTO_PASS).
-    File ops on cloud still skip the gate when ``file_write=session``; under
-    ``file_write=ask`` they keep the gate — see :func:`cloud_worker_skips_per_call_gate`.
+    File ops on cloud still skip the card when ``file_write=session``; under
+    ``file_write=ask`` they keep it — see :func:`cloud_worker_skips_per_call_gate`.
 
-    Desktop-touch tools (MCP / Host) still need the gate on cloud+desktop — see
+    Desktop-touch tools (MCP / Host) still need a card on cloud+desktop — see
     :func:`is_desktop_touch_tool`. CEO / captain always gate GRANTABLE regardless
     of backend location (tool_exec only narrows when ``role=="worker"``).
+
+    This is a *policy* predicate consumed by the tool_exec chokepoint (and the
+    kickoff-card decision), **not** a hand-out rule: whether a worker is handed the
+    turn's ``ApprovalGate`` object is no longer predicted upstream — it always is,
+    when the turn has one.
     """
     return backend is not None and backend.location == "local"
 
@@ -67,19 +74,24 @@ def cloud_worker_skips_per_call_gate(
     backend: WorkspaceBackend | None,
     tool_name: str,
     *,
+    arguments: dict[str, Any] | None = None,
     permission_axes: PermissionAxes | None = None,
     file_op_tools: frozenset[str] = frozenset(),
 ) -> bool:
     """True when the cloud-worker path may drop ``needs_approval`` for this tool.
 
     Local workers never skip via this helper (``worker_gate_applies``).
-    Desktop-touch (MCP / Host) never skip. File-mutation class under
-    ``file_write=ask`` never skip (谨慎 must prompt reversible writes on cloud).
-    Other server-sandbox tools on cloud stay historically ungated.
+    Desktop-touch (MCP / Host) never skip. 恒确认 shapes (``git push`` /
+    ``create_pr`` / ``host_package_install``) never skip — the cloud sandbox
+    isolates the server, not the remote being published to. File-mutation class
+    under ``file_write=ask`` never skip (谨慎 must prompt reversible writes on
+    cloud). Other server-sandbox tools on cloud stay historically ungated.
     """
     if worker_gate_applies(backend):
         return False
     if is_desktop_touch_tool(tool_name):
+        return False
+    if requires_always_confirm(tool_name, arguments):
         return False
     return not (
         permission_axes is not None

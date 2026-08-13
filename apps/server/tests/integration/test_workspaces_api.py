@@ -259,8 +259,14 @@ async def test_trash_list_restore_by_ws_id(client, _fs_data_dir):
     assert r.status_code == 200
 
 
-async def test_delete_agentcore_expands_no_500(client, _fs_data_dir):
-    """DELETE AgentCore/ expands children (422 on IO errors, never self-nest 500)."""
+async def test_delete_agentcore_soft_deletes_whole_dir(client, _fs_data_dir):
+    """DELETE AgentCore/ soft-deletes the visible dir whole and restores it back.
+
+    Cloud workspaces keep ``{index,trash,baselines}`` outside the user tree, so the
+    trash destination is no longer a descendant of ``AgentCore/`` and there is
+    nothing to expand by children — that path survives only for the in-tree
+    (local / sidecar) layout, covered in ``test_workspace_trash``.
+    """
     await register_and_login(client, "wsxacdel")
     conv_id = await _new_conversation(client, "AcDel")
     ws = f"conv:{conv_id}"
@@ -277,7 +283,7 @@ async def test_delete_agentcore_expands_no_500(client, _fs_data_dir):
     listed = await client.get(f"/v1/workspaces/{ws}/trash")
     assert listed.status_code == 200, listed.text
     entry = next(
-        e for e in listed.json()["data"] if e["original_path"] == "AgentCore/规则"
+        e for e in listed.json()["data"] if e["original_path"] == "AgentCore"
     )
     assert (
         await client.post(f"/v1/workspaces/{ws}/trash/{entry['entry_id']}/restore")

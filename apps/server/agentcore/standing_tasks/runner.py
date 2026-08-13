@@ -51,6 +51,10 @@ logger = get_logger(__name__)
 
 _SUMMARY_MAX = 500
 
+# Inbox copy for a fire the task-level mutex refused (STD-A4). Terminal on
+# purpose: the event is lost, not queued — the user decides whether to re-fire.
+_LEASE_BUSY_ERROR = "上一次代跑仍在进行中，本次触发未执行（未自动补跑）"
+
 
 def _truncate_summary(text: str | None) -> str | None:
     if not text:
@@ -110,8 +114,17 @@ async def run_standing_task_job(
     lease_owner: str | None = None,
     advance_schedule: bool = True,
     event_text: str | None = None,
+    trigger_source: str = "schedule",
 ) -> None:
-    """Run one claimed standing-task fire end-to-end."""
+    """Run one claimed standing-task fire end-to-end.
+
+    ``trigger_source`` — not ``advance_schedule`` — decides whether a task
+    disabled between claim and start still runs: the scheduler pre-advances the
+    clock and so passes ``advance_schedule=False``, which used to make that guard
+    unreachable. Webhook fires are refused at the route while manual「立即跑一次」
+    deliberately runs disabled tasks (验收 / 收件箱重跑), so only the schedule path
+    aborts here.
+    """
     sink = EventSink()
     conversation_id: str | None = None
     try:
@@ -122,7 +135,7 @@ async def run_standing_task_job(
                     run_id, error="站立任务不存在"
                 )
                 return
-            if not task.enabled and advance_schedule:
+            if not task.enabled and trigger_source == "schedule":
                 # Disabled after claim (race) — abort without advancing further.
                 await StandingTaskRunRepository(session).mark_failed(
                     run_id, error="站立任务已停用"
@@ -483,6 +496,7 @@ def spawn_standing_task_run(
     lease_owner: str | None = None,
     advance_schedule: bool = True,
     event_text: str | None = None,
+    trigger_source: str = "schedule",
 ) -> None:
     """Fire-and-forget a standing-task job."""
     spawn_background(
@@ -492,6 +506,7 @@ def spawn_standing_task_run(
             lease_owner=lease_owner,
             advance_schedule=advance_schedule,
             event_text=event_text,
+            trigger_source=trigger_source,
         )
     )
 
@@ -515,6 +530,11 @@ async def dispatch_standing_task(
     the existing lease columns before spawning. An unexpired lease →
     ``ConflictError`` (HTTP 409) — never a silent second run. The scheduler
     path already claimed via ``claim_due`` and passes ``lease_owner``.
+
+    A refused claim also lands a terminal inbox row for non-manual triggers, so a
+    webhook event dropped by the mutex is visible to the user instead of只回一个
+    409 到没人看的调用方。Manual「立即跑一次」skips the row: its caller *is* the
+    user and already sees the 409. The dropped fire is **not** re-run.
     """
     from uuid import uuid4
 
@@ -538,6 +558,22 @@ async def dispatch_standing_task(
                 lease_seconds=settings.standing_task_lease_seconds,
             )
             if claimed is None:
+                if trigger_source != "manual":
+                    runs = StandingTaskRunRepository(session)
+                    skipped = await runs.create(
+                        standing_task_id=task_id,
+                        user_id=user_id,
+                        conversation_id=pinned_conversation_id,
+                        status="failed",
+                        trigger_source=trigger_source,
+                    )
+                    await runs.mark_failed(skipped.id, error=_LEASE_BUSY_ERROR)
+                    logger.info(
+                        "standing_task.fire_skipped_busy",
+                        run_id=skipped.id,
+                        task_id=task_id,
+                        trigger_source=trigger_source,
+                    )
                 raise ConflictError("站立任务正在执行中，请稍后再试")
 
         try:
@@ -560,5 +596,6 @@ async def dispatch_standing_task(
         lease_owner=claimed_owner,
         advance_schedule=advance_schedule,
         event_text=event_text,
+        trigger_source=trigger_source,
     )
     return run_id

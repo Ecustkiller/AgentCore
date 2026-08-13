@@ -75,10 +75,12 @@ function isResumeRequestRefused(err: unknown): boolean {
 
 /**
  * Paused frame is gone / already settled — keep the card dropped and show a
- * plain banner (no one-click resume retry). Covers cloud resume 404/410,
+ * plain banner (no one-click resume retry). 冷路提交（`submitInteraction`）也用它
+ * 分辨「这张卡已经被结掉了」与「这次没发出去」：前者不能把卡放回可点，否则另一端早点掉的
+ * 卡会被一点再点、次次 404。Covers cloud resume 404/410,
  * product copy「挂起的回合不存在或已处理」, and sidecar PAUSED_TURN_NOT_FOUND.
  */
-function isPausedFrameGone(err: unknown): boolean {
+export function isPausedFrameGone(err: unknown): boolean {
   if (!(err instanceof StreamError)) return false;
   if (err.kind === "http" && (err.status === 404 || err.status === 410)) {
     return true;

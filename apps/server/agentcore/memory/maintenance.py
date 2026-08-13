@@ -40,10 +40,15 @@ class MemoryUpdateItem:
 
     Built from the ops that landed in a file that actually changed this pass (Agent记忆与
     知识系统 §1.6). ``file`` is a friendly label (偏好 / 画像 / 主题·<slug>), ``scope`` is
-    ``"global"`` or ``"project"`` (the conversation's project layer), ``content`` is the
+    ``"global"`` or ``"project"`` (the conversation's folder layer), ``content`` is the
     bullet text for add/update or the matched text for remove. ``project_id`` is the
-    folder id when scope is project (desktop 最近更新 deep-link). Serialized to the
+    folder id when scope is not global (desktop 最近更新 deep-link). Serialized to the
     ``memory_updates.items`` JSONB + the firehose event payload via ``dataclasses.asdict``.
+
+    The ``project`` spellings here are the PERSISTED wire shape (JSONB rows already on
+    disk + desktop ``memorySource`` leaf paths + mobile card), not product wording — the
+    容器统一为文件夹 rename (双模式工作区 §5.4) stops at this boundary; moving it needs a
+    backfill, so the UI translates ``project`` → 「本文件夹」on the read side instead.
     """
 
     action: str  # "add" | "update" | "remove"
@@ -109,7 +114,7 @@ def _enforce_topic_cap(
     Core ops and ops on an already-existing topic always pass; new topic files are admitted
     until that scope's total reaches ``cap``, then dropped (Agent记忆与知识系统 §1.5「按作用域
     各算一份」). A non-positive / None cap means no limit. The cap is counted independently
-    for the global and each project layer, since they are separate folders.
+    for the global and each folder layer, since they are separate note sets.
     """
     if not cap or cap <= 0:
         return list(ops)
@@ -148,12 +153,12 @@ async def maintain_user_memory(
     `messages` is the recent conversation window (reconciled against existing memory).
     `today` (ISO date) enables temporal refresh; `section_cap` bounds bullets per section;
     `max_topic_files` caps on-demand topic notes per scope. `folder_id` is the
-    conversation's project (None for a bare chat): it unlocks the PROJECT scope so a fact
-    true only in this project lands in the project layer instead of polluting global memory
+    conversation's folder (None for a bare chat): it unlocks the FOLDER scope so a fact
+    true only in this folder lands in the folder layer instead of polluting global memory
     (Agent记忆与知识系统 §1.5).
 
-    The extractor sees both the global preferences/profile/topics and (when in a project)
-    the project's profile/topics, then emits ops targeting a `(scope, file)`. Ops are grouped
+    The extractor sees both the global preferences/profile/topics and (when in a folder)
+    the folder's profile/topics, then emits ops targeting a `(scope, file)`. Ops are grouped
     per `(scope, file)` and applied independently, so a per-file CAS / edit only touches the
     notes that moved. Returns True iff at least one memory file changed. No ops (or a no-op
     apply) skips the write. Never raises — failures are logged and swallowed.
@@ -168,13 +173,13 @@ async def maintain_user_memory(
     applier = applier or MarkdownMemoryApplier(section_cap=section_cap)
     try:
         global_topics = {m.path for m in await store.list(user_id) if is_topic_path(m.path)}
-        project_topics: set[str] = set()
-        project_profile = ""
+        folder_topics: set[str] = set()
+        folder_profile = ""
         if folder_id:
-            project_topics = {
+            folder_topics = {
                 m.path for m in await store.list(user_id, scope=folder_id) if is_topic_path(m.path)
             }
-            project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
+            folder_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
         current_profile = await store.load(user_id, CORE_MEMORY_FILE)
         current_preferences = await store.load(user_id, PREFERENCES_MEMORY_FILE)
         extract_input = MemoryExtractInput(
@@ -182,11 +187,11 @@ async def maintain_user_memory(
             current_profile=current_profile,
             current_preferences=current_preferences,
             folder_id=folder_id,
-            current_project_memory=project_profile,
+            current_folder_memory=folder_profile,
             messages=messages,
             today=today,
             topic_files=sorted(topic_slug(path) for path in global_topics),
-            project_topic_files=sorted(topic_slug(path) for path in project_topics),
+            folder_topic_files=sorted(topic_slug(path) for path in folder_topics),
         )
         ops = await extractor.extract(extract_input)
         if not ops:
@@ -203,11 +208,11 @@ async def maintain_user_memory(
                 ),
             )
             return False
-        # Existing topics per scope for the cap. Only add the project key when there IS a
-        # project — otherwise ``{None: ..., None: ...}`` would collapse and lose the global set.
+        # Existing topics per scope for the cap. Only add the folder key when there IS a
+        # folder — otherwise ``{None: ..., None: ...}`` would collapse and lose the global set.
         existing_by_scope: dict[MemoryScope, set[str]] = {None: global_topics}
         if folder_id:
-            existing_by_scope[folder_id] = project_topics
+            existing_by_scope[folder_id] = folder_topics
         ops = _enforce_topic_cap(ops, existing_by_scope, max_topic_files)
         # Group by the (scope, file) target so each note is loaded/applied/saved once and a
         # per-file CAS only fires for notes that actually moved.

@@ -75,7 +75,7 @@ export function useWorkspaceModeState(
   const [binding, setBinding] = useState<WorkspaceBinding | null>(null);
   const [roots, setRoots] = useState<FsRoot[]>([]);
   const [containerRootId, setContainerRootId] = useState<string | null>(null);
-  const [projectName, setProjectName] = useState<string | null>(null);
+  const [folderName, setFolderName] = useState<string | null>(null);
   // Track which conversation the in-memory binding belongs to. When the id
   // changes, clear synchronously during render so consumers never see the prior
   // session's effective.rootId (composer Git chip flash) before refresh resolves.
@@ -85,7 +85,7 @@ export function useWorkspaceModeState(
     setBoundConversationId(conversationId);
     setBinding(null);
     setContainerRootId(null);
-    setProjectName(null);
+    setFolderName(null);
     setRoots([]);
   }
 
@@ -109,10 +109,10 @@ export function useWorkspaceModeState(
     const folder = conv?.folderId
       ? (getFolders().find((f) => f.id === conv.folderId) ?? null)
       : null;
-    setProjectName(folder?.name ?? null);
+    setFolderName(folder?.name ?? null);
     try {
       const [b, r] = await Promise.all([
-        getWorkspaceBinding(forId),
+        getWorkspaceBinding(forId, { fresh: true }),
         loadRoots(),
       ]);
       if (conversationIdRef.current !== forId) return;
@@ -145,9 +145,9 @@ export function useWorkspaceModeState(
         binding,
         localContainerRootId: containerRootId,
         roots,
-        projectName,
+        folderName,
       }),
-    [binding, containerRootId, roots, projectName],
+    [binding, containerRootId, roots, folderName],
   );
 
   if (!conversationId || !binding) return null;
@@ -202,16 +202,16 @@ export function WorkspaceModeMenu({
   onActionDone?: () => void;
 }) {
   const { effective, roots, refresh } = state;
-  const { isLocal, rootMissing, rootName, viaProject, projectName } = effective;
+  const { isLocal, rootMissing, rootName, viaFolder, folderName } = effective;
   const desktop = hasLocalFiles();
   const [exitBusy, setExitBusy] = useState(false);
   const handoffArmed = useHandoffArmed(conversationId ?? null);
   const setHandoffArmed = useBackgroundTasksStore((s) => s.setHandoffArmed);
 
-  const title = viaProject
-    ? projectName
-      ? `项目 · ${projectName}`
-      : "项目工作区"
+  const title = viaFolder
+    ? folderName
+      ? `文件夹 · ${folderName}`
+      : "文件夹工作区"
     : isLocal
       ? "本机草稿"
       : "云端草稿";
@@ -220,11 +220,11 @@ export function WorkspaceModeMenu({
     ? rootMissing
       ? "目录在本机不可用"
       : rootName
-        ? viaProject
+        ? viaFolder
           ? `本机路径 · ${rootName}`
           : `默认容器 · ${rootName}`
         : "本机草稿"
-    : viaProject
+    : viaFolder
       ? "云端共享空间"
       : "云端对话";
 
@@ -300,13 +300,13 @@ export function WorkspaceModeMenu({
       prefillRootId
         ? {
             rootId: prefillRootId,
-            projectName: projectName ?? rootName,
+            folderName: folderName ?? rootName,
           }
         : null,
     );
   };
 
-  /** 云会话 → 当前 desk；遗留本机 → 新建云项目再 clone（不改绑本会话）。 */
+  /** 云会话 → 当前 desk；遗留本机 → 新建云文件夹再 clone（不改绑本会话）。 */
   const connectGit = () => {
     let wsId: string | null = null;
     if (!isLocal && conversationId) {
@@ -348,8 +348,8 @@ export function WorkspaceModeMenu({
           <>
             <ModeAction
               icon={<Upload size={14} />}
-              label="导入本机项目到云"
-              hint="可选：新建云项目并导入"
+              label="导入到「我的文件」"
+              hint="可选：新建云文件夹并导入"
               onClick={importToCloud}
               disabled={anyBusy}
             />
@@ -378,19 +378,19 @@ export function WorkspaceModeMenu({
         ) : isLocal && rootMissing ? (
           <>
             <p className="px-2.5 py-1.5 text-xs text-muted-foreground">
-              目录在本机不可用。请导入本机项目到云或重新绑定本机路径后再继续。
+              目录在本机不可用。请导入到「我的文件」或重新绑定本机路径后再继续。
             </p>
             <ModeAction
               icon={<Upload size={14} />}
-              label="导入本机项目到云"
-              hint="本机文件夹快照 → 新建云项目"
+              label="导入到「我的文件」"
+              hint="本机文件夹快照 → 新建云文件夹"
               onClick={importToCloud}
               disabled={anyBusy}
             />
             <ModeAction
               icon={<GitBranch size={14} />}
               label="从 Git 克隆"
-              hint="新建云项目并浅克隆"
+              hint="新建云文件夹并浅克隆"
               onClick={connectGit}
               disabled={anyBusy}
             />
@@ -444,7 +444,7 @@ export function WorkspaceModeMenu({
             ) : null}
             <ModeAction
               icon={<Upload size={14} />}
-              label="导入本机项目到云"
+              label="导入到「我的文件」"
               hint="本机文件夹快照"
               onClick={importToCloud}
               disabled={anyBusy}

@@ -61,6 +61,15 @@ def test_cloud_capability_warning_forbids_reimport():
     assert "runsc_failed" in warn
 
 
+def test_capability_office_copy_carves_out_deterministic_word_pdf():
+    """两个分支都须点名 md_to_docx / md_to_pdf，且缺口只落在 pptx/xlsx。"""
+    for backend in (LocalBackend(), _CloudBackend()):
+        copy = exec_env_remediation_zh(backend=backend, kind="capability_office")
+        assert "md_to_docx" in copy and "md_to_pdf" in copy
+        assert ".pptx/.xlsx" in copy
+        assert ".docx/.pptx/.xlsx" not in copy
+
+
 def test_cloud_runtime_ready_copy_when_execution_on(
     monkeypatch: pytest.MonkeyPatch,
 ):

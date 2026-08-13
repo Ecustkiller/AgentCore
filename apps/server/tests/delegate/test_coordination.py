@@ -419,6 +419,7 @@ async def test_coord_drive_session_saver_does_not_shadow_coordination_session():
         session_store=store,
         session_saver=_saver,
         folder_id="test_birth",
+        approval_gate=None,
     )
     result = await t.execute(
         {
@@ -1237,6 +1238,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
         tools=ToolRegistry(),
         base_tool_context=base_ctx,
         folder_id="test_birth",
+        approval_gate=None,
     )
     reg = ToolRegistry()
     reg.register(delegate)
@@ -1258,6 +1260,7 @@ async def test_coordinate_react_loop_e2e(monkeypatch):
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         clear_active_coordination("e-coord-e2e")
@@ -1365,6 +1368,7 @@ async def test_captain_silent_listen_rounds_do_not_trip_empty_ladder(monkeypatch
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
             out=ReactLoopOut(finish_override=finish),
         )
     finally:
@@ -1814,6 +1818,7 @@ async def test_retired_criteria_kind_still_posts_all_completed_without_host_back
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
         folder_id="test_birth",
+        approval_gate=None,
     )
     result = await t.execute(
         {
@@ -1877,6 +1882,7 @@ async def test_retired_criteria_kind_wait_drains_without_shortcircuit(monkeypatc
         tools=ToolRegistry(),
         base_tool_context=local_ctx(),
         folder_id="test_birth",
+        approval_gate=None,
     )
     await t.execute(
         {

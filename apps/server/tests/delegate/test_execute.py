@@ -91,6 +91,56 @@ async def test_finalize_ignored_for_multi_worker_batch():
     assert "A" in result.output and "B" in result.output
 
 
+def _system_prompts(provider: Provider) -> list[str]:
+    return [
+        next((m.content or "" for m in req.messages if m.role == "system"), "")
+        for req in provider.requests
+    ]
+
+
+async def test_finalize_single_worker_identity_says_body_reaches_user():
+    """单人直出：finalize 入参穿到 RunPlan → worker 身份提示词换成对用户说话的口径。
+
+    直出路径把 worker 正文原样当最终答复，缺了这段交代它会按对主管汇报的口吻写，
+    「现在提交交接简报」这类内部动作旁白就进了用户可见的答复。
+    """
+    provider = Provider(["DIRECT"])
+    t = tool(provider)
+    result = await t.execute(
+        {"tasks": [{"role": "工程师", "task": "改一行"}], "finalize": True}, ctx()
+    )
+    assert result.effect is ToolEffect.HANDOFF  # 确实走了直出
+    worker_sys = _system_prompts(provider)[0]
+    assert "正文直达用户" in worker_sys
+    assert "现在提交交接简报" in worker_sys
+
+
+async def test_multi_worker_finalize_keeps_plain_worker_identity():
+    """多节点：直出不成立（direct_result 不触发）⇒ 身份提示词一字不变。"""
+    provider = Provider(["A", "B"])
+    t = tool(provider)
+    result = await t.execute(
+        {
+            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "finalize": True,
+        },
+        ctx(),
+    )
+    assert result.is_terminal is False
+    prompts = _system_prompts(provider)
+    assert prompts and all("正文直达用户" not in sys for sys in prompts)
+
+
+async def test_single_worker_without_finalize_keeps_plain_worker_identity():
+    """单节点但未声明 finalize：产出仍回主管合成 ⇒ 不换口径。"""
+    provider = Provider(["OUT"])
+    t = tool(provider)
+    await t.execute(
+        {"tasks": [{"role": "工程师", "task": "改一行"}], "coordinate": False}, ctx()
+    )
+    assert all("正文直达用户" not in sys for sys in _system_prompts(provider))
+
+
 async def test_finalize_falls_back_to_synthesis_when_worker_fails():
     """Worker 硬失败（缺必备章节 + strict）→ finalize 不直出，回退 synthesis。
 

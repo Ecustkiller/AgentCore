@@ -62,6 +62,36 @@ def ok_turn(
     )
 
 
+async def _gather_settled(
+    coros, *, fallback: tuple, beat: str, round_no: int
+) -> list:
+    """一波辩手并发跑到底，逐项吞异常 —— 单个 ``continue_run`` 抛错只让【该项】落失败位。
+
+    默认 ``asyncio.gather`` 会让第一个异常直接掀翻整波：同波已跑完的其他方发言随之作废，
+    异常再一路冲出 ``Moderator.run``，把前面所有轮次一起带走。这里把异常项换成下游早已
+    在处理的「没跑出来」哨兵（``state is None`` → ``failed_turn`` / 空答 / ``ok=False``
+    结辩），语义与「网关重试耗尽、该方缺席」逐字一致，不新增降级分支。
+
+    非 ``Exception``（``CancelledError`` / ``KeyboardInterrupt``）照旧传播——整轮停止不得
+    被当成某一方失败吞掉。
+    """
+    settled: list = []
+    for item in await asyncio.gather(*coros, return_exceptions=True):
+        if isinstance(item, BaseException):
+            if not isinstance(item, Exception):
+                raise item
+            logger.warning(
+                "debate.wave.side_crashed",
+                beat=beat,
+                round_no=round_no,
+                error=str(item),
+            )
+            settled.append(fallback)
+        else:
+            settled.append(item)
+    return settled
+
+
 def _log_gather_batch(
     event: str,
     *,
@@ -126,6 +156,7 @@ def make_round_runner(
                     focus,
                     need_first,
                     interjections,
+                    round_no=round_no,
                     beat=beat,
                     materials=materials,
                 )
@@ -162,10 +193,18 @@ async def first_round(
     sides,
     interjections=(),
     *,
+    round_no: int,
     beat: str = "statement",
     materials: str = "",
 ) -> list[SideTurn]:
-    """首轮：build_run_plan 一波并行辩手 → executor → 留人 → 折算 → SideTurn。"""
+    """开场波：build_run_plan 一波并行辩手 → executor → 留人 → 折算 → SideTurn。
+
+    「开场」是**这些方各自的第一次发言**，未必是全场第 1 轮：圆桌第 2/3 轮才被点名的方、
+    以及首次发言失败（未留下 session）后在后续轮重来的方，都从这里起跑。故 ``round_no``
+    是必填实参（本方本次发言所属的真实轮号）——run_id / 节点 ``round`` 标签 / 辩手 prompt
+    的轮号三者同源于它。写死 1 会让第 N 轮的发言顶掉第 1 轮那格（同 run_id 二次
+    ``run_started``），协作图上前一轮发言随之消失。
+    """
     from agentcore.runtime.runs import (
         BatchMetrics,
         RunPhase,
@@ -184,7 +223,7 @@ async def first_round(
             config,
             side,
             idx,
-            round_no=1,
+            round_no=round_no,
             focus=focus,
             interjections=interjections,
             turn_model=turn_model,
@@ -200,20 +239,23 @@ async def first_round(
     plan, errors = build_run_plan(
         tasks_raw,
         valid_tools=valid_tools,
-        id_prefix=f"{moderator_run_id}_r1",
+        id_prefix=f"{moderator_run_id}_r{round_no}",
         parent_run_id=moderator_run_id,
         depth=tool._depth + 2,
     )
     if errors or not plan.nodes:
-        logger.warning("debate.round1.build_failed", errors=errors)
+        logger.warning(
+            "debate.round1.build_failed", errors=errors, round_no=round_no
+        )
         return [
-            failed_turn(side, _beat_run_id(moderator_run_id, 1, side.key, beat), beat=beat)
+            failed_turn(
+                side, _beat_run_id(moderator_run_id, round_no, side.key, beat), beat=beat
+            )
             for side in sides
         ]
 
-    # run_id 命名统一：首轮辩手改用语义后缀 `_r1_{side.key}`，与后续轮 continue_run 的
-    # `_r{n}_{side.key}` 同构。形态专属拍（defense/rebuttal/thread/crux）追加 beat 后缀，
-    # 避免同轮多拍撞 id。
+    # run_id 命名统一：开场波辩手改用语义后缀 `_r{n}_{side.key}`，与后续轮 continue_run
+    # 同构。形态专属拍（defense/rebuttal/thread/crux）追加 beat 后缀，避免同轮多拍撞 id。
     # 检索预算：builder 只填全员统一默认；有约定文档残搜 2 由 debater_task 写入 payload，
     # 此处在 apply 之后补写到 RunSpec（CEO/schema 不可配置该字段）。
     from agentcore.runtime.runs.retrieval_budget import parse_retrieval_budget
@@ -221,10 +263,8 @@ async def first_round(
     patched: list = []
     for side, node, raw in zip(sides, plan.nodes, tasks_raw, strict=False):
         rb = parse_retrieval_budget(raw.get("retrieval_budget"))
-        kwargs: dict = {
-            "run_id": _beat_run_id(moderator_run_id, 1, side.key, beat),
-            "agent_id": _beat_run_id(moderator_run_id, 1, side.key, beat),
-        }
+        node_run_id = _beat_run_id(moderator_run_id, round_no, side.key, beat)
+        kwargs: dict = {"run_id": node_run_id, "agent_id": node_run_id}
         if rb is not None:
             kwargs["retrieval_budget"] = rb
         patched.append(replace(node, **kwargs))
@@ -241,9 +281,9 @@ async def first_round(
             nodes=len(plan.nodes),
         )
         raise PlanOnlyAbortError()
-    worker_gate = (
-        tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
-    )
+    # 上游不预判：有门就往下传，「这次调用该不该弹卡」由 tool_exec 那个唯一收口点按
+    # sandbox_approval 判（它拿得到工具名 / 参数 / 会话轴，这里拿不到）。
+    worker_gate = tool._approval_gate
     executor = build_agent_executor(
         plan=plan,
         llm=tool._llm,
@@ -279,6 +319,7 @@ async def first_round(
         m = batch_metrics[0]
         logger.info(
             "debate.round1.completed",
+            round_no=round_no,
             nodes=m.nodes,
             width=m.width,
             peak=m.peak_running,
@@ -356,9 +397,9 @@ async def next_round(
     sides = list(sides)
     last_round: RoundResult = history[-1] if history else None
     match_ledger = accumulate_match_ledger(history) if history else []
-    worker_gate = (
-        tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
-    )
+    # 上游不预判：有门就往下传，「这次调用该不该弹卡」由 tool_exec 那个唯一收口点按
+    # sandbox_approval 判（它拿得到工具名 / 参数 / 会话轴，这里拿不到）。
+    worker_gate = tool._approval_gate
     max_parallel = tool._max_parallel or resolve_max_parallel()
     semaphore = asyncio.Semaphore(max_parallel)
     mat = (materials or "").strip()
@@ -456,7 +497,12 @@ async def next_round(
             return state, int((time.monotonic() - t0) * 1000)
 
     wall_start = time.monotonic()
-    pairs = await asyncio.gather(*(_continue_side(side) for side in sides))
+    pairs = await _gather_settled(
+        (_continue_side(side) for side in sides),
+        fallback=(None, 0),
+        beat=beat,
+        round_no=round_no,
+    )
     wall_ms = int((time.monotonic() - wall_start) * 1000)
     states = [state for state, _elapsed in pairs]
     busy_ms = sum(elapsed for _state, elapsed in pairs)
@@ -508,9 +554,8 @@ def make_cross_exam_runner(
         from agentcore.runtime.runs import RunPhase, continue_run, resolve_max_parallel
 
         sides_by_key = {s.key: s for s in sides}
-        worker_gate = (
-            tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
-        )
+        # 上游不预判（同 next_round）：弹不弹卡交给 tool_exec 收口点。
+        worker_gate = tool._approval_gate
         max_parallel = tool._max_parallel or resolve_max_parallel()
         semaphore = asyncio.Semaphore(max_parallel)
         # 只质询「首轮已成功立论（有 session）+ 主持人给了问题」的方；顺序固定为 sides 声明序，账目 /
@@ -567,6 +612,13 @@ def make_cross_exam_runner(
                     complete_fb = cx_completion_feedback(qs, state.content)
                     complete_brief = cx_completion_brief(qs, state.content)
                     complete_run_id = f"{cx_run_id}_complete"
+                    # 补全文本随后并入正式答复、并进结辩允许集 —— 它必须过与主答同一道
+                    # 证据台账 id 闸，否则未绑定的 #eN 从这条「续写」溜进正文，还会在结辩
+                    # 里被当成合法引用。补全禁检索（不产新笔记），故允许集 = 本方 transcript
+                    # 里已引用过的 id（与结辩闸同基准）。
+                    prior_cited = side_cited_ledger_ids(
+                        (), side_key, transcript=session.transcript
+                    )
                     cont_state = await continue_run(
                         session=session,
                         feedback=complete_fb,
@@ -586,6 +638,9 @@ def make_cross_exam_runner(
                         draft_brief=complete_brief,
                         draft_system=draft_system(config, side, beat="cross_exam"),
                         allow_research=False,
+                        evidence_ledger=tool._evidence_ledger,
+                        check_evidence_ledger=True,
+                        allowed_ledger_ids=prior_cited,
                     )
                     if (
                         cont_state is not None
@@ -614,7 +669,12 @@ def make_cross_exam_runner(
                 return state, repair_state, int((time.monotonic() - t0) * 1000)
 
         wall_start = time.monotonic()
-        triples = await asyncio.gather(*(_answer(k, qs) for k, qs in targets))
+        triples = await _gather_settled(
+            (_answer(k, qs) for k, qs in targets),
+            fallback=(None, None, 0),
+            beat="cross_exam",
+            round_no=round_no,
+        )
         wall_ms = int((time.monotonic() - wall_start) * 1000)
         busy_ms = sum(elapsed for _state, _repair, elapsed in triples)
 
@@ -704,9 +764,8 @@ def make_closing_runner(
 
         sides = list(sides)
         rounds = list(rounds)
-        worker_gate = (
-            tool._approval_gate if tool._base_tool_context.backend.location == "local" else None
-        )
+        # 上游不预判（同 next_round）：弹不弹卡交给 tool_exec 收口点。
+        worker_gate = tool._approval_gate
         max_parallel = tool._max_parallel or resolve_max_parallel()
         semaphore = asyncio.Semaphore(max_parallel)
         # 结辩 run 的逐轮标记沿用末轮号（结辩是收场收束、非新一轮）：让画布把结辩修订挂到该方末轮
@@ -756,7 +815,12 @@ def make_closing_runner(
                 return state, int((time.monotonic() - t0) * 1000)
 
         wall_start = time.monotonic()
-        pairs = await asyncio.gather(*(_close(s) for s in targets))
+        pairs = await _gather_settled(
+            (_close(s) for s in targets),
+            fallback=(None, 0),
+            beat="closing",
+            round_no=final_round_no,
+        )
         wall_ms = int((time.monotonic() - wall_start) * 1000)
         states = [state for state, _elapsed in pairs]
         busy_ms = sum(elapsed for _state, elapsed in pairs)

@@ -7,12 +7,13 @@ from agentcore.runtime.events.sink import EventSink
 from tests.conftest import LogSpy
 
 
-def test_detach_logs_reason_and_already_detached(monkeypatch):
+def test_unsubscribe_logs_reason_and_already_detached(monkeypatch):
     spy = LogSpy()
     monkeypatch.setattr(sink_mod, "logger", spy)
 
     sink = EventSink(conversation_id="c1", message_id="m1")
-    sink.detach()  # default reason still works
+    sub = sink.subscribe()
+    sink.unsubscribe(sub)  # default reason still works
     first = spy.get("event_sink.detach")
     assert first["reason"] == "unspecified"
     assert first["conversation_id"] == "c1"
@@ -20,10 +21,22 @@ def test_detach_logs_reason_and_already_detached(monkeypatch):
     assert first["already_detached"] is False
 
     spy.events.clear()
-    sink.detach(reason="sse_disconnect")
+    sink.unsubscribe(sub, reason="sse_disconnect")
     second = spy.get("event_sink.detach")
     assert second["reason"] == "sse_disconnect"
     assert second["already_detached"] is True
+
+
+def test_note_no_consumer_logs_detach(monkeypatch):
+    """Handed off with nobody listening (queue drain / deferred resume) — same event."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+
+    sink = EventSink(conversation_id="c3", message_id="m3")
+    sink.note_no_consumer(reason="queued_no_waiter")
+    logged = spy.get("event_sink.detach")
+    assert logged["reason"] == "queued_no_waiter"
+    assert logged["already_detached"] is True
 
 
 def test_close_logs_only_open_to_closed_with_was_detached(monkeypatch):
@@ -31,7 +44,7 @@ def test_close_logs_only_open_to_closed_with_was_detached(monkeypatch):
     monkeypatch.setattr(sink_mod, "logger", spy)
 
     sink = EventSink(conversation_id="c2", message_id="m2")
-    sink.detach(reason="sse_disconnect")
+    sink.unsubscribe(sink.subscribe(), reason="sse_disconnect")
     spy.events.clear()
 
     sink.close(reason="turn_finally")
@@ -44,6 +57,21 @@ def test_close_logs_only_open_to_closed_with_was_detached(monkeypatch):
     spy.events.clear()
     sink.close(reason="turn_finally")  # idempotent — no second log
     assert spy.events == []
+
+
+def test_close_with_a_peer_still_attached_is_not_detached(monkeypatch):
+    """One端 dropping must not make the close look detached while another is listening."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+
+    sink = EventSink(conversation_id="c4", message_id="m4")
+    first = sink.subscribe(label="a")
+    sink.subscribe(label="b")
+    sink.unsubscribe(first, reason="sse_disconnect")
+    spy.events.clear()
+
+    sink.close(reason="turn_finally")
+    assert spy.get("event_sink.close")["was_detached"] is False
 
 
 def test_close_without_reason_still_works(monkeypatch):

@@ -408,15 +408,15 @@ def test_assembled_idle_surface_split():
     assert names.isdisjoint(COORDINATION_GATED_TOOLS)
 
 
-def test_assembled_offers_create_project():
-    """跨项目 P1：create_project 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
+def test_assembled_offers_create_folder():
+    """跨文件夹 P1：create_folder 须进 live CEO 装配（勿只挂 catalog / 漏 prepare.register）。"""
     names = set(_assemble().names)
     assert {
-        "list_projects",
-        "resolve_project",
-        "create_project",
-        "list_project_dir",
-        "read_project_file",
+        "list_folders",
+        "resolve_folder",
+        "create_folder",
+        "list_folder_dir",
+        "read_folder_file",
     } <= names
 
 
@@ -429,11 +429,11 @@ def test_register_always_ceo_tools_declare_loop():
     register_always_ceo_tools(reg, skill_registry=build_system_skill_registry())
     names = set(reg.names)
     assert {
-        "list_projects",
-        "resolve_project",
-        "create_project",
-        "list_project_dir",
-        "read_project_file",
+        "list_folders",
+        "resolve_folder",
+        "create_folder",
+        "list_folder_dir",
+        "read_folder_file",
         "read_image",
     } <= names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries

@@ -441,11 +441,8 @@ def make_witness_runner(
             _emit_unexamined(reason="no_targets")
             return []
 
-        worker_gate = (
-            tool._approval_gate
-            if tool._base_tool_context.backend.location == "local"
-            else None
-        )
+        # 上游不预判：弹不弹卡交给 tool_exec 收口点（对齐 rounds / drive_setup）。
+        worker_gate = tool._approval_gate
         max_parallel = tool._max_parallel or resolve_max_parallel()
         semaphore = asyncio.Semaphore(max_parallel)
 

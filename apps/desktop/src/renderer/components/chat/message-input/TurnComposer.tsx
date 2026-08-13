@@ -30,6 +30,7 @@ import { useServerHealthStore } from "@/stores/serverHealth";
 import {
   CloudUpload,
   ListPlus,
+  Loader2,
   Paperclip,
   Send,
   Square,
@@ -50,6 +51,7 @@ import { PermissionAxesBadge } from "./PermissionPresetBadge";
 import { RecordingBar } from "./RecordingBar";
 import { ComposerConnectionNotice } from "./ServerStatusIndicator";
 import { VoiceButton } from "./VoiceButton";
+import { forgetAttachmentUpload } from "./attachmentUploads";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -57,7 +59,7 @@ import type {
 import { composerHasSendableDraft } from "./composerAttachments";
 import { useComposerDrop } from "./useComposerDrop";
 import { useComposerSend } from "./useComposerSend";
-import type { AttachmentProjectHint } from "./useMentionMenu";
+import type { AttachmentFolderHint } from "./useMentionMenu";
 import { useMentionMenu } from "./useMentionMenu";
 import { useVoiceInput } from "./useVoiceInput";
 
@@ -98,7 +100,7 @@ export type TurnComposerVariant = "card" | "bar";
  * draft even across that swap. The textarea stays typable while a turn is generating
  * (queue up the next order); only sending is gated, with 停止 in the send slot.
  *
- * Draft-conversation-only concerns (workspace picker, attachment→project hint) are
+ * Draft-conversation-only concerns (workspace picker, attachment→folder hint) are
  * self-gated on `!conversationId`, so they never render on the canvas (which always
  * has a conversation).
  */
@@ -197,21 +199,21 @@ export function TurnComposer({
   const folders = useFolders();
   const draftIntent = useFoldersStore((s) => s.draftWorkspaceIntent);
   const pendingFolderId =
-    draftIntent.kind === "project" ? draftIntent.folderId : null;
+    draftIntent.kind === "folder" ? draftIntent.folderId : null;
   const dismissedAssignRef = useRef<Set<string>>(new Set());
-  const [assignHint, setAssignHint] = useState<AttachmentProjectHint | null>(
+  const [assignHint, setAssignHint] = useState<AttachmentFolderHint | null>(
     null,
   );
 
-  const handleAttachmentProjectHint = useCallback(
-    (hint: AttachmentProjectHint) => {
+  const handleAttachmentFolderHint = useCallback(
+    (hint: AttachmentFolderHint) => {
       const store = useFoldersStore.getState();
       const intent = store.draftWorkspaceIntent;
-      if (intent.kind === "project" && intent.folderId === hint.folderId) {
+      if (intent.kind === "folder" && intent.folderId === hint.folderId) {
         return;
       }
       if (
-        intent.kind !== "project" &&
+        intent.kind !== "folder" &&
         dismissedAssignRef.current.has(hint.folderId)
       ) {
         return;
@@ -230,9 +232,9 @@ export function TurnComposer({
     agentMentions,
     setAgentMentions,
     textareaRef,
-    onAttachmentProjectHint: conversationId
+    onAttachmentFolderHint: conversationId
       ? undefined
-      : handleAttachmentProjectHint,
+      : handleAttachmentFolderHint,
   });
 
   const drop = useComposerDrop(
@@ -256,9 +258,9 @@ export function TurnComposer({
     async (e: ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       e.target.value = "";
-      for (const f of files) await drop.attachDroppedFile(f);
+      await drop.attachFiles(files);
     },
-    [drop.attachDroppedFile],
+    [drop.attachFiles],
   );
 
   const voice = useVoiceInput({
@@ -270,7 +272,7 @@ export function TurnComposer({
     ),
   });
 
-  const { handleSend } = useComposerSend({
+  const { handleSend, isSending } = useComposerSend({
     value,
     setValue,
     attachments,
@@ -323,14 +325,14 @@ export function TurnComposer({
     }
   }, [assignHint, pendingFolderId]);
 
-  const currentProjectName = pendingFolderId
+  const currentFolderName = pendingFolderId
     ? (folders.find((f) => f.id === pendingFolderId)?.name ?? null)
     : null;
 
   const acceptAssignHint = useCallback(() => {
     if (!assignHint) return;
     useFoldersStore.getState().setDraftWorkspaceIntent({
-      kind: "project",
+      kind: "folder",
       folderId: assignHint.folderId,
     });
     setAssignHint(null);
@@ -375,6 +377,7 @@ export function TurnComposer({
 
   const removeAttachment = useCallback(
     (id: string) => {
+      forgetAttachmentUpload(id);
       setAttachments((prev) => prev.filter((a) => a.id !== id));
     },
     [setAttachments],
@@ -491,7 +494,7 @@ export function TurnComposer({
   // N4-A：只读离线硬禁用发送。
   const sendBlocked = serverUnhealthy;
   const hasDraft = composerHasSendableDraft(value, attachments);
-  const queueDisabled = !hasDraft || sendBlocked;
+  const queueDisabled = !hasDraft || sendBlocked || isSending;
   const midFlightLabel = "排队发送";
   const midFlightHint = "排队至本回合结束后发送（Enter）；Ctrl/Cmd+Enter 插队";
   const stopButton = (
@@ -545,11 +548,19 @@ export function TurnComposer({
       size="sm"
       tone="primary"
       onClick={() => void handleSend()}
-      disabled={!hasDraft || sendBlocked}
+      disabled={!hasDraft || sendBlocked || isSending}
       aria-label={bg ? "派发到云端后台" : "发送"}
-      title={sendBlocked ? "离线时无法发送" : undefined}
+      aria-busy={isSending || undefined}
+      data-sending={isSending ? "true" : undefined}
+      title={sendBlocked ? "离线时无法发送" : isSending ? "发送中…" : undefined}
     >
-      {bg ? <CloudUpload size={16} /> : <Send size={16} />}
+      {isSending ? (
+        <Loader2 size={16} className="animate-spin" aria-hidden />
+      ) : bg ? (
+        <CloudUpload size={16} />
+      ) : (
+        <Send size={16} />
+      )}
     </IconButton>
   );
 
@@ -664,8 +675,8 @@ export function TurnComposer({
 
       {!conversationId && assignHint && (
         <DraftWorkspaceAssignPrompt
-          attachmentProjectName={assignHint.folderName}
-          currentProjectName={currentProjectName}
+          attachmentFolderName={assignHint.folderName}
+          currentFolderName={currentFolderName}
           onAssign={acceptAssignHint}
           onKeep={dismissAssignHint}
         />

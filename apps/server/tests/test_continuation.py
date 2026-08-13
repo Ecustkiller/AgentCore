@@ -85,6 +85,7 @@ def _tool(store: SessionStore, provider: _Provider, sink: EventSink | None = Non
         captain_run_id="CEO",
         session_store=store,
         folder_id=_TEST_BIRTH_FOLDER_ID,
+        approval_gate=None,
     )
 
 
@@ -101,6 +102,7 @@ async def _seed(store: SessionStore, provider: _Provider, *, run_id: str = "t_1"
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res[run_id]
@@ -223,6 +225,7 @@ async def test_resolve_session_loader_miss_copy():
         session_store=store,
         session_loader=_miss,
         folder_id=_TEST_BIRTH_FOLDER_ID,
+        approval_gate=None,
     )
     try:
         await resolve_session(tool, "ghost", own_run_id="t_2")
@@ -442,12 +445,41 @@ async def test_resolve_session_rejects_in_progress():
         assert "进行中" in exc.message
 
 
+async def test_resolve_session_rejects_cancelled_without_waiting_copy():
+    """CANCELLED 是终局：不得回「仍在进行中，请用 depends_on 等它完成」——那是叫 CEO
+    去等一个永不完成的节点。要给一条真走得通的路（冷委派 + replaces_run_id）。"""
+    store = SessionStore()
+    tool = _tool(store, _Provider(["x"]))
+    completed = {"t_1": RunState(phase=RunPhase.CANCELLED, error="worker_timeout")}
+    try:
+        await resolve_session(tool, "t_1", own_run_id="t_2", completed=completed)
+        raise AssertionError("expected ContinuationRejectedError")
+    except ContinuationRejectedError as exc:
+        assert exc.cause == "cancelled"
+        assert "进行中" not in exc.message
+        assert "depends_on 等它完成" not in exc.message
+        assert "replaces_run_id" in exc.message
+
+
+async def test_resolve_session_rejects_skipped_as_never_ran():
+    store = SessionStore()
+    tool = _tool(store, _Provider(["x"]))
+    completed = {"t_1": RunState(phase=RunPhase.SKIPPED)}
+    try:
+        await resolve_session(tool, "t_1", own_run_id="t_2", completed=completed)
+        raise AssertionError("expected ContinuationRejectedError")
+    except ContinuationRejectedError as exc:
+        assert exc.cause == "never_ran"
+        assert "进行中" not in exc.message
+        assert "replaces_run_id" in exc.message
+
+
 async def test_continuation_rejected_is_non_retryable():
     """续派拒绝折成 FAILED 时标记不可重试，避免调度层同错重放两次。"""
     store = SessionStore()
     tool = _tool(store, _Provider(["x"]))
     spec = RunSpec(run_id="t_2", task="接着写", continue_from_run_id="ghost")
-    state = await run_continuation(tool, spec, {}, execution_id="e")
+    state = await run_continuation(tool, spec, {}, execution_id="e", approval_gate=None)
     assert state.phase is RunPhase.FAILED
     assert state.error_retryable is False
 
@@ -463,7 +495,7 @@ async def test_continuation_rejected_emits_run_failed():
         task="接着写",
         continue_from_run_id="ghost",
     )
-    state = await run_continuation(tool, spec, {}, execution_id="e")
+    state = await run_continuation(tool, spec, {}, execution_id="e", approval_gate=None)
     assert state.phase is RunPhase.FAILED
     sink.close()
     events = [e async for e in sink]

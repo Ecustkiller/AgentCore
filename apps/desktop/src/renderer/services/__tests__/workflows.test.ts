@@ -1,5 +1,5 @@
 import { ApiError, api } from "@/services/api";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAgentStepNode,
   createHumanGateNode,
@@ -9,12 +9,10 @@ import {
   validateWorkflowDefinition,
 } from "../workflowDefinition";
 import {
-  __resetWorkflowClientForTests,
-  createWorkflow,
   createWorkflowFromPlaybook,
   listWorkflowTemplates,
   listWorkflows,
-  patchWorkflow,
+  runWorkflow,
   toUserWorkflow,
   toWorkflowTemplate,
 } from "../workflows";
@@ -36,36 +34,10 @@ const apiGet = vi.mocked(api.get);
 const apiPost = vi.mocked(api.post);
 const apiPatch = vi.mocked(api.patch);
 
-function stubLocalStorage() {
-  const store: Record<string, string> = {};
-  (globalThis as { localStorage?: Storage }).localStorage = {
-    getItem: (k: string) => (k in store ? store[k] : null),
-    setItem: (k: string, v: string) => {
-      store[k] = v;
-    },
-    removeItem: (k: string) => {
-      delete store[k];
-    },
-    clear: () => {
-      for (const k of Object.keys(store)) delete store[k];
-    },
-    key: (i: number) => Object.keys(store)[i] ?? null,
-    get length() {
-      return Object.keys(store).length;
-    },
-  } as Storage;
-}
-
 beforeEach(() => {
   apiGet.mockReset();
   apiPost.mockReset();
   apiPatch.mockReset();
-  __resetWorkflowClientForTests();
-  stubLocalStorage();
-});
-
-afterEach(() => {
-  (globalThis as { localStorage?: Storage }).localStorage = undefined;
 });
 
 describe("workflowDefinition", () => {
@@ -170,36 +142,9 @@ describe("workflows client", () => {
     expect(w.definition.nodes).toEqual([]);
   });
 
-  it("falls back to localStorage when API is 404", async () => {
+  it("surfaces API errors instead of a local shadow store", async () => {
     apiGet.mockRejectedValue(new ApiError(404, "not found"));
-    apiPost.mockRejectedValue(new ApiError(404, "not found"));
-    apiPatch.mockRejectedValue(new ApiError(404, "not found"));
-
-    expect(await listWorkflows()).toEqual([]);
-
-    const created = await createWorkflow({
-      name: "本地草稿",
-      definition: {
-        nodes: [
-          createAgentStepNode({
-            id: "n1",
-            role: "调研员",
-            task: "收集",
-          }),
-        ],
-        edges: [],
-      },
-    });
-    expect(created.localOnly).toBe(true);
-    expect(created.name).toBe("本地草稿");
-
-    const listed = await listWorkflows();
-    expect(listed).toHaveLength(1);
-    expect(listed[0]?.id).toBe(created.id);
-
-    const patched = await patchWorkflow(created.id, { name: "改名" });
-    expect(patched.name).toBe("改名");
-    expect(patched.version).toBe(1);
+    await expect(listWorkflows()).rejects.toBeInstanceOf(ApiError);
   });
 
   it("uses remote when API responds", async () => {
@@ -216,7 +161,33 @@ describe("workflows client", () => {
     ]);
     const list = await listWorkflows();
     expect(list[0]?.id).toBe("wf-remote");
-    expect(list[0]?.localOnly).toBeFalsy();
+  });
+});
+
+describe("runWorkflow · 槽位覆盖", () => {
+  beforeEach(() => {
+    apiPost.mockResolvedValue({ conversation_id: "c1" });
+  });
+
+  it("没有覆盖时请求里不出现 slots（= 按 default 原样重跑）", async () => {
+    await runWorkflow("wf-1", { folderId: "f1", slots: {} });
+    expect(apiPost).toHaveBeenCalledWith("/v1/workflows/wf-1/run", {
+      folder_id: "f1",
+      note: null,
+    });
+  });
+
+  it("只带用户改过的槽位，空值不占位", async () => {
+    await runWorkflow("wf-1", {
+      folderId: "f1",
+      note: " 顺便看看定价 ",
+      slots: { topic: " Linear 的项目视图 ", angle: "   " },
+    });
+    expect(apiPost).toHaveBeenCalledWith("/v1/workflows/wf-1/run", {
+      folder_id: "f1",
+      note: "顺便看看定价",
+      slots: { topic: "Linear 的项目视图" },
+    });
   });
 });
 
@@ -231,21 +202,51 @@ describe("workflow templates / from-playbook (§10.8)", () => {
     expect(t.id).toBe("research_report");
     expect(t.title).toBe("调研报告");
     expect(t.slots).toEqual([
-      { key: "topic", label: "主题", required: true, hint: "议题" },
+      {
+        key: "topic",
+        label: "主题",
+        required: true,
+        hint: "议题",
+        choices: [],
+      },
     ]);
   });
 
-  it("fills fallback primary slots when API omits them", () => {
+  it("keeps optional slots optional and carries their allowed values", () => {
     const t = toWorkflowTemplate({
       id: "build_website",
       title: "建站",
       summary: "文案→前端→QA",
-      primary_slots:
-        "topic（必填，站点/落地页/控制台一句话简述；产物目录固定 site/）",
+      primary_slots: "topic（必填，一句话简述）；style（可选，站点气质）",
+      slots: [
+        { key: "topic", label: "简述", required: true, hint: "一句话简述" },
+        {
+          key: "style",
+          label: "气质",
+          required: false,
+          hint: "不填按 marketing",
+          choices: [
+            { value: "marketing", label: "营销落地页" },
+            { value: "toolshed", label: "工具台 dense" },
+          ],
+        },
+      ],
     });
-    expect(t.slots[0]?.key).toBe("topic");
-    expect(t.slots[0]?.required).toBe(true);
-    expect(t.slots[0]?.hint).toContain("简述");
+    expect(t.slots.map((s) => s.required)).toEqual([true, false]);
+    expect(t.slots[1]?.choices.map((c) => c.value)).toEqual([
+      "marketing",
+      "toolshed",
+    ]);
+  });
+
+  it("has no local slot replica: prose-only payload yields no slots", () => {
+    const t = toWorkflowTemplate({
+      id: "compare_options",
+      title: "方案对比选型",
+      summary: "并行评估再汇总",
+      primary_slots: "question（必填）；options（必填）",
+    });
+    expect(t.slots).toEqual([]);
   });
 
   it("listWorkflowTemplates returns empty on 404 (hide official section)", async () => {
@@ -261,15 +262,27 @@ describe("workflow templates / from-playbook (§10.8)", () => {
         title: "多角对齐摸底",
         summary: "N 路并行摸底",
         slots: [
-          { key: "topic", label: "主题" },
-          { key: "angles", label: "方向" },
+          { key: "topic", label: "主题", required: true },
+          { key: "angles", label: "方向", required: true },
+        ],
+      },
+      {
+        id: "compare_options",
+        title: "方案对比选型",
+        summary: "并行评估再汇总",
+        slots: [
+          { key: "question", label: "问题", required: true },
+          { key: "options", label: "选项", required: true },
         ],
       },
     ]);
     const list = await listWorkflowTemplates();
-    expect(list).toHaveLength(1);
-    expect(list[0]?.id).toBe("parallel_brief");
+    expect(list.map((t) => t.id)).toEqual([
+      "parallel_brief",
+      "compare_options",
+    ]);
     expect(list[0]?.slots.map((s) => s.key)).toEqual(["topic", "angles"]);
+    expect(list[1]?.slots.map((s) => s.key)).toEqual(["question", "options"]);
   });
 
   it("createWorkflowFromPlaybook posts playbook + slots", async () => {
@@ -288,7 +301,6 @@ describe("workflow templates / from-playbook (§10.8)", () => {
       slots: { topic: "SaaS 营销官网" },
     });
     expect(created.id).toBe("wf-from-pb");
-    expect(created.localOnly).toBeFalsy();
     expect(apiPost).toHaveBeenCalledWith("/v1/workflows/from-playbook", {
       playbook: "build_website",
       name: "我的建站",
@@ -296,7 +308,7 @@ describe("workflow templates / from-playbook (§10.8)", () => {
     });
   });
 
-  it("createWorkflowFromPlaybook does not fall back locally on 404", async () => {
+  it("createWorkflowFromPlaybook surfaces 404 (backend-only expansion)", async () => {
     apiPost.mockRejectedValueOnce(new ApiError(404, "not found"));
     await expect(
       createWorkflowFromPlaybook({

@@ -1,33 +1,33 @@
 """约定文档 ``artifact_dir``：布局常量 → 委派交付默认目录 + 验收前缀。
 
 工作区布局事实见 ``workspace_context``；本模块只在 ``form=files`` /
-已声明 ``artifacts`` 且语义为约定文档时，按 ``stage_dirs``
-填默认落盘目录。Worker 只定文件名。
+已声明 ``artifacts`` 时按 ``stage_dirs`` 填默认落盘目录。Worker 只定文件名。
+
+**落点只认显式来源**（按序）：``deliverable.workspace_native``（真 = 产物是用户
+工作区原生文件，无约定落点）→ 已声明 ``artifacts`` 推导出的目录 → 显式
+``deliverable.artifact_dir`` → 默认 ``DRAFTS_DIR``（``AgentCore/文档/工作稿``）。
+运行时**不**扫 role / task 自由文猜「像调研还是像审查」——那条整链已净删除
+（意图分类器形态，且误判对用户不可见）。``research/`` 有机器语义（辩手读它
+取证），只经 playbook 常量或显式声明进入。→ 双模式工作区 §四
 
 **验收 vs 归属分键**：``artifact_dir`` / 目录前缀 / 通配 = 验收覆盖；具体文件
 路径 = C3 归属与 sibling 互斥。裸目录**永不**注入 ``artifacts`` 冒充归属键。
 
 **与声明产物对齐**：非空 ``artifacts`` 若已落在 ``AgentCore/文档/…``（含自定义
-子目录如 ``AI开发/``，不限于 research/debate/reviews），案卷核对目录由这些路径
-推导；不得再钉默认 ``research`` 造成假 path_hint。调研笔记无声明路径时仍可用
-``research``。显式 ``artifact_dir`` 仅在无法从 artifacts 推导时生效。
-
-**语义收紧**：brief 里引用约定文档路径（必读材料）不算调研成文意图；业务向
-``artifacts``（``src/`` · ``site/`` 等）或批次 ``skip_dossier_default``
-（kw 名历史遗留 ``code_verified``，**非** criteria kind）默认不套约定文档目录。
+子目录如 ``AI开发/``，不限于约定 stage 目录），案卷核对目录由这些路径推导；
+业务向 ``artifacts``（``src/`` · ``site/`` 等）自带落点，不套约定文档目录。
 
 不做：``file_write`` 启发式改写、根目录搬迁、``playbook=none`` 特例。
 """
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from agentcore.workspace.stage_dirs import (
     DEBATE_DIR,
     DOCS_PREFIX,
-    PROJECT_DOCS_DIR,
+    DRAFTS_DIR,
     RESEARCH_DIR,
     REVIEWS_DIR,
 )
@@ -35,34 +35,7 @@ from agentcore.workspace.stage_dirs import (
 if TYPE_CHECKING:
     from agentcore.runtime.runs.types import Deliverable, RunSpec
 
-_STAGE_DIRS = (RESEARCH_DIR, DEBATE_DIR, REVIEWS_DIR)
-
-# 约定文档语义（讨论 / 调研 / 审查）；与 WC 边界句同一产品口径，非写盘启发式。
-# 英文词须词界，避免把路径段 research 当意图（路径引用另经 _strip_dossier_path_refs）。
-_DOSSIER_SEMANTIC = re.compile(
-    r"调研|研究|竞品|审查|质检|评审|讨论|笔记|约定文档|透镜|"
-    r"(?<![a-zA-Z])research(?![a-zA-Z])|"
-    r"(?<![a-zA-Z])dossier(?![a-zA-Z])|"
-    r"(?<![a-zA-Z])review(?![a-zA-Z])",
-    re.IGNORECASE,
-)
-_REVIEW_SEMANTIC = re.compile(
-    r"审查|质检|评审|(?<![a-zA-Z])review(?![a-zA-Z])",
-    re.IGNORECASE,
-)
-
-# 工作区约定文档路径引用（含可选反引号）；剥掉后再扫语义，避免「必读材料」误绑出口。
-_DOSSIER_PATH_REF = re.compile(
-    r"`?"
-    r"(?:"
-    r"(?:AgentCore/)?文档/(?:research|debate|reviews|项目)"
-    r"|"
-    + "|".join(re.escape(d) for d in (*_STAGE_DIRS, PROJECT_DOCS_DIR))
-    + r")"
-    r"(?:/[^\s`\"'，。；;、]*)?"
-    r"`?",
-    re.IGNORECASE,
-)
+_STAGE_DIRS = (DRAFTS_DIR, RESEARCH_DIR, DEBATE_DIR, REVIEWS_DIR)
 
 
 def normalize_artifact_dir(path: str) -> str:
@@ -87,23 +60,6 @@ def _looks_like_business_artifact(path: str) -> bool:
     if not p or "/" not in p:
         return False
     return not (p == DOCS_PREFIX or p.startswith(f"{DOCS_PREFIX}/"))
-
-
-def _strip_dossier_path_refs(text: str) -> str:
-    """Remove workspace dossier path citations so they do not count as intent."""
-    return _DOSSIER_PATH_REF.sub(" ", text.replace("\\", "/"))
-
-
-def _is_dossier_semantic(role: str, task: str) -> bool:
-    text = _strip_dossier_path_refs(f"{role}\n{task}")
-    return bool(_DOSSIER_SEMANTIC.search(text))
-
-
-def _default_stage_dir(role: str, task: str) -> str:
-    text = _strip_dossier_path_refs(f"{role}\n{task}")
-    if _REVIEW_SEMANTIC.search(text):
-        return REVIEWS_DIR
-    return RESEARCH_DIR
 
 
 def _acceptance_dir_for_docs_path(path: str) -> str:
@@ -175,19 +131,18 @@ def _dir_from_artifacts(artifacts: list[str]) -> str:
     return stage_dir_covering(result) or result
 
 
-def resolve_artifact_dir(
-    deliverable: Deliverable,
-    *,
-    role: str = "",
-    task: str = "",
-    code_verified: bool = False,
-) -> str:
+def resolve_artifact_dir(deliverable: Deliverable) -> str:
     """Resolve the dossier dir for a file deliverable, or ``\"\"`` when not applicable.
 
-    ``code_verified``：**非 kind**——kw 名历史遗留；语义 = skip default dossier
-    dir（e.g. ``repair_code`` playbook）。S3 不再绑 criteria kind；牵一发动全身
-    故未改名。Call-site compat only.
+    Explicit sources only — the deliverable itself. Role / task free text is
+    **not** an input: no signature to read it from, so the deleted intent
+    classifier cannot creep back in.
     """
+    # 最高优先级：产物是用户工作区原生文件（源码 / 项目文件）→ 无约定落点。
+    # 压过 ``artifacts`` 推导与显式 ``artifact_dir``：写码节点即便声明了工作间
+    # 路径，代码也该留在工作区里它本来的位置。
+    if deliverable.workspace_native:
+        return ""
     if deliverable.form == "prose":
         return ""
     fileish = deliverable.form == "files" or bool(deliverable.artifacts)
@@ -207,14 +162,7 @@ def resolve_artifact_dir(
     if any(_looks_like_business_artifact(a) for a in deliverable.artifacts):
         return ""
 
-    # 修码等批：默认不套约定文档目录（显式 / 约定文档 artifacts 已在上面放行）。
-    if code_verified:
-        return ""
-
-    if not _is_dossier_semantic(role, task):
-        return ""
-
-    return _default_stage_dir(role, task)
+    return DRAFTS_DIR
 
 
 def is_acceptance_only_artifact_pattern(path: str) -> bool:
@@ -236,21 +184,13 @@ def is_file_ownership_path(path: str) -> bool:
     return not is_acceptance_only_artifact_pattern(path)
 
 
-def apply_artifact_dir_defaults(
-    deliverable: Deliverable,
-    *,
-    role: str,
-    task: str,
-    code_verified: bool = False,
-) -> None:
+def apply_artifact_dir_defaults(deliverable: Deliverable) -> None:
     """Fill ``artifact_dir``; relocate bare filenames under it (in-place).
 
     Empty ``artifacts`` stays empty — acceptance uses ``artifact_dir`` directly;
     do not inject ``[dir/]`` (that falsely exclusivizes a shared dossier).
     """
-    resolved = resolve_artifact_dir(
-        deliverable, role=role, task=task, code_verified=code_verified
-    )
+    resolved = resolve_artifact_dir(deliverable)
     if not resolved:
         return
 
@@ -284,28 +224,21 @@ def apply_artifact_dir_defaults(
     deliverable.artifacts = relocated
 
 
-def apply_artifact_dir_to_spec(spec: RunSpec, *, code_verified: bool = False) -> None:
+def apply_artifact_dir_to_spec(spec: RunSpec) -> None:
     """Apply dossier ``artifact_dir`` defaults to one plan node (in-place)."""
     if spec.deliverable is None:
         return
-    apply_artifact_dir_defaults(
-        spec.deliverable,
-        role=spec.role,
-        task=spec.task,
-        code_verified=code_verified,
-    )
+    apply_artifact_dir_defaults(spec.deliverable)
 
 
-def apply_artifact_dir_to_specs(
-    specs: list[RunSpec], *, code_verified: bool = False
-) -> None:
+def apply_artifact_dir_to_specs(specs: list[RunSpec]) -> None:
     for spec in specs:
-        apply_artifact_dir_to_spec(spec, code_verified=code_verified)
+        apply_artifact_dir_to_spec(spec)
 
 
-def apply_artifact_dir_to_plan(plan: object, *, code_verified: bool = False) -> None:
+def apply_artifact_dir_to_plan(plan: object) -> None:
     nodes = getattr(plan, "nodes", None) or []
-    apply_artifact_dir_to_specs(list(nodes), code_verified=code_verified)
+    apply_artifact_dir_to_specs(list(nodes))
 
 
 __all__ = [

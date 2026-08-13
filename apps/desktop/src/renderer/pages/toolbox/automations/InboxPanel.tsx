@@ -39,6 +39,17 @@ function formatWhen(iso: string): string {
   }
 }
 
+/**
+ * 收件箱筛选。是「筛过一遍同一份列表」而非换页，所以做成圆角 chip +
+ * `aria-pressed`，与二级下划线 tab（导航）形态分开。
+ */
+const FILTERS = [
+  { id: "all", label: "全部" },
+  { id: "actionable", label: "待处理" },
+] as const;
+
+type InboxFilter = (typeof FILTERS)[number]["id"];
+
 const STATUS_META: Record<
   StandingTaskRunStatus,
   { label: string; className: string; Icon: typeof CheckCircle2 }
@@ -74,7 +85,7 @@ export function InboxPanel() {
   const [runs, setRuns] = useState<StandingTaskRun[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "actionable">("all");
+  const [filter, setFilter] = useState<InboxFilter>("all");
 
   const load = useCallback(async () => {
     setListError(null);
@@ -135,7 +146,7 @@ export function InboxPanel() {
       notifySuccess(`已重新触发（${runId.slice(0, 8)}…）`);
       await load();
     } catch (e) {
-      notifyError(e, "重跑失败");
+      notifyError(e, "重新触发失败");
     } finally {
       setBusyId(null);
     }
@@ -147,34 +158,26 @@ export function InboxPanel() {
         自动化任务的运行结果：成功摘要、失败与待你拍板的挂起项。
       </p>
 
-      <div className="mt-4 flex w-fit items-center gap-0.5 rounded-lg border border-border p-0.5">
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-pressed={filter === "all"}
-          className={
-            filter === "all"
-              ? "bg-accent text-foreground hover:bg-accent"
-              : undefined
-          }
-          onClick={() => setFilter("all")}
-        >
-          全部
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          aria-pressed={filter === "actionable"}
-          className={
-            filter === "actionable"
-              ? "bg-accent text-foreground hover:bg-accent"
-              : undefined
-          }
-          onClick={() => setFilter("actionable")}
-        >
-          待处理
-        </Button>
-      </div>
+      <fieldset className="mt-4 flex w-fit items-center gap-1.5">
+        <legend className="sr-only">收件箱筛选</legend>
+        {FILTERS.map((f) => (
+          <Button
+            key={f.id}
+            variant="ghost"
+            size="sm"
+            aria-pressed={filter === f.id}
+            className={cn(
+              "rounded-full",
+              filter === f.id
+                ? "bg-primary/15 text-foreground hover:bg-primary/15"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setFilter(f.id)}
+          >
+            {f.label}
+          </Button>
+        ))}
+      </fieldset>
 
       <section className="mt-6">
         {runs === null ? (
@@ -283,7 +286,7 @@ export function InboxPanel() {
                             }
                             onClick={() => void onRerun(run)}
                           >
-                            重跑
+                            重新触发
                           </Button>
                           {!run.ackedAt && (
                             <Button

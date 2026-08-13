@@ -1,3 +1,4 @@
+import { type FileNode, type FileSource, parentDir } from "@/lib/fileSource";
 import type { AlwaysQuota, DocumentNode } from "@/services/documents";
 
 /** Offline mock scenes for `#/preview/files` — always-usage states for shoot review. */
@@ -24,8 +25,8 @@ export const FILES_PREVIEW_SCENES = [
   },
   {
     id: "files-quota-project-split",
-    title: "用量 · 项目两段",
-    description: "含全局两段条 · tooltip 解色",
+    title: "用量 · 文件夹两段",
+    description: "全局/本文件夹各占一半 · tooltip 解色",
   },
 ] as const;
 
@@ -34,6 +35,43 @@ export type FilesPreviewSceneId = (typeof FILES_PREVIEW_SCENES)[number]["id"];
 export const FILES_PREVIEW_PROJECT_FOLDER_ID = "folder-demo";
 
 const MAX_CHARS = 24000;
+
+/**
+ * 文件夹自己的盘上文件——预览里跟条目区同屏，好一眼核对两者不再同名：条目区叫
+ * 「记忆」，盘上 ``AgentCore/`` 叫「AI 工作间」且沉在同级最后。
+ */
+const PREVIEW_WORKSPACE_TREE: FileNode[] = [
+  { path: "合同", name: "合同", isDir: true },
+  { path: "合同/服务协议.md", name: "服务协议.md", isDir: false },
+  { path: "报告.md", name: "报告.md", isDir: false },
+  { path: "AgentCore", name: "AgentCore", isDir: true },
+  { path: "AgentCore/文档", name: "文档", isDir: true },
+  { path: "AgentCore/文档/工作稿", name: "工作稿", isDir: true },
+  { path: "AgentCore/文档/工作稿/初稿.md", name: "初稿.md", isDir: false },
+];
+
+const previewReadOnly = () => Promise.reject(new Error("预览为只读桩"));
+
+/**
+ * Offline stub source for the preview's file tree — listing only, no mutations.
+ * Its `id` must not look like a scene id: `shoot-files.mjs` scrapes this file for
+ * scene ids by pattern, and a match here would shoot a scene that does not exist.
+ */
+export const filesPreviewSource: FileSource = {
+  id: "preview-workspace",
+  label: "示例文件夹",
+  caps: { watch: false, transfer: false, edit: false, snapshots: false },
+  listDir: (dir: string) =>
+    Promise.resolve(
+      PREVIEW_WORKSPACE_TREE.filter((n) => parentDir(n.path) === dir),
+    ),
+  listTree: () => Promise.resolve([...PREVIEW_WORKSPACE_TREE]),
+  read: previewReadOnly,
+  createFile: previewReadOnly,
+  mkdir: previewReadOnly,
+  move: previewReadOnly,
+  delete: previewReadOnly,
+};
 
 export function buildGlobalEntriesMock(): DocumentNode[] {
   return [
@@ -48,6 +86,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       description: "沟通与工作习惯",
       name: "偏好.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 1200,
     },
     {
@@ -61,6 +100,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       description: "用户长期事实",
       name: "画像.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 800,
     },
     {
@@ -74,6 +114,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       description: "回复语气与禁忌",
       name: "语气.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 2200,
     },
     {
@@ -87,6 +128,7 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       description: "偶发合规附录",
       name: "合规附录.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: null,
     },
     {
@@ -100,7 +142,23 @@ export function buildGlobalEntriesMock(): DocumentNode[] {
       description: "",
       name: "坏条目.md",
       frontmatterError: "unclosed frontmatter",
+      disputedAt: null,
       alwaysChars: null,
+    },
+    {
+      // 纠错通道: user said「这条不对」— row stays, AI stopped using it, no char cost.
+      id: "g-disputed",
+      parentId: null,
+      folderId: null,
+      kind: "document",
+      role: "rule",
+      aiMaintained: true,
+      applyMode: "always",
+      description: "过时的偏好，已被用户标错",
+      name: "旧偏好.md",
+      frontmatterError: null,
+      disputedAt: "2026-08-01T09:00:00Z",
+      alwaysChars: 900,
     },
   ];
 }
@@ -119,6 +177,7 @@ export function buildEmptyGlobalEntriesMock(): DocumentNode[] {
       description: "",
       name: "偏好.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 0,
     },
     {
@@ -132,6 +191,7 @@ export function buildEmptyGlobalEntriesMock(): DocumentNode[] {
       description: "",
       name: "画像.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 0,
     },
   ];
@@ -147,9 +207,10 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
       role: "rule",
       aiMaintained: true,
       applyMode: "always",
-      description: "本项目技术栈与事实",
+      description: "本文件夹技术栈与事实",
       name: "画像.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 3200,
     },
     {
@@ -163,6 +224,7 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
       description: "一句话定位 + 任务路由",
       name: "导航.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 2400,
     },
     {
@@ -176,6 +238,7 @@ export function buildProjectEntriesMock(folderId: string): DocumentNode[] {
       description: "部署流程备忘",
       name: "主题/部署流程.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: null,
     },
   ];
@@ -194,6 +257,7 @@ export function buildEmptyProjectEntriesMock(folderId: string): DocumentNode[] {
       description: "",
       name: "画像.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 0,
     },
     {
@@ -207,6 +271,7 @@ export function buildEmptyProjectEntriesMock(folderId: string): DocumentNode[] {
       description: "",
       name: "导航.md",
       frontmatterError: null,
+      disputedAt: null,
       alwaysChars: 0,
     },
   ];
@@ -297,7 +362,9 @@ export function alwaysQuotaForScene(sceneId: FilesPreviewSceneId): {
         }),
       };
     case "files-quota-project-split":
-      // Keep under the near-full threshold so the two-tone bar is the focus.
+      // The two-tone bar only renders once a scope goes 快满/已超 (calm scopes are
+      // a single line), so this scene sits just past the threshold — with a
+      // near-even split, which 接近满 / 已超限 don't cover.
       return {
         global: buildAlwaysQuotaMock({
           used: 4200,
@@ -306,10 +373,10 @@ export function alwaysQuotaForScene(sceneId: FilesPreviewSceneId): {
           projectChars: 0,
         }),
         project: buildAlwaysQuotaMock({
-          used: 9800,
+          used: 21000,
           max: MAX_CHARS,
-          globalChars: 4200,
-          projectChars: 5600,
+          globalChars: 11000,
+          projectChars: 10000,
         }),
       };
     default:

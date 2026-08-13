@@ -2,7 +2,9 @@
 
 零侵入（评估体系 §四）：只消费现有运行入口的返回值与 ``EventSink`` 事件，不改引擎/管线
 一行——
-- ``single`` 路径 → :func:`agentcore.runtime.engine.react_loop`（轻、快，测工具/引用最准）；
+- ``single`` 路径 → :func:`agentcore.runtime.engine.react_loop`（轻、快，测工具/引用最准），
+  挂 :func:`_eval_approval_gate`（少打断轴 + 0 超时）——不是「免审」，是「按少打断档跑、
+  真需要点的立刻判 DENY」；
 - ``team`` 路径   → :func:`agentcore.runtime.pipeline.run_chat_pipeline`（拿 ``runs`` 判委派、
   ``cost_runs`` 算成本），强制 ``approvals_enabled=False`` 关掉 ask_user/plan_review 挂起，
   评测绝不空等超时。
@@ -50,6 +52,7 @@ from agentcore.llm.factory import build_provider
 from agentcore.llm.pricing import NANO_PER_CNY, calculate_cost
 from agentcore.llm.profiles import ProfileParams, TurnProfiles
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.costing import aggregate_cost
 from agentcore.runtime.engine import ReactLoopOut, react_loop
 from agentcore.runtime.events import FinishReason
@@ -88,6 +91,38 @@ def _clamp_ceo_rounds(profiles: TurnProfiles, max_rounds: int) -> TurnProfiles:
             return p
 
     return _Clamped(model=profiles.model, model_overrides=dict(profiles.model_overrides))
+
+
+def _eval_approval_gate(sink: RecordingSink) -> ApprovalGate:
+    """The ``single`` path's approval gate — a 少打断 session with nobody at the keyboard.
+
+    Evals used to hand ``react_loop`` no gate at all, which (before the chokepoint
+    was made fail-closed) meant GRANTABLE tools ran without anyone ever asking. A
+    real ``less_interrupt`` session behaves the same way for the calls evals make —
+    ``file_write=session`` trusts reversible writes, ``command=auto`` auto-passes the
+    execution class — so wiring the real gate with those axes keeps eval fidelity
+    while closing the hole. ``timeout_seconds=0`` keeps the harness's「绝不空等超时」
+    contract: anything that genuinely needs a click (恒确认 / 熔断 FORCE / 永久删)
+    resolves to DENY instantly instead of blocking the case.
+    """
+    from agentcore.core.types import DEFAULT_PERMISSION_AXES
+    from agentcore.runtime.interaction import default_interaction_registry
+    from agentcore.tools.builtin import (
+        approval_class_tool_names,
+        delegation_grantable_tool_names,
+    )
+    from agentcore.tools.registration import host_class_tool_names
+
+    return ApprovalGate(
+        sink=sink,
+        conversation_id=f"eval-{new_id()}",
+        registry=default_interaction_registry(),
+        timeout_seconds=0,
+        file_op_tools=approval_class_tool_names(),
+        delegation_grantable_tools=delegation_grantable_tool_names(),
+        host_class_tools=host_class_tool_names(),
+        permission_axes=DEFAULT_PERMISSION_AXES,
+    )
 
 
 _CREDENTIALS_HINT = (
@@ -469,6 +504,7 @@ class EvalHarness:
             tool_context=ctx,
             profile=profile,
             turn_model=profiles.model,
+            approval_gate=_eval_approval_gate(sink),
             out=ReactLoopOut(citations=citations, finish_override=finish_override),
             # 交付正文只留最终交付 (Fork-B, 全队对称): score the SAME deliverable a real
             # single-agent turn persists — the executor.captain path is deliverable_only,

@@ -2,10 +2,7 @@ import { ClearScratchDialog } from "@/components/files/ClearScratchDialog";
 import { CloneRepoDialog } from "@/components/files/CloneRepoDialog";
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
-import {
-  DeleteFolderDialog,
-  archiveConversationsBeforeDelete,
-} from "@/components/folders/DeleteFolderDialog";
+import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
 import { Button } from "@/components/ui";
 import {
   ContextMenu,
@@ -16,21 +13,23 @@ import {
 } from "@/components/ui/context-menu";
 import {
   getConversations,
-  useArchiveConversation,
   useDeleteConversation,
   useRenameConversation,
 } from "@/hooks/useConversations";
 import {
   getFolders,
+  releaseFolderConversations,
   useDeleteFolder,
   usePermanentDeleteFolder,
+  useRestoreFolder,
+  useUpdateFolder,
 } from "@/hooks/useFolders";
 import { removeConversationScratch } from "@/hooks/useWorkspaces";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import type { FileSource } from "@/lib/fileSource";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
-import { notifyActionError, notifyError } from "@/lib/toast";
+import { notifyActionError, notifyError, notifyInfo } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import {
@@ -61,14 +60,15 @@ import { useNavigate } from "react-router-dom";
 import { conversationIdOf, folderIdOf } from "./storage";
 
 /**
- * One workspace root = a **flat, collapsible section**: a header (chevron + name +
- * cloud/local badge + create buttons) with its file tree shown beneath **only when
- * expanded**. Project folders (`folder:<id>`) may also render a `projectRail`
- * (flat AgentCore entries) above the file tree.
+ * One workspace root = a **collapsible section**: a header (chevron + name +
+ * create buttons) with its file tree shown beneath **only when expanded**.
+ * Folders (`folder:<id>`) may also render nested folder rows (`nested`) and a
+ * `folderRail` (flat AgentCore entries) above the file tree.
  *
  * - `conv:<id>` **云** scratch：右键可打开/重命名/删除对话、清空本对话产物。
  * - `conv:<id>` **本地** scratch：无根级清空（树内单删 / 删对话）。
- * - `folder:<id>` 项目共享空间：右键可「删除项目」（与侧栏 {@link WorkspaceGroupHeader} 同构）；无清空。
+ * - `folder:<id>` 文件夹：右键可重命名 / 「删除文件夹」（与侧栏 {@link WorkspaceGroupHeader}
+ *   同构）；无清空。
  */
 export function WorkspaceSection({
   ws,
@@ -78,7 +78,12 @@ export function WorkspaceSection({
   onToggle,
   onOpenFile,
   flashing,
-  projectRail,
+  folderRail,
+  nested,
+  depth = 0,
+  hideRootDirs,
+  onCreateSubfolder,
+  showLocationBadge = true,
   offlineCloud = false,
   filterQuery = "",
 }: {
@@ -89,8 +94,23 @@ export function WorkspaceSection({
   onToggle: () => void;
   onOpenFile: (path: string, name: string) => void;
   flashing: boolean;
-  /** Project-only rail children (记忆 → 规则), rendered above the file tree when expanded. */
-  projectRail?: ReactNode;
+  /** Folder-only rail children (记忆 → 规则), rendered above the file tree when expanded. */
+  folderRail?: ReactNode;
+  /** Nested folder rows (我的文件 tree), rendered directly under the header. */
+  nested?: ReactNode;
+  /** Nesting level inside 我的文件 — indents the header and its tree. */
+  depth?: number;
+  /** Forwarded to {@link FileTree}: child-folder dirs already shown as rail rows. */
+  hideRootDirs?: readonly string[];
+  /**
+   * Replaces the tree's plain `mkdir` at this root with「在此新建文件夹」, so a
+   * folder created at a folder's top level is a real folder (可分组 / 可记忆),
+   * not a bare directory the rail cannot address. Receives the trigger element so
+   * the cascade opens next to it.
+   */
+  onCreateSubfolder?: (anchorEl?: Element | null) => void;
+  /** Off inside 我的文件 / 本机文件夹 — the section header already says which. */
+  showLocationBadge?: boolean;
   /** N4-A: cloud workspace while read-only offline — grey + hint, keep visible. */
   offlineCloud?: boolean;
   /** Forwarded to {@link FileTree} for path/name filter (hub search box). */
@@ -119,14 +139,15 @@ export function WorkspaceSection({
 
   const deleteMutation = useDeleteConversation();
   const renameMutation = useRenameConversation();
-  const archiveMutation = useArchiveConversation();
+  const renameFolderMutation = useUpdateFolder();
   const deleteFolderMutation = useDeleteFolder();
   const permanentDeleteMutation = usePermanentDeleteFolder();
+  const restoreFolderMutation = useRestoreFolder();
   const currentId = useConversationStore((s) => s.currentConversationId);
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
   );
-  /** Cloud conv scratch only — local/project roots never get root-level clear. */
+  /** Cloud conv scratch only — local/folder roots never get root-level clear. */
   const canClearScratch =
     !!conversationId && !isLocal && !offlineCloud && !!source?.caps.edit;
   /** Cloud workspace only — clone API requires cloud location. */
@@ -171,7 +192,14 @@ export function WorkspaceSection({
     if (!editing) setDraft(ws.name);
   }, [ws.name, editing]);
 
-  const requestTreeAction = (action: "file" | "dir" | "upload") => {
+  const requestTreeAction = (
+    action: "file" | "dir" | "upload",
+    anchorEl?: Element | null,
+  ) => {
+    if (action === "dir" && onCreateSubfolder) {
+      onCreateSubfolder(anchorEl ?? rootRef.current);
+      return;
+    }
     if (expanded) {
       if (action === "upload") treeRef.current?.triggerUpload();
       else treeRef.current?.startCreate(action);
@@ -194,8 +222,12 @@ export function WorkspaceSection({
     navigate(`/conversations/${conversationId}`);
   };
 
+  /** Inline rename, for both flavours of root: a `conv:` scratch renames the
+   * conversation, a `folder:` row renames the folder itself (§5.4 用户起名). */
+  const canRename = !!conversationId || !!folderId;
+
   const startEdit = () => {
-    if (!conversationId) return;
+    if (!canRename) return;
     setConfirmingDelete(false);
     setDraft(ws.name);
     setEditing(true);
@@ -203,13 +235,19 @@ export function WorkspaceSection({
 
   const commitEdit = () => {
     setEditing(false);
-    if (!conversationId) return;
-    const title = draft.trim();
-    if (!title || title === ws.name) return;
-    renameMutation.mutate(
-      { id: conversationId, title },
-      { onError: (err) => notifyError(err, "重命名失败") },
-    );
+    const name = draft.trim();
+    if (!name || name === ws.name) return;
+    if (conversationId) {
+      renameMutation.mutate(
+        { id: conversationId, title: name },
+        { onError: (err) => notifyError(err, "重命名失败") },
+      );
+    } else if (folderId) {
+      renameFolderMutation.mutate(
+        { id: folderId, patch: { name } },
+        { onError: (err) => notifyError(err, "重命名文件夹失败") },
+      );
+    }
   };
 
   const requestDeleteConversation = () => {
@@ -232,24 +270,30 @@ export function WorkspaceSection({
     if (wasActive) navigate("/");
   };
 
+  /** Mirrors the sidebar's delete: 撤销 toast raised from the awaited handler,
+   * because this section unmounts as soon as the folder is gone. */
   const confirmDeleteFolder = async () => {
     if (!folderId) return;
-    const convs = liveFolderConvs();
-    if (convs.length > 0) {
-      const ok = await archiveConversationsBeforeDelete(convs, {
-        archive: (id) => archiveMutation.mutateAsync(id),
-        dropRuntime: dropConversationRuntime,
-        currentId,
-        onLeaveActive: () => navigate("/"),
-      });
-      if (!ok) {
-        notifyError("归档失败，项目未删除");
-        return;
-      }
+    const name = folder?.name ?? ws.name;
+    try {
+      await deleteFolderMutation.mutateAsync(folderId);
+    } catch (err) {
+      notifyError(err, "删除文件夹失败");
+      return;
     }
-    deleteFolderMutation.mutate(folderId, {
-      onSuccess: () => setDeleteFolderOpen(false),
-      onError: (err) => notifyError(err, "删除项目失败"),
+    setDeleteFolderOpen(false);
+    const leftActive = releaseFolderConversations(folderId, {
+      dropRuntime: dropConversationRuntime,
+      currentId,
+    });
+    if (leftActive) navigate("/");
+    notifyInfo("已删除文件夹", {
+      description: name,
+      duration: 8000,
+      action: {
+        label: "撤销",
+        onClick: () => restoreFolderMutation.mutate({ id: folderId, name }),
+      },
     });
   };
 
@@ -319,8 +363,9 @@ export function WorkspaceSection({
           }
           commitEdit();
         }}
+        style={{ marginLeft: depth * 12 }}
         className="h-7 min-w-0 flex-1 bg-transparent px-1 text-sm focus:outline-none"
-        aria-label="重命名工作区"
+        aria-label={folderId ? "重命名文件夹" : "重命名对话"}
       />
     </div>
   ) : (
@@ -335,7 +380,8 @@ export function WorkspaceSection({
         variant="ghost"
         onClick={onToggle}
         aria-expanded={expanded}
-        className="h-auto min-h-9 min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none py-1.5 pl-2 pr-0 text-left text-sm font-medium"
+        style={{ paddingLeft: 8 + depth * 12 }}
+        className="h-auto min-h-9 min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none py-1.5 pr-0 text-left text-sm font-medium"
       >
         {expanded ? (
           <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
@@ -371,48 +417,52 @@ export function WorkspaceSection({
               <FilePlus size={14} />
             </IconButton>
             <IconButton
-              title="新建文件夹"
-              onClick={() => requestTreeAction("dir")}
+              title={onCreateSubfolder ? "在此新建文件夹" : "新建文件夹"}
+              onClick={(e) => requestTreeAction("dir", e.currentTarget)}
             >
               <FolderPlus size={14} />
             </IconButton>
           </div>
         )
       )}
-      <span
-        className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ${
-          isLocal
-            ? "bg-primary/10 text-primary"
-            : "bg-muted text-muted-foreground"
-        }`}
-      >
-        {isLocal ? <HardDrive size={12} /> : <Cloud size={12} />}
-        {isLocal ? "本地" : "云端"}
-      </span>
+      {showLocationBadge && (
+        <span
+          className={`flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-xs ${
+            isLocal
+              ? "bg-primary/10 text-primary"
+              : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {isLocal ? <HardDrive size={12} /> : <Cloud size={12} />}
+          {isLocal ? "本地" : "云端"}
+        </span>
+      )}
     </div>
   );
 
+  const hintStyle = { paddingLeft: 28 + depth * 12 };
   const tree = offlineCloud ? (
-    <div className="py-1 pl-7 text-xs text-muted-foreground">
-      离线时云端工作区不可用；本机文件夹可浏览（只读），恢复连接后再改文件。
+    <div className="py-1 text-xs text-muted-foreground" style={hintStyle}>
+      离线时云端文件不可用；本机文件夹可浏览（只读），恢复连接后再改文件。
     </div>
   ) : localUnavailable ? (
-    <div className="py-1 pl-7 text-xs text-muted-foreground/70">
-      本地项目的文件在你电脑上，请在桌面端查看。
+    <div className="py-1 text-xs text-muted-foreground/70" style={hintStyle}>
+      本机文件夹里的文件在你电脑上，请在桌面端查看。
     </div>
   ) : source ? (
     <FileTree
       ref={treeRef}
       source={source}
       chrome={false}
-      indent={14}
+      indent={14 + depth * 12}
       activePath={activePath}
       filterQuery={filterQuery}
+      hideRootDirs={hideRootDirs}
       onOpenFile={onOpenFile}
       emptyText="还没有文件——对话里 AI 产出的文件会落在这里"
     />
   ) : (
-    <div className="py-1 pl-7 text-xs text-muted-foreground/70">
+    <div className="py-1 text-xs text-muted-foreground/70" style={hintStyle}>
       无法打开此工作区，文件源暂不可用。
     </div>
   );
@@ -437,7 +487,9 @@ export function WorkspaceSection({
                 </ContextMenuItem>
                 <ContextMenuItem onSelect={() => requestTreeAction("dir")}>
                   <FolderPlus size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">新建文件夹</span>
+                  <span className="flex-1 truncate">
+                    {onCreateSubfolder ? "在此新建文件夹" : "新建文件夹"}
+                  </span>
                 </ContextMenuItem>
                 {source.caps.transfer && (
                   <ContextMenuItem onSelect={() => requestTreeAction("upload")}>
@@ -483,20 +535,20 @@ export function WorkspaceSection({
                 </span>
               </ContextMenuItem>
             )}
+            {canRename && (
+              <ContextMenuItem onSelect={startEdit}>
+                <Pencil size={14} className="shrink-0" />
+                <span className="flex-1 truncate">重命名</span>
+              </ContextMenuItem>
+            )}
             {conversationId && (
-              <>
-                <ContextMenuItem onSelect={startEdit}>
-                  <Pencil size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">重命名</span>
-                </ContextMenuItem>
-                <ContextMenuItem
-                  variant="danger"
-                  onSelect={requestDeleteConversation}
-                >
-                  <Trash2 size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">删除对话</span>
-                </ContextMenuItem>
-              </>
+              <ContextMenuItem
+                variant="danger"
+                onSelect={requestDeleteConversation}
+              >
+                <Trash2 size={14} className="shrink-0" />
+                <span className="flex-1 truncate">删除对话</span>
+              </ContextMenuItem>
             )}
             {folderId && (
               <>
@@ -506,7 +558,7 @@ export function WorkspaceSection({
                   onSelect={() => setDeleteFolderOpen(true)}
                 >
                   <Trash2 size={14} className="shrink-0" />
-                  <span className="flex-1 truncate">删除项目…</span>
+                  <span className="flex-1 truncate">删除文件夹…</span>
                 </ContextMenuItem>
               </>
             )}
@@ -515,7 +567,8 @@ export function WorkspaceSection({
       )}
       {expanded && (
         <>
-          {projectRail}
+          {nested}
+          {folderRail}
           {tree}
         </>
       )}

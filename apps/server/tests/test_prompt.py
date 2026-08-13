@@ -690,7 +690,7 @@ def test_core_teaches_execution_and_recall_routing():
     assert "读文件" in hint or "列目录" in hint
     assert "冒充已跑或已验" in hint
     assert "不扫用户文" in hint or "硬分叉" in hint
-    assert "已绑定本地工程" in hint or "跑当前项目" in hint
+    assert "已绑定本地工程" in hint or "跑当前工作区" in hint
     # 不再叠长禁令散文
     assert "不要先读完口述" not in hint
     assert "禁止 DIRECT" not in hint
@@ -819,6 +819,14 @@ def test_core_teaches_presentation_honesty():
     assert "*_slim.pptx" in orch or "slim.pptx" in orch
     assert "图形组织图" in orch
     assert "说满" in orch and "空派" in orch
+
+
+def test_core_teaches_word_pdf_orthogonal_to_execution():
+    """CEO 常驻：`.docx`/`.pdf` 走确定性导出，无 code_execute 也照交；缺口只覆盖 pptx/xlsx。"""
+    hint = _CEO_CORE_HINT
+    assert "md_to_docx" in hint and "md_to_pdf" in hint
+    assert "`.pptx`/`.xlsx`" in hint
+    assert "`.pptx`/`.docx`/`.xlsx`" not in hint
 
 
 def test_core_teaches_required_sections_same_literal():
@@ -1004,11 +1012,11 @@ def test_ceo_core_workspace_outranks_global_current_project_memory():
     assert "问还是派·中性" in hint
 
 
-def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
-    """空壳/双项目 kickoff：跨项目读写通吃派工换桌、CEO 只读跨桌仅认桌、≠挂载冒充。"""
+def test_ceo_core_teaches_empty_shell_dual_folder_kickoff():
+    """空壳/双文件夹 kickoff：跨文件夹读写通吃派工换桌、CEO 只读跨桌仅认桌、≠挂载冒充。"""
     hint = _CEO_CORE_HINT
-    assert "【跨项目 / 空壳 kickoff】" in hint
-    assert "list_project_dir" in hint and "read_project_file" in hint
+    assert "【跨文件夹 / 空壳 kickoff】" in hint
+    assert "list_folder_dir" in hint and "read_folder_file" in hint
     assert "轻量认桌" in hint or "认桌/抽样" in hint
     assert "出生桌" in hint
     assert "云端读不到本地" in hint and "禁止" in hint
@@ -1023,10 +1031,10 @@ def test_ceo_core_teaches_empty_shell_dual_project_kickoff():
     # 一句短指针（HOW 在 skill；禁双写长段）
     assert "先建齐再同次派" in hint or "先建齐" in hint
     assert "拒后禁塌缩" in hint
-    assert "team_orchestration_advanced" in hint and "跨项目并行指挥" in hint
+    assert "team_orchestration_advanced" in hint and "跨文件夹并行指挥" in hint
     # 禁「派工不填 target」与「写仍派工换桌」旧读/写分叉
     assert "写仍派工换桌" not in hint
-    assert "摸已登记项目用只读跨桌" not in hint
+    assert "摸已登记文件夹用只读跨桌" not in hint
 
 
 def test_core_guides_out_of_workspace_absolute_paths():

@@ -5,7 +5,7 @@ Document subsystem lands the terminal form: memory is now ``ai_maintained=true``
 in the single ``documents`` tree, addressed exactly as before through the ``MemoryStore`` seam —
 ``(user_id, path, scope)`` where ``path`` is a note's store-relative name ("画像.md",
 "主题/部署.md") and ``scope`` is the layer (``None`` = global, a ``folder_id`` = that
-project). Episodic digests and per-scope consolidation sidecar live in dedicated tables
+folder). Episodic digests and per-scope consolidation sidecar live in dedicated tables
 (``memory_episodes`` / ``memory_scope_states``), not this store. Because every semantic
 memory consumer depends only on this Protocol, swapping the backing here changes the base
 for the injectable chain — 换底, not a rewrite.
@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import DocumentRepository
+from agentcore.documents.description import maybe_schedule_description_fill
 from agentcore.memory.always_quota import (
     AlwaysQuotaExceededError,
     notify_always_quota_exceeded,
@@ -143,8 +144,13 @@ class DocumentMemoryStore:
                 for (scope_key, path), body in snapshot.memory_bodies.items():
                     if scope_key != sk or not path.endswith(".md"):
                         continue
+                    # Warm already dropped disputed notes, so everything cached is live.
                     out.append(
-                        MemoryFileMeta(path=path, version=memory_version(body))
+                        MemoryFileMeta(
+                            path=path,
+                            version=memory_version(body),
+                            description=snapshot.memory_descriptions.get((sk, path), ""),
+                        )
                     )
                 return out
             try:
@@ -160,7 +166,14 @@ class DocumentMemoryStore:
                 if not path.endswith(".md"):
                     continue
                 version = str(item.get("version") or memory_version(""))
-                out.append(MemoryFileMeta(path=path, version=version))
+                out.append(
+                    MemoryFileMeta(
+                        path=path,
+                        version=version,
+                        description=str(item.get("description") or ""),
+                        disputed=bool(item.get("disputed")),
+                    )
+                )
             return out
         try:
             async with self._repo() as repo:
@@ -170,8 +183,15 @@ class DocumentMemoryStore:
             return []
         # FileMemoryStore listed only ``*.md`` (rglob) — the meta sidecar is addressed by exact
         # path, never listed. Keep that so callers' path-prefix filters behave identically.
+        # Disputed notes are listed (the editor must still show them) and flagged; skipping
+        # injection is the reader's call, not this store's.
         return [
-            MemoryFileMeta(path=n.name, version=memory_version(n.content))
+            MemoryFileMeta(
+                path=n.name,
+                version=memory_version(n.content),
+                description=n.description or "",
+                disputed=n.disputed_at is not None,
+            )
             for n in notes
             if n.name.endswith(".md")
         ]
@@ -231,7 +251,7 @@ class DocumentMemoryStore:
         role, apply_mode = _classify(path)
         async with self._repo() as repo:
             try:
-                await repo.save_memory_note(
+                note = await repo.save_memory_note(
                     user_id,
                     path,
                     markdown,
@@ -243,6 +263,17 @@ class DocumentMemoryStore:
             except AlwaysQuotaExceededError as exc:
                 await notify_always_quota_exceeded(user_id, exc)
                 raise
+        if apply_mode == "on_demand":
+            # An on-demand topic reaches the model as NAME + description only, so a topic
+            # with no description is effectively unfindable. Always-injected cores ride the
+            # prompt whole and need none.
+            maybe_schedule_description_fill(
+                document_id=note.id,
+                user_id=user_id,
+                kind=note.kind,
+                description=note.description or "",
+                content=note.content,
+            )
 
     async def delete(self, user_id: str, path: str, scope: MemoryScope = None) -> None:
         creds = self._account_cloud_creds()

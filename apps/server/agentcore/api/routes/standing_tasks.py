@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, Query, Request
 
 from agentcore.api.dependencies import (
     AuthUser,
+    get_conversation_repo,
     get_folder_repo,
     get_standing_task_repo,
     get_standing_task_run_repo,
@@ -25,8 +26,9 @@ from agentcore.api.schemas.standing_tasks import (
     UpdateStandingTaskRequest,
 )
 from agentcore.core.errors import NotFoundError, ValidationError
+from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, new_id
-from agentcore.db.repositories import FolderRepository
+from agentcore.db.repositories import ConversationRepository, FolderRepository
 from agentcore.db.repositories.standing_tasks import (
     StandingTaskRepository,
     StandingTaskRunRepository,
@@ -54,6 +56,8 @@ from agentcore.standing_tasks.webhook import (
 
 router = APIRouter(tags=["standing-tasks"])
 hooks_router = APIRouter(prefix="/hooks", tags=["standing-hooks"])
+
+logger = get_logger(__name__)
 
 
 def _require_cloud_folder(folder) -> None:
@@ -297,10 +301,17 @@ async def update_standing_task(
     repo: StandingTaskRepository = Depends(get_standing_task_repo),
     folders: FolderRepository = Depends(get_folder_repo),
     workflows: UserWorkflowRepository = Depends(get_user_workflow_repo),
+    conversations: ConversationRepository = Depends(get_conversation_repo),
 ):
     existing = await repo.get_by_id(task_id, user_id=user.user_id)
     if existing is None:
         raise NotFoundError("站立任务不存在")
+
+    # Snapshot before ``repo.update`` mutates this identity-mapped row: the pinned
+    # thread carries the runtime truth an edit has to reach (see below).
+    pinned_conversation_id = existing.conversation_id
+    previous_folder_id = existing.folder_id
+    previous_axes = dict(existing.permission_axes or {})
 
     fields = body.model_fields_set
     kwargs: dict = {}
@@ -316,8 +327,10 @@ async def update_standing_task(
         kwargs["folder_id"] = body.folder_id
     if "enabled" in fields:
         kwargs["enabled"] = body.enabled
+    next_axes: dict | None = None
     if "permission_axes" in fields and body.permission_axes is not None:
-        kwargs["permission_axes"] = body.permission_axes.to_axes().to_dict()
+        next_axes = body.permission_axes.to_axes().to_dict()
+        kwargs["permission_axes"] = next_axes
     if "clear_workflow" in fields and body.clear_workflow:
         kwargs["workflow_id"] = None
     elif "workflow_id" in fields and body.workflow_id is not None:
@@ -389,9 +402,51 @@ async def update_standing_task(
     ):
         raise ValidationError("webhook 任务不可设置 cron / schedule_preset")
 
+    folder_changed = kwargs.get("folder_id", previous_folder_id) != previous_folder_id
+    # The thread we wrote axes to, paired with what landed there — the audit below
+    # needs both, and they are only ever set together.
+    axes_written: tuple[str, dict] | None = None
+    if pinned_conversation_id and folder_changed:
+        # A chat keeps its birth project for life (conversations/crud.py), so the
+        # pinned thread cannot follow the task into another workspace. Release it:
+        # the next fire opens a thread in the new project with the current axes.
+        kwargs["conversation_id"] = None
+    elif pinned_conversation_id and next_axes is not None and next_axes != previous_axes:
+        # ``conversations.permission_axes`` is the runtime truth every turn path reads
+        # (fire, resume-after-approval, crash recovery). Editing the task has to land
+        # there or the new axes never reach a 代跑. ``commit=False`` → one transaction
+        # with the task row below.
+        written = await conversations.set_permission_axes(
+            pinned_conversation_id,
+            user_id=user.user_id,
+            permission_axes=next_axes,
+            commit=False,
+        )
+        if written is not None:
+            axes_written = (pinned_conversation_id, next_axes)
+
     row = await repo.update(task_id, user_id=user.user_id, **kwargs)
     if row is None:
         raise NotFoundError("站立任务不存在")
+    if axes_written is not None:
+        axes_conversation_id, written_axes = axes_written
+        logger.info(
+            "conversation.permission_axes_changed",
+            conversation_id=axes_conversation_id,
+            standing_task_id=task_id,
+            previous=previous_axes,
+            permission_axes=written_axes,
+        )
+        from agentcore.runtime.audit.permission_events import (
+            record_permission_axes_change,
+        )
+
+        await record_permission_axes_change(
+            user_id=user.user_id,
+            conversation_id=axes_conversation_id,
+            previous=previous_axes,
+            next_axes=written_axes,
+        )
     return await _summary(
         row,
         user_id=user.user_id,

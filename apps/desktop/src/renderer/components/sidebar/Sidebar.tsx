@@ -210,7 +210,7 @@ export function Sidebar() {
       {/* Divider — nav vs conversation list */}
       <div className="mx-3 border-t border-sidebar-border" />
 
-      {/* 置顶 (全局) → 项目 → 快速对话 (未置顶裸聊); full list on /conversations
+      {/* 置顶 (全局) → 文件夹 → 快速对话 (未置顶裸聊); full list on /conversations
           (前端UX §一 方案C). */}
       <div className="flex-1 overflow-y-auto">
         {!collapsed && (

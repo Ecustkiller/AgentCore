@@ -137,8 +137,8 @@ def test_empty_tasks_rejected_and_clears_playbook_marks():
     out = rejected({"tasks": [], "playbook_id": "none"})
     assert "'tasks' 必须是非空数组" in (out.result.error or "")
     assert out.result.contract_failure is True
-    # 手写臂已把 playbook 标记清空；force 此时还没读 → None（实例保持旧值）。
-    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None, force=None)
+    # 手写臂已把 playbook 标记清空（force 不再走 flags——execute / replan 各自入口解析）。
+    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None)
 
 
 def test_sub_fanout_cap_rejected_at_depth(monkeypatch):
@@ -146,15 +146,14 @@ def test_sub_fanout_cap_rejected_at_depth(monkeypatch):
     monkeypatch.setattr(prelude_mod, "logger", spy)
     tasks = [{"role": f"r{i}", "task": f"t{i}"} for i in range(MAX_WORKER_SUBDELEGATIONS)]
     out = rejected(
-        {"tasks": tasks, "force": True},
+        {"tasks": tasks, "force": ["post_close"]},
         depth=1,
         sub_workers_spawned=1,
     )
     assert "子团队扇出已达上限" in (out.result.error or "")
     # 扇出拒绝不是契约自纠打回（保持原样：不设 contract_failure）。
     assert out.result.contract_failure is False
-    # 这道闸在读 force 之后 → 标记照写。
-    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None, force=True)
+    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None)
     logged = spy.get("delegate.sub_fanout_rejected")
     assert logged["spawned"] == 1
     assert logged["requested"] == MAX_WORKER_SUBDELEGATIONS
@@ -171,12 +170,12 @@ def test_sub_fanout_within_cap_passes():
 
 def test_handwritten_tasks_normalized():
     tools = ToolRegistry()
-    out = accepted({"tasks": _ONE_TASK, "force": True}, tools=tools)
+    out = accepted({"tasks": _ONE_TASK, "force": ["isomorphic"]}, tools=tools)
     assert out.tasks_raw == _ONE_TASK
     assert out.playbook is None
     assert out.playbook_notes == []
     assert out.valid_tools == {s.name for s in tools.list_all()}
-    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None, force=True)
+    assert out.flags == DelegateCallFlags(playbook=None, playbook_args=None)
     assert out.presentation_format_warning is None
     assert out.automation_delivery_warning is None
 
@@ -311,10 +310,11 @@ def test_no_soft_warnings_on_a_clean_batch():
     assert out.root_slice_warn is None
 
 
-@pytest.mark.parametrize("force_arg", [None, False, 0, "", True, "yes"])
-def test_force_flag_is_bool_coerced(force_arg):
+@pytest.mark.parametrize("force_arg", [None, False, 0, "", True, "yes", ["thrash"]])
+def test_prelude_does_not_touch_force(force_arg):
+    """force 已移出前奏：execute / replan 各自在入口解析（见 force_scopes）。"""
     args: dict = {"tasks": _ONE_TASK}
     if force_arg is not None:
         args["force"] = force_arg
     out = accepted(args)
-    assert out.flags.force is bool(force_arg)
+    assert not hasattr(out.flags, "force")

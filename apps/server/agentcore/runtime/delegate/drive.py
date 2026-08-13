@@ -365,8 +365,8 @@ async def _drive_body(
 
     # 收口后冷开整团重派硬闸（与同图 replan 补跑闸分轨；共用 MAX_GAP_FILL_ADDS）。
     # 须在 team_preview 之前拒，避免开工卡先弹出。append / 并入活跃图不走本闸。
-    force = bool(getattr(tool, "_delegate_force", False))
-    if not force and not merging_into_active and seed_completed is None:
+    # 逐闸 force：本闸只认 force=["post_close"]，判定在闸内（同队续派另有入口）。
+    if not merging_into_active and seed_completed is None:
         from agentcore.core.logging import get_logger
         from agentcore.core.types import ToolEffect
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
@@ -395,7 +395,8 @@ async def _drive_body(
             )
 
     # Sticky channel-dead + write-desk 硬拒（与 post_close 同层；并入/续跑未完成写盘节点也拒）。
-    # prose / 无写盘需求批次放行；不扫 task 自由文。force 不逃生（能力缺失非收口策略）。
+    # prose / 无写盘需求批次放行；不扫 task 自由文。
+    # 本闸不设 force scope：通道死是能力缺失，不是收口策略，点名哪道闸都不逃生。
     from agentcore.core.logging import get_logger
     from agentcore.core.types import ToolEffect
     from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
@@ -442,10 +443,17 @@ async def _drive_body(
         if preview_early is not None:
             return preview_early
 
-    # 同构再委派护栏：活跃协调上角色+任务高度同构 → 结构化拒绝（除非 force）。
-    # 触顶换马甲护栏：近期 thrashing worker + 相似 task/artifacts → 拒冷派（除非 force /
-    # continue_from）。与 isomorphic 同层；不挪用已退役的 completion-gap streak。
-    if not force:
+    # 同构再委派护栏：活跃协调上角色+任务高度同构 → 结构化拒绝（除非点名放行本闸）。
+    # 触顶换马甲护栏：近期 thrashing worker + 相似 task/artifacts → 拒冷派（除非点名放行
+    # 本闸 / continue_from）。与 isomorphic 同层；不挪用已退役的 completion-gap streak。
+    # 两道闸各认各的 scope——一次 force 不再顺手把另一道也打开。
+    from agentcore.runtime.delegate.force_scopes import (
+        GATE_ISOMORPHIC,
+        GATE_THRASH,
+        force_allows,
+    )
+
+    if not force_allows(tool, GATE_THRASH):
         from agentcore.core.logging import get_logger
         from agentcore.core.types import ToolEffect
         from agentcore.runtime.coordination.thrash import (
@@ -480,7 +488,7 @@ async def _drive_body(
                 has_deps=False,
             )
 
-    if merging_into_active and not force:
+    if merging_into_active and not force_allows(tool, GATE_ISOMORPHIC):
         from agentcore.core.types import ToolEffect
         from agentcore.runtime.coordination.isomorphic import (
             is_isomorphic_redelegation,
@@ -560,7 +568,7 @@ async def _drive_body(
         seed_completed=seed_completed,
         seed_notes=seed_notes,
     )
-    # 跨项目 · 多 local 认领簿（C0 允许多根；仅登记，不拒第二本地根）。
+    # 跨文件夹 · 多 local 认领簿（C0 允许多根；仅登记，不拒第二本地根）。
     if getattr(tool, "_local_root_claims", None) is None:
         from agentcore.runtime.delegate.target_desktop import LocalRootClaimBook
 
@@ -624,6 +632,7 @@ async def _drive_body(
             seed_completed=seed_completed,
             cancel_run_ids=redirects.cancel_run_ids,
             stop_run_ids=redirects.stop_run_ids,
+            timeout_run_ids=redirects.timeout_run_ids,
             on_progress=redirects.on_progress,
             on_boundary=on_boundary,
             on_skipped=_on_skipped,

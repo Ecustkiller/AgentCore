@@ -81,7 +81,85 @@ export function waitForPrimaryStreamIdle(
   });
 }
 
+/**
+ * 本端自有会话连接闸（对话级订阅互斥 · 云对话多端同权 B2 · P0-b）。
+ *
+ * primary 栈排的是同端两条连接的 fold **次序**；这里排的是「对话级长订阅
+ * （``GET …/stream?follow=true``）不得与本端自己开的回合连接同折一个回合」——
+ * 那会把同一回合折两次。
+ *
+ * 不能复用 primary 栈：midFlight 的 primary claim 必须等 drain 才拿（提前拿会自锁
+ * 自己的 ``waitForPrimaryStreamIdle``），可它的 POST 从发出那一刻起，服务端就已经
+ * 排出了新回合——对订阅方而言它从那时起就该让位。
+ */
+type LocalStreamSlot = {
+  /** 当前打开的本端连接数（回合流嵌套 / midFlight 并发）。 */
+  count: number;
+  listeners: Set<(busy: boolean) => void>;
+};
+
+const localStreams = new Map<string, LocalStreamSlot>();
+
+function localSlotOf(conversationId: string): LocalStreamSlot {
+  let slot = localStreams.get(conversationId);
+  if (!slot) {
+    slot = { count: 0, listeners: new Set() };
+    localStreams.set(conversationId, slot);
+  }
+  return slot;
+}
+
+function dropLocalSlotIfEmpty(conversationId: string): void {
+  const slot = localStreams.get(conversationId);
+  if (slot && slot.count === 0 && slot.listeners.size === 0) {
+    localStreams.delete(conversationId);
+  }
+}
+
+/**
+ * 声明本端为该会话开了自有 SSE（POST 回合流 / 回合级 attach / midFlight 排队连接）。
+ *
+ * 同步通知订阅者（对话级订阅据此立刻让位），故必须在**发出请求之前**调用；返回的释放
+ * 函数幂等，调用方在 ``finally`` 里调一次即可。
+ */
+export function beginLocalConversationStream(
+  conversationId: string,
+): () => void {
+  const slot = localSlotOf(conversationId);
+  slot.count += 1;
+  if (slot.count === 1) {
+    for (const cb of [...slot.listeners]) cb(true);
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    slot.count -= 1;
+    if (slot.count > 0) return;
+    for (const cb of [...slot.listeners]) cb(false);
+    dropLocalSlotIfEmpty(conversationId);
+  };
+}
+
+export function hasLocalConversationStream(conversationId: string): boolean {
+  return (localStreams.get(conversationId)?.count ?? 0) > 0;
+}
+
+/** 订阅本端自有连接的忙/闲翻转（对话级订阅用来让位 / 复位）。 */
+export function subscribeLocalConversationStream(
+  conversationId: string,
+  cb: (busy: boolean) => void,
+): () => void {
+  const slot = localSlotOf(conversationId);
+  slot.listeners.add(cb);
+  return () => {
+    slot.listeners.delete(cb);
+    dropLocalSlotIfEmpty(conversationId);
+  };
+}
+
 /** 测试隔离：清空所有会话的所有权态。 */
 export function resetStreamOwnershipForTests(): void {
   slots.clear();
+  localStreams.clear();
 }

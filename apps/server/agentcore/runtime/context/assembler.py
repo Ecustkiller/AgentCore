@@ -19,7 +19,10 @@ byte-identical to the old assembly. Keeping that foundation prefix stable across
 not an irrevocable product invariant. Discipline lives here (:class:`SectionOrder`): new
 sections append at the volatile tail or insert at a stable key between existing slots;
 never reorder existing keys. ``observe`` emits ``assembly_hash`` so drift is searchable
-without enforcing a hard PrefixStabilityPolicy.
+without enforcing a hard PrefixStabilityPolicy — and, since the discount is a claim about
+BILLING rather than about the assembled text, ``track_sections`` feeds
+``observability.prefix_cache`` so ``cost.prefix_cache`` can check that claim against what the
+provider actually charged (审计议题 D4: 先补可观测, 不动装配).
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ from __future__ import annotations
 import hashlib
 
 from agentcore.core.logging import get_logger
+from agentcore.observability.prefix_cache import digest_text, record_prompt_sections
 from agentcore.runtime.context.contributor import PromptContributor
 
 logger = get_logger(__name__)
@@ -83,6 +87,23 @@ class ContextAssembler:
         """The kept contributors in RENDER order (sorted; for debugging / budgeting)."""
         return sorted(self._contributors, key=lambda c: c.order)
 
+    def track_sections(self, *, scope: str) -> ContextAssembler:
+        """Register this layer's section fingerprints with the prefix-cache probe (no log).
+
+        审计议题 D4. Nested layers (shared base → CEO chat → per-turn tail) each hand their
+        render up as ONE section of the layer above, so without this the outer ``observe``
+        can only say "the whole CEO prompt changed". Registering every layer lets
+        ``observability.prefix_cache`` splice them back into leaves and name the section that
+        actually broke the byte prefix (文件索引 / 项目清单 / 变尾段). Silent by design —
+        ``observe`` already owns the one log line per assembly.
+
+        Zero behavior change, same contract as ``observe``: reads the kept contributors,
+        returns ``self``.
+        """
+        kept = sorted(self._contributors, key=lambda c: c.order)
+        record_prompt_sections(scope=scope, sections=[(c.key, c.text) for c in kept])
+        return self
+
     def observe(self, *, scope: str, soft_cap: int | None = None) -> ContextAssembler:
         """Log assembled size, per-section chars, and ``assembly_hash`` — observe-only
         (COST-004 / M6).
@@ -93,6 +114,9 @@ class ContextAssembler:
         待数据出再据此开「仅裁易变尾 (order≥800)」软闸 (项目审计-成本性能专项 §九)。trace /
         conversation 上下文由 contextvars 自动并入每行日志, 故此处无需显式传。``soft_cap`` 为
         None ⇒ 不判越限。
+
+        ``section_digests`` (D4) 让「哪段变了」离线可算: 比对相邻两回合同 scope 的日志行即可,
+        无需进程内状态 (在线归因见 ``track_sections``)。
         """
         kept = sorted(self._contributors, key=lambda c: c.order)
         sections = {c.key: len(c.text) for c in kept}
@@ -103,11 +127,12 @@ class ContextAssembler:
             scope=scope,
             total_chars=total,
             sections=sections,
+            section_digests={c.key: digest_text(c.text) for c in kept},
             assembly_hash=assembly_hash(rendered),
             over_soft_cap=soft_cap is not None and soft_cap > 0 and total > soft_cap,
             soft_cap=soft_cap,
         )
-        return self
+        return self.track_sections(scope=scope)
 
     def render(self) -> str:
         """Sort kept contributors by ``order`` (stable) and join with ``"\\n"``."""

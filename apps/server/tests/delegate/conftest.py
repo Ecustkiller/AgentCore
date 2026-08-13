@@ -216,6 +216,7 @@ def tool(provider: Provider, sink: EventSink | None = None) -> DelegateTool:
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx(),
+        approval_gate=None,
         folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 
@@ -286,6 +287,7 @@ def nesting_tool(provider: NestingProvider, sink: EventSink) -> DelegateTool:
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx(),
+        approval_gate=None,
         captain_run_id="CEO",
         folder_id=_TEST_BIRTH_FOLDER_ID,
     )
@@ -307,6 +309,7 @@ def tool_ckpt(
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx(),
+        approval_gate=None,
         conversation_id=conversation_id,
         registry=registry,
         checkpoint_timeout_seconds=timeout,
@@ -336,6 +339,7 @@ def tool_durable(
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx(),
+        approval_gate=None,
         conversation_id="conv1",
         registry=registry,
         checkpoint_timeout_seconds=5.0,
@@ -363,6 +367,7 @@ def scope_tool(provider: ScopeProvider | DepProvider) -> DelegateTool:
         history=[],
         tools=tools,
         base_tool_context=ctx(),
+        approval_gate=None,
         folder_id=_TEST_BIRTH_FOLDER_ID,
     )
 

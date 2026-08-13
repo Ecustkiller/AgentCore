@@ -254,6 +254,67 @@ async def test_load_chat_context_no_consecutive_roles_after_pair_fold(monkeypatc
     assert all(a != b for a, b in zip(roles, roles[1:], strict=False))
 
 
+async def test_load_chat_context_realigns_when_cap_drops_the_boundary_user(monkeypatch):
+    """CTX-A4 ratchet: the loader's OWN cap-driven cut must keep the near end user-led.
+
+    _select_fold floors the fold to a user boundary, but a stalled compaction lets the
+    un-folded tail outgrow compaction_context_max_messages — and list_recent_after then
+    drops the oldest of that tail, which is exactly the boundary user the fold preserved.
+    The window handed to a strict backend must still read [summary(assistant), user, …].
+    """
+    import agentcore.conversation.history as history_mod
+
+    messages = _msgs(60)
+    fold = _select_fold(messages, recency=20, min_fold=4)
+    watermark = fold[-1].created_at
+    tail = [m for m in messages if m.created_at > watermark]
+    assert tail[0].role == "user"  # the fold's own cut is aligned
+
+    conv = SimpleNamespace(
+        compaction_summary="## 已确立的事实\n- X",
+        compacted_through=watermark,
+    )
+
+    class _FakeConvRepo:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id_unscoped(self, conversation_id):
+            return conv
+
+    class _FakeMsgRepo:
+        def __init__(self, session):
+            pass
+
+        async def list_recent_after(self, conversation_id, *, after, limit):
+            # Production semantics: recent-biased — the OLDEST of the tail is what drops.
+            return [m for m in messages if m.created_at > after][-limit:]
+
+    monkeypatch.setattr(history_mod, "ConversationRepository", _FakeConvRepo)
+    monkeypatch.setattr(history_mod, "MessageRepository", _FakeMsgRepo)
+    # One under the tail length: the cap drops exactly tail[0], the boundary user.
+    monkeypatch.setattr(
+        history_mod.settings,
+        "compaction_context_max_messages",
+        len(tail) - 1,
+        raising=True,
+    )
+
+    out = await history_mod.load_chat_context(SimpleNamespace(), "c1")
+    assert out[0]["role"] == "assistant"  # summary block
+    assert out[1]["role"] == "user"  # the orphaned assistant went with its dropped prompt
+    roles = [item["role"] for item in out]
+    assert all(a != b for a, b in zip(roles, roles[1:], strict=False))
+    assert out[-1]["content"] == messages[-1].content  # newest turns are never the ones cut
+
+
+def test_from_first_user_drops_an_all_assistant_remainder():
+    """Terminal case of the same cut: nothing to align to → the summary rides alone."""
+    from agentcore.conversation.history import _from_first_user
+
+    assert _from_first_user([{"role": "assistant", "content": "orphan"}]) == []
+
+
 # --- _summarize (async, fake provider) ---
 
 

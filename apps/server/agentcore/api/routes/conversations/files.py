@@ -4,10 +4,12 @@ import mimetypes
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.api.dependencies import (
     AuthUser,
     get_conversation_repo,
+    get_db,
 )
 from agentcore.api.download_headers import download_headers
 from agentcore.api.schemas import (
@@ -31,6 +33,7 @@ from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
 from agentcore.docs_export.workspace_export import ExportMarkdownError, export_markdown_path
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.workspace.files import (
     copy_file,
     create_dir,
@@ -44,7 +47,7 @@ from agentcore.workspace.files import (
     write_file_text,
 )
 from agentcore.workspace.git import CloneError, clone_repo
-from agentcore.workspace.locate import build_server_workspace
+from agentcore.workspace.locate import WorkspaceCoords, build_server_workspace
 from agentcore.workspace.protocol import (
     AlreadyExists,
     NotAFile,
@@ -72,19 +75,37 @@ def _file_workspace_folder_id(conv: Conversation) -> str | None:
     return ws_folder_id
 
 
+async def _workspace_coords(
+    user_id: str, conv: Conversation, session: AsyncSession
+) -> WorkspaceCoords:
+    """The four coordinates every ``workspace.files`` call needs.
+
+    Resolved once per request here rather than inside the file service: the
+    service stays a pure function of ``(user, folder, placement, conversation)``,
+    and the placement lookup rides this request's own session.
+    """
+    folder_id = _file_workspace_folder_id(conv)
+    placement = await resolve_folder_placement(folder_id, session=session)
+    return {
+        "user_id": user_id,
+        "folder_id": folder_id,
+        "folder_rel_path": placement.rel_path,
+        "conversation_id": conv.id,
+    }
+
+
 @router.get("/{conversation_id}/workspace/files", response_model=WorkspaceFileListResponse)
 async def list_workspace_files(
     conversation_id: str,
     user: AuthUser,
     recursive: bool = Query(False),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """List the files in the conversation's scratch workspace (top level or recursive)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     entries = await list_files(
-        user_id=user.user_id,
-        folder_id=_file_workspace_folder_id(conv),
-        conversation_id=conv.id,
+        **await _workspace_coords(user.user_id, conv, session),
         recursive=recursive,
     )
     return WorkspaceFileListResponse(
@@ -100,6 +121,7 @@ async def upload_workspace_file(
     request: Request,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Upload (create/overwrite) a workspace file from the raw request body.
 
@@ -119,9 +141,7 @@ async def upload_workspace_file(
 
     try:
         written = await upload_file(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=path,
             data=data,
         )
@@ -139,15 +159,12 @@ async def export_conversation_workspace_docx(
     body: ExportDocxRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Export a conversation-workspace Markdown file to a sibling ``.docx``."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
-        backend = build_server_workspace(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
-        )
+        backend = build_server_workspace(**await _workspace_coords(user.user_id, conv, session))
         result = await export_markdown_path(backend, body.path)
     except ExportMarkdownError as e:
         raise ValidationError(e.message) from e
@@ -168,6 +185,7 @@ async def read_workspace_file_for_edit(
     path: str,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Read a workspace file for in-panel editing (full text + mtime CAS baseline).
 
@@ -177,9 +195,7 @@ async def read_workspace_file_for_edit(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         text, mtime_ms, eol = await read_file_for_edit(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=path,
         )
     except OutsideWorkspace as e:
@@ -201,6 +217,7 @@ async def write_workspace_file(
     body: WorkspaceWriteRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Conditionally write editor text back to a workspace file (mtime CAS).
 
@@ -215,9 +232,7 @@ async def write_workspace_file(
 
     try:
         ok, mtime_ms = await write_file_text(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=path,
             content=body.content,
             baseline_mtime_ms=body.baseline_mtime_ms,
@@ -236,6 +251,7 @@ async def download_workspace_file(
     path: str,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Download a single file from the conversation's scratch workspace.
 
@@ -245,9 +261,7 @@ async def download_workspace_file(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         file_path = await resolve_download_file(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=path,
             max_bytes=settings.workspace_upload_max_bytes,
         )
@@ -273,14 +287,13 @@ async def delete_workspace_file(
     path: str,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Delete a file or directory from the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         await delete_file(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=path,
         )
     except OutsideWorkspace as e:
@@ -296,14 +309,13 @@ async def move_workspace_file(
     body: MoveFileRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Move/rename a file or directory within the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         await move_file(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             src=body.src,
             dst=body.dst,
         )
@@ -322,14 +334,13 @@ async def copy_workspace_file(
     body: MoveFileRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Copy a file or directory within the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         await copy_file(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             src=body.src,
             dst=body.dst,
         )
@@ -350,14 +361,13 @@ async def create_workspace_dir(
     body: CreateDirRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Create a directory in the conversation's scratch workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     try:
         await create_dir(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             path=body.path,
         )
     except OutsideWorkspace as e:
@@ -373,6 +383,7 @@ async def clone_repo_into_workspace(
     body: CloneRepoRequest,
     user: AuthUser,
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
+    session: AsyncSession = Depends(get_db),
 ):
     """Clone a public git repository into the conversation's scratch workspace (决策⑤ · G3)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
@@ -387,9 +398,7 @@ async def clone_repo_into_workspace(
         auth = None
     try:
         dest = await clone_repo(
-            user_id=user.user_id,
-            folder_id=_file_workspace_folder_id(conv),
-            conversation_id=conv.id,
+            **await _workspace_coords(user.user_id, conv, session),
             repo_url=body.repo_url,
             dest=body.dest,
             auth=auth,

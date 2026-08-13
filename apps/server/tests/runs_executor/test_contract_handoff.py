@@ -56,6 +56,7 @@ async def test_file_write_handoff_empty_content_passes_without_retry():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -149,6 +150,7 @@ async def test_upstream_missing_handoff_forced_then_accepted_on_rework():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     arch = res["t_arch"]
@@ -219,6 +221,7 @@ async def test_handoff_retry_preserves_prior_content_avoids_empty_false_fail():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     arch = res["t_arch"]
@@ -260,6 +263,7 @@ async def test_upstream_without_handoff_tool_synthesizes_degraded_without_rework
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     arch = res["t_arch"]
@@ -283,6 +287,7 @@ async def test_leaf_without_dependents_does_not_force_handoff():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -325,6 +330,7 @@ async def test_leaf_with_tools_missing_handoff_gets_supplement_or_degraded():
         system_prompt="SYS",
         user_message="req",
         execution_id="e-leaf-tool",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -353,6 +359,7 @@ async def test_leaf_short_body_with_handoff_tool_still_skips_when_no_tools():
         system_prompt="SYS",
         user_message="req",
         execution_id="e-leaf-short",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -430,6 +437,7 @@ async def test_leaf_tool_missing_handoff_then_accepted_on_rework():
         system_prompt="SYS",
         user_message="req",
         execution_id="e-leaf-rework",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -468,6 +476,7 @@ async def test_artifacts_missing_soft_completes_without_write_pass():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -516,6 +525,7 @@ async def test_artifacts_hit_when_file_write_covers_declared_path():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -596,6 +606,7 @@ async def test_strict_degraded_handoff_completes_when_files_landed():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     sec = res["t_sec"]
@@ -648,6 +659,7 @@ async def test_strict_zero_landing_soft_completes_without_degraded_dependents():
         system_prompt="SYS",
         user_message="req",
         execution_id="e-nofile",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     sec = res.get("t_sec") or res.get("t_1") or next(iter(res.values()))

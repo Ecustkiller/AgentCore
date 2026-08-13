@@ -65,21 +65,25 @@ _VERIFY_TASK_HINTS = re.compile(
     re.IGNORECASE,
 )
 
+# ``.docx`` / ``.pdf`` are deliberately absent: ``md_to_docx`` / ``md_to_pdf`` are
+# deterministic FILESYSTEM exporters registered unconditionally, so a Word / PDF
+# target still lands with the execution sandbox withheld.
 _BINARY_ARTIFACT_HINTS = re.compile(
     r"(python-pptx|openpyxl|ffmpeg|可播放|可直接播放|二进制|可执行文件|"
-    r"\.pptx|\.docx|\.xlsx|\.exe|\.apk|\.mp4|\.mp3|\.wav|\.avi|\.mov)",
+    r"\.pptx|\.xlsx|\.exe|\.apk|\.mp4|\.mp3|\.wav|\.avi|\.mov)",
     re.IGNORECASE,
 )
 
-_OFFICE_ARTIFACT_SUFFIXES = frozenset({".pptx", ".docx", ".xlsx", ".odt", ".rtf"})
+# Office targets with no deterministic exporter — these really do need execution.
+_EXEC_OFFICE_SUFFIXES = frozenset({".pptx", ".xlsx", ".odt", ".rtf"})
 
-_OFFICE_DELIVERABLE_HINTS = re.compile(
+_EXEC_OFFICE_HINTS = re.compile(
     r"(?:"
-    r"\.pptx|\.docx|\.xlsx|\.odt|\.rtf|"
+    r"\.pptx|\.xlsx|\.odt|\.rtf|"
     r"python-pptx|openpyxl|"
     r"幻灯片|演示文稿|课件|"
     r"\bPPTX?\b|PowerPoint|"
-    r"Word\s*文档|Excel(?:表|表格|文件)?"
+    r"Excel(?:表|表格|文件)?"
     r")",
     re.IGNORECASE,
 )
@@ -220,30 +224,31 @@ def plan_mentions_binary_artifact(plan: RunPlan) -> bool:
             return True
     return False
 
-def _path_looks_office(path: str) -> bool:
+def _path_looks_exec_office(path: str) -> bool:
     lowered = path.lower().replace("\\", "/")
     return any(
         lowered.endswith(suf) or lowered.endswith(f"*{suf}") or f"*{suf}" in lowered
-        for suf in _OFFICE_ARTIFACT_SUFFIXES
+        for suf in _EXEC_OFFICE_SUFFIXES
     )
 
-def plan_suggests_office_deliverable(plan: RunPlan) -> bool:
-    """True when any worker task/artifacts read like Office/document landing.
+def plan_suggests_exec_office_deliverable(plan: RunPlan) -> bool:
+    """True when any worker task/artifacts read like an Office target needing execution.
 
-    Used by soft capability warnings for Office/document batches.
+    ``.docx`` / ``.pdf`` are excluded on purpose — ``md_to_docx`` / ``md_to_pdf``
+    produce them deterministically without a sandbox.
     """
     for node in plan.nodes:
         text = (node.task or "").strip()
-        if text and _OFFICE_DELIVERABLE_HINTS.search(text):
+        if text and _EXEC_OFFICE_HINTS.search(text):
             return True
         d = node.deliverable
         if d is None:
             continue
         name = str(getattr(d, "name", "") or "").strip()
-        if name and _path_looks_office(name):
+        if name and _path_looks_exec_office(name):
             return True
         for art in d.artifacts or []:
-            if art and _path_looks_office(str(art)):
+            if art and _path_looks_exec_office(str(art)):
                 return True
     return False
 
@@ -278,7 +283,7 @@ def execution_capability_warning(
                 backend=backend, kind="capability_runtime_ready"
             )
         return None
-    if plan_suggests_office_deliverable(plan):
+    if plan_suggests_exec_office_deliverable(plan):
         return exec_env_remediation_zh(backend=backend, kind="capability_office")
     return exec_env_remediation_zh(backend=backend, kind="capability_run")
 
@@ -515,17 +520,6 @@ def _worker_files_written(state: RunState) -> bool:
     if state.files_touched:
         return True
     return bool(state.transcript and _files_from_transcript(state.transcript))
-
-def _worker_landed_paths(state: RunState) -> list[str]:
-    if state.files_touched:
-        return list(state.files_touched)
-    if state.transcript:
-        return _files_from_transcript(state.transcript)
-    return []
-
-def _worker_office_files_written(state: RunState) -> bool:
-    """True when this worker landed at least one Office/document target suffix."""
-    return any(_path_looks_office(p) for p in _worker_landed_paths(state) if p)
 
 def _files_from_transcript(transcript: list[LLMMessage]) -> list[str]:
     from agentcore.runtime.runs.serialize import files_touched_from_transcript

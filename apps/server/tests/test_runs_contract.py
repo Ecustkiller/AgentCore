@@ -444,6 +444,7 @@ def test_form_files_passes_when_file_copy_landed():
     """file_copy 成功落盘须计入 files_written（产物复制进工作区）。"""
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
+    from agentcore.tools.file_products import file_product, with_file_products_marker
 
     transcript = [
         LLMMessage(
@@ -459,7 +460,10 @@ def test_form_files_passes_when_file_copy_landed():
                             ' "destination": "deck.pptx"}'
                         )))
             ]),
-        LLMMessage(role="tool", content="已复制", tool_call_id="cp1"),
+        LLMMessage(
+            role="tool",
+            content=with_file_products_marker("已复制", [file_product("deck.pptx")]),
+            tool_call_id="cp1"),
     ]
     touched = files_touched_from_transcript(transcript)
     assert touched == ["deck.pptx"]
@@ -475,6 +479,7 @@ def test_requires_files_passes_when_str_replace_landed():
     """str_replace / file_append 成功落盘须计入 files_written（分区 worker 增量补丁）。"""
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
+    from agentcore.tools.file_products import file_product, with_file_products_marker
 
     transcript = [
         LLMMessage(
@@ -487,7 +492,12 @@ def test_requires_files_passes_when_str_replace_landed():
                         name="str_replace",
                         arguments='{"path": "site/index.html", "old_string": "a", "new_string": "b"}'))
             ]),
-        LLMMessage(role="tool", content="已替换 site/index.html", tool_call_id="s1"),
+        LLMMessage(
+            role="tool",
+            content=with_file_products_marker(
+                "已替换 site/index.html", [file_product("site/index.html")]
+            ),
+            tool_call_id="s1"),
     ]
     touched = files_touched_from_transcript(transcript)
     assert touched == ["site/index.html"]

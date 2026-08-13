@@ -29,6 +29,7 @@ function wireIntoInteractionStore(
   event: SSEEvent,
   conversationId: string,
   origin: DispatchContext["source"],
+  live: boolean,
 ): void {
   // Cold pause cards are CEO-lane: never bind via growth-graph host lookup
   // alone when a same-turn stamp exists, or ResumePrompt keys the wrong turn.
@@ -45,6 +46,7 @@ function wireIntoInteractionStore(
     conversationId,
     messageId,
     origin,
+    { live },
   );
 }
 
@@ -83,6 +85,7 @@ export function handleInteractionEvent(
   ctx: DispatchContext,
 ): boolean {
   const { conversationId } = ctx;
+  const live = ctx.replay !== true;
 
   if (isInteractionOrphanedEvent(event.type)) {
     const p = event.payload as InteractionOrphanedPayload;
@@ -105,7 +108,7 @@ export function handleInteractionEvent(
       flushPendingContent(conversationId);
       flushPendingFrames(conversationId);
     }
-    wireIntoInteractionStore(event, conversationId, ctx.source);
+    wireIntoInteractionStore(event, conversationId, ctx.source, live);
 
     if (requiredDef.timeline) {
       const wire = wireFor(requiredDef.kind);
@@ -129,7 +132,7 @@ export function handleInteractionEvent(
 
   const resolvedDef = defFromResolvedEvent(event.type);
   if (resolvedDef) {
-    wireIntoInteractionStore(event, conversationId, ctx.source);
+    wireIntoInteractionStore(event, conversationId, ctx.source, live);
     const effects = resolvedDef.sseResolved;
     const wire = wireFor(resolvedDef.kind);
     const id = (event.payload as Record<string, unknown>)?.[wire.idField];

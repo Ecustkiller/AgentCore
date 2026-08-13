@@ -4,10 +4,14 @@ import { statusPillSoft } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FileNode, FileSource } from "@/lib/fileSource";
 import {
+  AGENTCORE_ROOT_LABEL,
+  AGENTCORE_ROOT_TOOLTIP,
   countDescendantFiles,
+  isAgentCoreRootDir,
   stageDirCaption,
   stageDirMeta,
 } from "@/lib/stageDirs";
+import { cn } from "@/lib/utils";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import type React from "react";
 import { InlineCreateRow, InlineInput, InlineRow } from "./FileTreeInline";
@@ -129,6 +133,8 @@ export function FileTreeRow(props: FileTreeRowProps) {
   const stageCaption = stage
     ? stageDirCaption(stage, countDescendantFiles(node.path, data.childrenOf))
     : null;
+  // 约定根改叫「AI 工作间」并退成次要行：与条目区（「记忆」）消歧，且它是过程材料。
+  const isWorkroom = isAgentCoreRootDir(node.path);
 
   return (
     <li>
@@ -177,14 +183,22 @@ export function FileTreeRow(props: FileTreeRowProps) {
               }}
               style={rowStyle}
             >
-              <SimpleTooltip label={stage?.tooltip ?? node.path}>
+              <SimpleTooltip
+                label={
+                  stage?.tooltip ??
+                  (isWorkroom ? AGENTCORE_ROOT_TOOLTIP : node.path)
+                }
+              >
                 <Button
                   variant="ghost"
                   onClick={() => {
                     props.onSelect(node);
                     props.onToggle(node.path);
                   }}
-                  className="h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal"
+                  className={cn(
+                    "h-auto min-w-0 flex-1 justify-start gap-1.5 overflow-hidden rounded-none px-0 py-1.5 text-left text-xs font-normal",
+                    isWorkroom && "text-muted-foreground",
+                  )}
                 >
                   {open ? (
                     <ChevronDown
@@ -197,7 +211,9 @@ export function FileTreeRow(props: FileTreeRowProps) {
                       className="shrink-0 text-muted-foreground"
                     />
                   )}
-                  <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                  <span className="min-w-0 flex-1 truncate">
+                    {isWorkroom ? AGENTCORE_ROOT_LABEL : node.name}
+                  </span>
                   {stageCaption && (
                     <span
                       className={`shrink-0 rounded-full px-1.5 py-0.5 text-xs leading-none ${statusPillSoft.muted}`}

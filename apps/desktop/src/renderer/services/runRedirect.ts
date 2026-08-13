@@ -8,10 +8,14 @@ export interface SubmitRunRedirectParams {
 }
 
 /**
- * Queue a mid-flight redirect for one worker (中间可见性 Phase 2a).
+ * Redirect one in-flight worker (中间可见性 Phase 2a).
  *
  * Local turns route to the sidecar process (the cloud HTTP POST cannot reach the
- * in-process queue). Step 2 will drain this queue to cancel + re-run the worker.
+ * in-process queue). The drive loop drains this queue on its next cancel poll:
+ * the worker is cancelled outright, then re-run with the feedback — hot
+ * `continue_run` from its salvaged transcript when continuable, else a
+ * same-role `_redir` handoff from scratch (`runtime/delegate/drive_redirect.py`).
+ * Nothing about it is「排队等下一步」——say so in any UI confirmation.
  */
 export async function submitRunRedirect(
   conversationId: string,

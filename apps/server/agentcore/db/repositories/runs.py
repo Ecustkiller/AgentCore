@@ -333,12 +333,22 @@ class PausedTurnRepository:
         )
         return result.scalar_one_or_none() is not None
 
-    async def delete(self, message_id: str) -> None:
-        """Drop a paused turn (live in-process resolve / timeout settled it instead)."""
-        await self._session.execute(
-            delete(PausedTurnRow).where(PausedTurnRow.message_id == message_id)
+    async def delete(self, message_id: str) -> PausedTurnRow | None:
+        """Drop a paused turn (live in-process resolve / timeout settled it instead).
+
+        Returns the removed row (``None`` when there was nothing to remove) so the
+        caller can tell「this really was a pending card」from「already gone」without a
+        second query — the attention signal needs the frame's user / conversation to
+        clear the badge, and only the winner of the delete may send it.
+        """
+        result = await self._session.execute(
+            delete(PausedTurnRow)
+            .where(PausedTurnRow.message_id == message_id)
+            .returning(PausedTurnRow)
         )
+        row = result.scalar_one_or_none()
         await self._session.commit()
+        return row
 
     async def delete_stale(self, *, before: datetime, limit: int) -> int:
         """Delete up to ``limit`` paused turns idle since before ``before`` (TTL sweep).
@@ -500,24 +510,31 @@ class TurnJournalRepository:
         return [{"kind": r.kind, "payload": r.payload, "ts": r.ts} for r in result.scalars().all()]
 
     async def list_recent_turn_ids(
-        self, conversation_id: str, *, limit: int = 40
+        self, conversation_id: str, *, limit: int = 40, after: datetime | None = None
     ) -> list[str]:
         """Distinct ``turn_id``s for a conversation, newest-first by session time.
 
         Orders by ``max(created_at)`` per turn — **not** in-turn ``seq`` (which is a
         within-turn counter and would starve older turns' durable cards after a long
         journal). Shared by stage_card scan / recovery / interaction resolve.
+
+        ``after`` keeps only turns whose journal ends strictly later than that instant.
+        The memory consolidation pass passes its watermark so the action inventory it
+        summarizes covers the same turns as its message window, not every recent turn.
         """
         cid = (conversation_id or "").strip()
         if not cid or limit <= 0:
             return []
-        result = await self._session.execute(
+        stmt = (
             select(TurnJournalRow.turn_id)
             .where(TurnJournalRow.conversation_id == cid)
             .group_by(TurnJournalRow.turn_id)
             .order_by(func.max(TurnJournalRow.created_at).desc())
             .limit(limit)
         )
+        if after is not None:
+            stmt = stmt.having(func.max(TurnJournalRow.created_at) > after)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def find_turn_id_for_execution(

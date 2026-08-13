@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -22,16 +23,22 @@ from agentcore.runtime.debate import (
     DebateConfig,
     Moderator,
     RoundBoundary,
+    RoundDecision,
     RoundPolicy,
     RoundResult,
 )
-from agentcore.runtime.debate.events import account_moderator, moderator_plan_event
+from agentcore.runtime.debate.events import moderator_plan_event, settle_moderator_node
 from agentcore.runtime.debate.rounds import (
     make_closing_runner,
     make_cross_exam_runner,
     make_round_runner,
 )
-from agentcore.runtime.debate.steer_queue import fold_steers, take_steers
+from agentcore.runtime.debate.steer_queue import (
+    close_steer_window,
+    fold_steers,
+    open_steer_window,
+    take_steers,
+)
 from agentcore.runtime.events import (
     EventSink,
     debate_result,
@@ -98,7 +105,7 @@ class DebateTool:
         profile_set: ProfileSet | None = None,
         max_parallel: int | None = None,
         captain_run_id: str | None = None,
-        approval_gate: ApprovalGate | None = None,
+        approval_gate: ApprovalGate | None,
         depth: int = 0,
         conversation_id: str = "",
         ambient_armed: bool = False,
@@ -167,6 +174,8 @@ class DebateTool:
         self._stage_card_finalize: dict[str, Any] | None = None
         # 已在开跑边界落 resolved（中途失败不回 pending）。
         self._stage_card_finalized_at_start: bool = False
+        # 主持人节点终帧只发一次（``settle_moderator_node`` 的幂等闸）。
+        self._moderator_settled: bool = False
 
     def _kickoff_system_prompt(self) -> str:
         return self._system_prompt
@@ -712,12 +721,17 @@ class DebateTool:
         )
         graph_parent = self._debate_graph_parent_run_id or self._captain_run_id
 
+        # 终帧兜底所需：节点是否已开播、主持人实例（用量来源）、开播时刻、失败文案。
+        node_started = False
+        moderator: Moderator | None = None
+        started_at = time.monotonic()
+        node_error = ""
         try:
             # 先声明主持人节点（CEO 之下 / 汇总员锚点经 act），辩手节点逐轮声明。
             self._sink.emit(
                 moderator_plan_event(self, execution_id, moderator_run_id, config)
             )
-            # 主持人作为完成态节点：开播 run_started，收场 run_completed（见 account_moderator）。
+            # 主持人作为完成态节点：开播 run_started，收尾必发一帧（见 settle_moderator_node）。
             self._sink.emit(
                 run_started(
                     moderator_run_id,
@@ -725,6 +739,8 @@ class DebateTool:
                     parent_run_id=graph_parent,
                 )
             )
+            node_started = True
+            started_at = time.monotonic()
             started_fields = {
                 "form": config.form.value,
                 "sides": len(config.sides),
@@ -779,6 +795,10 @@ class DebateTool:
                 run_id=moderator_run_id,
                 parent_run_id=graph_parent,
             )
+            # 掌舵窗口开在主持人开跑处（庭前取证期入的队也能被首轮边界捞到）；无活跃用户
+            # 时不开——没挂 on_round_boundary，谁都捞不走，收下就是骗人。
+            if self._ambient_armed:
+                open_steer_window(execution_id)
             runner = make_round_runner(self, execution_id, moderator_run_id, config)
             cross_exam_runner = make_cross_exam_runner(
                 self, execution_id, moderator_run_id, config
@@ -889,9 +909,24 @@ class DebateTool:
                         decision=boundary.decision.value,
                         n=len(steers),
                     )
+                # 本边界之后还会不会再有一个边界来捞 steer —— 与 Moderator.run 的收场判定
+                # 同源（用户 conclude 凌驾裁判；否则裁判 converged；轮数上限是硬顶）。不会
+                # 再有 ⇒ 立刻关窗：其后的结辩 + 简报可达数十秒，那期间收下的掌舵永不生效。
+                last_boundary = round_no >= max_rounds or (
+                    boundary.decision is RoundDecision.CONCLUDE
+                    if boundary is not None
+                    else converged
+                )
+                if last_boundary:
+                    dropped = close_steer_window(execution_id)
+                    logger.info(
+                        "debate.steer.window_closed",
+                        execution_id=execution_id,
+                        round_no=round_no,
+                        dropped=dropped,
+                    )
                 return boundary
 
-            started_at = time.monotonic()
             try:
                 result = await moderator.run(
                     config,
@@ -909,6 +944,14 @@ class DebateTool:
                 # First-round run_plan already emitted; end the CEO turn without debaters.
                 summary = "[plan-only] 已记录辩论计划，跳过辩手执行。"
                 logger.info("debate.plan_only_done", motion=config.motion[:80])
+                settle_moderator_node(
+                    self,
+                    moderator,
+                    moderator_run_id,
+                    moderator_model,
+                    summary=summary,
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                )
                 return ToolResult(
                     tool_call_id="",
                     success=True,
@@ -918,11 +961,17 @@ class DebateTool:
                 )
             except Exception as exc:  # noqa: BLE001 — 辩论崩溃降级为工具失败，让 CEO 回落
                 logger.exception("debate.failed", motion=config.motion[:80])
-                return err(f"辩论执行失败：{exc}。可重试，或改用 delegate 单独处理。")
+                # 终帧交给 finally 统一发（异常路径此前只 return，节点永久转圈）。
+                node_error = f"辩论执行失败：{exc}"
+                return err(f"{node_error}。可重试，或改用 delegate 单独处理。")
 
-            duration_ms = int((time.monotonic() - started_at) * 1000)
-            account_moderator(
-                self, moderator, moderator_run_id, moderator_model, result, duration_ms
+            settle_moderator_node(
+                self,
+                moderator,
+                moderator_run_id,
+                moderator_model,
+                summary=result.node_summary,
+                duration_ms=int((time.monotonic() - started_at) * 1000),
             )
             result_payload = result.to_event_payload()
             result_payload["evidence_ledger"] = self._evidence_ledger.all_entries()
@@ -957,4 +1006,27 @@ class DebateTool:
                 metadata=usage_metadata(self._acc.usage),
             )
         finally:
-            pass  # divert redirect 已退役；保留 try 体结构
+            # 掌舵窗口归还：正常收场已在末轮边界关过（幂等），这里兜住其余出口——全员失败
+            # 早停（不走边界钩子）、setup / moderator.run 崩溃、plan-only 提前 return。
+            # 不关则条目连同 key 常驻进程内存，且辩论早已结束还在照单全收。
+            close_steer_window(execution_id)
+            # 主持人节点终帧必发：正常收场 / plan-only 已在上面提前 settle（钉住
+            # run_completed → debate_result 的线序），这里兜住其余一切出口——moderator.run
+            # 崩溃、开播后到开跑前的 setup 抛错、乃至向上逃逸的异常。不兜则协作图上的主持人
+            # 节点永久转圈（CEO 回合仍以 completed 收口，前端「整回合失败冻结」兜底不生效），
+            # 且主持人自身几次 LLM 调用整笔丢账。
+            if node_started and not self._moderator_settled:
+                inflight = sys.exc_info()[1]
+                settle_moderator_node(
+                    self,
+                    moderator,
+                    moderator_run_id,
+                    moderator_model,
+                    summary="",
+                    duration_ms=int((time.monotonic() - started_at) * 1000),
+                    error=(
+                        node_error
+                        or (str(inflight) if inflight else "")
+                        or "辩论异常中止，未产出结果。"
+                    ),
+                )

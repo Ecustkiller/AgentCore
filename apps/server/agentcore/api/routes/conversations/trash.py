@@ -13,7 +13,8 @@ from agentcore.conversation.common import resolve_local_binding
 from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
-from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
+from agentcore.folders.placement import resolve_workspace_paths
+from agentcore.workspace.locate import workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.protocol import AlreadyExists, OutsideWorkspace, WorkspaceIOError
 from agentcore.workspace.trash import (
@@ -54,12 +55,13 @@ async def list_conversation_trash(
     """List ``AgentCore/trash`` entries for this conversation's workspace."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await _refuse_local_trash(session, conv, action="列出")
-    root = workspace_root_path(
+    root, internal_root = await resolve_workspace_paths(
         user_id=user.user_id,
         folder_id=conv.folder_id,
         conversation_id=conversation_id,
+        session=session,
     )
-    entries = list_trash_entries(root=root)
+    entries = list_trash_entries(root=root, internal_root=internal_root)
     days = trash_retention_days()
     return TrashListResponse(
         data=[
@@ -94,14 +96,15 @@ async def restore_conversation_trash(
     key = workspace_storage_key(
         user_id=user.user_id, folder_id=conv.folder_id, conversation_id=conversation_id
     )
-    root = workspace_root_path(
+    root, internal_root = await resolve_workspace_paths(
         user_id=user.user_id,
         folder_id=conv.folder_id,
         conversation_id=conversation_id,
+        session=session,
     )
     try:
         async with workspace_lock(key):
-            restore_from_trash(root=root, entry_id=entry_id)
+            restore_from_trash(root=root, entry_id=entry_id, internal_root=internal_root)
     except TrashNotFound as e:
         raise NotFoundError("软删条目不存在") from e
     except TrashExpiredError as e:

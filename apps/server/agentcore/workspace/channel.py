@@ -27,7 +27,9 @@ channel sticky-dead for the turn (sibling inflight settle + later ops fail-fast)
 so a dropped desktop never hangs the turn on cascaded deadlines. Concurrent
 desktop round-trips are capped (``max_inflight``, default 16); extras queue before
 suspend, and queue wait rides the outer tool wall clock. No online fulfiller →
-immediate typed failure (no deadline wait).
+immediate typed failure (no deadline wait), named the way the turn-start presence
+gate would have named it: a desktop that is online but no longer declares this
+root reads as 未声明持有本会话的本地目录, not 无履约方.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from typing import Any, NoReturn
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_WORKSPACE,
     client_tool_payload,
@@ -52,6 +55,7 @@ from agentcore.runtime.events.workspace import workspace_op_required
 from agentcore.runtime.interaction import InteractionKind
 from agentcore.runtime.ports import ClientRequestBridge
 from agentcore.runtime.tool_deadline import derive_channel_timeout
+from agentcore.workspace.limits import LOCAL_ROOT_NOT_HELD
 from agentcore.workspace.protocol import (
     AlreadyExists,
     AmbiguousMatch,
@@ -337,7 +341,11 @@ class WorkspaceChannel:
             deliver_root: str | None = rid if rid else None
 
             def _emit_op_required() -> None:
-                """Push to fulfill hub; settle immediately when no fulfiller."""
+                """Push to fulfill hub; settle immediately when nobody can run it.
+
+                The absence is named, not lumped: origin device gone, root no
+                longer held, or no fulfiller at all.
+                """
                 push_client_tool_required(
                     user_id=self.user_id,
                     conversation_id=self.conversation_id,
@@ -356,6 +364,14 @@ class WorkspaceChannel:
                     error_kind="WorkspaceIOError",
                     error_detail=(
                         f"local workspace op '{op_name}' failed: no fulfiller（无履约方）"
+                    ),
+                    origin_offline_detail=(
+                        f"local workspace op '{op_name}' failed: "
+                        f"{ORIGIN_DEVICE_OFFLINE}"
+                    ),
+                    root_not_held_detail=(
+                        f"local workspace op '{op_name}' failed: "
+                        f"{LOCAL_ROOT_NOT_HELD}"
                     ),
                 )
 

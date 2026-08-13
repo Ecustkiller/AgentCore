@@ -19,6 +19,7 @@ from agentcore.workflows.definition import (
     validate_workflow_definition,
 )
 from agentcore.workflows.playbook_templates import (
+    PRIMARY_SLOTS,
     WORKFLOW_PLAYBOOK_IDS,
     PlaybookTemplateError,
     instantiate_from_playbook,
@@ -262,6 +263,38 @@ def test_playbook_template_catalog():
         assert item.title
         assert item.primary_slots
         assert "快照" in item.summary or "降级" in item.summary or "不保留" in item.summary
+        # Structured slots are the single source: required flags mirror PRIMARY_SLOTS.
+        assert item.slots
+        assert tuple(s.key for s in item.slots if s.required) == PRIMARY_SLOTS[item.id]
+        for slot in item.slots:
+            assert slot.key and slot.label
+            assert slot.key in item.primary_slots
+
+
+def test_playbook_template_slots_expose_enum_and_optional():
+    by_id = {i.id: i for i in list_playbook_templates()}
+
+    style = next(s for s in by_id["build_website"].slots if s.key == "style")
+    assert style.required is False
+    assert [c.value for c in style.choices] == ["marketing", "toolshed"]
+
+    compare = by_id["compare_options"]
+    assert [s.key for s in compare.slots] == ["question", "options"]
+    assert all(s.required for s in compare.slots)
+    assert all(not s.choices for s in compare.slots)
+
+
+def test_playbook_template_rejects_value_outside_enum():
+    assert merge_playbook_slots("build_website", {"topic": "官网", "style": "toolshed"})[
+        "style"
+    ] == "toolshed"
+    # Blank optional enum slot → builder default, not an error.
+    assert "style" not in merge_playbook_slots("build_website", {"topic": "官网"})
+
+    with pytest.raises(PlaybookTemplateError) as ei:
+        merge_playbook_slots("build_website", {"topic": "官网", "style": "赛博朋克"})
+    assert "marketing" in str(ei.value)
+    assert "toolshed" in str(ei.value)
 
 
 def test_from_playbook_success_research_report():

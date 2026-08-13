@@ -22,9 +22,9 @@ _CEO_ORCHESTRATION = {
     "delegate",
     "replan",
     "debate",
-    "list_projects",
-    "resolve_project",
-    "create_project",
+    "list_folders",
+    "resolve_folder",
+    "create_folder",
     "ask_user",
 }
 # Mutation / execution built-ins the coordinator must NOT hold (they belong to workers),

@@ -98,6 +98,68 @@ def test_unrelated_task_does_not_collide():
     assert find_thrash_collision(other, recent_thrash_records("conv-1")) is None
 
 
+def test_thrash_memory_expires_after_ttl(monkeypatch):
+    """记忆过期后同题冷派放行 —— 闸给的出路是 continue_from 带现场续派，现场随 roster
+    TTL 一起没了还继续拒，就是把 CEO 指向一条已不存在的路（几十轮后重开同主题被拒）。"""
+    import time
+
+    from agentcore.runtime.coordination import thrash as thrash_mod
+
+    monkeypatch.setattr(thrash_mod, "_THRASH_TTL_SECONDS", 0.05)
+    note_thrashing_worker(
+        "conv-ttl",
+        ThrashRecord(run_id="w1", task="修复 TopBar 缺少 named export", artifacts=("a.ts",)),
+    )
+    assert len(recent_thrash_records("conv-ttl")) == 1
+
+    time.sleep(0.06)
+    assert recent_thrash_records("conv-ttl") == []
+    cold = _plan(
+        RunSpec(
+            run_id="w2",
+            role="工程师",
+            task="修复 TopBar named export 缺失问题",
+            deliverable=Deliverable(form="files", artifacts=["a.ts"]),
+        )
+    )
+    assert find_thrash_collision(cold, recent_thrash_records("conv-ttl")) is None
+
+
+def test_thrash_memory_evicts_least_recently_used_conversation(monkeypatch):
+    """进程内会话数有上限：最久未访问的对话被淘汰，活跃对话的闸不受影响。"""
+    from agentcore.runtime.coordination import thrash as thrash_mod
+
+    monkeypatch.setattr(thrash_mod, "_MAX_THRASH_CONVERSATIONS", 2)
+    for cid in ("conv-a", "conv-b"):
+        note_thrashing_worker(cid, ThrashRecord(run_id=f"{cid}-w", task="修导出错误"))
+    # Touching conv-a makes conv-b the least-recently-used bucket.
+    assert len(recent_thrash_records("conv-a")) == 1
+    note_thrashing_worker("conv-c", ThrashRecord(run_id="c-w", task="修导出错误"))
+
+    assert len(recent_thrash_records("conv-a")) == 1
+    assert len(recent_thrash_records("conv-c")) == 1
+    assert recent_thrash_records("conv-b") == []
+
+
+def test_thrash_records_still_collide_within_ttl():
+    """回收只做减法：TTL 内的记录照常命中，闸语义不变。"""
+    note_thrashing_worker(
+        "conv-live",
+        ThrashRecord(run_id="w1", task="修复 TopBar 缺少 named export", artifacts=("a.ts",)),
+    )
+    records = recent_thrash_records("conv-live")
+    assert records[0].noted_at > 0  # 入册时间戳是回收的唯一依据
+    cold = _plan(
+        RunSpec(
+            run_id="w2",
+            role="工程师",
+            task="修复 TopBar named export 缺失问题",
+            deliverable=Deliverable(form="files", artifacts=["a.ts"]),
+        )
+    )
+    assert find_thrash_collision(cold, records) is not None
+
+
 def test_post_worker_progress_thrash_fail_soft(monkeypatch):
     """thrash 记账炸了不得阻断 WORKER_COMPLETED 投递。"""
     from agentcore.runtime.coordination.host import post_worker_progress

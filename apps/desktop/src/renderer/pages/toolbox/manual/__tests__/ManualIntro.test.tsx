@@ -21,7 +21,11 @@ describe("ManualIntro", () => {
     expect(screen.queryByText(/在 ChatGPT/)).toBeNull();
     expect(screen.queryByText(/在 Cursor/)).toBeNull();
     expect(screen.getByText("协作，是更高级的智能")).toBeTruthy();
-    expect(screen.getByText("接入额度后开聊")).toBeTruthy();
+    // 开箱即用：第一步就是说目标，不再拿「先去接额度」当门槛。
     expect(screen.getByText("说目标")).toBeTruthy();
+    expect(screen.queryByText("接入额度后开聊")).toBeNull();
+    expect(screen.getByText(/平台代付，打开就能聊/)).toBeTruthy();
+    // BYOK 仍在，但降级为可选升级。
+    expect(screen.getByText(/可选升级/)).toBeTruthy();
   });
 });

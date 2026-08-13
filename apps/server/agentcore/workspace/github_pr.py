@@ -22,6 +22,10 @@ from agentcore.core.logging import get_logger
 logger = get_logger(__name__)
 
 _GITHUB_API = "https://api.github.com"
+# Per-call deadline when the caller does not supply a client. Callers that live
+# under a wall-clock budget (the ``git`` tool) pass their own client so one place
+# owns the number; never fall back to httpx's library default.
+_DEFAULT_API_TIMEOUT = 30.0
 _GITHUB_HOSTS = frozenset({"github.com", "www.github.com"})
 # git@github.com:owner/repo(.git)
 _SSH_SCP = re.compile(
@@ -143,9 +147,10 @@ async def fetch_default_branch(
     repo: str,
     token: str,
 ) -> str | CreatePullRequestErr:
+    """Read the repo's default branch; ``client`` owns the per-call deadline."""
     url = f"{_GITHUB_API}/repos/{quote(owner)}/{quote(repo)}"
     try:
-        resp = await client.get(url, headers=_api_headers(token), timeout=20.0)
+        resp = await client.get(url, headers=_api_headers(token))
     except httpx.HTTPError as exc:
         return CreatePullRequestErr(
             message=f"无法查询仓库默认分支：{type(exc).__name__}",
@@ -190,7 +195,11 @@ async def create_pull_request(
     token: str,
     client: httpx.AsyncClient | None = None,
 ) -> CreatePullRequestResult:
-    """POST ``/repos/{owner}/{repo}/pulls`` and return the PR HTML URL."""
+    """POST ``/repos/{owner}/{repo}/pulls`` and return the PR HTML URL.
+
+    A supplied ``client`` owns the per-call deadline (the ``git`` tool budgets it);
+    the standalone fallback uses ``_DEFAULT_API_TIMEOUT``.
+    """
     title = title.strip()
     if not title:
         return CreatePullRequestErr(message="title 不能为空", code="invalid_args")
@@ -212,12 +221,10 @@ async def create_pull_request(
     }
     url = f"{_GITHUB_API}/repos/{quote(owner)}/{quote(repo)}/pulls"
     own_client = client is None
-    http = client or httpx.AsyncClient()
+    http = client or httpx.AsyncClient(timeout=_DEFAULT_API_TIMEOUT)
     try:
         try:
-            resp = await http.post(
-                url, headers=_api_headers(token), json=payload, timeout=30.0
-            )
+            resp = await http.post(url, headers=_api_headers(token), json=payload)
         except httpx.HTTPError as exc:
             return CreatePullRequestErr(
                 message=f"创建 PR 网络失败：{type(exc).__name__}",

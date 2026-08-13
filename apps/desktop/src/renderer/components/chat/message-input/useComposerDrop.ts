@@ -1,4 +1,3 @@
-import { hasLocalFiles } from "@/lib/capabilities";
 import { collectClipboardFiles } from "@/lib/clipboardFiles";
 import {
   type Dispatch,
@@ -8,10 +7,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { trackAttachmentUpload } from "./attachmentUploads";
 import type { PendingAttachment } from "./composerAttachments";
 import {
-  prepareBrowserFileAttachment,
-  stageDroppedFileAttachment,
+  ATTACH_MAX_BYTES,
+  OVERSIZE_REASON,
+  describeFileAttachment,
+  residentAttachmentForFile,
+  safeBrowserFileName,
 } from "./resideAttachment";
 
 /** Soft attach errors: auto-dismiss (Slack / Linear style), not sticky form validation. */
@@ -53,59 +56,97 @@ export function useComposerDrop(
     };
   }, []);
 
+  const patchAttachment = useCallback(
+    (id: string, patch: Partial<PendingAttachment>) => {
+      setAttachments((prev) =>
+        prev.map((a) => (a.id === id ? { ...a, ...patch } : a)),
+      );
+    },
+    [setAttachments],
+  );
+
+  /**
+   * chip 先出、上传后台跑：用户拖入 / 粘贴后立刻看到附件，几 MB 的读盘与 PUT 不再
+   * 卡在这次交互里，也不再推迟到点发送之后（那正是「点了完全没反应」的来源）。
+   */
   const attachDroppedFile = useCallback(
     async (file: File) => {
       const key = `dropped:${file.name}:${file.size}`;
       if (attachments.some((a) => a.key === key)) return;
-
-      // 桌面 Electron：主进程驻留（含二进制 / 区外路径）；绝对路径不进 renderer 状态。
-      if (hasLocalFiles()) {
-        const res = await stageDroppedFileAttachment(conversationId, file);
-        if (!res.ok) {
-          flashDropError(res.reason);
-          return;
-        }
-        setAttachments((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            key,
-            name: res.name,
-            path: res.path,
-            text: res.text,
-            truncated: res.truncated,
-            kind: "file",
-            workspacePath: res.workspacePath,
-            stagingId: res.stagingId,
-            binary: res.binary,
-          },
-        ]);
+      if (file.size > ATTACH_MAX_BYTES) {
+        flashDropError(OVERSIZE_REASON);
         return;
       }
 
-      // 浏览器：回形针 / 拖 / 贴共用 prepare → 立即 PUT 或持 fileBlob。
-      const res = await prepareBrowserFileAttachment(conversationId, file);
-      if (!res.ok) {
-        flashDropError(res.reason);
-        return;
-      }
+      const id = crypto.randomUUID();
+      const name = safeBrowserFileName(file.name);
       setAttachments((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id,
           key,
-          name: res.name,
-          path: res.path,
-          text: res.text,
-          truncated: res.truncated,
+          name,
+          path: name,
+          text: "",
+          truncated: false,
           kind: "file",
-          workspacePath: res.workspacePath,
-          binary: res.binary,
-          ...(res.fileBlob ? { fileBlob: res.fileBlob } : {}),
+          // 先按 MIME 猜；读过头部字节后由 describeFileAttachment 修正。
+          binary: file.type.startsWith("image/"),
+          fileBlob: file,
+          uploadState: "uploading",
         },
       ]);
+
+      // 预览元信息只读头部，先落到 chip 上——这样即便上传失败，发送时的重试也拿得到
+      // 正确的正文 / 二进制判定，不会把 docx 当空文本发出去。
+      let meta: Awaited<ReturnType<typeof describeFileAttachment>> | undefined;
+      try {
+        meta = await describeFileAttachment(file);
+        patchAttachment(id, meta);
+      } catch {
+        /* 读头失败不致命：驻留时会再判一次 */
+      }
+
+      const res = await trackAttachmentUpload(
+        id,
+        conversationId,
+        residentAttachmentForFile(conversationId, file, meta),
+      );
+
+      if (!res.ok) {
+        flashDropError(res.reason);
+        patchAttachment(id, { uploadState: "error", uploadError: res.reason });
+        return;
+      }
+      patchAttachment(id, {
+        name: res.name,
+        path: res.path,
+        text: res.text,
+        truncated: res.truncated,
+        binary: res.binary,
+        workspacePath: res.workspacePath,
+        stagingId: res.stagingId,
+        // 已落地就放掉 File；只有还需发送时再传的草稿才继续持有。
+        fileBlob: res.fileBlob,
+        uploadState: undefined,
+        uploadError: undefined,
+      });
     },
-    [attachments, conversationId, flashDropError, setAttachments],
+    [
+      attachments,
+      conversationId,
+      flashDropError,
+      patchAttachment,
+      setAttachments,
+    ],
+  );
+
+  /** 多文件并行附加：串行 for-await 会让第 N 个文件白等前 N-1 个传完。 */
+  const attachFiles = useCallback(
+    async (files: readonly File[]) => {
+      await Promise.all(files.map((f) => attachDroppedFile(f)));
+    },
+    [attachDroppedFile],
   );
 
   const handleDragOver = useCallback(
@@ -130,11 +171,9 @@ export function useComposerDrop(
       if (files.length === 0) return;
       e.preventDefault();
       clearDropError();
-      void (async () => {
-        for (const f of files) await attachDroppedFile(f);
-      })();
+      void attachFiles(files);
     },
-    [isGenerating, attachDroppedFile, clearDropError],
+    [isGenerating, attachFiles, clearDropError],
   );
 
   const handleDrop = useCallback(
@@ -161,10 +200,10 @@ export function useComposerDrop(
       } else {
         dropped.push(...Array.from(e.dataTransfer.files));
       }
-      for (const f of dropped) await attachDroppedFile(f);
       if (sawDir) flashDropError("文件夹请用 @ 引用，拖拽仅支持文件");
+      await attachFiles(dropped);
     },
-    [isGenerating, attachDroppedFile, clearDropError, flashDropError],
+    [isGenerating, attachFiles, clearDropError, flashDropError],
   );
 
   return {
@@ -172,6 +211,7 @@ export function useComposerDrop(
     dropError,
     clearDropError,
     attachDroppedFile,
+    attachFiles,
     handleDragOver,
     handleDragLeave,
     handleDrop,

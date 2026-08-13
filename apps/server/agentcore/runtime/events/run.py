@@ -32,6 +32,7 @@ def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any]:
     }
     if cost.get("estimated_total") is not None:
         out["estimated_total"] = int(cost["estimated_total"])
+        out["estimated_currency"] = str(cost.get("estimated_currency") or out["currency"])
     return out
 
 
@@ -440,6 +441,10 @@ def run_cancelled(
     - ``stop`` — whole-turn abort (停止整轮); no per-worker redirect follow-up.
     - ``user_stop`` — user「只停这项工作」; wave absorbs like redirect but **no** hot/cold
       follow-up — drive converges so the CEO keeps the turn.
+    - ``worker_timeout`` — 硬超时强杀: the run blew past its wall-clock ceiling and was
+      killed after the grace round (nobody re-tasked it). Absorbed + salvaged exactly
+      like ``redirect`` — the CEO may 续派 the partial 现场 — but the cause is the
+      timeout, so the face must not read「已改方向」.
 
     Orthogonal to ``run_failed`` (error terminal). Durable so reload doesn't leave the
     node stuck ``running`` / agent ``working``.
@@ -570,6 +575,7 @@ def delivery_status(
     gaps: list[dict[str, Any]],
     actions: list[dict[str, Any]],
     artifacts: list[dict[str, Any]] | None = None,
+    promoted: list[dict[str, str]] | None = None,
 ) -> SSEEvent:
     """交付状态（能力闸门与交付诚实性）：delegate 批次收尾的结构化交付对账。
 
@@ -583,21 +589,24 @@ def delivery_status(
     ``gaps`` items are ``{role, description}`` plus optional ``reason`` /
     ``severity`` / ``paths``；``actions`` 已知 kind 含 ``bind_local_folder`` /
     ``website_verify`` / ``continue_skipped_runs``（已撤 ``continue_writing``）.
+    ``promoted`` = 这张卡上 ``promote_product`` 的 ``{from, to}`` 归位行；CEO 归位后按同
+    ``execution_id`` 重发本事件（路径已改写为 ``to``；跨回合再归位时旧行保留）。零归位
+    是合法状态，此时整条 key 不上 wire（客户端按缺省空数组读），既不报错也不拦收口。
     DURABLE：落 journal；folds 同 ``execution_id`` 保最新。
     Must NOT ride ``content_delta``（终稿正文与交付对账分离）。
     """
-    return SSEEvent(
-        type=EventType.DELIVERY_STATUS,
-        payload={
-            "execution_id": execution_id,
-            "state": state,
-            "summary": summary,
-            "delivered_files": delivered_files,
-            "gaps": gaps,
-            "actions": actions,
-            "artifacts": list(artifacts or []),
-        },
-    )
+    payload: dict[str, Any] = {
+        "execution_id": execution_id,
+        "state": state,
+        "summary": summary,
+        "delivered_files": delivered_files,
+        "gaps": gaps,
+        "actions": actions,
+        "artifacts": list(artifacts or []),
+    }
+    if promoted:
+        payload["promoted"] = list(promoted)
+    return SSEEvent(type=EventType.DELIVERY_STATUS, payload=payload)
 
 
 def user_interjection(

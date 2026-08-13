@@ -34,9 +34,11 @@ from agentcore.tools.builtin.file_ops import (
     write_scope_rejection,
 )
 from agentcore.tools.builtin.web.read_url import _safe_request
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -132,6 +134,7 @@ class DownloadUrlTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -262,6 +265,10 @@ class DownloadUrlTool:
         except WorkspaceIOError as e:
             return _fail(f"写入 `{rel_path}` 失败：{e}", start)
 
+        # 治理面与交付物台账是两件事，缺哪支都少一半（与 file_ops 的写盘笔同形）：这支盖
+        # landed-files 闸 / Artifact-first path kind / 首写者归属 / 同 path file_read 上限
+        # 重置（写后核对不该被读闸挡住）/ 兄弟 verify 缓存失效；台账那支是下面的
+        # ``file_products``。
         _mark_landed_files(context, rel_path)
 
         site = site_of(url)
@@ -302,6 +309,10 @@ class DownloadUrlTool:
                 "installer_like": installer,
                 "site": site,
             },
+            # 交付物台账（契约见 ``tools/file_products.py``）：报 sanitize 之后真正落盘的
+            # 那一个路径，不是模型请求的原始 path。下载来的字节不是任何工作区源文件的
+            # 导出件，故不填 ``derived_from``。
+            file_products=[file_product(rel_path)],
         )
 
 

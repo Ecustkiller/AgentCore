@@ -67,6 +67,7 @@ async def _run_worker(
         annotate_citations=False,
         turn_evidence_ledger=ledger,
         on_reset=resets.append,
+        approval_gate=None,
     )
     return result, messages, sink, resets
 
@@ -230,6 +231,7 @@ async def test_worker_search_only_rn_auto_deep_read_passes_without_reset():
         turn_evidence_ledger=led,
         on_reset=resets.append,
         ledger_registrant="worker:w1",
+        approval_gate=None,
     )
     assert content == "结论见 #r1。"
     assert rounds == 1
@@ -281,6 +283,7 @@ async def test_worker_search_only_rn_deep_read_fail_strips_without_rework():
         turn_evidence_ledger=led,
         on_reset=resets.append,
         ledger_registrant="worker:w1",
+        approval_gate=None,
     )
     assert rounds == 1
     assert "#r1" not in content
@@ -490,6 +493,7 @@ async def test_ceo_forged_ledger_ref_strips_without_rework():
         out=ReactLoopOut(citations=[]),
         annotate_citations=True,
         turn_evidence_ledger=led,
+        approval_gate=None,
     )
     assert rounds == 1
     assert "#r9" not in content
@@ -515,6 +519,7 @@ async def test_ceo_bracket_still_uses_config_max_reworks():
         out=ReactLoopOut(citations=[]),
         annotate_citations=True,
         turn_evidence_ledger=None,
+        approval_gate=None,
     )
     assert content == "见正文无角标。"
     assert rounds == 3  # 回炉 2 次后干净收口

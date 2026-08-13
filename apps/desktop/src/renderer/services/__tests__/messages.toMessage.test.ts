@@ -81,6 +81,25 @@ describe("toMessage (reload hydrate)", () => {
     expect(shouldSetGeneratingOnHydrate([msg])).toBe(false);
   });
 
+  it("carries the 曾中断恢复 marker so a redriven turn is not silently normal", () => {
+    // 崩溃重驱恢复归属原回合 (D5)：成果落回原消息，标记必须跟着一起回放。
+    const recovered = toMessage(
+      row({
+        id: "m-recovered",
+        role: "assistant",
+        content: "完整成果",
+        status: "complete",
+        recovered: true,
+      }),
+    );
+    expect(recovered.recovered).toBe(true);
+
+    const plain = toMessage(
+      row({ id: "m-plain", role: "assistant", content: "一次跑完" }),
+    );
+    expect(plain.recovered).toBeUndefined();
+  });
+
   it("reloads face from usage.error when runs.error is absent (REST path)", () => {
     const msg = toMessage(
       row({

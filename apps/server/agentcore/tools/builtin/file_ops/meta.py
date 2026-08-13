@@ -7,9 +7,11 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -42,6 +44,8 @@ class FileDeleteTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        # 删除只会让台账里的 path 消失，不产生新产物。
+        file_products=FileProductsContract.NO_PRODUCT,
     )
 
     @property
@@ -168,6 +172,7 @@ class FileMoveTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -219,6 +224,7 @@ class FileMoveTool:
                 success=True,
                 output=output,
                 duration_ms=int((time.monotonic() - start) * 1000),
+                file_products=[file_product(destination)],
             )
 
         for p in (source, destination):
@@ -293,6 +299,8 @@ class FileMoveTool:
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
+            # 搬家不是派生（源不是中间稿），只报落地路径，不填 derived_from。
+            file_products=[file_product(destination)],
         )
 
 
@@ -302,6 +310,7 @@ class FileCopyTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -353,6 +362,7 @@ class FileCopyTool:
                 success=True,
                 output=output,
                 duration_ms=int((time.monotonic() - start) * 1000),
+                file_products=[file_product(destination)],
             )
 
         scope_denied = _reject_write_scope(
@@ -386,6 +396,7 @@ class FileCopyTool:
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
+            file_products=[file_product(destination)],
         )
 
 
@@ -395,6 +406,8 @@ class MkdirTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        # 只建目录：台账记的是文件产物，空目录不是交付物。
+        file_products=FileProductsContract.NO_PRODUCT,
     )
 
     @property

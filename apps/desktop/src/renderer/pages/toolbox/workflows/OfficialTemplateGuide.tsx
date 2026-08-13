@@ -1,19 +1,44 @@
+import type { WorkflowTemplate } from "@/services/workflows";
+
+/** 官方 playbook id → 「什么时候该挑它」。标题一律取接口返回值，这里只写目标。 */
+const PICK_WHEN: Record<string, string> = {
+  parallel_brief: "只想弄懂议题、先摸清几个方向",
+  research_report: "要一份能落盘交付的长文报告",
+  build_website: "要落地页 / 营销站 / 控制台页面",
+  build_app: "从零搭一个能跑的应用",
+  compare_options: "要在几个选项里比完再拍板",
+};
+
 /**
- * 官方模板区轻量分流提示（静态文案，不依赖模板 id / API）。
- * 卡片仍按接口返回的 templates 渲染；文案可预留尚未上架的「决策对比」。
+ * 官方模板区的选型提示：只讲「什么目标挑哪个」。
+ *
+ * 条目与标题都来自接口返回的目录，目录里没有的模板不会被点名——此前是硬编码
+ * 文案，点过并不在目录里的模板名。
  */
-export function OfficialTemplateGuide() {
+export function OfficialTemplateGuide({
+  templates,
+}: {
+  templates: WorkflowTemplate[];
+}) {
+  const rows = templates.flatMap((t) => {
+    const when = PICK_WHEN[t.id];
+    return when ? [{ id: t.id, title: t.title, when }] : [];
+  });
+  if (rows.length === 0) return null;
+
   return (
     <div
       data-testid="official-template-guide"
       className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
     >
-      <p>
-        选模板先看目标：只要弄懂议题→「多角摸底」；要交落盘报告→「调研报告成文」。
-      </p>
-      <p className="mt-1">
-        要落地页/营销站→「搭建营销站点」；从零做应用→「从零搭应用」。要比多个选项再拍板→「决策对比」（目录有则选用）。
-      </p>
+      <p className="font-medium text-foreground">选模板先看目标</p>
+      <ul className="mt-1 space-y-0.5">
+        {rows.map((r) => (
+          <li key={r.id}>
+            {r.when} → 「{r.title}」
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

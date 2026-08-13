@@ -92,6 +92,7 @@ async def test_continue_run_final_web_seam_still_fails_over_threshold(tmp_path: 
         sink=EventSink(),
         base_tool_context=ctx,
         execution_id="e",
+        approval_gate=None,
     )
 
     assert state.phase is RunPhase.COMPLETED

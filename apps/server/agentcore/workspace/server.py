@@ -50,8 +50,8 @@ from agentcore.workspace.indexing.maintainer import IndexMaintainer
 from agentcore.workspace.indexing.manager import IndexManager
 from agentcore.workspace.indexing.registry import (
     drop_index_registry,
-    shared_index_maintainer,
-    shared_index_manager,
+    shared_index_maintainer_for_dir,
+    shared_index_manager_for_dir,
 )
 from agentcore.workspace.limits import FILE_TOO_LARGE_DETAIL, WORKSPACE_READ_MAX_BYTES
 from agentcore.workspace.local import LocalWorkspace
@@ -92,6 +92,7 @@ from agentcore.workspace.shared_paths import (
     shared_workspace_storage_key,
 )
 from agentcore.workspace.sparse_listing import is_ai_list_hidden_file
+from agentcore.workspace.stage_dirs import INDEX_ZONE_NAME, internal_zone_path
 from agentcore.workspace.text_replace import (
     TextReplaceAmbiguous,
     TextReplaceNoMatch,
@@ -179,19 +180,104 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
+def _write_bytes_sync(path: Path, data: bytes) -> None:
+    """Parent ``mkdir`` + atomic write — must run off the asyncio event-loop thread.
+
+    Panel uploads / editor saves run up to ``workspace_upload_max_bytes`` (25 MiB);
+    writing that inline would stall every other request on this worker (other
+    users' SSE streams included) for the whole flush.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _atomic_write_bytes(path, data)
+
+
+def _write_text_sync(path: Path, content: str) -> None:
+    """Parent ``mkdir`` + truncating text write — must run off the event-loop thread.
+
+    Deliberately *not* atomic: :meth:`ServerWorkspace.write` never was, and turning
+    it into a temp+rename here would change what a concurrent reader observes.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _append_text_sync(path: Path, content: str) -> None:
+    """Parent ``mkdir`` + append (creating the file) — must run off the event loop."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(content)
+
+
+def _read_bytes_with_mtime_sync(path: Path) -> tuple[bytes, int]:
+    """Whole-file read + its mtime — must run off the asyncio event-loop thread."""
+    return path.read_bytes(), path.stat().st_mtime_ns // 1_000_000
+
+
+def _glob_entries_sync(base: Path, pattern: str, *, cap: int) -> list[Path]:
+    """Directory glob — must run off the asyncio event-loop thread.
+
+    Recursive ``**/*`` walks (and sorts) the entire tree before the cap applies, so
+    a cloned repo is a full-tree stat storm, not a bounded listing.
+    """
+    return sorted(base.glob(pattern))[:cap]
+
+
+def _copy_sync(source: Path, dest: Path) -> None:
+    """Whole-file / whole-tree copy — must run off the asyncio event-loop thread."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir():
+        shutil.copytree(source, dest)
+    else:
+        shutil.copy2(source, dest)
+
+
+def _delete_target_sync(
+    target: Path,
+    *,
+    hard: bool,
+    mount_root: Path,
+    zone_root: Path | None,
+    trash_rel: str,
+) -> None:
+    """Hard delete / soft-delete move — must run off the asyncio event-loop thread.
+
+    All the policy (which mount, hard vs trash, index handle release) is decided by
+    the caller; this is only the unbounded tree work.
+    """
+    if hard:
+        if target.is_dir():
+            shutil.rmtree(target)
+        else:
+            target.unlink()
+    elif trash_dest_under_target(root=mount_root, target=target, internal_root=zone_root):
+        soft_delete_expanding_trash_ancestor(
+            root=mount_root, target=target, internal_root=zone_root
+        )
+    else:
+        soft_delete_to_trash(
+            root=mount_root,
+            target=target,
+            original_rel=trash_rel,
+            internal_root=zone_root,
+        )
+
+
 class ServerWorkspace:
     """``WorkspaceBackend`` backed by a directory + sandbox on the host machine.
 
-    ``location`` defaults to ``"server"`` (an isolated cloud sandbox — workers run
-    un-gated). The sidecar reuses this exact backend but passes ``location="local"``:
-    there the engine runs ON the user's machine and ``root`` IS their real disk, so a
-    delegated worker's ``file_write`` / ``code_execute`` needs the same consent the
-    cloud's local mode demands — the gate keys off ``backend.location == "local"``
-    (see ``delegate.py`` worker_gate, ``pipeline.py`` revise_gate). Primary-root ops
+    ``location`` defaults to ``"server"`` (an isolated cloud sandbox — a worker's
+    server-sandbox calls skip the per-call approval card). The sidecar reuses this exact
+    backend but passes ``location="local"``: there the engine runs ON the user's machine
+    and ``root`` IS their real disk, so a delegated worker's ``file_write`` /
+    ``code_execute`` needs the same consent the cloud's local mode demands — that
+    per-call decision keys off ``backend.location == "local"`` inside
+    ``runtime/sandbox_approval`` (the turn's ``ApprovalGate`` is always handed down;
+    MCP / Host / 恒确认 / ``file_write=ask`` still prompt on cloud). Primary-root ops
     use direct ``Path`` I/O either way. Cloud sessions with W3/organize grants (no
     ``abs_path``) additionally attach a ``WorkspaceChannel`` and route **only**
     ``external/<alias>/…`` via per-op ``root_id`` (same transport as
-    ``LocalWorkspace``) — ``location`` stays ``"server"`` so worker_gate stays off.
+    ``LocalWorkspace``) — ``location`` stays ``"server"`` so those calls keep the
+    cloud card exemption.
     """
 
     def __init__(
@@ -202,9 +288,18 @@ class ServerWorkspace:
         root_label: str = "workspace",
         location: Literal["server", "local"] = "server",
         lock_key: str | None = None,
+        internal_root: Path | None = None,
     ) -> None:
         self._root = root
         self._sandbox = sandbox
+        # Where ``{index,trash,baselines}`` live for this root. ``None`` = in-tree
+        # under ``root/AgentCore/`` — correct for sidecar / local (root IS the
+        # user's own directory) and shared spaces (flat namespace). Cloud
+        # conversation workspaces pass an out-of-tree, id-keyed path: cloud folders
+        # nest for real, so an ancestor folder must not see a child's deleted
+        # files / baseline zips / index DB as ordinary content, and the zones must
+        # survive the child being renamed (双模式工作区 §5.4).
+        self._internal_root = internal_root
         self.root_label = root_label
         self.location: Literal["server", "local"] = location
         # A′ sink: primary-tree mutations take this key (cloud builds). None =
@@ -263,24 +358,26 @@ class ServerWorkspace:
     def start_code_index_maintenance(self) -> None:
         """Kick coalesced background ensure (write / ``code_search`` / warm).
 
-        Uses the process-wide maintainer for this root so sidecar turn backends
-        and ``warmCodeIndex`` coalesce. Lazy B1: only when the workspace has
-        non-internal content — empty chats must not ``mkdir AgentCore/index``
-        (which would leak into hub has_files).
+        Uses the process-wide maintainer for this **index dir** so sidecar turn
+        backends and ``warmCodeIndex`` coalesce. Keying on the index dir rather
+        than the root also means a folder rename keeps one SQLite handle instead
+        of opening a second one under the new path. Lazy B1: only when the
+        workspace has non-internal content — empty chats must not materialize an
+        index dir (which would leak into hub has_files while in-tree).
         """
         if not path_has_non_internal_entries(self._root):
             return
         self._get_index_manager()
-        self._index_maintainer = shared_index_maintainer(self._root, self)
+        self._index_maintainer = shared_index_maintainer_for_dir(self.index_dir, self)
         self._index_maintainer.schedule()
 
     async def _release_code_index_for_tree_delete(self) -> None:
-        """Abort maintenance + drop SQLite handles before removing ``AgentCore/index``.
+        """Abort maintenance + drop SQLite handles before removing the index dir.
 
         Windows cannot ``rmtree`` a SQLite file held open by a background ensure
         (WinError 32).
         """
-        await drop_index_registry(self._root)
+        await drop_index_registry(self.index_dir)
         self._index_manager = None
         self._index_maintainer = None
 
@@ -338,6 +435,27 @@ class ServerWorkspace:
     def root(self) -> Path:
         """The server-side workspace directory (used by the snapshot path)."""
         return self._root
+
+    @property
+    def index_dir(self) -> Path:
+        """Where this workspace's BM25 code index lives (may be outside the tree)."""
+        return internal_zone_path(
+            INDEX_ZONE_NAME, root=self._root, internal_root=self._internal_root
+        )
+
+    def _internal_root_for(self, mount_root: Path) -> Path | None:
+        """Zone container for whichever root an op resolved against.
+
+        Only the primary root has an out-of-tree container; shared-space second
+        roots keep their zones in-tree, so a delete inside ``shared/<alias>/`` lands
+        in that space's own trash — 谁执行删除落谁的.
+        """
+        try:
+            if mount_root.resolve() == self._root.resolve():
+                return self._internal_root
+        except OSError:
+            pass
+        return None
 
     async def _gate_shared(self, path: str, *, write: bool) -> None:
         """Realtime role check for ``shared/<alias>/…`` (tool-call granularity)."""
@@ -491,7 +609,7 @@ class ServerWorkspace:
 
     def _get_index_manager(self) -> IndexManager:
         if self._index_manager is None:
-            self._index_manager = shared_index_manager(self._root)
+            self._index_manager = shared_index_manager_for_dir(self.index_dir)
         return self._index_manager
 
     def _reject_oversized_file(self, target: Path) -> None:
@@ -507,6 +625,10 @@ class ServerWorkspace:
             raise WorkspaceIOError(FILE_TOO_LARGE_DETAIL)
 
     async def read(self, path: str) -> str:
+        # Reads stay inline, unlike the write path: the background index maintainer
+        # reads workspace files through here, and a read handle held across an await
+        # makes a concurrent atomic write's ``os.replace`` fail with WinError 5 on
+        # Windows (sidecar). ``WORKSPACE_READ_MAX_BYTES`` caps the loop stall.
         if self._external_needs_channel(path):
             return await self._require_external_bridge().read(path)
         await self._gate_shared(path, write=False)
@@ -530,8 +652,7 @@ class ServerWorkspace:
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="write")
             try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_text(content, encoding="utf-8")
+                await asyncio.to_thread(_write_text_sync, target, content)
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
             self._mark_mutated()
@@ -547,14 +668,9 @@ class ServerWorkspace:
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="append")
             try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                if target.exists():
-                    if not target.is_file():
-                        raise NotAFile(path)
-                    with target.open("a", encoding="utf-8") as fh:
-                        fh.write(content)
-                else:
-                    target.write_text(content, encoding="utf-8")
+                if target.exists() and not target.is_file():
+                    raise NotAFile(path)
+                await asyncio.to_thread(_append_text_sync, target, content)
             except NotAFile:
                 raise
             except OSError as e:
@@ -610,8 +726,7 @@ class ServerWorkspace:
             await self._gate_shared(path, write=True)
             target = self._safe(path, write=True, op="write_bytes")
             try:
-                target.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_bytes(target, data)
+                await asyncio.to_thread(_write_bytes_sync, target, data)
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
             self._mark_mutated()
@@ -636,8 +751,7 @@ class ServerWorkspace:
             raise NotAFile(path)
         self._reject_oversized_file(target)
         try:
-            raw = target.read_bytes()
-            mtime_ms = target.stat().st_mtime_ns // 1_000_000
+            raw, mtime_ms = await asyncio.to_thread(_read_bytes_with_mtime_sync, target)
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
         try:
@@ -686,8 +800,7 @@ class ServerWorkspace:
                     if disk_ms != baseline_mtime_ms:
                         return False, disk_ms
                 body = content.replace("\n", "\r\n") if eol == "crlf" else content
-                target.parent.mkdir(parents=True, exist_ok=True)
-                _atomic_write_bytes(target, body.encode("utf-8"))
+                await asyncio.to_thread(_write_bytes_sync, target, body.encode("utf-8"))
                 new_ms = target.stat().st_mtime_ns // 1_000_000
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
@@ -709,7 +822,9 @@ class ServerWorkspace:
                 return []
             raise NotADirectory(directory)
         try:
-            entries = sorted(base.glob(pattern))[:_MAX_LIST_ENTRIES]
+            entries = await asyncio.to_thread(
+                _glob_entries_sync, base, pattern, cap=_MAX_LIST_ENTRIES
+            )
             out: list[DirEntry] = []
             for entry in entries:
                 # Per-entry parent — recursive ``**/*`` yields nested paths; using the
@@ -1026,41 +1141,33 @@ class ServerWorkspace:
                 path.replace("\\", "/").rstrip("/") == "AgentCore/index"
                 or path.replace("\\", "/").startswith("AgentCore/index/")
             )
+            zone_root = self._internal_root_for(mount_root)
             will_expand_agentcore = (not hard) and trash_dest_under_target(
-                root=mount_root, target=target
+                root=mount_root, target=target, internal_root=zone_root
             )
             if will_clear_index or will_expand_agentcore:
                 await self._release_code_index_for_tree_delete()
+            shared_routed = (
+                route_shared(path, self._shared_mounts) if parse_shared_path(path) else None
+            )
+            trash_rel = (
+                routed.rel
+                if routed is not None
+                else (
+                    shared_routed.rel
+                    if shared_routed is not None
+                    else path.replace("\\", "/")
+                )
+            ) or path.replace("\\", "/")
             try:
-                if hard:
-                    if target.is_dir():
-                        shutil.rmtree(target)
-                    else:
-                        target.unlink()
-                elif trash_dest_under_target(root=mount_root, target=target):
-                    soft_delete_expanding_trash_ancestor(
-                        root=mount_root, target=target
-                    )
-                else:
-                    shared_routed = (
-                        route_shared(path, self._shared_mounts)
-                        if parse_shared_path(path)
-                        else None
-                    )
-                    trash_rel = (
-                        routed.rel
-                        if routed is not None
-                        else (
-                            shared_routed.rel
-                            if shared_routed is not None
-                            else path.replace("\\", "/")
-                        )
-                    )
-                    soft_delete_to_trash(
-                        root=mount_root,
-                        target=target,
-                        original_rel=trash_rel or path.replace("\\", "/"),
-                    )
+                await asyncio.to_thread(
+                    _delete_target_sync,
+                    target,
+                    hard=hard,
+                    mount_root=mount_root,
+                    zone_root=zone_root,
+                    trash_rel=trash_rel,
+                )
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
             self._mark_mutated()
@@ -1098,11 +1205,7 @@ class ServerWorkspace:
             except ValueError:
                 pass  # dest is not under source — expected
             try:
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                if source.is_dir():
-                    shutil.copytree(source, dest)
-                else:
-                    shutil.copy2(source, dest)
+                await asyncio.to_thread(_copy_sync, source, dest)
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
             self._mark_mutated()
@@ -1159,7 +1262,7 @@ class ServerWorkspace:
                 # Read bytes + decode (no newline translation). ``apply_text_replace``
                 # keeps exact hits byte-faithful; CRLF↔LF mismatch uses the LF-normalize
                 # fallback and restores the file's original eol on write-back.
-                content = target.read_bytes().decode("utf-8")
+                content = (await asyncio.to_thread(target.read_bytes)).decode("utf-8")
             except UnicodeDecodeError as e:
                 raise NotUTF8(path) from e
             except OSError as e:
@@ -1172,7 +1275,9 @@ class ServerWorkspace:
                 raise AmbiguousMatch(result.count)
 
             try:
-                _atomic_write_bytes(target, result.content.encode("utf-8"))
+                await asyncio.to_thread(
+                    _atomic_write_bytes, target, result.content.encode("utf-8")
+                )
             except OSError as e:
                 raise WorkspaceIOError(str(e)) from e
 

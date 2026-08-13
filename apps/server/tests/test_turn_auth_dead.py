@@ -34,13 +34,13 @@ def _req() -> LLMRequest:
 def test_llm_auth_error_sets_credential_source():
     byok = LLMAuthError(provider_name="user")
     assert byok.details.get("credential_source") == "user"
-    assert "模型配置" in byok.message
+    assert "设置 · 服务商" in byok.message
     assert "user" not in byok.message
 
     platform = LLMAuthError(provider_name="platform")
     assert platform.details.get("credential_source") == "platform"
     assert "平台模型暂时不可用" in platform.message
-    assert "设置 · 模型配置" not in platform.message
+    assert "设置 · 服务商" not in platform.message
     assert "platform" not in platform.message
 
     ctx = error_context_from(platform)
@@ -225,6 +225,7 @@ async def test_delegate_execute_rejects_when_auth_dead():
             history=[],
             tools=MagicMock(),
             base_tool_context=MagicMock(),
+            approval_gate=None,
         )
         tool._tools.list_all = MagicMock(return_value=[])
         result = await tool.execute(

@@ -69,8 +69,8 @@ export function WhiteboardPage() {
 
   const pickedFolderName =
     pickedFolderId == null
-      ? "未归入项目"
-      : (folders.find((f) => f.id === pickedFolderId)?.name ?? "项目");
+      ? "未归入文件夹"
+      : (folders.find((f) => f.id === pickedFolderId)?.name ?? "文件夹");
 
   const handleDelete = useCallback(async (id: string) => {
     try {
@@ -104,7 +104,7 @@ export function WhiteboardPage() {
             </Button>
           </PopoverTrigger>
           <PopoverContent align="end" className="w-64 p-3">
-            <p className="text-xs text-muted-foreground">归入项目（可选）</p>
+            <p className="text-xs text-muted-foreground">归入文件夹（可选）</p>
             <button
               type="button"
               onClick={() => setPickedFolderId(null)}
@@ -115,7 +115,7 @@ export function WhiteboardPage() {
               ) : (
                 <span className="size-1.5" />
               )}
-              未归入项目
+              未归入文件夹
             </button>
             {folders.map((f) => (
               <button

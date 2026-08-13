@@ -736,6 +736,19 @@ async def test_write_receipt_notes_persisted(tmp_path: Path):
     assert "kind: skeleton" in result.output
 
 
+async def test_write_receipt_reports_chars_not_bytes(tmp_path: Path):
+    """规模按字符报：中文正文标成「字节」会让作者以为写少了、回读空转。"""
+    body = "# 民事起诉状\n\n原告：昝雯，住青海省西宁市。\n"
+    assert len(body.encode("utf-8")) != len(body)  # 中文下两口径必然分叉
+    result = await FileWriteTool().execute(
+        {"path": "诉状.md", "content": body}, _ctx(tmp_path)
+    )
+    assert result.success is True
+    assert f"已写入 {len(body)} 字符到 诉状.md" in result.output
+    assert f"chars: {len(body)}" in result.output
+    assert "字节" not in result.output
+
+
 async def test_write_prose_then_append_rejected(tmp_path: Path):
     """成篇 file_write 后同 path file_append 硬拒（Artifact-first）。"""
     prose = "# 报告\n\n" + ("这是实质正文段落。" * 50)  # well over substantial
@@ -1759,18 +1772,18 @@ async def test_write_scope_explore_memory_rejects_user_project_path(tmp_path: Pa
     assert "src/main.py" in (result.error or "")
 
 
-async def test_write_scope_explore_memory_rejects_project_docs(tmp_path: Path):
+async def test_write_scope_explore_memory_has_no_inner_path_ban(tmp_path: Path):
+    """步 3：闸只判「在不在 AgentCore/ 下」——厚约定文档已是条目，worker 无工具可写。"""
     ctx = _explore_ctx(tmp_path)
     result = await FileWriteTool().execute(
         {
-            "path": "AgentCore/文档/项目/架构详解.md",
-            "content": "# 厚约定文档\n",
+            "path": "AgentCore/文档/背景/架构详解.md",
+            "content": "# 背景资料\n",
         },
         ctx,
     )
-    assert result.success is False
-    assert result.contract_failure is True
-    assert "文档/项目" in (result.error or "")
+    assert result.success is True
+    assert (tmp_path / "AgentCore" / "文档" / "背景" / "架构详解.md").is_file()
 
 
 async def test_write_scope_none_rejects_all(tmp_path: Path):

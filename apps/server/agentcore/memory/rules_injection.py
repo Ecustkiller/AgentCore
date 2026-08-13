@@ -20,22 +20,41 @@ from typing import TYPE_CHECKING
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import DocumentRepository
 from agentcore.documents.frontmatter import strip_entry_frontmatter
-from agentcore.memory.injection import _PROJECT_MEMORY_LABEL, _PROJECT_NAV_LABEL
+from agentcore.memory.injection import (
+    _ANCESTOR_MEMORY_LABEL,
+    _FOLDER_MEMORY_LABEL,
+    _FOLDER_NAV_LABEL,
+    disputed_memory_paths,
+)
+from agentcore.memory.scope_chain import (
+    ancestor_scopes,
+    db_scope_chain,
+    own_scope_chain,
+    snapshot_scope_chain,
+)
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
     CORE_MEMORY_FILE,
     NAVIGATION_MEMORY_FILE,
     MemoryStore,
 )
-from agentcore.memory.user_memory import strip_memory_chrome, topic_summary_line
+from agentcore.memory.user_memory import strip_memory_chrome
 
 if TYPE_CHECKING:
     from agentcore.memory.account_prepare_cache import AccountPrepareSnapshot
 
 logger = get_logger(__name__)
 
-# Labels the project-layer user rules inside the shared block (mirrors the memory project label).
-_USER_RULE_PROJECT_LABEL = "（以下为「当前项目」专属规则，仅在本项目内适用）"
+# Labels the folder-layer user rules inside the shared block (mirrors the memory folder label).
+_USER_RULE_FOLDER_LABEL = "（以下为「当前文件夹」专属规则，仅在本文件夹内适用）"
+
+# Labels an ANCESTOR folder's user rules (双模式工作区 §5.4 沿树继承). Nesting has no
+# hard-override structure either — proximity is expressed by order (outer first) and by
+# saying so in the label, same as the global-vs-folder seam.
+_USER_RULE_ANCESTOR_LABEL = (
+    "（以下为「上层文件夹」的规则，其下所有文件夹一并适用；"
+    "与更靠近当前文件夹的规则冲突时，以更近的为准）"
+)
 
 _RULE_BULLET_RE = re.compile(r"^\s*[-*]\s+(.*)$")
 
@@ -291,8 +310,8 @@ def _injectable_body(raw: str, *, chrome: bool) -> str | None:
 class RuleFragment:
     """One always-injected rule doc, ready to place in ``<rules>``.
 
-    ``body`` is fully rendered (frontmatter/chrome stripped, project-labeled when
-    project-scoped). Fragments are equal on the read side — no authority tier.
+    ``body`` is fully rendered (frontmatter/chrome stripped, folder-labeled when
+    folder-scoped). Fragments are equal on the read side — no authority tier.
     """
 
     body: str
@@ -308,81 +327,121 @@ def compose_injected_rules(fragments: Sequence[RuleFragment]) -> str:
 
 
 async def _memory_fragments(
-    store: MemoryStore, user_id: str, *, folder_id: str | None
+    store: MemoryStore, user_id: str, *, scope_chain: Sequence[str]
 ) -> list[RuleFragment]:
     """The AI-memory core as fragments, rendered exactly as the legacy memory concatenation.
 
-    GLOBAL 偏好.md + 画像.md (in ``ALWAYS_MEMORY_FILES`` order, chrome-stripped) then — for a
-    project conversation — that project's 画像.md then 导航.md (skip missing), project-labeled
-    (§二 stable global prefix).
+    GLOBAL 偏好.md + 画像.md (in ``ALWAYS_MEMORY_FILES`` order, chrome-stripped), then every
+    ANCESTOR folder's 画像.md outermost-first (§5.4 沿树继承), then the current folder's
+    画像.md and 导航.md (skip missing).
+
+    ``导航.md`` does **not** inherit: it is a route table of workspace-root-relative paths, and
+    an outer folder's routes do not resolve from an inner folder's root. Re-basing them is a
+    product decision nobody has made — routing the model at broken paths is worse than not
+    routing it at all.
+
+    A note the user marked wrong (纠错通道) is skipped in whatever layer it was marked — one
+    listing per touched scope answers that, and an unreadable listing degrades to「not
+    disputed」rather than dropping the layer.
     """
     frags: list[RuleFragment] = []
+    global_disputed = await disputed_memory_paths(store, user_id, None)
     for file in ALWAYS_MEMORY_FILES:
+        if file in global_disputed:
+            continue
         body = _injectable_body(await store.load(user_id, file), chrome=True)
         if body:
             frags.append(RuleFragment(body=body))
-    if folder_id:
-        project_body = _injectable_body(
-            await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id), chrome=True
+    for scope in ancestor_scopes(scope_chain):
+        if CORE_MEMORY_FILE in await disputed_memory_paths(store, user_id, scope):
+            continue
+        body = _injectable_body(
+            await store.load(user_id, CORE_MEMORY_FILE, scope=scope), chrome=True
         )
-        if project_body:
-            frags.append(RuleFragment(body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}"))
-        nav_body = _injectable_body(
-            await store.load(user_id, NAVIGATION_MEMORY_FILE, scope=folder_id),
-            chrome=True,
-        )
-        if nav_body:
-            frags.append(RuleFragment(body=f"{_PROJECT_NAV_LABEL}\n{nav_body}"))
+        if body:
+            frags.append(RuleFragment(body=f"{_ANCESTOR_MEMORY_LABEL}\n{body}"))
+    if scope_chain:
+        folder_id = scope_chain[-1]
+        folder_disputed = await disputed_memory_paths(store, user_id, folder_id)
+        if CORE_MEMORY_FILE not in folder_disputed:
+            folder_body = _injectable_body(
+                await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id), chrome=True
+            )
+            if folder_body:
+                frags.append(RuleFragment(body=f"{_FOLDER_MEMORY_LABEL}\n{folder_body}"))
+        if NAVIGATION_MEMORY_FILE not in folder_disputed:
+            nav_body = _injectable_body(
+                await store.load(user_id, NAVIGATION_MEMORY_FILE, scope=folder_id),
+                chrome=True,
+            )
+            if nav_body:
+                frags.append(RuleFragment(body=f"{_FOLDER_NAV_LABEL}\n{nav_body}"))
     return frags
 
 
 async def _user_rule_fragments(
-    repo: DocumentRepository, user_id: str, *, folder_id: str | None
+    repo: DocumentRepository, user_id: str, *, scope_chain: Sequence[str]
 ) -> list[RuleFragment]:
     """The user's own always-injected rule docs (``ai_maintained=false``) as fragments.
 
-    GLOBAL rules first, then — for a project conversation — that project's rules, project-labeled.
-    Frontmatter stripped; unclosed fence omits the entry.
+    GLOBAL rules first, then each ANCESTOR folder outermost-first, then the current folder
+    (§5.4 沿树继承 — 近的排在后面). Frontmatter stripped; unclosed fence omits the entry.
     """
     frags: list[RuleFragment] = []
     for doc in await repo.list_injectable_rules(user_id, None, ai_maintained=False):
         body = _injectable_body(doc.content, chrome=False)
         if body:
             frags.append(RuleFragment(body=body))
-    if folder_id:
-        for doc in await repo.list_injectable_rules(user_id, folder_id, ai_maintained=False):
+    for scope in ancestor_scopes(scope_chain):
+        for doc in await repo.list_injectable_rules(user_id, scope, ai_maintained=False):
+            body = _injectable_body(doc.content, chrome=False)
+            if body:
+                frags.append(RuleFragment(body=f"{_USER_RULE_ANCESTOR_LABEL}\n{body}"))
+    if scope_chain:
+        for doc in await repo.list_injectable_rules(
+            user_id, scope_chain[-1], ai_maintained=False
+        ):
             body = _injectable_body(doc.content, chrome=False)
             if body:
                 frags.append(
-                    RuleFragment(body=f"{_USER_RULE_PROJECT_LABEL}\n{body}")
+                    RuleFragment(body=f"{_USER_RULE_FOLDER_LABEL}\n{body}")
                 )
+    return frags
+
+
+def _cloud_rule_fragments(
+    payload: Mapping[str, object], key: str, *, label: str | None
+) -> list[RuleFragment]:
+    """One ``/rules/list`` list field → fragments (optionally layer-labeled)."""
+    frags: list[RuleFragment] = []
+    for doc in _iter_cloud_rule_docs(payload, key):
+        body = _injectable_body(str(doc.get("content") or ""), chrome=False)
+        if body:
+            frags.append(RuleFragment(body=f"{label}\n{body}" if label else body))
     return frags
 
 
 def _user_rule_fragments_from_cloud(
     payload: Mapping[str, object], *, folder_id: str | None
 ) -> list[RuleFragment]:
-    """Map ``POST /v1/account/rules/list`` payload into injection fragments."""
-    frags: list[RuleFragment] = []
-    global_rules = payload.get("global_rules") or []
-    if isinstance(global_rules, list):
-        for doc in global_rules:
-            if not isinstance(doc, Mapping):
-                continue
-            body = _injectable_body(str(doc.get("content") or ""), chrome=False)
-            if body:
-                frags.append(RuleFragment(body=body))
+    """Map ``POST /v1/account/rules/list`` payload into injection fragments.
+
+    The cloud resolves the ancestor chain (a sidecar has no folders table) and hands back
+    ``ancestor_rules`` already ordered outermost-first; older clouds omit the key and simply
+    do not inherit.
+    """
+    frags = _cloud_rule_fragments(payload, "global_rules", label=None)
     if folder_id:
-        project_rules = payload.get("project_rules") or []
-        if isinstance(project_rules, list):
-            for doc in project_rules:
-                if not isinstance(doc, Mapping):
-                    continue
-                body = _injectable_body(str(doc.get("content") or ""), chrome=False)
-                if body:
-                    frags.append(
-                        RuleFragment(body=f"{_USER_RULE_PROJECT_LABEL}\n{body}")
-                    )
+        frags.extend(
+            _cloud_rule_fragments(
+                payload, "ancestor_rules", label=_USER_RULE_ANCESTOR_LABEL
+            )
+        )
+        frags.extend(
+            _cloud_rule_fragments(
+                payload, "project_rules", label=_USER_RULE_FOLDER_LABEL
+            )
+        )
     return frags
 
 
@@ -393,19 +452,25 @@ async def assemble_injected_rules(
     *,
     folder_id: str | None,
     enabled: bool,
+    scope_chain: Sequence[str] | None = None,
 ) -> str:
     """Load + compose this turn's ``<rules>`` body (read-side full injection).
 
     Returns one equal-authority markdown string for ``assemble_system_prompt``. AI memory
     is gated by the caller-supplied ``enabled`` flag (product resolve always on / 定案 A;
     False ⇒ no memory fragments); USER rules are the user's own instructions and are injected
-    regardless. Display order is global→project, user-owned entries then AI-maintained core
-    (load order only — not an authority tier).
+    regardless. Display order is global→ancestors→current, user-owned entries then
+    AI-maintained core (load order only — not an authority tier).
+
+    ``scope_chain`` (outermost-first, current folder last) is resolved by the caller so this
+    stays a pure assembler over the passed repo/store — omitting it injects the current
+    folder only. The production entry point is :func:`assemble_turn_rules`.
     """
+    chain = tuple(scope_chain) if scope_chain is not None else own_scope_chain(folder_id)
     fragments: list[RuleFragment] = []
-    fragments.extend(await _user_rule_fragments(repo, user_id, folder_id=folder_id))
+    fragments.extend(await _user_rule_fragments(repo, user_id, scope_chain=chain))
     if enabled:
-        fragments.extend(await _memory_fragments(store, user_id, folder_id=folder_id))
+        fragments.extend(await _memory_fragments(store, user_id, scope_chain=chain))
     return compose_injected_rules(fragments)
 
 
@@ -422,19 +487,27 @@ def _memory_fragments_from_snapshot(
         )
         if body:
             frags.append(RuleFragment(body=body))
+    chain = snapshot_scope_chain(snapshot, folder_id)
+    for scope in ancestor_scopes(chain):
+        body = _injectable_body(
+            memory_body_from_snapshot(snapshot, CORE_MEMORY_FILE, scope=scope),
+            chrome=True,
+        )
+        if body:
+            frags.append(RuleFragment(body=f"{_ANCESTOR_MEMORY_LABEL}\n{body}"))
     if folder_id:
-        project_body = _injectable_body(
+        folder_body = _injectable_body(
             memory_body_from_snapshot(snapshot, CORE_MEMORY_FILE, scope=folder_id),
             chrome=True,
         )
-        if project_body:
-            frags.append(RuleFragment(body=f"{_PROJECT_MEMORY_LABEL}\n{project_body}"))
+        if folder_body:
+            frags.append(RuleFragment(body=f"{_FOLDER_MEMORY_LABEL}\n{folder_body}"))
         nav_body = _injectable_body(
             memory_body_from_snapshot(snapshot, NAVIGATION_MEMORY_FILE, scope=folder_id),
             chrome=True,
         )
         if nav_body:
-            frags.append(RuleFragment(body=f"{_PROJECT_NAV_LABEL}\n{nav_body}"))
+            frags.append(RuleFragment(body=f"{_FOLDER_NAV_LABEL}\n{nav_body}"))
     return frags
 
 
@@ -453,6 +526,9 @@ async def assemble_turn_rules(
     turn hot path. User-rule loading degrades to「no rules」on ANY error (missing DB in a
     unit test, transient / offline failure) so memory injection can never break a turn —
     matching the rest of the memory system's defensive posture.
+
+    Nested folders inherit outside-in (§5.4): the ancestor chain comes from the warm
+    snapshot on the ticketed path and from ``folders.rel_path`` otherwise.
     """
     from agentcore.account.credentials import get_account_credentials
     from agentcore.db.base import async_session_factory
@@ -475,12 +551,13 @@ async def assemble_turn_rules(
             # miss → empty injection (no cloud await)
         else:
             async with async_session_factory() as session:
+                chain = await db_scope_chain(user_id, folder_id, session=session)
                 user_fragments = await _user_rule_fragments(
-                    DocumentRepository(session), user_id, folder_id=folder_id
+                    DocumentRepository(session), user_id, scope_chain=chain
                 )
             if enabled:
                 memory_frags = await _memory_fragments(
-                    store, user_id, folder_id=folder_id
+                    store, user_id, scope_chain=chain
                 )
     except Exception as e:  # noqa: BLE001 - user rules must never break a turn's assembly
         logger.warning("memory.user_rules_load_failed", user_id=user_id, error=str(e))
@@ -513,13 +590,17 @@ def rule_consult_name(doc_name: str) -> str:
 async def _scope_on_demand_user_rules(
     repo: DocumentRepository, user_id: str, folder_id: str | None
 ) -> list[tuple[str, str]]:
-    """``(consult_name, summary)`` pairs for one scope's on_demand user rules."""
+    """``(consult_name, description)`` pairs for one scope's live on_demand user rules.
+
+    The summary is the entry's ``description`` — written for retrieval — never its first
+    content line; the repo already drops user-disputed entries.
+    """
     out: list[tuple[str, str]] = []
     for doc in await repo.list_on_demand_user_rules(user_id, folder_id):
         name = rule_consult_name(doc.name)
         if not name:
             continue
-        out.append((name, topic_summary_line(doc.content or "")))
+        out.append((name, doc.description or ""))
     return out
 
 
@@ -533,26 +614,30 @@ def _iter_cloud_rule_docs(
     return [doc for doc in raw if isinstance(doc, Mapping)]
 
 
+def _collect_cloud_on_demand(
+    summaries: dict[str, str], payload: Mapping[str, object], key: str
+) -> None:
+    for doc in _iter_cloud_rule_docs(payload, key):
+        name = rule_consult_name(str(doc.get("name") or ""))
+        if not name:
+            continue
+        summaries.setdefault(name, str(doc.get("description") or ""))
+
+
 def on_demand_user_rules_from_cloud(
     payload: Mapping[str, object], *, folder_id: str | None
 ) -> list[OnDemandUserRule]:
     """Map account ``/rules/list`` on_demand fields into the「规则目录」entries.
 
-    Merge matches the local-DB path: global first, then project via ``setdefault``
-    (global summary wins on name collision). Older clouds omitting the keys → [].
+    Merge matches the local-DB path: global, then ancestors outermost-first, then the
+    current folder, all via ``setdefault`` (the outer summary wins a name collision, as it
+    has since the global-vs-folder split). Older clouds omitting the keys → [].
     """
     summaries: dict[str, str] = {}
-    for doc in _iter_cloud_rule_docs(payload, "global_on_demand_rules"):
-        name = rule_consult_name(str(doc.get("name") or ""))
-        if not name:
-            continue
-        summaries.setdefault(name, topic_summary_line(str(doc.get("content") or "")))
+    _collect_cloud_on_demand(summaries, payload, "global_on_demand_rules")
     if folder_id:
-        for doc in _iter_cloud_rule_docs(payload, "project_on_demand_rules"):
-            name = rule_consult_name(str(doc.get("name") or ""))
-            if not name:
-                continue
-            summaries.setdefault(name, topic_summary_line(str(doc.get("content") or "")))
+        _collect_cloud_on_demand(summaries, payload, "ancestor_on_demand_rules")
+        _collect_cloud_on_demand(summaries, payload, "project_on_demand_rules")
     return [
         OnDemandUserRule(name=name, summary=summaries[name]) for name in sorted(summaries)
     ]
@@ -561,13 +646,20 @@ def on_demand_user_rules_from_cloud(
 def lookup_on_demand_rule_body_from_cloud(
     payload: Mapping[str, object], *, folder_id: str | None, name: str
 ) -> str | None:
-    """Project-then-global body lookup on a ``/rules/list`` payload (consult_rule)."""
+    """Nearest-layer-first body lookup on a ``/rules/list`` payload (consult_rule).
+
+    Current folder → ancestors innermost-first → global: 近的覆盖远的, so the layer the
+    user is standing in answers even when an outer folder defines the same rule name.
+    """
     key = rule_consult_name(name)
     if not key:
         return None
 
-    def _body_in(scope_key: str) -> str | None:
-        for doc in _iter_cloud_rule_docs(payload, scope_key):
+    def _body_in(scope_key: str, *, innermost_first: bool = False) -> str | None:
+        docs = _iter_cloud_rule_docs(payload, scope_key)
+        # Ancestors arrive as one flat outermost-first list; reading it backwards is what
+        # makes the nearest ancestor answer.
+        for doc in reversed(docs) if innermost_first else docs:
             if rule_consult_name(str(doc.get("name") or "")) != key:
                 continue
             body = str(doc.get("content") or "")
@@ -576,6 +668,8 @@ def lookup_on_demand_rule_body_from_cloud(
 
     if folder_id:
         hit = _body_in("project_on_demand_rules")
+        if hit is None:
+            hit = _body_in("ancestor_on_demand_rules", innermost_first=True)
         if hit is not None:
             return hit
     return _body_in("global_on_demand_rules")
@@ -584,7 +678,7 @@ def lookup_on_demand_rule_body_from_cloud(
 async def load_on_demand_user_rules(
     user_id: str, *, folder_id: str | None
 ) -> list[OnDemandUserRule]:
-    """Merge global + project on_demand user rules for the「规则目录」(or []).
+    """Merge global + the folder chain's on_demand user rules for the「规则目录」(or []).
 
     Degrades to [] on any error (same defensive posture as always-rule loading).
     Account-ticketed turns read the process prepare snapshot only (warm seeds it;
@@ -608,9 +702,9 @@ async def load_on_demand_user_rules(
             summaries: dict[str, str] = {}
             for name, summary in await _scope_on_demand_user_rules(repo, user_id, None):
                 summaries.setdefault(name, summary)
-            if folder_id:
+            for scope in await db_scope_chain(user_id, folder_id, session=session):
                 for name, summary in await _scope_on_demand_user_rules(
-                    repo, user_id, folder_id
+                    repo, user_id, scope
                 ):
                     summaries.setdefault(name, summary)
             return [

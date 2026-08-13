@@ -9,6 +9,7 @@ vi.mock("@/services/sidecarRouting", () => ({
 }));
 
 import { api } from "@/services/api";
+import { getActiveSidecarTarget } from "@/services/sidecarRouting";
 import { submitDebateSteer } from "../debate";
 
 const post = vi.mocked(api.post);
@@ -50,5 +51,48 @@ describe("submitDebateSteer", () => {
       ask: "",
       ask_target: "",
     });
+  });
+
+  // 收场后（末轮边界已过、正在结辩/出简报）引擎 ok=false：调用方据此改口，
+  // 不能把「没有下一轮来捞它」的掌舵仍显示成「已发送·下一轮生效」。
+  it("reports the engine's rejection instead of echoing 已发送", async () => {
+    post.mockResolvedValue({ ok: false, queued: 0 });
+    await expect(
+      submitDebateSteer("conv-1", {
+        executionId: "exec-1",
+        decision: { kind: "conclude", ask: "", askTarget: "" },
+      }),
+    ).resolves.toBe(false);
+  });
+
+  it("reports acceptance while the debate still has a boundary ahead", async () => {
+    await expect(
+      submitDebateSteer("conv-1", {
+        executionId: "exec-1",
+        decision: { kind: "conclude", ask: "", askTarget: "" },
+      }),
+    ).resolves.toBe(true);
+  });
+
+  it("relays the sidecar verdict for local turns", async () => {
+    vi.mocked(getActiveSidecarTarget).mockReturnValueOnce({
+      rootId: "root-1",
+      subpath: undefined,
+    } as never);
+    const debateSteer = vi.fn().mockResolvedValue({ accepted: false });
+    vi.stubGlobal("window", { sidecarApi: { debateSteer } });
+    await expect(
+      submitDebateSteer("conv-1", {
+        executionId: "exec-1",
+        decision: {
+          kind: "continue",
+          focus: "",
+          ask: "再问一轮",
+          askTarget: "",
+        },
+      }),
+    ).resolves.toBe(false);
+    expect(post).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
   });
 });

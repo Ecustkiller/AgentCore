@@ -1,5 +1,5 @@
 import type { GroupedConversations } from "@/hooks/useConversations";
-import type { FolderMeta } from "@/services/folders";
+import type { FolderMeta, FolderTrash } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 
 function hoursAgo(h: number): string {
@@ -8,6 +8,10 @@ function hoursAgo(h: number): string {
 
 function daysAgo(d: number): string {
   return new Date(Date.now() - d * 86_400_000).toISOString();
+}
+
+function daysAhead(d: number): string {
+  return new Date(Date.now() + d * 86_400_000).toISOString();
 }
 
 const MOCK_FOLDERS: FolderMeta[] = [
@@ -65,7 +69,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     title: "Agent 身份色板对齐",
     updatedAt: daysAgo(1),
     messageCount: 11,
-    lastMessagePreview: "项目圆点复用 --agent-N，避免硬编码 hex。",
+    lastMessagePreview: "文件夹圆点复用 --agent-N，避免硬编码 hex。",
     folderId: "folder-eng",
   },
   {
@@ -73,7 +77,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     title: "未分组随想",
     updatedAt: new Date(Date.now() - 86_400_000 - 3_600_000).toISOString(),
     messageCount: 3,
-    lastMessagePreview: "先记一下，回头再归进项目。",
+    lastMessagePreview: "先记一下，回头再归进文件夹。",
     folderId: null,
   },
   {
@@ -105,7 +109,7 @@ const MOCK_CONVERSATIONS: Conversation[] = [
     title: "用户访谈纪要 · 五月",
     updatedAt: daysAgo(45),
     messageCount: 8,
-    lastMessagePreview: "「一眼看不到项目归属」是高频抱怨。",
+    lastMessagePreview: "「一眼看不到文件夹归属」是高频抱怨。",
     folderId: "folder-research",
   },
 ];
@@ -131,6 +135,33 @@ const MOCK_ARCHIVED: Conversation[] = [
   },
 ];
 
+const MOCK_TRASH: FolderTrash = {
+  retentionDays: 30,
+  items: [
+    {
+      id: "folder-gone-cloud",
+      name: "旧版官网改版",
+      mode: "cloud",
+      deletedAt: hoursAgo(3),
+      purgeAt: daysAhead(29),
+    },
+    {
+      id: "folder-gone-local",
+      name: "本机实验仓",
+      mode: "local",
+      deletedAt: daysAgo(28),
+      purgeAt: daysAhead(2),
+    },
+    {
+      id: "folder-gone-soon",
+      name: "临时素材",
+      mode: "cloud",
+      deletedAt: daysAgo(30),
+      purgeAt: new Date(Date.now() + 5 * 3_600_000).toISOString(),
+    },
+  ],
+};
+
 export type ConversationsPreviewScene = {
   id: string;
   title: string;
@@ -151,8 +182,13 @@ export const CONVERSATIONS_PREVIEW_SCENES: readonly ConversationsPreviewScene[] 
     },
     {
       id: "conversations-collaboration",
-      title: "项目协作时间线",
-      description: "项目筛选 · 幕摘要 + 阶段产物",
+      title: "文件夹协作时间线",
+      description: "文件夹筛选 · 幕摘要 + 阶段产物",
+    },
+    {
+      id: "conversations-trash",
+      title: "最近删除",
+      description: "已删文件夹 · 保留期倒计时 + 恢复",
     },
   ] as const;
 
@@ -226,4 +262,8 @@ export function buildConversationsPreviewGrouped(): GroupedConversations {
 
 export function buildConversationsPreviewArchived(): Conversation[] {
   return MOCK_ARCHIVED;
+}
+
+export function buildConversationsPreviewTrash(): FolderTrash {
+  return MOCK_TRASH;
 }

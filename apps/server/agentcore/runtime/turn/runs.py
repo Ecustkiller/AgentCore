@@ -26,10 +26,16 @@ Posture
 This registry is the **process-local cache** of live tasks + sinks. Durable RUNNING
 ownership lives in ``turn_leases`` (Postgres; heartbeat + owner) so a process restart
 no longer silently drops in-flight turns — the lease sweeper claims expired rows and
-routes them through ``recover_turn``. Reconnect (``EventSink.take_over`` / ``detach``)
-and stop stay orthogonal to recover. Cross-process Redis lease backend is a later
-swap behind the same repository seam.
+routes them through ``recover_turn``. Reconnect (``EventSink.subscribe`` /
+``unsubscribe``) and stop stay orthogonal to recover. Cross-process Redis lease backend
+is a later swap behind the same repository seam.
+
+Every registration also publishes the new run to
+:mod:`agentcore.runtime.events.conversation_hub`, so端 following the conversation (not
+just the turn) pick it up — see :meth:`TurnRunRegistry.register`.
 """
+
+from __future__ import annotations
 
 import asyncio
 import contextlib
@@ -53,10 +59,15 @@ class TurnRun:
     conversation_id: str
     task: asyncio.Task
     sink: EventSink
-    # Set by :meth:`stop` / :meth:`stop_and_drain` / shutdown salvage before
-    # ``task.cancel()`` so the CancelledError handler can tell clean cancel
-    # (terminal + release) from true hard kill (orphan lease for sweeper).
+    # Set by :meth:`mark_user_stop` / :meth:`stop` / :meth:`stop_and_drain` /
+    # shutdown salvage before ``task.cancel()`` so the CancelledError handler can
+    # tell clean cancel (terminal + release) from true hard kill (orphan lease for
+    # sweeper).
     user_stopped: bool = False
+    # True once ``task.cancel()`` has been delivered for this run, so a repeat Stop
+    # (or an overlap supersede landing on an already-unwinding run) does not deliver
+    # a second CancelledError into the turn's teardown ``finally``.
+    cancel_requested: bool = False
 
 
 @dataclass
@@ -75,9 +86,47 @@ class ResumeDeferredWaiter:
     llm_credentials: Any = None
     llm_supports_tools: bool | None = None
     x_client_platform: str | None = None
+    # The device that clicked resume: the wake runs off another turn's callback,
+    # so it must be re-bound here rather than inherited (see fulfill/origin.py).
+    origin_device_id: str | None = None
     # Soft-gate warnings to emit on the resume sink when the slot frees.
     preflight_warnings: list[str] = field(default_factory=list)
     started: asyncio.Future[Any] | None = field(default=None, repr=False)
+    # SSE futures adopted from repeat submits of the SAME message_id (幂等 join):
+    # they settle together with ``started`` off this one resume run.
+    joined: list[asyncio.Future[Any]] = field(default_factory=list, repr=False)
+
+    def waiting(self) -> list[asyncio.Future[Any]]:
+        """Every SSE future still waiting on this resume (primary + joined)."""
+        return [f for f in (self.started, *self.joined) if f is not None]
+
+    def join(self, other: ResumeDeferredWaiter) -> None:
+        """Adopt ``other``'s SSE future — a re-click on the same cold card.
+
+        Both connections are handed the same sink on wake and each subscribes to it, so
+        they are peers that see the same frames (the old single-queue sink made them
+        split frames instead). Only the first one drains the pre-subscribe handoff
+        backlog — preflight warnings; everything after fans out to both.
+        """
+        fut = other.started
+        if fut is None or fut is self.started or fut in self.joined:
+            return
+        self.joined.append(fut)
+
+    def settle(self, sink: EventSink) -> bool:
+        """Hand the resume sink to every waiting SSE; False when none is left."""
+        delivered = False
+        for fut in self.waiting():
+            if not fut.done():
+                fut.set_result(sink)
+                delivered = True
+        return delivered
+
+    def unwind(self) -> None:
+        """Cancel every waiting SSE — this resume will never produce a sink."""
+        for fut in self.waiting():
+            if not fut.done():
+                fut.cancel()
 
 
 # Set on an ``asyncio.Task`` when that specific run was cancelled by user stop /
@@ -104,11 +153,30 @@ class TurnRunRegistry:
         self._runs: dict[str, TurnRun] = {}
         # At most one cold-resume deferred waiter per conversation (slot owner next).
         self._resume_deferred: dict[str, ResumeDeferredWaiter] = {}
+        # Strong refs to the detached wake tasks (bare create_task lets the loop GC
+        # a running task mid-claim).
+        self._deferred_tasks: set[asyncio.Task] = set()
 
     @staticmethod
     def _mark_user_stopped(run: TurnRun) -> None:
         run.user_stopped = True
         setattr(run.task, _TASK_USER_STOPPED, True)
+
+    @staticmethod
+    def _cancel_once(run: TurnRun) -> bool:
+        """Deliver ``task.cancel()`` at most once per run; True when it was sent.
+
+        A repeat Stop — or an overlap supersede landing on a run that is already
+        unwinding — must not re-deliver: the extra ``CancelledError`` lands inside
+        the turn's teardown ``finally`` and skips whatever flush / release had not
+        run yet. ``task.done()`` cannot guard that window (a task running its
+        ``finally`` is not done).
+        """
+        if run.cancel_requested or run.task.done():
+            return False
+        run.cancel_requested = True
+        run.task.cancel()
+        return True
 
     @staticmethod
     def begin_shutdown_salvage() -> None:
@@ -151,7 +219,7 @@ class TurnRunRegistry:
                 )
 
                 cancel_coordination_on_user_stop(conversation_id)
-            existing.task.cancel()
+            self._cancel_once(existing)
         self._runs[conversation_id] = TurnRun(
             run_id=run_id,
             conversation_id=conversation_id,
@@ -159,6 +227,19 @@ class TurnRunRegistry:
             sink=sink,
         )
         task.add_done_callback(lambda _t: self._discard(conversation_id, run_id))
+        # 对话级订阅 (云对话多端同权 B2): every turn start funnels through here, so this is
+        # where端 parked on the conversation (idle second device, another window) learn a
+        # new run exists — send / FIFO drain / cold-resume wake / stage_card alike.
+        try:
+            from agentcore.runtime.events.conversation_hub import conversation_streams
+
+            conversation_streams.publish_run(conversation_id, sink)
+        except Exception:  # noqa: BLE001 — a观察端 must never break turn registration
+            logger.exception(
+                "turn_run.conversation_publish_failed",
+                conversation_id=conversation_id,
+                run_id=run_id,
+            )
         return run_id
 
     def _discard(self, conversation_id: str, run_id: str) -> None:
@@ -194,15 +275,37 @@ class TurnRunRegistry:
     def has_resume_deferred(self, conversation_id: str) -> bool:
         return conversation_id in self._resume_deferred
 
-    def register_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+    def resume_deferred_message_id(self, conversation_id: str) -> str | None:
+        """The parked cold card's ``message_id`` (``None`` when nothing is parked).
+
+        Lets the resume route recognise a repeat submit of the same card and skip a
+        second settlement prewrite before it joins (运行时三模型与挂起 · 重复提交).
+        """
+        waiter = self._resume_deferred.get(conversation_id)
+        return waiter.message_id if waiter is not None else None
+
+    def register_resume_deferred(self, waiter: ResumeDeferredWaiter) -> ResumeDeferredWaiter:
         """Park a cold resume until the slot frees (or start immediately if already idle).
 
-        Replaces any prior deferred waiter for the conversation (last click wins;
-        prior ``started`` Future is cancelled so its SSE unwinds).
+        Same ``message_id`` → **幂等 join**: the parked waiter keeps the slot and
+        adopts this submit's SSE future, so a double-click shares one resume run and
+        the first stream is never cut. Last-click-wins only applies to *another* cold
+        card of the same conversation — then the prior SSE is cancelled so it unwinds.
+        Returns the waiter that owns the slot (the parked one on join).
         """
-        prior = self._resume_deferred.pop(waiter.conversation_id, None)
-        if prior is not None and prior.started is not None and not prior.started.done():
-            prior.started.cancel()
+        prior = self._resume_deferred.get(waiter.conversation_id)
+        if prior is not None and prior is not waiter:
+            if prior.message_id == waiter.message_id:
+                prior.join(waiter)
+                logger.info(
+                    "resume.deferred_joined",
+                    conversation_id=waiter.conversation_id,
+                    message_id=waiter.message_id,
+                    busy_reason=prior.busy_reason,
+                    waiting=len(prior.waiting()),
+                )
+                return prior
+            prior.unwind()
         self._resume_deferred[waiter.conversation_id] = waiter
         logger.info(
             "resume.deferred",
@@ -215,6 +318,7 @@ class TurnRunRegistry:
             taken = self._resume_deferred.pop(waiter.conversation_id, None)
             if taken is waiter:
                 self._arm_resume_deferred_start(taken)
+        return waiter
 
     def _arm_resume_deferred_start(self, waiter: ResumeDeferredWaiter) -> None:
         try:
@@ -228,10 +332,63 @@ class TurnRunRegistry:
                 reason="no_running_loop",
             )
             return
-        loop.call_soon(lambda: asyncio.create_task(self._start_resume_deferred(waiter)))
+        loop.call_soon(lambda: self._spawn_resume_deferred(waiter))
+
+    def _spawn_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+        task = asyncio.create_task(self._start_resume_deferred(waiter))
+        self._deferred_tasks.add(task)
+        task.add_done_callback(self._deferred_tasks.discard)
+
+    def _repark_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+        """Slot re-taken between arm and run: park again without evicting a newer card.
+
+        Registration during the arm window is the later click: same ``message_id``
+        joins into it, a different card supersedes this one (its SSE unwinds).
+        """
+        current = self._resume_deferred.get(waiter.conversation_id)
+        if current is None or current is waiter:
+            self._resume_deferred[waiter.conversation_id] = waiter
+            return
+        if current.message_id == waiter.message_id:
+            current.join(waiter)
+            return
+        waiter.unwind()
 
     async def _start_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
-        """Claim the paused frame and start resume_chat (waiter SSE or detached)."""
+        """Claim the paused frame and start resume_chat, settling the waiter either way.
+
+        Detached from the request: nothing else can settle this waiter, so a claim
+        that raises must still cancel the SSE futures (else that「继续」spins forever)
+        and hand the freed slot back to the FIFO queue.
+        """
+        try:
+            await self._drive_resume_deferred(waiter)
+        except asyncio.CancelledError:
+            self._abandon_resume_deferred(waiter)
+            raise
+        except Exception as e:  # noqa: BLE001 — detached: no caller left to settle it
+            logger.exception(
+                "resume.deferred_failed",
+                conversation_id=waiter.conversation_id,
+                message_id=waiter.message_id,
+                error=str(e),
+            )
+            self._abandon_resume_deferred(waiter)
+
+    def _abandon_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
+        """Unwind the waiting SSE(s) and let FIFO take the slot this wake gave up."""
+        waiter.unwind()
+        try:
+            from .queue import turn_queue
+
+            turn_queue.schedule_drain(waiter.conversation_id)
+        except Exception:  # noqa: BLE001 — drain must not mask the wake failure
+            logger.exception(
+                "turn_run.queue_drain_failed",
+                conversation_id=waiter.conversation_id,
+            )
+
+    async def _drive_resume_deferred(self, waiter: ResumeDeferredWaiter) -> None:
         from agentcore.conversation.service import resume_chat
         from agentcore.runtime.events import turn_warning
         from agentcore.runtime.suspension.persistence import claim_paused_turn
@@ -247,7 +404,7 @@ class TurnRunRegistry:
         # Another turn may have claimed the slot between arm and run.
         existing = self._runs.get(waiter.conversation_id)
         if existing is not None and not existing.task.done():
-            self._resume_deferred[waiter.conversation_id] = waiter
+            self._repark_resume_deferred(waiter)
             return
 
         suspension = await claim_paused_turn(
@@ -260,9 +417,7 @@ class TurnRunRegistry:
                 message_id=waiter.message_id,
                 claimed=False,
             )
-            fut = waiter.started
-            if fut is not None and not fut.done():
-                fut.cancel()
+            waiter.unwind()
             turn_queue.schedule_drain(waiter.conversation_id)
             return
 
@@ -270,22 +425,22 @@ class TurnRunRegistry:
         for warning in waiter.preflight_warnings:
             sink.emit(turn_warning(warning))
 
-        fut = waiter.started
-        if fut is not None and not fut.done():
-            fut.set_result(sink)
-        else:
-            sink.detach(reason="resume_deferred_no_waiter")
+        if not waiter.settle(sink):
+            sink.note_no_consumer(reason="resume_deferred_no_waiter")
 
-        task = asyncio.create_task(
-            resume_chat(
-                suspension=suspension,
-                response=waiter.checkpoint_response,
-                sink=sink,
-                llm_credentials=waiter.llm_credentials,
-                llm_supports_tools=waiter.llm_supports_tools,
-                x_client_platform=waiter.x_client_platform,
+        from agentcore.fulfill.origin import origin_device
+
+        with origin_device(waiter.origin_device_id):
+            task = asyncio.create_task(
+                resume_chat(
+                    suspension=suspension,
+                    response=waiter.checkpoint_response,
+                    sink=sink,
+                    llm_credentials=waiter.llm_credentials,
+                    llm_supports_tools=waiter.llm_supports_tools,
+                    x_client_platform=waiter.x_client_platform,
+                )
             )
-        )
         self.register(
             conversation_id=waiter.conversation_id, task=task, sink=sink
         )
@@ -293,6 +448,22 @@ class TurnRunRegistry:
     def get(self, conversation_id: str) -> TurnRun | None:
         """The conversation's active run, or ``None`` if nothing is running."""
         return self._runs.get(conversation_id)
+
+    def mark_user_stop(self, conversation_id: str) -> bool:
+        """Record 用户主动停止 **before** anything cancels (stop / regenerate routes).
+
+        Both routes orphan hot pending interactions first, and that pass awaits the
+        DB while cancelling their Futures — with ≥2 pending, the awaiter unwinds on
+        the first cancel, mid-pass. If the flag were still unset there,
+        :meth:`is_clean_cancel` would read False and the turn would orphan its lease
+        (bubble「中断」instead of「已停止」, and the sweeper re-drives the very turn
+        the user just stopped). Returns ``False`` when nothing is running.
+        """
+        run = self._runs.get(conversation_id)
+        if run is None or run.task.done():
+            return False
+        self._mark_user_stopped(run)
+        return True
 
     def stop(self, conversation_id: str) -> bool:
         """Hard-cancel the conversation's active run (explicit ``POST .../stop``).
@@ -307,6 +478,8 @@ class TurnRunRegistry:
         instead of orphaning for sweeper reclaim. Also cascade-cancels any live
         coordination drive + in-flight workers (SSE disconnect must NOT use this
         path — detach-and-continue stays on ``release_turn_coordination`` alone).
+        Cancel is delivered once per run (:meth:`_cancel_once`): a second click while
+        the turn is still unwinding reports ``True`` without re-cancelling.
         """
         run = self._runs.get(conversation_id)
         if run is None or run.task.done():
@@ -318,8 +491,13 @@ class TurnRunRegistry:
             )
 
             cancel_coordination_on_user_stop(conversation_id)
-        run.task.cancel()
-        logger.info("turn_run.stop", conversation_id=conversation_id, run_id=run.run_id)
+        signalled = self._cancel_once(run)
+        logger.info(
+            "turn_run.stop",
+            conversation_id=conversation_id,
+            run_id=run.run_id,
+            signalled=signalled,
+        )
         return True
 
     def is_user_stop(self, conversation_id: str) -> bool:
@@ -406,7 +584,7 @@ class TurnRunRegistry:
 
                 cancel_coordination_on_user_stop(run.conversation_id)
             if not run.task.done():
-                run.task.cancel()
+                self._cancel_once(run)
                 tasks.append(run.task)
             logger.info(
                 "turn_run.shutdown_salvage",

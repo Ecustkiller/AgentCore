@@ -1,11 +1,12 @@
 import { queryClient } from "@/lib/queryClient";
-import { conversationKeys } from "@/lib/queryKeys";
+import { conversationKeys, folderKeys } from "@/lib/queryKeys";
 import { ConversationsPage } from "@/pages/conversations/ConversationsPage";
 import {
   CONVERSATIONS_PREVIEW_SCENES,
   buildCollaborationTimelineMock,
   buildConversationsPreviewArchived,
   buildConversationsPreviewGrouped,
+  buildConversationsPreviewTrash,
 } from "@/preview/conversationsScenes";
 import { FlaskConical } from "lucide-react";
 import { useLayoutEffect } from "react";
@@ -22,6 +23,7 @@ function seedPreviewCaches() {
     conversationKeys.archived,
     buildConversationsPreviewArchived(),
   );
+  queryClient.setQueryData(folderKeys.trash, buildConversationsPreviewTrash());
   queryClient.setQueryData(
     conversationKeys.collaborationTimeline(PREVIEW_FOLDER_ID),
     buildCollaborationTimelineMock(PREVIEW_FOLDER_ID),
@@ -98,6 +100,7 @@ export function ConversationsPreviewPage() {
           <ConversationsPreviewBody
             key={selected}
             focusArchived={selected === "conversations-archived"}
+            focusTrash={selected === "conversations-trash"}
             focusFolderId={
               selected === "conversations-collaboration"
                 ? PREVIEW_FOLDER_ID
@@ -112,9 +115,11 @@ export function ConversationsPreviewPage() {
 
 function ConversationsPreviewBody({
   focusArchived,
+  focusTrash,
   focusFolderId,
 }: {
   focusArchived: boolean;
+  focusTrash: boolean;
   focusFolderId?: string | null;
 }) {
   const navigate = useNavigate();
@@ -125,11 +130,13 @@ function ConversationsPreviewBody({
       replace: true,
       state: focusArchived
         ? { focusArchived: true }
-        : focusFolderId
-          ? { focusFolderId }
-          : {},
+        : focusTrash
+          ? { focusTrash: true }
+          : focusFolderId
+            ? { focusFolderId }
+            : {},
     });
-  }, [focusArchived, focusFolderId, navigate]);
+  }, [focusArchived, focusTrash, focusFolderId, navigate]);
 
   return <ConversationsPage />;
 }

@@ -28,6 +28,7 @@ from . import (
     messages,
     run_redirect,
     run_stop,
+    save_as_workflow,
     shared_mounts,
     snapshots,
     trash,
@@ -64,3 +65,5 @@ router.include_router(browser_live.router)
 router.include_router(browser_takeover.router)
 # M0 多 session_id：list / create / close（追加在末尾）。
 router.include_router(browser_sessions.router)
+# 一轮协作固化为工作流（同样追加在末尾，不改既有 OpenAPI 顺序）。
+router.include_router(save_as_workflow.router)

@@ -222,6 +222,7 @@ async def test_executor_failure_emits_run_failed_and_state():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     sink.close()
@@ -253,6 +254,7 @@ async def test_deterministic_llm_error_marks_state_not_retryable():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.FAILED
@@ -279,6 +281,7 @@ async def test_closed_llm_client_marks_state_not_retryable():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.FAILED
@@ -300,6 +303,7 @@ async def test_closed_llm_client_marks_state_not_retryable():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e2",
+        approval_gate=None,
     )
     res2 = await WaveScheduler().run(plan2, executor2)
     assert res2["u_1"].error_retryable is False
@@ -324,6 +328,7 @@ async def test_unknown_crash_stays_retryable():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.FAILED
@@ -345,6 +350,7 @@ async def test_worker_hard_failure_bills_completed_rounds():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -380,6 +386,7 @@ async def test_executor_infra_retry_consumes_seeded_transcript():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     seeded = {
         "t_1": RunState(
@@ -420,6 +427,7 @@ async def test_failed_worker_run_final_fact_reseeds_from_journal():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     log = TurnFactLog()
     token = current_fact_log.set(log)
@@ -456,6 +464,7 @@ async def test_worker_failure_before_any_usage_has_no_ledger_row():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -624,6 +633,7 @@ async def test_files_form_soft_completes_without_forcing_write():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -735,6 +745,7 @@ async def test_worker_grantable_tool_runs_without_gate():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.COMPLETED
@@ -759,6 +770,7 @@ async def test_worker_with_omitted_tools_is_offered_all_team_tools():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.COMPLETED
@@ -787,6 +799,7 @@ async def test_worker_with_explicit_tools_is_not_restricted():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan, executor)
     offered = set(provider.offered[0])
@@ -826,6 +839,7 @@ async def test_debater_path_offers_file_write_without_readonly_box():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
         collaboration=False,
     )
     res = await WaveScheduler().run(plan, executor)
@@ -857,6 +871,7 @@ async def test_collaboration_off_denies_note_tools_to_unrestricted_debater():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
         collaboration=False,
     )
     await WaveScheduler().run(plan, executor)
@@ -886,6 +901,7 @@ async def test_collaboration_off_denies_note_tools_to_unrestricted_worker():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
         collaboration=False,
     )
     await WaveScheduler().run(plan, executor)
@@ -914,6 +930,7 @@ async def test_collaboration_on_grants_note_tools_when_tools_declared():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan, executor)
     assert "post_note" in provider.offered[0]
@@ -942,6 +959,7 @@ async def test_worker_always_granted_handoff_even_if_tools_declared_without_it()
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan, executor)
     assert "handoff" in provider.offered[0]
@@ -964,6 +982,7 @@ async def test_worker_collects_web_citations_onto_runstate():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]

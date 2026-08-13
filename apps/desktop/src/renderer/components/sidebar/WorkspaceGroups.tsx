@@ -14,19 +14,24 @@ import { WorkspaceGroupHeader } from "./WorkspaceGroupHeader";
 const MAX_PER_GROUP = 5;
 
 /**
- * The sidebar's「项目」zone (前端UX §一 方案C): collapsible per-folder groups
- * between「置顶」and「快速对话」, fed by {@link useWorkspaceGroups}. Foldered
- * chats live ONLY here when unpinned (pinned lift to the rail 置顶区; 裸聊 stay
- * in「快速对话」). Empty folders are hidden; a folder whose every chat is pinned
- * still renders its header so「+」/ 归档全部 remain reachable. The zone renders
- * nothing when no group exists.
+ * The sidebar's **folder** zone (前端UX §一 方案C): collapsible per-folder groups
+ * between「置顶」and「快速对话」, fed by {@link useWorkspaceGroups}. Group name =
+ * folder name (双模式工作区 §5.4). Foldered chats live ONLY here when unpinned
+ * (pinned lift to the rail 置顶区; 裸聊 stay in「快速对话」). Empty folders are
+ * hidden; a folder whose every chat is pinned still renders its header so「+」/
+ * 归档全部 remain reachable. The zone renders nothing when no group exists.
+ *
+ * Groups are **flat even though 我的文件 nests** — the sidebar answers「这段对话在
+ * 哪个文件夹」, and a nested rail here would bury chats behind ancestor rows that
+ * hold no chats of their own. Nesting lives on the files page; a nested folder is
+ * told apart by its ancestor breadcrumb, not by indentation.
  *
  * Expand state persists per folder (`useSidebarStore.expandedSections`, keyed by
  * folderId): an explicit user toggle always wins; with no stored choice a group
  * defaults collapsed, except the one holding the **unpinned** active conversation
  * (pinned actives already sit in the 置顶区). Each group reuses
  * {@link ConversationItem} so rows keep the same status dot / rename / move /
- * archive behavior. Group headers expose project actions via
+ * archive behavior. Group headers expose folder actions via
  * {@link WorkspaceGroupHeader} (header receives full folder members incl. pinned).
  */
 export function WorkspaceGroups() {

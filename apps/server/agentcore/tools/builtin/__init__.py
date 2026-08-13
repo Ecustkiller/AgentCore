@@ -147,12 +147,47 @@ def browser_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     return browser_host_kind_for(backend) is not None
 
 
+def git_execution_enabled_for(
+    backend: WorkspaceBackend | None,
+    *,
+    desktop_online: bool = False,
+) -> bool:
+    """Whether the ``git`` tool may appear in a runtime toolset for this workspace.
+
+    ``git_ops`` has exactly two transports (see ``git_ops.spawn.git_transport_scope``):
+    a same-process ``git`` spawned under ``backend.root`` — cloud ``ServerWorkspace``
+    and the sidecar's ``ServerWorkspace(location="local")`` — or ``WorkspaceOp.GIT_RUN``
+    over the desktop channel, which is the ONLY path a rootless ``LocalWorkspace`` has.
+    That second transport needs a live desktop, so a channel-backed local workspace
+    reached from a non-desktop session can never run git: withhold the whole tool
+    instead of advertising one whose every call is an instant refusal.
+
+    ``backend is None`` (capability catalog / tests) keeps the tool listed, same
+    posture as :func:`code_execution_enabled_for`.
+
+    The in-process transport additionally folds in the boot probe for a usable
+    ``git`` binary (``git_ops.binary_health``) — an image or PATH without git turns
+    every call into a raw ``FileNotFoundError``, so withhold the tool instead. The
+    probe answers "can THIS process exec git", which is meaningless for the channel
+    transport: there git runs on the user's machine, so that branch returns above
+    and is never gated on it. ``None`` (never probed) keeps the tool offered.
+    """
+    if backend is None:
+        return True
+    if backend.location == "local" and getattr(backend, "root", None) is None:
+        return desktop_online
+    from agentcore.tools.builtin.git_ops.binary_health import git_binary_health
+
+    return git_binary_health() is not False
+
+
 def build_builtin_registry(
     *,
     include_execution_tools: bool = True,
     include_host_tools: bool = False,
     include_browser: bool = False,
     include_desktop_online_tools: bool = False,
+    include_git: bool = True,
     location: Literal["server", "local"] | None = None,
     languages: tuple[str, ...] | list[str] | None = None,
 ) -> ToolRegistry:
@@ -172,6 +207,9 @@ def build_builtin_registry(
 
     ``include_desktop_online_tools`` gates ``desktop_online_class`` tools (e.g.
     ``external_mount_readonly``): desktop online only — not ``host≠off``.
+
+    ``include_git`` gates ``git_class`` (``git``): the workspace must have a root to
+    spawn git under, or a live desktop channel (see ``git_execution_enabled_for``).
 
     ``include_browser`` gates the L3 browser class on the builtin surface
     (navigate/click/type/scroll/snapshot — CEO+worker; screenshot stays worker-only).
@@ -194,6 +232,8 @@ def build_builtin_registry(
             continue
         if reg.browser_class and not include_browser:
             continue
+        if reg.git_class and not include_git:
+            continue
         if reg.local_only and location != "local":
             continue
         registry.register(
@@ -214,6 +254,7 @@ def build_worker_registry(
     ``command=ask`` withholds the entire execution class
     (``code_execute`` / ``test_run`` / ``terminal``) — read-only retrieval stays on.
     Host tools gate on ``desktop_online`` ∧ ``host≠off`` (orthogonal to command).
+    ``git`` gates on the workspace's real git transport (``git_execution_enabled_for``).
     """
     location = backend.location if backend is not None else None
     include_execution = execution_class_enabled_for(backend, permission_axes)
@@ -221,6 +262,7 @@ def build_worker_registry(
     include_host = desktop_online and (
         permission_axes is None or not permission_axes.host_disabled
     )
+    include_git = git_execution_enabled_for(backend, desktop_online=desktop_online)
     # Prefer explicit languages; else reuse a probe cached on the backend by
     # ``resolve_exec_languages`` (prepare / resume). Cloud stays untrimmed.
     resolved_languages = languages
@@ -233,6 +275,7 @@ def build_worker_registry(
         include_host_tools=include_host,
         include_desktop_online_tools=desktop_online,
         include_browser=include_browser,
+        include_git=include_git,
         location=location,
         languages=resolved_languages,
     )
@@ -250,6 +293,8 @@ def build_worker_registry(
             continue
         if reg.desktop_online_class and not desktop_online:
             continue
+        if reg.git_class and not include_git:
+            continue
         if reg.local_only and (backend is None or backend.location != "local"):
             continue
         registry.register(instantiate_declared(cls, location=location))
@@ -262,6 +307,7 @@ def build_ceo_tool_registry(
     permission_axes: "PermissionAxes | None" = None,
     backend_location: str | None = None,
     include_browser: bool = False,
+    include_git: bool = True,
 ) -> ToolRegistry:
     """The CEO chat agent's DIRECT toolset: read / retrieval + Host + local terminal.
 
@@ -277,6 +323,9 @@ def build_ceo_tool_registry(
     Orchestration primitives are wired separately in ``tools.ceo_toolset``.
     Host tools appear only when ``desktop_online`` ∧ ``host≠off``.
     ``terminal`` appears only when ``backend_location=="local"``.
+    **Git**: ``include_git`` mirrors the worker registry's ``git_execution_enabled_for``
+    verdict — callers pass the worker roster's answer so both toolsets agree on whether
+    this workspace can run git at all.
     """
     include_host = desktop_online and (
         permission_axes is None or not permission_axes.host_disabled
@@ -288,6 +337,7 @@ def build_ceo_tool_registry(
         include_host_tools=include_host,
         include_desktop_online_tools=desktop_online,
         include_browser=include_browser,
+        include_git=include_git,
         location=location,
     )
     registry = ToolRegistry()

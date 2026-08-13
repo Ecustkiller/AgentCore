@@ -10,10 +10,11 @@
 不认已删字数字段腿。``parallel_brief`` / 普通多角摸底**不**因多人而进硬门。审校落盘**不**靠角色名
 抬 files——只认 playbook / 已声明的 ``form=files``·``reviews/`` artifacts。
 
-调研两阶段引用（块 2）：``citation_mode=="two_phase"``（playbook 盖戳）或
-落盘/声明路径在 ``AgentCore/文档/research/`` / ``AgentCore/文档/reviews/``
-→ A 检索草案不跑成稿引用闸 → 同 worker 自动升级 B 后再验；``immediate`` 显式退出；
-draft 不进 ``file_acceptance`` / artifacts 主清单。
+调研两阶段引用（块 2）：**只认** ``citation_mode=="two_phase"``（playbook / CEO 盖戳）
+→ A 检索草案不跑成稿引用闸 → 同 worker 自动升级 B 后再验；``immediate`` / 未声明退出；
+draft 不进 ``file_acceptance`` / artifacts 主清单。路径入口（声明或落盘在
+``research/`` · ``reviews/`` 下即算调研类）已撤——那个落点由扫 role·task 的正则填出，
+是隔一层的自由文推断；即兴委派要成稿级引用验收须自报 ``citation_mode``。
 
 文献成文证据降档（学术综述诚实性）：``research_report`` / 同等成文综述在证据不足时
 由 ``delivery_status`` 注入 ``reason=evidence_deficit`` blocking gap → state 不得
@@ -52,12 +53,14 @@ PAPER_PARALLEL_MERGE_DISCIPLINE = (
     "调研透镜 / 代码 / 建站等多产物场景不受本条约束。"
 )
 
-# 出行/报告成文：主交付永远是 .md；用户要 PDF/可分享时才 md→md_to_pdf→handoff。
-MD_PDF_EXPORT_DISCIPLINE = (
+# 出行/报告成文：主交付永远是 .md；用户要 PDF/Word/可分享时才 md→md_to_pdf|md_to_docx→handoff。
+# 两个导出器都是确定性 FILESYSTEM 工具、与执行沙箱正交，无 code_execute 也能交。
+MD_EXPORT_DISCIPLINE = (
     "【成文交付·MD 为主】主交付永远是 `.md`。"
-    "用户要 PDF / 可分享文件时：顺序 = 成篇 `.md` → 调用 `md_to_pdf`（对主文件）→ handoff；"
-    "【禁止】用多份 HTML 顶替 PDF；【禁止】把 code_execute + reportlab 当主路径做 PDF"
-    "（确定性 `md_to_pdf` 才是主路径）。"
+    "用户要 PDF / Word / 可分享文件时：顺序 = 成篇 `.md` → 调用 `md_to_pdf` 或 `md_to_docx`"
+    "（对主文件）→ handoff；两者都是确定性导出、不依赖执行沙箱。"
+    "【禁止】用多份 HTML 顶替 PDF；【禁止】把 code_execute + reportlab / python-docx 当主路径"
+    "（确定性 `md_to_pdf` / `md_to_docx` 才是主路径）。"
 )
 
 # research_report 成篇主文件权威默认（可被 playbook_args.output_path 覆盖）。
@@ -285,59 +288,22 @@ def research_report_main_artifact(output_path: str | None = None) -> str:
     return DEFAULT_RESEARCH_REPORT_ARTIFACT
 
 
-def _research_casefile_path(path: str) -> bool:
-    """True when path is under research/ or reviews/ stage dirs (``stage_dirs``)."""
-    p = (path or "").strip().lstrip("/")
-    return (
-        p in (RESEARCH_DIR, REVIEWS_DIR)
-        or p.startswith(RESEARCH_PREFIX)
-        or p.startswith(REVIEWS_PREFIX)
-    )
+def is_two_phase_citation_deliverable(deliverable: Any) -> bool:
+    """True when deliverable explicitly opts into A(draft)→B(cite-tier) acceptance.
 
-
-def is_two_phase_citation_deliverable(
-    deliverable: Any,
-    *,
-    landed_paths: list[str] | None = None,
-) -> bool:
-    """True when deliverable opts into A(draft)→B(cite-tier) citation acceptance.
-
-    判定「调研类」（不扫 task/角色自由文）：
-    - ``citation_mode=="immediate"`` → 否（显式退出）
-    - ``citation_mode=="two_phase"`` → 是（playbook / CEO 盖戳）
-    - 否则：声明的 ``artifacts`` / ``artifact_dir`` 或已落盘路径落在
-      ``AgentCore/文档/research/`` 或 ``AgentCore/文档/reviews/`` → 是
-      （自由 delegate 约定文档与 playbook 同口径）
+    只认显式 ``citation_mode=="two_phase"``（playbook / CEO 盖戳）；``immediate``
+    与未声明一律否。**无路径入口**：原「声明的 ``artifacts`` / ``artifact_dir`` 或
+    已落盘路径在 ``research/`` · ``reviews/`` 下即算调研类」已撤——那个落点是扫
+    role·task 的正则填出来的，等于隔一层的自由文推断。``playbooks/research.py``
+    逐处盖戳，即兴委派要成稿级引用验收须自报 ``citation_mode``。
     """
-    mode: str | None
-    artifacts: list[str] = []
-    artifact_dir = ""
     if deliverable is None:
-        mode = None
-    elif isinstance(deliverable, dict):
+        return False
+    if isinstance(deliverable, dict):
         mode = deliverable.get("citation_mode")
-        raw_arts = deliverable.get("artifacts") or []
-        if isinstance(raw_arts, list):
-            artifacts = [str(a) for a in raw_arts if a]
-        ad = deliverable.get("artifact_dir") or ""
-        artifact_dir = ad if isinstance(ad, str) else ""
     else:
         mode = getattr(deliverable, "citation_mode", None)
-        artifacts = [str(a) for a in (getattr(deliverable, "artifacts", None) or []) if a]
-        artifact_dir = str(getattr(deliverable, "artifact_dir", "") or "")
-
-    if mode == "immediate":
-        return False
-    if mode == "two_phase":
-        return True
-
-    candidates = list(artifacts)
-    if artifact_dir.strip():
-        candidates.append(artifact_dir.strip())
-    for path in landed_paths or []:
-        if path:
-            candidates.append(str(path))
-    return any(_research_casefile_path(p) for p in candidates)
+    return mode == "two_phase"
 
 
 # ── 文献成文证据降档（delivery_status 消费）────────────────────────────────
@@ -458,8 +424,9 @@ def plan_is_literature_report_delivery(plan_nodes: object) -> bool:
     """True for ``research_report`` / 同等成文综述；``parallel_brief`` 默认 False.
 
     判定（结构字段，不扫 task/角色自由文；不认已删字数字段）：
-    - 批内已声明 reviews/ files 审校座 **且** 存在 two_phase / research·reviews 约定文档 deliverable
-      （``research_report`` 与手写同构；``parallel_brief`` 无审校落盘 → 不进）。
+    - 批内已声明 reviews/ files 审校座 **且** 存在显式 ``citation_mode=two_phase``
+      deliverable（``research_report`` 与手写同构；``parallel_brief`` 无审校落盘 → 不进）。
+      成稿座只按落盘路径推断的旧腿随两阶段路径入口一并撤。
     """
     if not isinstance(plan_nodes, (list, tuple)) or not plan_nodes:
         return False

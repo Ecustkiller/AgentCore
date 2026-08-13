@@ -28,10 +28,10 @@ describe("resolveTurnDisplayMoney", () => {
   it("prefers turn billed total, then estimated_total", () => {
     expect(
       resolveTurnDisplayMoney({ total: 28, estimated_total: 99 }, []),
-    ).toEqual({ nano: 28, estimated: false });
+    ).toEqual({ nano: 28, estimated: false, currency: "CNY" });
     expect(
       resolveTurnDisplayMoney({ total: 0, estimated_total: 99 }, []),
-    ).toEqual({ nano: 99, estimated: true });
+    ).toEqual({ nano: 99, estimated: true, currency: "CNY" });
   });
 
   it("falls back to run estimated sum when turn cost is absent", () => {
@@ -40,7 +40,7 @@ describe("resolveTurnDisplayMoney", () => {
         { total: 0, estimated_total: 10 },
         { total: 0, estimated_total: 5 },
       ]),
-    ).toEqual({ nano: 15, estimated: true });
+    ).toEqual({ nano: 15, estimated: true, currency: "CNY" });
   });
 
   it("sums run billed totals when turn cost is absent", () => {
@@ -49,7 +49,22 @@ describe("resolveTurnDisplayMoney", () => {
         { total: 10, pricing_source: "curated" },
         { total: 5, pricing_source: "curated" },
       ]),
-    ).toEqual({ nano: 15, estimated: false });
+    ).toEqual({ nano: 15, estimated: false, currency: "CNY" });
+  });
+
+  it("carries the BYOK estimate's own currency out (社区价卡 USD，不折人民币)", () => {
+    expect(
+      resolveTurnDisplayMoney(
+        { total: 0, estimated_total: 99, estimated_currency: "USD" },
+        [],
+      ),
+    ).toEqual({ nano: 99, estimated: true, currency: "USD" });
+    expect(
+      resolveTurnDisplayMoney(null, [
+        { total: 0, estimated_total: 10, estimated_currency: "USD" },
+        { total: 0, estimated_total: 5, estimated_currency: "USD" },
+      ]),
+    ).toEqual({ nano: 15, estimated: true, currency: "USD" });
   });
 
   it("returns null when nothing real to show", () => {

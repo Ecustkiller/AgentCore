@@ -97,6 +97,11 @@ class Deliverable:
     # fill from ``stage_dirs`` when form=files / files_written is dossier-semantic;
     # worker picks filenames under this dir. Acceptance uses ``artifacts`` prefix.
     artifact_dir: str = ""
+    # 产物 = 用户工作区原生文件（源码 / 项目文件，就地改或新建），不套 AI 工作间落点。
+    # ``resolve_artifact_dir`` 里优先级最高：为真直接返回空落点，压过 ``artifacts``
+    # 推导与显式 ``artifact_dir``。写码类节点（build_feature / repair_code）盖此戳，
+    # 否则 ``form=files`` 语义过载会把业务代码引向默认的 ``文档/工作稿/``。
+    workspace_native: bool = False
     # When set (e.g. ``site/``), the contract gate cross-checks HTML↔CSS↔JS seams
     # across ALL web files under this workspace prefix — not only this run's batch.
     # Used by build_website QA to catch integrated orphan selectors after parallel
@@ -324,7 +329,7 @@ class RunSpec:
     # accumulates (one block per adjust) when a node is steered across multiple
     # checkpoints before it runs. → 见设计: docs/03-AI核心/执行引擎架构设计.md §检查点决策语义
     steer: str = ""
-    # 跨项目指挥 · 形状甲：本 worker 的目标 Folder id（解析后的项目身份）。
+    # 跨文件夹指挥 · 形状甲：本 worker 的目标 Folder id（解析后的文件夹身份）。
     # 有值 → prepare_agent_node 另建 backend + 记忆跟该 folder；None → 坐会话默认桌。
     # 嵌套子派：省略时由 builder 填父目标（再点名才换）。不改会话 folder_id。
     target_folder_id: str | None = None
@@ -429,17 +434,20 @@ class RunState:
     # are the common cases. ``None`` = normal finish. Worker runs leave it None (their
     # emptiness is handled by the contract retry / soft-fail path, not the turn finish).
     finish_override: FinishReason | None = None
-    # Workspace paths this worker created or modified (file_write / str_replace /
-    # file_move), derived from its transcript when the run completes. The DelegateTool
-    # surfaces these in the CEO-facing aggregate as a「文件产出」manifest so the CEO
-    # knows what landed on disk WITHOUT re-listing the workspace to verify (省掉收敛
-    # 阶段的冗余 file_list 轮). Best-effort: a file a worker wrote indirectly (e.g. via
-    # a code_execute script) is not captured — only direct file-tool calls are.
+    # Workspace paths this worker landed, harvested from the transcript when the run
+    # completes — the tools' OWN self-reports (``ToolResult.file_products``), so an
+    # indirect landing (a ``code_execute`` script's copy-out) counts exactly like a
+    # ``file_write``, and a new file-producing tool is on the ledger the day it reports.
+    # The DelegateTool surfaces these in the CEO-facing aggregate as a「文件产出」manifest
+    # so the CEO knows what landed WITHOUT re-listing the workspace (省掉收敛阶段的冗余
+    # file_list 轮).
     files_touched: list[str] = field(default_factory=list)
-    # Path-level acceptance for ``files_touched`` (块 1)：``[{path, status, reason?,
-    # detail?}]`` with status ∈ accepted|rejected. Cite/contract failures that name a
-    # path reject it even on soft-COMPLETED; ``delivery_status.delivered_files`` and
-    # CEO「已交付」only count accepted. Empty when the run landed nothing.
+    # Path-level acceptance for ``files_touched`` (块 1)：``[{path, status, kind?,
+    # derived_from?, reason?, detail?}]`` with status ∈ accepted|rejected. ``kind`` /
+    # ``derived_from`` come from the producing tool's self-report (产物类型；导出件指回
+    # 源文件). Cite/contract failures that name a path reject it even on soft-COMPLETED;
+    # ``delivery_status.delivered_files`` and CEO「已交付」only count accepted. Empty when
+    # the run landed nothing.
     file_acceptance: list[dict[str, Any]] = field(default_factory=list)
     # Tool failure facts from this run's LoopController tally (tool_name / failure_count /
     # last_error / succeeded_after). Empty when no non-policy tool failure occurred.

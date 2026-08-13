@@ -31,10 +31,10 @@ from agentcore.security import (
     decode_folders_token,
     decode_inference_token,
 )
-from agentcore.tools.builtin.projects import (
-    CreateProjectTool,
-    ListProjectsTool,
-    ResolveProjectTool,
+from agentcore.tools.builtin.folders import (
+    CreateFolderTool,
+    ListFoldersTool,
+    ResolveFolderTool,
 )
 from agentcore.tools.protocol import ToolContext
 
@@ -59,6 +59,7 @@ def _summary(
     mode: str = "cloud",
     local_root_id: str | None = None,
     local_subpath: str | None = None,
+    rel_path: str | None = None,
 ) -> dict[str, Any]:
     now = datetime(2026, 8, 9, 12, 0, 0).isoformat()
     return {
@@ -67,6 +68,7 @@ def _summary(
         "mode": mode,
         "local_root_id": local_root_id,
         "local_subpath": local_subpath,
+        "rel_path": rel_path if rel_path is not None else name,
         "created_at": now,
         "updated_at": now,
     }
@@ -187,10 +189,10 @@ async def test_cloud_list_unauthorized(monkeypatch: pytest.MonkeyPatch, folders_
 # --- tools: HTTP when creds bound; DB when not --------------------------------
 
 
-async def test_list_projects_uses_cloud_when_creds_bound(
+async def test_list_folders_uses_cloud_when_creds_bound(
     monkeypatch: pytest.MonkeyPatch, folders_creds
 ):
-    import agentcore.tools.builtin.projects as projects_mod
+    import agentcore.tools.builtin.folders as folders_mod
 
     db_called = {"n": 0}
 
@@ -210,8 +212,8 @@ async def test_list_projects_uses_cloud_when_creds_bound(
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(projects_mod, "async_session_factory", lambda: _CM())
-    monkeypatch.setattr(projects_mod, "FolderRepository", _Repo)
+    monkeypatch.setattr(folders_mod, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(folders_mod, "FolderRepository", _Repo)
 
     async def _fake_list(creds: FoldersCredentials) -> list[dict[str, Any]]:
         assert creds.api_key == "folders-jwt"
@@ -223,20 +225,21 @@ async def test_list_projects_uses_cloud_when_creds_bound(
     )
 
     with folders_credentials_scope(folders_creds):
-        result = await ListProjectsTool().execute({}, _ctx())
+        result = await ListFoldersTool().execute({}, _ctx())
     assert result.success
     assert "cloud-only" in result.output
     assert db_called["n"] == 0
 
 
-async def test_list_projects_uses_db_without_creds(monkeypatch: pytest.MonkeyPatch):
-    import agentcore.tools.builtin.projects as projects_mod
+async def test_list_folders_uses_db_without_creds(monkeypatch: pytest.MonkeyPatch):
+    import agentcore.tools.builtin.folders as folders_mod
 
     class _Folder:
         id = "db-1"
         name = "FromDB"
         local_root_id = None
         local_subpath = None
+        rel_path = "FromDB"
         created_at = datetime(2026, 8, 9, 12, 0, 0)
         updated_at = datetime(2026, 8, 9, 12, 0, 0)
 
@@ -255,22 +258,22 @@ async def test_list_projects_uses_db_without_creds(monkeypatch: pytest.MonkeyPat
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(projects_mod, "async_session_factory", lambda: _CM())
-    monkeypatch.setattr(projects_mod, "FolderRepository", _Repo)
+    monkeypatch.setattr(folders_mod, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(folders_mod, "FolderRepository", _Repo)
 
     cloud_list = AsyncMock(side_effect=AssertionError("no cloud without creds"))
     monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", cloud_list)
 
-    result = await ListProjectsTool().execute({}, _ctx())
+    result = await ListFoldersTool().execute({}, _ctx())
     assert result.success
     assert "FromDB" in result.output
     cloud_list.assert_not_awaited()
 
 
-async def test_create_project_cloud_http_path(
+async def test_create_folder_cloud_http_path(
     monkeypatch: pytest.MonkeyPatch, folders_creds
 ):
-    import agentcore.tools.builtin.projects as projects_mod
+    import agentcore.tools.builtin.folders as folders_mod
 
     class _Repo:
         def __init__(self, session: Any) -> None:
@@ -286,11 +289,14 @@ async def test_create_project_cloud_http_path(
         async def __aexit__(self, *args: object) -> None:
             return None
 
-    monkeypatch.setattr(projects_mod, "async_session_factory", lambda: _CM())
-    monkeypatch.setattr(projects_mod, "FolderRepository", _Repo)
+    monkeypatch.setattr(folders_mod, "async_session_factory", lambda: _CM())
+    monkeypatch.setattr(folders_mod, "FolderRepository", _Repo)
 
-    async def _fake_create(creds: FoldersCredentials, *, name: str) -> dict[str, Any]:
+    async def _fake_create(
+        creds: FoldersCredentials, *, name: str, parent_id: str | None = None
+    ) -> dict[str, Any]:
         assert name == "NewCloud"
+        assert parent_id is None
         return _summary(id="created-1", name=name)
 
     monkeypatch.setattr(
@@ -299,12 +305,40 @@ async def test_create_project_cloud_http_path(
     )
 
     with folders_credentials_scope(folders_creds):
-        result = await CreateProjectTool().execute({"name": "NewCloud"}, _ctx())
+        result = await CreateFolderTool().execute({"name": "NewCloud"}, _ctx())
     assert result.success
     assert "created-1" in result.output
 
 
-async def test_resolve_project_cloud_http_path(
+async def test_create_folder_nested_cloud_http_path(
+    monkeypatch: pytest.MonkeyPatch, folders_creds
+):
+    """``parent_path`` resolves off the same cloud roster, then rides HTTP as an id."""
+
+    async def _fake_list(creds: FoldersCredentials) -> list[dict[str, Any]]:
+        del creds
+        return [_summary(id="parent-1", name="设计", rel_path="工作/设计")]
+
+    async def _fake_create(
+        creds: FoldersCredentials, *, name: str, parent_id: str | None = None
+    ) -> dict[str, Any]:
+        assert parent_id == "parent-1"
+        return _summary(id="created-2", name=name, rel_path=f"工作/设计/{name}")
+
+    monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", _fake_list)
+    monkeypatch.setattr(
+        "agentcore.folders.credentials.cloud_create_cloud_folder", _fake_create
+    )
+
+    with folders_credentials_scope(folders_creds):
+        result = await CreateFolderTool().execute(
+            {"name": "图标", "parent_path": "工作/设计"}, _ctx()
+        )
+    assert result.success
+    assert result.display["rel_path"] == "工作/设计/图标"
+
+
+async def test_resolve_folder_cloud_http_path(
     monkeypatch: pytest.MonkeyPatch, folders_creds
 ):
     async def _fake_list(creds: FoldersCredentials) -> list[dict[str, Any]]:
@@ -314,7 +348,7 @@ async def test_resolve_project_cloud_http_path(
     monkeypatch.setattr("agentcore.folders.credentials.cloud_list_folders", _fake_list)
 
     with folders_credentials_scope(folders_creds):
-        result = await ResolveProjectTool().execute({"name": "solo"}, _ctx())
+        result = await ResolveFolderTool().execute({"path": "solo"}, _ctx())
     assert result.success
     assert result.display["folder_id"] == "only"
 
@@ -358,7 +392,7 @@ async def test_load_target_folder_binding_cloud_auth_fails_honestly(
 
     with folders_credentials_scope(folders_creds), pytest.raises(TargetDesktopError) as ei:
         await load_target_folder_binding(folder_id="any", user_id="u1")
-    assert "无法绑定目标项目" in ei.value.message
+    assert "无法绑定目标文件夹" in ei.value.message
     assert "unauthorized" in ei.value.message
 
 
@@ -370,6 +404,7 @@ async def test_load_target_folder_binding_still_db_without_creds(
         name = "DB"
         local_root_id = None
         local_subpath = None
+        rel_path = "DB"
 
     class _Repo:
         def __init__(self, session: object) -> None:

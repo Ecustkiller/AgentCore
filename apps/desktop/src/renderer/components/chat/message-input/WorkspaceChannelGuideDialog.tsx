@@ -9,8 +9,10 @@ import {
 } from "@/components/ui/dialog";
 
 /**
- * 「在哪工作」说明弹窗——只有两通道：云协作（推荐）/ 本机传统。
- * 不把合回、遗留 handoff 写成第三平级模式；禁 sidecar / 过桥实现词。
+ * 「在哪工作」说明弹窗——只回答用户的三个问题：文件放在哪、改的是哪一份、怎么拿回自己电脑。
+ *
+ * 文案面向普通用户：入口名与「在哪工作」菜单逐字一致，内部实现词与设计文档术语一律不出现
+ * （同名测试守着，防抄设计文档回潮）。云是推荐默认，本机只作并列说明、不给推荐标。
  */
 export function WorkspaceChannelGuideDialog({
   open,
@@ -19,7 +21,7 @@ export function WorkspaceChannelGuideDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** 桌面才有本机传统入口；Web/无本机盘只讲云。 */
+  /** 有本机盘（桌面端）才讲「打开本机文件夹」；Web 只讲云。 */
   showLocalTraditional: boolean;
 }) {
   return (
@@ -28,21 +30,19 @@ export function WorkspaceChannelGuideDialog({
         <DialogHeader>
           <DialogTitle>在哪工作：怎么选</DialogTitle>
           <DialogDescription>
-            只有两条通道：云协作（推荐）与本机传统。云协作下的几个入口只是起步方式不同，不是第三种模式。
+            默认把文件放在云上的「我的文件」；也可以直接改你电脑上的文件夹。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 px-5 pb-2 text-sm text-foreground">
           <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-medium text-foreground">云协作</h3>
+              <h3 className="text-sm font-medium text-foreground">我的文件</h3>
               <Badge tone="primary">推荐</Badge>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              文件在云桌，多端同一份；Agent
-              改的是云上的副本。要进你电脑上的文件夹，用 ModeControl
-              的合回或下载 ZIP——不会自动双向同步。合回落本机 ≠
-              本机传统工作区（那是另一条通道）。
+              文件存在云上，你在电脑、手机、网页看到的是同一份。它不会自动同步到你电脑：想在自己电脑上拿到，手动导出到某个文件夹，或者导出
+              ZIP。
             </p>
             <dl className="space-y-2">
               <div className="space-y-0.5">
@@ -50,23 +50,23 @@ export function WorkspaceChannelGuideDialog({
                   快速对话
                 </dt>
                 <dd className="text-xs leading-relaxed text-muted-foreground">
-                  临时云桌，适合先聊再定项目。要写文件时系统会自动建云项目，也可先点「新建云项目」自建
+                  不用先选地方，想到什么直接聊；真要存文件时会自动建一个文件夹，也可以先点「新建文件夹」自己建
                 </dd>
               </div>
               <div className="space-y-0.5">
                 <dt className="text-xs font-medium text-foreground">
-                  新建云项目
+                  新建文件夹
                 </dt>
                 <dd className="text-xs leading-relaxed text-muted-foreground">
-                  空的云项目
+                  建一个空文件夹，从头开始
                 </dd>
               </div>
               <div className="space-y-0.5">
                 <dt className="text-xs font-medium text-foreground">
-                  导入本机项目到云
+                  从本机导入
                 </dt>
                 <dd className="text-xs leading-relaxed text-muted-foreground">
-                  把本机文件夹快照上传成云项目
+                  把你电脑上的文件夹复制一份上来；之后改的是云上这份，电脑里的原件不会跟着变
                 </dd>
               </div>
               <div className="space-y-0.5">
@@ -74,7 +74,7 @@ export function WorkspaceChannelGuideDialog({
                   从 Git 克隆
                 </dt>
                 <dd className="text-xs leading-relaxed text-muted-foreground">
-                  在云上浅克隆远程仓库
+                  把远程仓库拉一份到云上
                 </dd>
               </div>
             </dl>
@@ -82,10 +82,11 @@ export function WorkspaceChannelGuideDialog({
 
           {showLocalTraditional ? (
             <section className="space-y-2 rounded-lg border border-border/60 p-3">
-              <h3 className="text-sm font-medium text-foreground">本机传统</h3>
+              <h3 className="text-sm font-medium text-foreground">
+                打开本机文件夹
+              </h3>
               <p className="text-xs leading-relaxed text-muted-foreground">
-                菜单里的「打开本机项目」：打开的就是本机文件夹；Agent
-                正常直接改这里。适合已有大仓、或必须碰本机环境。这不是离线模式：模型调用仍走网络，对话也会回写云端。仅本机引擎暂时不可用时，才会临时经云协助——不是第三条通道。
+                改的就是你电脑上的那个目录，不用先复制上来，适合东西本来就在电脑上、或者非得用你电脑上那套环境的活。它不是离线模式：模型调用一样要联网，对话记录也仍然存在云上。
               </p>
             </section>
           ) : null}
@@ -93,27 +94,24 @@ export function WorkspaceChannelGuideDialog({
           <section className="space-y-1.5 px-0.5">
             <h3 className="text-sm font-medium text-foreground">怎么选</h3>
             <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
-              <li>日常、要多端、不确定 → 云协作</li>
+              <li>日常用、想在手机和网页接着看 → 「我的文件」里的任一个</li>
               {showLocalTraditional ? (
-                <li>已有大仓、必须摸本机工具链 → 打开本机项目</li>
+                <li>
+                  东西已经在你电脑上、又要用你电脑上的环境 → 打开本机文件夹
+                </li>
               ) : null}
               {showLocalTraditional ? (
                 <li>
-                  工程已在本机、又想改成云权威 →
-                  用「导入本机项目到云」（可选，不是必须迁）
+                  电脑上的文件夹也想换设备接着用 → 从本机导入（可选，不必搬）
                 </li>
               ) : null}
-              <li>
-                遗留「后台云端」不是平级第三通道；入口不在 Composer「＋」，而在
-                ModeControl 高级 / 遗留
-              </li>
             </ul>
           </section>
         </div>
 
         <DialogFooter className="gap-3 sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground sm:max-w-[18rem]">
-            选过的通道会记住，方便下次从同一习惯继续。
+            这次选的会记住，下次默认还从这里开始。
           </p>
           <Button type="button" onClick={() => onOpenChange(false)}>
             知道了

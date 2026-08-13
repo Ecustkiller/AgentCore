@@ -23,11 +23,11 @@ import {
   formatGrantReadonlyFolderAnswer,
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
 import {
-  formatRegisterLocalProjectAnswer,
-  pickAndRegisterLocalProject,
-} from "@/lib/registerLocalProject";
+  formatRegisterLocalFolderAnswer,
+  pickAndRegisterLocalFolder,
+} from "@/lib/registerLocalFolder";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import type {
   AskAssumption,
@@ -218,7 +218,7 @@ export function AskQuestionFields({
       if (!hasLocalFiles() || !window.fsApi) return;
       setBindBusyLabel(opt.label);
       clearPickerFeedback();
-      const result = await pickAndOpenLocalProject(navigate, {
+      const result = await pickAndOpenLocalFolder(navigate, {
         notifyOnFailure: false,
       });
       if (!result.ok) {
@@ -242,7 +242,7 @@ export function AskQuestionFields({
         setBindBusyLabel(null);
         return;
       }
-      const result = await pickAndRegisterLocalProject({
+      const result = await pickAndRegisterLocalFolder({
         notifyOnFailure: false,
       });
       if (!result.ok) {
@@ -253,7 +253,7 @@ export function AskQuestionFields({
         setBindBusyLabel(null);
         return;
       }
-      const value = formatRegisterLocalProjectAnswer(
+      const value = formatRegisterLocalFolderAnswer(
         opt.label,
         result.folder.name,
       );

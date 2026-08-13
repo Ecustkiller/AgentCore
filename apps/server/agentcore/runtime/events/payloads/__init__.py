@@ -63,9 +63,11 @@ TS_EXPORTS: tuple[TsExport, ...] = (
         doc=(
             "A running tool's coarse EXECUTION phase (工具执行阶段进度). Known values:\n"
             "web_search → queued / querying / fallback; read_url → fetching / reading /\n"
-            "blocked; code_execute → executing. Kept as a widened `string` on the wire so\n"
-            "the backend can add phases without a client bump — an unknown value maps to a\n"
-            "generic「处理中」."
+            "blocked; code_execute / test_run → executing; git → git_queued (waiting behind\n"
+            "another write on the same repo) / git_credentials (PAT / gh token lookup) /\n"
+            "git_remote (push·pull·fetch network leg, create_pr's GitHub REST) / executing\n"
+            "(local git command). Kept as a widened `string` on the wire so the backend can\n"
+            "add phases without a client bump — an unknown value maps to a generic「处理中」."
         ),
     ),
     TsInterface(chat.ToolUseProgressPayload),
@@ -185,6 +187,7 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(run.DeliveryGap),
     TsInterface(run.DeliveryAction),
     TsInterface(run.DeliveryArtifact),
+    TsInterface(run.DeliveryPromotion),
     TsInterface(run.DeliveryStatusPayload),
     TsInterface(run.UserInterjectionAttachment),
     TsInterface(run.UserInterjectionPayload),
@@ -360,6 +363,7 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(workspace.ExternalMountReadonlyRequiredPayload),
     TsInterface(workspace.HostOpRequiredPayload),
     TsInterface(workspace.McpOpRequiredPayload),
+    TsInterface(workspace.AutoFolderCreatedPayload),
     TsInterface(workspace.HandoffSnapshotDonePayload),
     TsInterface(workspace.HandoffJobStartedPayload),
     TsInterface(workspace.HandoffApplyResult),
@@ -469,6 +473,7 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     ),
     EventType.HOST_OP_REQUIRED: workspace.HostOpRequiredPayload,
     EventType.MCP_OP_REQUIRED: workspace.McpOpRequiredPayload,
+    EventType.AUTO_FOLDER_CREATED: workspace.AutoFolderCreatedPayload,
     EventType.HANDOFF_SNAPSHOT_DONE: workspace.HandoffSnapshotDonePayload,
     EventType.HANDOFF_JOB_STARTED: workspace.HandoffJobStartedPayload,
     EventType.HANDOFF_APPLY_DONE: workspace.HandoffApplyDonePayload,

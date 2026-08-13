@@ -5,10 +5,15 @@ non-owner receives 404 (IDOR-safe). Soft-deleting a folder archives its
 conversations in place (keeps ``folder_id``); workspace binding is set at
 create and is immutable thereafter.
 
-List / create / get-by-id accept either an access session or a folders narrow
-ticket (sidecar cloud roster). Mutating archive / permanent-delete / timeline
-remain access-session only.
+List / create / get-by-id / soft-delete accept either an access session or a
+folders narrow ticket (sidecar cloud roster) — the sidecar-hosted CEO owns the
+same roster verbs the sidebar does (``delete_folder`` 软删经此路)。
+Permanent delete / rename / timeline / 最近删除 remain access-session only: 彻底删
+只由用户在桌面弹窗里勾选确认，恢复是用户的补救面，AI 永远够不到（这一轮 AI 只能
+删不能恢复）。
 """
+
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel
@@ -26,21 +31,44 @@ from agentcore.api.schemas import (
     CollaborationTimelineItem,
     CollaborationTimelineResponse,
     CreateFolderRequest,
+    DeletedFolderListResponse,
+    DeletedFolderSummary,
     FolderSummary,
     StatusResponse,
     UpdateFolderRequest,
 )
 from agentcore.config import settings
-from agentcore.core.errors import NotFoundError
+from agentcore.core.errors import ConflictError, NotFoundError, ValidationError
+from agentcore.core.logging import get_logger
 from agentcore.db.repositories import FolderRepository
 from agentcore.folders.collaboration_timeline import (
     display_act_title,
     list_folder_collaboration_timeline,
 )
 from agentcore.folders.permanent_delete import permanent_delete_folder
+from agentcore.folders.tree_ops import (
+    FolderTreeError,
+    move_folder,
+    rename_folder,
+    restore_folder_tree,
+    soft_delete_folder_tree,
+)
 from agentcore.security.tokens import create_folders_token
+from agentcore.workspace.locks import WorkspaceBusyError
+from agentcore.workspace.retention import retention_cutoff
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/folders", tags=["folders"])
+
+# Recycle-bin page size. A project list is human-scale; this only bounds a pathological
+# account, and「最近删除」has no paging UI to spend a cursor on.
+_TRASH_LIST_LIMIT = 200
+
+
+def _purge_at(folder) -> datetime:
+    """When the retention sweeper may hard-purge this soft-deleted project."""
+    return folder.deleted_at + timedelta(days=settings.workspace_retention_days)
 
 
 class FoldersTokenResponse(BaseModel):
@@ -70,7 +98,9 @@ async def create_folder(
 
     Local mode is unique per ``(user_id, local_root_id, local_subpath)`` — same
     path re-open returns the existing row (VS Code / Cursor workspace reuse).
-    Cloud projects are unchanged (duplicate names allowed).
+    Cloud projects become a real directory under ``parent_id``; a name already
+    taken among live siblings gets a numeric suffix rather than a 409 — the name
+    is now a path segment, and two of them cannot share one directory.
     """
     if body.mode == "local":
         assert body.local_root_id is not None  # validated by CreateFolderRequest
@@ -83,11 +113,19 @@ async def create_folder(
             response.status_code = 200
             return FolderSummary.from_folder(existing)
 
+    parent_rel_path: str | None = None
+    if body.parent_id:
+        parent = await repo.get_by_id(body.parent_id, user_id=user.user_id)
+        if parent is None:
+            raise NotFoundError("上级文件夹不存在")
+        parent_rel_path = parent.rel_path
+
     folder = await repo.create(
         user_id=user.user_id,
         name=body.name,
         local_root_id=body.local_root_id if body.mode == "local" else None,
         local_subpath=body.local_subpath if body.mode == "local" else None,
+        parent_rel_path=parent_rel_path,
     )
     return FolderSummary.from_folder(folder)
 
@@ -99,6 +137,75 @@ async def list_folders(
 ):
     folders = await repo.list_by_user(user.user_id)
     return [FolderSummary.from_folder(f) for f in folders]
+
+
+# --- 最近删除 (project recycle bin) ---
+# Declared ahead of the ``/{folder_id}`` matchers: FastAPI resolves in registration
+# order, so a literal ``/trash`` segment must be registered first to win.
+
+
+@router.get("/trash", response_model=DeletedFolderListResponse)
+async def list_deleted_folders(
+    user: AuthUser,
+    repo: FolderRepository = Depends(get_folder_repo),
+):
+    """列出可恢复的已删项目（最近删除）。
+
+    Access-session only — the folders narrow ticket is for the sidecar CEO's roster
+    chores, and recovery is the user's own remedy surface.
+    """
+    folders = await repo.list_deleted_by_user(
+        user.user_id, not_before=retention_cutoff(), limit=_TRASH_LIST_LIMIT
+    )
+    return DeletedFolderListResponse(
+        data=[DeletedFolderSummary.from_folder(f, purge_at=_purge_at(f)) for f in folders],
+        total=len(folders),
+        retention_days=settings.workspace_retention_days,
+    )
+
+
+@router.post("/trash/{folder_id}/restore", response_model=FolderSummary)
+async def restore_deleted_folder(
+    folder_id: str,
+    user: AuthUser,
+    repo: FolderRepository = Depends(get_folder_repo),
+    session: AsyncSession = Depends(get_db),
+):
+    """恢复一个已删项目：项目行复活，删除时连带归档的对话解档。
+
+    Past retention the answer is 409, never a silent success — the workspace files
+    may already be gone. Losing the race with the 6-hour purge sweep between the
+    lookup and the conditional UPDATE surfaces the same way (「该项目已被清理」);
+    that window is reported honestly rather than reconciled.
+
+    Boards unbound at delete time and the bare-chat auto cloud desk pointer stay
+    cleared — see :meth:`FolderRepository.restore`.
+    """
+    folder = await repo.get_deleted_by_id(folder_id, user_id=user.user_id)
+    if not folder:
+        raise NotFoundError("项目不存在或不在最近删除中")
+    if folder.deleted_at <= retention_cutoff():
+        raise ConflictError(
+            f"该项目已超过 {settings.workspace_retention_days} 天保留期，无法恢复"
+        )
+
+    try:
+        restored = await restore_folder_tree(
+            session,
+            user_id=user.user_id,
+            folder_id=folder_id,
+            not_before=retention_cutoff(),
+        )
+    except WorkspaceBusyError as e:
+        raise ConflictError("工作区正忙（有回合在跑），请稍后再恢复") from e
+    if restored is None:
+        raise ConflictError("该项目已被清理，无法恢复")
+    logger.info(
+        "folders.restored",
+        folder_id=folder_id,
+        user_id=user.user_id,
+    )
+    return FolderSummary.from_folder(restored)
 
 
 @router.get("/{folder_id}", response_model=FolderSummary)
@@ -120,12 +227,37 @@ async def update_folder(
     body: UpdateFolderRequest,
     user: AuthUser,
     repo: FolderRepository = Depends(get_folder_repo),
+    session: AsyncSession = Depends(get_db),
 ):
+    """Rename and/or re-parent a folder — DB rows and the directory move together.
+
+    Refuses with 409 while a turn holds the workspace lock: moving the directory
+    out from under a running turn is not something to do silently, and neither is
+    queueing the user's rename behind it (不得静默改名).
+    """
     fields = body.model_fields_set
-    kwargs: dict = {}
-    if "name" in fields:
-        kwargs["name"] = body.name
-    folder = await repo.update(folder_id, user_id=user.user_id, **kwargs)
+    folder = None
+    try:
+        if "name" in fields and body.name is not None:
+            folder = await rename_folder(
+                session, user_id=user.user_id, folder_id=folder_id, new_name=body.name
+            )
+            if folder is None:
+                raise NotFoundError("文件夹不存在")
+        if "parent_id" in fields:
+            folder = await move_folder(
+                session,
+                user_id=user.user_id,
+                folder_id=folder_id,
+                new_parent_id=body.parent_id,
+            )
+    except FolderTreeError as e:
+        raise ValidationError(str(e)) from e
+    except WorkspaceBusyError as e:
+        raise ConflictError("工作区正忙（有回合在跑），请稍后再改名或移动") from e
+
+    if folder is None:
+        folder = await repo.get_by_id(folder_id, user_id=user.user_id)
     if not folder:
         raise NotFoundError("文件夹不存在")
     return FolderSummary.from_folder(folder)
@@ -134,10 +266,24 @@ async def update_folder(
 @router.delete("/{folder_id}", response_model=StatusResponse)
 async def delete_folder(
     folder_id: str,
-    user: AuthUser,
-    repo: FolderRepository = Depends(get_folder_repo),
+    user: FoldersApiUser,
+    session: AsyncSession = Depends(get_db),
 ):
-    deleted = await repo.soft_delete(folder_id, user_id=user.user_id)
+    """软删项目（对话就地归档；工作区走保留期自动清理）。
+
+    Nested folders go with it, and the directory is parked in the tombstone area so
+    the name is free again immediately (双模式工作区 §5.4).
+
+    Reachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``
+    lands on the same path as the sidebar. The irreversible twin below stays
+    access-session only.
+    """
+    try:
+        deleted = await soft_delete_folder_tree(
+            session, user_id=user.user_id, folder_id=folder_id
+        )
+    except WorkspaceBusyError as e:
+        raise ConflictError("工作区正忙（有回合在跑），请稍后再删除") from e
     if not deleted:
         raise NotFoundError("文件夹不存在")
     return StatusResponse()
@@ -148,7 +294,7 @@ async def delete_folder_permanent(
     folder_id: str,
     user: AuthUser,
 ):
-    """彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.
+    """彻底删除文件夹：清盘成员对话 + 云端共享工作区/快照，再移除文件夹行.
 
     Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
     Local-mode OS directories are never touched — only DB + server-side data.

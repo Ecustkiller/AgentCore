@@ -29,6 +29,8 @@ from agentcore.api.dependencies import (
     get_messaging_service,
     get_shared_space_service,
     get_user_llm_provider_repo,
+    session_audience,
+    session_mfa_verified,
 )
 from agentcore.api.schemas import (
     ChangePasswordRequest,
@@ -473,17 +475,24 @@ async def update_me(
 async def change_password(
     body: ChangePasswordRequest,
     user: AuthUser,
+    request: Request,
     response: Response,
     service: AuthService = Depends(get_auth_service),
     db: AsyncSession = Depends(get_db),
 ):
     """Change the signed-in user's password (修改密码). All other devices are logged out
     (their refresh families are revoked); this session is handed fresh cookies so the
-    active device stays signed in."""
+    active device stays signed in.
+
+    The replacement pair inherits this session's audience and MFA proof: the same
+    endpoint serves the product clients and the admin console, so hardcoding either
+    audience would strand the other side."""
     tokens = await service.change_password(
         user_id=user.user_id,
         current_password=body.current_password,
         new_password=body.new_password,
+        audience=session_audience(request),
+        mfa_verified=session_mfa_verified(request),
     )
     _set_auth_cookies(response, tokens, user_id=user.user_id)
     if user.role == "admin":

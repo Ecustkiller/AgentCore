@@ -404,7 +404,7 @@ export const collaborationChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "不用每次重新交代背景——偏好与项目习惯会跨对话延续。",
+          text: "不用每次重新交代背景——偏好与工作习惯会跨对话延续。",
         },
         {
           type: "paragraph",
@@ -420,7 +420,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "越用越懂",
-              desc: "常用口味与项目习惯会沉淀下来；换个对话也不用重新介绍自己和项目。",
+              desc: "常用口味与工作习惯会沉淀下来；换个对话也不用重新介绍自己和手头的事。",
             },
           ],
         },
@@ -463,6 +463,213 @@ export const collaborationChapter: ManualChapterContent = {
               },
             },
             "。",
+          ],
+        },
+      ],
+    },
+    {
+      id: MANUAL_SECTION_IDS.collaboration.workflow,
+      title: "存为工作流",
+      icon: "Workflow",
+      blocks: [
+        {
+          type: "lead",
+          text: "某一轮协作跑得满意，可以把「谁做什么、先后怎么排」存下来——下次同类的活直接照这张图跑，不用再从头交代一遍。",
+        },
+        {
+          type: "paragraph",
+          text: "主路径：从满意的那一轮存起",
+          emphasis: true,
+        },
+        {
+          type: "steps",
+          items: [
+            {
+              title: "先正常跑一轮",
+              desc: "像平时那样说目标，让团队干完。多队员的回合结束后，回合状态条上会出现「存为工作流」；一个人就答完的回合没有分工可存，不出这个入口。",
+            },
+            {
+              title: "存下来",
+              desc: "起个名字保存，系统按这轮的分工与先后顺序生成一张工作流。",
+            },
+            {
+              title: "之后微调、跑一次、或交给定时",
+              desc: [
+                "到 ",
+                {
+                  text: "工具箱 · 工作流",
+                  link: { kind: "go", to: APP_PATHS.toolbox.workflows.root },
+                },
+                " 在画布上改；点「跑一次」选个工作区就能直起；也可以让自动化里的任务绑着它按时跑。",
+              ],
+            },
+          ],
+        },
+        {
+          type: "callout",
+          variant: "warning",
+          text: "快照只带走「谁做什么、先后依赖、交付要求」。这一轮的模型选择、辩论站位等运行细节不进快照，复跑效果可能与原轮不同——它是可复用的拆法，不是录像回放。",
+        },
+        {
+          type: "paragraph",
+          text: "画布是事后微调的地方，不用从零画",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "队员步骤",
+              desc: "一个队员干一件事：写清角色、任务说明和要交什么。",
+            },
+            {
+              title: "等人关卡",
+              desc: "跑到这儿停下来等你看一眼，你放行后下游才继续。",
+            },
+            {
+              title: "连线定先后",
+              desc: "没有连线的步骤同一批并行；有连线的等上游交活再解锁。",
+            },
+            {
+              title: "开跑按图执行",
+              desc: "跑的时候结构锁定，不临场加人改序；要改结构就回画布改一版。权限仍按你选的自主度，不因为存过图就自动放宽。",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          text: "也可以从官方模板起步",
+          emphasis: true,
+        },
+        {
+          type: "paragraph",
+          text: "工作流页顶部列着官方模板（多角摸底、调研报告成文、方案对比选型等），先看目标再挑。点「使用」是复制一份成你自己的工作流，再改名字和步骤；原模板只读，改坏了随时重新复制一份。",
+        },
+        {
+          type: "callout",
+          variant: "info",
+          text: [
+            "工作流管「活儿怎么拆」，",
+            {
+              text: "自动化",
+              link: {
+                kind: "jump",
+                to: MANUAL_SECTION_IDS.collaboration.automation,
+              },
+            },
+            " 管「什么时候跑」。日常聊天不需要它——没绑工作流时，CEO 照常即兴组队。",
+          ],
+        },
+      ],
+    },
+    {
+      id: MANUAL_SECTION_IDS.collaboration.automation,
+      title: "自动化",
+      icon: "CalendarClock",
+      blocks: [
+        {
+          type: "lead",
+          text: "常做的活配上定时或 Webhook，到点由 CEO 自动开一轮协作；你回来只在收件箱看摘要，处理待你拍板的那几条。",
+        },
+        {
+          type: "paragraph",
+          text: "一个任务要配什么",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "触发方式",
+              desc: "定时（每天 / 每周 / 自定义 cron）或 Webhook（外部系统 POST 一下就开跑，事件正文会带进本轮上下文）。一个任务只选一种，密钥只在创建或轮换时显示一次。",
+            },
+            {
+              title: "目标",
+              desc: "到点要完成什么，写法与在对话里下任务一样——目标、约束、期望产出。",
+            },
+            {
+              title: "工作区",
+              desc: "产物落在哪个云工作区。任务只能绑云工作区：你关机的时候，本机文件夹跑不了。",
+            },
+            {
+              title: "自主度",
+              desc: [
+                "和对话里同一套",
+                {
+                  text: "配方",
+                  link: {
+                    kind: "jump",
+                    to: MANUAL_SECTION_IDS.collaboration.autonomy,
+                  },
+                },
+                "。无人值守时若撞上要你拍板的检查点，这一轮会挂起等你，不会替你做决定。",
+              ],
+            },
+            {
+              title: "绑一张工作流（可选）",
+              desc: "绑了就按图跑，目标文案只当本轮补充；不绑就按目标文案让 CEO 即兴组队。",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          text: "结果去哪看",
+          emphasis: true,
+        },
+        {
+          type: "bullets",
+          items: [
+            {
+              title: "收件箱",
+              desc: "每次运行一条：成功摘要、失败原因、待你拍板的挂起项；tab 上的红点是还没处理的条数。",
+            },
+            {
+              title: "点进对话",
+              desc: "每次运行都是一轮真实对话——点「去拍板 / 进对话」照样看协作图、回检查点，和平时一样。",
+            },
+            {
+              title: "收尾",
+              desc: "看完标为已读；失败的那条可以重新触发一次。",
+            },
+          ],
+        },
+        {
+          type: "paragraph",
+          text: "系统任务",
+          emphasis: true,
+        },
+        {
+          type: "paragraph",
+          text: "自动化页顶部是平台预制的系统任务（如每日对话复盘）：目标由系统托管、不可改，你只配触发时间、复盘范围与报告落点。开启前它不会跑，之后也能随时暂停。",
+        },
+        {
+          type: "callout",
+          variant: "tip",
+          text: "想确认配得对不对，不用等到点——在任务上点「立即触发」，当场跑一轮看看。",
+        },
+        {
+          type: "callout",
+          variant: "info",
+          text: [
+            "入口：",
+            {
+              text: "工具箱 · 自动化",
+              link: { kind: "go", to: APP_PATHS.toolbox.automations.root },
+            },
+            "；结果在 ",
+            {
+              text: "收件箱",
+              link: { kind: "go", to: APP_PATHS.toolbox.automations.inbox },
+            },
+            "。想让它每次都按同一套拆法跑，先 ",
+            {
+              text: "存为工作流",
+              link: {
+                kind: "jump",
+                to: MANUAL_SECTION_IDS.collaboration.workflow,
+              },
+            },
+            " 再绑上。",
           ],
         },
       ],

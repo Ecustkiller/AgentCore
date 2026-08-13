@@ -343,6 +343,42 @@ registerConversationUiClearer((conversationId) => {
 });
 
 /**
+ * Send-failure rollback: hand the draft back after the optimistic bubble was
+ * already shown and the composer cleared (attachment upload failed at the last
+ * step). Merges instead of clobbering — the user may have started typing the
+ * next message during the wait — and targets the CURRENT draft key, which is the
+ * new conversation's when a draft had just been promoted.
+ */
+export function restoreComposerDraft(
+  conversationId: string | null,
+  draft: {
+    value: string;
+    attachments: PendingAttachment[];
+    agentMentions: PendingAgentMention[];
+  },
+): void {
+  const key = draftKeyFor(conversationId);
+  const store = useComposerDraftStore.getState();
+  if (draft.value) {
+    store.setValue(key, (prev) =>
+      prev.trim() ? `${draft.value}\n${prev}` : draft.value,
+    );
+  }
+  if (draft.attachments.length > 0) {
+    store.setAttachments(key, (prev) => [
+      ...draft.attachments,
+      ...prev.filter((p) => !draft.attachments.some((a) => a.id === p.id)),
+    ]);
+  }
+  if (draft.agentMentions.length > 0) {
+    store.setAgentMentions(key, (prev) => [
+      ...draft.agentMentions,
+      ...prev.filter((p) => !draft.agentMentions.some((a) => a.id === p.id)),
+    ]);
+  }
+}
+
+/**
  * Every ``stagingId`` still referenced by a draft — the survivor set for the
  * main-process ``attach-staging`` sweep. Read after {@link loadDrafts}, so it
  * already reflects what survived the {@link PERSIST_LIMIT} eviction.

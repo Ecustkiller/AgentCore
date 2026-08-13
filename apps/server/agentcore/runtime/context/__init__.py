@@ -10,11 +10,11 @@ is intentionally NOT here: unification is injection-side only (文档「守恒�
 from agentcore.runtime.context.assembler import ContextAssembler, assembly_hash
 from agentcore.runtime.context.consultable import Consultable, ConsultDirectoryEntry
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
-from agentcore.runtime.context.project_catalog import (
-    ProjectCatalogEntry,
-    build_project_catalog_entries,
-    load_project_catalog,
-    render_project_catalog,
+from agentcore.runtime.context.folder_catalog import (
+    FolderCatalogEntry,
+    build_folder_catalog_entries,
+    load_folder_catalog,
+    render_folder_catalog,
 )
 from agentcore.runtime.context.workspace_context import (
     ChannelProfile,
@@ -33,19 +33,19 @@ __all__ = [
     "Consultable",
     "ConsultDirectoryEntry",
     "ContextAssembler",
-    "ProjectCatalogEntry",
+    "FolderCatalogEntry",
     "PromptContributor",
     "SectionOrder",
     "WorkspaceGitFact",
     "assembly_hash",
-    "build_project_catalog_entries",
+    "build_folder_catalog_entries",
     "build_workspace_context",
     "build_workspace_overview",
     "detect_workspace_git",
     "detect_workspace_git_sync",
     "desktop_client_can_bind",
     "format_workspace_git_line",
-    "load_project_catalog",
-    "render_project_catalog",
+    "load_folder_catalog",
+    "render_folder_catalog",
     "resolve_channel_profile",
 ]

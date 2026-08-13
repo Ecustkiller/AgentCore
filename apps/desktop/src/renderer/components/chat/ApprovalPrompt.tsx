@@ -262,6 +262,15 @@ function primaryArg(
     if (manager && pkg) return `${manager} ${pkg}${cask}`;
     return pkg || manager || null;
   }
+  if (toolName === "delete_folder") {
+    // ``folder_name`` is resolved server-side from the roster (never model-supplied)
+    // — a bare folder_id UUID is unauditable.
+    const name =
+      typeof args.folder_name === "string" ? args.folder_name.trim() : "";
+    const id = typeof args.folder_id === "string" ? args.folder_id.trim() : "";
+    if (name) return `${name}${id ? ` · ${id}` : ""}`;
+    return id || null;
+  }
   if (toolName === "file_batch") {
     const ops = args.operations;
     if (Array.isArray(ops)) return `本次共 ${ops.length} 项`;

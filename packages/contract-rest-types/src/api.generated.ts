@@ -254,7 +254,11 @@ export interface paths {
         put?: never;
         /**
          * List Account Memory
-         * @description List memory note paths under one scope (global when ``scope`` is null).
+         * @description List memory notes under one scope (global when ``scope`` is null).
+         *
+         *     Carries each note's retrieval ``description`` and its ``disputed`` mark so a sidecar
+         *     warm builds the same directory — and skips the same user-disputed entries — as an
+         *     in-process turn.
          */
         post: operations["list_account_memory_v1_account_memory_list_post"];
         delete?: never;
@@ -998,6 +1002,10 @@ export interface paths {
          * @description Change the signed-in user's password (修改密码). All other devices are logged out
          *     (their refresh families are revoked); this session is handed fresh cookies so the
          *     active device stays signed in.
+         *
+         *     The replacement pair inherits this session's audience and MFA proof: the same
+         *     endpoint serves the product clients and the admin console, so hardcoding either
+         *     audience would strand the other side.
          */
         post: operations["change_password_v1_auth_change_password_post"];
         delete?: never;
@@ -1795,6 +1803,9 @@ export interface paths {
          *     The Moderator never hard-stops for the user — this fire-and-forget channel is the
          *     boss直控 path (同 ``run-redirect`` 模式). Applied at the next round boundary via
          *     existing ``pending_interjections`` / ``focus_override`` / ``CONCLUDE`` mechanisms.
+         *
+         *     ``ok=False`` = 该 execution 的掌舵窗口已关（辩论没在跑，或已过末轮边界、正在结辩 /
+         *     出简报）：**没有**下一轮边界来捞它，故如实拒收，前端据此改口不说「已发送·下一轮生效」。
          */
         post: operations["submit_debate_steer_v1_conversations__conversation_id__debate_steer_post"];
         delete?: never;
@@ -2288,6 +2299,7 @@ export interface paths {
          *     槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume
          *     pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状
          *     404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
+         *     同 ``message_id`` 重复提交走幂等 join：跳过第二次预写，两条 SSE 共享同一次续跑。
          *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -2314,6 +2326,32 @@ export interface paths {
         get: operations["get_run_llm_window_v1_conversations__conversation_id__messages__message_id__runs__run_id__llm_window_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/save-as-workflow": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Save Turn As Workflow
+         * @description 固化这一回合的团队拆法为账户级工作流（owner-scoped，同源幂等）。
+         *
+         *     幂等只认来源（``user_workflows.source`` 列上的 conversation_id + message_id），不认
+         *     ``name``：同一轮再点一次保存返回已有那条，想要「同一轮多个变体」走保存后改名 / 另存，
+         *     而不是靠这个端点的隐藏分支。来源是服务端权威元数据、不在客户端能覆盖的 definition 里
+         *     （:mod:`agentcore.workflows.source`），所以这里能直接走索引查。422 = 这轮压根没有多队
+         *     员协作（无计划快照或有效节点 < 2），或整轮只有辩论（辩论不写计划快照，折不出画布）。
+         */
+        post: operations["save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2383,7 +2421,12 @@ export interface paths {
          *
          *     Owner-gated like send. Removes the entry by ``queue_id``; already started / unknown
          *     → 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.
-         *     On success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink (multi-client).
+         *
+         *     On success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink AND signals
+         *     it to every端 following the conversation (云对话多端同权 B2 · 验收 5). The signal lane
+         *     is what makes the withdraw visible when there is no live run at all — the queue
+         *     outlives its host turn (drain not yet armed / deferred owns the next slot), and until
+         *     now cancelling in that window told the other端 nothing.
          */
         post: operations["cancel_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__cancel_post"];
         delete?: never;
@@ -2629,13 +2672,23 @@ export interface paths {
          *
          *     With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
          *     synthetic deltas (header value observational — clients clear-then-fold), then live
-         *     tail. Without the header (same-process fast path): ``EventSink.take_over`` full
-         *     ``_history`` replay.
+         *     tail. Without the header (same-process fast path): the sink's own in-memory history.
          *
-         *     Returns ``204 No Content`` when no run is live for the conversation (already
-         *     finished / never started / suspended at a checkpoint) — the client then falls back
-         *     to the persisted transcript (reload) / durable resume. A pure observer: dropping
-         *     this stream detaches again (never cancels); an explicit 停止 still goes through
+         *     ``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an
+         *     idle conversation holds the connection (heartbeats) instead of 204ing, and每个新回合
+         *     is replayed + tailed on the same stream. That is what lets a second device parked on
+         *     an idle conversation see the turn another device just started — with回合级 attach it
+         *     took a 204 and then had no way to learn anything ever happened.
+         *
+         *     Without it (default), returns ``204 No Content`` when no run is live for the
+         *     conversation (already finished / never started / suspended at a checkpoint) — the
+         *     client then falls back to the persisted transcript (reload) / durable resume, and
+         *     the stream ends when that one turn does. Kept as the default because a客户端 that
+         *     also opens the POST turn stream would otherwise fold the next turn twice; opting in
+         *     is the客户端's statement that this is its ONE connection for the conversation.
+         *
+         *     Either way a pure observer: dropping this stream only unsubscribes it (never
+         *     cancels, and never touches the other端); an explicit 停止 still goes through
          *     ``POST .../stop``. Owner-gated.
          */
         get: operations["attach_stream_v1_conversations__conversation_id__stream_get"];
@@ -3308,9 +3361,12 @@ export interface paths {
         head?: never;
         /**
          * Patch Document
-         * @description Rename, reparent, and/or set apply via frontmatter.
+         * @description Rename, reparent, set apply via frontmatter, and/or mark the entry wrong.
          *
-         *     Set ``reparent`` to apply ``parent_id``.
+         *     Set ``reparent`` to apply ``parent_id``. ``disputed`` is the 纠错通道: the user says
+         *     「这条不对」in the memory UI and the entry stops being injected / consulted while
+         *     staying on disk (no silent delete, and the mark survives later AI rewrites because it
+         *     lives in a column, not in the body). Nothing infers this from conversation text.
          */
         patch: operations["patch_document_v1_documents__document_id__patch"];
         trace?: never;
@@ -3401,7 +3457,9 @@ export interface paths {
          *
          *     Local mode is unique per ``(user_id, local_root_id, local_subpath)`` — same
          *     path re-open returns the existing row (VS Code / Cursor workspace reuse).
-         *     Cloud projects are unchanged (duplicate names allowed).
+         *     Cloud projects become a real directory under ``parent_id``; a name already
+         *     taken among live siblings gets a numeric suffix rather than a 409 — the name
+         *     is now a path segment, and two of them cannot share one directory.
          */
         post: operations["create_folder_v1_folders_post"];
         delete?: never;
@@ -3430,6 +3488,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/folders/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Folders
+         * @description 列出可恢复的已删项目（最近删除）。
+         *
+         *     Access-session only — the folders narrow ticket is for the sidecar CEO's roster
+         *     chores, and recovery is the user's own remedy surface.
+         */
+        get: operations["list_deleted_folders_v1_folders_trash_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/folders/trash/{folder_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Deleted Folder
+         * @description 恢复一个已删项目：项目行复活，删除时连带归档的对话解档。
+         *
+         *     Past retention the answer is 409, never a silent success — the workspace files
+         *     may already be gone. Losing the race with the 6-hour purge sweep between the
+         *     lookup and the conditional UPDATE surfaces the same way (「该项目已被清理」);
+         *     that window is reported honestly rather than reconciled.
+         *
+         *     Boards unbound at delete time and the bare-chat auto cloud desk pointer stay
+         *     cleared — see :meth:`FolderRepository.restore`.
+         */
+        post: operations["restore_deleted_folder_v1_folders_trash__folder_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/folders/{folder_id}": {
         parameters: {
             query?: never;
@@ -3444,11 +3553,28 @@ export interface paths {
         get: operations["get_folder_v1_folders__folder_id__get"];
         put?: never;
         post?: never;
-        /** Delete Folder */
+        /**
+         * Delete Folder
+         * @description 软删项目（对话就地归档；工作区走保留期自动清理）。
+         *
+         *     Nested folders go with it, and the directory is parked in the tombstone area so
+         *     the name is free again immediately (双模式工作区 §5.4).
+         *
+         *     Reachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``
+         *     lands on the same path as the sidebar. The irreversible twin below stays
+         *     access-session only.
+         */
         delete: operations["delete_folder_v1_folders__folder_id__delete"];
         options?: never;
         head?: never;
-        /** Update Folder */
+        /**
+         * Update Folder
+         * @description Rename and/or re-parent a folder — DB rows and the directory move together.
+         *
+         *     Refuses with 409 while a turn holds the workspace lock: moving the directory
+         *     out from under a running turn is not something to do silently, and neither is
+         *     queueing the user's rename behind it (不得静默改名).
+         */
         patch: operations["update_folder_v1_folders__folder_id__patch"];
         trace?: never;
     };
@@ -3487,7 +3613,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Folder Permanent
-         * @description 彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.
+         * @description 彻底删除文件夹：清盘成员对话 + 云端共享工作区/快照，再移除文件夹行.
          *
          *     Distinct from ``DELETE /{folder_id}`` (soft-delete + archive members).
          *     Local-mode OS directories are never touched — only DB + server-side data.
@@ -4236,6 +4362,11 @@ export interface paths {
          *     Heartbeat comments keep the stream warm; the subscription is released when
          *     the client disconnects.
          *
+         *     Optional ``device_id`` makes reconnects replace their own previous stream
+         *     rather than pile up; optional ``platform`` (query param, falling back to
+         *     ``X-Client-Platform``) tells the AI attention signal which surfaces are
+         *     reachable. Neither is required — an undeclared client streams exactly as before.
+         *
          *     Auth resolves the user via a request-scoped DB session; that session is
          *     returned before the long-lived stream opens so each open desktop client does
          *     not pin a primary-pool connection until the app closes.
@@ -4842,6 +4973,11 @@ export interface paths {
          *     Per-role split lives on the turn payroll
          *     (``GET /messages/{id}/cost``), not this monthly account view.
          *
+         *     This is the account total, so it also carries spend that belongs to no
+         *     conversation at all (AI 改写 / 文档 description — ``role=assist`` ledger rows).
+         *     ``requests`` counts assistant turns only, so those rows raise 花销 without
+         *     raising 请求数.
+         *
          *     ``quota`` mirrors what ``enforce_quota`` will actually apply to this user:
          *     per-user override columns first, else global ``quota_*`` — so the meters
          *     never show a cap the gate wouldn't enforce.
@@ -5371,6 +5507,34 @@ export interface paths {
         put?: never;
         /** Run Workflow */
         post: operations["run_workflow_v1_workflows__workflow_id__run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workflows/{workflow_id}/suggest-slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suggest Workflow Slots
+         * @description 抽出「上一次的具体输入」并写回 definition（前端第一次点「跑一次」时调）。
+         *
+         *     从一轮协作固化出来的工作流，任务描述里写死的是那一次的主题——用户第二次要用它才会撞上
+         *     这件事，所以这一次背景模型调用挂在这里而不是保存路径上。抽到了就连占位符带 ``slots``
+         *     一起落库，以后再跑不用重抽。
+         *
+         *     三种「不抽」都返回**与调用前逐字一致**的 definition（不是报错）：已经有槽位（幂等）、
+         *     不是固化来源（官方模板自带槽位、手画的归用户管）、抽槽本身失败或没认出可验证的片段。
+         *     前端拿到没有 ``slots`` 的 definition 就照常直接跑。
+         */
+        post: operations["suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5928,6 +6092,16 @@ export interface components {
         };
         /** AccountMemoryFileMeta */
         AccountMemoryFileMeta: {
+            /**
+             * Description
+             * @default
+             */
+            description: string;
+            /**
+             * Disputed
+             * @default false
+             */
+            disputed: boolean;
             /** Path */
             path: string;
             /** Version */
@@ -6007,6 +6181,11 @@ export interface components {
         AccountRuleDoc: {
             /** Content */
             content: string;
+            /**
+             * Description
+             * @default
+             */
+            description: string;
             /** Name */
             name: string;
         };
@@ -6021,8 +6200,19 @@ export interface components {
         /**
          * AccountRulesListResponse
          * @description Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.
+         *
+         *     ``ancestor_*`` carry the enclosing folders' layers, outermost-first, and
+         *     ``folder_chain`` is that same chain by id with the current folder last: the engine may
+         *     be a desktop sidecar with no folders table, so the cloud is the only place that can
+         *     resolve「谁在谁里面」(双模式工作区 §5.4 沿树继承).
          */
         AccountRulesListResponse: {
+            /** Ancestor On Demand Rules */
+            ancestor_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
+            /** Ancestor Rules */
+            ancestor_rules?: components["schemas"]["AccountRuleDoc"][];
+            /** Folder Chain */
+            folder_chain?: string[];
             /** Global On Demand Rules */
             global_on_demand_rules?: components["schemas"]["AccountRuleDoc"][];
             /** Global Rules */
@@ -6844,6 +7034,19 @@ export interface components {
             role?: string | null;
             /** Run Id */
             run_id: string;
+        };
+        /**
+         * AutoFolderNotice
+         * @description The cloud folder a bare chat auto-created for this turn's file writes.
+         *
+         *     ``name`` is the name at creation time; the client shows the folder's current name
+         *     (looked up by ``folder_id``) since the notice itself offers a rename.
+         */
+        AutoFolderNotice: {
+            /** Folder Id */
+            folder_id: string;
+            /** Name */
+            name: string;
         };
         /**
          * AutoTitleRequest
@@ -7930,7 +8133,11 @@ export interface components {
         };
         /**
          * CostBreakdown
-         * @description A run's / turn's / window's cost in integer nano-CNY (canonical).
+         * @description A run's / turn's / window's cost in integer nano-money (canonical).
+         *
+         *     Billed (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two
+         *     separate breakdowns, each carrying its own ``currency`` — that is how a mixed
+         *     turn stays representable without FX.
          */
         CostBreakdown: {
             /** Cached */
@@ -8018,6 +8225,8 @@ export interface components {
             mode: "local" | "cloud";
             /** Name */
             name: string;
+            /** Parent Id */
+            parent_id?: string | null;
         };
         /** CreateFriendRequestBody */
         CreateFriendRequestBody: {
@@ -8233,6 +8442,57 @@ export interface components {
         DeleteAccountRequest: {
             /** Password */
             password: string;
+        };
+        /**
+         * DeletedFolderListResponse
+         * @description Recoverable projects, most recently deleted first.
+         *
+         *     Only projects the user deleted appear — machine reclaims (a race loser's auto
+         *     cloud desk) and projects soft-deleted before the recycle bin existed are omitted,
+         *     as are projects already past retention (they are no longer restorable).
+         *     ``retention_days`` mirrors ``workspace_retention_days``.
+         */
+        DeletedFolderListResponse: {
+            /** Data */
+            data: components["schemas"]["DeletedFolderSummary"][];
+            /** Retention Days */
+            retention_days: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * DeletedFolderSummary
+         * @description One recoverable folder in「最近删除」.
+         */
+        DeletedFolderSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+            /** Id */
+            id: string;
+            /** Local Root Id */
+            local_root_id?: string | null;
+            /** Local Subpath */
+            local_subpath?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "local" | "cloud";
+            /** Name */
+            name: string;
+            /**
+             * Purge At
+             * Format: date-time
+             */
+            purge_at: string;
         };
         /**
          * DemoTapeCatalogResponse
@@ -8551,6 +8811,8 @@ export interface components {
             created_at: string;
             /** Description */
             description: string;
+            /** Disputed At */
+            disputed_at?: string | null;
             /** Folder Id */
             folder_id: string | null;
             /** Frontmatter Error */
@@ -8593,6 +8855,8 @@ export interface components {
             created_at: string;
             /** Description */
             description: string;
+            /** Disputed At */
+            disputed_at?: string | null;
             /** Folder Id */
             folder_id: string | null;
             /** Frontmatter Error */
@@ -8615,11 +8879,13 @@ export interface components {
         };
         /**
          * DocumentPatchRequest
-         * @description Rename, reparent, and/or change apply (via frontmatter edit).
+         * @description Rename, reparent, change apply (via frontmatter edit), and/or mark 这条不对.
          */
         DocumentPatchRequest: {
             /** Apply Mode */
             apply_mode?: ("always" | "on_demand") | null;
+            /** Disputed */
+            disputed?: boolean | null;
             /** Name */
             name?: string | null;
             /** Parent Id */
@@ -8895,6 +9161,10 @@ export interface components {
             mode: "local" | "cloud";
             /** Name */
             name: string;
+            /** Parent Rel Path */
+            parent_rel_path?: string | null;
+            /** Rel Path */
+            rel_path?: string | null;
             /**
              * Updated At
              * Format: date-time
@@ -9663,8 +9933,14 @@ export interface components {
          *     - ``semantic``: diff card; ``items`` lists add/update/remove bullets.
          *
          *     Returned only with the LATEST messages window, and pushed live on the per-user firehose.
+         *
+         *     ``anchor_at`` is the last consolidated message's ``created_at`` — the thread position
+         *     the card describes, which ``created_at`` (when the debounced pass happened to run) does
+         *     not give. Null on older rows and on writes with no message window.
          */
         MemoryUpdateView: {
+            /** Anchor At */
+            anchor_at?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -9791,6 +10067,8 @@ export interface components {
             paused?: boolean | null;
             /** Reasoning Content */
             reasoning_content?: string | null;
+            /** Recovered */
+            recovered?: boolean | null;
             /** Role */
             role: string;
             /** Rounds */
@@ -10328,6 +10606,32 @@ export interface components {
             permission_axes: components["schemas"]["PermissionAxesModel"];
         };
         /**
+         * PlaybookSlotChoice
+         * @description One allowed value of an enumerated slot (render a picker, not a textbox).
+         */
+        PlaybookSlotChoice: {
+            /** Label */
+            label: string;
+            /** Value */
+            value: string;
+        };
+        /**
+         * PlaybookTemplateSlotModel
+         * @description Machine-readable primary slot — clients build the copy form from this.
+         */
+        PlaybookTemplateSlotModel: {
+            /** Choices */
+            choices?: components["schemas"]["PlaybookSlotChoice"][];
+            /** Hint */
+            hint?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Required */
+            required: boolean;
+        };
+        /**
          * PlaybookTemplateSummary
          * @description Official playbook listed as a read-only workflow template.
          */
@@ -10336,6 +10640,8 @@ export interface components {
             id: string;
             /** Primary Slots */
             primary_slots: string;
+            /** Slots */
+            slots?: components["schemas"]["PlaybookTemplateSlotModel"][];
             /** Summary */
             summary: string;
             /** Title */
@@ -10960,6 +11266,10 @@ export interface components {
             folder_id: string;
             /** Note */
             note?: string | null;
+            /** Slots */
+            slots?: {
+                [key: string]: string;
+            };
         };
         /** RunWorkflowResponse */
         RunWorkflowResponse: {
@@ -10990,6 +11300,7 @@ export interface components {
          *     none of these.
          */
         RunsPayload: {
+            auto_folder?: components["schemas"]["AutoFolderNotice"] | null;
             /** Captain Context */
             captain_context?: {
                 [key: string]: unknown;
@@ -11013,6 +11324,14 @@ export interface components {
             } | null;
             /** Turn Warning */
             turn_warning?: string | null;
+        };
+        /**
+         * SaveTurnAsWorkflowRequest
+         * @description 固化一轮已跑完的协作；省略 ``name`` 时服务端按队员角色生成。
+         */
+        SaveTurnAsWorkflowRequest: {
+            /** Name */
+            name?: string | null;
         };
         /**
          * SearchItem
@@ -11799,6 +12118,7 @@ export interface components {
         SubmitDebateSteerResponse: {
             /**
              * Ok
+             * @description False = 掌舵窗口已关（辩论没在跑，或已过末轮边界、正在结辩/出简报），没有下一轮边界来捞它 —— 客户端须如实回执，不得显示「已发送·下一轮生效」。
              * @default true
              */
             ok: boolean;
@@ -12327,11 +12647,18 @@ export interface components {
         };
         /**
          * UpdateFolderRequest
-         * @description Rename only — project workspace binding is immutable after create.
+         * @description Rename and/or re-parent — the local-mode binding stays immutable.
+         *
+         *     ``parent_id`` is a *request* field, not storage: the server turns it into a
+         *     ``rel_path`` prefix, which is the single source of truth for nesting
+         *     (双模式工作区 §5.4). Omit it to leave the folder where it is; send ``null`` to
+         *     move it to the top level.
          */
         UpdateFolderRequest: {
             /** Name */
             name?: string | null;
+            /** Parent Id */
+            parent_id?: string | null;
         };
         /**
          * UpdateFulfillRootsRequest
@@ -12681,7 +13008,13 @@ export interface components {
         };
         /**
          * WorkflowDefinitionModel
-         * @description Canvas JSON: nodes + edges (agent_step | human_gate).
+         * @description Canvas JSON: nodes + edges (agent_step | human_gate) + optional slots.
+         *
+         *     **校验用它，落库用** :meth:`payload` —— 不要用 ``model_dump()``。这几个字段声明的是
+         *     「服务端认识什么」，不是「客户端能存什么」：definition 归用户所有，未知字段必须原样
+         *     透传（``extra="allow"`` 在这里和 :class:`WorkflowSlotModel` 上都是为了这件事）。按已知
+         *     字段重建这份 JSON，是 ``deliverable`` / ``slots`` / ``source`` 先后被抹掉的同一个根因
+         *     —— 见 :mod:`agentcore.workflows.definition` 的所有权约定。
          */
         WorkflowDefinitionModel: {
             /** Edges */
@@ -12692,6 +13025,47 @@ export interface components {
             nodes?: {
                 [key: string]: unknown;
             }[];
+            /** Slots */
+            slots?: components["schemas"]["WorkflowSlotModel"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * WorkflowSlotModel
+         * @description One canvas slot: ``{{key}}`` in task text, ``default`` = 原轮的原值。
+         *
+         *     Optional — a definition without slots behaves exactly as before.
+         */
+        WorkflowSlotModel: {
+            /**
+             * Default
+             * @default
+             */
+            default: string;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * WorkflowSourceModel
+         * @description 这条工作流是从哪儿来的——服务端权威，客户端只读。
+         *
+         *     ``kind`` 今天只有 ``"turn"``（从一轮协作固化），带原对话 / 消息定位。手画的、官方模板
+         *     复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
+         *     :mod:`agentcore.workflows.source`。
+         */
+        WorkflowSourceModel: {
+            /** Conversation Id */
+            conversation_id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Message Id */
+            message_id?: string | null;
+        } & {
+            [key: string]: unknown;
         };
         /** WorkflowSummary */
         WorkflowSummary: {
@@ -12710,6 +13084,7 @@ export interface components {
             id: string;
             /** Name */
             name: string;
+            source?: components["schemas"]["WorkflowSourceModel"] | null;
             /**
              * Updated At
              * Format: date-time
@@ -17147,6 +17522,46 @@ export interface operations {
             };
         };
     };
+    save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SaveTurnAsWorkflowRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     set_permission_axes_v1_conversations__conversation_id__permission_axes_put: {
         parameters: {
             query?: never;
@@ -17663,7 +18078,10 @@ export interface operations {
     };
     attach_stream_v1_conversations__conversation_id__stream_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。 */
+                follow?: boolean;
+            };
             header?: {
                 "Last-Event-ID"?: string | null;
                 authorization?: string | null;
@@ -19554,6 +19972,74 @@ export interface operations {
             };
         };
     };
+    list_deleted_folders_v1_folders_trash_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedFolderListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_deleted_folder_v1_folders_trash__folder_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                folder_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FolderSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_folder_v1_folders__folder_id__get: {
         parameters: {
             query?: never;
@@ -21099,8 +21585,12 @@ export interface operations {
     };
     realtime_firehose_v1_realtime_get: {
         parameters: {
-            query?: never;
+            query?: {
+                device_id?: string;
+                platform?: string;
+            };
             header?: {
+                "X-Client-Platform"?: string | null;
                 authorization?: string | null;
             };
             path?: never;
@@ -23920,6 +24410,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunWorkflowResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                workflow_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowSummary"];
                 };
             };
             /** @description Validation Error */

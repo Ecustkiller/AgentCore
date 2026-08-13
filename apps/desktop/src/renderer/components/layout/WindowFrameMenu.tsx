@@ -70,7 +70,7 @@ export function WindowFrameMenu() {
         <Button
           variant="neutral"
           icon={<Scan size={13} className="shrink-0" />}
-          className="mr-2 h-7 gap-1.5 border border-sidebar-border px-2.5 text-sm text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground [-webkit-app-region:no-drag]"
+          className="mr-2 h-7 gap-1.5 bg-sidebar-accent/50 px-2.5 text-sm font-normal text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground [-webkit-app-region:no-drag]"
         >
           {activeLabel}
         </Button>

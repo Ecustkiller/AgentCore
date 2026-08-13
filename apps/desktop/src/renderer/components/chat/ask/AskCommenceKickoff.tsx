@@ -18,11 +18,11 @@ import {
   formatGrantReadonlyFolderAnswer,
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
 import {
-  formatRegisterLocalProjectAnswer,
-  pickAndRegisterLocalProject,
-} from "@/lib/registerLocalProject";
+  formatRegisterLocalFolderAnswer,
+  pickAndRegisterLocalFolder,
+} from "@/lib/registerLocalFolder";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { AskAssumption, AskOption, AskQuestion } from "@/types/events";
 import { ChevronRight, Loader2, OctagonX, Rocket } from "lucide-react";
@@ -69,7 +69,7 @@ export function AskCommenceKickoffBody({
     if (opt.action === "open_local_project") {
       setBindBusyLabel(opt.label);
       setBindError(null);
-      const result = await pickAndOpenLocalProject(navigate);
+      const result = await pickAndOpenLocalFolder(navigate);
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         setBindBusyLabel(null);
@@ -83,13 +83,13 @@ export function AskCommenceKickoffBody({
     setBindError(null);
 
     if (opt.action === "register_local_project") {
-      const result = await pickAndRegisterLocalProject();
+      const result = await pickAndRegisterLocalFolder();
       if (!result.ok) {
         if (result.reason === "error") setBindError(result.message);
         setBindBusyLabel(null);
         return;
       }
-      const value = formatRegisterLocalProjectAnswer(
+      const value = formatRegisterLocalFolderAnswer(
         opt.label,
         result.folder.name,
       );

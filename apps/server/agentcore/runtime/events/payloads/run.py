@@ -364,6 +364,15 @@ class DeliveryArtifact(WirePayload):
     ``detail`` for the file checklist. Draft is out of scope for block 1.
     ``workspace_id``: landing desk when the plan node set ``target_folder_id``
     (``folder:{id}``); omit → client falls back to the session birth desk.
+
+    ``kind`` / ``derived_from`` are the producing tool's OWN self-report
+    (``tools/file_products.py``), carried verbatim from the run-level ledger:
+    ``kind`` is the normalized product type (``md`` / ``docx`` / ``pdf`` / ``code``
+    / ``image`` / ``file`` …); ``derived_from`` names the source this product was
+    EXPORTED from (``md_to_docx``: docx ← 源 md), so a client can demote that source
+    to 中间稿 the same way ``fold_exported_sources`` does server-side. Absent when the
+    producer did not self-report — clients must NOT guess lineage from extensions or
+    tool names, and must keep every accepted path reachable (fold ≠ drop).
     """
 
     path: str
@@ -371,6 +380,26 @@ class DeliveryArtifact(WirePayload):
     reason: str | None = absent()
     detail: str | None = absent()
     workspace_id: str | None = absent()
+    kind: str | None = absent()
+    derived_from: str | None = absent()
+
+
+class DeliveryPromotion(WirePayload):
+    """One 成品归位 move on ``delivery_status.promoted``（AI 工作间 → 用户工作区）.
+
+    归位是**移动**不是标记（标记离开产品 UI 那刻即失效：ZIP 里没有、合回本机也没有），
+    so ``from`` no longer exists on disk and ``to`` is where the product lives now.
+    The same payload's ``delivered_files`` / ``artifacts[].path`` are rewritten to
+    ``to`` — this row is the only remaining link back to the old path (审计按旧路径
+    回查时的唯一线索).
+
+    位置态，与 ``status=accepted``（质量态）正交：只有 accepted 的产物可归位，但归位
+    本身不改验收结论。**空数组是合法状态**（字段缺省即空）——多幕协作的中间幕本就
+    零归位，不得据此报错或拦收口。
+    """
+
+    from_path: str = Field(alias="from", description="AI 工作间旧路径（已不存在）")
+    to: str = Field(description="用户工作区新路径（现在的位置）")
 
 
 class DeliveryStatusPayload(WirePayload):
@@ -382,7 +411,10 @@ class DeliveryStatusPayload(WirePayload):
     blocking 缺口; blocked = 有 blocking 缺口且无落盘产物;
     notes = 仍有 soft 提醒且非「仅 unverified_note」（如 path_hint；轻提醒，非「部分未满足」）。
     ``artifacts``: path-level acceptance (accepted+rejected); ``delivered_files``
-    remains accepted-only for older clients."""
+    remains accepted-only for older clients.
+    ``promoted``: 这张对账卡上已 ``promote_product`` 归位的成品（``{from, to}``）。CEO 在
+    收口前调用后本事件按同 ``execution_id`` 重发，路径已改写为 ``to``；跨回合再归位时
+    旧行保留（旧路径的回查线索）。无归位时字段缺省（= 空数组，合法状态）。"""
 
     execution_id: str
     state: DeliveryState
@@ -391,6 +423,7 @@ class DeliveryStatusPayload(WirePayload):
     gaps: list[DeliveryGap]
     actions: list[DeliveryAction]
     artifacts: list[DeliveryArtifact] = []
+    promoted: list[DeliveryPromotion] = []
 
 
 class UserInterjectionAttachment(WirePayload):
@@ -525,7 +558,7 @@ class RunFailedPayload(WirePayload):
 class RunCancelledPayload(WirePayload):
     run_id: str
     agent_id: str
-    reason: Literal["redirect", "stop", "user_stop"]
+    reason: Literal["redirect", "stop", "user_stop", "worker_timeout"]
     execution_id: str | None = absent()
 
 

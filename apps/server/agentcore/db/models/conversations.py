@@ -41,6 +41,15 @@ class Conversation(Base):
     #   without deleting it; surfaced only in the「已归档」view, reversible.
     pinned: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     archived: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    # Why this row is archived (最近删除 · 项目恢复). ``archived`` alone cannot tell a
+    # user's own「归档」apart from the collateral archive a project soft-delete does,
+    # so restoring the project would drag deliberately-archived chats back into the
+    # sidebar. Set ONLY on rows that were still un-archived at project delete time,
+    # and cleared when that project is restored. Rows soft-deleted before this column
+    # existed carry false — those projects restore with their chats left archived.
+    archived_by_folder_delete: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
     mode: Mapped[str] = mapped_column(String(20), default="chat", server_default=text("'chat'"))
     # Permission axes (会话级权限 · 安全权限与治理):
     # {file_write, command, team_kickoff, host}. Runtime gates read THIS column — not
@@ -148,10 +157,35 @@ class Conversation(Base):
 
 class Folder(Base):
     __tablename__ = "folders"
+    __table_args__ = (
+        # 同层禁重名（双模式工作区 §5.4）。``rel_path`` 是云文件夹物理落点的单一
+        # 真相源, 所以「同层唯一」就是「整条相对路径唯一」——父子关系由前缀表达,
+        # 不存在第二个 parent_id 需要一起约束。局部索引跳过本机文件夹 (rel_path
+        # NULL) 与软删行 (软删会把目录搬去墓碑区, 名字当场释放给新文件夹复用)。
+        # 大小写不敏感: Windows / macOS 盘上 ``报告`` 与 ``报告`` 是同一个目录,
+        # DB 放两行会让改名时的物理 mv 互相覆盖。
+        Index(
+            "uq_folders_user_rel_path_live",
+            "user_id",
+            text("lower(rel_path)"),
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL AND rel_path IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
+    # Cloud folder placement — POSIX path relative to the user's visible tree root
+    # (``workspaces/<user>/tree/``), **the** single source of truth for where the
+    # directory physically is. Nesting is expressed by prefix (``设计/图标`` sits
+    # inside ``设计``); there is deliberately no ``parent_id`` to drift from it.
+    # NULL = local-mode folder (its files live on the user's own disk; the
+    # ``local_root_id`` + ``local_subpath`` branch below is unchanged).
+    # Renames / moves rewrite this for the whole subtree in one transaction and
+    # ``mv`` the directory; ``id`` stays put so standing tasks / memory / boards /
+    # write-claim ledgers keep resolving.
+    rel_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     # Local-mode binding: desktop FS root id. NULL + NULL ``local_subpath`` = cloud
     # project (shared ``folder:<id>`` scope). Opaque desktop handle (not a
     # server-owned UUID). Immutable after create (no relocate this period).
@@ -165,6 +199,14 @@ class Folder(Base):
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Who asked for the soft-delete (最近删除 recycle bin). ``'user'`` = a deliberate
+    # delete from the sidebar / CEO ``delete_folder``, the only kind the recycle bin
+    # lists and restores. ``'auto_desk_reclaim'`` = a race loser's silently-minted
+    # bare-chat cloud desk being reclaimed — machine litter that carries a
+    # conversation-derived name and would otherwise read as a real project. NULL =
+    # soft-deleted before this column existed; deliberately NOT backfilled, so a
+    # brand-new recycle bin under-lists rather than surfacing old auto-desk junk.
+    delete_origin: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
 
 # --- Messages ---
@@ -316,6 +358,10 @@ class MemoryUpdateRow(Base):
     conversation on hard-delete (``ConversationRepository.hard_delete``). NOT tied to any
     message id (it post-dates the whole window), so message delete / regenerate never touch
     it — a re-run doesn't un-remember what an earlier pass already learned.
+
+    ``anchor_at`` is a display ordering hint that does NOT change any of that: a plain
+    timestamp, deliberately not a message id, so deleting the message it points near can
+    never dangle it or take the card down with it.
     """
 
     __tablename__ = "memory_updates"
@@ -337,6 +383,14 @@ class MemoryUpdateRow(Base):
     # Empty for episodic tips. Shape owned by memory/maintenance.py MemoryUpdateItem.
     items: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    # created_at of the LAST message this pass consolidated — where the card belongs in
+    # the thread. ``created_at`` alone cannot answer that: an episodic pass fires on an
+    # idle debounce, so the card is written minutes after the window it covers, and by
+    # then newer turns may already sit below it. NULL for rows written before this
+    # column existed and for writes with no message window (semantic sweeps, quota).
+    anchor_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")

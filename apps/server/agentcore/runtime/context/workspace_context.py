@@ -10,7 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
-from agentcore.workspace.stage_dirs import DEBATE_DIR, RESEARCH_DIR, REVIEWS_DIR
+from agentcore.workspace.stage_dirs import (
+    DEBATE_DIR,
+    DRAFTS_DIR,
+    RESEARCH_DIR,
+    REVIEWS_DIR,
+)
 
 if TYPE_CHECKING:
     from agentcore.core.types import HostAxis, PermissionAxes
@@ -97,8 +102,29 @@ async def detect_workspace_git(backend: WorkspaceBackend | None) -> WorkspaceGit
     return WorkspaceGitFact(present=True, branch=branch)
 
 
-def format_workspace_git_line(fact: WorkspaceGitFact) -> str:
-    """Single git fact line for ``<workspace_context>`` (soft tip; never a kickoff gate)."""
+_GIT_UNASSEMBLED_LINE = (
+    "版本控制：本回合未装配 `git` 工具——本机工作区的 Git 只能经桌面回填通道在用户机器上跑，"
+    "而本会话通道未连接，跑不了。工具表里没有 `git`："
+    "勿声称已提交 / 已拉取 / 已建基线，也勿把 Git 操作写进给队员的任务。"
+    "装配启用：在桌面客户端打开【本对话】（通道连上即装配），"
+    "或改用云端工作区 / 桌面 sidecar 会话。"
+    "同轮可开工：文件读写与其它已装配工具不受影响；"
+    "需要版本操作时可请用户在本机自行执行后贴结果给你分析。"
+)
+
+
+def format_workspace_git_line(
+    fact: WorkspaceGitFact, *, tool_enabled: bool = True
+) -> str:
+    """Single git fact line for ``<workspace_context>`` (soft tip; never a kickoff gate).
+
+    ``tool_enabled`` is the same verdict the registries use
+    (``tools.builtin.git_execution_enabled_for``): when the tool is not assembled the
+    repo-presence tip is replaced outright, so the block never advises ``init_baseline``
+    on a turn where ``git`` is absent from the model's tool table.
+    """
+    if not tool_enabled:
+        return _GIT_UNASSEMBLED_LINE
     scope = "仅识别工作区根 `.git`，不扫嵌套、不上溯"
     readonly = "只读 status/diff/log 无仓 → no_repo；其它写入无仓仍硬错"
     if fact.present is True:
@@ -117,7 +143,6 @@ def format_workspace_git_line(fact: WorkspaceGitFact) -> str:
         )
     return (
         f"版本控制：未能确认根 `.git`（{scope}）。"
-        "有桌面通道时结构化 `git` 经本机执行；无通道则不可用。"
         "写码时若确认无仓，可请用户授权 `git.init_baseline` 建首基线；不挡派工/开工卡。"
         f"{readonly}。"
     )
@@ -176,6 +201,7 @@ def build_workspace_context(
     terminal_enabled: bool | None = None,
     browser_enabled: bool | None = None,
     package_install_enabled: bool | None = None,
+    git_tool_enabled: bool | None = None,
     exec_languages: list[str] | tuple[str, ...] | None = None,
     host_axis: HostAxis | str | None = None,
     permission_axes: PermissionAxes | None = None,
@@ -210,6 +236,9 @@ def build_workspace_context(
     ``git_fact`` is the root-``.git`` probe (same rule as the ``git`` tool). Callers
     that already awaited :func:`detect_workspace_git` should pass it; otherwise a
     sync root probe runs. Soft tip only — never a kickoff / durable-pause gate.
+    Whether the ``git`` TOOL is assembled at all is a separate fact
+    (``git_execution_enabled_for`` — the same predicate the registries use), stamped on
+    the capability line; override ``git_tool_enabled`` is tests / probes only.
     """
     if backend is None:
         return ""
@@ -248,7 +277,7 @@ def build_workspace_context(
         # 裸聊默认云 scratch：空树 ≠ 本机/已打开仓库。对模型显式纠偏，避免把宿主路径当项目。
         identity_line = (
             f"工作区身份：本会话云端草稿/临时文件空间（根标签 `{root_label}`）——"
-            "不是用户本机目录，也不是用户本机已打开的仓库或项目工作区。"
+            "不是用户本机目录，也不是用户本机已打开的仓库或工程工作区。"
         )
         # Host 定案 §3.4: 云 reach 与 host= 正交——工作区在云；本机 Host 以能力行为准。
         reach_line = (
@@ -256,7 +285,7 @@ def build_workspace_context(
             "本机 Host（音响/系统信息/打开设置等）另计，以能力行 host= 为准——"
             "host=已装配时可经桌面回填通道调用 host_*；"
             "host=未装配时勿假装已查本机、勿假设能打开或安装用户机器上的软件；"
-            "空树只表示本会话云端草稿尚无文件，勿当成「本机空项目」或宿主机器上的 Git 仓库。"
+            "空树只表示本会话云端草稿尚无文件，勿当成「本机空工程」或宿主机器上的 Git 仓库。"
         )
         artifact_line = (
             "产物出口：你写入工作区的文件保存在云端工作区（不在用户本机），"
@@ -286,7 +315,7 @@ def build_workspace_context(
             "【口头同意闭环】用户已明确「可以整理 / 允许」→ 须立刻发带 "
             "`grant_organize_folder` 的确认卡并履约；禁止空心「等待确认」/纯文本劝授权。"
             "成功后以 `external/<别名>/…` 访问（经桌面通道、仅本次对话、可撤销）。"
-            "与工作区绑定正交——不必先改绑或打开本地项目。"
+            "与工作区绑定正交——不必先改绑或打开本机文件夹。"
             "「看桌面/看本机某目录」只走 `external_mount_readonly`：直接调用，"
             "【禁止】为只读新发 `grant_readonly_folder` 卡；"
             "已点名常见目录+任务 → well_known（desktop/downloads/documents），"
@@ -303,10 +332,10 @@ def build_workspace_context(
         if is_local:
             desktop_line = (
                 "客户端通道：桌面端在线（本机执行通道可用）。"
-                "本机传统/已绑工程会话：「打开项目 / 跑起来看一下」=跑**当前**项目"
+                "本机传统/已绑工程会话：「打开项目 / 跑起来看一下」=跑**当前**工作区"
                 "（terminal 启服报 URL），勿再弹 open_local_project 建新本地工作区；"
                 "换工程优先引导 Composer「导入到云 / 连接 Git」"
-                "（勿默认催 create_project 过写盘闸；裸聊写盘缺桌由运行时自动建云桌）；"
+                "（勿默认催 create_folder 过写盘闸；裸聊写盘缺桌由运行时自动建云文件夹）；"
                 "本机传统换开合法非默认（≠离线）。"
             )
         else:
@@ -315,8 +344,8 @@ def build_workspace_context(
                 "勿用纯文本解释或询问；完成前不要委派本机任务）："
                 "① 【新产品路径·云协作推荐】要本机目录进工作区 → **优先**引导 Composer"
                 "「导入到云 / 连接 Git」后再派；"
-                "同指挥面云 `create_project` 仅用户明确要求新建或显式多线先建"
-                "（禁止为过写盘闸而建；裸聊写盘缺桌由运行时自动建云桌）；"
+                "同指挥面云 `create_folder` 仅用户明确要求新建或显式多线先建"
+                "（禁止为过写盘闸而建；裸聊写盘缺桌由运行时自动建云文件夹）；"
                 "本机传统（合法非默认，≠离线）→ 可发 `open_local_project` / "
                 "`register_local_project` / `bind_local_folder`，勿当默认推荐、"
                 "勿与云平级主推；"
@@ -324,9 +353,9 @@ def build_workspace_context(
                 "【禁止】为只读新发 grant_readonly_folder）；整理 → "
                 "`grant_organize_folder`（与①正交，勿改绑冒充；"
                 "口头同意须立刻发卡；歧义可 2～3 个具体文件夹候选）；"
-                "③ 「优化/改项目」≠默认开项目卡：已有附件且用户收窄本轮范围（先这些/就这些）→ "
-                "先读材料与工作区已有产物动手，勿把开项目/绑本地当开工前置；"
-                "「在哪工作」仅新建会话可选（云协作推荐：快速对话/云项目/导入·连 Git；"
+                "③ 「优化/改项目」≠默认开文件夹卡：已有附件且用户收窄本轮范围（先这些/就这些）→ "
+                "先读材料与工作区已有产物动手，勿把开文件夹/绑本地当开工前置；"
+                "「在哪工作」仅新建会话可选（云协作推荐：快速对话/云端文件夹/导入·连 Git；"
                 "本机传统可选非默认），"
                 "勿引导用户去设置改模式、勿推销本机草稿当默认。"
             )
@@ -337,7 +366,7 @@ def build_workspace_context(
         # 复检（对照 b0a9）；禁「就好办了」与臆造设置/Folders 路径。
         desktop_line = (
             "客户端通道：桌面回填通道未连接——"
-            "打开本地项目、本机文件夹绑定、区外目录授权均须官方桌面客户端且通道已连接，"
+            "打开本机文件夹、本机文件夹绑定、区外目录授权均须官方桌面客户端且通道已连接，"
             "当前会话无法履约；请引导用户在桌面客户端打开本对话，或前往 "
             "https://fashitianxia.xyz/download 下载安装桌面端后再操作；"
             "勿发 grant_* / bind_local_folder / open_local_project / "
@@ -350,8 +379,8 @@ def build_workspace_context(
             "① 官网下载安装桌面端（若尚未）→ ② 在桌面客户端打开【本对话】→ "
             "③ 确认状态栏桌面回填通道已连接（host/local_open=已装配）→ "
             "④ 用 Composer「导入到云 / 连接 Git」（云协作推荐），"
-            "或用户明确要求新建时云 `create_project`（禁止为过写盘闸而建；"
-            "裸聊写盘缺桌由运行时自动建云桌），"
+            "或用户明确要求新建时云 `create_folder`（禁止为过写盘闸而建；"
+            "裸聊写盘缺桌由运行时自动建云文件夹），"
             "或本机传统 open/register/bind（合法非默认，≠离线），"
             "或按意图 grant_organize / external_mount_readonly；"
             "禁止臆造「设置→Folders / 侧栏授权页」等非产品真源入口路径——"
@@ -428,6 +457,14 @@ def build_workspace_context(
     caps.append(f"code_execute={'已装配' if exec_on else '未装配'}")
     caps.append(f"package_install={'已装配' if pkg_on else '未装配'}")
     caps.append(f"terminal={'已装配' if term_on else '未装配'}")
+    # git 与执行类正交：云/sidecar 直接 spawn，本机远程工作区须桌面通道在线。
+    if git_tool_enabled is not None:
+        git_on = git_tool_enabled
+    else:
+        from agentcore.tools.builtin import git_execution_enabled_for
+
+        git_on = git_execution_enabled_for(backend, desktop_online=desktop_online)
+    caps.append(f"git={'已装配' if git_on else '未装配'}")
     caps.append(f"browser={'已装配' if browser_on else '未装配'}")
     caps.append(f"local_open={'已装配' if local_open_on else '未装配'}")
     caps.append(f"host={'已装配' if host_on else '未装配'}")
@@ -651,38 +688,44 @@ def build_workspace_context(
 
         interpreters_line = format_interpreters_line(tuple(langs))
 
-    # 约定文档布局（始终可见）：三行出口 + 一句边界。只陈述路径事实，不注入文档正文进 <rules>。
+    # 约定文档布局（始终可见）：四行出口 + 一句边界。只陈述路径事实，不注入文档正文进 <rules>。
+    dossier_drafts_line = f"约定文档出口·默认落点（无专属出口的产物）：`{DRAFTS_DIR}/`"
     dossier_research_line = f"约定文档出口·调研/讨论：`{RESEARCH_DIR}/`"
     dossier_debate_line = f"约定文档出口·辩论副产物：`{DEBATE_DIR}/`"
     dossier_reviews_line = f"约定文档出口·审查：`{REVIEWS_DIR}/`"
     dossier_boundary_line = (
-        "约定文档边界：讨论/调研/审查类交付写此树；用户工程源码仍写业务路径；"
+        "约定文档边界：讨论/调研/审查类交付写此树，其余产物走默认落点；"
+        "用户工程源码仍写业务路径；"
         "向用户报产物路径须用上列完整前缀，禁缩短成裸 reviews/research/debate。"
     )
     # Git fact: prefer caller probe (async Local); else sync root; never gates kickoff.
+    # Repo presence and tool assembly are separate facts — an unassembled turn drops
+    # the init_baseline tip rather than advising a tool the model does not hold.
     resolved_git = git_fact if git_fact is not None else detect_workspace_git_sync(backend)
-    git_line = format_workspace_git_line(resolved_git)
+    git_line = format_workspace_git_line(resolved_git, tool_enabled=git_on)
 
-    # 跨项目并行指挥（事实面短教；整条 HOW 见 consult team_orchestration_advanced）。
+    # 跨文件夹并行指挥（事实面短教；整条 HOW 见 consult team_orchestration_advanced）。
     # 与 desktop_line 的 open/register/bind 分流互补，不替代。
-    # 跨已登记项目读写通吃 = delegate+target_folder_id；CEO list/read_project = 派前轻量认桌。
-    cross_project_line = (
-        "跨项目指挥：默认工作区=出生桌（通用 file_* 只绑出生桌）；"
-        "跨已登记项目（只读摸底与写盘通吃）→`list_projects` / `resolve_project` 得 id"
-        "（歧义 `ask_user` choice，禁猜最近）后同一次 `delegate` 各 task 填"
-        "`target_folder_id`（=该队员坐哪张桌；换桌+记忆跟桌；不改本会话 folder_id；"
-        "写不写盘由 write_scope/grant 正交，默认 none）；"
+    # 跨文件夹读写通吃 = delegate+target_folder_id；CEO list/read_folder = 派前轻量认桌。
+    cross_folder_line = (
+        "跨文件夹指挥：默认工作区=出生桌（通用 file_* 只绑出生桌）；"
+        "跨文件夹（只读摸底与写盘通吃）→`list_folders` / `resolve_folder` 得 id"
+        "（按路径解析，`设计/图标` ≠ 顶层 `图标`；歧义 `ask_user` choice 带完整路径，"
+        "禁猜最近）后同一次 `delegate` 各 task 填"
+        "`target_folder_id`（=该队员坐哪个文件夹，范围含其子文件夹；换桌+记忆跟桌；"
+        "不改本会话 folder_id；写不写盘由 write_scope/grant 正交，默认 none）；"
         "【禁止】派工不填 target_folder_id 坐空 scratch；"
-        "CEO `list_project_dir` / `read_project_file` 仅派前轻量认桌/抽样，非摸底主通道"
+        "CEO `list_folder_dir` / `read_folder_file` 仅派前轻量认桌/抽样，非摸底主通道"
         "（`folder_id`+相对路径；不改挂载、不写目标桌记忆；队员拿不到这两工具）；"
         "【禁止】以「云端读不到本地」为由改绑/open/mount 冒充跨仓读；"
         "空/近空→先 `ask_user` 钉目标，禁连续 file_list 确认空；"
         "开发双仓≠open/register/bind/`external_mount_readonly` 冒充"
-        "（挂载=区外只读，正交；跨项目须派工换桌）；"
+        "（挂载=区外只读，正交；跨文件夹须派工换桌）；"
         "有出生未点名=默认桌；无出生：纯对话/只读可派（scratch 禁写）；"
-        "裸聊写盘缺桌由运行时自动建云桌，勿先 ask_user/create_project；"
-        "多项目/名册目标（含只读）须点名禁默写 scratch；"
-        "仅用户明确新建/显式多线先建：云 `create_project`（只建云）/ "
+        "裸聊写盘缺桌由运行时自动建云文件夹，勿先 ask_user/create_folder；"
+        "多个文件夹目标（含只读）须点名禁默写 scratch；"
+        "仅用户明确新建/显式多线先建：云 `create_folder`（只建云；挂到某层填 "
+        "`parent_path`；≠队员在当前工作区里 `mkdir` 建子目录）/ "
         "Composer「导入到云 / 连接 Git」（云协作推荐）；"
         "本机传统 `open_local_project` / `register_local_project` / `bind_local_folder` "
         "合法非默认（≠离线），勿与云平级主推；"
@@ -696,12 +739,13 @@ def build_workspace_context(
         reach_line,
         artifact_line,
         egress_line,
+        dossier_drafts_line,
         dossier_research_line,
         dossier_debate_line,
         dossier_reviews_line,
         dossier_boundary_line,
         git_line,
-        cross_project_line,
+        cross_folder_line,
         desktop_line,
         grant_line,
         mounts_line,

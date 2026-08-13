@@ -41,7 +41,7 @@ def test_tool_failure_fields_passes_authored_product_message():
 def test_tool_failure_fields_curates_by_stable_code():
     face = tool_failure_fields(code="retrieval_budget_exhausted")
     assert face == {
-        "message": "本回合检索次数已用尽。",
+        "message": "本次任务的联网查资料次数已用完，这一次没有再去搜；我会基于已经查到的内容继续。",
         "code": "retrieval_budget_exhausted",
     }
 

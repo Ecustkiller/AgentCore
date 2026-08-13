@@ -11,6 +11,7 @@ Plus auto conversation titles (a sidebar UX feature, not a memory layer).
 
 from agentcore.memory.account_prepare_cache import (
     AccountPrepareSnapshot,
+    account_rules_memory_ttl_remaining,
     clear_account_rules_memory_cache,
     get_account_rules_memory_snapshot,
     prepare_account_folder_id,
@@ -49,6 +50,14 @@ from agentcore.memory.rules_injection import (
     mutate_user_rule_markdown,
     rule_consult_name,
     strip_entry_frontmatter,
+)
+from agentcore.memory.scope_chain import (
+    ancestor_scopes,
+    cloud_scope_chain,
+    db_scope_chain,
+    own_scope_chain,
+    resolve_scope_chain,
+    snapshot_scope_chain,
 )
 from agentcore.memory.store import (
     ALWAYS_MEMORY_FILES,
@@ -136,6 +145,7 @@ __all__ = [
     "load_memory_topics",
     "MemoryTopic",
     "AccountPrepareSnapshot",
+    "account_rules_memory_ttl_remaining",
     "clear_account_rules_memory_cache",
     "get_account_rules_memory_snapshot",
     "prepare_account_folder_id",
@@ -144,6 +154,12 @@ __all__ = [
     "warm_account_rules_memory",
     "RuleFragment",
     "OnDemandUserRule",
+    "ancestor_scopes",
+    "cloud_scope_chain",
+    "db_scope_chain",
+    "own_scope_chain",
+    "resolve_scope_chain",
+    "snapshot_scope_chain",
     "assemble_injected_rules",
     "assemble_turn_rules",
     "compose_injected_rules",

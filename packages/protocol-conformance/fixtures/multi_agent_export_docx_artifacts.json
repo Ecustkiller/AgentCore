@@ -1,0 +1,376 @@
+{
+  "name": "multi_agent_export_docx_artifacts",
+  "description": "交付台账·导出件：md + 自报 derived_from 的 docx 双双进 delivery_status.artifacts（首条非空产物清单向量；产物卡不漏导出件、可把源 md 折为中间稿）",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我来安排起草起诉状并导出 Word。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "文书撰写"
+            }
+          ]
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec_docx",
+        "plan_type": "multi_agent",
+        "task_summary": "抚养费起诉状（Word）",
+        "agents": [
+          {
+            "id": "w1",
+            "role": "文书撰写",
+            "thinking": true
+          }
+        ],
+        "runs": [
+          {
+            "id": "r1",
+            "agent_id": "w1",
+            "task": "起草抚养费起诉状并导出 Word",
+            "depends_on": []
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "run_started",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "parent_run_id": null,
+        "kind": "agent"
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "tc1",
+        "tool_name": "file_write",
+        "arguments": {
+          "path": "抚养费起诉状-昝雯.md",
+          "content": "# 民事起诉状\n\n原告：昝雯……"
+        },
+        "run_id": "r1"
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "tc1",
+        "tool_name": "file_write",
+        "status": "success",
+        "result": "已写入",
+        "run_id": "r1"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "tc2",
+        "tool_name": "md_to_docx",
+        "arguments": {
+          "path": "抚养费起诉状-昝雯.md"
+        },
+        "run_id": "r1"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "tc2",
+        "tool_name": "md_to_docx",
+        "status": "success",
+        "result": "已导出 Word：抚养费起诉状-昝雯.docx（38964 字节）\n【artifact manifest】\npath: 抚养费起诉状-昝雯.docx\nkind: docx\nbytes: 38964\nsource: 抚养费起诉状-昝雯.md\nwarnings: （无）\n【验真】请以本 manifest 确认落盘；可用工作区下载打开 .docx。",
+        "run_id": "r1"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "run_completed",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "output_summary": "起诉状已成稿并导出 Word",
+        "duration_ms": 2400,
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "output_files": [
+          "抚养费起诉状-昝雯.md",
+          "抚养费起诉状-昝雯.docx"
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:02.405Z"
+    },
+    {
+      "type": "delivery_status",
+      "payload": {
+        "execution_id": "exec_docx",
+        "state": "delivered",
+        "summary": "已交付 2 个文件",
+        "delivered_files": [
+          "抚养费起诉状-昝雯.md",
+          "抚养费起诉状-昝雯.docx"
+        ],
+        "gaps": [],
+        "actions": [],
+        "artifacts": [
+          {
+            "path": "抚养费起诉状-昝雯.md",
+            "status": "accepted",
+            "kind": "md"
+          },
+          {
+            "path": "抚养费起诉状-昝雯.docx",
+            "status": "accepted",
+            "kind": "docx",
+            "derived_from": "抚养费起诉状-昝雯.md"
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:02.406Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "status": "success",
+        "result": "团队完成 1 项任务。"
+      },
+      "timestamp": "2026-01-01T00:00:02.407Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": " Word 版起诉状已生成：`抚养费起诉状-昝雯.docx`。"
+      },
+      "timestamp": "2026-01-01T00:00:02.408Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 2600,
+          "output_tokens": 460,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:02.409Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "error": null,
+    "content": "我来安排起草起诉状并导出 Word。 Word 版起诉状已生成：`抚养费起诉状-昝雯.docx`。",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来安排起草起诉状并导出 Word。"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec_docx"
+      },
+      {
+        "kind": "content",
+        "text": " Word 版起诉状已生成：`抚养费起诉状-昝雯.docx`。"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [
+      {
+        "id": "w1",
+        "role": "文书撰写",
+        "thinking": true,
+        "status": "completed",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "r1",
+        "agentId": "w1",
+        "task": "起草抚养费起诉状并导出 Word",
+        "status": "completed",
+        "dependsOn": [],
+        "outputSummary": "起诉状已成稿并导出 Word",
+        "debrief": null,
+        "durationMs": 2400,
+        "error": null,
+        "failureKind": null,
+        "productLanded": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": "member",
+        "model": "deepseek-v4-flash",
+        "usage": {
+          "input": 1200,
+          "output": 300,
+          "reasoning": 120,
+          "cache_hit": 800,
+          "cache_miss": 400
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "continuesRunId": null,
+        "revised": null,
+        "replacesRunId": null,
+        "actId": "act-1",
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": [],
+        "process": [
+          {
+            "kind": "tool",
+            "id": "tc1",
+            "tool_name": "file_write",
+            "arguments": {
+              "path": "抚养费起诉状-昝雯.md",
+              "content": "# 民事起诉状\n\n原告：昝雯……"
+            },
+            "result": "已写入",
+            "status": "success"
+          },
+          {
+            "kind": "tool",
+            "id": "tc2",
+            "tool_name": "md_to_docx",
+            "arguments": {
+              "path": "抚养费起诉状-昝雯.md"
+            },
+            "result": "已导出 Word：抚养费起诉状-昝雯.docx（38964 字节）\n【artifact manifest】\npath: 抚养费起诉状-昝雯.docx\nkind: docx\nbytes: 38964\nsource: 抚养费起诉状-昝雯.md\nwarnings: （无）\n【验真】请以本 manifest 确认落盘；可用工作区下载打开 .docx。",
+            "status": "success"
+          }
+        ]
+      }
+    ],
+    "acts": [
+      {
+        "actId": "act-1",
+        "kind": "multi_agent",
+        "title": null,
+        "anchorRunId": null,
+        "authorizedBy": null
+      }
+    ],
+    "progress": {
+      "completed": 1,
+      "total": 1
+    },
+    "interactions": [],
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "CNY",
+      "pricing_source": "curated"
+    },
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": {
+      "execution_id": "exec_docx",
+      "state": "delivered",
+      "summary": "已交付 2 个文件",
+      "delivered_files": [
+        "抚养费起诉状-昝雯.md",
+        "抚养费起诉状-昝雯.docx"
+      ],
+      "gaps": [],
+      "actions": [],
+      "artifacts": [
+        {
+          "path": "抚养费起诉状-昝雯.md",
+          "status": "accepted",
+          "kind": "md"
+        },
+        {
+          "path": "抚养费起诉状-昝雯.docx",
+          "status": "accepted",
+          "kind": "docx",
+          "derived_from": "抚养费起诉状-昝雯.md"
+        }
+      ]
+    },
+    "turnWarning": null,
+    "autoFolder": null,
+    "teamNotes": [],
+    "userInterjections": []
+  }
+}

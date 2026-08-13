@@ -13,7 +13,6 @@ never breaks loading an older row.
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, fields
 from typing import Any
 
@@ -33,6 +32,12 @@ from agentcore.runtime.runs.types import (
     RunPolicy,
     RunSpec,
     RunState,
+)
+from agentcore.tools.file_products import (
+    LANDING_TOOL_NAMES,
+    LANDING_TOOLS,
+    FileProduct,
+    file_products_from_text,
 )
 
 
@@ -80,44 +85,23 @@ def message_from_dict(d: dict[str, Any]) -> LLMMessage:
     )
 
 
-# Tools whose path argument names the file a worker creates or modifies. Used to
-# derive a run's 文件产出 manifest from its transcript. Delete / move-away are
-# intentionally excluded: the manifest answers "what did this worker produce",
-# not a full mutation audit (a deleted path is not a deliverable).
-# ``file_copy`` counts like ``file_move`` (destination is the landed product path).
-_FILE_PRODUCT_ARG: dict[str, str] = {
-    "file_write": "path",
-    "file_append": "path",
-    "str_replace": "path",
-    "write_section": "path",
-    "file_move": "destination",
-    "file_copy": "destination",
-}
-
 # Failed landing-tool result → attribution for zero-disk gaps (contract / delivery card).
 # Prefer channel-dead over generic write-failed when both appear.
 _CHANNEL_DEAD_MARKERS = ("channel dead", "活性挂起", "workspace channel dead")
 
-# code_execute 的结构化写回通道（生产方见 tools/builtin/code_execute.py）: a code_execute
-# RESULT carries the sandbox copy-out paths (ExecutionResult.written_files) in a machine
-# marker on its tool output, so a product landed INDIRECTLY by an executed script counts
-# toward files_touched WITHOUT parsing the fragile「已写回工作区」prose (文件名可含「、」).
-# The tool name + marker format are kept INLINE here (exactly like the file-tool names /
-# "handoff" / "escalate") to keep this serialization module dependency-light; a round-trip
-# unit test pins the producer↔consumer format so the two never silently drift.
-_CODE_EXECUTE_TOOL_NAME = "code_execute"
-_CODE_EXECUTE_WRITTEN_MARKER_RE = re.compile(
-    r"<!--agentcore:written_files:(.*?)-->", re.DOTALL
-)
+# ``code_execute`` lands files INDIRECTLY (sandbox copy-out), so the governance pen set
+# (``LANDING_TOOLS``) excludes it — but a worker being told 「用什么落盘」 should hear it.
+# Prose only: the ledger reads self-reported products and needs no tool name at all.
+_INDIRECT_LANDING_TOOL_NAME = "code_execute"
 
 
 def file_landing_tool_names() -> tuple[str, ...]:
-    """Ordered tool names that count toward ``files_touched`` / files_written gaps.
+    """Ordered tool names to NAME in files-not-landed gap copy (prose only).
 
-    Single source for gap copy + transcript harvest: ``_FILE_PRODUCT_ARG`` keys plus
-    ``code_execute`` write-back. Callers must not hard-code a subset.
+    Single source for every such list — callers must not hand-write a subset (that is
+    how ``write_section`` went missing from the contract copy for a whole release).
     """
-    return (*_FILE_PRODUCT_ARG.keys(), _CODE_EXECUTE_TOOL_NAME)
+    return (*LANDING_TOOL_NAMES, _INDIRECT_LANDING_TOOL_NAME)
 
 
 def format_file_landing_tools_slash() -> str:
@@ -145,7 +129,7 @@ def landing_write_failure_kind(
     for msg in transcript:
         if msg.role == "assistant" and msg.tool_calls:
             for tc in msg.tool_calls:
-                if tc.function.name in _FILE_PRODUCT_ARG and tc.id:
+                if tc.function.name in LANDING_TOOLS and tc.id:
                     landing_call_ids.add(tc.id)
         elif msg.role == "tool" and msg.tool_call_id in landing_call_ids:
             content = llm_content_text(msg.content)
@@ -162,29 +146,10 @@ def landing_write_failure_kind(
 
 
 # 工具失败机器尾注 (生产方见 runtime/engine/tool_exec.py · TOOL_FAILED_MARKER):
-# file 工具通道按「执行成功口径」记账——assistant 调用只记 path 意图，须等同 tool_call_id
-# 的 tool result **且无此失败尾注** 才计入 files_touched。LLMMessage 无独立 success 字段，
-# allowlist / 审批 / 熔断拒绝与执行失败均由 tool_exec 追加此 marker。格式内联 + round-trip
-# 单测锁死（同构 written_files marker）。
+# LLMMessage 无独立 success 字段，allowlist / 审批 / 熔断拒绝与执行失败均由 tool_exec 追加
+# 此 marker，让 landing_write_failure_kind 区分「写盘尝试失败」与「压根没试」。格式内联 +
+# round-trip 单测锁死（同构产物自报尾注）。
 _TOOL_FAILED_MARKER = "<!--agentcore:tool_failed-->"
-
-
-def _written_files_from_marker(content: str) -> list[str]:
-    """Workspace paths a ``code_execute`` result reported writing back, from its marker.
-
-    Reads EVERY marker in ``content`` (a run may make several code_execute calls),
-    yielding each JSON string path in order. A malformed / truncated marker is skipped
-    (best-effort — the file-tool success channel still covers file_write landings).
-    """
-    out: list[str] = []
-    for match in _CODE_EXECUTE_WRITTEN_MARKER_RE.finditer(content):
-        try:
-            paths = json.loads(match.group(1))
-        except (ValueError, TypeError):
-            continue
-        if isinstance(paths, list):
-            out.extend(p for p in paths if isinstance(p, str) and p.strip())
-    return out
 
 
 def _tool_result_failed(content: str) -> bool:
@@ -192,73 +157,42 @@ def _tool_result_failed(content: str) -> bool:
     return _TOOL_FAILED_MARKER in (content or "")
 
 
-def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
-    """Best-effort list of workspace paths a worker created/modified, first-seen order.
+def file_products_from_transcript(transcript: list[LLMMessage]) -> list[FileProduct]:
+    """产物台账：本 run 落盘的 ``{path, kind, derived_from?}``，首次出现顺序。
 
-    Two complementary channels, merged in transcript order and de-duped:
+    事实来源是**工具自报**：落盘工具在 :class:`~agentcore.tools.protocol.ToolResult`
+    上声明产物，引擎在 tool 消息上盖 ``<!--agentcore:file_products:…-->`` 机器尾注
+    （生产方 ``tools.file_products.with_file_products_marker``，round-trip 单测钉死格式）。
+    这里只读尾注——不认工具名、不解析入参、不读散文回执：
 
-    - **Structured write-back** (primary for ``code_execute``): a ``code_execute`` result
-      carries the sandbox copy-out paths in a machine marker (``staging.write_back`` →
-      ``ExecutionResult.written_files`` → tool output). This makes a product landed
-      *indirectly by an executed script* visible to the files-form / artifacts gate / CEO
-      manifest — read off the marker, never the fragile「已写回工作区」prose. Correlated
-      to its issuing ``code_execute`` call by ``tool_call_id`` so an incidental marker in
-      some other tool's result (e.g. a file_read echoing one) is never counted.
-    - **Execution-success** (file tools): file_write / file_append / str_replace /
-      file_move name their product path in the call args. The path is recorded only when
-      the correlated tool result (same ``tool_call_id``) is present **and** does not carry
-      the ``<!--agentcore:tool_failed-->`` trailer (producer: ``tool_exec`` — allowlist /
-      approval / breaker denials and execute failures). A bare call with no result, or a
-      failed/denied result, is not a deliverable. Delete / move-away excluded.
+    - 入参不等于产物（``md_to_docx`` 入参是源 md，产物是推导出的 docx；批量工具一次产上千个）；
+    - 落盘通道不止工具调用（沙箱写回、换树），凡自报者一律记账，无需在任何名单里登记；
+    - 失败 / 被拒的调用不自报，天然不入账（引擎只在 ``success`` 时盖章）。
 
-    口径仍限本 run 自己写的文件: the transcript is this run's own, and the write-back paths
-    are this execution's staging diff (never pre-existing / concurrent-sibling files). The
-    CEO is told to re-verify only if the manifest looks empty or incomplete.
+    回显防护也在生产侧：盖章前先清掉输出里回显的尾注（``file_read`` 读到一份带尾注的文本
+    不算它产的），所以这里无需按 ``tool_call_id`` 反查工具名。只读 ``role="tool"`` 消息——
+    模型正文里复述一段尾注不是事实。
+
+    同一 path 被多次自报（写完再改）只记首次，与 ``files_touched`` 的去重口径一致。
+    口径仍限本 run：transcript 是本 run 自己的，自报的是本次执行真正落的盘。
     """
-    seen: list[str] = []
-
-    def _add(path: object) -> None:
-        if isinstance(path, str) and path.strip() and path.strip() not in seen:
-            seen.append(path.strip())
-
-    # call ids collected as we walk forward — the assistant call always precedes its
-    # tool result, so the id is known by the time the result is reached.
-    code_execute_call_ids: set[str] = set()
-    # file-tool product path by call id — committed only on a non-failed tool result.
-    file_product_by_call_id: dict[str, str] = {}
+    out: list[FileProduct] = []
+    seen: set[str] = set()
     for msg in transcript:
-        if msg.role == "assistant" and msg.tool_calls:
-            for tc in msg.tool_calls:
-                name = tc.function.name
-                if name == _CODE_EXECUTE_TOOL_NAME:
-                    if tc.id:
-                        code_execute_call_ids.add(tc.id)
-                    continue
-                arg = _FILE_PRODUCT_ARG.get(name)
-                if not arg or not tc.id:
-                    continue
-                try:
-                    parsed = json.loads(tc.function.arguments or "{}")
-                except (ValueError, TypeError):
-                    continue
-                if isinstance(parsed, dict):
-                    path = parsed.get(arg)
-                    if isinstance(path, str) and path.strip():
-                        from agentcore.workspace._paths import sanitize_write_relpath
+        if msg.role != "tool":
+            continue
+        for product in file_products_from_text(llm_content_text(msg.content)):
+            path = product.path.strip()
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            out.append(product)
+    return out
 
-                        file_product_by_call_id[tc.id] = sanitize_write_relpath(
-                            path.strip()
-                        )
-        elif msg.role == "tool" and msg.tool_call_id:
-            if msg.tool_call_id in code_execute_call_ids:
-                for path in _written_files_from_marker(llm_content_text(msg.content)):
-                    _add(path)
-            elif (
-                msg.tool_call_id in file_product_by_call_id
-                and not _tool_result_failed(llm_content_text(msg.content))
-            ):
-                _add(file_product_by_call_id[msg.tool_call_id])
-    return seen
+
+def files_touched_from_transcript(transcript: list[LLMMessage]) -> list[str]:
+    """Paths of :func:`file_products_from_transcript` (first-seen order, de-duped)."""
+    return [p.path for p in file_products_from_transcript(transcript)]
 
 
 def escalations_from_transcript(transcript: list[LLMMessage]) -> list[dict[str, Any]]:
@@ -555,6 +489,8 @@ def plan_to_json(plan: RunPlan) -> dict[str, Any]:
         payload["workflow_id"] = plan.workflow_id
     if plan.workflow_version is not None:
         payload["workflow_version"] = int(plan.workflow_version)
+    if plan.finalize:
+        payload["finalize"] = True
     return payload
 
 
@@ -573,6 +509,8 @@ def plan_from_json(data: dict[str, Any]) -> RunPlan:
         plan.workflow_version = wv
     elif isinstance(wv, str) and wv.strip().isdigit():
         plan.workflow_version = int(wv.strip())
+    # 收口批标记随快照走：resume 折回同一张图时 worker 的身份口径不能变。
+    plan.finalize = bool(data.get("finalize"))
     return plan
 
 

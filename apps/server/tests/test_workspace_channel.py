@@ -28,6 +28,7 @@ from agentcore.runtime.events import EventType, SSEEvent
 from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp, index_io_mode
+from agentcore.workspace.limits import LOCAL_ROOT_NOT_HELD
 from agentcore.workspace.local import LocalWorkspace
 from agentcore.workspace.protocol import (
     AmbiguousMatch,
@@ -52,7 +53,16 @@ def _patch_deliver(monkeypatch: pytest.MonkeyPatch):
     """Default: every CLIENT_TOOL deliver succeeds and is captured for tests."""
     _CAPTURE.clear()
 
-    def fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+    def fake_deliver(
+        user_id,
+        conversation_id,
+        channel,
+        root_id,
+        event,
+        *,
+        origin_device_id=None,
+        hub=None,
+    ):
         _CAPTURE.append(event)
         return DeliverResult.DELIVERED
 
@@ -491,6 +501,31 @@ async def test_no_fulfiller_fail_fast_without_wall_clock_wait(monkeypatch):
     assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
 
 
+async def test_root_not_held_settles_with_the_authorization_copy(monkeypatch):
+    """Desktop online without this root: name the missing grant, not 无履约方."""
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool",
+        lambda *a, **k: DeliverResult.ROOT_NOT_HELD,
+    )
+    channel = WorkspaceChannel(
+        user_id=USER,
+        conversation_id=CONV,
+        registry=InteractionRegistry(),
+        timeout_seconds=5.0,
+        root_id=ROOT_ID,
+    )
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(WorkspaceIOError) as ei:
+        await channel.request(WorkspaceOp.READ, {"path": "revoked.txt"})
+    elapsed = asyncio.get_running_loop().time() - t0
+    detail = str(ei.value)
+    assert LOCAL_ROOT_NOT_HELD in detail
+    assert "read" in detail
+    assert "无履约方" not in detail
+    assert elapsed < 0.5
+    assert channel._dead is False  # noqa: SLF001
+
+
 async def test_delivered_op_stays_open_until_resolve():
     """Fulfill delivery keeps the Future open until resolve (rehang / desktop settle)."""
     from agentcore.runtime.events.client_tool_reattach import pending_client_tool_events
@@ -722,14 +757,14 @@ async def test_server_mutation_still_schedules_index(tmp_path):
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
     from agentcore.workspace.indexing.registry import (
         clear_index_registry,
-        shared_index_manager,
+        shared_index_manager_for_dir,
     )
     from agentcore.workspace.server import ServerWorkspace
 
     clear_index_registry()
     try:
         ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
-        manager = shared_index_manager(tmp_path)
+        manager = shared_index_manager_for_dir(ws.index_dir)
         manager.ensure_index = AsyncMock(return_value=True)  # type: ignore[method-assign]
 
         await ws.write("x.py", "x = 1\n")

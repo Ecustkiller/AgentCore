@@ -138,6 +138,7 @@ async def _run_loop(
         ),
         role=role,
         run_id="run-1",
+        approval_gate=None,
     )
 
 
@@ -221,6 +222,7 @@ async def test_execute_tools_unknown_tool_returns_error_message():
         reg,
         _context(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -248,6 +250,7 @@ async def test_execute_tools_unknown_tool_suggests_alias():
         reg,
         _context(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -277,6 +280,7 @@ async def test_execute_tools_wait_not_found_no_fuzzy_to_unrelated():
         reg,
         _context(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -316,6 +320,7 @@ async def test_execute_tools_happy_path_emits_start_and_end():
         _registry(tool),
         _context(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 

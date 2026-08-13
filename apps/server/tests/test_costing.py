@@ -272,6 +272,7 @@ def test_aggregate_cost_empty_is_zero():
         "total": 0,
         "estimated_total": 0,
         "currency": "CNY",
+        "estimated_currency": "CNY",
         "pricing_source": "curated",
     }
 

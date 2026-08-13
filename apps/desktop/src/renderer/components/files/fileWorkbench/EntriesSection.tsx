@@ -19,6 +19,7 @@ import {
   getAlwaysQuota,
   listScopeEntries,
   renameDocument,
+  setDocumentDisputed,
   updateDocumentApplyMode,
 } from "@/services/documents";
 import {
@@ -37,14 +38,16 @@ import {
   History,
   Loader2,
   Pencil,
+  ThumbsDown,
   Trash2,
+  Undo2,
 } from "lucide-react";
 import { type ReactNode, forwardRef } from "react";
 
 /** Which layer a section renders: GLOBAL entries, or one project's. */
 export type EntryScope =
   | { kind: "global" }
-  | { kind: "project"; folderId: string };
+  | { kind: "folder"; folderId: string };
 
 const ENTRIES_QUERY_KEY = ["scope-entries"] as const;
 const QUOTA_QUERY_KEY = ["always-quota"] as const;
@@ -61,6 +64,14 @@ const APPLY_HINT: Record<DocumentApplyMode, string> = {
 
 /** Near-full threshold for consequence copy (not just color). */
 const NEAR_FULL_PERCENT = 80;
+
+/**
+ * Rows under this print no size at all. A row's char count exists to answer
+ * 「池子紧张时该删谁」; against a 24k pool a sub-千字 entry answers it with nothing,
+ * and it is the common case — repeated down the whole list the number stops
+ * reading as a signal and just eats the width the filename needs.
+ */
+const ROW_CHARS_FLOOR = 1000;
 
 /** Fixed AI core leaf names (aligned with server ``memory.store`` / write_guards). */
 const AI_CORE_NAMES = new Set(["偏好.md", "画像.md", "导航.md"]);
@@ -222,10 +233,10 @@ function glueCapacity(verb: "还剩" | "超出", amount: string): string {
  */
 export function formatMeterHeadline(
   q: AlwaysQuota,
-  variant: "global" | "project",
+  variant: "global" | "folder",
 ): string {
   const tone = alwaysMeterTone(q);
-  const subject = variant === "project" ? "常驻（含全局）" : "常驻";
+  const subject = variant === "folder" ? "常驻（含全局）" : "常驻";
   if (tone === "over") {
     const overBy = Math.max(0, q.usedChars - q.maxChars);
     return `${subject} · 已满，${glueCapacity("超出", formatRoughChars(overBy))}`;
@@ -264,7 +275,7 @@ export function EntriesSection({
   indent?: number;
 }) {
   const queryClient = useQueryClient();
-  const folderId = scope.kind === "project" ? scope.folderId : null;
+  const folderId = scope.kind === "folder" ? scope.folderId : null;
 
   const entries = useQuery({
     queryKey: [...ENTRIES_QUERY_KEY, folderId ?? "global"],
@@ -344,6 +355,17 @@ export function EntriesSection({
     }
   };
 
+  // 纠错通道: only the user can say「这条不对」, and saying it stops the entry from being
+  // used without deleting it — the text stays here to read, re-check and undo.
+  const setDisputed = async (doc: DocumentNode, disputed: boolean) => {
+    try {
+      await setDocumentDisputed(doc.id, disputed);
+      await refresh();
+    } catch (e) {
+      notifyError(e, disputed ? "标记失败" : "撤销标记失败");
+    }
+  };
+
   const isActive = (target: EntryOpenTarget) =>
     target.channel === "memory"
       ? memoryActivePath === target.path
@@ -354,6 +376,7 @@ export function EntriesSection({
     const other: DocumentApplyMode = mode === "always" ? "on_demand" : "always";
     const canToggleApply = !doc.aiMaintained && !doc.frontmatterError;
     const canDelete = !isAiCoreMemoryLeaf(doc);
+    const disputed = doc.disputedAt != null;
     const target = entryOpenTarget(doc);
     return (
       <ContextMenu key={doc.id}>
@@ -366,6 +389,7 @@ export function EntriesSection({
             label={doc.name}
             description={doc.description}
             frontmatterError={doc.frontmatterError}
+            disputed={disputed}
             active={isActive(target)}
             onOpen={() => onOpen(target)}
             applyMode={mode}
@@ -391,6 +415,23 @@ export function EntriesSection({
             <span className="flex-1 truncate">设为按需</span>
           </ContextMenuItem>
           <ContextMenuSeparator />
+          {disputed ? (
+            <ContextMenuItem
+              title="恢复后 AI 会重新使用这条"
+              onSelect={() => void setDisputed(doc, false)}
+            >
+              <Undo2 size={14} className="shrink-0" />
+              <span className="flex-1 truncate">恢复使用</span>
+            </ContextMenuItem>
+          ) : (
+            <ContextMenuItem
+              title="AI 不再使用这条，内容保留，可随时恢复"
+              onSelect={() => void setDisputed(doc, true)}
+            >
+              <ThumbsDown size={14} className="shrink-0" />
+              <span className="flex-1 truncate">这条不对</span>
+            </ContextMenuItem>
+          )}
           <ContextMenuItem
             disabled={doc.aiMaintained}
             onSelect={() => void renameEntry(doc)}
@@ -425,6 +466,7 @@ export function EntriesSection({
         label={leaf.name}
         description=""
         frontmatterError={null}
+        disputed={false}
         active={isActive(target)}
         onOpen={() => onOpen(target)}
         applyMode={leaf.applyMode}
@@ -442,7 +484,7 @@ export function EntriesSection({
           {quota.isSuccess ? (
             <AlwaysQuotaMeter
               quota={quota.data}
-              variant={scope.kind === "global" ? "global" : "project"}
+              variant={scope.kind === "global" ? "global" : "folder"}
             />
           ) : quota.isError && !isFeatureUnavailable(quota.error) ? (
             <button
@@ -468,6 +510,7 @@ export function EntriesSection({
           label="最近更新"
           description=""
           frontmatterError={null}
+          disputed={false}
           active={memoryActivePath === MEMORY_UPDATES_PATH}
           onOpen={onOpenUpdates}
         />
@@ -506,7 +549,7 @@ export function EntriesSection({
           style={{ paddingLeft: leafPad }}
         >
           <p className="text-xs text-muted-foreground/60">
-            {scope.kind === "global" ? "还没有全局条目" : "本项目还没有条目"}
+            {scope.kind === "global" ? "还没有全局条目" : "本文件夹还没有条目"}
           </p>
           <p className="text-xs text-muted-foreground/50">
             短硬约束用常驻，厚知识用按需
@@ -523,22 +566,74 @@ export function EntriesSection({
   );
 }
 
+/**
+ * Always-pool meter, sized by state: calm scopes collapse to the remaining-chars
+ * line alone so the rail reads as a list of entries; 快满 / 已超 keep the full
+ * block (consequence copy + two-tone bar). Quota stays visible in every state —
+ * only the chrome around it shrinks.
+ *
+ * Calm state deliberately has **no bar**: at the 288px default rail width an
+ * inline bar pushes `常驻（含全局）· 还剩约 N 万字` past truncation, and the number
+ * it would cut is the only thing this line exists to say.
+ */
 function AlwaysQuotaMeter({
   quota,
   variant,
 }: {
   quota: AlwaysQuota;
-  variant: "global" | "project";
+  variant: "global" | "folder";
 }) {
   const tone = alwaysMeterTone(quota);
   const headline = formatMeterHeadline(quota, variant);
+
+  if (tone === "ok") {
+    return (
+      <div
+        className="min-w-0 truncate text-xs text-muted-foreground"
+        title="每次对话都会带上"
+      >
+        {headline}
+      </div>
+    );
+  }
+
   const caption =
     tone === "over"
       ? "AI 暂时记不下新东西，去整理"
-      : tone === "near"
-        ? "AI 快记不下新东西了，去整理"
-        : "每次对话都会带上";
+      : "AI 快记不下新东西了，去整理";
+  const title = [
+    variant === "folder" ? "浅色是全局，深色是本文件夹" : null,
+    tone === "over" ? `已满：${caption}` : `快满了：${caption}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
+  return (
+    <div
+      className="min-w-0 rounded-lg bg-destructive/5 px-1.5 py-1.5"
+      title={title}
+    >
+      {/* Wraps rather than truncates: this is the state where 还剩/超出多少字 must
+          survive, and the block is already the one allowed to take room. */}
+      <div className="text-sm font-medium leading-snug text-destructive">
+        {headline}
+      </div>
+      <div className="mt-1.5 text-xs leading-snug text-destructive">
+        {caption}
+      </div>
+      <AlwaysQuotaBar quota={quota} variant={variant} />
+    </div>
+  );
+}
+
+/** 快满 / 已超 fill — calm scopes render no bar, so every tone here is destructive. */
+function AlwaysQuotaBar({
+  quota,
+  variant,
+}: {
+  quota: AlwaysQuota;
+  variant: "global" | "folder";
+}) {
   const max = Math.max(1, quota.maxChars);
   // When over the cap, scale segments against used so both tones stay visible
   // (max-based math would clamp global to 100% and hide the project slice).
@@ -555,76 +650,28 @@ function AlwaysQuotaMeter({
   const usedPct = over
     ? 100
     : Math.min(100, Math.max(0, (100 * quota.usedChars) / max));
-  const warn = tone !== "ok";
-
-  const titleParts = [
-    variant === "project" ? "浅色是全局，深色是本项目" : null,
-    tone === "over"
-      ? "已满：AI 暂时记不下新东西，去整理"
-      : tone === "near"
-        ? "快满了：AI 快记不下新东西了，去整理"
-        : "每次对话都会带上",
-  ].filter(Boolean);
 
   return (
-    <div
-      className={cn(
-        "min-w-0",
-        warn ? "rounded-lg bg-destructive/5 px-1.5 py-1.5" : "py-0.5",
-      )}
-      title={titleParts.join(" · ")}
-    >
-      <div
-        className={cn(
-          "truncate text-sm",
-          warn ? "font-medium text-destructive" : "text-muted-foreground",
-        )}
-      >
-        {headline}
-      </div>
-      <div
-        className={cn(
-          "mt-1.5 truncate text-xs leading-snug",
-          warn ? "text-destructive" : "text-muted-foreground/70",
-        )}
-      >
-        {caption}
-      </div>
-      <div
-        className={cn(
-          "flex h-1.5 w-full overflow-hidden rounded-full bg-muted",
-          warn ? "mt-2" : "mt-1.5",
-        )}
-      >
-        {variant === "project" ? (
-          <>
-            <div
-              className={cn(
-                "h-full transition-[width]",
-                warn ? "bg-destructive/45" : "bg-primary/35",
-              )}
-              style={{ width: `${globalPct}%` }}
-              title="全局"
-            />
-            <div
-              className={cn(
-                "h-full transition-[width]",
-                warn ? "bg-destructive" : "bg-primary/80",
-              )}
-              style={{ width: `${projectPct}%` }}
-              title="本项目"
-            />
-          </>
-        ) : (
+    <div className="mt-2 flex h-1.5 w-full overflow-hidden rounded-full bg-muted">
+      {variant === "folder" ? (
+        <>
           <div
-            className={cn(
-              "h-full rounded-full transition-[width]",
-              warn ? "bg-destructive" : "bg-primary/70",
-            )}
-            style={{ width: `${usedPct}%` }}
+            className="h-full bg-destructive/45 transition-[width]"
+            style={{ width: `${globalPct}%` }}
+            title="全局"
           />
-        )}
-      </div>
+          <div
+            className="h-full bg-destructive transition-[width]"
+            style={{ width: `${projectPct}%` }}
+            title="本文件夹"
+          />
+        </>
+      ) : (
+        <div
+          className="h-full rounded-full bg-destructive transition-[width]"
+          style={{ width: `${usedPct}%` }}
+        />
+      )}
     </div>
   );
 }
@@ -637,6 +684,8 @@ const EntryLeafRow = forwardRef<
     label: string;
     description: string;
     frontmatterError: string | null;
+    /** User marked this entry wrong: AI stops using it, the text stays (纠错通道). */
+    disputed?: boolean;
     active: boolean;
     onOpen: () => void;
     applyMode?: DocumentApplyMode;
@@ -651,6 +700,7 @@ const EntryLeafRow = forwardRef<
     label,
     description,
     frontmatterError,
+    disputed = false,
     active,
     onOpen,
     applyMode,
@@ -661,10 +711,15 @@ const EntryLeafRow = forwardRef<
   ref,
 ) {
   const hasMeta = Boolean(description || frontmatterError);
+  // A disputed entry no longer rides the prompt, so its always size is not being spent.
+  // Empty rows stay silent too, which is also what keeps a cold-start placeholder and a
+  // written-but-empty entry looking the same.
   const showAlwaysChars =
     applyMode === "always" &&
+    !disputed &&
     typeof alwaysChars === "number" &&
-    Number.isFinite(alwaysChars);
+    Number.isFinite(alwaysChars) &&
+    alwaysChars >= ROW_CHARS_FLOOR;
   return (
     <div
       ref={ref}
@@ -686,7 +741,23 @@ const EntryLeafRow = forwardRef<
         <span className={cn("shrink-0", hasMeta ? "mt-0.5" : "")}>{icon}</span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-center gap-1">
-            <span className="min-w-0 truncate">{label}</span>
+            <span
+              className={cn(
+                "min-w-0 truncate",
+                disputed && "text-muted-foreground line-through",
+              )}
+            >
+              {label}
+            </span>
+            {disputed ? (
+              <span
+                title="你标了「这条不对」：AI 不再使用，内容仍保留（右键可恢复）"
+                className="inline-flex shrink-0 items-center gap-0.5 text-muted-foreground"
+              >
+                <ThumbsDown size={12} aria-hidden />
+                <span className="text-xs">已停用</span>
+              </span>
+            ) : null}
             {frontmatterError ? (
               <span
                 title={`frontmatter 无效，该条不生效：${frontmatterError}`}
@@ -722,7 +793,11 @@ const EntryLeafRow = forwardRef<
       {applyMode && onToggleApplyMode ? (
         <button
           type="button"
-          title={`${APPLY_LABEL[applyMode]} · ${APPLY_HINT[applyMode]}（点击切换）`}
+          title={
+            disputed
+              ? `${APPLY_LABEL[applyMode]} · 已停用，AI 不会用（点击切换生效方式）`
+              : `${APPLY_LABEL[applyMode]} · ${APPLY_HINT[applyMode]}（点击切换）`
+          }
           aria-label={`生效方式：${APPLY_LABEL[applyMode]}，点击切换`}
           onClick={onToggleApplyMode}
           className={cn("shrink-0 rounded-full", hasMeta ? "mt-0.5" : "")}

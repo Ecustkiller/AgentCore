@@ -47,6 +47,7 @@ async def test_restore_into_workspace_uses_source_key_and_dest_root(monkeypatch,
         snapshot_id="snap-1",
         dest_user_id="u1",
         dest_folder_id=None,
+        dest_folder_rel_path=None,
         dest_conversation_id="job",
     )
 
@@ -57,7 +58,7 @@ async def test_restore_into_workspace_uses_source_key_and_dest_root(monkeypatch,
     )
     # … and extracted into the *job* conversation's workspace root.
     assert captured["root"] == workspace_root_path(
-        user_id="u1", folder_id=None, conversation_id="job"
+        user_id="u1", folder_rel_path=None, conversation_id="job"
     )
 
 

@@ -15,7 +15,7 @@ from agentcore.llm.resolve import ProviderPurpose
 # re-pick a model in settings. Same product semantics here when credentials are
 # absent at build_* (no silent platform key) — invariant text stays in details.
 _MISSING_LLM_CREDENTIALS_USER_MESSAGE = (
-    "当前模型不可用或凭据未就绪，请在「设置 · 模型配置」中改选可用模型后再试。"
+    "当前模型不可用或凭据未就绪，请在「设置 · 模型」中改选可用模型后再试。"
 )
 
 

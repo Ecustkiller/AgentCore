@@ -180,7 +180,7 @@ function runFaceSig(run: RunNode): string {
     run.error ? "1" : "0",
     run.failureKind ?? "",
     usage ? `${usage.input}+${usage.output}` : "",
-    cost ? `${cost.nano}:${cost.estimated ? 1 : 0}` : "",
+    cost ? `${cost.nano}:${cost.estimated ? 1 : 0}:${cost.currency}` : "",
     run.checkpoint?.status ?? "",
     escalationCountSig(run),
   ].join("|");
@@ -353,13 +353,16 @@ export function deriveAgentNodeLive(
   const foldedChildCount = foldInfo?.descendants.get(run.id)?.length ?? 0;
   const durationMs =
     foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
+  // 无 FX：同一节点内各 run 同凭据来源 → 同价卡表 → 同币种，按首个记名。
   let costNano = 0;
   let costEstimated = false;
+  let costCurrency: string | null = null;
   for (const r of roundRuns) {
     const m = pickCostMoney(r.cost);
     if (!m || m.nano <= 0) continue;
     costNano += m.nano;
     if (m.estimated) costEstimated = true;
+    costCurrency ??= m.currency;
   }
   const realTokens = roundRuns.reduce(
     (n, r) => n + (r.usage ? r.usage.input + r.usage.output : 0),
@@ -432,7 +435,9 @@ export function deriveAgentNodeLive(
     startedAt: faceRun.startedAt ?? run.startedAt,
     realTokens,
     costText:
-      costNano > 0 ? formatCostCaption(costNano, costEstimated) : undefined,
+      costNano > 0
+        ? formatCostCaption(costNano, costEstimated, costCurrency)
+        : undefined,
     handleDirection: opts.handleDirection,
     isSubtask,
     isRevision: isContinuation,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any, Literal, NamedTuple
 
 from agentcore.core.logging import get_logger
@@ -9,8 +10,17 @@ from agentcore.runtime.delegate.target_desktop_gate import gate_bare_chat_requir
 
 logger = get_logger(__name__)
 
-_AUTO_CLOUD_DESK_NAME_MAX = 200
-_DEFAULT_AUTO_CLOUD_DESK_NAME = "云项目"
+_DEFAULT_AUTO_CLOUD_DESK_NAME = "云文件夹"
+# 标题模型被要求「最多约 16 个字（或等长短语）」——按显示宽度量（CJK 计 2）正好是
+# 这个上限：约 16 个汉字 / 32 个西文字符。再长的就是一句话，不是名字。
+_NAME_SHAPE_MAX_WIDTH = 32
+# ``fallback_title`` 与 ``_sanitize_title``（memory.conversation_title）截断时在末尾
+# 留省略号。留着标记的标题是半句话，当侧栏标签还行，当目录名不成立。
+_TRUNCATION_MARKERS = ("…", "...")
+
+
+def _display_width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
 
 
 class AutoDeskPersistResult(NamedTuple):
@@ -29,18 +39,23 @@ class AutoDeskPersistResult(NamedTuple):
     outcome: Literal["won", "lost", "failed"]
 
 
-def auto_cloud_desk_name(
-    *,
-    conversation_title: str | None,
-    user_message: str | None,
-) -> str:
+def auto_cloud_desk_name(*, conversation_title: str | None) -> str:
+    """裸聊自动建桌的文件夹名——只有「形状像个名字」的会话标题才被采用。
+
+    这个名字会成为云端磁盘上的真实目录段，所以判断标准是「当文件夹名是否成立」，
+    而不是标题上限：够短、且不带截断标记（半句话）。不满足一律退通用名，用户可在
+    对话里当场改名。
+
+    用户原话**不作为**命名来源：那串话常含身份证号 / 电话 / 住址，而且没有任何形
+    状保证。标题是否由 LLM 生成无从追溯（追溯要加 DB 列、跨三层改），这里只做形状
+    判断，失败方向退通用名。
+    """
     title = (conversation_title or "").strip()
-    if title:
-        return title[:_AUTO_CLOUD_DESK_NAME_MAX]
-    preview = " ".join((user_message or "").split()).strip()
-    if preview:
-        return preview[:_AUTO_CLOUD_DESK_NAME_MAX]
-    return _DEFAULT_AUTO_CLOUD_DESK_NAME
+    if not title or title.endswith(_TRUNCATION_MARKERS):
+        return _DEFAULT_AUTO_CLOUD_DESK_NAME
+    if _display_width(title) > _NAME_SHAPE_MAX_WIDTH:
+        return _DEFAULT_AUTO_CLOUD_DESK_NAME
+    return title
 
 
 async def load_conversation_title(
@@ -196,16 +211,28 @@ async def reclaim_orphan_auto_desk_folder(
     user_id: str,
     folder_id: str,
 ) -> None:
-    """Soft-delete a Folder minted by a race loser (best-effort, no sweeper)."""
+    """Soft-delete a Folder minted by a race loser (best-effort, no sweeper).
+
+    Tagged as a machine reclaim so it never reaches the「最近删除」recycle bin: the
+    folder is named after a conversation title and would otherwise be indistinguishable
+    from a project the user deleted on purpose.
+    """
     cleaned = folder_id.strip() if isinstance(folder_id, str) else ""
     if not user_id or not cleaned:
         return
     try:
         from agentcore.db.base import async_session_factory
         from agentcore.db.repositories import FolderRepository
+        from agentcore.db.repositories.folders import (
+            FOLDER_DELETE_ORIGIN_AUTO_DESK_RECLAIM,
+        )
 
         async with async_session_factory() as session:
-            deleted = await FolderRepository(session).soft_delete(cleaned, user_id=user_id)
+            deleted = await FolderRepository(session).soft_delete(
+                cleaned,
+                user_id=user_id,
+                origin=FOLDER_DELETE_ORIGIN_AUTO_DESK_RECLAIM,
+            )
         if deleted:
             logger.info(
                 "delegate.auto_desk_orphan_reclaimed",

@@ -45,6 +45,7 @@ from agentcore.runtime.runs.executor.shared import (
 from agentcore.runtime.runs.landing_product import filter_product_landing_paths
 from agentcore.runtime.runs.serialize import (
     debrief_from_transcript,
+    file_products_from_transcript,
     files_touched_from_transcript,
     landing_write_failure_kind,
 )
@@ -119,7 +120,7 @@ async def continue_run(
     base_tool_context: ToolContext,
     execution_id: str,
     profile_set: ProfileSet | None = None,
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     round_no: int = 0,
     side_key: str | None = None,
     context_blocks: list[ContextBlock] | None = None,
@@ -200,7 +201,7 @@ async def _continue_run_scoped(
     base_tool_context: ToolContext,
     execution_id: str,
     profile_set: ProfileSet | None = None,
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     round_no: int = 0,
     side_key: str | None = None,
     context_blocks: list[ContextBlock] | None = None,
@@ -455,7 +456,8 @@ async def _continue_run_scoped(
             ).to_fact()
         )
         debrief = debrief_from_transcript(messages)
-        touched = files_touched_from_transcript(messages)
+        products = file_products_from_transcript(messages)
+        touched = [p.path for p in products]
         warnings = [] if verdict.ok else list(verdict.failures)
         warnings, debrief = _apply_finish_interrupt(
             finish_override,
@@ -478,6 +480,7 @@ async def _continue_run_scoped(
             touched,
             phase=RunPhase.COMPLETED,
             path_rejections=path_rej,
+            products=products,
         )
         sink.emit(
             run_completed(

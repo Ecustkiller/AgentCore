@@ -71,11 +71,7 @@ def _grant_citation_rework_reread(
         )
 
 
-def _two_phase_citation(
-    deliverable: Any,
-    *,
-    landed_paths: list[str] | None = None,
-) -> bool:
+def _two_phase_citation(deliverable: Any) -> bool:
     from agentcore.runtime.runs.research_quality import is_two_phase_citation_deliverable
 
-    return is_two_phase_citation_deliverable(deliverable, landed_paths=landed_paths)
+    return is_two_phase_citation_deliverable(deliverable)

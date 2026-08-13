@@ -29,6 +29,12 @@ from agentcore.runtime.events.chat import (
     turn_saved,
     turn_warning,
 )
+from agentcore.runtime.events.conversation_hub import (
+    ConversationStreamHub,
+    ConversationWatcher,
+    conversation_streams,
+    publish_conversation_signal,
+)
 from agentcore.runtime.events.debate import (
     debate_pretrial_completed,
     debate_pretrial_orders,
@@ -97,9 +103,10 @@ from agentcore.runtime.events.run import (
     user_interjection,
     workspace_lock_wait,
 )
-from agentcore.runtime.events.sink import EventSink
+from agentcore.runtime.events.sink import EventSink, SinkSubscription
 from agentcore.runtime.events.types import EventType, FinishReason, SSEEvent
 from agentcore.runtime.events.workspace import (
+    auto_folder_created,
     handoff_apply_done,
     handoff_job_started,
     handoff_snapshot_done,
@@ -113,6 +120,11 @@ __all__ = [
     "FinishReason",
     "SSEEvent",
     "EventSink",
+    "SinkSubscription",
+    "ConversationStreamHub",
+    "ConversationWatcher",
+    "conversation_streams",
+    "publish_conversation_signal",
     "_JOURNAL_EVENT_TYPES",
     "_JOURNAL_SURFACE_TYPES",
     "message_start",
@@ -147,6 +159,7 @@ __all__ = [
     "external_mount_readonly_required",
     "host_op_required",
     "mcp_op_required",
+    "auto_folder_created",
     "handoff_snapshot_done",
     "handoff_job_started",
     "handoff_apply_done",

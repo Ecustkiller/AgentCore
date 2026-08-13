@@ -1422,6 +1422,41 @@ async def test_external_stop_cancels_inflight_with_stop_reason():
     assert {msg for _, msg in cancel_msgs} == {"stop"}
 
 
+async def test_hard_timeout_target_cancels_with_worker_timeout_msg():
+    """硬超时强杀与「改派」共用 cancel 通道，但 msg 必须说实话（→ run_cancelled.reason）。"""
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b"))
+    cancel_targets: set[str] = set()
+    cancel_msgs: list[tuple[str, str | None]] = []
+    a_started = asyncio.Event()
+
+    async def slow_ex(spec: RunSpec, _completed) -> RunState:
+        if spec.run_id == "a":
+            a_started.set()
+            try:
+                await asyncio.sleep(10)
+            except asyncio.CancelledError as e:
+                cancel_msgs.append((spec.run_id, str(e.args[0]) if e.args else None))
+                raise
+        return RunState(phase=RunPhase.COMPLETED, content=spec.run_id)
+
+    async def _schedule_cancel():
+        await a_started.wait()
+        cancel_targets.add("a")
+
+    asyncio.create_task(_schedule_cancel())
+    res = await WaveScheduler().run(
+        plan,
+        slow_ex,
+        cancel_run_ids=lambda: frozenset(cancel_targets),
+        timeout_run_ids=lambda: frozenset({"a"}),
+    )
+    assert cancel_msgs == [("a", "worker_timeout")]
+    assert res["a"].phase is RunPhase.CANCELLED  # absorbed like redirect, sibling unaffected
+    assert res["b"].phase is RunPhase.COMPLETED
+
+
 async def test_redirect_path_does_not_swallow_stop_cancel():
     """A worker already stop-cancelled must not be absorbed via redirect marker.
 

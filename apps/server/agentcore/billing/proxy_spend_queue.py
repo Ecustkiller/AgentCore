@@ -7,8 +7,8 @@ materializes ``cost_events`` by run_id (as-built: 成本配额 §三). Drain / l
 live on ``CostLedgerQueue``.
 
 Pricing / attribution field assembly is shared with in-process metering via
-:mod:`agentcore.billing.ledger_call` — this facade only gates conversation_id
-and stamps ``source=proxy_spend``.
+:mod:`agentcore.billing.ledger_call` — this facade only stamps
+``source=proxy_spend``.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ class ProxySpendQueue:
         self,
         *,
         user_id: str,
-        conversation_id: str,
+        conversation_id: str | None,
         model: str,
         usage: TokenUsage,
         trace_id: str | None = None,
@@ -62,14 +62,20 @@ class ProxySpendQueue:
         credential_source: str | None = None,
         duration_ms: int = 0,
     ) -> str | None:
-        """Price one inference call and enqueue a detail row (+ materialize run)."""
-        if not conversation_id:
+        """Price one inference call and enqueue a detail row (+ materialize run).
+
+        A missing ``conversation_id`` header no longer drops the spend — the row
+        goes in account-level (NULL conversation), same shape as in-process
+        metering. The header gap stays observable, since a sidecar turn should
+        always carry one.
+        """
+        conversation_id = conversation_id or None
+        if conversation_id is None:
             logger.warning(
                 "inference.proxy_spend_no_conversation",
                 user_id=user_id,
                 model=model,
             )
-            return None
 
         call = assemble_ledger_call(
             model=model,

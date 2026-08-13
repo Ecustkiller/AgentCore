@@ -57,6 +57,7 @@ async def _run_abort_worker(*, with_partial: bool):
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     return plan, res["t_1"]
@@ -135,6 +136,7 @@ async def test_interrupted_empty_pass_tells_retry_it_was_a_transport_cut():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -166,6 +168,7 @@ async def test_unknown_deliverable_fields_ignored_no_contract_retry():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -188,6 +191,7 @@ async def test_clean_success_has_no_finish_interrupt_warning():
         system_prompt="SYS",
         user_message="req",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]

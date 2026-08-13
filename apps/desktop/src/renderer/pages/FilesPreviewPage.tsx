@@ -1,3 +1,4 @@
+import { FileTree } from "@/components/files/FileTree";
 import { AgentCoreSection } from "@/components/files/fileWorkbench/AgentCoreSection";
 import { queryClient } from "@/lib/queryClient";
 import {
@@ -6,6 +7,7 @@ import {
   type FilesPreviewSceneId,
   alwaysQuotaForScene,
   entriesForScene,
+  filesPreviewSource,
 } from "@/preview/filesScenes";
 import { FlaskConical } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
@@ -80,8 +82,9 @@ export function FilesPreviewPage() {
         </div>
       </aside>
       <div className="min-h-0 min-w-0 flex-1 bg-background p-4">
+        {/* w-72 = FileWorkbench 左栏默认宽度，好让截图能看出窄栏截断。 */}
         <div
-          className="mx-auto h-full max-w-sm overflow-y-auto rounded-xl border border-border bg-card p-2 shadow-sm"
+          className="mx-auto h-full w-72 overflow-y-auto rounded-xl border border-border bg-card p-2 shadow-sm"
           data-files-rail
         >
           <AgentCoreSection
@@ -98,21 +101,25 @@ export function FilesPreviewPage() {
           />
           <div className="my-3 border-t border-border" />
           <div className="px-2 pb-1 text-xs font-medium text-muted-foreground">
-            示例项目
+            示例文件夹
           </div>
           <AgentCoreSection
-            scope={{
-              kind: "project",
-              folderId: PROJECT_FOLDER_ID,
-              projectName: "示例项目",
-            }}
+            scope={{ kind: "folder", folderId: PROJECT_FOLDER_ID }}
             memoryActivePath={null}
             documentActivePath={null}
             onOpenEntry={() => undefined}
             onEntryDeleted={() => undefined}
             onEntryRenamed={() => undefined}
-            indent={0}
+            indent={14}
             forceOpen
+          />
+          {/* 文件夹自己的盘上文件——与上面的条目区同屏，好核对两者已不同名。 */}
+          <FileTree
+            source={filesPreviewSource}
+            chrome={false}
+            indent={14}
+            activePath={null}
+            onOpenFile={() => undefined}
           />
         </div>
       </div>

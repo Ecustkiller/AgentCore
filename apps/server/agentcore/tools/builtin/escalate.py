@@ -294,7 +294,11 @@ class EscalateTool:
         # regression (设计 §4.4).
         # 结构化升级（复用 ask_user 的问题规整）：把岔路拆成 choice/text 选项随挂起卡下发。
         # Local import 避免经 ask_user 包 __init__ 触发 runtime 依赖环。
-        from agentcore.tools.builtin.ask_user.schema import ListArgError, normalize_questions
+        from agentcore.tools.builtin.ask_user.schema import (
+            ListArgError,
+            OptionLabelError,
+            normalize_questions,
+        )
 
         channel = context.escalation
         if blocking and channel is not None and channel.armed:
@@ -308,6 +312,21 @@ class EscalateTool:
                     error=(
                         f"{exc} 请直接传 JSON 数组，不要把数组再序列化成字符串。"
                     ),
+                )
+            # Same normalizer as ask_user, so it raises the same label rejection here.
+            # Unhandled it escapes as a crash whose traceback reaches the event stream
+            # and the escalation card never opens — the human is simply never asked.
+            except OptionLabelError as exc:
+                logger.info(
+                    "worker.escalate_option_label_rejected",
+                    run_id=context.run_id,
+                    error=str(exc),
+                )
+                return ToolResult(
+                    tool_call_id="",
+                    success=False,
+                    output="",
+                    error=str(exc),
                 )
             # browser_login / 写权冲突 must reach the human (password never touches AI;
             # 「移交」自然语言不会自动转锁). Skip coordination CEO arbitration.

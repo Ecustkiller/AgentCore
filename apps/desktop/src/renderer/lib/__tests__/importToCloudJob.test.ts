@@ -58,7 +58,7 @@ describe("startImportToCloudJob toasts", () => {
       startImportToCloudJob({
         root,
         ownsRoot: true,
-        projectName: "Demo",
+        folderName: "Demo",
       }),
     ).toBe(true);
     expect(toast).toHaveBeenCalledWith(
@@ -85,7 +85,7 @@ describe("startImportToCloudJob toasts", () => {
     startImportToCloudJob({
       root,
       ownsRoot: true,
-      projectName: "Demo",
+      folderName: "Demo",
     });
     await flush();
     expect(toast.success).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe("startImportToCloudJob toasts", () => {
     startImportToCloudJob({
       root,
       ownsRoot: true,
-      projectName: "Part",
+      folderName: "Part",
     });
     await flush();
     expect(toast.success).toHaveBeenCalledWith(
@@ -145,7 +145,7 @@ describe("startImportToCloudJob toasts", () => {
     startImportToCloudJob({
       root,
       ownsRoot: true,
-      projectName: "Partial",
+      folderName: "Partial",
     });
     await flush();
     expect(toast.warning).toHaveBeenCalledWith(
@@ -173,7 +173,7 @@ describe("startImportToCloudJob toasts", () => {
     startImportToCloudJob({
       root,
       ownsRoot: true,
-      projectName: "Demo",
+      folderName: "Demo",
     });
     await flush();
     expect(toast).toHaveBeenLastCalledWith(
@@ -191,11 +191,11 @@ describe("startImportToCloudJob toasts", () => {
     startImportToCloudJob({
       root,
       ownsRoot: true,
-      projectName: "Demo",
+      folderName: "Demo",
     });
     await flush();
     expect(toast.error).toHaveBeenCalledWith(
-      "导入到云失败",
+      "导入到「我的文件」失败",
       expect.objectContaining({
         duration: 8_000,
         action: undefined,

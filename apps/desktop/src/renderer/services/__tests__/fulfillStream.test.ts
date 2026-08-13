@@ -28,6 +28,7 @@ vi.mock("@/lib/clientBuildInfo", () => ({
 
 vi.mock("@/services/deviceIdentity", () => ({
   getDeviceId: () => getDeviceIdMock(),
+  resetDeviceIdentityForTests: () => undefined,
 }));
 
 vi.mock("@/services/api", () => ({
@@ -48,6 +49,25 @@ import {
 
 function flushMicrotasks(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A fresh SSE response per fetch — a Response body is single-use. */
+function sseResponse(opts: { end?: boolean } = {}): Response {
+  const encoder = new TextEncoder();
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"ready"}\n\n'));
+        if (opts.end) controller.close();
+      },
+    }),
+    { status: 200, headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
+/** Roots declared on one `GET /v1/fulfill` call (`""` = declared empty). */
+function declaredRoots(call: unknown[] | undefined): string | null {
+  return new URL(String(call?.[0])).searchParams.get("roots");
 }
 
 describe("fulfillStream", () => {
@@ -286,6 +306,109 @@ describe("fulfillStream", () => {
     });
     // no reconnect solely for roots change
     expect(fetchMock.mock.calls.length).toBe(fetchesAfterConnect);
+
+    stopFulfillStream();
+  });
+
+  it("授权根读不出来时保持既有声明，不上报空集", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async () => sseResponse());
+
+    startFulfillStream();
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
+      device_id: "device-test-1",
+      roots: ["root-a"],
+    });
+    const postsAfterConnect = apiPostMock.mock.calls.length;
+
+    // 主进程读授权根失败（IPC 挂了）——这不等于「用户撤了权」
+    listRoots.mockRejectedValue(new Error("IPC 不可用"));
+    rootsChangedCb?.();
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(apiPostMock).not.toHaveBeenCalledWith("/v1/fulfill/roots", {
+      device_id: "device-test-1",
+      roots: [],
+    });
+    expect(apiPostMock.mock.calls.length).toBe(postsAfterConnect);
+    expect(warn).toHaveBeenCalled();
+
+    stopFulfillStream();
+    warn.mockRestore();
+  });
+
+  it("读取失败时重连仍声明上次已知 roots", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const fetchMock = vi.mocked(fetch);
+    // 每次连上即收尾 → 走真实重连路径
+    fetchMock.mockImplementation(async () => sseResponse({ end: true }));
+
+    startFulfillStream();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(declaredRoots(fetchMock.mock.calls[0])).toBe("root-a");
+
+    listRoots.mockRejectedValue(new Error("IPC 不可用"));
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // 重连的 GET 会整体替换 hub 里的 session：读不到就不能把 roots 缩成空集
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(declaredRoots(fetchMock.mock.calls[1])).toBe("root-a");
+    expect(apiPostMock).not.toHaveBeenCalledWith("/v1/fulfill/roots", {
+      device_id: "device-test-1",
+      roots: [],
+    });
+
+    stopFulfillStream();
+    warn.mockRestore();
+    vi.mocked(Math.random).mockRestore();
+  });
+
+  it("用户撤销全部授权 → 如实上报空集，重连也声明空集", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async () => sseResponse());
+
+    startFulfillStream();
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
+      device_id: "device-test-1",
+      roots: ["root-a"],
+    });
+
+    listRoots.mockResolvedValue([]);
+    rootsChangedCb?.();
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
+      device_id: "device-test-1",
+      roots: [],
+    });
+
+    // 撤权后再连：上次已知集合不得把真实空集盖回去
+    stopFulfillStream();
+    startFulfillStream();
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(declaredRoots(fetchMock.mock.calls.at(-1))).toBe("");
 
     stopFulfillStream();
   });

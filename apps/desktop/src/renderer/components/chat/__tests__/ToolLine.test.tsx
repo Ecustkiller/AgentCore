@@ -305,7 +305,7 @@ describe("ToolLine · 过程工具默认折叠", () => {
     expect(screen.getAllByText("部署流程")).toHaveLength(1);
   });
 
-  it("suppresses the peek for read_conversation — title chip only", () => {
+  it("read_conversation 折叠态亮对话标题（不摆 conversation_id、不泄正文）", () => {
     render(
       <ToolLine
         step={step({
@@ -322,7 +322,8 @@ describe("ToolLine · 过程工具默认折叠", () => {
       />,
     );
     expect(screen.queryByText(/很长的 transcript/)).toBeNull();
-    expect(screen.getByText("conv_abc")).toBeTruthy();
+    expect(screen.queryByText("conv_abc")).toBeNull();
+    expect(screen.getByText("上周方案")).toBeTruthy();
   });
 
   it("suppresses the peek for consult_skill — the summary shows only when expanded", () => {
@@ -671,14 +672,19 @@ describe("ToolLineGroup · 混杂组浏览器 CTA", () => {
 });
 
 describe("toolDetail · title chip", () => {
-  it("prefers path / name / run_id over long prose bodies", () => {
+  it("prefers path / name over long prose bodies", () => {
     expect(toolDetail({ path: "a/b.md", draft: "## 长草稿\n更多" })).toBe(
       "a/b.md",
     );
     expect(toolDetail({ name: "部署流程" })).toBe("部署流程");
-    expect(toolDetail({ run_id: "run_1", answer: "很长的裁决正文……" })).toBe(
-      "run_1",
-    );
+  });
+
+  it("绝不把内部标识摆进标题（用户对不上协作图上的角色名）", () => {
+    expect(
+      toolDetail({ run_id: "r-a3f2e1c8-9b21", answer: "很长的裁决正文……" }),
+    ).toBe("");
+    expect(toolDetail({ conversation_id: "c-8f31ab02" })).toBe("");
+    expect(toolDetail({ interjection_id: "i-77120c9a" })).toBe("");
   });
 
   it("does not leak update_synthesis draft into the title", () => {
@@ -884,6 +890,46 @@ describe("ToolLine · file_read ceiling guidance", () => {
     );
     // Only the real code_execute fault counts — ceiling is guidance.
     expect(screen.getByText("1 failed")).toBeTruthy();
+  });
+});
+
+describe("ToolLine · git 执行相位", () => {
+  // git can sit ~2min behind the repo queue, a credential lookup and a remote round
+  // trip. Each of those waits reports its own phase, so the running row must name the
+  // leg instead of showing a bare pulse — and each backend token needs real copy here.
+  it.each([
+    ["git_queued", "Waiting for repo"],
+    ["git_credentials", "Checking credentials"],
+    ["git_remote", "Contacting remote"],
+    ["executing", "Running"],
+  ] as const)("shows %s as「%s」while the call is in flight", (phase, text) => {
+    render(
+      <ToolLine
+        step={step({
+          tool_name: "git",
+          arguments: { subcommand: "push" },
+          result: null,
+          status: "running",
+          phase,
+        })}
+      />,
+    );
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+
+  it("degrades an unknown backend phase to the generic hint", () => {
+    render(
+      <ToolLine
+        step={step({
+          tool_name: "git",
+          arguments: { subcommand: "push" },
+          result: null,
+          status: "running",
+          phase: "git_future_leg" as never,
+        })}
+      />,
+    );
+    expect(screen.getByText("Working")).toBeTruthy();
   });
 });
 

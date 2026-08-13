@@ -4,6 +4,7 @@
 export type SSEEventType =
   | "approval_required"
   | "approval_resolved"
+  | "auto_folder_created"
   | "batch_metrics"
   | "board_op_required"
   | "board_read_required"

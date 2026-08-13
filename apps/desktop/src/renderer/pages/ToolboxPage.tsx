@@ -40,7 +40,7 @@ const MANUAL: ToolboxEntry = {
   description: "从上手到玩转，到看懂团队怎么运转",
   icon: BookOpen,
   color: "manual",
-  to: "/toolbox/manual",
+  to: APP_PATHS.toolbox.manual.root,
 };
 
 // 只列真能点进去的创作工具。文档 / 思维导图 / 多维表格 / 幻灯片 / 可运行产物属未开工方向，
@@ -65,7 +65,7 @@ const CAPABILITIES: ToolboxEntry[] = [
     description: "Agent 可调用的动作工具，含可用性与调用参数",
     icon: Wrench,
     color: "tools",
-    to: "/toolbox/tools",
+    to: APP_PATHS.toolbox.tools,
   },
   {
     id: "guidelines",
@@ -74,7 +74,7 @@ const CAPABILITIES: ToolboxEntry[] = [
       "AI 遵循的提示词：全员准则 + CEO 完整提示词 + 工具进阶用法（薄技能）",
     icon: ScrollText,
     color: "guidelines",
-    to: "/toolbox/guidelines",
+    to: APP_PATHS.toolbox.guidelines,
   },
   {
     id: "automations",
@@ -94,11 +94,11 @@ const CAPABILITIES: ToolboxEntry[] = [
   },
   {
     id: "connectors",
-    title: "集成 · 连接器",
+    title: "连接器",
     description: "MCP 与第三方服务接入",
     icon: Plug,
     color: "connectors",
-    to: "/toolbox/connectors",
+    to: APP_PATHS.toolbox.connectors,
   },
 ];
 

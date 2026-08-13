@@ -7,6 +7,8 @@ into appropriate HTTP responses. Every ``code`` is a member of the single
 so codes never drift apart from the SSE emitters or the frontend mirror.
 """
 
+from datetime import UTC, datetime, timedelta
+
 from agentcore.core.error_codes import ErrorCode
 
 
@@ -50,21 +52,142 @@ class OurServiceUnavailableError(LLMError):
     retryable = True
 
 
+# Longest upstream ``Retry-After`` an interactive turn will actually sit out.
+# Single source for two decisions that must never drift apart: the provider retry
+# loop refuses to sleep past it (``llm.provider.openai_compatible``), and the 429
+# faces below refuse to keep advertising a retry nobody will attempt.
+MAX_RETRY_AFTER = 30.0
+
+
+def format_retry_after_moment(retry_after: float, *, now: datetime | None = None) -> str:
+    """Wall-clock UTC moment a ``retry_after``-second cooldown ends at.
+
+    Day-scale ``Retry-After`` values are upstream day resets, so the honest thing
+    to show is when service returns — never「等 16.6 小时」, which reads as a
+    promise no retry budget ever made. UTC is stamped explicitly (the quota gate's
+    「明日 0 点（UTC）重置」convention) instead of the server's local zone, which
+    is not the user's.
+    """
+    base = now.astimezone(UTC) if now is not None else datetime.now(UTC)
+    moment = base + timedelta(seconds=retry_after)
+    return f"{moment.month} 月 {moment.day} 日 {moment:%H:%M}（UTC）"
+
+
 class LLMRateLimitError(LLMError):
-    """LLM API rate limit hit (429). User-facing zh message; retryable."""
+    """LLM API rate limit hit (429). User-facing zh message.
+
+    Retryable only while the cooldown fits an interactive turn. Past
+    :data:`MAX_RETRY_AFTER` the provider loop already refuses to retry, so the
+    error stops saying「请稍后再试」and names the moment upstream frees up
+    instead — otherwise the user obeys copy the engine has already overruled
+    and burns a handful of guaranteed-failing retries.
+
+    Inside the ceiling the copy still says「再试」but never「点重试」: the red
+    error card carries no retry control (定案 A), so naming a button sends the
+    user hunting for one. Re-sending the message is the real next step.
+
+    Platform-funded turns take the ``QUOTA_EXCEEDED`` face for that same long
+    cooldown: build 429s through :func:`upstream_rate_limit_error` so the split
+    by credential source happens in one place.
+    """
 
     code = ErrorCode.LLM_RATE_LIMIT
     retryable = True
 
-    def __init__(self, retry_after: float | None = None, **kwargs):
+    def __init__(
+        self,
+        retry_after: float | None = None,
+        *,
+        now: datetime | None = None,
+        **kwargs,
+    ):
         self.retry_after = retry_after
-        # 工程侧不睡满 >30s 的 Retry-After；文案也不承诺「等一小时」。
-        if retry_after is not None and 0 < retry_after <= 30:
-            message = f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试，或点重试。"
+        if retry_after is not None and retry_after > MAX_RETRY_AFTER:
+            self.retryable = False
+            # BYOK: the throttled allowance is the user's own; unknown source
+            # stays on the vaguer「上游额度」rather than guessing whose key it is.
+            whose = (
+                "你的服务商额度"
+                if kwargs.get("credential_source") == "user"
+                else "上游额度"
+            )
+            message = (
+                f"上游限流，本回合无法继续。{whose}将于 "
+                f"{format_retry_after_moment(retry_after, now=now)} 恢复，"
+                "在此之前重试仍会失败。"
+            )
+        elif retry_after is not None and 0 < retry_after <= MAX_RETRY_AFTER:
+            message = f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试。"
         else:
-            message = "上游限流，暂时无法继续本回合。请稍后再试或点重试。"
+            message = "上游限流，暂时无法继续本回合。请稍后再试。"
         # retry_after 进 details，供 SSE ErrorContext / history 复用。
         super().__init__(message, retry_after=retry_after, **kwargs)
+
+
+class LLMQuotaExceededError(LLMError):
+    """Our own cloud hop refused the call because a usage quota is exhausted.
+
+    The sidecar leaf reaches models through ``/inference/``, which answers
+    ``QUOTA_EXCEEDED`` for a fault only the cloud can see: the user's allowance is
+    spent. Distinct from :class:`LLMRateLimitError` — nothing clears on its own, so
+    retrying only burns a minute of backoff before repeating the same refusal, and
+    the remedy is the ``QUOTA_EXCEEDED`` CTA (wait for reset / bring your own key)
+    rather than「稍后再试」.
+
+    Wire twin of :class:`QuotaExceededError` (route preflight, HTTP 429) for the
+    leaf side of that hop: same code, but an ``LLMError`` so the provider retry loop
+    and the turn's error surfacing treat it like any other leaf failure.
+
+    Also the face a *vendor* 429 takes when a platform key draws a cooldown longer
+    than :data:`MAX_RETRY_AFTER` (:func:`upstream_rate_limit_error`): to the user
+    that is the same wall — an operator-owned allowance they cannot clear.
+    """
+
+    code = ErrorCode.QUOTA_EXCEEDED
+    status_code = 429
+    retryable = False
+
+    _DEFAULT_MESSAGE = (
+        "额度已用完，本回合无法继续。请等待额度重置，"
+        "或在「设置 · 服务商」接入自己的 API Key。"
+    )
+
+    def __init__(self, message: str | None = None, **kwargs):
+        super().__init__(message or self._DEFAULT_MESSAGE, **kwargs)
+
+
+def upstream_rate_limit_error(
+    retry_after: float | None,
+    *,
+    credential_source: str | None = None,
+    now: datetime | None = None,
+    **details,
+) -> LLMError:
+    """Product face for an upstream 429, split by who funds the key.
+
+    Inside :data:`MAX_RETRY_AFTER` this is an ordinary retryable rate limit.
+    Past it the turn is not retried at all, and the two credential sources need
+    different exits: a platform-funded call hit an allowance wall the user cannot
+    clear, so it takes the ``QUOTA_EXCEEDED`` face (client suppresses retry and
+    offers「接入自己的 Key」); BYOK keeps the rate-limit face, since telling a user
+    who already brought their own key to bring one is nonsense. An unknown source
+    takes the BYOK-free conservative branch rather than guessing a platform wall.
+    """
+    if credential_source in ("user", "platform"):
+        details["credential_source"] = credential_source
+    if (
+        retry_after is not None
+        and retry_after > MAX_RETRY_AFTER
+        and details.get("credential_source") == "platform"
+    ):
+        return LLMQuotaExceededError(
+            "平台模型额度已用完，本回合无法继续。上游将于 "
+            f"{format_retry_after_moment(retry_after, now=now)} 恢复；"
+            "或在「设置 · 服务商」接入自己的 API Key 立即继续。",
+            retry_after=retry_after,
+            **details,
+        )
+    return LLMRateLimitError(retry_after, now=now, **details)
 
 
 class LLMTimeoutError(LLMError):
@@ -124,6 +247,37 @@ class LLMInsufficientBalanceError(LLMError):
         super().__init__(message, **kwargs)
 
 
+# Single source for「你还没配 key」across the leaf error and the route preflights
+# (conversations / inference proxy pass it as ``byok_missing_message``). It named a
+# 「模型配置」page that never existed, and the rename had to touch four copies —
+# one constant so the next wording change is one edit.
+BYOK_KEY_REQUIRED_MESSAGE = "请先在「设置 · 服务商」中填入你的 API Key，再发起对话。"
+
+
+class LLMKeyRequiredError(LLMError):
+    """A turn reached the model hop with no BYOK key configured at all.
+
+    Wire twin of :class:`BYOKKeyMissingError` (route preflight, HTTP 402) for the
+    sidecar leaf: the cloud ``/inference/`` hop refuses before it ever contacts a
+    vendor, and the leaf must keep the ``LLM_KEY_REQUIRED`` code so the client
+    routes to 设置·服务商. Distinct from :class:`LLMInsufficientBalanceError` —
+    there is no key and no account to top up, so 充值 is the wrong remedy — and not
+    retryable, since only the user adding a key can change the outcome.
+
+    Copy names 服务商 because that is the settings page keys actually live on;
+    「模型配置」 was a page this product never shipped.
+    """
+
+    code = ErrorCode.LLM_KEY_REQUIRED
+    status_code = 402
+    retryable = False
+
+    _DEFAULT_MESSAGE = BYOK_KEY_REQUIRED_MESSAGE
+
+    def __init__(self, message: str | None = None, **kwargs):
+        super().__init__(message or self._DEFAULT_MESSAGE, **kwargs)
+
+
 class LLMAuthError(LLMError):
     """Configured API key rejected upstream (HTTP 401/403): invalid, revoked,
     or lacking permission — for any provider (BYOK DeepSeek, platform Claude, …).
@@ -132,7 +286,7 @@ class LLMAuthError(LLMError):
     *configured* key fails mid-turn, so it surfaces as an inline ``error`` event. Not
     retryable — re-sending with the same bad key just re-fails — and its message (and
     the ``LLM_KEY_INVALID`` code, which the client maps to a "去配置" action) routes
-    the user back to 设置·模型配置 to fix the key.
+    the user back to 设置·服务商 to fix the key.
 
     Platform keys are operator-owned: default copy must not echo upstream gateway
     help (e.g. CC Switch tutorials) or the internal provider label ``platform``.
@@ -163,7 +317,7 @@ class LLMAuthError(LLMError):
                     label = name
                 else:
                     label = "服务商"
-                message = f"{label} API Key 无效或无权限，请在「设置 · 模型配置」中更新后重试。"
+                message = f"{label} API Key 无效或无权限，请在「设置 · 服务商」中更新后重试。"
         # Wire CTA 分流：platform → 接入自己的 Key；user/BYOK → 去设置换 Key。
         if "credential_source" not in kwargs:
             kwargs["credential_source"] = "platform" if name == "platform" else "user"
@@ -183,8 +337,9 @@ class InferenceTokenExpiredError(LLMAuthError):
     code = ErrorCode.INFERENCE_TOKEN_EXPIRED
     retryable = True
 
+    # 「再试」= 重发本条消息：红错误卡不挂重试按钮（定案 A），点名一个按钮只会让人白找。
     _DEFAULT_MESSAGE = (
-        "本地与云端的推理凭证已失效或过期。请点击重试（将自动换新凭证）；仍失败请重新登录后再试。"
+        "本地与云端的推理凭证已失效或过期。请稍后再试（将自动换新凭证）；仍失败请重新登录后再试。"
     )
 
     def __init__(self, message: str | None = None, **kwargs):
@@ -366,6 +521,8 @@ class QuotaExceededError(AgentCoreError):
     client can surface a "quota reached" state distinct from auth (401) or
     validation (422). ``dimension`` / ``used`` / ``limit`` ride along on the
     exception for logging and tests.
+
+    Leaf-side twin (same code, inside the LLM family): :class:`LLMQuotaExceededError`.
     """
 
     code = ErrorCode.QUOTA_EXCEEDED
@@ -391,10 +548,12 @@ class BYOKKeyMissingError(AgentCoreError):
 
     In BYOK billing mode every user-facing turn runs on the user's own API key;
     with none configured the turn is refused *before* the SSE opens (route preflight)
-    so the client can route the user to 设置·模型配置 rather than getting a
+    so the client can route the user to 设置·服务商 rather than getting a
     half-opened stream. 402 Payment Required fits "you must supply your own
     billing credentials to proceed", and the ``LLM_KEY_REQUIRED`` code lets the
     client distinguish it from auth (401) / quota (429).
+
+    Leaf-side twin (same code, inside the LLM family): :class:`LLMKeyRequiredError`.
     """
 
     code = ErrorCode.LLM_KEY_REQUIRED

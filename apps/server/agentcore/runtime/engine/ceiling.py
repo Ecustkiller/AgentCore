@@ -10,12 +10,15 @@ from agentcore.core.types import ToolEffect
 from agentcore.llm.profiles import ProfileParams
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+from agentcore.runtime.approvals import ApprovalGate
 from agentcore.runtime.events import EventSink, FinishReason, escalation_raised
+from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.loop_controller import LoopController
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
 from .ask_user_absorb import prepare_blocking_ask_user_tool_calls
+from .escalation_gate import apply_escalation_gate
 from .finalize import force_finalize
 from .segments import join_segments
 from .tool_exec import execute_tools
@@ -105,6 +108,11 @@ async def ceiling_finalize(
     tool_context: ToolContext,
     sink: EventSink,
     finish_override_sink: list[FinishReason] | None,
+    approval_gate: ApprovalGate | None,
+    citation_sink: list[dict[str, Any]] | None,
+    annotate_citations: bool,
+    turn_evidence_ledger: EvidenceLedgerCore | None,
+    ledger_registrant: str,
     gate_escalation_sink: list[dict[str, Any]] | None,
     cutoff_reason_sink: list[str] | None = None,
     files_expected: bool = False,
@@ -116,6 +124,14 @@ async def ceiling_finalize(
     thrashing one is flagged DEGRADED + escalated (signal only — no auto replan).
     On-track ``token_budget`` still stamps ``cutoff_reason_sink`` so delivery_status
     / CEO gaps stay honest (不标 DEGRADED、不自动 replan).
+
+    ``approval_gate`` / ``citation_sink`` / ``annotate_citations`` /
+    ``turn_evidence_ledger`` / ``ledger_registrant`` are required (no defaults):
+    收口轮仍可能调 GRANTABLE / 调研工具，本臂的 ``execute_tools`` 必须带上与孪生履约点
+    (``directive_apply`` 的 Finalize 臂) 相同的审批闸与引用/台账汇聚通道。收口点转
+    fail-closed 后，漏传 ``approval_gate`` 不再意味着 file_write 绕卡落盘，而是这一臂
+    本该弹卡的调用整类被拒（该问却没人可问）——两种都是坏的，故签名不留默认值，让漏传
+    在类型层面就是 ``TypeError``。
     """
     # Hard-ceiling termination: the token backstop broke the loop, or max_rounds
     # exhausted. Always force-finalize (杜绝死循环); route the finish by run health so an
@@ -212,6 +228,11 @@ async def ceiling_finalize(
     if coordination is not None and coordination.kind == "coordination_tools":
         if coordination.content:
             final_content = join_segments(final_content, coordination.content)
+            # G4: mirror before tools may suspend (same update point as the twin).
+            if role == "captain":
+                from agentcore.runtime.engine.loop import sync_captain_loop_mirror
+
+                sync_captain_loop_mirror(final_content=final_content)
         if coordination.reasoning:
             final_reasoning += coordination.reasoning
         tool_calls = prepare_blocking_ask_user_tool_calls(
@@ -233,16 +254,35 @@ async def ceiling_finalize(
             messages,
             investigation_tools=controller.investigation_tool_names,
         )
-        tool_results, terminal, _attempts = await execute_tools(
+        tool_results, terminal, attempts = await execute_tools(
             tool_calls,
             tools,
             tool_context,
             sink,
+            approval_gate=approval_gate,
+            citation_sink=citation_sink,
+            annotate_citations=annotate_citations,
+            turn_evidence_ledger=turn_evidence_ledger,
+            ledger_registrant=ledger_registrant,
             run_id=run_id,
             role=role,
             allowed_tool_names=allowed_tool_names,
         )
         messages.extend(tool_results)
+        if gate_escalation_sink is not None and role == "worker":
+            apply_escalation_gate(
+                attempts=attempts,
+                tool_results=tool_results,
+                sink=sink,
+                run_id=run_id,
+                agent_id=tool_context.agent_id,
+                gate_escalation_sink=gate_escalation_sink,
+            )
+        # No next round to govern here — record only so the run's terminal export
+        # (tool_failure_facts / controller seed) still sees this last round's
+        # attempts. The twin's post-tool governance (breaker / tool_defs /
+        # govern_after_tools) steers the NEXT round and has no meaning past the ceiling.
+        controller.record(attempts)
         if terminal is not None:
             usage_meta = terminal.metadata or {}
             total_usage = total_usage + TokenUsage(

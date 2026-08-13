@@ -193,6 +193,37 @@ def _research_dossier_block_for_brief(config: DebateConfig) -> str:
     )
 
 
+def degraded_brief(
+    config: DebateConfig, rounds: Sequence[RoundResult], *, reason: str
+) -> DebateBrief:
+    """收场简报调用**抛异常**时的诚实降级 —— 保住已跑轮次，明说缺了什么。
+
+    与 :func:`build_brief` 内的坏 JSON 降级是两回事：那条是「模型回了不可解析的话」，
+    这条是「这次调用根本没回来」。收场是双产物的最后一步，一次网关抖动不该让前面 N 轮
+    发言 / 质询 / 裁判 / 小结全部作废——但也不许拿半成品冒充完整简报，故 ``leaning`` /
+    ``confidence`` / ``handoffs`` 一律留空（不编结论），只在 ``recommendation`` 里逐项
+    交代缺失面。CEO 收尾文本、前端简报区、落盘产物读的都是这同一段话。
+    """
+    if not rounds:
+        return DebateBrief(
+            crux=config.motion,
+            recommendation=(
+                f"【收场简报缺失】辩论未产生有效轮次，且收场简报调用失败（{_clip(reason, 120)}），"
+                "本场无可交付结论。"
+            ),
+        )
+    return DebateBrief(
+        crux=rounds[0].focus or config.motion,
+        recommendation=(
+            f"【收场简报缺失】收场时简报生成调用失败（{_clip(reason, 120)}）。"
+            f"已完成的 {len(rounds)} 轮交锋、各方发言与逐轮小结【完整保留】（见交锋叙事线），"
+            "但【争议焦点提炼 / 各方最强论点 / 胜负手 / 倾向判断与置信度 / 交接清单】"
+            "本场均未产出——请据逐轮小结自行判断，或重开一场以取回决策简报。"
+            "转述时不得把逐轮小结当成终审结论。"
+        ),
+    )
+
+
 async def build_brief(
     complete_json: CompleteJson,
     config: DebateConfig,

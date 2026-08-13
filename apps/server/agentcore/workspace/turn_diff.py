@@ -13,6 +13,7 @@ import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.storage._archive import unzip_into, zip_dir
 from agentcore.workspace.handoff_diff import (
     FileChange,
@@ -98,8 +99,11 @@ async def compute_turn_files_diff(
         conversation_id=conversation_id,
         snapshot_id=baseline_snapshot_id,
     )
+    placement = await resolve_folder_placement(folder_id)
     root = resolve_workspace_root(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        user_id=user_id,
+        folder_rel_path=placement.rel_path,
+        conversation_id=conversation_id,
     )
     live_archive = zip_dir(root)
     return TurnFilesDiff(

@@ -5,8 +5,8 @@ import {
   pickAndBindLocalFolder,
   pickLocalFolderRoot,
 } from "@/lib/bindLocalFolder";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
-import { pickAndRegisterLocalProject } from "@/lib/registerLocalProject";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
+import { pickAndRegisterLocalFolder } from "@/lib/registerLocalFolder";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/capabilities", () => ({
@@ -124,7 +124,7 @@ describe("pickLocalFolderRoot structured failures", () => {
   });
 });
 
-describe("pickAndOpenLocalProject mode=local", () => {
+describe("pickAndOpenLocalFolder mode=local", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     const { findLocalFolderByBinding } = await import("@/services/folders");
@@ -157,7 +157,7 @@ describe("pickAndOpenLocalProject mode=local", () => {
     vi.mocked(createFolder).mockResolvedValue({ folder, created: true });
 
     const navigate = vi.fn();
-    const result = await pickAndOpenLocalProject(navigate, {
+    const result = await pickAndOpenLocalFolder(navigate, {
       notifyOnFailure: false,
     });
 
@@ -213,7 +213,7 @@ describe("pickAndOpenLocalProject mode=local", () => {
     vi.mocked(findLocalFolderByBinding).mockReturnValue(existing);
 
     const navigate = vi.fn();
-    const result = await pickAndOpenLocalProject(navigate, {
+    const result = await pickAndOpenLocalFolder(navigate, {
       notifyOnFailure: false,
     });
 
@@ -227,7 +227,7 @@ describe("pickAndOpenLocalProject mode=local", () => {
   });
 });
 
-describe("pickAndRegisterLocalProject mode=local", () => {
+describe("pickAndRegisterLocalFolder mode=local", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     const { findLocalFolderByBinding } = await import("@/services/folders");
@@ -259,7 +259,7 @@ describe("pickAndRegisterLocalProject mode=local", () => {
     };
     vi.mocked(createFolder).mockResolvedValue({ folder, created: true });
 
-    const result = await pickAndRegisterLocalProject({
+    const result = await pickAndRegisterLocalFolder({
       notifyOnFailure: false,
     });
 

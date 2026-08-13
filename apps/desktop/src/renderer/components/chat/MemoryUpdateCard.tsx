@@ -2,6 +2,7 @@ import {
   MemoryUpdateItemRow,
   formatMemoryTime,
   memoryScopeOverview,
+  visibleMemoryUpdateItems,
 } from "@/components/memory/MemoryUpdateItemRow";
 import { Card } from "@/components/ui";
 import { countPillMuted, statusCardChrome } from "@/components/ui/tone-presets";
@@ -16,6 +17,7 @@ import { useConversationStore } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { Brain, ChevronDown, ChevronRight, NotebookPen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { memoryAnchorTime } from "./messageTimeline";
 
 /** 本场摘要超过此长度（或含换行）默认两行截断，可展开全文（对齐 ConclusionHero）。 */
 export const EPISODIC_SUMMARY_CLAMP_CHARS = 60;
@@ -28,6 +30,8 @@ export const EPISODIC_SUMMARY_CLAMP_CHARS = 60;
  *
  * - ``episodic``: light tip — session digest was filed for later consolidation.
  * - ``semantic``: expandable diff — what changed in 偏好 / 画像 / 主题.
+ * - ``quota``: the always pool is full — the summary says so and the rows name every
+ *   entry that could not be written plus the ones holding the pool (审计 CTX-A2).
  */
 export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   const navigate = useNavigate();
@@ -36,6 +40,8 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const conversationFolderId =
     getConversations().find((c) => c.id === conversationId)?.folderId ?? null;
+  // 与卡片在时间线上的落点同一个时刻，否则卡片会显示得比它下方的消息还晚。
+  const timeLabel = formatMemoryTime(memoryAnchorTime(update));
 
   const isEpisodic = update.kind === "episodic";
   if (isEpisodic) {
@@ -65,7 +71,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
                   已记下本场摘要
                 </span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {formatMemoryTime(update.createdAt)}
+                  {timeLabel}
                 </span>
                 {open ? (
                   <ChevronDown
@@ -85,7 +91,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
                   已记下本场摘要
                 </span>
                 <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-                  {formatMemoryTime(update.createdAt)}
+                  {timeLabel}
                 </span>
               </div>
             )}
@@ -103,7 +109,8 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
     );
   }
 
-  if (update.items.length === 0 && !(update.summary ?? "").trim()) return null;
+  const items = visibleMemoryUpdateItems(update.items);
+  if (items.length === 0 && !(update.summary ?? "").trim()) return null;
 
   const openLeaf = (target: string, projectId?: string | null) => {
     const folderId = parseProjectMemoryFolderId(target) ?? projectId ?? null;
@@ -119,10 +126,14 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
     });
   };
 
-  const hasAnyTarget = update.items.some((it) => it.target);
-  const scopeOverview = memoryScopeOverview(update.items);
-  const title =
-    update.items.length > 0
+  const hasAnyTarget = items.some((it) => it.target);
+  const scopeOverview = memoryScopeOverview(items);
+  // A quota card is not a change log: its summary IS the message (什么没写进来、为什么),
+  // and the rows below it name the entries.
+  const isQuota = update.kind === "quota";
+  const title = isQuota
+    ? (update.summary ?? "常驻条目已满")
+    : items.length > 0
       ? scopeOverview
         ? `记忆已更新 · ${scopeOverview}`
         : "记忆已更新"
@@ -131,9 +142,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
   // Prefer conversation project; else any project id already on the items (for
   // 「移到全局」 / naming when the card was produced in a project chat).
   const projectFolderId =
-    conversationFolderId ||
-    update.items.find((it) => it.projectId)?.projectId ||
-    null;
+    conversationFolderId || items.find((it) => it.projectId)?.projectId || null;
 
   return (
     <Card
@@ -151,13 +160,13 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
         >
           {title}
         </span>
-        {update.items.length > 0 && (
-          <span className={countPillMuted}>{update.items.length} 项</span>
+        {items.length > 0 && (
+          <span className={countPillMuted}>{items.length} 项</span>
         )}
         <span className="ml-auto shrink-0 text-xs text-muted-foreground">
-          {formatMemoryTime(update.createdAt)}
+          {timeLabel}
         </span>
-        {update.items.length > 0 ? (
+        {items.length > 0 ? (
           open ? (
             <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
           ) : (
@@ -168,10 +177,10 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
           )
         ) : null}
       </button>
-      {open && update.items.length > 0 && (
+      {open && items.length > 0 && (
         <div className="px-3 pb-3">
           <ul className="space-y-0.5">
-            {update.items.map((item, i) => (
+            {items.map((item, i) => (
               <MemoryUpdateItemRow
                 key={`${item.action}:${item.file}:${item.section}:${i}`}
                 item={item}

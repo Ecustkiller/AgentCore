@@ -1,14 +1,17 @@
 """Two-layer memory orchestration (episodic session digests → semantic consolidation).
 
 Episodic (live path): each finished turn arms a per-conversation idle debounce /
-turn-cap. When it fires, a ≤200-char session summary (plus optional verified project
-facts; action inventory from turn_journal) is appended to ``memory_episodes`` and a light
-``memory_updated`` tip is pushed — never a direct preference/profile write.
+turn-cap. When it fires, a ≤200-char session summary of everything since the
+``memory_synced_at`` watermark (plus optional verified folder facts; action inventory
+from turn_journal) is appended to ``memory_episodes`` and a light ``memory_updated`` tip
+is pushed — never a direct preference/profile write. The tip is pushed only when the LLM
+really summarized the window; a timed-out pass still stores its episode for the semantic
+layer but shows no card.
 
 Semantic (batch): after an episodic write (and on the periodic sweeper), if undigested
 episodes ≥ ``memory_semantic_min_episodes`` OR age since last success ≥
 ``memory_semantic_max_age_hours``, one consolidator pass rewrites always-files
-(including project ``导航.md`` incremental merge) and applies topic ops, then pushes a
+(including folder ``导航.md`` incremental merge) and applies topic ops, then pushes a
 diff card. Digested episodes older than 30 days are purged on each sweeper pass.
 
 Open-turn deferral, per-user locks, and ``memory_synced_at`` watermarks are unchanged.
@@ -20,7 +23,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
 from agentcore.billing.gate import run_background_llm
@@ -227,6 +230,7 @@ async def _record_and_publish(
     kind: str,
     items: list[MemoryUpdateItem],
     summary: str | None = None,
+    anchor_at: datetime | None = None,
 ) -> None:
     items_payload = [asdict(it) for it in items]
     async with async_session_factory() as session:
@@ -236,6 +240,7 @@ async def _record_and_publish(
             items=items_payload,
             kind=kind,
             summary=summary,
+            anchor_at=anchor_at,
         )
         update_payload = {
             "id": row.id,
@@ -244,6 +249,7 @@ async def _record_and_publish(
             "kind": kind,
             "summary": summary,
             "items": items_payload,
+            "anchor_at": anchor_at.isoformat() if anchor_at is not None else None,
         }
     await _publish_memory_updated(
         user_id=user_id,
@@ -344,11 +350,20 @@ async def run_semantic_for_scope(
 
 
 async def _load_conversation_action_inventory(
-    session, conversation_id: str, *, max_turns: int = 40
+    session,
+    conversation_id: str,
+    *,
+    max_turns: int = 40,
+    after: datetime | None = None,
 ) -> TurnActionInventory:
-    """Union tool actions from recent turn journals for this conversation."""
+    """Union tool actions from recent turn journals for this conversation.
+
+    ``after`` (the consolidation watermark) keeps the inventory on the same turns as
+    the message window, so already-summarized tool work is not re-reported as newly
+    verified facts in the next episode.
+    """
     repo = TurnJournalRepository(session)
-    turn_ids = await repo.list_recent_turn_ids(conversation_id, limit=max_turns)
+    turn_ids = await repo.list_recent_turn_ids(conversation_id, limit=max_turns, after=after)
     if not turn_ids:
         return TurnActionInventory()
     # Newest-first from list_recent_turn_ids; harvest all for the window.
@@ -357,6 +372,23 @@ async def _load_conversation_action_inventory(
         entries = await repo.load(turn_id)
         parts.append(inventory_from_journal_entries(entries))
     return merge_inventories(parts)
+
+
+@dataclass(frozen=True)
+class _EpisodicDigest:
+    """One episodic pass's text plus whether the LLM actually produced it.
+
+    ``summarized=False`` means the summarizer timed out or came back empty and
+    ``fallback_episode_summary`` stitched the window's first user turns together. That
+    text is fine as raw material for the semantic pass (which reads episodes as input
+    and decides for itself what is durable), but it must NEVER surface as a card: it is
+    the user's own words verbatim, and a chat that opened with an ID number, a phone
+    number and an address would have all three re-posted into the thread under a
+    「已记下本场摘要」heading. No summary ⇒ no card.
+    """
+
+    summary: str
+    summarized: bool
 
 
 def _consolidation_failure_retryable(exc: BaseException) -> bool:
@@ -518,22 +550,28 @@ async def consolidate_conversation(
                 if synced is not None and latest <= synced:
                     return False
                 folder_id = conv.folder_id
+                # Only what arrived since the last pass. Re-reading a fixed recent tail
+                # made adjacent episodes overlap — in the worst observed case the second
+                # card restated the whole first one, because both summarized the same
+                # messages. The 40-message cap still bounds a long unconsolidated gap.
                 window = await load_recent_history(
                     session,
                     conversation_id,
                     max_messages=settings.memory_consolidation_window_messages,
+                    after=synced,
                 )
                 actions = await _load_conversation_action_inventory(
                     session,
                     conversation_id,
                     max_turns=settings.memory_consolidation_window_messages,
+                    after=synced,
                 )
 
             credentials: LLMCredentials | None = None
             wrote_episodic = False
             if window:
 
-                async def _episodic_runner(creds: LLMCredentials) -> str:
+                async def _episodic_runner(creds: LLMCredentials) -> _EpisodicDigest:
                     model = resolve_user_model(creds)
                     provider = build_provider(creds, purpose="platform_internal")
                     try:
@@ -543,11 +581,14 @@ async def consolidate_conversation(
                             max_chars=settings.memory_episodic_summary_max_chars,
                             actions=actions,
                         )
-                        if not summary.strip():
-                            summary = fallback_episode_summary(
+                        if summary.strip():
+                            return _EpisodicDigest(summary=summary, summarized=True)
+                        return _EpisodicDigest(
+                            summary=fallback_episode_summary(
                                 window, max_chars=settings.memory_episodic_summary_max_chars
-                            )
-                        return summary
+                            ),
+                            summarized=False,
+                        )
                     finally:
                         await provider.close()
 
@@ -555,23 +596,34 @@ async def consolidate_conversation(
                 if bg is None:
                     return False
                 credentials = bg.credentials
+                digest = bg.value
                 episode = await append_episode(
                     ep_store,
                     user_id=user_id,
                     conversation_id=conversation_id,
-                    summary=bg.value,
+                    summary=digest.summary,
                     scope=folder_id,
                     max_chars=settings.memory_episodic_summary_max_chars,
                     actions=actions,
                 )
                 wrote_episodic = True
-                await _record_and_publish(
-                    conversation_id=conversation_id,
-                    user_id=user_id,
-                    kind="episodic",
-                    items=[],
-                    summary=episode.summary,
-                )
+                if digest.summarized:
+                    await _record_and_publish(
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        kind="episodic",
+                        items=[],
+                        summary=episode.summary,
+                        anchor_at=latest,
+                    )
+                else:
+                    logger.warning(
+                        "memory.episodic_card_suppressed",
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        episode_id=episode.id,
+                        reason="no_llm_summary",
+                    )
 
             async with async_session_factory() as session:
                 await ConversationRepository(session).set_memory_synced_at(conversation_id, latest)

@@ -304,7 +304,13 @@ async def run_agent_tick(
                 # so a resident can't teleport through several locations in a single tick.
                 first = result.tool_calls[0]
                 _msgs, _terminal, attempts = await execute_tools(
-                    [first], tools, ctx, sink, run_id=run_id
+                    # 居民行动工具全是 approval=NEVER；小镇也没有可询问的用户。
+                    [first],
+                    tools,
+                    ctx,
+                    sink,
+                    approval_gate=None,
+                    run_id=run_id,
                 )
                 action_name = first.function.name
                 args_json = first.function.arguments or ""

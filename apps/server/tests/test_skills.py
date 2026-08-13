@@ -488,6 +488,15 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "怎么打开 .md" in faq_body or ".md" in faq_body and "阅读预览" in faq_body
     assert "Markdown 是什么" in faq_body or "语法" in faq_body  # 禁科普口径
     assert "完整预览" in faq_body and "不是一路" in faq_body
+    # 文件夹：入口条在 map、删除语义在 faq；保留期跟随服务端设置，勿手写漂移
+    assert "删除文件夹…" in map_body and "⋯" in map_body
+    assert "删文件夹会怎样？" in faq_body
+    assert "项目" not in map_body and "项目" not in faq_body
+    assert "一并归档" in faq_body and "已归档" in faq_body
+    assert f"约 {settings.workspace_retention_days} 天后由系统自动清理" in faq_body
+    assert "立即永久清除" in faq_body and "不可恢复" in faq_body
+    # 本机磁盘不受影响（线上 trace 曾编造「删本地项目会动本机目录」）
+    assert "两种删法都不动你电脑上的文件" in faq_body
     # 定案 A：Cursor 规则 ↔ AgentCore 用户规则（权威对照须字面在 faq，可独立短答）
     assert "Cursor `.cursor/rules` / `.mdc` ≠ AgentCore 用户规则" in faq_body
     assert "AgentCore 用户规则 = `AgentCore/规则/` + `remember`" in faq_body
@@ -547,11 +556,13 @@ def test_product_bug_triage_skill_teaches_l1_l2_and_ceilings():
     )
 
 
-def test_team_orchestration_skill_teaches_cross_project_parallel():
-    """跨项目并行指挥整条用法（第二教学面；与双模式 §五 / 编排器 delegate 定案一致）。"""
+def test_team_orchestration_skill_teaches_cross_folder_parallel():
+    """跨文件夹并行指挥整条用法（第二教学面；与双模式 §五 / 编排器 delegate 定案一致）。"""
     body = _body("team_orchestration_advanced")
-    assert "【跨项目并行指挥】" in body
-    assert "list_projects" in body and "resolve_project" in body
+    assert "【跨文件夹并行指挥】" in body
+    assert "list_folders" in body and "resolve_folder" in body
+    # 嵌套：resolve 按路径，歧义候选带完整 rel_path。
+    assert "按路径" in body and "rel_path" in body
     assert "ask_user" in body and "choice" in body
     assert "禁止" in body and "最近" in body
     assert "target_folder_id" in body
@@ -559,8 +570,10 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "folder_id" in body
     assert "默认桌" in body
     assert "scratch" in body
-    assert "create_project" in body
-    assert "自动建云桌" in body
+    assert "create_folder" in body
+    # 与 mkdir 划清界限：容器 vs 当前工作区里的普通子目录。
+    assert "mkdir" in body
+    assert "自动建云文件夹" in body
     assert "register_local_project" in body  # 本机传统可教
     assert "open_local_project" in body
     assert "导入到云" in body or "连接 Git" in body
@@ -581,29 +594,29 @@ def test_team_orchestration_skill_teaches_cross_project_parallel():
     assert "裸聊单目标" in body or "运行时继承" in body
     assert "能少则少" in body and "拿不准先少派" in body
     assert "不" in body and "覆盖" in body
-    # 跨项目读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
-    assert "list_project_dir" in body and "read_project_file" in body
+    # 跨文件夹读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
+    assert "list_folder_dir" in body and "read_folder_file" in body
     assert "认桌" in body or "抽样" in body
     assert "出生桌" in body
     assert "读写通吃" in body or "只读摸底与改盘" in body or "只读摸底" in body
     assert "写仍派工换桌" not in body
     assert "只读跨桌摸底" not in body
     assert "云端读不到本地" in body and "禁止" in body
-    # 空壳/双项目 kickoff：先问、同次两路、≠open/bind/挂载冒充
+    # 空壳/双文件夹 kickoff：先问、同次两路、≠open/bind/挂载冒充
     assert "空壳" in body or "近空" in body
     assert "file_list" in body
     assert "同一次" in body or "同次" in body
     assert "external_mount_readonly" in body
     assert "开发双仓" in body or "区外挂载" in body or "冒充" in body
-    # 目录摘要须可触发 consult（多项目 / 派工换桌 / target_folder / 先建齐再派）
+    # 目录摘要须可触发 consult（多文件夹 / 派工换桌 / target_folder / 先建齐再派）
     skill = build_system_skill_registry().get("team_orchestration_advanced")
     assert skill is not None
-    assert "跨项目" in skill.summary
+    assert "跨文件夹" in skill.summary
     assert "target_folder_id" in skill.summary
-    assert "派前认桌" in skill.summary or "list_project_dir" in skill.summary
+    assert "派前认桌" in skill.summary or "list_folder_dir" in skill.summary
     assert "空壳" in skill.summary or "mount" in skill.summary or "冒充" in skill.summary
     assert "先建齐再派" in skill.summary  # 显式多线先建齐再派
-    assert "自动建云桌" in skill.summary or "勿催 create" in skill.summary
+    assert "自动建云文件夹" in skill.summary or "勿催 create" in skill.summary
     assert "拒后禁塌缩" in skill.summary
 
 
@@ -706,6 +719,15 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
     assert "文本" in body and "表格" in body
     assert "说满" in body and "空派" in body
     assert "SmartArt" not in body and "DrawingML" not in body
+
+
+def test_team_orchestration_skill_teaches_deterministic_word_pdf_export():
+    """`.docx`/`.pdf` 走 md_to_docx / md_to_pdf，与执行沙箱正交；无执行缺口只覆盖 pptx/xlsx。"""
+    body = _body("team_orchestration_advanced")
+    assert "md_to_docx" in body
+    assert "python-docx" in body  # 只作禁用主路径出现
+    assert "Office · 无执行" in body
+    assert "`.docx`/`.pptx`/`.xlsx` 等且能力行" not in body
 
 
 def test_team_orchestration_skill_teaches_windows_bat_crlf_ascii():
@@ -1103,7 +1125,7 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "中间省略" in body or "file_write" in body
     # 定案：优化项目 ≠ 默认催 open_local；附件收窄范围时先干活；本机传统可教非默认。
     assert "open_local_project" in body
-    assert "≠默认开项目卡" in body or "收窄本轮" in body
+    assert "≠默认开文件夹卡" in body or "收窄本轮" in body
     assert "开工前置" in body
     assert "register_local_project" in body
     assert "导入到云" in body or "连接 Git" in body
@@ -1111,12 +1133,12 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "本机传统" in body
     assert "Ask" not in body or "改导" not in body  # 不得再写 Ask 点了会改导
     assert "team_orchestration_advanced" in body
-    assert "跨项目并行指挥" in body
+    assert "跨文件夹并行指挥" in body
     assert "开发双仓" in body
     assert "target_folder_id" in body
     assert "派前认桌" in body or "只读跨桌仅派前" in body or "读写通吃" in body
     assert "写仍派工换桌" not in body
-    assert "跨项目须派工换桌" in body or "读写通吃" in body
+    assert "跨文件夹须派工换桌" in body or "读写通吃" in body
     # 已绑/本机传统工程：跑当前；换工程优先导入/连 Git。
     assert "本机传统" in body or "已绑" in body or "跑" in body
     assert "跑" in body and "当前" in body

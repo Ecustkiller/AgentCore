@@ -34,7 +34,12 @@ def _ok(output: str, start: float, **kwargs: Any) -> ToolResult:
 async def _git_failure(
     stdout: str, stderr: str, exit_code: int, start: float, **kwargs: Any
 ) -> ToolResult:
-    from .spawn import _AUTH_FAILURE_HINT, _looks_like_auth_failure
+    from .spawn import (
+        _AUTH_FAILURE_HINT,
+        _UNUSABLE_REPO_HINT,
+        _looks_like_auth_failure,
+        _looks_like_unusable_repo,
+    )
 
     detail = (stderr or stdout or f"git 退出码 {exit_code}").strip()
     meta = dict(kwargs.pop("metadata", {}) or {})
@@ -46,6 +51,12 @@ async def _git_failure(
                 f"{detail}\n"
                 "（活性超时：勿原样重试同一命令；若持续失败可检查 .git/index.lock 或其它 git 占用。）"
             )
+    elif _looks_like_unusable_repo(stderr or stdout):
+        # Reached only with a root ``.git`` present (no-repo forks off earlier), so
+        # this stays a hard error — a broken repo is never soft ``no_repo``.
+        meta.setdefault("code", policy_mod._REPO_UNUSABLE_CODE)
+        if _UNUSABLE_REPO_HINT not in detail:
+            detail = f"{detail}\n{_UNUSABLE_REPO_HINT}"
     blob = f"{stderr}\n{stdout}"
     lower = blob.lower()
     if (

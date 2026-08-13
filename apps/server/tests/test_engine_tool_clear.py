@@ -202,6 +202,7 @@ async def _run_loop(provider: _CapturingProvider) -> None:
         tool_context=_context(),
         profile=profile,
         turn_model="m",
+        approval_gate=None,
     )
 
 

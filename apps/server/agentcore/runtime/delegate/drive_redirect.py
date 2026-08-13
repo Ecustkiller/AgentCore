@@ -76,6 +76,20 @@ class RedirectController:
         """Subset of ``cancel_ids`` that came from user run-stop (not redirect)."""
         return frozenset(self.stop_ids)
 
+    def timeout_run_ids(self) -> frozenset[str]:
+        """Subset of ``cancel_ids`` the hard-timeout guard force-cancelled.
+
+        Coordination merges timeout kills into the same cancel channel as
+        ``cancel_worker`` / redirect, so Wave can only tell them apart by asking the
+        session — otherwise a worker killed on the timeout ceiling is reported as
+        「已改方向」.
+        """
+        if self.session is None:
+            return frozenset()
+        return frozenset(
+            rid for rid in self.cancel_ids if self.session.was_timeout_force_cancelled(rid)
+        )
+
     def cold_fallback(self, original: RunSpec, redir: RunRedirectRequest) -> str:
         """Append a same-role handoff node (``_redir`` + replaces_run_id + steer)."""
         # Unique handoff id if the same author cold-falls more than once this drive.
@@ -365,6 +379,7 @@ class RedirectController:
                 seed_completed=results,
                 cancel_run_ids=self.cancel_run_ids,
                 stop_run_ids=self.stop_run_ids,
+                timeout_run_ids=self.timeout_run_ids,
                 on_progress=self.on_progress,
                 on_boundary=None,
                 on_skipped=on_skipped,

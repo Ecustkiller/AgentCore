@@ -42,6 +42,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -130,6 +131,9 @@ _BROWSER_REGISTRATION = ToolRegistration(
     audience=AUDIENCE_BOTH,
     execution_class=True,
     browser_class=True,
+    # 关键帧 jpeg 确实落在工作区 ``browser/`` 下，但它是给这一步配的画面（已随
+    # ``display.frame`` 走），不是本回合的交付物——台账不记它。
+    file_products=FileProductsContract.NO_PRODUCT,
 )
 
 # Screenshot stays worker-only — visual验收 / 截图确认仍派队员.
@@ -138,6 +142,8 @@ _BROWSER_SCREENSHOT_REGISTRATION = ToolRegistration(
     audience=AUDIENCE_WORKER_ONLY,
     execution_class=True,
     browser_class=True,
+    # 同上：截的是画面不是交付物。
+    file_products=FileProductsContract.NO_PRODUCT,
 )
 
 # Alias for navigate class attribute (same registration as shared CEO+worker set).

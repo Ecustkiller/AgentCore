@@ -14,6 +14,10 @@ different values on orthogonal metadata axes:
 - ``apply_mode`` / ``description``: **derived indexes** of the md body's frontmatter
   (``apply`` / ``description``). Frontmatter is the sole writable source of truth; these
   columns are recomputed on every body write and must never be set by a bypass path.
+- ``disputed_at`` (§纠错通道): the user marked this entry wrong → it stops being injected
+  while the row and its body stay put. **DB-only**, same reason as ``ai_maintained``: the
+  AI owns the body, so a frontmatter flag would be cleared by the next rewrite — exactly
+  the failure this channel exists to prevent.
 
 ``parent_id`` is the intra-tree parent; ``kind`` is the node type (folder / document;
 ``upload`` / ``base`` reserved). Soft-deleted (``deleted_at``); CAS via SHA-256 of the body.
@@ -99,6 +103,12 @@ class Document(Base):
     # Derived index of frontmatter ``description`` (缺席 / empty → "").
     description: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("''")
+    )
+    # 纠错通道: set when the USER explicitly marks this entry wrong (「这条不对」). Injection
+    # and the on-demand catalog skip it; the row, its body and this timestamp stay so the
+    # correction is traceable and reversible (no silent physical delete). Never set by AI.
+    disputed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     # Node name within its parent. For memory notes this is the store-relative path
     # (e.g. "画像.md", "主题/部署.md") so the (user, path, scope) seam maps 1:1 to a row.

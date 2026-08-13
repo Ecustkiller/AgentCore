@@ -174,6 +174,23 @@ export function axesCustomSummary(axes: PermissionAxes): string {
     HOST_BADGE[axes.host],
   ].join(" · ");
 }
+
+function optionShort<T extends string>(
+  options: { value: T; short: string }[],
+  value: T,
+): string {
+  return options.find((o) => o.value === value)?.short ?? value;
+}
+
+/** Spelled-out four-axis summary, phrased like ``RECIPE_LABELS.description``. */
+export function axesDetailSummary(axes: PermissionAxes): string {
+  return [
+    `改文件${optionShort(FILE_WRITE_OPTIONS, axes.file_write)}`,
+    `执行${optionShort(COMMAND_OPTIONS, axes.command)}`,
+    `组队${optionShort(TEAM_KICKOFF_OPTIONS, axes.team_kickoff)}`,
+    `本机${optionShort(HOST_OPTIONS, axes.host)}`,
+  ].join(" · ");
+}
 export function axesEqual(a: PermissionAxes, b: PermissionAxes): boolean {
   return (
     a.file_write === b.file_write &&

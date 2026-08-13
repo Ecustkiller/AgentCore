@@ -32,8 +32,8 @@ vi.mock("@/hooks/useConversations", () => ({
   getConversations: vi.fn(() => []),
 }));
 
-vi.mock("@/lib/openLocalProject", () => ({
-  pickAndOpenLocalProject: vi.fn(),
+vi.mock("@/lib/openLocalFolder", () => ({
+  pickAndOpenLocalFolder: vi.fn(),
 }));
 
 vi.mock("@/lib/composerChannelPreference", () => ({
@@ -118,6 +118,26 @@ describe("paletteCommands · 前往发现性", () => {
   });
 });
 
+describe("paletteCommands · 设置深链", () => {
+  it("renames 外观 to 通用 but still answers the old query", () => {
+    const cmds = buildPaletteCommands(baseCtx);
+    const general = cmds.find((c) => c.id === "nav-settings-general");
+    expect(general).toBeTruthy();
+    if (!general) return;
+    expect(general.title).toBe("设置 · 通用");
+
+    general.run();
+    expect(baseCtx.navigate).toHaveBeenCalledWith("/more/general");
+
+    expect(commandMatches(general, "通用")).toBe(true);
+    expect(commandMatches(general, "外观")).toBe(true);
+    expect(commandMatches(general, "appearance")).toBe(true);
+    expect(commandMatches(general, "theme")).toBe(true);
+
+    expect(cmds.some((c) => c.id === "nav-settings-appearance")).toBe(false);
+  });
+});
+
 describe("paletteCommands · 区外只读授权", () => {
   it("hides grant command without local FS", async () => {
     const { hasLocalFiles } = await import("../capabilities");
@@ -147,10 +167,10 @@ describe("paletteCommands · 区外只读授权", () => {
     );
   });
 
-  it("injects connect-git, import-to-cloud, and 打开本机项目 on desktop FS", async () => {
+  it("injects connect-git, import-to-cloud, and 打开本机文件夹 on desktop FS", async () => {
     const { hasLocalFiles } = await import("../capabilities");
     const { useFoldersStore } = await import("@/stores/folders");
-    const { pickAndOpenLocalProject } = await import("@/lib/openLocalProject");
+    const { pickAndOpenLocalFolder } = await import("@/lib/openLocalFolder");
     const { setComposerChannelPreference } = await import(
       "@/lib/composerChannelPreference"
     );
@@ -177,7 +197,7 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(setComposerChannelPreference).toHaveBeenCalledWith("cloud");
 
     const importCmd = cmds.find((c) => c.id === "import-to-cloud");
-    expect(importCmd?.title).toBe("导入本机项目到云");
+    expect(importCmd?.title).toBe("导入本机文件夹到「我的文件」");
     expect(importCmd?.hint).toContain("推荐");
     if (!importCmd) return;
     expect(commandMatches(importCmd, "daoru")).toBe(true);
@@ -185,7 +205,7 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(openImportToCloud).toHaveBeenCalled();
 
     const localCmd = cmds.find((c) => c.id === "open-local-project");
-    expect(localCmd?.title).toBe("打开本机项目");
+    expect(localCmd?.title).toBe("打开本机文件夹");
     expect(localCmd?.hint).toContain("≠离线");
     if (!localCmd) return;
     expect(commandMatches(localCmd, "benji")).toBe(true);
@@ -193,6 +213,6 @@ describe("paletteCommands · 区外只读授权", () => {
     expect(setComposerChannelPreference).toHaveBeenCalledWith(
       "local_traditional",
     );
-    expect(pickAndOpenLocalProject).toHaveBeenCalledWith(baseCtx.navigate);
+    expect(pickAndOpenLocalFolder).toHaveBeenCalledWith(baseCtx.navigate);
   });
 });

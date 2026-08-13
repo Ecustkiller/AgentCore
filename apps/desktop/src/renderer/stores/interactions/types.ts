@@ -57,6 +57,33 @@ export interface InteractionEntry {
    * Settlement is locked — UI keeps submitting and hides cancel-改口.
    */
   resumeDeferred?: { busyReason: ResumeDeferredBusyReason };
+  /**
+   * 这张卡是**另一端**（手机 / 另一台桌面）拍板收口的（云对话多端同权 B2 · 验收 2）。
+   *
+   * 线材里没有「谁答的」，所以判定只在本会话内成立：本端一直显示着 pending（从未
+   * `beginSubmit`）却收到一帧 live `*_resolved`、且这一帧确实**是人答的** ⇒ 不是我点的。
+   * 重放段不算（那是历史回放，不是刚发生的转折），journal 水合也不算（上一次会话可能正是
+   * 本端点的），CEO 裁决 / 假设推进 / 超时也不算（压根没有人）。
+   *
+   * 已知窄边角：用户点「允许本回合」后，服务端会顺手放行同类的兄弟卡；若某张兄弟卡的
+   * `*_required` 恰好在这一点之后才到达本端（毫秒级），本端来不及乐观收它，就会把服务端
+   * 的顺带放行读成另一端。只影响一条几秒后退场的提示，不改任何执行语义。
+   *
+   * 用途只有一个：卡不能**直接消失**——消失会让用户以为是自己点的。
+   */
+  settledElsewhere?: boolean;
+  /**
+   * 本端点下去，服务端回执说**这张卡已经结了**（`already_processed` / 404）。
+   *
+   * 与 {@link settledElsewhere} 是两回事：回执只说「已经结了」，不带 `status` /
+   * `arbitrated_by`，证不了是谁结的——升级卡的 404 可能是主管接管仲裁，也可能是超时兜底。
+   * 所以这条只用来**关掉操作面**（卡不能再点，否则用户一点再点、次次 404），归属仍等带线材
+   * 字段的 `*_resolved` 帧来证；那帧到之前 `resolution` 是空的，呈现侧据此说「已处理」而不是
+   * 替它猜一个「已批准」。
+   *
+   * 也不同于 `orphaned`：orphaned 是卡作废了（回合结束 / 服务重启），这里是卡**被答了**。
+   */
+  settledByReceipt?: boolean;
 }
 
 /**

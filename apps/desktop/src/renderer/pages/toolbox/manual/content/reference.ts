@@ -85,22 +85,22 @@ export const referenceChapter: ManualChapterContent = {
       blocks: [
         {
           type: "lead",
-          text: "团队做出来的东西，都落在工作区——你和 AI 共享的文件空间。项目即工作区：创建项目时选定本地或云端，之后不可改。",
+          text: "团队做出来的东西，都落在工作区——你和 AI 共享的文件空间。文件夹即工作区：容器只有文件夹，在「我的文件」里新建（云端），或打开本机文件夹（本地）。",
         },
         {
           type: "bullets",
           items: [
             {
-              title: "项目即工作区",
-              desc: "建项目时必须绑定工作区（本地文件夹或云端空间），创建时确定、事后不改绑；项目内对话共用这份空间。",
+              title: "文件夹即工作区",
+              desc: "每个文件夹自带一份工作区，云端或本地在建立时就定下、事后不改绑；文件夹内的对话共用这份空间。",
             },
             {
-              title: "绑本地文件夹",
-              desc: "创建时选本地——团队直接改你电脑上的真实项目，适合开发内环。",
+              title: "打开本机文件夹",
+              desc: "打开你电脑上的目录——团队直接改真实文件，适合开发内环；打开过的会留在「本机文件夹」列表里。",
             },
             {
-              title: "不绑 → 云端项目",
-              desc: "创建时选云端，或随手裸聊用对话临时空间——文件在服务端；手机、网页也能看同一项目。",
+              title: "我的文件",
+              desc: "在「我的文件」里新建文件夹，可任意嵌套；文件在服务端，手机、网页看到同一份。随手裸聊则用对话临时空间。",
             },
             {
               title: "模式条",
@@ -117,6 +117,10 @@ export const referenceChapter: ManualChapterContent = {
             {
               title: "文件工作台",
               desc: "在文件页直接看、改、整理产物。",
+            },
+            {
+              title: "删了能找回",
+              desc: "右键文件夹「删除文件夹…」后，保留期内都能恢复：删完那条提示上点「撤销」，或去「全部对话」页左边的「最近删除」。恢复会把文件夹和一并归档的对话带回来，但白板会留在顶层白板列表。删除弹窗里勾「立即永久清除」才是不可逆的。本机文件夹在你电脑上的文件，删除与恢复都不会动。",
             },
           ],
         },
@@ -160,9 +164,9 @@ export const referenceChapter: ManualChapterContent = {
               to: APP_PATHS.more.usage,
             },
             {
-              label: "外观",
-              desc: "明暗主题与界面偏好",
-              to: APP_PATHS.more.appearance,
+              label: "通用",
+              desc: "界面主题与进阶开关",
+              to: APP_PATHS.more.general,
             },
             {
               label: "快捷键",
@@ -250,6 +254,52 @@ export const referenceChapter: ManualChapterContent = {
                       link: {
                         kind: "jump",
                         to: MANUAL_SECTION_IDS.collaboration.control,
+                      },
+                    },
+                    "。",
+                  ],
+                },
+              ],
+            },
+            {
+              q: "工作流和自动化有什么区别？",
+              a: [
+                {
+                  type: "text",
+                  text: [
+                    "工作流管「活儿怎么拆」——把满意的一轮存成可复用的团队拆法；自动化管「什么时候跑」——给任务配定时或 Webhook，到点由 CEO 自动开一轮。任务绑一张工作流就按图跑，不绑就按目标文案让 CEO 即兴组队。展开见 ",
+                    {
+                      text: "存为工作流",
+                      link: {
+                        kind: "jump",
+                        to: MANUAL_SECTION_IDS.collaboration.workflow,
+                      },
+                    },
+                    " 与 ",
+                    {
+                      text: "自动化",
+                      link: {
+                        kind: "jump",
+                        to: MANUAL_SECTION_IDS.collaboration.automation,
+                      },
+                    },
+                    "。",
+                  ],
+                },
+              ],
+            },
+            {
+              q: "电脑关着，定时任务还会跑吗？",
+              a: [
+                {
+                  type: "text",
+                  text: [
+                    "会——任务跑在云端，所以只能绑云工作区，本机文件夹选不了。跑完的摘要与待你拍板的挂起项都留在 ",
+                    {
+                      text: "自动化 · 收件箱",
+                      link: {
+                        kind: "go",
+                        to: APP_PATHS.toolbox.automations.inbox,
                       },
                     },
                     "。",
@@ -441,7 +491,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "先打开文件页看工作区——Agent 创建、修改的文件都落在那里。云端项目换设备也能看到同一份；本地项目请确认绑的是你以为的那个文件夹。",
+                  text: "先打开文件页看工作区——Agent 创建、修改的文件都落在那里。「我的文件」换设备也能看到同一份；本机文件夹请确认打开的是你以为的那个目录。",
                 },
               ],
             },
@@ -687,7 +737,34 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "你和团队共享的文件空间；项目即工作区，产物都落在这里。",
+                  text: "你和团队共享的文件空间；文件夹即工作区，产物都落在这里。",
+                },
+              ],
+            },
+            {
+              q: "工作流",
+              a: [
+                {
+                  type: "text",
+                  text: "保存下来的团队拆法——谁做什么、先后怎么排。存的是这一轮的分工，不含模型选择等运行细节；开跑时再选工作区。官方模板只读，「使用」= 复制一份成你自己的。",
+                },
+              ],
+            },
+            {
+              q: "系统任务",
+              a: [
+                {
+                  type: "text",
+                  text: "自动化页里平台预制的任务（如每日对话复盘）——目标由系统托管、不可改，你只配触发时间、范围与落点。与工作流页的「官方模板」不是一回事。",
+                },
+              ],
+            },
+            {
+              q: "收件箱",
+              a: [
+                {
+                  type: "text",
+                  text: "自动化任务每次运行的结果列表——成功摘要、失败原因、待你拍板的挂起项；tab 红点是还没处理的条数。",
                 },
               ],
             },

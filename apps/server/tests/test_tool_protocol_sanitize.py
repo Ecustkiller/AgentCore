@@ -180,7 +180,9 @@ async def test_execute_tools_sanitizes_name_and_runs():
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
-    msgs, terminal, attempts = await execute_tools([tc], reg, ctx, EventSink())
+    msgs, terminal, attempts = await execute_tools(
+        [tc], reg, ctx, EventSink(), approval_gate=None
+    )
     assert terminal is None
     assert attempts[0].success is True
     assert tc.function.name == "web_search"
@@ -203,7 +205,7 @@ async def test_execute_tools_not_found_mentions_protocol_strip():
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
-    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink())
+    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink(), approval_gate=None)
     assert attempts[0].success is False
     assert "not found" in msgs[0].content
     assert "协议标签" in msgs[0].content
@@ -224,7 +226,7 @@ async def test_execute_tools_worker_only_miss_is_actionable_policy():
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
-    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink())
+    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink(), approval_gate=None)
     assert attempts[0].success is False
     assert attempts[0].policy_failure is True
     assert "delegate" in msgs[0].content
@@ -245,7 +247,7 @@ async def test_execute_tools_file_write_miss_points_to_delegate():
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
-    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink())
+    msgs, _, attempts = await execute_tools([tc], reg, ctx, EventSink(), approval_gate=None)
     assert attempts[0].policy_failure is True
     assert "delegate" in msgs[0].content
     assert "worker" in msgs[0].content.lower() or "委派" in msgs[0].content

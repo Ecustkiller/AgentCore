@@ -1,4 +1,4 @@
-﻿"""辩论观测：主持人 attribution 透传 + 后续轮 gather 埋点口径。"""
+"""辩论观测：主持人 attribution 透传 + 后续轮 gather 埋点口径。"""
 
 from __future__ import annotations
 

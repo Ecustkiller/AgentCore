@@ -43,6 +43,18 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS: tuple[str, ...] = (
     # Ambient listing rides the same local channel — retire with the file family
     # so post-dead index_files rejects are not leftover noise.
     "index_files",
+    # Export / land-bytes tools: every call round-trips the same dead backend
+    # (read the .md or .zip, write the sibling artifact / members / downloaded
+    # bytes), so leaving them on the surface only buys guaranteed-failed rounds.
+    # download_url even burns its network fetch first, then fails on write.
+    "md_to_docx",
+    "md_to_pdf",
+    "archive_extract",
+    "download_url",
+    # Same shape: every call unconditionally reads workspace bytes through the dead
+    # backend (``read_bytes`` → base64 → vision), so it can only fail — and leaving it
+    # on the CEO surface invites 「换个工具再看一眼图」 rounds that never can work.
+    "read_image",
 )
 
 # Short user-visible honest sentence (chat bubble / harvest fallback). Soft steer
@@ -62,6 +74,18 @@ EXEC_ENV_DEAD_USER_VISIBLE = (
 # ``is_channel_dead_detail`` / SSE mapping stay aligned with tool envelopes.
 CHANNEL_DEAD_PREPARE_ABORT = (
     "本机工作区通道无响应（已挂起 / channel dead）。请检查桌面连接后重试。"
+)
+
+# A desktop holds workspace caps but not this bound root. Shared by the turn-start
+# presence gate (``runtime/pipeline/errors.py`` case 2, re-exported there as
+# ``LOCAL_ROOT_NOT_HELD``) and by mid-turn op delivery, which meets the same fact
+# after the gate has run — roots can be revoked while the turn is in flight. Lives
+# here so the delivery side reaches it without importing the pipeline package.
+LOCAL_ROOT_NOT_HELD = (
+    "桌面已在线，但未声明持有本会话的本地目录"
+    "（授权可能已移除，或已换用其他电脑）。"
+    "请在桌面重新授权该文件夹后，点「重新生成」"
+    "（不要再次发送）。"
 )
 
 WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (

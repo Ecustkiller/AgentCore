@@ -31,11 +31,11 @@ import {
   formatGrantReadonlyFolderAnswer,
   pickAndGrantReadonlyFolder,
 } from "@/lib/grantReadonlyFolder";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
 import {
-  formatRegisterLocalProjectAnswer,
-  pickAndRegisterLocalProject,
-} from "@/lib/registerLocalProject";
+  formatRegisterLocalFolderAnswer,
+  pickAndRegisterLocalFolder,
+} from "@/lib/registerLocalFolder";
 import type { CheckpointUserDecision } from "@/services/checkpoint";
 import type { AskOption, AskQuestion } from "@/types/events";
 import {
@@ -152,7 +152,7 @@ export function AskDecisionBody({
       if (!canLocalFs) return;
       setBindBusyLabel(opt.label);
       clearPickerFeedback();
-      const result = await pickAndOpenLocalProject(navigate, {
+      const result = await pickAndOpenLocalFolder(navigate, {
         notifyOnFailure: false,
       });
       if (!result.ok) {
@@ -178,7 +178,7 @@ export function AskDecisionBody({
         setBindBusyLabel(null);
         return;
       }
-      const result = await pickAndRegisterLocalProject({
+      const result = await pickAndRegisterLocalFolder({
         notifyOnFailure: false,
       });
       if (!result.ok) {
@@ -189,7 +189,7 @@ export function AskDecisionBody({
         setBindBusyLabel(null);
         return;
       }
-      const value = formatRegisterLocalProjectAnswer(
+      const value = formatRegisterLocalFolderAnswer(
         opt.label,
         result.folder.name,
       );

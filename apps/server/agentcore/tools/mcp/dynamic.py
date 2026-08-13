@@ -17,6 +17,19 @@ logger = get_logger(__name__)
 _NAME_SAFE = re.compile(r"[^a-zA-Z0-9_-]+")
 _TOOL_NAME_MAX = 64
 
+# Timeout ladder — 通道 = 实际值 + slack ≤ 引擎墙钟 (same shape as ``host_shell`` /
+# ``host_package_install``). Worst case one MCP call costs the desktop 握手 45s +
+# tools/list 30s (server must be respawned) + tools/call 30s (mcp-service.ts).
+_MCP_OP_TIMEOUT_SECONDS = 105.0
+# Channel transport deadline: the layer that MUST fire first when an MCP Server wedges,
+# because only it can name the failure（「本机 MCP 操作超时」+ server / tool below）.
+_MCP_CHANNEL_TIMEOUT_SECONDS = _MCP_OP_TIMEOUT_SECONDS + 15.0
+# Engine wall-clock ceiling. Its clock starts at tool dispatch — strictly earlier than the
+# channel's — so an equal budget (both hardcoded 120s before) makes the MCP-specific error
+# unreachable: every wedged Server surfaced as the engine's generic 活性挂起, blurring an
+# external tool fault into "the model used the tool wrong". Must outlive the channel.
+_MCP_ENGINE_TIMEOUT_SECONDS = _MCP_CHANNEL_TIMEOUT_SECONDS + 15.0
+
 
 def sanitize_mcp_tool_name(server_id: str, tool_name: str) -> str:
     """Build a unique FC name: ``mcp_{server}_{tool}`` (truncated to 64)."""
@@ -60,7 +73,7 @@ class McpDynamicTool:
             parameters=_parameters_schema(input_schema),
             category=ToolCategory.SEARCH,
             approval=ToolApproval.GRANTABLE,
-            timeout_seconds=120.0,
+            timeout_seconds=_MCP_ENGINE_TIMEOUT_SECONDS,
         )
 
     @property
@@ -94,14 +107,19 @@ class McpDynamicTool:
                     "tool_name": self._mcp_tool_name,
                     "arguments": arguments if isinstance(arguments, dict) else {},
                 },
-                timeout=120.0,
+                timeout=_MCP_CHANNEL_TIMEOUT_SECONDS,
             )
         except McpOpError as e:
+            # Name the external dependency: without it a wedged / missing MCP Server is
+            # indistinguishable (to the model) from its own misuse of the tool.
             return ToolResult(
                 tool_call_id="",
                 success=False,
                 output="",
-                error=str(e),
+                error=(
+                    f"MCP 工具 {self._mcp_tool_name} 调用失败"
+                    f"（MCP Server：{self._server_name}）：{e}"
+                ),
             )
         is_error = bool(value.get("isError")) if isinstance(value, dict) else False
         content = value.get("content") if isinstance(value, dict) else value

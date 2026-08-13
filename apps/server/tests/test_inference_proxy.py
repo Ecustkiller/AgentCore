@@ -590,7 +590,15 @@ async def test_record_proxy_spend_carries_attribution(monkeypatch, tmp_path):
     assert row["call_id"] == "call_stable_1"
 
 
-async def test_record_proxy_spend_skips_without_conversation(monkeypatch, tmp_path):
+async def test_record_proxy_spend_bills_without_conversation(monkeypatch, tmp_path):
+    """A missing conversation header no longer drops the spend (「放宽账本」).
+
+    The ledger column used to be NOT NULL, so this call was discarded outright —
+    real tokens, no record. It now lands as an account-level row (NULL
+    conversation, only ``user_id``), so the money still reaches 用量页 / 额度. The
+    header gap stays observable via ``inference.proxy_spend_no_conversation``: a
+    sidecar turn should always carry one, and losing it is a bug worth seeing.
+    """
     calls, queue = _capture_record_runs(monkeypatch, tmp_path)
     await inference._record_proxy_spend(
         user_id="u1",
@@ -598,8 +606,15 @@ async def test_record_proxy_spend_skips_without_conversation(monkeypatch, tmp_pa
         model="deepseek-v4-flash",
         usage=inference.usage_from_deepseek({"prompt_tokens": 10, "completion_tokens": 1}),
     )
-    assert await queue.drain_once() == 0
-    assert calls == []  # no conversation → no row (can't satisfy the NOT NULL column)
+    assert await queue.drain_once() == 1
+
+    assert len(calls) == 1
+    kw = calls[0]
+    assert kw["user_id"] == "u1"
+    assert kw["conversation_id"] is None
+    assert kw["message_id"] is None
+    (row,) = kw["calls"]
+    assert row["cost_total_nano"] > 0
 
 
 async def test_record_proxy_spend_enqueue_survives_ledger_failure(monkeypatch, tmp_path):

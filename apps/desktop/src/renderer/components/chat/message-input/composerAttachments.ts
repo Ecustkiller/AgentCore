@@ -29,6 +29,13 @@ export interface PendingAttachment {
    * 不可进 localStorage；仅内存。
    */
   fileBlob?: File;
+  /**
+   * 附加即上传的进行态：chip 在用户操作后立刻出现，驻留/上传在后台跑
+   * （见 `attachmentUploads`）。仅内存，不进 localStorage。
+   */
+  uploadState?: "uploading" | "error";
+  /** `uploadState === "error"` 时的中文原因，挂在 chip 上。 */
+  uploadError?: string;
 }
 
 /**

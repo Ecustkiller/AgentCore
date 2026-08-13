@@ -32,7 +32,7 @@ from agentcore.workspace.sparse_listing import (
     format_remaining_summary,
     partition_sparse_paths,
 )
-from agentcore.workspace.stage_dirs import RESEARCH_DIR
+from agentcore.workspace.stage_dirs import DRAFTS_DIR
 
 logger = get_logger(__name__)
 
@@ -396,8 +396,11 @@ def _upstream_intermediate_persist_hint(spec: RunSpec) -> str:
     """A1: where upstream links may park large intermediates for downstream ``file_read``.
 
     Playbook-pinned ``artifacts`` win (strict task-book paths). Otherwise free-form teams
-    land under ``RESEARCH_DIR`` with a descriptive filename — never workspace-root
+    land under ``DRAFTS_DIR`` with a descriptive filename — never workspace-root
     ``findings-<role>.md``. Does not replace playbook pinning; only guides free teams.
+
+    落点是「工作稿」而非 ``research/``：大中间产物正是「AI 干活的过程材料」的定义，
+    而 ``research/`` 曾因这类默认指引沦为杂物入口 → [术语表 · 成品归位].
     """
     pinned = [
         p.strip().replace("\\", "/")
@@ -414,7 +417,7 @@ def _upstream_intermediate_persist_hint(spec: RunSpec) -> str:
     return (
         "中间产物怎么交：零散发现直接写进你的文字产出即可（会自动转交下游）；若产物较大、"
         "值得落盘供下游 file_read 取用，就调 file_write，落在"
-        f" `{RESEARCH_DIR}/` 下【自起描述性文件名】"
+        f" `{DRAFTS_DIR}/` 下【自起描述性文件名】"
         "（勿用工作区根 `findings-<角色>.md`），切勿用空路径。"
     )
 
@@ -429,7 +432,7 @@ def _team_position_block(plan: RunPlan, spec: RunSpec) -> str:
     final artifact itself (and, lacking a filename, fire empty-path file_write). It now
     learns it is one link that hands off — and, when it does want to PERSIST a large
     intermediate product for the downstream to ``file_read``, A1 tells it either the
-    task-book ``artifacts`` path (strict) or ``RESEARCH_DIR`` + a descriptive filename
+    task-book ``artifacts`` path (strict) or ``DRAFTS_DIR`` + a descriptive filename
     (free teams; never workspace-root ``findings-<role>.md``). A TERMINAL node instead
     learns it IS the final author (reinforcing structure ownership, the worker-side L3
     lever). Blank for a solo single worker (no team → the request simply is its whole job).

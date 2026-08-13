@@ -85,15 +85,26 @@ class ConversationRepository:
         return conv
 
     async def set_permission_axes(
-        self, conversation_id: str, *, user_id: str, permission_axes: dict
+        self,
+        conversation_id: str,
+        *,
+        user_id: str,
+        permission_axes: dict,
+        commit: bool = True,
     ) -> Conversation | None:
-        """Owner-scoped update of the session permission axes. Returns None if missing."""
+        """Owner-scoped update of the session permission axes. Returns None if missing.
+
+        Pass ``commit=False`` to land this in the caller's unit-of-work — the
+        standing-task PATCH writes the task row and its pinned thread's axes in
+        one transaction so an edit can never authorize half of a fire.
+        """
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if not conv:
             return None
         conv.permission_axes = permission_axes
-        await self._session.commit()
-        await self._session.refresh(conv)
+        await commit_or_flush(self._session, commit=commit)
+        if commit:
+            await self._session.refresh(conv)
         return conv
 
     async def set_model_profile(
@@ -279,11 +290,16 @@ class ConversationRepository:
         ``sort`` accepts ``updated_at`` / ``created_at`` / ``cost`` / ``delegated``
         (multi-agent turn count).
         """
+        # Account-level ledger rows (NULL conversation — AI 改写 / 文档 description)
+        # are filtered out rather than grouped into a NULL bucket that joins to
+        # nothing: they are the account's spend, shown on 用量页 / 全站看板, and no
+        # conversation on this roster may claim them.
         cost_subq = (
             select(
                 CostEvent.conversation_id.label("conversation_id"),
                 _sum_int(CostEvent.cost_total_nano).label("cost_total"),
             )
+            .where(CostEvent.conversation_id.is_not(None))
             .group_by(CostEvent.conversation_id)
             .subquery()
         )

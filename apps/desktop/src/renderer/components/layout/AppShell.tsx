@@ -2,6 +2,7 @@ import { useGroupedConversations } from "@/hooks/useConversations";
 import { isWebClient } from "@/lib/capabilities";
 import { GLOBAL_SHORTCUTS, shouldRunGlobalShortcut } from "@/lib/shortcuts";
 import { useApplyTheme } from "@/lib/theme";
+import { primeDeviceId } from "@/services/deviceIdentity";
 import {
   startFulfillStream,
   stopFulfillStream,
@@ -12,6 +13,7 @@ import {
   startNativeNotificationRouting,
   startTeamActivityNotifications,
 } from "@/services/teamActivityNotifications";
+import { stopAllConversationFollows } from "@/services/turns/conversationFollow";
 import { useProductNoticesStore } from "@/stores/productNotices";
 import { useStandingInboxStore } from "@/stores/standingInbox";
 import { startUpdates } from "@/stores/updates";
@@ -57,12 +59,19 @@ export function AppShell() {
   // self-manages 401→refresh→reconnect and re-syncs on each (re)connect.
   // Device-level fulfill firehose (`GET /v1/fulfill`) co-lives here: CLIENT_TOOL
   // ops must reach this install even when no conversation SSE is open.
+  // Priming the device id here (not only inside the fulfill connect) means the
+  // very first turn already carries `X-Client-Device`, so its local ops are
+  // pinned to this machine instead of any online install.
+  // 对话级订阅（云对话多端同权 B2）挂在会话上、由 hydrate 起停，但它跨路由存活；
+  // shell 卸载 = 退出登录 / 关窗，一并硬关，别把一条 SSE 留给下一个账号。
   useEffect(() => {
+    primeDeviceId();
     startRealtime();
     startFulfillStream();
     return () => {
       stopRealtime();
       stopFulfillStream();
+      stopAllConversationFollows();
     };
   }, []);
 

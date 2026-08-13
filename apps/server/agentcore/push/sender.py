@@ -1,10 +1,11 @@
 """Push transport port + FCM v1 adapter (原生推送下发, 认证与会话 §十).
 
 A :class:`PushSender` is pure transport: given device tokens + a notification it
-delivers, and returns the tokens the provider rejected as *unregistered* so the caller
-can prune them (the DB resolve + prune lives in :mod:`agentcore.push.notify`). This
-mirrors the project's port/adapter posture (cf. ``ChatEventPublisher`` / ``AssetStorage``)
-so FCM can be swapped (APNs direct, a test double) without touching trigger code.
+delivers, and reports back a :class:`PushResult` — what the provider accepted, plus the
+tokens it rejected as *unregistered* so the caller can prune them (the DB resolve +
+prune lives in :mod:`agentcore.push.notify`). This mirrors the project's port/adapter
+posture (cf. ``ChatEventPublisher`` / ``AssetStorage``) so FCM can be swapped (APNs
+direct, a test double) without touching trigger code.
 
 The FCM adapter speaks the HTTP **v1** API with a service-account OAuth2 bearer. It needs
 **no new dependency**: the bearer is minted by signing the service-account JWT with the
@@ -20,8 +21,11 @@ from asyncio import Lock
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import lru_cache
+from hashlib import sha256
 from pathlib import Path
 from typing import Protocol, runtime_checkable
+
+import httpx
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
@@ -46,12 +50,57 @@ class PushNotification:
     data: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class PushResult:
+    """What one fan-out actually achieved.
+
+    Reporting the counts (not just the stale tokens) is what lets a caller — and its
+    log line — tell「压根没发」from「发了但没到」: ``accepted`` is the provider's own
+    receipt, so a zero there is never dressed up as a delivered push.
+
+    - ``accepted``: tokens the provider took (HTTP 200).
+    - ``stale``: tokens it reported unregistered — the caller prunes these.
+    - ``failed``: everything else (transport error, quota, 5xx, or a credential
+      exchange that never produced a bearer, in which case nothing left the process).
+    """
+
+    accepted: int = 0
+    stale: tuple[str, ...] = ()
+    failed: int = 0
+
+
+def device_fingerprint(token: str) -> str:
+    """Stable 8-hex tag for a device token — logs identify a device, never carry its token.
+
+    The same device keeps the same tag across mint / send / prune lines, so a 真机 session
+    is followable end to end without a push credential ever entering the log stream.
+    """
+    return sha256(token.encode("utf-8")).hexdigest()[:8]
+
+
+def _accepted_message_id(resp: httpx.Response) -> str:
+    """FCM's id for an accepted message (``""`` when the body is not the documented shape).
+
+    This is the one handle that outlives our own logs (FCM console / support ticket), so a
+    「发了但没到」can be chased past the point where we stop seeing it. Parsing it must
+    never break a send, hence the swallow.
+    """
+    try:
+        name = str(resp.json().get("name", ""))
+    except Exception:  # noqa: BLE001 — an unreadable body costs the id, nothing else
+        return ""
+    return name.rsplit("/", 1)[-1]
+
+
 @runtime_checkable
 class PushSender(Protocol):
-    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
-        """Deliver ``notification`` to each token; return the tokens the provider
-        reported STALE (unregistered/invalid) so the caller prunes them. Best-effort:
-        a transport error logs and is swallowed (a missing push must never break a turn).
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> PushResult:
+        """Deliver ``notification`` to each token and report what the provider did.
+
+        The result's ``stale`` tokens are the ones the provider reported unregistered so
+        the caller prunes them; its counts are what keep a silent no-op from reading as a
+        delivered push. Best-effort: a transport error logs and is swallowed (a missing
+        push must never break a turn).
         """
         ...
 
@@ -59,8 +108,8 @@ class PushSender(Protocol):
 class NullPushSender:
     """No-op sender (push disabled / unconfigured). Delivers nothing, prunes nothing."""
 
-    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
-        return []
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> PushResult:
+        return PushResult()
 
 
 class FcmPushSender:
@@ -123,22 +172,35 @@ class FcmPushSender:
                     return None
                 payload = resp.json()
                 self._access_token = payload["access_token"]
-                self._access_token_exp = now + float(payload.get("expires_in", 3600))
+                expires_in = float(payload.get("expires_in", 3600))
+                self._access_token_exp = now + expires_in
+                # The one line proving the service account itself works: after this,
+                # a missing notification is FCM's or the device's, not our credentials'.
+                logger.info(
+                    "push.fcm_token_minted",
+                    project_id=self._project_id,
+                    expires_in=int(expires_in),
+                )
                 return self._access_token
             except Exception as e:  # noqa: BLE001 — auth failure degrades to "no push"
                 logger.warning("push.fcm_token_error", error=str(e))
                 return None
 
-    async def send(self, tokens: Sequence[str], notification: PushNotification) -> list[str]:
+    async def send(self, tokens: Sequence[str], notification: PushNotification) -> PushResult:
         if not tokens:
-            return []
+            return PushResult()
         bearer = await self._bearer()
         if not bearer:
-            return []
+            # No bearer ⇒ not one byte left the process. Counted as failed (not as an
+            # empty fan-out) so the caller's log can never read as「已发送」.
+            return PushResult(failed=len(tokens))
         headers = {"Authorization": f"Bearer {bearer}"}
+        accepted = 0
+        failed = 0
         dead: list[str] = []
         async with outbound_async_client(timeout=_HTTP_TIMEOUT) as client:
             for token in tokens:
+                device = device_fingerprint(token)
                 message = {
                     "token": token,
                     "notification": {
@@ -153,22 +215,32 @@ class FcmPushSender:
                         self._send_url, headers=headers, json={"message": message}
                     )
                 except Exception as e:  # noqa: BLE001 — one bad send never aborts the fan-out
-                    logger.warning("push.fcm_send_error", error=str(e))
+                    logger.warning("push.fcm_send_error", error=str(e), device=device)
+                    failed += 1
                     continue
                 if resp.status_code == 200:
+                    accepted += 1
+                    logger.info(
+                        "push.fcm_sent",
+                        device=device,
+                        message_id=_accepted_message_id(resp),
+                    )
                     continue
                 # 404 NOT_FOUND or an UNREGISTERED error = the app was uninstalled / token
                 # rotated; mark it for pruning. Other non-2xx (quota, 5xx) are transient —
                 # log and keep the token for the next attempt.
                 if resp.status_code == 404 or "UNREGISTERED" in resp.text:
                     dead.append(token)
+                    logger.info("push.fcm_token_stale", device=device, status=resp.status_code)
                 else:
+                    failed += 1
                     logger.warning(
                         "push.fcm_send_failed",
                         status=resp.status_code,
                         body=resp.text[:200],
+                        device=device,
                     )
-        return dead
+        return PushResult(accepted=accepted, stale=tuple(dead), failed=failed)
 
 
 @lru_cache(maxsize=1)
@@ -187,12 +259,17 @@ def build_push_sender() -> PushSender:
         return NullPushSender()
     try:
         data = json.loads(Path(path).read_text(encoding="utf-8"))
-        return FcmPushSender(
-            project_id=settings.fcm_project_id or data["project_id"],
+        project_id = settings.fcm_project_id or data["project_id"]
+        sender = FcmPushSender(
+            project_id=project_id,
             client_email=data["client_email"],
             private_key=data["private_key"],
             token_uri=data.get("token_uri", _DEFAULT_TOKEN_URI),
         )
+        # Which Firebase project this process sends from — the fastest way to catch a
+        # 真机 registered against project A while the server pushes from project B.
+        logger.info("push.fcm_configured", project_id=project_id)
+        return sender
     except Exception as e:  # noqa: BLE001 — a bad credential file must not crash boot
         logger.warning("push.fcm_init_failed", error=str(e))
         return NullPushSender()

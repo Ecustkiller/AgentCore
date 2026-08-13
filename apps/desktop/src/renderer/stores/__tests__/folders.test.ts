@@ -17,17 +17,17 @@ beforeEach(() => {
 describe("pending markers", () => {
   it("tracks pending rename independently of draft intent", () => {
     store().setPendingRename("a");
-    store().setDraftWorkspaceIntent({ kind: "project", folderId: "b" });
+    store().setDraftWorkspaceIntent({ kind: "folder", folderId: "b" });
     expect(store().pendingRenameId).toBe("a");
     expect(store().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "b",
     });
 
     store().setPendingRename(null);
     expect(store().pendingRenameId).toBeNull();
     expect(store().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "b",
     });
   });
@@ -36,9 +36,9 @@ describe("pending markers", () => {
     store().setDraftWorkspaceIntent({ kind: "quick_cloud" });
     expect(store().draftWorkspaceIntent).toEqual({ kind: "quick_cloud" });
 
-    store().setDraftWorkspaceIntent({ kind: "project", folderId: "f1" });
+    store().setDraftWorkspaceIntent({ kind: "folder", folderId: "f1" });
     expect(store().draftWorkspaceIntent).toEqual({
-      kind: "project",
+      kind: "folder",
       folderId: "f1",
     });
 
@@ -72,12 +72,12 @@ describe("import / connect git dialog flags", () => {
   it("openImportToCloud accepts legacy localRootId prefill and clears on close", () => {
     store().openImportToCloud({
       rootId: "root-legacy",
-      projectName: "旧项目",
+      folderName: "旧文件夹",
     });
     expect(store().importToCloudOpen).toBe(true);
     expect(store().importToCloudPrefill).toEqual({
       rootId: "root-legacy",
-      projectName: "旧项目",
+      folderName: "旧文件夹",
     });
     store().closeImportToCloud();
     expect(store().importToCloudOpen).toBe(false);

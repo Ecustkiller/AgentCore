@@ -34,8 +34,13 @@ HOT_ORPHAN_KINDS: frozenset[str] = frozenset(
 )
 
 
-def _is_hot_user_pending_kind(kind: str, payload: dict[str, Any] | None) -> bool:
-    """True for hot-path kinds awaiting the user (excludes ``awaiting=ceo``)."""
+def is_hot_user_pending_kind(kind: str, payload: dict[str, Any] | None) -> bool:
+    """True for hot-path kinds awaiting the user (excludes ``awaiting=ceo``).
+
+    Also the gate for the AI attention signal (云对话多端同权 B2): a card the CEO
+    arbitrates has not stopped the turn on a human, so it must not reach the user's
+    firehose or their phone either.
+    """
     if kind not in HOT_ORPHAN_KINDS:
         return False
     return not (
@@ -45,7 +50,7 @@ def _is_hot_user_pending_kind(kind: str, payload: dict[str, Any] | None) -> bool
 
 
 def _should_orphan_pending(pending: PendingInteraction) -> bool:
-    return _is_hot_user_pending_kind(pending.kind, pending.payload)
+    return is_hot_user_pending_kind(pending.kind, pending.payload)
 
 
 def has_hot_user_pending(conversation_id: str | None) -> bool:
@@ -55,7 +60,7 @@ def has_hot_user_pending(conversation_id: str | None) -> bool:
         return False
     registry = default_interaction_registry()
     for req in registry.list_pending(cid):
-        if _is_hot_user_pending_kind(req.kind.value, req.payload):
+        if is_hot_user_pending_kind(req.kind.value, req.payload):
             return True
     return False
 
@@ -152,7 +157,7 @@ async def orphan_registry_pending(
     orphaned: list[str] = []
     for req in list(registry.list_pending(conversation_id)):
         kind = req.kind.value
-        if not _is_hot_user_pending_kind(kind, req.payload):
+        if not is_hot_user_pending_kind(kind, req.payload):
             continue
         await emit_orphan_fact(
             interaction_id=req.id,

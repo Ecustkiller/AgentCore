@@ -200,11 +200,16 @@ async def run_red_team_round(
         if defense_turn is not None:
             turns.append(replace(defense_turn, beat="defense", absent=True, ok=False))
         else:
+            # runner 一个发言都没回（本不该发生：RoundRunner 契约是每方一条，失败方
+            # ok=False）——此处没有任何 run 被派出去，故 run_id 留空而非另造一个。
+            # run_id 的唯一出处是 rounds._beat_run_id；在这里拼一个「像那么回事」的 id
+            # 会让 debate_round / debate_result 引用图上不存在的节点，前端按 id 回取
+            # 发言全文永远落空。空 id = 如实说「这方缺席、没有可回取的 run」。
             turns.append(
                 SideTurn(
                     subject.key,
                     subject.name,
-                    f"r{round_no}_{subject.key}_defense",
+                    "",
                     "",
                     ok=False,
                     absent=True,

@@ -28,6 +28,16 @@ const KIND_ORDER: Record<TimelineItem["kind"], number> = {
 };
 
 /**
+ * 记忆卡的锚定时刻：后端给的 `anchor_at`（本次固化窗口最后一条消息 = 被总结那一轮的末尾）
+ * 优先，缺省（semantic / quota、老数据）回落到落库时刻 `createdAt`。
+ *
+ * 卡片右上角展示的时间戳也走这里：既然卡片是按这个时刻插进时间线的，展示落库时刻会让卡片
+ * 的时间比它下方那条消息还晚，读起来是乱序。
+ */
+export const memoryAnchorTime = (update: MemoryUpdate): string =>
+  update.anchorAt ?? update.createdAt;
+
+/**
  * 把消息、后台云端任务、记忆更新卡并成一条时间线。
  *
  * 消息 + 任务按 `created_at` 排成「基准时间线」；记忆卡则**锚定到它所在那一回合的末尾**
@@ -36,6 +46,9 @@ const KIND_ORDER: Record<TimelineItem["kind"], number> = {
  * 排序会让一张滞后的记忆卡正好落在「新提问 ↔ 长回合回答」之间，被夹进问答对里。锚到回合
  * 末尾既不打断问答对，又让每回合各一张、按时间分布，不会退回「全堆在对话最底部」的老毛病
  * （记忆更新对话内可见 §1.6）。无任务且无记忆卡时退化为纯消息列表（最常见路径）。
+ *
+ * 记忆卡用 {@link memoryAnchorTime} 而非落库时刻定位：固化滞后常常超过用户发下一条消息的
+ * 间隔，此时落库时刻已晚于「下一条提问」，卡片会落空锚点冲到列表末尾。
  */
 export function mergeTimeline(
   messages: Message[],
@@ -89,7 +102,7 @@ export function mergeTimeline(
     ...memoryUpdates.map(
       (update): TimelineItem => ({
         kind: "memory",
-        at: Date.parse(update.createdAt) || 0,
+        at: Date.parse(memoryAnchorTime(update)) || 0,
         key: `mem:${update.id}`,
         update,
       }),

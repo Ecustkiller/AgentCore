@@ -41,7 +41,8 @@ COORDINATION_PERIOD_HINT = (
     "（协作图才是进度真相，易与图矛盾）。对用户开口仅三选一：请示用户 / "
     "报告阻塞与选项 / 宣布阶段结论（非纯进度）。禁止用 delegate 占位等待"
     "（同构再派会被拒绝）。可用 delegate 追加【全新角色/任务】队员"
-    "（同回合自动并入当前协作图）；确需强制追加传 force=true。"
+    "（同回合自动并入当前协作图）；要让在跑/已完成的人接着干填 continue_from_run_id，"
+    '确需再开一份同构工作只放行该闸（force=["isomorphic"]）。'
     "其它工具：cancel_worker / update_synthesis（仅新结论/冲突/方向修正，"
     "禁止纯进度播报）/ resolve_escalation / queue_user_message / ask_user；"
     "老板插话后须【先】用可见正文响应该句再谈团队；"

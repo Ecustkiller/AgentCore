@@ -11,10 +11,19 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.docs_export.layout import (
+    DOC_LAYOUTS,
+    LAYOUT_INVALID_MESSAGE,
+    LAYOUT_PARAM_DESCRIPTION,
+    LAYOUT_STANDARD,
+    parse_layout,
+)
 from agentcore.docs_export.workspace_export import ExportMarkdownError, export_markdown_to_pdf_path
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -30,6 +39,7 @@ class MdToPdfTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -50,6 +60,12 @@ class MdToPdfTool:
                         "type": "string",
                         "description": "工作区内的 Markdown 相对路径（如 `docs/报告.md`）",
                     },
+                    "layout": {
+                        "type": "string",
+                        "enum": list(DOC_LAYOUTS),
+                        "default": LAYOUT_STANDARD,
+                        "description": LAYOUT_PARAM_DESCRIPTION,
+                    },
                 },
                 "required": ["path"],
             },
@@ -69,8 +85,18 @@ class MdToPdfTool:
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
 
+        layout = parse_layout(arguments.get("layout"))
+        if layout is None:
+            return ToolResult(
+                tool_call_id="",
+                success=False,
+                output="",
+                error=LAYOUT_INVALID_MESSAGE,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+
         try:
-            result = await export_markdown_to_pdf_path(context.backend, rel_path)
+            result = await export_markdown_to_pdf_path(context.backend, rel_path, layout=layout)
         except ExportMarkdownError as e:
             return ToolResult(
                 tool_call_id="",
@@ -85,6 +111,7 @@ class MdToPdfTool:
             source=result.source_path,
             output=result.output_path,
             bytes=result.size_bytes,
+            layout=layout,
             warnings=len(result.warnings),
             run_id=context.run_id,
         )
@@ -115,4 +142,8 @@ class MdToPdfTool:
                 "bytes": result.size_bytes,
                 "warnings": list(result.warnings),
             },
+            # 台账事实口径：产物是导出的 .pdf，源 md 记在 derived_from（同 md_to_docx）。
+            file_products=[
+                file_product(result.output_path, derived_from=result.source_path)
+            ],
         )

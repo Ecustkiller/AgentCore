@@ -1,7 +1,7 @@
 import { hasLocalFiles } from "@/lib/capabilities";
 import { setComposerChannelPreference } from "@/lib/composerChannelPreference";
 import { startNewConversation } from "@/lib/newConversation";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
 import { chord } from "@/lib/shortcuts";
 import { notifyError } from "@/lib/toast";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
@@ -47,6 +47,7 @@ import {
   ScrollText,
   Settings,
   Share2,
+  SlidersHorizontal,
   Sun,
   Terminal,
   Timer,
@@ -130,17 +131,18 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: () => startNewConversation(navigate),
     },
     {
-      id: "new-project",
-      title: "新建云项目",
+      id: "new-folder",
+      title: "在「我的文件」里新建文件夹",
       category: "操作",
       icon: FolderPlus,
       keywords: [
         "new",
-        "project",
         "folder",
+        "project",
         "workspace",
         "xinjian",
-        "xiangmu",
+        "wenjianjia",
+        "wodewenjian",
         "gongzuoqu",
       ],
       run: () => useFoldersStore.getState().openCreateFolder(),
@@ -292,7 +294,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
           },
           {
             id: "import-to-cloud",
-            title: "导入本机项目到云",
+            title: "导入本机文件夹到「我的文件」",
             category: "操作" as const,
             icon: Upload,
             keywords: [
@@ -303,7 +305,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
               "daoru",
               "bendi",
               "benji",
-              "xiangmu",
+              "wenjianjia",
             ],
             hint: "推荐 · 本机快照到云",
             run: () => {
@@ -312,9 +314,9 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
             },
           },
           {
-            // §七：本机传统入口（打开本机项目）；履约由 openLocal 并行桶恢复。
+            // §七：本机传统入口（打开本机文件夹）；履约由 openLocal 并行桶恢复。
             id: "open-local-project",
-            title: "打开本机项目",
+            title: "打开本机文件夹",
             category: "操作" as const,
             icon: HardDrive,
             keywords: [
@@ -326,12 +328,12 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
               "chuantong",
               "dakai",
               "bendi",
-              "xiangmu",
+              "wenjianjia",
             ],
             hint: "本机传统 · 直改目录，≠离线",
             run: () => {
               setComposerChannelPreference("local_traditional");
-              void pickAndOpenLocalProject(navigate);
+              void pickAndOpenLocalFolder(navigate);
             },
           },
           {
@@ -435,7 +437,7 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
         "jineng",
         "nengli",
       ],
-      run: go("/toolbox/guidelines"),
+      run: go(APP_PATHS.toolbox.guidelines),
     },
     {
       id: "nav-manual",
@@ -560,12 +562,24 @@ export function buildPaletteCommands(ctx: CommandContext): PaletteCommand[] {
       run: go("/more/usage"),
     },
     {
-      id: "nav-settings-appearance",
-      title: "设置 · 外观",
+      // 原「设置 · 外观」(/more/appearance)：保留 appearance / 外观 关键词，
+      // 老肌肉记忆搜「外观」仍落到这里。
+      id: "nav-settings-general",
+      title: "设置 · 通用",
       category: "前往",
-      icon: Palette,
-      keywords: ["settings", "appearance", "theme", "waiguan"],
-      run: go("/more/appearance"),
+      icon: SlidersHorizontal,
+      keywords: [
+        "settings",
+        "general",
+        "appearance",
+        "theme",
+        "tongyong",
+        "waiguan",
+        "外观",
+        "主题",
+        "诊断",
+      ],
+      run: go("/more/general"),
     },
     {
       id: "nav-settings-shortcuts",

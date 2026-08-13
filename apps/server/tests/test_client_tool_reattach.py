@@ -9,6 +9,7 @@ import json
 import pytest
 
 from agentcore.api import sse
+from agentcore.fulfill.origin import origin_device
 from agentcore.runtime.events import EventSink, content_delta
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_BOARD,
@@ -123,7 +124,6 @@ async def test_attach_does_not_resend_client_tool(monkeypatch):
 
     sink = EventSink(conversation_id=CONV)
     sink.emit(content_delta("Hi"))
-    sink.detach()
 
     fut = registry.create(
         "req-open",
@@ -162,7 +162,16 @@ async def test_fulfill_rehang_redelivers_open_client_tool(monkeypatch):
     _clear_pending(registry)
     captured: list = []
 
-    def fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+    def fake_deliver(
+        user_id,
+        conversation_id,
+        channel,
+        root_id,
+        event,
+        *,
+        origin_device_id=None,
+        hub=None,
+    ):
         captured.append(event)
         return DeliverResult.DELIVERED
 
@@ -190,6 +199,75 @@ async def test_fulfill_rehang_redelivers_open_client_tool(monkeypatch):
     registry.discard("req-open")
 
 
+async def test_payload_snapshots_origin_device_without_leaking_it_on_the_wire():
+    registry = InteractionRegistry()
+    with origin_device("desk-A"):
+        payload = client_tool_payload(
+            CHANNEL_HOST,
+            EventType.HOST_OP_REQUIRED.value,
+            params={"op": "host_shell", "args": {}},
+            user_id="u-origin",
+        )
+    assert payload["origin_device_id"] == "desk-A"
+
+    registry.create(
+        "req-origin", CONV, kind=InteractionKind.CLIENT_TOOL, payload=payload
+    )
+    req = registry.get("req-origin")
+    assert req is not None
+    event = build_client_tool_required(req)
+    assert event is not None
+    # Routing meta stays server-side: the device does not need to be told which
+    # device it is.
+    assert "origin_device_id" not in event.payload
+    registry.discard("req-origin")
+
+
+async def test_rehang_routes_by_the_payload_origin_not_the_ambient_one(monkeypatch):
+    """Reconnect happens outside the turn — the snapshot is the only truth."""
+    from agentcore.fulfill.dispatch import DeliverResult
+    from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
+
+    registry = default_interaction_registry()
+    _clear_pending(registry)
+    seen: list[str | None] = []
+
+    def fake_deliver(
+        user_id,
+        conversation_id,
+        channel,
+        root_id,
+        event,
+        *,
+        origin_device_id=None,
+        hub=None,
+    ):
+        seen.append(origin_device_id)
+        return DeliverResult.DELIVERED
+
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool", fake_deliver
+    )
+
+    with origin_device("desk-A"):
+        payload = client_tool_payload(
+            CHANNEL_HOST,
+            EventType.HOST_OP_REQUIRED.value,
+            params={"op": "host_shell", "args": {}},
+            user_id="u-origin",
+        )
+    registry.create(
+        "req-pinned", CONV, kind=InteractionKind.CLIENT_TOOL, payload=payload
+    )
+    try:
+        # Device B reconnecting is what triggers the re-hang.
+        with origin_device("desk-B"):
+            assert rehang_pending_client_tools("u-origin") == 1
+        assert seen == ["desk-A"]
+    finally:
+        registry.discard("req-pinned")
+
+
 async def test_attach_skips_discarded_client_tool(monkeypatch):
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     registry = default_interaction_registry()
@@ -197,7 +275,6 @@ async def test_attach_skips_discarded_client_tool(monkeypatch):
 
     sink = EventSink(conversation_id=CONV)
     sink.emit(content_delta("Hi"))
-    sink.detach()
 
     registry.create(
         "req-gone",
@@ -333,6 +410,42 @@ async def test_build_hot_skips_done_and_ceo_escalation():
     registry.discard("esc-user")
 
 
+async def test_rebuilt_escalation_keeps_the_original_wait_policy():
+    """重连重建的升级卡与原帧同一等待口径：运维配了上限才带 ``timeout_seconds``。
+
+    卡面据此二选一（无上限 = 一直等你），所以这里凭空造 / 丢失上限都会让文案说谎。
+    """
+    registry = InteractionRegistry()
+    base = {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "question": "pick?",
+        "assumption": "default",
+        "awaiting": "user",
+    }
+    registry.create("esc-wait", CONV, kind=InteractionKind.ESCALATION, payload=dict(base))
+    unlimited_req = registry.get("esc-wait")
+    assert unlimited_req is not None
+    unlimited = build_hot_interaction_required(unlimited_req)
+    assert unlimited is not None
+    assert "timeout_seconds" not in unlimited.payload
+
+    registry.create(
+        "esc-capped",
+        CONV,
+        kind=InteractionKind.ESCALATION,
+        payload={**base, "timeout_seconds": 900.0},
+    )
+    capped_req = registry.get("esc-capped")
+    assert capped_req is not None
+    capped = build_hot_interaction_required(capped_req)
+    assert capped is not None
+    assert capped.payload["timeout_seconds"] == 900.0
+
+    registry.discard("esc-wait")
+    registry.discard("esc-capped")
+
+
 async def test_attach_resends_open_approval(monkeypatch):
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     registry = default_interaction_registry()
@@ -340,7 +453,6 @@ async def test_attach_resends_open_approval(monkeypatch):
 
     sink = EventSink(conversation_id=CONV)
     sink.emit(content_delta("Hi"))
-    sink.detach()
 
     registry.create(
         "appr-open",
@@ -387,7 +499,6 @@ async def test_attach_skips_discarded_approval(monkeypatch):
 
     sink = EventSink(conversation_id=CONV)
     sink.emit(content_delta("Hi"))
-    sink.detach()
 
     registry.create(
         "appr-gone",

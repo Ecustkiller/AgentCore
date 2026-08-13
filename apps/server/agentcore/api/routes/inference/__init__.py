@@ -8,7 +8,7 @@ from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm.resolve import resolve_user_llm_credentials
-from agentcore.runtime.costing import ROLE_CAPTAIN, background_run_cost
+from agentcore.runtime.costing import ROLE_CAPTAIN
 from agentcore.security.tokens import decode_inference_token
 
 router = APIRouter(tags=["inference"])
@@ -36,7 +36,6 @@ __all__ = [
     "enforce_quota",
     "QuotaLimits",
     "ROLE_CAPTAIN",
-    "background_run_cost",
     "inference_user",
     "_resolve_inference_credentials",
     "usage_from_deepseek",

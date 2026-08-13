@@ -258,6 +258,7 @@ async def test_worker_nested_loop_does_not_clobber_captain_mirror():
             role="worker",
             deliverable_only=True,  # same flag as captain — must NOT gate the mirror
             on_reset=lambda _reason: None,
+            approval_gate=None,
         )
 
         after = current_captain_loop.get()
@@ -294,6 +295,7 @@ async def test_captain_loop_publishes_and_resets_mirror():
         turn_model="m",
         role="captain",
         deliverable_only=True,
+        approval_gate=None,
     )
     assert content == "hello captain"
     assert current_captain_loop.get() is None  # finally reset
@@ -337,6 +339,7 @@ async def test_captain_mirror_updates_after_prose_join():
         profile=make_profile_params(max_rounds=4),
         turn_model="m",
         role="captain",
+        approval_gate=None,
     )
     assert "final" in content
     assert seen == ["pre-tool prose"]
@@ -366,6 +369,7 @@ async def test_react_loop_controller_seed_skips_team_gate():
         role="captain",
         deliverable_only=True,
         controller_seed=seed,
+        approval_gate=None,
     )
     assert content == long
     nudges = [

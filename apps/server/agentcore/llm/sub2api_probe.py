@@ -1,4 +1,12 @@
-"""Best-effort Sub2API admin probe for 503 upstream diagnostics."""
+"""Best-effort Sub2API admin probe for 503 upstream diagnostics.
+
+Everything produced here describes the **operator's** relay accounts, so it is
+an ops/log artifact only — never error copy for the end user, who in platform
+mode owns no upstream account to fix. Callers must keep it out of any
+user-visible field (see ``openai_compatible._log_sub2api_diagnosis``). The
+account address is masked anyway: logs are widely read, and the raw address is
+never the thing that makes a diagnosis actionable.
+"""
 
 from __future__ import annotations
 
@@ -99,7 +107,7 @@ def _diagnose_account(account: dict[str, Any]) -> Sub2ApiProbeResult:
         )
 
     return Sub2ApiProbeResult(
-        diagnosis=f"账号 {email} token 有效但被上游拒绝，可能被限流或暂停",
+        diagnosis=f"账号 {masked} token 有效但被上游拒绝，可能被限流或暂停",
         account_email_masked=masked,
     )
 

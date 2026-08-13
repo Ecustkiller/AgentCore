@@ -4,6 +4,10 @@ What it actually provides:
 - Timeout enforcement (kill the whole process tree on timeout / cancel)
 - A per-execution temp dir used as the default working directory
 - stdout/stderr capture
+- 产物写回 reporting: which workspace files the run wrote (``written_files``).
+  Unlike gVisor there is no copy-out leg to enumerate — the script writes the real
+  workspace directly — so the landing is reconstructed by a bounded post-run scan
+  (``written_scan``).
 
 What it does NOT provide — read before enabling on a shared/cloud host:
 - NO real isolation: the child runs with the **full privileges of the API process**
@@ -40,11 +44,18 @@ from collections.abc import Callable
 from pathlib import Path
 
 from agentcore.core.errors import SandboxError, SandboxTimeoutError
+from agentcore.core.logging import get_logger
 from agentcore.tools.sandbox.protocol import (
     ExecutionRequest,
     ExecutionResult,
     SandboxCapabilities,
 )
+from agentcore.tools.sandbox.written_scan import (
+    scan_written_files,
+    written_scan_cutoff_ns,
+)
+
+logger = get_logger(__name__)
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -439,6 +450,8 @@ class SubprocessSandbox:
             code_file.write_text(request.code, encoding="utf-8")
 
             cmd = cmd_prefix + [str(code_file)]
+            # Anchor for「本次执行写了什么」BEFORE the child can touch anything.
+            cutoff_ns = written_scan_cutoff_ns()
             cancel_flag = threading.Event()
             done_event = threading.Event()
             proc_holder: dict[str, subprocess.Popen[bytes]] = {}
@@ -486,6 +499,12 @@ class SubprocessSandbox:
                         )
                     raise
 
+                # Same rule as the gVisor copy-out leg: only a run that COMPLETED
+                # on its own (any exit code) reports artifacts. A killed run is
+                # skipped there because nothing was persisted; here the writes are
+                # already on the real disk, but advertising files a forced stop may
+                # have left half-written would be worse than staying quiet.
+                written = await self._scan_written_files(request.cwd, cutoff_ns)
                 duration_ms = int((time.monotonic() - start) * 1000)
                 return ExecutionResult(
                     success=exit_code == 0,
@@ -493,6 +512,7 @@ class SubprocessSandbox:
                     stderr=stderr_str,
                     exit_code=exit_code,
                     duration_ms=duration_ms,
+                    written_files=written,
                 )
 
             except SandboxTimeoutError as exc:
@@ -513,6 +533,31 @@ class SubprocessSandbox:
                 raise SandboxError(f"代码执行环境启动失败：{e}") from e
         finally:
             await _cleanup_tempdir(tmpdir)
+
+    async def _scan_written_files(
+        self, cwd: str | None, cutoff_ns: int
+    ) -> list[str] | None:
+        """产物写回: workspace-relative paths this run created or modified.
+
+        ``None`` = not applicable (no workspace cwd — the run lived in the throwaway
+        temp dir, so nothing could land). ``[]`` = looked and nothing changed.
+        Never raises: the execution already succeeded, and a failed bookkeeping scan
+        must not turn that into a tool error.
+        """
+        if not cwd:
+            return None
+        try:
+            scan = await asyncio.to_thread(
+                scan_written_files, Path(cwd), cutoff_ns=cutoff_ns
+            )
+        except OSError as exc:
+            logger.info("sandbox.written_scan_failed", error=str(exc)[:200])
+            return None
+        if scan.truncated:
+            # Fail-visible: the deep tail was cut by the scan budget, so this list
+            # can be short. Better a logged partial than a silently slow execution.
+            logger.info("sandbox.written_scan_truncated", found=len(scan.files))
+        return scan.files
 
     async def health_check(self) -> bool:
         """Verify the sandbox can execute code, recording why when it cannot."""

@@ -123,12 +123,15 @@ def _user_facing_file_locations(state: RunState) -> str:
     Single-worker ``direct_result`` has no CEO synthesis pass, so accepted paths must
     be appended here or the turn ends without telling the user where files landed.
     Wording is end-user facing (where / how to open), not the CEO-facing citation block.
+
+    要 Word 就该指到 ``.docx``：自报了 ``derived_from`` 的导出件会把它的源文件折叠到
+    「中间稿」一行（口径见 ``fold_exported_sources``），主推的只有导出件。
     """
     if not state.file_acceptance:
         return ""
-    from agentcore.runtime.runs.file_acceptance import accepted_paths
+    from agentcore.runtime.runs.file_acceptance import fold_exported_sources
 
-    files = accepted_paths(state.file_acceptance)
+    files, intermediates = fold_exported_sources(state.file_acceptance)
     rejected: list[tuple[str, str]] = []
     for row in state.file_acceptance:
         if not isinstance(row, dict) or row.get("status") != "rejected":
@@ -142,6 +145,9 @@ def _user_facing_file_locations(state: RunState) -> str:
     if files:
         listed = "、".join(f"`{p}`" for p in files)
         parts.append(f"文件位置：{listed}（可在工作区文件页打开）")
+    if intermediates:
+        drafts = "、".join(f"`{p}`" for p in intermediates)
+        parts.append(f"（中间稿：{drafts}，已导出为上述文件，一般无需打开）")
     if rejected:
         bits = [f"`{p}`" + (f"（{detail}）" if detail else "") for p, detail in rejected[:8]]
         # Honest residual: completed runs can still carry path-level rejections.

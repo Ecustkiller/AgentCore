@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
 
 /** How many 裸聊 the「快速对话」zone shows before deferring to /conversations.
- * Adaptive: with no「项目」groups the zone owns more of the rail ({@link BARE_LIMIT_SOLO});
+ * Adaptive: with no folder groups the zone owns more of the rail ({@link BARE_LIMIT_SOLO});
  * once groups sit above it the cap relaxes to {@link BARE_LIMIT_WITH_GROUPS}.
  * Overflow exits via「查看全部对话」. Pinned chats live in {@link PinnedConversations}. */
 const BARE_LIMIT_SOLO = 15;
@@ -25,7 +25,7 @@ function byRecency(a: Conversation, b: Conversation): number {
  * when older than the cut-off.
  *
  * No section title. A hairline separates this zone from whatever sits above
- * (置顶 and/or 项目). When every chat is foldered or pinned this zone renders nothing.
+ * (置顶 and/or 文件夹). When every chat is foldered or pinned this zone renders nothing.
  */
 export function RecentConversations() {
   const conversations = useConversations();
@@ -61,7 +61,7 @@ export function RecentConversations() {
 
   return (
     <>
-      {/* Hairline above 裸聊 when 置顶 and/or 项目 sit above (Sidebar nav divider
+      {/* Hairline above 裸聊 when 置顶 and/or 文件夹 sit above (Sidebar nav divider
           uses the same mx-3 sibling pattern). */}
       {(hasGroups || hasPinned) && (
         <div className="mx-3 border-t border-sidebar-border" />
@@ -79,8 +79,8 @@ export function RecentConversations() {
 
 /**
  * The「查看全部对话」entry into the full management page (/conversations). Lives at the
- * very bottom of the rail's conversation area — after「置顶」+「项目」+「快速对话」— so it's
- * the single overflow exit for everything (older 裸聊, extra workspaces, per-group
+ * very bottom of the rail's conversation area — after「置顶」+ 文件夹组 +「快速对话」— so
+ * it's the single overflow exit for everything (older 裸聊, extra folders, per-group
  * overflow). Hidden when there are no conversations at all.
  */
 export function ViewAllConversations() {

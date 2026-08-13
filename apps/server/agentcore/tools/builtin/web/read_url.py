@@ -51,6 +51,16 @@ _DEFAULT_MAX_CHARS = 8000
 _MAX_CHARS_CAP = 30000
 _MAX_REDIRECTS = 5
 _SNIPPET_MAX = 200  # citation preview length — a sentence or two, not the whole lead
+# Slack over ``max_chars`` for the JSON envelope itself (url + title + keys/quotes).
+# NOT slack for escape growth — that is budgeted by shaping ``content`` in
+# :func:`_page_output`, since escaping is unbounded relative to the raw char count.
+_OUTPUT_ENVELOPE_SLACK = 1024
+# In-band truncation notice. A budget cut must be a stated fact, not a silent one:
+# the model would otherwise read a short body as the whole page and claim full coverage.
+_OUTPUT_TRUNCATED_NOTE = (
+    "content 末尾已截断（正文经 JSON 转义后超出本次输出预算）：尾部内容缺失，"
+    "勿据此断言已读全文；需要尾部信息时请换更聚焦的来源，或如实说明未覆盖。"
+)
 # Query-string length (chars) above which a read of a NOVEL domain is treated as a
 # possible exfil beacon (PI-002): a fabricated ``?d=<secret>`` rides the query, while
 # legitimate article URLs rarely carry a 64+ char opaque query. The query-length AND
@@ -229,6 +239,39 @@ def _make_snippet(description: str, text: str) -> str:
     return re.sub(r"\s+", " ", source)[:_SNIPPET_MAX].strip()
 
 
+def _page_output(*, url: str, title: str, text: str, limit: int) -> tuple[str, bool]:
+    """Model-facing JSON whose **serialized** length fits ``limit``; ``(json, truncated)``.
+
+    ``json.dumps`` escaping inflates the payload past the raw character count (每个换行
+    ``\\n`` 变两字符；换行密集的列表/表格页轻松上千个), so budgeting on ``len(text)`` alone
+    lets the dump blow past ``output_limit`` — and ``ToolResult`` then trims it with a
+    character-level head+tail cut, handing the model a JSON object sliced through the
+    middle while the result still reads as a success. So the budget is spent on the dump
+    itself: shrink ``content`` until the serialized form fits, and declare the cut in-band
+    (``truncated`` + ``note``) instead of letting the envelope be chopped.
+    """
+
+    def _dump(body: str, truncated: bool) -> str:
+        payload: dict[str, Any] = {"url": url, "title": title, "content": body}
+        if truncated:
+            payload["truncated"] = True
+            payload["note"] = _OUTPUT_TRUNCATED_NOTE
+        return json.dumps(payload, ensure_ascii=False)
+
+    output = _dump(text, False)
+    if len(output) <= limit:
+        return output, False
+    # Largest prefix whose dump still fits (dump length is monotonic in prefix length).
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(_dump(text[:mid], True)) <= limit:
+            lo = mid
+        else:
+            hi = mid - 1
+    return _dump(text[:lo], True), True
+
+
 def _make_display(
     *,
     url: str,
@@ -396,9 +439,9 @@ class ReadUrlTool:
             cached = cache.get(url, min_chars=max_chars)
             if cached is not None:
                 text = cached.content[:max_chars]
-                output = json.dumps(
-                    {"url": url, "title": cached.title, "content": text},
-                    ensure_ascii=False,
+                limit = max_chars + _OUTPUT_ENVELOPE_SLACK
+                output, output_truncated = _page_output(
+                    url=url, title=cached.title, text=text, limit=limit
                 )
                 logger.info("tool.read_url_cache_hit", url=url, content_chars=len(text))
                 return ToolResult(
@@ -406,11 +449,15 @@ class ReadUrlTool:
                     success=True,
                     output=output,
                     duration_ms=int((time.monotonic() - start) * 1000),
-                    output_limit=max_chars + 1024,
+                    # ``_page_output`` already fit the dump to ``limit``; the max() only
+                    # covers the degenerate envelope-over-budget case (very long url /
+                    # title) so a chopped, unparseable JSON can never reach the model.
+                    output_limit=max(limit, len(output)),
                     metadata={
                         "title": cached.title,
                         "content_chars": len(text),
                         "cached": True,
+                        "output_truncated": output_truncated,
                     },
                     citations=[
                         stamp_citation_tier(
@@ -558,14 +605,23 @@ class ReadUrlTool:
                     stored_at=time.time(),
                 )
             )
-        output = json.dumps({"url": url, "title": title, "content": text}, ensure_ascii=False)
+        limit = max_chars + _OUTPUT_ENVELOPE_SLACK
+        output, output_truncated = _page_output(
+            url=url, title=title, text=text, limit=limit
+        )
         return ToolResult(
             tool_call_id="",
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
-            output_limit=max_chars + 1024,
-            metadata={"title": title, "content_chars": len(text)},
+            # See the cache-hit branch: the dump is already budget-shaped, the max() only
+            # guards the degenerate envelope-over-budget case.
+            output_limit=max(limit, len(output)),
+            metadata={
+                "title": title,
+                "content_chars": len(text),
+                "output_truncated": output_truncated,
+            },
             citations=[
                 stamp_citation_tier(
                     {

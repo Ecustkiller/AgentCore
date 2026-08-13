@@ -6,11 +6,13 @@ endpoint) sets that Future. State is in-process — the same single-worker postu
 the rate limiter already takes (see ``config.py``); front with Redis to scale to
 multiple workers.
 
-Scope: the CEO chat path always. Delegated workers share this SAME per-turn gate
-ONLY in local mode (双模式工作区 P2d 执行门) — a worker must not run code or
+Scope: the CEO chat path and every delegated worker / debater share this SAME
+per-turn gate object whenever the turn has one — a worker must not run code or
 mutate files on the user's real machine without the same consent the CEO gives.
-In cloud mode workers stay un-gated (the server sandbox is isolated) and are
-handed no gate.
+Which calls actually raise a card is decided per call at the tool_exec chokepoint
+(``sandbox_approval``): cloud workers stay un-gated for server-sandbox tools (the
+sandbox is isolated) but still prompt for MCP / Host / 恒确认 / ``file_write=ask``.
+A ``None`` gate means the turn has nobody to ask — not「免审」.
 """
 
 from dataclasses import dataclass, field
@@ -19,6 +21,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, ToolApproval
+from agentcore.runtime.always_confirm import is_git_remote_publish, requires_always_confirm
 from agentcore.runtime.events import (
     EventSink,
     approval_required,
@@ -137,33 +140,11 @@ def _is_permanent_delete(tool_name: str, arguments: dict[str, Any]) -> bool:
     return False
 
 
-def _is_git_remote_publish(tool_name: str, arguments: dict[str, Any]) -> bool:
-    """True for structured ``git push`` / ``create_pr`` — always needs a confirm card.
-
-    Session file trust, kickoff/delegation grants, and turn-wide file-class /
-    per-tool grants must not silently cover remote publish (product: 普通 push /
-    开 PR 先弹确认).
-    """
-    if tool_name != "git":
-        return False
-    sub = str(arguments.get("subcommand") or "").strip().lower()
-    return sub in {"push", "create_pr"}
-
-
-def _requires_always_confirm(tool_name: str, arguments: dict[str, Any]) -> bool:
-    """True for calls that must always show a confirm card.
-
-    Covers structured git remote publish and Host package install — ``host=session`` /
-    kickoff / turn grants must not silently cover installing software on the user's
-    machine (桶4 · 恒确认).
-    """
-    if _is_git_remote_publish(tool_name, arguments):
-        return True
-    return tool_name == "host_package_install"
-
-
-# Back-compat alias for callers / tests that imported the old name.
-_is_git_push = _is_git_remote_publish
+# Private aliases keep this module's call sites (and older imports) stable; the
+# predicate itself lives one layer up so pre-authorize skip paths share it.
+_is_git_remote_publish = is_git_remote_publish
+_requires_always_confirm = requires_always_confirm
+_is_git_push = is_git_remote_publish
 
 
 def _preview_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -491,12 +472,12 @@ class ApprovalGate:
                 continue
             if req.payload.get("tool_name") not in tool_names:
                 continue
-            # Never sweep always-confirm calls (git push/create_pr · host_package_install).
+            # Never sweep always-confirm calls (git push/create_pr ·
+            # host_package_install · delete_folder).
             pending_args = req.payload.get("arguments")
             pending_tool = str(req.payload.get("tool_name") or "")
-            if pending_tool == "host_package_install" or (
-                isinstance(pending_args, dict)
-                and _requires_always_confirm(pending_tool, pending_args)
+            if _requires_always_confirm(
+                pending_tool, pending_args if isinstance(pending_args, dict) else {}
             ):
                 continue
             swept.append(

@@ -41,6 +41,39 @@ class TestCronNextRun:
         nxt = next_run_after("0 9 * * *", after)
         assert nxt == datetime(2026, 7, 28, 9, 0, tzinfo=UTC)
 
+    def test_custom_dom_and_dow_both_set_fire_on_either(self):
+        # Vixie: 日与周都非 * → 取或。「每月 1 号 或 每周一 09:00」
+        # 2026-08-13 is a Thursday → the Monday hit lands first (dow side of the OR).
+        after = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+        assert next_run_after("0 9 1 * 1", after) == datetime(2026, 8, 17, 9, 0, tzinfo=UTC)
+        # 2026-09-01 is a Tuesday: the dom side fires on its own (under the old AND
+        # semantics the next fire would not have come until 2027-02-01).
+        after = datetime(2026, 8, 31, 10, 0, tzinfo=UTC)
+        assert next_run_after("0 9 1 * 1", after) == datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+
+    def test_star_day_field_keeps_and_semantics(self):
+        # Only one day field restricted → the other is trivially true (AND).
+        after = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+        # Mondays only — the 1st must not pull an extra fire in.
+        assert next_run_after("0 9 * * 1", after) == datetime(2026, 8, 17, 9, 0, tzinfo=UTC)
+        # 1st only — Mondays must not pull an extra fire in.
+        assert next_run_after("0 9 1 * *", after) == datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
+
+    def test_step_dom_counts_as_star_for_the_day_rule(self):
+        # Vixie sets DOM_STAR for any field starting with ``*`` (``*/n`` included),
+        # so ``*/10`` + Monday is AND: the first Monday whose dom ∈ {1,11,21,31}.
+        after = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+        assert next_run_after("0 9 */10 * 1", after) == datetime(2026, 8, 31, 9, 0, tzinfo=UTC)
+
+    def test_presets_unaffected_by_the_or_rule(self):
+        after = datetime(2026, 8, 13, 10, 0, tzinfo=UTC)
+        assert next_run_after(CRON_PRESETS["weekly_mon"], after) == datetime(
+            2026, 8, 17, 9, 0, tzinfo=UTC
+        )
+        assert next_run_after(CRON_PRESETS["monthly_1"], after) == datetime(
+            2026, 9, 1, 9, 0, tzinfo=UTC
+        )
+
     def test_invalid_cron_raises(self):
         with pytest.raises(CronError):
             validate_cron("not a cron")
@@ -1215,12 +1248,19 @@ async def test_dispatch_claims_lease_and_rejects_in_flight(monkeypatch):
         async def clear_lease(self, task_id, *, owner=None):
             cleared.append(owner or "")
 
+    created: list[dict] = []
+    failed: list[tuple[str, str]] = []
+
     class _Runs:
         def __init__(self, session):
             pass
 
         async def create(self, **kwargs):
+            created.append(kwargs)
             return SimpleNamespace(id=f"run-{len(claims)}")
+
+        async def mark_failed(self, run_id, *, error):
+            failed.append((run_id, error))
 
     class _Session:
         async def __aenter__(self):
@@ -1256,6 +1296,224 @@ async def test_dispatch_claims_lease_and_rejects_in_flight(monkeypatch):
             trigger_source="webhook",
         )
     assert len(spawned) == 1
+    # STD-A4: the dropped event is visible in the inbox, not only a 409 to the caller.
+    assert [c["status"] for c in created] == ["running", "failed"]
+    assert created[1]["trigger_source"] == "webhook"
+    assert created[1]["conversation_id"] == "conv-1"
+    assert failed and "未自动补跑" in failed[0][1]
+
+
+@pytest.mark.asyncio
+async def test_manual_dispatch_conflict_writes_no_inbox_row(monkeypatch):
+    """「立即跑一次」's caller is the user and sees the 409 — no inbox noise."""
+    from agentcore.core.errors import ConflictError
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = SimpleNamespace(id="task-1", conversation_id="conv-1", user_id="u1")
+    created: list[dict] = []
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, task_id, *, user_id=None):
+            return task
+
+        async def claim_dispatch(self, task_id, *, owner, lease_seconds, now=None):
+            return None  # already held
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def create(self, **kwargs):
+            created.append(kwargs)
+            return SimpleNamespace(id="run-x")
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+
+    with pytest.raises(ConflictError, match="正在执行"):
+        await runner_mod.dispatch_standing_task(
+            task_id="task-1",
+            user_id="u1",
+            trigger_source="manual",
+        )
+    assert created == []
+
+
+@pytest.mark.asyncio
+async def test_poll_records_inbox_row_when_dispatch_fails(monkeypatch):
+    """STD-A5: the clock is advanced before dispatch, so a failure loses this
+    period's fire — it must show up in the inbox, not only in a server log."""
+    from agentcore.standing_tasks import scheduler as sched_mod
+
+    task = SimpleNamespace(
+        id="task-1", user_id="u1", cron="0 9 * * 1", conversation_id="conv-1"
+    )
+    advanced: list[str] = []
+    cleared: list[str] = []
+    created: list[dict] = []
+    failed: list[tuple[str, str]] = []
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def claim_due(self, *, now, owner, lease_seconds, limit):
+            return [task]
+
+        async def advance_next_run(self, task_id, *, next_run_at):
+            advanced.append(task_id)
+
+        async def clear_lease(self, task_id, *, owner=None):
+            cleared.append(task_id)
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def create(self, **kwargs):
+            created.append(kwargs)
+            return SimpleNamespace(id="run-missed")
+
+        async def mark_failed(self, run_id, *, error):
+            failed.append((run_id, error))
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    async def boom(**kwargs):
+        raise RuntimeError("派单炸了")
+
+    monkeypatch.setattr(sched_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(sched_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(sched_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(sched_mod, "dispatch_standing_task", boom)
+
+    assert await sched_mod.poll_due_standing_tasks(owner="sched-test") == 0
+    # Clock stays advanced and the lease is released — the miss is surfaced, not re-run.
+    assert advanced == ["task-1"]
+    assert cleared == ["task-1"]
+    assert [c["status"] for c in created] == ["failed"]
+    assert created[0]["trigger_source"] == "schedule"
+    assert created[0]["user_id"] == "u1"
+    assert failed == [("run-missed", sched_mod._DISPATCH_FAILED_ERROR.format(error="派单炸了"))]
+
+
+@pytest.mark.asyncio
+async def test_scheduled_fire_aborts_when_task_disabled_after_claim(monkeypatch):
+    """STD-A5: the guard keys off ``trigger_source``. It used to hang off
+    ``advance_schedule``, which the scheduler always passes as False."""
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = SimpleNamespace(id="task-1", user_id="u1", enabled=False)
+    run_marks: dict[str, object] = {}
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, task_id, user_id=None):
+            return task
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def mark_failed(self, run_id, *, error):
+            run_marks["failed"] = error
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+
+    await runner_mod.run_standing_task_job(
+        run_id="run-1",
+        task_id="task-1",
+        advance_schedule=False,
+        trigger_source="schedule",
+    )
+    assert run_marks["failed"] == "站立任务已停用"
+
+
+@pytest.mark.asyncio
+async def test_manual_fire_still_runs_a_disabled_task(monkeypatch):
+    """「立即跑一次」is the 验收 / 收件箱重跑 path — disabling must not block it."""
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = SimpleNamespace(
+        id="task-1",
+        user_id="u1",
+        folder_id="folder-1",
+        enabled=False,
+        goal="g",
+        name="n",
+        permission_axes={},
+        cron="0 9 * * 1",
+        conversation_id="conv-1",
+    )
+    run_marks: dict[str, object] = {}
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, task_id, user_id=None):
+            return task
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def mark_failed(self, run_id, *, error):
+            run_marks["failed"] = error
+
+    class _Folders:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, folder_id, user_id=None):
+            return None  # stop the job right after the enabled guard
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(runner_mod, "FolderRepository", _Folders)
+
+    await runner_mod.run_standing_task_job(
+        run_id="run-1",
+        task_id="task-1",
+        advance_schedule=False,
+        trigger_source="manual",
+    )
+    assert run_marks["failed"] == "站立任务仅支持云工作区"
 
 
 @pytest.mark.asyncio
@@ -2157,3 +2415,379 @@ async def test_run_job_with_workflow_uses_direct_start(monkeypatch):
     assert isinstance(wf_kwargs, dict)
     assert wf_kwargs["workflow_id"] == "wf-1"
     assert wf_kwargs["workflow_version"] == 2
+
+
+# --- 编辑已跑过的任务：授权轴 / 所属项目要真的到达下一次代跑 -----------------------
+#
+# 这几条覆盖「任务表 ↔ 钉对话」这条接缝，因此**不 monkeypatch**
+# ``resolve_permission_axes``（上面的老用例把它打成 None，等于把接缝屏蔽掉）。
+
+
+class _FakeConversationRepo:
+    """Minimal ConversationRepository stand-in over a shared in-memory row map."""
+
+    def __init__(self, store: _FakeConversationStore) -> None:
+        self._store = store
+
+    async def get_by_id(self, conversation_id, *, user_id=None):
+        return self._store.rows.get(conversation_id)
+
+    async def get_by_id_unscoped(self, conversation_id):
+        return self._store.rows.get(conversation_id)
+
+    async def set_permission_axes(
+        self, conversation_id, *, user_id, permission_axes, commit=True
+    ):
+        conv = self._store.rows.get(conversation_id)
+        if conv is None:
+            return None
+        conv.permission_axes = dict(permission_axes)
+        self._store.axes_writes.append((conversation_id, dict(permission_axes), commit))
+        return conv
+
+    async def create(self, **kwargs):
+        conv = SimpleNamespace(
+            id=f"conv-{len(self._store.rows) + 1}",
+            title=kwargs.get("title"),
+            folder_id=kwargs.get("folder_id"),
+            mode=kwargs.get("mode"),
+            permission_axes=dict(kwargs.get("permission_axes") or {}),
+            model_profile_id=None,
+        )
+        self._store.rows[conv.id] = conv
+        self._store.created.append(dict(kwargs))
+        return conv
+
+
+class _FakeConversationStore:
+    """One conversation map shared by the PATCH route and the fire (same seam)."""
+
+    def __init__(self, rows: dict[str, SimpleNamespace] | None = None) -> None:
+        self.rows: dict[str, SimpleNamespace] = dict(rows or {})
+        self.created: list[dict] = []
+        self.axes_writes: list[tuple[str, dict, bool]] = []
+
+    def repo(self, _session: object = None) -> _FakeConversationRepo:
+        return _FakeConversationRepo(self)
+
+
+def _standing_row(**overrides) -> SimpleNamespace:
+    row = SimpleNamespace(
+        id="task-1",
+        user_id="u1",
+        folder_id="fold-a",
+        name="每周巡检",
+        goal="巡检竞品",
+        trigger_kind="schedule",
+        cron="0 9 * * 1",
+        permission_axes={
+            "file_write": "session",
+            "command": "auto",
+            "team_kickoff": "rules",
+            "host": "session",
+        },
+        enabled=True,
+        next_run_at=datetime(2026, 8, 3, 9, 0, tzinfo=UTC),
+        conversation_id=None,
+        last_run_at=None,
+        webhook_id=None,
+        webhook_secret_hash=None,
+        template_key=None,
+        template_config={},
+        workflow_id=None,
+        created_at=datetime(2026, 7, 28, tzinfo=UTC),
+        updated_at=datetime(2026, 7, 28, tzinfo=UTC),
+    )
+    for key, value in overrides.items():
+        setattr(row, key, value)
+    return row
+
+
+def _standing_conversation(conv_id: str, task: SimpleNamespace) -> SimpleNamespace:
+    """The pinned thread as the first fire left it."""
+    return SimpleNamespace(
+        id=conv_id,
+        title=task.name,
+        folder_id=task.folder_id,
+        mode="standing",
+        permission_axes=dict(task.permission_axes),
+        model_profile_id=None,
+    )
+
+
+def _patch_task_route(monkeypatch, task: SimpleNamespace):
+    """Repo/folder doubles for the PATCH route + a silenced permission audit."""
+    from agentcore.runtime.audit import permission_events
+
+    audited: list[dict] = []
+
+    class _Repo:
+        async def get_by_id(self, task_id, *, user_id=None):
+            return task if task_id == task.id else None
+
+        async def update(self, task_id, *, user_id, **fields):
+            if task_id != task.id:
+                return None
+            for key, value in fields.items():
+                setattr(task, key, value)
+            return task
+
+    class _Folders:
+        async def get_by_id(self, folder_id, *, user_id=None):
+            return SimpleNamespace(id=folder_id, name=folder_id, local_root_id=None)
+
+    async def _record(**kwargs):
+        audited.append(kwargs)
+
+    monkeypatch.setattr(permission_events, "record_permission_axes_change", _record)
+    return _Repo(), _Folders(), audited
+
+
+def _patch_fire(monkeypatch, *, task: SimpleNamespace, store: _FakeConversationStore) -> dict:
+    """Wire one standing fire against in-memory rows; returns a capture dict.
+
+    Leaves ``resolve_permission_axes`` real so the axes actually travel task →
+    pinned conversation → pipeline.
+    """
+    import agentcore.db.repositories as repositories
+    from agentcore.standing_tasks import runner as runner_mod
+
+    captured: dict = {}
+
+    class _Tasks:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, task_id, user_id=None):
+            return task if task_id == task.id else None
+
+        async def attach_conversation(self, task_id, *, conversation_id, commit=True):
+            task.conversation_id = conversation_id
+            return task
+
+        async def clear_lease(self, *a, **k):
+            return None
+
+        async def advance_next_run(self, *a, **k):
+            return None
+
+    class _Runs:
+        def __init__(self, session):
+            pass
+
+        async def mark_failed(self, run_id, *, error):
+            captured["failed"] = error
+
+        async def mark_succeeded(self, run_id, *, summary):
+            captured["succeeded"] = summary
+
+        async def mark_awaiting_user(self, run_id, *, summary=None):
+            captured["awaiting_user"] = summary
+
+        async def set_conversation_and_message(self, *a, **k):
+            return None
+
+    class _Folders:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, folder_id, user_id=None):
+            return SimpleNamespace(id=folder_id, name=folder_id, local_root_id=None)
+
+    class _Msgs:
+        def __init__(self, session):
+            pass
+
+        async def create(self, **kwargs):
+            return SimpleNamespace(id="msg-u1")
+
+        async def list_recent(self, *a, **k):
+            return []
+
+    class _Users:
+        def __init__(self, session):
+            pass
+
+        async def get_by_id(self, uid):
+            return SimpleNamespace(user_id=uid)
+
+    class _Paused:
+        def __init__(self, session):
+            pass
+
+        async def exists_for_message(self, message_id):
+            return False
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def commit(self):
+            return None
+
+    async def _model_selection(session, conv, user_id):
+        captured["model_conv"] = conv
+        return SimpleNamespace(origin="byok", provider_id=None, model="m")
+
+    async def _profiles(session, conv, user_id):
+        captured["profile_conv"] = conv
+        return None
+
+    async def _backend(**kwargs):
+        captured["backend_folder_id"] = kwargs.get("folder_id")
+        return MagicMock()
+
+    async def _pipeline(**kwargs):
+        captured["pipeline"] = kwargs
+        return {"finish_reason": FinishReason.END_TURN, "content": "跑完"}
+
+    monkeypatch.setattr(runner_mod, "async_session_factory", lambda: _Session())
+    monkeypatch.setattr(runner_mod, "StandingTaskRepository", _Tasks)
+    monkeypatch.setattr(runner_mod, "StandingTaskRunRepository", _Runs)
+    monkeypatch.setattr(runner_mod, "FolderRepository", _Folders)
+    monkeypatch.setattr(runner_mod, "ConversationRepository", store.repo)
+    # resolve_permission_axes reaches the row through this late import.
+    monkeypatch.setattr(repositories, "ConversationRepository", store.repo)
+    monkeypatch.setattr(runner_mod, "MessageRepository", _Msgs)
+    monkeypatch.setattr(runner_mod, "PausedTurnRepository", _Paused)
+    monkeypatch.setattr(runner_mod, "UserRepository", _Users)
+    monkeypatch.setattr(runner_mod, "resolve_conversation_model_selection", _model_selection)
+    monkeypatch.setattr(runner_mod, "resolve_profile_set", _profiles)
+    monkeypatch.setattr(
+        runner_mod, "preflight_resolved_llm_credentials", AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(runner_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        runner_mod, "resolve_conversation_history_access", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(runner_mod, "build_turn_backend", _backend)
+    monkeypatch.setattr(runner_mod, "load_chat_context", AsyncMock(return_value=[]))
+    monkeypatch.setattr(runner_mod, "_run_pipeline", _pipeline)
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_axes_edit_after_first_fire_reaches_next_run(monkeypatch):
+    """收紧自主度后，下一次代跑按新轴开跑（不是首跑那次冻结的轴）。"""
+    from agentcore.api.routes import standing_tasks as routes
+    from agentcore.api.schemas.conversations import PermissionAxesModel
+    from agentcore.api.schemas.standing_tasks import UpdateStandingTaskRequest
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = _standing_row(conversation_id="conv-1")
+    store = _FakeConversationStore({"conv-1": _standing_conversation("conv-1", task)})
+    repo, folders, audited = _patch_task_route(monkeypatch, task)
+
+    out = await routes.update_standing_task(
+        task_id="task-1",
+        body=UpdateStandingTaskRequest(
+            permission_axes=PermissionAxesModel(
+                file_write="ask", command="ask", team_kickoff="rules", host="off"
+            )
+        ),
+        user=SimpleNamespace(user_id="u1"),
+        repo=repo,
+        folders=folders,
+        conversations=store.repo(),
+    )
+    assert out.permission_axes.file_write.value == "ask"
+    # 授权面的运行时真相在钉对话上，且与任务行同一事务落库。
+    assert store.rows["conv-1"].permission_axes["file_write"] == "ask"
+    assert store.axes_writes == [
+        (
+            "conv-1",
+            {"file_write": "ask", "command": "ask", "team_kickoff": "rules", "host": "off"},
+            False,
+        )
+    ]
+    assert [a["conversation_id"] for a in audited] == ["conv-1"]
+    # 只改轴不换项目 → 线程保留。
+    assert task.conversation_id == "conv-1"
+
+    captured = _patch_fire(monkeypatch, task=task, store=store)
+    await runner_mod.run_standing_task_job(
+        run_id="run-2", task_id="task-1", advance_schedule=False
+    )
+    axes = captured["pipeline"]["permission_axes"]
+    assert axes.file_write.value == "ask"
+    assert axes.command.value == "ask"
+    assert captured.get("succeeded") == "跑完"
+
+
+@pytest.mark.asyncio
+async def test_folder_edit_after_first_fire_rethreads_into_new_project(monkeypatch):
+    """换项目：钉对话解绑，下一次代跑在新项目开线程，模型档案 / 项目档案随之走新项目。"""
+    from agentcore.api.routes import standing_tasks as routes
+    from agentcore.api.schemas.standing_tasks import UpdateStandingTaskRequest
+    from agentcore.standing_tasks import runner as runner_mod
+
+    task = _standing_row(conversation_id="conv-1")
+    store = _FakeConversationStore({"conv-1": _standing_conversation("conv-1", task)})
+    repo, folders, _audited = _patch_task_route(monkeypatch, task)
+
+    out = await routes.update_standing_task(
+        task_id="task-1",
+        body=UpdateStandingTaskRequest(folder_id="fold-b"),
+        user=SimpleNamespace(user_id="u1"),
+        repo=repo,
+        folders=folders,
+        conversations=store.repo(),
+    )
+    assert out.folder_id == "fold-b"
+    # 对话出生项目终身不可变 → 解绑重开，而不是把旧线程拖过去。
+    assert task.conversation_id is None
+    assert store.rows["conv-1"].folder_id == "fold-a"
+
+    captured = _patch_fire(monkeypatch, task=task, store=store)
+    await runner_mod.run_standing_task_job(
+        run_id="run-2", task_id="task-1", advance_schedule=False
+    )
+    assert [c["folder_id"] for c in store.created] == ["fold-b"]
+    assert task.conversation_id == "conv-2"
+    assert captured["model_conv"].id == "conv-2"
+    assert captured["model_conv"].folder_id == "fold-b"
+    assert captured["profile_conv"].folder_id == "fold-b"
+    assert captured["backend_folder_id"] == "fold-b"
+    assert captured["pipeline"]["folder_id"] == "fold-b"
+
+
+@pytest.mark.asyncio
+async def test_patch_leaves_pinned_thread_alone_without_a_real_change(monkeypatch):
+    """未钉对话 / 项目没变：不写对话、不解绑（只有真实变更才动线程）。"""
+    from agentcore.api.routes import standing_tasks as routes
+    from agentcore.api.schemas.conversations import PermissionAxesModel
+    from agentcore.api.schemas.standing_tasks import UpdateStandingTaskRequest
+
+    unpinned = _standing_row()
+    store = _FakeConversationStore()
+    repo, folders, audited = _patch_task_route(monkeypatch, unpinned)
+    await routes.update_standing_task(
+        task_id="task-1",
+        body=UpdateStandingTaskRequest(
+            permission_axes=PermissionAxesModel(file_write="ask", command="ask")
+        ),
+        user=SimpleNamespace(user_id="u1"),
+        repo=repo,
+        folders=folders,
+        conversations=store.repo(),
+    )
+    assert store.axes_writes == []
+    assert audited == []
+    assert unpinned.permission_axes["file_write"] == "ask"
+
+    pinned = _standing_row(conversation_id="conv-1")
+    store2 = _FakeConversationStore({"conv-1": _standing_conversation("conv-1", pinned)})
+    repo2, folders2, _ = _patch_task_route(monkeypatch, pinned)
+    await routes.update_standing_task(
+        task_id="task-1",
+        body=UpdateStandingTaskRequest(folder_id="fold-a", enabled=False),
+        user=SimpleNamespace(user_id="u1"),
+        repo=repo2,
+        folders=folders2,
+        conversations=store2.repo(),
+    )
+    assert pinned.conversation_id == "conv-1"
+    assert store2.axes_writes == []

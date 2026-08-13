@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+import { APP_PATHS } from "@/pages/toolbox/manual/paths";
+import { useStandingInboxStore } from "@/stores/standingInbox";
+import type { McpApi, McpConfigResult } from "@shared/mcp-contract";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ConnectorsPage } from "../ConnectorsPage";
+
+function stubMcpApi(): McpApi {
+  const listServers = vi.fn(
+    async (): Promise<McpConfigResult> => ({ ok: true, servers: [] }),
+  );
+  const api = {
+    runOp: vi.fn(),
+    listServers,
+    upsertServer: vi.fn(),
+    removeServer: vi.fn(),
+    setServerEnabled: vi.fn(),
+    testServer: vi.fn(),
+  } as unknown as McpApi;
+  vi.stubGlobal("mcpApi", api);
+  return api;
+}
+
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={[APP_PATHS.toolbox.connectors]}>
+      <ConnectorsPage />
+    </MemoryRouter>,
+  );
+}
+
+beforeEach(() => {
+  useStandingInboxStore.setState({ badge: 0 });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  cleanup();
+});
+
+describe("连接器页 · 统一页头", () => {
+  it("主 CTA 进页头动作位，页内不再自绘返回链接与大标题", async () => {
+    const api = stubMcpApi();
+    const { container } = renderPage();
+    await waitFor(() => expect(api.listServers).toHaveBeenCalled());
+
+    const header = container.querySelector("header");
+    expect(screen.getAllByRole("link", { name: "工具箱" })).toHaveLength(1);
+    expect(container.querySelector("h1")).toBeNull();
+    expect(screen.getByRole("navigation", { name: "工具箱能力" })).toBeTruthy();
+    expect(
+      header?.contains(screen.getByRole("button", { name: "添加 Server" })),
+    ).toBe(true);
+  });
+
+  it("说明文降级为内容区说明行，不占页头", async () => {
+    const api = stubMcpApi();
+    const { container } = renderPage();
+    await waitFor(() => expect(api.listServers).toHaveBeenCalled());
+
+    const note = screen.getByText(/配置本机 stdio MCP Server/);
+    expect(container.querySelector("header")?.contains(note)).toBe(false);
+  });
+
+  it("无 mcpApi 的降级分支只留页头那一份返回链接", () => {
+    const { container } = renderPage();
+
+    expect(screen.getAllByRole("link", { name: "工具箱" })).toHaveLength(1);
+    expect(container.querySelector("h1")).toBeNull();
+    expect(screen.getByText(/本机 MCP 仅桌面端可用/)).toBeTruthy();
+  });
+});

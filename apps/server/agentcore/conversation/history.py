@@ -122,6 +122,7 @@ async def load_recent_history(
     *,
     max_messages: int = 40,
     fold_failures: bool = False,
+    after: datetime | None = None,
 ) -> list[dict]:
     """Load the MOST RECENT ``max_messages``, in chronological order.
 
@@ -139,9 +140,18 @@ async def load_recent_history(
     assistant turns become one short system note. When False (memory
     consolidation), empty assistants stay dropped so synthetic notes never
     enter the memory file.
+
+    ``after``: keep only messages strictly newer than this instant, still capped
+    at ``max_messages``. The memory consolidation window passes its watermark here
+    so each pass summarizes what is genuinely new; the chat prompt path leaves it
+    None and gets the plain recent tail.
     """
     repo = MessageRepository(session)
-    messages = await repo.list_recent(conversation_id, limit=max_messages)
+    messages = (
+        await repo.list_recent(conversation_id, limit=max_messages)
+        if after is None
+        else await repo.list_recent_after(conversation_id, after=after, limit=max_messages)
+    )
     if fold_failures:
         return _fold_history_messages(messages)
     history = []
@@ -154,6 +164,27 @@ async def load_recent_history(
                     item["evidence_ledger"] = list(ledger)
             history.append(item)
     return history
+
+
+def _from_first_user(history: list[dict]) -> list[dict]:
+    """The window from its first ``user`` item on — the summary-prefixed tail's own cut.
+
+    A compacted window is cut TWICE: ``compaction._select_fold`` floors the fold to a
+    user-turn boundary so the un-folded tail starts on ``user``, and then the loader
+    re-cuts that tail from the newest side at ``compaction_context_max_messages``. BOTH
+    cuts have to respect that boundary — a cap-driven drop (stalled compaction, tail
+    outgrown the cap) that eats the tail's leading ``user`` leaves the assistant-role
+    summary block adjacent to an assistant turn, which a strict OpenAI-compatible
+    backend 400s.
+
+    Same rule as the fold's, walked the other way: forward to the first ``user``. What
+    it drops are replies whose prompt the cap already discarded — orphans either way.
+    An all-assistant remainder yields the summary alone.
+    """
+    for index, item in enumerate(history):
+        if item.get("role") == "user":
+            return history[index:]
+    return []
 
 
 def _summary_block(summary: str) -> dict:
@@ -185,10 +216,11 @@ async def load_chat_context(
     unchanged — this only swaps WHAT fills the window. When the conversation has a
     summary, the tail is everything strictly newer than the watermark (recent-biased
     and capped, so a stalled compaction degrades by dropping the oldest un-folded tail,
-    never the newest — see ``MessageRepository.list_recent_after``). The summary rides
-    as the FIRST item (assistant block) right after the system prompt, keeping the
-    stable system prefix cached and re-caching only summary+tail when a re-compaction
-    changes the summary (执行引擎架构设计 §三 长对话压缩).
+    never the newest — see ``MessageRepository.list_recent_after``), taken from its first
+    ``user`` on so that cap-driven drop keeps the near-end aligned (:func:`_from_first_user`).
+    The summary rides as the FIRST item (assistant block) right after the system prompt,
+    keeping the stable system prefix cached and re-caching only summary+tail when a
+    re-compaction changes the summary (执行引擎架构设计 §三 长对话压缩).
 
     NB: long-term memory consolidation deliberately still reads raw recent messages via
     :func:`load_recent_history` — it reconciles ACTUAL turns into the memory file and
@@ -202,7 +234,7 @@ async def load_chat_context(
             limit=settings.compaction_context_max_messages,
         )
         history: list[dict] = [_summary_block(conv.compaction_summary)]
-        history.extend(_fold_history_messages(rows))
+        history.extend(_from_first_user(_fold_history_messages(rows)))
         return history
 
     return await load_recent_history(

@@ -60,7 +60,7 @@ class SkillConsultSource:
 
 @dataclass
 class MemoryConsultSource:
-    """On-demand TOPIC notes (``主题/<slug>.md``); project-then-global resolve."""
+    """On-demand TOPIC notes (``主题/<slug>.md``); nearest-folder-then-global resolve."""
 
     store: MemoryStore
     folder_id: str | None = None
@@ -77,22 +77,26 @@ class MemoryConsultSource:
         return [ConsultDirectoryEntry(name=t.name, summary=t.summary) for t in topics]
 
     async def fetch_by_name(self, user_id: str, name: str) -> str | None:
+        """Current folder → ancestors innermost-first → global (§5.4 近的覆盖远的)."""
         if not self.enabled:
             return None
         slug = _memory_slug(name)
         if not slug:
             return None
-        body = ""
-        if self.folder_id:
-            body = await self.store.load(user_id, topic_path(slug), scope=self.folder_id)
-        if not body.strip():
-            body = await self.store.load(user_id, topic_path(slug))
+        from agentcore.memory.scope_chain import resolve_scope_chain
+
+        chain = await resolve_scope_chain(user_id, self.folder_id)
+        for scope in reversed(chain):
+            body = await self.store.load(user_id, topic_path(slug), scope=scope)
+            if body.strip():
+                return body
+        body = await self.store.load(user_id, topic_path(slug))
         return body if body.strip() else None
 
 
 @dataclass
 class RuleConsultSource:
-    """On-demand user rules; project-then-global resolve (cloud list or local DB)."""
+    """On-demand user rules; nearest-folder-then-global resolve (cloud list or local DB)."""
 
     folder_id: str | None = None
 
@@ -113,9 +117,12 @@ class RuleConsultSource:
                     payload, folder_id=self.folder_id, name=key
                 )
             async with async_session_factory() as session:
+                from agentcore.memory.scope_chain import db_scope_chain
+
                 repo = DocumentRepository(session)
-                if self.folder_id:
-                    body = await self._load_named(repo, user_id, self.folder_id, key)
+                chain = await db_scope_chain(user_id, self.folder_id, session=session)
+                for scope in reversed(chain):
+                    body = await self._load_named(repo, user_id, scope, key)
                     if body is not None:
                         return body
                 return await self._load_named(repo, user_id, None, key)

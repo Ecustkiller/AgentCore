@@ -1,7 +1,8 @@
-"""Tests for workspace path policy (conversation scratch → directory).
+"""Tests for workspace path policy (conversation → directory).
 
-Pins Folder 重构 To-Be: every conversation owns ``conv/<id>/`` scratch;
-``folder_id`` is sidebar grouping only. ``data_dir`` is redirected to ``tmp_path``.
+Pins 双模式工作区 §5.4: a cloud folder's directory follows ``folders.rel_path``
+under the user-visible ``tree/`` segment, while scratch, tombstones and hidden
+zones stay physically outside it. ``data_dir`` is redirected to ``tmp_path``.
 """
 
 from pathlib import Path
@@ -21,49 +22,80 @@ from agentcore.workspace.locate import (
     build_local_workspace,
     build_server_workspace,
     build_workspace,
+    folder_tombstone_path,
     format_workspace_id,
     parse_workspace_id,
     resolve_workspace_root,
     workspace_has_entries,
+    workspace_internal_root,
     workspace_storage_key,
 )
 from agentcore.workspace.server import ServerWorkspace
 
 
-def test_foldered_conversation_shares_folder_root(tmp_path: Path, monkeypatch):
+def test_folder_root_lives_under_the_visible_tree(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert root == tmp_path / "workspaces" / "u1" / "f1"
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="设计", conversation_id="c1")
+    assert root == tmp_path / "workspaces" / "u1" / "tree" / "设计"
     assert root.is_dir()
+
+
+def test_nested_folder_root_follows_the_rel_path_prefix(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    root = resolve_workspace_root(
+        user_id="u1", folder_rel_path="设计/图标", conversation_id="c1"
+    )
+    assert root == tmp_path / "workspaces" / "u1" / "tree" / "设计" / "图标"
 
 
 def test_conversations_in_same_folder_share_root(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    r1 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    r2 = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c2")
+    r1 = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
+    r2 = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c2")
     assert r1 == r2
 
 
 def test_ungrouped_conversations_get_independent_roots(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    r1 = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c1")
-    r2 = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c2")
+    r1 = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c1")
+    r2 = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c2")
     assert r1 != r2
     assert r1 == tmp_path / "workspaces" / "u1" / "conv" / "c1"
-    assert r1.parent.name == "conv"
+
+
+def test_scratch_is_outside_the_visible_tree(tmp_path: Path, monkeypatch):
+    """A user folder named ``conv`` must not collide with the scratch namespace."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    scratch = resolve_workspace_root(
+        user_id="u1", folder_rel_path=None, conversation_id="c1"
+    )
+    folder = resolve_workspace_root(
+        user_id="u1", folder_rel_path="conv", conversation_id="c1"
+    )
+    assert scratch != folder
+    assert "tree" not in scratch.parts
+
+
+def test_rootless_coordinates_refuse_to_resolve(tmp_path: Path, monkeypatch):
+    """Folder-scoped callers pass ``conversation_id=""``; that must never mean ``conv/``."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    with pytest.raises(ValueError, match="无法定位工作区"):
+        resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="")
 
 
 def test_users_are_isolated_by_directory(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    a = resolve_workspace_root(user_id="alice", folder_id="f1", conversation_id="c1")
-    b = resolve_workspace_root(user_id="bob", folder_id="f1", conversation_id="c1")
+    a = resolve_workspace_root(user_id="alice", folder_rel_path="f1", conversation_id="c1")
+    b = resolve_workspace_root(user_id="bob", folder_rel_path="f1", conversation_id="c1")
     assert a != b
-    assert a.parent.name == "alice"  # <workspaces>/<user_id>/<folder_id>
+    assert a.parts[-3] == "alice"
 
 
 def test_build_server_workspace_targets_resolved_root(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    ws = build_server_workspace(user_id="u1", folder_id=None, conversation_id="c9")
+    ws = build_server_workspace(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c9"
+    )
     assert isinstance(ws, ServerWorkspace)
     assert ws.location == "server"
 
@@ -109,6 +141,7 @@ def test_build_workspace_picks_local_when_bound():
     ws = build_workspace(
         user_id="u1",
         folder_id="f1",
+        folder_rel_path="f1",
         conversation_id="c1",
         sink=EventSink(),
         local_binding=LocalBinding(root_id="root-1"),
@@ -122,6 +155,7 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     ws = build_workspace(
         user_id="u1",
         folder_id="f1",
+        folder_rel_path="f1",
         conversation_id="c1",
         sink=EventSink(),
         local_binding=None,
@@ -130,7 +164,7 @@ def test_build_workspace_falls_back_to_cloud_when_unbound(tmp_path: Path, monkey
     assert ws.location == "server"
 
 
-# --- storage key (mirrors the on-disk layout for snapshots) ---
+# --- storage key: id-derived, deliberately NOT the on-disk path ---
 
 
 def test_storage_key_folder_project():
@@ -143,11 +177,53 @@ def test_storage_key_ungrouped_space():
     assert key == "workspaces/u1/conv/c1"
 
 
-def test_storage_key_mirrors_on_disk_root(tmp_path: Path, monkeypatch):
+def test_storage_key_survives_a_rename(tmp_path: Path, monkeypatch):
+    """Snapshot history and the mutation lock must not move when a folder is renamed."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    key = workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert root == Path(settings.data_dir) / key
+    before = resolve_workspace_root(
+        user_id="u1", folder_rel_path="旧名", conversation_id="c1"
+    )
+    after = resolve_workspace_root(
+        user_id="u1", folder_rel_path="新名", conversation_id="c1"
+    )
+    assert before != after
+    assert workspace_storage_key(
+        user_id="u1", folder_id="f1", conversation_id="c1"
+    ) == workspace_storage_key(user_id="u1", folder_id="f1", conversation_id="c1")
+    assert Path(settings.data_dir) / workspace_storage_key(
+        user_id="u1", folder_id="f1", conversation_id="c1"
+    ) not in (before, after)
+
+
+# --- hidden zones + tombstone live outside the visible tree ---
+
+
+def test_internal_root_is_outside_the_tree_and_id_keyed(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    internal = workspace_internal_root(user_id="u1", folder_id="f1", conversation_id="")
+    assert internal == tmp_path / "workspaces" / "u1" / "internal" / "folder" / "f1"
+    assert "tree" not in internal.parts
+
+
+def test_internal_root_ignores_the_visible_name(tmp_path: Path, monkeypatch):
+    """Renaming a folder must not orphan its index / trash / baselines."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    assert workspace_internal_root(
+        user_id="u1", folder_id="f1", conversation_id=""
+    ) == workspace_internal_root(user_id="u1", folder_id="f1", conversation_id="")
+
+
+def test_scratch_internal_root_is_conversation_keyed(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    internal = workspace_internal_root(user_id="u1", folder_id=None, conversation_id="c1")
+    assert internal == tmp_path / "workspaces" / "u1" / "internal" / "conv" / "c1"
+
+
+def test_tombstone_is_id_named_and_outside_the_tree(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    grave = folder_tombstone_path(user_id="u1", folder_id="f1")
+    assert grave == tmp_path / "workspaces" / "u1" / "deleted" / "f1"
+    assert "tree" not in grave.parts
 
 
 # --- public workspace id (the /v1/workspaces addressing token) ---
@@ -178,56 +254,74 @@ def test_parse_workspace_id_rejects_malformed():
 
 def test_workspace_has_entries_false_when_missing(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c1")
+    assert not workspace_has_entries(
+        user_id="u1", folder_rel_path=None, conversation_id="c1"
+    )
     assert not (tmp_path / "workspaces" / "u1" / "conv" / "c1").exists()
+
+
+def test_workspace_has_entries_false_without_a_placement(tmp_path: Path, monkeypatch):
+    """A folder row with no slot yet has no directory — False, not a crash."""
+    monkeypatch.setattr(settings, "data_dir", str(tmp_path))
+    assert not workspace_has_entries(user_id="u1", folder_rel_path=None, conversation_id="")
 
 
 def test_workspace_has_entries_false_when_empty(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
-    assert not workspace_has_entries(user_id="u1", folder_id="f1", conversation_id="c1")
+    resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
+    assert not workspace_has_entries(
+        user_id="u1", folder_rel_path="f1", conversation_id="c1"
+    )
 
 
 def test_workspace_has_entries_true_when_non_empty(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "note.txt").write_text("hi", encoding="utf-8")
-    assert workspace_has_entries(user_id="u1", folder_id="f1", conversation_id="c1")
+    assert workspace_has_entries(user_id="u1", folder_rel_path="f1", conversation_id="c1")
 
 
 def test_workspace_has_entries_false_when_only_internal_index(
     tmp_path: Path, monkeypatch
 ):
-    """AgentCore/index alone must not count as hub has_files."""
+    """AgentCore/index alone must not count as hub has_files (local-shaped trees)."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c1")
     (root / "AgentCore" / "index").mkdir(parents=True)
     (root / "AgentCore" / "index" / "code_search.db").write_bytes(b"")
-    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c1")
+    assert not workspace_has_entries(
+        user_id="u1", folder_rel_path=None, conversation_id="c1"
+    )
 
 
 def test_workspace_has_entries_false_when_only_internal_zones(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c2")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c2")
     for zone in ("index", "trash", "baselines"):
         (root / "AgentCore" / zone).mkdir(parents=True)
-    assert not workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c2")
+    assert not workspace_has_entries(
+        user_id="u1", folder_rel_path=None, conversation_id="c2"
+    )
 
 
 def test_workspace_has_entries_true_with_agentcore_docs(tmp_path: Path, monkeypatch):
     """Visible AgentCore content (文档等) still counts; bare top-level index too."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c3")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c3")
     (root / "AgentCore" / "index").mkdir(parents=True)
     (root / "AgentCore" / "文档").mkdir(parents=True)
     (root / "AgentCore" / "文档" / "note.md").write_text("x", encoding="utf-8")
-    assert workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c3")
+    assert workspace_has_entries(
+        user_id="u1", folder_rel_path=None, conversation_id="c3"
+    )
 
-    root2 = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c4")
+    root2 = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c4")
     (root2 / "index").mkdir()  # bare name — not an internal zone
-    assert workspace_has_entries(user_id="u1", folder_id=None, conversation_id="c4")
+    assert workspace_has_entries(
+        user_id="u1", folder_rel_path=None, conversation_id="c4"
+    )
 
 
 @pytest.mark.asyncio
@@ -245,6 +339,23 @@ async def test_empty_server_workspace_start_index_does_not_mkdir(tmp_path: Path)
     assert ws._index_maintainer is not None  # noqa: SLF001
     await ws._index_maintainer.drain()  # noqa: SLF001
     assert (tmp_path / Path(*INDEX_REL.split("/"))).is_dir()
+
+
+@pytest.mark.asyncio
+async def test_cloud_index_dir_lands_outside_the_tree(tmp_path: Path):
+    """A nested folder's index DB must not read as its parent's content."""
+    from agentcore.tools.sandbox.subprocess import SubprocessSandbox
+
+    root = tmp_path / "tree" / "设计"
+    root.mkdir(parents=True)
+    internal = tmp_path / "internal" / "folder" / "f1"
+    ws = ServerWorkspace(root=root, sandbox=SubprocessSandbox(), internal_root=internal)
+    assert ws.index_dir == internal / "index"
+
+    await ws.write("hello.py", "print(1)\n")
+    await ws._index_maintainer.drain()  # noqa: SLF001
+    assert (internal / "index").is_dir()
+    assert not (root / "AgentCore").exists()
 
 
 @pytest.mark.asyncio

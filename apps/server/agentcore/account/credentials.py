@@ -184,8 +184,11 @@ async def cloud_list_user_rules(
 ) -> dict[str, Any]:
     """POST ``…/account/rules/list`` → always + on_demand rule docs.
 
-    Shape: ``{global_rules, project_rules, global_on_demand_rules, project_on_demand_rules}``
-    (on_demand keys may be absent on older clouds — treat as empty).
+    Shape: ``{global_rules, project_rules, ancestor_rules, global_on_demand_rules,
+    project_on_demand_rules, ancestor_on_demand_rules, folder_chain}``. The ``ancestor_*``
+    lists are outermost-first and ``folder_chain`` ends at ``folder_id`` (§5.4 沿树继承);
+    on_demand / ancestor / chain keys may be absent on older clouds — treat as empty, which
+    degrades to「不继承」rather than to a wrong chain.
     """
     return await _post_json(
         creds,
@@ -235,7 +238,11 @@ async def cloud_memory_list(
     *,
     scope: str | None,
 ) -> list[dict[str, Any]]:
-    """POST ``…/account/memory/list`` → ``[{path, version}, …]``."""
+    """POST ``…/account/memory/list`` → ``[{path, version, description, disputed}, …]``.
+
+    Items pass through verbatim; an older cloud simply omits the two newer keys (readers
+    default them to ""/False, i.e. no description and not disputed).
+    """
     data = await _post_json(
         creds,
         path="/memory/list",

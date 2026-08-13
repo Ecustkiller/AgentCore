@@ -70,6 +70,7 @@ def build_hot_interaction_required(req: InteractionRequest) -> SSEEvent | None:
     who = awaiting if awaiting in ("user", "ceo") else "user"
     questions = payload.get("questions")
     ownership = payload.get("ownership_paths")
+    ceiling = payload.get("timeout_seconds")
     return escalation_required(
         str(payload.get("run_id") or ""),
         str(payload.get("agent_id") or ""),
@@ -85,6 +86,9 @@ def build_hot_interaction_required(req: InteractionRequest) -> SSEEvent | None:
             str(payload["lock_owner_run_id"])
             if isinstance(payload.get("lock_owner_run_id"), str)
             else None
+        ),
+        timeout_seconds=(
+            float(ceiling) if isinstance(ceiling, (int, float)) and ceiling > 0 else None
         ),
     )
 

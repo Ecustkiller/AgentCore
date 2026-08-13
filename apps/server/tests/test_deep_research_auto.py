@@ -235,6 +235,7 @@ def _debate_tool(
         permission_axes=permission_axes,
         registry=registry,
         captain_run_id="ceo",
+        approval_gate=None,
     )
     return tool, saved, sink
 

@@ -21,9 +21,13 @@ import { useState } from "react";
  * decides HOW to open it — navigate to /files from the conversation, or open a tab directly
  * inside the editor); rows without a resolvable `target` render as plain text.
  *
- * P2-a: project-scope pill shows `本项目 · {名}` (falls back to「本项目」when the folder
- * name is unknown). P2-b: optional「移到本项目 / 移到全局」on add/update rows when a
- * current project folder is known and the section allows the move.
+ * Quota cards reuse these rows so「什么没写进来 / 谁占着配额」reads like any other memory
+ * row and deep-links the same way; {@link visibleMemoryUpdateItems} hides the internal
+ * fingerprint row.
+ *
+ * P2-a: folder-scope pill shows `本文件夹 · {名}` (falls back to「本文件夹」when the
+ * folder name is unknown). P2-b: optional「移到本文件夹 / 移到全局」on add/update rows
+ * when a current folder is known and the section allows the move.
  */
 
 const ACTION_META: Record<
@@ -33,7 +37,25 @@ const ACTION_META: Record<
   add: { label: "新增", tone: "success" },
   update: { label: "更新", tone: "primary" },
   remove: { label: "移除", tone: "muted" },
+  // Always-pool quota rows (审计 CTX-A2): what could NOT be written, and which entries
+  // are currently holding the pool. Nothing was evicted — these name the trade-off.
+  quota_denied: { label: "未写入", tone: "muted" },
+  quota_holder: { label: "占用", tone: "muted" },
 };
+
+/** Quota rows report pool state; they are not applied changes and cannot be moved. */
+const QUOTA_ACTIONS = new Set(["quota", "quota_denied", "quota_holder"]);
+
+/**
+ * Drop rows that exist only for the backend (the `quota` row carries the card's dedup
+ * fingerprint — a hash the user must never see). Used for both rendering and counting so
+ * the「N 项」pill matches what the card actually lists.
+ */
+export function visibleMemoryUpdateItems<T extends { action: string }>(
+  items: readonly T[],
+): T[] {
+  return items.filter((it) => it.action !== "quota");
+}
 
 /** Resolve a folder id to its display name from the cached folder list. */
 export function resolveProjectName(
@@ -43,18 +65,18 @@ export function resolveProjectName(
   return getFolders().find((f) => f.id === projectId)?.name ?? null;
 }
 
-/** Scope pill label: `全局` / `本项目 · {名}` / `本项目` (name resolve failure). */
+/** Scope pill label: `全局` / `本文件夹 · {名}` / `本文件夹` (name resolve failure). */
 export function memoryScopePillLabel(
   scope: string,
   projectId?: string | null,
 ): string {
   if (scope !== "project") return "全局";
   const name = resolveProjectName(projectId);
-  return name ? `本项目 · ${name}` : "本项目";
+  return name ? `本文件夹 · ${name}` : "本文件夹";
 }
 
 /**
- * Compact scope overview for a card title (e.g. `全局 + 本项目 · Foo`). Empty when
+ * Compact scope overview for a card title (e.g. `全局 + 本文件夹 · Foo`). Empty when
  * there are no items.
  */
 export function memoryScopeOverview(
@@ -97,6 +119,7 @@ export function canMoveMemoryItem(
   projectFolderId: string | null | undefined,
 ): boolean {
   if (item.action === "remove") return false;
+  if (QUOTA_ACTIONS.has(item.action)) return false;
   if (!(item.content ?? "").trim()) return false;
   if (!projectFolderId) return false;
   if (
@@ -124,7 +147,7 @@ export function MemoryUpdateItemRow({
 }: {
   item: MemoryUpdateItem;
   onOpenLeaf: (target: string, projectId?: string | null) => void;
-  /** Current project folder — enables「移到本项目」for global rows. */
+  /** Current folder — enables「移到本文件夹」for global rows. */
   projectFolderId?: string | null;
   /** Fired after a successful move (feed may refetch). */
   onMoved?: () => void;
@@ -136,6 +159,7 @@ export function MemoryUpdateItemRow({
   };
   const leafLabel = item.section ? `${item.file} · ${item.section}` : item.file;
   const removed = item.action === "remove";
+  const dimmed = removed || item.action === "quota_denied";
   const folderId = projectFolderId || item.projectId || null;
   const showToProject = canMoveMemoryItem(item, "to_project", folderId);
   const showToGlobal = canMoveMemoryItem(item, "to_global", folderId);
@@ -157,7 +181,7 @@ export function MemoryUpdateItemRow({
         notifyInfo("记忆刚被更新，请刷新后再试搬层");
         return;
       }
-      notifyInfo(direction === "to_project" ? "已移到本项目" : "已移到全局");
+      notifyInfo(direction === "to_project" ? "已移到本文件夹" : "已移到全局");
       onMoved?.();
     } catch (e) {
       notifyActionError(
@@ -182,7 +206,7 @@ export function MemoryUpdateItemRow({
             }}
             className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
           >
-            移到本项目
+            移到本文件夹
           </button>
         )}
         {showToGlobal && (
@@ -215,8 +239,8 @@ export function MemoryUpdateItemRow({
       {item.content && (
         <p
           className={`mt-0.5 whitespace-pre-wrap break-words text-sm ${
-            removed ? "text-muted-foreground line-through" : "text-foreground"
-          }`}
+            dimmed ? "text-muted-foreground" : "text-foreground"
+          } ${removed ? "line-through" : ""}`}
         >
           {item.content}
         </p>

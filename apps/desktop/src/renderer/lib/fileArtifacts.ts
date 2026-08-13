@@ -1,7 +1,14 @@
 // 回合产物盘点 —— 聊天流内联「本回合改动的文件」卡的纯数据源。
 //
 // 主清单（块 1）：只认 ``delivery_status.artifacts``（accepted+rejected 验收态）。
-// 无该字段 / 空数组 → 空清单（不 silent 降级扫工具列表）。
+// 无该字段 / 空数组 → 空清单（不 silent 降级扫工具列表）。导出件（.docx / .pdf）只存在于
+// 工具自报的产物行里——工具入参只有源 md，故任何按参数合成的清单都会漏掉它。
+//
+// 成品 / 过程材料分组：``delivery_status.promoted``（成品归位）是唯一依据（见
+// {@link splitPromotedProducts}）——归位是 CEO 收口时的显式移动，产物地位**不由路径推断**。
+//
+// 中间稿折叠：行里自报的 ``derived_from`` 是唯一依据（见 {@link splitExportedSources}），
+// 不按扩展名 / 工具名猜派生关系；折叠只降级、不删除。
 //
 // 工具列表（process / execution）仍供「查看改动」等旁路（TurnFileChangesReview /
 // ConversationChangesPanel）：写/改/删/移经 builtin file_ops，抽成功变更 + 参数预览。
@@ -14,7 +21,11 @@
 // 只是把「文件去哪了」可视化，真相仍以工作区文件树为准。
 
 import type { Execution } from "@/stores/execution";
-import type { DeliveryStatusPayload, ProcessStep } from "@/types/events";
+import type {
+  DeliveryPromotion,
+  DeliveryStatusPayload,
+  ProcessStep,
+} from "@/types/events";
 import { toWorkspaceRelPath } from "@shared/workspace-path";
 
 /** 文件变更类型 —— 决定图标 / 文案 / 是否可预览（删除态无文件可看）。 */
@@ -45,6 +56,15 @@ export interface FileArtifact {
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;
+  /**
+   * 已归位成品的 AI 工作间旧路径（`path` 已是归位后的新路径，旧路径盘上不再存在）。
+   * 有值 = 进「成品」组；无值 = 过程材料。
+   */
+  promotedFrom?: string;
+  /** 产出工具自报的产物类型（`md` / `docx` / `pdf` / `code` / …）；未自报时缺省。 */
+  kind?: string;
+  /** 自报的派生源：本产物是那份文件的导出件（`md_to_docx`：docx ← 源 md）。 */
+  derivedFrom?: string;
   /**
    * 落地 desk（`folder:…` / `conv:…`）。来自 delivery `workspace_id`；
    * 缺省时打开完整预览回退会话工作区 wsId。
@@ -154,23 +174,59 @@ export function hasChangePreviews(artifacts: FileArtifact[]): boolean {
 }
 
 /**
+ * 归位对照表（键 = 路径，值 = 该文件的归位记录）。
+ *
+ * 后端按同 ``execution_id`` 重发时**已把 ``artifacts[].path`` 改写成 ``to``**，故新路径侧
+ * 是主匹配路径；旧路径侧一并建索引只作防御（历史快照仍可能带旧路径），两侧同指一份文件，
+ * 不会因此多渲染一行——{@link dedupe} 按最终路径收敛。
+ *
+ * ``promoted`` 是「这张卡上已归位的」累积表，非「本回合归位的」：跨回合再归位（X→Y→Z）时
+ * 旧行保留，后写条目覆盖同名键，故命中的是最近一跳。
+ */
+function promotionsByPath(
+  deliveryStatus: DeliveryStatusPayload,
+): Map<string, DeliveryPromotion> {
+  const out = new Map<string, DeliveryPromotion>();
+  if (!Array.isArray(deliveryStatus.promoted)) return out;
+  for (const row of deliveryStatus.promoted) {
+    const from = toWorkspaceRelPath(asStr(row.from));
+    const to = toWorkspaceRelPath(asStr(row.to));
+    if (!from || !to) continue;
+    const entry: DeliveryPromotion = { from, to };
+    out.set(from, entry);
+    out.set(to, entry);
+  }
+  return out;
+}
+
+/**
  * 主清单：有 ``deliveryStatus.artifacts`` 字段时用之（含空数组）；
  * 缺字段 → null（调用方应视为空，勿再扫工具列表）。
+ *
+ * 归位过的行落在新路径上（后端已改写；本地按对照表兜一道），并记下旧路径供分组。
  */
 export function fileArtifactsFromDeliveryStatus(
   deliveryStatus: DeliveryStatusPayload | null | undefined,
 ): FileArtifact[] | null {
   if (!deliveryStatus || !Array.isArray(deliveryStatus.artifacts)) return null;
+  const promotions = promotionsByPath(deliveryStatus);
   const out: FileArtifact[] = [];
   for (const row of deliveryStatus.artifacts) {
-    const path = toWorkspaceRelPath(asStr(row.path));
-    if (!path) continue;
+    const listedPath = toWorkspaceRelPath(asStr(row.path));
+    if (!listedPath) continue;
     const status = row.status;
     if (status !== "accepted" && status !== "rejected") continue;
+    // 只有 accepted 可归位（质量态是位置态的前提）。
+    const promotion =
+      status === "accepted" ? promotions.get(listedPath) : undefined;
+    const path = promotion?.to ?? listedPath;
     const workspaceId =
       typeof row.workspace_id === "string" && row.workspace_id.trim()
         ? row.workspace_id.trim()
         : undefined;
+    // 派生源同样跟着归位改路径，否则源被归位后中间稿折叠会认不出自己的源。
+    const listedSource = toWorkspaceRelPath(asStr(row.derived_from));
+    const derivedFrom = promotions.get(listedSource)?.to ?? listedSource;
     out.push({
       path,
       name: basename(path),
@@ -178,9 +234,73 @@ export function fileArtifactsFromDeliveryStatus(
       acceptanceReason: row.reason,
       acceptanceDetail: row.detail,
       ...(workspaceId ? { workspaceId } : {}),
+      ...(row.kind ? { kind: row.kind } : {}),
+      ...(derivedFrom ? { derivedFrom } : {}),
+      ...(promotion ? { promotedFrom: promotion.from } : {}),
     });
   }
   return dedupe(out);
+}
+
+/**
+ * 拆出「成品 / 过程材料 / 未通过」——用户一眼分清哪些是给他的东西。
+ *
+ * **成品** = 已归位（`promotedFrom`）的产物：CEO 收口时显式移进用户工作区的那几份。这是
+ * **这张对账卡累积的**归位表，不限于最后一回合——跨回合再归位时早先的成品仍在成品组里，
+ * 用户看的是「哪些东西是我的」，不是「这一幕动了什么」。
+ * **过程材料** = 其余已验收产物，仍在 AI 工作间里（与文件页「AI 工作间」同一心智）。
+ * **未通过** = rejected，两组都不进，维持原样单列。
+ *
+ * `products` 为空（零归位）是多幕协作中间幕的**合法状态**：调用方直接不渲染成品组，
+ * 不留空组占位、不加提示语——「归位了什么」由收口正文交代，清单不设闸。
+ */
+export function splitPromotedProducts(artifacts: FileArtifact[]): {
+  products: FileArtifact[];
+  materials: FileArtifact[];
+  rejected: FileArtifact[];
+} {
+  const products: FileArtifact[] = [];
+  const materials: FileArtifact[] = [];
+  const rejected: FileArtifact[] = [];
+  for (const a of artifacts) {
+    if (a.acceptance === "rejected") rejected.push(a);
+    else if (a.promotedFrom) products.push(a);
+    else materials.push(a);
+  }
+  return { products, materials, rejected };
+}
+
+/**
+ * 拆出「主推件 / 被折叠的中间稿」——口径与后端 `fold_exported_sources` 一致。
+ *
+ * 一件**已验收**产物的 `derivedFrom` 指向另一件**已验收**产物时，后者是它的源：用户要的是
+ * 导出件（`md_to_docx`：docx ← 源 md），并列两份会让人把 .md 当成「那份 Word」。只认工具
+ * 自报的派生关系——不看扩展名、不看工具名，没自报就一份都不降级。
+ *
+ * 折叠 ≠ 删除：中间稿仍在返回值里，调用方须留可展开的入口。导出件本身永不被藏——源未验收
+ * 时无从折叠；自报成环导致主清单会被清空时整体不折叠。
+ */
+export function splitExportedSources(artifacts: FileArtifact[]): {
+  primary: FileArtifact[];
+  intermediate: FileArtifact[];
+} {
+  const acceptedPaths = new Set(
+    artifacts.filter((a) => a.acceptance === "accepted").map((a) => a.path),
+  );
+  const sources = new Set<string>();
+  for (const a of artifacts) {
+    if (a.acceptance !== "accepted") continue;
+    const src = a.derivedFrom;
+    if (!src || src === a.path) continue;
+    if (acceptedPaths.has(src)) sources.add(src);
+  }
+  if (sources.size === 0) return { primary: artifacts, intermediate: [] };
+  const primary = artifacts.filter((a) => !sources.has(a.path));
+  if (primary.length === 0) return { primary: artifacts, intermediate: [] };
+  return {
+    primary,
+    intermediate: artifacts.filter((a) => sources.has(a.path)),
+  };
 }
 
 /** 单聊：从内联过程时间线（message.process）抽成功的文件变更（「查看改动」旁路）。 */

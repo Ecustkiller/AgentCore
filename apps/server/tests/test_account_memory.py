@@ -439,7 +439,11 @@ def test_on_demand_user_rules_from_cloud_maps_catalog():
         {
             "global_rules": [{"name": "用户规则.md", "content": "- always"}],
             "global_on_demand_rules": [
-                {"name": "合规附录.md", "content": "- 对外须用中文\n"},
+                {
+                    "name": "合规附录.md",
+                    "content": "- 对外须用中文\n",
+                    "description": "对外发布前查的合规口径",
+                },
             ],
             "project_on_demand_rules": [
                 {"name": "出差报销.md", "content": "- 先走审批\n"},
@@ -448,7 +452,8 @@ def test_on_demand_user_rules_from_cloud_maps_catalog():
         folder_id="F1",
     )
     assert [r.name for r in rules] == ["出差报销", "合规附录"]
-    assert any(r.name == "合规附录" and r.summary for r in rules)
+    # The catalog summary is the retrieval description, not the rule's first line.
+    assert [r.summary for r in rules] == ["", "对外发布前查的合规口径"]
 
 
 def test_on_demand_from_cloud_empty_when_keys_absent():

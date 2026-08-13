@@ -523,6 +523,7 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
             ? { ownershipPaths: f.ownershipPaths }
             : {}),
           ...(f.lockOwnerRunId ? { lockOwnerRunId: f.lockOwnerRunId } : {}),
+          ...(f.timeoutSeconds ? { timeoutSeconds: f.timeoutSeconds } : {}),
         });
       break;
     }
@@ -812,9 +813,11 @@ export function describeFrame(frame: RunFrame, plan: ExecutionPlan): string {
     case "run_failed":
       return `${role(frame.agentId)} 失败`;
     case "run_cancelled":
-      return frame.reason === "redirect"
-        ? `${role(frame.agentId)} 已改方向`
-        : `${role(frame.agentId)} 已停止`;
+      if (frame.reason === "redirect") return `${role(frame.agentId)} 已改方向`;
+      // 硬超时强杀 ≠ 改方向：没人给它派新活，是撞了时间上限被结束。
+      if (frame.reason === "worker_timeout")
+        return `${role(frame.agentId)} 超时结束`;
+      return `${role(frame.agentId)} 已停止`;
     case "run_skipped":
       return frame.reason === "abort"
         ? `${role(frame.agentId)} 未执行 · 已中止`

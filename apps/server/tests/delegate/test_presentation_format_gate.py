@@ -48,6 +48,7 @@ def _delegate(
         permission_axes=permission_axes or _KICKOFF_RULES,
         conversation_id=conversation_id,
         folder_id="test_birth",
+        approval_gate=None,
     )
 
 

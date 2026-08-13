@@ -7,8 +7,10 @@ afterEach(() => {
   cleanup();
 });
 
+const dialogText = () => screen.getByRole("dialog").textContent ?? "";
+
 describe("WorkspaceChannelGuideDialog", () => {
-  it("shows cloud + local sections on desktop", () => {
+  it("讲清「我的文件」在云上、不自动同步、要手动导出", () => {
     render(
       <WorkspaceChannelGuideDialog
         open
@@ -17,24 +19,70 @@ describe("WorkspaceChannelGuideDialog", () => {
       />,
     );
     expect(screen.getByText("在哪工作：怎么选")).toBeTruthy();
-    expect(screen.getByText(/只有两条通道/)).toBeTruthy();
-    expect(screen.getByText("云协作")).toBeTruthy();
-    expect(screen.getByText("推荐")).toBeTruthy();
-    expect(
-      screen.getByText(
-        /要写文件时系统会自动建云项目，也可先点「新建云项目」自建/,
-      ),
-    ).toBeTruthy();
-    expect(screen.getByText("本机传统")).toBeTruthy();
-    expect(screen.getByText(/不是离线模式/)).toBeTruthy();
-    expect(screen.getByText(/临时经云协助/)).toBeTruthy();
-    expect(screen.getByText(/合回落本机 ≠/)).toBeTruthy();
-    expect(screen.getByText(/遗留「后台云端」不是平级第三通道/)).toBeTruthy();
-    expect(screen.getByText(/选过的通道会记住/)).toBeTruthy();
+    expect(screen.getByText("我的文件")).toBeTruthy();
+    expect(screen.getByText(/看到的是同一份/)).toBeTruthy();
+    expect(screen.getByText(/不会自动同步到你电脑/)).toBeTruthy();
+    expect(dialogText()).toContain("导出 ZIP");
     expect(screen.getByRole("button", { name: "知道了" })).toBeTruthy();
   });
 
-  it("hides local traditional when no local disk", () => {
+  it("入口名与「在哪工作」菜单逐字一致", () => {
+    render(
+      <WorkspaceChannelGuideDialog
+        open
+        onOpenChange={() => {}}
+        showLocalTraditional
+      />,
+    );
+    for (const label of [
+      "快速对话",
+      "新建文件夹",
+      "从本机导入",
+      "从 Git 克隆",
+      "打开本机文件夹",
+    ]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+  });
+
+  it("导入说清是复制一份、原件不再跟着变", () => {
+    render(
+      <WorkspaceChannelGuideDialog
+        open
+        onOpenChange={() => {}}
+        showLocalTraditional
+      />,
+    );
+    expect(screen.getByText(/复制一份上来/)).toBeTruthy();
+    expect(screen.getByText(/原件不会跟着变/)).toBeTruthy();
+  });
+
+  it("本机文件夹直改本地，但明说不是离线模式", () => {
+    render(
+      <WorkspaceChannelGuideDialog
+        open
+        onOpenChange={() => {}}
+        showLocalTraditional
+      />,
+    );
+    const local = screen.getByText(/不是离线模式/);
+    expect(local.textContent).toMatch(/就是你电脑上的那个目录/);
+    expect(local.textContent).toMatch(/联网/);
+    expect(local.textContent).toMatch(/对话记录也仍然存在云上/);
+  });
+
+  it("只有云被标「推荐」，本机不并列推荐", () => {
+    render(
+      <WorkspaceChannelGuideDialog
+        open
+        onOpenChange={() => {}}
+        showLocalTraditional
+      />,
+    );
+    expect(screen.getAllByText("推荐")).toHaveLength(1);
+  });
+
+  it("没有本机盘时只讲云", () => {
     render(
       <WorkspaceChannelGuideDialog
         open
@@ -42,15 +90,45 @@ describe("WorkspaceChannelGuideDialog", () => {
         showLocalTraditional={false}
       />,
     );
-    expect(screen.getByText("云协作")).toBeTruthy();
+    expect(screen.getByText("我的文件")).toBeTruthy();
     expect(screen.getByText("推荐")).toBeTruthy();
-    expect(
-      screen.getByText(
-        /要写文件时系统会自动建云项目，也可先点「新建云项目」自建/,
-      ),
-    ).toBeTruthy();
-    expect(screen.queryByText("本机传统")).toBeNull();
-    expect(screen.getByText(/只有两条通道/)).toBeTruthy();
-    expect(screen.getByText(/不是平级第三通道/)).toBeTruthy();
+    expect(screen.getByText(/不会自动同步到你电脑/)).toBeTruthy();
+    expect(screen.queryByText("打开本机文件夹")).toBeNull();
+    expect(dialogText()).not.toContain("离线模式");
   });
+
+  // 防回潮：这份文案曾直接抄自内部设计文档，把实现词和防回潮对照写法漏给了用户。
+  const BANNED = [
+    "ModeControl",
+    "Composer",
+    "sidecar",
+    "云桌",
+    "过桥",
+    "本机传统",
+    "遗留",
+    "后台云端",
+    "通道",
+    "合回",
+    "≠",
+  ];
+
+  it.each([true, false])(
+    "不出现代码符号与内部黑话（showLocalTraditional=%s）",
+    (showLocalTraditional) => {
+      render(
+        <WorkspaceChannelGuideDialog
+          open
+          onOpenChange={() => {}}
+          showLocalTraditional={showLocalTraditional}
+        />,
+      );
+      const text = dialogText().toLowerCase();
+      for (const word of BANNED) {
+        expect(
+          text.includes(word.toLowerCase()),
+          `文案里不该出现「${word}」`,
+        ).toBe(false);
+      }
+    },
+  );
 });

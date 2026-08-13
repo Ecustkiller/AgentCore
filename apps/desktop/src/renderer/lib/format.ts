@@ -190,14 +190,29 @@ export function formatDuration(ms: number): string {
   return `${m}m${s}s`;
 }
 
-/** 1 元 = 10^9 nano-CNY：台账/接口里钱的规范单位（整数，绝不用 float）。 */
-const NANO_PER_YUAN = 1_000_000_000;
+/** 1 单位 = 10^9 nano：台账/接口里钱的规范单位（整数，绝不用 float）。 */
+const NANO_PER_UNIT = 1_000_000_000;
 
 /**
- * BYOK 估算金额的轻量说明（tooltip / title）——与平台记账 ¥ 视觉分离，
+ * 币种符号表。后端每个金额都自带 `currency`（平台记账 CNY / BYOK 社区估算 USD），
+ * **全系统无汇率换算**——这里只挑符号，绝不折算。
+ */
+const CURRENCY_SYMBOLS: Record<string, string> = { CNY: "¥", USD: "$" };
+
+/** 默认币种：平台记账台账恒为人民币；仅当后端没给 `currency` 时兜底。 */
+const DEFAULT_CURRENCY = "CNY";
+
+/** 币种代码 → 展示符号；未知币种退化为「CODE 」前缀，不冒充 ¥。 */
+function currencySymbol(currency?: string | null): string {
+  const code = (currency || DEFAULT_CURRENCY).toUpperCase();
+  return CURRENCY_SYMBOLS[code] ?? `${code} `;
+}
+
+/**
+ * BYOK 估算金额的轻量说明（tooltip / title）——与平台记账视觉分离，
  * 明确「非上游账单」。
  */
-export const COST_ESTIMATE_HINT = "按社区价目估算，非上游账单";
+export const COST_ESTIMATE_HINT = "按社区价目（美元列表价）估算，非上游账单";
 
 /** 费用位标注：自带密钥场景（credential_source=user / estimated_total）。 */
 export const COST_ESTIMATE_LABEL = "自带密钥·估算";
@@ -214,50 +229,78 @@ export const COST_UNPRICED_HINT =
   "平台无此模型价目（社区价目缺），实际费用以上游供应商账单为准";
 
 /**
- * 把整数 nano-CNY 成本格式化为人民币展示串（大众面，§7.2）。
+ * 把整数 nano 成本格式化为带币种符号的展示串（大众面，§7.2）。
  *
- * 钱一律以整数 nano-CNY 流转（1 元 = 1e9），绝不用 float；前端直接 `nano/1e9`，
- * 不再走汇率。约定（§7.5）：0 / 无花销显「—」（不显「¥0.00」）；有花销但不足
- * 1 分显「<¥0.01」。
+ * 钱一律以整数 nano 流转（1 单位 = 1e9），绝不用 float；前端直接 `nano/1e9`，
+ * **不做汇率换算**——符号取自后端随金额下发的 `currency`（平台记账 CNY、BYOK
+ * 社区估算 USD）。约定（§7.5）：0 / 无花销显「—」（不显「¥0.00」）；有花销但
+ * 不足 1 分/1 美分显「<¥0.01」/「<$0.01」。
  */
-export function formatCost(nanoCny: number): string {
-  if (nanoCny <= 0) return "—";
-  const yuan = nanoCny / NANO_PER_YUAN;
-  if (yuan < 0.01) return "<¥0.01";
-  return `¥${yuan.toFixed(2)}`;
+export function formatCost(nano: number, currency?: string | null): string {
+  if (nano <= 0) return "—";
+  const symbol = currencySymbol(currency);
+  const amount = nano / NANO_PER_UNIT;
+  if (amount < 0.01) return `<${symbol}0.01`;
+  return `${symbol}${amount.toFixed(2)}`;
 }
 
 /**
  * 展示金额：平台记账走 {@link formatCost}；估算金额一律带「≈」前缀，
- * 不得与记账 ¥ 混淆。0 / 无值仍显「—」（`pricing_source=unpriced` 同此）。
+ * 不得与记账金额混淆。0 / 无值仍显「—」（`pricing_source=unpriced` 同此）。
  */
-export function formatDisplayCost(nanoCny: number, estimated = false): string {
-  const base = formatCost(nanoCny);
+export function formatDisplayCost(
+  nano: number,
+  estimated = false,
+  currency?: string | null,
+): string {
+  const base = formatCost(nano, currency);
   if (base === "—" || !estimated) return base;
   return `≈${base}`;
 }
 
-/** SSE / fold `CostBreakdown` 叶子上挑「记账 total vs 估算 estimated_total」。 */
+/**
+ * SSE / fold `CostBreakdown` 叶子上挑「记账 total vs 估算 estimated_total」，
+ * **连同该笔金额自己的币种**一起返回。
+ *
+ * 记账 total 用 `currency`；BYOK 估算用 `estimated_currency`（一个回合可能记账
+ * 人民币、估算美元），缺省回落 `currency` 兼容旧 wire。调用方必须把 currency
+ * 一路带到格式化，禁止按 `pricing_source` 猜币种。
+ */
 export function pickCostMoney(
   cost:
     | {
         total: number;
+        currency?: string | null;
         estimated_total?: number | null;
+        estimated_currency?: string | null;
         pricing_source?: string | null;
       }
     | null
     | undefined,
-): { nano: number; estimated: boolean } | null {
+): { nano: number; estimated: boolean; currency: string } | null {
   if (!cost) return null;
-  if (cost.total > 0) return { nano: cost.total, estimated: false };
+  const billedCurrency = cost.currency || DEFAULT_CURRENCY;
+  if (cost.total > 0) {
+    return { nano: cost.total, estimated: false, currency: billedCurrency };
+  }
   const est = cost.estimated_total;
-  if (est != null && est > 0) return { nano: est, estimated: true };
-  return { nano: 0, estimated: false };
+  if (est != null && est > 0) {
+    return {
+      nano: est,
+      estimated: true,
+      currency: cost.estimated_currency || billedCurrency,
+    };
+  }
+  return { nano: 0, estimated: false, currency: billedCurrency };
 }
 
 /** 费用展示串：有金额时附带「自带密钥·估算」标注。 */
-export function formatCostCaption(nanoCny: number, estimated = false): string {
-  const base = formatDisplayCost(nanoCny, estimated);
+export function formatCostCaption(
+  nano: number,
+  estimated = false,
+  currency?: string | null,
+): string {
+  const base = formatDisplayCost(nano, estimated, currency);
   if (base === "—" || !estimated) return base;
   return `${base} ${COST_ESTIMATE_LABEL}`;
 }

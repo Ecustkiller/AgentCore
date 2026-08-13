@@ -69,7 +69,7 @@ class AskOption(WirePayload):
     native client action instead of a plain text answer (unknown/absent → plain option):
     `open_local_project` / `register_local_project` / `bind_local_folder` are
     **本机传统** wire enums（合法非默认；云协作仍推荐「导入到云 / 连接 Git」；≠离线；
-    勿当默认主推；``create_project`` 仍只建云）；
+    勿当默认主推；``create_folder`` 仍只建云）；
     `grant_readonly_folder` is a **legacy** session read-only mount under
     ``external/<alias>/`` (orthogonal to binding); **new** read-only mounts use the
     ``external_mount_readonly`` tool instead — do not newly emit this action for
@@ -396,6 +396,11 @@ class EscalationRequiredPayload(WirePayload):
     )
     lock_owner_run_id: str | None = absent(
         "当前写权持有者 run_id。旧流缺字段按无。"
+    )
+    timeout_seconds: float | None = absent(
+        "本次挂起的墙钟上限（秒）——仅运维配了 checkpoint_timeout_seconds 才有值，届时"
+        "回落 assumption 发 timed_out。缺省 = 默认的无限期等待（D2）：不答就不会自动继续。"
+        "卡面文案据此二选一，不得无条件承诺「未答则按假设继续」。"
     )
 
 

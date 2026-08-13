@@ -1,4 +1,7 @@
-import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
+import {
+  CollapsibleSpeech,
+  USER_BUBBLE_COLLAPSED_MAX_H,
+} from "@/components/chat/debate/CollapsibleSpeech";
 import {
   INTERJECTION_TONE_CLASS,
   interjectionStatusLabel,
@@ -12,9 +15,6 @@ import {
 } from "@/stores/conversation";
 import type { UserInterjection } from "@/stores/execution";
 import { useExecutionStore } from "@/stores/execution";
-
-/** 与 UserMessage 一致：约 6–8 行（偏 ChatGPT 紧）。 */
-const USER_BUBBLE_COLLAPSED_MAX_H = "max-h-36";
 
 /**
  * 插话主时间线单条（经典 steer + 协调共用）——挂在 process `user_interjection`
@@ -149,7 +149,7 @@ function InterjectionUserBubble({
         <CollapsibleSpeech
           contentKey={item.content}
           fadeToClass="from-muted"
-          collapsedMaxHClass={USER_BUBBLE_COLLAPSED_MAX_H}
+          collapsedMaxH={USER_BUBBLE_COLLAPSED_MAX_H}
           sceneKey={`interjection:${item.interjectionId}`}
         >
           <p className="whitespace-pre-wrap break-words">{item.content}</p>

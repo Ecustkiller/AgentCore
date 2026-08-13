@@ -169,6 +169,7 @@ async def test_push_client_tool_required_no_longer_settles_no_fulfiller(
 async def test_root_scoped_workspace_needs_a_declared_root(
     bridge, hub: FulfillerHub
 ) -> None:
+    """Bound but rootless: refused as ``root_not_held`` — the engine IS online."""
     bridge.bind_user(USER)
 
     def deliver() -> DeliverResult:
@@ -181,7 +182,7 @@ async def test_root_scoped_workspace_needs_a_declared_root(
             hub=hub,
         )
 
-    assert deliver() is DeliverResult.NO_FULFILLER
+    assert deliver() is DeliverResult.ROOT_NOT_HELD
     bridge.declare_root("root-1")
     assert deliver() is DeliverResult.DELIVERED
 

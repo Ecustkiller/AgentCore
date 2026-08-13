@@ -49,7 +49,7 @@ def build_captain_executor(
     profile: ProfileParams,
     turn_model: str,
     citation_sink: list[dict],
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     supports_tools: bool | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
     native_image_parts: list[dict] | None = None,
@@ -118,7 +118,7 @@ def build_captain_resumer(
     profile: ProfileParams,
     turn_model: str,
     citation_sink: list[dict],
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     supports_tools: bool | None = None,
     controller_seed: dict | None = None,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
@@ -206,12 +206,17 @@ async def _drive_captain_loop(
     # so an LLM error RETURNS partial usage (priced on the COMPLETED path below); this
     # except only catches non-LLM crashes, where the mirror is the only record left.
     inflight: list[TokenUsage] = []
+    # Same role for the round counter: the loop stamps it at each round's TOP, so a
+    # crash on round 30 still reports 30 instead of a「0 轮 · 跑了几分钟」state that
+    # contradicts the run's own duration.
+    inflight_rounds: list[int] = []
     # B2: react_loop appends FinishReason stamps here when the captain loop ends on a
     # non-default terminal path (DEGRADED / UNPRODUCTIVE / PAUSED, …). Chronological:
     # later stamps supersede earlier ones (e.g. unproductive early-stop then
     # force-finalize ask_user → PAUSED). resolve_finish_override takes the last.
     finish_override: list[FinishReason] = []
     loop_out = ReactLoopOut(
+        rounds=inflight_rounds,
         citations=citation_sink,
         usage=inflight,
         finish_override=finish_override,
@@ -298,15 +303,19 @@ async def _drive_captain_loop(
         )
 
         frozen = freeze_partial_transcript(messages) if messages else []
-        return _priced_failure(
+        failed = _priced_failure(
             str(e),
             model=turn_model,
             usage=partial,
-            rounds=0,
+            rounds=inflight_rounds[0] if inflight_rounds else 0,
             duration_ms=duration_ms,
             transcript=frozen or None,
             content=content_from_transcript(frozen) if frozen else "",
         )
+        # A stamp the loop already made (DEGRADED / UNPRODUCTIVE / PAUSED) is a fact
+        # about how the turn ran; crashing afterwards must not silently downgrade it
+        # back to the rounds-derived default.
+        return replace(failed, finish_override=resolve_finish_override(finish_override))
     finally:
         # Browser B: same as worker executor.node — release this captain run's session
         # bind so the next user turn (new captain_run_id) can reuse the conversation's

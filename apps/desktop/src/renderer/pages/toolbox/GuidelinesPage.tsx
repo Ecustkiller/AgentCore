@@ -10,10 +10,7 @@ import { SkillCard } from "@/components/tools/SkillCard";
  * 已从薄技能区去重，避免与包卡片重复）。 */
 export function GuidelinesPage() {
   return (
-    <CapabilityPage
-      title="AI 提示词"
-      subtitle="AI 遵循的提示词全文：常驻的系统提示词模板（全员共享准则 + CEO 完整提示词），以及按需注入的工具进阶用法（薄技能）。每条 AI 回复还可查看「本回合实际提示词」。"
-    >
+    <CapabilityPage note="AI 遵循的提示词全文：常驻的系统提示词模板（全员共享准则 + CEO 完整提示词），以及按需注入的工具进阶用法（薄技能）。每条 AI 回复还可查看「本回合实际提示词」。">
       {(data) => {
         const packs = data.packs ?? [];
         const packSkillNames = new Set(

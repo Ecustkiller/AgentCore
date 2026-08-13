@@ -13,6 +13,7 @@ A′: ``create_snapshot`` / ``restore_snapshot`` / ``restore_into_workspace`` ho
 from __future__ import annotations
 
 from datetime import timedelta
+from pathlib import Path
 
 from sqlalchemy import select
 
@@ -24,6 +25,25 @@ from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.snapshot_kinds import system_prune_ids
 
 logger = get_logger(__name__)
+
+
+def _resolve_root(
+    *, user_id: str, folder_rel_path: str | None, conversation_id: str
+) -> Path:
+    """The workspace directory to snapshot / restore into.
+
+    Note the asymmetry, and that it is the point: the storage **key** below stays
+    id-derived so a rename never orphans snapshot history, while the *directory*
+    follows ``folders.rel_path``. Callers pass the placement in (routes resolve it
+    via ``folders.placement``) rather than having this module query for it — a
+    snapshot service that needs a database to find a path is a snapshot service
+    that cannot be unit-tested.
+    """
+    return resolve_workspace_root(
+        user_id=user_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
+    )
 
 # Open handoff jobs still need Diff (§7.6): not applied / not discarded.
 # Includes ``succeeded`` — Diff window must keep ``base_snapshot_id`` (do not unpin on succeed).
@@ -129,6 +149,7 @@ async def create_snapshot(
     *,
     user_id: str,
     folder_id: str | None,
+    folder_rel_path: str | None,
     conversation_id: str,
     label: str | None = None,
 ) -> SnapshotRef:
@@ -144,8 +165,10 @@ async def create_snapshot(
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    root = resolve_workspace_root(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    root = _resolve_root(
+        user_id=user_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     provider = build_storage_provider()
     async with workspace_lock(key):
@@ -185,7 +208,12 @@ async def list_snapshots(
 
 
 async def restore_snapshot(
-    *, user_id: str, folder_id: str | None, conversation_id: str, snapshot_id: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    snapshot_id: str,
 ) -> None:
     """Extract a snapshot over the conversation's workspace (``SnapshotNotFound``).
 
@@ -194,8 +222,10 @@ async def restore_snapshot(
     key = workspace_storage_key(
         user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
     )
-    root = resolve_workspace_root(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    root = _resolve_root(
+        user_id=user_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     async with workspace_lock(key):
         await build_storage_provider().restore(key, snapshot_id, root)
@@ -219,6 +249,7 @@ async def restore_into_workspace(
     snapshot_id: str,
     dest_user_id: str,
     dest_folder_id: str | None,
+    dest_folder_rel_path: str | None,
     dest_conversation_id: str,
 ) -> None:
     """Restore one conversation's snapshot into *another* conversation's workspace.
@@ -242,9 +273,9 @@ async def restore_into_workspace(
         folder_id=dest_folder_id,
         conversation_id=dest_conversation_id,
     )
-    dest_root = resolve_workspace_root(
+    dest_root = _resolve_root(
         user_id=dest_user_id,
-        folder_id=dest_folder_id,
+        folder_rel_path=dest_folder_rel_path,
         conversation_id=dest_conversation_id,
     )
     async with workspace_lock(dest_key):

@@ -103,7 +103,7 @@ def test_cloud_scratch_facts():
     assert "不是用户本机目录" in out
     assert "不是用户本机已打开的仓库" in out
     assert "空树" in out
-    assert "本机空项目" in out or "宿主机器" in out
+    assert "本机空工程" in out or "宿主机器" in out
     assert "触达不了用户的电脑" not in out
     assert "本机 Host" in out or "host=" in out
     assert "host=已装配" in out
@@ -114,12 +114,14 @@ def test_cloud_scratch_facts():
     assert "合法非默认" in out or "非默认" in out
     assert "本机传统" in out
     assert "改导" not in out  # skill/context 不得写 Ask 改导导入
-    # 跨项目指挥事实面（与 skills 第二教学面互补）
-    assert "跨项目指挥" in out
-    assert "list_projects" in out and "resolve_project" in out
+    # 跨文件夹指挥事实面（与 skills 第二教学面互补）
+    assert "跨文件夹指挥" in out
+    assert "list_folders" in out and "resolve_folder" in out
     assert "target_folder_id" in out
-    assert "create_project" in out
-    assert "自动建云桌" in out
+    assert "create_folder" in out
+    # 嵌套：resolve 按路径，歧义候选带完整路径。
+    assert "按路径解析" in out and "完整路径" in out
+    assert "自动建云文件夹" in out
     assert "禁猜最近" in out or "猜最近" in out
     assert "禁默写 scratch" in out or ("scratch" in out and "写盘" in out)
     assert "多" in out and "并行" in out
@@ -128,8 +130,8 @@ def test_cloud_scratch_facts():
     # 一句短指针（HOW 在 skill）；先建仅显式新建/多线
     assert "先建齐再同次派" in out
     assert "拒后禁塌缩" in out
-    # 跨项目读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
-    assert "list_project_dir" in out and "read_project_file" in out
+    # 跨文件夹读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
+    assert "list_folder_dir" in out and "read_folder_file" in out
     assert "认桌" in out or "抽样" in out
     assert "出生桌" in out
     assert "写仍派工换桌" not in out
@@ -198,7 +200,8 @@ def test_cloud_scratch_facts():
     assert "API Key" in out or "密钥" in out or "明文" in out
     # 旧「云端临时空间」短标签已换成诚实草稿口径
     assert "工作区身份：云端临时空间" not in out
-    # 约定文档布局（始终可见）：三行出口 + 边界
+    # 约定文档布局（始终可见）：四行出口 + 边界
+    assert "约定文档出口·默认落点（无专属出口的产物）：`AgentCore/文档/工作稿/`" in out
     assert "约定文档出口·调研/讨论：`AgentCore/文档/research/`" in out
     assert "约定文档出口·辩论副产物：`AgentCore/文档/debate/`" in out
     assert "约定文档出口·审查：`AgentCore/文档/reviews/`" in out

@@ -1,6 +1,6 @@
 """LLM consolidation of preference / profile / navigation / topic memory — NOT vector search.
 
-Rewrites always-files (偏好 / 画像 / project 导航) as whole documents and applies
+Rewrites always-files (偏好 / 画像 / folder 导航) as whole documents and applies
 structured ops to topic notes from undigested episodic digests + current semantic
 markdown. Uses a chat LLM ``complete()`` pass only; no embeddings, no vector index,
 no similarity retrieval. Never runs on a single conversation window.
@@ -18,8 +18,12 @@ from typing import Protocol
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
-from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.action_inventory import TurnActionInventory
+from agentcore.memory.always_quota import (
+    AlwaysQuotaExceededError,
+    collect_always_quota_denials,
+    push_always_quota_card,
+)
 from agentcore.memory.episodic import EpisodeRecord, merge_episode_actions
 from agentcore.memory.maintenance import (
     MemoryUpdateItem,
@@ -78,12 +82,12 @@ class SemanticConsolidateInput:
     episodes: Sequence[EpisodeRecord]
     current_preferences: str = ""
     current_profile: str = ""
-    current_project_profile: str = ""
+    current_folder_profile: str = ""
     current_navigation: str = ""
     folder_id: str | None = None
     today: str = ""
     topic_files: Sequence[str] = ()
-    project_topic_files: Sequence[str] = ()
+    folder_topic_files: Sequence[str] = ()
     # Union of action inventories from undigested episodes (nav anti-hallucination).
     action_inventory: TurnActionInventory | None = None
 
@@ -94,8 +98,8 @@ class SemanticConsolidateResult:
 
     preferences: str | None = None  # None = leave file unchanged
     profile: str | None = None
-    project_profile: str | None = None
-    navigation: str | None = None  # project 导航.md only
+    folder_profile: str | None = None
+    navigation: str | None = None  # folder 导航.md only
     ops: list[MemoryOp] | None = None
     parse_failed: bool = False
 
@@ -114,48 +118,48 @@ Output ONLY a JSON object:
 {
   "preferences": "<FULL rewritten 偏好.md markdown, or null to leave unchanged>",
   "profile": "<FULL rewritten GLOBAL 画像.md markdown, or null to leave unchanged>",
-  "project_profile": "<FULL rewritten PROJECT 画像.md, or null; only when a project exists>",
-  "navigation": "<FULL rewritten PROJECT 导航.md, or null; only when a project exists>",
+  "folder_profile": "<FULL rewritten FOLDER 画像.md, or null; only when a folder exists>",
+  "navigation": "<FULL rewritten FOLDER 导航.md, or null; only when a folder exists>",
   "ops": [ <zero or more TOPIC-ONLY ops> ]
 }
 
-Always-file rules (preferences / profile / project_profile):
+Always-file rules (preferences / profile / folder_profile):
 - When you change a file, return its COMPLETE new markdown body (not a patch). Keep the
   same FIXED section structure — never invent free headings (禁止「技术栈」「当前状态」
   「数据模型」等自由小节；任务态/进行中工作不进画像):
   - 偏好.md sections: 沟通偏好, 工作习惯
   - 画像.md sections (global profile): 技术栈与工具, 关于用户的事实, 纠正记录
     (NEVER 项目约束 in global profile)
-  - project_profile sections: 技术栈与工具, 关于用户的事实, 项目约束
-    (纠正记录 is global-only — put corrections in profile, not project_profile)
+  - folder_profile sections: 技术栈与工具, 关于用户的事实, 项目约束
+    (纠正记录 is global-only — put corrections in profile, not folder_profile)
 - PRESERVE every still-valid bullet. Do not drop entries just because a session did not
   mention them. Only remove/rewrite when a summary clearly supersedes or contradicts.
 - Prefer soft wording (倾向 / 偏好). Absolute dates for time-bound facts.
 - Use null when that file needs no change.
 
-Navigation (navigation field — PROJECT 导航.md short entry ONLY):
-- Only when a project exists (CURRENT PROJECT navigation section is present). Otherwise
+Navigation (navigation field — FOLDER 导航.md short entry ONLY):
+- Only when a folder exists (CURRENT FOLDER navigation section is present). Otherwise
   leave navigation null.
 - 导航 is a SHORT pointer file: optional one-line定位 + a route table of ONE-line bullets
   shaped like「我要 X → 先读/先查 Y」(path or command). Never paste long bodies; thick
-  content goes to 主题/<slug>.md via ops (or 文档/项目/ pointed by a route).
-- Write a route ONLY when a session summary's verified project facts / action inventory
+  content goes to 主题/<slug>.md via ops.
+- Write a route ONLY when a session summary's verified folder facts / action inventory
   prove it — next session can skip one action because of it. Chat-only / preference-only
   sessions → leave navigation null (zero change).
 - Paths and commands in NEW route lines must appear in the batch action inventory. Do not
   invent paths or commands.
 - Hard cap: at most __MAX_NAV_ROUTES__ route bullets. When over the cap, MERGE similar
   routes (do not append unboundedly). Preserve still-useful existing routes.
-- Do NOT put project ops knowledge into project_profile / 画像 — navigation + topics only.
+- Do NOT put folder ops knowledge into folder_profile / 画像 — navigation + topics only.
 
-Scope routing (profile vs project_profile — position = scope):
-- 项目约束 and THIS project's tech stack / project-only facts belong ONLY in
-  project_profile. Never put 项目约束 or「本项目…」tech stack into global profile.
-- When a project exists (project_profile section is present in the user prompt): default
-  技术栈与工具 and project-specific facts into project_profile; if unsure, prefer
-  project_profile (not global).
-- When NO project exists: leave project_profile null; do NOT write 项目约束 into global
-  profile (omit that section entirely). Cross-project personal stacks may stay in global
+Scope routing (profile vs folder_profile — position = scope):
+- 项目约束 and THIS folder's tech stack / folder-only facts belong ONLY in
+  folder_profile. Never put 项目约束 or「本文件夹…」tech stack into global profile.
+- When a folder exists (folder_profile section is present in the user prompt): default
+  技术栈与工具 and folder-specific facts into folder_profile; if unsure, prefer
+  folder_profile (not global).
+- When NO folder exists: leave folder_profile null; do NOT write 项目约束 into global
+  profile (omit that section entirely). Cross-folder personal stacks may stay in global
   技术栈与工具.
 
 Preference promotion rule (strict — 偏好.md only):
@@ -177,7 +181,7 @@ Domain split (write-side — 偏好.md vs 主题/*.md):
   without them and ADD/UPDATE the durable bits into the appropriate 主题/*.md op(s).
 
 Topic ops (ops array) — ONLY for 主题/<slug>.md notes:
-  {"action":"add|remove|update","file":"主题/<slug>.md","scope":"global|project",
+  {"action":"add|remove|update","file":"主题/<slug>.md","scope":"global|folder",
    "section":"<optional>","content":"...","match":"..."}
 Do NOT put 偏好.md / 画像.md / 导航.md changes into ops — those go in the rewrite fields above.
 
@@ -203,18 +207,18 @@ def _render_semantic_prompt(data: SemanticConsolidateInput) -> str:
         f"# Undigested session summaries (episodic)\n{episodes_block}",
     ]
     if data.folder_id:
-        proj_topics = (
-            "\n".join(f"- 主题/{s}.md" for s in data.project_topic_files) or "(none)"
+        folder_topics = (
+            "\n".join(f"- 主题/{s}.md" for s in data.folder_topic_files) or "(none)"
         )
         sections.append(
-            f"# CURRENT PROJECT profile (画像.md)\n"
-            f"{data.current_project_profile.strip() or '(empty)'}"
+            f"# CURRENT FOLDER profile (画像.md)\n"
+            f"{data.current_folder_profile.strip() or '(empty)'}"
         )
         sections.append(
-            f"# CURRENT PROJECT navigation (导航.md)\n"
+            f"# CURRENT FOLDER navigation (导航.md)\n"
             f"{data.current_navigation.strip() or '(empty)'}"
         )
-        sections.append(f"# Existing PROJECT topic notes\n{proj_topics}")
+        sections.append(f"# Existing FOLDER topic notes\n{folder_topics}")
         inv = data.action_inventory or TurnActionInventory()
         from agentcore.memory.action_inventory import render_action_inventory_for_prompt
 
@@ -228,7 +232,7 @@ def _render_semantic_prompt(data: SemanticConsolidateInput) -> str:
             "(merge when over; do not append unboundedly)"
         )
     else:
-        sections.append("# No current project — leave project_profile and navigation null.")
+        sections.append("# No current folder — leave folder_profile and navigation null.")
     sections.append("Produce the semantic consolidation JSON now.")
     return "\n\n".join(sections)
 
@@ -402,8 +406,8 @@ def sanitize_profile_rewrite(markdown: str, *, scope: MemoryScope) -> str:
     """Hard-gate 画像.md rewrite sections to match ``_coerce_op`` scope口径.
 
     - Keep only fixed ``PROFILE_SECTIONS`` names (drop free headings like「技术栈」).
-    - Global (``scope is None``): drop project-only sections (``项目约束``).
-    - Project (folder scope): drop global-only sections (``纠正记录``).
+    - Global (``scope is None``): drop folder-only sections (``项目约束``).
+    - Folder scope: drop global-only sections (``纠正记录``).
     """
     doc = _parse(markdown)
     drop = (
@@ -463,7 +467,7 @@ def parse_semantic_result(
     return SemanticConsolidateResult(
         preferences=_normalize_rewrite(payload.get("preferences")),
         profile=_normalize_rewrite(payload.get("profile")),
-        project_profile=_normalize_rewrite(payload.get("project_profile")),
+        folder_profile=_normalize_rewrite(payload.get("folder_profile")),
         navigation=_normalize_rewrite(payload.get("navigation")),
         ops=ops,
         parse_failed=False,
@@ -489,6 +493,9 @@ def diff_memory_markdown(
     items: list[MemoryUpdateItem] = []
     label = _memory_file_label(file)
     target = _memory_leaf_target(file, scope)
+    # ``scope`` / ``project_id`` on the card stay spelled "project": they are the
+    # persisted ``memory_updates.items`` JSONB + firehose payload shape the desktop /
+    # mobile cards read. Renaming them is a contract+backfill batch, not wording.
     scope_label = "project" if scope else "global"
     project_id = scope if scope else None
     all_sections = sorted(set(old_map) | set(new_map))
@@ -580,8 +587,6 @@ class LLMSemanticConsolidator:
 
         self._provider = provider
         self._selected = select_call(role, model or settings.platform_model)
-        self.last_usage: TokenUsage = TokenUsage()
-        self.last_model: str = ""
 
     async def consolidate(self, data: SemanticConsolidateInput) -> SemanticConsolidateResult:
         request = build_selected_request(
@@ -599,8 +604,6 @@ class LLMSemanticConsolidator:
         except TimeoutError:
             logger.warning("memory.semantic_timeout", user_id=data.user_id)
             return SemanticConsolidateResult(parse_failed=True)
-        self.last_usage = response.usage
-        self.last_model = response.model or self._selected.model or ""
         return parse_semantic_result(response.content or "", folder_id=data.folder_id)
 
 
@@ -622,21 +625,24 @@ async def consolidate_semantic_memory(
     Returns True if a file changed, False if the pass completed with no durable change,
     or None if the consolidator failed (parse/timeout/exception) — caller must NOT mark
     episodes digested on None.
+
+    A full always pool refuses only the entry it would have grown (CTX-A2): the pass keeps
+    going, every other file still lands, and the refusals ride one card that names them.
     """
     if not episodes:
         return False
     applier = applier or MarkdownMemoryApplier(section_cap=section_cap)
     try:
         global_topics = {m.path for m in await store.list(user_id) if is_topic_path(m.path)}
-        project_topics: set[str] = set()
-        project_profile = ""
+        folder_topics: set[str] = set()
+        folder_profile = ""
         current_navigation = ""
         batch_actions = merge_episode_actions(episodes)
         if folder_id:
-            project_topics = {
+            folder_topics = {
                 m.path for m in await store.list(user_id, scope=folder_id) if is_topic_path(m.path)
             }
-            project_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
+            folder_profile = await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
             current_navigation = await store.load(
                 user_id, NAVIGATION_MEMORY_FILE, scope=folder_id
             )
@@ -648,12 +654,12 @@ async def consolidate_semantic_memory(
                 episodes=episodes,
                 current_preferences=current_preferences,
                 current_profile=current_profile,
-                current_project_profile=project_profile,
+                current_folder_profile=folder_profile,
                 current_navigation=current_navigation,
                 folder_id=folder_id,
                 today=today,
                 topic_files=sorted(topic_slug(p) for p in global_topics),
-                project_topic_files=sorted(topic_slug(p) for p in project_topics),
+                folder_topic_files=sorted(topic_slug(p) for p in folder_topics),
                 action_inventory=batch_actions,
             )
         )
@@ -663,6 +669,20 @@ async def consolidate_semantic_memory(
 
         changed = False
 
+        async def _save_note(file: str, body: str, *, scope: MemoryScope) -> bool:
+            """Save one note; a quota refusal skips just this file, not the pass."""
+            try:
+                await store.save(user_id, file, body, scope=scope)
+                return True
+            except AlwaysQuotaExceededError:
+                logger.info(
+                    "memory.semantic_save_quota_denied",
+                    user_id=user_id,
+                    file=file,
+                    scope=scope or "global",
+                )
+                return False
+
         async def _apply_rewrite(
             file: str, old: str, new: str | None, *, scope: MemoryScope
         ) -> None:
@@ -670,7 +690,7 @@ async def consolidate_semantic_memory(
             if new is None:
                 return
             # Anti-loss compares against a scope-legal baseline so stripping
-            # project-only (global) / global-only (project) sections is not
+            # folder-only (global) / global-only (folder) sections is not
             # treated as silent mass-drop.
             old_for_gate = old
             if file == CORE_MEMORY_FILE:
@@ -696,7 +716,8 @@ async def consolidate_semantic_memory(
                 if new.strip() == old.strip():
                     return
                 nav_body = new if new.endswith("\n") else new + "\n"
-                await store.save(user_id, file, nav_body, scope=scope)
+                if not await _save_note(file, nav_body, scope=scope):
+                    return
                 changed = True
                 if collect_items is not None:
                     collect_items.extend(
@@ -714,50 +735,61 @@ async def consolidate_semantic_memory(
             updated = apply_core_rewrite(old, new)
             if updated == old:
                 return
-            await store.save(user_id, file, updated, scope=scope)
+            if not await _save_note(file, updated, scope=scope):
+                return
             changed = True
             if collect_items is not None:
                 collect_items.extend(
                     diff_memory_markdown(old, updated, file=file, scope=scope)
                 )
 
-        await _apply_rewrite(
-            PREFERENCES_MEMORY_FILE, current_preferences, result.preferences, scope=None
-        )
-        await _apply_rewrite(CORE_MEMORY_FILE, current_profile, result.profile, scope=None)
-        if folder_id:
-            await _apply_rewrite(
-                CORE_MEMORY_FILE,
-                project_profile,
-                result.project_profile,
-                scope=folder_id,
-            )
-            await _apply_rewrite(
-                NAVIGATION_MEMORY_FILE,
-                current_navigation,
-                result.navigation,
-                scope=folder_id,
-            )
-
         ops = list(result.ops or [])
-        if ops:
-            existing_by_scope: dict[MemoryScope, set[str]] = {None: global_topics}
+        with collect_always_quota_denials() as denials:
+            await _apply_rewrite(
+                PREFERENCES_MEMORY_FILE,
+                current_preferences,
+                result.preferences,
+                scope=None,
+            )
+            await _apply_rewrite(
+                CORE_MEMORY_FILE, current_profile, result.profile, scope=None
+            )
             if folder_id:
-                existing_by_scope[folder_id] = project_topics
-            ops = _enforce_topic_cap(ops, existing_by_scope, max_topic_files)
-            by_target: dict[tuple[MemoryScope, str], list[MemoryOp]] = defaultdict(list)
-            for op in ops:
-                by_target[(op.scope, op.file)].append(op)
-            for (scope, file), file_ops in by_target.items():
-                current = await store.load(user_id, file, scope=scope)
-                updated = applier.apply(current, file_ops)
-                if updated != current:
-                    await store.save(user_id, file, updated, scope=scope)
-                    changed = True
-                    if collect_items is not None:
-                        collect_items.extend(
-                            _item_from_op(op, file=file, scope=scope) for op in file_ops
-                        )
+                await _apply_rewrite(
+                    CORE_MEMORY_FILE,
+                    folder_profile,
+                    result.folder_profile,
+                    scope=folder_id,
+                )
+                await _apply_rewrite(
+                    NAVIGATION_MEMORY_FILE,
+                    current_navigation,
+                    result.navigation,
+                    scope=folder_id,
+                )
+
+            if ops:
+                existing_by_scope: dict[MemoryScope, set[str]] = {None: global_topics}
+                if folder_id:
+                    existing_by_scope[folder_id] = folder_topics
+                ops = _enforce_topic_cap(ops, existing_by_scope, max_topic_files)
+                by_target: dict[tuple[MemoryScope, str], list[MemoryOp]] = defaultdict(list)
+                for op in ops:
+                    by_target[(op.scope, op.file)].append(op)
+                for (scope, file), file_ops in by_target.items():
+                    current = await store.load(user_id, file, scope=scope)
+                    updated = applier.apply(current, file_ops)
+                    if updated != current:
+                        if not await _save_note(file, updated, scope=scope):
+                            continue
+                        changed = True
+                        if collect_items is not None:
+                            collect_items.extend(
+                                _item_from_op(op, file=file, scope=scope)
+                                for op in file_ops
+                            )
+        if denials:
+            await push_always_quota_card(user_id, denials[-1].usage, denials)
 
         if changed:
             logger.info(
@@ -784,7 +816,11 @@ async def apply_explicit_memory_ops(
     section_cap: int | None = None,
     collect_items: list[MemoryUpdateItem] | None = None,
 ) -> bool:
-    """Apply ops directly to semantic files (explicit user remember). Immediate effect."""
+    """Apply ops directly to semantic files (explicit user remember). Immediate effect.
+
+    A file the always quota refuses is skipped with the rest still applied, and the
+    refusals ride one card that names them (CTX-A2).
+    """
     if not ops:
         return False
     applier = applier or MarkdownMemoryApplier(section_cap=section_cap)
@@ -793,16 +829,29 @@ async def apply_explicit_memory_ops(
         by_target[(op.scope, op.file)].append(op)
     changed = False
     try:
-        for (scope, file), file_ops in by_target.items():
-            current = await store.load(user_id, file, scope=scope)
-            updated = applier.apply(current, file_ops)
-            if updated != current:
-                await store.save(user_id, file, updated, scope=scope)
+        with collect_always_quota_denials() as denials:
+            for (scope, file), file_ops in by_target.items():
+                current = await store.load(user_id, file, scope=scope)
+                updated = applier.apply(current, file_ops)
+                if updated == current:
+                    continue
+                try:
+                    await store.save(user_id, file, updated, scope=scope)
+                except AlwaysQuotaExceededError:
+                    logger.info(
+                        "memory.explicit_save_quota_denied",
+                        user_id=user_id,
+                        file=file,
+                        scope=scope or "global",
+                    )
+                    continue
                 changed = True
                 if collect_items is not None:
                     collect_items.extend(
                         _item_from_op(op, file=file, scope=scope) for op in file_ops
                     )
+        if denials:
+            await push_always_quota_card(user_id, denials[-1].usage, denials)
         return changed
     except Exception as e:
         logger.warning("memory.explicit_apply_failed", user_id=user_id, error=str(e))

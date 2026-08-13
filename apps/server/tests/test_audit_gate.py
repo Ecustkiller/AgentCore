@@ -147,6 +147,7 @@ async def _run_captain(
         profile=profile,
         turn_model="m",
         role=role,
+        approval_gate=None,
     )
     return content, messages
 

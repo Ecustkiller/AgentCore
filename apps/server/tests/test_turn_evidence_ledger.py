@@ -216,6 +216,7 @@ async def test_worker_loop_annotates_stable_ids_not_pool_numbers():
         annotate_citations=False,
         turn_evidence_ledger=led,
         ledger_registrant="worker:w1",
+        approval_gate=None,
     )
     tool_msg = next(m for m in messages if m.role == "tool")
     content = tool_msg.content or ""
@@ -264,6 +265,7 @@ async def test_ceo_loop_annotates_stable_ids_when_ledger_present():
         annotate_citations=True,
         turn_evidence_ledger=led,
         ledger_registrant="ceo",
+        approval_gate=None,
     )
     tool_msg = next(m for m in messages if m.role == "tool")
     content = tool_msg.content or ""

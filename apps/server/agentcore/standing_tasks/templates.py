@@ -133,13 +133,13 @@ def build_scope_briefing(
     ]
     folder_ids: list[str] = list(cfg["folder_ids"])
     if folder_ids:
-        lines.append("- 包含项目：")
+        lines.append("- 包含文件夹：")
         for fid in folder_ids:
             label = names.get(fid) or fid
             lines.append(f"  - {label}（folder_id=`{fid}`）")
         lines.append(
-            "查阅时：对每个项目分别 search_conversations"
-            "（scope=project + folder_id，并设 updated_within_hours）；"
+            "查阅时：对每个文件夹分别 search_conversations"
+            "（scope=folder + folder_id，并设 updated_within_hours）；"
             "若含裸聊再搜 scope=global_chats。"
         )
     elif cfg["include_global"]:

@@ -298,6 +298,7 @@ async def test_loop_finalizes_ask_user_to_paused():
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -469,6 +470,7 @@ async def test_loop_absorbs_content_into_blocking_ask_user():
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -565,6 +567,7 @@ async def test_unproductive_then_finalize_ask_user_stamps_paused_last():
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)

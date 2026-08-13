@@ -14,6 +14,7 @@ const {
   attachSidecarTurn,
   projectUnsyncedTurns,
   projectPausedRuns,
+  syncConversationFollow,
 } = vi.hoisted(() => ({
   attachOnOpen: vi.fn(async () => {}),
   settleCloudRunningAssistant: vi.fn(async () => "ghost" as const),
@@ -21,12 +22,17 @@ const {
   attachSidecarTurn: vi.fn(async () => true),
   projectUnsyncedTurns: vi.fn(),
   projectPausedRuns: vi.fn(),
+  syncConversationFollow: vi.fn(),
 }));
 
 vi.mock("../turns/recovery", () => ({
   attachOnOpen,
   settleCloudRunningAssistant,
   settleOrphanEmptyAssistants,
+}));
+
+vi.mock("../turns/conversationFollow", () => ({
+  syncConversationFollow,
 }));
 
 vi.mock("../turns/sidecarAttach", () => ({
@@ -91,6 +97,7 @@ beforeEach(() => {
   attachSidecarTurn.mockClear();
   projectUnsyncedTurns.mockClear();
   projectPausedRuns.mockClear();
+  syncConversationFollow.mockClear();
   vi.stubGlobal("window", { __WEB__: true });
 });
 
@@ -227,6 +234,58 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
 
     expect(settleCloudRunningAssistant).toHaveBeenCalledTimes(1);
     expect(attachOnOpen).not.toHaveBeenCalled();
+  });
+
+  it("云会话挂上对话级订阅；本机引擎在跑则不订（服务端没有 run）", async () => {
+    seedMessages({ role: "assistant", status: "complete" });
+
+    await runHydrateAttachSettle(CID, {
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+    expect(syncConversationFollow).toHaveBeenCalledWith(CID);
+
+    syncConversationFollow.mockClear();
+    await runHydrateAttachSettle(CID, {
+      sidecarLive: true,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+    expect(syncConversationFollow).toHaveBeenCalledWith(null);
+  });
+
+  it("纯云冷挂起仍订阅：另一端放行后的续跑是一个新 run", async () => {
+    seedMessages({ role: "assistant", status: "complete", id: "a-paused" });
+
+    await runHydrateAttachSettle(CID, {
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 1,
+      unsynced: [],
+    });
+
+    expect(syncConversationFollow).toHaveBeenCalledWith(CID);
+  });
+
+  it("迟到的 hydrate 不抢订阅：用户已切走就不动全局那一条", async () => {
+    seedMessages({ role: "assistant", status: "complete" });
+    useConversationStore.getState().switchConversation("conv-other");
+
+    await runHydrateAttachSettle(CID, {
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+
+    expect(syncConversationFollow).not.toHaveBeenCalled();
   });
 
   it("skips settle/attach when session abort already pumping", async () => {

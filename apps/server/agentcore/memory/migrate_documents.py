@@ -15,8 +15,8 @@ Properties (照 §1.4 迁移先例):
   migrates next run.
 
 It reads the on-disk layout directly (``<base>/<user>/…`` global, ``<base>/<user>/_folders/
-<folder_id>/…`` project) rather than the store API so it can enumerate every user + scope,
-including project scopes whose only content is leftover episodic digests (which the
+<folder_id>/…`` folder) rather than the store API so it can enumerate every user + scope,
+including folder scopes whose only content is leftover episodic digests (which the
 store's ``list`` deliberately skips — those move via ``migrate_episodes``).
 """
 
@@ -33,8 +33,8 @@ from agentcore.memory.store import MEMORY_META_FILE
 
 logger = get_logger(__name__)
 
-# The reserved subdir under a user's global folder that holds project layers (mirrors
-# FileMemoryStore._PROJECT_CONTAINER); its children are ``<folder_id>/`` project scopes.
+# The reserved subdir under a user's global folder that holds folder layers (mirrors
+# FileMemoryStore._PROJECT_CONTAINER); its children are ``<folder_id>/`` folder scopes.
 _PROJECT_CONTAINER = "_folders"
 
 
@@ -62,14 +62,14 @@ def _is_memory_note(rel: str) -> bool:
 
 
 def _scope_notes(scope_dir: Path, *, is_global: bool) -> list[tuple[str, str]]:
-    """(relative-path, body) of every memory note in one scope dir (skips the project container)."""
+    """(relative-path, body) of every memory note in one scope dir (skips the folder container)."""
     out: list[tuple[str, str]] = []
     for path in sorted(scope_dir.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(scope_dir).as_posix()
-        # The global scope's dir contains the nested project container — never copy those into
-        # the global layer (project scopes are migrated on their own below).
+        # The global scope's dir contains the nested folder container — never copy those into
+        # the global layer (folder scopes are migrated on their own below).
         if is_global and rel.split("/", 1)[0] == _PROJECT_CONTAINER:
             continue
         if not _is_memory_note(rel):
@@ -151,12 +151,12 @@ async def migrate_file_memory_to_documents(
         user_id = user_dir.name
         users += 1
         try:
-            # Global layer: notes directly under the user dir (project container excluded).
+            # Global layer: notes directly under the user dir (folder container excluded).
             m, s, f = await _migrate_scope(
                 user_id, None, _scope_notes(user_dir, is_global=True), session_factory
             )
             migrated, skipped, failed = migrated + m, skipped + s, failed + f
-            # Project layers: each ``_folders/<folder_id>/`` subtree.
+            # Folder layers: each ``_folders/<folder_id>/`` subtree.
             container = user_dir / _PROJECT_CONTAINER
             if container.exists():
                 for scope_dir in sorted(container.iterdir()):

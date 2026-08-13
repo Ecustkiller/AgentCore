@@ -52,10 +52,10 @@ describe("describeStreamError", () => {
     const err = new StreamError("http", 402, {
       code: "LLM_KEY_REQUIRED",
       serverMessage:
-        "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。",
+        "请先在「设置 · 服务商」中填入你的 DeepSeek API Key，再发起对话。",
     });
     expect(describeStreamError(err)).toBe(
-      "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再发起对话。",
+      "请先在「设置 · 服务商」中填入你的 DeepSeek API Key，再发起对话。",
     );
   });
 
@@ -237,6 +237,9 @@ describe("attachConversation (实时重连续看 1b)", () => {
     await attachConversation("conv-42");
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toContain("/v1/conversations/conv-42/stream");
+    // 回合级语义：绝不带 ``follow``——rejoinLiveTurn 的「无 live run → 读持久化」
+    // 分支就靠这个 204（对话级长订阅走 turns/conversationFollow）。
+    expect(url).not.toContain("follow");
     expect(init?.method).toBe("GET");
     expect(init?.headers).toEqual(
       expect.objectContaining({

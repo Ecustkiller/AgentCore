@@ -345,12 +345,12 @@ async def _wire_continuation_toolset(
 
     # Same explore-pending sink as fresh assemble (resume mid-explore: suppress
     # structured files_written inference + worker write_scope=explore_memory until
-    # update_project_profile clears the flag).
+    # update_folder_profile clears the flag).
     # Soft-empty / named-refresh via resolve_hard_explore_reason（与 assemble 同源）.
     if memory_enabled and folder_id:
         from agentcore.conversation.scratch import resolve_conversation_local_binding
         from agentcore.memory.explore_profile import (
-            project_profile_explore_reason,
+            folder_profile_explore_reason,
             resolve_folder_workspace_key,
             resolve_hard_explore_reason,
         )
@@ -370,7 +370,7 @@ async def _wire_continuation_toolset(
             binding_injected=folder_binding_injected,
         )
         key_for_gates = current_key if current_key is not None else ""
-        explore_reason = await project_profile_explore_reason(
+        explore_reason = await folder_profile_explore_reason(
             default_memory_store(),
             user_id,
             folder_id,
@@ -381,7 +381,7 @@ async def _wire_continuation_toolset(
             base_tool_context.cold_start_explore_pending = True
             base_tool_context.write_scope = "explore_memory"
         if current_key:
-            upd = chat_tools.get_optional("update_project_profile")
+            upd = chat_tools.get_optional("update_folder_profile")
             if upd is not None and getattr(upd, "workspace_key", None) is None:
                 cast_upd: Any = upd
                 cast_upd.workspace_key = current_key

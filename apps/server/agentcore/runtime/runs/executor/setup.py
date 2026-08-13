@@ -100,7 +100,7 @@ async def prepare_agent_node(
     priced_model, request_model = resolve_run_models(
         env.profiles, spec.model, cost_role=env.cost_role
     )
-    # 跨项目指挥 · 形状甲：有目标 folder → 换 backend + 记忆跟桌（不改会话挂载）。
+    # 跨文件夹指挥 · 形状甲：有目标 folder → 换 backend + 记忆跟桌（不改会话挂载）。
     worker_tools_base = env.tools
     system_prompt = env.system_prompt
     base_ctx = env.base_tool_context
@@ -249,6 +249,10 @@ async def prepare_agent_node(
         # execution class absent (cloud without sandbox) ⇒ the identity says so,
         # instead of the generic wording implying the worker can run code.
         can_execute=worker_tools.get_optional("code_execute") is not None,
+        # 单人直出: a finalize batch of one hands this body to the user verbatim
+        # (drive_finalize → direct_result), so the register switches from
+        # 「向主管交活」to speaking to the user.
+        direct_to_user=env.plan.solo_direct_answer(),
     )
     if not env.collaboration:
         identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")

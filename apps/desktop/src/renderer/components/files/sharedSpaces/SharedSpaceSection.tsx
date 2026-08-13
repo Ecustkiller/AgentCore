@@ -1,10 +1,8 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
 import { IconButton } from "@/components/files/parts";
-import { CreateSharedSpaceDialog } from "@/components/files/sharedSpaces/CreateSharedSpaceDialog";
 import { SharedSpaceEventsDialog } from "@/components/files/sharedSpaces/SharedSpaceEventsDialog";
 import { SharedSpaceMembersDialog } from "@/components/files/sharedSpaces/SharedSpaceMembersDialog";
-import { CreateFolderCascadePanel } from "@/components/folders/CreateFolderMenu";
-import { Button, IconButton as UiIconButton } from "@/components/ui";
+import { Button } from "@/components/ui";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -12,11 +10,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   useDeleteSharedSpace,
   useRemoveOrLeaveSharedMember,
@@ -33,14 +26,12 @@ import { useAuthStore } from "@/stores/auth";
 import {
   Check,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   FilePlus,
   FolderOpen,
   FolderPlus,
   History,
   Pencil,
-  Plus,
   Trash2,
   Upload,
   Users,
@@ -366,112 +357,5 @@ export function SharedSpaceSection({
         spaceName={space.name}
       />
     </div>
-  );
-}
-
-/**
- * 「项目」段头：区名 + `+` Popover（新建项目同层 cascade / 新建共享空间 Dialog）。
- * 共享空间已并入项目段混排，不再有独立「共享空间」区头。
- * 与 DraftChip 同构：同一 Popover 内 pick→create 切视图，避免 Dropdown→Host 竞态。
- */
-export function ProjectsRailHeader({
-  onSharedCreated,
-}: {
-  onSharedCreated?: (spaceId: string) => void;
-}) {
-  const [createSharedOpen, setCreateSharedOpen] = useState(false);
-  const [pop, setPop] = useState(false);
-  const [view, setView] = useState<"pick" | "create">("pick");
-
-  const closePick = () => {
-    setPop(false);
-    setView("pick");
-  };
-
-  return (
-    <>
-      <div className="flex items-center gap-1 px-2 pb-0.5 pt-3">
-        <span className="min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground">
-          项目
-        </span>
-        <Popover
-          open={pop}
-          onOpenChange={(o) => {
-            setPop(o);
-            if (!o) setView("pick");
-          }}
-        >
-          <PopoverTrigger asChild>
-            <UiIconButton aria-label="新建" title="新建">
-              <Plus size={13} />
-            </UiIconButton>
-          </PopoverTrigger>
-          <PopoverContent
-            align="end"
-            // Keep side when switching pick→create (taller cascade); flip feels like a jump.
-            avoidCollisions={false}
-            className={view === "create" ? "w-auto p-0" : "min-w-40 p-0"}
-            onCloseAutoFocus={(e) => e.preventDefault()}
-          >
-            {view === "create" ? (
-              <div>
-                <div className="flex items-center gap-1 border-b border-border px-1 py-1">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground"
-                    onClick={() => setView("pick")}
-                  >
-                    <ChevronLeft size={14} />
-                    新建
-                  </Button>
-                  <span className="px-1 text-xs font-medium text-foreground">
-                    新建云项目
-                  </span>
-                </div>
-                <CreateFolderCascadePanel onClose={closePick} />
-              </div>
-            ) : (
-              <div className="p-1">
-                <Button
-                  variant="ghost"
-                  onClick={() => setView("create")}
-                  className="h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium"
-                  icon={
-                    <FolderPlus
-                      size={14}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                  }
-                >
-                  <span className="flex-1 truncate">新建云项目</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    closePick();
-                    setCreateSharedOpen(true);
-                  }}
-                  className="h-auto w-full justify-start gap-2 px-2.5 py-1.5 text-left text-xs font-medium"
-                  icon={
-                    <Users
-                      size={14}
-                      className="shrink-0 text-muted-foreground"
-                    />
-                  }
-                >
-                  <span className="flex-1 truncate">新建共享空间…</span>
-                </Button>
-              </div>
-            )}
-          </PopoverContent>
-        </Popover>
-      </div>
-      <CreateSharedSpaceDialog
-        open={createSharedOpen}
-        onClose={() => setCreateSharedOpen(false)}
-        onCreated={onSharedCreated}
-      />
-    </>
   );
 }

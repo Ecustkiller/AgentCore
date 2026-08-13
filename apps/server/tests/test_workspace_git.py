@@ -67,7 +67,7 @@ async def test_git_clone_failure_raises(tmp_path: Path):
 async def test_clone_repo_rejects_non_http_urls(url: str, tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     with pytest.raises(ValueError):
-        await clone_repo(user_id="u1", folder_id=None, conversation_id="c1", repo_url=url)
+        await clone_repo(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c1", repo_url=url)
 
 
 @pytest.mark.parametrize(
@@ -85,21 +85,21 @@ async def test_clone_repo_blocks_ssrf_private_targets(url: str, tmp_path: Path, 
     passes the http(s) scheme check — so git clone can't reach internal services."""
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     with pytest.raises(ValueError):
-        await clone_repo(user_id="u1", folder_id=None, conversation_id="c1", repo_url=url)
+        await clone_repo(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c1", repo_url=url)
 
 
 async def test_clone_repo_rejects_existing_nonempty_dest(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
     from agentcore.workspace.locate import resolve_workspace_root
 
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c1")
     (root / "existing").mkdir()
     (root / "existing" / "f.txt").write_text("x", encoding="utf-8")
 
     with pytest.raises(ValueError):
         await clone_repo(
             user_id="u1",
-            folder_id=None,
+            folder_id=None, folder_rel_path=None,
             conversation_id="c1",
             repo_url="https://example.com/owner/existing.git",
         )
@@ -110,7 +110,7 @@ async def test_clone_repo_blocks_traversal_dest(tmp_path: Path, monkeypatch):
     with pytest.raises(ValueError):
         await clone_repo(
             user_id="u1",
-            folder_id=None,
+            folder_id=None, folder_rel_path=None,
             conversation_id="c1",
             repo_url="https://example.com/o/r.git",
             dest="../escape",
@@ -130,13 +130,13 @@ async def test_clone_repo_end_to_end(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(gitmod, "_validate_url", lambda url: None)
 
     dest_rel = await clone_repo(
-        user_id="u1", folder_id="f1", conversation_id="c1", repo_url=src.as_uri()
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", repo_url=src.as_uri()
     )
     assert dest_rel == "myrepo"
 
     from agentcore.workspace.locate import resolve_workspace_root
 
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     text = (root / "myrepo" / "README.md").read_text(encoding="utf-8").replace("\r\n", "\n")
     assert text == "hello clone\n"
 

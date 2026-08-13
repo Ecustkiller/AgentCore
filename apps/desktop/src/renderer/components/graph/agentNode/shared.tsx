@@ -203,6 +203,36 @@ export function failureFaceLabel(
   return "失败";
 }
 
+/**
+ * User-facing failure sentence — {@link failureFaceLabel} one level down (chip label vs
+ * the detail line under it).
+ *
+ * `run.error` is a **model** face: on the infra paths it is `str(exception)` and on the
+ * contract paths it names engine gates (「结构闸：缺少 audit JSON 产物：…」), which reads to
+ * the user as if *they* forgot to hand something in. So curate by the machine-readable
+ * `failureKind` and never render the raw text; it stays in logs / run detail for us.
+ */
+export function failureDetailSentence(
+  failureKind?: import("@/types/events").RunFailureKind | null,
+  productLanded?: boolean | null,
+): string {
+  if (productLanded) {
+    return "中途出错了，不过已经生成的文件都保留了下来。";
+  }
+  switch (failureKind) {
+    case "quality":
+      return "产出没有达到要求，没有采用。可以让我重做这一部分。";
+    case "format":
+      return "产出的格式不符合要求，没有采用。可以让我重做这一部分。";
+    case "model":
+      return "模型响应中断，这一步没有完成。可以让我重试。";
+    case "call":
+      return "调用出错，这一步没有完成。可以让我重试。";
+    default:
+      return "这一步没有完成。可以让我重试。";
+  }
+}
+
 /** Face status line for parallel wave visibility (排队 / 执行 / 完成用时 / 失败). */
 export function statusFaceLabel(
   status: RunStatus,

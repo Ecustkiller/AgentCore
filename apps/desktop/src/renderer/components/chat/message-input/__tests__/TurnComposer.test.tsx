@@ -159,6 +159,8 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
     dragOver: false,
     dropError: null,
     clearDropError: vi.fn(),
+    attachDroppedFile: vi.fn(),
+    attachFiles: vi.fn(),
     handleDragOver: vi.fn(),
     handleDragLeave: vi.fn(),
     handleDrop: vi.fn(),
@@ -170,9 +172,13 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
 // 直接 mock 这个 hook；其余 store 行为（setState / getState）保留真实实现。
 const genMock = vi.hoisted(() => ({ value: false }));
 const handleSendMock = vi.hoisted(() => vi.fn());
+const sendingMock = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/components/chat/message-input/useComposerSend", () => ({
-  useComposerSend: () => ({ handleSend: handleSendMock }),
+  useComposerSend: () => ({
+    handleSend: handleSendMock,
+    isSending: sendingMock.value,
+  }),
 }));
 vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
   useMentionMenu: () => ({
@@ -220,6 +226,7 @@ function renderComposer(variant?: "card" | "bar") {
 
 beforeEach(async () => {
   genMock.value = false;
+  sendingMock.value = false;
   handleSendMock.mockClear();
   useConversationStore.setState({
     currentConversationId: null,
@@ -395,5 +402,19 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("发送中：按钮进入 in-flight 态并挡住连点", async () => {
+    const { useComposerDraftStore } = await import("@/stores/composer");
+    useComposerDraftStore.getState().setValue("__draft__", "带附件的一条");
+    sendingMock.value = true;
+    renderComposer("bar");
+
+    const send = screen.getByRole("button", { name: "发送" });
+    expect(send.getAttribute("data-sending")).toBe("true");
+    expect(send.getAttribute("aria-busy")).toBe("true");
+    expect((send as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(send);
+    expect(handleSendMock).not.toHaveBeenCalled();
   });
 });

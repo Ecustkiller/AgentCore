@@ -223,6 +223,7 @@ async def _finalize_ask_user() -> tuple[AskUserSuspension, list[dict]]:
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -277,6 +278,7 @@ async def _finalize_plan_review(monkeypatch) -> tuple[PlanReviewSuspension, list
         suspension_deleter=deleter,
         captain_run_id="cap",
         folder_id=_TEST_BIRTH_FOLDER_ID,
+        approval_gate=None,
     )
     reg = ToolRegistry()
     reg.register(delegate)
@@ -321,6 +323,7 @@ async def _finalize_plan_review(monkeypatch) -> tuple[PlanReviewSuspension, list
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)

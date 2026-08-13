@@ -162,7 +162,12 @@ class HandlerMixin:
     async def _on_warm_account_rules_memory(
         self, request_id: Any, params: dict[str, Any]
     ) -> None:
-        """Non-turn RPC: warm account rules/memory snapshot into prepare cache."""
+        """Non-turn RPC: warm account rules/memory snapshot into prepare cache.
+
+        The reply's ``ttlSeconds`` is the seeded entry's remaining life — the
+        caller must re-warm within it. Prepare reads this cache only, so a lapsed
+        entry means empty rules / memory injection, not a cloud re-fetch.
+        """
         if not self._initialized:
             await self._send(
                 protocol.make_error(
@@ -182,7 +187,10 @@ class HandlerMixin:
                 )
             )
             return
-        from agentcore.memory.account_prepare_cache import warm_account_rules_memory
+        from agentcore.memory.account_prepare_cache import (
+            account_rules_memory_ttl_remaining,
+            warm_account_rules_memory,
+        )
         from agentcore.sidecar.server_pkg.turns import normalize_folder_id_param
 
         folder_id = (
@@ -207,6 +215,7 @@ class HandlerMixin:
                 protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e))
             )
             return
+        ttl_seconds = account_rules_memory_ttl_remaining(self._user_id, folder_id)
         logger.info(
             "sidecar.warm_account_rules_memory",
             user_id=self._user_id,
@@ -214,6 +223,7 @@ class HandlerMixin:
             degraded=snapshot.degraded,
             topic_count=len(snapshot.memory_topics),
             memory_file_count=len(snapshot.memory_bodies),
+            ttl_seconds=ttl_seconds,
         )
         await self._reply(
             request_id,
@@ -222,6 +232,9 @@ class HandlerMixin:
                 "degraded": snapshot.degraded,
                 "topicCount": len(snapshot.memory_topics),
                 "memoryFileCount": len(snapshot.memory_bodies),
+                # 续期握手：本条快照的剩余寿命。缓存过期即空注入（不回落云端），
+                # 故调用方必须在此窗口内重暖，不能把「暖过一次」当永久有效。
+                "ttlSeconds": ttl_seconds,
             },
         )
 
@@ -1179,15 +1192,21 @@ class HandlerMixin:
                 )
             )
             return
-        enqueue_steer(
-            execution_id=execution_id,
-            conversation_id=conversation_id,
-            decision=decision,  # type: ignore[arg-type]
-            focus=focus,
-            ask=ask,
-            ask_target=ask_target,
+        # ok=False = 掌舵窗口已关（辩论没在跑 / 已过末轮边界）：没有边界来捞它，如实拒收。
+        accepted = (
+            enqueue_steer(
+                execution_id=execution_id,
+                conversation_id=conversation_id,
+                decision=decision,  # type: ignore[arg-type]
+                focus=focus,
+                ask=ask,
+                ask_target=ask_target,
+            )
+            is not None
         )
-        await self._reply(request_id, {"ok": True, "queued": peek_steer_count(execution_id)})
+        await self._reply(
+            request_id, {"ok": accepted, "queued": peek_steer_count(execution_id)}
+        )
 
     async def _on_list_browser_sessions(self, request_id: Any, params: dict[str, Any]) -> None:
         """Local hydrate: list live BrowserSessions from this process's Registry.

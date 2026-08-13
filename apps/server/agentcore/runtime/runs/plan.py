@@ -90,6 +90,25 @@ class RunPlan:
     topology_lock: bool = False
     workflow_id: str | None = None
     workflow_version: int | None = None
+    # 本批 delegate 的 ``finalize`` 入参（收口批）。纯透传：调度器不读，只有
+    # :meth:`solo_direct_answer` 与身份构建看它。
+    finalize: bool = False
+
+    def solo_direct_answer(self) -> bool:
+        """单人直出：这名 worker 的正文即本回合给用户的最终答复。
+
+        与 ``delegate.drive_finalize`` 走 ``ceo_format.direct_result`` 的判据同形
+        （finalize 批 + 图上只有一个节点）——那条路径把 worker 的 ``state.content``
+        原样当最终答复，没有主管再改写 / 转述 / 汇总。执行器据此换 worker 的身份口径
+        （``executor.identities.build_worker_identity``）。
+
+        另收窄到 CEO 直派（``depth<=1``，见 ``build_run_plan``）：嵌套 lead 自己发的
+        收口批同样命中 ``direct_result``，但那份正文只是 lead 的终稿，往上仍可能被
+        主管合成——对子队员说「直达用户」是假的。宁可漏报（少一段口径）也不误报。
+        """
+        if not (self.finalize and len(self.nodes) == 1):
+            return False
+        return self.nodes[0].depth <= 1
 
     def add(self, spec: RunSpec) -> RunSpec:
         """Append one node. A duplicate ``run_id`` is a caller bug (ids are

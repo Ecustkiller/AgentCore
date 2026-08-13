@@ -11,6 +11,7 @@ from agentcore.core.errors import ErrorCode
 from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
+    checkpoint_required,
     citations_event,
     content_delta,
     content_reset,
@@ -28,6 +29,7 @@ from agentcore.runtime.events import (
     turn_saved,
     turn_warning,
 )
+from agentcore.runtime.events.attach_replay import replay_close_event, replay_open_event
 from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
 
 from ._common import _CONV, _COST, _USAGE, _ctx_block
@@ -612,6 +614,33 @@ def _reload_cursor_structure() -> list[SSEEvent]:
     ]
 
 
+def _reload_cursor_paused_ask() -> list[SSEEvent]:
+    """游标重连 · 耐久卡绑定（SSE-A1）：attach 回放段本身就得能画出待答卡。
+
+    ``message_start`` 是 EPHEMERAL、不落 journal，却是前端拿到服务端 ``message_id`` 的
+    唯一盖章点——耐久卡的「继续」正按这个 id 提交（``POST …/messages/{id}/resume``）。故回放
+    段由 :func:`replay_open_event` 开场：盖章在耐久卡之前，卡才绑得到本回合气泡。
+
+    开场帧与收口帧都取自服务端回放合成器本体（不手抄），回放段形状一变、导出的 golden 就变，
+    契约漂移门禁即红。
+    """
+    return [
+        replay_open_event(turn_id="m1", conversation_id=_CONV),
+        # journal process_content → 单块正文（游标回放同构，无叠字）。
+        content_delta("我先按 A 方案推进。"),
+        checkpoint_required(
+            checkpoint_id="cp1",
+            conversation_id=_CONV,
+            question="继续按 A 方案，还是换 B？",
+            context="两者成本相近，B 多花一天但更稳。",
+            intent="decision",
+        ),
+        # 收口事实回放：detached 回合的 message_end 发进了空气，attach 段按 turn_end 合成
+        # （仅 finish_reason；usage/cost 由 Message 列 rehydrate）。
+        replay_close_event(FinishReason.PAUSED),
+    ]
+
+
 def _mid_run_refresh_ceo_narration() -> list[SSEEvent]:
     """运行中刷新（process 渐进持久化）：CEO 旁白→工具→旁白→交付，保序交织。
 
@@ -773,6 +802,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "reload_cursor_structure": (
         "游标重连结构完整（P3）：全量 journal 回放 → 工具行+正文同在、无叠字",
         _reload_cursor_structure,
+    ),
+    "reload_cursor_paused_ask": (
+        "游标重连耐久卡（SSE-A1）：回放段以 message_start 盖章开场 → 待答 ask_user 卡绑本回合",
+        _reload_cursor_paused_ask,
     ),
     "mid_run_refresh_ceo_narration": (
         "运行中刷新：CEO 旁白→工具→旁白→交付 process 保序（process 渐进持久化）",

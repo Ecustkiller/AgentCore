@@ -4,8 +4,9 @@
 （token 硬顶 / 鉴权死 / 工具表 / 深度），不碰协作图、不碰 DB、不写 `self`：
 要么产出一份「规范化后的委派请求」，要么产出一条硬拒。
 
-`_active_playbook` / `_active_playbook_args` / `_delegate_force` 三个 per-call 标记
-原来在这里直接写 `self`，现在改由 :class:`DelegateCallFlags` 带回、`execute` 赋值。
+`_active_playbook` / `_active_playbook_args` 两个 per-call 标记原来在这里直接写 `self`，
+现在改由 :class:`DelegateCallFlags` 带回、`execute` 赋值。逐闸 `force` 不走这里——
+`execute` / `replan` 各自在入口解析（见 `force_scopes`），前奏硬拒也不留残值。
 """
 
 from __future__ import annotations
@@ -95,15 +96,10 @@ def _should_auto_light_delegate(tasks_raw: list[Any]) -> bool:
 
 @dataclass(frozen=True)
 class DelegateCallFlags:
-    """本次调用的 per-call 标记，由 `execute` 镜像到工具实例上。
-
-    ``force`` 为 ``None`` 表示这次拒绝发生在原内联代码读 ``arguments['force']`` 之前，
-    实例上的旧值保持不变（拒绝路径逐字等价）。
-    """
+    """本次调用的 per-call 标记，由 `execute` 镜像到工具实例上。"""
 
     playbook: str | None
     playbook_args: dict[str, Any] | None
-    force: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -285,7 +281,6 @@ def resolve_delegate_prelude(
     flags = DelegateCallFlags(
         playbook=active_playbook,
         playbook_args=active_playbook_args,
-        force=bool(arguments.get("force")),
     )
     if "complexity_hint" not in arguments and _should_auto_light_delegate(tasks_raw):
         complexity_hint = "light"

@@ -46,10 +46,15 @@ def maybe_enqueue_inprocess_call(
 ) -> str | None:
     """Enqueue one ``cost_calls`` row (+ materialize its run) when drain is live.
 
-    Skips when: drain not running (sidecar / unit tests), missing user or
-    conversation context, zero usage, ``scenario`` is the inference proxy
-    marker (proxy already records via ``proxy_spend``), or a vision board_read
-    (billed only via the turn ``cost_runs`` vision row).
+    ``user_id`` is the only envelope key required: an account-level chrome call
+    (AI 改写 / 文档 description, ``cost_role=assist``) belongs to no conversation
+    and lands as a ``conversation_id = NULL`` row — real spend stays visible in
+    the account windows instead of being dropped (成本配额与计费 §三).
+
+    Skips when: drain not running (sidecar / unit tests), no bound ``user_id``
+    (evals / 测连 probes have no account to charge), zero usage, ``scenario`` is
+    the inference proxy marker (proxy already records via ``proxy_spend``), or a
+    vision board_read (billed only via the turn ``cost_runs`` vision row).
     """
     if scenario == PROXY_LLM_SCENARIO:
         return None
@@ -63,9 +68,9 @@ def maybe_enqueue_inprocess_call(
         return None
 
     user_id = get_log_value("user_id")
-    conversation_id = get_log_value("conversation_id")
-    if not user_id or not conversation_id:
+    if not user_id:
         return None
+    conversation_id = get_log_value("conversation_id") or None
 
     call = assemble_ledger_call(
         model=model,

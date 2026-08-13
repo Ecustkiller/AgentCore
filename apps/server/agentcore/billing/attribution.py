@@ -23,7 +23,9 @@ from agentcore.llm.credentials import (
 )
 from agentcore.runtime.costing import ROLE_CAPTAIN, ROLE_MEMBER
 
-_ALLOWED_ROLES = frozenset({"captain", "member", "arena", "title", "memory", "vision"})
+_ALLOWED_ROLES = frozenset(
+    {"captain", "member", "arena", "title", "memory", "vision", "assist"}
+)
 
 
 def _encode_header_value(value: str) -> str:

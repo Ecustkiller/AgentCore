@@ -1,0 +1,86 @@
+{
+  "name": "reload_cursor_paused_ask",
+  "description": "游标重连耐久卡（SSE-A1）：回放段以 message_start 盖章开场 → 待答 ask_user 卡绑本回合",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我先按 A 方案推进。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "checkpoint_required",
+      "payload": {
+        "checkpoint_id": "cp1",
+        "conversation_id": "conv_demo",
+        "question": "继续按 A 方案，还是换 B？",
+        "context": "两者成本相近，B 多花一天但更稳。",
+        "assumptions": [],
+        "questions": [],
+        "intent": "decision"
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "paused"
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    }
+  ],
+  "projected": {
+    "status": "paused",
+    "finishReason": "paused",
+    "error": null,
+    "content": "",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "checkpoint",
+        "checkpoint_id": "cp1"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [],
+    "runs": [],
+    "acts": [],
+    "progress": {
+      "completed": 0,
+      "total": 0
+    },
+    "interactions": [
+      {
+        "kind": "ask_user",
+        "id": "cp1",
+        "status": "pending",
+        "question": "继续按 A 方案，还是换 B？",
+        "context": "两者成本相近，B 多花一天但更稳。"
+      }
+    ],
+    "cost": null,
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": null,
+    "turnWarning": null,
+    "autoFolder": null,
+    "teamNotes": [],
+    "userInterjections": []
+  }
+}

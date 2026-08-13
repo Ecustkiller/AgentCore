@@ -21,7 +21,7 @@ import {
 } from "@/services/sharedSpaces";
 import { useMutation, useQuery } from "@tanstack/react-query";
 
-/** Accepted shared spaces — rendered inside the files-page「项目」段 (not a separate rail group). */
+/** Accepted shared spaces — their own files-page rail zone, parallel to 我的文件. */
 export function useSharedSpaces() {
   return useQuery({
     queryKey: sharedSpaceKeys.list,

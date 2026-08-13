@@ -837,3 +837,82 @@ def test_extract_identifiers():
     assert "user_name" in ids
     # camelCase 和 PascalCase 也应被提取（转小写）
     assert len(ids) >= 2
+
+
+# ── setup_note_wall：批间继承 ────────────────────────────────────────────────
+
+
+class _WallSink:
+    def __init__(self) -> None:
+        self.events: list = []
+
+    def emit(self, event) -> None:  # noqa: ANN001 — duck-typed EventSink
+        self.events.append(event)
+
+
+class _WallTool:
+    """setup_note_wall 只用到 ``_note_wall`` / ``_sink`` 两个属性。"""
+
+    def __init__(self) -> None:
+        self._note_wall = None
+        self._sink = _WallSink()
+
+
+def _wall_plan():
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunSpec
+
+    plan = RunPlan()
+    plan.add(RunSpec(run_id="w1", role="研究员", task="查资料"))
+    plan.add(RunSpec(run_id="w2", role="撰写员", task="写初稿"))
+    return plan
+
+
+def test_setup_note_wall_inherits_across_replan_continuation():
+    """replan 续跑（带 seed_completed）必须继承上一批的墙 —— 曾因「有 seed = 新批」换成空墙，
+    续跑 worker 看不到队友已广播的决定，CEO 收尾对账段也空。"""
+    from agentcore.runtime.delegate.drive_setup import setup_note_wall
+    from agentcore.runtime.runs.types import RunPhase, RunState
+
+    tool = _WallTool()
+    first, collab = setup_note_wall(
+        tool,
+        _wall_plan(),
+        execution_id="e1",
+        coordination="wall",
+        seed_completed=None,
+        seed_notes=None,
+    )
+    assert collab is True and first is not None
+    first.post(
+        run_id="w1", agent_id="a1", role="研究员", kind=NOTE_KIND_DECISION, text="接口用 POST /login"
+    )
+
+    second, collab2 = setup_note_wall(
+        tool,
+        _wall_plan(),
+        execution_id="e1",
+        coordination="wall",
+        seed_completed={"w1": RunState(phase=RunPhase.COMPLETED, content="初稿")},
+        seed_notes=None,
+    )
+    assert collab2 is True and second is not None and second is not first
+    assert any("POST /login" in n.text for n in second.all_for("w2"))
+    assert any(getattr(e, "payload", {}).get("source") == "inherited" for e in tool._sink.events)
+
+
+def test_setup_note_wall_fresh_turn_starts_empty():
+    """跨回合 / 耐久恢复走全新工具实例（prev_wall 为 None）→ 空墙，不凭空造继承。"""
+    from agentcore.runtime.delegate.drive_setup import setup_note_wall
+    from agentcore.runtime.runs.types import RunPhase, RunState
+
+    wall, collab = setup_note_wall(
+        _WallTool(),
+        _wall_plan(),
+        execution_id="e2",
+        coordination="wall",
+        seed_completed={"w1": RunState(phase=RunPhase.COMPLETED, content="上回合产物")},
+        seed_notes=None,
+    )
+    assert collab is True and wall is not None
+    assert wall.all_for("w2") == []

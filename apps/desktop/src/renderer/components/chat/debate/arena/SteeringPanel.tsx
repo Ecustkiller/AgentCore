@@ -20,6 +20,9 @@ export interface SentSteer {
   ask: string;
   focus: string;
   targetName: string | null;
+  /** 引擎是否真收下。false = 已停止接收（末轮边界已过，正在结辩 / 出简报；或引擎不可达）：
+   * 没有下一轮边界来捞它 —— 回执必须如实说没生效，不能照样显示「已发送」。 */
+  accepted: boolean;
 }
 
 interface SteerTarget {
@@ -69,7 +72,13 @@ export function SteeringPanel({
               你{s.targetName ? ` · 定向 ${s.targetName}` : ""}
               {s.kind === "conclude" ? " · 够了收" : ""}
               {s.focus ? ` · 角度「${s.focus}」` : ""}
-              {" · 已发送·下一轮生效"}
+              {s.accepted ? (
+                " · 已发送·下一轮生效"
+              ) : (
+                <span className="text-destructive">
+                  {" · 未生效·辩论已停止接收掌舵"}
+                </span>
+              )}
             </p>
             {s.ask ? <p className="text-foreground">{s.ask}</p> : null}
           </div>
@@ -121,7 +130,7 @@ function AmbientSteerBar({
       executionId,
       decision: call,
     })
-      .then(() => {
+      .then((accepted) => {
         const targetName = target
           ? (targets.find((t) => t.key === target)?.name ?? null)
           : null;
@@ -130,6 +139,7 @@ function AmbientSteerBar({
           ask: trimmedAsk,
           focus,
           targetName,
+          accepted,
         });
         setAsk("");
         setAngle("");

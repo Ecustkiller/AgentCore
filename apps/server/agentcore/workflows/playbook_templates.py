@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.runtime.runs.playbooks import PLAYBOOKS, expand_playbook
+from agentcore.runtime.runs.playbooks.build_site import STYLE_MARKETING, STYLE_TOOLSHED
 from agentcore.workflows.definition import (
     WorkflowDefinitionError,
     tasks_dropped_meta_keys,
@@ -51,25 +52,92 @@ def _coerce_list_slot(val: Any) -> Any:
     parts = [p.strip() for p in _LIST_SLOT_SPLIT.split(s) if p.strip()]
     return parts if parts else val
 
-# Curated official list (product). Other PLAYBOOKS names → explicit reject.
-# Intentionally NOT 1:1 with PLAYBOOKS — see module docstring.
-WORKFLOW_PLAYBOOK_IDS: tuple[str, ...] = (
-    "parallel_brief",
-    "research_report",
-    "build_website",
-    "build_app",
-    "compare_options",
-)
+
+@dataclass(frozen=True, slots=True)
+class PlaybookSlotChoice:
+    """One allowed value of an enumerated slot (UI renders a picker, not a textbox)."""
+
+    value: str
+    label: str
+
+
+@dataclass(frozen=True, slots=True)
+class PlaybookTemplateSlot:
+    """Machine-readable primary slot — the single source clients render forms from."""
+
+    key: str
+    label: str
+    required: bool
+    hint: str | None = None
+    choices: tuple[PlaybookSlotChoice, ...] = ()
+
+
+# Curated official catalog (product): membership, order and the slots each template
+# asks for. Other PLAYBOOKS names → explicit reject; intentionally NOT 1:1 with
+# PLAYBOOKS — see module docstring. Builders may accept more slots than listed here.
+_SLOT_DEFS: dict[str, tuple[PlaybookTemplateSlot, ...]] = {
+    "parallel_brief": (
+        PlaybookTemplateSlot(
+            key="topic", label="主题", required=True, hint="要摸底对齐的主题"
+        ),
+        PlaybookTemplateSlot(
+            key="angles",
+            label="方向",
+            required=True,
+            hint="≥2 个可并行方向；数组或逗号/顿号分隔，如：法律、品牌、舆情",
+        ),
+    ),
+    "research_report": (
+        PlaybookTemplateSlot(
+            key="topic", label="主题", required=True, hint="调研 / 报告主题"
+        ),
+    ),
+    "build_website": (
+        PlaybookTemplateSlot(
+            key="topic",
+            label="简述",
+            required=True,
+            hint="站点/落地页/控制台一句话简述；产物目录固定 site/，不是文件夹槽",
+        ),
+        PlaybookTemplateSlot(
+            key="style",
+            label="气质",
+            required=False,
+            hint="站点气质；不填按 marketing",
+            choices=(
+                PlaybookSlotChoice(value=STYLE_MARKETING, label="营销落地页"),
+                PlaybookSlotChoice(value=STYLE_TOOLSHED, label="工具台 dense"),
+            ),
+        ),
+    ),
+    "build_app": (
+        PlaybookTemplateSlot(
+            key="app", label="应用", required=True, hint="要搭建的应用 / SPA 简述"
+        ),
+    ),
+    "compare_options": (
+        PlaybookTemplateSlot(
+            key="question",
+            label="问题",
+            required=True,
+            hint="要决策的问题，如：选 Postgres 还是 MySQL",
+        ),
+        PlaybookTemplateSlot(
+            key="options",
+            label="选项",
+            required=True,
+            hint="≥2 个待比较选项；数组或逗号/顿号分隔",
+        ),
+    ),
+}
+
+WORKFLOW_PLAYBOOK_IDS: tuple[str, ...] = tuple(_SLOT_DEFS)
 
 _KNOWN: frozenset[str] = frozenset(WORKFLOW_PLAYBOOK_IDS)
 
-# Required primary slots the API asks the user to fill (builders may accept more).
+# Required primary slots the API asks the user to fill (derived — never hand-listed).
 PRIMARY_SLOTS: dict[str, tuple[str, ...]] = {
-    "parallel_brief": ("topic", "angles"),
-    "research_report": ("topic",),
-    "build_website": ("topic",),
-    "build_app": ("app",),
-    "compare_options": ("question", "options"),
+    pid: tuple(s.key for s in slots if s.required) for pid, slots in _SLOT_DEFS.items()
 }
 
 # Soft optional defaults merged under user slots (user wins). Builders already default
@@ -109,23 +177,6 @@ _SUMMARY: dict[str, str] = {
     ),
 }
 
-_PRIMARY_SLOT_HELP: dict[str, str] = {
-    "parallel_brief": (
-        "topic（必填，主题）；angles（必填，≥2 个可并行方向；"
-        "数组或逗号/顿号分隔文本）"
-    ),
-    "research_report": "topic（必填，主题）",
-    "build_website": (
-        "topic（必填，站点/落地页/控制台一句话简述；产物目录固定 site/，不是文件夹槽）；"
-        "style（可选，marketing 默认 / toolshed=工具台 dense）"
-    ),
-    "build_app": "app（必填，应用/SPA 简述）",
-    "compare_options": (
-        "question（必填，要决策的问题）；options（必填，≥2 个待比较选项；"
-        "数组或逗号/顿号分隔文本）"
-    ),
-}
-
 _DEGRADE_NOTE = (
     "复制后可在画布调整拆法；部分执行细项（工具白名单等）不会带入快照。"
 )
@@ -136,7 +187,9 @@ class PlaybookTemplateItem:
     id: str
     title: str
     summary: str
+    # Prose one-liner for chat / help copy; ``slots`` is what clients render.
     primary_slots: str
+    slots: tuple[PlaybookTemplateSlot, ...]
 
 
 class PlaybookTemplateError(ValueError):
@@ -145,6 +198,21 @@ class PlaybookTemplateError(ValueError):
 
 def is_workflow_playbook(name: str | None) -> bool:
     return bool(name) and name in _KNOWN
+
+
+def _slot_help(slot: PlaybookTemplateSlot) -> str:
+    parts = ["必填" if slot.required else "可选"]
+    if slot.hint:
+        parts.append(slot.hint)
+    if slot.choices:
+        allowed = " / ".join(f"{c.value}={c.label}" for c in slot.choices)
+        parts.append(f"可选值：{allowed}")
+    return f"{slot.key}（{'，'.join(parts)}）"
+
+
+def primary_slots_help(playbook: str) -> str:
+    """Render the prose slot help from the structured slots (same single source)."""
+    return "；".join(_slot_help(s) for s in _SLOT_DEFS.get(playbook, ()))
 
 
 def list_playbook_templates() -> list[PlaybookTemplateItem]:
@@ -158,7 +226,8 @@ def list_playbook_templates() -> list[PlaybookTemplateItem]:
                 id=pid,
                 title=_TITLE.get(pid, pid),
                 summary=summary,
-                primary_slots=_PRIMARY_SLOT_HELP.get(pid, pb.slots if pb else ""),
+                primary_slots=primary_slots_help(pid),
+                slots=_SLOT_DEFS[pid],
             )
         )
     return out
@@ -203,8 +272,20 @@ def merge_playbook_slots(playbook: str, slots: dict[str, Any] | None) -> dict[st
             missing.append(key)
         # Non-empty list / other types → leave to expand_playbook errors.
     if missing:
-        help_text = _PRIMARY_SLOT_HELP[playbook]
+        help_text = primary_slots_help(playbook)
         raise PlaybookTemplateError(f"缺少主槽：{', '.join(missing)}；需要 {help_text}")
+
+    for slot in _SLOT_DEFS[playbook]:
+        if not slot.choices:
+            continue
+        val = merged.get(slot.key)
+        if not isinstance(val, str) or not val.strip():
+            continue
+        allowed = [c.value for c in slot.choices]
+        if val.strip() not in allowed:
+            raise PlaybookTemplateError(
+                f"槽位 {slot.key} 只接受：{' / '.join(allowed)}；收到「{val.strip()}」"
+            )
     return merged
 
 

@@ -81,6 +81,15 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "detail": "str",
     },
+    "fulfill.no_fulfiller": {
+        "reason": "str",
+        "channel": "str",
+        "root_id": "str",
+        "origin_device": "str",
+        "devices": "int",
+        "user": "str",
+        "conversation_id": "str",
+    },
     "desktop.mcp_list_ok": {
         "duration_ms": "int",
         "tool_count": "int",
@@ -291,12 +300,33 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "scope": "str",
         "total_chars": "int",
         "sections": "dict",
+        "section_digests": "dict",
         "assembly_hash": "str",
         "over_soft_cap": "bool",
         "soft_cap": "int",
     },
+    "cost.prefix_cache": {
+        "scenario": "str",
+        "model": "str",
+        "breach": "str",
+        "breach_section": "str",
+        "changed_sections": "list",
+        "cache_reported": "bool",
+        "input_tokens": "int",
+        "cache_hit_tokens": "int",
+        "hit_ratio": "float",
+        "reusable_tokens": "int",
+        "reusable_basis": "str",
+        "forfeited_tokens": "int",
+        "prompt_messages": "int",
+        "stable_prefix_messages": "int",
+        "prompt_chars": "int",
+        "stable_prefix_chars": "int",
+        "chain_calls": "int",
+    },
     "cost.ledger_write_failed": {"error": "str"},
     "cost.ledger_drain_before_reconcile_failed": {},
+    "cost.currency_mixed": {"bucket": "str", "currencies": "list", "kept": "str"},
     "workspace.snapshot_created": {},
     "workspace.snapshot_failed": {"error": "str"},
     "workspace.system_snapshot_prune_failed": {"error": "str"},
@@ -390,6 +420,14 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "error": "str",
     },
+    "billing.call_quota_refused": {
+        "user_id": "str",
+        "dimension": "str",
+        "used": "int",
+        "limit": "int",
+        "model": "str",
+        "scenario": "str",
+    },
     "memory.consolidation_window_dropped": {
         "conversation_id": "str",
         "error": "str",
@@ -414,6 +452,40 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "message_id": "str",
         "was_detached": "bool",
     },
+    "attention.signalled": {
+        "state": "str",
+        "kind": "str",
+        "conversation_id": "str",
+        "interaction_id": "str",
+        "pushed": "bool",
+        "push_outcome": "str",
+    },
+    "push.fcm_configured": {
+        "project_id": "str",
+    },
+    "push.fcm_token_minted": {
+        "project_id": "str",
+        "expires_in": "int",
+    },
+    "push.fcm_sent": {
+        "device": "str",
+        "message_id": "str",
+    },
+    "push.fcm_token_stale": {
+        "device": "str",
+        "status": "int",
+    },
+    "push.skipped": {
+        "user_id": "str",
+        "reason": "str",
+    },
+    "push.notified": {
+        "user_id": "str",
+        "devices": "int",
+        "accepted": "int",
+        "pruned": "int",
+        "failed": "int",
+    },
 }
 
 # S3-retired names: no emit site, kept so old JSONL still validates against the registry.
@@ -435,6 +507,10 @@ KEY_DESC: dict[str, str] = {
         "regenerate 早退拒绝（会话不存在 / 目标非用户消息或已删除）；排前端传错 id"
     ),
     "chat.prepare_phase": "prepare/assemble 分段耗时（phase + ms；每 phase 一行）",
+    "fulfill.no_fulfiller": (
+        "回合中途派单落空（reason=desktop_offline 桌面未连接 / root_not_held 桌面在线未声明该 root；"
+        "第三态来源设备离线另见 fulfill.origin_offline）"
+    ),
     "desktop.mcp_list_ok": "MCP list 成功（duration_ms / tool_count）",
     "desktop.mcp_list_degraded": "MCP list 超时或降级（带 duration_ms）",
     "desktop.mcp_list_cache_hit": "MCP list 命中进程内缓存（含 cache_scope / duration_ms）",
@@ -467,7 +543,16 @@ KEY_DESC: dict[str, str] = {
     "llm.call_failed": "LLM 调用失败（model/credential_source；可取则带 provider_id）",
     "llm.stream_stalled": "LLM 流式空闲超时（model/credential_source；可取则带 provider_id）",
     "cost.recorded": "回合落账成功（含 by_role 角色拆解）",
-    "cost.prompt_assembled": "系统提示装配观测（段 chars + assembly_hash；零行为副作用）",
+    "cost.currency_mixed": (
+        "同一钱袋汇总到两种币种（平台模型漏配 curated CNY 卡）；无 FX 不可相加，保留首个"
+    ),
+    "cost.prompt_assembled": (
+        "系统提示装配观测（段 chars + section_digests + assembly_hash；零行为副作用）"
+    ),
+    "cost.prefix_cache": (
+        "前缀缓存实测（hit_ratio 命中率 + breach/breach_section 击穿归因 + "
+        "reusable/forfeited；cache_reported=false 表示上游没报缓存，不等于 0% 命中）"
+    ),
     "pipeline.error": "回合管线未捕获异常",
     "http.unhandled_error": "HTTP 层未捕获异常",
     "http.db_pool_exhausted": "主库连接池耗尽（快失败 503，非 PG 宕机）",
@@ -492,6 +577,9 @@ KEY_DESC: dict[str, str] = {
     ),
     "billing.background_platform_auth_fallback": (
         "后台 chrome 平台 key 被上游 auth 拒绝后一次回落用户 BYOK"
+    ),
+    "billing.call_quota_refused": (
+        "逐调用配额闸拒绝一次平台代付上游调用（云内联与 sidecar 代理同粒度）"
     ),
     "compaction.done": "长对话压缩成功（folded/kept/summary_chars）",
     "compaction.failed": "长对话压缩失败（顶层异常；不推水位）",
@@ -530,6 +618,22 @@ KEY_DESC: dict[str, str] = {
     ),
     "account.rules_memory_cache_seed": "账户 rules/memory 快照写入进程缓存（非回合暖）",
     "account.rules_memory_warm_failed": "warm 拉取 rules/memory 部分失败（degraded seed）",
+    "attention.signalled": (
+        "「AI 停住在等你」信号已发；push_outcome = delivered / undelivered / "
+        "skipped_mobile_online / not_requested，pushed 只在真有设备收下时为 true"
+    ),
+    "push.fcm_configured": "FCM sender 装配成功；project_id 须与真机注册的 Firebase 项目一致",
+    "push.fcm_token_minted": (
+        "服务账号 JWT 换 OAuth2 access token 成功（凭据可用；此后未达即非凭据问题）"
+    ),
+    "push.fcm_sent": (
+        "FCM 已接收该设备的推送；message_id 可在 FCM 控制台续查「发了但没到」"
+    ),
+    "push.fcm_token_stale": "FCM 报 token 失效（404 / UNREGISTERED）→ 剪掉该设备",
+    "push.skipped": "推送未发出（reason=unconfigured 未配置推送 / no_devices 无注册设备）",
+    "push.notified": (
+        "用户级推送扇出结果；accepted=0 表示一台都没送出（区分「压根没发」与「发了但没到」）"
+    ),
 }
 
 
@@ -538,10 +642,13 @@ def scan_events() -> set[str]:
     for path in AGENTCORE.rglob("*.py"):
         if "observability" in path.parts and path.name in {"catalog.py", "events.py"}:
             continue
+        # utf-8-sig: a BOM makes ``ast.parse`` raise, and swallowing that used to
+        # drop every event in the file without a word — 7 files were invisible.
+        # An unparseable source file now fails the sync loudly for the same reason.
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        except SyntaxError:
-            continue
+            tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
+        except SyntaxError as e:
+            raise SystemExit(f"无法解析 {path}（日志事件会被静默漏登记）：{e}") from e
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue

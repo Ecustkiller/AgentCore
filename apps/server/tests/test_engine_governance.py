@@ -161,6 +161,7 @@ async def _run(
         annotate_citations=annotate_citations,
         deliverable_only=deliverable_only,
         on_reset=on_reset,
+        approval_gate=None,
     )
     return result, messages
 
@@ -510,6 +511,7 @@ async def test_captain_deliverable_only_keeps_timeline_no_reset():
         profile=make_profile_params(max_rounds=20),
         turn_model="m",
         deliverable_only=True,
+        approval_gate=None,
     )
     assert content == "最终结论：一二三。"
     # 关键：CEO 的旁白回退【不】发 content_reset（旁白留在时间线；仅数据通道 messages.content 被裁）。
@@ -558,6 +560,7 @@ async def test_captain_coordination_wait_aside_not_in_deliverable():
             profile=make_profile_params(max_rounds=20),
             turn_model="m",
             deliverable_only=True,
+            approval_gate=None,
         )
         assert content == "阶段结论：调研已齐，开始合成。"
         assert "还在检索" not in content
@@ -655,6 +658,7 @@ async def test_usage_sink_holds_completed_round_usage_on_raise():
             turn_model="m",
             raise_on_error=True,
             out=ReactLoopOut(usage=sink_usage),
+            approval_gate=None,
         )
     # The round that completed before the crash is mirrored for the caller to bill.
     assert len(sink_usage) == 1
@@ -683,6 +687,7 @@ async def test_usage_sink_empty_when_first_round_raises():
             turn_model="m",
             raise_on_error=True,
             out=ReactLoopOut(usage=sink_usage),
+            approval_gate=None,
         )
     assert sink_usage == []
 
@@ -762,6 +767,7 @@ async def test_tool_timeout_aborts_and_loop_recovers():
         tool_context=_context(),
         profile=profile,
         turn_model="m",
+        approval_gate=None,
     )
 
     assert content == "recovered"
@@ -813,6 +819,7 @@ async def _run_loop(  # noqa: ANN001
             if finish_override_sink is None
             else ReactLoopOut(finish_override=finish_override_sink)
         ),
+        approval_gate=None,
     )
 
 
@@ -846,6 +853,7 @@ async def test_length_empty_degrades_immediately_without_continue():
         profile=profile,
         turn_model="primary",
         out=ReactLoopOut(finish_override=finish_override),
+        approval_gate=None,
     )
 
     assert content == ""
@@ -887,6 +895,7 @@ async def test_length_empty_not_exempted_for_captain_coordination(monkeypatch):
         out=ReactLoopOut(finish_override=finish_override),
         role="captain",
         run_id="cap",
+        approval_gate=None,
     )
     assert content == ""
     assert rounds == 1
@@ -986,6 +995,7 @@ async def _run_with_sink(provider, profile, sink, *, turn_model: str = "primary"
         profile=profile,
         turn_model=turn_model,
         out=ReactLoopOut(finish_override=finish_override),
+        approval_gate=None,
     )
     return content, rounds, finish_override
 
@@ -1126,6 +1136,7 @@ async def test_circuit_breaker_warns_then_disables_failing_tool():
         tool_context=_context(),
         profile=profile,
         turn_model="m",
+        approval_gate=None,
     )
 
     steers = [m.content or "" for m in messages if m.role == "user"]
@@ -1179,6 +1190,7 @@ async def test_read_url_disable_survives_react_loop_restart():
         profile=make_profile_params(max_rounds=20),
         turn_model="m",
         run_id=run_id,
+        approval_gate=None,
     )
     assert is_read_url_retired(run_id)
     steers = [m.content or "" for m in messages if m.role == "user"]
@@ -1198,6 +1210,7 @@ async def test_read_url_disable_survives_react_loop_restart():
         profile=make_profile_params(max_rounds=5),
         turn_model="m",
         run_id=run_id,
+        approval_gate=None,
     )
     assert provider2.offered[0] == ["other"]
     clear_read_url_retired(run_id)
@@ -1283,6 +1296,7 @@ async def _run_with_registry(provider: _ScriptedProvider, reg: ToolRegistry):
         tool_context=_context(),
         profile=profile,
         turn_model="m",
+        approval_gate=None,
     )
     return content, messages
 

@@ -1,4 +1,6 @@
 import { logEvent } from "@/lib/log";
+import { queryClient } from "@/lib/queryClient";
+import { conversationKeys } from "@/lib/queryKeys";
 import { parseResumeDeferredPayload } from "@/lib/resumeDeferred";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
@@ -22,6 +24,7 @@ import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useInteractionStore } from "@/stores/interactions";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import type {
+  AutoFolderCreatedPayload,
   ContentDeltaPayload,
   ContentResetPayload,
   ErrorPayload,
@@ -54,6 +57,16 @@ function finalizeTurnTrace(conversationId: string): void {
   traceTurnEnd(conversationId, lastA?.process);
 }
 
+/**
+ * 队里少了一项后，剩下几条的「第 N/M」全都过期了——GET 权威重排（禁轮询，只在信号后拉）。
+ *
+ * 出队 / 取消可能来自另一端，本端无从算出新序；空队则无可重排，不发这一趟请求。
+ */
+function renumberRemainingQueue(conversationId: string): void {
+  if (useQueuedTurnsStore.getState().list(conversationId).length === 0) return;
+  void reconcileQueuedTurns(conversationId);
+}
+
 export function handleMessageStreamEvent(
   event: SSEEvent,
   ctx: DispatchContext,
@@ -84,12 +97,14 @@ export function handleMessageStreamEvent(
       // 按 queue_id 清 QueuedTurnsBar；用户泡由 midFlight 在本帧前补插。
       const p = event.payload as TurnQueueStartedPayload;
       useQueuedTurnsStore.getState().remove(conversationId, p.queue_id);
+      renumberRemainingQueue(conversationId);
       return true;
     }
     case "turn_queue_cancelled": {
       // EPHEMERAL：多端同步清排队 UI（本地 cancel 已清则幂等 no-op）。
       const p = event.payload as TurnQueueCancelledPayload;
       clearQueuedTurnLocally(conversationId, p.queue_id);
+      renumberRemainingQueue(conversationId);
       return true;
     }
     case "resume_deferred": {
@@ -109,6 +124,21 @@ export function handleMessageStreamEvent(
       useConversationStore
         .getState()
         .recordTurnWarning(payload.message, conversationId);
+      return true;
+    }
+    case "auto_folder_created": {
+      // 裸聊写盘自动建了云文件夹：气泡里出轻提示（告知落点，不挡回合）。文件夹列表随即
+      // 刷新，提示上的「打开」「改名」才有真东西可指。
+      const p = event.payload as AutoFolderCreatedPayload;
+      useConversationStore
+        .getState()
+        .recordAutoFolder(
+          { folderId: p.folder_id, name: p.name },
+          conversationId,
+        );
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.grouped,
+      });
       return true;
     }
     case "workspace_lock_wait": {

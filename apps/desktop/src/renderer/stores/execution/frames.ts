@@ -199,6 +199,8 @@ export type RunFrame =
       /** Wire `ownership_paths` — 写权冲突结构化裁决。 */
       ownershipPaths?: string[];
       lockOwnerRunId?: string;
+      /** Wire `timeout_seconds` — 运维配置的等待上限；缺省 = 无限期等（默认部署）。 */
+      timeoutSeconds?: number;
     }
   | {
       // 阻塞式求决策 settlement.
@@ -507,6 +509,9 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         ...(typeof p.lock_owner_run_id === "string" &&
         p.lock_owner_run_id.trim()
           ? { lockOwnerRunId: p.lock_owner_run_id.trim() }
+          : {}),
+        ...(typeof p.timeout_seconds === "number" && p.timeout_seconds > 0
+          ? { timeoutSeconds: p.timeout_seconds }
           : {}),
       };
     }

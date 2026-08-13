@@ -333,3 +333,75 @@ describe("turn_queue_started · 契约出队清轻态", () => {
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });
 });
+
+/**
+ * 队里少一项，剩下几条的「第 N/M」就过期了——出队 / 取消可能来自另一端，本端算不出新序，
+ * 只能拉 GET 权威（禁轮询：只在信号后拉；空队则一趟都不发）。
+ */
+describe("少一项后的重排（云对话多端同权 B2 · 验收 5）", () => {
+  function queueTwo(): void {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-a",
+      conversationId: CID,
+      content: "A",
+      position: 1,
+      queueDepth: 2,
+    });
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-b",
+      conversationId: CID,
+      content: "B",
+      position: 2,
+      queueDepth: 2,
+    });
+  }
+
+  it("另一端取消中间一项 → 剩余条拉 GET 重排", () => {
+    queueTwo();
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_cancelled",
+        timestamp: "",
+        payload: { queue_id: "q-a", conversation_id: CID },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(reconcileMock).toHaveBeenCalledWith(CID);
+  });
+
+  it("出队开跑后仍有剩余 → 同样重排", () => {
+    queueTwo();
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_started",
+        timestamp: "",
+        payload: {
+          queue_id: "q-a",
+          conversation_id: CID,
+          remaining_depth: 1,
+        },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(reconcileMock).toHaveBeenCalledWith(CID);
+  });
+
+  it("清空到空队 → 无序可重排，不发请求", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q-only",
+      conversationId: CID,
+      content: "唯一一条",
+      position: 1,
+      queueDepth: 1,
+    });
+    handleMessageStreamEvent(
+      {
+        type: "turn_queue_cancelled",
+        timestamp: "",
+        payload: { queue_id: "q-only", conversation_id: CID },
+      },
+      { conversationId: CID, source: "server" },
+    );
+    expect(reconcileMock).not.toHaveBeenCalled();
+  });
+});

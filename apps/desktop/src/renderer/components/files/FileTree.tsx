@@ -79,6 +79,11 @@ interface FileTreeProps {
    * 匹配项可见并自动展开祖先；空串不过滤）。不下探文件内容、不发搜索 API。
    */
   filterQuery?: string;
+  /**
+   * 根层要藏起来的目录名——「我的文件」把子文件夹渲染成自己的 rail 行，
+   * 若树里再列一遍，同一个文件夹会出现两次（且树里那份没有归属/记忆入口）。
+   */
+  hideRootDirs?: readonly string[];
 }
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
@@ -94,6 +99,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       indent = 0,
       emptyText = "空文件夹",
       filterQuery = "",
+      hideRootDirs,
     },
     ref,
   ) {
@@ -452,7 +458,15 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
     );
 
     const rootStatus = data.statusOf("");
-    const rootChildren = data.childrenOf("");
+    const loadedRootChildren = data.childrenOf("");
+    // Child folders own their own rail row; hiding them here is what keeps a
+    // nested folder from also showing up as a plain directory of its parent.
+    const rootChildren =
+      loadedRootChildren && hideRootDirs?.length
+        ? loadedRootChildren.filter(
+            (n) => !(n.isDir && hideRootDirs.includes(n.name)),
+          )
+        : loadedRootChildren;
     const visibleRootChildren = filterVisible
       ? (rootChildren ?? []).filter((n) => filterVisible.has(n.path))
       : (rootChildren ?? []);

@@ -106,16 +106,16 @@ async def test_code_execute_display_unchanged_without_write_back():
     assert result.display is not None
     assert "written_files" not in result.display
     assert "已写回工作区" not in result.output
-    assert "agentcore:written_files" not in result.output
+    assert result.file_products == []
 
 
-async def test_code_execute_output_carries_structured_write_back_marker():
-    # 结构化写回通道 (files_touched 事实口径): besides the human「已写回工作区」line, the
-    # output carries a machine-readable JSON marker so files_touched_from_transcript can
-    # count the landing WITHOUT parsing the prose — robust even when a filename contains
-    # the「、」separator the prose line joins on (which would break naive splitting).
+async def test_code_execute_self_reports_write_back_products():
+    # 落盘产物自报 (台账事实口径): the sandbox copy-out paths ride ``ToolResult.file_products``
+    # — the same channel as file_write — so the ledger counts them WITHOUT parsing the human
+    #「已写回工作区」line, which cannot be split safely when a filename contains「、」.
     from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
+    from agentcore.tools.file_products import with_file_products_marker
 
     backend = _FakeBackend(
         ExecutionResult(
@@ -130,9 +130,13 @@ async def test_code_execute_output_carries_structured_write_back_marker():
     result = await CodeExecuteTool(location="server").execute(
         {"code": "make()", "language": "python"}, _ctx(backend)
     )
-    assert "<!--agentcore:written_files:" in result.output
-    # The produced marker round-trips through the run's files_touched harvest exactly —
-    # including the「、」filename that the human prose line cannot be split on safely.
+    assert [(p.path, p.kind) for p in result.file_products] == [
+        ("out/a、b.md", "md"),
+        ("out/chart.png", "image"),
+    ]
+    # 回执文案不带尾注: the marker is stamped by the engine onto the transcript message only.
+    assert "agentcore:file_products" not in result.output
+    # Through the engine's stamping it round-trips into the run's ledger exactly.
     transcript = [
         LLMMessage(
             role="assistant",
@@ -144,7 +148,11 @@ async def test_code_execute_output_carries_structured_write_back_marker():
                 )
             ],
         ),
-        LLMMessage(role="tool", content=result.output, tool_call_id="c1"),
+        LLMMessage(
+            role="tool",
+            content=with_file_products_marker(result.output, result.file_products),
+            tool_call_id="c1",
+        ),
     ]
     assert files_touched_from_transcript(transcript) == ["out/a、b.md", "out/chart.png"]
 

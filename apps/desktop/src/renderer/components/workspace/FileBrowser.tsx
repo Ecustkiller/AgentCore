@@ -24,7 +24,7 @@ import { type ReactNode, useRef, useState } from "react";
  * 点文件 → 经 {@link useSidePanelStore.showFile} 开顶栏 File 内容 tab（多开并存），
  * 不再 swap 掉树。文件中枢页仍用 {@link FileWorkbench} 左右分栏。
  *
- * 单行面板头：左侧 `leading`（项目·本地/云端 chip）、中段文件操作、右侧 `trailing`（快照等）。
+ * 单行面板头：左侧 `leading`（文件夹·本地/云端 chip）、中段文件操作、右侧 `trailing`（快照等）。
  */
 export function FileBrowser({
   source,

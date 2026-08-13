@@ -120,13 +120,20 @@ describe("useWorkspaceModeState conversation switch", () => {
       { initialProps: { id: "conv-a" as string | null } },
     );
 
-    await waitFor(() => expect(getBinding).toHaveBeenCalledWith("conv-a"));
+    // The control always reads through to the server: a cached binding could be
+    // up to a TTL stale, and the mode chip must not show the wrong workspace.
+    const fresh = { fresh: true };
+    await waitFor(() =>
+      expect(getBinding).toHaveBeenCalledWith("conv-a", fresh),
+    );
 
     await act(async () => {
       rerender({ id: "conv-b" });
     });
     expect(result.current).toBeNull();
-    await waitFor(() => expect(getBinding).toHaveBeenCalledWith("conv-b"));
+    await waitFor(() =>
+      expect(getBinding).toHaveBeenCalledWith("conv-b", fresh),
+    );
 
     await act(async () => {
       resolveA(bindingA);

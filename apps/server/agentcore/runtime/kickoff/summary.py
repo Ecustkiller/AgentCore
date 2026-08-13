@@ -113,7 +113,7 @@ class KickoffSummary:
 # 无 Folder 时（裸聊 scratch / 未绑会话工作区）的人审可见落座文案——勿留空让前端猜。
 SESSION_DESK_LABEL = "本会话工作区"
 # Folder 行存在但名册未解析到显示名时的兜底（enrich 失败 / 空 name）。
-UNNAMED_DESK_LABEL = "未命名项目"
+UNNAMED_DESK_LABEL = "未命名文件夹"
 
 
 def worker_rows(

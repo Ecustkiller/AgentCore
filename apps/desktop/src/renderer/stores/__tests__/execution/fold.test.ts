@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ExecutionPlan,
   type RunFrame,
+  describeFrame,
   frameFromEvent,
   projectExecution,
 } from "../../execution";
@@ -268,6 +269,25 @@ describe("projectExecution (fold)", () => {
     const agent = exec.agents.find((a) => a.id === "agent-1");
     expect(agent?.status).toBe("error");
     expect(agent?.toolProgress).toBeNull();
+  });
+
+  it("names a hard-timeout kill 超时结束, not 已改方向", () => {
+    // 硬超时强杀与「改派」共用取消通道；scrubber 只有 reason 能区分二者，说错就等于
+    // 告诉用户有人给这名队员派了新活（其实是撞了时间上限被结束）。
+    const timeoutKill: RunFrame = {
+      t: 3,
+      kind: "run_cancelled",
+      runId: "run-1",
+      agentId: "agent-1",
+      reason: "worker_timeout",
+    };
+    expect(describeFrame(timeoutKill, plan)).toContain("超时结束");
+    expect(
+      describeFrame({ ...timeoutKill, reason: "redirect" }, plan),
+    ).toContain("已改方向");
+    expect(describeFrame({ ...timeoutKill, reason: "stop" }, plan)).toContain(
+      "已停止",
+    );
   });
 
   it("marks run and agent cancelled on run_cancelled", () => {
@@ -870,6 +890,58 @@ describe("projectExecution (fold)", () => {
       kind: "escalation_required",
       browserLogin: true,
     });
+  });
+
+  // 等待口径（诚实性）: 默认部署无墙钟上限，wire 不带 timeout_seconds ⇒ 状态里也不能凭空出现
+  // 一个「会自动继续」的口径；运维配了上限才折进来，供卡面照实写。
+  it("folds the wire wait ceiling onto RunEscalation.timeoutSeconds, absent by default", () => {
+    const base = {
+      t: 2,
+      kind: "escalation_required" as const,
+      escalationId: "esc-1",
+      runId: "run-1",
+      agentId: "agent-1",
+      question: "Q?",
+      assumption: "暂用 A",
+      escalationKind: "normal" as const,
+    };
+    const unlimited = projectExecution(
+      plan,
+      [started("agent-1", "run-1"), base],
+      "running",
+    ).runs.find((s) => s.id === "run-1")?.escalations[0];
+    expect(unlimited?.timeoutSeconds).toBeUndefined();
+
+    const capped = projectExecution(
+      plan,
+      [started("agent-1", "run-1"), { ...base, timeoutSeconds: 1800 }],
+      "running",
+    ).runs.find((s) => s.id === "run-1")?.escalations[0];
+    expect(capped?.timeoutSeconds).toBe(1800);
+  });
+
+  it("frameFromEvent maps wire timeout_seconds → frame.timeoutSeconds", () => {
+    const payload = {
+      escalation_id: "e1",
+      run_id: "run-1",
+      agent_id: "agent-1",
+      question: "Q?",
+      assumption: "暂用 A",
+    };
+    expect(
+      frameFromEvent({
+        type: "escalation_required",
+        timestamp: "t",
+        payload,
+      } as SSEEvent),
+    ).not.toHaveProperty("timeoutSeconds");
+    expect(
+      frameFromEvent({
+        type: "escalation_required",
+        timestamp: "t",
+        payload: { ...payload, timeout_seconds: 900 },
+      } as SSEEvent),
+    ).toMatchObject({ kind: "escalation_required", timeoutSeconds: 900 });
   });
 
   it("folds a blocking escalate timed_out: status timed_out, answer stays null", () => {

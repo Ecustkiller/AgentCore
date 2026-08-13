@@ -204,6 +204,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     delivery_status: dict[str, Any] | None = None
     # 预检警告（turn_warning）：P2 DURABLE。
     turn_warning: str | None = None
+    # 裸聊写盘自动建文件夹告知（auto_folder_created，§5.4 裸聊行）：DURABLE，刷新后轻提示重建。
+    auto_folder: dict[str, Any] | None = None
     # 团队便签墙 (§2.2 通): the batch's posted notes in chronological order. Journaled, so it
     # replays on reload (unlike transport-only board ops). Deduped by noteId for replay safety.
     team_notes: list[dict[str, Any]] = []
@@ -980,6 +982,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if isinstance(msg, str) and msg.strip():
                 turn_warning = msg
 
+        elif etype == "auto_folder_created":
+            fid = p.get("folder_id")
+            if isinstance(fid, str) and fid.strip():
+                auto_folder = {"folderId": fid, "name": str(p.get("name") or "")}
+
         elif etype == "team_synthesis_preview":
             # 同 key 保最新（后写覆盖）。
             team_synthesis_preview = p
@@ -1121,6 +1128,8 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         # 交付状态（delivery_status）：结构化交付对账（已交付/缺口/待操作），null 当无。
         "deliveryStatus": delivery_status,
         "turnWarning": turn_warning,
+        # 裸聊自动建文件夹告知（auto_folder_created）：{folderId, name}，null 当本回合没建。
+        "autoFolder": auto_folder,
         # 团队便签墙 (§2.2 通): the turn's posted notes (chronological), [] when none.
         "teamNotes": team_notes,
         # 协调中用户插话：同 interjectionId 保最新，[] when none.

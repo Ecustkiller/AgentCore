@@ -29,6 +29,14 @@ DEFAULT_TOOL_FAILURE_MESSAGE = "工具执行失败，请稍后重试。"
 # String literals below stay byte-equal to their tool/db sources (no import — avoids
 # engine ↔ db/tools cycles): ``db.errors.DATABASE_UNAVAILABLE_MESSAGE``,
 # ``exec_env.EXEC_ENV_PROBE_FAIL_USER_MESSAGE``, ``core.net`` local-search connect copy.
+#
+# Copy rule for every sentence here: say what happened, what it means for the user, and
+# what they can do — in that order, in the user's own vocabulary. Deny paths steer the
+# model with imperatives ("不要原样重试" / "请改用其他方案"); those belong on ``result``
+# only. A denial the user themselves issued must never come back as an order to them,
+# and an unattended path must never promise a confirmation UI that does not exist.
+# Engine concepts (run / 收口 / 台账 / handoff / 落盘 / 活性挂起 / 白名单 / 检索预算 /
+# 收尾窗口 / 结构闸) are internal — they never appear below.
 _CURATED_BY_CODE: dict[str, str] = {
     ErrorCode.TOOL_ERROR: DEFAULT_TOOL_FAILURE_MESSAGE,
     ErrorCode.TOOL_NOT_FOUND: "当前无法使用该工具，请换一种方式继续。",
@@ -43,11 +51,37 @@ _CURATED_BY_CODE: dict[str, str] = {
     ErrorCode.DATABASE_UNAVAILABLE: "AgentCore 服务暂时不可用，请稍后重试",
     "database_unavailable": "AgentCore 服务暂时不可用，请稍后重试",
     # Engine meta codes (not ErrorCode members) — still stable on the wire.
-    "retrieval_budget_exhausted": "本回合检索次数已用尽。",
+    "retrieval_budget_exhausted": (
+        "本次任务的联网查资料次数已用完，这一次没有再去搜；我会基于已经查到的内容继续。"
+    ),
     "args_parse_failed": "工具参数无效，已中止本次调用。",
-    "allowlist_deny": "当前无权执行该操作。",
-    "timeout": "工具响应超时，请缩小范围或换一种方式继续。",
-    "liveness_timeout": "工具响应超时，请缩小范围或换一种方式继续。",
+    "allowlist_deny": (
+        "这一步要用的工具不在本次任务的可用范围内，已跳过。如果需要，可以让我换个方式来做。"
+    ),
+    # The task is out of time / tokens and only finishing tools stay open.
+    "wind_down_deny": "本次任务已接近时间或用量上限，正在整理结果，这一步用到的工具已经停用。",
+    # Safety fuse. Nothing ran, so the user's files and data are untouched — say so.
+    "safety_breaker_deny": (
+        "出于安全考虑，这一步操作已被拦下，没有执行。如果确实需要，请告诉我你想怎么做。"
+    ),
+    # Fuse / confirmation needed but nobody to ask (unattended job, ops kill switch).
+    # A conversation really does have the confirmation card, so pointing there is honest;
+    # naming a generic「可确认的界面」to someone who is already the user is not.
+    "safety_breaker_unattended": (
+        "这一步有安全风险，而当前任务在后台运行、无法向你确认，已跳过。"
+        "如果确实需要，可以在对话里让我重做这一步。"
+    ),
+    "approval_unattended": (
+        "这一步需要你确认才能执行，而当前任务在后台运行、无法向你确认，已跳过。"
+        "如果需要执行，可以在对话里让我重做这一步。"
+    ),
+    # Covers an explicit refuse *and* a card that timed out — hence「没有得到确认」rather
+    # than「你拒绝了」.
+    "approval_denied": (
+        "这一步没有得到你的确认，没有执行，也没有改动任何东西。想继续的话告诉我一声。"
+    ),
+    "timeout": "这一步等了很久都没有响应，已经中止。可以让我缩小范围或换个方式再试一次。",
+    "liveness_timeout": "这一步等了很久都没有响应，已经中止。可以让我缩小范围或换个方式再试一次。",
     "workspace_channel_dead": "工作区通道暂时不可用，请稍后重试。",
     "landed_status_name": "参数无效：请调用真实的写盘工具。",
     "host_unavailable": "浏览器宿主暂时不可用，请稍后重试。",

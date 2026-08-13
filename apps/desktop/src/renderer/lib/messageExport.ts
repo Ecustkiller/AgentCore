@@ -89,12 +89,18 @@ const TOOL_DETAIL_KEYS = [
   "text",
 ] as const;
 
+/** `id` / `*_id` 是内部标识：复制出去的过程稿同样不摆（与工具行标题同一条纪律）。 */
+function isInternalIdArg(key: string): boolean {
+  return key === "id" || key.endsWith("_id");
+}
+
 function toolDetail(args: Record<string, unknown>): string {
   for (const k of TOOL_DETAIL_KEYS) {
     const v = args[k];
     if (typeof v === "string" && v.trim()) return v.trim();
   }
-  for (const v of Object.values(args)) {
+  for (const [k, v] of Object.entries(args)) {
+    if (isInternalIdArg(k)) continue;
     if (typeof v === "string" && v.trim()) return v.trim();
   }
   return "";

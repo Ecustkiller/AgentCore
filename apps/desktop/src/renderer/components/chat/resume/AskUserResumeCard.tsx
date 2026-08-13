@@ -3,6 +3,7 @@ import { AskUserCard } from "@/components/chat/CheckpointCard";
 import { DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { notifyError } from "@/lib/toast";
 import {
+  notifySubmitInteractionResult,
   submitInteraction,
   submitInteractionFeedback,
 } from "@/services/interactionSubmit";
@@ -91,7 +92,7 @@ function AskUserBrowserLoginResumeCard({ turn }: { turn: PendingResume }) {
         },
       });
       if (result !== "ok") {
-        notifyError(submitInteractionFeedback(result));
+        notifySubmitInteractionResult(result);
         setSubmitting(null);
       }
     } catch (err) {

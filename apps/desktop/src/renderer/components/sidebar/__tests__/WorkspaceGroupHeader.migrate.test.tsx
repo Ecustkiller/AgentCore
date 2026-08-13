@@ -14,6 +14,9 @@ vi.mock("@/hooks/useConversations", () => ({
 vi.mock("@/hooks/useFolders", () => ({
   useDeleteFolder: () => ({ mutate: vi.fn() }),
   usePermanentDeleteFolder: () => ({ mutate: vi.fn() }),
+  useRestoreFolder: () => ({ mutate: vi.fn() }),
+  useFolderTrash: () => ({ data: undefined }),
+  releaseFolderConversations: vi.fn(() => false),
 }));
 vi.mock("@/lib/newConversation", () => ({
   startNewConversation: vi.fn(),
@@ -35,28 +38,32 @@ vi.mock("@/stores/conversation", () => ({
     }),
 }));
 
-function folder(mode: "local" | "cloud"): FolderMeta {
+function folder(
+  mode: "local" | "cloud",
+  overrides: Partial<FolderMeta> = {},
+): FolderMeta {
   return {
     id: "f1",
     name: "DemoProj",
     mode,
     localRootId: mode === "local" ? "root-1" : null,
     localSubpath: mode === "local" ? "" : null,
+    ...overrides,
   };
 }
 
 function renderHeader(
   mode: "local" | "cloud",
-  onToggleExpanded: () => void = () => {},
+  overrides: Partial<FolderMeta> = {},
 ) {
   return render(
     <MemoryRouter>
       <TooltipProvider>
         <WorkspaceGroupHeader
-          folder={folder(mode)}
+          folder={folder(mode, overrides)}
           convs={[]}
           expanded
-          onToggleExpanded={onToggleExpanded}
+          onToggleExpanded={() => {}}
         />
       </TooltipProvider>
     </MemoryRouter>,
@@ -80,7 +87,7 @@ describe("WorkspaceGroupHeader · local traditional (no migrate debt badge)", ()
     expect(screen.getByText("DemoProj")).toBeTruthy();
     expect(screen.getByLabelText(LOCAL_TRADITIONAL_LABEL)).toBeTruthy();
     expect(screen.queryByText("请迁移")).toBeNull();
-    expect(screen.getByLabelText("在本机项目中新开对话")).toBeTruthy();
+    expect(screen.getByLabelText("在此本机文件夹中新开对话")).toBeTruthy();
   });
 
   it("cloud group has no import menu entry", async () => {
@@ -88,27 +95,33 @@ describe("WorkspaceGroupHeader · local traditional (no migrate debt badge)", ()
     expect(screen.getByText("DemoProj")).toBeTruthy();
     expect(screen.queryByText("请迁移")).toBeNull();
     expect(screen.getByLabelText("云端")).toBeTruthy();
-    expect(screen.getByLabelText("在云项目中新开对话")).toBeTruthy();
+    expect(screen.getByLabelText("在此文件夹中新开对话")).toBeTruthy();
 
-    const trigger = screen.getByLabelText("项目操作");
+    const trigger = screen.getByLabelText("文件夹操作");
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
     expect(await screen.findByText("新建对话")).toBeTruthy();
-    expect(screen.queryByText("导入本机项目到云")).toBeNull();
+    expect(screen.queryByText("导入到「我的文件」")).toBeNull();
   });
 
-  it("⋯ menu 导入本机项目到云 opens import with prefill", async () => {
+  it("⋯ menu 导入到「我的文件」 opens import with prefill", async () => {
     renderHeader("local");
-    const trigger = screen.getByLabelText("项目操作");
+    const trigger = screen.getByLabelText("文件夹操作");
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
-    const item = await screen.findByText("导入本机项目到云");
+    const item = await screen.findByText("导入到「我的文件」");
     fireEvent.click(item);
     const state = useFoldersStore.getState();
     expect(state.importToCloudOpen).toBe(true);
     expect(state.importToCloudPrefill).toEqual({
       rootId: "root-1",
-      projectName: "DemoProj",
+      folderName: "DemoProj",
     });
+  });
+
+  it("a nested folder shows its ancestor path so same-named siblings differ", () => {
+    renderHeader("cloud", { relPath: "设计/图标", parentRelPath: "设计" });
+    expect(screen.getByText("DemoProj")).toBeTruthy();
+    expect(screen.getByText("设计")).toBeTruthy();
   });
 });

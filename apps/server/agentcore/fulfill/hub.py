@@ -6,9 +6,15 @@ device* of this user can execute a given channel op against a given root, and
 delivers the request frame to that device's SSE subscription.
 
 Multi-device is first-class: each ``(user_id, device_id)`` holds at most one
-live :class:`FulfillerSession`. Selection prefers the most recently registered
-session whose ``caps`` include the channel and whose ``roots`` hold the
-``root_id`` (any capable session when ``root_id`` is ``None``).
+live :class:`FulfillerSession`. Selection takes sessions whose ``caps`` include
+the channel and whose ``roots`` hold the ``root_id`` (any capable session when
+``root_id`` is ``None``), then prefers the device that started the turn
+(``fulfill/origin.py``) and falls back to the most recently registered one.
+
+For ops that act on the fulfilling machine itself — running commands, touching
+disk, mounting directories — that preference is a hard constraint
+(:data:`ORIGIN_PINNED_CHANNELS`): with the origin device gone, callers must fail
+honestly rather than run the user's shell command on a second install.
 
 Backpressure: fulfillment frames must not be silently shed. A full queue marks
 the session unhealthy — it is closed so the client reconnects (and is removed
@@ -40,6 +46,34 @@ FULFILL_CHANNELS: frozenset[str] = frozenset(
         "external_mount",
     }
 )
+
+# Channels whose ops execute against the fulfilling machine: shell / file IO
+# (workspace), OS affordances (host), locally spawned stdio servers (mcp), and
+# reading a directory off that disk (external_mount). Landing one of these on a
+# device the user is not sitting at is a wrong answer, not a degraded one — so
+# when the turn's origin device is known these pin to it.
+#
+# The rest are display / reminder surfaces: a board batch belongs to whichever
+# install has the canvas open, and a notification is worth showing anywhere.
+ORIGIN_PINNED_CHANNELS: frozenset[str] = frozenset(
+    {
+        "workspace",
+        "host",
+        "mcp",
+        "external_mount",
+    }
+)
+
+
+def origin_pinned(channel: str, *, root_id: str | None) -> bool:
+    """True when this op must reach the turn's origin device or fail.
+
+    A ``root_id`` already names one authorized directory on one install, so
+    rooted ops keep their existing root-based location untouched; pinning only
+    replaces the "any capable device" fallback taken when ``root_id`` is absent.
+    """
+    return root_id is None and channel in ORIGIN_PINNED_CHANNELS
+
 
 # A stalled fulfiller's queue is capped here; once full the session is closed
 # (never drop-oldest). Sized above typical concurrent CLIENT_TOOL in-flight so
@@ -228,11 +262,19 @@ class FulfillerHub:
         *,
         root_id: str | None,
         channel: str,
+        origin_device_id: str | None = None,
+        require_origin: bool = False,
     ) -> FulfillerSession | None:
         """Pick the best online fulfiller for ``channel`` (+ optional ``root_id``).
 
         Rules: caps contain ``channel`` → roots contain ``root_id`` (any capable
-        session when ``root_id`` is ``None``) → most recently registered.
+        session when ``root_id`` is ``None``) → the turn's ``origin_device_id`` →
+        most recently registered.
+
+        ``require_origin`` turns that preference into a constraint: when the
+        origin device is not among the candidates, return ``None`` instead of
+        handing the op to a peer. It is inert while ``origin_device_id`` is
+        ``None`` (unknown origin ⇒ the caller cannot be pinned to anything).
         """
         sessions = self._by_user.get(user_id)
         if not sessions:
@@ -244,6 +286,14 @@ class FulfillerHub:
         ]
         if not candidates:
             return None
+        if origin_device_id:
+            origin = next(
+                (s for s in candidates if s.device_id == origin_device_id), None
+            )
+            if origin is not None:
+                return origin
+            if require_origin:
+                return None
         return max(candidates, key=lambda s: s.registered_at)
 
     def has_fulfiller(
@@ -252,9 +302,25 @@ class FulfillerHub:
         *,
         root_id: str | None,
         channel: str,
+        origin_device_id: str | None = None,
+        require_origin: bool = False,
     ) -> bool:
-        """True when :meth:`find` would return a live session."""
-        return self.find(user_id, root_id=root_id, channel=channel) is not None
+        """True when :meth:`find` would return a live session (same arguments).
+
+        Presence gates must pass the selection arguments delivery will use, or a
+        gate that let the turn through is followed by a delivery that reports no
+        machine to run on.
+        """
+        return (
+            self.find(
+                user_id,
+                root_id=root_id,
+                channel=channel,
+                origin_device_id=origin_device_id,
+                require_origin=require_origin,
+            )
+            is not None
+        )
 
     def deliver(self, session: FulfillerSession, event: dict[str, Any]) -> bool:
         """Push ``event`` onto ``session``. On queue-full, close it and return False."""

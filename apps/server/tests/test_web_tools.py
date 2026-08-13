@@ -2509,6 +2509,130 @@ def test_tool_result_custom_lower_limit_keeps_both_ends():
     assert len(r.output) <= 200
 
 
+# --- read_url output budget: json escaping must not chop the envelope ---
+
+
+def _newline_dense_html(blocks: int) -> str:
+    """A page whose extracted text is ~2/3 newlines (每个 ``</p></div>`` 各产一个 ``\\n``).
+
+    Escaped by ``json.dumps`` each ``\\n`` costs two chars, so the raw-char budget
+    (``max_chars``) badly under-counts the serialized payload — the TOOL-A2 shape.
+    """
+    body = "<div><p>行</p></div>" * blocks
+    return f"<html><head><title>密集换行页</title></head><body>{body}</body></html>"
+
+
+async def test_read_url_escape_heavy_page_stays_valid_json_and_declares_cut(monkeypatch):
+    """转义膨胀超预算：仍是合法 JSON + 截断事实在带内可见（不许伪装成完整正文）。"""
+    max_chars = 3000
+    html = _newline_dense_html(2000)
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    result = await ReadUrlTool().execute(
+        {"url": "https://dense.example.com/table", "max_chars": max_chars}, _ctx()
+    )
+
+    assert result.success is True
+    # Pre-fix: the dump blew ``max_chars + 1024`` and ToolResult head+tail chopped it,
+    # so the model got a JSON object sliced through the middle (and no error field).
+    payload = json.loads(result.output)
+    assert "系统视图截断" not in result.output  # no character-level cut of the envelope
+    assert payload["url"] == "https://dense.example.com/table"
+    assert payload["title"] == "密集换行页"
+    assert payload["content"]  # a real prefix survives, not an empty body
+    # The cut is a stated fact — in-band for the model and in metadata for logs.
+    assert payload["truncated"] is True
+    assert "截断" in payload["note"]
+    assert result.metadata["output_truncated"] is True
+    # Budget actually holds now that it is spent on the SERIALIZED form.
+    assert len(result.output) <= max_chars + read_url_mod._OUTPUT_ENVELOPE_SLACK
+    assert result.output_limit >= len(result.output)  # ToolResult must not re-trim
+
+
+async def test_read_url_plain_page_not_flagged_truncated(monkeypatch):
+    """预算内的页面不加 truncated/note（截断标记必须只在真截断时出现）。"""
+    html = "<html><head><title>短页</title></head><body><p>正文内容</p></body></html>"
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    result = await ReadUrlTool().execute({"url": "https://short.example.com/p"}, _ctx())
+
+    payload = json.loads(result.output)
+    assert payload == {
+        "url": "https://short.example.com/p",
+        "title": "短页",
+        "content": "正文内容",
+    }
+    assert result.metadata["output_truncated"] is False
+
+
+async def test_read_url_cache_hit_shares_the_output_budget(monkeypatch):
+    """缓存命中走同一预算收口：命中结果同样是合法 JSON + 带内截断声明。"""
+    max_chars = 3000
+    html = _newline_dense_html(2000)
+    calls = {"n": 0}
+
+    async def _allow(_url: str):
+        return None
+
+    async def _fake_request(_client, _method, url, **_kwargs):
+        calls["n"] += 1
+        return httpx.Response(200, html=html, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _fake_request)
+
+    ctx = _ctx(conversation_id="conv-dense-budget")
+    tool = ReadUrlTool()
+    args = {"url": "https://dense.example.com/cached", "max_chars": max_chars}
+    await tool.execute(args, ctx)
+    hit = await tool.execute(args, ctx)
+
+    assert calls["n"] == 1
+    assert hit.metadata["cached"] is True
+    payload = json.loads(hit.output)
+    assert payload["truncated"] is True
+    assert hit.metadata["output_truncated"] is True
+    assert len(hit.output) <= max_chars + read_url_mod._OUTPUT_ENVELOPE_SLACK
+    assert hit.output_limit >= len(hit.output)
+
+
+def test_page_output_keeps_json_valid_when_envelope_alone_exceeds_budget():
+    """退化情形（超长 title/url 撑爆信封）：宁可超预算，也不交半截 JSON。"""
+    output, truncated = read_url_mod._page_output(
+        url="https://x.example.com/" + ("p" * 500),
+        title="标题" * 500,
+        text="正文" * 500,
+        limit=200,
+    )
+    assert truncated is True
+    payload = json.loads(output)  # parseable even though the envelope cannot fit
+    assert payload["content"] == ""  # nothing of the body survived — and it says so
+    assert payload["truncated"] is True
+    r = ToolResult(
+        tool_call_id="",
+        success=True,
+        output=output,
+        output_limit=max(200, len(output)),
+    )
+    assert json.loads(r.output) == payload  # the caller's max() keeps it intact
+
+
 # --- citations: site_of + tool wiring + cross-round dedup ---
 
 

@@ -27,15 +27,15 @@ from pathlib import Path
 from agentcore.workspace.stage_dirs import (
     AGENTCORE_ROOT,
     DEBATE_PREFIX,
+    DRAFTS_PREFIX,
     INTERNAL_ZONE_NAMES,
-    PROJECT_DOCS_PREFIX,
     RESEARCH_PREFIX,
     REVIEWS_PREFIX,
 )
 
 # Write-path unsafe chars (null/controls + Windows reserved). Separators handled
 # separately: kept as directory structure outside dossier prefixes; flattened to
-# ``_`` under research/reviews/debate/项目 so nested model paths become one file.
+# ``_`` under 工作稿/research/reviews/debate so nested model paths become one file.
 _UNSAFE_IN_SEGMENT = re.compile(r'[\0-\x1f:*?"<>|]')
 _UNSAFE_IN_FILENAME = re.compile(r'[\0-\x1f\\/:*?"<>|]+')
 _MULTI_UNDERSCORE = re.compile(r"_+")
@@ -84,10 +84,10 @@ def truncate_filename_utf8(
 
 # Longest-first so prefixes nest correctly if layouts ever share a stem.
 _DOSSIER_WRITE_PREFIXES: tuple[str, ...] = (
+    DRAFTS_PREFIX,
     RESEARCH_PREFIX,
     REVIEWS_PREFIX,
     DEBATE_PREFIX,
-    PROJECT_DOCS_PREFIX,
 )
 
 # --- System noise (AI + user UI) ---
@@ -423,12 +423,20 @@ def _finalize_cleaned_name(cleaned: str, *, empty_fallback: str) -> str:
     return truncate_filename_utf8(cleaned or empty_fallback)
 
 
-def _clean_path_segment(segment: str) -> str:
-    """Strip reserved chars from one path segment (directory or file name)."""
+def clean_path_segment(segment: str, *, empty_fallback: str = "_") -> str:
+    """Strip reserved chars from one path segment (directory or file name).
+
+    Public because cloud folder names (``cloud_tree``) must land on disk under the
+    same rules model-supplied write paths do — one sanitizer, not two.
+    """
     cleaned = _UNSAFE_IN_SEGMENT.sub("_", segment)
     cleaned = _MULTI_UNDERSCORE.sub("_", cleaned)
-    cleaned = _finalize_cleaned_name(cleaned, empty_fallback="_")
+    cleaned = _finalize_cleaned_name(cleaned, empty_fallback=empty_fallback)
     return _neutralize_win_reserved_segment(cleaned)
+
+
+def _clean_path_segment(segment: str) -> str:
+    return clean_path_segment(segment)
 
 
 def _clean_dossier_filename(rest: str) -> str:
@@ -447,7 +455,7 @@ def sanitize_write_relpath(
     * Dangerous characters (controls, ``:*?"<>|``) → ``_``.
     * Windows reserved device names (``nul`` / ``CON`` / ``nul.txt`` / …) get a
       leading ``_`` so they never land as hanging Win32 device paths.
-    * Under dossier prefixes (``research`` / ``reviews`` / ``debate`` / ``项目``),
+    * Under dossier prefixes (``工作稿`` / ``research`` / ``reviews`` / ``debate``),
       everything after the prefix is treated as a **single file name**: nested
       ``/`` ``\\`` become ``_`` so ``…/research/a/b.md`` → ``…/research/a_b.md``.
     * Each file / segment name is capped to ``_MAX_FILENAME_BYTES`` UTF-8 bytes

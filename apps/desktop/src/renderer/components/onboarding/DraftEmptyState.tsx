@@ -16,11 +16,7 @@ export function DraftEmptyState({
   previewKind?: ReturnType<typeof resolveDraftEmptyKind>;
 }) {
   const conversations = useConversations();
-  const kind =
-    previewKind ??
-    resolveDraftEmptyKind({
-      conversationCount: conversations.length,
-    });
+  const kind = previewKind ?? resolveDraftEmptyKind({ conversations });
   const fill = useComposerDraftStore((s) => s.fill);
 
   if (kind === "starter_chips") {

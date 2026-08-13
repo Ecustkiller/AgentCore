@@ -52,7 +52,7 @@ def test_parse_semantic_result_topic_ops_only():
     {
       "preferences": null,
       "profile": "# 用户记忆\\n\\n## 关于用户的事实\\n- 用 Rust\\n",
-      "project_profile": null,
+      "folder_profile": null,
       "ops": [
         {"action": "add", "file": "主题/部署.md", "content": "用 docker compose"},
         {"action": "add", "file": "画像.md", "section": "关于用户的事实", "content": "应被丢弃"}
@@ -79,7 +79,7 @@ def test_sanitize_global_profile_strips_project_constraints():
     assert "禁止 jQuery" not in clean
 
 
-def test_sanitize_project_profile_keeps_fixed_sections_drops_free():
+def test_sanitize_folder_profile_keeps_fixed_sections_drops_free():
     messy = (
         "# 用户记忆\n\n"
         "## 技术栈\n- React\n\n"
@@ -135,7 +135,7 @@ async def test_consolidate_strips_project_constraints_from_global(tmp_path):
     assert "白板" not in body
 
 
-async def test_consolidate_routes_project_profile_when_folder(tmp_path):
+async def test_consolidate_routes_folder_profile_when_folder(tmp_path):
     store = FileMemoryStore(tmp_path)
     folder = "c5ab5b86-test"
     await store.save(
@@ -158,7 +158,7 @@ async def test_consolidate_routes_project_profile_when_folder(tmp_path):
         )
     ]
     new_global = "# 用户记忆\n\n## 关于用户的事实\n- 个人用中文\n"
-    new_project = (
+    new_folder = (
         "# 用户记忆\n\n"
         "## 技术栈与工具\n- 旧栈\n- TypeScript\n- 白板引擎\n\n"
         "## 项目约束\n- 禁止 jQuery\n\n"
@@ -167,7 +167,7 @@ async def test_consolidate_routes_project_profile_when_folder(tmp_path):
     fake = _FakeConsolidator(
         SemanticConsolidateResult(
             profile=new_global,
-            project_profile=new_project,
+            folder_profile=new_folder,
             ops=[],
             parse_failed=False,
         )
@@ -183,11 +183,11 @@ async def test_consolidate_routes_project_profile_when_folder(tmp_path):
     global_body = await store.load("u1", CORE_MEMORY_FILE)
     assert "项目约束" not in global_body
     assert "白板引擎" not in global_body
-    project_body = await store.load("u1", CORE_MEMORY_FILE, scope=folder)
-    assert "TypeScript" in project_body
-    assert "项目约束" in project_body
-    assert "禁止 jQuery" in project_body
-    assert "数据模型" not in project_body
+    folder_body = await store.load("u1", CORE_MEMORY_FILE, scope=folder)
+    assert "TypeScript" in folder_body
+    assert "项目约束" in folder_body
+    assert "禁止 jQuery" in folder_body
+    assert "数据模型" not in folder_body
 
 
 async def test_consolidate_semantic_rewrites_profile(tmp_path):

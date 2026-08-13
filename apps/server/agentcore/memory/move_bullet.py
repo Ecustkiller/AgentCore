@@ -1,9 +1,12 @@
-"""Move one memory bullet between the GLOBAL and PROJECT layers (位置即作用域纠错).
+"""Move one memory bullet between the GLOBAL and FOLDER layers (位置即作用域纠错).
 
 Semantics: remove the bullet from the source layer, then add it under the same
 section on the target layer — never a scope flag flip. Used by the desktop
-「移到本项目 / 移到全局」actions on the semantic diff card and the dual-pane
+「移到本文件夹 / 移到全局」actions on the semantic diff card and the dual-pane
 profile editor (Agent记忆与知识系统 §1.6 P2-b).
+
+``MoveDirection`` keeps the ``to_project`` spelling: it is the ``POST /v1/memory/move``
+request contract the desktop already sends, not product wording (双模式工作区 §5.4).
 """
 
 from __future__ import annotations
@@ -65,7 +68,7 @@ def _resolve_file(
     *, kind: str, section: str, topic_slug: str | None
 ) -> str | MoveBulletError:
     if kind == "preferences":
-        return MoveBulletError("偏好仅存在于全局，不能搬到项目层")
+        return MoveBulletError("偏好仅存在于全局，不能搬到文件夹层")
     if kind == "topic":
         slug = (topic_slug or "").strip()
         if not slug:
@@ -94,13 +97,13 @@ def validate_move(
 ) -> MoveBulletError | None:
     """Reject illegal layer moves before touching the store."""
     if file == PREFERENCES_MEMORY_FILE:
-        return MoveBulletError("偏好仅存在于全局，不能搬到项目层")
+        return MoveBulletError("偏好仅存在于全局，不能搬到文件夹层")
     if section in PREFERENCES_SECTIONS:
         return MoveBulletError("偏好条目仅存在于全局，不能搬层")
     if section in _GLOBAL_ONLY_SECTIONS and direction == "to_project":
-        return MoveBulletError("「纠正记录」只属于全局，不能移到本项目")
+        return MoveBulletError("「纠正记录」只属于全局，不能移到本文件夹")
     if section in _PROJECT_ONLY_SECTIONS and direction == "to_global":
-        return MoveBulletError("「项目约束」只属于本项目，不能移到全局")
+        return MoveBulletError("「项目约束」只属于本文件夹，不能移到全局")
     return None
 
 
@@ -125,7 +128,7 @@ async def move_memory_bullet(
     source_baseline: str | None = None,
     target_baseline: str | None = None,
 ) -> MoveBulletResult:
-    """Atomically move one bullet between global and ``folder_id`` project layers.
+    """Atomically move one bullet between global and ``folder_id`` folder layers.
 
     Caller must hold ``user_memory_lock``. Empty ``content`` / ``folder_id`` are
     rejected. CAS baselines are optional (``None`` = unconditional write).
@@ -135,7 +138,7 @@ async def move_memory_bullet(
         return MoveBulletError("没有可搬移的内容")
     fid = (folder_id or "").strip()
     if not fid:
-        return MoveBulletError("搬到本项目需要当前项目")
+        return MoveBulletError("搬到本文件夹需要当前文件夹")
     if direction not in ("to_project", "to_global"):
         return MoveBulletError("无效的搬层方向")
 

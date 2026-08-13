@@ -53,6 +53,10 @@ PROFILES: dict[str, ProfileParams] = {
     "compaction": ProfileParams(temperature=0.3, max_rounds=1, thinking=False),
     "file.rewrite": ProfileParams(temperature=0.4, max_rounds=1, thinking=False),
     "title": ProfileParams(temperature=0.3, max_tokens=1024, max_rounds=1, thinking=False),
+    # 固化工作流时抽槽位：结构化 JSON 一次性抽取，低温 + 不思考（同 title / memory）。
+    "workflow.slots": ProfileParams(
+        temperature=0.2, max_tokens=1024, max_rounds=1, thinking=False
+    ),
 }
 
 _DEFAULT_PROFILE = "chat"

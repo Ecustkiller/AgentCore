@@ -132,7 +132,7 @@ export const DEMO_DEBATE_MODEL: DebateModel = {
     handoffs: [
       { kind: "value", text: "要不要牺牲速度换更稳的回滚" },
       { kind: "fact", text: "试点实际成本" },
-      { kind: "question", text: "第一批放行哪些项目" },
+      { kind: "question", text: "第一批放行哪些试点" },
     ],
   },
   sides: [

@@ -77,10 +77,19 @@ def exec_env_remediation_zh(
         )
 
     if kind == "capability_office":
+        # 仅针对无确定性导出器的 Office 目标（.pptx/.xlsx/.odt/.rtf）。
+        # Word/PDF 有 md_to_docx / md_to_pdf，与沙箱正交——别顺手一起报做不到。
+        docx_clause = (
+            "【注意·别扩大缺口】`.docx` / `.pdf` **不在**本缺口内："
+            "确定性导出工具 `md_to_docx` / `md_to_pdf` 无条件装配、与执行沙箱无关，"
+            "落盘 `.md` 后导出即可当场交付真 Word / PDF；"
+            "【禁止】把 Word/PDF 一并说成本回合做不到。"
+        )
         if local:
             return (
                 "[能力提示] 本回合执行环境未装配（无 code_execute / test_run / terminal），"
-                "Office/文档目标（.docx/.pptx/.xlsx 等）无法在本回合生成。"
+                "需执行才能生成的 Office 目标（.pptx/.xlsx 等）无法在本回合生成。"
+                f"{docx_clause}"
                 "【禁止】再派「写脚本 / 跑脚本」空转，也【禁止】再 claim code_execute=已装配；"
                 "请立即发 ask_user 卡说明缺口，并**推荐**引导 Composer「导入到云 / 连接 Git」"
                 "或诚实收口并标缺口（脚本仅备本机运行，目标 Office 文件未生成）。"
@@ -89,7 +98,8 @@ def exec_env_remediation_zh(
         return (
             "[能力提示] 本回合已是云端会话，执行环境未装配"
             f"{failure_clause}（无 code_execute / test_run / terminal），"
-            "Office/文档目标（.docx/.pptx/.xlsx 等）无法在本回合生成。"
+            "需执行才能生成的 Office 目标（.pptx/.xlsx 等）无法在本回合生成。"
+            f"{docx_clause}"
             "【禁止】再派「写脚本 / 跑脚本」空转，也【禁止】再 claim 已装配；"
             "【禁止】再引导「导入到云」。"
             "请立即发 ask_user 说明沙箱不可用，并给 export_to_local / 本机传统 /"

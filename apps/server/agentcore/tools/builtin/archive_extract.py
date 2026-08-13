@@ -22,9 +22,11 @@ from agentcore.tools.builtin.file_ops import (
     _prepare_write_relpath,
     write_scope_rejection,
 )
+from agentcore.tools.file_products import FileProduct, file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -45,6 +47,22 @@ ARCHIVE_EXTRACT_TOOL_NAME = "archive_extract"
 _EXTRACT_MAX_FILES = 5_000
 _EXTRACT_MAX_UNCOMPRESSED_BYTES = 200 * 1024 * 1024  # 200 MiB
 
+# 自报产物条数上限（交付物台账 · 契约见 ``tools/file_products.py``）。取值与
+# ``sandbox/written_scan._MAX_FILES`` / ``gvisor_write_back_max_files`` 一致：解压是
+# 唯一一支单次能落上千个文件的笔，而产物尾注**进 transcript 并回喂模型**，把 5000 条
+# 路径列全既冲爆上下文也没有信息量（用户面产物卡同理）。落盘不受此限——限的只是记账
+# 与回执的条数；截断时回执明说，绝不假装只产了这些。
+_PRODUCT_REPORT_MAX = 200
+
+
+def _extracted_products(written: list[str]) -> list[FileProduct]:
+    """Self-report the members that really landed (bounded by ``_PRODUCT_REPORT_MAX``).
+
+    解压出来的成员不是任何源文件的导出件（源是那个 zip，不是中间稿），故不填
+    ``derived_from``——填了会让 zip 在用户面被误折叠成中间稿。
+    """
+    return [file_product(p) for p in written[:_PRODUCT_REPORT_MAX]]
+
 
 class ArchiveExtractTool:
     """Extract a workspace ``.zip`` into a destination directory."""
@@ -52,6 +70,7 @@ class ArchiveExtractTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -186,6 +205,7 @@ class ArchiveExtractTool:
                 return _fail(
                     f"{scope_err}（已写出 {len(written)} 个文件后停下）",
                     start,
+                    products=_extracted_products(written),
                 )
             try:
                 n = await backend.write_bytes(out_path, content)
@@ -194,11 +214,13 @@ class ArchiveExtractTool:
                     _outside_workspace_msg(out_path, location=location)
                     + f"（已写出 {len(written)} 个文件后停下）",
                     start,
+                    products=_extracted_products(written),
                 )
             except WorkspaceIOError as e:
                 return _fail(
                     f"写入 `{out_path}` 失败：{e}（已写出 {len(written)} 个文件后停下）",
                     start,
+                    products=_extracted_products(written),
                 )
             written.append(out_path)
             total_bytes += int(n)
@@ -224,6 +246,12 @@ class ArchiveExtractTool:
         ]
         if more > 0:
             lines.append(f"  … 另有 {more} 个文件未列出")
+        if len(written) > _PRODUCT_REPORT_MAX:
+            lines.append(
+                f"注意：文件数超过 {_PRODUCT_REPORT_MAX}，交付物台账只逐条登记前 "
+                f"{_PRODUCT_REPORT_MAX} 个路径；其余文件同样已落盘，"
+                f"请按目录 `{dest_path}` 整体交付，勿逐个点名。"
+            )
         if dest_note:
             lines.append(dest_note)
         lines.append("【验真】请以本回执路径确认落盘；可用 file_list 抽查目标目录。")
@@ -240,6 +268,7 @@ class ArchiveExtractTool:
                 "bytes_written": total_bytes,
                 "paths": written,
             },
+            file_products=_extracted_products(written),
         )
 
 
@@ -248,7 +277,9 @@ def _fail(
     start: float,
     *,
     contract_failure: bool = False,
+    products: list[FileProduct] | None = None,
 ) -> ToolResult:
+    """Failed extract. ``products`` = 中途停下前已真正落盘的成员（部分成功不抹账）。"""
     return ToolResult(
         tool_call_id="",
         success=False,
@@ -256,4 +287,5 @@ def _fail(
         error=error,
         duration_ms=int((time.monotonic() - start) * 1000),
         metadata={"contract_failure": True} if contract_failure else {},
+        file_products=list(products or []),
     )

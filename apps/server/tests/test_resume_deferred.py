@@ -104,6 +104,170 @@ async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
     turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
 
 
+async def test_wake_failure_unwinds_waiter_and_schedules_drain(monkeypatch):
+    """The wake coroutine is detached: a claim that raises must settle it itself.
+
+    Otherwise the user's「继续」SSE waits on ``started`` forever (no timeout on the
+    route side) and the conversation's queued messages never drain.
+    """
+    drained: list[str] = []
+
+    async def boom_claim(_message_id: str, conversation_id: str | None = None):
+        raise RuntimeError("claim exploded")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", boom_claim
+    )
+    monkeypatch.setattr(
+        turn_queue, "schedule_drain", lambda cid: drained.append(cid)
+    )
+
+    cid = "c-deferred-wake-failure"
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+    host = asyncio.create_task(_never())
+    turn_runs.register(
+        conversation_id=cid, task=host, sink=EventSink(message_id="host")
+    )
+
+    started: asyncio.Future = asyncio.get_running_loop().create_future()
+    turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-boom",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=started,
+        )
+    )
+
+    host.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await host
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(started, timeout=2.0)
+    assert drained == [cid]
+    turn_queue.clear(cid)
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+
+
+async def test_same_message_id_resume_joins_instead_of_cutting_the_first_stream():
+    """重复提交同一张冷卡 = 幂等 join：共用 waiter，第一条流不被掐断。"""
+    cid = "c-deferred-join"
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+    host = asyncio.create_task(_never())
+    turn_runs.register(
+        conversation_id=cid, task=host, sink=EventSink(message_id="host")
+    )
+    loop = asyncio.get_running_loop()
+
+    first: asyncio.Future = loop.create_future()
+    second: asyncio.Future = loop.create_future()
+    parked = turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-same",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=first,
+        )
+    )
+    joined = turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-same",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=second,
+        )
+    )
+
+    assert joined is parked
+    assert turn_runs._resume_deferred[cid] is parked  # noqa: SLF001
+    assert not first.cancelled()
+    assert parked.waiting() == [first, second]
+    # One resume run, both SSEs served off the same sink.
+    sink = EventSink(message_id="paused-same")
+    assert parked.settle(sink) is True
+    assert first.result() is sink
+    assert second.result() is sink
+
+    # Another cold card of the same conversation still wins (last click wins).
+    third: asyncio.Future = loop.create_future()
+    other = turn_runs.register_resume_deferred(
+        ResumeDeferredWaiter(
+            conversation_id=cid,
+            message_id="paused-other",
+            busy_reason="live_turn",
+            checkpoint_response=_checkpoint(),
+            started=third,
+        )
+    )
+    assert other is not parked
+    assert turn_runs._resume_deferred[cid] is other  # noqa: SLF001
+
+    host.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await host
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+    if not third.done():
+        third.cancel()
+
+
+async def test_repark_does_not_evict_a_waiter_registered_while_armed(monkeypatch):
+    """Slot re-taken between arm and run: re-park must not clobber the newer card."""
+    claimed: list[str] = []
+
+    async def fake_claim(message_id: str, conversation_id: str | None = None):
+        claimed.append(message_id)
+        return object()
+
+    monkeypatch.setattr(
+        "agentcore.runtime.suspension.persistence.claim_paused_turn", fake_claim
+    )
+
+    cid = "c-deferred-repark"
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+    loop = asyncio.get_running_loop()
+
+    armed = ResumeDeferredWaiter(
+        conversation_id=cid,
+        message_id="paused-armed",
+        busy_reason="live_turn",
+        checkpoint_response=_checkpoint(),
+        started=loop.create_future(),
+    )
+    newer_started: asyncio.Future = loop.create_future()
+    newer = ResumeDeferredWaiter(
+        conversation_id=cid,
+        message_id="paused-newer",
+        busy_reason="live_turn",
+        checkpoint_response=_checkpoint(),
+        started=newer_started,
+    )
+    turn_runs._resume_deferred[cid] = newer  # noqa: SLF001
+
+    # The armed wake finds the slot taken again and re-parks.
+    host = asyncio.create_task(_never())
+    turn_runs.register(
+        conversation_id=cid, task=host, sink=EventSink(message_id="host")
+    )
+    await turn_runs._start_resume_deferred(armed)  # noqa: SLF001
+
+    assert claimed == []
+    assert turn_runs._resume_deferred[cid] is newer  # noqa: SLF001
+    assert not newer_started.done()
+    assert armed.started is not None and armed.started.cancelled()
+
+    host.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await host
+    turn_runs._resume_deferred.pop(cid, None)  # noqa: SLF001
+    newer_started.cancel()
+
+
 async def test_fifo_yields_to_deferred_then_drains(monkeypatch):
     """Slot empty: deferred starts first; FIFO only after deferred run finishes."""
     started_queue: list[str] = []

@@ -130,6 +130,47 @@ def test_red_team_round_emits_findings_and_empty_closings():
     assert "rebuttal" in beats
 
 
+def test_red_team_absent_defense_carries_no_phantom_run_id():
+    """回应拍一条发言都没回时的缺席格不得另造 run_id。
+
+    run_id 的唯一出处是执行侧的命名工厂（``rounds._beat_run_id``，带主持人前缀）。在编排层
+    另拼一个 ``r{n}_{key}_defense`` 既与全场命名不同构、图上也根本没有这个节点——它会随
+    ``debate_round`` / ``debate_result`` 上 wire，前端按 id 回取发言全文永远落空。空 id =
+    如实说「这方缺席、没有可回取的 run」。
+    """
+
+    class _NoDefenseRunner(_RecordingRunner):
+        async def __call__(self, *, beat="statement", **kw):  # noqa: ANN001
+            if beat == "defense":
+                self.calls.append({"beat": beat, "sides": [s.key for s in kw["sides"]]})
+                return []
+            return await super().__call__(beat=beat, **kw)
+
+    runner = _NoDefenseRunner()
+    result = _run(
+        _ScriptedLLM(judge_results=[_CONVERGE]),
+        runner,
+        _config(
+            form=DebateForm.RED_TEAM,
+            sides=_red_team_sides(),
+            policy=RoundPolicy(max_rounds=1),
+        ),
+    )
+    turns = result.rounds[0].turns
+    defense = [t for t in turns if t.beat == "defense"]
+    assert len(defense) == 1
+    assert defense[0].side_key == "plan"
+    assert defense[0].ok is False and defense[0].absent is True
+    assert defense[0].run_id == ""
+    # 上 wire 的每个非空 run_id 都确有其 run（= runner 真发过的那些）。
+    payload_ids = [s["run_id"] for s in result.rounds[0].to_event_payload()["sides"]]
+    assert {rid for rid in payload_ids if rid} == {t.run_id for t in turns if t.run_id}
+    assert not any(rid.startswith("r1_") for rid in payload_ids)  # 旧拼装形状已绝迹
+    # finding 侧同理：无人回应 ⇒ unanswered，不挂 response_run_id。
+    assert all(f.status is FindingStatus.UNANSWERED for f in result.rounds[0].findings)
+    assert all(not f.response_run_id for f in result.rounds[0].findings)
+
+
 def test_roundtable_serial_thread_turns():
     rt = [DebateSide(key=k, name=k, stance=k) for k in ("a", "b", "c")]
     llm = _ScriptedLLM(judge_results=[_CONVERGE])

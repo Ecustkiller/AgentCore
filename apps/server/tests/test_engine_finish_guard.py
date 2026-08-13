@@ -75,6 +75,7 @@ async def _run(
         out=None if citation_sink is None else ReactLoopOut(citations=citation_sink),
         annotate_citations=annotate_citations,
         on_reset=on_reset,
+        approval_gate=None,
     )
     return result, messages, sink
 

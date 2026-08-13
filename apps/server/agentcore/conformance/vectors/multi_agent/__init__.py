@@ -13,6 +13,7 @@ from .async_delivery import (
     _multi_agent_execution_detached_completed,
     _multi_agent_execution_detached_harvest_settle,
 )
+from .auto_folder import _multi_agent_auto_folder_created
 from .batch4_hardening import (
     _multi_agent_incremental_preview_badge,
     _multi_agent_merge_race_secondary_delegate,
@@ -34,6 +35,7 @@ from .delegate import (
 )
 from .delivery import (
     _multi_agent_delivery_status_partial,
+    _multi_agent_export_docx_artifacts,
     _multi_agent_pptx_promised_md_only,
 )
 from .escalation import (
@@ -145,6 +147,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "→addressed（note=已在本回合据此调整团队）",
         _multi_agent_user_interjection_delegate_append,
     ),
+    "multi_agent_auto_folder_created": (
+        "裸聊写盘自动建文件夹（§5.4）：auto_folder_created DURABLE → autoFolder 轻提示"
+        "（告知落点 + 可当场改名；不挂起回合）",
+        _multi_agent_auto_folder_created,
+    ),
     "multi_agent_delegate": ("多 Agent：委派 2 队员，runs 树 + 进度 + 总账", _multi_agent_delegate),
     "multi_agent_browser_session": (
         "浏览器：worker 用 browser_*（navigate→snapshot→click→screenshot），"
@@ -208,6 +215,11 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "交付状态结构化：delivery_status DURABLE → deliveryStatus（同 execution_id 保最新；"
         "已交付文件 + 缺口 + bind_local_folder 行动项随卡重建）",
         _multi_agent_delivery_status_partial,
+    ),
+    "multi_agent_export_docx_artifacts": (
+        "交付台账·导出件：md + 自报 derived_from 的 docx 双双进 delivery_status.artifacts"
+        "（首条非空产物清单向量；产物卡不漏导出件、可把源 md 折为中间稿）",
+        _multi_agent_export_docx_artifacts,
     ),
     "multi_agent_pptx_promised_md_only": (
         "选 pptx 却只落 md/脚本：delivery_status=partial 可见缺口；"

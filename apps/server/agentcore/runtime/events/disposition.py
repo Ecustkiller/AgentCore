@@ -126,6 +126,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.DURABLE,
         "回合前软门禁提示——用户可见；runs 投影 → toMessage 重现横幅（P2）",
     ),
+    EventType.AUTO_FOLDER_CREATED: (
+        Disposition.DURABLE,
+        "裸聊写盘自动建文件夹告知落点——刷新后轻提示仍在，用户仍可从它进文件夹 / 改名",
+    ),
     EventType.TEAM_SYNTHESIS_PREVIEW: (
         Disposition.DURABLE,
         "协调模式团队进展预览——同 key 保最新由前端 fold 保证；刷新后 StatusStrip 可重建（P2）",

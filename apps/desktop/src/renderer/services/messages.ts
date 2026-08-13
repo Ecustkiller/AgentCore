@@ -108,6 +108,9 @@ export interface BackendMessage {
     error?: { code: string; message: string } | null;
     /** 预检警告（P2 DURABLE）：journaled turn_warning lifted for plain-chat reload. */
     turn_warning?: string | null;
+    /** 裸聊自动建文件夹告知（§5.4）：lifted auto_folder_created so the landing notice
+     * (with its rename entry) survives a reload. null unless this turn minted one. */
+    auto_folder?: { folder_id: string; name: string } | null;
   } | null;
   /** 回合 token 用量 (Tier 2 重载持久化): the turn's token snapshot in the ledger short-key
    * shape, projected server-side from the row's `usage` column. Replayed onto
@@ -128,6 +131,8 @@ export interface BackendMessage {
   paused?: boolean | null;
   /** 消息来源（如 execution_harvest）；写入 usage JSON，读路径投影到此字段. */
   origin?: string | null;
+  /** 曾中断恢复（``usage.recovered``）：本回合崩过、由租约清扫重驱原地跑完. */
+  recovered?: boolean | null;
   /** 回合轮次 (Tier 2 重载持久化): ReAct rounds the turn ran, projected from the same column.
    * Replayed onto `message.rounds`; the bubble surfaces「N 轮」only when > 1. null for
    * user / pre-feature rows. */
@@ -162,10 +167,16 @@ export interface MessageWindow {
 /** Map a persisted `memory_updates` row (REST `MemoryUpdateView`) to the client's
  * domain {@link MemoryUpdate} for the conversation-tail card. */
 export function toMemoryUpdate(m: Schemas["MemoryUpdateView"]): MemoryUpdate {
-  const kind = m.kind === "episodic" ? "episodic" : "semantic";
+  const kind =
+    m.kind === "episodic"
+      ? "episodic"
+      : m.kind === "quota"
+        ? "quota"
+        : "semantic";
   return {
     id: m.id,
     createdAt: m.created_at,
+    anchorAt: m.anchor_at ?? null,
     kind,
     summary: m.summary ?? null,
     items: (m.items ?? []).map((it) => ({
@@ -315,6 +326,13 @@ export function toMessage(m: BackendMessage): Message {
     cost: m.cost ?? undefined,
     // 预检警告（P2）：runs 投影抬升的 turn_warning → 消息横幅。
     turnWarning: m.runs?.turn_warning ?? undefined,
+    // 裸聊自动建文件夹（§5.4）：runs 投影抬升 → 落点轻提示（含改名入口）。
+    autoFolder: m.runs?.auto_folder
+      ? {
+          folderId: m.runs.auto_folder.folder_id,
+          name: m.runs.auto_folder.name,
+        }
+      : undefined,
     // 收到的上下文 · CEO 侧 (上下文传递可视化 通道①): turn-level, so it replays independently
     // of the team graph — present on pure-chat reloads (empty `events`) too.
     captainContext: m.runs?.captain_context?.length
@@ -350,6 +368,8 @@ export function toMessage(m: BackendMessage): Message {
     evidenceLedger: m.evidence_ledger?.length ? m.evidence_ledger : undefined,
     // REST origin（如 execution_harvest）；缺省时下方前缀兜底。
     origin: m.origin ?? undefined,
+    // 曾中断恢复：崩溃重驱把这条回合跑完了，气泡上如实挂标记。
+    ...(m.recovered ? { recovered: true } : {}),
   };
   // 异步团队收口：优先 REST origin；正文前缀兜底旧数据。
   if (

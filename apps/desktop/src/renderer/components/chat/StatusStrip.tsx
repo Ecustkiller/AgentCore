@@ -1,3 +1,4 @@
+import { SaveAsWorkflowButton } from "@/components/chat/SaveAsWorkflowButton";
 import { StoppedTurnFileChangesChip } from "@/components/chat/StoppedTurnFileChanges";
 import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
 import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
@@ -8,6 +9,7 @@ import {
   workerProgress,
 } from "@/components/chat/teamSynthesisPhase";
 import { useCoordinationWaitChrome } from "@/components/chat/useCoordinationWaitChrome";
+import { failureDetailSentence } from "@/components/graph/agentNode/shared";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
@@ -464,7 +466,7 @@ function CompletedStrip({
   // 显式标注，不再静默省略费用段（读起来像「免费」）。金额位绝不冒充数字。
   const costSegment =
     money && money.nano > 0
-      ? ` · ${stopped ? "已花 " : ""}${formatCostCaption(money.nano, money.estimated)}`
+      ? ` · ${stopped ? "已花 " : ""}${formatCostCaption(money.nano, money.estimated, money.currency)}`
       : hasUnpricedUsage(execution.runs)
         ? ` · ${COST_UNPRICED_LABEL}`
         : "";
@@ -497,6 +499,9 @@ function CompletedStrip({
         </span>
         {/* 硬停 + 本回合动过工作区 → 露出改动入口（无改动不渲染；真 diff 在右坞）。 */}
         {stopped ? <StoppedTurnFileChangesChip execution={execution} /> : null}
+        {/* 工作流主入口：刚跑完一轮满意的多队员协作 = 用户想要工作流的那一刻。
+            单队员 / 纯对话 / 硬停回合自行不渲染（saveAsWorkflowGate）。 */}
+        <SaveAsWorkflowButton execution={execution} />
         <StripControls
           execution={execution}
           expanded={expanded}
@@ -534,12 +539,13 @@ function FailureStrip({
     ? (execution.agents.find((a) => a.id === failedRun.agentId) ?? null)
     : null;
 
-  // Prefer run.error; else session-level error (底栏同源). Never claim「未获取到」
-  // when the banner already has a concrete product sentence (91eb strip vs banner).
-  const errorDetail =
-    failedRun?.error?.trim() ||
-    sessionError?.trim() ||
-    "未获取到具体错误信息。";
+  // Prefer the failed run, curated by failureKind — `run.error` is model-facing
+  // (`str(exception)` / engine gate names) and reading it as advice sends users hunting
+  // for material they never owed. Else session-level error (底栏同源, already a product
+  // sentence). Never claim「未获取到」when the banner has one (91eb strip vs banner).
+  const errorDetail = failedRun
+    ? failureDetailSentence(failedRun.failureKind, failedRun.productLanded)
+    : sessionError?.trim() || "未获取到具体错误信息。";
 
   const taskText = failedRun?.task?.trim() ?? "";
   const canToggleDetail =
@@ -554,7 +560,7 @@ function FailureStrip({
   // 未计价可见 (拍板 2026-07-20)：无价可算时不写「已花」+ 数字，改挂未计价标注。
   const spentSegment =
     money != null && money.nano > 0
-      ? ` · 已花 ${formatCostCaption(money.nano, money.estimated)}`
+      ? ` · 已花 ${formatCostCaption(money.nano, money.estimated, money.currency)}`
       : hasUnpricedUsage(execution.runs)
         ? ` · ${COST_UNPRICED_LABEL}`
         : null;

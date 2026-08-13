@@ -17,10 +17,12 @@ import { ResumePrompt } from "../ResumePrompt";
 const submitInteraction = vi.fn().mockResolvedValue("ok");
 const notifyError = vi.fn();
 
+const notifySubmitInteractionResult = vi.fn();
+
 vi.mock("@/services/interactionSubmit", () => ({
   submitInteraction: (...args: unknown[]) => submitInteraction(...args),
-  submitInteractionFeedback: (result: "busy" | "orphaned") =>
-    result === "orphaned" ? "确认已失效" : "请稍候再试",
+  notifySubmitInteractionResult: (...args: unknown[]) =>
+    notifySubmitInteractionResult(...args),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -224,7 +226,7 @@ describe("ResumePrompt · team_preview delegate", () => {
     render(<ResumePrompt />);
     fireEvent.click(screen.getByText("授权并开工"));
     await waitFor(() => {
-      expect(notifyError).toHaveBeenCalledWith("请稍候再试");
+      expect(notifySubmitInteractionResult).toHaveBeenCalledWith("busy");
     });
   });
 

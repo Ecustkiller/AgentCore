@@ -59,6 +59,37 @@ def _get_lock(key: str) -> asyncio.Lock:
     return lock
 
 
+class WorkspaceBusyError(RuntimeError):
+    """The workspace lock is held by a running turn (routes map this to 409)."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(key)
+        self.key = key
+
+
+@asynccontextmanager
+async def workspace_lock_nowait(key: str) -> AsyncIterator[None]:
+    """Take the lock or refuse immediately with :class:`WorkspaceBusyError`.
+
+    For structural operations that move a directory out from under whoever holds
+    the lock — renaming / moving / deleting a folder. Silently queueing behind a
+    running turn would leave the user staring at a request that eventually renames
+    their folder minutes later (不得静默改名); a fast, honest 「工作区正忙」 is the
+    contract instead.
+
+    Same non-blocking reasoning as ``workspace_lock``: nothing awaits between the
+    ``locked()`` probe and ``acquire()``, so on one event loop this cannot race.
+    """
+    lock = _get_lock(key)
+    if lock.locked():
+        raise WorkspaceBusyError(key)
+    await lock.acquire()
+    try:
+        yield
+    finally:
+        lock.release()
+
+
 @asynccontextmanager
 async def workspace_lock(
     key: str,

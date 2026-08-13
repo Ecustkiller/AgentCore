@@ -146,7 +146,7 @@ def test_parse_semantic_result_reads_navigation():
     {
       "preferences": null,
       "profile": null,
-      "project_profile": null,
+      "folder_profile": null,
       "navigation": "# 导航\\n- 改注入 → 先读 apps/server/agentcore/memory/injection.py\\n",
       "ops": []
     }

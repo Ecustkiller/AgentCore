@@ -9,6 +9,7 @@ from agentcore.tools.protocol import ToolContext, ToolResult
 
 from . import policy as policy_mod
 from . import spawn as spawn_mod
+from .phases import PHASE_REMOTE
 from .policy import _remote_name_error
 from .results import _error, _git_failure, _ok, _truncate_line_output
 from .spawn import _cloud_network_extra_env, _parse_status_sb
@@ -124,7 +125,11 @@ async def cmd_fetch(
 
     extra = await _cloud_network_extra_env(context)
     stdout, stderr, code = await spawn_mod._run_git(
-        ["fetch", remote], cwd=cwd, timeout=60.0, extra_env=extra
+        ["fetch", remote],
+        cwd=cwd,
+        timeout=policy_mod._GIT_NETWORK_TIMEOUT,
+        extra_env=extra,
+        phase=PHASE_REMOTE,
     )
     if code != 0:
         return await _git_failure(stdout, stderr, code, start, metadata=meta)

@@ -16,9 +16,11 @@ from agentcore.tools.builtin.code_integrity import (
     is_brace_code_path,
 )
 from agentcore.tools.builtin.write_diagnostics import attach_write_diagnostics
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_WORKER_ONLY,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -63,7 +65,7 @@ logger = get_logger(__name__)
 
 # 写类工具「回显结果」：worker 写 / 追加 / 替换后，常会为「确认写对没」再花一整轮 read 回读自检
 # （trace 4d715ea0 实测：8 个 append worker 全是 读→追加→回读→handoff，那一轮回读零信息增量）。
-# Artifact-first：写/append 成功回执 = artifact manifest（path/bytes/lines/hash/标题树/末段预览），
+# Artifact-first：写/append 成功回执 = artifact manifest（path/chars/lines/hash/标题树/末段预览），
 # 并硬拒对本 run 已落盘 path 的 body file_read；成篇 prose 后同 path append 亦硬拒。
 # 回显有界（行数 + 字符双上限），大文件不炸 token。
 _EDIT_ECHO_CONTEXT = 3
@@ -332,6 +334,7 @@ class FileWriteTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -364,7 +367,7 @@ class FileWriteTool:
                 "括号结构不完整或含省略标记 → 硬拒绝（防截断类缺 `}`）。"
                 "只改一部分优先 str_replace；骨架填空才用 file_append。"
                 "路径必须是相对于工作区的相对路径。"
-                "【约定文档扁平】`AgentCore/文档/` 下 research/reviews/debate/项目 "
+                "【约定文档扁平】`AgentCore/文档/` 下 research/reviews/debate "
                 "写盘扁平：前缀后嵌套 `/` 压成 `_` 单文件名（非路径损坏）。"
             ),
             parameters={
@@ -573,7 +576,7 @@ class FileWriteTool:
         output = format_artifact_manifest(
             path=rel_path,
             content=write_content,
-            bytes_written=written,
+            chars_written=written,
             kind=kind,
             action="write",
         )
@@ -597,6 +600,7 @@ class FileWriteTool:
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
+            file_products=[file_product(rel_path)],
         )
         return await attach_write_diagnostics(result, context=context, path=rel_path)
 
@@ -607,6 +611,7 @@ class FileAppendTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -768,7 +773,7 @@ class FileAppendTool:
         output = format_artifact_manifest(
             path=rel_path,
             content=merged,
-            bytes_written=appended,
+            chars_written=appended,
             kind=kind,
             action="append",
         )
@@ -780,6 +785,7 @@ class FileAppendTool:
             success=True,
             output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
+            file_products=[file_product(rel_path)],
         )
         return await attach_write_diagnostics(result, context=context, path=rel_path)
 
@@ -789,6 +795,7 @@ class StrReplaceTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -972,6 +979,7 @@ class StrReplaceTool:
             output=f"已在 {rel_path} 替换 {outcome.count} 处{loc}{echo}{rename_suffix}",
             duration_ms=int((time.monotonic() - start) * 1000),
             metadata={"replacements": outcome.count},
+            file_products=[file_product(rel_path)],
         )
         return await attach_write_diagnostics(result, context=context, path=rel_path)
 
@@ -986,6 +994,7 @@ class WriteSectionTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
+        file_products=FileProductsContract.SELF_REPORT,
     )
 
     @property
@@ -1183,6 +1192,8 @@ class WriteSectionTool:
                 output=unchanged,
                 duration_ms=int((time.monotonic() - start) * 1000),
                 metadata={"section": slug, "unchanged": True},
+                # 幂等成功也自报：分区已是目标正文，这个 path 就是本 run 的产物。
+                file_products=[file_product(rel_path)],
             )
 
         try:
@@ -1211,4 +1222,5 @@ class WriteSectionTool:
             output=f"已将 SECTION:{slug} 写入 {rel_path}{src}{rename_suffix}",
             duration_ms=int((time.monotonic() - start) * 1000),
             metadata={"section": slug, "path": rel_path},
+            file_products=[file_product(rel_path)],
         )

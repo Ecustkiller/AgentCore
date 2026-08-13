@@ -35,14 +35,36 @@ afterEach(() => {
 });
 
 describe("resolveDraftEmptyKind", () => {
-  const base: DraftEmptyInput = { conversationCount: 0 };
+  const base: DraftEmptyInput = { conversations: [] };
 
   it("starter_chips for a keyless brand-new user (no access gate)", () => {
     expect(resolveDraftEmptyKind(base)).toBe("starter_chips");
   });
 
-  it("returning once the user has any conversation", () => {
-    expect(resolveDraftEmptyKind({ conversationCount: 3 })).toBe("returning");
+  it("returning once the user has actually run a turn end to end", () => {
+    expect(
+      resolveDraftEmptyKind({ conversations: [{ messageCount: 2 }] }),
+    ).toBe("returning");
+  });
+
+  // 第一次没跑成的人，第二次回来最需要抓手——不能因为库里留了条记录就把引导收走。
+  it("keeps the guidance for someone whose only attempts never got an answer", () => {
+    expect(
+      resolveDraftEmptyKind({
+        conversations: [
+          { messageCount: 0 }, // 误触新建
+          { messageCount: 1 }, // 发出去就没下文 / 中途放弃
+        ],
+      }),
+    ).toBe("starter_chips");
+  });
+
+  it("one successful conversation among failures is enough to graduate", () => {
+    expect(
+      resolveDraftEmptyKind({
+        conversations: [{ messageCount: 1 }, { messageCount: 4 }],
+      }),
+    ).toBe("returning");
   });
 });
 

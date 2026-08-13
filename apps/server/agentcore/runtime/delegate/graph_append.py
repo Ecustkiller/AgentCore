@@ -233,6 +233,9 @@ _RECENT_GRAPH_APPEND_NOTE = (
     'append_to_execution_id="latest"（引擎自动解析到它）或直接传上述精确 id'
     "（多图并存时以显式 id 优先）：跨回合会新开图并经 prev_execution_id 链到它；"
     "同回合二次派发合入同一张图。新任务默认仍新建图。"
+    "要动上面某个具体队员（含本图已收口后）：在 tasks[] 上填其 run_id——"
+    "让原作者带现场接着干用 continue_from_run_id，接手 failed/skipped 缺口用 "
+    "replaces_run_id。"
 )
 
 
@@ -286,7 +289,8 @@ def format_recent_graph_worker_facts(
         phase = getattr(state, "phase", None) if state is not None else None
         status = _worker_status_label(phase)
         task = _task_brief(str(getattr(node, "task", "") or ""))
-        lines.append(f"- role={role}; status={status}; task={task}")
+        # run_id 是续派 / 补缺口入口的必填项——不给出来，收口后就只剩会被拒的冷派。
+        lines.append(f"- run_id={run_id or '—'}; role={role}; status={status}; task={task}")
     extra = len(nodes) - _MAX_RECENT_GRAPH_WORKERS
     if extra > 0:
         lines.append(f"- …另有 {extra} 名 worker 未列出")

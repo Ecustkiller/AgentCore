@@ -34,6 +34,7 @@ from agentcore.db.repositories import (
     TurnMetricsRepository,
     TurnStreamStateRepository,
 )
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
@@ -681,6 +682,9 @@ class CloudStore:
                 ref = await create_snapshot(
                     user_id=user_id,
                     folder_id=folder_id,
+                    folder_rel_path=(
+                        await resolve_folder_placement(folder_id)
+                    ).rel_path,
                     conversation_id=conversation_id,
                 )
                 logger.info(

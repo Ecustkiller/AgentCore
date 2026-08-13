@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from agentcore.runtime.runs.contract import _normalize_artifact_relpath
+from agentcore.tools.file_products import LANDING_TOOLS
 from agentcore.workspace._paths import sanitize_write_relpath
 from agentcore.workspace.stage_dirs import (
     DEBATE_DIR,
@@ -70,24 +71,24 @@ def filter_product_landing_paths(
 
 
 def landing_tool_path_from_args(tool_name: str, args: dict | None) -> str | None:
-    """Extract workspace path from landing-tool args (``file_move`` / ``file_copy`` → destination).
+    """A landing tool's TARGET path, read off its call arguments.
 
-    Applies :func:`sanitize_write_relpath` so harvested paths match what write
-    tools actually land on disk. Keys align with ``serialize._FILE_PRODUCT_ARG``.
+    This is attempt-level metadata (``ToolAttempt.meta.path``) for governance that runs
+    when there is no successful result to read — same-path write-reject streaks, denied
+    calls, liveness timeouts. It is **not** the delivery ledger: what a run produced
+    comes from the tool's own self-report (``ToolResult.file_products``), never from
+    arguments. A relocating call is recognized by its arguments, not by name: it names a
+    ``source``, so its target is ``destination`` and a stray ``path`` is never mistaken
+    for one; every other write names ``path``. :func:`sanitize_write_relpath` keeps this
+    aligned with what the write tools actually land on disk.
     """
-    if not isinstance(args, dict):
+    if not isinstance(args, dict) or tool_name not in LANDING_TOOLS:
         return None
-    key = "destination" if tool_name in {"file_move", "file_copy"} else "path"
-    if tool_name not in {
-        "file_write",
-        "file_append",
-        "str_replace",
-        "write_section",
-        "file_move",
-        "file_copy",
-    }:
-        return None
-    raw = args.get(key)
+    raw = args.get("destination")
+    if not isinstance(raw, str) or not raw.strip():
+        if isinstance(args.get("source"), str):
+            return None
+        raw = args.get("path")
     if not isinstance(raw, str):
         return None
     cleaned = raw.strip().replace("\\", "/")

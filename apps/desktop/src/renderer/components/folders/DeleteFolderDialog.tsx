@@ -7,47 +7,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { Conversation } from "@/stores/conversation";
+import { useFolderTrash } from "@/hooks/useFolders";
 import { useEffect, useState } from "react";
 
-/** Matches server retention default (双模式工作区 §七). */
-export const FOLDER_FILE_RETENTION_DAYS = 30;
-
 /**
- * Archive each conversation in `convs` before deleting the folder. Returns false
- * on the first failure (caller should abort delete).
- */
-export async function archiveConversationsBeforeDelete(
-  convs: Conversation[],
-  {
-    archive,
-    dropRuntime,
-    currentId,
-    onLeaveActive,
-  }: {
-    archive: (id: string) => Promise<unknown>;
-    dropRuntime: (id: string) => void;
-    currentId: string | null;
-    onLeaveActive: () => void;
-  },
-): Promise<boolean> {
-  for (const { id } of convs) {
-    try {
-      await archive(id);
-      dropRuntime(id);
-      if (id === currentId) onLeaveActive();
-    } catch {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
- * Shared confirmation when deleting a folder (= 项目).
- * Soft-delete is the default; check the permanent option to hard-delete in the
- * same dialog (no second step / type-to-confirm). Used by
- * {@link WorkspaceSection} and {@link WorkspaceGroupHeader}.
+ * Shared confirmation when deleting a folder (= the only kind of container).
+ * Soft-delete is the default and recoverable from「最近删除」; check the permanent
+ * option to hard-delete in the same dialog (no second step / type-to-confirm).
+ * Used by {@link WorkspaceSection} and {@link WorkspaceGroupHeader}.
  */
 export function DeleteFolderDialog({
   open,
@@ -67,6 +34,9 @@ export function DeleteFolderDialog({
   onPermanentConfirm: () => void | Promise<void>;
 }) {
   const [permanent, setPermanent] = useState(false);
+  // The retention window is the server's number (`/folders/trash`), never a
+  // client constant — the recoverable copy would otherwise drift from the sweeper.
+  const retentionDays = useFolderTrash(open).data?.retentionDays ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -82,7 +52,7 @@ export function DeleteFolderDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>删除项目「{name}」？</DialogTitle>
+          <DialogTitle>删除文件夹「{name}」？</DialogTitle>
           <DialogDescription asChild>
             <div className="space-y-2 text-sm text-muted-foreground">
               {permanent ? (
@@ -99,12 +69,22 @@ export function DeleteFolderDialog({
                 </>
               ) : (
                 <>
+                  <p className="text-foreground">
+                    {retentionDays === null
+                      ? "删除后可在「最近删除」中恢复"
+                      : `${retentionDays} 天内可在「最近删除」中恢复`}
+                    ，逾期后云端文件由系统自动清理。
+                  </p>
                   {liveConvCount > 0 && (
-                    <p>其下 {liveConvCount} 条对话将一并归档。</p>
+                    <p>· 其下 {liveConvCount} 条对话一并归档，恢复时一起回来</p>
                   )}
                   <p>
-                    云端文件约 {FOLDER_FILE_RETENTION_DAYS} 天后由系统自动清理。
+                    ·
+                    恢复不含白板的文件夹归属（白板会留在顶层白板列表）与裸聊的自动云桌指针（下回合自动重建）
                   </p>
+                  {isLocal && (
+                    <p>· 本机文件夹里的文件始终不动（删除与恢复都不碰它）</p>
+                  )}
                 </>
               )}
             </div>
@@ -138,7 +118,7 @@ export function DeleteFolderDialog({
               void (permanent ? onPermanentConfirm() : onConfirm())
             }
           >
-            {permanent ? "彻底删除" : "删除项目"}
+            {permanent ? "彻底删除" : "删除文件夹"}
           </Button>
         </DialogFooter>
       </DialogContent>

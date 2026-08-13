@@ -56,7 +56,7 @@ export function deriveRepoNameFromUrl(repoUrl: string): string {
  * ``POST /v1/workspaces/{ws_id}/clone`` — http(s) only; private repos need
  * account PAT under 设置 → Git 凭据.
  *
- * When ``wsId`` is null, creates a cloud project first（连接 Git = 云 clone
+ * When ``wsId`` is null, creates a cloud folder first（从 Git 克隆 = 云 clone
  * remote），then clones into ``folder:{id}``.
  */
 export function CloneRepoDialog({
@@ -67,7 +67,7 @@ export function CloneRepoDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Existing cloud ws (`folder:…` / `conv:…`). Null → create cloud project. */
+  /** Existing cloud ws (`folder:…` / `conv:…`). Null → create cloud folder. */
   wsId: string | null;
   onCloned?: (path: string, folderId?: string) => void;
 }) {
@@ -77,7 +77,7 @@ export function CloneRepoDialog({
   const [busy, setBusy] = useState(false);
   /** Survives a failed clone so retry does not create another empty project. */
   const [createdFolderId, setCreatedFolderId] = useState<string | null>(null);
-  const createProject = wsId == null;
+  const needsNewFolder = wsId == null;
 
   const reset = () => {
     setRepoUrl("");
@@ -105,16 +105,16 @@ export function CloneRepoDialog({
       const destTrim = dest.trim();
       if (!targetWsId) {
         if (!folderId) {
-          const projectName = destTrim || deriveRepoNameFromUrl(url);
+          const folderName = destTrim || deriveRepoNameFromUrl(url);
           const { folder } = await createFolder({
-            name: projectName,
+            name: folderName,
             mode: "cloud",
           });
           addFolderCache(folder);
           folderId = folder.id;
           setCreatedFolderId(folder.id);
           useFoldersStore.getState().setDraftWorkspaceIntent({
-            kind: "project",
+            kind: "folder",
             folderId: folder.id,
           });
         }
@@ -154,11 +154,11 @@ export function CloneRepoDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {createProject ? "从 Git 克隆" : "克隆仓库"}
+            {needsNewFolder ? "从 Git 克隆" : "克隆仓库"}
           </DialogTitle>
           <DialogDescription>
-            {createProject
-              ? "浅克隆到新建云项目（仅 http(s)）。私仓请先在 "
+            {needsNewFolder
+              ? "浅克隆到「我的文件」里的新文件夹（仅 http(s)）。私仓请先在 "
               : "浅克隆到当前云工作区（仅 http(s)）。私仓请先在 "}
             <Link
               to="/more/git"
@@ -186,8 +186,8 @@ export function CloneRepoDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium" htmlFor="clone-dest">
-              {createProject
-                ? "项目名称 / 目标目录（可选）"
+              {needsNewFolder
+                ? "文件夹名称 / 目标目录（可选）"
                 : "目标目录（可选）"}
             </label>
             <Input
@@ -214,7 +214,7 @@ export function CloneRepoDialog({
           </Button>
           <Button disabled={busy} onClick={() => void submit()}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-            {createProject ? "连接并克隆" : "克隆"}
+            克隆
           </Button>
         </DialogFooter>
       </DialogContent>

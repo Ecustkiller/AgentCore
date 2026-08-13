@@ -53,7 +53,7 @@ export function ResourceSection({
   const byokTitle = unpriced ? COST_UNPRICED_HINT : COST_ESTIMATE_HINT;
   const costLabel =
     money != null && money.nano > 0
-      ? formatCostCaption(money.nano, money.estimated)
+      ? formatCostCaption(money.nano, money.estimated, money.currency)
       : tokenTotal > 0 && byokHint
         ? `${formatCompact(tokenTotal)} tok · ${byokLabel}`
         : null;
@@ -103,7 +103,11 @@ export function ResourceSection({
                 label={
                   money.estimated ? `成本（${COST_ESTIMATE_LABEL}）` : "成本"
                 }
-                value={formatDisplayCost(money.nano, money.estimated)}
+                value={formatDisplayCost(
+                  money.nano,
+                  money.estimated,
+                  money.currency,
+                )}
               />
               {money.estimated ? (
                 <SimpleTooltip label={COST_ESTIMATE_HINT}>
@@ -112,11 +116,16 @@ export function ResourceSection({
                   </p>
                 </SimpleTooltip>
               ) : cost ? (
+                // 分项与 total 同属这条 run 的一张价卡 → 同 cost.currency。
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  输入 {formatDisplayCost(cost.input)} · 输出{" "}
-                  {formatDisplayCost(cost.output)}
+                  输入 {formatDisplayCost(cost.input, false, cost.currency)} ·
+                  输出 {formatDisplayCost(cost.output, false, cost.currency)}
                   {cost.cached > 0 && (
-                    <> · 缓存省 {formatDisplayCost(cost.cached)}</>
+                    <>
+                      {" "}
+                      · 缓存省{" "}
+                      {formatDisplayCost(cost.cached, false, cost.currency)}
+                    </>
                   )}
                 </p>
               ) : null}

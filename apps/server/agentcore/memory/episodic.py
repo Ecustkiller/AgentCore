@@ -1,7 +1,7 @@
 """Episodic (session-summary) memory layer.
 
 Each settled conversation writes one ≤N-char dialogue digest (plus optional verified
-project-fact bullets) into ``memory_episodes``. Digests are append-only, never deduped,
+folder-fact bullets) into ``memory_episodes``. Digests are append-only, never deduped,
 never injected into prompts — they only feed the later semantic consolidation pass.
 When turn_journal shows real tool activity, the digest input includes a secret-redacted
 action inventory so verified paths/commands can land.
@@ -21,7 +21,6 @@ from typing import Protocol
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
-from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.memory.action_inventory import (
     TurnActionInventory,
     inventory_from_json,
@@ -38,6 +37,8 @@ from agentcore.memory.store import MemoryScope
 
 logger = get_logger(__name__)
 
+# Persisted heading: it is already written into ``memory_episodes`` rows and is what
+# splits stored digests, so it keeps the「项目」spelling (双模式工作区 §5.4).
 _FACTS_HEADING = "## 本场证实的项目事实"
 _MAX_VERIFIED_FACTS_CHARS = 600
 
@@ -353,7 +354,12 @@ Preference / habit rule (strict):
   summarize the request only.
 """
 
-_EPISODIC_TIMEOUT_SECONDS = 20.0
+# The background tier (free Flash) measured 35–37s on real memory windows, so the old
+# 20s ceiling timed out every single pass. Nothing waits on this call — it runs after
+# the turn settled — so the cost of waiting is a slower sweep, while the cost of
+# clipping it is a lost session summary. Kept above the semantic pass's 45s for the
+# same reason: episodic is the layer whose failure is user-visible.
+_EPISODIC_TIMEOUT_SECONDS = 90.0
 
 
 class EpisodicSummarizer(Protocol):
@@ -376,8 +382,6 @@ class LLMEpisodicSummarizer:
         from agentcore.config import settings
 
         self._selected = select_call(role, model or settings.platform_model)
-        self.last_usage: TokenUsage = TokenUsage()
-        self.last_model: str = ""
 
     async def summarize(
         self,
@@ -411,8 +415,6 @@ class LLMEpisodicSummarizer:
         except TimeoutError:
             logger.warning("memory.episodic_summary_timeout")
             return ""
-        self.last_usage = response.usage
-        self.last_model = response.model or self._selected.model or ""
         dialogue, facts = split_summary_and_facts(response.content or "")
         # Drop "verified" facts when there was no real tool activity (anti-hallucination).
         if inv.is_empty():
@@ -423,7 +425,12 @@ class LLMEpisodicSummarizer:
 def fallback_episode_summary(
     messages: Sequence[ChatMessage], *, max_chars: int = 200
 ) -> str:
-    """Deterministic fallback when the LLM summary is empty: first user turns, clamped."""
+    """Deterministic fallback when the LLM summary is empty: first user turns, clamped.
+
+    This is the user's raw wording, not a summary, so it is only ever stored as episode
+    material for the semantic pass to read — the caller suppresses the「已记下本场摘要」
+    card when it lands here (see ``consolidation._EpisodicDigest``).
+    """
     bits: list[str] = []
     for m in messages:
         if m.get("role") == "user" and str(m.get("content") or "").strip():

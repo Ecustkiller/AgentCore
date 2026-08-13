@@ -6,6 +6,7 @@ import contextlib
 import json
 
 import agentcore.runtime.pipeline as pipeline_pkg
+from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
 from agentcore.core.types import DEFAULT_PERMISSION_AXES, PermissionAxes, ToolEffect, new_id
 from agentcore.llm.credentials import LLMCredentials
@@ -187,6 +188,13 @@ async def resume_chat_pipeline(
         permission_axes=(
             json.dumps(permission_axes.to_dict()) if permission_axes is not None else None
         ),
+    )
+    # 云对话多端同权 B2 §2.2: a resumed turn can stop on a fresh card too, so it needs
+    # the same attention addressee the original run published. Reset in finally.
+    attention_token = bind_attention_scope(
+        user_id=suspension.user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
     )
     # Session roster write-through (as-built: 成本配额 §三): fire-and-forget + turn-end flush (parity with run).
     roster_writer = SessionRosterWriter.wrap(session_saver)
@@ -454,32 +462,36 @@ async def resume_chat_pipeline(
         )
         return result
     finally:
+        # Cancel-safe teardown (see ``teardown_step``): a second Stop lands on the
+        # first ``await`` here and would otherwise skip every later flush/release.
+        from agentcore.conversation.stage_card_resolve import (
+            maybe_orphan_stage_cards_at_turn_end,
+        )
+        from agentcore.runtime.interaction_orphan import orphan_registry_pending
+        from agentcore.runtime.pipeline.teardown import teardown_step
+
         # 触发点①：resume turn 结束防御性 orphan
-        with contextlib.suppress(Exception):
-            from agentcore.runtime.interaction_orphan import orphan_registry_pending
-
-            await orphan_registry_pending(conversation_id, turn_id=message_id)
-        with contextlib.suppress(Exception):
-            from agentcore.conversation.stage_card_resolve import (
-                maybe_orphan_stage_cards_at_turn_end,
-            )
-
-            await maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink)
+        await teardown_step(
+            orphan_registry_pending(conversation_id, turn_id=message_id),
+            step="orphan_registry_pending",
+        )
+        await teardown_step(
+            maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink),
+            step="orphan_stage_cards",
+        )
         current_fact_log.reset(fact_log_token)
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
         # write leaves a checked-out DB connection for the GC to terminate (asyncpg
         # connection_lost noise). Best-effort — a drain failure must never break turn teardown.
-        with contextlib.suppress(Exception):
-            await journal_writer.flush()
+        await teardown_step(journal_writer.flush(), step="journal_flush")
         current_journal_writer.reset(journal_writer_token)
         from agentcore.runtime.audit.recorder import current_audit_recorder
 
-        with contextlib.suppress(Exception):
-            await audit_recorder.flush()
-        with contextlib.suppress(Exception):
-            if roster_writer is not None:
-                await roster_writer.flush()
+        await teardown_step(audit_recorder.flush(), step="audit_flush")
+        if roster_writer is not None:
+            await teardown_step(roster_writer.flush(), step="roster_flush")
         current_audit_recorder.reset(audit_token)
+        reset_attention_scope(attention_token)
         turn_history.reset(history_token)
         if memory_cache_token is not None:
             from agentcore.runtime.memory_consult_cache import consulted_memory_cache
@@ -509,5 +521,4 @@ async def resume_chat_pipeline(
             current_execution_id.reset(execution_id_token)
         # Do NOT close the sink here (see run_chat_pipeline): its owner closes it, so the
         # resumed turn's persist_turn_result tail (title / stage_card) still reaches the client.
-        with contextlib.suppress(Exception):
-            await llm.close()
+        await teardown_step(llm.close(), step="llm_close")

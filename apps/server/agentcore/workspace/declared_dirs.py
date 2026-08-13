@@ -3,7 +3,8 @@
 Authority (no name heuristics)::
 
     - ``stage_dirs`` — ``AgentCore`` / ``AgentCore/文档`` ancestors, plus
-      ``research`` / ``debate`` / ``reviews`` / ``项目`` stage trees (exact or under).
+      ``工作稿`` / ``research`` / ``debate`` / ``reviews`` stage trees
+      (exact or under).
     - ``attachments.ATTACHMENTS_DIR`` — resident attachment root (exact or under).
 
 Writes already ``mkdir(parents=True)`` into these trees; listing a missing path
@@ -19,8 +20,8 @@ from agentcore.workspace.stage_dirs import (
     DEBATE_DIR,
     DEBATE_PREFIX,
     DOCS_PREFIX,
-    PROJECT_DOCS_DIR,
-    PROJECT_DOCS_PREFIX,
+    DRAFTS_DIR,
+    DRAFTS_PREFIX,
     RESEARCH_DIR,
     RESEARCH_PREFIX,
     REVIEWS_DIR,
@@ -32,10 +33,10 @@ _DECLARED_EXACT: frozenset[str] = frozenset({AGENTCORE_ROOT, DOCS_PREFIX, ATTACH
 
 # Stage leaf dirs: exact match or descendant under the matching PREFIX.
 _DECLARED_STAGE: tuple[tuple[str, str], ...] = (
+    (DRAFTS_DIR, DRAFTS_PREFIX),
     (RESEARCH_DIR, RESEARCH_PREFIX),
     (DEBATE_DIR, DEBATE_PREFIX),
     (REVIEWS_DIR, REVIEWS_PREFIX),
-    (PROJECT_DOCS_DIR, PROJECT_DOCS_PREFIX),
 )
 
 _ATTACHMENTS_PREFIX = f"{ATTACHMENTS_DIR}/"

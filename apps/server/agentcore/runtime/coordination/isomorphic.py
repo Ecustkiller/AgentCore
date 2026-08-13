@@ -1,7 +1,8 @@
 """Secondary-delegate structured guards for mid-coordination ``delegate``.
 
 1. Isomorphic re-delegation: same roles + similar tasks onto an already-running
-   team would silently duplicate the roster (3→6). Reject unless ``force=true``.
+   team would silently duplicate the roster (3→6). Reject unless this gate's own
+   ``force=["isomorphic"]`` scope is named (sibling gates stay shut).
 2. Merge ``run_id`` collisions: ``live.add`` raises :class:`RunPlanError` — report
    merged vs skipped nodes instead of a silent success echo.
 """
@@ -94,12 +95,15 @@ def isomorphic_reject_message(
     total: int,
 ) -> str:
     """Structured rejection body for the delegate tool result."""
+    from agentcore.runtime.delegate.force_scopes import GATE_ISOMORPHIC, force_hint
+
     roles = [(_node_role(n) or n.run_id) for n in new_plan.nodes]
     roster = "、".join(roles) if roles else "（空）"
     return (
         "【再委派已拒绝·同构计划】当前协作图仍有未完成队员"
         f"（已完成 {completed}/{total}），本次 tasks（{roster}）与在跑队员角色+任务高度同构，"
-        "禁止静默并入以免重复派工。若确需强制追加，请显式传 force=true；"
+        "禁止静默并入以免重复派工。要让在跑的人继续干请填 continue_from_run_id；"
+        f"确需再开一份同构工作只放行本闸（{force_hint(GATE_ISOMORPHIC)}，不开其它闸）；"
         "否则继续等待团队事件 / cancel_worker / update_synthesis，勿重复 delegate。"
     )
 

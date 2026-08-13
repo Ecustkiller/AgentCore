@@ -126,6 +126,91 @@ def _multi_agent_delivery_status_partial() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_export_docx_artifacts() -> list[SSEEvent]:
+    """交付台账·导出件：写 md 再导出 docx，两件都进 ``artifacts``（首条非空产物向量）。
+
+    真实事故形状：worker ``file_write`` 起诉状 md → ``md_to_docx`` 导出真实 .docx；产物卡
+    只认 ``delivery_status.artifacts``，而两个工具的**入参都只有那份 md**——docx 只存在于
+    工具自报的产物里。故本向量钉死 wire 侧的两件事：导出件自成一行（计数不再是 1），且
+    它带 ``derived_from`` 指向源 md（客户端据此把源折成中间稿；``kind`` 同为自报）。
+    """
+    md = "抚养费起诉状-昝雯.md"
+    docx = "抚养费起诉状-昝雯.docx"
+    agents = [{"id": "w1", "role": "文书撰写", "thinking": True}]
+    plan_runs = [
+        {"id": "r1", "agent_id": "w1", "task": "起草抚养费起诉状并导出 Word", "depends_on": []},
+    ]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排起草起诉状并导出 Word。"),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "文书撰写"}]}),
+        run_plan(
+            execution_id="exec_docx",
+            plan_type="multi_agent",
+            task_summary="抚养费起诉状（Word）",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        tool_use_start(
+            "tc1",
+            "file_write",
+            {"path": md, "content": "# 民事起诉状\n\n原告：昝雯……"},
+            run_id="r1",
+        ),
+        tool_use_end("tc1", "file_write", success=True, output="已写入", run_id="r1"),
+        # 导出工具的入参也只有源 md——.docx 这个路径只从工具自报的产物来。
+        tool_use_start("tc2", "md_to_docx", {"path": md}, run_id="r1"),
+        tool_use_end(
+            "tc2",
+            "md_to_docx",
+            success=True,
+            output=(
+                f"已导出 Word：{docx}（38964 字节）\n"
+                "【artifact manifest】\n"
+                f"path: {docx}\n"
+                "kind: docx\n"
+                "bytes: 38964\n"
+                f"source: {md}\n"
+                "warnings: （无）\n"
+                "【验真】请以本 manifest 确认落盘；可用工作区下载打开 .docx。"
+            ),
+            run_id="r1",
+        ),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="起诉状已成稿并导出 Word",
+            duration_ms=2400,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+            output_files=[md, docx],
+        ),
+        delivery_status(
+            execution_id="exec_docx",
+            state="delivered",
+            summary="已交付 2 个文件",
+            delivered_files=[md, docx],
+            gaps=[],
+            actions=[],
+            artifacts=[
+                {"path": md, "status": "accepted", "kind": "md"},
+                {
+                    "path": docx,
+                    "status": "accepted",
+                    "kind": "docx",
+                    "derived_from": md,
+                },
+            ],
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队完成 1 项任务。"),
+        content_delta(f" Word 版起诉状已生成：`{docx}`。"),
+        message_end(FinishReason.END_TURN, input_tokens=2600, output_tokens=460, cost=_COST),
+    ]
+
+
 def _multi_agent_pptx_promised_md_only() -> list[SSEEvent]:
     """选 pptx 却只落 md/脚本：部分交付卡可见；假「PPT 已可打开」经 finish_guard 回炉。
 

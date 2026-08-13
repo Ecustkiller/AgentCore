@@ -58,6 +58,7 @@ from agentcore.memory.explore_refresh import shutdown_explore_refresh_scheduler
 from agentcore.middleware.client_version import DesktopMinVersionMiddleware
 from agentcore.middleware.csrf import CsrfMiddleware
 from agentcore.middleware.errors import JSONErrorMiddleware
+from agentcore.middleware.origin_device import OriginDeviceMiddleware
 from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.middleware.request_attribution import RequestAttributionMiddleware
 from agentcore.runtime.audit_retention import audit_retention_loop
@@ -269,6 +270,12 @@ async def lifespan(app: FastAPI):
     # Browser netns is orthogonal to GVisorSandbox.health_check (network_mode=none).
     # Failure withholds cloud browser_* (no Local fallback — C4); never blocks boot.
     await probe_browser_netns_at_startup()
+    # Server-side ``git`` binary: withholds the git tool on an image/PATH without it
+    # rather than letting every call surface as FileNotFoundError. Orthogonal to the
+    # sandbox — git is spawned by the API process, not inside gVisor.
+    from agentcore.tools.builtin.git_ops.binary_health import probe_git_binary_at_startup
+
+    await probe_git_binary_at_startup()
     # Schema-drift notice: warn loudly (never block) if the live DB is behind the
     # migration head, so an unapplied migration surfaces at boot instead of as a
     # mid-session UndefinedColumnError on a core endpoint.
@@ -460,6 +467,9 @@ app = FastAPI(
 # Innermost: stamp http_method/path/req_id onto the same task that checkouts use
 # (must sit inside BaseHTTPMiddleware so contextvars are not stranded on a parent).
 app.add_middleware(RequestAttributionMiddleware)
+# Also innermost + pure ASGI: the turn task created by a route handler copies this
+# context, so CLIENT_TOOL ops can be pinned to the device that sent the request.
+app.add_middleware(OriginDeviceMiddleware)
 app.add_middleware(CsrfMiddleware)
 app.add_middleware(AuthRateLimitMiddleware)
 # Desktop floor (426 CLIENT_TOO_OLD) before CSRF/rate-limit work; still inside

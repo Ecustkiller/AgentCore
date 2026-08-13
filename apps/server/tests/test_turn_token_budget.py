@@ -189,6 +189,7 @@ async def test_delegate_execute_rejects_when_ceiling_hit(monkeypatch):
             history=[],
             tools=MagicMock(),
             base_tool_context=MagicMock(),
+            approval_gate=None,
         )
         tool._tools.list_all = MagicMock(return_value=[])
         result = await tool.execute(

@@ -19,6 +19,14 @@ import { type FoldReplaySource, foldEventsFrom } from "./source";
 
 type FoldInput = FoldReplaySource | SSEEvent[];
 
+/**
+ * 回放的是**录像**，不是刚发生的转折——`replay` 标记让「刚刚变了」类的呈现别把录像里的
+ * 收口当成此刻发生的事（如卡被另一端拍板的收口条：向量里的 `*_resolved` 本就是当初那次
+ * 会话里人自己点的）。
+ */
+const REPLAY_CTX = (conversationId: string) =>
+  ({ conversationId, source: "server", replay: true }) as const;
+
 function seedSlice(conversationId: string, userPrompt?: string): void {
   const store = useConversationStore.getState();
   // Fresh slice each time so re-playing the same fixture starts clean.
@@ -60,7 +68,7 @@ export function replayFixtureNow(
   const events = foldEventsFrom(input);
   seedSlice(conversationId, userPrompt);
   for (const event of events) {
-    dispatchSSEEvent(event, { conversationId, source: "server" });
+    dispatchSSEEvent(event, REPLAY_CTX(conversationId));
   }
   // content_delta is rAF-buffered and a paused fixture never emits message_end, so
   // flush to land the final text on the bubble synchronously.
@@ -83,7 +91,7 @@ export function replayFixturePrefix(
   seedSlice(conversationId, userPrompt);
   const n = Math.max(0, Math.min(count, events.length));
   for (let i = 0; i < n; i++) {
-    dispatchSSEEvent(events[i], { conversationId, source: "server" });
+    dispatchSSEEvent(events[i], REPLAY_CTX(conversationId));
   }
   // content_delta is rAF-buffered; flush so a paused mid-stream frame lands its
   // partial text synchronously before the harness screenshots.
@@ -111,7 +119,7 @@ export function replayFixtureStreamed(
       flushPendingContent(conversationId);
       return;
     }
-    dispatchSSEEvent(events[i++], { conversationId, source: "server" });
+    dispatchSSEEvent(events[i++], REPLAY_CTX(conversationId));
     timer = setTimeout(tick, stepMs);
   };
   tick();

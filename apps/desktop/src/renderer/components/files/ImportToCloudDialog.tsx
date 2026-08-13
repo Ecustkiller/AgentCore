@@ -41,8 +41,8 @@ export function ImportToCloudDialogHost() {
 type OwnedRoot = { root: FsRoot; owns: boolean };
 
 /**
- * 导入到云 MVP：选本机夹 → 填名 → 点导入即关窗；上传在后台 job（toast 进度 / 可取消）。
- * Prefill 根来自遗留 Folder.localRootId 时不 removeRoot（共享本机绑定）。
+ * 导入到「我的文件」MVP：选本机夹 → 填名 → 点导入即关窗；上传在后台 job（toast 进度 /
+ * 可取消）。Prefill 根来自遗留 Folder.localRootId 时不 removeRoot（共享本机绑定）。
  */
 export function ImportToCloudDialog({
   open,
@@ -55,7 +55,7 @@ export function ImportToCloudDialog({
   onImported?: (folderId: string) => void;
   prefill?: ImportToCloudPrefill | null;
 }) {
-  const [projectName, setProjectName] = useState("");
+  const [folderName, setFolderName] = useState("");
   const [owned, setOwned] = useState<OwnedRoot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const prefillAppliedForOpen = useRef(false);
@@ -82,7 +82,7 @@ export function ImportToCloudDialog({
   const reset = async () => {
     const prev = ownedRef.current;
     ownedRef.current = null;
-    setProjectName("");
+    setFolderName("");
     setOwned(null);
     setError(null);
     prefillAppliedForOpen.current = false;
@@ -97,8 +97,8 @@ export function ImportToCloudDialog({
     if (prefillAppliedForOpen.current) return;
     prefillAppliedForOpen.current = true;
 
-    const nameHint = prefill?.projectName?.trim() || "";
-    if (nameHint) setProjectName(nameHint);
+    const nameHint = prefill?.folderName?.trim() || "";
+    if (nameHint) setFolderName(nameHint);
 
     const rootId = prefill?.rootId?.trim();
     if (!rootId) return;
@@ -111,7 +111,7 @@ export function ImportToCloudDialog({
         const found = roots.find((r) => r.id === rootId);
         if (!found) return;
         setOwnedSync({ root: found, owns: false });
-        if (!nameHint) setProjectName(found.name);
+        if (!nameHint) setFolderName(found.name);
       } catch {
         // Prefill miss → user still picks manually.
       }
@@ -132,8 +132,8 @@ export function ImportToCloudDialog({
     const prev = ownedRef.current;
     setOwnedSync({ root: picked.root, owns: true });
     void clearOwned(prev);
-    if (!projectName.trim()) {
-      setProjectName(picked.root.name);
+    if (!folderName.trim()) {
+      setFolderName(picked.root.name);
     }
   };
 
@@ -150,17 +150,17 @@ export function ImportToCloudDialog({
     }
     // Keep dialog + root if a job is already running (avoid handoff leak).
     if (isImportToCloudJobRunning()) {
-      notifyInfo("导入到云进行中", {
-        description: "请等待当前任务完成或在进度提示中取消后再试",
+      notifyInfo("已有导入正在进行", {
+        description: "请等待当前导入完成，或在进度提示中取消后再试",
       });
       return;
     }
-    const name = projectName.trim() || handoff.root.name;
+    const name = folderName.trim() || handoff.root.name;
     // Transfer root ownership to the job before close/reset can clearOwned.
     ownedRef.current = null;
     setOwned(null);
     setError(null);
-    setProjectName("");
+    setFolderName("");
     prefillAppliedForOpen.current = false;
     // Close without reset clearOwned — root now belongs to the job.
     onOpenChange(false);
@@ -168,7 +168,7 @@ export function ImportToCloudDialog({
     const started = startImportToCloudJob({
       root: handoff.root,
       ownsRoot: handoff.owns,
-      projectName: name,
+      folderName: name,
       onImported,
     });
     // Rare race: begin lost after pre-check — reclaim temp root ourselves.
@@ -187,11 +187,9 @@ export function ImportToCloudDialog({
     >
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>导入本机项目到云</DialogTitle>
+          <DialogTitle>导入到「我的文件」</DialogTitle>
           <DialogDescription>
-            将本机文件夹快照上传到新建云项目（套用 ignore；打包上限 100MiB / 2
-            万文件，单文件 PUT 上限 25MiB）。之后只认云桌，不建本地工作区。
-            本会话仍挂旧归属，请在新云项目继续。
+            把选中的本机文件夹复制一份到「我的文件」。之后改的是云上这份副本，本机原文件夹不会跟着变，两边也不会自动同步。
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 px-5 py-2">
@@ -216,13 +214,13 @@ export function ImportToCloudDialog({
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium" htmlFor="import-name">
-              云项目名称
+              文件夹名称
             </label>
             <Input
               id="import-name"
               placeholder="默认取文件夹名"
-              value={projectName}
-              onChange={(e) => setProjectName(e.target.value)}
+              value={folderName}
+              onChange={(e) => setFolderName(e.target.value)}
             />
           </div>
           {error ? (
@@ -236,7 +234,7 @@ export function ImportToCloudDialog({
             取消
           </Button>
           <Button disabled={!root} onClick={() => submit()}>
-            导入到云
+            导入
           </Button>
         </DialogFooter>
       </DialogContent>

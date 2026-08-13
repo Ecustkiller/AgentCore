@@ -99,7 +99,8 @@ export interface MemoryUpdateFeedEntry {
   id: string;
   conversationId: string;
   createdAt: string;
-  kind: "episodic" | "semantic";
+  /** `quota` = the always pool refused a write (审计 CTX-A2), not an applied change. */
+  kind: "episodic" | "semantic" | "quota";
   summary?: string | null;
   items: MemoryUpdateItem[];
 }
@@ -130,7 +131,12 @@ export function listMemoryUpdates(
         id: u.id,
         conversationId: u.conversation_id,
         createdAt: u.created_at,
-        kind: u.kind === "episodic" ? "episodic" : "semantic",
+        kind:
+          u.kind === "episodic"
+            ? "episodic"
+            : u.kind === "quota"
+              ? "quota"
+              : "semantic",
         summary: u.summary ?? null,
         items: (u.items ?? []).map(
           (it): MemoryUpdateItem => ({

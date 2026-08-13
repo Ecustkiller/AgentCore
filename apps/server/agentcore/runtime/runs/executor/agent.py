@@ -40,7 +40,7 @@ def build_agent_executor(
     system_prompt: str,
     user_message: str,
     execution_id: str,
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     delegate_factory: DelegateFactory | None = None,
     interaction_bridge: ClientRequestBridge | None = None,
     escalation_timeout: float | None = None,

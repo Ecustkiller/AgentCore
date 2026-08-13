@@ -5,10 +5,17 @@ with the same per-origin billing decision: ``model_origin=byok`` requires the
 user's own key (no quota check); ``model_origin=platform`` enforces quota then
 runs on the global key.
 
+This is the **admission** gate — one check as a turn / job / proxied call starts,
+so a refusal is a clean 402/429/503 before any stream opens. It is not the whole
+quota defence: :mod:`agentcore.billing.call_quota` re-checks before every upstream
+call, which is what stops concurrent turns and worker fan-out from overselling one
+stale reading (成本配额与计费 §一).
+
 Background product chrome (title / memory / compaction) resolves
 platform-first via ``resolve_and_gate_background``: platform spend always passes
 ``enforce_quota`` (no BYOK freeload); quota exhaustion returns ``None`` so
-best-effort callers degrade instead of 429-ing the user turn.
+best-effort callers degrade instead of 429-ing the user turn. ``run_background_llm``
+keeps that contract when the per-call gate refuses mid-flight.
 
 Auth-rejected platform keys fall back **once** to user BYOK through
 ``run_background_llm`` — the sole chrome entry that may retry after
@@ -29,6 +36,7 @@ from agentcore.conversation.quota import QuotaLimits, enforce_quota
 from agentcore.core.errors import (
     BYOKKeyMissingError,
     LLMAuthError,
+    LLMQuotaExceededError,
     PlatformBillingUnavailableError,
     QuotaExceededError,
 )
@@ -280,7 +288,11 @@ async def run_background_llm[T](
     3. On ``LLMAuthError`` **and** ``credentials.source == "platform"``: resolve
        user BYOK once via ``resolve_and_gate_background_user_fallback`` and re-run.
     4. Missing credentials on either side, or BYOK also auth-fails → ``None``.
-    5. Any other runner exception propagates unchanged.
+    5. On ``LLMQuotaExceededError``: the per-call gate found the platform quota
+       spent after step 1 admitted the call. Same decision as step 1's own quota
+       skip, just seen a moment later — degrade to ``None`` rather than raise, so
+       chrome keeps the "never 429s the user turn" contract.
+    6. Any other runner exception propagates unchanged.
 
     No process-local auth circuit breaker — each call re-resolves. Call sites must
     re-raise ``LLMAuthError`` from their generators so this entry can see it.
@@ -307,6 +319,15 @@ async def run_background_llm[T](
     try:
         value = await runner(primary)
         return BackgroundLlmResult(value=value, credentials=primary)
+    except LLMQuotaExceededError as e:
+        # Quota ran out between resolve and call (per-call gate, billing.call_quota).
+        logger.info(
+            "billing.background_quota_skip",
+            user_id=user_id,
+            purpose=purpose,
+            error=str(e),
+        )
+        return None
     except LLMAuthError as e:
         await maybe_mark_byok_provider_error(
             user_id=user_id, purpose=purpose, credentials=primary, exc=e

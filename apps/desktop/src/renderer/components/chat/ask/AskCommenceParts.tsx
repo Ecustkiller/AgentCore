@@ -401,7 +401,7 @@ export function ChoiceQuestion({
                       }
                       onFolderUnavailable?.(
                         opt.action === "open_local_project"
-                          ? "打开本地项目仅桌面端可用"
+                          ? "打开本机文件夹仅桌面端可用"
                           : "本机目录授权仅桌面端可用",
                       );
                     }}

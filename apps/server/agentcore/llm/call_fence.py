@@ -1,8 +1,17 @@
-"""Leaf LLM call observation fence — wrap providers from ``build_provider``.
+"""Leaf LLM call fence — wrap providers from ``build_provider``.
 
 Observes every logical ``complete`` / ``stream`` invocation (success → ``llm.call``,
 failure → ``llm.call_failed``). Does **not** retry, swap models, or alter chunk
 contracts (``stream_reset`` / ``aborted`` pass through unchanged).
+
+Two admission checks run before each upstream call, in the same place and for the
+same reason — this call should not be made:
+
+- the turn's auth/balance death latch (``llm.turn_auth_dead``);
+- the per-call platform quota brake (``billing.call_quota``), which gives cloud
+  in-process turns the granularity the sidecar already gets from its per-call
+  ``/inference/`` route gate. Both refusals raise leaf ``LLMError``s, so they land
+  on the ``llm.call_failed`` path like any other pre-upstream leaf failure.
 
 Stream interrupt salvage: consumer ``aclose`` / mid-stream exception still emit
 ``llm.call`` (and thus meter) when a chunk already carried billable usage; with
@@ -37,7 +46,11 @@ from agentcore.llm.provider.protocol import (
 
 
 class ObservingLLMProvider:
-    """Observation-only decorator around a leaf :class:`LLMProvider`."""
+    """Observing decorator around a leaf :class:`LLMProvider`.
+
+    Observation-only for anything the upstream returns; the only thing it decides
+    is whether a call may start at all (auth-dead latch + platform quota).
+    """
 
     def __init__(self, inner: LLMProvider) -> None:
         self._inner = inner
@@ -126,12 +139,27 @@ class ObservingLLMProvider:
         """True when a stream chunk already carried real tokens (no fabrication)."""
         return usage is not None and bool(usage.input_tokens or usage.output_tokens)
 
+    async def _refuse_if_quota_spent(self, request: LLMRequest) -> None:
+        """Raise ``LLMQuotaExceededError`` when this call's payer is out of quota.
+
+        Lazy import: ``billing`` reaches back into ``llm`` for pricing, so a
+        top-level import here would close the cycle at ``build_provider`` time.
+        """
+        from agentcore.billing.call_quota import enforce_call_quota
+
+        await enforce_call_quota(
+            provider_name=self._provider_name(),
+            model=request.model,
+            scenario=request.scenario,
+        )
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         from agentcore.llm.turn_auth_dead import mark_turn_auth_dead, raise_if_turn_auth_dead
 
         start = time.monotonic()
         try:
             raise_if_turn_auth_dead()
+            await self._refuse_if_quota_spent(request)
             response = await self._inner.complete(request)
         except Exception as e:
             mark_turn_auth_dead(e)
@@ -180,6 +208,7 @@ class ObservingLLMProvider:
         outcome = "open"
         try:
             raise_if_turn_auth_dead()
+            await self._refuse_if_quota_spent(request)
             async for chunk in self._inner.stream(request):
                 if chunk.aborted:
                     aborted = True

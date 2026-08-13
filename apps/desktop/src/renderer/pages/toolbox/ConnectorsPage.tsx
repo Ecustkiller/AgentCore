@@ -1,10 +1,10 @@
 import { PageContainer } from "@/components/layout/PageContainer";
+import { ToolboxPageHeader } from "@/components/toolbox/ToolboxPageHeader";
 import { Badge, Button, Card, Input } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import type { McpServerConfig, McpServerListItem } from "@shared/mcp-contract";
-import { ChevronLeft, Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Plug, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 
 function emptyDraft(): McpServerConfig {
   return {
@@ -22,7 +22,6 @@ function emptyDraft(): McpServerConfig {
  * 仅 Electron（window.mcpApi）；Web stub 无 API → 诚实说明。
  */
 export function ConnectorsPage() {
-  const navigate = useNavigate();
   const api = typeof window !== "undefined" ? window.mcpApi : undefined;
   const [servers, setServers] = useState<McpServerListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -48,17 +47,9 @@ export function ConnectorsPage() {
 
   if (!api) {
     return (
-      <PageContainer width="content">
-        <Button
-          variant="ghost"
-          onClick={() => navigate("/toolbox")}
-          className="mb-4 h-auto gap-1 px-0 py-0 text-sm text-muted-foreground hover:text-foreground"
-          icon={<ChevronLeft size={16} />}
-        >
-          工具箱
-        </Button>
-        <h1 className="text-xl font-semibold text-foreground">集成 · 连接器</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
+      <PageContainer width="canvas">
+        <ToolboxPageHeader />
+        <p className="text-sm text-muted-foreground">
           本机 MCP 仅桌面端可用（stdio 由本机进程拉起）。当前环境无法配置本地
           MCP Server，请使用 AgentCore 桌面应用。
         </p>
@@ -147,34 +138,19 @@ export function ConnectorsPage() {
   };
 
   return (
-    <PageContainer width="content">
-      <Button
-        variant="ghost"
-        onClick={() => navigate("/toolbox")}
-        className="mb-4 h-auto gap-1 px-0 py-0 text-sm text-muted-foreground hover:text-foreground"
-        icon={<ChevronLeft size={16} />}
-      >
-        工具箱
-      </Button>
+    <PageContainer width="canvas">
+      <ToolboxPageHeader
+        actions={
+          <Button size="md" onClick={openNew} icon={<Plus size={14} />}>
+            添加 Server
+          </Button>
+        }
+      />
 
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">
-            集成 · 连接器
-          </h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            配置本机 stdio MCP Server。启用后，下一轮协作中的 worker
-            可发现并调用其工具（一律需审批；CEO 不直持）。
-          </p>
-        </div>
-        <Button
-          onClick={openNew}
-          icon={<Plus size={16} />}
-          className="shrink-0"
-        >
-          添加 Server
-        </Button>
-      </header>
+      <p className="max-w-2xl text-xs text-muted-foreground">
+        配置本机 stdio MCP Server。启用后，下一轮协作中的 worker
+        可发现并调用其工具（一律需审批；CEO 不直持）。
+      </p>
 
       {error ? (
         <p className="mt-4 text-sm text-destructive" role="alert">

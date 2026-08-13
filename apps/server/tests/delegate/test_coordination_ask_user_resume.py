@@ -221,6 +221,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
         base_tool_context=base_ctx,
         captain_run_id="cap",
         folder_id="test_birth",
+        approval_gate=None,
     )
     ask_tool = AskUserTool(
         sink=sink,
@@ -268,6 +269,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         current_execution_id.reset(exec_token)
@@ -326,6 +328,7 @@ async def test_ask_user_soft_stop_rebuilds_coordination_on_resume(monkeypatch):
         base_tool_context=resume_ctx,
         captain_run_id="cap",
         folder_id="test_birth",
+        approval_gate=None,
     )
 
     settled = await settle_resumed_suspension(

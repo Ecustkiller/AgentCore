@@ -1,8 +1,7 @@
-import { notifyError } from "@/lib/toast";
 import {
   isInteractionOrphanedError,
+  notifySubmitInteractionResult,
   submitInteraction,
-  submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import {
   type DelegationAuthView,
@@ -57,7 +56,7 @@ export async function decideDelegationAuthorization(
       hotBody: { kind: "delegation_authorization", decision },
     });
     if (result !== "ok") {
-      notifyError(submitInteractionFeedback(result));
+      notifySubmitInteractionResult(result);
     }
   } catch (err) {
     if (isInteractionOrphanedError(err)) {

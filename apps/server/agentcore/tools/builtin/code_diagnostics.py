@@ -23,6 +23,7 @@ from agentcore.tools.builtin.write_diagnostics import (
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -122,6 +123,7 @@ class CodeDiagnosticsTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        file_products=FileProductsContract.READ_ONLY,
     )
 
     @property

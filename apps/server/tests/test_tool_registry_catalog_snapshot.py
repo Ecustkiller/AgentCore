@@ -8,6 +8,7 @@ this snapshot alongside their declaration.
 from __future__ import annotations
 
 from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.runtime.always_confirm import requires_always_confirm
 from agentcore.tools.builtin import (
     approval_class_tool_names,
     build_builtin_registry,
@@ -130,17 +131,19 @@ _CATALOG_ORCHESTRATION_ORDER = [
     "replan",
     "debate",
     "consult",
-    "list_projects",
-    "resolve_project",
-    "create_project",
-    "list_project_dir",
-    "read_project_file",
+    "list_folders",
+    "resolve_folder",
+    "create_folder",
+    "delete_folder",
+    "list_folder_dir",
+    "read_folder_file",
     "remember",
-    "update_project_profile",
+    "update_folder_profile",
     "ask_user",
     "read_image",
     "board_ops",
     "board_read",
+    "promote_product",
 ]
 
 _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
@@ -196,17 +199,19 @@ _CATALOG_AVAILABLE_TO: dict[str, tuple[str, ...]] = {
     "replan": (AVAILABLE_TO_CEO,),
     "debate": (AVAILABLE_TO_CEO,),
     "consult": (AVAILABLE_TO_CEO, AVAILABLE_TO_WORKER),
-    "list_projects": (AVAILABLE_TO_CEO,),
-    "resolve_project": (AVAILABLE_TO_CEO,),
-    "create_project": (AVAILABLE_TO_CEO,),
-    "list_project_dir": (AVAILABLE_TO_CEO,),
-    "read_project_file": (AVAILABLE_TO_CEO,),
+    "list_folders": (AVAILABLE_TO_CEO,),
+    "resolve_folder": (AVAILABLE_TO_CEO,),
+    "create_folder": (AVAILABLE_TO_CEO,),
+    "delete_folder": (AVAILABLE_TO_CEO,),
+    "list_folder_dir": (AVAILABLE_TO_CEO,),
+    "read_folder_file": (AVAILABLE_TO_CEO,),
     "remember": (AVAILABLE_TO_CEO,),
-    "update_project_profile": (AVAILABLE_TO_CEO,),
+    "update_folder_profile": (AVAILABLE_TO_CEO,),
     "ask_user": (AVAILABLE_TO_CEO,),
     "read_image": (AVAILABLE_TO_CEO,),
     "board_ops": (AVAILABLE_TO_CEO,),
     "board_read": (AVAILABLE_TO_CEO,),
+    "promote_product": (AVAILABLE_TO_CEO,),
 }
 
 
@@ -402,15 +407,29 @@ def test_tool_registry_declarations_cover_roster():
         "replan": CeoWire.COORDINATION,
         "debate": CeoWire.ALWAYS,
         "consult": CeoWire.CONSULT,
-        "list_projects": CeoWire.ALWAYS,
-        "resolve_project": CeoWire.ALWAYS,
-        "create_project": CeoWire.ALWAYS,
-        "list_project_dir": CeoWire.ALWAYS,
-        "read_project_file": CeoWire.ALWAYS,
+        "list_folders": CeoWire.ALWAYS,
+        "resolve_folder": CeoWire.ALWAYS,
+        "create_folder": CeoWire.ALWAYS,
+        "delete_folder": CeoWire.ALWAYS,
+        "list_folder_dir": CeoWire.ALWAYS,
+        "read_folder_file": CeoWire.ALWAYS,
         "remember": CeoWire.MEMORY,
-        "update_project_profile": CeoWire.MEMORY,
+        "update_folder_profile": CeoWire.MEMORY,
         "ask_user": CeoWire.CHECKPOINT,
         "read_image": CeoWire.ALWAYS,
         "board_ops": CeoWire.BOARD,
         "board_read": CeoWire.BOARD,
+        # 成品归位：CEO 恒持（收口前把已验收成品搬进用户工作区）。
+        "promote_product": CeoWire.ALWAYS,
     }
+
+    # 指挥面同样「CEO 永不持 GRANTABLE」，唯一破例是 delete_folder：删文件夹每次都要
+    # 用户点确认卡（恒确认，见 runtime.always_confirm），破例本身钉在这里可审。
+    # 走目录取 schema——delegate / debate 是重依赖手工装配，直接 cls() 构不出来。
+    catalog_approvals = {e.schema.name: e.schema.approval for e in build_capability_catalog()}
+    for name in _CATALOG_ORCHESTRATION_ORDER:
+        expected = (
+            ToolApproval.GRANTABLE if name == "delete_folder" else ToolApproval.NEVER
+        )
+        assert catalog_approvals[name] is expected, name
+    assert requires_always_confirm("delete_folder", {}) is True

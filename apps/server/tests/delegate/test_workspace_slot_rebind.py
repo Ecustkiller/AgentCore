@@ -140,6 +140,7 @@ async def test_bind_landing_desk_rebinds_shared_slot_and_moves_tree(tmp_path: Pa
 
     binding = SimpleNamespace(
         folder_id="desk-1",
+        rel_path="desk-1",
         name="云项目",
         local_binding=None,
     )
@@ -203,6 +204,7 @@ async def test_apply_target_desktop_forks_slot_and_passes_attachment_context(
     tools = ToolRegistry()
     binding = SimpleNamespace(
         folder_id="target_f",
+        rel_path="target_f",
         name="目标",
         local_binding=None,
     )

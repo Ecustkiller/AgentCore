@@ -8,16 +8,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from agentcore.config import settings
 from agentcore.workspace._paths import path_has_non_internal_entries
-
-_WORKSPACES_SEGMENT = "workspaces"
-_SHARED_SEGMENT = "shared"
+from agentcore.workspace.layout import (
+    SHARED_SEGMENT,
+    WORKSPACES_SEGMENT,
+    workspaces_base_path,
+)
 
 
 def shared_workspace_root_path(space_id: str) -> Path:
     """On-disk root for a shared space — without creating it."""
-    return Path(settings.data_dir) / _WORKSPACES_SEGMENT / _SHARED_SEGMENT / space_id
+    return workspaces_base_path() / SHARED_SEGMENT / space_id
 
 
 def shared_workspace_has_entries(space_id: str) -> bool:
@@ -27,7 +28,7 @@ def shared_workspace_has_entries(space_id: str) -> bool:
 
 def shared_workspace_storage_key(space_id: str) -> str:
     """Lock / snapshot key for a shared space (cross-user)."""
-    return f"{_WORKSPACES_SEGMENT}/{_SHARED_SEGMENT}/{space_id}"
+    return f"{WORKSPACES_SEGMENT}/{SHARED_SEGMENT}/{space_id}"
 
 
 def resolve_shared_workspace_root(space_id: str) -> Path:

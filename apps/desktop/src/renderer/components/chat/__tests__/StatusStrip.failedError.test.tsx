@@ -1,8 +1,13 @@
 // @vitest-environment jsdom
 /**
- * FailureStrip error detail (91eb)：execution=failed 但无 failedRun.error 时，
+ * FailureStrip error detail (91eb)：execution=failed 但无 failedRun 时，
  * 回退会话级 error（与底栏 RetryBanner 同源），禁止仍写「未获取到具体错误信息。」
+ *
+ * 有 failedRun 时改按 failureKind 出人话——`run.error` 是模型面（基础设施路径上就是
+ * `str(exception)`，契约路径上是「结构闸：…」这类引擎词），照抄给用户会让他以为是自己
+ * 少放了材料。
  */
+import { failureDetailSentence } from "@/components/graph/agentNode/shared";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
@@ -18,6 +23,8 @@ import { StatusStrip } from "../StatusStrip";
 
 const MID = "msg-failed-error-strip";
 const INTERRUPT_COPY = "模型响应中断，已保留已生成内容，可继续。";
+const GATE_ERROR =
+  "结构闸：缺少 audit JSON 产物：`AgentCore/文档/reviews/code-audit-1-server_conversation.audit.json`";
 
 let sessionError: string | null = null;
 
@@ -149,7 +156,7 @@ describe("StatusStrip · FailureStrip error detail", () => {
     expect(screen.queryByText("未获取到具体错误信息。")).toBeNull();
   });
 
-  it("failedRun.error wins over session error", () => {
+  it("failed run → curated sentence, never the raw run.error", () => {
     sessionError = INTERRUPT_COPY;
     const exec = projectExecution(plan, failedWithErrorFrames, "failed");
     const failed = exec.runs.find((r) => r.status === "failed");
@@ -157,9 +164,68 @@ describe("StatusStrip · FailureStrip error detail", () => {
 
     renderStrip(exec);
 
-    expect(screen.getByText("工具超时：web_search")).toBeTruthy();
+    expect(screen.queryByText("工具超时：web_search")).toBeNull();
+    expect(screen.getByText(failureDetailSentence(null, null))).toBeTruthy();
     expect(screen.queryByText(INTERRUPT_COPY)).toBeNull();
     expect(screen.queryByText("未获取到具体错误信息。")).toBeNull();
+  });
+
+  it("contract gate error never reaches the user as engine jargon", () => {
+    const frames: RunFrame[] = [
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r-ceo",
+        agentId: "ceo",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      {
+        t: 2,
+        kind: "run_failed",
+        runId: "r-ceo",
+        agentId: "ceo",
+        error: GATE_ERROR,
+        failureKind: "format",
+      },
+    ];
+    const exec = projectExecution(plan, frames, "failed");
+    const { container } = renderStrip(exec);
+
+    // The user must not read「结构闸」/ an artifact path and conclude they forgot to
+    // hand something in — that reason is ours to act on, not theirs.
+    expect(container.textContent).not.toContain("结构闸");
+    expect(container.textContent).not.toContain(".audit.json");
+    expect(screen.getByText(failureDetailSentence("format", null))).toBeTruthy();
+  });
+
+  it("files already saved before the failure keep that fact", () => {
+    const frames: RunFrame[] = [
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r-ceo",
+        agentId: "ceo",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      {
+        t: 2,
+        kind: "run_failed",
+        runId: "r-ceo",
+        agentId: "ceo",
+        error: "ConnectError: upstream 503",
+        failureKind: "call",
+        productLanded: true,
+      },
+    ];
+    const exec = projectExecution(plan, frames, "failed");
+    const { container } = renderStrip(exec);
+
+    expect(container.textContent).not.toContain("ConnectError");
+    expect(screen.getByText(failureDetailSentence("call", true))).toBeTruthy();
   });
 
   it("no run error and no session error → keep 未获取到 fallback", () => {
@@ -200,8 +266,7 @@ describe("StatusStrip · FailureStrip error detail", () => {
         kind: "run_failed",
         runId: "r-audit",
         agentId: "w1",
-        error:
-          "结构闸：缺少 audit JSON 产物：`AgentCore/文档/reviews/code-audit-1-server_conversation.audit.json`",
+        error: GATE_ERROR,
       },
     ];
     const exec = projectExecution(longPlan, frames, "failed");

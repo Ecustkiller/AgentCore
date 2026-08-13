@@ -166,7 +166,7 @@ async def test_queued_waiter_receives_sink_on_drain(monkeypatch):
     await tq_mod._start_queued_turn("c-wait", item)
     assert started.done()
     await asyncio.wait_for(done.wait(), timeout=2.0)
-    assert handed and not handed[0]._detached  # noqa: SLF001
+    assert handed and not handed[0]._consumer_dropped  # noqa: SLF001 — 交给活跃等待端
 
     frames: list[str] = []
     async for frame in gen:
@@ -212,7 +212,7 @@ async def test_start_queued_turn_emits_started_before_stream(monkeypatch):
 
 
 async def test_enqueue_and_ensure_drain_emits_live_turn_queued():
-    """emit_live_queued=True → live sink 收到 turn_queued（协调升队多端可见）。"""
+    """on_live_sink=True → live sink 收到 turn_queued（协调升队多端可见）。"""
     from agentcore.runtime.events import EventType
 
     cid = "c-live-queued"
@@ -224,7 +224,7 @@ async def test_enqueue_and_ensure_drain_emits_live_turn_queued():
         status = turn_queue.enqueue_and_ensure_drain(
             cid,
             new_queued_turn(content="from-coord", user_id="u"),
-            emit_live_queued=True,
+            on_live_sink=True,
         )
         types = [e.type for e in sink._history]  # noqa: SLF001
         assert EventType.TURN_QUEUED in types
@@ -240,13 +240,13 @@ async def test_enqueue_and_ensure_drain_emits_live_turn_queued():
 
 
 async def test_queued_disconnect_before_drain_starts_detached(monkeypatch):
-    """等待中断连 → started 取消 → drain 仍起回合但 sink.detach。"""
+    """等待中断连 → started 取消 → drain 仍起回合但记「无消费者」。"""
     detached_flags: list[bool] = []
     done = asyncio.Event()
 
     async def fake_stream_chat(**kwargs):
         sink: EventSink = kwargs["sink"]
-        detached_flags.append(sink._detached)  # noqa: SLF001
+        detached_flags.append(sink._consumer_dropped)  # noqa: SLF001
         sink.close()
         done.set()
 
@@ -270,7 +270,7 @@ async def test_queued_disconnect_before_drain_starts_detached(monkeypatch):
 
 async def test_queued_disconnect_after_handoff_detaches_sink():
     """半断连回归（审查②）：drain 已 set_result、等待端在消费 sink 前断开 →
-    已交付 sink 必须 detach（回合继续 detached 跑，不悬挂主观察者）。"""
+    已交付 sink 记「无消费者」（回合继续 detached 跑，不悬挂假观察者）。"""
     from agentcore.api.sse import _queued_turn_generator
 
     started: asyncio.Future[EventSink] = asyncio.get_running_loop().create_future()
@@ -288,7 +288,8 @@ async def test_queued_disconnect_after_handoff_detaches_sink():
     started.set_result(sink)  # drain 交付 sink（视等待端为活跃 → 不 detach）…
     # …客户端恰在等待端 resume 之前断开：GeneratorExit 落在 turn_queued yield 点。
     await gen.aclose()
-    assert sink._detached  # noqa: SLF001 — 断连→detached 闭环
+    assert sink._consumer_dropped  # noqa: SLF001 — 断连→无消费者 闭环
+    assert sink.is_detached
     assert not sink._closed  # noqa: SLF001 — 回合本身不被取消/关闭（D9）
 
 

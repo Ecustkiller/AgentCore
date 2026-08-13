@@ -59,7 +59,7 @@ file_write 把它真正写进工作区，而不是把整份内容粘在回复正
 哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。只贴在聊天里的代码不算交付。
 
 写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
-回执为 artifact manifest（path / bytes / lines / hash / 标题树 / 末段预览）——【以此验真】，\
+回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
 【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
 str_replace（局部修订）或同轮 handoff，勿为空转自检。
 
@@ -107,7 +107,7 @@ _WORKER_DELIVERABLE_FORM_FILES = """\
 正文只简短交代：改了哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。
 
 写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
-回执为 artifact manifest（path / bytes / lines / hash / 标题树 / 末段预览）——【以此验真】，\
+回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
 【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
 str_replace（局部修订）或同轮 handoff，勿为空转自检。
 
@@ -329,6 +329,18 @@ escalate 的 blocking 按题自选（默认 false）：已有合理默认、报�
 结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
 开放问题则照常用一句话问、不必硬凑选项。"""
 
+# 单人直出（``RunPlan.solo_direct_answer``）: a finalize batch with a single node hands this
+# worker's ``state.content`` to the user verbatim (``ceo_format.direct_result``) — no CEO
+# synthesis pass rewrites, retells or summarises it. Without saying so the worker keeps the
+# default「向主管交活」register and its internal-action narration (「现在提交交接简报」) lands
+# in what the user reads as the turn's answer. Off for every other topology (byte-identical).
+_WORKER_DIRECT_TO_USER = """\
+【正文直达用户】你是这次委派的唯一队员，你写的交付正文会【原样】作为本回合的最终答复呈现给\
+用户——不会再有主管改写、转述或替你总结。所以正文直接对用户说话（里面的「你」＝用户本人）、\
+开门见山给结果：【禁止】内部动作旁白与流程播报（如「现在提交交接简报」「接下来我将调用某某工具」\
+「已完成本次任务并提交」）——交接简报走的是用户看不见的结构化通道，写进正文只是一句突兀的自述；\
+【禁止】用对主管汇报的口吻（如「向您汇报」「以上是我的交付，请审阅」）。"""
+
 # Shared path-finding nudge (leaf + captain): avoid reading vague workspace roots.
 # Inserted in build_worker_identity — not inside captain nesting preamble (P3 surface).
 _WORKER_PATH_FIND_NUDGE = """\
@@ -398,6 +410,7 @@ def build_worker_identity(
     form: DeliverableForm | None = None,
     artifacts: Sequence[str] | None = None,
     can_execute: bool = True,
+    direct_to_user: bool = False,
 ) -> str:
     """Assemble a worker's identity preamble (topology-split handoff + leaf/captain).
 
@@ -411,16 +424,21 @@ def build_worker_identity(
     ``can_execute`` mirrors whether the execution class (code_execute / test_run) is in
     this turn's worker registry — False layers the 能写≠能跑 self-description in so the
     prompt never over-claims capability the toolset withheld (能力闸门与交付诚实性).
+    ``direct_to_user`` is the plan's 单人直出 signal (``RunPlan.solo_direct_answer``):
+    True adds the 正文直达用户 register so the body reads as the answer the user gets,
+    not as a report filed with a supervisor.
     """
     effective_form = resolve_identity_form(form, artifacts=artifacts)
     intro = _worker_captain_intro(depth=depth) if captain else _WORKER_LEAF_INTRO
     no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
+    direct = f"\n\n{_WORKER_DIRECT_TO_USER}" if direct_to_user else ""
     return (
         f"{intro}\n\n"
         f"{_WORKER_PATH_FIND_NUDGE}\n\n"
         f"{_WORKER_TEAM_NOTE_POLICY}\n\n"
         f"{_deliverable_policy(has_dependents=has_dependents, form=effective_form)}"
-        f"{no_exec}\n\n"
+        f"{no_exec}"
+        f"{direct}\n\n"
         f"{_WORKER_TOOL_SAFETY_POLICY}"
     )
 

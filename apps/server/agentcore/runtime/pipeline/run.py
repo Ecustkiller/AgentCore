@@ -6,6 +6,7 @@ import contextlib
 import json
 import time
 
+from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.logging import get_logger
 from agentcore.core.types import PermissionAxes, new_id
 from agentcore.llm.credentials import LLMCredentials
@@ -80,6 +81,7 @@ async def run_chat_pipeline(
     folder_binding_injected: bool = False,
     folder_local_root_id: str | None = None,
     folder_local_subpath: str | None = None,
+    inherited_journal_entries: list[dict] | None = None,
 ) -> dict:
     """Run the full chat pipeline for a single user message.
 
@@ -88,9 +90,12 @@ async def run_chat_pipeline(
 
     ``approvals_enabled`` gates GRANTABLE tools behind the user's consent (the
     default interactive path). It is set False for an autonomous local→云 handoff
-    job (双模式工作区 P2e / e2): that run has no live client to answer prompts and
-    operates on an isolated server sandbox, so — like cloud-mode workers — it needs
-    no gate; leaving it on would deadlock every file/exec tool on a timeout-deny.
+    job (双模式工作区 P2e / e2): that run has no live client to answer prompts, so a
+    gate would only deadlock every file/exec tool on a timeout-deny. What keeps its
+    work running is the cloud-sandbox exemption in ``runtime.sandbox_approval`` (the
+    same one every cloud worker gets), **not** the absent gate: since the chokepoint
+    went fail-closed, a call that genuinely needs a human (MCP / Host / 恒确认 / 熔断
+    FORCE) is denied on this path instead of silently executing.
 
     ``memory_enabled`` is a caller-supplied runtime gate (product resolve is always
     True / 定案 A): False injects no memory <rules> this turn — kept for internal
@@ -126,6 +131,12 @@ async def run_chat_pipeline(
     billing_mode); the caller resolves them once (route preflight) and threads them
     here so the whole turn runs on the user's own DeepSeek quota. ``None`` falls
     back to the global server key (platform mode).
+
+    ``inherited_journal_entries`` continues an EXISTING turn under the caller's
+    ``message_id`` (crash-recovery closing — parity with ``resume_chat_pipeline``).
+    The prior facts become the log's inherited prefix rather than new entries, so
+    finalize appends this segment to that one stream instead of re-writing it.
+    ``None`` = fresh turn.
     """
     profiles = turn_profiles_for_turn(profile_set, llm_credentials)
     message_id = message_id or new_id()
@@ -141,7 +152,7 @@ async def run_chat_pipeline(
     # (round_boundary / llm_call / note / message_final) AND the sink's display facts
     # (run_*/tool_use_*/interaction) accumulate here in ONE order — copied into each
     # delegated worker's task, so the whole team writes to this log. Reset in finally.
-    fact_log = TurnFactLog()
+    fact_log = TurnFactLog(inherited_entries=list(inherited_journal_entries or []))
     fact_log_token = current_fact_log.set(fact_log)
     # Append-on-emit: every fact is durably written before its SSE event is delivered.
     from agentcore.core.log_context import get_log_value
@@ -153,6 +164,9 @@ async def run_chat_pipeline(
         turn_id=message_id,
         conversation_id=conversation_id,
         trace_id=get_log_value("trace_id"),
+        # Continuation counts past the inherited prefix (same hint ``recover`` uses for
+        # this turn); the durable seq itself is allocated by the store.
+        initial_seq=len(inherited_journal_entries or []),
     )
     journal_writer_token = current_journal_writer.set(journal_writer)
     audit_recorder, audit_token = bind_recorder(
@@ -168,6 +182,14 @@ async def run_chat_pipeline(
         permission_axes=(
             json.dumps(permission_axes.to_dict()) if permission_axes is not None else None
         ),
+    )
+    # 云对话多端同权 B2 §2.2: publish who to reach when a card stops this turn on the
+    # user — the approval gate / escalation channel run deep in the engine with no
+    # user_id of their own. Reset in finally.
+    attention_token = bind_attention_scope(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
     )
     # Session roster write-through (as-built: 成本配额 §三): fire-and-forget on the hot path,
     # flush with audit at turn-end so cross-turn load-on-miss stays durable.
@@ -256,6 +278,7 @@ async def run_chat_pipeline(
                 conversation_id=conversation_id,
                 user_message=user_message,
                 history=history,
+                evidence_ledger=evidence_ledger,
                 sink=sink,
                 backend=assemble_backend,
                 folder_id=folder_id,
@@ -278,13 +301,7 @@ async def run_chat_pipeline(
             prepare_reads_cache_only.reset(prepare_cache_only_token)
             prepare_account_folder_id.reset(prepare_folder_token)
 
-        # 出处诚实：hydrate 后注入「已登记来源」结构化摘要（对照台账字段，禁占位叙事）。
-        from agentcore.runtime.evidence_ledger import format_registered_sources_prompt
-
-        sources_block = format_registered_sources_prompt(evidence_ledger)
         chat_system_prompt = assembled.chat_system_prompt
-        if sources_block:
-            chat_system_prompt = f"{chat_system_prompt}\n\n{sources_block}"
 
         # --- Phase 3: Execute ---
         sink.emit(message_start(message_id, conversation_id=conversation_id))
@@ -375,18 +392,24 @@ async def run_chat_pipeline(
             roster_writer=roster_writer,
         )
     finally:
+        # Every ``await`` below runs through ``teardown_step``: a second Stop (or an
+        # overlap supersede) must not pierce the block and skip the remaining flushes.
+        from agentcore.conversation.stage_card_resolve import (
+            maybe_orphan_stage_cards_at_turn_end,
+        )
+        from agentcore.runtime.interaction_orphan import orphan_registry_pending
+        from agentcore.runtime.pipeline.teardown import teardown_step
+
         # 触发点①：turn 结束防御性 orphan 未 settle 的热路交互
-        with contextlib.suppress(Exception):
-            from agentcore.runtime.interaction_orphan import orphan_registry_pending
-
-            await orphan_registry_pending(conversation_id, turn_id=message_id)
+        await teardown_step(
+            orphan_registry_pending(conversation_id, turn_id=message_id),
+            step="orphan_registry_pending",
+        )
         # 批 B 失效修订：收尾时未调 debate / 未起 MLR → pending stage_card 落 orphan 事实
-        with contextlib.suppress(Exception):
-            from agentcore.conversation.stage_card_resolve import (
-                maybe_orphan_stage_cards_at_turn_end,
-            )
-
-            await maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink)
+        await teardown_step(
+            maybe_orphan_stage_cards_at_turn_end(conversation_id, sink=sink),
+            step="orphan_stage_cards",
+        )
         # 未消费的 MLR 预授权在 turn 出口显式丢弃（不依赖 ContextVar 消亡）。
         with contextlib.suppress(Exception):
             from agentcore.runtime.kickoff.stage_card import discard_mlr_preauth
@@ -396,17 +419,15 @@ async def run_chat_pipeline(
         # Drain the append-on-emit journal BEFORE dropping the writer: an abandoned in-flight
         # write leaves a checked-out DB connection for the GC to terminate (asyncpg
         # connection_lost noise). Best-effort — a drain failure must never break turn teardown.
-        with contextlib.suppress(Exception):
-            await journal_writer.flush()
+        await teardown_step(journal_writer.flush(), step="journal_flush")
         current_journal_writer.reset(journal_writer_token)
         from agentcore.runtime.audit.recorder import current_audit_recorder
 
-        with contextlib.suppress(Exception):
-            await audit_recorder.flush()
-        with contextlib.suppress(Exception):
-            if roster_writer is not None:
-                await roster_writer.flush()
+        await teardown_step(audit_recorder.flush(), step="audit_flush")
+        if roster_writer is not None:
+            await teardown_step(roster_writer.flush(), step="roster_flush")
         current_audit_recorder.reset(audit_token)
+        reset_attention_scope(attention_token)
         turn_history.reset(history_token)
         turn_citations.reset(citations_token)
         consulted_memory_cache.reset(memory_cache_token)
@@ -445,5 +466,4 @@ async def run_chat_pipeline(
         # closes it, so the tail reaches the client. (Title survived the old early-close
         # via its DB write; transport-only events vanished without that ownership.)
         if llm is not None:
-            with contextlib.suppress(Exception):
-                await llm.close()
+            await teardown_step(llm.close(), step="llm_close")

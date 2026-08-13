@@ -48,6 +48,7 @@ import {
   wireFor,
 } from "@/stores/interactions";
 import type {
+  AutoFolderCreatedPayload,
   CitationsPayload,
   ContentDeltaPayload,
   ContentResetPayload,
@@ -140,6 +141,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   /** journal 内最后一条 `execution_completed.status`（若有）→ 投影到 execution.status。 */
   let fromExecutionCompleted: ExecutionStatus | null = null;
   let turnWarning: string | null = null;
+  let autoFolder: ProjectedTurn["autoFolder"] = null;
   const userInterjections: {
     interjectionId: string;
     executionId: string;
@@ -515,6 +517,11 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         turnWarning = (ev.payload as TurnWarningPayload).message;
         break;
       }
+      case "auto_folder_created": {
+        const p = ev.payload as AutoFolderCreatedPayload;
+        autoFolder = { folderId: p.folder_id, name: p.name };
+        break;
+      }
       case "team_synthesis_preview": {
         // 同 key 保最新（后写覆盖）——journal append-only，fold 侧去重。
         teamSynthesisPreview = ev.payload as TeamSynthesisPreviewPayload;
@@ -727,6 +734,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
     teamSynthesisPreview,
     deliveryStatus,
     turnWarning,
+    autoFolder,
     // 团队便签墙 (§2.2 通): single source = projectExecution's frame fold (above), mapped to the
     // golden's ProjectedTeamNote shape — the same single-source pattern as `escalations`.
     teamNotes: (execution?.teamNotes ?? []).map((n) => ({

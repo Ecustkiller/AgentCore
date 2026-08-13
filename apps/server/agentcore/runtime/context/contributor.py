@@ -50,9 +50,9 @@ class SectionOrder(IntEnum):
     # On-demand user rules (consult) — constraint appendices, NOT memory topics.
     # Same live-tool gate: render only when ``consult`` is wired this turn.
     RULE_DIRECTORY = 560
-    # Derived cross-project roster (Folder name + 画像.md first line). CEO-only;
+    # Derived cross-folder roster (Folder path + 画像.md first line). CEO-only;
     # rendered outside ``<rules>`` so it stays separate from the always-on entry block.
-    PROJECT_CATALOG = 570
+    FOLDER_CATALOG = 570
     CITATION = 600
     CEO_VISUALIZATION = 700
     WORKSPACE_OVERVIEW = 800
@@ -66,6 +66,10 @@ class SectionOrder(IntEnum):
     # unproductive (history drops tool I/O — same volatile-tail reason as recent graph).
     PRIOR_DELEGATE_RETRY = 860
     ATTACHMENT = 900
+    # 已登记来源台账 (#rN): hydrated from the whole conversation's assistant rows, so it
+    # grows monotonically with the chat — the most volatile section there is, and the one
+    # a future budget lever would trim first. Last so the sections above keep their bytes.
+    REGISTERED_SOURCES = 950
 
 
 @dataclass(frozen=True)

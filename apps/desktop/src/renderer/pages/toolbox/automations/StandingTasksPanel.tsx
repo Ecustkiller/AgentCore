@@ -2,6 +2,7 @@ import { Button, Card } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { APP_PATHS } from "@/pages/toolbox/manual/paths";
 import { ApiError } from "@/services/api";
 import { type FolderMeta, listFolders } from "@/services/folders";
 import {
@@ -17,13 +18,28 @@ import {
   scheduleLabel,
 } from "@/services/standingTasks";
 import { useStandingInboxStore } from "@/stores/standingInbox";
-import { Loader2, Pencil, Plus, Sparkles, Trash2, Zap } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import {
+  Loader2,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+  Workflow,
+  Zap,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   StandingTaskEditorDrawer,
   emptyStandingTaskForm,
   formFromStandingTask,
 } from "./StandingTaskEditor";
+import {
+  type ScheduleWorkflowDraft,
+  readScheduleFromWorkflow,
+  withoutScheduleFromWorkflow,
+} from "./scheduleFromWorkflow";
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
@@ -60,12 +76,17 @@ function taskScheduleText(task: StandingTask): string {
  * 自动化 · 任务列表。创建/编辑走右侧抽屉，不在本页内联堆表单。
  */
 export function StandingTasksPanel() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [tasks, setTasks] = useState<StandingTask[] | null>(null);
   const [templates, setTemplates] = useState<StandingTaskTemplate[]>([]);
   const [cloudFolders, setCloudFolders] = useState<FolderMeta[]>([]);
   const [folderNames, setFolderNames] = useState<Record<string, string>>({});
   const [listError, setListError] = useState<string | null>(null);
+  const [foldersError, setFoldersError] = useState<string | null>(null);
   const [editor, setEditor] = useState<"create" | StandingTask | null>(null);
+  /** 「设为定时」深链带来的绑定，只作用于当前这次新建。 */
+  const [draftWorkflow, setDraftWorkflow] =
+    useState<ScheduleWorkflowDraft | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [ensuringKey, setEnsuringKey] = useState<string | null>(null);
 
@@ -74,14 +95,26 @@ export function StandingTasksPanel() {
     try {
       const [taskList, folders, templateList] = await Promise.all([
         listStandingTasks(),
-        listFolders().catch(() => [] as FolderMeta[]),
+        listFolders().then(
+          (rows) => ({ ok: true as const, rows }),
+          (e: unknown) => ({
+            ok: false as const,
+            message: errMsg(e, "工作区列表加载失败"),
+          }),
+        ),
         listStandingTaskTemplates().catch(() => [] as StandingTaskTemplate[]),
       ]);
-      const cloud = folders.filter((f) => f.mode === "cloud");
-      setCloudFolders(cloud);
-      setFolderNames(
-        Object.fromEntries(folders.map((f) => [f.id, f.name] as const)),
-      );
+      // An empty folder list must not be conflated with a failed request —
+      // both would otherwise read as「没有可用的云工作区」.
+      if (folders.ok) {
+        setFoldersError(null);
+        setCloudFolders(folders.rows.filter((f) => f.mode === "cloud"));
+        setFolderNames(
+          Object.fromEntries(folders.rows.map((f) => [f.id, f.name] as const)),
+        );
+      } else {
+        setFoldersError(folders.message);
+      }
       setTasks(taskList);
       setTemplates(templateList);
     } catch (e) {
@@ -93,6 +126,22 @@ export function StandingTasksPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 从工作流卡片「设为定时」进来：直接开新建抽屉并预填绑定，再把参数摘掉。
+  useEffect(() => {
+    const draft = readScheduleFromWorkflow(searchParams);
+    if (!draft) return;
+    setDraftWorkflow(draft);
+    setEditor("create");
+    setSearchParams(withoutScheduleFromWorkflow(searchParams), {
+      replace: true,
+    });
+  }, [searchParams, setSearchParams]);
+
+  const closeEditor = useCallback(() => {
+    setEditor(null);
+    setDraftWorkflow(null);
+  }, []);
 
   const onToggle = async (task: StandingTask, enabled: boolean) => {
     setBusyId(task.id);
@@ -162,7 +211,11 @@ export function StandingTasksPanel() {
     }
     const folderId = cloudFolders[0]?.id;
     if (!folderId) {
-      notifyError("请先创建一个云工作区，再开启系统模板");
+      notifyError(
+        foldersError
+          ? `读不到工作区列表（${foldersError}），暂时无法确定报告落点，请重试`
+          : "请先创建一个云工作区，再开启系统任务",
+      );
       return;
     }
     setEnsuringKey(tpl.key);
@@ -191,13 +244,28 @@ export function StandingTasksPanel() {
       );
       setEditor(task);
     } catch (e) {
-      notifyError(e, "开启系统模板失败");
+      notifyError(e, "开启系统任务失败");
     } finally {
       setEnsuringKey(null);
     }
   };
 
   const editorOpen = editor !== null;
+  const editing = editor === "create" || editor === null ? null : editor;
+
+  // Stable identity: the drawer resets its form whenever `initial` changes,
+  // so a list re-render must not wipe what the user is editing.
+  const initialForm = useMemo(() => {
+    if (editing) return formFromStandingTask(editing);
+    const base = emptyStandingTaskForm(cloudFolders);
+    if (!draftWorkflow) return base;
+    return {
+      ...base,
+      name: draftWorkflow.workflowName || base.name,
+      workflowId: draftWorkflow.workflowId,
+      workflowName: draftWorkflow.workflowName || null,
+    };
+  }, [editing, cloudFolders, draftWorkflow]);
 
   const guideTemplates = templates.filter(
     (tpl) => !tpl.installedTaskId || tpl.enabled !== true,
@@ -219,9 +287,26 @@ export function StandingTasksPanel() {
         </Button>
       </div>
 
+      {foldersError && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
+          <p className="min-w-0 flex-1 text-xs text-destructive">
+            读不到工作区列表（{foldersError}
+            ），任务落点与作用域暂时无法选择。这不代表你没有云工作区。
+          </p>
+          <Button
+            variant="neutral"
+            size="sm"
+            icon={<RefreshCw size={14} />}
+            onClick={() => void load()}
+          >
+            重试
+          </Button>
+        </div>
+      )}
+
       {guideTemplates.length > 0 && (
         <section className="mt-4 space-y-3">
-          <p className="text-xs font-medium text-muted-foreground">系统模板</p>
+          <p className="text-xs font-medium text-muted-foreground">系统任务</p>
           {guideTemplates.map((tpl) => {
             const installed = !!tpl.installedTaskId;
             const ensuring = ensuringKey === tpl.key;
@@ -291,17 +376,14 @@ export function StandingTasksPanel() {
 
       <StandingTaskEditorDrawer
         open={editorOpen}
-        mode={editor === "create" || editor === null ? "create" : "edit"}
-        initial={
-          editor === "create" || editor === null
-            ? emptyStandingTaskForm(cloudFolders)
-            : formFromStandingTask(editor)
-        }
-        taskId={editor === "create" || editor === null ? null : editor.id}
+        mode={editing ? "edit" : "create"}
+        initial={initialForm}
+        taskId={editing?.id ?? null}
         cloudFolders={cloudFolders}
-        onClose={() => setEditor(null)}
+        foldersError={foldersError}
+        onClose={closeEditor}
         onSaved={async () => {
-          setEditor(null);
+          closeEditor();
           await load();
         }}
       />
@@ -317,7 +399,7 @@ export function StandingTasksPanel() {
         ) : tasks.length === 0 ? (
           <Card className="px-4 py-6 text-center">
             <p className="text-sm text-muted-foreground">
-              还没有任务。可开启上方系统模板，或新建周期简报 / Webhook 入口。
+              还没有任务。可开启上方系统任务，或新建周期简报 / Webhook 入口。
             </p>
             <Button
               className="mt-3"
@@ -360,12 +442,32 @@ export function StandingTasksPanel() {
                           <span className="text-xs text-muted-foreground">
                             {taskScheduleText(task)}
                           </span>
+                          {task.workflowId && (
+                            <Link
+                              to={APP_PATHS.toolbox.workflows.edit(
+                                task.workflowId,
+                              )}
+                              className="inline-flex max-w-56 items-center gap-1 rounded-lg bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+                              title={
+                                task.workflowName
+                                  ? `绑定工作流：${task.workflowName}（去画布编辑）`
+                                  : "已绑定工作流（去画布编辑）"
+                              }
+                            >
+                              <Workflow size={12} className="shrink-0" />
+                              <span className="truncate">
+                                {task.workflowName ?? "已绑定工作流"}
+                              </span>
+                            </Link>
+                          )}
                         </div>
-                        <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                          {isSystem
-                            ? "每日自动复盘近期对话，确认后才落盘记忆与文档。"
-                            : task.goal}
-                        </p>
+                        {(isSystem || task.goal.trim()) && (
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
+                            {isSystem
+                              ? "每日自动复盘近期对话，确认后才落盘记忆与文档。"
+                              : task.goal}
+                          </p>
+                        )}
                         <p className="mt-1 text-xs text-muted-foreground">
                           工作区：{folderNames[task.folderId] ?? task.folderId}
                           {task.triggerKind === "schedule" && (
@@ -390,9 +492,9 @@ export function StandingTasksPanel() {
                           disabled={busy || !task.enabled}
                           icon={<Zap size={14} />}
                           onClick={() => void onRunNow(task)}
-                          title="立即跑一次"
+                          title="不等下次到点，现在就跑一轮"
                         >
-                          跑一次
+                          立即触发
                         </Button>
                         <Button
                           variant="ghost"

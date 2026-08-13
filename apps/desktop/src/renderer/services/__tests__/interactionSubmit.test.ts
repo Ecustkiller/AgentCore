@@ -1,36 +1,57 @@
+import { notifyError, notifyInfo } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
-import { runResume } from "@/services/turns";
+import { isPausedFrameGone, runResume } from "@/services/turns";
 import { useInteractionStore } from "@/stores/interactions";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isInteractionOrphanedError,
   isPendingInteractionsAwaitingError,
+  notifySubmitInteractionResult,
   submitInteraction,
+  submitInteractionFeedback,
 } from "../interactionSubmit";
+
+vi.mock("@/lib/toast", () => ({
+  notifyError: vi.fn(),
+  notifyInfo: vi.fn(),
+}));
 
 vi.mock("@/services/interaction", () => ({
   resolveInteraction: vi.fn(),
 }));
 vi.mock("@/services/turns", () => ({
   runResume: vi.fn(),
+  isPausedFrameGone: vi.fn(),
 }));
 vi.mock("@/stores/composer", () => ({
   useComposerDraftStore: {
     getState: () => ({ fill: vi.fn() }),
   },
 }));
+const clearError = vi.fn();
+vi.mock("@/stores/conversation", () => ({
+  useConversationStore: {
+    getState: () => ({ clearError }),
+  },
+}));
 
 const resolveMock = vi.mocked(resolveInteraction);
 const resumeMock = vi.mocked(runResume);
+const frameGoneMock = vi.mocked(isPausedFrameGone);
 const store = () => useInteractionStore.getState();
 
 beforeEach(() => {
   store().clear();
   resolveMock.mockReset();
   resumeMock.mockReset();
-  resolveMock.mockResolvedValue(undefined);
+  frameGoneMock.mockReset();
+  clearError.mockReset();
+  vi.mocked(notifyError).mockReset();
+  vi.mocked(notifyInfo).mockReset();
+  resolveMock.mockResolvedValue("settled");
   resumeMock.mockResolvedValue(undefined);
+  frameGoneMock.mockReturnValue(false);
 });
 
 describe("submitInteraction path table", () => {
@@ -221,7 +242,7 @@ describe("submitInteraction path table", () => {
     resolveMock.mockImplementation(
       () =>
         new Promise((r) => {
-          release = () => r(undefined);
+          release = () => r("settled");
         }),
     );
     const first = submitInteraction({
@@ -267,6 +288,134 @@ describe("submitInteraction path table", () => {
     expect(resumeMock).toHaveBeenCalledTimes(2);
     resolveFirst();
     await expect(first).resolves.toBe("ok");
+  });
+});
+
+/**
+ * 「这张卡已经结了」的回执（云对话多端同权 B2 · 验收 5）：卡收起来不再可点，但不认领结果
+ * 与处理方——回执不带 `status` / `arbitrated_by`，证不了是人还是运行时兜底结的。
+ */
+describe("submitInteraction · 已经结了的回执", () => {
+  function raiseApproval(id: string): void {
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: { approval_id: id, tool_name: "x", arguments: {} },
+    });
+  }
+
+  it("热路 200 already_processed → 收口，不再可点", async () => {
+    raiseApproval("a-dup");
+    resolveMock.mockResolvedValue("already_processed");
+
+    const result = await submitInteraction({
+      id: "a-dup",
+      kind: "approval",
+      conversationId: "c1",
+      hotBody: { kind: "approval", decision: "approve" },
+    });
+
+    expect(result).toBe("already_settled");
+    expect(store().get("a-dup")?.status).toBe("resolved");
+    expect(store().get("a-dup")?.settledByReceipt).toBe(true);
+  });
+
+  it("热路 404 → 说「已经处理过了」，不说「卡失效了」", async () => {
+    raiseApproval("a-404");
+    resolveMock.mockRejectedValue(new ApiError(404, "not found"));
+
+    const result = await submitInteraction({
+      id: "a-404",
+      kind: "approval",
+      conversationId: "c1",
+      hotBody: { kind: "approval", decision: "approve" },
+    });
+
+    expect(result).toBe("already_settled");
+    expect(store().get("a-404")?.status).toBe("resolved");
+    expect(submitInteractionFeedback("already_settled")).toContain(
+      "已经处理过了",
+    );
+  });
+
+  it("回执不认领结果：resolution 仍是空的（等线材帧）", async () => {
+    raiseApproval("a-blank");
+    resolveMock.mockResolvedValue("already_processed");
+
+    await submitInteraction({
+      id: "a-blank",
+      kind: "approval",
+      conversationId: "c1",
+      hotBody: { kind: "approval", decision: "deny" },
+    });
+
+    expect(store().get("a-blank")?.resolution).toBeUndefined();
+    expect(store().get("a-blank")?.settledElsewhere).toBeUndefined();
+  });
+
+  it("冷路挂起帧已不在 → 卡不放回可点（否则一点再点、次次 404）", async () => {
+    store().upsertRequired({
+      kind: "plan_review",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: { checkpoint_id: "pr-gone", steps: [], pending: [] },
+    });
+    resumeMock.mockRejectedValue(new Error("挂起的回合不存在或已处理"));
+    frameGoneMock.mockReturnValue(true);
+
+    const result = await submitInteraction({
+      id: "pr-gone",
+      kind: "plan_review",
+      conversationId: "c1",
+      cold: { messageId: "srv-pr", decision: "continue", note: "" },
+    });
+
+    expect(result).toBe("already_settled");
+    expect(store().get("pr-gone")?.status).toBe("resolved");
+    expect(store().get("pr-gone")?.settledByReceipt).toBe(true);
+    // runResume 为这次失败挂的错误横幅由这句更贴切的收口取代。
+    expect(clearError).toHaveBeenCalledWith("c1");
+  });
+
+  it("冷路帧还在的失败仍放回可点（这次没发出去，不是卡结了）", async () => {
+    store().upsertRequired({
+      kind: "plan_review",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: { checkpoint_id: "pr-busy", steps: [], pending: [] },
+    });
+    resumeMock.mockRejectedValue(new ApiError(409, "busy"));
+
+    await expect(
+      submitInteraction({
+        id: "pr-busy",
+        kind: "plan_review",
+        conversationId: "c1",
+        cold: { messageId: "srv-pr", decision: "continue", note: "" },
+      }),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(store().get("pr-busy")?.status).toBe("pending");
+    expect(clearError).not.toHaveBeenCalled();
+  });
+});
+
+describe("提交没走成时的提示", () => {
+  it("「已经结了」不是错——多端同权下是常态，不报红", () => {
+    notifySubmitInteractionResult("already_settled");
+
+    expect(vi.mocked(notifyInfo)).toHaveBeenCalledWith(
+      submitInteractionFeedback("already_settled"),
+    );
+    expect(vi.mocked(notifyError)).not.toHaveBeenCalled();
+  });
+
+  it("忙 / 失效仍报错", () => {
+    notifySubmitInteractionResult("busy");
+    notifySubmitInteractionResult("orphaned");
+
+    expect(vi.mocked(notifyError)).toHaveBeenCalledWith("请稍候再试");
+    expect(vi.mocked(notifyError)).toHaveBeenCalledWith("确认已失效");
   });
 });
 

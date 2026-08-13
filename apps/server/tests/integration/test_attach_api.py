@@ -4,8 +4,8 @@ Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
 Covers auth, ownership (IDOR), the 204 "nothing live" fallback, and the core
 replay-then-tail behaviour against a stand-in detached run registered directly in
 the ``TurnRunRegistry`` (the full SSE turn is exercised elsewhere) — so this
-isolates the route + ``EventSink.take_over`` contract: a re-attaching client
-replays the transcript so far, then follows new events live.
+isolates the route + sink-subscription contract: a re-attaching client replays the
+transcript so far, then follows new events live as one of N peers.
 """
 
 import asyncio
@@ -148,6 +148,73 @@ async def test_attach_replays_history_then_tails(live_client):
     # Dropping the attach stream is a pure detach — it never cancelled the run via
     # this path (the registry slot was only cleared by our explicit cancel above).
     assert turn_runs.get(conv) is None
+
+
+async def test_two_clients_attach_the_same_run_independently(live_client, new_client):
+    """两端同开一条 live run：同帧、互不瓜分；一端断开不影响另一端，也不动回合。"""
+    await register_and_login(live_client, "attachpeer")
+    conv = await _new_conversation(live_client, "peers")
+
+    sink = EventSink()
+    task = asyncio.create_task(_never())
+    turn_runs.register(conversation_id=conv, task=task, sink=sink)
+    url = f"/v1/conversations/{conv}/stream"
+    try:
+        async with live_client.stream("GET", url) as first:
+            first_lines = first.aiter_lines()
+            await _read_until(first_lines, "attach-caught-up")
+            async with live_client.stream("GET", url) as second:
+                second_lines = second.aiter_lines()
+                await _read_until(second_lines, "attach-caught-up")
+
+                sink.emit(content_delta("BOTH"))  # 同一帧两端都要收到
+                await _read_until(first_lines, "BOTH")
+                await _read_until(second_lines, "BOTH")
+            # second 已断开（真 TCP 关闭）——first 必须毫发无伤。
+            await asyncio.sleep(0.05)
+            sink.emit(content_delta("SURVIVOR"))
+            await _read_until(first_lines, "SURVIVOR")
+        assert not task.done()  # 观察端断开从不取消回合
+    finally:
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+
+
+async def test_follow_stream_stays_open_and_picks_up_the_next_turn(live_client, monkeypatch):
+    """对话级订阅：空闲不 204，另一端起新回合后本端自动收到（云对话多端同权 B2）。"""
+    from agentcore.api import sse
+
+    monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.1)  # 别等真实 15s 心跳
+    await register_and_login(live_client, "attachfollow")
+    conv = await _new_conversation(live_client, "follow")
+
+    # 无 live run —— 回合级 attach 会 204，对话级订阅必须保持连接。
+    assert (await live_client.get(f"/v1/conversations/{conv}/stream")).status_code == 204
+
+    task: asyncio.Task | None = None
+    try:
+        async with live_client.stream(
+            "GET", f"/v1/conversations/{conv}/stream", params={"follow": "true"}
+        ) as resp:
+            assert resp.status_code == 200
+            lines = resp.aiter_lines()
+            await _read_until(lines, "ping")  # 空闲期心跳，不断流
+
+            # 另一端发消息 → 新回合注册（这里直接注册一个替身 run）。
+            sink = EventSink()
+            task = asyncio.create_task(_never())
+            turn_runs.register(conversation_id=conv, task=task, sink=sink)
+            await _read_until(lines, "attach-caught-up")
+            sink.emit(content_delta("NEXT_TURN"))
+            await _read_until(lines, "NEXT_TURN")
+    finally:
+        if task is not None:
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        await asyncio.sleep(0)
 
 
 async def test_attach_rejects_non_owner(client, new_client):

@@ -1,10 +1,12 @@
+import { notifyError, notifyInfo } from "@/lib/toast";
 import { ApiError } from "@/services/api";
 import { resolveInteraction } from "@/services/interaction";
 import type { ResolveInteractionBody } from "@/services/interaction";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
-import { runResume } from "@/services/turns";
+import { isPausedFrameGone, runResume } from "@/services/turns";
 import { useComposerDraftStore } from "@/stores/composer";
+import { useConversationStore } from "@/stores/conversation";
 import {
   INTERACTION_SUBMIT_PATH,
   useInteractionStore,
@@ -74,11 +76,35 @@ export function isPendingInteractionsAwaitingError(err: unknown): boolean {
 export const PENDING_INTERACTIONS_HINT =
   "有待拍板的确认卡，先处理或停止当前任务";
 
+export type SubmitInteractionResult =
+  | "ok"
+  | "orphaned"
+  | "busy"
+  | "already_settled";
+
 /** User-visible copy when submitInteraction returns a non-ok status. */
 export function submitInteractionFeedback(
-  result: Exclude<Awaited<ReturnType<typeof submitInteraction>>, "ok">,
+  result: Exclude<SubmitInteractionResult, "ok">,
 ): string {
-  return result === "orphaned" ? "确认已失效" : "请稍候再试";
+  if (result === "orphaned") return "确认已失效";
+  // 谁处理的说不了（回执不带处理方），只如实说清「这张卡结了、AI 在往下走」。
+  if (result === "already_settled") return "这张卡已经处理过了，AI 已继续";
+  return "请稍候再试";
+}
+
+/**
+ * 提交没走成时的提示。`already_settled` 不是错——多端同权下卡被先到的那端结掉是常态，
+ * 报成红色失败会让用户以为出了故障。
+ */
+export function notifySubmitInteractionResult(
+  result: Exclude<SubmitInteractionResult, "ok">,
+): void {
+  const copy = submitInteractionFeedback(result);
+  if (result === "already_settled") {
+    notifyInfo(copy);
+    return;
+  }
+  notifyError(copy);
 }
 
 export type HotSubmitBody = ResolveInteractionBody;
@@ -102,6 +128,10 @@ export interface ColdSubmitArgs {
  * pausedTurns remains recovery/`setForConversation` routing shell + origin
  * fallback — do not require a pausedTurns frame to submit when IX has the entry.
  * Dedup = caller local submitting + Interaction beginSubmit when tracked.
+ *
+ * 「已经结了」的回执（`already_processed` / 404）→ `already_settled`：卡收起来不再可点
+ * （多端同权下另一端可能早就点掉了，放回可点只会一点再点、次次 404），但**不认领**结果与
+ * 处理方——回执证不了人（升级卡的 404 也可能是主管接管仲裁），归属只认线材帧。
  */
 export async function submitInteraction(args: {
   id: string;
@@ -111,7 +141,7 @@ export async function submitInteraction(args: {
   cold?: ColdSubmitArgs;
   /** question_posted: text to drop into the composer. */
   composeText?: string;
-}): Promise<"ok" | "orphaned" | "busy"> {
+}): Promise<SubmitInteractionResult> {
   const path = INTERACTION_SUBMIT_PATH[args.kind];
   const store = useInteractionStore.getState();
 
@@ -133,12 +163,20 @@ export async function submitInteraction(args: {
         store.reopen(args.id);
         throw new Error("缺少热路提交体");
       }
-      await resolveInteraction(
+      const receipt = await resolveInteraction(
         args.conversationId,
         args.id,
         args.hotBody,
         store.get(args.id)?.origin === "sidecar" ? "sidecar" : "cloud",
       );
+      if (receipt === "already_processed") {
+        store.markSettledByReceipt({
+          kind: args.kind,
+          id: args.id,
+          conversationId: args.conversationId,
+        });
+        return "already_settled";
+      }
       // Optimistic resolved; matching *_resolved SSE is idempotent.
       // Keep hotBody as resolution so grant_delegation / decision UI can read it
       // before the resolved SSE arrives.
@@ -153,10 +191,15 @@ export async function submitInteraction(args: {
         store.markOrphaned(args.id);
         return "orphaned";
       }
-      // Legacy 404 on hot path: treat as orphaned (假卡) rather than silent remove.
+      // 404 = 服务端已经没有这张待办了。它多半是被先到的那端结掉的（多端同权），说成
+      // 「卡失效了」既不准也误导；收起来、如实说结了，谁结的等线材帧。
       if (err instanceof ApiError && err.status === 404) {
-        store.markOrphaned(args.id);
-        return "orphaned";
+        store.markSettledByReceipt({
+          kind: args.kind,
+          id: args.id,
+          conversationId: args.conversationId,
+        });
+        return "already_settled";
       }
       store.reopen(args.id);
       throw err;
@@ -218,6 +261,18 @@ export async function submitInteraction(args: {
     if (isInteractionOrphanedError(err)) {
       store.markOrphaned(args.id);
       return "orphaned";
+    }
+    // 挂起帧已经不在了（另一端先续跑了 / 本机帧已结）。放回可点等于请用户一点再点、次次
+    // 404，所以这里收口：卡收起来，只说「结了」。runResume 已经为这次失败挂了错误横幅——
+    // 那条被这句更贴切的收口取代，别让一次正常的多端抢先看着像故障。
+    if (isPausedFrameGone(err)) {
+      store.markSettledByReceipt({
+        kind: args.kind,
+        id: args.id,
+        conversationId: args.conversationId,
+      });
+      useConversationStore.getState().clearError(args.conversationId);
+      return "already_settled";
     }
     if (tracked) store.reopen(args.id);
     throw err;

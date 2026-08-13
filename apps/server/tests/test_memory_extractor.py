@@ -154,26 +154,26 @@ def test_parse_project_constraint_routes_to_folder():
     assert ops[0].section == "项目约束"
 
 
-def test_parse_project_scope_resolves_to_folder_id():
+def test_parse_folder_scope_resolves_to_folder_id():
     raw = (
-        '{"ops": [{"action": "add", "scope": "project", "section": "技术栈与工具",'
-        ' "content": "本项目用 Rust"}]}'
+        '{"ops": [{"action": "add", "scope": "folder", "section": "技术栈与工具",'
+        ' "content": "本文件夹用 Rust"}]}'
     )
     ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].scope == "F1"
 
 
-def test_parse_project_scope_without_project_falls_back_to_global():
-    # "project" with no current project (bare chat) degrades to global, not dropped.
-    raw = '{"ops": [{"action": "add", "scope": "project", "section": "关于用户的事实", "content": "x"}]}'
+def test_parse_folder_scope_without_folder_falls_back_to_global():
+    # "folder" with no current folder (bare chat) degrades to global, not dropped.
+    raw = '{"ops": [{"action": "add", "scope": "folder", "section": "关于用户的事实", "content": "x"}]}'
     ops = parse_memory_ops(raw, folder_id=None)
     assert ops[0].scope is None
 
 
-def test_parse_preferences_are_always_global_even_in_project():
-    # Preferences are universal (decision §六.2): a project scope token is ignored for 偏好.md.
+def test_parse_preferences_are_always_global_even_in_folder():
+    # Preferences are universal (decision §六.2): a folder scope token is ignored for 偏好.md.
     raw = (
-        '{"ops": [{"action": "add", "scope": "project", "section": "工作习惯",'
+        '{"ops": [{"action": "add", "scope": "folder", "section": "工作习惯",'
         ' "content": "小步快跑"}]}'
     )
     ops = parse_memory_ops(raw, folder_id="F1")
@@ -181,10 +181,10 @@ def test_parse_preferences_are_always_global_even_in_project():
     assert ops[0].scope is None
 
 
-def test_parse_topic_op_can_be_project_scoped():
+def test_parse_topic_op_can_be_folder_scoped():
     raw = (
-        '{"ops": [{"action": "add", "scope": "project", "file": "主题/部署.md",'
-        ' "content": "本项目部署走 X"}]}'
+        '{"ops": [{"action": "add", "scope": "folder", "file": "主题/部署.md",'
+        ' "content": "本文件夹部署走 X"}]}'
     )
     ops = parse_memory_ops(raw, folder_id="F1")
     assert ops[0].file == "主题/部署.md"
@@ -240,7 +240,7 @@ def test_extract_prompt_documents_files_and_scope_routing():
     assert "偏好.md" in _EXTRACT_SYSTEM_PROMPT
     assert "画像.md" in _EXTRACT_SYSTEM_PROMPT
     assert "scope" in _EXTRACT_SYSTEM_PROMPT
-    assert '"project"' in _EXTRACT_SYSTEM_PROMPT
+    assert '"folder"' in _EXTRACT_SYSTEM_PROMPT
 
 
 # --- LLMMemoryExtractor (async, with a fake provider) ---
@@ -298,7 +298,7 @@ async def test_extractor_prompt_includes_current_profile_and_convo():
     assert "新的需求" in user_prompt
 
 
-async def test_extractor_prompt_includes_preferences_and_project_layer():
+async def test_extractor_prompt_includes_preferences_and_folder_layer():
     provider = _FakeProvider('{"ops": []}')
     extractor = LLMMemoryExtractor(provider)
     await extractor.extract(
@@ -307,16 +307,16 @@ async def test_extractor_prompt_includes_preferences_and_project_layer():
             current_profile="## 技术栈与工具\n- 用 Python",
             current_preferences="## 沟通偏好\n- 用中文",
             folder_id="F1",
-            current_project_memory="## 关于用户的事实\n- 本项目客户是 X",
+            current_folder_memory="## 关于用户的事实\n- 本文件夹客户是 X",
             messages=[{"role": "user", "content": "hi"}],
-            project_topic_files=["部署"],
+            folder_topic_files=["部署"],
         )
     )
     p = provider.requests[0].messages[-1].content
     assert "用中文" in p  # global preferences rendered
     assert "用 Python" in p  # global profile rendered
-    assert "本项目客户是 X" in p  # project profile rendered
-    assert "部署" in p  # project topic listed
+    assert "本文件夹客户是 X" in p  # folder profile rendered
+    assert "部署" in p  # folder topic listed
 
 
 async def test_extractor_malformed_output_yields_no_ops():

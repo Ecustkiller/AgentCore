@@ -276,6 +276,13 @@ export interface RunEscalation {
   ownershipPaths?: string[];
   /** 当前写权持有者 run_id（wire `lock_owner_run_id`）。 */
   lockOwnerRunId?: string;
+  /**
+   * 这次挂起真实拿到的墙钟上限（秒，wire `timeout_seconds`）——只有运维配了
+   * `checkpoint_timeout_seconds` 才有值。缺省 = 默认部署的无限期等待：不答就一直挂着，
+   * 所以卡面**不得**无条件写「未答则按假设继续」（见 escalationWaitCopy）。
+   * Desktop-local — 不进 conformance ProjectedTurn（与 browserLogin 同类）。
+   */
+  timeoutSeconds?: number;
 }
 
 /** 团队便签墙 (§2.2 通): one note a worker broadcast to its CONCURRENT siblings via `post_note`

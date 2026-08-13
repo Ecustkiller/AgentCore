@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from agentcore.docs_export.layout import LAYOUT_STANDARD, DocLayout
 from agentcore.docs_export.md_to_docx import (
     collect_image_srcs,
     convert_markdown_to_docx,
@@ -65,8 +66,13 @@ async def _read_markdown(backend: WorkspaceBackend, rel: str) -> str:
 async def export_markdown_path(
     backend: WorkspaceBackend,
     md_path: str,
+    *,
+    layout: DocLayout = LAYOUT_STANDARD,
 ) -> ExportMarkdownResult:
-    """Read ``md_path``, convert, write sibling ``.docx``. Raises ``ExportMarkdownError``."""
+    """Read ``md_path``, convert, write sibling ``.docx``. Raises ``ExportMarkdownError``.
+
+    ``layout`` 默认 ``standard``——桌面「导出 Word」HTTP 路径不传，行为保持现状。
+    """
     rel = _normalize_md_path(md_path)
     markdown = await _read_markdown(backend, rel)
 
@@ -86,7 +92,7 @@ async def export_markdown_path(
         except WorkspaceError:
             image_bytes[src] = None
 
-    result = convert_markdown_to_docx(markdown, images=image_bytes)
+    result = convert_markdown_to_docx(markdown, images=image_bytes, layout=layout)
     out_path = docx_path_for_markdown(rel)
     try:
         written = await backend.write_bytes(out_path, result.docx_bytes)
@@ -106,12 +112,17 @@ async def export_markdown_path(
 async def export_markdown_to_pdf_path(
     backend: WorkspaceBackend,
     md_path: str,
+    *,
+    layout: DocLayout = LAYOUT_STANDARD,
 ) -> ExportMarkdownResult:
-    """Read ``md_path``, convert, write sibling ``.pdf``. Raises ``ExportMarkdownError``."""
+    """Read ``md_path``, convert, write sibling ``.pdf``. Raises ``ExportMarkdownError``.
+
+    ``layout`` 默认 ``standard``——桌面「导出 PDF」HTTP 路径不传，行为保持现状。
+    """
     rel = _normalize_md_path(md_path)
     markdown = await _read_markdown(backend, rel)
 
-    result = convert_markdown_to_pdf(markdown)
+    result = convert_markdown_to_pdf(markdown, layout=layout)
     out_path = pdf_path_for_markdown(rel)
     try:
         written = await backend.write_bytes(out_path, result.pdf_bytes)

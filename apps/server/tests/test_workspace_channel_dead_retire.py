@@ -172,6 +172,43 @@ def test_apply_retire_from_backend_channel_is_dead():
     assert controller._workspace_channel_dead is True  # noqa: SLF001
 
 
+def test_backend_write_tools_retire_with_the_file_family():
+    """Backend-bound export / land-bytes / read-bytes tools retire with the family.
+
+    Left on the surface they fail on every call (``download_url`` even burns its
+    network fetch first; ``read_image`` reads the image bytes before any vision
+    call), which is exactly the thrash the family retire prevents.
+    """
+    clear_active_coordination()
+    backend = _dead_local_backend()
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="s",
+        agent_id="a",
+        backend=backend,
+        user_id="u",
+        workspace_channel=backend._channel,
+    )
+    disabled: set[str] = set()
+    assert (
+        apply_workspace_channel_dead_retire(
+            disabled_tools=disabled,
+            controller=create_loop_controller(frozenset()),
+            tool_context=ctx,
+        )
+        is True
+    )
+    for name in (
+        "md_to_docx",
+        "md_to_pdf",
+        "archive_extract",
+        "download_url",
+        "read_image",
+    ):
+        assert name in WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS
+        assert name in disabled
+
+
 def test_single_op_timeout_does_not_seed_disabled_family():
     """channel_op (non-sticky) must not latch session or seed the retire family."""
     clear_active_coordination()
@@ -244,6 +281,7 @@ async def test_sibling_worker_seeds_disabled_from_session_channel_dead():
             turn_model="m",
             run_id="sibling-worker",
             role="worker",
+            approval_gate=None,
         )
         assert provider.offered
         offered = provider.offered[0]
@@ -298,6 +336,7 @@ async def test_react_loop_round_poll_channel_is_dead_strips_file_family():
         run_id="poll-worker",
         role="worker",
         on_round_begin=_mark_dead_after_round0,
+        approval_gate=None,
     )
     assert len(provider.offered) >= 2
     assert "file_list" in provider.offered[0]

@@ -6,7 +6,7 @@ After the prompt is fixed, this pass resets the watermark for affected users so
 the periodic sweeper re-runs consolidation over their existing chats.
 
 Safety: only users whose global 偏好+画像 are empty AND who hold no other memory
-notes (topics / project layers) are touched. Memory is product-always-on (定案 A),
+notes (topics / folder layers) are touched. Memory is product-always-on (定案 A),
 so the scan is not filtered by ``users.memory_enabled``. Idempotent — a second run
 finds watermarks already NULL and makes no changes.
 """

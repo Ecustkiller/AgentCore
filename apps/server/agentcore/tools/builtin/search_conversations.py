@@ -65,7 +65,7 @@ def _format_search_output(
     lines.append("")
     for row in rows:
         folder_bit = (
-            f" · 项目「{row['folder_name']}」"
+            f" · 文件夹「{row['folder_name']}」"
             if row.get("folder_name")
             else (" · 裸聊" if not row.get("folder_id") else "")
         )
@@ -182,7 +182,7 @@ class SearchConversationsTool:
         manual_wire=True,
     )
 
-    # Host conversation's project (None = bare chat). Used when scope=project.
+    # Host conversation's folder (None = bare chat). Used when scope=folder.
     folder_id: str | None = None
 
     def __init__(self, *, folder_id: str | None = None) -> None:
@@ -207,15 +207,15 @@ class SearchConversationsTool:
                     },
                     "scope": {
                         "type": "string",
-                        "enum": ["all", "project", "global_chats"],
+                        "enum": ["all", "folder", "global_chats"],
                         "description": (
-                            "all=全账号（默认）；project=宿主对话所在项目；"
-                            "global_chats=仅裸聊（无项目）。"
+                            "all=全账号（默认）；folder=宿主对话所在文件夹；"
+                            "global_chats=仅裸聊（无文件夹）。"
                         ),
                     },
                     "folder_id": {
                         "type": "string",
-                        "description": "可选；指定其它项目 id（须属同一用户）。",
+                        "description": "可选；指定其它文件夹 id（须属同一用户）。",
                     },
                     "include_archived": {
                         "type": "boolean",
@@ -244,11 +244,11 @@ class SearchConversationsTool:
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         query = str(arguments.get("query") or "").strip()
         scope = str(arguments.get("scope") or "all").strip() or "all"
-        if scope not in {"all", "project", "global_chats"}:
+        if scope not in {"all", "folder", "global_chats"}:
             return ToolResult(
                 tool_call_id="",
                 success=False,
-                output="scope 须为 all / project / global_chats。",
+                output="scope 须为 all / folder / global_chats。",
                 error="invalid scope",
             )
         include_archived = bool(arguments.get("include_archived") or False)
@@ -281,10 +281,10 @@ class SearchConversationsTool:
         soft_note: str | None = None
         if explicit_folder:
             folder_id = explicit_folder
-        elif scope == "project":
+        elif scope == "folder":
             if not self.folder_id:
                 soft_note = (
-                    "当前是裸聊（无项目）；已按 all 范围检索。"
+                    "当前是裸聊（无文件夹）；已按 all 范围检索。"
                     "请改用 scope=all 或 global_chats。"
                 )
             else:

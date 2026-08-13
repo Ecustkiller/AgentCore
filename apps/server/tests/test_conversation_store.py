@@ -22,6 +22,7 @@ from agentcore.conversation.store.merge import (
     status_rank,
     visible_failed_assistant_content,
 )
+from agentcore.folders.placement import FolderPlacement
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.ports import ConversationStore
 
@@ -716,6 +717,11 @@ async def test_finalize_cloud_auto_snapshot_passes_folder_id(monkeypatch):
     monkeypatch.setattr(CloudStore, "clear_stream_segments", AsyncMock(return_value=None))
     monkeypatch.setattr(settings, "workspace_snapshot_enabled", True)
     monkeypatch.setattr(cloud_mod, "create_snapshot", _fake_create_snapshot)
+    monkeypatch.setattr(
+        cloud_mod,
+        "resolve_folder_placement",
+        AsyncMock(return_value=FolderPlacement(folder_id="folder-42", rel_path="项目")),
+    )
 
     await CloudStore().finalize(
         mode="cloud",

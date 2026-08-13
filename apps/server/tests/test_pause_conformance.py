@@ -186,6 +186,7 @@ async def test_pause_journal_projects_to_captain_transcript():
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -301,6 +302,7 @@ async def test_pause_journal_after_completed_tool_round():
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)
@@ -388,6 +390,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript(monkeypa
         suspension_deleter=deleter,
         captain_run_id="cap",
         folder_id=_TEST_BIRTH_FOLDER_ID,
+        approval_gate=None,
     )
     reg = ToolRegistry()
     reg.register(delegate)
@@ -443,6 +446,7 @@ async def test_plan_review_pause_journal_projects_to_captain_transcript(monkeypa
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)

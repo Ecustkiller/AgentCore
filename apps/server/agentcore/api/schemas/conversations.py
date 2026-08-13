@@ -174,6 +174,9 @@ class CreateFolderRequest(BaseModel):
     # Required when ``mode=local``; forbidden when ``mode=cloud``.
     local_root_id: str | None = Field(None, max_length=200)
     local_subpath: str | None = Field(None, max_length=400)
+    # Nest the new folder inside this one (omit / null = top level). Resolved to a
+    # ``rel_path`` prefix server-side; there is no ``parent_id`` column.
+    parent_id: str | None = None
 
     @model_validator(mode="after")
     def _validate_mode_binding(self) -> "CreateFolderRequest":
@@ -189,9 +192,16 @@ class CreateFolderRequest(BaseModel):
 
 
 class UpdateFolderRequest(BaseModel):
-    """Rename only — project workspace binding is immutable after create."""
+    """Rename and/or re-parent — the local-mode binding stays immutable.
+
+    ``parent_id`` is a *request* field, not storage: the server turns it into a
+    ``rel_path`` prefix, which is the single source of truth for nesting
+    (双模式工作区 §5.4). Omit it to leave the folder where it is; send ``null`` to
+    move it to the top level.
+    """
 
     name: str | None = None
+    parent_id: str | None = None
 
 
 class FolderSummary(BaseModel):
@@ -200,6 +210,15 @@ class FolderSummary(BaseModel):
     mode: Literal["local", "cloud"]
     local_root_id: str | None = None
     local_subpath: str | None = None
+    # Where the folder sits in the user-visible cloud tree, POSIX and relative to
+    # the tree root (``设计/图标`` = 图标 nested in 设计). ``id`` remains the handle
+    # every reference uses; this is the display / navigation coordinate and it
+    # changes on rename or move.
+    rel_path: str | None = None
+    # Convenience projection of ``rel_path``'s prefix so clients can build the tree
+    # without parsing paths. Derived, never stored — there is no ``parent_id``
+    # column to drift out of sync with the path.
+    parent_rel_path: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -207,6 +226,41 @@ class FolderSummary(BaseModel):
 
     @classmethod
     def from_folder(cls, folder) -> "FolderSummary":
+        from agentcore.workspace.cloud_tree import parent_rel_path
+
+        rel_path = folder.rel_path or None
+        return cls(
+            id=folder.id,
+            name=folder.name,
+            mode="local" if folder.local_root_id else "cloud",
+            local_root_id=folder.local_root_id,
+            local_subpath=folder.local_subpath,
+            rel_path=rel_path,
+            parent_rel_path=(parent_rel_path(rel_path) or None) if rel_path else None,
+            created_at=folder.created_at,
+            updated_at=folder.updated_at,
+        )
+
+
+class DeletedFolderSummary(BaseModel):
+    """One recoverable folder in「最近删除」."""
+
+    id: str
+    name: str
+    mode: Literal["local", "cloud"]
+    local_root_id: str | None = None
+    local_subpath: str | None = None
+    created_at: datetime
+    deleted_at: datetime
+    # When the retention sweeper is entitled to purge this project for good. The server
+    # owns the arithmetic so a client never re-derives「还剩几天」from ``deleted_at`` and
+    # a hard-coded window; the sweep runs on a 6-hour cadence, so treat this as the
+    # earliest possible purge, not a promise.
+    purge_at: datetime
+
+    @classmethod
+    def from_folder(cls, folder, *, purge_at: datetime) -> "DeletedFolderSummary":
+        assert folder.deleted_at is not None  # repo only returns soft-deleted rows
         return cls(
             id=folder.id,
             name=folder.name,
@@ -214,8 +268,23 @@ class FolderSummary(BaseModel):
             local_root_id=folder.local_root_id,
             local_subpath=folder.local_subpath,
             created_at=folder.created_at,
-            updated_at=folder.updated_at,
+            deleted_at=folder.deleted_at,
+            purge_at=purge_at,
         )
+
+
+class DeletedFolderListResponse(BaseModel):
+    """Recoverable projects, most recently deleted first.
+
+    Only projects the user deleted appear — machine reclaims (a race loser's auto
+    cloud desk) and projects soft-deleted before the recycle bin existed are omitted,
+    as are projects already past retention (they are no longer restorable).
+    ``retention_days`` mirrors ``workspace_retention_days``.
+    """
+
+    data: list[DeletedFolderSummary]
+    total: int
+    retention_days: int
 
 
 class FolderGroup(BaseModel):

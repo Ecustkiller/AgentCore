@@ -58,6 +58,7 @@ from agentcore.db.repositories.shared_spaces import SharedSpaceRepository
 from agentcore.messaging import MessagingService
 from agentcore.messaging.hub import HubChatEventPublisher, default_chat_hub
 from agentcore.security.tokens import (
+    TokenAudience,
     decode_access_token_claims,
     decode_access_token_family,
     decode_access_token_mfa_verified,
@@ -97,6 +98,22 @@ def _is_auth_path(path: str) -> bool:
 
 def _is_admin_path(path: str) -> bool:
     return path.startswith(_ADMIN_PREFIX)
+
+
+def session_audience(request: Request) -> TokenAudience:
+    """The audience of the caller's current access token.
+
+    Reads the claim ``get_current_user`` stashed on ``request.state`` (already
+    validated to be one of the two audiences). Routes that re-mint a token pair for
+    the *same* session must carry this over rather than defaulting, or the successor
+    session fails ``_enforce_audience_bounds`` on the next ``/v1/admin/*`` call.
+    """
+    return "admin" if getattr(request.state, "token_aud", None) == "admin" else "product"
+
+
+def session_mfa_verified(request: Request) -> bool:
+    """Whether the caller's access token carries the admin-MFA proof (claim ``mfa``)."""
+    return getattr(request.state, "mfa_verified", False) is True
 
 
 def _enforce_audience_bounds(request: Request, user: User, aud: str) -> None:
@@ -385,12 +402,16 @@ async def get_folders_api_user(
     authorization: Annotated[str | None, Header()] = None,
     user_repo: UserRepository = Depends(get_user_repo),
 ) -> User:
-    """Resolve the user for account folders read/write (list/create/get-by-id).
+    """Resolve the user for account folders read/write (list/create/get-by-id/soft-delete).
 
     Accepts either a normal product access session (cookie or Bearer access JWT)
     **or** a folders narrow ticket (``Authorization: Bearer`` with ``type=folders``).
     Inference tokens are refused (wrong type on both decoders). Sidecar must never
     receive an access token — it uses the folders ticket only.
+
+    Soft-delete is in scope so the sidecar CEO's ``delete_folder`` shares one path
+    with the sidebar. The irreversible ``DELETE /{id}/permanent`` deliberately stays
+    on ``AuthUser`` — never reachable with a folders ticket.
     """
     bearer = _bearer_token(authorization)
     if bearer:

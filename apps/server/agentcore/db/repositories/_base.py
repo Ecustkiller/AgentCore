@@ -27,6 +27,12 @@ from sqlalchemy.sql.elements import ColumnElement
 # None (which clears a nullable column).
 _UNSET: object = object()
 
+# Infrastructure conversations that never belong in a user-facing list: ``handoff``
+# hosts a local→云 job run (双模式 P2e/e2), ``standing`` hosts a 站立任务 pin. Every
+# user-scoped read filters them out; so must every user-triggered bulk write, or a
+# project delete would archive rows the user can neither see nor un-archive.
+HIDDEN_CONVERSATION_MODES: tuple[str, ...] = ("handoff", "standing")
+
 
 async def commit_or_flush(session: AsyncSession, *, commit: bool) -> None:
     """Commit (default single-op) or flush (composite unit-of-work step).

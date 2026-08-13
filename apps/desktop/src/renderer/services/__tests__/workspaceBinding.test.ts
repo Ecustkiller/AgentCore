@@ -8,6 +8,7 @@ import {
   type WorkspaceBinding,
   bindLocalWorkspace,
   getWorkspaceBinding,
+  invalidateWorkspaceBinding,
   isBoundRootMissing,
   unbindWorkspace,
 } from "@/services/workspaceBinding";
@@ -28,6 +29,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
+  invalidateWorkspaceBinding();
 });
 afterEach(() => vi.unstubAllGlobals());
 
@@ -84,6 +86,81 @@ describe("workspace binding service", () => {
       rootId: null,
       source: null,
     });
+  });
+});
+
+// Attaching a file asks "cloud or local?" several times in a burst (once on
+// attach, again on send), which used to cost a serial round-trip each before
+// the first byte moved.
+describe("workspace binding cache", () => {
+  const cloud = () =>
+    jsonResponse({ mode: "cloud", scope: "conversation", root_id: null });
+  const local = () =>
+    jsonResponse({ mode: "local", scope: "folder", root_id: "root-1" });
+
+  it("collapses a burst of reads into a single request", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(cloud()));
+
+    const [a, b] = await Promise.all([
+      getWorkspaceBinding("c1"),
+      getWorkspaceBinding("c1"),
+    ]);
+    const c = await getWorkspaceBinding("c1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(a).toEqual(c);
+    expect(b).toEqual(c);
+  });
+
+  it("keeps conversations apart", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(cloud()));
+
+    await getWorkspaceBinding("c1");
+    await getWorkspaceBinding("c2");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("bypasses the cache for an explicit fresh read", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(cloud()));
+
+    await getWorkspaceBinding("c1");
+    await getWorkspaceBinding("c1", { fresh: true });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("takes the new binding from a mutation instead of refetching", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(local()));
+
+    await bindLocalWorkspace("c1", "root-1");
+    const after = await getWorkspaceBinding("c1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(after).toMatchObject({ mode: "local", rootId: "root-1" });
+  });
+
+  it("drops sibling entries on mutation (a foldered bind flips them too)", async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(cloud()));
+    await getWorkspaceBinding("c2");
+
+    fetchMock.mockImplementation(() => Promise.resolve(local()));
+    await bindLocalWorkspace("c1", "root-1");
+
+    expect((await getWorkspaceBinding("c2")).mode).toBe("local");
+  });
+
+  it("does not cache a failed lookup", async () => {
+    fetchMock.mockImplementationOnce(() =>
+      Promise.resolve(new Response("gone", { status: 404 })),
+    );
+    fetchMock.mockImplementation(() => Promise.resolve(cloud()));
+
+    await expect(getWorkspaceBinding("c1")).rejects.toThrow();
+    await expect(getWorkspaceBinding("c1")).resolves.toMatchObject({
+      mode: "cloud",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

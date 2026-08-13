@@ -1,5 +1,13 @@
 """Validate + expand user-workflow definitions into delegate-shaped tasks.
 
+**所有权约定**：``definition`` 是用户的画布内容，客户端整份提交、整份覆盖。服务端
+**只校验不重建**——校验通过就原样落库，不认识的字段照样存下去。前后端各自按「自己知道的
+字段」重建这份 JSON，是 ``deliverable`` 非 form 字段、画布 ``slots``、固化 ``source``
+先后被静默抹掉的同一个根因；:func:`client_owned_definition` 是客户端写路径唯一的闸口。
+
+唯一的例外是服务端权威的键（:data:`SERVER_OWNED_DEFINITION_KEYS`），它们有自己的列，
+客户端送上来的同名键一律丢弃 —— 见 :mod:`agentcore.workflows.source`。
+
 First-period kinds: ``agent_step`` | ``human_gate``.
 ``human_gate`` does not become a worker — it marks every direct predecessor
 ``checkpoint_after=true`` (wave-boundary user review).
@@ -8,19 +16,43 @@ Edge policy (aligns with :func:`tasks_to_workflow_definition` normal form):
 ``human_gate→human_gate`` is rejected; a gate may feed an agent only when it has
 at least one reachable ``agent_step`` ancestor. Expand still walks gate chains
 recursively for through-deps (defense in depth for legacy toxic graphs).
+
+Optional top-level ``slots`` parameterizes the canvas: agent-step ``task`` text may
+carry ``{{key}}`` placeholders that :func:`expand_workflow_to_tasks` fills from the
+caller's overrides, falling back to each slot's ``default`` (see
+:mod:`agentcore.workflows.slots`). No ``slots`` → task text is untouched.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from agentcore.runtime.runs.constants import MAX_DELEGATION_TASKS
+from agentcore.workflows.slots import (
+    fill_placeholders,
+    resolve_slot_values,
+    slot_definition_errors,
+    slots_from_definition,
+)
 
 _ALLOWED_KINDS = frozenset({"agent_step", "human_gate"})
+
+# definition 顶层归服务端所有的键：它们各有自己的列，客户端写不进来。放行的后果不是
+# 「多存一个没用的键」——``source`` 一旦能由客户端指定，手画的工作流就能冒充固化来源。
+SERVER_OWNED_DEFINITION_KEYS = frozenset({"source"})
 
 
 class WorkflowDefinitionError(ValueError):
     """Invalid workflow definition (cycle / empty step / bad edge / over limit)."""
+
+
+def client_owned_definition(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    """客户端提交的画布内容 → 可落库的 definition（浅拷贝，去掉服务端拥有的键）。
+
+    这是**唯一**该出现在客户端写路径上的转换：不挑字段、不补字段，未知字段原样透传。
+    """
+    return {k: v for k, v in (raw or {}).items() if k not in SERVER_OWNED_DEFINITION_KEYS}
 
 
 def validate_workflow_definition(definition: dict[str, Any] | None) -> list[str]:
@@ -46,15 +78,25 @@ def validate_workflow_definition(definition: dict[str, Any] | None) -> list[str]
 
     if by_id:
         errors.extend(_edge_policy_errors(edges, by_id))
+    if isinstance(definition, dict):
+        errors.extend(slot_definition_errors(definition.get("slots")))
     return errors
 
 
-def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]:
+def expand_workflow_to_tasks(
+    definition: dict[str, Any],
+    *,
+    slot_values: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     """Expand a definition into hand-written-delegate-shaped tasks.
 
     Uses structural checks only (not edge-policy bans) so legacy gate chains still
     expand with correct through-deps. Raises :class:`WorkflowDefinitionError`
     when structurally invalid or empty of agent steps.
+
+    ``slot_values`` overrides declared slots for this run; omitted / blank keys fall
+    back to each slot's ``default`` (the original turn's value), so a definition with
+    slots and no overrides expands byte-for-byte to the text it was saved from.
     """
     errors, nodes, edges, ids, by_id = _collect_structure(definition)
     if ids:
@@ -97,6 +139,8 @@ def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]
             for pred in _agent_ancestors_through_gates(src, edges, by_id):
                 agent_deps[dst].append(pred)
 
+    values = resolve_slot_values(slots_from_definition(definition), slot_values)
+
     # Preserve declaration order of agent_steps.
     tasks: list[dict[str, Any]] = []
     for n in nodes:
@@ -109,7 +153,7 @@ def expand_workflow_to_tasks(definition: dict[str, Any]) -> list[dict[str, Any]]
         item: dict[str, Any] = {
             "id": nid,
             "role": str(n.get("role") or "").strip(),
-            "task": str(n.get("task") or "").strip(),
+            "task": fill_placeholders(str(n.get("task") or "").strip(), values),
         }
         if deps:
             item["depends_on"] = deps

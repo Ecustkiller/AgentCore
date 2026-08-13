@@ -21,6 +21,7 @@ from typing import Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.storage._archive import ArchiveLimitError, zip_dir
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
@@ -184,9 +185,11 @@ async def _capture_cloud_baseline(
         return None
     label = f"turn-baseline:{message_id}"
     try:
+        placement = await resolve_folder_placement(folder_id)
         ref = await create_snapshot(
             user_id=user_id,
             folder_id=folder_id,
+            folder_rel_path=placement.rel_path,
             conversation_id=conversation_id,
             label=label,
         )

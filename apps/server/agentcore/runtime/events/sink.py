@@ -1,11 +1,12 @@
-"""EventSink — async queue bridging execution and SSE delivery."""
+"""EventSink — fan-out bridge between one running turn and its N live观察端."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import copy
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
@@ -173,8 +174,127 @@ def synthesize_required_marker(
     return True
 
 
+@dataclass(slots=True)
+class _Frame:
+    """One fanned-out event plus the emit-side task that backfills its journal ``seq``."""
+
+    event: SSEEvent
+    seq_ready: asyncio.Task[None] | None = None
+
+
+async def _backfill_seq(event: SSEEvent, barrier: asyncio.Future[int | None]) -> None:
+    """Write the allocated journal ``seq`` onto ``event`` once its write lands.
+
+    Emit-side by construction (云对话多端同权 B2 · §6.1): ``seq`` used to ride a second
+    queue that only paired up because ONE consumer dequeued events and barriers in
+    lockstep. With N subscriber queues that invariant is gone —串号 would follow — so
+    the barrier now resolves once per event, into the event object itself, and每个
+    subscriber只是等它落定 (:meth:`SinkSubscription.get`).
+
+    Never raises: a failed / cancelled journal write only means the frame ships without
+    an ``id:`` line, which must not kill anybody's stream.
+    """
+    try:
+        allocated = await barrier
+    except asyncio.CancelledError:
+        return
+    except Exception as e:  # noqa: BLE001 — seq is best-effort transport metadata
+        logger.warning("event_sink.seq_backfill_failed", type=event.type.value, error=str(e))
+        return
+    if allocated is not None:
+        event.seq = allocated
+
+
+# One观察端's live queue is capped here; a端 too slow to drain sheds its OLDEST
+# undelivered frame instead of growing without bound or stalling ``emit``. Sized like
+# the IM firehose (``messaging/hub.py``) — only a genuinely stuck client sheds, and it
+# loses only its own smoothness: correctness is the journal's job (L2), not this queue's.
+_SUBSCRIBER_QUEUE_MAXSIZE = 1000
+
+
+class SinkSubscription:
+    """One live consumer of an :class:`EventSink` — a bounded, drop-oldest queue.
+
+    Every观察端 (POST 发送流 / attach / 对话级订阅) holds its OWN subscription: they are
+    peers, not「primary + 旁路」. Dropping one never touches the others (:meth:`EventSink.
+    unsubscribe`), which is exactly the 断开连坐 bug the single-queue sink had.
+    """
+
+    __slots__ = ("_queue", "dropped", "label")
+
+    def __init__(self, *, label: str) -> None:
+        self.label = label
+        self.dropped = 0
+        self._queue: asyncio.Queue[_Frame | None] = asyncio.Queue(
+            maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
+        )
+
+    def _offer(self, frame: _Frame) -> bool:
+        """Enqueue ``frame``; drop the oldest when full. False → something was shed."""
+        try:
+            self._queue.put_nowait(frame)
+            return True
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(frame)
+            self.dropped += 1
+            return False
+
+    def _close(self) -> None:
+        """End-of-stream sentinel for this consumer (keeps the pending backlog)."""
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(None)
+
+    async def get(self) -> SSEEvent | None:
+        """Next event for this consumer, or ``None`` once the sink closed.
+
+        Waits for the emit-side ``seq`` backfill (shielded, so this consumer's own
+        cancellation never cancels a task其它端 are also waiting on) before handing the
+        event over — the ``id:`` line must carry the journal seq for ``Last-Event-ID``.
+        """
+        frame = await self._queue.get()
+        if frame is None:
+            return None
+        ready = frame.seq_ready
+        if ready is not None and not ready.done():
+            try:
+                await asyncio.shield(ready)
+            except asyncio.CancelledError:
+                # The shared backfill was cancelled (sink closed with the write still in
+                # flight): ship the frame without an ``id:`` rather than tearing down N
+                # streams over transport metadata. Our OWN cancellation still unwinds.
+                if not ready.cancelled():
+                    raise
+        return frame.event
+
+    async def __aiter__(self) -> AsyncIterator[SSEEvent]:
+        while True:
+            event = await self.get()
+            if event is None:
+                return
+            yield event
+
+
 class EventSink:
-    """Async queue bridging execution (producer) and SSE (consumer)."""
+    """Fan-out bridge between one running turn (producer) and its N live观察端.
+
+    Execution emits here; every subscribed端 gets its own bounded queue
+    (:class:`SinkSubscription`), so two devices watching the same turn see the SAME
+    frames instead of瓜分ing them, and one disconnecting never cuts the others. Frames
+    emitted while nobody is subscribed spool in ``_queue`` (the handoff window between
+    sink creation and the first consumer, plus the legacy single-consumer :meth:`get`
+    path the sidecar pump uses).
+
+    Durability is orthogonal: DURABLE facts land in the journal whether or not anybody
+    is listening, so catching up is a replay concern, never a queue concern.
+    """
 
     def __init__(
         self,
@@ -182,13 +302,23 @@ class EventSink:
         conversation_id: str | None = None,
         message_id: str | None = None,
     ) -> None:
-        self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue()
-        self._persist_barriers: asyncio.Queue[asyncio.Future[int | None] | None] = asyncio.Queue()
+        # Live观察端 (peers — no primary). Fan-out order is registration order.
+        self._subscribers: list[SinkSubscription] = []
+        # Spool for frames emitted with nobody subscribed: the handoff window (sink
+        # created → the POST / drain / resume consumer subscribes) and the legacy
+        # single-consumer :meth:`get` path. Bounded + drop-oldest like a subscription.
+        self._queue: asyncio.Queue[SSEEvent | None] = asyncio.Queue(
+            maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
+        )
         self._closed = False
-        self._detached = False
-        # Strong refs for fire-and-forget barrier combiner tasks so the loop does not
-        # destroy them while pending ("Task was destroyed but it is pending").
+        # Observability only: a consumer once dropped off this sink. Paired with an
+        # empty ``_subscribers`` it means "closed after everyone left" — never used to
+        # gate delivery (that would resurrect the sink-wide detach latch we just killed).
+        self._consumer_dropped = False
+        # Strong refs for fire-and-forget barrier combiner / seq-backfill tasks so the
+        # loop does not destroy them while pending ("Task was destroyed but it is pending").
         self._barrier_tasks: set[asyncio.Task[None]] = set()
+        self._seq_tasks: set[asyncio.Task[None]] = set()
         self._history: list[SSEEvent] = []
         self._journal: list[dict[str, Any]] = []
         self._process: list[dict[str, Any]] = []
@@ -220,7 +350,7 @@ class EventSink:
         # payload so settle can stamp turn_end + result.error for reload.
         self._last_error: dict[str, Any] | None = None
         # MESSAGE_END is DERIVED (history-skipped, never journaled). Capture finish_reason
-        # so attach's no-cursor ``take_over`` can synthesize the close frame — same role as
+        # so :meth:`history_snapshot` can synthesize the close frame — same role as
         # ``_turn_end_close_event`` on the journal cursor-replay path (收口窗对齐).
         self._stream_finish_reason: str | None = None
         if conversation_id and message_id:
@@ -270,9 +400,7 @@ class EventSink:
         if self._closed:
             return
         self._record_history(event)
-        if not self._detached:
-            self._queue.put_nowait(event)
-            self._persist_barriers.put_nowait(None)
+        self._deliver(event, None)
         _run_emit_tap(self, event)
 
     def emit_sse_only(self, event: SSEEvent) -> None:
@@ -315,7 +443,17 @@ class EventSink:
 
         task = loop.create_task(_wait())
         self._barrier_tasks.add(task)
-        task.add_done_callback(self._barrier_tasks.discard)
+
+        def _release(done: asyncio.Task[None]) -> None:
+            self._barrier_tasks.discard(done)
+            # Settle here rather than in a ``finally`` inside ``_wait``: :meth:`close`
+            # may cancel this task before it ever ran (emit + close in one tick), and a
+            # never-started coroutine skips its own cleanup. An unsettled ``combined``
+            # hangs every端 waiting for this event's seq — forever.
+            if not combined.done():
+                combined.cancel()
+
+        task.add_done_callback(_release)
         return combined
 
     @property
@@ -325,20 +463,134 @@ class EventSink:
 
     @property
     def is_detached(self) -> bool:
-        """True while no SSE consumer is attached (disconnect / observer drop).
+        """Derived: no端 is currently subscribed.
 
-        Detach is temporary: :meth:`take_over` re-arms the live queue. CLIENT_TOOL
-        ``*_required`` frames no longer ride this sink — they go through the
-        device-level fulfill hub (re-hang on fulfiller connect).
+        Not a latch — there is no sink-wide detach flag any more. One consumer
+        dropping only removes ITS subscription (断开不连坐); this reads True solely
+        when the last one has gone (or none ever arrived).
         """
-        return self._detached
+        return not self._subscribers
+
+    @property
+    def subscriber_count(self) -> int:
+        """How many live观察端 this turn currently has."""
+        return len(self._subscribers)
+
+    def subscribe(self, *, label: str = "sse", backlog: bool = False) -> SinkSubscription:
+        """Register one live consumer and return its own bounded queue.
+
+        ``backlog=True`` hands over the frames emitted before anybody was listening —
+        the handoff window of a sink that is born already streaming (POST 发送 preflight
+        warnings / ``turn_queue_started`` / cold-resume warnings). Attach-style
+        consumers pass ``False`` and catch up through replay instead, otherwise the
+        spool would double-deliver what the replay already carries.
+
+        Subscribing to an already-closed sink yields the sentinel immediately, so a
+        late观察端 replays and stops rather than hanging on a queue nobody feeds.
+        """
+        sub = SinkSubscription(label=label)
+        if backlog:
+            while True:
+                try:
+                    spooled = self._queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if spooled is not None:
+                    sub._offer(_Frame(event=spooled))
+        self._subscribers.append(sub)
+        if self._closed:
+            sub._close()
+        return sub
+
+    def unsubscribe(self, sub: SinkSubscription, *, reason: str = "unspecified") -> None:
+        """Drop ONE consumer (disconnect / page away). Peers keep streaming.
+
+        Observability: logs ``event_sink.detach`` — ``already_detached`` marks an
+        idempotent repeat (this subscription was already gone).
+        """
+        already_detached = sub not in self._subscribers
+        if not already_detached:
+            self._subscribers.remove(sub)
+            self._consumer_dropped = True
+        sub._close()
+        logger.info(
+            "event_sink.detach",
+            reason=reason,
+            conversation_id=self._conversation_id,
+            message_id=self._message_id,
+            already_detached=already_detached,
+        )
+
+    def note_no_consumer(self, *, reason: str) -> None:
+        """Record that this sink was handed off with nobody listening (drain / resume).
+
+        Purely observational — the turn runs detached and its facts still land in the
+        journal, so a later观察端 catches up by replay.
+        """
+        self._consumer_dropped = True
+        logger.info(
+            "event_sink.detach",
+            reason=reason,
+            conversation_id=self._conversation_id,
+            message_id=self._message_id,
+            already_detached=not self._subscribers,
+        )
+
+    def _deliver(self, event: SSEEvent, barrier: asyncio.Future[int | None] | None) -> bool:
+        """Fan ``event`` out to every subscriber (or spool it). True → someone got it.
+
+        The journal ``seq`` is resolved HERE, once per event, before fan-out — see
+        :func:`_backfill_seq` for why that cannot live on the consumer side any more.
+        """
+        ready = self._arm_seq_backfill(event, barrier)
+        subs = tuple(self._subscribers)
+        if not subs:
+            self._spool(event)
+            return False
+        frame = _Frame(event=event, seq_ready=ready)
+        for sub in subs:
+            if not sub._offer(frame):
+                logger.warning(
+                    "event_sink.backpressure_drop",
+                    conversation_id=self._conversation_id,
+                    message_id=self._message_id,
+                    label=sub.label,
+                    type=event.type.value,
+                    dropped=sub.dropped,
+                )
+        return True
+
+    def _arm_seq_backfill(
+        self, event: SSEEvent, barrier: asyncio.Future[int | None] | None
+    ) -> asyncio.Task[None] | None:
+        if barrier is None:
+            return None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        task = loop.create_task(_backfill_seq(event, barrier))
+        self._seq_tasks.add(task)
+        task.add_done_callback(self._seq_tasks.discard)
+        return task
+
+    def _spool(self, event: SSEEvent) -> None:
+        """Buffer a frame nobody is listening to yet (bounded, drop-oldest)."""
+        try:
+            self._queue.put_nowait(event)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(event)
 
     def emit(self, event: SSEEvent) -> bool:
-        """Emit ``event``. Returns True iff it was put on the live SSE queue.
+        """Emit ``event`` to every live观察端. True iff at least one got it.
 
-        Closed / detached sinks skip the live queue (Pillar A may still journal
-        DURABLE facts when closed). ``False`` means *not live-queued* — not
-        "bridge dead". CLIENT_TOOL delivery is independent of this sink.
+        A closed sink skips delivery (Pillar A may still journal DURABLE facts when
+        closed); with nobody subscribed the frame spools instead. ``False`` means *no
+        live consumer* — not "bridge dead". CLIENT_TOOL delivery is independent of
+        this sink.
         """
         if self._closed:
             # Pillar A: DURABLE display facts persist at execution/host journal scope
@@ -361,13 +613,9 @@ class EventSink:
         self._record_history(event)
         if self._checkpointer is not None:
             self._checkpointer.observe(event)
-        live = False
-        if not self._detached:
-            self._queue.put_nowait(event)
-            self._persist_barriers.put_nowait(
-                self._combine_persist_barriers([*process_futures, persist_future])
-            )
-            live = True
+        live = self._deliver(
+            event, self._combine_persist_barriers([*process_futures, persist_future])
+        )
         _run_emit_tap(self, event)
         # G6: reinject after content_reset is fully processed (history + SSE +
         # checkpointer already saw the reset). Display-only path skips process /
@@ -503,34 +751,19 @@ class EventSink:
             return
         self._history.append(SSEEvent(type=t, payload=event.payload, timestamp=event.timestamp))
 
-    def detach(self, *, reason: str = "unspecified") -> None:
-        """Drop the live SSE consumer without closing the sink (reattach via take_over).
+    def history_snapshot(self) -> list[SSEEvent]:
+        """Replay段 for a观察端 that just subscribed (same-process fast path).
 
-        Observability: always logs ``event_sink.detach`` (including idempotent re-detach)
-        so operators can tell disconnect detach from a true :meth:`close`.
+        A pure read: it neither evicts a consumer nor re-arms anything — every端 is one
+        of N peers and catches up on its own (which is why the old ``take_over``, with
+        its「清空积压再武装」exclusivity, is gone).
+
+        Aligned with journal cursor replay: MESSAGE_END is history-skipped, and a turn
+        that finished with nobody attached emitted it into the void — without a synthetic
+        close the client finalizes only via reconnect-banner salvage (bubble stuck
+        streaming).
         """
-        already_detached = self._detached
-        self._detached = True
-        logger.info(
-            "event_sink.detach",
-            reason=reason,
-            conversation_id=self._conversation_id,
-            message_id=self._message_id,
-            already_detached=already_detached,
-        )
-
-    def take_over(self) -> list[SSEEvent]:
-        while True:
-            try:
-                self._queue.get_nowait()
-                with contextlib.suppress(asyncio.QueueEmpty):
-                    self._persist_barriers.get_nowait()
-            except asyncio.QueueEmpty:
-                break
         snapshot = list(self._history)
-        # Align with journal cursor replay: MESSAGE_END is history-skipped, and a
-        # detached turn emits it while nobody is attached — without a synthetic close
-        # the client finalizes only via reconnect-banner salvage (bubble stuck streaming).
         if self._stream_finish_reason is not None:
             snapshot.append(
                 SSEEvent(
@@ -538,11 +771,6 @@ class EventSink:
                     payload={"finish_reason": self._stream_finish_reason},
                 )
             )
-        if self._closed:
-            self._queue.put_nowait(None)
-            self._persist_barriers.put_nowait(None)
-        else:
-            self._detached = False
         return snapshot
 
     def _has_marker(self, kind: str, key: str, value: str) -> bool:
@@ -1071,7 +1299,7 @@ class EventSink:
         (``was_detached`` distinguishes a prior consumer drop from a still-attached close).
         """
         if not self._closed:
-            was_detached = self._detached
+            was_detached = self._consumer_dropped and not self._subscribers
             self._closed = True
             for task in list(self._barrier_tasks):
                 task.cancel()
@@ -1084,8 +1312,9 @@ class EventSink:
                 except RuntimeError:
                     pass
                 self._checkpointer = None
-            self._queue.put_nowait(None)
-            self._persist_barriers.put_nowait(None)
+            for sub in tuple(self._subscribers):
+                sub._close()
+            self._spool_close()
             logger.info(
                 "event_sink.close",
                 reason=reason,
@@ -1094,18 +1323,26 @@ class EventSink:
                 was_detached=was_detached,
             )
 
-    async def get(self) -> SSEEvent | None:
-        event = await self._queue.get()
-        if event is None:
-            return None
-        barrier = await self._persist_barriers.get()
-        if barrier is not None:
-            allocated = await barrier
-            if allocated is not None:
-                event.seq = allocated
-        return event
+    def _spool_close(self) -> None:
+        """End-of-stream sentinel on the spool (legacy single-consumer path)."""
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._queue.get_nowait()
+            with contextlib.suppress(asyncio.QueueFull):
+                self._queue.put_nowait(None)
 
-    async def __aiter__(self):
+    async def get(self) -> SSEEvent | None:
+        """Legacy single-consumer read off the spool (sidecar pump / tests).
+
+        SSE routes take a :meth:`subscribe` handle instead — one bounded queue per端 is
+        what makes two clients see the same frames. This path carries no ``seq`` (the
+        sidecar's JSON-RPC notifications have no ``id:`` line to fill).
+        """
+        return await self._queue.get()
+
+    async def __aiter__(self) -> AsyncIterator[SSEEvent]:
         while True:
             event = await self._queue.get()
             if event is None:

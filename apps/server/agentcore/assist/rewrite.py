@@ -7,6 +7,9 @@
 与对话/记忆共用一套 :class:`LLMProvider` 与 BYOK 凭据解析；``scenario="file.rewrite"``
 （``llm/config.py`` 的 profile）让花费按场景归因。一次性 ``complete`` 调用并带超时——
 交互式编辑里用户在等，超时即报错而非干等（映射为 :class:`LLMTimeoutError`）。
+
+花销按 ``role=assist`` 的账户级台账行入账（无 ``conversation_id`` / ``message_id``）
+→ 见 docs/05-平台与运维/成本配额与计费.md §三。
 """
 
 import asyncio
@@ -16,7 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.billing.gate import preflight_llm_credentials
 from agentcore.core.errors import LLMTimeoutError
+from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.costing import PERSONA_REWRITE, ROLE_ASSIST
 from agentcore.db.models import User
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm import LLMMessage, LLMProvider
@@ -119,7 +124,7 @@ async def _resolve_assist_credentials(
         user=user,
         cost_repo=cost_repo,
         byok_missing_message=(
-            "请先在「设置 · 模型配置」中填入你的 DeepSeek API Key，再使用 AI 改写。"
+            "请先在「设置 · 服务商」中填入你的 DeepSeek API Key，再使用 AI 改写。"
         ),
         model_origin=selection.origin,
         provider_id=selection.provider_id,
@@ -128,7 +133,7 @@ async def _resolve_assist_credentials(
         credentials = platform_llm_credentials(model=selection.model)
         if credentials is None:
             raise PlatformBillingUnavailableError(
-                "平台模型暂不可用，请稍后再试或在「设置 · 模型配置」中接入自己的 API Key。"
+                "平台模型暂不可用，请稍后再试或在「设置 · 服务商」中接入自己的 API Key。"
             )
     return credentials
 
@@ -144,10 +149,18 @@ async def rewrite_selection_for_user(
 
     计费/凭据 preflight（BYOK vs 平台）+ provider 构建都收在 assist 服务里，路由不碰
     ``llm``——这样 ``api`` 只依赖 ``assist`` 服务，符合 api→service→llm 调用链。
+
+    绑 ``user_id``：叶子围栏的逐调用配额闸（``billing.call_quota``）从日志上下文读付费
+    账号，没绑就整条路静默不查（只剩路由那一次 preflight）。改写不属于任何会话，故
+    ``conversation_id`` 无从绑定——台账已放宽为可空，这笔花销按 ``role=assist`` 的
+    **账户级行**落账（进用量页与额度 SUM，不进任何单回合工资单）。
     """
-    credentials = await _resolve_assist_credentials(
-        session=session, user=user, cost_repo=cost_repo
-    )
-    provider = build_provider(credentials)
-    model = resolve_user_model(credentials)
-    return await rewrite_selection(provider, data, model=model)
+    with log_context(
+        user_id=user.user_id, cost_role=ROLE_ASSIST, persona=PERSONA_REWRITE
+    ):
+        credentials = await _resolve_assist_credentials(
+            session=session, user=user, cost_repo=cost_repo
+        )
+        provider = build_provider(credentials)
+        model = resolve_user_model(credentials)
+        return await rewrite_selection(provider, data, model=model)

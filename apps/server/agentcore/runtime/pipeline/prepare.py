@@ -17,10 +17,10 @@ from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.profiles import TurnProfiles
 from agentcore.memory import assemble_turn_rules
 from agentcore.runtime.context import (
-    ProjectCatalogEntry,
+    FolderCatalogEntry,
     build_workspace_context,
     detect_workspace_git,
-    load_project_catalog,
+    load_folder_catalog,
     resolve_channel_profile,
 )
 from agentcore.runtime.costing import RunCost
@@ -74,7 +74,7 @@ class PreparedTurn:
     vision_cost_sink: list[RunCost]
     attachment_context: str
     native_image_parts: list[dict]
-    project_catalog: list[ProjectCatalogEntry]
+    folder_catalog: list[FolderCatalogEntry]
     bound_execution_id: str
     execution_id_token: object
 
@@ -124,12 +124,12 @@ async def prepare_fresh_turn(
             enabled=memory_enabled,
         ),
     )
-    # Derived cross-project roster (跨项目找项目): Folder name + 画像.md first line,
+    # Derived cross-folder roster (跨文件夹找文件夹): Folder path + 画像.md first line,
     # recent-activity ordered with a hard count cap. Outside ``<rules>`` so it never
-    # evicts always memory. Empty when the user has no projects.
-    project_catalog = await _timed_phase(
-        "project_catalog",
-        load_project_catalog(memory_store, user_id),
+    # evicts always memory. Empty when the user has no folders.
+    folder_catalog = await _timed_phase(
+        "folder_catalog",
+        load_folder_catalog(memory_store, user_id),
     )
     # Clean, stable base (base + date + workspace facts + memory): NO attachments,
     # NO CEO hints. This is the cacheable prefix shared by the CEO and reused
@@ -407,7 +407,7 @@ async def prepare_fresh_turn(
         vision_cost_sink=vision_cost_sink,
         attachment_context=attachment_context,
         native_image_parts=native_image_parts,
-        project_catalog=project_catalog,
+        folder_catalog=folder_catalog,
         bound_execution_id=bound_execution_id,
         execution_id_token=execution_id_token,
     )

@@ -5,9 +5,9 @@ from collections.abc import Sequence
 
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
-from agentcore.runtime.context.project_catalog import (
-    ProjectCatalogEntry,
-    render_project_catalog,
+from agentcore.runtime.context.folder_catalog import (
+    FolderCatalogEntry,
+    render_folder_catalog,
 )
 from agentcore.runtime.resolve.profile import (
     FRAGMENT_BASE,
@@ -20,12 +20,15 @@ from agentcore.runtime.resolve.prompt.base import (
     _DEFAULT_SYSTEM_PROMPT,
     _RUNTIME_CONTEXT_TEMPLATE,
 )
-from agentcore.runtime.resolve.prompt.ceo_core import _CEO_CORE_HINT
+from agentcore.runtime.resolve.prompt.ceo_core import (
+    _CEO_CORE_HINT,
+    _PROMOTE_PRODUCT_TOOL_HINT,
+)
 from agentcore.runtime.resolve.prompt.citation import CHAT_CITATION_HINT
 from agentcore.runtime.resolve.prompt.cold_start import (
-    _PROJECT_NAV_STALE_HINT,
-    _PROJECT_PROFILE_EMPTY_SOFT_HINT,
-    _PROJECT_PROFILE_TOOL_HINT,
+    _FOLDER_NAV_STALE_HINT,
+    _FOLDER_PROFILE_EMPTY_SOFT_HINT,
+    _FOLDER_PROFILE_TOOL_HINT,
     _explore_act_block,
 )
 from agentcore.runtime.resolve.prompt.memory_rules import _format_rules
@@ -81,6 +84,9 @@ def assemble_system_prompt(
             SectionOrder.MEMORY,
         )
         .add("attachment_context", extra_context, SectionOrder.ATTACHMENT)
+        # D4 前缀缓存归因: 本层的段会被上层当作一整段收进去, 只有各层都登记, 击穿点才能归到叶段
+        # (如 memory_rules / workspace_facts) 而不是笼统的「CEO 提示变了」。只登记不改装配。
+        .track_sections(scope="shared_base")
         .render()
     )
 
@@ -175,10 +181,10 @@ def compose_ceo_chat_prompt(
     *,
     ceo_tool_names: set[str],
     on_demand_entries: Sequence[ConsultDirectoryEntry] = (),
-    project_catalog: Sequence[ProjectCatalogEntry] = (),
+    folder_catalog: Sequence[FolderCatalogEntry] = (),
     cold_start_explore: bool | str | None = False,
-    project_nav_stale: bool = False,
-    project_profile_empty_soft: bool = False,
+    folder_nav_stale: bool = False,
+    folder_profile_empty_soft: bool = False,
     # Deprecated: skill_registry / memory_topics / on_demand_rules — prefer on_demand_entries.
     skill_registry: object | None = None,
     memory_topics: Sequence[object] = (),
@@ -187,12 +193,14 @@ def compose_ceo_chat_prompt(
     """Compose the CEO chat agent's system prompt from the clean base.
 
     Layers the entry coordinator's hint stack onto the shared base: the SLIM CEO core
-    + unified ``<按需目录>`` (only when ``consult`` is wired) + derived ``<项目清单>`` +
+    + unified ``<按需目录>`` (only when ``consult`` is wired) + derived ``<文件夹清单>`` +
     citation + visualization. ``on_demand_entries`` must match the tool's merged source.
     """
     ceo_core = resolve(FRAGMENT_CEO_CORE, _CEO_CORE_HINT)
-    if "update_project_profile" in ceo_tool_names:
-        ceo_core = f"{ceo_core.rstrip()}\n{_PROJECT_PROFILE_TOOL_HINT.strip()}\n"
+    if "update_folder_profile" in ceo_tool_names:
+        ceo_core = f"{ceo_core.rstrip()}\n{_FOLDER_PROFILE_TOOL_HINT.strip()}\n"
+    if "promote_product" in ceo_tool_names:
+        ceo_core = f"{ceo_core.rstrip()}\n{_PROMOTE_PRODUCT_TOOL_HINT.strip()}\n"
     reason: str | None
     if cold_start_explore is True:
         reason = "empty"
@@ -202,13 +210,13 @@ def compose_ceo_chat_prompt(
         reason = None
     explore_block = _explore_act_block(reason)
     empty_soft_block = (
-        _PROJECT_PROFILE_EMPTY_SOFT_HINT.strip()
-        if project_profile_empty_soft and not explore_block
+        _FOLDER_PROFILE_EMPTY_SOFT_HINT.strip()
+        if folder_profile_empty_soft and not explore_block
         else ""
     )
     stale_block = (
-        _PROJECT_NAV_STALE_HINT.strip()
-        if project_nav_stale and not explore_block
+        _FOLDER_NAV_STALE_HINT.strip()
+        if folder_nav_stale and not explore_block
         else ""
     )
     if on_demand_entries:
@@ -237,13 +245,13 @@ def compose_ceo_chat_prompt(
         .add("ceo_base", base_prompt, SectionOrder.BASE)
         .add("ceo_core", ceo_core, SectionOrder.CEO_CORE)
         .add("cold_start_explore", explore_block, SectionOrder.CEO_CORE)
-        .add("project_profile_empty_soft", empty_soft_block, SectionOrder.CEO_CORE)
-        .add("project_nav_stale", stale_block, SectionOrder.CEO_CORE)
+        .add("folder_profile_empty_soft", empty_soft_block, SectionOrder.CEO_CORE)
+        .add("folder_nav_stale", stale_block, SectionOrder.CEO_CORE)
         .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
         .add(
-            "project_catalog",
-            render_project_catalog(project_catalog),
-            SectionOrder.PROJECT_CATALOG,
+            "folder_catalog",
+            render_folder_catalog(folder_catalog),
+            SectionOrder.FOLDER_CATALOG,
         )
         .add("citation", resolve(FRAGMENT_CITATION, CHAT_CITATION_HINT), SectionOrder.CITATION)
         .add(
@@ -251,6 +259,9 @@ def compose_ceo_chat_prompt(
             resolve(FRAGMENT_CEO_VISUALIZATION, _CEO_VISUALIZATION_HINT),
             SectionOrder.CEO_VISUALIZATION,
         )
+        # D4: 见 assemble_system_prompt —— 本层带来 folder_catalog（项目清单，按最近活跃排序、
+        # 却落在稳定前缀中段），正是要能被单独指认的击穿嫌疑段。
+        .track_sections(scope="ceo_chat")
         .render()
     )
 

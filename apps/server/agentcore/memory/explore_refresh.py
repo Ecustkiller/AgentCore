@@ -5,9 +5,8 @@ schedules a **silent** per-folder refresh: workspace snapshot → memory-tier LL
 merge-write 导航/画像 (optional topics) → update fingerprint + clear dirty.
 
 Never blocks the user turn. Never runs CEO+delegate+team_preview.
-``文档/项目/`` is out of scope here (D1: explore-pending workers use
-``write_scope=explore_memory``, which still bans thick project dossiers;
-this bypass does not go through worker write tools either).
+Thick folder dossiers are on-demand ``主题/`` entries; this bypass only
+merge-writes the short entry, so it never grows one.
 """
 
 from __future__ import annotations
@@ -26,12 +25,12 @@ from agentcore.memory.explore_profile import (
     _KEY_MANIFEST_CANDIDATES,
     MAX_EXPLORE_TOPICS,
     filter_topics_by_scope_cap,
-    load_project_profile,
+    load_folder_profile,
     parse_explore_topics,
     record_explore_closeout,
-    write_project_navigation,
-    write_project_profile_cas,
-    write_project_topics_replace,
+    write_folder_navigation,
+    write_folder_profile_cas,
+    write_folder_topics_replace,
 )
 from agentcore.memory.store import (
     NAVIGATION_MEMORY_FILE,
@@ -52,21 +51,21 @@ _REFRESH_TIMEOUT_SECONDS = 45.0
 _JSON_OBJECT_RE = re.compile(r"\{[\s\S]*\}")
 
 _REFRESH_SYSTEM = """\
-You refresh a project's short memory entry after its workspace structure drifted.
+You refresh a folder's short memory entry after its workspace structure drifted.
 You receive a workspace snapshot (top-level tree + key manifest excerpts) plus the
-CURRENT project 画像.md and 导航.md. Merge-update them so the short entry stays
-accurate — do NOT invent long encyclopedic docs; do NOT write AgentCore/文档/项目/.
+CURRENT folder 画像.md and 导航.md. Merge-update them so the short entry stays
+accurate — do NOT invent long encyclopedic docs.
 
 Output ONLY a JSON object:
 {
-  "profile": "<FULL project 画像.md markdown to merge, or null if unchanged>",
+  "profile": "<FULL folder 画像.md markdown to merge, or null if unchanged>",
   "navigation": "<FULL 导航.md short entry (one-line定位 + 我要…→先读路由), or null>",
   "topics": [{"slug":"<ascii>","content":"<markdown>"}]  // optional; soft top 5; omit or [] if none
 }
 
 Rules:
 - profile sections (when present): 技术栈与工具, 关于用户的事实, 项目约束
-- navigation is a SHORT pointer only — never paste long bodies; point to 主题/ or 文档/项目/
+- navigation is a SHORT pointer only — never paste long bodies; point to 主题/
 - Prefer null over rewriting when the snapshot does not change durable facts
 - Never wipe still-valid bullets; merge updates only
 - No CEO/team language; no fake completeness claims
@@ -157,7 +156,7 @@ def _normalize_optional_md(value: object) -> str | None:
     return text
 
 
-async def refresh_project_explore_from_snapshot(
+async def refresh_folder_explore_from_snapshot(
     *,
     user_id: str,
     folder_id: str,
@@ -173,12 +172,12 @@ async def refresh_project_explore_from_snapshot(
     if not folder_id or not (snapshot or "").strip():
         return False
 
-    current_profile = await load_project_profile(store, user_id, folder_id)
+    current_profile = await load_folder_profile(store, user_id, folder_id)
     current_nav = await store.load(user_id, NAVIGATION_MEMORY_FILE, scope=folder_id)
     user_prompt = (
         f"# Workspace snapshot\n{snapshot.strip()}\n\n"
-        f"# CURRENT project 画像.md\n{current_profile.strip() or '(empty)'}\n\n"
-        f"# CURRENT project 导航.md\n{current_nav.strip() or '(empty)'}\n\n"
+        f"# CURRENT folder 画像.md\n{current_profile.strip() or '(empty)'}\n\n"
+        f"# CURRENT folder 导航.md\n{current_nav.strip() or '(empty)'}\n\n"
         "Produce the refresh JSON now."
     )
 
@@ -242,7 +241,7 @@ async def refresh_project_explore_from_snapshot(
 
     wrote = False
     if profile_md:
-        ok, _, conflict = await write_project_profile_cas(
+        ok, _, conflict = await write_folder_profile_cas(
             store=store,
             user_id=user_id,
             folder_id=folder_id,
@@ -257,7 +256,7 @@ async def refresh_project_explore_from_snapshot(
                 folder_id=folder_id,
             )
     if nav_md:
-        path = await write_project_navigation(
+        path = await write_folder_navigation(
             store=store, user_id=user_id, folder_id=folder_id, markdown=nav_md
         )
         if path:
@@ -278,7 +277,7 @@ async def refresh_project_explore_from_snapshot(
                 warning=warning,
             )
         if capped:
-            written = await write_project_topics_replace(
+            written = await write_folder_topics_replace(
                 store=store, user_id=user_id, folder_id=folder_id, topics=capped
             )
             if written:
@@ -311,7 +310,7 @@ async def _default_refresh_runner(pending: _PendingRefresh) -> bool:
         model = resolve_user_model(credentials)
         provider = build_provider(credentials, purpose="platform_internal")
         try:
-            return await refresh_project_explore_from_snapshot(
+            return await refresh_folder_explore_from_snapshot(
                 user_id=pending.user_id,
                 folder_id=pending.folder_id,
                 workspace_key=pending.workspace_key,
@@ -457,7 +456,7 @@ __all__ = [
     "ExploreRefreshScheduler",
     "build_workspace_explore_snapshot",
     "get_explore_refresh_scheduler",
-    "refresh_project_explore_from_snapshot",
+    "refresh_folder_explore_from_snapshot",
     "schedule_explore_refresh",
     "shutdown_explore_refresh_scheduler",
 ]

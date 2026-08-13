@@ -1,9 +1,9 @@
 """SSE generator: idle heartbeat + event passthrough + optional id: seq.
 
-The live-tail races a persistent ``sink.get`` task against a heartbeat timeout
-(``asyncio.wait``, never ``wait_for``) so a turn that is alive but thinking keeps
-the connection flowing bytes without cancelling a get that may already hold a
-dequeued event behind the persist barrier. No DB, no HTTP — plain async tests
+The live-tail races a persistent subscription ``get`` task against a heartbeat
+timeout (``asyncio.wait``, never ``wait_for``) so a turn that is alive but thinking
+keeps the connection flowing bytes without cancelling a get that may already hold a
+dequeued event behind its emit-side seq backfill. No DB, no HTTP — plain async tests
 (asyncio_mode=auto).
 """
 
@@ -54,24 +54,28 @@ async def test_emits_heartbeat_while_idle(monkeypatch):
 
 
 async def test_heartbeat_does_not_cancel_get_waiting_on_persist_barrier(monkeypatch):
-    """SS-1: heartbeat timeout must not cancel ``sink.get`` mid persist barrier.
+    """SS-1: heartbeat timeout must not cancel a ``get`` awaiting the seq backfill.
 
-    If the get has already dequeued the event and is awaiting the barrier,
-    cancelling it (as ``wait_for`` would) drops the event and desyncs
-    queue/barrier pairing. Persistent get + ``asyncio.wait`` must ping while
-    still delivering the event once the barrier resolves.
+    If the get has already dequeued the frame and is waiting for its journal write
+    to land, cancelling it (as ``wait_for`` would) drops the event. Persistent get +
+    ``asyncio.wait`` must ping while still delivering the event — with its ``id:`` —
+    once the barrier resolves.
     """
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.02)
     sink = EventSink()
     loop = asyncio.get_running_loop()
     barrier: asyncio.Future[int | None] = loop.create_future()
-    sink._queue.put_nowait(content_delta("held"))
-    sink._persist_barriers.put_nowait(barrier)
 
     gen = sse._event_generator(sink, None)
     try:
         ping = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
-        assert ping.startswith(":")
+        assert ping.startswith(":")  # subscribed, nothing to send yet
+
+        # Fan out a frame whose journal write has not landed: the consumer dequeues
+        # it and blocks on the emit-side backfill instead of shipping it seq-less.
+        sink._deliver(content_delta("held"), barrier)  # noqa: SLF001
+        held_ping = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
+        assert held_ping.startswith(":")
 
         barrier.set_result(99)
         frame = await asyncio.wait_for(gen.__anext__(), timeout=1.0)

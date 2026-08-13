@@ -31,7 +31,7 @@ async def execute_tools(
     context: ToolContext,
     sink: EventSink,
     *,
-    approval_gate: ApprovalGate | None = None,
+    approval_gate: ApprovalGate | None,
     citation_sink: list[dict[str, Any]] | None = None,
     annotate_citations: bool = True,
     turn_evidence_ledger: EvidenceLedgerCore | None = None,
@@ -49,6 +49,11 @@ async def execute_tools(
     governance to detect mechanical loops. When multiple terminals appear in one
     round, SUSPEND wins (durable pause must not lose to call-order luck) and a
     warning is logged; normal agent toolsets never hold both classes.
+
+    ``approval_gate`` has no default on purpose: this is the last hop before the
+    approval chokepoint, so「忘了传」must be a ``TypeError`` rather than a silent
+    ungate. Pass the turn's gate, or an explicit ``None`` to declare that this path
+    has no user to ask — approval-requiring calls then fail closed.
 
     ``allowed_tool_names`` is the run's least-privilege allow-list (``None`` = no
     restriction). Schema offering already filters to this list; this parameter

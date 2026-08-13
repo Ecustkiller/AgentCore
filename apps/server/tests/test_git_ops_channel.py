@@ -104,10 +104,10 @@ async def test_channel_write_no_repo_hard_error():
 
 
 async def test_channel_status_via_git_run():
+    """One desktop round trip: the command itself, with no repo pre-flight probe."""
     ctx, channel = _channel_ctx(
         has_git=True,
         replies=[
-            {"stdout": "true\n", "stderr": "", "exit_code": 0},
             {
                 "stdout": "## feature/x\n M a.txt\n",
                 "stderr": "",
@@ -118,17 +118,15 @@ async def test_channel_status_via_git_run():
     status = await GitTool().execute({"subcommand": "status"}, ctx)
     assert status.success is True
     assert "feature/x" in status.output
-    assert len(channel.calls) == 2
+    assert len(channel.calls) == 1
     assert channel.calls[0][0] == WorkspaceOp.GIT_RUN
-    assert channel.calls[0][1]["argv"] == ["rev-parse", "--is-inside-work-tree"]
-    assert channel.calls[1][1]["argv"][0] == "status"
+    assert channel.calls[0][1]["argv"][0] == "status"
 
 
 async def test_channel_log_via_git_run():
     ctx, channel = _channel_ctx(
         has_git=True,
         replies=[
-            {"stdout": "true\n", "stderr": "", "exit_code": 0},
             {
                 "stdout": "abc1234 message\n",
                 "stderr": "",
@@ -139,8 +137,29 @@ async def test_channel_log_via_git_run():
     log = await GitTool().execute({"subcommand": "log", "max_count": 5}, ctx)
     assert log.success is True
     assert "abc1234" in log.output
-    assert channel.calls[1][0] == WorkspaceOp.GIT_RUN
-    assert channel.calls[1][1]["argv"][0] == "log"
+    assert len(channel.calls) == 1
+    assert channel.calls[0][0] == WorkspaceOp.GIT_RUN
+    assert channel.calls[0][1]["argv"][0] == "log"
+
+
+async def test_channel_unusable_repo_is_hard_error_not_no_repo():
+    """Desktop reports a broken work tree → honest failure, never soft ``no_repo``."""
+    ctx, channel = _channel_ctx(
+        has_git=True,
+        replies=[
+            {
+                "stdout": "",
+                "stderr": "fatal: not a git repository: '../nowhere/.git'",
+                "exit_code": 128,
+            },
+        ],
+    )
+    result = await GitTool().execute({"subcommand": "status"}, ctx)
+    assert result.success is False
+    assert result.metadata is not None
+    assert result.metadata.get("code") == "repo_unusable"
+    assert "not a git repository" in (result.error or "").lower()
+    assert len(channel.calls) == 1
 
 
 async def test_channel_git_run_passes_subpath_cwd():
@@ -149,7 +168,6 @@ async def test_channel_git_run_passes_subpath_cwd():
         has_git=True,
         base_subpath="projA",
         replies=[
-            {"stdout": "true\n", "stderr": "", "exit_code": 0},
             {
                 "stdout": "## main\n",
                 "stderr": "",
@@ -159,7 +177,7 @@ async def test_channel_git_run_passes_subpath_cwd():
     )
     status = await GitTool().execute({"subcommand": "status"}, ctx)
     assert status.success is True
-    assert len(channel.calls) == 2
+    assert len(channel.calls) == 1
     for _op, args in channel.calls:
         assert args.get("cwd") == "projA"
         assert "argv" in args
@@ -171,7 +189,6 @@ async def test_channel_git_run_omits_cwd_when_unscoped():
         has_git=True,
         base_subpath="",
         replies=[
-            {"stdout": "true\n", "stderr": "", "exit_code": 0},
             {
                 "stdout": "## main\n",
                 "stderr": "",

@@ -141,6 +141,41 @@ def test_paused_latch_projects_on_message_detail():
     assert d.content and "检查点" in d.content
 
 
+def test_recovered_badge_projects_on_message_detail():
+    """曾中断恢复 (D5)：崩溃重驱原地跑完的回合带 ``recovered``，诚实不隐瞒。
+
+    Lives on the completed row (not a separate face) because the redrive finishes
+    the SAME turn — the bubble reads as「这条消息自己跑完了」plus the marker.
+    """
+    d = MessageDetail.model_validate(
+        {
+            "id": "m-recovered",
+            "conversation_id": "c1",
+            "role": "assistant",
+            "content": "崩溃前后拼起来的完整成果",
+            "status": "complete",
+            "recovered": True,
+            "created_at": datetime.now(UTC),
+            "usage": None,
+        }
+    )
+    assert d.recovered is True
+    assert d.status == "complete"
+    # Ordinary turns must stay unmarked rather than defaulting to False noise.
+    plain = MessageDetail.model_validate(
+        {
+            "id": "m-plain",
+            "conversation_id": "c1",
+            "role": "assistant",
+            "content": "一次跑完",
+            "status": "complete",
+            "created_at": datetime.now(UTC),
+            "usage": None,
+        }
+    )
+    assert plain.recovered is None
+
+
 def test_inflight_fixture_validates_against_message_detail():
     """Committed rest fixture stays aligned with MessageDetail (contracts gate)."""
     import json

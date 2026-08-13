@@ -225,7 +225,10 @@ async def run_agent_tick(
             elif result.tool_calls:
                 # One tick = one action: apply exactly the FIRST tool the agent chose.
                 first = result.tool_calls[0]
-                await execute_tools([first], tools, ctx, sink, run_id=ctx.run_id)
+                # 小镇行动工具全是 approval=NEVER，本就没有可弹的卡，也没有可问的用户。
+                await execute_tools(
+                    [first], tools, ctx, sink, approval_gate=None, run_id=ctx.run_id
+                )
                 args_json = first.function.arguments or ""
                 tool_calls = [(first.function.name, args_json)]
                 # Native tool-calling returns empty content — the in-character thought

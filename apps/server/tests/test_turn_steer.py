@@ -263,6 +263,7 @@ async def test_react_loop_user_stop_discards_undrained_steer():
             profile=make_profile_params(max_rounds=4),
             turn_model="m",
             role="captain",
+            approval_gate=None,
         )
     )
     turn_runs.register(conversation_id=cid, task=loop_task, sink=sink)
@@ -342,6 +343,7 @@ async def test_react_loop_drains_steer_at_step_top():
         profile=make_profile_params(max_rounds=4),
         turn_model="m",
         role="captain",
+        approval_gate=None,
     )
     assert "done after steer" in content
     assert any("请改成要点列表" in c and "中途补充" in c for c in seen_user_contents)
@@ -372,6 +374,7 @@ async def test_worker_loop_does_not_accept_classic_steer():
         turn_model="m",
         role="worker",
         on_reset=lambda _r: None,
+        approval_gate=None,
     )
     assert try_enqueue(conversation_id="c-worker", content="nope") is None
     _reset_for_tests()

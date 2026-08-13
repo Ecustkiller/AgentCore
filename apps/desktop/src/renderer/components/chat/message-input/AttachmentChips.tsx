@@ -1,7 +1,8 @@
 import { DirTypeIcon, FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { MessageSquare, Users, X } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { AlertCircle, Loader2, MessageSquare, Users, X } from "lucide-react";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -49,47 +50,76 @@ export function AttachmentChips({
           )}
         </span>
       ))}
-      {attachments.map((a) => (
-        <span
-          key={a.id}
-          className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
-        >
-          {a.kind === "dir" ? (
-            <DirTypeIcon name={a.name} path={a.path} size={12} />
-          ) : a.kind === "conversation" ? (
-            <MessageSquare size={12} className="shrink-0" />
-          ) : (
-            <FileTypeIcon name={a.name} path={a.path} size={12} />
-          )}
-          <span className="shrink-0 text-muted-foreground">
-            {KIND_LABEL[a.kind]}
+      {attachments.map((a) => {
+        const uploading = a.uploadState === "uploading";
+        const failed = a.uploadState === "error";
+        return (
+          <span
+            key={a.id}
+            data-upload-state={a.uploadState}
+            className={cn(
+              "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs",
+              failed
+                ? "bg-destructive/10 text-destructive"
+                : "bg-accent text-accent-foreground",
+            )}
+          >
+            {uploading ? (
+              <Loader2
+                size={12}
+                className="shrink-0 animate-spin text-muted-foreground"
+                aria-hidden
+              />
+            ) : failed ? (
+              <AlertCircle size={12} className="shrink-0" aria-hidden />
+            ) : a.kind === "dir" ? (
+              <DirTypeIcon name={a.name} path={a.path} size={12} />
+            ) : a.kind === "conversation" ? (
+              <MessageSquare size={12} className="shrink-0" />
+            ) : (
+              <FileTypeIcon name={a.name} path={a.path} size={12} />
+            )}
+            <span
+              className={cn(
+                "shrink-0",
+                failed ? "text-destructive" : "text-muted-foreground",
+              )}
+            >
+              {uploading ? "上传中" : failed ? "上传失败" : KIND_LABEL[a.kind]}
+            </span>
+            <SimpleTooltip
+              label={
+                failed
+                  ? (a.uploadError ?? "上传失败，发送时会重试")
+                  : a.kind === "conversation"
+                    ? "引用对话"
+                    : a.path
+              }
+            >
+              <span className="truncate">
+                {a.name}
+                {a.kind === "dir" ? "/" : ""}
+              </span>
+            </SimpleTooltip>
+            {a.truncated && !uploading && !failed && (
+              <span className="shrink-0 text-muted-foreground">
+                {a.kind === "dir"
+                  ? "部分"
+                  : a.kind === "conversation"
+                    ? "近期"
+                    : "已截断"}
+              </span>
+            )}
+            <IconButton
+              onClick={() => onRemove(a.id)}
+              aria-label="移除附件"
+              className="size-5 shrink-0"
+            >
+              <X size={12} />
+            </IconButton>
           </span>
-          <SimpleTooltip
-            label={a.kind === "conversation" ? "引用对话" : a.path}
-          >
-            <span className="truncate">
-              {a.name}
-              {a.kind === "dir" ? "/" : ""}
-            </span>
-          </SimpleTooltip>
-          {a.truncated && (
-            <span className="shrink-0 text-muted-foreground">
-              {a.kind === "dir"
-                ? "部分"
-                : a.kind === "conversation"
-                  ? "近期"
-                  : "已截断"}
-            </span>
-          )}
-          <IconButton
-            onClick={() => onRemove(a.id)}
-            aria-label="移除附件"
-            className="size-5 shrink-0"
-          >
-            <X size={12} />
-          </IconButton>
-        </span>
-      ))}
+        );
+      })}
     </div>
   );
 }

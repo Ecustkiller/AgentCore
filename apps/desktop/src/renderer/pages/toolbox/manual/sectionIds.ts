@@ -4,7 +4,7 @@
  * 信息架构：
  * - intro: what / mindset / quickstart
  * - collaboration: briefing / progress / checkpoint / autonomy / debate /
- *   control / memory
+ *   control / memory / workflow / automation
  * - mechanism: live / legend / panorama / scenarios
  * - reference: tools / workspace / settings / faq / troubleshooting /
  *   privacy / glossary
@@ -29,6 +29,10 @@ export const MANUAL_SECTION_IDS = {
     /** 中途插手（含带现场续派） */
     control: "control",
     memory: "memory",
+    /** 把一轮协作存成工作流，之后微调 / 复跑 */
+    workflow: "workflow",
+    /** 给任务配定时 / Webhook，到点自动开一轮 */
+    automation: "automation",
   },
   mechanism: {
     live: "live",

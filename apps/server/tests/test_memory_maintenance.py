@@ -362,9 +362,9 @@ async def test_maintain_writes_preferences_to_preferences_file(tmp_path):
     assert "用中文" in await store.load("u1", PREFERENCES_MEMORY_FILE)
 
 
-async def test_maintain_surfaces_project_layer_to_extractor(tmp_path):
+async def test_maintain_surfaces_folder_layer_to_extractor(tmp_path):
     store = FileMemoryStore(tmp_path)
-    await store.save("u1", CORE_MEMORY_FILE, "## 关于用户的事实\n- 本项目事实\n", scope="F1")
+    await store.save("u1", CORE_MEMORY_FILE, "## 关于用户的事实\n- 本文件夹事实\n", scope="F1")
     await store.save("u1", "主题/部署.md", "## 要点\n- x\n", scope="F1")
     extractor = _FakeExtractor([])
     await maintain_user_memory(
@@ -372,13 +372,13 @@ async def test_maintain_surfaces_project_layer_to_extractor(tmp_path):
     )
     data = extractor.inputs[0]
     assert data.folder_id == "F1"
-    assert "本项目事实" in data.current_project_memory
-    assert "部署" in data.project_topic_files
+    assert "本文件夹事实" in data.current_folder_memory
+    assert "部署" in data.folder_topic_files
 
 
 async def test_maintain_topic_cap_is_per_scope(tmp_path):
     store = FileMemoryStore(tmp_path)
-    # Global is already at cap=1; a NEW project topic is still admitted (counted separately).
+    # Global is already at cap=1; a NEW folder topic is still admitted (counted separately).
     await store.save("u1", "主题/G.md", "## 要点\n- g\n")
     extractor = _FakeExtractor(
         [MemoryOp(action=MemoryAction.ADD, content="proj", file="主题/P.md", scope="F1")]

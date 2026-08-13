@@ -1,9 +1,9 @@
-"""Cold-start explore act — project ``画像.md`` / ``导航.md`` + fingerprint meta.
+"""Cold-start explore act — folder ``画像.md`` / ``导航.md`` + fingerprint meta.
 
 Product exception to §1.5 (normally no mid-turn AI write of ``ai_maintained`` profile):
-explore-act close-out may write the **project** layer only. Orthogonal to consolidation
+explore-act close-out may write the **folder** layer only. Orthogonal to consolidation
 ``_is_cold_start`` (global preferences+profile empty). See 编排器 · 冷启动探索幕 /
-记忆 §1.5. Optional project ``主题/<slug>.md`` whole-file replace (soft top 5 / call).
+记忆 §1.5. Optional folder ``主题/<slug>.md`` whole-file replace (soft top 5 / call).
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 _MAX_CAS_RETRIES = 3
-# Soft top per update_project_profile call (T2): extras → warning, not hard reject.
+# Soft top per update_folder_profile call (T2): extras → warning, not hard reject.
 MAX_EXPLORE_TOPICS = 5
 _SLUG_ALLOWED_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,38}$")
 
@@ -66,20 +66,27 @@ _KEY_MANIFEST_CANDIDATES = (
 
 # Named-refresh hard gate — allow-list substrings only (非意图分类器).
 # Synonyms already listed in CEO prompt / 记忆 docs; bare「探索」omitted (too broad).
+# 这两张表匹配的是**用户原话**，不是产品术语：容器已统一叫文件夹（双模式工作区 §5.4），
+# 但「项目」仍是用户嘴里的常用词，删掉即等于让这批人的点名静默失效——故两种说法并存，
+# 不是旧名 alias。
 _NAMED_EXPLORE_REFRESH_PHRASES = (
     "先了解",
     "重新了解",
+    "刷新文件夹记忆",
     "刷新项目记忆",
 )
 
 # Empty-profile + 工程点名 → hard explore-pending（非意图分类器；短允许表）.
 # Bare empty profile alone is soft-hint only (不挡 delegate / 不置 pending).
-_NAMED_PROJECT_WORK_PHRASES = (
+_NAMED_FOLDER_WORK_PHRASES = (
     "继续开发",
+    "改这个文件夹",
+    "在这个文件夹",
+    "摸清这个文件夹",
     "改这个项目",
     "在这个项目",
-    "全面摸底",
     "摸清这个项目",
+    "全面摸底",
     "先摸仓",
 )
 
@@ -92,12 +99,12 @@ def user_named_explore_refresh(user_message: str | None) -> bool:
     return any(phrase in text for phrase in _NAMED_EXPLORE_REFRESH_PHRASES)
 
 
-def user_named_project_work(user_message: str | None) -> bool:
+def user_named_folder_work(user_message: str | None) -> bool:
     """True when empty-profile should hard-gate (工程点名短语允许表)."""
     text = (user_message or "").strip()
     if not text:
         return False
-    return any(phrase in text for phrase in _NAMED_PROJECT_WORK_PHRASES)
+    return any(phrase in text for phrase in _NAMED_FOLDER_WORK_PHRASES)
 
 
 def resolve_hard_explore_reason(
@@ -106,21 +113,21 @@ def resolve_hard_explore_reason(
 ) -> tuple[str | None, bool]:
     """Named-refresh + soft-empty downgrade (assemble / resume must stay identical).
 
-    Returns ``(hard_reason, project_profile_empty_soft)``.
+    Returns ``(hard_reason, folder_profile_empty_soft)``.
     ``hard_reason`` is set for pending/write_scope=explore_memory; soft empty alone
     yields ``(None, True)`` so the request is not blocked.
     """
     soft_empty = False
     if not explore_reason and user_named_explore_refresh(user_message):
         explore_reason = "refresh"
-    if explore_reason == "empty" and not user_named_project_work(user_message):
+    if explore_reason == "empty" and not user_named_folder_work(user_message):
         soft_empty = True
         explore_reason = None
     return explore_reason, soft_empty
 
 
 def profile_has_substance(markdown: str | None) -> bool:
-    """True when project ``画像.md`` has real content (not chrome / empty headers only)."""
+    """True when folder ``画像.md`` has real content (not chrome / empty headers only)."""
     raw = markdown or ""
     doc = _parse(raw)
     if any(b.strip() for s in doc.sections for b in s.bullets):
@@ -137,15 +144,15 @@ def profile_has_substance(markdown: str | None) -> bool:
     return False
 
 
-def project_profile_is_empty(markdown: str | None) -> bool:
+def folder_profile_is_empty(markdown: str | None) -> bool:
     """Inverse of :func:`profile_has_substance` — the explore-act「够用」skip probe."""
     return not profile_has_substance(markdown)
 
 
-async def load_project_profile(
+async def load_folder_profile(
     store: MemoryStore, user_id: str, folder_id: str
 ) -> str:
-    """Load project-layer ``画像.md`` ("" when missing)."""
+    """Load folder-layer ``画像.md`` ("" when missing)."""
     return await store.load(user_id, CORE_MEMORY_FILE, scope=folder_id)
 
 
@@ -423,7 +430,7 @@ async def load_explore_fingerprint(
     return meta.explore_fingerprint
 
 
-async def project_profile_explore_reason(
+async def folder_profile_explore_reason(
     store: MemoryStore,
     user_id: str,
     folder_id: str | None,
@@ -439,8 +446,8 @@ async def project_profile_explore_reason(
     """
     if not folder_id:
         return None
-    current = await load_project_profile(store, user_id, folder_id)
-    if project_profile_is_empty(current):
+    current = await load_folder_profile(store, user_id, folder_id)
+    if folder_profile_is_empty(current):
         return "empty"
     stored = await load_explore_workspace_key(store, user_id, folder_id)
     if not stored:
@@ -453,7 +460,7 @@ async def project_profile_explore_reason(
     return None
 
 
-async def project_profile_needs_explore(
+async def folder_profile_needs_explore(
     store: MemoryStore,
     user_id: str,
     folder_id: str | None,
@@ -461,7 +468,7 @@ async def project_profile_needs_explore(
     current_workspace_key: str | None = None,
 ) -> bool:
     """True when auto-explore should inject (empty profile or workspace rebind)."""
-    reason = await project_profile_explore_reason(
+    reason = await folder_profile_explore_reason(
         store,
         user_id,
         folder_id,
@@ -480,7 +487,7 @@ def merge_profile_by_sections(old_md: str, new_md: str) -> str:
     """
     if not (new_md or "").strip():
         return old_md or ""
-    if project_profile_is_empty(old_md):
+    if folder_profile_is_empty(old_md):
         doc = _parse(new_md)
         if not doc.preamble.strip():
             doc.preamble = _DEFAULT_PREAMBLE
@@ -526,7 +533,7 @@ def _section_has_substance(section: _Section) -> bool:
     return any(b.strip() for b in section.bullets)
 
 
-async def write_project_profile_cas(
+async def write_folder_profile_cas(
     *,
     store: MemoryStore,
     user_id: str,
@@ -534,14 +541,14 @@ async def write_project_profile_cas(
     new_markdown: str,
     baseline: str | None = None,
 ) -> tuple[bool, str, bool]:
-    """Merge-write project ``画像.md`` under the per-user memory lock (CAS + retry).
+    """Merge-write folder ``画像.md`` under the per-user memory lock (CAS + retry).
 
     Returns ``(ok, resulting_markdown, conflict)``.
     ``conflict=True`` when a caller-supplied ``baseline`` no longer matches after retries.
     """
     if not folder_id:
-        raise ValueError("folder_id required for project profile write")
-    if project_profile_is_empty(new_markdown):
+        raise ValueError("folder_id required for folder profile write")
+    if folder_profile_is_empty(new_markdown):
         return False, "", False
 
     async with user_memory_lock(user_id):
@@ -555,7 +562,7 @@ async def write_project_profile_cas(
                     continue
                 return False, current, True
             merged = merge_profile_by_sections(current, new_markdown)
-            if project_profile_is_empty(merged):
+            if folder_profile_is_empty(merged):
                 return False, current, False
             if merged == current:
                 return True, current, False
@@ -623,19 +630,19 @@ def parse_explore_topics(
     return out, warnings
 
 
-async def write_project_topics_replace(
+async def write_folder_topics_replace(
     *,
     store: MemoryStore,
     user_id: str,
     folder_id: str,
     topics: list[tuple[str, str]],
 ) -> list[str]:
-    """Whole-file replace project ``主题/<slug>.md`` notes (explore-act close-out).
+    """Whole-file replace folder ``主题/<slug>.md`` notes (explore-act close-out).
 
     Returns list of written paths (``主题/<slug>.md``). Empty ``topics`` → no-op.
     """
     if not folder_id:
-        raise ValueError("folder_id required for project topic write")
+        raise ValueError("folder_id required for folder topic write")
     if not topics:
         return []
     written: list[str] = []
@@ -654,16 +661,16 @@ async def write_project_topics_replace(
     return written
 
 
-async def write_project_navigation(
+async def write_folder_navigation(
     *,
     store: MemoryStore,
     user_id: str,
     folder_id: str,
     markdown: str,
 ) -> str | None:
-    """Whole-file replace project ``导航.md`` (short always entry). Empty → no-op."""
+    """Whole-file replace folder ``导航.md`` (short always entry). Empty → no-op."""
     if not folder_id:
-        raise ValueError("folder_id required for project navigation write")
+        raise ValueError("folder_id required for folder navigation write")
     body = (markdown or "").strip()
     if not body:
         return None

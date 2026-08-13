@@ -73,6 +73,7 @@ def _nesting_executor(plan: RunPlan, provider, factory):
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
         delegate_factory=factory,
     )
 
@@ -318,6 +319,85 @@ def test_worker_identity_teaches_escalate_blocking_choice():
     assert "escalate 不会打断你" not in body
 
 
+def test_worker_identity_direct_to_user_switches_register():
+    """单人直出：正文原样给用户 ⇒ identity 换口径（对用户说话、禁内部动作旁白）。
+
+    ``direct_to_user=True`` 对应 ``RunPlan.solo_direct_answer()``（finalize 批 + 单节点，
+    即 ``drive_finalize`` 走 ``direct_result`` 的那条路）；默认关，其余拓扑字节不变。
+    """
+    from agentcore.runtime.runs.executor.identities import build_worker_identity
+
+    direct = build_worker_identity(has_dependents=False, direct_to_user=True)
+    assert "正文直达用户" in direct
+    assert "原样】作为本回合的最终答复" in direct
+    assert "现在提交交接简报" in direct  # 事故原话：内部动作旁白点名禁掉
+    assert "向您汇报" in direct  # 对主管汇报的口吻点名禁掉
+
+    plain = build_worker_identity(has_dependents=False)
+    assert "正文直达用户" not in plain
+    # 默认参数与显式 False 字节一致（不惊扰其余场景）。
+    assert plain == build_worker_identity(has_dependents=False, direct_to_user=False)
+    # 交付形态 / 拓扑各分支同样只在开关打开时长出这一段。
+    assert "正文直达用户" not in build_worker_identity(
+        has_dependents=True, form="prose"
+    )
+    assert "正文直达用户" in build_worker_identity(
+        has_dependents=False, form="files", captain=True, direct_to_user=True
+    )
+
+
+async def test_executor_wires_solo_finalize_direct_answer_into_identity():
+    """结构化信号穿到执行器：finalize 批 + 单节点 ⇒ worker system prompt 带直出段。"""
+    plan, _ = build_run_plan([{"role": "工程师", "task": "改一行"}], id_prefix="t")
+    plan.finalize = True
+    assert plan.solo_direct_answer() is True
+    provider = _ContentProvider(["OUT"])
+    await _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())(
+        plan.nodes[0], {}
+    )
+    assert "正文直达用户" in provider.system_messages[0]
+
+
+async def test_executor_omits_direct_answer_for_multi_node_or_plain_batch():
+    """多节点 / 非 finalize：两侧都不该长出直出段（提示词一字不变）。"""
+    multi, _ = build_run_plan(
+        [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="m"
+    )
+    multi.finalize = True
+    assert multi.solo_direct_answer() is False
+    multi_provider = _ContentProvider(["A", "B"])
+    await _nesting_executor(multi, multi_provider, lambda rid, d: _stub_subteam())(
+        multi.nodes[0], {}
+    )
+    assert "正文直达用户" not in multi_provider.system_messages[0]
+
+    solo, _ = build_run_plan([{"role": "工程师", "task": "改一行"}], id_prefix="s")
+    assert solo.solo_direct_answer() is False  # finalize 缺省 = 不直出
+    solo_provider = _ContentProvider(["OUT"])
+    await _nesting_executor(solo, solo_provider, lambda rid, d: _stub_subteam())(
+        solo.nodes[0], {}
+    )
+    assert "正文直达用户" not in solo_provider.system_messages[0]
+
+
+async def test_nested_lead_finalize_batch_is_not_direct_to_user():
+    """嵌套 lead 的收口批同样命中 direct_result，但那份正文只是 lead 的终稿。
+
+    往上仍可能被主管合成，对子队员说「直达用户」是假的——宁可漏报也不误报。
+    CEO 直派是 depth=1（见 ``build_run_plan``），子队员更深。
+    """
+    nested, _ = build_run_plan(
+        [{"role": "子队员", "task": "改一行"}], id_prefix="n", depth=2
+    )
+    nested.finalize = True
+    assert nested.solo_direct_answer() is False
+    provider = _ContentProvider(["OUT"])
+    await _nesting_executor(nested, provider, lambda rid, d: _stub_subteam())(
+        nested.nodes[0], {}
+    )
+    assert "正文直达用户" not in provider.system_messages[0]
+
+
 async def test_executor_passes_registry_capability_into_identity():
     """Executor 把 registry 能力事实接进 identity：空 registry（无 code_execute）→
     worker system prompt 带「执行环境未装配」自述。"""
@@ -364,6 +444,7 @@ async def test_worker_escalation_is_harvested_and_nonblocking():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     res = await WaveScheduler().run(plan, executor)
     state = res["t_1"]
@@ -411,6 +492,7 @@ async def test_worker_escalation_emits_live_event_before_completion():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan, executor)
     sink.close()
@@ -559,6 +641,7 @@ async def test_cancel_worker_keeps_escalations_and_member_usage():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     results = await WaveScheduler().run(
         plan,

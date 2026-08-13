@@ -39,7 +39,12 @@ _TERMINAL_FINISH = frozenset(
 
 class TurnInterruptReason(StrEnum):
     USER_STOP = "user_stop"
+    # Reserved for a termination we can actually evidence. Sweeps and stale-row
+    # cleanups must NOT borrow it: a turn whose lease simply stopped beating is
+    # indistinguishable here from one whose process died, and labelling the guess
+    # 「process_kill」sent case 519270db's root-cause hunt down the wrong road twice.
     PROCESS_KILL = "process_kill"
+    LEASE_EXPIRED = "lease_expired"
     REDRIVE_FAILED = "redrive_failed"
 
 
@@ -52,8 +57,11 @@ def normalize_interrupt_reason(reason: str | TurnInterruptReason) -> TurnInterru
         return TurnInterruptReason.USER_STOP
     if raw in (TurnInterruptReason.REDRIVE_FAILED.value, "redrive_unwired"):
         return TurnInterruptReason.REDRIVE_FAILED
-    # no_dag / process_kill / unknown → process kill terminal
-    return TurnInterruptReason.PROCESS_KILL
+    if raw == TurnInterruptReason.PROCESS_KILL.value:
+        # Historical rows (and any caller that really did observe a kill).
+        return TurnInterruptReason.PROCESS_KILL
+    # no_dag / lease_expired / unknown → we found it dead, we did not see it die
+    return TurnInterruptReason.LEASE_EXPIRED
 
 
 def finish_reason_for(reason: TurnInterruptReason) -> FinishReason:
@@ -63,10 +71,24 @@ def finish_reason_for(reason: TurnInterruptReason) -> FinishReason:
 
 
 # 案 20260803-fake-dispatch-stall-claim · C：redrive_failed 禁止静默清队无说明。
-# USER_STOP / PROCESS_KILL 仍只靠 metadata + StatusStrip；本原因必须正文可见。
+# 有正文时 USER_STOP / PROCESS_KILL 仍只靠 metadata + StatusStrip；本原因必须正文可见。
+#
+# 文案只讲用户能判断的三件事：发生了什么、影响是什么、他能做什么。旧稿「本轮未完工（团队已清）」
+# 里的「已清」是内部动作（未恢复的队员状态被丢弃），用户读到只会想「清掉的是我的文件吗、是队员
+# 写的东西吗」——而崩溃后他最想确认的恰恰是这个，所以这里必须正面回答「都还在」。
 REDRIVE_FAILED_USER_VISIBLE = (
-    "【中断说明】后台恢复失败，本轮未完工（团队已清）。可直接发送下一条继续。"
+    "【中断说明】服务中断后没能接着把这一轮跑完——队员都已停下，这一轮不会再有新进展。"
+    "已经写进工作区的文件、以及上面已经产出的内容都还在。"
+    "直接发下一条就能继续，也可以让我接着没做完的部分往下做。"
 )
+
+# 旧稿留下的正文标记：升级前已挂上说明的回合再次收口时，靠它保持幂等（勿删）。
+_LEGACY_REDRIVE_MARKERS = ("后台恢复失败",)
+
+# 案 519270db-team-synthesis-discarded-empty-bubble：团队跑满 19 分钟、delegate 综述已产出，
+# CEO 终稿尚未开写就被清扫收口 → 用户拿到 0 字空泡，连「失败了」都无从得知。StatusStrip 的
+# chrome 救不了一个空气泡：历史里它就是一条什么都没说的助手消息。
+INTERRUPTED_EMPTY_USER_VISIBLE = "【中断说明】本轮意外中断，未产出回复。可直接发送下一条继续。"
 
 
 def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
@@ -77,6 +99,11 @@ def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
     first DSML open tag so unfinished tool XML never enters the incomplete bubble
     (``upsert_assistant`` still runs sanitize + length ceiling).
 
+    Nothing streamed is the exception: an empty bubble states nothing at all, so it
+    gets the honesty note. Silence is whitelisted to USER_STOP alone — the user
+    pressed stop and already knows why the turn ended; every other way a turn can die
+    owes them words, including reasons added later.
+
     REDRIVE_FAILED: always leave a user-visible honesty note in the body so a
     kickoff bubble cannot freeze as「已开工」while the team was silently cleared.
     """
@@ -84,8 +111,12 @@ def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
 
     text = prepare_assistant_content((content or "").strip(), salvage=True)
     if reason is not TurnInterruptReason.REDRIVE_FAILED:
+        if not text and reason is not TurnInterruptReason.USER_STOP:
+            return INTERRUPTED_EMPTY_USER_VISIBLE
         return text
-    if REDRIVE_FAILED_USER_VISIBLE in text or "后台恢复失败" in text:
+    if REDRIVE_FAILED_USER_VISIBLE in text or any(
+        marker in text for marker in _LEGACY_REDRIVE_MARKERS
+    ):
         return text
     if not text:
         return REDRIVE_FAILED_USER_VISIBLE
@@ -198,8 +229,9 @@ async def settle_prior_running_assistants(
 
     Covers dead-registry / no-lease zombies that overlap cancel cannot see (e.g.
     empty-journal cancel that released the lease). Uses
-    :class:`TurnInterruptReason.PROCESS_KILL` → ``finish_reason=interrupted``
-    (supersede semantics). Pause latches (``usage.paused`` / ``paused_turns``)
+    :class:`TurnInterruptReason.LEASE_EXPIRED` → ``finish_reason=interrupted``
+    (supersede semantics) — finding a stale RUNNING row is not evidence of a kill.
+    Pause latches (``usage.paused`` / ``paused_turns``)
     are left alone. Best-effort: per-row failures are logged, not raised.
     Returns how many closes reported success (including already-terminal).
     """
@@ -234,7 +266,7 @@ async def settle_prior_running_assistants(
                 message_id=row.id,
                 conversation_id=conversation_id,
                 trace_id=getattr(row, "trace_id", None),
-                reason=TurnInterruptReason.PROCESS_KILL,
+                reason=TurnInterruptReason.LEASE_EXPIRED,
                 load_stream_state=True,
             )
         except Exception as e:  # noqa: BLE001 — continue remaining rows

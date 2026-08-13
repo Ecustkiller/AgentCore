@@ -83,6 +83,7 @@ async def clone_repo(
     *,
     user_id: str,
     folder_id: str | None,
+    folder_rel_path: str | None,
     conversation_id: str,
     repo_url: str,
     dest: str | None = None,
@@ -103,7 +104,9 @@ async def clone_repo(
     )
     async with workspace_lock(key):
         root = resolve_workspace_root(
-            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+            user_id=user_id,
+            folder_rel_path=folder_rel_path,
+            conversation_id=conversation_id,
         )
         dest_rel = dest.strip() if dest and dest.strip() else _derive_dest_name(repo_url)
         target = resolve_safe_path(root, dest_rel)

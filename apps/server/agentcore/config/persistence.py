@@ -59,10 +59,10 @@ class PersistenceSettings(BaseModel):
     # backstop retired with 读侧全量定案).
     memory_always_max_chars: int = 24_000
 
-    # CEO-only derived project catalog (跨项目找项目): max Folder rows injected as
-    # name＋画像首句. Orthogonal to always-on ``<rules>`` (read side injects all always
+    # CEO-only derived folder catalog (跨文件夹找文件夹): max Folder rows injected as
+    # path＋画像首句. Orthogonal to always-on ``<rules>`` (read side injects all always
     # entries; write-side quota owns 常驻满了). 0 = disable catalog injection.
-    project_catalog_max_entries: int = 12
+    folder_catalog_max_entries: int = 12
 
     # One-time file→document memory migration (§5.7 换底): copy file-backed memory into the
     # documents tree at startup. Idempotent + best-effort; safe to leave on (a no-op once done).

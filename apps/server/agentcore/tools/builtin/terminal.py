@@ -26,6 +26,7 @@ from agentcore.tools.builtin.long_running import (
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -217,6 +218,8 @@ class TerminalTool:
         audience=AUDIENCE_BOTH,
         execution_class=True,
         local_only=True,
+        # 长驻进程（dev server / build）在用户机器上留下的东西枚举不出，也不是交付物。
+        file_products=FileProductsContract.NO_PRODUCT,
     )
 
     @property

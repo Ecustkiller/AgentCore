@@ -99,11 +99,13 @@ from agentcore.workspace.files import (
 )
 from agentcore.workspace.git import CloneError, clone_repo
 from agentcore.workspace.locate import (
+    WorkspaceCoords,
     build_server_workspace,
     build_shared_workspace,
     format_shared_workspace_id,
     parse_workspace_id,
     workspace_has_entries,
+    workspace_internal_root,
     workspace_root_path,
     workspace_storage_key,
 )
@@ -147,6 +149,11 @@ class _WsTarget:
     name: str
     location: Literal["cloud", "local"]
     root_id: str | None
+    # Where the folder's directory currently sits (``folders.rel_path``). Carried on
+    # the target because resolution already loaded the row: re-querying it later
+    # would be a second lookup on a possibly different session, and a placement that
+    # comes back empty silently demotes the request to the conversation scratch.
+    rel_path: str | None = None
     space_id: str | None = None
     member_role: str | None = None
 
@@ -202,6 +209,7 @@ async def _resolve_owned_workspace(
                 name=folder.name,
                 location="local" if folder.local_root_id else "cloud",
                 root_id=folder.local_root_id,
+                rel_path=folder.rel_path,
             )
         return _WsTarget(
             ws_id=ws_id,
@@ -222,6 +230,7 @@ async def _resolve_owned_workspace(
         name=folder.name,
         location="local" if folder.local_root_id else "cloud",
         root_id=folder.local_root_id,
+        rel_path=folder.rel_path,
     )
 
 
@@ -245,6 +254,21 @@ def _refuse_shared_extra(target: _WsTarget) -> None:
     """v1: shared spaces support file CRUD only (no clone / snapshot)."""
     if target.space_id:
         raise ConflictError("共享空间暂不支持此操作")
+
+
+def _workspace_coords(user_id: str, target: _WsTarget) -> WorkspaceCoords:
+    """The four coordinates every cloud file / snapshot call needs.
+
+    The services take the placement rather than looking it up, so they stay pure
+    functions of ``(user, folder, placement, conversation)`` — and unit-testable
+    without a database.
+    """
+    return {
+        "user_id": user_id,
+        "folder_id": target.folder_id,
+        "folder_rel_path": target.rel_path,
+        "conversation_id": target.conversation_id,
+    }
 
 
 def _storage_key(user_id: str, target: _WsTarget) -> str:
@@ -334,7 +358,7 @@ async def list_workspaces(
             True
             if local
             else workspace_has_entries(
-                user_id=user.user_id, folder_id=folder.id, conversation_id=""
+                user_id=user.user_id, folder_rel_path=folder.rel_path, conversation_id=""
             )
         )
         # Projects always list (a project is a project), even when empty cloud.
@@ -359,7 +383,7 @@ async def list_workspaces(
             True
             if local
             else workspace_has_entries(
-                user_id=user.user_id, folder_id=None, conversation_id=conv.id
+                user_id=user.user_id, folder_rel_path=None, conversation_id=conv.id
             )
         )
         if not local and not has_files:
@@ -412,9 +436,7 @@ async def list_workspace_files(
         entries = await _list_shared_entries(target.space_id, recursive=recursive)
     else:
         entries = await list_files(
-            user_id=user.user_id,
-            folder_id=target.folder_id,
-            conversation_id=target.conversation_id,
+            **_workspace_coords(user.user_id, target),
             recursive=recursive,
         )
     return WorkspaceFileListResponse(
@@ -445,9 +467,7 @@ async def list_workspace_file_index(
         paths, truncated = await _shared_index(target.space_id)
     else:
         paths, truncated = await list_file_index(
-            user_id=user.user_id,
-            folder_id=target.folder_id,
-            conversation_id=target.conversation_id,
+            **_workspace_coords(user.user_id, target),
         )
     return WorkspaceFileIndexResponse(data=paths, total=len(paths), truncated=truncated)
 
@@ -497,9 +517,7 @@ async def upload_workspace_file(
             )
         else:
             written = await upload_file(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=path,
                 data=data,
             )
@@ -561,11 +579,7 @@ async def export_workspace_docx(
         if target.space_id:
             backend = build_shared_workspace(target.space_id)
         else:
-            backend = build_server_workspace(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
-            )
+            backend = build_server_workspace(**_workspace_coords(user.user_id, target))
         result = await export_markdown_path(backend, body.path)
         if target.space_id:
             await shared_svc.record_file_change(
@@ -628,11 +642,7 @@ async def export_workspace_pdf(
         if target.space_id:
             backend = build_shared_workspace(target.space_id)
         else:
-            backend = build_server_workspace(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
-            )
+            backend = build_server_workspace(**_workspace_coords(user.user_id, target))
         result = await export_markdown_to_pdf_path(backend, body.path)
         if target.space_id:
             await shared_svc.record_file_change(
@@ -676,9 +686,7 @@ async def read_workspace_file_for_edit(
             text, mtime_ms, eol = await _shared_read_edit(target.space_id, path)
         else:
             text, mtime_ms, eol = await read_file_for_edit(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=path,
             )
     except OutsideWorkspace as e:
@@ -737,9 +745,7 @@ async def write_workspace_file_text(
                 )
         else:
             ok, mtime_ms = await write_file_text(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=path,
                 content=body.content,
                 baseline_mtime_ms=body.baseline_mtime_ms,
@@ -778,9 +784,7 @@ async def download_workspace_file(
             )
         else:
             file_path = await resolve_download_file(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=path,
                 max_bytes=max_bytes,
             )
@@ -827,9 +831,7 @@ async def delete_workspace_file(
             )
         else:
             await delete_file(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=path,
             )
     except OutsideWorkspace as e:
@@ -869,9 +871,7 @@ async def move_workspace_file(
             )
         else:
             await move_file(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 src=body.src,
                 dst=body.dst,
             )
@@ -912,9 +912,7 @@ async def copy_workspace_file(
             )
         else:
             await copy_file(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 src=body.src,
                 dst=body.dst,
             )
@@ -956,9 +954,7 @@ async def create_workspace_dir(
             )
         else:
             await create_dir(
-                user_id=user.user_id,
-                folder_id=target.folder_id,
-                conversation_id=target.conversation_id,
+                **_workspace_coords(user.user_id, target),
                 path=body.path,
             )
     except OutsideWorkspace as e:
@@ -994,9 +990,7 @@ async def clone_repo_into_workspace(
         auth = None
     try:
         dest = await clone_repo(
-            user_id=user.user_id,
-            folder_id=target.folder_id,
-            conversation_id=target.conversation_id,
+            **_workspace_coords(user.user_id, target),
             repo_url=body.repo_url,
             dest=body.dest,
             auth=auth,
@@ -1055,9 +1049,7 @@ async def create_workspace_snapshot(
     _refuse_shared_extra(target)
     # create_snapshot holds workspace_lock at the sink (A′).
     ref = await create_snapshot(
-        user_id=user.user_id,
-        folder_id=target.folder_id,
-        conversation_id=target.conversation_id,
+        **_workspace_coords(user.user_id, target),
         label=body.label,
     )
     return SnapshotSummary.model_validate(ref)
@@ -1084,9 +1076,7 @@ async def restore_workspace_snapshot(
     # restore_snapshot holds workspace_lock at the sink (A′).
     try:
         await restore_snapshot(
-            user_id=user.user_id,
-            folder_id=target.folder_id,
-            conversation_id=target.conversation_id,
+            **_workspace_coords(user.user_id, target),
             snapshot_id=snapshot_id,
         )
     except SnapshotNotFound as e:
@@ -1149,10 +1139,15 @@ async def list_workspace_trash(
     _refuse_shared_extra(target)
     root = workspace_root_path(
         user_id=user.user_id,
+        folder_rel_path=target.rel_path,
+        conversation_id=target.conversation_id,
+    )
+    internal_root = workspace_internal_root(
+        user_id=user.user_id,
         folder_id=target.folder_id,
         conversation_id=target.conversation_id,
     )
-    entries = list_trash_entries(root=root)
+    entries = list_trash_entries(root=root, internal_root=internal_root)
     days = trash_retention_days()
     return TrashListResponse(
         data=[
@@ -1192,12 +1187,17 @@ async def restore_workspace_trash(
     _refuse_shared_extra(target)
     root = workspace_root_path(
         user_id=user.user_id,
+        folder_rel_path=target.rel_path,
+        conversation_id=target.conversation_id,
+    )
+    internal_root = workspace_internal_root(
+        user_id=user.user_id,
         folder_id=target.folder_id,
         conversation_id=target.conversation_id,
     )
     try:
         async with workspace_lock(_storage_key(user.user_id, target)):
-            restore_from_trash(root=root, entry_id=entry_id)
+            restore_from_trash(root=root, entry_id=entry_id, internal_root=internal_root)
     except TrashNotFound as e:
         raise NotFoundError("软删条目不存在") from e
     except TrashExpiredError as e:

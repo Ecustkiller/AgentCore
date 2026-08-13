@@ -9,6 +9,8 @@ with handoff: only ``spawn_background``. Pause truth is ``paused_turns``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from agentcore.billing.gate import preflight_resolved_llm_credentials
 from agentcore.conversation.background import spawn_background
 from agentcore.conversation.common import (
@@ -64,15 +66,20 @@ async def dispatch_workflow_run(
     conversation_id: str | None = None,
     workflow_name: str = "工作流",
     permission_axes: dict | None = None,
+    slot_values: Mapping[str, str] | None = None,
 ) -> str:
     """Validate definition, preflight credentials, ensure conversation, spawn job.
 
     Credential gate runs synchronously (same semantics as conversation turn
     preflight) before create/spawn so a refused run returns 402/429/503 instead
     of a 200 「已开跑」 shell. Returns conversation id only after admit.
+
+    ``slot_values`` swaps this run's inputs into the definition's ``{{key}}``
+    placeholders; unfilled slots keep their default (the value the workflow was
+    frozen from), so an untouched form reruns the original turn verbatim.
     """
     try:
-        tasks = expand_workflow_to_tasks(definition)
+        tasks = expand_workflow_to_tasks(definition, slot_values=slot_values)
     except WorkflowDefinitionError as e:
         raise ValueError(str(e)) from e
     if not tasks:

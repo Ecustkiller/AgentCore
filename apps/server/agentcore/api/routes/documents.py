@@ -8,6 +8,10 @@ Patching ``apply_mode`` edits frontmatter then re-derives — never a column-onl
 Write-side always quota (闸在写侧): create / content edit / promote-to-always go through
 the always-pool gate. Editing an existing always entry past the cap is allowed with
 ``quota_warning``; creating or promoting past the cap is refused (409).
+
+``PATCH {disputed}`` is the 纠错通道 (「这条不对」): a user-only mark that stops an entry
+from being injected / consulted while keeping it readable here. ``disputed_at`` rides
+every node view so the UI can show and undo the mark.
 """
 
 from __future__ import annotations
@@ -60,6 +64,9 @@ class DocumentNodeView(BaseModel):
     frontmatter_error: str | None = None
     # Chars counting toward the always pool (same meter as write-side gate); null if not always.
     always_chars: int | None = None
+    # When the user marked this entry wrong (纠错通道). Set ⇒ the entry is kept and still
+    # readable / editable here, but never injected and never offered to ``consult``.
+    disputed_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -97,12 +104,15 @@ class DocumentWriteResult(BaseModel):
 
 
 class DocumentPatchRequest(BaseModel):
-    """Rename, reparent, and/or change apply (via frontmatter edit)."""
+    """Rename, reparent, change apply (via frontmatter edit), and/or mark 这条不对."""
 
     name: str | None = Field(default=None, min_length=1, max_length=500)
     parent_id: str | None = None
     reparent: bool = False
     apply_mode: DocApplyMode | None = None
+    # True = 「这条不对」(stop injecting, keep the entry); False = undo the mark.
+    # Only ever set by an explicit user action in the memory UI.
+    disputed: bool | None = None
 
 
 class AlwaysQuotaView(BaseModel):
@@ -142,6 +152,7 @@ def _node(doc: Document) -> DocumentNodeView:
         name=doc.name,
         frontmatter_error=_fm_error(doc),
         always_chars=_always_chars(doc),
+        disputed_at=doc.disputed_at,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -160,6 +171,7 @@ def _detail(doc: Document, *, quota_warning: str | None = None) -> DocumentDetai
         name=doc.name,
         frontmatter_error=_fm_error(doc),
         always_chars=_always_chars(doc),
+        disputed_at=doc.disputed_at,
         content=doc.content,
         version=memory_version(doc.content),
         created_at=doc.created_at,
@@ -378,9 +390,12 @@ async def patch_document(
     user: AuthUser,
     repo: DocumentRepository = Depends(get_document_repo),
 ) -> DocumentDetailView:
-    """Rename, reparent, and/or set apply via frontmatter.
+    """Rename, reparent, set apply via frontmatter, and/or mark the entry wrong.
 
-    Set ``reparent`` to apply ``parent_id``.
+    Set ``reparent`` to apply ``parent_id``. ``disputed`` is the 纠错通道: the user says
+    「这条不对」in the memory UI and the entry stops being injected / consulted while
+    staying on disk (no silent delete, and the mark survives later AI rewrites because it
+    lives in a column, not in the body). Nothing infers this from conversation text.
     """
     doc = await repo.get(document_id, user_id=user.user_id)
     if doc is None:
@@ -435,6 +450,12 @@ async def patch_document(
             )
         except FrontmatterEditError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if body.disputed is not None:
+        marked = await repo.set_disputed(
+            document_id, user_id=user.user_id, disputed=body.disputed
+        )
+        if marked is None:
+            raise HTTPException(status_code=400, detail="cannot dispute this node")
     refreshed = await repo.get(document_id, user_id=user.user_id)
     assert refreshed is not None
     return _detail(refreshed, quota_warning=quota_warning)

@@ -21,7 +21,13 @@ class UsageBreakdown(WirePayload):
 
 
 class CostBreakdown(WirePayload):
-    """A run's / turn's cost in integer nano-CNY (1 CNY = 1e9)."""
+    """A run's / turn's cost in integer nano-money (1 unit = 1e9).
+
+    ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY or
+    community-estimated USD, never converted (this product has no FX). Clients
+    must read it to pick a symbol; inferring ¥ from ``pricing_source`` is how BYOK
+    dollars once rendered as yuan at ~1/7 of the real amount.
+    """
 
     input: int
     cached: int
@@ -32,6 +38,10 @@ class CostBreakdown(WirePayload):
     pricing_source: str = "curated"
     # BYOK estimate total when billed total is 0; absent on platform-only rows.
     estimated_total: int | None = absent()
+    # Currency of ``estimated_total`` — the estimate rides the USD community table
+    # while ``total`` stays CNY, so on a turn aggregate the two amounts can differ
+    # in unit. Absent (legacy / run rows) → read ``currency``.
+    estimated_currency: str | None = absent()
 
 
 class MotionCardSide(WirePayload):

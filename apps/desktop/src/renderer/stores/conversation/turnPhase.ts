@@ -9,6 +9,7 @@
  * 读写 phase 的命令式 API 见 `turnPhaseActions.ts`。
  */
 
+import { INTERACTION_ORPHANED_EVENT } from "@/types/interactionExt";
 import { INTERACTION_KIND_WIRE } from "@agentcore/contract-types";
 
 export type TurnPhase =
@@ -34,6 +35,16 @@ const INTERACTION_REQUIRED_EVENTS: ReadonlySet<string> = new Set(
   Object.values(INTERACTION_KIND_WIRE)
     .map((w) => w.requiredEvent)
     .filter((name) => name.endsWith("_required")),
+);
+
+/**
+ * 配对的 `*_resolved` 收口帧。`*_required` 既然能在这个窗把卡画出来（见上），它的收口
+ * 帧就只可能在同一个窗到。`question_posted` 无收口帧（`resolvedEvent: null`）。
+ */
+const INTERACTION_RESOLVED_EVENTS: ReadonlySet<string> = new Set(
+  Object.values(INTERACTION_KIND_WIRE)
+    .map((w) => w.resolvedEvent)
+    .filter((name): name is string => !!name?.endsWith("_resolved")),
 );
 
 export function isTerminalPhase(phase: TurnPhase): boolean {
@@ -62,6 +73,17 @@ export function allowsStreamingMutations(phase: TurnPhase): boolean {
  * stopping + terminal 另放行 INTERACTION_KIND_WIRE 的 `*_required`（见上常量）：
  * 冷挂起 ask 常紧挨 `message_end(paused)`，门闩若挡掉则 live 看不到拍板卡。
  *
+ * 配对的 `*_resolved` 同窗放行。本端自己拍板不依赖这帧（提交路已乐观 `markResolved`），
+ * 所以挡掉它伤的全是**本端没答**的那些收口：另一端拍板（多端同权「已由另一端处理」收口条
+ * 的唯一来源——journal 水合被明确排除在外）、CEO 仲裁、按假设推进 / 墙钟超时（压根没有人
+ * 答，连回执都没有）。挡掉等于让一张服务端早已结掉的卡继续显示可点。它只把卡推向
+ * resolved（`markResolved` 建不出 pending），副作用也只有清挂起帧 / 记结算帧，不是内容突变。
+ *
+ * `interaction_orphaned` 同样放行：它**只出自收尾**（settlement 预写 / 服务重启对账），
+ * 天然落在 `message_end` 之后的 terminal 窗。挡掉它就等于把「这张卡已经没人能收答复」
+ * 这条事实丢在门口——卡继续显示可点，点必失败，直到刷新或切会话才变灰。它只把卡推向
+ * 终态，不能复活任何 pending，所以在 terminal 放行不构成内容突变。
+ *
  * Cloud CLIENT_TOOL `workspace_op_required` / `host_op_required` / … **不再**走
  * 会话 SSE：设备级履约通道跨会话，不绑 turnPhase；取消靠 `client_tool_cancelled`
  * abort 在飞 op。Sidecar 本地回合的同类帧在 `dispatchSSEEvent` 里于门闩之前履约
@@ -82,10 +104,18 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
   ) {
     return true;
   }
-  // stopping + terminal：冷/热交互 required 帧（至少 checkpoint_required）。
+  // stopping + terminal：冷/热交互 required 帧（至少 checkpoint_required）与配对收口帧。
   if (
     (phase === "stopping" || isTerminalPhase(phase)) &&
-    INTERACTION_REQUIRED_EVENTS.has(eventType)
+    (INTERACTION_REQUIRED_EVENTS.has(eventType) ||
+      INTERACTION_RESOLVED_EVENTS.has(eventType))
+  ) {
+    return true;
+  }
+  // stopping + terminal：收尾 orphan（见上；失效卡必须当场变灰）。
+  if (
+    (phase === "stopping" || isTerminalPhase(phase)) &&
+    eventType === INTERACTION_ORPHANED_EVENT
   ) {
     return true;
   }

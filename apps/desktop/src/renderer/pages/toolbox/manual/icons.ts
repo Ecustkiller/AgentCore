@@ -3,6 +3,7 @@ import {
   BookMarked,
   BookOpen,
   Brain,
+  CalendarClock,
   Compass,
   Crown,
   FolderOpen,
@@ -25,6 +26,7 @@ import {
   Swords,
   Target,
   UsersRound,
+  Workflow,
   Wrench,
 } from "lucide-react";
 
@@ -34,6 +36,7 @@ const MANUAL_ICONS: Record<string, LucideIcon> = {
   BookMarked,
   BookOpen,
   Brain,
+  CalendarClock,
   Compass,
   Crown,
   FolderOpen,
@@ -55,6 +58,7 @@ const MANUAL_ICONS: Record<string, LucideIcon> = {
   Swords,
   Target,
   UsersRound,
+  Workflow,
   Wrench,
 };
 

@@ -16,6 +16,7 @@ import {
 import { traceTurnMilestone } from "@/services/turnTrace";
 import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import {
+  beginLocalConversationStream,
   claimPrimaryStream,
   releasePrimaryStream,
 } from "@/services/turns/streamOwnership";
@@ -255,12 +256,20 @@ export async function pumpSseBody(
 }
 
 /** Apply buffered attach catch-up events in one React batch (avoid per-frame worker
- * running→completed paint during clear-then-fold replay). Clears any bridge
- * hydrateFromJournal first so journal frames are not double-folded. */
-function flushAttachCatchUp(conversationId: string, events: SSEEvent[]): void {
+ * running→completed paint during clear-then-fold replay).
+ *
+ * ``clearPartial`` (default) wipes the tail assistant's execution first so a full
+ * journal replay cannot double-fold the partial we already painted. A catch-up段
+ * for a turn we never saw (对话级订阅接到另一端开的新回合) has no partial to clear —
+ * clearing there would wipe the *previous* turn's team graph, so callers pass false. */
+export function flushAttachCatchUp(
+  conversationId: string,
+  events: SSEEvent[],
+  opts: { clearPartial?: boolean } = {},
+): void {
   unstable_batchedUpdates(() => {
     const last = getRuntime(conversationId).messages.at(-1);
-    if (last?.role === "assistant") {
+    if (opts.clearPartial !== false && last?.role === "assistant") {
       const { clearExecution } = useExecutionStore.getState();
       clearExecution(last.id);
       if (last.serverMessageId && last.serverMessageId !== last.id) {
@@ -268,7 +277,11 @@ function flushAttachCatchUp(conversationId: string, events: SSEEvent[]): void {
       }
     }
     for (const event of events) {
-      dispatchSSEEvent(event, { conversationId, source: "server" });
+      dispatchSSEEvent(event, {
+        conversationId,
+        source: "server",
+        replay: true,
+      });
     }
     flushPendingContent(conversationId);
     flushPendingFrames(conversationId);
@@ -291,6 +304,10 @@ export type AttachOutcome = "attached" | "none";
  * then one-shot fold so already-completed workers do not paint running→completed
  * again on refresh. Older servers without the comment flush the buffer when the
  * stream ends (degraded: still one paint, no live boundary).
+ *
+ * **回合级** attach（不带 ``follow``）：无 live run 时服务端回 204 → ``"none"``，回合
+ * 收口即断流。调用方（``rejoinLiveTurn``）靠这个 204 判「回合已结束、去读持久化」，
+ * 所以这里绝不能改成对话级长订阅——那条路见 ``turns/conversationFollow``。
  */
 export async function attachConversation(
   conversationId: string,
@@ -299,6 +316,7 @@ export async function attachConversation(
   throwIfCannotOpenStream(conversationId, signal);
   enterTurnStreaming(conversationId);
   const primaryToken = claimPrimaryStream(conversationId);
+  const releaseLocalStream = beginLocalConversationStream(conversationId);
 
   const doFetch = (signal: AbortSignal) => {
     const headers: Record<string, string> = {
@@ -381,6 +399,7 @@ export async function attachConversation(
     flushPendingContent(conversationId);
     flushPendingFrames(conversationId);
     releasePrimaryStream(conversationId, primaryToken);
+    releaseLocalStream();
   }
 }
 
@@ -400,6 +419,7 @@ async function runMessageStream(
   throwIfCannotOpenStream(conversationId, signal);
   enterTurnStreaming(conversationId);
   const primaryToken = claimPrimaryStream(conversationId);
+  const releaseLocalStream = beginLocalConversationStream(conversationId);
 
   const doFetch = (signal: AbortSignal) =>
     fetch(`${BASE_URL}${path}`, {
@@ -462,6 +482,7 @@ async function runMessageStream(
     flushPendingContent(conversationId);
     flushPendingFrames(conversationId);
     releasePrimaryStream(conversationId, primaryToken);
+    releaseLocalStream();
   }
 }
 

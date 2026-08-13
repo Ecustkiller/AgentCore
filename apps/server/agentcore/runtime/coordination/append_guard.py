@@ -431,7 +431,7 @@ def append_overlap_reject_message(
             "【同批交付物交叉已拒绝】"
             f"（本批 {total} 人）。冲突：{detail}。"
             "请为并行队员分配不同文件路径，或用 depends_on 标明交接关系后再派；"
-            "跨项目同相对路径不互拦——确认是否误用同一 target_folder_id。"
+            "跨文件夹同相对路径不互拦——确认是否误用同一 target_folder_id。"
         )
     if all_sibling_role:
         return (
@@ -618,6 +618,7 @@ def declare_nested_drive_artifacts(
     artifacts transfers only those paths from the lead (not ``transfer_all_from``).
     Root depth-0 coordination already declares in ``host`` — skipped here.
     """
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
     from agentcore.workspace.write_claims import (
         file_ownership_v2_enabled,
         resolve_write_coordinator,
@@ -629,7 +630,7 @@ def declare_nested_drive_artifacts(
         return []
 
     ownership = resolve_write_coordinator(execution_id=execution_id)
-    force = bool(getattr(tool, "_delegate_force", False))
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
     completed: set[str] | frozenset[str] | None = None
     try:
         from agentcore.runtime.coordination.session import resolve_coordination_session

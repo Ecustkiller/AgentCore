@@ -10,11 +10,19 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.errors import is_schema_error
-from agentcore.db.repositories.standing_tasks import StandingTaskRepository
+from agentcore.db.repositories.standing_tasks import (
+    StandingTaskRepository,
+    StandingTaskRunRepository,
+)
 from agentcore.standing_tasks.runner import dispatch_standing_task
 from agentcore.standing_tasks.schedule import next_run_after
 
 logger = get_logger(__name__)
+
+# The clock was already advanced before dispatch, so a dispatch failure loses this
+# period's fire for good. Say so in the inbox instead of only in a server log —
+# the miss is surfaced, never re-run (no retry, no catch-up).
+_DISPATCH_FAILED_ERROR = "本次定时代跑未能启动，本周期已跳过（未自动补跑）：{error}"
 
 
 async def poll_due_standing_tasks(*, owner: str | None = None) -> int:
@@ -71,8 +79,21 @@ async def poll_due_standing_tasks(*, owner: str | None = None) -> int:
                 exc_info=True,
             )
             async with async_session_factory() as session:
+                # Lease first: a failure recording the miss must not leave the task
+                # locked for the rest of the lease window.
                 await StandingTaskRepository(session).clear_lease(
                     task.id, owner=owner_id
+                )
+                runs = StandingTaskRunRepository(session)
+                missed = await runs.create(
+                    standing_task_id=task.id,
+                    user_id=task.user_id,
+                    conversation_id=task.conversation_id,
+                    status="failed",
+                    trigger_source="schedule",
+                )
+                await runs.mark_failed(
+                    missed.id, error=_DISPATCH_FAILED_ERROR.format(error=e)
                 )
     return spawned
 

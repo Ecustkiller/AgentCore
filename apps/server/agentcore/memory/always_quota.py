@@ -3,7 +3,13 @@
 Meters injectable always-on rule bodies by character count. User edits of an
 existing always entry may exceed the cap (allow + warning); AI create/merge that
 would grow past the cap is refused and may push one ``memory_updates`` card per
-pending fingerprint (same state → one card; user fix / content change resets).
+pending fingerprint (same state + same refused entries → one card; user fix /
+content change resets).
+
+A full pool must never read as「AI 从此记不住东西」(审计 CTX-A2): the card names
+every entry this pass could not write AND the biggest entries currently holding the
+pool, so the user can see what to trim. Nothing is silently evicted — the write is
+refused, the existing entries stay.
 
 See docs/03-AI核心/Agent记忆与知识系统.md「配额：闸在写侧，读侧全量」.
 """
@@ -11,6 +17,8 @@ See docs/03-AI核心/Agent记忆与知识系统.md「配额：闸在写侧，读
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Literal
@@ -22,7 +30,11 @@ from agentcore.core.logging import get_logger
 from agentcore.db.models import Document
 from agentcore.db.repositories import DocumentRepository, MemoryUpdateRepository
 from agentcore.documents.frontmatter import strip_entry_frontmatter
-from agentcore.memory.maintenance import MemoryUpdateItem
+from agentcore.memory.maintenance import (
+    MemoryUpdateItem,
+    _memory_file_label,
+    _memory_leaf_target,
+)
 from agentcore.memory.store import memory_version
 
 logger = get_logger(__name__)
@@ -42,8 +54,12 @@ _AI_DENIED_MESSAGE = (
     "常驻条目已满（{used}/{max} 字符），无法继续写入常驻。请删减或改为按需后再试。"
 )
 _CARD_SUMMARY = (
-    "常驻条目已满（{used}/{max} 字符）。AI 已暂停写入常驻；请删减或改为按需后重试。"
+    "常驻条目已满（{used}/{max} 字符）：以下 {denied} 条没能写进常驻，"
+    "现有条目一条也没被删。删减或改为按需后即可继续。"
 )
+# How many current always entries the card names as「谁占着配额」. Enough to act on,
+# short enough that the card stays a card.
+_HOLDER_ROWS = 5
 
 
 @dataclass(frozen=True)
@@ -81,14 +97,68 @@ class AlwaysQuotaDecision:
 
 
 class AlwaysQuotaExceededError(Exception):
-    """AI write refused because the always pool would grow past the cap."""
+    """AI write refused because the always pool would grow past the cap.
 
-    def __init__(self, usage: AlwaysUsage, message: str | None = None) -> None:
+    Carries WHICH entry was refused (``file`` is the store-relative memory path or the
+    document name, ``scope`` the folder id / None for global) so the card can name it
+    instead of only reporting that the pool is full.
+    """
+
+    def __init__(
+        self,
+        usage: AlwaysUsage,
+        message: str | None = None,
+        *,
+        file: str = "",
+        scope: str | None = None,
+        attempted_chars: int = 0,
+    ) -> None:
         self.usage = usage
+        self.file = file
+        self.scope = scope
+        self.attempted_chars = attempted_chars
         self.message = message or _AI_DENIED_MESSAGE.format(
             used=usage.used_chars, max=usage.max_chars
         )
         super().__init__(self.message)
+
+    @property
+    def denial(self) -> DeniedAlwaysWrite:
+        return DeniedAlwaysWrite(
+            file=self.file,
+            scope=self.scope,
+            attempted_chars=self.attempted_chars,
+            usage=self.usage,
+        )
+
+
+@dataclass(frozen=True)
+class DeniedAlwaysWrite:
+    """One always write the quota refused — a card row, not a log line."""
+
+    file: str
+    scope: str | None
+    attempted_chars: int
+    usage: AlwaysUsage
+
+
+# Bound around a whole consolidation pass: denials accumulate instead of pushing a card
+# each, so one full pool produces ONE card naming everything it blocked. Unbound (single
+# tool / API write) keeps the immediate one-denial card.
+always_quota_denials: ContextVar[list[DeniedAlwaysWrite] | None] = ContextVar(
+    "always_quota_denials", default=None
+)
+
+
+@contextmanager
+def collect_always_quota_denials() -> Iterator[list[DeniedAlwaysWrite]]:
+    """Collect this pass's refused always writes; caller flushes one card at the end."""
+    denials: list[DeniedAlwaysWrite] = []
+    token = always_quota_denials.set(denials)
+    try:
+        yield denials
+    finally:
+        always_quota_denials.reset(token)
 
 
 def always_entry_chars(content: str) -> int:
@@ -261,41 +331,112 @@ def _card_fingerprint(row_items: list | None, summary: str | None) -> str | None
     return None
 
 
+def _denial_card_fingerprint(
+    usage: AlwaysUsage, denials: Sequence[DeniedAlwaysWrite]
+) -> str:
+    """Pending-state identity: the pool state PLUS which entries it refused.
+
+    Pool state alone would swallow the second card when the same full pool blocks a
+    *different* entry — exactly the item-level visibility this card exists for.
+    """
+    keys = sorted(f"{d.scope or ''}/{d.file}" for d in denials)
+    return f"{usage.fingerprint}#{','.join(keys)}" if keys else usage.fingerprint
+
+
+def _denied_rows(denials: Sequence[DeniedAlwaysWrite]) -> list[MemoryUpdateItem]:
+    """One row per refused write: which entry, which layer, how big it was."""
+    rows: list[MemoryUpdateItem] = []
+    for d in denials:
+        if not d.file:
+            continue
+        rows.append(
+            MemoryUpdateItem(
+                action="quota_denied",
+                file=_memory_file_label(d.file),
+                section="",
+                scope="project" if d.scope else "global",
+                content=f"这次的更新没能写入常驻（{d.attempted_chars} 字符）",
+                target=_memory_leaf_target(d.file, d.scope),
+                project_id=d.scope,
+            )
+        )
+    return rows
+
+
+async def _holder_rows(
+    repo: DocumentRepository, user_id: str, *, folder_id: str | None
+) -> list[MemoryUpdateItem]:
+    """The biggest current always entries — the「为什么满了」half of the card."""
+    docs = await list_always_quota_docs(repo, user_id, folder_id=folder_id)
+    sized = [(always_entry_chars(d.content), d) for d in docs]
+    sized = [pair for pair in sized if pair[0] > 0]
+    sized.sort(key=lambda pair: (-pair[0], pair[1].name))
+    return [
+        MemoryUpdateItem(
+            action="quota_holder",
+            file=_memory_file_label(doc.name),
+            section="",
+            scope="project" if doc.folder_id else "global",
+            content=f"占用 {chars} 字符",
+            target=_memory_leaf_target(doc.name, doc.folder_id),
+            project_id=doc.folder_id,
+        )
+        for chars, doc in sized[:_HOLDER_ROWS]
+    ]
+
+
 async def record_always_quota_card_once(
     session: AsyncSession,
     *,
     user_id: str,
     conversation_id: str,
     usage: AlwaysUsage,
+    denials: Sequence[DeniedAlwaysWrite] = (),
 ):
-    """Persist a quota card, or return ``None`` when the same pending fingerprint exists."""
+    """Persist a quota card, or return ``None`` when the same pending state repeats.
+
+    The card is item-level: a hidden fingerprint row (dedup key), one row per entry this
+    pass could not write, and the biggest entries currently holding the pool.
+    """
     from agentcore.db.models import MemoryUpdateRow
 
     repo = MemoryUpdateRepository(session)
     rows = await repo.list_for_conversation(conversation_id, limit=50)
     latest = next((r for r in reversed(rows) if r.kind == QUOTA_CARD_KIND), None)
-    if latest is not None and _card_fingerprint(latest.items, latest.summary) == usage.fingerprint:
+    fingerprint = _denial_card_fingerprint(usage, denials)
+    if latest is not None and _card_fingerprint(latest.items, latest.summary) == fingerprint:
         logger.info(
             "memory.always_quota_card_suppressed",
             conversation_id=conversation_id,
-            fingerprint=usage.fingerprint,
+            fingerprint=fingerprint,
         )
         return None
 
-    summary = _CARD_SUMMARY.format(used=usage.used_chars, max=usage.max_chars)
-    item = MemoryUpdateItem(
-        action="quota",
-        file="",
-        section="",
-        scope="global",
-        content=usage.fingerprint,
-        target="",
-        project_id=None,
+    denied_rows = _denied_rows(denials)
+    summary = _CARD_SUMMARY.format(
+        used=usage.used_chars, max=usage.max_chars, denied=len(denied_rows)
     )
+    items = [
+        MemoryUpdateItem(
+            action="quota",
+            file="",
+            section="",
+            scope="global",
+            content=fingerprint,
+            target="",
+            project_id=None,
+        ),
+        *denied_rows,
+        *await _holder_rows(
+            DocumentRepository(session),
+            user_id,
+            folder_id=next((d.scope for d in denials if d.scope), None),
+        ),
+    ]
     row: MemoryUpdateRow = await repo.record(
         conversation_id=conversation_id,
         user_id=user_id,
-        items=[asdict(item)],
+        items=[asdict(item) for item in items],
         kind=QUOTA_CARD_KIND,
         summary=summary,
     )
@@ -304,12 +445,26 @@ async def record_always_quota_card_once(
         conversation_id=conversation_id,
         used=usage.used_chars,
         max=usage.max_chars,
+        denied=len(denied_rows),
     )
     return row
 
 
 async def notify_always_quota_exceeded(user_id: str, exc: AlwaysQuotaExceededError) -> None:
-    """Best-effort card push when an AI write hits the always cap."""
+    """Route one refused AI write: collect it for the pass, or push its card now."""
+    pending = always_quota_denials.get()
+    if pending is not None:
+        pending.append(exc.denial)
+        return
+    await push_always_quota_card(user_id, exc.usage, [exc.denial])
+
+
+async def push_always_quota_card(
+    user_id: str,
+    usage: AlwaysUsage,
+    denials: Sequence[DeniedAlwaysWrite],
+) -> None:
+    """Best-effort ``memory_updates`` card naming everything the full pool blocked."""
     import contextlib
 
     conversation_id = memory_write_conversation_id.get()
@@ -324,7 +479,8 @@ async def notify_always_quota_exceeded(user_id: str, exc: AlwaysQuotaExceededErr
                 session,
                 user_id=user_id,
                 conversation_id=conversation_id,
-                usage=exc.usage,
+                usage=usage,
+                denials=denials,
             )
             if row is None:
                 return
@@ -335,6 +491,9 @@ async def notify_always_quota_exceeded(user_id: str, exc: AlwaysQuotaExceededErr
                 "kind": row.kind,
                 "summary": row.summary,
                 "items": row.items,
+                # Quota cards describe the pool, not a message window — always null;
+                # sent anyway so every memory_updated payload has the same shape.
+                "anchor_at": None,
             }
         with contextlib.suppress(Exception):
             await default_chat_hub().publish(

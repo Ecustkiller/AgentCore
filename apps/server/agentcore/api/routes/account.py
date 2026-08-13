@@ -16,6 +16,7 @@ Desktop convention (parallel desktop inject):
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -31,6 +32,7 @@ from agentcore.conversation.log_export import (
     render_conversation_log,
     search_snippet_from_messages,
 )
+from agentcore.db.models import Document
 from agentcore.db.repositories import (
     ConversationRepository,
     DocumentRepository,
@@ -226,15 +228,35 @@ class AccountRulesListRequest(BaseModel):
 class AccountRuleDoc(BaseModel):
     name: str
     content: str
+    # Retrieval summary for the 规则目录; on_demand entries are picked by this, not by body.
+    description: str = ""
 
 
 class AccountRulesListResponse(BaseModel):
-    """Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``."""
+    """Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.
+
+    ``ancestor_*`` carry the enclosing folders' layers, outermost-first, and
+    ``folder_chain`` is that same chain by id with the current folder last: the engine may
+    be a desktop sidecar with no folders table, so the cloud is the only place that can
+    resolve「谁在谁里面」(双模式工作区 §5.4 沿树继承).
+    """
 
     global_rules: list[AccountRuleDoc]
     project_rules: list[AccountRuleDoc]
+    ancestor_rules: list[AccountRuleDoc] = Field(default_factory=list)
     global_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
     project_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    ancestor_on_demand_rules: list[AccountRuleDoc] = Field(default_factory=list)
+    folder_chain: list[str] = Field(default_factory=list)
+
+
+def _rule_docs(docs: Sequence[Document]) -> list[AccountRuleDoc]:
+    return [
+        AccountRuleDoc(
+            name=d.name, content=d.content or "", description=d.description or ""
+        )
+        for d in docs
+    ]
 
 
 @router.post("/rules/list", response_model=AccountRulesListResponse)
@@ -245,34 +267,44 @@ async def list_account_user_rules(
 ) -> AccountRulesListResponse:
     """User rules for turn assembly: always → ``<rules>``; on_demand → catalog + consult."""
     repo = DocumentRepository(session)
-    global_docs = await repo.list_injectable_rules(
-        user.user_id, None, ai_maintained=False
-    )
-    project_docs = []
+    folder_chain: list[str] = []
+    if body.folder_id:
+        folder_chain = await FolderRepository(session).list_ancestor_chain_ids(
+            body.folder_id, user_id=user.user_id
+        )
+        if body.folder_id not in folder_chain:
+            folder_chain = [body.folder_id]
+    ancestors = folder_chain[:-1]
+
+    ancestor_docs: list[Document] = []
+    ancestor_on_demand: list[Document] = []
+    for scope in ancestors:
+        ancestor_docs += await repo.list_injectable_rules(
+            user.user_id, scope, ai_maintained=False
+        )
+        ancestor_on_demand += await repo.list_on_demand_user_rules(user.user_id, scope)
+
+    project_docs: Sequence[Document] = []
+    project_on_demand: Sequence[Document] = []
     if body.folder_id:
         project_docs = await repo.list_injectable_rules(
             user.user_id, body.folder_id, ai_maintained=False
         )
-    global_on_demand = await repo.list_on_demand_user_rules(user.user_id, None)
-    project_on_demand = []
-    if body.folder_id:
         project_on_demand = await repo.list_on_demand_user_rules(
             user.user_id, body.folder_id
         )
     return AccountRulesListResponse(
-        global_rules=[
-            AccountRuleDoc(name=d.name, content=d.content or "") for d in global_docs
-        ],
-        project_rules=[
-            AccountRuleDoc(name=d.name, content=d.content or "") for d in project_docs
-        ],
-        global_on_demand_rules=[
-            AccountRuleDoc(name=d.name, content=d.content or "") for d in global_on_demand
-        ],
-        project_on_demand_rules=[
-            AccountRuleDoc(name=d.name, content=d.content or "")
-            for d in project_on_demand
-        ],
+        global_rules=_rule_docs(
+            await repo.list_injectable_rules(user.user_id, None, ai_maintained=False)
+        ),
+        project_rules=_rule_docs(project_docs),
+        ancestor_rules=_rule_docs(ancestor_docs),
+        global_on_demand_rules=_rule_docs(
+            await repo.list_on_demand_user_rules(user.user_id, None)
+        ),
+        project_on_demand_rules=_rule_docs(project_on_demand),
+        ancestor_on_demand_rules=_rule_docs(ancestor_on_demand),
+        folder_chain=folder_chain,
     )
 
 
@@ -320,6 +352,10 @@ class AccountMemoryScopeRequest(BaseModel):
 class AccountMemoryFileMeta(BaseModel):
     path: str
     version: str
+    # Retrieval summary shown in the 按需目录 ("" = the entry has none yet).
+    description: str = ""
+    # User marked this note wrong (纠错通道) — the sidecar must not inject or consult it.
+    disputed: bool = False
 
 
 class AccountMemoryListResponse(BaseModel):
@@ -332,11 +368,24 @@ async def list_account_memory(
     user: AccountApiUser,
     session: AsyncSession = Depends(get_db),
 ) -> AccountMemoryListResponse:
-    """List memory note paths under one scope (global when ``scope`` is null)."""
+    """List memory notes under one scope (global when ``scope`` is null).
+
+    Carries each note's retrieval ``description`` and its ``disputed`` mark so a sidecar
+    warm builds the same directory — and skips the same user-disputed entries — as an
+    in-process turn.
+    """
     store = DocumentMemoryStore(session)
     metas = await store.list(user.user_id, body.scope)
     return AccountMemoryListResponse(
-        files=[AccountMemoryFileMeta(path=m.path, version=m.version) for m in metas]
+        files=[
+            AccountMemoryFileMeta(
+                path=m.path,
+                version=m.version,
+                description=m.description,
+                disputed=m.disputed,
+            )
+            for m in metas
+        ]
     )
 
 

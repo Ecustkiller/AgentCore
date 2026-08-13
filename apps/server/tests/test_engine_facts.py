@@ -140,6 +140,7 @@ async def _run(provider: _ScriptedProvider, tool: _StubTool, *, max_rounds: int 
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         current_fact_log.reset(token)
@@ -326,6 +327,7 @@ async def test_window_from_journal_reconstructs_live_transcript():
             turn_model="m",
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         current_fact_log.reset(token)
@@ -376,6 +378,7 @@ async def test_tool_call_fact_captures_post_annotation_text_ceo_path():
             role="captain",
             out=ReactLoopOut(citations=citations),
             annotate_citations=True,
+            approval_gate=None,
         )
     finally:
         current_fact_log.reset(token)
@@ -419,5 +422,6 @@ async def test_no_facts_recorded_when_no_log_bound():
         turn_model="m",
         run_id="cap",
         role="captain",
+        approval_gate=None,
     )
     assert content == "hi"

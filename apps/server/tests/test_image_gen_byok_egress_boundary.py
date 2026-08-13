@@ -40,7 +40,7 @@ def test_artifact_manifest_end_preview_redacts_key():
     out = format_artifact_manifest(
         path="env",
         content=body,
-        bytes_written=len(body.encode()),
+        chars_written=len(body),
         kind="text",
     )
     assert "sk-abcdEFGH1234567890" not in out

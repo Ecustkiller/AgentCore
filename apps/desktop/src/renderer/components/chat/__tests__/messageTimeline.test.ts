@@ -30,9 +30,15 @@ const am = (id: string, at: string): Message =>
     isStreaming: false,
   }) as Message;
 
-const mem = (id: string, at: string): MemoryUpdate => ({
+// `at` = 落库时刻 (created_at); `anchorAt` = 被总结那一轮的末尾, 有则定位用它。
+const mem = (
+  id: string,
+  at: string,
+  anchorAt: string | null = null,
+): MemoryUpdate => ({
   id,
   createdAt: at,
+  anchorAt,
   kind: "semantic",
   items: [],
 });
@@ -115,6 +121,41 @@ describe("mergeTimeline", () => {
       "m:u2",
       "m:a2",
       "mem:memX",
+    ]);
+  });
+
+  it("anchors on anchor_at when consolidation landed after the next question", () => {
+    // 真实案例：固化是回合结束后异步跑的，卡片落库(10:03:01)比下一条提问(10:03:00)还晚 1 秒。
+    // 它总结的是 u1→a1 这一轮，anchor_at = 该轮最后一条消息(a1, 10:01:30)，卡片就该留在那一轮
+    // 末尾；只看落库时刻则永远锚不上任何一条后续提问，卡片会冲到列表最末。
+    const messages = [
+      um("u1", "2026-01-01T10:00:00Z"),
+      am("a1", "2026-01-01T10:01:30Z"),
+      um("u2", "2026-01-01T10:03:00Z"),
+    ];
+    const items = mergeTimeline(
+      messages,
+      [],
+      [mem("mem1", "2026-01-01T10:03:01Z", "2026-01-01T10:01:30Z")],
+    );
+    expect(items.map((i) => i.key)).toEqual([
+      "m:u1",
+      "m:a1",
+      "mem:mem1",
+      "m:u2",
+    ]);
+
+    // 同一张卡没有 anchor_at 时（semantic / quota / 老数据）仍按落库时刻走 —— 也正是被修掉的旧行为。
+    const fallback = mergeTimeline(
+      messages,
+      [],
+      [mem("mem1", "2026-01-01T10:03:01Z")],
+    );
+    expect(fallback.map((i) => i.key)).toEqual([
+      "m:u1",
+      "m:a1",
+      "m:u2",
+      "mem:mem1",
     ]);
   });
 

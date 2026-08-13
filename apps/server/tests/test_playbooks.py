@@ -478,6 +478,19 @@ def test_build_feature_defaults_to_api_plus_parallel_ui_and_test():
     assert "FastAPI+React" in by_id["api"]["task"]
 
 
+def test_build_feature_code_nodes_land_in_workspace_not_dossier():
+    """三个写码节点的产物是工作区源码 → 不得被派去 AI 工作间的默认落点。"""
+    from agentcore.runtime.runs.builder import build_run_plan
+
+    tasks, errors = expand_playbook("build_feature", {"feature": "用户登录"})
+    assert errors == []
+    assert all(t["deliverable"]["workspace_native"] is True for t in tasks)
+
+    plan, plan_errors = build_run_plan(tasks, id_prefix="pb_bf")
+    assert plan_errors == []
+    assert all(n.deliverable and n.deliverable.artifact_dir == "" for n in plan.nodes)
+
+
 def test_build_feature_include_filters_steps():
     tasks, _ = expand_playbook("build_feature", {"feature": "X", "include": ["ui"]})
     assert set(_by_id(tasks)) == {"api", "ui"}
@@ -665,6 +678,8 @@ def test_repair_code_diagnose_patch_verify_shape():
     assert by_id["diagnose"]["max_rounds"] == 4
     assert by_id["patch"]["max_rounds"] == 6
     assert by_id["patch"]["deliverable"]["form"] == "files"
+    # 就地改工作区源码 → 无约定落点（不套 AI 工作间）。
+    assert by_id["patch"]["deliverable"]["workspace_native"] is True
     assert "requires_files" not in by_id["patch"]["deliverable"]
     assert "name" not in by_id["patch"]["deliverable"]
     assert "src/app.ts" in by_id["patch"]["deliverable"]["artifacts"]
@@ -694,6 +709,24 @@ def test_repair_code_diagnose_patch_verify_shape():
     assert "min_length" not in by_id["verify"]["deliverable"]
     assert by_id["diagnose"]["deliverable"]["form"] == "prose"
     assert by_id["verify"]["deliverable"]["form"] == "prose"
+
+
+def test_repair_code_patch_without_target_still_lands_in_workspace():
+    """无 target/artifacts 的 patch 节点最易被默认落点误导——这里钉死无落点。"""
+    from agentcore.runtime.runs.builder import build_run_plan
+
+    tasks, errors = expand_playbook(
+        "repair_code", {"problem": "Dashboard 白屏", "verify": "pytest -q"}
+    )
+    assert errors == []
+    patch = _by_id(tasks)["patch"]
+    assert patch["deliverable"] == {"form": "files", "workspace_native": True}
+
+    plan, plan_errors = build_run_plan(tasks, id_prefix="pb_rc")
+    assert plan_errors == []
+    node = next(n for n in plan.nodes if n.run_id.endswith("patch"))
+    assert node.deliverable is not None
+    assert node.deliverable.artifact_dir == ""
 
 
 def test_repair_code_ui_verify_slot_flows_into_verify_task():

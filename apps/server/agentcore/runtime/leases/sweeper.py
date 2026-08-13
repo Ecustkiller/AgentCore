@@ -55,9 +55,13 @@ async def salvage_interrupted_turn(
     message_id: str,
     conversation_id: str,
     trace_id: str | None = None,
-    reason: str = "process_kill",
+    reason: str = TurnInterruptReason.LEASE_EXPIRED.value,
 ) -> bool:
     """Mark a crashed turn incomplete + append ``turn_end`` interrupted.
+
+    The default reason says what the sweeper actually knows — a lease stopped
+    beating — not「process_kill」, which claims an observation nobody made and
+    which case 519270db proved will misdirect the next person who reads the row.
 
     Works for pure-chat and unfinished-DAG turns: message status is updated from
     stream_state, and ``turn_end`` is appended at the next journal seq (never
@@ -93,7 +97,7 @@ async def salvage_no_dag_turn(
         message_id=message_id,
         conversation_id=conversation_id,
         trace_id=trace_id,
-        reason=TurnInterruptReason.PROCESS_KILL.value,
+        reason=TurnInterruptReason.LEASE_EXPIRED.value,
     )
 
 

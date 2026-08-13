@@ -65,8 +65,8 @@ class RememberTool:
         ceo_wire=CeoWire.MEMORY,
     )
 
-    # The conversation's project (None for a bare chat). A ``scope='project'`` directive routes
-    # the rule to this project's layer; without a project it stays global.
+    # The conversation's folder (None for a bare chat). A ``scope='folder'`` directive routes
+    # the rule to this folder's layer; without a folder it stays global.
     folder_id: str | None = None
 
     @property
@@ -82,8 +82,8 @@ class RememberTool:
                 "（旧条不存在则只追加，且须诚实说明）；"
                 "forget 删除；list 列出当前作用域规则（不写盘）。"
                 "写入/删除后立即生效，下一轮对话即注入。"
-                "禁止把项目调研简报 / 技术栈盘点 / 探索幕产出写成规则——"
-                "那是项目画像，须用 update_project_profile。"
+                "禁止把文件夹调研简报 / 技术栈盘点 / 探索幕产出写成规则——"
+                "那是文件夹画像，须用 update_folder_profile。"
             ),
             parameters={
                 "type": "object",
@@ -110,9 +110,9 @@ class RememberTool:
                     },
                     "scope": {
                         "type": "string",
-                        "enum": ["global", "project"],
+                        "enum": ["global", "folder"],
                         "description": (
-                            "global=对所有对话生效（默认）；project=仅当前项目生效。"
+                            "global=对所有对话生效（默认）；folder=仅当前文件夹生效。"
                         ),
                     },
                 },
@@ -129,8 +129,8 @@ class RememberTool:
         replaces_raw = arguments.get("replaces")
         replaces = str(replaces_raw).strip() if replaces_raw is not None else None
         scope_token = str(arguments.get("scope") or "global").strip().lower()
-        # project scope only when the conversation is actually in a project; else global.
-        folder_id = self.folder_id if scope_token == "project" and self.folder_id else None
+        # folder scope only when the conversation is actually in a folder; else global.
+        folder_id = self.folder_id if scope_token == "folder" and self.folder_id else None
 
         if action != "list" and not content:
             return ToolResult(
@@ -221,7 +221,7 @@ class RememberTool:
             logger.info(
                 "memory.remember_written",
                 user_id=context.user_id,
-                scope="project" if folder_id else "global",
+                scope="folder" if folder_id else "global",
                 action=result.action,
             )
 

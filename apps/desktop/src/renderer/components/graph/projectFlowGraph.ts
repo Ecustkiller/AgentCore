@@ -354,14 +354,17 @@ export function projectFlowNodes({
     const durationMs =
       foldedCx.length > 0 ? sumDurationMs(roundRuns) : run.durationMs;
     // 轮节点聚合口径与 durationMs 一致：成本 / token 计入折进的质询作答。
-    // BYOK：记账 total=0 时用 estimated_total，节点上标「自带密钥·估算」。
+    // BYOK：记账 total=0 时用 estimated_total（美元社区价目），节点上标「自带密钥·估算」。
+    // 无 FX：折进的 run 同凭据来源 → 同币种，按首个记名。
     let costNano = 0;
     let costEstimated = false;
+    let costCurrency: string | null = null;
     for (const r of roundRuns) {
       const m = pickCostMoney(r.cost);
       if (!m || m.nano <= 0) continue;
       costNano += m.nano;
       if (m.estimated) costEstimated = true;
+      costCurrency ??= m.currency;
     }
     const realTokens = roundRuns.reduce(
       (n, r) => n + (r.usage ? r.usage.input + r.usage.output : 0),
@@ -432,7 +435,9 @@ export function projectFlowNodes({
       startedAt: faceRun.startedAt ?? run.startedAt,
       realTokens,
       costText:
-        costNano > 0 ? formatCostCaption(costNano, costEstimated) : undefined,
+        costNano > 0
+          ? formatCostCaption(costNano, costEstimated, costCurrency)
+          : undefined,
       handleDirection,
       isSubtask,
       isRevision: isContinuation,

@@ -1,10 +1,12 @@
 """Honest prepare / turn-start aborts for local workspace presence + liveness.
 
-Three user-visible cases (message already persisted → guide regenerate, not resend):
+Four user-visible cases (message already persisted → guide regenerate, not resend):
 
 1. No desktop fulfillment session at all (desktop offline / not connected).
 2. Desktop online for ``workspace`` but does not declare this ``root_id``.
 3. Fulfiller present yet channel IO hangs / sticky-dead — existing channel-dead copy.
+4. Another device is online, but the one that started this turn is not (pinned
+   channels only — see ``fulfill/origin.py``).
 
 Prepare-phase local IO also shares a wall-clock budget (see
 ``settings.prepare_local_io_budget_seconds``) so op timeouts cannot sum unbound.
@@ -24,8 +26,10 @@ from typing import NoReturn
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
+from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE, current_origin_device
 from agentcore.workspace.limits import (
     CHANNEL_DEAD_PREPARE_ABORT,
+    LOCAL_ROOT_NOT_HELD,
     is_channel_dead_detail,
     is_liveness_timeout_detail,
 )
@@ -40,22 +44,27 @@ LOCAL_DESKTOP_OFFLINE = (
     "（不要再次发送，以免出现两条用户消息）。"
 )
 
-# Case 2 — some desktop holds workspace caps, but not this bound root.
-LOCAL_ROOT_NOT_HELD = (
-    "桌面已在线，但未声明持有本会话的本地目录"
-    "（授权可能已移除，或已换用其他电脑）。"
-    "请在桌面重新授权该文件夹后，点「重新生成」"
-    "（不要再次发送）。"
-)
+# Case 2 — ``LOCAL_ROOT_NOT_HELD``, imported from ``workspace/limits.py``: mid-turn
+# delivery says the same thing when roots change after this gate ran
+# (``fulfill/dispatch.py`` → ``DeliverResult.ROOT_NOT_HELD``).
 
 # Case 3 — re-export the existing sticky-dead prepare abort (channel hung).
 LOCAL_CHANNEL_DEAD = CHANNEL_DEAD_PREPARE_ABORT
+
+# Case 4 — some other install could serve this op, but it is not the machine the
+# user is working from, and local file ops must not silently change machine.
+LOCAL_ORIGIN_DEVICE_OFFLINE = (
+    f"{ORIGIN_DEVICE_OFFLINE}"
+    "（本地工作区操作不会转投其他电脑。）"
+    "回到那台电脑后，点「重新生成」（不要再次发送）。"
+)
 
 PREPARE_LOCAL_ABORT_MESSAGES: frozenset[str] = frozenset(
     {
         LOCAL_DESKTOP_OFFLINE,
         LOCAL_ROOT_NOT_HELD,
         LOCAL_CHANNEL_DEAD,
+        LOCAL_ORIGIN_DEVICE_OFFLINE,
     }
 )
 
@@ -93,19 +102,35 @@ def raise_if_local_workspace_fulfiller_absent(
 ) -> None:
     """Millisecond presence gate: local channel turns need a workspace fulfiller.
 
-    Distinguishes desktop-offline vs root-not-held. No-op for cloud / sidecar
-    Path-backed local backends. Raises ``WorkspaceIOError`` with an honest message.
+    Distinguishes desktop-offline vs root-not-held vs origin-device-gone. No-op
+    for cloud / sidecar Path-backed local backends. Raises ``WorkspaceIOError``
+    with an honest message.
+
+    Asks the hub the same question delivery will ask (origin device included),
+    so the gate can never pass a turn whose first op reports having no machine
+    to run on.
     """
     if not _backend_needs_workspace_fulfiller(backend):
         return
     channel = getattr(backend, "_channel", None)
     root_id = (getattr(channel, "root_id", None) or "") or None
-    from agentcore.fulfill.hub import default_fulfiller_hub
+    from agentcore.fulfill.hub import default_fulfiller_hub, origin_pinned
 
     hub = default_fulfiller_hub()
-    if hub.has_fulfiller(user_id, root_id=root_id, channel="workspace"):
+    origin_device_id = current_origin_device()
+    pinned = bool(origin_device_id) and origin_pinned("workspace", root_id=root_id)
+    if hub.has_fulfiller(
+        user_id,
+        root_id=root_id,
+        channel="workspace",
+        origin_device_id=origin_device_id,
+        require_origin=pinned,
+    ):
         return
-    if hub.has_fulfiller(user_id, root_id=None, channel="workspace"):
+    if pinned and hub.has_fulfiller(user_id, root_id=root_id, channel="workspace"):
+        reason = "origin_device_offline"
+        message = LOCAL_ORIGIN_DEVICE_OFFLINE
+    elif hub.has_fulfiller(user_id, root_id=None, channel="workspace"):
         reason = "root_not_held"
         message = LOCAL_ROOT_NOT_HELD
     else:
@@ -116,6 +141,7 @@ def raise_if_local_workspace_fulfiller_absent(
         reason=reason,
         root_id=root_id,
         user=user_id,
+        origin_device=origin_device_id,
     )
     raise WorkspaceIOError(message)
 

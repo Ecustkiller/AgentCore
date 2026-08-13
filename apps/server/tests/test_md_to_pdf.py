@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+import zlib
 from pathlib import Path
 
 import pytest
@@ -80,6 +82,72 @@ def test_discover_cjk_font_respects_candidates(tmp_path: Path) -> None:
     real = discover_cjk_font()
     # On CI without fonts this may be None — that's OK; just don't crash.
     assert real is None or real.is_file()
+
+
+_PLEADING_MD = """# 民事起诉状
+
+## 诉讼请求
+
+原告：张三，男，1980 年生。
+
+- 证据一
+"""
+
+
+def _text_positions(pdf_bytes: bytes) -> list[tuple[float, float]]:
+    """Decompressed content-stream ``Td`` origins — one per rendered text line."""
+    chunks: list[str] = []
+    for raw in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", pdf_bytes, re.S):
+        try:
+            chunks.append(zlib.decompress(raw).decode("latin-1"))
+        except zlib.error:
+            continue
+    return [
+        (float(x), float(y))
+        for x, y in re.findall(r"([\d.]+) ([\d.]+) Td", "\n".join(chunks))
+    ]
+
+
+def test_default_layout_centers_h1_without_first_line_indent():
+    """默认档与 md_to_docx 同口径：大标题居中，正文左边界与二级标题、列表齐平。"""
+    h1, h2, body, item = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)
+    assert h2[0] == body[0] == item[0]
+    assert h1[0] > body[0] + 20  # 居中 → 起笔远离左边界
+
+
+def test_official_layout_indents_body_first_line():
+    """公文档：只有正文首行右移两字（11pt 正文 → 22pt），标题与列表不动。"""
+    plain = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)
+    official = _text_positions(
+        convert_markdown_to_pdf(_PLEADING_MD, layout="official").pdf_bytes
+    )
+    assert official[2][0] == pytest.approx(plain[2][0] + 2 * 11, abs=0.01)
+    assert [official[i] for i in (0, 1, 3)] == [plain[i] for i in (0, 1, 3)]
+
+
+def test_layout_never_inferred_from_body_text():
+    """同一份公文正文，不传档位就必须与技术文档一个排版——禁止内容启发式。"""
+    plain = _text_positions(convert_markdown_to_pdf(_PLEADING_MD).pdf_bytes)
+    explicit = _text_positions(
+        convert_markdown_to_pdf(_PLEADING_MD, layout="standard").pdf_bytes
+    )
+    assert plain == explicit
+
+
+@pytest.mark.asyncio
+async def test_export_markdown_to_pdf_path_layout_defaults_to_standard(tmp_path: Path):
+    """HTTP「导出 PDF」路径不传 layout，落盘文件必须没有首行缩进。"""
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "起诉状.md").write_text(_PLEADING_MD, encoding="utf-8")
+    backend = ServerWorkspace(root=root, sandbox=SubprocessSandbox())
+
+    await export_markdown_to_pdf_path(backend, "起诉状.md")
+    plain = _text_positions((root / "起诉状.pdf").read_bytes())
+    await export_markdown_to_pdf_path(backend, "起诉状.md", layout="official")
+    official = _text_positions((root / "起诉状.pdf").read_bytes())
+
+    assert official[2][0] > plain[2][0]
 
 
 @pytest.mark.asyncio

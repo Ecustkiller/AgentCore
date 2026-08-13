@@ -10,19 +10,27 @@ import {
   saveAgentCoreExpanded,
 } from "@/components/files/fileWorkbench/storage";
 import { cn } from "@/lib/utils";
-import { AGENTCORE_ROOT_NAME } from "@/services/documents";
 import { ChevronDown, ChevronRight, Folder, FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-/** Which convention-tree layer: GLOBAL (cloud root) or one project's. */
+/** Which convention-tree layer: GLOBAL (cloud root) or one folder's. */
 export type AgentCoreScope =
   | { kind: "global" }
-  | { kind: "project"; folderId: string; projectName: string };
+  | { kind: "folder"; folderId: string };
 
 /**
- * Unified `AgentCore/` rail section — flat entries by scope (目标形态 · 文件页形态).
+ * Entry-base rail title. The base holds exactly one kind of thing — equal md
+ * entries — so the name presumes neither who wrote it nor what it holds, and it
+ * no longer collides with the on-disk `AgentCore/`（文件树里的「AI 工作间」）.
+ */
+export const ENTRIES_SECTION_NAME = "记忆";
+
+/**
+ * Entry-base rail section — flat entries by scope (目标形态 · 文件页形态).
  * No 记忆/规则/文档 subfolders; always-pool meter + 常驻/按需 badges live in
  * {@link EntriesSection}. Leaves open via memory / document sources (CAS unchanged).
+ *
+ * Presentation only — entries still live under the `AgentCore` document root.
  */
 export function AgentCoreSection({
   scope,
@@ -101,7 +109,7 @@ export function AgentCoreSection({
   const entryScope =
     scope.kind === "global"
       ? ({ kind: "global" } as const)
-      : ({ kind: "project", folderId: scope.folderId } as const);
+      : ({ kind: "folder", folderId: scope.folderId } as const);
 
   const headerPad = indent + 8;
   const childIndent = indent + 14;
@@ -130,7 +138,7 @@ export function AgentCoreSection({
         ) : (
           <Folder size={14} className="shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 truncate">{AGENTCORE_ROOT_NAME}</span>
+        <span className="min-w-0 flex-1 truncate">{ENTRIES_SECTION_NAME}</span>
       </button>
 
       {sectionOpen && (

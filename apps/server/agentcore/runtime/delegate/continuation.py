@@ -25,8 +25,10 @@ class ContinuationRejectedError(Exception):
     """输入校验失败：该项拒绝续派，驱动层折成 FAILED RunState 交回 CEO。
 
     ``cause`` 枚举（观测 / CEO 文案分流，勿暗示「id 抄错」）：
-    ``empty`` / ``self`` / ``in_progress`` / ``recall_limit`` /
-    ``evicted`` / ``loader_absent`` / ``loader_miss`` / ``not_found``.
+    ``empty`` / ``self`` / ``in_progress`` / ``cancelled`` / ``never_ran`` /
+    ``recall_limit`` / ``evicted`` / ``loader_absent`` / ``loader_miss`` / ``not_found``.
+    ``in_progress`` 只给真·未终局的目标——终局但无现场的 CANCELLED / SKIPPED 各有其 cause，
+    否则文案会叫 CEO 去等一个不会完成的节点。
     """
 
     def __init__(self, message: str, *, cause: str = "not_found") -> None:
@@ -100,11 +102,25 @@ async def resolve_session(
             "或去掉该字段走冷委派。",
             cause="self",
         )
-    # 终局 run（COMPLETED / FAILED）可带现场续写；真正进行中（未终局）才拒。FAILED 放行——
-    # CEO 用 continue_from 让原作者在失败草稿上改写正是同人续派的用途。CANCELLED / SKIPPED
-    # 不是「可续终局」：前者走 redirect/salvage 的 partial session（本闸不动），后者从未产出。
+    # 终局 run（COMPLETED / FAILED）可带现场续写；FAILED 放行——CEO 用 continue_from 让原作者
+    # 在失败草稿上改写正是同人续派的用途。CANCELLED / SKIPPED 同样是【终局】，只是没有登记
+    # 可续现场：把它们混进「仍在进行中，请用 depends_on 等它完成」会把 CEO 指向一个永远不会
+    # 再完成的节点，白等一整波。三种情形各自说实话，各给一条真的走得通的路。
     if completed is not None and target in completed:
         st = completed[target]
+        if st.phase is RunPhase.CANCELLED:
+            raise ContinuationRejectedError(
+                f"目标 run `{target}` 已中断（cancelled：改方向 / 超时强杀 / 用户只停这项），"
+                "它不会再完成，也没有登记可续写现场。请改冷委派并设 `replaces_run_id` 标接手"
+                "（**不要**用 depends_on 等它）。",
+                cause="cancelled",
+            )
+        if st.phase is RunPhase.SKIPPED:
+            raise ContinuationRejectedError(
+                f"目标 run `{target}` 从未执行（skipped：级联跳过 / 中止），没有现场可续。"
+                "请改冷委派并设 `replaces_run_id` 标接手。",
+                cause="never_ran",
+            )
         if st.phase not in (RunPhase.COMPLETED, RunPhase.FAILED):
             raise ContinuationRejectedError(
                 f"目标 run `{target}` 仍在进行中（{st.phase.value}），无法带现场续派。"
@@ -188,7 +204,7 @@ async def run_continuation(
     completed: Mapping[str, RunState],
     *,
     execution_id: str,
-    approval_gate: Any = None,
+    approval_gate: Any,
 ) -> RunState:
     """执行带现场续派：校验 → continue_run → 提交 session → 计入续派账。"""
     from agentcore.runtime.runs import continue_run

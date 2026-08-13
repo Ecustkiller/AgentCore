@@ -130,7 +130,9 @@ export const toolMeta = (name: string): { Icon: LucideIcon; label: string } =>
 /** Tool execution phase → waiting-state chrome (network UX): a running tool's coarse phase
  * (from a `tool_use_progress` event) as user-facing text — a slow builtin fires these while its
  * blocking leg is in flight so the waiting row is live instead of a dead spinner. web_search:
- * Searching / Queued / Trying fallback; read_url: Fetching page / Extracting; code_execute: Running. */
+ * Searching / Queued / Trying fallback; read_url: Fetching page / Extracting; code_execute: Running.
+ * git can wait ~2min, and each of its waits names itself: queued behind another write on the same
+ * repo, resolving credentials, on the remote round trip, or running the local command. */
 const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
   queued: "Queued",
   querying: "Searching",
@@ -139,6 +141,9 @@ const TOOL_PHASE_TEXT: Record<ToolPhase, string> = {
   reading: "Extracting",
   executing: "Running",
   blocked: "Network blocked",
+  git_queued: "Waiting for repo",
+  git_credentials: "Checking credentials",
+  git_remote: "Contacting remote",
 };
 
 /** Waiting-state text for a running tool step's `phase`, or null when it has none yet.
@@ -148,7 +153,12 @@ export function toolPhaseText(phase: string | undefined): string | null {
   return TOOL_PHASE_TEXT[phase as ToolPhase] ?? "Working";
 }
 
-/** Locator / identity args — safe to chip into the collapsed ToolLine title. */
+/** Locator args — safe to chip into the collapsed ToolLine title.
+ *
+ * 内部标识（run_id / conversation_id / interjection_id）不在此列，且**不要再加回来**：
+ * 用户在协作图上认的是角色名，`Cancel worker r-a3f2e1c8-…` 让他无从判断 CEO 撤的是谁、
+ * 处置得对不对。撤队员 / 裁决求助的标题改挂角色名（{@link RUN_TARGET_ARG_TOOLS}），
+ * 查阅历史对话改挂对话标题（结果 peek）。 */
 const TOOL_DETAIL_KEYS = [
   "query",
   "url",
@@ -157,10 +167,21 @@ const TOOL_DETAIL_KEYS = [
   "command",
   "q",
   "name", // consult / consult_skill / consult_memory / consult_rule
-  "conversation_id", // read_conversation
-  "run_id", // cancel_worker / resolve_escalation
-  "interjection_id", // queue_user_message
 ];
+
+/** 拿 `run_id` 指人的 CEO 处置工具——标题上要显示的是那名队员的角色名。 */
+export const RUN_TARGET_ARG_TOOLS = new Set([
+  "cancel_worker",
+  "resolve_escalation",
+]);
+
+/** 形似内部标识（长十六进制串 / `wave_3` 式生成 id）——绝不进用户面标题。
+ *
+ * 这两个工具的 `run_id` 也接受角色名 / 短名（后端自行解析），CEO 那样填时它本就是用户
+ * 认得的词，可直接显示；只有真 id 才需要靠协作图翻译，翻不出来就不显示。 */
+export function looksLikeInternalId(raw: string): boolean {
+  return /[0-9a-f]{8,}/i.test(raw) || /^[a-z][a-z0-9]*[_-]\d+$/i.test(raw);
+}
 
 /** Short one-liner body args (e.g. a tiny `code` snippet). Long / multiline prose
  * (`draft` / `answer` / `text` / …) stays out of the title — expand + peek cover it. */

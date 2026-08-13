@@ -48,6 +48,9 @@ DEFAULT_TIMEOUT_WARN_RATIO = 0.75
 # file_write）经 :func:`wind_down_allowed_tools` 叠加——回读自己产物属于写作，
 # 不是继续调查；web_search / read_url / grep 等检索类不放回。
 # code_diagnostics：修码自检（内环），收尾/delivery_idle 收窄后仍可用。
+# md_to_docx / md_to_pdf：把已成篇 .md 确定性导出为同目录同名交付件——用户要
+# PDF / Word / 可分享文件时的成文主路径末步（见 research_quality.MD_EXPORT_DISCIPLINE），
+# 属收口落盘而非新战线：不检索、不出网、回执只有一行 manifest。
 # 便签三件套亦不在基础集：仅 collaboration/wall（工具面已授 post_note）经
 # :func:`wind_down_allowed_tools` 叠加——收尾可贴/读/改便签，仍禁检索/外网。
 WIND_DOWN_ALLOWED_TOOLS = frozenset(
@@ -62,6 +65,8 @@ WIND_DOWN_ALLOWED_TOOLS = frozenset(
         "mkdir",
         "file_batch",
         "file_list",
+        "md_to_docx",
+        "md_to_pdf",
         "code_diagnostics",
     }
 )

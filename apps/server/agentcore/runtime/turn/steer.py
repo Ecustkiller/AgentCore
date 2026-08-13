@@ -50,6 +50,9 @@ class PendingTurnSteer:
     agent_mentions: list[dict[str, Any]] = field(default_factory=list)
     requires_tools: bool = False
     x_client_platform: str | None = None
+    # Survives promotion to the conversation queue so a leftover steer keeps
+    # pointing at the machine that typed it (see fulfill/origin.py).
+    origin_device_id: str | None = None
     llm_credentials: Any = None
     llm_supports_tools: bool | None = None
 
@@ -164,6 +167,7 @@ def try_enqueue(
     agent_mentions: list[dict[str, Any]] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
+    origin_device_id: str | None = None,
     llm_credentials: Any = None,
     llm_supports_tools: bool | None = None,
 ) -> PendingTurnSteer | None:
@@ -181,6 +185,7 @@ def try_enqueue(
         agent_mentions=list(agent_mentions or []),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
+        origin_device_id=origin_device_id,
         llm_credentials=llm_credentials,
         llm_supports_tools=llm_supports_tools,
     )
@@ -262,14 +267,22 @@ def _emit_degraded_turn_queued(
     Clients that already saw ``user_interjection(received)`` must also see
     ``user_interjection(queued)`` + ``turn_queued.degraded_from=steer`` (dual emit,
     same posture as coordination enqueue). Returns whether a live sink received
-    ``turn_queued``.
+    ``turn_queued`` — other端 following the conversation are reached either way.
+
+    Called after the ``queued`` status so the dual emit keeps its contract order; that
+    is why the enqueue itself passes ``signal_watchers=False``.
     """
-    from agentcore.runtime.events import turn_queued
+    from .queue import broadcast_turn_queued
 
-    from .runs import turn_runs
-
-    run = turn_runs.get(conversation_id)
-    if run is None or run.task.done():
+    reached_live_sink = broadcast_turn_queued(
+        conversation_id=conversation_id,
+        queue_id=queue_id,
+        position=position,
+        queue_depth=queue_depth,
+        degraded_from="steer",
+        on_live_sink=True,
+    )
+    if not reached_live_sink:
         logger.info(
             "turn_steer.promoted_to_queue_no_sink",
             conversation_id=conversation_id,
@@ -279,17 +292,7 @@ def _emit_degraded_turn_queued(
             queue_depth=queue_depth,
             degraded_from="steer",
         )
-        return False
-    run.sink.emit(
-        turn_queued(
-            queue_id=queue_id,
-            position=position,
-            queue_depth=queue_depth,
-            conversation_id=conversation_id,
-            degraded_from="steer",
-        )
-    )
-    return True
+    return reached_live_sink
 
 
 def _emit_interjection_status(
@@ -377,10 +380,14 @@ def promote_leftovers_to_queue(leftovers: list[PendingTurnSteer]) -> int:
                     agent_mentions=item.agent_mentions,
                     requires_tools=item.requires_tools,
                     x_client_platform=item.x_client_platform,
+                    origin_device_id=item.origin_device_id,
                     llm_credentials=item.llm_credentials,
                     llm_supports_tools=item.llm_supports_tools,
                     interjection_id=item.interjection_id,
                 ),
+                # 双发次序是契约：queued 状态先行，degraded turn_queued 随后由
+                # ``_emit_degraded_turn_queued`` 发出（含对话级信号）。
+                signal_watchers=False,
             )
         except Exception as exc:  # noqa: BLE001 — surface as failed, never raise into loop finally
             logger.exception(

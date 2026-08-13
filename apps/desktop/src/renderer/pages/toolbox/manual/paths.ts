@@ -6,7 +6,9 @@
 export const APP_PATHS = {
   files: "/files",
   toolbox: {
+    root: "/toolbox",
     tools: "/toolbox/tools",
+    guidelines: "/toolbox/guidelines",
     connectors: "/toolbox/connectors",
     automations: {
       root: "/toolbox/automations",
@@ -28,7 +30,7 @@ export const APP_PATHS = {
     model: "/more/model",
     providers: "/more/providers",
     usage: "/more/usage",
-    appearance: "/more/appearance",
+    general: "/more/general",
     shortcuts: "/more/shortcuts",
     feedback: "/more/feedback",
     /** Legacy; `#/more/notices` redirects to the IM official chat. */

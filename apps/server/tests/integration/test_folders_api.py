@@ -2,17 +2,22 @@
 
 Auto-skips (via the shared ``client`` fixture) when no PostgreSQL is reachable.
 Covers create modes, birth-time membership, soft-delete archives (no ungroup),
-permanent wipe (conversations + cloud space), absence of PATCH …/folder, and IDOR isolation.
+最近删除 list + restore, permanent wipe (conversations + cloud space), absence of
+PATCH …/folder, and IDOR isolation.
 """
 
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx
 import pytest
+from sqlalchemy import select, update
 
 import agentcore.folders.permanent_delete as permanent_delete_mod
 from agentcore.config import settings
-from agentcore.db.repositories import MessageRepository
+from agentcore.db.models import Conversation, Folder
+from agentcore.db.repositories import FolderRepository, MessageRepository
+from agentcore.db.repositories.folders import FOLDER_DELETE_ORIGIN_AUTO_DESK_RECLAIM
 from agentcore.storage.factory import build_storage_provider
 from agentcore.workspace.locate import workspace_root_path
 from tests.integration.conftest import register_and_login
@@ -85,6 +90,65 @@ async def test_create_cloud_and_local_folders(client):
     r = await client.get("/v1/folders")
     assert r.status_code == 200, r.text
     assert {f["id"] for f in r.json()} == {cloud["id"], local["id"]}
+
+
+async def test_cloud_tree_nest_rename_move_and_restore(client, _fs_data_dir):
+    """真目录树端到端：嵌套建、改名带子树、移动、软删释放名字、恢复重新占位。"""
+    user_id = await register_and_login(client, "foldertree")
+
+    def tree(rel: str) -> Path:
+        return workspace_root_path(
+            user_id=user_id, folder_rel_path=rel, conversation_id=""
+        )
+
+    parent = await _create_cloud_folder(client, "研究")
+    r = await client.post(
+        "/v1/folders", json={"name": "2026/Q1", "mode": "cloud", "parent_id": parent}
+    )
+    assert r.status_code == 201, r.text
+    child = r.json()
+    # The slash is a path separator, not part of a name — it gets sanitized away.
+    assert child["rel_path"] == "研究/2026_Q1"
+    assert child["parent_rel_path"] == "研究"
+
+    ws = f"folder:{child['id']}"
+    assert (
+        await client.put(f"/v1/workspaces/{ws}/files/note.md", content=b"body")
+    ).status_code == 200
+    assert (tree("研究/2026_Q1") / "note.md").exists()
+
+    # Rename the parent: the child's directory (and its files) follow by prefix.
+    r = await client.patch(f"/v1/folders/{parent}", json={"name": "调研"})
+    assert r.status_code == 200, r.text
+    assert r.json()["rel_path"] == "调研"
+    assert (tree("调研/2026_Q1") / "note.md").read_text(encoding="utf-8") == "body"
+    assert not tree("研究").exists()
+    r = await client.get(f"/v1/workspaces/{ws}/files/note.md")
+    assert r.status_code == 200 and r.content == b"body"
+
+    # Move the child back to the tree root.
+    r = await client.patch(f"/v1/folders/{child['id']}", json={"parent_id": None})
+    assert r.status_code == 200, r.text
+    assert r.json()["rel_path"] == "2026_Q1"
+    assert (tree("2026_Q1") / "note.md").exists()
+
+    # A folder cannot be moved into its own subtree.
+    r = await client.patch(f"/v1/folders/{parent}", json={"parent_id": parent})
+    assert r.status_code == 422, r.text
+
+    # Soft-delete frees the visible name at once (directory → tombstone area).
+    assert (await client.delete(f"/v1/folders/{child['id']}")).status_code == 200
+    assert not tree("2026_Q1").exists()
+    again = await client.post(
+        "/v1/folders", json={"name": "2026_Q1", "mode": "cloud"}
+    )
+    assert again.json()["rel_path"] == "2026_Q1"
+
+    # Restore lands beside the squatter rather than on top of it, files intact.
+    r = await client.post(f"/v1/folders/trash/{child['id']}/restore")
+    assert r.status_code == 200, r.text
+    assert r.json()["rel_path"] == "2026_Q1 (2)"
+    assert (tree("2026_Q1 (2)") / "note.md").read_text(encoding="utf-8") == "body"
 
 
 async def test_create_folder_requires_mode(client):
@@ -327,6 +391,180 @@ async def test_delete_folder_archives_conversations(client):
     assert detail["archived"] is True
 
 
+async def test_soft_delete_keeps_member_updated_at(client, session_factory):
+    """删除项目不得改写成员对话的最近活动时间——刷了就再也追不回来。"""
+    await register_and_login(client, "folderkeepstamp")
+    folder_id = await _create_cloud_folder(client, "Stamped")
+    conv = (
+        await client.post(
+            "/v1/conversations", json={"title": "old news", "folder_id": folder_id}
+        )
+    ).json()["id"]
+
+    async with session_factory() as s:
+        before = (
+            await s.execute(select(Conversation.updated_at).where(Conversation.id == conv))
+        ).scalar_one()
+
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    async with session_factory() as s:
+        row = (
+            await s.execute(
+                select(Conversation.updated_at, Conversation.archived).where(
+                    Conversation.id == conv
+                )
+            )
+        ).one()
+    assert row.archived is True
+    assert row.updated_at == before
+
+
+async def test_restore_project_unarchives_only_what_the_delete_archived(client):
+    """用户自己归档的对话不该被恢复拽回侧栏；连带归档的那批才解档。"""
+    await register_and_login(client, "folderrestore")
+    folder_id = await _create_cloud_folder(client, "Comeback")
+    kept = (
+        await client.post(
+            "/v1/conversations", json={"title": "live one", "folder_id": folder_id}
+        )
+    ).json()["id"]
+    self_archived = (
+        await client.post(
+            "/v1/conversations", json={"title": "I archived this", "folder_id": folder_id}
+        )
+    ).json()["id"]
+    assert (
+        await client.patch(
+            f"/v1/conversations/{self_archived}", json={"archived": True}
+        )
+    ).status_code == 200
+
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    listed = (await client.get("/v1/folders/trash")).json()
+    assert listed["total"] == 1
+    entry = listed["data"][0]
+    assert entry["id"] == folder_id
+    assert entry["name"] == "Comeback"
+    assert listed["retention_days"] == settings.workspace_retention_days
+    # 清算时刻由服务端算好，前端不拿 deleted_at 自己减。
+    purge_at = datetime.fromisoformat(entry["purge_at"])
+    deleted_at = datetime.fromisoformat(entry["deleted_at"])
+    assert purge_at - deleted_at == timedelta(days=settings.workspace_retention_days)
+
+    restored = await client.post(f"/v1/folders/trash/{folder_id}/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["id"] == folder_id
+    assert restored.json()["name"] == "Comeback"
+
+    assert [f["id"] for f in (await client.get("/v1/folders")).json()] == [folder_id]
+    assert (await client.get("/v1/folders/trash")).json()["data"] == []
+
+    live = (await client.get("/v1/conversations")).json()
+    assert [c["id"] for c in live["data"]] == [kept]
+    archived = (await client.get("/v1/conversations", params={"archived": True})).json()
+    assert [c["id"] for c in archived["data"]] == [self_archived]
+
+
+async def test_restore_past_retention_is_refused_not_silently_ok(
+    client, session_factory
+):
+    await register_and_login(client, "folderexpired")
+    folder_id = await _create_cloud_folder(client, "TooLate")
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    aged = datetime.now(UTC) - timedelta(days=settings.workspace_retention_days + 1)
+    async with session_factory() as s:
+        await s.execute(update(Folder).where(Folder.id == folder_id).values(deleted_at=aged))
+        await s.commit()
+
+    # 过期的不再列为可恢复。
+    assert (await client.get("/v1/folders/trash")).json()["data"] == []
+
+    r = await client.post(f"/v1/folders/trash/{folder_id}/restore")
+    assert r.status_code == 409, r.text
+    assert (await client.get("/v1/folders")).json() == []
+
+
+async def test_trash_excludes_machine_reclaimed_auto_desks(client, session_factory):
+    """自动铸的裸聊云桌名字像正常项目，但它是机器垃圾，不进回收站。"""
+    user_id = await register_and_login(client, "folderautodesk")
+    user_deleted = await _create_cloud_folder(client, "Real Project")
+    assert (await client.delete(f"/v1/folders/{user_deleted}")).status_code == 200
+
+    async with session_factory() as s:
+        desk = await FolderRepository(s).create(user_id=user_id, name="聊聊周报怎么写")
+    async with session_factory() as s:
+        assert await FolderRepository(s).soft_delete(
+            desk.id,
+            user_id=user_id,
+            origin=FOLDER_DELETE_ORIGIN_AUTO_DESK_RECLAIM,
+        )
+
+    listed = (await client.get("/v1/folders/trash")).json()
+    assert [f["id"] for f in listed["data"]] == [user_deleted]
+
+    # 够不到就是够不到：直接点名恢复也不行。
+    assert (await client.post(f"/v1/folders/trash/{desk.id}/restore")).status_code == 404
+
+
+async def test_trash_ignores_projects_soft_deleted_before_the_feature(
+    client, session_factory
+):
+    """历史软删行没有 delete_origin，宁可少列也不冒充「用户删的」。"""
+    user_id = await register_and_login(client, "folderlegacy")
+    async with session_factory() as s:
+        legacy = await FolderRepository(s).create(user_id=user_id, name="Legacy")
+    async with session_factory() as s:
+        await s.execute(
+            update(Folder)
+            .where(Folder.id == legacy.id)
+            .values(deleted_at=datetime.now(UTC), delete_origin=None)
+        )
+        await s.commit()
+
+    assert (await client.get("/v1/folders/trash")).json()["data"] == []
+    assert (
+        await client.post(f"/v1/folders/trash/{legacy.id}/restore")
+    ).status_code == 404
+
+
+async def test_trash_is_access_session_only(client, new_client):
+    """folders 窄票是给 sidecar CEO 干名册活的；恢复是用户补救面，AI 够不到。"""
+    await register_and_login(client, "foldertrashticket")
+    folder_id = await _create_cloud_folder(client, "Ticketed")
+    token = (await client.post("/v1/folders/token")).json()["token"]
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    async with new_client() as sidecar:
+        headers = {"Authorization": f"Bearer {token}"}
+        # 同一张票读得动名册……
+        assert (await sidecar.get("/v1/folders", headers=headers)).status_code == 200
+        # ……但看不到回收站，也恢复不了。
+        assert (await sidecar.get("/v1/folders/trash", headers=headers)).status_code == 401
+        assert (
+            await sidecar.post(
+                f"/v1/folders/trash/{folder_id}/restore", headers=headers
+            )
+        ).status_code == 401
+
+
+async def test_trash_is_isolated_between_users(client, new_client):
+    await register_and_login(client, "trashowner")
+    folder_id = await _create_cloud_folder(client, "Mine To Restore")
+    assert (await client.delete(f"/v1/folders/{folder_id}")).status_code == 200
+
+    async with new_client() as other:
+        await register_and_login(other, "trashintruder")
+        assert (await other.get("/v1/folders/trash")).json()["data"] == []
+        assert (
+            await other.post(f"/v1/folders/trash/{folder_id}/restore")
+        ).status_code == 404
+
+    assert (await client.post(f"/v1/folders/trash/{folder_id}/restore")).status_code == 200
+
+
 async def test_soft_delete_folder_hides_workspace_from_hub(
     client, _fs_data_dir
 ):
@@ -373,7 +611,45 @@ async def test_permanent_delete_folder_wipes_conversations_and_cloud_space(
     assert (await client.get("/v1/folders")).json() == []
     assert (await client.get(f"/v1/workspaces/{ws}/files")).status_code == 404
     assert not workspace_root_path(
-        user_id=user_id, folder_id=folder_id, conversation_id=""
+        user_id=user_id, folder_rel_path="Gone", conversation_id=""
+    ).exists()
+
+
+async def test_permanent_delete_folder_wipes_nested_subtree(
+    client, session_factory, monkeypatch, _fs_data_dir
+):
+    """嵌套子文件夹跟着父一起走：父目录被整个 rmtree，留下子行就是指向空气的幽灵项目。"""
+    monkeypatch.setattr(permanent_delete_mod, "async_session_factory", session_factory)
+    user_id = await register_and_login(client, "folderuser7n")
+    parent = await _create_cloud_folder(client, "Root")
+    r = await client.post(
+        "/v1/folders", json={"name": "Nested", "mode": "cloud", "parent_id": parent}
+    )
+    assert r.status_code == 201, r.text
+    child = r.json()["id"]
+
+    r = await client.post(
+        "/v1/conversations", json={"title": "in parent", "folder_id": parent}
+    )
+    parent_conv = r.json()["id"]
+    r = await client.post(
+        "/v1/conversations", json={"title": "in child", "folder_id": child}
+    )
+    child_conv = r.json()["id"]
+    await _seed_message(session_factory, child_conv)
+    assert (
+        await client.put(f"/v1/workspaces/folder:{child}/files/n.txt", content=b"x")
+    ).status_code == 200
+
+    r = await client.delete(f"/v1/folders/{parent}/permanent")
+    assert r.status_code == 200, r.text
+
+    assert (await client.get("/v1/folders")).json() == []
+    for conv in (parent_conv, child_conv):
+        assert (await client.get(f"/v1/conversations/{conv}")).status_code == 404
+    assert (await client.get(f"/v1/workspaces/folder:{child}/files")).status_code == 404
+    assert not workspace_root_path(
+        user_id=user_id, folder_rel_path="Root", conversation_id=""
     ).exists()
 
 

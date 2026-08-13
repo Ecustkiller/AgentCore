@@ -36,6 +36,7 @@ import { unstable_batchedUpdates } from "react-dom";
 import { loadRecovery } from "../resume";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import { markGhostInterrupted } from "./recovery";
+import { beginLocalConversationStream } from "./streamOwnership";
 
 /** In-flight attach per conversation — hydrate 两次 coalesce 到同一 Promise。 */
 const attachInFlight = new Map<string, Promise<boolean>>();
@@ -113,7 +114,10 @@ export async function attachSidecarTurn(
   // Same-session guard: original runSidecarTurn invoke still alive → skip.
   if (getRuntime(conversationId).isGenerating) return true;
 
+  // 本端在折这个会话 → 对话级订阅让位（桌面执行的云回合两边都有事件流）。
+  const releaseLocalStream = beginLocalConversationStream(conversationId);
   const p = attachSidecarTurnExclusive(conversationId, opts).finally(() => {
+    releaseLocalStream();
     if (attachInFlight.get(conversationId) === p) {
       attachInFlight.delete(conversationId);
     }
@@ -145,8 +149,9 @@ async function attachSidecarTurnExclusive(
     resolveDone = resolve;
   });
 
-  const foldEvent = (event: SSEEvent): void => {
-    dispatchSSEEvent(event, { conversationId, source: "sidecar" });
+  /** ``replay`` = 这帧来自 attach 快照（本地引擎的既往帧），不是刚发生的转折。 */
+  const foldEvent = (event: SSEEvent, replay = false): void => {
+    dispatchSSEEvent(event, { conversationId, source: "sidecar", replay });
     if (isTerminalEvent(event.type)) {
       finished = true;
       resolveDone();
@@ -325,7 +330,7 @@ async function attachSidecarTurnExclusive(
     unstable_batchedUpdates(() => {
       for (let i = 0; i < snapshot.length; i++) {
         if (ac.signal.aborted) break;
-        foldEvent(snapshot[i] as SSEEvent);
+        foldEvent(snapshot[i] as SSEEvent, true);
       }
     });
     while (!ac.signal.aborted && liveQueue.length > 0) {

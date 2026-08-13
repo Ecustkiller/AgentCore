@@ -1,12 +1,14 @@
-"""Process-wide IndexManager / IndexMaintainer registry.
+"""Process-wide IndexManager / IndexMaintainer registry, keyed by **index dir**.
 
-Two entry styles share the same process dicts (keys are distinct path shapes):
+Every caller registers under the directory that actually holds ``code_search.db``:
+``ServerWorkspace`` passes :attr:`ServerWorkspace.index_dir` (in-tree
+``<root>/AgentCore/index`` for local / sidecar, an out-of-tree id-keyed dir for
+cloud folders), and ``LocalWorkspace`` passes its host cache under
+``data_dir/code_index/<root_id>/<base_digest>``.
 
-* **Workspace root** (``ServerWorkspace`` / sidecar): ``shared_index_manager`` /
-  ``shared_index_maintainer`` → ``IndexManager.for_workspace_root``.
-* **Index directory** (``LocalWorkspace`` host cache under ``data_dir/code_index``):
-  ``shared_index_manager_for_dir`` / ``shared_index_maintainer_for_dir`` →
-  ``IndexManager(index_dir)``.
+Keying on the index dir rather than the workspace root is what keeps a cloud
+folder rename from opening a *second* SQLite handle on the same database — the
+visible path moves, the id-keyed index dir does not.
 
 Sidecar turns build a fresh ``ServerWorkspace`` each time; without a shared
 maintainer, concurrent ``schedule`` calls cannot coalesce across turns.
@@ -31,54 +33,19 @@ _managers: dict[str, IndexManager] = {}
 _maintainers: dict[str, IndexMaintainer] = {}
 
 
-def root_key(root: Path | str) -> str:
-    """Canonical registry key for a local-disk workspace root."""
-    return str(Path(root).resolve())
-
-
 def index_dir_key(index_dir: Path | str) -> str:
     """Canonical registry key for a host-side index directory."""
     return str(Path(index_dir).resolve())
 
 
-def shared_index_manager(root: Path | str) -> IndexManager:
-    """Return the process-wide ``IndexManager`` for ``root`` (create on miss)."""
-    key = root_key(root)
-    manager = _managers.get(key)
-    if manager is None:
-        manager = IndexManager.for_workspace_root(key)
-        _managers[key] = manager
-    return manager
-
-
 def shared_index_manager_for_dir(index_dir: Path | str) -> IndexManager:
-    """Return the process-wide ``IndexManager`` for ``index_dir`` (create on miss).
-
-    Used by ``LocalWorkspace`` where the BM25 DB lives under
-    ``data_dir/code_index/<root_id>/<base_digest>`` rather than beside a disk root.
-    """
+    """Return the process-wide ``IndexManager`` for ``index_dir`` (create on miss)."""
     key = index_dir_key(index_dir)
     manager = _managers.get(key)
     if manager is None:
         manager = IndexManager(key)
         _managers[key] = manager
     return manager
-
-
-def shared_index_maintainer(root: Path | str, backend: WorkspaceBackend) -> IndexMaintainer:
-    """Return the process-wide ``IndexMaintainer`` for ``root``.
-
-    Rebinds ``backend`` on every call so ensure I/O uses the caller's workspace
-    (same root; mounts may differ per turn).
-    """
-    key = root_key(root)
-    maintainer = _maintainers.get(key)
-    if maintainer is None:
-        maintainer = IndexMaintainer(shared_index_manager(root), backend)
-        _maintainers[key] = maintainer
-    else:
-        maintainer.bind_backend(backend)
-    return maintainer
 
 
 def shared_index_maintainer_for_dir(
@@ -100,19 +67,15 @@ def shared_index_maintainer_for_dir(
     return maintainer
 
 
-async def drop_index_registry(root_or_index_dir: Path | str) -> None:
+async def drop_index_registry(index_dir: Path | str) -> None:
     """Drop manager + maintainer for a registry key so the index dir can be removed.
-
-    ``root_or_index_dir`` is whatever key style was used to register: a workspace
-    root (Server) or a host ``code_index`` cache directory (Local).
 
     Lets in-flight maintenance **finish** (``settle``) before releasing the handle:
     ``ensure_index`` runs in a worker thread, so cancelling it returns while the
     thread still holds ``code_search.db`` open. Required on Windows before ``rmtree``
     of the index dir (WinError 32 sharing violation).
     """
-    # Both entry styles resolve the path the same way; one pop covers either key.
-    key = root_key(root_or_index_dir)
+    key = index_dir_key(index_dir)
     maintainer = _maintainers.pop(key, None)
     if maintainer is not None:
         await maintainer.settle()
@@ -122,7 +85,7 @@ async def drop_index_registry(root_or_index_dir: Path | str) -> None:
 
 
 def clear_index_registry() -> None:
-    """Drop all registry entries (tests only) — root keys and index-dir keys."""
+    """Drop all registry entries (tests only)."""
     for maintainer in list(_maintainers.values()):
         maintainer.abort()
     for manager in list(_managers.values()):

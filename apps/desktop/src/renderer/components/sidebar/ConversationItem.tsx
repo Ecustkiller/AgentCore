@@ -36,6 +36,7 @@ import {
   type ExportFormat,
   exportConversation,
 } from "@/services/conversations";
+import { useConversationAwaitingAttention } from "@/stores/aiAttention";
 import {
   type Conversation,
   useConversationGenerating,
@@ -181,16 +182,19 @@ export function ConversationItem({
   const awaitingResume = usePausedTurnStore((s) =>
     s.pending.some((p) => p.conversationId === conversation.id),
   );
+  // 上面两个只看得见**本端流过**的对话。firehose 的 `ai_attention` 补上另一端起的回合
+  // ——从没在这台机器上打开过的对话也能亮灯（云对话多端同权 B2 · L1）。
+  const awaitingAttention = useConversationAwaitingAttention(conversation.id);
   const navigate = useNavigate();
   const isActive = conversation.id === currentId;
   const currentFolderId = conversation.folderId ?? null;
   const showRowActions = hovered || confirmingDelete || moreOpen;
   const deleteConfirmLabel = currentFolderId
-    ? "确认永久删除（项目文件会保留）"
+    ? "确认永久删除（文件夹里的文件会保留）"
     : "确认永久删除（无法恢复）";
 
   const status: "running" | "awaiting" | null =
-    awaitingInteraction || awaitingResume
+    awaitingInteraction || awaitingResume || awaitingAttention
       ? "awaiting"
       : isGenerating
         ? "running"

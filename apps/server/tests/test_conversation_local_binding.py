@@ -123,7 +123,7 @@ async def test_section_72_cloud_folder_binding_none_then_server_workspace(
     assert binding is None
     ws = build_workspace(
         user_id="u1",
-        folder_id=folder.id,
+        folder_id=folder.id, folder_rel_path=folder.id,
         conversation_id=conv.id,
         sink=EventSink(),
         local_binding=binding,
@@ -154,7 +154,7 @@ async def test_section_72_local_root_yields_local_workspace_bridge(monkeypatch):
     assert binding.root_id == "legacy-root"
     ws = build_workspace(
         user_id="u1",
-        folder_id=folder.id,
+        folder_id=folder.id, folder_rel_path=folder.id,
         conversation_id=conv.id,
         sink=EventSink(),
         local_binding=binding,

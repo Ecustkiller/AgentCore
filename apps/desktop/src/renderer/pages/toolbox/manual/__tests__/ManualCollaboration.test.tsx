@@ -7,6 +7,11 @@ import { afterEach, describe, expect, it } from "vitest";
 
 afterEach(cleanup);
 
+/** 节 id 挂在标题上，正文在其外层 `<section>`。 */
+function sectionText(id: string): string {
+  return document.getElementById(id)?.closest("section")?.textContent ?? "";
+}
+
 const SECTION_IDS = [
   "briefing",
   "progress",
@@ -15,6 +20,8 @@ const SECTION_IDS = [
   "debate",
   "control",
   "memory",
+  "workflow",
+  "automation",
 ] as const;
 
 describe("ManualCollaboration", () => {
@@ -49,6 +56,64 @@ describe("ManualCollaboration", () => {
     expect(screen.queryByText(/ask_user/)).toBeNull();
     expect(screen.queryByText(/plan_review/)).toBeNull();
     expect(screen.queryByText(/run_redirect/)).toBeNull();
+  });
+
+  it("renders workflow section: save-a-turn main path, canvas as touch-up, honest snapshot limit", () => {
+    render(
+      <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
+        <ManualCollaboration />
+      </MemoryRouter>,
+    );
+
+    const text = sectionText("workflow");
+    expect(text).toMatch(/主路径：从满意的那一轮存起/);
+    expect(text).toMatch(/回合状态条上会出现「存为工作流」/);
+    expect(text).toMatch(/画布是事后微调的地方，不用从零画/);
+    expect(text).toMatch(/队员步骤/);
+    expect(text).toMatch(/等人关卡/);
+    // 诚实边界：快照不带模型选择 / 辩论站位
+    expect(text).toMatch(/复跑效果可能与原轮不同/);
+    expect(text).toMatch(/复制一份成你自己的工作流/);
+    // 「模板」只用于工作流页的官方模板
+    expect(text).toMatch(/官方模板/);
+    expect(text).not.toMatch(/系统模板/);
+  });
+
+  it("renders automation section: triggers, inbox, system tasks, workflow binding", () => {
+    render(
+      <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
+        <ManualCollaboration />
+      </MemoryRouter>,
+    );
+
+    const text = sectionText("automation");
+    expect(text).toMatch(/定时（每天 \/ 每周 \/ 自定义 cron）/);
+    expect(text).toMatch(/Webhook/);
+    expect(text).toMatch(/收件箱/);
+    expect(text).toMatch(/系统任务/);
+    expect(text).toMatch(/立即触发/);
+    expect(text).toMatch(/云工作区/);
+    expect(text).toMatch(/绑一张工作流（可选）/);
+    expect(text).toMatch(/重新触发/);
+    // 内部词 / 退役词不得外泄；自动化页的预制件不叫「模板」
+    expect(text).not.toMatch(/站立任务/);
+    expect(text).not.toMatch(/系统模板/);
+    expect(text).not.toMatch(/重跑/);
+  });
+
+  it("relates the two: workflow = how to split, automation = when to run", () => {
+    render(
+      <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
+        <ManualCollaboration />
+      </MemoryRouter>,
+    );
+
+    expect(sectionText("workflow")).toMatch(
+      /工作流管「活儿怎么拆」.*管「什么时候跑」/,
+    );
+    expect(sectionText("automation")).toMatch(
+      /绑了就按图跑.*不绑就按目标文案让 CEO 即兴组队/,
+    );
   });
 
   it("preserves section order and stays text-only (embeds belong to mechanism)", () => {

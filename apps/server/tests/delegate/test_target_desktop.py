@@ -19,10 +19,30 @@ from agentcore.runtime.delegate.target_desktop import (
     resolve_bare_chat_write_scope,
     task_structurally_requires_write_desk,
 )
+from agentcore.runtime.delegate.target_desktop_auto_cloud import auto_cloud_desk_name
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 from agentcore.workspace.locate import LocalBinding
+
+
+class _RecordingSink:
+    """Collect emitted events so 裸聊落点告知 can be asserted without a real bus."""
+
+    def __init__(self) -> None:
+        self.events: list[object] = []
+
+    def emit(self, event: object) -> None:
+        self.events.append(event)
+
+
+def _auto_folder_notices(sink: _RecordingSink) -> list[dict]:
+    return [
+        e.payload  # type: ignore[attr-defined]
+        for e in sink.events
+        if getattr(e, "type", None) is not None
+        and getattr(e.type, "value", None) == "auto_folder_created"  # type: ignore[attr-defined]
+    ]
 
 
 def test_effective_target_folder_id_prefers_explicit():
@@ -346,6 +366,7 @@ async def test_apply_target_desktop_switches_backend_and_memory():
     tools = ToolRegistry()
     binding = SimpleNamespace(
         folder_id="target_f",
+        rel_path="target_f",
         name="目标项目",
         local_binding=None,
     )
@@ -501,6 +522,7 @@ async def test_load_target_folder_binding_cloud_folder_has_no_local_binding(
         name="Cloud Desk",
         local_root_id=None,
         local_subpath=None,
+        rel_path="Cloud Desk",
     )
 
     class _Repo:
@@ -584,6 +606,7 @@ async def test_apply_target_desktop_allows_second_local_root():
     await claims.seed_from_backend(session_backend)  # type: ignore[arg-type]
     binding = SimpleNamespace(
         folder_id="local_b",
+        rel_path="local_b",
         name="本地B",
         local_binding=LocalBinding(root_id="root_other", root_label="B"),
     )
@@ -645,6 +668,7 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
     await claims.seed_from_backend(session_backend)  # type: ignore[arg-type]
     binding = SimpleNamespace(
         folder_id="cloud_c",
+        rel_path="cloud_c",
         name="云C",
         local_binding=None,
     )
@@ -685,6 +709,38 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
     assert applied.system_prompt == "CLOUD_PROMPT"
 
 
+def test_auto_cloud_desk_name_takes_name_shaped_title():
+    """够短、没有截断标记的标题 → 直接当文件夹名（中西文同轨）。"""
+    assert auto_cloud_desk_name(conversation_title="  抚养费起诉状  ") == "抚养费起诉状"
+    assert (
+        auto_cloud_desk_name(conversation_title="Child support complaint")
+        == "Child support complaint"
+    )
+
+
+def test_auto_cloud_desk_name_rejects_truncated_title():
+    """`fallback_title` 降级出来的半句话（末尾省略号）不当目录名。"""
+    from agentcore.conversation.common import fallback_title
+
+    cut = fallback_title("帮我写一份要求男方支付抚养费的起诉状、金额为4000元每月，另附证据清单")
+    assert cut.endswith("…")
+    assert auto_cloud_desk_name(conversation_title=cut) == "云文件夹"
+
+
+def test_auto_cloud_desk_name_rejects_sentence_length_title():
+    """没被截断但一看就是一句话（超出名字宽度）→ 通用名。"""
+    zh = "帮我写一份要求男方支付抚养费的起诉状"
+    en = "Draft a child support complaint for me"
+    assert auto_cloud_desk_name(conversation_title=zh) == "云文件夹"
+    assert auto_cloud_desk_name(conversation_title=en) == "云文件夹"
+
+
+def test_auto_cloud_desk_name_falls_back_without_title():
+    """无标题一律退通用名——绝不拿用户原话（可能含身份证 / 电话 / 住址）当目录段。"""
+    assert auto_cloud_desk_name(conversation_title=None) == "云文件夹"
+    assert auto_cloud_desk_name(conversation_title="   ") == "云文件夹"
+
+
 @pytest.mark.asyncio
 async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
     """DelegateTool.execute：裸聊写盘缺 target → 静默建云桌并过闸。"""
@@ -704,7 +760,7 @@ async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
         return {"id": "auto_desk", "name": name, "mode": "cloud"}
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -739,12 +795,13 @@ async def test_delegate_execute_bare_chat_auto_provisions(monkeypatch):
         llm=_DummyLLM(),  # type: ignore[arg-type]
         sink=EventSink(),
         system_prompt="sys",
-        user_message="用户消息预览应被标题覆盖",
+        user_message="用户原话不参与建桌命名",
         history=[],
         tools=ToolRegistry(),
         base_tool_context=ctx,
         folder_id=None,
         captain_run_id="CEO",
+        approval_gate=None,
     )
     provisioned: list[dict[str, object]] = []
 
@@ -791,7 +848,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_skips_when_hint_exists(monkeypat
         return {"id": "x", "name": name}
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     hint = TurnTargetDeskHint()
@@ -802,7 +859,6 @@ async def test_ensure_bare_chat_auto_cloud_desk_skips_when_hint_exists(monkeypat
         default_target_folder_id="existing",
         turn_target_desk=hint,
         user_id="u1",
-        user_message="msg",
     )
     assert out is None
     assert creates == []
@@ -821,7 +877,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_skips_prose(monkeypatch):
         return {"id": "x", "name": name}
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     hint = TurnTargetDeskHint()
@@ -831,7 +887,6 @@ async def test_ensure_bare_chat_auto_cloud_desk_skips_prose(monkeypatch):
         default_target_folder_id=None,
         turn_target_desk=hint,
         user_id="u1",
-        user_message="闲聊",
     )
     assert out is None
     assert creates == []
@@ -860,7 +915,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypat
         return True
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -889,6 +944,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypat
         user_id="u1",
         conversation_id="c-bare",
     )
+    sink = _RecordingSink()
     out = await ensure_bare_chat_auto_cloud_desk(
         session_folder_id=None,
         tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
@@ -896,14 +952,17 @@ async def test_ensure_bare_chat_auto_cloud_desk_persists_on_first_mint(monkeypat
         turn_target_desk=hint,
         user_id="u1",
         conversation_id="c-bare",
-        user_message="写文件",
         tool_context=ctx,
+        sink=sink,
     )
     assert out == "desk-1"
     assert hint.folder_id == "desk-1"
     assert persisted == [("c-bare", "desk-1")]
     assert ctx.auto_desk_folder_id == "desk-1"
     assert birth_writes == []
+    # 建成即告知落点（§5.4 裸聊行）：一条 auto_folder_created，不挂起回合。
+    # 无标题 → 通用名（用户原话不参与命名）。
+    assert _auto_folder_notices(sink) == [{"folder_id": "desk-1", "name": "云文件夹"}]
 
 
 @pytest.mark.asyncio
@@ -926,7 +985,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_reuses_persisted(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -947,6 +1006,7 @@ async def test_ensure_bare_chat_auto_cloud_desk_reuses_persisted(monkeypatch):
         user_id="u1",
         conversation_id="c-bare",
     )
+    sink = _RecordingSink()
     out = await ensure_bare_chat_auto_cloud_desk(
         session_folder_id=None,
         tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
@@ -955,12 +1015,15 @@ async def test_ensure_bare_chat_auto_cloud_desk_reuses_persisted(monkeypatch):
         user_id="u1",
         conversation_id="c-bare",
         tool_context=ctx,
+        sink=sink,
     )
     assert out == "desk-1"
     assert creates == []
     assert hint.folder_id == "desk-1"
     assert binds == ["desk-1"]
     assert hint.auto_cloud_provisioned is False
+    # 复用同一张桌不再告知：落点在建桌那回合已经说过了。
+    assert _auto_folder_notices(sink) == []
 
 
 @pytest.mark.asyncio
@@ -977,7 +1040,7 @@ async def test_ensure_bare_chat_explicit_target_skips_persist_reuse(monkeypatch)
         return {"id": "x", "name": name}
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -1021,7 +1084,7 @@ async def test_ensure_bare_chat_birth_session_skips_auto_desk(monkeypatch):
         return {"id": "x", "name": name}
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -1084,7 +1147,7 @@ async def test_ensure_bare_chat_race_loser_reclaims_orphan_mint(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -1117,6 +1180,7 @@ async def test_ensure_bare_chat_race_loser_reclaims_orphan_mint(monkeypatch):
         user_id="u1",
         conversation_id="c-bare",
     )
+    sink = _RecordingSink()
     out = await ensure_bare_chat_auto_cloud_desk(
         session_folder_id=None,
         tasks_raw=[{"role": "工", "deliverable": {"form": "files"}}],
@@ -1124,13 +1188,15 @@ async def test_ensure_bare_chat_race_loser_reclaims_orphan_mint(monkeypatch):
         turn_target_desk=hint,
         user_id="u1",
         conversation_id="c-bare",
-        user_message="写文件",
         tool_context=ctx,
+        sink=sink,
     )
     assert out == "desk-winner"
     assert hint.folder_id == "desk-winner"
     assert ctx.auto_desk_folder_id == "desk-winner"
     assert reclaimed == ["mint-loser"]
+    # 输掉竞态：本回合的 mint 已回收，若再告知就会指向一个刚被丢掉的文件夹。
+    assert _auto_folder_notices(sink) == []
 
 
 @pytest.mark.asyncio
@@ -1159,7 +1225,7 @@ async def test_ensure_bare_chat_dead_pointer_remints_after_bind_miss(monkeypatch
         return True
 
     monkeypatch.setattr(
-        "agentcore.tools.builtin.projects.create_cloud_folder",
+        "agentcore.tools.builtin.folders.create_cloud_folder",
         _fake_create,
     )
     monkeypatch.setattr(
@@ -1196,11 +1262,10 @@ async def test_ensure_bare_chat_dead_pointer_remints_after_bind_miss(monkeypatch
         turn_target_desk=hint,
         user_id="u1",
         conversation_id="c-bare",
-        user_message="写文件",
         tool_context=ctx,
     )
     assert out == "desk-fresh"
-    assert creates == ["写文件"]
+    assert creates == ["云文件夹"]
     assert binds == ["desk-dead", "desk-fresh"]
     assert hint.folder_id == "desk-fresh"
     assert ctx.auto_desk_folder_id == "desk-fresh"

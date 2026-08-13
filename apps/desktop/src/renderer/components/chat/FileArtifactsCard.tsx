@@ -1,4 +1,5 @@
 import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
+import { AutoFolderNoticeLine } from "@/components/chat/AutoFolderNoticeCard";
 import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Button, IconButton } from "@/components/ui";
 import {
@@ -14,10 +15,13 @@ import {
   type FileArtifact,
   type FileOp,
   hasChangePreviews,
+  splitExportedSources,
+  splitPromotedProducts,
 } from "@/lib/fileArtifacts";
 import { isHtmlPath } from "@/lib/fileSource";
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
 import { stageFileLabel } from "@/lib/stageDirs";
+import type { AutoFolderNotice } from "@/stores/conversation";
 import { usePersistentDisclosure } from "@/stores/disclosure";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
@@ -44,6 +48,17 @@ import type { ReactNode } from "react";
  * **直达**内置浏览器 tab（`workspace://` + BrowserPanel；desk 优先 artifact.workspaceId，
  * 否则会话工作区 wsId）。「查看改动」聚焦右坞「改动」tab（无则先挂；与
  * {@link TurnFileChangesReview} 同源，前端UX设计.md §十）。
+ *
+ * 裸聊自动建桌的回合另带 `autoFolder`：落点告知作为卡头一行（{@link AutoFolderNoticeLine}），
+ * 因为文件正是落进那个文件夹——同一件事不再在气泡顶部另开一张卡说第二遍。
+ *
+ * 导出件（`报告.md` → `报告.docx`）主推、源文件降级为中间稿收进折叠区
+ * （{@link splitExportedSources} 只认工具自报的 `derivedFrom`）：用户要的是那份 Word，
+ * 并列两份会让人点开 .md 以为被糊弄。中间稿仍在卡里可展开——降级不是藏起来。
+ *
+ * 清单按「成品 / 过程材料」分组（{@link splitPromotedProducts}），与文件页「AI 工作间」
+ * 同一套心智：归位过的是给用户的东西，其余是 AI 干活留下的材料。零归位（多幕协作中间幕）
+ * 不渲染成品组——空组占位会把合法状态演成异常。
  */
 
 const OP_META: Record<
@@ -247,20 +262,53 @@ function FileRow({
   );
 }
 
+/**
+ * 分组小标题。只在该组有行时渲染；过程材料组用次要样式（与文件页「AI 工作间」行同款
+ * `text-muted-foreground`），成品组保持正文色——用户要的东西不该退到背景里。
+ */
+function GroupHeader({
+  label,
+  hint,
+  secondary = false,
+}: {
+  label: string;
+  hint: string;
+  secondary?: boolean;
+}) {
+  return (
+    <div className="flex items-baseline gap-1.5 border-t border-border px-3 pt-2 pb-1 text-xs">
+      <span
+        className={`shrink-0 font-medium ${secondary ? "text-muted-foreground" : "text-foreground"}`}
+      >
+        {label}
+      </span>
+      <span className="min-w-0 truncate text-muted-foreground/70">{hint}</span>
+    </div>
+  );
+}
+
 export function FileArtifactsCard({
   artifacts,
   conversationId = null,
   turnKey,
+  autoFolder,
 }: {
   artifacts: FileArtifact[];
   conversationId?: string | null;
   /** 回合作用域（= messageId）：给了才把整卡/审计行开合持久化。 */
   turnKey?: string;
+  /** 裸聊自动建桌的落点告知——文件落在这里，所以并进本卡头部而非另起一卡。 */
+  autoFolder?: AutoFolderNotice;
 }) {
   // 文件不多（≤4）默认展开一目了然；多了先收起，避免长清单淹没答复。
   const [expanded, setExpanded] = usePersistentDisclosure(
     turnKey ? `${turnKey}:files` : null,
     artifacts.length <= 4,
+  );
+  // 中间稿默认收着：要的是导出件，源稿一般无需打开（但一键就能翻出来）。
+  const [draftsOpen, setDraftsOpen] = usePersistentDisclosure(
+    turnKey ? `${turnKey}:files:drafts` : null,
+    false,
   );
   const showFile = useSidePanelStore((s) => s.showFile);
   const showChanges = useSidePanelStore((s) => s.showChanges);
@@ -272,6 +320,10 @@ export function FileArtifactsCard({
 
   if (artifacts.length === 0) return null;
 
+  // 主推件 / 中间稿分区（只认自报 derivedFrom，与后端 fold_exported_sources 同口径）。
+  const { primary, intermediate } = splitExportedSources(artifacts);
+  // 主推件再按位置态分组（只认 promoted，不由路径推断产物地位）。
+  const { products, materials, rejected } = splitPromotedProducts(primary);
   const canReview =
     hasChangePreviews(artifacts) || (!!conversationId && !!turnKey);
 
@@ -288,6 +340,17 @@ export function FileArtifactsCard({
     // 非 HTML / 无完整预览能力：File tab 跟落地 desk（无 workspaceId → 会话出生桌）。
     showFile(a.path, a.name, a.workspaceId);
   };
+
+  const fileRow = (a: FileArtifact) => (
+    <FileRow
+      key={`${a.acceptance ?? a.op ?? "file"}:${a.path}`}
+      artifact={a}
+      conversationId={conversationId}
+      turnKey={turnKey}
+      onOpen={() => openArtifact(a)}
+      opensFullPreview={canFullPreview && isHtmlPath(a.path)}
+    />
+  );
 
   return (
     <div className="mt-3 overflow-hidden rounded-xl border border-border bg-card">
@@ -332,20 +395,57 @@ export function FileArtifactsCard({
           </SimpleTooltip>
         )}
       </div>
+      {/* 落点先于清单，且不随清单折叠——收起文件也得看得见文件去哪了。 */}
+      {autoFolder && <AutoFolderNoticeLine notice={autoFolder} />}
       {expanded && (
-        // 无行间横线（统一两卡列表语言）：单行可点行有 hover 底色 + 图标锚点，保持现有密度。
-        <ul className="border-t border-border">
-          {artifacts.map((a) => (
-            <FileRow
-              key={`${a.acceptance ?? a.op ?? "file"}:${a.path}`}
-              artifact={a}
-              conversationId={conversationId}
-              turnKey={turnKey}
-              onOpen={() => openArtifact(a)}
-              opensFullPreview={canFullPreview && isHtmlPath(a.path)}
-            />
-          ))}
-        </ul>
+        <>
+          {/* 无行间横线（统一两卡列表语言）：单行可点行有 hover 底色 + 图标锚点，保持现有密度。 */}
+          {products.length > 0 && (
+            <>
+              <GroupHeader label="成品" hint="已归位到你的工作区" />
+              <ul>{products.map(fileRow)}</ul>
+            </>
+          )}
+          {materials.length > 0 && (
+            <>
+              <GroupHeader
+                label="过程材料"
+                hint="AI 干活留下的，平时不必打开"
+                secondary
+              />
+              <ul>{materials.map(fileRow)}</ul>
+            </>
+          )}
+          {/* 未通过：两组都不进，末尾单列（行本身维持原样：X + 未通过徽章 + 事由）。 */}
+          {rejected.length > 0 && (
+            <ul className="border-t border-border">{rejected.map(fileRow)}</ul>
+          )}
+          {intermediate.length > 0 && (
+            <div className="border-t border-border">
+              <Button
+                variant="ghost"
+                onClick={() => setDraftsOpen((v) => !v)}
+                aria-expanded={draftsOpen}
+                className="h-auto w-full min-w-0 justify-start gap-2 rounded-none px-3 py-2 text-xs text-muted-foreground hover:bg-accent/50"
+              >
+                <span className="flex w-full items-center gap-1.5 text-left">
+                  {draftsOpen ? (
+                    <ChevronUp size={14} className="shrink-0" />
+                  ) : (
+                    <ChevronDown size={14} className="shrink-0" />
+                  )}
+                  <span>中间稿 {intermediate.length} 份</span>
+                  <span className="min-w-0 truncate text-muted-foreground/70">
+                    已导出为上述文件，一般无需打开
+                  </span>
+                </span>
+              </Button>
+              {draftsOpen && (
+                <ul className="opacity-70">{intermediate.map(fileRow)}</ul>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );

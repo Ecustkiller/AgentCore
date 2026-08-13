@@ -13,11 +13,10 @@ from agentcore.memory.explore_profile import record_explore_closeout
 from agentcore.memory.explore_refresh import (
     ExploreRefreshScheduler,
     _PendingRefresh,
-    refresh_project_explore_from_snapshot,
+    refresh_folder_explore_from_snapshot,
     schedule_explore_refresh,
 )
 from agentcore.memory.store import CORE_MEMORY_FILE, NAVIGATION_MEMORY_FILE, FileMemoryStore
-from agentcore.workspace.stage_dirs import PROJECT_DOCS_DIR, PROJECT_DOCS_PREFIX
 
 
 @dataclass
@@ -123,7 +122,7 @@ async def test_refresh_from_snapshot_writes_nav_profile_and_clears_dirty(tmp_pat
             '"topics":[]}'
         )
     )
-    ok = await refresh_project_explore_from_snapshot(
+    ok = await refresh_folder_explore_from_snapshot(
         user_id=uid,
         folder_id=folder,
         workspace_key=f"folder:{folder}",
@@ -166,7 +165,7 @@ async def test_refresh_parse_failure_leaves_dirty(tmp_path, monkeypatch):
     await save_scope_meta(ep_store, uid, meta, scope=folder)
 
     provider = _FakeProvider(content="not-json")
-    ok = await refresh_project_explore_from_snapshot(
+    ok = await refresh_folder_explore_from_snapshot(
         user_id=uid,
         folder_id=folder,
         workspace_key=f"folder:{folder}",
@@ -182,6 +181,11 @@ async def test_refresh_parse_failure_leaves_dirty(tmp_path, monkeypatch):
     assert meta.explore_fingerprint == "fp-old"
 
 
-def test_project_docs_stage_constant():
-    assert PROJECT_DOCS_DIR == "AgentCore/文档/项目"
-    assert PROJECT_DOCS_PREFIX == "AgentCore/文档/项目/"
+def test_stage_dirs_hold_products_only():
+    """步 3：``文档/`` 退化成纯产物目录——厚约定文档已是 documents 条目。"""
+    from agentcore.memory.explore_refresh import _REFRESH_SYSTEM
+    from agentcore.workspace import stage_dirs
+
+    assert not hasattr(stage_dirs, "PROJECT_DOCS_DIR")
+    assert not hasattr(stage_dirs, "PROJECT_DOCS_PREFIX")
+    assert "文档/项目" not in _REFRESH_SYSTEM

@@ -135,6 +135,29 @@ def test_escalation_required_emits_browser_login_only_when_true():
     assert "browser_login" not in omitted.payload
 
 
+def test_escalation_required_carries_timeout_only_when_ops_configured_one():
+    """诚实性：默认部署无超时 ⇒ 字段缺席，卡面不得承诺「未答则按假设继续」。"""
+    default_deploy = escalation_required(
+        "r1",
+        "a1",
+        escalation_id="e1",
+        question="该走哪个方案?",
+        assumption="暂按 A",
+        timeout_seconds=None,
+    )
+    assert "timeout_seconds" not in default_deploy.payload
+
+    with_ceiling = escalation_required(
+        "r1",
+        "a1",
+        escalation_id="e1",
+        question="该走哪个方案?",
+        assumption="暂按 A",
+        timeout_seconds=1800.0,
+    )
+    assert with_ceiling.payload["timeout_seconds"] == 1800.0
+
+
 def test_escalate_schema_teaches_blocking_choice():
     """Worker 按题自选 blocking：schema 须写清该停 / 能报，默认仍 false。"""
     schema = EscalateTool().schema
@@ -241,3 +264,96 @@ async def test_browser_login_skips_ceo_arbitration_when_coordination_active(monk
     assert result.success is True
     assert seen["browser_login"] is True
     assert seen["awaiting"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_bracketed_recommendation_label_is_rejected_not_crashed(monkeypatch):
+    """A bad label must cost the model one retry, not the user their escalation.
+
+    ``normalize_questions`` is shared with ask_user, which catches this rejection;
+    escalate used to catch only ``ListArgError``, so the same input escaped as a
+    crash — server traceback into the event stream, card never opened, human never
+    asked. Online 0.6.0 hit exactly that.
+    """
+    spy = LogSpy()
+    monkeypatch.setattr(escalate_mod, "logger", spy)
+    called = False
+
+    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+        nonlocal called
+        called = True
+        return EscalationOutcome(status="resolved", answer="never reached")
+
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="w1",
+        agent_id="a",
+        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+        user_id="u",
+        conversation_id="c1",
+        escalation=EscalationChannel(armed=True, request=_request),
+    )
+    result = await EscalateTool().execute(
+        {
+            "question": "该走哪个方案?",
+            "assumption": "暂按方案A继续",
+            "blocking": True,
+            "questions": [
+                {
+                    "id": "plan",
+                    "prompt": "选一个方案",
+                    "options": [
+                        {"id": "a", "label": "方案A（推荐）"},
+                        {"id": "b", "label": "方案B"},
+                    ],
+                }
+            ],
+        },
+        ctx,
+    )
+
+    assert result.success is False
+    assert "recommended" in result.error
+    assert called is False  # rejected before delivery — no half-open card
+    assert spy.get("worker.escalate_option_label_rejected")["run_id"] == "w1"
+
+
+@pytest.mark.asyncio
+async def test_clean_labels_still_reach_the_escalation_card():
+    """Guard the rejection above against over-reach: bare「推荐」in a name is fine."""
+    seen: dict = {}
+
+    async def _request(q, a, questions, kind, awaiting="user", **kwargs):
+        seen["questions"] = questions
+        return EscalationOutcome(status="resolved", answer="选方案A")
+
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="w1",
+        agent_id="a",
+        backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+        user_id="u",
+        conversation_id="c1",
+        escalation=EscalationChannel(armed=True, request=_request),
+    )
+    result = await EscalateTool().execute(
+        {
+            "question": "该走哪个方案?",
+            "assumption": "暂按方案A继续",
+            "blocking": True,
+            "questions": [
+                {
+                    "id": "plan",
+                    "prompt": "选一个方案",
+                    "options": [
+                        {"id": "a", "label": "推荐算法重写", "recommended": True},
+                        {"id": "b", "label": "方案B"},
+                    ],
+                }
+            ],
+        },
+        ctx,
+    )
+
+    assert result.success is True
+    assert seen["questions"][0]["options"][0]["label"] == "推荐算法重写"

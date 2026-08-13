@@ -8,6 +8,9 @@ missing fonts produce an explicit warning (never silent tofu).
 MVP coverage: headings #–####, paragraphs, ordered/unordered lists, tables,
 fenced code. Images are rendered as alt-text placeholders with a warning
 (embedding is out of scope for this MVP).
+
+段落几何按 ``layout`` 档位走，与 ``md_to_docx`` 同口径（见 ``docs_export.layout``）：
+一级标题两档都居中；首行缩进两字只在 ``official`` 档开。
 """
 
 from __future__ import annotations
@@ -20,6 +23,13 @@ from typing import Any
 
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
+
+from agentcore.docs_export.layout import (
+    FIRST_LINE_INDENT_CHARS,
+    LAYOUT_OFFICIAL,
+    LAYOUT_STANDARD,
+    DocLayout,
+)
 
 # CommonMark + GFM tables. html=False keeps raw HTML out of the tree.
 _MD = MarkdownIt("commonmark", {"html": False, "linkify": False, "breaks": False}).enable(
@@ -93,10 +103,19 @@ def discover_cjk_font(candidates: Sequence[Path] | None = None) -> Path | None:
     return None
 
 
-def convert_markdown_to_pdf(markdown: str) -> MdToPdfResult:
-    """Convert Markdown text to a .pdf (deterministic; no LLM / code_execute)."""
+def convert_markdown_to_pdf(
+    markdown: str,
+    *,
+    layout: DocLayout = LAYOUT_STANDARD,
+) -> MdToPdfResult:
+    """Convert Markdown text to a .pdf (deterministic; no LLM / code_execute).
+
+    ``layout`` 同 ``md_to_docx``：``standard``（默认）= 技术文档/报告；``official`` =
+    中文正式文书，正文首行缩进两字。
+    """
     _ensure_fpdf()
     warnings: list[str] = []
+    indent_body = layout == LAYOUT_OFFICIAL
     fonts = _resolve_fonts(warnings)
 
     pdf = _FPDF(format="A4", unit="mm")
@@ -126,7 +145,7 @@ def convert_markdown_to_pdf(markdown: str) -> MdToPdfResult:
             for w in img_warns:
                 if w not in warnings:
                     warnings.append(w)
-            _write_paragraph(pdf, fonts, text)
+            _write_paragraph(pdf, fonts, text, first_line_indent=indent_body)
             i += 3
             continue
 
@@ -251,18 +270,46 @@ def _write_heading(pdf: Any, fonts: _FontBundle, text: str, level: int) -> None:
     pdf.set_x(pdf.l_margin)
     pdf.ln(3 if level <= 2 else 2)
     _set_body_font(pdf, fonts, size=_HEADING_PT[level], bold=True)
-    pdf.multi_cell(0, _LINE + 1, _safe_text(text or "", fonts))
+    # 文档大标题居中是通例（同 md_to_docx），两个档位都开。
+    align = "C" if level == 1 else "L"
+    pdf.multi_cell(0, _LINE + 1, _safe_text(text or "", fonts), align=align)
     pdf.ln(1)
 
 
-def _write_paragraph(pdf: Any, fonts: _FontBundle, text: str) -> None:
+def _write_paragraph(
+    pdf: Any,
+    fonts: _FontBundle,
+    text: str,
+    *,
+    first_line_indent: bool = False,
+) -> None:
     pdf.set_x(pdf.l_margin)
     if not text.strip():
         pdf.ln(2)
         return
     _set_body_font(pdf, fonts)
-    pdf.multi_cell(0, _LINE, _safe_text(text, fonts))
+    if first_line_indent:
+        _write_indented_paragraph(pdf, _safe_text(text, fonts))
+    else:
+        pdf.multi_cell(0, _LINE, _safe_text(text, fonts))
     pdf.ln(1)
+
+
+def _write_indented_paragraph(pdf: Any, text: str) -> None:
+    """首行缩进两字：走 fpdf2 文本区（``multi_cell`` 没有首行缩进这一档）。
+
+    行高换算成与 ``multi_cell`` 相同的 ``_LINE``，两条路径的行距与换页流一致；缩进宽度
+    取 2 em——中日韩字形是全角，2 em 就是整两个字。
+    """
+    line_height = _LINE / pdf.font_size if pdf.font_size else 1.0
+    with pdf.text_columns() as columns:
+        paragraph = columns.paragraph(
+            line_height=line_height,
+            first_line_indent=FIRST_LINE_INDENT_CHARS * pdf.font_size,
+        )
+        paragraph.write(text)
+        columns.end_paragraph()
+    pdf.set_x(pdf.l_margin)
 
 
 def _write_code(pdf: Any, fonts: _FontBundle, content: str, *, info: str) -> None:

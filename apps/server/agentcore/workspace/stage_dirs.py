@@ -1,8 +1,12 @@
 """阶段产物（约定文档）目录约定 —— 后端单一权威源。
 
-工作区相对路径：``AgentCore/文档/{research,debate,reviews,项目}/``。
+工作区相对路径：``AgentCore/文档/{工作稿,research,debate,reviews}/``。
+``工作稿`` 是**默认落点**：无显式路径的 worker 产物落这里，运行时不再从
+role/task 自由文猜「像调研还是像审查」（见双模式工作区 §四）。``research`` 有
+机器语义（辩手读它取证），只接 playbook 常量或显式声明的调研产物。
 仅工作区盘；**永不**进 documents / ``<rules>`` 注入（见记忆 §5.0）。
-``文档/项目/`` = 厚约定文档（探索 pending 不写；闸清后/普通回合按需落盘）。
+``文档/`` 是**纯产物目录**：厚约定文档不再落盘，改写 documents 条目
+（挂原文件夹、生效档按需），存量由 ``memory/migrate_project_docs.py`` 一次性读入。
 开发期直切，无根级旧路径兼容。
 
 同树旁路（系统噪音，对 AI 与用户文件 UI 都隐藏；**不**注入）::
@@ -16,41 +20,77 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 AGENTCORE_ROOT = "AgentCore"
 DOCS_DIR_NAME = "文档"
 DOCS_PREFIX = f"{AGENTCORE_ROOT}/{DOCS_DIR_NAME}"
 
+DRAFTS_DIR = f"{DOCS_PREFIX}/工作稿"
 RESEARCH_DIR = f"{DOCS_PREFIX}/research"
 DEBATE_DIR = f"{DOCS_PREFIX}/debate"
 REVIEWS_DIR = f"{DOCS_PREFIX}/reviews"
-# Thick project dossiers (导航/主题 are short; this holds long-form). Not injected.
-PROJECT_DOCS_DIR = f"{DOCS_PREFIX}/项目"
 
+DRAFTS_PREFIX = f"{DRAFTS_DIR}/"
 RESEARCH_PREFIX = f"{RESEARCH_DIR}/"
 DEBATE_PREFIX = f"{DEBATE_DIR}/"
 REVIEWS_PREFIX = f"{REVIEWS_DIR}/"
-PROJECT_DOCS_PREFIX = f"{PROJECT_DOCS_DIR}/"
 
 # Machine-readable bypass under the same AgentCore/ root (system noise).
-INTERNAL_ZONE_NAMES: frozenset[str] = frozenset({"index", "trash", "baselines"})
-INDEX_REL = f"{AGENTCORE_ROOT}/index"
-TRASH_REL = f"{AGENTCORE_ROOT}/trash"
-BASELINES_REL = f"{AGENTCORE_ROOT}/baselines"
+INDEX_ZONE_NAME = "index"
+TRASH_ZONE_NAME = "trash"
+BASELINES_ZONE_NAME = "baselines"
+INTERNAL_ZONE_NAMES: frozenset[str] = frozenset(
+    {INDEX_ZONE_NAME, TRASH_ZONE_NAME, BASELINES_ZONE_NAME}
+)
+# In-tree relative form. Still the layout for local / sidecar roots and shared
+# spaces, and still what the desktop mirror (``fs/workspaceIgnore.ts``) hides.
+# Cloud conversation workspaces keep these zones OUT of the tree — see
+# ``internal_zone_base`` and ``locate.workspace_internal_root``.
+INDEX_REL = f"{AGENTCORE_ROOT}/{INDEX_ZONE_NAME}"
+TRASH_REL = f"{AGENTCORE_ROOT}/{TRASH_ZONE_NAME}"
+BASELINES_REL = f"{AGENTCORE_ROOT}/{BASELINES_ZONE_NAME}"
+
+
+def internal_zone_base(*, root: Path, internal_root: Path | None) -> Path:
+    """Directory holding ``{index,trash,baselines}`` for one workspace root.
+
+    ``internal_root=None`` means **in-tree** (``<root>/AgentCore/``): correct for
+    backends whose root cannot have another folder nested inside it — local /
+    sidecar (the root *is* the user's own directory, and desktop restore reads
+    ``AgentCore/trash`` there) and shared spaces (flat namespace). Cloud
+    conversation workspaces pass an explicit out-of-tree path because cloud
+    folders nest for real (双模式工作区 §5.4).
+    """
+    return internal_root if internal_root is not None else root / AGENTCORE_ROOT
+
+
+def internal_zone_path(
+    zone_name: str, *, root: Path, internal_root: Path | None
+) -> Path:
+    """One zone directory (``index`` / ``trash`` / ``baselines``) for a root."""
+    return internal_zone_base(root=root, internal_root=internal_root) / zone_name
+
 
 __all__ = [
     "AGENTCORE_ROOT",
     "DOCS_DIR_NAME",
     "DOCS_PREFIX",
+    "DRAFTS_DIR",
     "RESEARCH_DIR",
     "DEBATE_DIR",
     "REVIEWS_DIR",
-    "PROJECT_DOCS_DIR",
+    "DRAFTS_PREFIX",
     "RESEARCH_PREFIX",
     "DEBATE_PREFIX",
     "REVIEWS_PREFIX",
-    "PROJECT_DOCS_PREFIX",
     "INTERNAL_ZONE_NAMES",
+    "INDEX_ZONE_NAME",
+    "TRASH_ZONE_NAME",
+    "BASELINES_ZONE_NAME",
     "INDEX_REL",
     "TRASH_REL",
     "BASELINES_REL",
+    "internal_zone_base",
+    "internal_zone_path",
 ]

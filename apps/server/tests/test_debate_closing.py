@@ -1,4 +1,4 @@
-﻿"""结辩收束（P4·阶段化发言角色）prompt / 材料注入 / 台账 id 闸自测（per-PR 零 LLM）。
+"""结辩收束（P4·阶段化发言角色）prompt / 材料注入 / 台账 id 闸自测（per-PR 零 LLM）。
 
 验收面：
 1. 阶段角色契约（胜负手 / 禁新论据 / CLOSING_LENGTH_HINT）仍在场；

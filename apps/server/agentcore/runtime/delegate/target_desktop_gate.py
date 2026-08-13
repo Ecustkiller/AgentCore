@@ -6,11 +6,11 @@ from typing import Any
 
 # Honest reject when bare chat (no birth) would park a *write* worker on scratch.
 # Auto cloud-desk provision covers the empty-hint case; this copy is for residual
-# rejects (multi-project same turn, create failure, …) — do not urge create/ask.
+# rejects (multi-folder same turn, create failure, …) — do not urge create/ask.
 NO_TARGET_SCRATCH_GATE_MSG = (
-    "写盘任务必须点名目标项目（target_folder_id）；"
+    "写盘任务必须点名目标文件夹（target_folder_id）；"
     "纯对话/只读可不点名（worker 坐会话 scratch、禁写）。"
-    "同回合已涉及多个项目时请各写盘 task 显式点名。"
+    "同回合已涉及多个文件夹时请各写盘 task 显式点名。"
 )
 
 # Identity tip when a bare-chat worker sits on conv scratch with write_scope=none.

@@ -128,10 +128,14 @@ async def run_handoff_job(
             snapshot_id=base_snapshot_id,
             dest_user_id=user_id,
             dest_folder_id=None,
+            dest_folder_rel_path=None,
             dest_conversation_id=job_conversation_id,
         )
         backend = build_server_workspace(
-            user_id=user_id, folder_id=None, conversation_id=job_conversation_id
+            user_id=user_id,
+            folder_id=None,
+            folder_rel_path=None,
+            conversation_id=job_conversation_id,
         )
         result = await run_chat_pipeline(
             conversation_id=job_conversation_id,
@@ -149,6 +153,7 @@ async def run_handoff_job(
         result_ref = await create_snapshot(
             user_id=user_id,
             folder_id=None,
+            folder_rel_path=None,
             conversation_id=job_conversation_id,
             label=f"result:{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}",
         )

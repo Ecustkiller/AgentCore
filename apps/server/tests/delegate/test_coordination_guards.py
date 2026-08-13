@@ -21,6 +21,7 @@ from agentcore.runtime.coordination.session import (
     set_active_coordination,
 )
 from agentcore.runtime.coordination.wait import await_coordination_injection
+from agentcore.runtime.delegate.force_scopes import EMPTY_FORCE_SCOPES
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunSpec
 from agentcore.runtime.turn.interrupt import TurnInterruptReason, compose_interrupt_body
@@ -238,14 +239,14 @@ async def test_secondary_isomorphic_delegate_rejected():
         )
         assert not breaker.tool_circuit_breaker()
 
-    # force=true allows the merge.
+    # 点名放行同构闸允许并入（不触碰其它三道闸）。
     forced = await t.execute(
         {
             "tasks": [
                 {"role": "审查", "task": "做C审查"},
             ],
             "coordinate": True,
-            "force": True,
+            "force": ["isomorphic"],
         },
         ctx(),
     )
@@ -346,7 +347,7 @@ async def test_thrash_rebrand_cold_delegate_rejected_continue_and_force():
                 }
             ],
             "coordinate": False,
-            "force": True,
+            "force": ["thrash"],
         },
         ctx(),
     )
@@ -359,11 +360,15 @@ async def test_thrash_rebrand_cold_delegate_rejected_continue_and_force():
 
 
 def _fake_merge_tool(*, force: bool = False) -> MagicMock:
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, ForceScopes
+
     tool = MagicMock()
     tool._sink = MagicMock()
-    # MagicMock would otherwise make getattr(_delegate_force) / _folder_id truthy
+    # MagicMock would otherwise make getattr(_force_scopes) / _folder_id truthy
     # and bypass guards or invent a fake birth desk for ownership keys.
-    tool._delegate_force = force
+    tool._force_scopes = (
+        ForceScopes(frozenset({GATE_SEAT_OVERLAP})) if force else EMPTY_FORCE_SCOPES
+    )
     tool._folder_id = None
     return tool
 
@@ -1240,13 +1245,36 @@ def test_redrive_failed_body_forces_user_visible_notice():
     body = compose_interrupt_body(kickoff, reason=TurnInterruptReason.REDRIVE_FAILED)
     assert kickoff in body
     assert REDRIVE_FAILED_USER_VISIBLE in body
-    assert "后台恢复失败" in body
 
     empty = compose_interrupt_body("", reason=TurnInterruptReason.REDRIVE_FAILED)
     assert empty == REDRIVE_FAILED_USER_VISIBLE
 
     # Idempotent — no stacked notices on re-salvage.
     again = compose_interrupt_body(body, reason=TurnInterruptReason.REDRIVE_FAILED)
+    assert again.count("【中断说明】") == 1
+
+
+def test_redrive_failed_notice_answers_what_survived_not_internal_verbs():
+    """崩溃后用户最怕的是「清掉的是我的东西吗」——文案必须正面回答，别丢内部动词。"""
+    from agentcore.runtime.turn.interrupt import REDRIVE_FAILED_USER_VISIBLE
+
+    note = REDRIVE_FAILED_USER_VISIBLE
+    # 影响：这一轮不再继续（队员停下）。
+    assert "不会再有新进展" in note
+    # 用户的东西还在——这是崩溃现场他唯一想确认的事。
+    assert "文件" in note and "都还在" in note
+    # 他能做什么。
+    assert "直接发下一条" in note
+    # 内部动作 / 标识不进用户面。
+    for internal in ("团队已清", "已清", "run_id", "execution", "redrive", "salvage"):
+        assert internal not in note
+
+
+def test_redrive_failed_notice_stays_idempotent_over_legacy_bodies():
+    """升级前挂的是旧稿：再次收口不许叠第二条说明。"""
+    legacy = "好，派 3 个 worker 开工：\n\n【中断说明】后台恢复失败，本轮未完工（团队已清）。可直接发送下一条继续。"
+    again = compose_interrupt_body(legacy, reason=TurnInterruptReason.REDRIVE_FAILED)
+    assert again == legacy
     assert again.count("【中断说明】") == 1
 
 
@@ -1890,7 +1918,7 @@ def test_nested_declare_transfers_paths_from_parent_not_all():
     )
     tool = MagicMock()
     tool._depth = 1
-    tool._delegate_force = False
+    tool._force_scopes = EMPTY_FORCE_SCOPES
 
     original = wc.resolve_write_coordinator
     wc.resolve_write_coordinator = lambda **_kwargs: ownership  # type: ignore[assignment]
@@ -1927,7 +1955,7 @@ def test_nested_declare_skipped_at_depth_zero():
     )
     tool = MagicMock()
     tool._depth = 0
-    tool._delegate_force = False
+    tool._force_scopes = EMPTY_FORCE_SCOPES
 
     original = wc.resolve_write_coordinator
     wc.resolve_write_coordinator = lambda **_kwargs: ownership  # type: ignore[assignment]
@@ -1959,7 +1987,7 @@ def _fake_replan_tool(*, execution_id: str, plan, completed: dict | None = None)
     tool._tools = _FakeReplanTools()
     tool._captain_run_id = "cap"
     tool._depth = 0
-    tool._delegate_force = False
+    tool._force_scopes = EMPTY_FORCE_SCOPES
     tool._topology_lock = False
     tool._folder_id = "test_birth"
     tool._supervised = SupervisedRun(

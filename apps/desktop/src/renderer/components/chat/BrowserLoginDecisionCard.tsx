@@ -6,6 +6,7 @@ import { MANUAL_HELP, ManualHelpLink } from "@/components/ManualHelpLink";
  *
  * Reveals the right-dock browser shell only when the user clicks「打开浏览器」.
  */
+import { escalationWaitNote } from "@/components/chat/escalationWaitCopy";
 import { Button, DecisionCard, DecisionCardIcon } from "@/components/ui";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
@@ -24,6 +25,7 @@ export function BrowserLoginDecisionCard({
   question,
   assumption,
   conversationId,
+  timeoutSeconds,
   busy,
   submitting,
   onLoggedIn,
@@ -37,6 +39,8 @@ export function BrowserLoginDecisionCard({
   conversationId: string | null;
   /** Call-site key (escalation.id / checkpointId); retained for API compatibility. */
   revealKey: string;
+  /** 后端下发的等待上限；缺省 = 一直等（冷路挂起本就没有墙钟）。 */
+  timeoutSeconds?: number | null;
   busy: boolean;
   submitting: BrowserLoginSubmitKind | null;
   onLoggedIn: () => void;
@@ -66,7 +70,7 @@ export function BrowserLoginDecisionCard({
           </p>
           {assumption ? (
             <p className="mt-2 rounded-lg bg-card/60 px-2.5 py-1.5 text-xs text-muted-foreground">
-              未答则按此继续：{assumption}
+              {escalationWaitNote({ assumption, timeoutSeconds })}
             </p>
           ) : null}
         </div>

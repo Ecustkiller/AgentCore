@@ -296,9 +296,9 @@ const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
   },
   { label: "用量", desc: "查看花费与额度", to: APP_PATHS.more.usage },
   {
-    label: "外观",
-    desc: "明暗主题与界面偏好",
-    to: APP_PATHS.more.appearance,
+    label: "通用",
+    desc: "界面主题与进阶开关",
+    to: APP_PATHS.more.general,
   },
   {
     label: "快捷键",

@@ -30,11 +30,11 @@ def _redirect_data_dir(tmp_path: Path, monkeypatch):
 async def test_upload_then_download_roundtrip():
     blob = bytes(range(256))
     written = await upload_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="in/data.bin", data=blob
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="in/data.bin", data=blob
     )
     assert written == 256
     got = await download_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="in/data.bin"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="in/data.bin"
     )
     assert got == blob
 
@@ -46,15 +46,15 @@ async def test_download_allows_above_ai_read_gate_under_upload_ceiling():
     # Bypass upload HTTP body path: write via service after building workspace root.
     from agentcore.workspace.locate import build_server_workspace
 
-    backend = build_server_workspace(user_id="u1", folder_id="f1", conversation_id="c1")
+    backend = build_server_workspace(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
     await backend.write_bytes("big.pptx", b"B" * size)
 
     resolved = await resolve_download_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="big.pptx"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="big.pptx"
     )
     assert resolved.stat().st_size == size
     got = await download_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="big.pptx"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="big.pptx"
     )
     assert len(got) == size
 
@@ -64,12 +64,12 @@ async def test_download_rejects_over_upload_ceiling(monkeypatch):
     from agentcore.workspace.locate import build_server_workspace
 
     ceiling = settings.workspace_upload_max_bytes
-    backend = build_server_workspace(user_id="u1", folder_id="f1", conversation_id="c1")
+    backend = build_server_workspace(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
     await backend.write_bytes("huge.bin", b"H" * (ceiling + 1))
 
     with pytest.raises(WorkspaceIOError) as ei:
         await resolve_download_file(
-            user_id="u1", folder_id="f1", conversation_id="c1", path="huge.bin"
+            user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="huge.bin"
         )
     assert str(ei.value) == FILE_TOO_LARGE_DETAIL
 
@@ -89,17 +89,17 @@ def test_raise_http_for_download_io_maps_other_io_to_422():
 
 
 async def test_uploaded_file_appears_in_listing():
-    await upload_file(user_id="u1", folder_id="f1", conversation_id="c1", path="top.txt", data=b"x")
+    await upload_file(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="top.txt", data=b"x")
     await upload_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="sub/deep.txt", data=b"y"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="sub/deep.txt", data=b"y"
     )
-    top = {e.path for e in await list_files(user_id="u1", folder_id="f1", conversation_id="c1")}
+    top = {e.path for e in await list_files(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")}
     assert "top.txt" in top
 
     deep = {
         e.path
         for e in await list_files(
-            user_id="u1", folder_id="f1", conversation_id="c1", recursive=True
+            user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", recursive=True
         )
     }
     assert "sub/deep.txt" in deep
@@ -110,14 +110,14 @@ async def test_list_entries_include_size_and_mtime():
     body = b"hello-meta"
     await upload_file(
         user_id="u1",
-        folder_id="f1",
+        folder_id="f1", folder_rel_path="f1",
         conversation_id="c1",
         path="nested/note.txt",
         data=body,
     )
     top = {
         e.path: e
-        for e in await list_files(user_id="u1", folder_id="f1", conversation_id="c1")
+        for e in await list_files(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
     }
     assert "nested" in top
     assert top["nested"].is_dir is True
@@ -128,7 +128,7 @@ async def test_list_entries_include_size_and_mtime():
     by_path = {
         e.path: e
         for e in await list_files(
-            user_id="u1", folder_id="f1", conversation_id="c1", recursive=True
+            user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", recursive=True
         )
     }
     file_entry = by_path["nested/note.txt"]
@@ -139,22 +139,22 @@ async def test_list_entries_include_size_and_mtime():
 
 async def test_download_missing_raises():
     with pytest.raises(PathNotFound):
-        await download_file(user_id="u1", folder_id="f1", conversation_id="c1", path="ghost.bin")
+        await download_file(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="ghost.bin")
 
 
 async def test_download_directory_raises_not_a_file():
     await upload_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="d/inner.txt", data=b"x"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="d/inner.txt", data=b"x"
     )
     with pytest.raises(NotAFile):
-        await download_file(user_id="u1", folder_id="f1", conversation_id="c1", path="d")
+        await download_file(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="d")
 
 
 async def test_upload_traversal_is_blocked():
     with pytest.raises(OutsideWorkspace):
         await upload_file(
             user_id="u1",
-            folder_id="f1",
+            folder_id="f1", folder_rel_path="f1",
             conversation_id="c1",
             path="../escape.bin",
             data=b"x",
@@ -164,20 +164,20 @@ async def test_upload_traversal_is_blocked():
 async def test_conversation_scratch_spaces_are_independent_when_bare():
     """Bare chats (folder_id=None) each own an independent scratch."""
     await upload_file(
-        user_id="u1", folder_id=None, conversation_id="c1", path="shared.txt", data=b"v"
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c1", path="shared.txt", data=b"v"
     )
     with pytest.raises(PathNotFound):
         await download_file(
-            user_id="u1", folder_id=None, conversation_id="c2", path="shared.txt"
+            user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c2", path="shared.txt"
         )
 
 
 async def test_project_conversations_share_folder_space():
     """Siblings in the same project share one workspace root."""
     await upload_file(
-        user_id="u1", folder_id="f1", conversation_id="c1", path="shared.txt", data=b"v"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", path="shared.txt", data=b"v"
     )
     got = await download_file(
-        user_id="u1", folder_id="f1", conversation_id="c2", path="shared.txt"
+        user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c2", path="shared.txt"
     )
     assert got == b"v"

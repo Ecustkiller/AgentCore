@@ -12,6 +12,7 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.runs.executor import build_agent_executor
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.tools.file_products import file_product
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -76,6 +77,7 @@ def _executor(plan, provider, sink: EventSink, *, profile_set: TurnProfiles | No
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
 
 
@@ -138,8 +140,12 @@ class _ScriptedRounds:
 
 
 class _FileWriteTool:
-    """A stub named ``file_write`` (the name files_touched_from_transcript keys on);
-    it records calls and reports success so the gate sees a landed file."""
+    """A stub named ``file_write`` that lands a file the way the real pen does.
+
+    The ledger reads a tool's OWN self-report (``ToolResult.file_products``), not its
+    name or its arguments — so a stub must report the path it "landed" for
+    ``files_touched`` / the落盘 gate to see anything, exactly like the real tool.
+    """
 
     def __init__(self) -> None:
         self.calls = 0
@@ -159,7 +165,13 @@ class _FileWriteTool:
 
     async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
         self.calls += 1
-        return ToolResult(tool_call_id="", success=True, output="written")
+        path = str((arguments or {}).get("path") or "").strip()
+        return ToolResult(
+            tool_call_id="",
+            success=True,
+            output="written",
+            file_products=[file_product(path)] if path else [],
+        )
 
 
 class _ToolCallThenContent:

@@ -13,7 +13,11 @@ vi.mock("@/services/sidecarRouting", () => ({
 vi.mock("@/services/workspace", () => ({
   uploadWorkspaceFile: vi.fn(),
 }));
+vi.mock("@/lib/capabilities", () => ({
+  hasLocalFiles: vi.fn(() => false),
+}));
 
+import { hasLocalFiles } from "@/lib/capabilities";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { uploadWorkspaceFile } from "@/services/workspace";
 import { getWorkspaceBinding } from "@/services/workspaceBinding";
@@ -21,12 +25,14 @@ import {
   ATTACH_MAX_BYTES,
   ensureAttachmentResident,
   prepareBrowserFileAttachment,
+  residentAttachmentForFile,
   safeBrowserFileName,
 } from "../resideAttachment";
 
 const getBinding = vi.mocked(getWorkspaceBinding);
 const resolveTarget = vi.mocked(resolveConversationLocalTarget);
 const upload = vi.mocked(uploadWorkspaceFile);
+const hasLocal = vi.mocked(hasLocalFiles);
 
 describe("ensureAttachmentResident", () => {
   beforeEach(() => {
@@ -327,5 +333,225 @@ describe("prepareBrowserFileAttachment", () => {
   it("safeBrowserFileName strips path and leading dots", () => {
     expect(safeBrowserFileName("..\\foo/bar.txt")).toBe("bar.txt");
     expect(safeBrowserFileName("...")).toBe("attachment");
+  });
+});
+
+describe("residentAttachmentForFile（附加即上传）", () => {
+  beforeEach(() => {
+    getBinding.mockReset();
+    resolveTarget.mockReset();
+    upload.mockReset();
+    hasLocal.mockReturnValue(true);
+    (window as unknown as { fsApi?: unknown }).fsApi = undefined;
+  });
+
+  it("云端会话：渲染进程直接 PUT File，不经主进程暂存", async () => {
+    getBinding.mockResolvedValue({
+      mode: "cloud",
+      scope: "conversation",
+      rootId: null,
+      source: "container",
+    });
+    upload.mockResolvedValue(undefined as never);
+    const stageDroppedFile = vi.fn();
+    const consumeStagedBytes = vi.fn();
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      stageDroppedFile,
+      consumeStagedBytes,
+    };
+    const file = new File(["hello"], "notes.txt", { type: "text/plain" });
+
+    const res = await residentAttachmentForFile("c1", file);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.workspacePath).toBe("attachments/notes.txt");
+    expect(res.text).toBe("hello");
+    // 关键：PUT 的就是原 File，没有「写盘 → 读回 → 重新包 Blob」那几次拷贝。
+    expect(upload).toHaveBeenCalledWith("c1", "attachments/notes.txt", file);
+    expect(stageDroppedFile).not.toHaveBeenCalled();
+    expect(consumeStagedBytes).not.toHaveBeenCalled();
+  });
+
+  it("本机工作区：交主进程复制，渲染进程不 PUT", async () => {
+    getBinding.mockResolvedValue({
+      mode: "local",
+      scope: "folder",
+      rootId: "root-1",
+      source: "explicit",
+    });
+    resolveTarget.mockResolvedValue({ rootId: "root-1", subpath: "" });
+    const stageDroppedFile = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        name: "notes.txt",
+        workspacePath: "attachments/notes.txt",
+        binary: false,
+        text: "hello",
+        truncated: false,
+      },
+    });
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      stageDroppedFile,
+    };
+
+    const res = await residentAttachmentForFile(
+      "c1",
+      new File(["hello"], "notes.txt", { type: "text/plain" }),
+    );
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.workspacePath).toBe("attachments/notes.txt");
+    expect(stageDroppedFile).toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("桌面草稿：暂存留底的同时把 File 留在内存（发送时直传，不再读回字节）", async () => {
+    const stageDroppedFile = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        name: "shot.png",
+        binary: true,
+        text: "",
+        truncated: false,
+        stagingId: "stg-9",
+      },
+    });
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      stageDroppedFile,
+    };
+    const file = new File([new Uint8Array([0x89])], "shot.png", {
+      type: "image/png",
+    });
+
+    const res = await residentAttachmentForFile(null, file);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.stagingId).toBe("stg-9");
+    expect(res.fileBlob).toBe(file);
+    expect(getBinding).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("桌面草稿暂存失败时退回内存 File，不把附件丢掉", async () => {
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      stageDroppedFile: vi
+        .fn()
+        .mockResolvedValue({ ok: false, reason: "暂存附件失败" }),
+    };
+    const file = new File(["hi"], "a.txt", { type: "text/plain" });
+
+    const res = await residentAttachmentForFile(null, file);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.fileBlob).toBe(file);
+    expect(res.stagingId).toBeUndefined();
+  });
+
+  it("超过上限直接拒，不发起任何驻留", async () => {
+    const big = new File(["x"], "big.bin");
+    Object.defineProperty(big, "size", { value: ATTACH_MAX_BYTES + 1 });
+    const stageDroppedFile = vi.fn();
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      stageDroppedFile,
+    };
+
+    const res = await residentAttachmentForFile("c1", big);
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toContain("25MB");
+    expect(stageDroppedFile).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+});
+
+describe("ensureAttachmentResident 兼顾暂存与内存 File", () => {
+  beforeEach(() => {
+    getBinding.mockReset();
+    resolveTarget.mockReset();
+    upload.mockReset();
+    (window as unknown as { fsApi?: unknown }).fsApi = undefined;
+  });
+
+  it("云端：同时有暂存 id 和内存 File 时走 File 直传，不读回字节", async () => {
+    getBinding.mockResolvedValue({
+      mode: "cloud",
+      scope: "conversation",
+      rootId: null,
+      source: "container",
+    });
+    resolveTarget.mockResolvedValue(null);
+    const consume = vi.fn();
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      finalizeStagedAttachment: vi.fn(),
+      consumeStagedBytes: consume,
+    };
+    upload.mockResolvedValue(undefined as never);
+    const blob = new File([new Uint8Array([1, 2])], "shot.png", {
+      type: "image/png",
+    });
+
+    const res = await ensureAttachmentResident("c1", {
+      name: "shot.png",
+      stagingId: "stg-1",
+      binary: true,
+      text: "",
+      truncated: false,
+      fileBlob: blob,
+    });
+
+    expect(res).toEqual({
+      ok: true,
+      workspacePath: "attachments/shot.png",
+      name: "shot.png",
+      binary: true,
+      text: "",
+      truncated: false,
+    });
+    expect(consume).not.toHaveBeenCalled();
+    expect(upload).toHaveBeenCalledWith("c1", "attachments/shot.png", blob);
+  });
+
+  it("本机工作区：即便手里有 File 也先 finalize 暂存，别误传云端", async () => {
+    getBinding.mockResolvedValue({
+      mode: "local",
+      scope: "folder",
+      rootId: "root-1",
+      source: "explicit",
+    });
+    resolveTarget.mockResolvedValue({ rootId: "root-1", subpath: "" });
+    const finalize = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        name: "shot.png",
+        workspacePath: "attachments/shot.png",
+        binary: true,
+        text: "",
+        truncated: false,
+      },
+    });
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      finalizeStagedAttachment: finalize,
+    };
+
+    const res = await ensureAttachmentResident("c1", {
+      name: "shot.png",
+      stagingId: "stg-1",
+      binary: true,
+      text: "",
+      truncated: false,
+      fileBlob: new File([new Uint8Array([1])], "shot.png"),
+    });
+
+    expect(res.ok).toBe(true);
+    expect(finalize).toHaveBeenCalledWith("stg-1", {
+      rootId: "root-1",
+      subpath: undefined,
+    });
+    expect(upload).not.toHaveBeenCalled();
   });
 });

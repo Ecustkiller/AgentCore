@@ -10,6 +10,7 @@ from typing import Any, Literal
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import DocumentRepository
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.memory.document_store import DocumentMemoryStore
 from agentcore.memory.locks import user_memory_lock
 from agentcore.memory.rules_injection import append_user_rule
@@ -168,6 +169,7 @@ async def apply_daily_review_selections(
         backend = build_server_workspace(
             user_id=user_id,
             folder_id=folder_id,
+            folder_rel_path=(await resolve_folder_placement(folder_id)).rel_path,
             conversation_id=conversation_id,
         )
         for p in docs:

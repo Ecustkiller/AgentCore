@@ -15,10 +15,18 @@ export {
   settleOrphanEmptyAssistants,
 } from "./turns/recovery";
 export { runHydrateAttachSettle } from "./turns/hydrateAttachSettle";
+export {
+  syncConversationFollow,
+  stopAllConversationFollows,
+} from "./turns/conversationFollow";
 export { attachSidecarTurn } from "./turns/sidecarAttach";
 export { projectUnsyncedTurns } from "./turns/projectUnsynced";
 export { reconcileQueuedTurns } from "./turns/reconcileQueuedTurns";
-export { runRegenerate, runResume } from "./turns/regenerate";
+export {
+  isPausedFrameGone,
+  runRegenerate,
+  runResume,
+} from "./turns/regenerate";
 export {
   sendTurn,
   continueTurn,

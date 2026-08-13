@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
+from agentcore.tools.file_products import FileProduct
 
 if TYPE_CHECKING:
     from agentcore.board.channel import BoardChannel
@@ -32,7 +33,7 @@ class WorkspaceSlot:
     ``dataclasses.replace`` on :class:`ToolContext` copies this object by
     reference, so a mid-turn rebind (``ctx.backend = new``) is visible to every
     snapshot that still shares the slot. Callers that deliberately sit on another
-    desk (``apply_target_desktop`` / ``project_fs``) must pass a fresh slot.
+    desk (``apply_target_desktop`` / ``folder_fs``) must pass a fresh slot.
     """
 
     backend: WorkspaceBackend
@@ -119,9 +120,9 @@ class ToolSchema:
 class TurnTargetDeskHint:
     """Turn-scoped soft default desk for bare-chat ``delegate`` (not session birth).
 
-    ``create_project`` / unique ``resolve_project`` stamp a folder id onto the CEO
+    ``create_folder`` / unique ``resolve_folder`` stamp a folder id onto the CEO
     :class:`ToolContext`. A second distinct id in the same turn clears the default
-    so multi-project fan-out still requires explicit ``target_folder_id``. Never
+    so multi-folder fan-out still requires explicit ``target_folder_id``. Never
     rewrites conversation ``folder_id``.
 
     ``auto_cloud_provisioned``: runtime silently created a cloud desk this turn for
@@ -141,6 +142,26 @@ class TurnTargetDeskHint:
             return
         self._seen.add(cleaned)
         self.folder_id = cleaned if len(self._seen) == 1 else None
+
+
+@dataclass
+class TurnPromotionLedger:
+    """成品归位（``promote_product``）的回合台账 —— 交付对账快照 + 已归位的 ``{from,to}``。
+
+    **为何是 ToolContext 上的共享可变对象、而不是 ContextVar**：``execute_tools`` 用
+    ``asyncio.gather`` 跑每个工具调用，gather 会复制 context —— ``delegate`` 里写的
+    ContextVar 对同回合后续那次 ``promote_product`` 调用（另一个 Task）不可见。
+    ``dataclasses.replace`` 浅拷贝仍指向同一个对象，所以整回合共用一本账
+    （同 ``turn_target_desk`` / ``landed_artifact_kinds`` 的模式；``coordination.session``
+    的注释记着同一条坑）。逐回合 ``ToolContext.create`` 天然隔离并发回合。
+
+    ``reconciliation`` = 本回合最近一次 ``delivery_status`` 载荷（accepted 闸门的真源；
+    归位只读它，**不重算验收**）。``promotions`` = 已归位行，顺序即归位序。
+    读写口径见 :mod:`agentcore.runtime.delegate.promotion`。
+    """
+
+    reconciliation: dict[str, Any] | None = None
+    promotions: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -405,15 +426,16 @@ class ToolContext:
     # path → 首次落盘该 path 的 ``agent_id``（共享可变 dict，与 kinds 同生命周期）。
     landed_artifact_authors: dict[str, str] = field(default_factory=dict)
     # 冷启动探索幕未完成（硬挡：rebind / 点名 refresh / empty+工程点名；尚未成功
-    # ``update_project_profile``）。assemble 注入 ``<cold_start_explore>`` 时置 True；
+    # ``update_folder_profile``）。assemble 注入 ``<cold_start_explore>`` 时置 True；
     # 画像写入成功后清 False。Delegate 读此旗标：抑制 form/artifacts→files_written
     # 推断，并要求探路队 ≥2 worker（form 与写盘闸正交，见 ``write_scope``）。
     # 与 deep_research_auto_debate_count 同模式——CEO base ToolContext 上就地翻转。
     cold_start_explore_pending: bool = False
     # Worker 写盘范围契约（与 deliverable.form 正交）。默认 ``project``=可写工作区；
     # 硬挡 explore-pending 时 assemble/resume 将 base 设为 ``explore_memory``（worker
-    # 经 ``dataclasses.replace`` 继承）——仅允许 ``AgentCore/`` 下约定记忆与探索笔记，
-    # 禁止 ``AgentCore/文档/项目/``；``none``=拒一切写。闸在写工具入口。
+    # 经 ``dataclasses.replace`` 继承）——仅允许 ``AgentCore/`` 下约定记忆与探索笔记；
+    # ``none``=拒一切写。闸在写工具入口。厚约定文档已是 documents 条目，worker 无写
+    # 条目的工具，故本闸不再需要一条路径禁令。
     write_scope: Literal["none", "explore_memory", "project"] = "project"
     # Sidecar/desktop-injected Folder local bind for explore workspace_key
     # (RPC ``localRootId`` / ``localSubpath``, same camelCase shape as ``folderId``).
@@ -425,6 +447,8 @@ class ToolContext:
     # 裸聊同回合先建/解析后的软默认目标桌（共享可变；``replace`` 浅拷贝同引用）。
     # 仅缺省 ``delegate`` 目标时消费；多 id 同回合清空。≠ 会话出生 ``folder_id``。
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
+    # 成品归位台账（共享可变；``replace`` 浅拷贝同引用）——见 ``TurnPromotionLedger``。
+    promotion_ledger: TurnPromotionLedger = field(default_factory=TurnPromotionLedger)
     # Bare-chat landing write desk (``Conversation.auto_desk_folder_id``). Orthogonal
     # to birth ``folder_id`` / sidebar / memory. When set, CEO file tools + overview
     # sit on this Folder while affiliation stays 裸聊. Never auto-promote.
@@ -521,6 +545,16 @@ class ToolResult:
     output_limit: int | None = None
     citations: list[dict[str, Any]] | None = None
     display: dict[str, Any] | None = None
+    # 落盘产物自报 (交付物台账事实口径 · agentcore.tools.file_products): a tool that
+    # LANDED files declares them here — ``{path, kind, derived_from?}`` per product,
+    # with ``path`` as the path it actually wrote (post-sanitize), not the requested
+    # one. The engine stamps them onto the transcript message as a machine marker at
+    # its single tool choke point, so ``files_touched`` / ``file_acceptance`` read
+    # facts off the RESULT instead of guessing producers from call arguments. Report
+    # only what really landed: a write that failed reports nothing (so failed / denied
+    # calls stay out of the ledger), while a script that exited non-zero AFTER copying
+    # files out still reports them. Tools that write nothing leave it empty.
+    file_products: list[FileProduct] = field(default_factory=list)
     # Optional user-facing failure face (``tool_use_end.failure``). Most tools leave these
     # None — the engine's central mapper emits curated Chinese by stable code. Only set when
     # a tool truly needs product copy distinct from the model-facing ``error``/``output``.

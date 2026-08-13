@@ -14,6 +14,7 @@ from agentcore.conversation.common import resolve_local_binding
 from agentcore.core.errors import ConflictError, NotFoundError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.storage import SnapshotNotFound
 from agentcore.workspace.snapshots import (
     create_snapshot,
@@ -76,9 +77,11 @@ async def create_conversation_snapshot(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await _refuse_local_snapshot_mutate(session, conv, action="创建")
     # create_snapshot holds workspace_lock at the sink (A′).
+    placement = await resolve_folder_placement(conv.folder_id, session=session)
     ref = await create_snapshot(
         user_id=user.user_id,
         folder_id=conv.folder_id,
+        folder_rel_path=placement.rel_path,
         conversation_id=conversation_id,
         label=body.label,
     )
@@ -101,10 +104,12 @@ async def restore_conversation_snapshot(
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     await _refuse_local_snapshot_mutate(session, conv, action="恢复")
     # restore_snapshot holds workspace_lock at the sink (A′).
+    placement = await resolve_folder_placement(conv.folder_id, session=session)
     try:
         await restore_snapshot(
             user_id=user.user_id,
             folder_id=conv.folder_id,
+            folder_rel_path=placement.rel_path,
             conversation_id=conversation_id,
             snapshot_id=snapshot_id,
         )

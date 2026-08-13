@@ -1,4 +1,5 @@
 ﻿import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
+import type { DescribedError } from "@/lib/errors";
 import {
   EMPTY_RESPONSE_CHIP_LABELS,
   OUR_SERVICE_UNAVAILABLE_MESSAGE,
@@ -7,6 +8,7 @@ import {
   degradedFinishChipLabel,
   describeError,
   errorActionForCode,
+  formatAssistantErrorMessage,
   isClientSideLlmRejection,
   isConnectivityErrorCode,
   isEmptyResponseUserSurface,
@@ -289,7 +291,7 @@ describe("error action by type", () => {
     const coded = describeError(
       new StreamError("http", undefined, {
         code: "INFERENCE_TOKEN_EXPIRED",
-        serverMessage: "本地与云端的推理凭证已失效或过期。请点击重试",
+        serverMessage: "本地与云端的推理凭证已失效或过期。请稍后再试",
       }),
     );
     expect(coded?.action).toBeNull();
@@ -452,5 +454,49 @@ describe("our-cloud DATABASE_UNAVAILABLE face", () => {
     expect(connectivityEscalationSuffix("LLM_ERROR", "u2")).toContain(
       "设置 · 服务商",
     );
+  });
+});
+
+describe("operator relay diagnosis never reaches the user", () => {
+  // 平台模式下用户没有自己的 key —— Sub2API 探针描述的是运营方账号。后端已改为只写
+  // 日志；这里钉住老 journal 残留的 context 也拼不出「诊断：…」。
+  const UPSTREAM_503 = "上游模型服务暂时不可用（503），请稍后再试";
+  const legacyContext = {
+    upstream_status: 503,
+    credential_source: "platform",
+    sub2api_diagnosis:
+      "账号 eli***@gmail.com token 有效但被上游拒绝，可能被限流或暂停",
+    sub2api_account: "eli***@gmail.com",
+  } as NonNullable<DescribedError["context"]>;
+
+  it("formatAssistantErrorMessage keeps the product sentence verbatim", () => {
+    const text = formatAssistantErrorMessage({
+      code: "LLM_UPSTREAM_ERROR",
+      message: UPSTREAM_503,
+      context: legacyContext,
+    });
+    expect(text).toBe(UPSTREAM_503);
+    expect(text).not.toContain("诊断");
+    expect(text).not.toContain("@gmail.com");
+  });
+
+  it("describeError does not append it to the banner / toast either", () => {
+    const described = describeError(
+      new StreamError("http", 502, {
+        code: "LLM_UPSTREAM_ERROR",
+        serverMessage: UPSTREAM_503,
+      }),
+    );
+    expect(described?.message).toBe(UPSTREAM_503);
+    expect(described?.message).not.toContain("诊断");
+  });
+
+  it("preview / export outlets show the same sentence", () => {
+    expect(
+      visibleMessageText({
+        content: "",
+        error: { message: UPSTREAM_503 },
+      }),
+    ).toBe(UPSTREAM_503);
   });
 });

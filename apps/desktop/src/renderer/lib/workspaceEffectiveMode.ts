@@ -22,19 +22,19 @@ export interface EffectiveWorkspace {
   /** True when locality comes from default container, not an explicit bind. */
   viaContainer: boolean;
   /** Project name when the conversation inherits a folder workspace. */
-  projectName: string | null;
+  folderName: string | null;
   /** Binding lives on the project (vs bare conversation scratch). */
-  viaProject: boolean;
+  viaFolder: boolean;
 }
 
 export function resolveEffectiveWorkspace(opts: {
   binding: WorkspaceBinding | null;
   localContainerRootId: string | null | undefined;
   roots: readonly FsRoot[];
-  projectName?: string | null;
+  folderName?: string | null;
 }): EffectiveWorkspace {
-  const { binding, localContainerRootId, roots, projectName = null } = opts;
-  const viaProject = binding?.scope === "folder";
+  const { binding, localContainerRootId, roots, folderName = null } = opts;
+  const viaFolder = binding?.scope === "folder";
   const boundRootId =
     binding?.mode === "local" && binding.rootId ? binding.rootId : null;
 
@@ -46,8 +46,8 @@ export function resolveEffectiveWorkspace(opts: {
       rootName,
       rootMissing: isBoundRootMissing(binding, roots),
       viaContainer: binding?.source === "container",
-      projectName: viaProject ? projectName : null,
-      viaProject,
+      folderName: viaFolder ? folderName : null,
+      viaFolder,
     };
   }
 
@@ -60,8 +60,8 @@ export function resolveEffectiveWorkspace(opts: {
       rootName,
       rootMissing: !roots.some((r) => r.id === localContainerRootId),
       viaContainer: true,
-      projectName: null,
-      viaProject: false,
+      folderName: null,
+      viaFolder: false,
     };
   }
 
@@ -71,19 +71,19 @@ export function resolveEffectiveWorkspace(opts: {
     rootName: null,
     rootMissing: false,
     viaContainer: false,
-    projectName: viaProject ? projectName : null,
-    viaProject,
+    folderName: viaFolder ? folderName : null,
+    viaFolder,
   };
 }
 
 /**
- * Chip / mode-bar label（可见短标；项目会话只留项目名，通道靠图标 + title）:
- * - project（local / cloud）: 「项目名」
+ * Chip / mode-bar label（可见短标；有归属的会话只留文件夹名，通道靠图标 + title）:
+ * - folder（local / cloud）: 「文件夹名」
  * - bare local: 「本机草稿」
  * - bare cloud（已建会话）: 「云端对话」（草稿 chip 仍用「快速对话」）
  */
 export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
-  if (ws.viaProject && ws.projectName) return ws.projectName;
+  if (ws.viaFolder && ws.folderName) return ws.folderName;
   if (ws.isLocal) return "本机草稿";
   return "云端对话";
 }
@@ -93,10 +93,12 @@ export function formatWorkspaceChipLabel(ws: EffectiveWorkspace): string {
  * （文件夹绑定，≠ 执行路径）。执行路径不在大众 Composer 产品面展示。
  */
 export function formatWorkspaceChipTitle(ws: EffectiveWorkspace): string {
-  if (ws.viaProject) {
+  if (ws.viaFolder) {
     return ws.isLocal
       ? `${LOCAL_TRADITIONAL_LABEL}（本机文件夹权威，≠离线）`
       : "云端对话";
   }
-  return ws.isLocal ? "本机草稿（文件落本机默认目录，不算项目）" : "云端对话";
+  return ws.isLocal
+    ? "本机草稿（文件落本机默认目录，未归入文件夹）"
+    : "云端对话";
 }

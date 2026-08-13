@@ -1,23 +1,35 @@
 """Single source of truth for turning token usage into money (不变量 #2).
 
 Every place that needs a cost calls :func:`calculate_cost` — there is no other
-price table and no per-site arithmetic. **Ledger authority is nano-CNY**
-(``1 CNY = 1e9 nano``); curated domestic cards write ¥/1M tokens directly.
-API / display paths use nano-CNY with no FX (``nano_to_yuan``; ``cny_total`` is yuan).
+price table and no per-site arithmetic.
+
+**There is no FX anywhere in this product.** A price card is denominated in the
+currency its source publishes, and the resulting money keeps that currency all
+the way to the pixel:
+
+- **curated** ``_PRICING`` — 国内官价, **CNY**. Billed money (``cost_total_nano``),
+  quota, and admin totals are this and only this.
+- **community** snapshot — public vendor list prices, **USD**
+  (:func:`~agentcore.llm.community_prices.community_currency`). BYOK estimates
+  ride this table, so they are dollars and must render as ``$``.
 
 Money is never a float. Costs are computed in :class:`~decimal.Decimal` and
-returned as integer **nano-CNY** — the canonical unit stored in the
-``cost_events`` ledger and carried over the API. Display converts nano → 元
-via :func:`nano_to_yuan` (``nano / 1e9``, no FX).
+returned as integer **nano-units of** ``Cost.currency`` (``1 unit = 1e9 nano``).
+``NANO_PER_CNY`` names that scale for the CNY ledger / quota; the scale itself is
+currency-independent, and display divides by it via :func:`nano_to_major`.
 
 Pricing layers (call-level ``credential_source``):
 
-- User (BYOK): community estimate table → ``unpriced`` (never Flash/glm fallback)
-- Platform/vendor: curated ``_PRICING`` (exact, then date-stem of a dated sibling)
-  → community → glm-5.2 fallback + warning
+- User (BYOK): community estimate table (**USD**) → ``unpriced`` (never Flash/glm
+  fallback)
+- Platform/vendor: curated ``_PRICING`` (**CNY**; exact, then date-stem of a dated
+  sibling) → community → glm-5.2 fallback + warning
 
 User path never falls back to the default tier — unknown → ``unpriced`` (0).
-Platform/vendor keep default-tier fallback + warning (quota must not go blank).
+Platform/vendor keep default-tier fallback + warning (quota must not go blank);
+the community rung between them can only be reached by a 漏配 platform model
+(F4 requires a curated CNY card to ship), and it now reports its true USD
+currency instead of passing dollars off as yuan.
 Dated curated revisions log ``cost.pricing_prefix_match`` (match_kind=date_stem);
 wire ``pricing_source`` stays ``curated``.
 """
@@ -30,7 +42,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal
 
 from agentcore.core.logging import get_logger
-from agentcore.llm.community_prices import community_pricing_for
+from agentcore.llm.community_prices import community_currency, community_pricing_for
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH, DEEPSEEK_V4_FLASH_FREE, DEEPSEEK_V4_PRO
 from agentcore.llm.provider.protocol import TokenUsage
 
@@ -40,6 +52,10 @@ logger = get_logger(__name__)
 # user = BYOK; platform = operator main key; vendor = doubao/kimi/zhipu extras.
 CredentialSource = Literal["user", "platform", "vendor"]
 PricingSource = Literal["curated", "estimated", "unpriced"]
+# ISO-4217 code carried next to every amount. Not an enum on the wire (schemas
+# keep ``str``) so a future table can add one without a lockstep client release.
+CURRENCY_CNY = "CNY"
+CURRENCY_USD = "USD"
 # How a curated card was chosen (wire ``pricing_source`` stays ``curated``; this is
 # for logs / tests so exact vs dated-stem is observable without expanding the enum).
 CuratedMatchKind = Literal["exact", "date_stem"]
@@ -49,7 +65,8 @@ _VENDOR_PREFIXES = frozenset({"doubao", "kimi", "zhipu"})
 # Month/day must be calendar-plausible so bare ``-123456`` tails do not become stems.
 _DATE_SUFFIX_RE = re.compile(r"^(?P<stem>.+)-(?P<ymd>\d{8}|\d{6})$")
 
-# 1 CNY expressed in nano-CNY. The ledger and API speak integer nano-CNY.
+# 1 major unit expressed in nano. The billed ledger / quota speak nano-CNY, hence
+# the name; the scale is the same for every currency (a USD estimate is nano-USD).
 NANO_PER_CNY = 1_000_000_000
 
 # 豆包 (Volcengine 方舟) routed model id — keyed WITH the ``doubao/`` prefix because
@@ -217,12 +234,16 @@ def curated_pricing_for(
 
 @dataclass(frozen=True)
 class Cost:
-    """A run's (or turn's) cost in integer nano-CNY.
+    """A run's (or turn's) cost in integer nano-units of ``currency``.
 
     ``input`` is the whole input bill (cached + uncached); ``cached`` re-states
     just the cache-hit portion so the UI can show「省了多少」without re-pricing.
     ``output`` already includes reasoning tokens (reasoning is a billed subset of
     completion, not a separate line). ``total == input + output``.
+
+    ``currency`` is the price card's own currency — curated ``CNY``, community
+    ``USD``, never converted. Every consumer that shows one of these numbers must
+    show this alongside it; guessing from ``pricing_source`` is what broke before.
 
     ``pricing_source`` records which price layer produced the numbers.
     ``credential_source`` rides along for ledger routing (user → estimated column).
@@ -232,13 +253,32 @@ class Cost:
     cached: int
     output: int
     total: int
-    currency: str = "CNY"
+    currency: str = CURRENCY_CNY
     pricing_source: PricingSource = "curated"
     credential_source: CredentialSource = "platform"
 
 
+@dataclass(frozen=True)
+class ResolvedCard:
+    """The price card chosen for one call, with the currency it is written in.
+
+    A bundle rather than a tuple because the currency must never get dropped on
+    the way from table to ``Cost`` — that omission is exactly what made BYOK
+    dollars render as yuan.
+    """
+
+    card: dict[str, Decimal] | None
+    pricing_source: PricingSource
+    currency: str
+    used_fallback: bool = False
+
+
 def _nano(tokens: int, price_per_million: Decimal) -> int:
-    """Price ``tokens`` at ``price_per_million`` CNY/1M, as integer nano-CNY."""
+    """Price ``tokens`` at ``price_per_million`` per 1M, as integer nano-units.
+
+    Currency-agnostic: the card's currency rides on :class:`ResolvedCard`, and
+    both scales are 1 unit = 1e9 nano.
+    """
     if tokens <= 0:
         return 0
     value = Decimal(tokens) * price_per_million * _PER_MILLION_TO_NANO
@@ -287,17 +327,21 @@ def resolve_price_card(
     model: str,
     *,
     credential_source: CredentialSource,
-) -> tuple[dict[str, Decimal] | None, PricingSource, bool]:
-    """Resolve ``(card, pricing_source, used_flash_fallback)`` for one call.
+) -> ResolvedCard:
+    """Resolve the price card + its currency for one call.
 
-    User: community → unpriced (never default-tier fallback).
-    Platform/vendor: curated (exact, then date-stem) → community → glm-5.2 fallback.
+    User: community (USD) → unpriced (never default-tier fallback).
+    Platform/vendor: curated (CNY; exact, then date-stem) → community (USD)
+    → glm-5.2 fallback (CNY).
+
+    An ``unpriced`` result still names a currency so callers never have to invent
+    one for a zero.
     """
     if credential_source == "user":
         community = community_pricing_for(model)
         if community is not None:
-            return community, "estimated", False
-        return None, "unpriced", False
+            return ResolvedCard(community, "estimated", community_currency())
+        return ResolvedCard(None, "unpriced", community_currency())
 
     curated, match_kind, matched_key = curated_pricing_for(model)
     if curated is not None:
@@ -309,18 +353,21 @@ def resolve_price_card(
                 matched_key=matched_key,
                 match_kind=match_kind,
             )
-        return curated, "curated", False
+        return ResolvedCard(curated, "curated", CURRENCY_CNY)
     community = community_pricing_for(model)
     if community is not None:
-        return community, "estimated", False
-    return _PRICING[_DEFAULT_MODEL], "curated", True
+        # 漏配 platform model (F4 requires a curated CNY card to ship). Report the
+        # community table's real USD rather than letting dollars enter the CNY
+        # ledger unlabelled; the catalog builder flags the missing card upstream.
+        return ResolvedCard(community, "estimated", community_currency())
+    return ResolvedCard(_PRICING[_DEFAULT_MODEL], "curated", CURRENCY_CNY, used_fallback=True)
 
 
 def pricing_for(model: str) -> dict[str, Decimal]:
     """The price card for a model, falling back to the default (glm-5.2) tier."""
-    card, _src, _fb = resolve_price_card(model, credential_source="platform")
-    assert card is not None
-    return card
+    resolved = resolve_price_card(model, credential_source="platform")
+    assert resolved.card is not None
+    return resolved.card
 
 
 def has_curated_pricing(model: str) -> bool:
@@ -347,10 +394,10 @@ def pricing_for_model(
     source = resolve_credential_source(
         credential_source=credential_source, billing_mode=billing_mode, model=model
     )
-    card, pricing_source, _fb = resolve_price_card(model, credential_source=source)
-    if pricing_source == "unpriced":
+    resolved = resolve_price_card(model, credential_source=source)
+    if resolved.pricing_source == "unpriced":
         return None
-    return card
+    return resolved.card
 
 
 def calculate_cost(
@@ -364,7 +411,9 @@ def calculate_cost(
     """Convert a run's token usage into money — the only place this happens.
 
     Input is split by cache hit/miss (DeepSeek pre-splits the counts); output is
-    priced whole (reasoning already included). Returns integer nano-CNY.
+    priced whole (reasoning already included). Returns integer nano-units of
+    ``Cost.currency`` — CNY off a curated card, USD off the community snapshot.
+    Nothing is converted between the two.
 
     Pricing follows **call-level credential source** and the two-layer card
     resolve, not deployment ``settings.billing_mode``.
@@ -390,15 +439,15 @@ def calculate_cost(
         provider_name=provider_name,
         model=model,
     )
-    card, pricing_source, used_fallback = resolve_price_card(
-        model, credential_source=source
-    )
+    resolved = resolve_price_card(model, credential_source=source)
+    card, used_fallback = resolved.card, resolved.used_fallback
     if card is None:
         return Cost(
             input=0,
             cached=0,
             output=0,
             total=0,
+            currency=resolved.currency,
             pricing_source="unpriced",
             credential_source=source,
         )
@@ -422,7 +471,8 @@ def calculate_cost(
         cached=cached,
         output=output,
         total=input_total + output,
-        pricing_source=pricing_source,
+        currency=resolved.currency,
+        pricing_source=resolved.pricing_source,
         credential_source=source,
     )
 
@@ -451,11 +501,21 @@ def cache_savings(
     return max(full - paid, 0)
 
 
-def nano_to_yuan(nano: int) -> float:
-    """Convert ledger nano-CNY to yuan for display, rounded to fen (2 decimals).
+def nano_to_major(nano: int) -> float:
+    """Convert integer nano-money to its major unit, rounded to 2 decimals.
 
-    ``nano / NANO_PER_CNY`` — no FX. Wire field ``cny_total`` carries this yuan value
-    (name kept; semantics are 元, not USD×rate).
+    ``nano / NANO_PER_CNY`` — a pure scale change, **never** FX. The caller owns
+    the currency: nano-CNY yields 元, nano-USD yields dollars. Wire field
+    ``cny_total`` carries this value for whatever ``CostBreakdown.currency`` says.
     """
-    yuan = Decimal(nano) / Decimal(NANO_PER_CNY)
-    return float(yuan.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    major = Decimal(nano) / Decimal(NANO_PER_CNY)
+    return float(major.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def nano_to_yuan(nano: int) -> float:
+    """Convert ledger nano-CNY to 元 — the billed / quota path, which is CNY-only.
+
+    Alias of :func:`nano_to_major` kept for the CNY-only call sites (quota copy,
+    admin totals) so the currency assumption there stays legible.
+    """
+    return nano_to_major(nano)

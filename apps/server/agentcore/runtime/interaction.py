@@ -27,7 +27,10 @@ import asyncio
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from agentcore.attention import AttentionKind
 
 
 class InteractionKind(StrEnum):
@@ -206,16 +209,42 @@ class InteractionRegistry:
         The entry is ALWAYS discarded on exit — resolved, timed out, or cancelled —
         so no face can leak a pending request. Per-kind differences (the result type,
         the resolved emit, the timeout default) stay in the faces.
+
+        For the kinds that stop the turn on a human this is also the account-level
+        「需要你」boundary (云对话多端同权 B2 §2.2): the same two moments the SSE card
+        appears and disappears fan an ``ai_attention`` signal to every device the
+        user has, and — while the card is up and no phone is listening — a native
+        push. Both are fire-and-forget: the engine must not wait on a notification,
+        and the exit signal has to survive running under cancellation.
         """
         fut = self.create(request_id, conversation_id, kind=kind, payload=payload)
         if on_suspended is not None:
             on_suspended()
+        card_kind = _blocking_card_kind(kind, payload)
+        if card_kind is not None:
+            from agentcore.attention import signal_hot_card_required
+
+            signal_hot_card_required(
+                interaction_id=request_id,
+                kind=card_kind,
+                conversation_id=conversation_id,
+                payload=payload,
+            )
         try:
             if timeout is None:
                 return await fut
             return await asyncio.wait_for(fut, timeout=timeout)
         finally:
             self.discard(request_id)
+            if card_kind is not None:
+                from agentcore.attention import signal_hot_card_resolved
+
+                signal_hot_card_resolved(
+                    interaction_id=request_id,
+                    kind=card_kind,
+                    conversation_id=conversation_id,
+                    payload=payload,
+                )
 
     def get(self, request_id: str) -> InteractionRequest | None:
         """Look up a pending interaction (e.g. to verify its kind before resolving)."""
@@ -231,6 +260,24 @@ class InteractionRegistry:
         if conversation_id is not None:
             items = [r for r in items if r.conversation_id == conversation_id]
         return items
+
+
+def _blocking_card_kind(
+    kind: InteractionKind, payload: dict[str, Any] | None
+) -> AttentionKind | None:
+    """The :class:`~agentcore.attention.AttentionKind` this suspend blocks a human on.
+
+    ``None`` when nobody is waiting on the user — ``client_tool`` is a device
+    fulfilling an op, and a CEO-arbitrated escalation is the team talking to
+    itself. Imported lazily: this module is imported almost everywhere, and the
+    attention package pulls in the messaging hub + push transport.
+    """
+    from agentcore.attention import attention_kind_of
+    from agentcore.runtime.interaction_orphan import is_hot_user_pending_kind
+
+    if not is_hot_user_pending_kind(kind.value, payload):
+        return None
+    return attention_kind_of(kind.value)
 
 
 _registry = InteractionRegistry()

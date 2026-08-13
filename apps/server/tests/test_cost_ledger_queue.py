@@ -45,6 +45,24 @@ def _sample_runs(*, run_id: str = "run-1") -> list[dict]:
     ]
 
 
+def _sample_call(*, call_id: str, run_id: str = "run-assist") -> dict:
+    return {
+        "call_id": call_id,
+        "run_id": run_id,
+        "parent_run_id": None,
+        "agent_id": None,
+        "role": "assist",
+        "persona": "AI 改写",
+        "model": "m",
+        "tokens": {"input": 1, "output": 2},
+        "cost": {},
+        "cost_total_nano": 7,
+        "cost_estimated_nano": 0,
+        "currency": "CNY",
+        "duration_ms": 10,
+    }
+
+
 async def test_enqueue_runs_then_drain_records(monkeypatch, ledger_queue):
     calls: list = []
 
@@ -245,6 +263,73 @@ async def test_invalid_payload_still_quarantines(ledger_queue, tmp_path):
     path = qdir / "invalid.json"
     path.write_text(
         json.dumps({"id": "x", "user_id": "u1", "runs": [], "calls": []}),
+        encoding="utf-8",
+    )
+
+    assert await ledger_queue.drain_once() == 0
+    assert not path.exists()
+    assert list(qdir.glob("*.corrupt"))
+
+
+async def test_enqueue_account_level_row_without_a_conversation(monkeypatch, ledger_queue):
+    """AI 改写 / 文档 description: no conversation, and the outbox carries it anyway.
+
+    ``conversation_id`` used to be a hard requirement here, so this spend was
+    dropped at enqueue. It now rides through to the sink as NULL — the row is
+    account-level, not mis-filed onto some unrelated chat.
+    """
+    calls: list = []
+
+    class Repo:
+        def __init__(self, _session):
+            pass
+
+        async def record_calls(self, **kw):
+            calls.append(kw)
+            return 1
+
+    monkeypatch.setattr("agentcore.db.base.telemetry_session_factory", lambda: _FakeSession())
+    monkeypatch.setattr("agentcore.db.repositories.CostEventRepository", Repo)
+
+    rid = await ledger_queue.enqueue_calls_async(
+        user_id="u1",
+        conversation_id=None,
+        calls=[_sample_call(call_id="call-assist")],
+        source="inprocess_call",
+    )
+    assert rid is not None
+    assert await ledger_queue.drain_once() == 1
+    assert calls[0]["conversation_id"] is None
+    assert calls[0]["message_id"] is None
+    assert calls[0]["calls"][0]["call_id"] == "call-assist"
+
+
+async def test_enqueue_without_an_account_is_refused(ledger_queue):
+    """``user_id`` is the one envelope key the ledger cannot do without.
+
+    Every account window and quota SUM keys on it, so a row without an owner is
+    unbillable — refuse at enqueue rather than write money nobody owns.
+    """
+    assert (
+        ledger_queue.enqueue_runs(
+            user_id="",
+            conversation_id="c1",
+            runs=_sample_runs(run_id="run-ownerless"),
+            source="turn",
+        )
+        is None
+    )
+    await ledger_queue._await_pending_enqueues()
+    assert await ledger_queue._backend.pending_count() == 0
+
+
+async def test_ownerless_disk_payload_quarantines(ledger_queue, tmp_path):
+    """A legacy record with spend but no account can never be written — poison."""
+    qdir = tmp_path / "telemetry" / "cost_ledger_queue"
+    qdir.mkdir(parents=True)
+    path = qdir / "ownerless.json"
+    path.write_text(
+        json.dumps({"id": "x", "runs": _sample_runs(run_id="run-no-owner")}),
         encoding="utf-8",
     )
 

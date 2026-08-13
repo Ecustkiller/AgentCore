@@ -22,7 +22,15 @@ ROLE_MEMORY = "memory"
 # it gets its own priced ledger row (one model = one row, 同跨档不复价) so its spend shows
 # as its own line on the turn team payroll (``GET /messages/{id}/cost``).
 ROLE_VISION = "vision"
+# ``assist`` tags an **account-level** product-chrome call — AI 改写（划词改写）与
+# 文档 description 自动补: real spend that belongs to no conversation at all, so its
+# ledger row carries ``conversation_id = NULL`` (and ``message_id = NULL``) and only
+# SUMs into the account windows / 配额. ``persona`` carries which chrome it was.
+ROLE_ASSIST = "assist"
 PERSONA_CEO = "CEO"
+# Human-facing ``persona`` labels for the two account-level chrome paths.
+PERSONA_REWRITE = "AI 改写"
+PERSONA_DESCRIPTION = "文档摘要"
 # The four money keys carried in cost_events.cost (integer nano-CNY). The Cost
 # dataclass also exposes ``currency`` / ``pricing_source`` / ``credential_source``.
 COST_KEYS = ("input", "cached", "output", "total")
@@ -80,6 +88,9 @@ def split_cost(cost: dict) -> tuple[dict[str, int | str], int, int, str]:
     Accepts the ``asdict(Cost)`` shape. User-sourced money always lands in
     ``cost_estimated_nano`` with ``cost_total_nano == 0``; platform/vendor keep
     billed ``cost_total_nano``.
+
+    ``currency`` comes off the priced ``Cost`` (curated CNY / community USD) and
+    rides the row's scalar column — read it from there, not from the body.
     """
     body: dict[str, int | str] = {key: int(cost.get(key, 0)) for key in COST_KEYS}
     pricing_source = str(cost.get("pricing_source") or "curated")

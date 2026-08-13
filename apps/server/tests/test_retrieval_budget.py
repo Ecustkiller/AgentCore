@@ -211,14 +211,14 @@ async def test_tool_exec_exhausts_and_returns_structured_feedback():
     sink = EventSink()
 
     msgs1, _, _ = await execute_tools(
-        [_call("c1")], reg, _ctx(budget=state), sink, run_id="r1"
+        [_call("c1")], reg, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
     )
     assert stub.calls == 1
     assert state.used == 1
     assert "hits" in (msgs1[0].content or "")
 
     msgs2, _, _ = await execute_tools(
-        [_call("c2")], reg, _ctx(budget=state), sink, run_id="r1"
+        [_call("c2")], reg, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
     )
     assert stub.calls == 1  # second call blocked
     assert BUDGET_EXHAUSTED_FEEDBACK in (msgs2[0].content or "")
@@ -235,7 +235,9 @@ async def test_tool_exec_cache_hit_does_not_consume_budget():
     state = RetrievalBudgetState(limit=1)
     sink = EventSink()
 
-    await execute_tools([_call("c1")], reg, _ctx(budget=state), sink, run_id="r1")
+    await execute_tools(
+        [_call("c1")], reg, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
+    )
     assert stub.calls == 1
     assert state.used == 0
 
@@ -243,7 +245,9 @@ async def test_tool_exec_cache_hit_does_not_consume_budget():
     stub2 = _SearchStub(cached=False)
     reg2 = ToolRegistry()
     reg2.register(stub2)
-    await execute_tools([_call("c2")], reg2, _ctx(budget=state), sink, run_id="r1")
+    await execute_tools(
+        [_call("c2")], reg2, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
+    )
     assert stub2.calls == 1
     assert state.used == 1
 
@@ -256,7 +260,9 @@ async def test_tool_exec_failed_call_does_not_consume_budget():
     state = RetrievalBudgetState(limit=1)
     sink = EventSink()
 
-    await execute_tools([_call("c1")], reg, _ctx(budget=state), sink, run_id="r1")
+    await execute_tools(
+        [_call("c1")], reg, _ctx(budget=state), sink, approval_gate=None, run_id="r1"
+    )
     assert stub.calls == 1
     assert state.used == 0
 

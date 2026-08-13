@@ -16,8 +16,9 @@ import {
   getComposerChannelPreference,
   setComposerChannelPreference,
 } from "@/lib/composerChannelPreference";
-import { visibleDraftProjects } from "@/lib/draftWorkspaceProjects";
-import { pickAndOpenLocalProject } from "@/lib/openLocalProject";
+import { visibleDraftFolders } from "@/lib/draftWorkspaceFolders";
+import { folderAncestorNames } from "@/lib/folderTree";
+import { pickAndOpenLocalFolder } from "@/lib/openLocalFolder";
 import { formatWorkspaceChipTitle } from "@/lib/workspaceEffectiveMode";
 import {
   type FolderMeta,
@@ -43,8 +44,10 @@ import { WorkspaceChannelGuideDialog } from "./WorkspaceChannelGuideDialog";
 
 /**
  * Always-on「在哪工作」chip for the TurnComposer 底栏左簇（工作区首位）。
- * Draft: 云入口 + 本机传统（桌面）+ 已有项目；禁本机草稿；记上次通道（无顶栏说明壳）。
- * Bound conversation: read-only status (+ backup when local legacy).
+ * Draft: 云入口 + 本机传统（桌面）+ 已有文件夹；禁本机草稿；记上次通道（无顶栏说明壳）。
+ * A nested folder carries its「设计 / 图标」breadcrumb so same-named siblings in
+ * different parents stay tellable apart. Bound conversation: read-only status
+ * (+ backup when local legacy).
  */
 export function ComposerWorkspaceChip({
   conversationId,
@@ -103,7 +106,7 @@ function BoundChip({ conversationId }: { conversationId: string }) {
 function draftLabel(
   intent: DraftWorkspaceIntent,
   folders: FolderMeta[],
-): { icon: "local" | "cloud" | "project"; text: string } {
+): { icon: "local" | "cloud" | "folder"; text: string } {
   if (intent.kind === "quick_cloud") {
     return { icon: "cloud", text: "快速对话" };
   }
@@ -112,7 +115,7 @@ function draftLabel(
     return { icon: "local", text: "本机草稿" };
   }
   const folder = folders.find((f) => f.id === intent.folderId);
-  if (!folder) return { icon: "project", text: "项目" };
+  if (!folder) return { icon: "folder", text: "文件夹" };
   return {
     icon: folder.mode === "local" ? "local" : "cloud",
     text: folder.name,
@@ -120,9 +123,18 @@ function draftLabel(
 }
 
 function folderLocationHint(f: FolderMeta): string {
-  if (f.mode === "cloud") return "云端空间";
-  if (f.localSubpath) return `本地 · ${f.localSubpath}`;
-  return "本机文件夹";
+  if (f.mode === "cloud") {
+    const ancestors = folderAncestorNames(f);
+    return ancestors.length > 0
+      ? `我的文件 · ${ancestors.join(" / ")}`
+      : "我的文件";
+  }
+  // Same rule as the cloud branch above: the hint says what sits *above* the
+  // folder. Keeping the trailing segment when it repeats the folder's own name
+  // （白板 bound at …/白板）just renders「白板 / 本机 · 白板」.
+  const above = (f.localSubpath ?? "").split("/").filter(Boolean);
+  if (above.at(-1) === f.name) above.pop();
+  return above.length > 0 ? `本机 · ${above.join("/")}` : "本机文件夹";
 }
 
 function DraftChip() {
@@ -130,7 +142,7 @@ function DraftChip() {
   const [pop, setPop] = useState(false);
   const [guideOpen, setGuideOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [projectsExpanded, setProjectsExpanded] = useState(false);
+  const [foldersExpanded, setFoldersExpanded] = useState(false);
   /** Same popover handoff — avoid close→open race that swallows CreateFolderMenu. */
   const [view, setView] = useState<"pick" | "create">("pick");
   const intent = useFoldersStore((s) => s.draftWorkspaceIntent);
@@ -144,36 +156,30 @@ function DraftChip() {
     return isDesktop ? list : list.filter((f) => f.mode === "cloud");
   }, [grouped?.folders, isDesktop]);
 
-  const selectedFolderId = intent.kind === "project" ? intent.folderId : null;
+  const selectedFolderId = intent.kind === "folder" ? intent.folderId : null;
 
   const {
-    visible: projectRows,
+    visible: folderRows,
     matchCount,
     canExpand,
     hiddenCount,
   } = useMemo(
     () =>
-      visibleDraftProjects({
+      visibleDraftFolders({
         folders,
         conversations: grouped?.conversations ?? [],
         query,
-        expanded: projectsExpanded,
+        expanded: foldersExpanded,
         selectedFolderId,
       }),
-    [
-      folders,
-      grouped?.conversations,
-      query,
-      projectsExpanded,
-      selectedFolderId,
-    ],
+    [folders, grouped?.conversations, query, foldersExpanded, selectedFolderId],
   );
 
   const { icon, text } = draftLabel(intent, folders);
 
   const resetPickChrome = () => {
     setQuery("");
-    setProjectsExpanded(false);
+    setFoldersExpanded(false);
     setView("pick");
   };
 
@@ -188,11 +194,11 @@ function DraftChip() {
     closePick();
   };
 
-  const pickProject = (folder: FolderMeta) => {
+  const pickFolder = (folder: FolderMeta) => {
     setComposerChannelPreference(
       folder.mode === "local" ? "local_traditional" : "cloud",
     );
-    setIntent({ kind: "project", folderId: folder.id });
+    setIntent({ kind: "folder", folderId: folder.id });
     closePick();
   };
 
@@ -211,7 +217,7 @@ function DraftChip() {
   const pickLocalTraditional = () => {
     setComposerChannelPreference("local_traditional");
     closePick();
-    void pickAndOpenLocalProject(navigate);
+    void pickAndOpenLocalFolder(navigate);
   };
 
   const openCreateCloud = () => {
@@ -276,7 +282,7 @@ function DraftChip() {
                   在哪工作
                 </Button>
                 <span className="px-1 text-xs font-medium text-foreground">
-                  新建云项目
+                  新建文件夹
                 </span>
               </div>
               <CreateFolderCascadePanel onClose={closePick} />
@@ -291,14 +297,14 @@ function DraftChip() {
               />
               <DraftRow
                 icon={<Plus size={14} />}
-                label="新建云项目"
+                label="新建文件夹"
                 onClick={openCreateCloud}
               />
               {isDesktop ? (
                 <>
                   <DraftRow
                     icon={<Upload size={14} />}
-                    label="导入本机项目到云"
+                    label="从本机导入"
                     onClick={importToCloud}
                   />
                   <DraftRow
@@ -306,19 +312,23 @@ function DraftChip() {
                     label="从 Git 克隆"
                     onClick={connectGit}
                   />
-                  <DraftRow
-                    icon={<HardDrive size={14} />}
-                    label="打开本机项目"
-                    badge={
-                      lastChannel === "local_traditional" ? "上次" : undefined
-                    }
-                    onClick={pickLocalTraditional}
-                  />
+                  {/* Lands on your own disk, unlike the three above; a second
+                      divider would break the one-divider rule, so just a gap. */}
+                  <div className="mt-1.5">
+                    <DraftRow
+                      icon={<HardDrive size={14} />}
+                      label="打开本机文件夹"
+                      badge={
+                        lastChannel === "local_traditional" ? "上次" : undefined
+                      }
+                      onClick={pickLocalTraditional}
+                    />
+                  </div>
                 </>
               ) : null}
               <button
                 type="button"
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground"
+                className="flex w-full items-center gap-2 rounded-lg py-1.5 pr-2.5 pl-8 text-xs text-muted-foreground hover:bg-accent/40 hover:text-foreground"
                 onClick={openGuide}
               >
                 了解区别
@@ -327,46 +337,46 @@ function DraftChip() {
               <div className="my-1 border-t border-border" />
               <div className="mx-2.5 mb-1 flex items-center gap-2 pt-1">
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  项目
+                  文件夹
                 </span>
                 <SearchField
                   value={query}
                   onValueChange={setQuery}
                   placeholder="筛选…"
-                  aria-label="筛选项目"
+                  aria-label="筛选文件夹"
                   className="min-w-0 flex-1"
                   inputClassName="text-xs"
                 />
               </div>
-              {projectRows.map((f) => (
+              {folderRows.map((f) => (
                 <DraftRow
                   key={f.id}
                   icon={<FolderOpen size={14} />}
                   label={f.name}
                   hint={folderLocationHint(f)}
                   selected={
-                    intent.kind === "project" && intent.folderId === f.id
+                    intent.kind === "folder" && intent.folderId === f.id
                   }
-                  onClick={() => pickProject(f)}
+                  onClick={() => pickFolder(f)}
                 />
               ))}
               {matchCount === 0 && (
                 <p className="px-2.5 py-2 text-xs text-muted-foreground">
-                  {query.trim() ? "没有匹配的项目" : "还没有项目"}
+                  {query.trim() ? "没有匹配的文件夹" : "还没有文件夹"}
                 </p>
               )}
-              {canExpand && !projectsExpanded && hiddenCount > 0 ? (
+              {canExpand && !foldersExpanded && hiddenCount > 0 ? (
                 <DraftRow
                   icon={<ChevronDown size={14} />}
                   label={`查看全部（${matchCount}）`}
-                  onClick={() => setProjectsExpanded(true)}
+                  onClick={() => setFoldersExpanded(true)}
                 />
               ) : null}
-              {canExpand && projectsExpanded ? (
+              {canExpand && foldersExpanded ? (
                 <DraftRow
                   icon={<ChevronUp size={14} />}
                   label="收起"
-                  onClick={() => setProjectsExpanded(false)}
+                  onClick={() => setFoldersExpanded(false)}
                 />
               ) : null}
             </div>
@@ -377,6 +387,11 @@ function DraftChip() {
   );
 }
 
+/**
+ * Where the actions under it put your files. Indented to the rows' label column
+ * (px-2.5 + 14px icon + gap-2) so the group reads as one block — it is a label,
+ * not a section break: this menu keeps a single separator (动作区 ↔ 文件夹列表).
+ */
 function DraftRow({
   icon,
   label,

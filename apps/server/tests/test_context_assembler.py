@@ -1,4 +1,5 @@
-"""Unit tests for the context assembly spine (ContextAssembler + PromptContributor)."""
+"""Unit tests for the context assembly spine (ContextAssembler + PromptContributor)
+and the CEO turn prompt it renders (pipeline.assemble.build_chat_system_prompt)."""
 
 from __future__ import annotations
 
@@ -144,3 +145,75 @@ def test_observe_emits_assembly_hash(monkeypatch):
     assert row["assembly_hash"] == expected
     assert row["sections"] == {"base": 4, "memory": 3}
     assert row["total_chars"] == 7
+
+
+# --- CEO turn prompt (runtime/pipeline/assemble.py) ---------------------------------------
+
+
+def _spy_on_observe(monkeypatch) -> list[dict]:
+    captured: list[dict] = []
+
+    class _Spy:
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
+    monkeypatch.setattr("agentcore.runtime.context.assembler.logger", _Spy())
+    return captured
+
+
+def _ceo_turn(**overrides: object) -> str:
+    from agentcore.runtime.pipeline.assemble import build_chat_system_prompt
+
+    sections: dict[str, object] = {
+        "ceo_prompt": "CEO",
+        "workspace_overview": "",
+        "recent_team_graph": "",
+        "prior_delivery_gaps": "",
+        "prior_delegate_retry": "",
+        "attachment_context": "",
+        "registered_sources": "",
+        "soft_cap": None,
+    }
+    sections.update(overrides)
+    return build_chat_system_prompt(**sections)  # type: ignore[arg-type]
+
+
+def test_ceo_turn_renders_the_source_ledger_after_the_volatile_tail():
+    # CTX-A3: the ledger used to be f-string appended by the caller; it keeps the SAME
+    # position (last, after attachments) now that it is a section.
+    out = _ceo_turn(
+        attachment_context="<attachments/>",
+        registered_sources="<registered_sources/>",
+    )
+    assert out == "CEO\n<attachments/>\n<registered_sources/>"
+
+
+def test_ceo_turn_observation_covers_the_source_ledger(monkeypatch):
+    # CTX-A3 ratchet: assembly_hash / total_chars / section_digests must see the ledger.
+    # Appended outside the assembler, both under-reported by the whole block — so the
+    # prefix-drift signal went blind to the one section that grows every turn.
+    from agentcore.observability.prefix_cache import digest_text
+
+    captured = _spy_on_observe(monkeypatch)
+    ledger = "<registered_sources>\n- #r1 · url=https://example.com\n</registered_sources>"
+    out = _ceo_turn(registered_sources=ledger)
+
+    row = captured[0]
+    assert row["event"] == "cost.prompt_assembled"
+    assert row["sections"]["registered_sources"] == len(ledger)
+    assert row["total_chars"] == len("CEO") + len(ledger)
+    assert row["section_digests"]["registered_sources"] == digest_text(ledger)
+    assert row["assembly_hash"] == assembly_hash(out)  # hash covers the rendered ledger
+
+
+def test_ceo_turn_soft_cap_fires_on_a_ledger_that_alone_blows_it(monkeypatch):
+    # CTX-A3 ratchet: prompt_budget_char_soft_cap was unreachable via the ledger — the
+    # section that grows unbounded across a conversation never counted toward it.
+    captured = _spy_on_observe(monkeypatch)
+    ledger = "- #r1 · url=https://example.com · deep_read=是\n" * 40
+
+    _ceo_turn(registered_sources=ledger, soft_cap=200)
+    assert captured[-1]["over_soft_cap"] is True
+
+    _ceo_turn(soft_cap=200)  # same turn without the ledger stays well under
+    assert captured[-1]["over_soft_cap"] is False

@@ -306,7 +306,9 @@ def wrap_executor_with_timeouts(
 
             def _on_force_cancel(_guard: Any, _reason: str) -> None:
                 if worker_task is not None and not worker_task.done():
-                    worker_task.cancel("redirect")
+                    # The cancel msg becomes run_cancelled.reason — a timeout kill
+                    # must not be filed as a user redirect.
+                    worker_task.cancel("worker_timeout")
 
             arm_hard_timeout(
                 spec.run_id,

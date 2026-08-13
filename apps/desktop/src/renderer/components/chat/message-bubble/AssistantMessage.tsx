@@ -1,3 +1,4 @@
+import { AutoFolderNoticeCard } from "@/components/chat/AutoFolderNoticeCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
 import { SourceCards } from "@/components/chat/SourceCards";
@@ -5,6 +6,7 @@ import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { isAskSilentResolvedDecision } from "@/components/chat/decision";
 import { Button, IconButton } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,6 +42,7 @@ import {
 import { notifySuccess } from "@/lib/toast";
 import { runRegenerate } from "@/services/turns";
 import {
+  type AutoFolderNotice,
   assistantProjectionId,
   getActiveRuntime,
   useConversationStore,
@@ -47,7 +50,7 @@ import {
 import { useExecutionStore } from "@/stores/execution";
 import { useMessageInteractionCards } from "@/stores/interactions";
 import { useUsageStore } from "@/stores/usage";
-import { AlertTriangle, Check, Copy, KeyRound } from "lucide-react";
+import { AlertTriangle, Check, Copy, KeyRound, RotateCcw } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { AssistantMessageFooter } from "./AssistantMessageFooter";
@@ -59,37 +62,46 @@ import { WholeFilePasteHint } from "./WholeFilePasteHint";
 import type { MessageBubbleProps } from "./types";
 import { useCopyAction } from "./useCopyAction";
 
-function SingleAgentDeliveryAndFiles({
-  messageId,
-  conversationId,
-}: {
-  messageId: string;
-  conversationId: string | null;
-}) {
-  // 可用性短问可在无 plan 的 CEO 回合复用 delivery_status——单 Agent 路径也要渲染产物。
-  const deliveryStatus = useExecutionStore(
-    (s) => s.byId[messageId]?.deliveryStatus ?? null,
-  );
-  const artifacts = useMemo(
-    () => resolveFileArtifactsForCard(deliveryStatus),
-    [deliveryStatus],
-  );
+/** 长回答折叠阈值（px）：远高于用户气泡，只夹真正超长的答案。 */
+const ANSWER_COLLAPSED_MAX_H = 640;
+
+/**
+ * 「曾中断恢复」：这条回合中途崩过、由系统重驱跑完，成果仍在本条消息里。
+ * 诚实优先——不许静默假装一次跑完，所以标记常驻气泡顶部而非只进 footer。
+ */
+function RecoveredChip() {
   return (
-    <>
-      {artifacts.length > 0 && (
-        <FileArtifactsCard
-          artifacts={artifacts}
-          conversationId={conversationId}
-          turnKey={messageId}
-        />
-      )}
-    </>
+    <Badge
+      tone="muted"
+      pill
+      title="本回合中途中断，系统已自动接着跑完；成果就在这条消息里。"
+      className="mb-1.5 inline-flex items-center gap-1.5 px-2 py-0.5 font-normal"
+    >
+      <RotateCcw size={14} />
+      曾中断恢复
+    </Badge>
   );
 }
 
-function MultiAgentFileArtifacts({ messageId }: { messageId: string }) {
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  // 交付对账（同 execution_id 保最新）→ 产物清单。
+/**
+ * 回合产出文件 + 裸聊落点告知，一并挂在答复正文之后。
+ *
+ * 交付对账（同 execution_id 保最新）→ 产物清单；可用性短问可在无 plan 的 CEO 回合复用
+ * delivery_status，所以单 / 多 Agent 走同一条路径。
+ *
+ * 落点告知并进产出卡头部（文件就落在那个文件夹里，一处说清）；只有建了桌却没产出文件
+ * 时——产出卡不渲染——才独立成卡。两种形态都在正文之后：建桌发生在派工前、文件还没写，
+ * 顶部告知会抢在 AI 开口之前。
+ */
+function TurnFilesAndAutoFolder({
+  messageId,
+  conversationId,
+  autoFolder,
+}: {
+  messageId: string;
+  conversationId: string | null;
+  autoFolder?: AutoFolderNotice;
+}) {
   const deliveryStatus = useExecutionStore(
     (s) => s.byId[messageId]?.deliveryStatus ?? null,
   );
@@ -97,11 +109,15 @@ function MultiAgentFileArtifacts({ messageId }: { messageId: string }) {
     () => resolveFileArtifactsForCard(deliveryStatus),
     [deliveryStatus],
   );
+  if (artifacts.length === 0) {
+    return autoFolder ? <AutoFolderNoticeCard notice={autoFolder} /> : null;
+  }
   return (
     <FileArtifactsCard
       artifacts={artifacts}
       conversationId={conversationId}
       turnKey={messageId}
+      autoFolder={autoFolder}
     />
   );
 }
@@ -143,8 +159,8 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     finishReason,
     hasDedicatedPauseOrAskUi,
   });
-  // Prefer live message.error when it is the face source so context (diagnosis /
-  // upstream preview / credential_source) survives formatAssistantErrorMessage.
+  // Prefer live message.error when it is the face source so context (upstream
+  // preview / credential_source) survives formatAssistantErrorMessage.
   const displayError =
     resolvedFace == null
       ? null
@@ -245,13 +261,15 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     (cachedTurn
       ? pickCostMoney({
           total: cachedTurn.cost.total,
+          currency: cachedTurn.cost.currency,
           estimated_total: cachedTurn.estimated_cost?.total ?? null,
+          estimated_currency: cachedTurn.estimated_cost?.currency ?? null,
         })
       : null);
   // 未计价可见 (拍板 2026-07-20)：BYOK 无价可算时明示「未计价」，不静默省略。
   const costText =
     message.executionId === null && money != null && money.nano > 0
-      ? formatCostCaption(money.nano, money.estimated)
+      ? formatCostCaption(money.nano, money.estimated, money.currency)
       : message.executionId === null &&
           message.cost?.pricing_source === "unpriced"
         ? COST_UNPRICED_LABEL
@@ -356,7 +374,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
         <CollapsibleSpeech
           contentKey={displayContent}
           fadeToClass="from-background"
-          collapsedMaxHClass="max-h-[40rem]"
+          collapsedMaxH={ANSWER_COLLAPSED_MAX_H}
           sceneKey={`answer:${message.id}`}
         >
           <Markdown
@@ -389,6 +407,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
 
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
+      {message.recovered && <RecoveredChip />}
       {!hideFinishReasonChip && (
         <FinishReasonChip
           reason={finishReason}
@@ -450,14 +469,11 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           )}
         </div>
       )}
-      {message.executionId === null ? (
-        <SingleAgentDeliveryAndFiles
-          messageId={projectionId}
-          conversationId={conversationId}
-        />
-      ) : (
-        <MultiAgentFileArtifacts messageId={projectionId} />
-      )}
+      <TurnFilesAndAutoFolder
+        messageId={projectionId}
+        conversationId={conversationId}
+        autoFolder={message.autoFolder}
+      />
       {citations.length > 0 && (
         <SourceCards
           citations={citations}

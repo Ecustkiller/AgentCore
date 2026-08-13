@@ -248,6 +248,7 @@ async def test_preexisting_index_snapshotted_once_per_turn():
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
     await WaveScheduler().run(plan, executor)
     assert backend.index_calls == 1  # one walk for the whole batch, not three

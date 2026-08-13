@@ -14,7 +14,12 @@ from agentcore.core.errors import (
     ValidationError,
 )
 from agentcore.core.types import new_id
-from agentcore.security import decode_access_token, hash_refresh_token
+from agentcore.security import (
+    decode_access_token,
+    decode_access_token_claims,
+    decode_access_token_mfa_verified,
+    hash_refresh_token,
+)
 
 _PW = "password123"
 
@@ -546,7 +551,10 @@ async def test_change_password_rotates_secret_and_keeps_current_session():
     _, old_pair = await _do_login(svc,username="pia", password=_PW)
 
     new_pair = await svc.change_password(
-        user_id=user.user_id, current_password=_PW, new_password="brand-new-pw"
+        user_id=user.user_id,
+        current_password=_PW,
+        new_password="brand-new-pw",
+        audience="product",
     )
 
     # old password dead, new one works
@@ -569,7 +577,10 @@ async def test_change_password_clears_must_change_flag():
     assert (await creds.get_by_user_id(user.user_id)).password_must_change is True
 
     await svc.change_password(
-        user_id=user.user_id, current_password=temp, new_password="brand-new-pw"
+        user_id=user.user_id,
+        current_password=temp,
+        new_password="brand-new-pw",
+        audience="product",
     )
     assert (await creds.get_by_user_id(user.user_id)).password_must_change is False
 
@@ -579,7 +590,10 @@ async def test_change_password_wrong_current_raises():
     user = await svc.register(username="quinn", password=_PW)
     with pytest.raises(AuthenticationError):
         await svc.change_password(
-            user_id=user.user_id, current_password="nope", new_password="brand-new-pw"
+            user_id=user.user_id,
+            current_password="nope",
+            new_password="brand-new-pw",
+            audience="product",
         )
 
 
@@ -587,14 +601,84 @@ async def test_change_password_weak_new_raises():
     svc, _u, _c, _t = _make()
     user = await svc.register(username="rob", password=_PW)
     with pytest.raises(ValidationError):
-        await svc.change_password(user_id=user.user_id, current_password=_PW, new_password="short")
+        await svc.change_password(
+            user_id=user.user_id,
+            current_password=_PW,
+            new_password="short",
+            audience="product",
+        )
 
 
 async def test_change_password_same_as_current_raises():
     svc, _u, _c, _t = _make()
     user = await svc.register(username="sue", password=_PW)
     with pytest.raises(ValidationError):
-        await svc.change_password(user_id=user.user_id, current_password=_PW, new_password=_PW)
+        await svc.change_password(
+            user_id=user.user_id,
+            current_password=_PW,
+            new_password=_PW,
+            audience="product",
+        )
+
+
+async def test_change_password_keeps_admin_audience_and_mfa_claim():
+    """An admin changing their password must stay an *admin* session.
+
+    A ``product`` successor still passes ``/v1/auth/me`` (auth paths are exempt from
+    the audience gate), so the console looks logged in while every ``/v1/admin/*``
+    call 403s — and refreshing cannot recover it, because the stored family carries
+    the wrong ``client_aud`` too.
+    """
+    svc, _u, _c, tokens = _make()
+    user = await svc.register(username="root-admin", password=_PW)
+
+    pair = await svc.change_password(
+        user_id=user.user_id,
+        current_password=_PW,
+        new_password="brand-new-pw",
+        audience="admin",
+        mfa_verified=True,
+    )
+
+    assert decode_access_token_claims(pair.access_token) == (user.user_id, "admin")
+    assert decode_access_token_mfa_verified(pair.access_token) is True
+    live = [r for r in tokens.records.values() if r.revoked_at is None]
+    assert [r.client_aud for r in live] == ["admin"]
+
+
+async def test_change_password_admin_audience_survives_refresh():
+    """The successor family must keep minting admin tokens, not just the first pair."""
+    svc, _u, _c, _t = _make()
+    user = await svc.register(username="root-admin-2", password=_PW)
+
+    pair = await svc.change_password(
+        user_id=user.user_id,
+        current_password=_PW,
+        new_password="brand-new-pw",
+        audience="admin",
+        mfa_verified=True,
+    )
+    rotated = await svc.refresh(refresh_token=pair.refresh_token)
+
+    assert decode_access_token_claims(rotated.access_token) == (user.user_id, "admin")
+
+
+async def test_change_password_keeps_product_audience_for_desktop():
+    """The desktop half of the same endpoint must not be dragged to ``admin``."""
+    svc, _u, _c, tokens = _make()
+    user = await svc.register(username="desktop-user", password=_PW)
+
+    pair = await svc.change_password(
+        user_id=user.user_id,
+        current_password=_PW,
+        new_password="brand-new-pw",
+        audience="product",
+    )
+
+    assert decode_access_token_claims(pair.access_token) == (user.user_id, "product")
+    assert decode_access_token_mfa_verified(pair.access_token) is False
+    live = [r for r in tokens.records.values() if r.revoked_at is None]
+    assert [r.client_aud for r in live] == ["product"]
 
 
 # --- update profile (个人资料编辑) ---

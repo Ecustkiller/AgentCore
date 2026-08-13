@@ -6,8 +6,15 @@ sending stays POST). Carries ``chat_message``, ``chat_message_updated`` (recall/
 ``chat_changed`` (thin membership nudge: created / member_added / activated — client re-pulls),
 ``presence`` (online transitions
 to co-chat users), ``friend_request`` (created/accepted/rejected/cancelled),
-``memory_updated``, and shared-space nudges. Typing remains
-⏳ (消息IM.md §七).
+``memory_updated``, ``ai_attention`` (a conversation's AI stopped and is waiting on
+this user — signal only, no card content; 云对话多端同权 B2 §2.2), and shared-space
+nudges. Typing remains ⏳ (消息IM.md §七).
+
+Clients may declare ``device_id`` + ``platform`` at open. Both are optional (older
+clients keep working), but declaring them is what lets the server answer「is this
+user's **phone** reachable」 before it falls back to a native push. ``platform`` is
+a query param as well as a header because an ``EventSource``-based client cannot
+set headers.
 
 Auth is the access-token cookie, like every route. SSE cannot refresh a token
 mid-stream, so on a 401 the client reconnects after a refresh (认证与会话 §六) —
@@ -19,8 +26,9 @@ disconnected is re-synced on reconnect via the chat's ``last_read_message_id``
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Coroutine
+from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import StreamingResponse
 
@@ -108,6 +116,9 @@ async def _firehose(
 async def realtime_firehose(
     user: AuthUser,
     session: AsyncSession = Depends(get_db),
+    device_id: Annotated[str, Query(max_length=128)] = "",
+    platform: Annotated[str, Query(max_length=32)] = "",
+    x_client_platform: Annotated[str | None, Header(alias="X-Client-Platform")] = None,
 ) -> StreamingResponse:
     """Open this user's realtime firehose (server→client SSE).
 
@@ -116,6 +127,11 @@ async def realtime_firehose(
     (and last disconnect) also fans a ``presence`` event to co-chat users.
     Heartbeat comments keep the stream warm; the subscription is released when
     the client disconnects.
+
+    Optional ``device_id`` makes reconnects replace their own previous stream
+    rather than pile up; optional ``platform`` (query param, falling back to
+    ``X-Client-Platform``) tells the AI attention signal which surfaces are
+    reachable. Neither is required — an undeclared client streams exactly as before.
 
     Auth resolves the user via a request-scoped DB session; that session is
     returned before the long-lived stream opens so each open desktop client does
@@ -126,7 +142,11 @@ async def realtime_firehose(
 
     hub = default_chat_hub()
     became_online = not hub.is_online(user.user_id)
-    sub = hub.subscribe(user.user_id)
+    sub = hub.subscribe(
+        user.user_id,
+        device_id=device_id,
+        platform=platform or x_client_platform,
+    )
     if became_online:
         _schedule_presence(user.user_id, online=True)
 

@@ -123,6 +123,44 @@ async def test_schedule_does_not_block_caller(monkeypatch):
     assert "doc-1" not in desc_mod._inflight
 
 
+async def test_schedule_binds_account_level_billing_context(monkeypatch):
+    """The fill task inherits the billing envelope that makes its spend visible.
+
+    ``user_id`` is who the per-call quota gate charges; ``cost_role=assist`` +
+    ``persona`` are what the call meter stamps onto the ledger row. A document
+    belongs to no conversation, so ``conversation_id`` stays unbound and the row
+    lands account-level rather than mis-filed onto an unrelated chat (STD-A2).
+    """
+    from agentcore.core.log_context import get_log_value
+    from agentcore.costing import PERSONA_DESCRIPTION, ROLE_ASSIST
+
+    seen: dict[str, str] = {}
+    done = asyncio.Event()
+
+    async def _capture(**_kwargs):
+        try:
+            seen["user_id"] = get_log_value("user_id")
+            seen["cost_role"] = get_log_value("cost_role")
+            seen["persona"] = get_log_value("persona")
+            seen["conversation_id"] = get_log_value("conversation_id")
+            done.set()
+        finally:
+            desc_mod._inflight.discard("doc-ctx")
+
+    monkeypatch.setattr(desc_mod, "_mint_description_background", _capture)
+    desc_mod._inflight.clear()
+
+    schedule_description_generation(document_id="doc-ctx", user_id="u-7")
+    await asyncio.wait_for(done.wait(), 1)
+
+    assert seen["user_id"] == "u-7"
+    assert seen["cost_role"] == ROLE_ASSIST
+    assert seen["persona"] == PERSONA_DESCRIPTION
+    assert seen["conversation_id"] == ""
+    # Scoped bind: scheduling must not leave the context set on the caller.
+    assert get_log_value("cost_role") == ""
+
+
 async def test_maybe_schedule_skips_nonempty(monkeypatch):
     called: list[str] = []
 

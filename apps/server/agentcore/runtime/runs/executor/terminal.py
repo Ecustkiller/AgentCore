@@ -53,6 +53,7 @@ from agentcore.runtime.runs.salvage import (
 from agentcore.runtime.runs.serialize import (
     debrief_from_transcript,
     escalations_from_transcript,
+    file_products_from_transcript,
     files_touched_from_transcript,
 )
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
@@ -119,7 +120,9 @@ def build_terminal_run_state(
     # qualified brief) — empty inventory must not mint an empty ``degraded_synth``.
     # Leaf substantial (tools / longer body): always stamp degraded when missing.
     debrief = debrief_from_transcript(messages)
-    touched = files_touched_from_transcript(messages)
+    # 交付物台账：工具自报的产物（path + kind + derived_from），``touched`` 是它的路径投影。
+    products = file_products_from_transcript(messages)
+    touched = [p.path for p in products]
     product_touched = filter_product_landing_paths(
         touched, product_landing_artifacts
     )
@@ -284,6 +287,7 @@ def build_terminal_run_state(
                     phase=RunPhase.FAILED,
                     error=reason,
                     path_rejections=path_rej,
+                    products=products,
                 ),
                 tool_failures=list(tool_failures),
                 usage=usage,
@@ -473,6 +477,7 @@ def build_terminal_run_state(
                     phase=RunPhase.FAILED,
                     error=hard_gap.reason,
                     path_rejections=path_rej,
+                    products=products,
                 ),
                 tool_failures=list(tool_failures),
                 usage=usage,
@@ -525,6 +530,7 @@ def build_terminal_run_state(
                 touched,
                 phase=RunPhase.COMPLETED,
                 path_rejections=path_rej,
+                products=products,
             ),
             tool_failures=list(tool_failures),
             usage=usage,
@@ -550,17 +556,22 @@ def handle_agent_node_cancel(
     run_rounds: int = 0,
     priced_model: str | None = None,
 ) -> RunState | None:
-    """Triple cancel: redirect → salvage CANCELLED; user_stop → CANCELLED absorb;
-    stop → emit then re-raise.
+    """Quadruple cancel: redirect / worker_timeout → salvage CANCELLED;
+    user_stop → CANCELLED absorb; stop → emit then re-raise.
 
-    Returns a RunState on redirect/user_stop absorb; returns None when caller must ``raise``.
-    Redirect / user_stop cancel folds already-spent usage (completed rounds + in-flight pass)
+    Returns a RunState on redirect/worker_timeout/user_stop absorb; returns None when
+    caller must ``raise``.
+    Absorbed cancels fold already-spent usage (completed rounds + in-flight pass)
     onto the CANCELLED state — same honesty as the exception / FAILED path — so
     ``cancel_worker`` / run-stop does not evaporate escalations or member billing.
+
+    The cancel ``arg`` is the ONLY carrier of WHY the task was killed, so it maps
+    1:1 onto the wire ``run_cancelled.reason``: a hard-timeout kill says
+    ``worker_timeout``, never「已改方向」.
     """
     arg = str(e.args[0]) if e.args else ""
-    if arg == "redirect":
-        cancel_reason = "redirect"
+    if arg in ("redirect", "worker_timeout"):
+        cancel_reason = arg
     elif arg == "user_stop":
         cancel_reason = "user_stop"
     else:
@@ -573,9 +584,11 @@ def handle_agent_node_cancel(
             execution_id=env.execution_id,
         )
     )
-    if cancel_reason == "redirect":
+    if cancel_reason in ("redirect", "worker_timeout"):
         # Fold live streamed draft into messages when the ReAct pass was cut
         # before the final assistant turn was appended (用户已看见的一半产出).
+        # A timeout kill salvages exactly like a redirect: the partial 现场 is what
+        # the CEO 续派s from — only the recorded cause differs.
         draft = "".join(streamed_content).strip()
         salvage_msgs = list(messages)
         if draft and not any(m.role in ("assistant", "tool") for m in salvage_msgs):
@@ -584,17 +597,20 @@ def handle_agent_node_cancel(
         usage_acc = run_usage or TokenUsage()
         if inflight:
             usage_acc = usage_acc + inflight[0]
-        logger.info(
-            "run.redirect_cancelled",
-            run_id=spec.run_id,
-            salvage=session is not None,
-            transcript_len=len(session.transcript) if session else 0,
-            streamed_chars=len(draft),
-            tokens=usage_acc.total_tokens,
-        )
+        salvage_fields = {
+            "run_id": spec.run_id,
+            "salvage": session is not None,
+            "transcript_len": len(session.transcript) if session else 0,
+            "streamed_chars": len(draft),
+            "tokens": usage_acc.total_tokens,
+        }
+        if cancel_reason == "redirect":
+            logger.info("run.redirect_cancelled", **salvage_fields)
+        else:
+            logger.info("run.timeout_cancelled", **salvage_fields)
         return cancelled_state_from_salvage(
             session,
-            error="redirected",
+            error="redirected" if cancel_reason == "redirect" else "worker_timeout",
             usage=usage_acc,
             model=priced_model,
             rounds=run_rounds,

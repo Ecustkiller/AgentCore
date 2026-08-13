@@ -21,6 +21,7 @@ vi.mock("@/services/documents", () => ({
   createRuleDocument: vi.fn(),
   deleteDocument: vi.fn(),
   renameDocument: vi.fn(),
+  setDocumentDisputed: vi.fn(),
   updateDocumentApplyMode: vi.fn(),
 }));
 vi.mock("@/lib/toast", () => ({
@@ -34,6 +35,7 @@ import {
   createRuleDocument,
   getAlwaysQuota,
   listScopeEntries,
+  setDocumentDisputed,
   updateDocumentApplyMode,
 } from "@/services/documents";
 import {
@@ -56,6 +58,7 @@ const entry = (over: Partial<DocumentNode> = {}): DocumentNode => ({
   description: "",
   name: "e.md",
   frontmatterError: null,
+  disputedAt: null,
   alwaysChars: over.applyMode === "on_demand" ? null : 1200,
   ...over,
 });
@@ -68,7 +71,7 @@ const entryDetail = (over: Partial<DocumentDetail> = {}): DocumentDetail => ({
   ...over,
 });
 
-function renderScope(scope: "global" | "project" = "global") {
+function renderScope(scope: "global" | "folder" = "global") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -83,7 +86,7 @@ function renderScope(scope: "global" | "project" = "global") {
           scope={
             scope === "global"
               ? { kind: "global" }
-              : { kind: "project", folderId: "F1" }
+              : { kind: "folder", folderId: "F1" }
           }
           memoryActivePath={null}
           documentActivePath={null}
@@ -114,6 +117,8 @@ afterEach(() => {
 });
 
 describe("always usage copy helpers", () => {
+  // The 0 / 不足千字 buckets survive for the meter (`还剩 0 字` / `还剩不足千字`);
+  // rows below the floor render no size at all, which is asserted on the section.
   it("distinguishes 0 from under-a-thousand and coarsens to 千/万", () => {
     expect(formatAlwaysChars(0)).toBe("0 字");
     expect(formatAlwaysChars(450)).toBe("不足千字");
@@ -155,7 +160,7 @@ describe("always usage copy helpers", () => {
           globalChars: 4200,
           projectChars: 1400,
         },
-        "project",
+        "folder",
       ),
     ).toBe("常驻（含全局） · 还剩约 1.8 万字");
     expect(
@@ -322,7 +327,40 @@ describe("EntriesSection (global)", () => {
     expect(screen.queryByText(/^文档$/)).toBeNull();
     expect(screen.getByText(/还剩不足千字/)).toBeTruthy();
     expect(screen.getByText("约 1 千字")).toBeTruthy();
+    // 画像.md is 800 chars: below the row floor, so it prints no size at all.
+    expect(screen.queryByText("不足千字")).toBeNull();
     expect(screen.getByText("最近更新")).toBeTruthy();
+  });
+
+  it("prints a row size only for entries that actually hold the pool", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "语气.md", alwaysChars: 4200 }),
+      entry({ id: "g2", name: "小规则.md", alwaysChars: 450 }),
+      entry({
+        id: "g3",
+        name: "偏好.md",
+        aiMaintained: true,
+        alwaysChars: 0,
+      }),
+    ]);
+    renderScope("global");
+
+    expect(await screen.findByText("约 4 千字")).toBeTruthy();
+    // Sub-千字 and empty rows say nothing — deleting them would free nothing, and
+    // the silence is what makes 画像.md's cold-start placeholder look the same as
+    // the written-but-empty entry it becomes.
+    expect(screen.queryByText("不足千字")).toBeNull();
+    expect(screen.queryByText("0 字")).toBeNull();
+  });
+
+  it("keeps a calm meter to the number alone — explainer stays a tooltip", async () => {
+    renderScope("global");
+    const headline = await screen.findByText(/常驻 · 还剩/);
+    // 「每次对话都会带上」only as title; a rendered line would put the calm meter
+    // back to the multi-line block this rail was flattened out of.
+    expect(headline.getAttribute("title")).toBe("每次对话都会带上");
+    expect(screen.queryByText("每次对话都会带上")).toBeNull();
+    expect(screen.queryByText(/去整理/)).toBeNull();
   });
 
   it("shows core placeholders when the scope has no documents yet", async () => {
@@ -399,6 +437,65 @@ describe("EntriesSection (global)", () => {
     });
   });
 
+  it("marks a disputed entry as 已停用 and stops counting its always chars", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({
+        id: "g1",
+        name: "过时偏好.md",
+        applyMode: "always",
+        alwaysChars: 1200,
+        disputedAt: "2026-07-19T12:00:00Z",
+      }),
+    ]);
+    renderScope("global");
+
+    const label = await screen.findByText("过时偏好.md");
+    // Kept and readable — dispute is not a delete.
+    expect(label.className).toContain("line-through");
+    expect(screen.getByText("已停用")).toBeTruthy();
+    // Its size is no longer spent, so the row must not advertise a cost.
+    expect(screen.queryByText("约 1 千字")).toBeNull();
+  });
+
+  it("lets the user mark an entry wrong and undo it from the row menu", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "过时偏好.md", applyMode: "always" }),
+    ]);
+    vi.mocked(setDocumentDisputed).mockResolvedValue(
+      entry({
+        id: "g1",
+        name: "过时偏好.md",
+        disputedAt: "2026-07-19T12:00:00Z",
+      }),
+    );
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("过时偏好.md"));
+    fireEvent.click(await screen.findByText("这条不对"));
+    await waitFor(() =>
+      expect(setDocumentDisputed).toHaveBeenCalledWith("g1", true),
+    );
+
+    cleanup();
+    vi.mocked(setDocumentDisputed).mockClear();
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({
+        id: "g1",
+        name: "过时偏好.md",
+        applyMode: "always",
+        disputedAt: "2026-07-19T12:00:00Z",
+      }),
+    ]);
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("过时偏好.md"));
+    expect(screen.queryByText("这条不对")).toBeNull();
+    fireEvent.click(await screen.findByText("恢复使用"));
+    await waitFor(() =>
+      expect(setDocumentDisputed).toHaveBeenCalledWith("g1", false),
+    );
+  });
+
   it("shows calm unavailable when documents API is missing", async () => {
     vi.mocked(listScopeEntries).mockRejectedValue(new ApiError(404, "missing"));
     renderScope("global");
@@ -425,7 +522,7 @@ describe("EntriesSection (project)", () => {
       globalChars: 4200,
       projectChars: 5600,
     });
-    const { onOpenUpdates } = renderScope("project");
+    const { onOpenUpdates } = renderScope("folder");
     expect(await screen.findByText("导航.md")).toBeTruthy();
     expect(screen.getByText("项目路由")).toBeTruthy();
     // Missing project 画像.md still listed as a placeholder.
@@ -437,6 +534,9 @@ describe("EntriesSection (project)", () => {
     expect(
       screen.getByText(/常驻（含全局） · 快满了，还剩约 2 千字/),
     ).toBeTruthy();
+    // Consequence copy earns its line back once the pool is 快满 — that is the
+    // whole point of collapsing the calm state.
+    expect(screen.getByText("AI 快记不下新东西了，去整理")).toBeTruthy();
     expect(screen.getByText("约 2 千字")).toBeTruthy();
   });
 });

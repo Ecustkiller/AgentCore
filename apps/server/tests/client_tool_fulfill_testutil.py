@@ -24,7 +24,16 @@ def install_deliver_capture(monkeypatch: pytest.MonkeyPatch) -> list[SSEEvent]:
     """Patch fulfill dispatch to succeed and append SSEEvents for test awaits."""
     DELIVERED_EVENTS.clear()
 
-    def fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+    def fake_deliver(
+        user_id,
+        conversation_id,
+        channel,
+        root_id,
+        event,
+        *,
+        origin_device_id=None,
+        hub=None,
+    ):
         DELIVERED_EVENTS.append(event)
         return DeliverResult.DELIVERED
 

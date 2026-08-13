@@ -85,7 +85,8 @@ def test_desktop_touch_tool_names_cover_mcp_and_host():
     assert not is_desktop_touch_tool("web_search")
 
 
-def test_resolve_worker_gate_shares_gate_for_mcp_on_cloud():
+def test_resolve_worker_gate_hands_down_gate_for_mcp_on_cloud():
+    """MCP 在云端 worker 上必须有卡可弹；空名册也照传门（该免的卡由收口点免）。"""
     from types import SimpleNamespace
 
     from agentcore.runtime.delegate.drive_setup import resolve_worker_gate
@@ -117,7 +118,7 @@ def test_resolve_worker_gate_shares_gate_for_mcp_on_cloud():
         _tools=empty,
         _base_tool_context=SimpleNamespace(backend=backend),
     )
-    assert resolve_worker_gate(tool_no_mcp) is None
+    assert resolve_worker_gate(tool_no_mcp) is gate
 
 
 def test_ceo_registry_has_no_mcp_tools_by_default():
@@ -546,6 +547,100 @@ async def test_mcp_dynamic_tool_call_and_no_channel():
     assert ok.success
     assert ok.output == "hi"
     channel.request_mcp.assert_awaited_once()
+
+
+def _dynamic_tool() -> McpDynamicTool:
+    return McpDynamicTool(
+        fc_name="mcp_s_echo",
+        server_id="s",
+        server_name="Echo Server",
+        mcp_tool_name="echo",
+        description="Echo",
+        input_schema=None,
+    )
+
+
+def _dynamic_ctx(channel) -> ToolContext:
+    from unittest.mock import MagicMock
+
+    return ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="a",
+        backend=MagicMock(location="server"),
+        user_id="u1",
+        desktop_channel=channel,
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_channel_deadline_sits_below_engine_ceiling():
+    """通道 = 实际值 + slack ≤ 引擎墙钟；两层等值时内层 MCP 超时永不可达（TOOL-A3）。"""
+    from agentcore.runtime.engine import resolve_tool_timeout
+    from agentcore.tools.mcp import dynamic as dynamic_mod
+
+    tool = _dynamic_tool()
+    channel = AsyncMock()
+    channel.request_mcp = AsyncMock(return_value={"content": "hi"})
+    await tool.execute({}, _dynamic_ctx(channel))
+
+    passed = channel.request_mcp.await_args.kwargs.get("timeout")
+    assert passed == dynamic_mod._MCP_CHANNEL_TIMEOUT_SECONDS
+    assert passed > dynamic_mod._MCP_OP_TIMEOUT_SECONDS  # desktop budget + 往返 slack
+    ceiling = resolve_tool_timeout(tool.schema)
+    assert ceiling is not None and ceiling > passed
+
+
+@pytest.mark.asyncio
+async def test_wedged_mcp_server_surfaces_mcp_timeout_not_engine_liveness(monkeypatch):
+    """MCP Server 卡死：内层通道先响，模型看到指向 MCP 的原因而非通用「活性挂起」。"""
+    import asyncio
+
+    from agentcore.runtime.engine import resolve_tool_timeout
+    from agentcore.tools.mcp import dynamic as dynamic_mod
+
+    # Same ladder, compressed clock — the ordering is what is under test, not the values.
+    monkeypatch.setattr(dynamic_mod, "_MCP_CHANNEL_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(dynamic_mod, "_MCP_ENGINE_TIMEOUT_SECONDS", 0.50)
+
+    class _WedgedChannel:
+        """Mirrors ``DesktopClientChannel.request_mcp``'s deadline contract."""
+
+        async def request_mcp(self, _op, _args=None, *, timeout=None):
+            try:
+                await asyncio.wait_for(asyncio.sleep(30), timeout)
+            except TimeoutError as e:
+                raise McpOpError("本机 MCP 操作超时（call_tool：客户端未响应）") from e
+            raise AssertionError("wedged channel must never resolve")
+
+    tool = _dynamic_tool()  # schema built after the patch → picks up the ladder above
+    ceiling = resolve_tool_timeout(tool.schema)
+    assert ceiling == 0.50
+
+    # Engine backstop applied exactly as ``tool_exec`` does: it must NOT be the one to fire.
+    result = await asyncio.wait_for(
+        tool.execute({}, _dynamic_ctx(_WedgedChannel())), ceiling
+    )
+    assert result.success is False
+    assert "MCP" in (result.error or "")
+    assert "超时" in (result.error or "")
+    assert "echo" in (result.error or "")  # names the failing MCP tool …
+    assert "Echo Server" in (result.error or "")  # … and its Server
+
+
+@pytest.mark.asyncio
+async def test_mcp_op_error_names_server_and_tool():
+    """外部 MCP 故障必须可与「模型用错工具」区分：错误里点名 Server + 工具。"""
+    tool = _dynamic_tool()
+    channel = AsyncMock()
+    channel.request_mcp = AsyncMock(
+        side_effect=McpOpError("MCP Server 未启用或不存在（s）")
+    )
+    result = await tool.execute({}, _dynamic_ctx(channel))
+    assert result.success is False
+    assert "MCP Server 未启用或不存在（s）" in result.error
+    assert "Echo Server" in result.error
+    assert "echo" in result.error
 
 
 def test_mcp_reattach_rebuilds_required_event():

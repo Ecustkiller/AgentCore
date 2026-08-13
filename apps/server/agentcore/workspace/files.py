@@ -14,6 +14,7 @@ Panel download is **decoupled** from AI ``read_bytes``: it uses
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Literal, NoReturn
 
@@ -22,21 +23,57 @@ from agentcore.core.errors import PayloadTooLargeError, ValidationError
 from agentcore.workspace.limits import is_file_too_large_detail
 from agentcore.workspace.locate import build_server_workspace
 from agentcore.workspace.protocol import DirEntry, WorkspaceIOError
+from agentcore.workspace.server import ServerWorkspace
+
+
+def _backend(
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+) -> ServerWorkspace:
+    """Build the conversation's cloud workspace backend.
+
+    ``folder_rel_path`` is a parameter rather than something this layer looks up:
+    the placement is a property of the folder, and resolving it here would put a
+    database round-trip (and a database *dependency*) inside every file read. The
+    routes resolve it once via
+    :func:`agentcore.folders.placement.resolve_folder_placement`.
+    """
+    return build_server_workspace(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
+    )
 
 
 async def list_files(
-    *, user_id: str, folder_id: str | None, conversation_id: str, recursive: bool = False
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    recursive: bool = False
 ) -> list[DirEntry]:
     """List entries in the conversation's workspace (top level or recursive)."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     pattern = "**/*" if recursive else "*"
     return await backend.list(".", pattern)
 
 
 async def list_file_index(
-    *, user_id: str, folder_id: str | None, conversation_id: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
 ) -> tuple[list[str], bool]:
     """Flat, ignore-pruned, capped file-path list for @ mentions (文件中枢统一 F4).
 
@@ -45,19 +82,31 @@ async def list_file_index(
     there). Mirrors the desktop ``fsApi.listFiles`` so @ behaves the same across
     cloud and local.
     """
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     result = await backend.index_files()
     return result.paths, result.truncated
 
 
 async def upload_file(
-    *, user_id: str, folder_id: str | None, conversation_id: str, path: str, data: bytes
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    path: str,
+    data: bytes,
 ) -> int:
     """Write ``data`` to ``path`` in the conversation's workspace; return bytes."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     return await backend.write_bytes(path, data)
 
@@ -77,6 +126,7 @@ async def resolve_download_file(
     *,
     user_id: str,
     folder_id: str | None,
+    folder_rel_path: str | None,
     conversation_id: str,
     path: str,
     max_bytes: int | None = None,
@@ -85,8 +135,11 @@ async def resolve_download_file(
 
     Bypasses the AI ``read_bytes`` 5 MiB gate; default ceiling matches upload.
     """
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     ceiling = settings.workspace_upload_max_bytes if max_bytes is None else max_bytes
     return await backend.resolve_for_download(path, max_bytes=ceiling)
@@ -96,6 +149,7 @@ async def download_file(
     *,
     user_id: str,
     folder_id: str | None,
+    folder_rel_path: str | None,
     conversation_id: str,
     path: str,
     max_bytes: int | None = None,
@@ -104,58 +158,98 @@ async def download_file(
     target = await resolve_download_file(
         user_id=user_id,
         folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
         conversation_id=conversation_id,
         path=path,
         max_bytes=max_bytes,
     )
     try:
-        return target.read_bytes()
+        return await asyncio.to_thread(target.read_bytes)
     except OSError as e:
         raise WorkspaceIOError(str(e)) from e
 
 
 async def create_dir(
-    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    path: str,
 ) -> None:
     """Create directory ``path`` (with parents) in the conversation's workspace."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     await backend.mkdir(path)
 
 
 async def delete_file(
-    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    path: str,
 ) -> None:
     """Delete ``path`` (file or directory) in the conversation's workspace."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     await backend.delete(path)
 
 
 async def move_file(
-    *, user_id: str, folder_id: str | None, conversation_id: str, src: str, dst: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    src: str,
+    dst: str,
 ) -> None:
     """Move/rename ``src`` to ``dst`` in the conversation's workspace."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     await backend.move(src, dst)
 
 
 async def copy_file(
-    *, user_id: str, folder_id: str | None, conversation_id: str, src: str, dst: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    src: str,
+    dst: str,
 ) -> None:
     """Copy ``src`` to ``dst`` (file or directory tree) in the conversation's workspace."""
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     await backend.copy(src, dst)
 
 
 async def read_file_for_edit(
-    *, user_id: str, folder_id: str | None, conversation_id: str, path: str
+    *,
+    user_id: str,
+    folder_id: str | None,
+    folder_rel_path: str | None,
+    conversation_id: str,
+    path: str,
 ) -> tuple[str, int, Literal["lf", "crlf"]]:
     """Read ``path`` for editing: ``(text, mtime_ms, eol)`` — full text + CAS baseline.
 
@@ -164,8 +258,11 @@ async def read_file_for_edit(
     an in-panel save can do a write-time CAS instead of blind-clobbering a file
     an Agent turn changed.
     """
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     return await backend.read_for_edit(path)
 
@@ -174,6 +271,7 @@ async def write_file_text(
     *,
     user_id: str,
     folder_id: str | None,
+    folder_rel_path: str | None,
     conversation_id: str,
     path: str,
     content: str,
@@ -186,7 +284,10 @@ async def write_file_text(
     returned mtime is the current disk version. CAS is atomic under
     ``ServerWorkspace``'s ``lock_key`` (callers must not wrap the same key).
     """
-    backend = build_server_workspace(
-        user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+    backend = _backend(
+        user_id=user_id,
+        folder_id=folder_id,
+        folder_rel_path=folder_rel_path,
+        conversation_id=conversation_id,
     )
     return await backend.write_text_cas(path, content, baseline_mtime_ms=baseline_mtime_ms, eol=eol)

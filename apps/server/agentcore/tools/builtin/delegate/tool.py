@@ -110,7 +110,7 @@ class DelegateTool:
         profile_set: ProfileSet | None = None,
         max_parallel: int | None = None,
         captain_run_id: str | None = None,
-        approval_gate: ApprovalGate | None = None,
+        approval_gate: ApprovalGate | None,
         session_store: SessionStore | None = None,
         session_saver: SessionSaver | None = None,
         session_loader: SessionLoader | None = None,
@@ -159,7 +159,7 @@ class DelegateTool:
         # consult_memory exactly as this turn did (False ⇒ stays off).
         self._memory_enabled = memory_enabled
         self._conversation_history_access = conversation_history_access
-        # 跨项目指挥 · 嵌套默认目标桌（父 worker 的 target / 出生）；tasks 省略时继承。
+        # 跨文件夹指挥 · 嵌套默认目标桌（父 worker 的 target / 出生）；tasks 省略时继承。
         self._default_target_folder_id: str | None = None
         # 同回合多 local 认领簿（drive 入口 seed）；嵌套子派共享同一簿。
         self._local_root_claims = None
@@ -171,13 +171,15 @@ class DelegateTool:
         self._last_graph_execution_id: str | None = None
         self._last_graph_plan: RunPlan | None = None
         self._last_graph_seed: dict[str, RunState] | None = None
+        # 上一段 drive 收尾时波调度器给出的终态映射（run_id → 真实 RunState）——同回合
+        # 二次合入的 seed 只从这里取相，绝不按 plan 节点凭空判定完成。让出 / 软停时未跑的
+        # 尾节点本就不在映射里（缺席 = 还没跑），二次派发才会再调度它们。
+        self._last_drive_results: dict[str, RunState] | None = None
         # Cumulative sub-workers spawned by this captain (worker leads only).
         self._sub_workers_spawned = 0
         from agentcore.runtime.costing import WorkerResultAccumulator
 
         self._acc = WorkerResultAccumulator()
-        # 续派次数（CEO continue_from + redirect 热修；不计辩论）— turn_metrics.revises。
-        self._continuation_ids: list[str] = []
         self._supervised: SupervisedRun | None = None
         self._pending_boundary: tuple[BoundaryReason, list[RunSpec]] | None = None
         # 挂起即收口 (②): set by the CHECKPOINT boundary hook when it finalizes the turn at a
@@ -203,8 +205,11 @@ class DelegateTool:
         self._active_playbook_args: dict[str, Any] | None = None
         # 父 worker 带 code_audit_gate 时：嵌套手写 tasks 继承收工纪律（见 audit.apply_*）。
         self._inherit_code_audit_discipline: bool = False
-        # Per-call force flag for isomorphic re-delegation (set in execute).
-        self._delegate_force: bool = False
+        # 本次调用点名放行的闸（execute / replan 各自在入口无条件重解析——旧的单个
+        # `_delegate_force` 既一键全开四道闸，又会被后续 replan 读到残值）。
+        from agentcore.runtime.delegate.force_scopes import EMPTY_FORCE_SCOPES
+
+        self._force_scopes = EMPTY_FORCE_SCOPES
         # Turn user-message provenance (harvest closing stamps execution_harvest).
         from agentcore.runtime.delegate.post_close_gate import current_user_message_origin
 
@@ -254,15 +259,23 @@ class DelegateTool:
 
     @property
     def continuation_count(self) -> int:
-        """CEO 侧续派次数（continue_from + redirect 热修；不计辩论编排续写）。"""
-        n = len(self._continuation_ids)
+        """续派次数（continue_from + redirect 热修；不计辩论编排续写）。
+
+        本级 = 累加器里的条目（含已被 ``absorb_children`` 折进来的子团队），加上尚未
+        被折叠的在册 children；子工具一旦 absorb 就出列，两边不会重复计。
+        """
+        n = len(self._acc.continuations)
         for child in self._children:
             n += child.continuation_count
         return n
 
     def note_continuation(self, run_id: str) -> None:
-        """Record a successful CEO-side continuation for turn_metrics.revises."""
-        self._continuation_ids.append(run_id)
+        """Record a successful continuation for turn_metrics.revises.
+
+        Lives on the accumulator so a nested lead's 续派 rolls up the SAME merge path
+        as usage / ledger / collab — the tool object it happened on is discarded.
+        """
+        self._acc.continuations.append(run_id)
 
     @property
     def collab(self) -> dict[str, int]:
@@ -286,11 +299,14 @@ class DelegateTool:
             return
         self._active_playbook = flags.playbook
         self._active_playbook_args = flags.playbook_args
-        if flags.force is not None:
-            self._delegate_force = flags.force
 
     async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        from agentcore.runtime.delegate.force_scopes import parse_force_scopes
         from agentcore.runtime.runs import build_run_plan
+
+        # 逐闸 force 的唯一写入点：每次调用（含随后被前奏硬拒的调用）都重解析，
+        # 实例上不留残值，后续 delegate / replan 拿不到上一次的放行。
+        self._force_scopes = parse_force_scopes(arguments.get("force"))
 
         prelude = resolve_delegate_prelude(
             arguments,
@@ -332,8 +348,8 @@ class DelegateTool:
             user_id=getattr(self._base_tool_context, "user_id", "") or "",
             conversation_id=self._conversation_id
             or getattr(self._base_tool_context, "conversation_id", None),
-            user_message=self._user_message,
             tool_context=self._base_tool_context,
+            sink=self._sink,
         )
         default_target = self.effective_default_target_folder_id()
         bare_gate = gate_bare_chat_requires_target(
@@ -391,11 +407,6 @@ class DelegateTool:
         # 立刻定格，透传给 drive → format_for_ceo 用于完成侧日志。
         call_idx = self._calls
         prefix = f"del_{new_id()}"
-        # 约定文档目录默认：repair_code 不套 RESEARCH_DIR（S3：不再绑 criteria kind）。
-        playbook_early = arguments.get("playbook")
-        skip_dossier_default = (
-            isinstance(playbook_early, str) and playbook_early.strip() == "repair_code"
-        )
         if getattr(self, "_inherit_code_audit_discipline", False) and isinstance(
             tasks_raw, list
         ):
@@ -445,7 +456,6 @@ class DelegateTool:
             depth=self._depth + 1,
             complexity_hint=complexity_hint,
             existing_plan=host_plan_for_append,
-            code_verified=skip_dossier_default,
             default_target_folder_id=self.effective_default_target_folder_id(),
         )
         if errors:
@@ -684,6 +694,10 @@ class DelegateTool:
             if admitted_reject is not None:
                 return admitted_reject
 
+        # 收口批标记落在【真正被驱动的那张图】上（合入时是宿主图）：执行器据
+        # ``plan.solo_direct_answer()`` 决定 worker 的身份口径——单人直出时它的正文
+        # 会原样当最终答复，不该再用对主管汇报的写法。快照前写，resume 折回时不丢。
+        plan.finalize = finalize_flag
         record_plan_snapshot(plan)
 
         from agentcore.runtime.audit.hooks import on_delegate_plan
@@ -828,23 +842,29 @@ class DelegateTool:
             self._last_graph_execution_id = execution_id
             # 同回合二次合入：保留本图节点快照（journal 未命中时仍可作 existing_plan）。
             from agentcore.runtime.runs.plan import RunPlan as _RunPlan
-            from agentcore.runtime.runs.types import RunPhase
             from agentcore.runtime.runs.types import RunState as _RunState
 
             self._last_graph_plan = _RunPlan(
                 nodes=list(plan.nodes),
                 origin=plan.origin,
             )
-            # 阻塞跑完才记 completed seed；协调 kickoff 时队员未完成，勿伪造成完成。
+            # 阻塞跑完才记 seed；协调 kickoff 时队员未完成，勿伪造成完成。
             # 勿仅看 coordinate 入参：默认 true 时 ≥1 worker（含 solo）走协调臂，
             # 须以活跃 session 为准；否则同回合二次合入会把未完成节点当成已完成。
             from agentcore.runtime.coordination.session import active_coordination
 
             active = active_coordination(execution_id)
             if active is None or not active.active:
+                # 每个节点的相直接抄波调度器终态（完成 / 失败 / 跳过 / 取消照抄，
+                # 失败原因随行供二次名册点名）；让出或软停后从未跑的节点不在映射里，
+                # 也就不进 seed——二次派发仍会调度它们，不会静默漏跑。
+                # 只带相与失败原因：用量 / 产物 / 引用归属首批 segment，已在那边入账，
+                # 随 seed 二次流入会重复计费。
+                terminal = self._last_drive_results or {}
                 self._last_graph_seed = {
-                    n.run_id: _RunState(phase=RunPhase.COMPLETED, content="")
+                    n.run_id: _RunState(phase=state.phase, error=state.error)
                     for n in plan.nodes
+                    if (state := terminal.get(n.run_id)) is not None
                 }
         return annotate_batch_meta(
             result,
@@ -963,6 +983,9 @@ class DelegateTool:
         # 臂后台（coordinate=True）；显式经典由调用方传 coordinate=False。
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
+        # 续跑一律不直出（下面 drive 的 finalize=False）：快照折回的收口批标记要跟着回落，
+        # 否则恢复后才起跑的 worker 会以为正文原样呈给用户，实际仍回主管合成。
+        plan.finalize = False
         result = await drive(
             self,
             plan,
@@ -981,13 +1004,21 @@ class DelegateTool:
         )
 
     async def replan(self, arguments: dict[str, Any]) -> ToolResult:
+        from agentcore.runtime.delegate.force_scopes import parse_force_scopes
         from agentcore.runtime.runs import BoundaryReason
+
+        # 与 execute 对称：replan 只吃自己这次的 force，绝不沿用上一次 delegate 的
+        # 放行（旧实现读实例上的 `_delegate_force`，一次冷派的 force 会一路漏到这里）。
+        self._force_scopes = parse_force_scopes(arguments.get("force"))
 
         sup = self._supervised
         if sup is None:
             msg = (
                 "当前没有待续跑的受监督计划。replan 仅在 delegate 让出边界（输出『计划已"
-                "让出』）或部分队员失败/跳过后可用；要发起新任务请用 delegate。"
+                "让出』）或部分队员失败/跳过后可用。批次已收口后要动同一支团队，改调 "
+                "delegate 并在 tasks[] 上点名上一批的 run_id："
+                "让原作者接着干填 continue_from_run_id，补失败/跳过缺口填 replaces_run_id；"
+                "真发起新任务同样用 delegate。"
             )
             return ToolResult(tool_call_id="", success=False, output="", error=msg)
 

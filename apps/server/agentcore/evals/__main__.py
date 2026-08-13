@@ -11,6 +11,9 @@
     python -m agentcore.evals --compare        # 对比评估：团队 vs 单体（成对裁判，诊断）
     python -m agentcore.evals --calibrate      # 裁判校准：gold-set 算判↔人 kappa（kappa<门 即非 0）
 
+``--baseline`` 与 ``--out`` 同给时，回归门判定一并写进报告 JSON 的 ``ratchet`` 段——夜跑摘要
+据此渲染，不在 CI 里拿 jq 重算一遍门禁。
+
 真跑（非 ``--lint-only``）会调真实 DeepSeek，需 ``EVAL_DEEPSEEK_API_KEY``。L1 绝对分裁判默认
 固定 Pro 档（Pro 评 Flash，压同家族自偏好），可经 ``EVAL_JUDGE_MODEL`` 覆盖模型。
 退出码：全过/未回归/裁判可信=0；用例未过、跌破 baseline 或 kappa<门=1；
@@ -465,15 +468,45 @@ async def _run(args: argparse.Namespace) -> int:
         print("[plan-only] 形状评测（内容 Check / 裁判均为 n/a）")
     print(format_report(report))
 
-    if args.out:
-        out = Path(args.out)
-        out.write_text(
-            json.dumps(report_to_dict(report), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(f"\n[report] 已写出 JSON -> {out}")
+    payload = report_to_dict(report)
+    exit_code = 0 if report.passed == report.total else 1
 
     # baseline：--update-baseline 写盘后退出；否则给定 --baseline 且文件存在则跑回归门。
+    # 判定同时写进 payload["ratchet"]，供夜跑摘要直接读结论——否则 CI 只能拿 jq 再实现一遍
+    # 同一条比较（同一门禁两处实现，迟早漂）。
+    if args.baseline and not args.update_baseline:
+        bpath = Path(args.baseline)
+        if bpath.is_file():
+            baseline = json.loads(bpath.read_text(encoding="utf-8"))
+            regressed, detail = baseline_regression(report, baseline, args.regression_tolerance)
+            print(f"[baseline] {detail}")
+            base_rate = float(baseline.get("summary", {}).get("pass_rate", 0.0))
+            payload["ratchet"] = {
+                "available": True,
+                "baseline_path": str(bpath),
+                "baseline_pass_rate": round(base_rate, 4),
+                "pass_rate": round(report.pass_rate, 4),
+                "tolerance": args.regression_tolerance,
+                "regressed": regressed,
+                "detail": detail,
+            }
+            if regressed:
+                exit_code = 1
+        else:
+            detail = f"未找到 {bpath}（跳过回归门；首跑用 --update-baseline 落基线）"
+            print(f"[baseline] {detail}")
+            payload["ratchet"] = {
+                "available": False,
+                "baseline_path": str(bpath),
+                "pass_rate": round(report.pass_rate, 4),
+                "detail": detail,
+            }
+
+    if args.out:
+        out = Path(args.out)
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"\n[report] 已写出 JSON -> {out}")
+
     if args.update_baseline:
         path = Path(args.baseline) if args.baseline else _default_baseline_path(args.suite)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -484,17 +517,6 @@ async def _run(args: argparse.Namespace) -> int:
         print(f"[baseline] 已更新 -> {path}")
         return 0
 
-    exit_code = 0 if report.passed == report.total else 1
-    if args.baseline:
-        bpath = Path(args.baseline)
-        if bpath.is_file():
-            baseline = json.loads(bpath.read_text(encoding="utf-8"))
-            regressed, detail = baseline_regression(report, baseline, args.regression_tolerance)
-            print(f"[baseline] {detail}")
-            if regressed:
-                exit_code = 1
-        else:
-            print(f"[baseline] 未找到 {bpath}（跳过回归门；首跑用 --update-baseline 落基线）")
     return exit_code
 
 

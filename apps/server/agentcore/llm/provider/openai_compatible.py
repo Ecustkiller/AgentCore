@@ -15,6 +15,7 @@ from typing import Literal
 import httpx
 
 from agentcore.core.errors import (
+    MAX_RETRY_AFTER,
     InferenceTokenExpiredError,
     LLMAuthError,
     LLMClientClosedError,
@@ -25,6 +26,7 @@ from agentcore.core.errors import (
     LLMTimeoutError,
     LLMUpstreamError,
     is_llm_client_closed_error,
+    upstream_rate_limit_error,
 )
 from agentcore.core.logging import get_logger
 from agentcore.core.net import outbound_async_client
@@ -32,6 +34,7 @@ from agentcore.llm.errors import (
     body_preview,
     client_error_message,
     diagnose_empty_response,
+    inference_envelope_error,
     is_auth_rejection,
     is_balance_exhausted,
     is_non_retryable_client_status,
@@ -47,7 +50,6 @@ from agentcore.llm.provider.protocol import (
     CONNECT_MAX_RETRIES,
     INITIAL_BACKOFF,
     MAX_RETRIES,
-    MAX_RETRY_AFTER,
     RATE_LIMIT_MAX_RETRIES,
     TURN_CONNECT_MAX_RETRIES,
     LLMChunk,
@@ -86,6 +88,7 @@ _BACKOFF_MULTIPLIER = BACKOFF_MULTIPLIER
 _CONNECT_MAX_RETRIES = CONNECT_MAX_RETRIES
 _CONNECT_INITIAL_BACKOFF = CONNECT_INITIAL_BACKOFF
 _RATE_LIMIT_MAX_RETRIES = RATE_LIMIT_MAX_RETRIES
+# Not a protocol knob: the same ceiling decides the 429 copy (core.errors).
 _MAX_RETRY_AFTER = MAX_RETRY_AFTER
 # Loop ceiling must cover the longest retry policy (429 chains need more slots
 # than generic 5xx); per-error ``_can_retry_attempt`` still enforces the tighter
@@ -251,6 +254,24 @@ class OpenAICompatibleProvider:
     def base_url(self) -> str:
         return self._base_url
 
+    @property
+    def _is_inference_hop(self) -> bool:
+        """True when this leaf talks to our own cloud proxy instead of a vendor."""
+        return "/inference/" in self._base_url
+
+    @property
+    def _credential_source(self) -> str | None:
+        """Who funds this leaf's key — the platform-vs-BYOK CTA split (平台LLM接入 §二).
+
+        ``None`` on the inference hop: the sidecar's local carrier defaults its
+        source to ``user`` whoever actually pays, so the payer is only knowable
+        from the cloud's own envelope (``inference_envelope_error``). Guessing
+        there would brand a BYOK wall as a platform one.
+        """
+        if self._is_inference_hop:
+            return None
+        return "platform" if self._name == "platform" else "user"
+
     def clone(self) -> OpenAICompatibleProvider:
         """Independent HTTP client with the same credentials (coordination drive ownership)."""
         return OpenAICompatibleProvider(
@@ -331,7 +352,7 @@ class OpenAICompatibleProvider:
         if (
             os.environ.get("AGENTCORE_INFERENCE_UNARY", "").strip().lower()
             in {"1", "true", "yes"}
-            and "/inference/" in self._base_url
+            and self._is_inference_hop
         ):
             logger.info(
                 "llm.inference_unary_bypass",
@@ -713,7 +734,16 @@ class OpenAICompatibleProvider:
                 payload["thinking"] = {"type": "enabled"}
         return payload
 
-    async def _attach_sub2api_diagnosis(self, err: LLMUpstreamError) -> LLMUpstreamError:
+    async def _log_sub2api_diagnosis(self, err: LLMUpstreamError) -> LLMUpstreamError:
+        """Record why the operator's Sub2API relay 503'd — log surface only.
+
+        Everything the probe reports (OAuth expiry, the 5h window, an account
+        address) belongs to the *operator's* upstream accounts. In platform mode
+        the user has no key of their own, so none of it is theirs to act on:
+        on the bubble it sent people off to re-login ChatGPT and hunt for a
+        binding screen this product does not have. The user keeps the honest
+        「上游模型服务暂时不可用」sentence; ops read the diagnosis here.
+        """
         from agentcore.config.settings import settings
 
         status = err.details.get("upstream_status", 0)
@@ -724,10 +754,6 @@ class OpenAICompatibleProvider:
         if probe is None:
             return err
 
-        err.message = f"{err.message}\n诊断：{probe.diagnosis}"
-        err.details["sub2api_diagnosis"] = probe.diagnosis
-        if probe.account_email_masked:
-            err.details["sub2api_account"] = probe.account_email_masked
         logger.warning(
             "llm.upstream_error",
             provider=self._name,
@@ -746,9 +772,42 @@ class OpenAICompatibleProvider:
         body: bytes | None = None,
         attempt: int = 0,
     ) -> None:
+        # Sidecar→cloud hop: our own error envelope is the first truth source, and
+        # the status-based classification below is the fallback for answers we did
+        # not phrase (gateway pages, bare 401 on the JWT). The proxy flattens every
+        # typed error onto 402 / 429 / 502, so reading the number instead of the
+        # code turns an exhausted quota into vendor throttling and a missing BYOK
+        # key into an empty wallet — see ``inference_envelope_error``.
+        if self._is_inference_hop:
+            envelope_error = inference_envelope_error(status=status_code, body=body)
+            if envelope_error is not None:
+                if headers.get("x-upstream-retried"):
+                    # The cloud leaf already spent a retry budget on this fault.
+                    envelope_error.retryable = False
+                logger.warning(
+                    "llm.inference_envelope_relay",
+                    provider=self._name,
+                    status_code=status_code,
+                    error_code=envelope_error.code,
+                    retryable=envelope_error.retryable,
+                    body_preview=body_preview(body),
+                )
+                raise envelope_error
         if status_code == 429:
             retry_after = _parse_retry_after(headers.get("retry-after"), backoff)
-            raise LLMRateLimitError(retry_after=retry_after)
+            if not _rate_limit_should_retry(retry_after):
+                # The refusal now rides on the error itself, so the retry loop
+                # short-circuits before its own guard could log this.
+                logger.info(
+                    "llm.rate_limit_no_retry",
+                    provider=self._name,
+                    attempt=attempt + 1,
+                    retry_after_sec=retry_after,
+                    reason="retry_after_too_large",
+                )
+            raise upstream_rate_limit_error(
+                retry_after, credential_source=self._credential_source
+            )
         if status_code in (401, 403):
             logger.warning(
                 "llm.client_error",
@@ -758,7 +817,7 @@ class OpenAICompatibleProvider:
             )
             # Sidecar cloud proxy: Bearer is the short-lived inference JWT, not a BYOK key.
             # Map to a distinct code so the desktop remints / retries instead of「去设置」.
-            if "/inference/" in self._base_url:
+            if self._is_inference_hop:
                 raise InferenceTokenExpiredError(
                     upstream_status=status_code,
                     upstream_body_preview=body_preview(body),
@@ -802,7 +861,7 @@ class OpenAICompatibleProvider:
             # envelope with an LLM_* code (true upstream, wrapped by the proxy).
             # Never sniff free text / vendor gateway tutorials.
             relayed: str | None = None
-            if "/inference/" in self._base_url:
+            if self._is_inference_hop:
                 our_err = our_inference_service_5xx_error(status=status_code, body=body)
                 if our_err is not None:
                     raise our_err
@@ -956,7 +1015,7 @@ class OpenAICompatibleProvider:
             body=err.details.get("upstream_body_preview"),
             retry_attempts=attempt + 1,
         )
-        raise await self._attach_sub2api_diagnosis(final) from err
+        raise await self._log_sub2api_diagnosis(final) from err
 
     async def _request_with_retry(self, payload: dict, *, scenario: str = "chat") -> dict:
         last_error: Exception | None = None

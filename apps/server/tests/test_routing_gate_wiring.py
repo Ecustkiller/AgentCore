@@ -207,6 +207,7 @@ async def test_worker_react_loop_scheme_output_does_not_fill_gate_sink():
         role="worker",
         run_id="run-w",
         out=ReactLoopOut(gate_escalations=gate_sink),
+        approval_gate=None,
     )
 
     assert tool.calls == 1
@@ -240,6 +241,7 @@ async def test_worker_react_loop_execution_failure_does_not_escalate():
         role="worker",
         run_id="run-w",
         out=ReactLoopOut(gate_escalations=gate_sink),
+        approval_gate=None,
     )
 
     assert content == "改用别的方式"
@@ -273,6 +275,7 @@ async def test_captain_role_does_not_wire_escalation_gate():
         role="captain",
         run_id="run-c",
         out=ReactLoopOut(gate_escalations=gate_sink),
+        approval_gate=None,
     )
 
     assert gate_sink == []
@@ -302,5 +305,6 @@ async def test_worker_without_gate_sink_is_noop_even_on_scheme():
         turn_model="primary",
         role="worker",
         run_id="run-w",
+        approval_gate=None,
     )
     assert not any(e.type == EventType.RUN_ESCALATION_GATE for e in sink.emitted)

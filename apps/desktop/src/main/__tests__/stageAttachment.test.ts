@@ -1,5 +1,5 @@
 /**
- * 引用即驻留：主进程占位检测 + 二进制驻留 + 暂存/finalize（纯逻辑，不碰真实 OneDrive）。
+ * 引用即驻留：二进制驻留 + 暂存/finalize + 失败后的云占位诊断（纯逻辑，不碰真实 OneDrive）。
  */
 import {
   mkdir,
@@ -14,18 +14,36 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { execFileMock, cloudAttrs, userDataPath } = vi.hoisted(() => {
-  // Must attach promisify.custom BEFORE stageAttachment module loads
-  // (it does `promisify(execFile)` at import time).
-  const cloudAttrs = { stdout: "Archive" };
-  const custom = Symbol.for("nodejs.util.promisify.custom");
-  const execFileMock = Object.assign(vi.fn(), {
-    [custom]: () => Promise.resolve({ stdout: cloudAttrs.stdout, stderr: "" }),
+const { execFileMock, spawnedPowershell, cloudAttrs, userDataPath, ioFailure } =
+  vi.hoisted(() => {
+    // Must attach promisify.custom BEFORE stageAttachment module loads
+    // (it does `promisify(execFile)` at import time).
+    const cloudAttrs = { stdout: "Archive" };
+    const custom = Symbol.for("nodejs.util.promisify.custom");
+    // promisify() hands back the custom impl, so the raw execFile mock never runs —
+    // spy on the custom one or every "no powershell" assertion passes vacuously.
+    const spawnedPowershell = vi.fn(
+      async (_file: string, _args: string[], _opts: unknown) => ({
+        stdout: cloudAttrs.stdout,
+        stderr: "",
+      }),
+    );
+    const execFileMock = Object.assign(vi.fn(), {
+      [custom]: spawnedPowershell,
+    });
+    // Placeholder until beforeEach assigns a per-test userData dir.
+    const userDataPath = { current: "" };
+    /** Any path ending with this fails to open/stream — stands in for a placeholder
+     *  file Windows refuses to hydrate (OneDrive offline / paused). */
+    const ioFailure = { fileName: "" };
+    return {
+      execFileMock,
+      spawnedPowershell,
+      cloudAttrs,
+      userDataPath,
+      ioFailure,
+    };
   });
-  // Placeholder until beforeEach assigns a per-test userData dir.
-  const userDataPath = { current: "" };
-  return { execFileMock, cloudAttrs, userDataPath };
-});
 
 vi.mock("electron", () => ({
   app: { getPath: () => userDataPath.current },
@@ -38,6 +56,33 @@ vi.mock("node:child_process", async (importOriginal) => {
   return {
     ...actual,
     execFile: execFileMock,
+  };
+});
+
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const unreadable = (p: unknown) =>
+    ioFailure.fileName !== "" && String(p).endsWith(ioFailure.fileName);
+  return {
+    ...actual,
+    createReadStream: (
+      path: Parameters<typeof actual.createReadStream>[0],
+      options?: Parameters<typeof actual.createReadStream>[1],
+    ) =>
+      unreadable(path)
+        ? actual.createReadStream(`${String(path)}.__cloud_unavailable__`)
+        : actual.createReadStream(path, options),
+    promises: {
+      ...actual.promises,
+      open: (
+        path: Parameters<typeof actual.promises.open>[0],
+        flags?: Parameters<typeof actual.promises.open>[1],
+        mode?: Parameters<typeof actual.promises.open>[2],
+      ) =>
+        unreadable(path)
+          ? Promise.reject(new Error("EIO: cloud file unavailable"))
+          : actual.promises.open(path, flags, mode),
+    },
   };
 });
 
@@ -66,7 +111,9 @@ describe("stageAttachment", () => {
     root = { id: "stage-root", name: "stage", absPath: dir };
     setRoot(root);
     cloudAttrs.stdout = "Archive";
+    ioFailure.fileName = "";
     execFileMock.mockClear();
+    spawnedPowershell.mockClear();
     __resetStagingMemoryForTests();
     // Hermetic default: skip PowerShell path unless a test opts into win32.
     Object.defineProperty(process, "platform", { value: "linux" });
@@ -74,6 +121,7 @@ describe("stageAttachment", () => {
 
   afterEach(async () => {
     Object.defineProperty(process, "platform", { value: originalPlatform });
+    ioFailure.fileName = "";
     await rm(dir, { recursive: true, force: true });
     await rm(userData, { recursive: true, force: true });
     __resetStagingMemoryForTests();
@@ -288,7 +336,7 @@ describe("stageAttachment", () => {
     Object.defineProperty(process, "platform", { value: "linux" });
     const flagged = await isCloudPlaceholder(src);
     expect(flagged).toBe(false);
-    expect(execFileMock).not.toHaveBeenCalled();
+    expect(spawnedPowershell).not.toHaveBeenCalled();
   });
 
   it("isCloudPlaceholder (mocked win32) flags Offline attributes", async () => {
@@ -300,16 +348,155 @@ describe("stageAttachment", () => {
     expect(flagged).toBe(true);
   });
 
-  it("stageFromAbsPath rejects when placeholder detection returns true", async () => {
-    const src = join(dir, "onedrive-stub.docx");
-    await writeFile(src, "x");
-    Object.defineProperty(process, "platform", { value: "win32" });
-    cloudAttrs.stdout = "Offline, RecallOnDataAccess";
-    const res = await stageFromAbsPath(src);
-    expect(res.ok).toBe(false);
-    if (res.ok) return;
-    expect(res.reason).toContain("未同步");
-    expect(res.code).toBe("busy");
+  // Placeholder detection costs a powershell.exe spawn (300ms–2s cold). It used to
+  // run before every copy, so each attached file paid for it — these pin it to the
+  // failure branches only.
+  describe("no placeholder probing on the happy path (win32)", () => {
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { value: "win32" });
+    });
+
+    it("attaching a local image never spawns powershell", async () => {
+      const src = join(dir, "photo.png");
+      await writeFile(src, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]));
+
+      const res = await stageFromAbsPath(src);
+
+      expect(res.ok).toBe(true);
+      expect(spawnedPowershell).not.toHaveBeenCalled();
+    });
+
+    it("copying a local text file into a workspace never spawns powershell", async () => {
+      const src = join(dir, "notes.md");
+      await writeFile(src, "# hello\n", "utf-8");
+      const destDir = await mkdtemp(join(tmpdir(), "stage-nops-"));
+      setRoot({ id: "nops-root", name: "nops", absPath: destDir });
+      try {
+        const res = await stageFromAbsPath(src, { rootId: "nops-root" });
+
+        expect(res.ok).toBe(true);
+        expect(spawnedPowershell).not.toHaveBeenCalled();
+      } finally {
+        await rm(destDir, { recursive: true, force: true });
+      }
+    });
+
+    it("rescanning leftover staging dirs never spawns powershell", async () => {
+      // attach-staging/ holds bytes this process wrote — never cloud placeholders,
+      // yet the old pre-check probed every leftover dir on the first send.
+      const text = join(dir, "left-a.txt");
+      const image = join(dir, "left-b.png");
+      await writeFile(text, "a\n", "utf-8");
+      await writeFile(image, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      const stagedText = await stageFromAbsPath(text);
+      const stagedImage = await stageFromAbsPath(image);
+      expect(stagedText.ok).toBe(true);
+      expect(stagedImage.ok).toBe(true);
+      if (!stagedText.ok) return;
+      const stagingId = stagedText.data.stagingId;
+      expect(stagingId).toBeTruthy();
+      if (!stagingId) return;
+
+      // Simulate app restart: Map wiped, both dirs still on disk.
+      __resetStagingMemoryForTests();
+      spawnedPowershell.mockClear();
+
+      const destDir = await mkdtemp(join(tmpdir(), "stage-hydrate-nops-"));
+      setRoot({ id: "hyd-root", name: "hyd", absPath: destDir });
+      try {
+        const fin = await finalizeStagedAttachment(stagingId, {
+          rootId: "hyd-root",
+        });
+
+        expect(fin.ok).toBe(true);
+        expect(spawnedPowershell).not.toHaveBeenCalled();
+      } finally {
+        await rm(destDir, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe("placeholder diagnosis after a failed read/copy (win32)", () => {
+    beforeEach(() => {
+      Object.defineProperty(process, "platform", { value: "win32" });
+    });
+
+    it("reports an unsynced placeholder when the read fails", async () => {
+      const src = join(dir, "onedrive-stub.docx");
+      await writeFile(src, "x");
+      ioFailure.fileName = "onedrive-stub.docx";
+      cloudAttrs.stdout = "Offline, RecallOnDataAccess";
+
+      const res = await stageFromAbsPath(src);
+
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.code).toBe("busy");
+      expect(res.reason).toContain("未同步");
+      expect(spawnedPowershell).toHaveBeenCalledWith(
+        "powershell.exe",
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it("reports an unsynced placeholder when copying an image fails", async () => {
+      // Images skip the read probe entirely, so they only fail at copy time.
+      const src = join(dir, "cloud-photo.png");
+      await writeFile(src, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      ioFailure.fileName = "cloud-photo.png";
+      cloudAttrs.stdout = "Archive, Offline";
+
+      const res = await stageFromAbsPath(src);
+
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.code).toBe("busy");
+      expect(res.reason).toContain("未同步");
+    });
+
+    it("keeps the generic error when the file is not a placeholder", async () => {
+      const src = join(dir, "broken.txt");
+      await writeFile(src, "x");
+      ioFailure.fileName = "broken.txt";
+      cloudAttrs.stdout = "Archive";
+
+      const res = await stageFromAbsPath(src);
+
+      expect(res.ok).toBe(false);
+      if (res.ok) return;
+      expect(res.code).toBe("error");
+      expect(res.reason).toContain("读取文件失败");
+    });
+
+    it("does not probe when a staged copy fails to reach the workspace", async () => {
+      const src = join(dir, "staged-only.txt");
+      await writeFile(src, "body\n", "utf-8");
+      const staged = await stageFromAbsPath(src);
+      expect(staged.ok).toBe(true);
+      if (!staged.ok) return;
+      const stagingId = staged.data.stagingId;
+      expect(stagingId).toBeTruthy();
+      if (!stagingId) return;
+
+      const destDir = await mkdtemp(join(tmpdir(), "stage-fin-fail-"));
+      setRoot({ id: "fin-fail-root", name: "fin-fail", absPath: destDir });
+      ioFailure.fileName = "staged-only.txt";
+      spawnedPowershell.mockClear();
+      try {
+        const fin = await finalizeStagedAttachment(stagingId, {
+          rootId: "fin-fail-root",
+        });
+
+        expect(fin.ok).toBe(false);
+        if (fin.ok) return;
+        expect(fin.code).toBe("error");
+        expect(fin.reason).toContain("复制到工作区失败");
+        expect(spawnedPowershell).not.toHaveBeenCalled();
+      } finally {
+        await rm(destDir, { recursive: true, force: true });
+      }
+    });
   });
 
   it("stageFromBytes stages a clipboard PNG into attach-staging", async () => {

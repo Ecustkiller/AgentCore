@@ -94,7 +94,7 @@ def test_warm_code_index_coalesces_same_root(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("x = 1\n", encoding="utf-8")
 
     from agentcore.tools.sandbox.subprocess import SubprocessSandbox
-    from agentcore.workspace.indexing.registry import shared_index_maintainer
+    from agentcore.workspace.indexing.registry import shared_index_maintainer_for_dir
     from agentcore.workspace.server import ServerWorkspace
 
     ws1 = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
@@ -102,7 +102,9 @@ def test_warm_code_index_coalesces_same_root(tmp_path: Path) -> None:
     ws1.start_code_index_maintenance()
     ws2.start_code_index_maintenance()
     assert ws1._index_maintainer is ws2._index_maintainer  # noqa: SLF001
-    assert ws1._index_maintainer is shared_index_maintainer(tmp_path, ws2)  # noqa: SLF001
+    assert ws1._index_maintainer is shared_index_maintainer_for_dir(  # noqa: SLF001
+        ws2.index_dir, ws2
+    )
 
 
 def test_initialize_schedules_warm(tmp_path: Path, monkeypatch) -> None:

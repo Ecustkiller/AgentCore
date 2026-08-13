@@ -1,7 +1,8 @@
 """Shared types / constants for loop convergence governance.
 
-Split from ``loop_controller`` — pure move. Keep ``LANDING_TOOLS`` in sync with
-``serialize._FILE_PRODUCT_ARG`` (product-landing path tools).
+Split from ``loop_controller`` — pure move. ``LANDING_TOOLS`` (写盘的笔) is re-exported
+from its single declaration in ``agentcore.tools.file_products``; governance keys on it
+only where there is no result to read (idle exemption / breaker / steer copy).
 """
 
 from __future__ import annotations
@@ -11,6 +12,8 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+from agentcore.tools.file_products import LANDING_TOOLS
 
 DEFAULT_WINDOW = 8
 DEFAULT_THRESHOLD = 3
@@ -84,19 +87,9 @@ PROGRESS_TOOLS = frozenset(
         "ask_user",
     }
 )
-# Workspace landing tools: success clears delivery-idle thrashing; any attempt is
-# "落盘意图" and exempts that round from the delivery-idle clock.
-# Keep in sync with serialize._FILE_PRODUCT_ARG (product-landing path tools).
-LANDING_TOOLS = frozenset(
-    {
-        "file_write",
-        "file_append",
-        "str_replace",
-        "write_section",
-        "file_move",
-        "file_copy",
-    }
-)
+# ``LANDING_TOOLS`` (imported above) = workspace landing tools: success clears
+# delivery-idle thrashing; any attempt is "落盘意图" and exempts that round from the
+# delivery-idle clock.
 # Write tools that enter force_segmented when same-path reject streak trips
 # (keep str_replace / write_section as the preferred segmented pens).
 PATH_SEGMENT_FORCE_TOOLS = frozenset({"file_write", "file_append"})

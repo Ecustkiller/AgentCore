@@ -202,13 +202,13 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
     中间环（各路调研 + 提纲）与终稿同走约定文档契约：``form=files`` + 钉死
     ``AgentCore/文档/research/`` 下路径（角度名入文件名，对齐 MLR ``{透镜}透镜报告.md``；
     提纲钉 ``提纲.md``）。成篇验收钉死单一主文件（``output_path`` / 默认 ``报告.md``）；
-    主交付 `.md`；用户要 PDF/可分享时 brief 钉 ``md → md_to_pdf → handoff``（禁 HTML 顶替、
-    禁 reportlab 主路径）。若 CEO 手写并行拆章，须另加 merge 步并把各章 brief 写死同一路径——见
-    ``PAPER_PARALLEL_MERGE_DISCIPLINE``。
+    主交付 `.md`；用户要 PDF/Word/可分享时 brief 钉 ``md → md_to_pdf | md_to_docx → handoff``
+    （禁 HTML 顶替、禁 reportlab / python-docx 主路径）。若 CEO 手写并行拆章，须另加 merge 步
+    并把各章 brief 写死同一路径——见 ``PAPER_PARALLEL_MERGE_DISCIPLINE``。
     """
     from agentcore.runtime.runs.research_quality import (
         INDEPENDENT_REVIEW_REPORT_DISCIPLINE,
-        MD_PDF_EXPORT_DISCIPLINE,
+        MD_EXPORT_DISCIPLINE,
         PAPER_PARALLEL_MERGE_DISCIPLINE,
         research_report_main_artifact,
     )
@@ -330,7 +330,7 @@ def research_report(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[st
                 "忠于调研事实与来源、不杜撰。"
                 f"【主文件】整篇落盘到 `{main_path}`（验收只认这一路径）；"
                 f"{PAPER_PARALLEL_MERGE_DISCIPLINE}"
-                f"{MD_PDF_EXPORT_DISCIPLINE}"
+                f"{MD_EXPORT_DISCIPLINE}"
                 "【成篇落盘纪律·Artifact-first】① 【主路径】一次 file_write 完整正文；"
                 "或先短骨架（标题+各章小标题/FILL 占位）再按节填空——"
                 "禁止首写半章散文再 append；"

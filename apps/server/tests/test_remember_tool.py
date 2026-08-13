@@ -41,7 +41,7 @@ def test_remember_schema_is_static():
     # Steers the model to the split: explicit directive here, inferred preferences to巩固.
     assert "明确" in tool.schema.description
     assert tool.schema.parameters["required"] == []
-    assert tool.schema.parameters["properties"]["scope"]["enum"] == ["global", "project"]
+    assert tool.schema.parameters["properties"]["scope"]["enum"] == ["global", "folder"]
     assert tool.schema.parameters["properties"]["action"]["enum"] == [
         "add",
         "replace",

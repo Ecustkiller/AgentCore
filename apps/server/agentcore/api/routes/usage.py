@@ -39,6 +39,7 @@ from agentcore.db.repositories import (
     CostEventRepository,
     UserRepository,
 )
+from agentcore.llm.pricing import CURRENCY_CNY
 
 router = APIRouter(tags=["usage"])
 
@@ -51,7 +52,9 @@ def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, dict, int]:
     """Roll up a turn's payroll rows into (usage, cost, estimated_cost, rounds).
 
     Summed in Python from the rows already fetched for the payroll (no second
-    query). Billed and estimated stay on their scalar columns (never re-priced).
+    query). Billed and estimated stay on their scalar columns (never re-priced)
+    and each keeps its own ``currency`` — billed is CNY off curated cards, the
+    BYOK estimate is USD off the community table, and the two are never added.
     """
     usage = {"input": 0, "output": 0, "reasoning": 0, "cache_hit": 0, "cache_miss": 0}
     cost = {"input": 0, "cached": 0, "output": 0, "total": 0, "pricing_source": "curated"}
@@ -69,14 +72,17 @@ def _sum_rows(rows: list[CostEvent]) -> tuple[dict, dict, dict, int]:
         row_cost = row.cost or {}
         billed_nano = int(row.cost_total_nano or 0)
         estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
+        row_currency = str(row.currency or row_cost.get("currency") or CURRENCY_CNY)
         if billed_nano:
             for key in ("input", "cached", "output"):
                 cost[key] += int(row_cost.get(key, 0))
             cost["total"] += billed_nano
+            cost.setdefault("currency", row_currency)
         if estimated_nano:
             for key in ("input", "cached", "output"):
                 estimated[key] += int(row_cost.get(key, 0))
             estimated["total"] += estimated_nano
+            estimated.setdefault("currency", row_currency)
             if row_cost.get("pricing_source"):
                 estimated["pricing_source"] = str(row_cost["pricing_source"])
         rounds += int(row.rounds or 0)
@@ -101,6 +107,10 @@ async def get_message_cost(
         row_cost = row.cost or {}
         billed = int(row.cost_total_nano or 0)
         estimated_nano = int(getattr(row, "cost_estimated_nano", 0) or 0)
+        # Currency lives on the ledger's scalar column, not in the JSONB body
+        # (``split_cost`` keeps the body to money keys + sources), so stamp it on
+        # both breakdowns here — a BYOK row is USD and must not read as ¥.
+        row_currency = str(row.currency or row_cost.get("currency") or CURRENCY_CNY)
         agents.append(
             AgentCostLine(
                 run_id=row.run_id,
@@ -115,12 +125,13 @@ async def get_message_cost(
                         "input": int(row_cost.get("input", 0)) if billed else 0,
                         "cached": int(row_cost.get("cached", 0)) if billed else 0,
                         "output": int(row_cost.get("output", 0)) if billed else 0,
+                        "currency": row_currency if billed else CURRENCY_CNY,
                         "pricing_source": str(row_cost.get("pricing_source") or "curated"),
                     }
                 ),
                 estimated_cost=estimated_cost_breakdown(
                     estimated_nano=estimated_nano,
-                    cost=row_cost if estimated_nano else None,
+                    cost={**row_cost, "currency": row_currency} if estimated_nano else None,
                 ),
                 duration_ms=int(row.duration_ms or 0),
             )
@@ -175,6 +186,11 @@ async def get_usage_summary(
     Money is nano-CNY; ``CostBreakdown.cny_total`` is already yuan (no FX).
     Per-role split lives on the turn payroll
     (``GET /messages/{id}/cost``), not this monthly account view.
+
+    This is the account total, so it also carries spend that belongs to no
+    conversation at all (AI 改写 / 文档 description — ``role=assist`` ledger rows).
+    ``requests`` counts assistant turns only, so those rows raise 花销 without
+    raising 请求数.
 
     ``quota`` mirrors what ``enforce_quota`` will actually apply to this user:
     per-user override columns first, else global ``quota_*`` — so the meters

@@ -4,13 +4,22 @@ The `pnpm conformance` gate proves "mobile fold == oracle golden"; this proves t
 oracle itself is correct with HAND-VERIFIED expectations, so a correlated bug (oracle
 and a fold making the same mistake) can't pass both. Runs the full export pipeline
 (vector → serialize → project), the exact bytes the golden is written from.
+
+**Coverage is a curated subset, not every vector.** Failure / abort / gate-lifecycle
+faces live in the sibling ``test_conformance_projection_failures``; the rest of the
+vector set rides `pnpm conformance` alone. ``test_sentinel_coverage_ratchet`` at the
+bottom pins how large that uncovered remainder is allowed to be, so a new vector either
+gets a hand-verified assertion or has to widen the baseline in the PR diff.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agentcore.conformance.export import build_fixtures
+from agentcore.conformance.vectors import VECTORS
 from agentcore.runtime.journal.pending_interactions import GATE_KINDS
 
 
@@ -1069,3 +1078,73 @@ def test_carrier_means_consult_html_org_tree(projected):
     assert any(o.get("recommended") for o in opts)
     assert any("折叠" in label for label in labels)
     assert any("原样" in label and "HTML" in label for label in labels)
+
+
+def test_multi_agent_export_docx_artifacts(projected):
+    """导出件主清单：docx 只从自报产物来，工具入参里根本没有它。
+
+    手工推导（不抄 golden）：这一路的真相源是 ``delivery_status.artifacts``——两个工具调用
+    的 ``arguments`` 都只提到源 md（``file_write`` 写它、``md_to_docx`` 读它），所以任何按
+    工具参数合成的清单都只能给出 1 项，正是线上事故。断言分三段：① worker 时间线确实只有
+    这两步、参数里不出现 .docx；② artifacts 仍有两行且导出件在列（计数 2）；③ 导出件带
+    ``derived_from`` 指回源 md（客户端折中间稿的唯一依据），源 md 自己不带。
+    """
+    p = projected["multi_agent_export_docx_artifacts"]
+    assert p["status"] == "completed"
+    md = "抚养费起诉状-昝雯.md"
+    docx = "抚养费起诉状-昝雯.docx"
+
+    run = next(r for r in p["runs"] if r["id"] == "r1")
+    tools = [s for s in run["process"] if s["kind"] == "tool"]
+    assert [t["tool_name"] for t in tools] == ["file_write", "md_to_docx"]
+    assert all(docx not in str(t["arguments"]) for t in tools)
+
+    ds = p["deliveryStatus"]
+    assert ds is not None
+    assert ds["state"] == "delivered"
+    assert [(a["path"], a["status"]) for a in ds["artifacts"]] == [
+        (md, "accepted"),
+        (docx, "accepted"),
+    ]
+    assert ds["delivered_files"] == [md, docx]
+
+    by_path = {a["path"]: a for a in ds["artifacts"]}
+    assert by_path[docx]["kind"] == "docx"
+    assert by_path[docx]["derived_from"] == md
+    assert by_path[md]["kind"] == "md"
+    assert "derived_from" not in by_path[md]
+
+
+# Vectors with no hand-verified assertion in any sentinel module. Ratchet: only down.
+# Raising it means a new vector shipped judged solely by "both folds agree with the
+# golden the oracle wrote" — legal, but it has to be an explicit line in the diff.
+_SENTINEL_UNCOVERED_BASELINE = 68
+
+
+def _sentinel_sources() -> str:
+    """Source of every sentinel module (this one + its topic siblings)."""
+    here = Path(__file__).parent
+    return "\n".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted(here.glob("test_conformance_projection*.py"))
+    )
+
+
+def test_sentinel_coverage_ratchet():
+    """Keep the hand-verified subset from quietly shrinking as vectors are added.
+
+    A vector is "covered" when its name appears as a quoted literal in a sentinel module
+    — the same crude measure an auditor would apply from outside, deliberately, so the
+    number can't be inflated by indirection.
+    """
+    source = _sentinel_sources()
+    uncovered = sorted(name for name in VECTORS if f'"{name}"' not in source)
+    assert len(uncovered) <= _SENTINEL_UNCOVERED_BASELINE, (
+        f"{len(uncovered)} of {len(VECTORS)} vectors have no hand-verified assertion "
+        f"(baseline {_SENTINEL_UNCOVERED_BASELINE}). Add one for the new vector, or "
+        f"raise the baseline deliberately.\nUncovered: {uncovered}"
+    )
+    assert len(uncovered) == _SENTINEL_UNCOVERED_BASELINE, (
+        f"Coverage improved to {len(uncovered)} uncovered — tighten "
+        f"_SENTINEL_UNCOVERED_BASELINE to match (ratchet only goes down)."
+    )

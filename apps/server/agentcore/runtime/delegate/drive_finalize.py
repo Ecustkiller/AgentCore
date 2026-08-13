@@ -223,6 +223,7 @@ def handle_partial_failure(
         results,
         execution_id=execution_id,
         backend=tool._base_tool_context.backend,
+        promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
     partial_output = format_for_ceo(tool, plan, results, call_idx=call_idx)
     # Coordination terminal: workers are all marked done; without ALL_COMPLETED the
@@ -236,6 +237,7 @@ def handle_partial_failure(
         results,
         execution_id=execution_id,
         backend=tool._base_tool_context.backend,
+        promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
     return ToolResult(
         tool_call_id="",
@@ -321,6 +323,7 @@ async def finalize_successful_drive(
         execution_id=execution_id,
         backend=tool._base_tool_context.backend,
         criteria_gaps=soft_notes or None,
+        promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
 
     if finalize and len(plan.nodes) == 1:
@@ -363,6 +366,10 @@ async def finalize_drive(
     batch_metrics: list[BatchMetrics],
 ) -> ToolResult:
     """Full post-wave finalize pipeline (metrics → early exits → success)."""
+    # 本段 drive 的终态映射交回工具实例：同回合二次委派的 seed 以此为相
+    # （``DelegateTool._last_drive_results``）。必须在 pause / boundary / partial 早退之前
+    # 记——正是那几条路径上有失败节点与让出后未跑的尾节点。
+    tool._last_drive_results = dict(results)
     # Thrash rebrand memory before early exits (pause / partial) so cold re-delegate
     # in the same conversation still sees DEGRADED/ceiling_backstop workers.
     from agentcore.runtime.coordination.thrash import record_thrashing_from_results

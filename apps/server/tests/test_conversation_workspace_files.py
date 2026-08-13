@@ -7,6 +7,20 @@ import pytest
 
 from agentcore.api.routes.conversations import files as files_mod
 from agentcore.api.routes.conversations.files import _file_workspace_folder_id
+from agentcore.folders.placement import FolderPlacement
+
+
+@pytest.fixture(autouse=True)
+def _stub_placement(monkeypatch):
+    """No database here — these tests assert routing, not where a folder sits.
+
+    The visible path mirrors the id so a wrong folder still shows up as a wrong path.
+    """
+
+    async def _placement(folder_id, **_kw):
+        return FolderPlacement(folder_id=folder_id, rel_path=folder_id)
+
+    monkeypatch.setattr(files_mod, "resolve_folder_placement", _placement)
 
 
 def test_file_workspace_prefers_birth_over_auto_desk():

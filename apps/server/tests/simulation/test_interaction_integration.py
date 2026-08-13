@@ -115,7 +115,9 @@ async def _events_for_tick(session_factory, run_id: str, tick_number: int):
 def _interaction_sse_events(run_id: str):
     sink = default_sim_stream_registry.get_sync(run_id)
     assert sink is not None
-    return [event for event in sink.take_over() if event.type == EventType.SIM_INTERACTION]
+    return [
+        event for event in sink.history_snapshot() if event.type == EventType.SIM_INTERACTION
+    ]
 
 
 @pytest.fixture(autouse=True)

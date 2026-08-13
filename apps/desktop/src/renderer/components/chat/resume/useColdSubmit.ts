@@ -2,8 +2,8 @@ import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
 import { notifyError } from "@/lib/toast";
 import {
   type TeamPreviewResumeCorrections,
+  notifySubmitInteractionResult,
   submitInteraction,
-  submitInteractionFeedback,
 } from "@/services/interactionSubmit";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import { useInteractionStore } from "@/stores/interactions";
@@ -70,7 +70,7 @@ export function useColdSubmit(turn: PendingResume) {
     })
       .then((result) => {
         if (result !== "ok") {
-          notifyError(submitInteractionFeedback(result));
+          notifySubmitInteractionResult(result);
           setSubmitting(null);
         }
       })

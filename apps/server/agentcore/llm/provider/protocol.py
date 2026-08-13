@@ -30,11 +30,10 @@ TURN_SCALE_SCENARIOS = frozenset({"chat", "agent"})
 # 429 / Retry-After: allow more attempts than generic I/O so short exponential
 # Retry-After chains (2→4→8…) are actually waited, not abandoned on the 3rd hit.
 RATE_LIMIT_MAX_RETRIES = 6
-# Honor HTTP Retry-After up to this many seconds. Upstream sometimes returns
-# hour-scale values (e.g. 3600) that starve short outer budgets (title 20s)
-# even though a second-scale retry then succeeds — past this
-# cap we fall back to exponential backoff and log the raw header separately.
-MAX_RETRY_AFTER = 30.0
+# The Retry-After ceiling is NOT declared here: it also decides what the 429 error
+# tells the user, so it is single-sourced next to that copy as
+# ``core.errors.MAX_RETRY_AFTER``. Hour-scale headers (e.g. 3600) starve short outer
+# budgets (title 20s), so past the cap we neither sleep nor promise a retry.
 
 
 def connect_retry_policy(scenario: str) -> tuple[int, float]:

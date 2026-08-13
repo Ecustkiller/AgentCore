@@ -1,11 +1,12 @@
-"""执行与请求解耦 (C1 · slice 1a): TurnRunRegistry + EventSink.detach + SSE policy.
+"""执行与请求解耦 (C1 · slice 1a): TurnRunRegistry + sink subscriptions + SSE policy.
 
 These lock the decoupling that keeps a long turn alive past a dropped connection
 (实测案例复盘 案例 1: a 7-min turn lost its SSE and threw away the delivery):
 
 - the registry tracks the detached run per conversation and stops it on demand,
-- ``EventSink.detach`` caps the unread queue while still journaling for persistence,
-- ``_event_generator`` detaches (run continues) vs cancels (handoff) on disconnect.
+- an unsubscribed sink keeps journaling for persistence (nobody listening ≠ dead),
+- ``_event_generator`` unsubscribes + keeps the run (chat) vs cancels the producer
+  (handoff) on disconnect.
 
 No DB, no HTTP — plain async tests (asyncio_mode=auto).
 """
@@ -266,20 +267,22 @@ async def test_overlap_cancel_marks_old_task_as_user_stop():
                 t.cancel()
 
 
-# --- EventSink.detach ------------------------------------------------------
+# --- 无消费者时仍落 journal ---------------------------------------------------
 
 
-def test_detach_stops_queue_but_keeps_journal():
+async def test_unsubscribed_sink_still_journals():
     sink = EventSink()
-    sink.emit(_plan())  # journaled AND queued for SSE
-    assert sink._queue.qsize() == 1
+    sub = sink.subscribe()
+    sink.emit(_plan())  # journaled AND delivered to the live consumer
+    assert sub._queue.qsize() == 1
 
-    sink.detach()
-    sink.emit(run_started("s1", "a1"))  # after detach: journaled, NOT queued
+    sink.unsubscribe(sub)
+    assert sink.is_detached  # derived: nobody is listening any more
+    sink.emit(run_started("s1", "a1"))  # after the drop: journaled, not delivered
 
-    # The queue did not grow (the consumer is gone)...
-    assert sink._queue.qsize() == 1
-    # ...but the durable journal still captured the post-detach event, so the turn
+    # That consumer's queue did not grow (it is gone)...
+    assert sub._queue.qsize() == 2  # its own backlog + the close sentinel
+    # ...and the durable journal still captured the post-drop event, so the turn
     # persists + replays in full even though nobody was reading.
     journal = sink.execution_journal()
     assert [e["type"] for e in journal] == [
@@ -293,7 +296,7 @@ def test_detach_stops_queue_but_keeps_journal():
 
 async def test_disconnect_detaches_run_when_detach_on_disconnect(monkeypatch):
     # detach_on_disconnect (chat turns): a client disconnect must NOT cancel the
-    # detached run — it only detaches the sink so the run finishes + persists.
+    # detached run — it only drops that consumer so the run finishes + persists.
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     sink = EventSink()
     producer = asyncio.create_task(_never())
@@ -303,10 +306,11 @@ async def test_disconnect_detaches_run_when_detach_on_disconnect(monkeypatch):
         # yield); only then does aclose() raise GeneratorExit into the except.
         first = await asyncio.wait_for(gen.__anext__(), timeout=1.0)
         assert first.startswith(":")
+        assert sink.subscriber_count == 1
 
         await gen.aclose()  # simulate client disconnect
 
-        assert sink._detached is True
+        assert sink.subscriber_count == 0
         assert not producer.done()  # the run keeps going
     finally:
         producer.cancel()
@@ -314,7 +318,7 @@ async def test_disconnect_detaches_run_when_detach_on_disconnect(monkeypatch):
 
 async def test_disconnect_cancels_producer_by_default(monkeypatch):
     # Default policy (handoff SSEs): a disconnect cancels the producer so it stops
-    # working for a response nobody will read.
+    # working for a response nobody will read (the consumer unsubscribes either way).
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     sink = EventSink()
     producer = asyncio.create_task(_never())
@@ -324,7 +328,7 @@ async def test_disconnect_cancels_producer_by_default(monkeypatch):
     assert first.startswith(":")
 
     await gen.aclose()
-    assert sink._detached is False
+    assert sink.subscriber_count == 0
     with pytest.raises(asyncio.CancelledError):
         await producer
 
@@ -374,51 +378,51 @@ def test_history_caps_tool_result():
     assert len(stored) < len(big)
 
 
-async def test_take_over_replays_history_then_tails():
+async def test_history_snapshot_replays_then_new_subscriber_tails():
     sink = EventSink()
+    first = sink.subscribe()
     sink.emit(content_delta("Hel"))
-    sink.emit(content_delta("lo"))  # both queued AND folded into history
-    sink.detach()  # consumer dropped — run continues
-    sink.emit(content_delta("!"))  # history only (queue capped)
+    sink.emit(content_delta("lo"))  # both delivered AND folded into history
+    sink.unsubscribe(first)  # that consumer dropped — run continues
+    sink.emit(content_delta("!"))  # history only (nobody listening)
 
-    snapshot = sink.take_over()
-    # One coalesced content block carrying everything so far — the discarded queue
-    # backlog is NOT replayed on top of it (no doubling).
+    snapshot = sink.history_snapshot()
+    # One coalesced content block carrying everything so far.
     assert [e.type for e in snapshot] == [EventType.CONTENT_DELTA]
     assert snapshot[0].payload["delta"] == "Hello!"
-    assert sink._queue.qsize() == 0
 
-    # The queue is live again, so a post-attach event tails to the new consumer.
+    # A fresh subscription tails from now on (replay is the caller's job, so the
+    # snapshot is never re-delivered through the queue → no doubling).
+    second = sink.subscribe()
     sink.emit(content_delta(" more"))
-    tail = await asyncio.wait_for(sink.get(), timeout=1.0)
+    tail = await asyncio.wait_for(second.get(), timeout=1.0)
     assert tail.payload["delta"] == " more"
 
 
-async def test_take_over_on_finished_run_replays_then_ends():
+async def test_subscribe_on_finished_run_ends_immediately():
     sink = EventSink()
     sink.emit(content_delta("done"))
     sink.close()  # run finished before the client re-attached
 
-    snapshot = sink.take_over()
-    assert [e.payload["delta"] for e in snapshot] == ["done"]
-    # A closed sink hands the consumer the end sentinel so it replays then stops,
-    # rather than re-opening a queue nothing will ever feed.
-    assert await asyncio.wait_for(sink.get(), timeout=1.0) is None
+    assert [e.payload["delta"] for e in sink.history_snapshot()] == ["done"]
+    # A closed sink hands a late consumer the end sentinel so it replays then stops,
+    # rather than opening a queue nothing will ever feed.
+    sub = sink.subscribe()
+    assert await asyncio.wait_for(sub.get(), timeout=1.0) is None
 
 
-async def test_take_over_synthesizes_message_end_after_detached_close():
-    """No-cursor attach path: history skips MESSAGE_END — take_over must synthesize it
-    so a client attaching in the detached persist window finalizes (align with cursor replay)."""
+async def test_history_snapshot_synthesizes_message_end_after_detached_close():
+    """No-cursor attach path: history skips MESSAGE_END — the snapshot must synthesize
+    it so a client attaching in the detached persist window finalizes (align with cursor
+    replay)."""
     sink = EventSink()
     sink.emit(content_delta("CEO 总结"))
-    sink.detach()
     sink.emit(message_end(FinishReason.END_TURN, input_tokens=1, output_tokens=2))
     sink.close()
 
-    snapshot = sink.take_over()
+    snapshot = sink.history_snapshot()
     assert [e.type for e in snapshot] == [EventType.CONTENT_DELTA, EventType.MESSAGE_END]
     assert snapshot[-1].payload == {"finish_reason": "end_turn"}
-    assert await asyncio.wait_for(sink.get(), timeout=1.0) is None
 
 
 async def test_attach_generator_no_cursor_replays_message_end(monkeypatch):
@@ -426,7 +430,6 @@ async def test_attach_generator_no_cursor_replays_message_end(monkeypatch):
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     sink = EventSink()
     sink.emit(content_delta("Hi"))
-    sink.detach()
     sink.emit(message_end(FinishReason.CANCELLED))
     sink.close()
 
@@ -445,7 +448,6 @@ async def test_attach_generator_replays_then_tails_then_closes(monkeypatch):
     monkeypatch.setattr(sse, "_HEARTBEAT_INTERVAL_S", 0.01)
     sink = EventSink()
     sink.emit(content_delta("Hi"))
-    sink.detach()  # the original consumer dropped
 
     gen = sse._attach_generator(sink)
     replayed = await asyncio.wait_for(gen.__anext__(), timeout=1.0)

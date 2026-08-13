@@ -181,6 +181,7 @@ async def test_parallel_crash_does_not_cancel_sibling(registry: tuple[ToolRegist
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -199,7 +200,9 @@ async def test_parallel_crash_does_not_cancel_sibling(registry: tuple[ToolRegist
 async def test_crash_emits_failed_tool_use_end(registry: tuple[ToolRegistry, _OkTool]):
     reg, _ok_b = registry
     sink = EventSink()
-    await execute_tools([_call("c1", "crash")], reg, _ctx(), sink, run_id="r1")
+    await execute_tools(
+        [_call("c1", "crash")], reg, _ctx(), sink, approval_gate=None, run_id="r1"
+    )
 
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
@@ -241,6 +244,7 @@ async def test_tool_result_error_keeps_model_detail_and_curated_failure():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
     body = messages[0].content or ""
@@ -258,7 +262,9 @@ async def test_tool_result_error_keeps_model_detail_and_curated_failure():
 async def test_success_tool_use_end_omits_failure(registry: tuple[ToolRegistry, _OkTool]):
     reg, _ok_b = registry
     sink = EventSink()
-    await execute_tools([_call("c1", "ok_a")], reg, _ctx(), sink, run_id="r1")
+    await execute_tools(
+        [_call("c1", "ok_a")], reg, _ctx(), sink, approval_gate=None, run_id="r1"
+    )
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
     assert ends[0].payload["status"] == "success"
@@ -280,6 +286,7 @@ async def test_crash_message_carries_exception_type(registry: tuple[ToolRegistry
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -299,6 +306,7 @@ async def test_suspend_terminal_unchanged(registry: tuple[ToolRegistry, _OkTool]
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -328,6 +336,7 @@ async def test_multi_terminal_prefers_suspend():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
     assert terminal is not None
@@ -353,7 +362,13 @@ async def test_captain_role_strips_run_id_from_sse_but_facts_keep_it(
     try:
         cap_sink = EventSink()
         await execute_tools(
-            [_call("c1", "ok_a")], reg, _ctx(), cap_sink, run_id="cap-run", role="captain"
+            [_call("c1", "ok_a")],
+            reg,
+            _ctx(),
+            cap_sink,
+            approval_gate=None,
+            run_id="cap-run",
+            role="captain",
         )
     finally:
         current_fact_log.reset(token)
@@ -374,7 +389,13 @@ async def test_captain_role_strips_run_id_from_sse_but_facts_keep_it(
     try:
         wrk_sink = EventSink()
         await execute_tools(
-            [_call("w1", "ok_a")], reg, _ctx(), wrk_sink, run_id="w-run", role="worker"
+            [_call("w1", "ok_a")],
+            reg,
+            _ctx(),
+            wrk_sink,
+            approval_gate=None,
+            run_id="w-run",
+            role="worker",
         )
     finally:
         current_fact_log.reset(token)
@@ -402,6 +423,7 @@ async def test_illegal_json_args_return_explicit_error_not_empty_dict():
             reg,
             _ctx(),
             sink,
+            approval_gate=None,
             run_id="r1",
         )
 
@@ -445,6 +467,7 @@ async def test_remember_parse_failure_truncated_vs_escape_copy():
             reg,
             _ctx(),
             sink,
+            approval_gate=None,
             run_id="r1",
         )
     assert terminal is None
@@ -467,6 +490,7 @@ async def test_remember_parse_failure_truncated_vs_escape_copy():
             reg,
             _ctx(),
             EventSink(),
+            approval_gate=None,
             run_id="r2",
         )
     assert attempts2[0].parse_failure is True
@@ -490,6 +514,7 @@ async def test_default_parse_failure_truncated_forbids_full_replay():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         run_id="r1",
     )
     assert attempts[0].parse_failure is True
@@ -512,6 +537,7 @@ async def test_delegate_parse_failure_steers_away_from_nested_arguments():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
     assert terminal is None
@@ -611,6 +637,7 @@ async def test_execute_tools_salvages_handoff_bare_next_steps():
             reg,
             _ctx(),
             sink,
+            approval_gate=None,
             run_id="r1",
         )
     assert attempts[0].success is True
@@ -633,6 +660,7 @@ async def test_execute_tools_handoff_unsalvageable_still_parse_fails():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         run_id="r1",
     )
     assert terminal is None
@@ -655,6 +683,7 @@ async def test_execute_tools_unwraps_nested_delegate_arguments():
             reg,
             _ctx(),
             sink,
+            approval_gate=None,
             run_id="r1",
         )
     assert terminal is None
@@ -682,7 +711,14 @@ async def test_execute_tools_does_not_unwrap_when_top_level_tasks_present():
         },
         ensure_ascii=False,
     )
-    await execute_tools([_call("c1", "delegate", wire)], reg, _ctx(), EventSink(), run_id="r1")
+    await execute_tools(
+        [_call("c1", "delegate", wire)],
+        reg,
+        _ctx(),
+        EventSink(),
+        approval_gate=None,
+        run_id="r1",
+    )
     assert tracked.seen_args is not None
     assert tracked.seen_args["tasks"] == real_tasks
     assert "arguments" in tracked.seen_args
@@ -700,6 +736,7 @@ async def test_write_tool_parse_failure_splits_user_and_model_copy():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r1",
     )
     assert terminal is None
@@ -745,6 +782,7 @@ async def test_execute_tools_denies_tool_outside_allowlist():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="debate_r1_plaintiff",
         allowed_tool_names=["file_read", "web_search"],
     )
@@ -785,6 +823,7 @@ async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
         reg,
         _ctx(),
         sink,
+        approval_gate=None,
         run_id="r_landed",
         allowed_tool_names=["file_write", "file_read"],
     )
@@ -807,6 +846,7 @@ async def test_execute_tools_rejects_write_landed_imitation_before_allowlist():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         allowed_tool_names=None,
     )
     assert attempts2[0].success is False
@@ -824,6 +864,7 @@ async def test_execute_tools_allowlist_none_permits_registry_tool():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         allowed_tool_names=None,
     )
     assert fw.executed is True
@@ -832,10 +873,28 @@ async def test_execute_tools_allowlist_none_permits_registry_tool():
 
 
 async def test_files_touched_uses_execution_success_not_intent():
-    """DRIFT fix: denied / failed file_write must not enter files_touched; success must."""
+    """DRIFT fix: denied / failed file_write must not enter files_touched; success must.
+
+    The ledger reads the tool's OWN self-report off the result — a denied call never
+    runs (nothing to report) and a failing write reports nothing, so neither can be
+    talked into the ledger by the call arguments alone.
+    """
     from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.engine.tool_exec import TOOL_FAILED_MARKER
     from agentcore.runtime.runs.serialize import files_touched_from_transcript
+    from agentcore.tools.file_products import file_product
+
+    class _LandingWrite(_OkTool):
+        """Self-reports the path it landed, like the real ``file_write``."""
+
+        async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+            self.executed = True
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=self._output,
+                file_products=[file_product(str(arguments.get("path") or ""))],
+            )
 
     class _FailWrite(_OkTool):
         async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
@@ -843,7 +902,7 @@ async def test_files_touched_uses_execution_success_not_intent():
             return ToolResult(tool_call_id="", success=False, error="disk full")
 
     # 1) allowlist deny → marker + no harvest
-    fw = _OkTool("file_write", output="written")
+    fw = _LandingWrite("file_write", output="written")
     reg = ToolRegistry()
     reg.register(fw)
     denied, _, _ = await execute_tools(
@@ -851,6 +910,7 @@ async def test_files_touched_uses_execution_success_not_intent():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         allowed_tool_names=["file_read"],
     )
     assistant_deny = LLMMessage(
@@ -864,12 +924,13 @@ async def test_files_touched_uses_execution_success_not_intent():
 
     # 2) successful write → harvested
     ok_reg = ToolRegistry()
-    ok_reg.register(_OkTool("file_write", output="written"))
+    ok_reg.register(_LandingWrite("file_write", output="written"))
     ok_msgs, _, _ = await execute_tools(
         [_call("c2", "file_write", '{"path":"ok.md","content":"y"}')],
         ok_reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         allowed_tool_names=None,
     )
     assistant_ok = LLMMessage(
@@ -888,6 +949,7 @@ async def test_files_touched_uses_execution_success_not_intent():
         fail_reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         allowed_tool_names=None,
     )
     assistant_fail = LLMMessage(
@@ -908,6 +970,7 @@ async def test_execute_tools_forwards_contract_failure_to_attempt():
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         run_id="r1",
     )
     assert terminal is None
@@ -927,6 +990,7 @@ async def test_execute_end_error_carries_aggregable_reason():
             reg,
             _ctx(),
             EventSink(),
+            approval_gate=None,
             run_id="r1",
         )
     ends = [e for e in logs if e.get("event") == "tool.execute_end"]
@@ -947,6 +1011,7 @@ async def test_execute_end_ok_omits_reason():
             reg,
             _ctx(),
             EventSink(),
+            approval_gate=None,
             run_id="r1",
         )
     ends = [e for e in logs if e.get("event") == "tool.execute_end"]
@@ -985,6 +1050,7 @@ async def test_execute_end_forwards_code_search_index_status():
             reg,
             _ctx(),
             EventSink(),
+            approval_gate=None,
             run_id="r1",
         )
     ends = [e for e in logs if e.get("event") == "tool.execute_end"]
@@ -1043,7 +1109,10 @@ async def test_same_batch_handoff_waits_for_sibling_write(tmp_path: Path):
         reg,
         ctx,
         EventSink(),
+        # 云端沙箱上的 worker 写文件：按 sandbox_approval 免逐次卡（本例测的是同批次序）。
+        approval_gate=None,
         run_id="r1",
+        role="worker",
     )
     assert order[:2] == ["write_start", "write_end"]
     assert order[-1] == "handoff"
@@ -1115,6 +1184,7 @@ async def test_parallel_same_path_file_read_coalesces_once(tmp_path: Path):
         reg,
         ctx,
         sink,
+        approval_gate=None,
         run_id="r1",
     )
 
@@ -1159,6 +1229,7 @@ async def test_parallel_distinct_path_file_reads_not_coalesced(tmp_path: Path):
         reg,
         ctx,
         EventSink(),
+        approval_gate=None,
         run_id="r1",
     )
     assert all(a.success for a in attempts)
@@ -1179,6 +1250,7 @@ async def test_ceo_str_replace_miss_still_audience_deny():
         reg,
         ctx,
         EventSink(),
+        approval_gate=None,
         run_id="",
         role="captain",
     )
@@ -1197,6 +1269,7 @@ async def test_write_allowlist_deny_no_handoff_as_write(name: str):
         reg,
         _ctx(),
         EventSink(),
+        approval_gate=None,
         run_id="r1",
         allowed_tool_names=["file_read", "handoff"],  # write tool not allowed
     )
@@ -1435,3 +1508,78 @@ async def test_cloud_worker_file_write_session_still_ungated():
     assert tool.executed is True
     assert attempts[0].success is True
     assert messages[0].content == "wrote"
+
+
+class _GrantableWrite:
+    """A GRANTABLE file tool — the class that used to slip through un-asked."""
+
+    executed = False
+
+    @property
+    def schema(self) -> ToolSchema:
+        from agentcore.core.types import ToolApproval
+
+        return ToolSchema(
+            name="file_write",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.FILESYSTEM,
+            approval=ToolApproval.GRANTABLE,
+        )
+
+    async def execute(self, arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+        self.executed = True
+        return ToolResult(tool_call_id="", success=True, output="wrote")
+
+
+async def test_grantable_without_gate_is_denied_not_run():
+    """本该有闸却没传 → 拒绝执行，而不是放行（gate 缺席不再等于免审）。
+
+    桌面 worker 的 file_write 该弹卡（``sandbox_approval`` 只对云端沙箱免卡）。若这条
+    路的 gate 漏传了，从前会因为「GRANTABLE 判定挂在 gate 存在性上」直接执行；现在先算
+    「要不要审批」，再看「有没有人可问」，问不到就拒。
+    """
+    class _DesktopBackend:
+        location = "local"
+        root_label = "ws"
+
+    tool = _GrantableWrite()
+    reg = ToolRegistry()
+    reg.register(tool)
+    with capture_logs() as logs:
+        messages, terminal, attempts = await execute_tools(
+            [_call("tc-nogate", "file_write", '{"path":"a.md","content":"x"}')],
+            reg,
+            _ctx(backend=_DesktopBackend()),
+            EventSink(),
+            approval_gate=None,
+            run_id="worker-1",
+            role="worker",
+        )
+    assert tool.executed is False
+    assert terminal is None
+    assert attempts[0].success is False
+    assert "没有可询问的用户" in (messages[0].content or "")
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert [e["status"] for e in ends] == ["grantable_no_gate"]
+
+
+async def test_grantable_without_gate_denied_on_cloud_captain_path():
+    """云端免卡只给 worker：船长路径漏传 gate 同样拒绝，不借沙箱豁免蒙混过关。"""
+    tool = _GrantableWrite()
+    reg = ToolRegistry()
+    reg.register(tool)
+    with capture_logs() as logs:
+        _messages, _terminal, attempts = await execute_tools(
+            [_call("tc-nogate-cap", "file_write", '{"path":"a.md","content":"x"}')],
+            reg,
+            _ctx(),  # ServerWorkspace → 云端
+            EventSink(),
+            approval_gate=None,
+            run_id="cap-run",
+            role="captain",
+        )
+    assert tool.executed is False
+    assert attempts[0].success is False
+    ends = [e for e in logs if e.get("event") == "tool.execute_end"]
+    assert [e["status"] for e in ends] == ["grantable_no_gate"]

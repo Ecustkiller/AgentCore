@@ -162,6 +162,7 @@ async def _run_captain(
         profile=make_profile_params(max_rounds=12),
         turn_model="m",
         role="captain",
+        approval_gate=None,
     )
     return content or "", messages
 

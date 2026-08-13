@@ -6,6 +6,12 @@ per-run materialized view product surfaces (工资单 / 仪表盘 / 配额 SUM) 
 group beyond the structural captain/member bucket. Old rows may lack call
 details or persona — read side tolerates missing fields (no backfill).
 
+``conversation_id`` is nullable on all three tables: an **account-level** spend
+line (AI 改写 / 文档 description 自动补, ``role=assist``) belongs to no
+conversation. Such a row is real money and must be visible, so it SUMs into the
+account windows (用量页 / 仪表盘 / 配额) while every conversation-scoped read
+filters it out by construction (see 成本配额与计费 §三).
+
 ``CostLedgerOutbox`` is the shared DB durable queue (G5 mid-term) drained with
 ``FOR UPDATE SKIP LOCKED`` so every API worker can self-drain.
 """
@@ -30,7 +36,9 @@ from agentcore.db.base import Base
 
 from ._helpers import _new_uuid
 
-_ROLE_CHECK = "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision')"
+_ROLE_CHECK = (
+    "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision', 'assist')"
+)
 _OUTBOX_STATUS_CHECK = "status in ('pending', 'corrupt')"
 
 
@@ -44,7 +52,12 @@ class CostEvent(Base):
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    # NULL for an account-level call that belongs to no conversation (AI 改写 /
+    # 文档 description, ``role=assist``). ``user_id`` stays the only mandatory
+    # owner key — that is what the account windows and 配额 SUM aggregate on.
+    conversation_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), nullable=True, index=True
+    )
     # The assistant turn this run belongs to (== the persisted Message.id), or
     # NULL for an off-turn background LLM call (标题生成 / 记忆整合, Gap C): those
     # belong to no turn, so they SUM into the account/conversation totals but stay
@@ -109,7 +122,9 @@ class CostCall(Base):
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
+    conversation_id: Mapped[str | None] = mapped_column(
+        PG_UUID(as_uuid=False), nullable=True, index=True
+    )
     message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     call_id: Mapped[str] = mapped_column(String(128), unique=True)
     run_id: Mapped[str] = mapped_column(String(128))
@@ -152,7 +167,7 @@ class CostLedgerOutbox(Base):
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), nullable=False)
-    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), nullable=False)
+    conversation_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     message_id: Mapped[str | None] = mapped_column(PG_UUID(as_uuid=False), nullable=True)
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     source: Mapped[str] = mapped_column(String(64), nullable=False, server_default=text("'turn'"))

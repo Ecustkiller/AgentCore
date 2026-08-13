@@ -102,6 +102,7 @@ def _executor(plan: RunPlan, provider: _ContentProvider, sink: EventSink):
         system_prompt="SYS",
         user_message="原始请求",
         execution_id="e",
+        approval_gate=None,
     )
 
 
@@ -179,6 +180,7 @@ async def test_continue_run_revises_from_transcript_and_extends_it():
         sink=EventSink(),
         base_tool_context=_ctx(),
         execution_id="e",
+        approval_gate=None,
     )
 
     assert state.phase is RunPhase.COMPLETED
@@ -231,6 +233,7 @@ async def test_continue_run_strips_historical_reasoning_but_keeps_current_beat_e
         sink=EventSink(),
         base_tool_context=_ctx(),
         execution_id="e",
+        approval_gate=None,
     )
 
     assert state.phase is RunPhase.COMPLETED
@@ -286,6 +289,7 @@ async def test_continue_run_does_not_mutate_stored_transcript_until_committed():
         sink=EventSink(),
         base_tool_context=_ctx(),
         execution_id="e",
+        approval_gate=None,
     )
     assert session.transcript == before
 
@@ -303,6 +307,7 @@ async def test_continue_run_emits_continues_run_id_and_true_parent():
         sink=sink,
         base_tool_context=_ctx(),
         execution_id="e",
+        approval_gate=None,
         parent_run_id="CEO",
     )
     sink.close()
@@ -337,6 +342,7 @@ async def test_continue_run_failure_returns_failed_state():
         sink=sink,
         base_tool_context=_ctx(),
         execution_id="e",
+        approval_gate=None,
     )
     assert state.phase is RunPhase.FAILED
     assert "provider down" in state.error

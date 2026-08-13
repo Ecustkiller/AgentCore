@@ -339,6 +339,12 @@ class CoordinationSession:
     # appending here after the arming turn's ContextVar is reset (pillar A).
     host_journal_writer: Any | None = field(default=None, repr=False)
     host_turn_id: str = ""
+    # Set by crash redrive (``recover_turn``) to the ORIGINAL turn's message_id:
+    # this drive continues that turn, so its closing belongs there instead of a
+    # fresh assistant message (Resume 身份不变量 — 崩溃重驱亦不新开 turn).
+    # Deliberately NOT snapshotted: a soft-stop/resume hands the turn back to the
+    # resume pipeline, which already reuses the original id on its own.
+    recovered_turn_id: str = ""
     # Set when a harvest closing turn has been scheduled (idempotent).
     harvest_scheduled: bool = False
     # Drive posted ALL_COMPLETED / DRIVE_CANCELLED (终态对账前置条件).

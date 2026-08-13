@@ -19,9 +19,10 @@ _LONG_FORM_WRITING = """\
 **不要**用本 skill 单写手一人包办自搜+成文。本 skill 单写手留给：材料已齐只扩写、用户已给大纲、\
 改稿续写、短中篇无多角取证。
 
-【主交付·MD → PDF】主交付永远是 `.md`。用户要 PDF / 可分享文件时：顺序 = 成篇 `.md` → \
-调用 `md_to_pdf`（对主文件）→ handoff。【禁止】用多份 HTML 顶替 PDF；【禁止】把 \
-code_execute + reportlab 当主路径做 PDF（确定性 `md_to_pdf` 才是主路径）。
+【主交付·MD → PDF/Word】主交付永远是 `.md`。用户要 PDF / Word / 可分享文件时：顺序 = \
+成篇 `.md` → 调用 `md_to_pdf` 或 `md_to_docx`（对主文件）→ handoff。两者都是确定性导出、\
+与执行沙箱无关，`code_execute=未装配` 也照样能交真 PDF/Word。【禁止】用多份 HTML 顶替 PDF；\
+【禁止】把 code_execute + reportlab / python-docx 当主路径（确定性导出工具才是主路径）。
 
 【单写手超长·跨 delegate 分波】材料已齐、仍走单写手，但预估很长（多章手册 / 合并大规格 /\
 十余章以上）→ **勿**默认一人一次写完全文。按章跨多次 `delegate` 分波：第一波 task \
@@ -48,10 +49,10 @@ code_execute + reportlab 当主路径做 PDF（确定性 `md_to_pdf` 才是主�
 `deliverable.artifacts` 均指向它）；② 合并责任（末尾 merge worker `depends_on` 各章，\
 或你 CEO 收口合并进主文件）。验收只认合并后的那一篇；禁止「各写各的章节文件就交」。\
 （与上条「单写手分波」二选一形状：要么一人分波串写，要么多章并行+合并——勿混成并行同角色抢锁。）
-4. 写/append 成功回执即 artifact manifest（path / bytes / lines / hash / 标题树 / 末段预览）\
+4. 写/append 成功回执即 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）\
 ——以此验真，禁止为质检再 code_execute / file_read 回读正文；下一步仅 str_replace \
-（局部改）或同轮 handoff；成篇后勿再用 file_append，整文件覆盖须完整正文。用户要 PDF \
-时在 handoff 前对主文件调 `md_to_pdf`。\
+（局部改）或同轮 handoff；成篇后勿再用 file_append，整文件覆盖须完整正文。用户要 PDF / Word \
+时在 handoff 前对主文件调 `md_to_pdf` / `md_to_docx`。\
 【例外】≠ 为验真空转回读（仍认 artifact manifest）；清参后改稿才可先 `file_read`——\
 写参被收成已落盘短状态后须先读盘上真文，再 `str_replace`（优先）或按真文写，\
 【禁止】把短状态当正文重发。

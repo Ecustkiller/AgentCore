@@ -110,9 +110,10 @@ def admit_before_run_plan_emit(
         find_sibling_artifact_crosses,
     )
     from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
     from agentcore.workspace.write_claims import file_ownership_v2_enabled
 
-    force = getattr(tool, "_delegate_force", False) is True
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
 
     existing = active_coordination(execution_id)
     merging = (
@@ -533,7 +534,9 @@ def _merge_into_active_coordination(
 
     # Seat reclaim + overlap: same admit as replan.adds (vacated/completed
     # auto-replaces, then reject incomplete seat / still-running file holders).
-    force = getattr(tool, "_delegate_force", False) is True
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
+
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
     ownership = session.ensure_file_ownership() if file_ownership_v2_enabled() else None
     _folder = getattr(tool, "_folder_id", None)
     birth_desk = session.birth_desk_id or (
@@ -831,9 +834,10 @@ def try_start_coordination(
         return None
 
     # C3 sibling gate before session create (defense if caller skipped pre-emit admit).
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
     from agentcore.workspace.write_claims import file_ownership_v2_enabled
 
-    force = getattr(tool, "_delegate_force", False) is True
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
     creating_fresh = session is None
     if file_ownership_v2_enabled() and creating_fresh and not force:
         from agentcore.runtime.coordination.append_guard import (

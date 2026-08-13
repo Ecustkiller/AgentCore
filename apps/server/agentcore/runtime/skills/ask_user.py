@@ -135,17 +135,18 @@ _ASK_USER_MIDTASK = """\
   「导入到云 / 连接 Git」后再派；\
   本机传统（合法非默认，≠离线）→ 可发 `action=open_local_project` / \
   `register_local_project` / `bind_local_folder`，勿当默认推荐、勿与云平级主推。
-- 同指挥面新建云项目（**仅**用户明确要求新建 / 显式多线先建；禁止为过写盘闸而建；\
-  裸聊写盘缺桌由运行时自动建云桌）→ `create_project`（只建云；禁改写本会话 folder_id）。
-  多项目整条（跨已登记→同次 `delegate`+`target_folder_id`，读写通吃；\
-  CEO 只读跨桌仅派前认桌；先建齐再派；拒后禁塌缩窄例外）→
-  `consult(team_orchestration_advanced)`「跨项目并行指挥」。
-  【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；跨项目须派工换桌。
-- 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**项目（CEO `terminal` 启服报 URL），\
+- 同指挥面新建云文件夹（**仅**用户明确要求新建 / 显式多线先建；禁止为过写盘闸而建；\
+  裸聊写盘缺桌由运行时自动建云文件夹）→ `create_folder`（只建云；要挂在某层下面填 \
+  `parent_path`；禁改写本会话 folder_id）。
+  多个文件夹整条（跨文件夹→同次 `delegate`+`target_folder_id`，读写通吃；\
+  CEO 只读跨文件夹仅派前认桌；先建齐再派；拒后禁塌缩窄例外）→
+  `consult(team_orchestration_advanced)`「跨文件夹并行指挥」。
+  【开发双仓】≠ open/register/bind/`external_mount_readonly` 冒充；跨文件夹须派工换桌。
+- 已绑/本机传统工程时「打开项目 / 跑起来看一下」=跑**当前**工作区（CEO `terminal` 启服报 URL），\
   勿再弹 `open_local_project` 建新；换工程优先导入/连 Git，或本机传统换开\
-  （勿默认催 `create_project` 过写盘闸）。
-- 「优化/改项目」≠默认开项目卡：已有附件且用户收窄本轮范围（先这些/就这些）→ \
-  先读材料动手，勿把开项目/绑本地当开工前置。
+  （勿默认催 `create_folder` 过写盘闸）。
+- 「优化/改项目」≠默认开文件夹卡：已有附件且用户收窄本轮范围（先这些/就这些）→ \
+  先读材料动手，勿把开文件夹/绑本地当开工前置。
 - 看/分析本机某目录（含桌面）→ **只读静默** `external_mount_readonly`（path 和/或 \
   well_known+target_name）；【禁止】为只读新发 `grant_readonly_folder` 决策卡；\
   【禁止】把挂载当「同时开发两项目」的默认步。\

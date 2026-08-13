@@ -77,17 +77,27 @@ async def run_and_persist(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
+    continue_message_id: str | None = None,
+    inherited_journal_entries: list[dict] | None = None,
 ) -> dict | None:
     """Run the pipeline, then persist the assistant reply (+ derived title / stage_card).
 
     Returns the pipeline result dict (including ``message_id`` for this turn) on a
     normal completion; ``None`` only if the turn never produced a result (cancel /
     early abort paths that raise instead).
+
+    ``continue_message_id`` runs this turn ON an existing assistant row instead of a
+    freshly minted one (崩溃重驱恢复收口 · D5 归属原回合): the placeholder insert is
+    skipped (the row is already there, still ``running``) and finalize's merging
+    upsert writes the result back into that bubble. Pair it with
+    ``inherited_journal_entries`` — that turn's existing facts — so the journal
+    continues rather than restarting at seq 0.
     """
     session_saver, session_loader = session_callbacks(conversation_id)
     suspension_saver, suspension_deleter = suspension_callbacks()
 
-    message_id = new_id()
+    continuing = bool(continue_message_id)
+    message_id = continue_message_id or new_id()
     # attempt_id = this run of the turn (resume mints a fresh one); ≠ journal turn_id
     # (journal/audit turn_id ≡ message_id). Log context key is attempt_id; turn_metrics
     # still stores the value under its DB column ``turn_id``.
@@ -119,12 +129,14 @@ async def run_and_persist(
                 location=backend.location,
                 via="cloud",
                 message_id=message_id,
+                continuing=continuing,
             )
-            await create_assistant_placeholder(
-                conversation_id=conversation_id,
-                message_id=message_id,
-                trace_id=trace_id,
-            )
+            if not continuing:
+                await create_assistant_placeholder(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    trace_id=trace_id,
+                )
             sink.bind_content_checkpoint(
                 conversation_id=conversation_id,
                 message_id=message_id,
@@ -280,6 +292,7 @@ async def run_and_persist(
                             message_id=message_id,
                             x_client_platform=x_client_platform,
                             agent_mentions=agent_mentions,
+                            inherited_journal_entries=inherited_journal_entries,
                         )
                     except asyncio.CancelledError:
                         # Hard cancel / lifespan → terminal incomplete + release.

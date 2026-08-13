@@ -30,13 +30,13 @@ from agentcore.runtime.loop_controller import (
     fingerprint_tool_call,
 )
 from agentcore.runtime.tool_deadline import reset_tool_deadline, set_tool_deadline
+from agentcore.tools.file_products import LANDING_TOOLS, with_file_products_marker
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.registry import ToolRegistry
 
 from .timeout import resolve_tool_timeout
 from .tool_exec_args import (
     _ARGS_PARSE_FAILED_MARKER,
-    _FILE_PRODUCT_TOOL_NAMES,
     _attempt_meta_with_landing_path,
     _failed_tool_message,
     _format_args_parse_error,
@@ -258,7 +258,7 @@ async def run_one_tool(
         )
 
     if allowed_set is not None and name not in allowed_set:
-        if name in _FILE_PRODUCT_TOOL_NAMES:
+        if name in LANDING_TOOLS:
             # 白名单限制：说明限制即可；禁止劝「handoff 正文交差」冒充写盘。
             error_msg = (
                 f"工具 '{name}' 不在本 run 的允许列表中，未执行。"
@@ -272,16 +272,15 @@ async def run_one_tool(
                 "请仅使用当前已提供的工具，不要调用未授权的写盘或其他副作用工具。"
             )
             deny_status = "allowlist_deny"
+        # ``error_msg`` names the run allow-list and steers the model; user face is
+        # curated by code only.
         sink.emit(
             tool_use_end(
                 tc.id,
                 name or raw_name,
                 success=False,
                 output=error_msg,
-                failure=tool_failure_fields(
-                    code="allowlist_deny",
-                    product_message=error_msg,
-                ),
+                failure=tool_failure_fields(code="allowlist_deny"),
                 run_id=event_run_id,
             )
         )
@@ -388,10 +387,7 @@ async def run_one_tool(
                     name,
                     success=False,
                     output=exhausted,
-                    failure=tool_failure_fields(
-                        code="retrieval_budget_exhausted",
-                        product_message=exhausted,
-                    ),
+                    failure=tool_failure_fields(code="retrieval_budget_exhausted"),
                     run_id=event_run_id,
                 )
             )
@@ -487,16 +483,15 @@ async def run_one_tool(
             "这不是字节/行数触顶——请缩小处理范围、换路径策略或换工具；"
             "禁止原样重试同一次调用。"
         )
+        # The 活性挂起 / 触顶 distinction and the no-identical-retry ban exist to steer
+        # the model; they stay on ``result``. User face is curated by code only.
         sink.emit(
             tool_use_end(
                 tc.id,
                 name,
                 success=False,
                 output=timeout_msg,
-                failure=tool_failure_fields(
-                    code="liveness_timeout",
-                    product_message=timeout_msg,
-                ),
+                failure=tool_failure_fields(code="liveness_timeout"),
                 run_id=event_run_id,
             )
         )
@@ -652,8 +647,13 @@ async def run_one_tool(
     logger.info("tool.execute_end", **end_fields)
 
     citations = result.citations if (result.success and result.citations) else []
-    # 执行层失败打机器尾注（仅 transcript；SSE 上文仍用无 marker 的 output）。
-    msg_content = output if result.success else with_tool_failed_marker(output or "")
+    # 落盘产物自报 + 执行层失败：两条机器尾注都只进 transcript（SSE 上文仍是无 marker 的
+    # output），所以工具回执文案不受影响；也因此产物尾注落在 ToolResult 截断之后，不会被
+    # 截掉。自报即事实，不按 success 二次裁决——写盘工具失败时本就不自报，而脚本非零退出前
+    # 已 copy-out 的产物确实躺在盘上（漏账才是事故）；被拒 / 未执行的调用没有结果可自报。
+    msg_content = with_file_products_marker(output, result.file_products)
+    if not result.success:
+        msg_content = with_tool_failed_marker(msg_content or "")
     message = LLMMessage(role="tool", content=msg_content, tool_call_id=tc.id)
     policy_failure = bool(result.metadata.get("policy_failure"))
     # 参数契约拒绝 (tools/protocol.py): forward the tool's self-correctable-rejection

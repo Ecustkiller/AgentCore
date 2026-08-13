@@ -18,10 +18,11 @@ describe("ManualReference", () => {
   it("renders Phase 2 workspace dual-mode copy", () => {
     renderReference();
     expect(screen.getByText("工作区与文件")).toBeTruthy();
-    expect(screen.getByText(/绑本地文件夹/)).toBeTruthy();
-    expect(screen.getByText(/不绑 → 云端项目/)).toBeTruthy();
+    expect(screen.getAllByText(/打开本机文件夹/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/我的文件/).length).toBeGreaterThan(0);
     expect(screen.getByText(/模式条/)).toBeTruthy();
-    expect(screen.getAllByText(/项目即工作区/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/文件夹即工作区/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/项目即工作区/)).toBeNull();
     expect(screen.getByText(/右坞终端/)).toBeTruthy();
     expect(screen.getByText(/右坞浏览器/)).toBeTruthy();
     expect(screen.getByText(/统一浏览器/)).toBeTruthy();
@@ -100,6 +101,14 @@ describe("ManualReference", () => {
     expect(screen.queryByText("设置 · 自主度")).toBeNull();
   });
 
+  it("answers how workflows and automations relate", () => {
+    renderReference();
+    expect(screen.getByText("工作流和自动化有什么区别？")).toBeTruthy();
+    expect(screen.getByText("电脑关着，定时任务还会跑吗？")).toBeTruthy();
+    expect(screen.getAllByText(/存为工作流/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/自动化 · 收件箱/).length).toBeGreaterThan(0);
+  });
+
   it("renders glossary terms aligned with product glossary", () => {
     renderReference();
     expect(screen.getByText("队员")).toBeTruthy();
@@ -113,5 +122,8 @@ describe("ManualReference", () => {
     expect(screen.getAllByText("画布").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("白板").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("工作流")).toBeTruthy();
+    expect(screen.getByText("系统任务")).toBeTruthy();
+    expect(screen.getAllByText("收件箱").length).toBeGreaterThanOrEqual(1);
   });
 });

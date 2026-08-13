@@ -170,7 +170,16 @@ async def _drive(
     # Bridge fulfill delivery → turn sink so the existing fake desktop can settle.
     from agentcore.fulfill.dispatch import DeliverResult
 
-    def _fake_deliver(user_id, conversation_id, channel, root_id, event, *, hub=None):
+    def _fake_deliver(
+        user_id,
+        conversation_id,
+        channel,
+        root_id,
+        event,
+        *,
+        origin_device_id=None,
+        hub=None,
+    ):
         sink.emit(event)
         return DeliverResult.DELIVERED
 

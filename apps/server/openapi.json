@@ -266,6 +266,16 @@
       },
       "AccountMemoryFileMeta": {
         "properties": {
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
+          "disputed": {
+            "default": false,
+            "title": "Disputed",
+            "type": "boolean"
+          },
           "path": {
             "title": "Path",
             "type": "string"
@@ -498,6 +508,11 @@
             "title": "Content",
             "type": "string"
           },
+          "description": {
+            "default": "",
+            "title": "Description",
+            "type": "string"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -529,8 +544,29 @@
         "type": "object"
       },
       "AccountRulesListResponse": {
-        "description": "Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.",
+        "description": "Always rules for ``<rules>`` plus on_demand bodies for 规则目录 / ``consult``.\n\n``ancestor_*`` carry the enclosing folders' layers, outermost-first, and\n``folder_chain`` is that same chain by id with the current folder last: the engine may\nbe a desktop sidecar with no folders table, so the cloud is the only place that can\nresolve「谁在谁里面」(双模式工作区 §5.4 沿树继承).",
         "properties": {
+          "ancestor_on_demand_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Ancestor On Demand Rules",
+            "type": "array"
+          },
+          "ancestor_rules": {
+            "items": {
+              "$ref": "#/components/schemas/AccountRuleDoc"
+            },
+            "title": "Ancestor Rules",
+            "type": "array"
+          },
+          "folder_chain": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Folder Chain",
+            "type": "array"
+          },
           "global_on_demand_rules": {
             "items": {
               "$ref": "#/components/schemas/AccountRuleDoc"
@@ -2621,6 +2657,25 @@
           "run_id"
         ],
         "title": "AuditCausalNode",
+        "type": "object"
+      },
+      "AutoFolderNotice": {
+        "description": "The cloud folder a bare chat auto-created for this turn's file writes.\n\n``name`` is the name at creation time; the client shows the folder's current name\n(looked up by ``folder_id``) since the notice itself offers a rename.",
+        "properties": {
+          "folder_id": {
+            "title": "Folder Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "folder_id",
+          "name"
+        ],
+        "title": "AutoFolderNotice",
         "type": "object"
       },
       "AutoTitleRequest": {
@@ -5038,7 +5093,7 @@
         "type": "object"
       },
       "CostBreakdown": {
-        "description": "A run's / turn's / window's cost in integer nano-CNY (canonical).",
+        "description": "A run's / turn's / window's cost in integer nano-money (canonical).\n\nBilled (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two\nseparate breakdowns, each carrying its own ``currency`` — that is how a mixed\nturn stays representable without FX.",
         "properties": {
           "cached": {
             "title": "Cached",
@@ -5288,6 +5343,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           }
         },
         "required": [
@@ -5840,6 +5906,101 @@
           "password"
         ],
         "title": "DeleteAccountRequest",
+        "type": "object"
+      },
+      "DeletedFolderListResponse": {
+        "description": "Recoverable projects, most recently deleted first.\n\nOnly projects the user deleted appear — machine reclaims (a race loser's auto\ncloud desk) and projects soft-deleted before the recycle bin existed are omitted,\nas are projects already past retention (they are no longer restorable).\n``retention_days`` mirrors ``workspace_retention_days``.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeletedFolderSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "retention_days"
+        ],
+        "title": "DeletedFolderListResponse",
+        "type": "object"
+      },
+      "DeletedFolderSummary": {
+        "description": "One recoverable folder in「最近删除」.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "deleted_at": {
+            "format": "date-time",
+            "title": "Deleted At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "local_root_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Root Id"
+          },
+          "local_subpath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Subpath"
+          },
+          "mode": {
+            "enum": [
+              "local",
+              "cloud"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "purge_at": {
+            "format": "date-time",
+            "title": "Purge At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "mode",
+          "created_at",
+          "deleted_at",
+          "purge_at"
+        ],
+        "title": "DeletedFolderSummary",
         "type": "object"
       },
       "DemoTapeCatalogResponse": {
@@ -6553,6 +6714,18 @@
             "title": "Description",
             "type": "string"
           },
+          "disputed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disputed At"
+          },
           "folder_id": {
             "anyOf": [
               {
@@ -6672,6 +6845,18 @@
             "title": "Description",
             "type": "string"
           },
+          "disputed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disputed At"
+          },
           "folder_id": {
             "anyOf": [
               {
@@ -6744,7 +6929,7 @@
         "type": "object"
       },
       "DocumentPatchRequest": {
-        "description": "Rename, reparent, and/or change apply (via frontmatter edit).",
+        "description": "Rename, reparent, change apply (via frontmatter edit), and/or mark 这条不对.",
         "properties": {
           "apply_mode": {
             "anyOf": [
@@ -6760,6 +6945,17 @@
               }
             ],
             "title": "Apply Mode"
+          },
+          "disputed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disputed"
           },
           "name": {
             "anyOf": [
@@ -7350,6 +7546,28 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "parent_rel_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Rel Path"
+          },
+          "rel_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rel Path"
           },
           "updated_at": {
             "format": "date-time",
@@ -9078,8 +9296,20 @@
         "type": "object"
       },
       "MemoryUpdateView": {
-        "description": "One memory-write notice for the conversation-tail card (two-layer memory).\n\nProjected from a ``memory_updates`` row. ``kind`` selects the UI:\n- ``episodic``: light tip; ``summary`` is the ≤200-char session digest; ``items`` empty.\n- ``semantic``: diff card; ``items`` lists add/update/remove bullets.\n\nReturned only with the LATEST messages window, and pushed live on the per-user firehose.",
+        "description": "One memory-write notice for the conversation-tail card (two-layer memory).\n\nProjected from a ``memory_updates`` row. ``kind`` selects the UI:\n- ``episodic``: light tip; ``summary`` is the ≤200-char session digest; ``items`` empty.\n- ``semantic``: diff card; ``items`` lists add/update/remove bullets.\n\nReturned only with the LATEST messages window, and pushed live on the per-user firehose.\n\n``anchor_at`` is the last consolidated message's ``created_at`` — the thread position\nthe card describes, which ``created_at`` (when the debounced pass happened to run) does\nnot give. Null on older rows and on writes with no message window.",
         "properties": {
+          "anchor_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Anchor At"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -9382,6 +9612,17 @@
               }
             ],
             "title": "Reasoning Content"
+          },
+          "recovered": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovered"
           },
           "role": {
             "title": "Role",
@@ -10541,6 +10782,67 @@
         "title": "PermissionAxesUpdate",
         "type": "object"
       },
+      "PlaybookSlotChoice": {
+        "description": "One allowed value of an enumerated slot (render a picker, not a textbox).",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value",
+          "label"
+        ],
+        "title": "PlaybookSlotChoice",
+        "type": "object"
+      },
+      "PlaybookTemplateSlotModel": {
+        "description": "Machine-readable primary slot — clients build the copy form from this.",
+        "properties": {
+          "choices": {
+            "items": {
+              "$ref": "#/components/schemas/PlaybookSlotChoice"
+            },
+            "title": "Choices",
+            "type": "array"
+          },
+          "hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hint"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "required"
+        ],
+        "title": "PlaybookTemplateSlotModel",
+        "type": "object"
+      },
       "PlaybookTemplateSummary": {
         "description": "Official playbook listed as a read-only workflow template.",
         "properties": {
@@ -10551,6 +10853,13 @@
           "primary_slots": {
             "title": "Primary Slots",
             "type": "string"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/PlaybookTemplateSlotModel"
+            },
+            "title": "Slots",
+            "type": "array"
           },
           "summary": {
             "title": "Summary",
@@ -11811,6 +12120,13 @@
               }
             ],
             "title": "Note"
+          },
+          "slots": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Slots",
+            "type": "object"
           }
         },
         "required": [
@@ -11845,6 +12161,16 @@
       "RunsPayload": {
         "description": "Persisted turn replay payload for an assistant message.\n\n``events`` is a multi-agent turn's ordered run/tool SSE events; the client\nreplays them through the same fold as the live stream to reproduce the team\ngraph exactly on reload (empty ``[]`` for a single-agent turn). ``process`` is\na single-agent turn's 思考+工具 timeline (ordered reasoning/tool steps) the\nclient replays into the inline process panel; ``null`` unless the turn used a\ntool. ``run_processes`` is the per-worker-run ProcessStep[] map (对称 CEO\n``process``) so run-detail timelines reopen with the same interleaving as live;\n``null`` when no worker produced a timeline. ``captain_context`` is the CEO\ncaptain's received context (上下文传递可视化 通道①: ``system`` / ``history`` /\n``request``), turn-level so it replays on the CEO bubble even for a pure-chat\nturn (where ``events`` is empty); ``null`` unless the captain shipped context.\n``error`` is a 报错回合's terminal error, replaying the inline error card on\nreload (``null`` for a clean turn). ``null`` whole payload on messages with\nnone of these.",
         "properties": {
+          "auto_folder": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AutoFolderNotice"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "captain_context": {
             "anyOf": [
               {
@@ -11935,6 +12261,26 @@
           }
         },
         "title": "RunsPayload",
+        "type": "object"
+      },
+      "SaveTurnAsWorkflowRequest": {
+        "description": "固化一轮已跑完的协作；省略 ``name`` 时服务端按队员角色生成。",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "SaveTurnAsWorkflowRequest",
         "type": "object"
       },
       "SearchItem": {
@@ -13885,6 +14231,7 @@
         "properties": {
           "ok": {
             "default": true,
+            "description": "False = 掌舵窗口已关（辩论没在跑，或已过末轮边界、正在结辩/出简报），没有下一轮边界来捞它 —— 客户端须如实回执，不得显示「已发送·下一轮生效」。",
             "title": "Ok",
             "type": "boolean"
           },
@@ -14936,7 +15283,7 @@
         "type": "object"
       },
       "UpdateFolderRequest": {
-        "description": "Rename only — project workspace binding is immutable after create.",
+        "description": "Rename and/or re-parent — the local-mode binding stays immutable.\n\n``parent_id`` is a *request* field, not storage: the server turns it into a\n``rel_path`` prefix, which is the single source of truth for nesting\n(双模式工作区 §5.4). Omit it to leave the folder where it is; send ``null`` to\nmove it to the top level.",
         "properties": {
           "name": {
             "anyOf": [
@@ -14948,6 +15295,17 @@
               }
             ],
             "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
           }
         },
         "title": "UpdateFolderRequest",
@@ -15950,7 +16308,8 @@
         "type": "object"
       },
       "WorkflowDefinitionModel": {
-        "description": "Canvas JSON: nodes + edges (agent_step | human_gate).",
+        "additionalProperties": true,
+        "description": "Canvas JSON: nodes + edges (agent_step | human_gate) + optional slots.\n\n**校验用它，落库用** :meth:`payload` —— 不要用 ``model_dump()``。这几个字段声明的是\n「服务端认识什么」，不是「客户端能存什么」：definition 归用户所有，未知字段必须原样\n透传（``extra=\"allow\"`` 在这里和 :class:`WorkflowSlotModel` 上都是为了这件事）。按已知\n字段重建这份 JSON，是 ``deliverable`` / ``slots`` / ``source`` 先后被抹掉的同一个根因\n—— 见 :mod:`agentcore.workflows.definition` 的所有权约定。",
         "properties": {
           "edges": {
             "items": {
@@ -15967,9 +16326,84 @@
             },
             "title": "Nodes",
             "type": "array"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowSlotModel"
+            },
+            "maxItems": 6,
+            "title": "Slots",
+            "type": "array"
           }
         },
         "title": "WorkflowDefinitionModel",
+        "type": "object"
+      },
+      "WorkflowSlotModel": {
+        "additionalProperties": true,
+        "description": "One canvas slot: ``{{key}}`` in task text, ``default`` = 原轮的原值。\n\nOptional — a definition without slots behaves exactly as before.",
+        "properties": {
+          "default": {
+            "default": "",
+            "maxLength": 400,
+            "title": "Default",
+            "type": "string"
+          },
+          "key": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label"
+        ],
+        "title": "WorkflowSlotModel",
+        "type": "object"
+      },
+      "WorkflowSourceModel": {
+        "additionalProperties": true,
+        "description": "这条工作流是从哪儿来的——服务端权威，客户端只读。\n\n``kind`` 今天只有 ``\"turn\"``（从一轮协作固化），带原对话 / 消息定位。手画的、官方模板\n复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →\n:mod:`agentcore.workflows.source`。",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message Id"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "WorkflowSourceModel",
         "type": "object"
       },
       "WorkflowSummary": {
@@ -16002,6 +16436,16 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowSourceModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "updated_at": {
             "format": "date-time",
@@ -17125,7 +17569,7 @@
     },
     "/v1/account/memory/list": {
       "post": {
-        "description": "List memory note paths under one scope (global when ``scope`` is null).",
+        "description": "List memory notes under one scope (global when ``scope`` is null).\n\nCarries each note's retrieval ``description`` and its ``disputed`` mark so a sidecar\nwarm builds the same directory — and skips the same user-disputed entries — as an\nin-process turn.",
         "operationId": "list_account_memory_v1_account_memory_list_post",
         "parameters": [
           {
@@ -20315,7 +20759,7 @@
     },
     "/v1/auth/change-password": {
       "post": {
-        "description": "Change the signed-in user's password (修改密码). All other devices are logged out\n(their refresh families are revoked); this session is handed fresh cookies so the\nactive device stays signed in.",
+        "description": "Change the signed-in user's password (修改密码). All other devices are logged out\n(their refresh families are revoked); this session is handed fresh cookies so the\nactive device stays signed in.\n\nThe replacement pair inherits this session's audience and MFA proof: the same\nendpoint serves the product clients and the admin console, so hardcoding either\naudience would strand the other side.",
         "operationId": "change_password_v1_auth_change_password_post",
         "parameters": [
           {
@@ -23902,7 +24346,7 @@
     },
     "/v1/conversations/{conversation_id}/debate-steer": {
       "post": {
-        "description": "Queue an ambient steer for the live debate (下一轮边界非阻塞生效).\n\nThe Moderator never hard-stops for the user — this fire-and-forget channel is the\nboss直控 path (同 ``run-redirect`` 模式). Applied at the next round boundary via\nexisting ``pending_interjections`` / ``focus_override`` / ``CONCLUDE`` mechanisms.",
+        "description": "Queue an ambient steer for the live debate (下一轮边界非阻塞生效).\n\nThe Moderator never hard-stops for the user — this fire-and-forget channel is the\nboss直控 path (同 ``run-redirect`` 模式). Applied at the next round boundary via\nexisting ``pending_interjections`` / ``focus_override`` / ``CONCLUDE`` mechanisms.\n\n``ok=False`` = 该 execution 的掌舵窗口已关（辩论没在跑，或已过末轮边界、正在结辩 /\n出简报）：**没有**下一轮边界来捞它，故如实拒收，前端据此改口不说「已发送·下一轮生效」。",
         "operationId": "submit_debate_steer_v1_conversations__conversation_id__debate_steer_post",
         "parameters": [
           {
@@ -25568,7 +26012,7 @@
     },
     "/v1/conversations/{conversation_id}/messages/{message_id}/resume": {
       "post": {
-        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，\n槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume\npipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状\n404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
+        "description": "Continue a durably-paused turn via SSE (结构化挂起 2b ``POST .../resume``).\n\nThe turn paused at a plan_review / ask_user / team_preview checkpoint and lost its\nlive stream (disconnect / restart); only its persisted frame survived.\n\nSettlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，\n槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume\npipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状\n404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。\n同 ``message_id`` 重复提交走幂等 join：跳过第二次预写，两条 SSE 共享同一次续跑。\n\n``body.selected`` carries the user's ask_user picks (ignored for plan_review).\nGated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota\n— all BEFORE settlement/claim, so a refused turn keeps its resumable frame.",
         "operationId": "resume_message_v1_conversations__conversation_id__messages__message_id__resume_post",
         "parameters": [
           {
@@ -25767,6 +26211,107 @@
         ]
       }
     },
+    "/v1/conversations/{conversation_id}/messages/{message_id}/save-as-workflow": {
+      "post": {
+        "description": "固化这一回合的团队拆法为账户级工作流（owner-scoped，同源幂等）。\n\n幂等只认来源（``user_workflows.source`` 列上的 conversation_id + message_id），不认\n``name``：同一轮再点一次保存返回已有那条，想要「同一轮多个变体」走保存后改名 / 另存，\n而不是靠这个端点的隐藏分支。来源是服务端权威元数据、不在客户端能覆盖的 definition 里\n（:mod:`agentcore.workflows.source`），所以这里能直接走索引查。422 = 这轮压根没有多队\n员协作（无计划快照或有效节点 < 2），或整轮只有辩论（辩论不写计划快照，折不出画布）。",
+        "operationId": "save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "message_id",
+            "required": true,
+            "schema": {
+              "title": "Message Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SaveTurnAsWorkflowRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Turn As Workflow",
+        "tags": [
+          "conversations"
+        ]
+      }
+    },
     "/v1/conversations/{conversation_id}/permission-axes": {
       "put": {
         "description": "Switch the session permission axes (降档/升档确认由客户端负责).\n\nTakes effect on the next turn / durable resume (gate is built at turn entry).\nIllegal combo ``command=auto`` ∧ ``file_write=ask`` is rejected by the schema.",
@@ -25929,7 +26474,7 @@
     },
     "/v1/conversations/{conversation_id}/queued-turns/{queue_id}/cancel": {
       "post": {
-        "description": "Cancel one FIFO queued turn before drain (同对话再发 · 按项取消).\n\nOwner-gated like send. Removes the entry by ``queue_id``; already started / unknown\n→ 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.\nOn success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink (multi-client).",
+        "description": "Cancel one FIFO queued turn before drain (同对话再发 · 按项取消).\n\nOwner-gated like send. Removes the entry by ``queue_id``; already started / unknown\n→ 404. Stop does **not** clear the queue — cancel is the only per-item withdraw.\n\nOn success emits EPHEMERAL ``turn_queue_cancelled`` on the live turn sink AND signals\nit to every端 following the conversation (云对话多端同权 B2 · 验收 5). The signal lane\nis what makes the withdraw visible when there is no live run at all — the queue\noutlives its host turn (drain not yet armed / deferred owns the next slot), and until\nnow cancelling in that window told the other端 nothing.",
         "operationId": "cancel_queued_turn_v1_conversations__conversation_id__queued_turns__queue_id__cancel_post",
         "parameters": [
           {
@@ -26906,7 +27451,7 @@
     },
     "/v1/conversations/{conversation_id}/stream": {
       "get": {
-        "description": "Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).\n\nSince a disconnect no longer cancels a turn (slice 1a — it runs detached + persists\nin the background), a client that dropped (network blip) or reopened the app can\nrejoin the live run here: the SSE replays the transcript so far (coalesced — one\ncontent / reasoning block, the team graph, finished tool calls) then tails new\nevents, all in the SAME event shape as the original stream, so the client folds it\nthrough one dispatch path.\n\nWith ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state\nsynthetic deltas (header value observational — clients clear-then-fold), then live\ntail. Without the header (same-process fast path): ``EventSink.take_over`` full\n``_history`` replay.\n\nReturns ``204 No Content`` when no run is live for the conversation (already\nfinished / never started / suspended at a checkpoint) — the client then falls back\nto the persisted transcript (reload) / durable resume. A pure observer: dropping\nthis stream detaches again (never cancels); an explicit 停止 still goes through\n``POST .../stop``. Owner-gated.",
+        "description": "Re-attach to the conversation's in-flight turn and 续看 it live (C1 · slice 1b).\n\nSince a disconnect no longer cancels a turn (slice 1a — it runs detached + persists\nin the background), a client that dropped (network blip) or reopened the app can\nrejoin the live run here: the SSE replays the transcript so far (coalesced — one\ncontent / reasoning block, the team graph, finished tool calls) then tails new\nevents, all in the SAME event shape as the original stream, so the client folds it\nthrough one dispatch path.\n\nWith ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state\nsynthetic deltas (header value observational — clients clear-then-fold), then live\ntail. Without the header (same-process fast path): the sink's own in-memory history.\n\n``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an\nidle conversation holds the connection (heartbeats) instead of 204ing, and每个新回合\nis replayed + tailed on the same stream. That is what lets a second device parked on\nan idle conversation see the turn another device just started — with回合级 attach it\ntook a 204 and then had no way to learn anything ever happened.\n\nWithout it (default), returns ``204 No Content`` when no run is live for the\nconversation (already finished / never started / suspended at a checkpoint) — the\nclient then falls back to the persisted transcript (reload) / durable resume, and\nthe stream ends when that one turn does. Kept as the default because a客户端 that\nalso opens the POST turn stream would otherwise fold the next turn twice; opting in\nis the客户端's statement that this is its ONE connection for the conversation.\n\nEither way a pure observer: dropping this stream only unsubscribes it (never\ncancels, and never touches the other端); an explicit 停止 still goes through\n``POST .../stop``. Owner-gated.",
         "operationId": "attach_stream_v1_conversations__conversation_id__stream_get",
         "parameters": [
           {
@@ -26916,6 +27461,18 @@
             "schema": {
               "title": "Conversation Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
+            "in": "query",
+            "name": "follow",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "对话级长订阅（云对话多端同权 B2）：空闲不返回 204，保持连接送心跳，此后每个新回合（发送 / 队列 drain / 冷 resume 唤醒 / stage_card）自动续播。缺省 false = 回合级 attach（旧客户端语义：无 live run → 204，回合收口即断流）。",
+              "title": "Follow",
+              "type": "boolean"
             }
           },
           {
@@ -30359,7 +30916,7 @@
         ]
       },
       "patch": {
-        "description": "Rename, reparent, and/or set apply via frontmatter.\n\nSet ``reparent`` to apply ``parent_id``.",
+        "description": "Rename, reparent, set apply via frontmatter, and/or mark the entry wrong.\n\nSet ``reparent`` to apply ``parent_id``. ``disputed`` is the 纠错通道: the user says\n「这条不对」in the memory UI and the entry stops being injected / consulted while\nstaying on disk (no silent delete, and the mark survives later AI rewrites because it\nlives in a column, not in the body). Nothing infers this from conversation text.",
         "operationId": "patch_document_v1_documents__document_id__patch",
         "parameters": [
           {
@@ -30873,7 +31430,7 @@
         ]
       },
       "post": {
-        "description": "Create a project, or reuse an existing live local binding (HTTP 200).\n\nLocal mode is unique per ``(user_id, local_root_id, local_subpath)`` — same\npath re-open returns the existing row (VS Code / Cursor workspace reuse).\nCloud projects are unchanged (duplicate names allowed).",
+        "description": "Create a project, or reuse an existing live local binding (HTTP 200).\n\nLocal mode is unique per ``(user_id, local_root_id, local_subpath)`` — same\npath re-open returns the existing row (VS Code / Cursor workspace reuse).\nCloud projects become a real directory under ``parent_id``; a name already\ntaken among live siblings gets a numeric suffix rather than a 409 — the name\nis now a path segment, and two of them cannot share one directory.",
         "operationId": "create_folder_v1_folders_post",
         "parameters": [
           {
@@ -31013,8 +31570,150 @@
         ]
       }
     },
+    "/v1/folders/trash": {
+      "get": {
+        "description": "列出可恢复的已删项目（最近删除）。\n\nAccess-session only — the folders narrow ticket is for the sidecar CEO's roster\nchores, and recovery is the user's own remedy surface.",
+        "operationId": "list_deleted_folders_v1_folders_trash_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeletedFolderListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Deleted Folders",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
+    "/v1/folders/trash/{folder_id}/restore": {
+      "post": {
+        "description": "恢复一个已删项目：项目行复活，删除时连带归档的对话解档。\n\nPast retention the answer is 409, never a silent success — the workspace files\nmay already be gone. Losing the race with the 6-hour purge sweep between the\nlookup and the conditional UPDATE surfaces the same way (「该项目已被清理」);\nthat window is reported honestly rather than reconciled.\n\nBoards unbound at delete time and the bare-chat auto cloud desk pointer stay\ncleared — see :meth:`FolderRepository.restore`.",
+        "operationId": "restore_deleted_folder_v1_folders_trash__folder_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "folder_id",
+            "required": true,
+            "schema": {
+              "title": "Folder Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FolderSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Restore Deleted Folder",
+        "tags": [
+          "folders"
+        ]
+      }
+    },
     "/v1/folders/{folder_id}": {
       "delete": {
+        "description": "软删项目（对话就地归档；工作区走保留期自动清理）。\n\nNested folders go with it, and the directory is parked in the tombstone area so\nthe name is free again immediately (双模式工作区 §5.4).\n\nReachable with a folders narrow ticket so the sidecar CEO's ``delete_folder``\nlands on the same path as the sidebar. The irreversible twin below stays\naccess-session only.",
         "operationId": "delete_folder_v1_folders__folder_id__delete",
         "parameters": [
           {
@@ -31160,6 +31859,7 @@
         ]
       },
       "patch": {
+        "description": "Rename and/or re-parent a folder — DB rows and the directory move together.\n\nRefuses with 409 while a turn holds the workspace lock: moving the directory\nout from under a running turn is not something to do silently, and neither is\nqueueing the user's rename behind it (不得静默改名).",
         "operationId": "update_folder_v1_folders__folder_id__patch",
         "parameters": [
           {
@@ -31342,7 +32042,7 @@
     },
     "/v1/folders/{folder_id}/permanent": {
       "delete": {
-        "description": "彻底删除项目：清盘成员对话 + 云端共享工作区/快照，再移除项目行.\n\nDistinct from ``DELETE /{folder_id}`` (soft-delete + archive members).\nLocal-mode OS directories are never touched — only DB + server-side data.",
+        "description": "彻底删除文件夹：清盘成员对话 + 云端共享工作区/快照，再移除文件夹行.\n\nDistinct from ``DELETE /{folder_id}`` (soft-delete + archive members).\nLocal-mode OS directories are never touched — only DB + server-side data.",
         "operationId": "delete_folder_permanent_v1_folders__folder_id__permanent_delete",
         "parameters": [
           {
@@ -34363,9 +35063,47 @@
     },
     "/v1/realtime": {
       "get": {
-        "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. The first subscription\n(and last disconnect) also fans a ``presence`` event to co-chat users.\nHeartbeat comments keep the stream warm; the subscription is released when\nthe client disconnects.\n\nAuth resolves the user via a request-scoped DB session; that session is\nreturned before the long-lived stream opens so each open desktop client does\nnot pin a primary-pool connection until the app closes.",
+        "description": "Open this user's realtime firehose (server→client SSE).\n\nSubscribes the connection to the in-process hub; a new message in any chat the\nuser belongs to arrives as a ``chat_message`` event. The first subscription\n(and last disconnect) also fans a ``presence`` event to co-chat users.\nHeartbeat comments keep the stream warm; the subscription is released when\nthe client disconnects.\n\nOptional ``device_id`` makes reconnects replace their own previous stream\nrather than pile up; optional ``platform`` (query param, falling back to\n``X-Client-Platform``) tells the AI attention signal which surfaces are\nreachable. Neither is required — an undeclared client streams exactly as before.\n\nAuth resolves the user via a request-scoped DB session; that session is\nreturned before the long-lived stream opens so each open desktop client does\nnot pin a primary-pool connection until the app closes.",
         "operationId": "realtime_firehose_v1_realtime_get",
         "parameters": [
+          {
+            "in": "query",
+            "name": "device_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "Device Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "platform",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 32,
+              "title": "Platform",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "X-Client-Platform",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Client-Platform"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -37562,7 +38300,7 @@
     },
     "/v1/usage/summary": {
       "get": {
-        "description": "Account dashboard: today's tokens/cost, the month's cost, the recent\ndaily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``recent_daily_cost`` is the last\n``_TREND_DAYS`` UTC days (zero-filled, oldest-first) for the sparkline.\nMoney is nano-CNY; ``CostBreakdown.cny_total`` is already yuan (no FX).\nPer-role split lives on the turn payroll\n(``GET /messages/{id}/cost``), not this monthly account view.\n\n``quota`` mirrors what ``enforce_quota`` will actually apply to this user:\nper-user override columns first, else global ``quota_*`` — so the meters\nnever show a cap the gate wouldn't enforce.",
+        "description": "Account dashboard: today's tokens/cost, the month's cost, the recent\ndaily-cost trend, and the quota.\n\nWindows are bounded at the current UTC day / month start (MVP — a per-user\ntimezone is a later refinement). ``recent_daily_cost`` is the last\n``_TREND_DAYS`` UTC days (zero-filled, oldest-first) for the sparkline.\nMoney is nano-CNY; ``CostBreakdown.cny_total`` is already yuan (no FX).\nPer-role split lives on the turn payroll\n(``GET /messages/{id}/cost``), not this monthly account view.\n\nThis is the account total, so it also carries spend that belongs to no\nconversation at all (AI 改写 / 文档 description — ``role=assist`` ledger rows).\n``requests`` counts assistant turns only, so those rows raise 花销 without\nraising 请求数.\n\n``quota`` mirrors what ``enforce_quota`` will actually apply to this user:\nper-user override columns first, else global ``quota_*`` — so the meters\nnever show a cap the gate wouldn't enforce.",
         "operationId": "get_usage_summary_v1_usage_summary_get",
         "parameters": [
           {
@@ -40432,6 +41170,81 @@
           }
         },
         "summary": "Run Workflow",
+        "tags": [
+          "workflows"
+        ]
+      }
+    },
+    "/v1/workflows/{workflow_id}/suggest-slots": {
+      "post": {
+        "description": "抽出「上一次的具体输入」并写回 definition（前端第一次点「跑一次」时调）。\n\n从一轮协作固化出来的工作流，任务描述里写死的是那一次的主题——用户第二次要用它才会撞上\n这件事，所以这一次背景模型调用挂在这里而不是保存路径上。抽到了就连占位符带 ``slots``\n一起落库，以后再跑不用重抽。\n\n三种「不抽」都返回**与调用前逐字一致**的 definition（不是报错）：已经有槽位（幂等）、\n不是固化来源（官方模板自带槽位、手画的归用户管）、抽槽本身失败或没认出可验证的片段。\n前端拿到没有 ``slots`` 的 definition 就照常直接跑。",
+        "operationId": "suggest_workflow_slots_v1_workflows__workflow_id__suggest_slots_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workflow_id",
+            "required": true,
+            "schema": {
+              "title": "Workflow Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "access_token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Access Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowSummary"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Suggest Workflow Slots",
         "tags": [
           "workflows"
         ]

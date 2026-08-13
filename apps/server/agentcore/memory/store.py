@@ -10,16 +10,19 @@ Phase 2 of「记忆文件夹化」(Agent记忆与知识系统 §1.4 / §5.3) add
 the phase-1 single-folder layout, both behind the same ``MemoryStore`` seam:
 
 - **作用域 (scope)**: a note lives either GLOBAL (the user's cloud root — injected into
-  every conversation) or under a PROJECT layer keyed by a manual sidebar ``folder_id``
+  every conversation) or under a FOLDER layer keyed by a manual sidebar ``folder_id``
   (injected only when the conversation is in that group — D4 方案 1). ``scope=None`` =
   global (the phase-1 behavior, unchanged → zero migration); ``scope=<folder_id>`` = that
-  group's project memory. 位置即作用域: complements §5.3, no manual switch.
+  group's folder memory. 位置即作用域: complements §5.3, no manual switch.
 - **偏好/画像 二分**: the always-injected core splits into ``PREFERENCES_MEMORY_FILE``
   (沟通/工作习惯, soft, GLOBAL-only) and ``CORE_MEMORY_FILE`` (技术栈/关于用户的事实, can be
-  global OR project). Different change-reasons → different files → different CAS.
+  global OR folder). Different change-reasons → different files → different CAS.
 
 Storage stays hidden behind ``MemoryStore`` so the eventual swap to the cloud file tree is
-a one-liner (then project memory = a folder's ``ai_maintained`` rule files, §5.4 终点形态).
+a one-liner (then folder memory = a folder's ``ai_maintained`` rule files, §5.4 终点形态).
+
+``project_scopes`` / ``_PROJECT_CONTAINER`` keep the old spelling: the former is the
+persisted REST + repository contract, the latter an on-disk directory name (双模式工作区 §5.4).
 """
 
 from __future__ import annotations
@@ -37,20 +40,20 @@ logger = get_logger(__name__)
 
 # A memory note's SCOPE (Agent记忆与知识系统 §1.4): ``None`` = global (the user's cloud root,
 # injected into every conversation); a ``str`` is a ``folder_id`` = that manual group's
-# project scope (injected only when the conversation is in that sidebar group — D4 方案 1,
+# folder scope (injected only when the conversation is in that sidebar group — D4 方案 1,
 # folder-refactor-design §8). 位置即作用域 — no manual switch.
 MemoryScope = str | None
 
 # The always-injected PROFILE core (§四「偏好/画像 二分」): durable facts ABOUT the user —
-# 技术栈与工具 + 关于用户的事实. Can be GLOBAL or PROJECT (a project's facts: "本仓用 Rust").
+# 技术栈与工具 + 关于用户的事实. Can be GLOBAL or FOLDER (a folder's facts: "本仓用 Rust").
 CORE_MEMORY_FILE = "画像.md"
 
 # The always-injected PREFERENCES core (§四): how to work WITH the user — 沟通偏好 + 工作习惯.
-# Soft, occasionally-tuned, universal → GLOBAL-only (never copied into each project, §二).
+# Soft, occasionally-tuned, universal → GLOBAL-only (never copied into each folder, §二).
 PREFERENCES_MEMORY_FILE = "偏好.md"
 
-# Project-only always-injected short entry (记忆 · 双层项目知识): one-line定位 + 任务路由.
-# Not in ALWAYS_MEMORY_FILES — global layer has no 导航; project inject appends after 画像.
+# Folder-only always-injected short entry (记忆 · 双层文件夹知识): one-line定位 + 任务路由.
+# Not in ALWAYS_MEMORY_FILES — global layer has no 导航; folder inject appends after 画像.
 NAVIGATION_MEMORY_FILE = "导航.md"
 
 # The two always-injected GLOBAL core files, in stable injection order (preferences then profile):
@@ -59,7 +62,7 @@ NAVIGATION_MEMORY_FILE = "导航.md"
 ALWAYS_MEMORY_FILES = (PREFERENCES_MEMORY_FILE, CORE_MEMORY_FILE)
 
 # On-demand topic notes (§三 / §六): ``<scope>/主题/<slug>.md`` — procedural /
-# project knowledge the agent pulls only when relevant (vs the always-injected core).
+# folder knowledge the agent pulls only when relevant (vs the always-injected core).
 TOPIC_DIR = "主题"
 
 # Session-summary (episodic) layer historically lived under ``情景/<id>.md`` in the
@@ -80,10 +83,10 @@ def episodic_path(episode_id: str) -> str:
     """Relative path for one episodic summary file."""
     return f"{EPISODIC_DIR}/{episode_id}.md"
 
-# Reserved subdir under a user's global folder that holds the PROJECT-scoped layers
+# Reserved subdir under a user's global folder that holds the FOLDER-scoped layers
 # (``<user>/_folders/<folder_id>/…``). Leading underscore + ``_safe_segment`` keep it from
 # ever colliding with a real note (core files are 偏好.md/画像.md; topics live under 主题/),
-# and the global ``list`` skips it so project notes never leak into the global layer.
+# and the global ``list`` skips it so folder notes never leak into the global layer.
 _PROJECT_CONTAINER = "_folders"
 
 
@@ -105,6 +108,16 @@ def topic_slug(path: str) -> str:
 _SEGMENT_SPLIT = re.compile(r"[\\/]+")
 
 
+def _frontmatter_description(markdown: str) -> str:
+    """A note's frontmatter ``description`` ("" when absent or unparseable)."""
+    from agentcore.documents.frontmatter import FrontmatterError, parse_entry_frontmatter
+
+    parsed = parse_entry_frontmatter(markdown)
+    if isinstance(parsed, FrontmatterError):
+        return ""
+    return parsed.description.strip()
+
+
 def memory_version(markdown: str) -> str:
     """A content-addressed version tag for a memory file (the editor's CAS baseline).
 
@@ -122,10 +135,20 @@ def memory_version(markdown: str) -> str:
 
 @dataclass(frozen=True)
 class MemoryFileMeta:
-    """One file in a user's memory folder: its relative path + per-file CAS tag."""
+    """One file in a user's memory folder: its relative path + per-file CAS tag.
+
+    ``description`` / ``disputed`` are entry metadata the document-backed store carries
+    alongside the body (the legacy file store has neither and leaves the defaults). They
+    ride the meta so the on-demand catalog can be built from ONE listing — no per-note
+    body load to guess a summary, and no second query to learn what the user disputed.
+    """
 
     path: str  # relative to the user's memory folder, e.g. "画像.md"
     version: str  # per-file CAS = ``memory_version`` of the file's bytes
+    # Frontmatter ``description`` — the retrieval summary the 按需目录 shows ("" = name only).
+    description: str = ""
+    # User marked this note wrong (纠错通道): still readable / editable, never injected.
+    disputed: bool = False
 
 
 class MemoryStore(Protocol):
@@ -133,9 +156,9 @@ class MemoryStore(Protocol):
 
     Addressed by ``(user_id, path, scope)`` where ``path`` is relative to that scope's
     memory folder (e.g. ``"画像.md"``) and ``scope`` selects the layer: ``None`` = global
-    (default → the phase-1 behavior, unchanged), a ``folder_id`` = that project. ``load``
+    (default → the phase-1 behavior, unchanged), a ``folder_id`` = that folder. ``load``
     of a missing file returns "" so callers never have to branch on existence; ``list`` of
-    one scope never returns notes from another (global ``list`` skips the project layers).
+    one scope never returns notes from another (global ``list`` skips the folder layers).
     """
 
     async def list(self, user_id: str, scope: MemoryScope = None) -> list[MemoryFileMeta]:
@@ -155,7 +178,7 @@ class MemoryStore(Protocol):
         ...
 
     async def project_scopes(self, user_id: str) -> list[str]:
-        """List manual-group ``folder_id``s whose PROJECT layer holds any memory (editor rail)."""
+        """List manual-group ``folder_id``s whose FOLDER layer holds any memory (editor rail)."""
         ...
 
 
@@ -165,9 +188,9 @@ class FileMemoryStore:
     Layout (Agent记忆与知识系统 §1.4):
     - GLOBAL (``scope=None``): ``<base>/<user_id>/<path>`` — unchanged from phase 1, so
       existing memory IS the global layer (zero migration).
-    - PROJECT (``scope=<folder_id>``): ``<base>/<user_id>/_folders/<folder_id>/<path>`` —
+    - FOLDER (``scope=<folder_id>``): ``<base>/<user_id>/_folders/<folder_id>/<path>`` —
       nested under the reserved ``_PROJECT_CONTAINER`` so the global ``list`` (which skips
-      that subdir) never returns a project's notes, and each project is isolated.
+      that subdir) never returns a folder's notes, and each folder is isolated.
 
     File I/O is synchronous but the files are tiny (a few KB), so it runs inline. Failures
     are logged and degrade to empty / no-op so memory never breaks a turn.
@@ -228,12 +251,18 @@ class FileMemoryStore:
                 if not path.is_file():
                     continue
                 rel = path.relative_to(scope_dir).as_posix()
-                # Global scope must not surface project notes nested under the reserved
-                # container; project scopes are already rooted inside their own dir.
+                # Global scope must not surface folder notes nested under the reserved
+                # container; folder scopes are already rooted inside their own dir.
                 if scope is None and rel.split("/", 1)[0] == _PROJECT_CONTAINER:
                     continue
-                version = memory_version(path.read_text(encoding="utf-8"))
-                metas.append(MemoryFileMeta(path=rel, version=version))
+                body = path.read_text(encoding="utf-8")
+                metas.append(
+                    MemoryFileMeta(
+                        path=rel,
+                        version=memory_version(body),
+                        description=_frontmatter_description(body),
+                    )
+                )
         except OSError as e:
             logger.warning("memory.list_failed", user_id=user_id, error=str(e))
         return metas
@@ -262,11 +291,11 @@ class FileMemoryStore:
             logger.warning("memory.delete_failed", user_id=user_id, error=str(e))
 
     async def project_scopes(self, user_id: str) -> list[str]:
-        """List ``folder_id``s whose PROJECT layer holds any memory file (editor rail §P2).
+        """List ``folder_id``s whose FOLDER layer holds any memory file (editor rail §P2).
 
         Scans the reserved ``_folders`` container for subdirs holding ≥1 ``.md`` — i.e. the
-        projects the offline consolidation has actually written memory for — so the「文件」
-        page surfaces a「本项目记忆」node only where there IS something to edit. ``folder_id``
+        folders the offline consolidation has actually written memory for — so the「文件」
+        page surfaces a「本文件夹记忆」node only where there IS something to edit. ``folder_id``
         is a server UUID, so ``_safe_segment`` is a no-op and the dir name IS the id.
         Degrades to [] on any I/O error (memory never breaks the page).
         """
@@ -278,7 +307,7 @@ class FileMemoryStore:
             for child in sorted(container.iterdir()):
                 if not child.is_dir():
                     continue
-                # Episodic digests alone must not surface a「本项目记忆」editor node —
+                # Episodic digests alone must not surface a「本文件夹记忆」editor node —
                 # only semantic notes (核心 / 主题) count.
                 has_semantic = any(
                     p.is_file() and EPISODIC_DIR not in p.relative_to(child).parts

@@ -113,6 +113,17 @@ class McpOpRequiredPayload(WirePayload):
     args: dict[str, Any] = Field(default_factory=dict)
 
 
+class AutoFolderCreatedPayload(WirePayload):
+    """裸聊写盘自动建的云文件夹（双模式工作区 §5.4 裸聊行）——告知落点，不改会话归属。
+
+    ``name`` 是建桌那一刻的名字；用户当场改名后客户端以文件夹现名为准（按 ``folder_id``
+    查），本 payload 不追改名。
+    """
+
+    folder_id: str
+    name: str
+
+
 class HandoffSnapshotDonePayload(WirePayload):
     snapshot_id: str
     conversation_id: str

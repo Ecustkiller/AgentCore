@@ -9,6 +9,11 @@ on project delete. Stock can contain two orphan shapes:
    ``folders`` row remains (purge removed the row; file tools later recreated
    the tree) → report in dry-run; ``--apply`` deletes the directory.
 
+``--apply`` does an unrecoverable ``rmtree``, so **which directories even count** is
+not this script's judgment to make: it asks ``workspace.layout``, the single source for
+"who is a user dir, who is a top-level system segment". What separates a ghost from an
+un-migrated folder is the ``folders`` join below, not the scan.
+
 Run from ``apps/server``::
 
     # preview (default)
@@ -25,7 +30,6 @@ import asyncio
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from uuid import UUID
 
 from sqlalchemy import select, update
 
@@ -33,7 +37,7 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.models import Conversation, Folder
-from agentcore.workspace.locate import workspace_root_path
+from agentcore.workspace.layout import iter_flat_folder_dirs, workspaces_base_path
 
 logger = get_logger(__name__)
 
@@ -42,11 +46,8 @@ __all__ = [
     "GhostDirReport",
     "cleanup_auto_desk_orphans",
     "folder_is_pointer_orphan",
-    "is_folder_id_segment",
     "summarize_workspace_dir",
 ]
-
-_RESERVED_USER_CHILDREN = frozenset({"conv"})
 
 
 @dataclass(frozen=True)
@@ -75,17 +76,6 @@ class CleanupStats:
     ghost_dirs_failed: int = 0
     failures: list[str] = field(default_factory=list)
     ghost_reports: list[GhostDirReport] = field(default_factory=list)
-
-
-def is_folder_id_segment(name: str) -> bool:
-    """True when ``name`` looks like a Folder UUID path segment (not ``conv``)."""
-    if not name or name in _RESERVED_USER_CHILDREN:
-        return False
-    try:
-        UUID(name)
-    except ValueError:
-        return False
-    return True
 
 
 def folder_is_pointer_orphan(folder: Folder | None) -> bool:
@@ -172,30 +162,6 @@ async def list_existing_folder_ids(folder_ids: set[str]) -> set[str]:
         return set(rows)
 
 
-def iter_candidate_ghost_dirs(workspaces_root: Path) -> list[tuple[str, str, Path]]:
-    """Scan ``workspaces/<user>/<folder_id>/`` candidates (skips ``conv`` / non-UUID)."""
-    found: list[tuple[str, str, Path]] = []
-    if not workspaces_root.is_dir():
-        return found
-    try:
-        user_dirs = sorted(p for p in workspaces_root.iterdir() if p.is_dir())
-    except OSError:
-        return found
-    for user_dir in user_dirs:
-        user_id = user_dir.name
-        if user_id == "shared":
-            continue
-        try:
-            children = sorted(p for p in user_dir.iterdir() if p.is_dir())
-        except OSError:
-            continue
-        for child in children:
-            if not is_folder_id_segment(child.name):
-                continue
-            found.append((user_id, child.name, child))
-    return found
-
-
 async def _cleanup_pointer_orphans(*, dry_run: bool, stats: CleanupStats) -> None:
     try:
         pointers = await list_auto_desk_pointer_rows()
@@ -253,8 +219,13 @@ async def _cleanup_pointer_orphans(*, dry_run: bool, stats: CleanupStats) -> Non
 
 
 async def _cleanup_ghost_dirs(*, dry_run: bool, stats: CleanupStats) -> None:
-    workspaces_root = Path(settings.data_dir) / "workspaces"
-    candidates = iter_candidate_ghost_dirs(workspaces_root)
+    # ``iter_flat_folder_dirs`` is the single judgment of "which directory belongs to
+    # which user" (``workspace.layout``). It matters that this scan does not roll its
+    # own: an allowlist of UUID-shaped user dirs is what keeps ``im/`` — a *sibling*
+    # of the user dirs whose children are chat UUIDs — from being read as a user whose
+    # every chat is an orphan folder dir, i.e. from ``--apply`` deleting every group
+    # chat's attachments.
+    candidates = iter_flat_folder_dirs(workspaces_base_path())
     stats.ghost_dirs_scanned = len(candidates)
     if not candidates:
         return
@@ -293,11 +264,11 @@ async def _cleanup_ghost_dirs(*, dry_run: bool, stats: CleanupStats) -> None:
                     approx_bytes=approx_bytes,
                 )
                 continue
-            # Prefer the canonical path helper (same layout as runtime / retention).
-            expected = workspace_root_path(
-                user_id=user_id, folder_id=folder_id, conversation_id=""
-            )
-            target = expected if expected.resolve() == path.resolve() else path
+            # The scan hands us the real directory. There is no canonical path to
+            # cross-check against any more: a live folder lives at its visible
+            # ``tree/<rel_path>``, so an id-named directory here is by definition a
+            # leftover the layout no longer addresses (双模式工作区 §5.4).
+            target = path
             shutil.rmtree(target, ignore_errors=False)
             stats.ghost_dirs_deleted += 1
             logger.info(

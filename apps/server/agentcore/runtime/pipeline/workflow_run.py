@@ -11,6 +11,7 @@ from contextvars import Token
 from types import SimpleNamespace
 from typing import Any, Protocol, cast
 
+from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.core.types import PermissionAxes, new_id
@@ -94,6 +95,12 @@ async def run_workflow_pipeline(
         permission_axes=(
             json.dumps(permission_axes.to_dict()) if permission_axes is not None else None
         ),
+    )
+    # 云对话多端同权 B2 §2.2: attention addressee for cards raised inside this run.
+    attention_token = bind_attention_scope(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
     )
     roster_writer = SessionRosterWriter.wrap(session_saver)
     session_saver_wrapped = roster_writer.save if roster_writer is not None else None
@@ -245,22 +252,25 @@ async def run_workflow_pipeline(
         salvaged["workflow_version"] = workflow_version
         return salvaged
     finally:
-        with contextlib.suppress(Exception):
-            from agentcore.runtime.interaction_orphan import orphan_registry_pending
+        # Cancel-safe teardown (see ``teardown_step``): a second Stop must not pierce
+        # the block and skip the remaining flushes / release.
+        from agentcore.runtime.interaction_orphan import orphan_registry_pending
+        from agentcore.runtime.pipeline.teardown import teardown_step
 
-            await orphan_registry_pending(conversation_id, turn_id=message_id)
+        await teardown_step(
+            orphan_registry_pending(conversation_id, turn_id=message_id),
+            step="orphan_registry_pending",
+        )
         current_fact_log.reset(fact_log_token)
-        with contextlib.suppress(Exception):
-            await journal_writer.flush()
+        await teardown_step(journal_writer.flush(), step="journal_flush")
         current_journal_writer.reset(journal_token)
         from agentcore.runtime.audit.recorder import current_audit_recorder
 
-        with contextlib.suppress(Exception):
-            await audit_recorder.flush()
-        with contextlib.suppress(Exception):
-            if roster_writer is not None:
-                await roster_writer.flush()
+        await teardown_step(audit_recorder.flush(), step="audit_flush")
+        if roster_writer is not None:
+            await teardown_step(roster_writer.flush(), step="roster_flush")
         current_audit_recorder.reset(audit_token)
+        reset_attention_scope(attention_token)
         turn_history.reset(history_token)
         turn_citations.reset(citations_token)
         turn_evidence_ledger.reset(ledger_token)
@@ -278,5 +288,4 @@ async def run_workflow_pipeline(
                     )
             current_execution_id.reset(execution_id_token)
         if llm is not None:
-            with contextlib.suppress(Exception):
-                await llm.close()
+            await teardown_step(llm.close(), step="llm_close")

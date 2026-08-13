@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from agentcore.core.log_context import clear_log_context, log_context
+from agentcore.llm.provider.protocol import TokenUsage
 from agentcore.runtime.journal.pending_interactions import (
     fold_interactions,
     fold_pending_interactions,
@@ -869,6 +870,7 @@ def _debate_tool_for_stage_card_finalize(sink=None):
         conversation_id="conv_sc",
         message_id="m_debate",
         captain_run_id="captain",
+        approval_gate=None,
     )
 
 
@@ -959,6 +961,10 @@ async def test_finalize_at_debate_started_before_moderator_run(monkeypatch):
         assert kwargs["host_turn_id"] == "turn_host"
 
     class _FakeModerator:
+        # 崩溃后 _run_moderator 的 finally 要发终帧 + 入账，故 double 须带用量面。
+        usage = TokenUsage()
+        llm_rounds = 0
+
         def __init__(self, **_kw):
             pass
 

@@ -106,7 +106,7 @@ async def test_prepare_fresh_turn_aborts_when_channel_dead_skips_llm(
         _empty_rules,
     )
     monkeypatch.setattr(
-        "agentcore.runtime.pipeline.prepare.load_project_catalog",
+        "agentcore.runtime.pipeline.prepare.load_folder_catalog",
         _empty_catalog,
     )
 

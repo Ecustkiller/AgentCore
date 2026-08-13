@@ -11,6 +11,7 @@ import { ResumePrompt } from "../ResumePrompt";
 
 vi.mock("@/services/interactionSubmit", () => ({
   submitInteraction: vi.fn().mockResolvedValue("ok"),
+  notifySubmitInteractionResult: vi.fn(),
   submitInteractionFeedback: (result: "busy" | "orphaned") =>
     result === "orphaned" ? "确认已失效" : "请稍候再试",
 }));

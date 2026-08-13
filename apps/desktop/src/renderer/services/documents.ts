@@ -12,6 +12,9 @@ import { api } from "@/services/api";
  * Always-pool meter: {@link getAlwaysQuota}. Write past the cap while editing an
  * existing always entry returns `quota_warning`; create / promote past the cap is
  * 409 `ALWAYS_QUOTA_EXCEEDED`.
+ *
+ * 纠错通道: {@link setDocumentDisputed} marks an entry「这条不对」so the AI stops using
+ * it while the entry itself stays readable (`disputedAt`).
  */
 
 /** Cloud-documents convention root name (§5.0). ≠ local disk `~/Documents/AgentCore`. */
@@ -55,6 +58,11 @@ export interface DocumentNode {
    * Matches server `always_entry_chars` so row totals == meter `usedChars`.
    */
   alwaysChars: number | null;
+  /**
+   * When the user marked this entry wrong (`null` = live). Disputed entries are kept and
+   * still editable here, but the AI stops injecting / consulting them (纠错通道).
+   */
+  disputedAt: string | null;
 }
 
 /** A node plus its markdown body + content-hash CAS tag (the editor's load payload). */
@@ -100,6 +108,7 @@ interface DocumentNodeWire {
   name: string;
   frontmatter_error?: string | null;
   always_chars?: number | null;
+  disputed_at?: string | null;
 }
 
 interface DocumentDetailWire extends DocumentNodeWire {
@@ -139,6 +148,7 @@ const toNode = (w: DocumentNodeWire): DocumentNode => ({
     typeof w.always_chars === "number" && Number.isFinite(w.always_chars)
       ? w.always_chars
       : null,
+  disputedAt: w.disputed_at?.trim() || null,
 });
 
 const toDetail = (w: DocumentDetailWire): DocumentDetail => ({
@@ -327,6 +337,25 @@ export function updateDocumentApplyMode(
   return api
     .patch<DocumentNodeWire>(`/v1/documents/${encodeURIComponent(id)}`, {
       apply_mode: applyMode,
+    })
+    .then(toNode);
+}
+
+/**
+ * Mark an entry as wrong / undo that mark (纠错通道「这条不对」).
+ *
+ * Explicit user action only — nothing here is inferred from what was said in a
+ * conversation. A disputed entry stops being injected and stops appearing in the AI's
+ * on-demand catalog, but is neither deleted nor rewritten, so the user can read what was
+ * wrong and undo the mark.
+ */
+export function setDocumentDisputed(
+  id: string,
+  disputed: boolean,
+): Promise<DocumentNode> {
+  return api
+    .patch<DocumentNodeWire>(`/v1/documents/${encodeURIComponent(id)}`, {
+      disputed,
     })
     .then(toNode);
 }

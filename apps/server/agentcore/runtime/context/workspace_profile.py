@@ -264,7 +264,7 @@ def render_workspace_profile(profile: WorkspaceProfile) -> str:
     result = "\n".join(f"- {p}" for p in parts)
 
     if profile.agents_md_excerpt:
-        result += f"\n- 项目约定摘录：\n  > {profile.agents_md_excerpt[:200]}"
+        result += f"\n- 工程约定摘录：\n  > {profile.agents_md_excerpt[:200]}"
 
     if len(result) > 600:
         result = result[:597] + "..."

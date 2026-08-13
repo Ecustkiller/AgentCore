@@ -16,6 +16,14 @@ export const conversationKeys = {
     ["collaboration-timeline", folderId] as const,
 };
 
+/** 项目（folder）自有的查询面。The live folder list itself rides on
+ * `conversationKeys.grouped`; only the recycle bin has its own trip. */
+export const folderKeys = {
+  all: ["folders"] as const,
+  /** 最近删除（`GET /v1/folders/trash`）— 已删项目 + 保留天数. */
+  trash: ["folders", "trash"] as const,
+};
+
 export const workspaceKeys = {
   all: ["workspaces"] as const,
   /** The user's workspaces (= folders, cloud + local) for the 文件 hub rail

@@ -12,7 +12,6 @@ from agentcore.config import settings
 from scripts.cleanup_auto_desk_orphans import (
     cleanup_auto_desk_orphans,
     folder_is_pointer_orphan,
-    is_folder_id_segment,
     summarize_workspace_dir,
 )
 
@@ -20,15 +19,6 @@ from scripts.cleanup_auto_desk_orphans import (
 @pytest.fixture(autouse=True)
 def _redirect_data_dir(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(settings, "data_dir", str(tmp_path))
-
-
-def test_is_folder_id_segment_accepts_uuid_only():
-    fid = str(uuid4())
-    assert is_folder_id_segment(fid)
-    assert not is_folder_id_segment("conv")
-    assert not is_folder_id_segment("shared")
-    assert not is_folder_id_segment("not-a-uuid")
-    assert not is_folder_id_segment("")
 
 
 def test_folder_is_pointer_orphan_missing_and_soft_deleted():
@@ -170,6 +160,52 @@ async def test_cleanup_apply_nulls_pointers_and_deletes_ghost(tmp_path: Path):
     assert not ghost.exists()
     assert (live_dir / "stay.txt").is_file()
     assert (scratch / "scratch.txt").is_file()
+
+
+@pytest.mark.asyncio
+async def test_apply_never_touches_im_or_shared_spaces(tmp_path: Path):
+    """``im/`` 与用户目录平级，其子目录是 chat UUID —— 误当用户目录扫就是删光群聊附件。
+
+    黑名单式判据（「只跳过 shared」）正是这么漏的：``im`` 不在名单里，它下面每个
+    chat 都通过 UUID 判定、在 folders 表查无此行，然后被 ``--apply`` rmtree。
+    """
+    user_id = str(uuid4())
+    ghost_id = str(uuid4())
+    chat_id = str(uuid4())
+    space_id = str(uuid4())
+
+    ghost = tmp_path / "workspaces" / user_id / ghost_id
+    ghost.mkdir(parents=True)
+    (ghost / "gone.txt").write_text("x", encoding="utf-8")
+    chat_attachment = tmp_path / "workspaces" / "im" / chat_id / "群聊附件.png"
+    chat_attachment.parent.mkdir(parents=True)
+    chat_attachment.write_bytes(b"\x89PNG")
+    shared_file = tmp_path / "workspaces" / "shared" / space_id / "共享.md"
+    shared_file.parent.mkdir(parents=True)
+    shared_file.write_text("s", encoding="utf-8")
+
+    with (
+        patch(
+            "scripts.cleanup_auto_desk_orphans.list_auto_desk_pointer_rows",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch(
+            "scripts.cleanup_auto_desk_orphans.load_folders_by_id",
+            new=AsyncMock(return_value={}),
+        ),
+        patch(
+            "scripts.cleanup_auto_desk_orphans.list_existing_folder_ids",
+            new=AsyncMock(return_value=set()),
+        ),
+    ):
+        stats = await cleanup_auto_desk_orphans(dry_run=False)
+
+    # 只有真用户目录下那一个 id 命名目录进了候选集。
+    assert stats.ghost_dirs_scanned == 1
+    assert stats.ghost_dirs_deleted == 1
+    assert not ghost.exists()
+    assert chat_attachment.read_bytes() == b"\x89PNG"
+    assert shared_file.is_file()
 
 
 @pytest.mark.asyncio

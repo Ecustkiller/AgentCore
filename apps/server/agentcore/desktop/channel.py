@@ -6,6 +6,12 @@ affordances that only exist in the Electron shell (native notifications + Host o
 Wired whenever the desktop client is online (local workspace **or** cloud +
 ``desktop_online``) — never by pinging ``127.0.0.1`` from the cloud API process.
 Delivery goes through the device-level fulfill hub (not the turn display sink).
+
+Host ops, MCP stdio servers and read-only mounts all act on one specific
+machine, so they are pinned to the device that started the turn
+(``fulfill.hub.ORIGIN_PINNED_CHANNELS``) and fail honestly when it goes away.
+Native notifications are not: a reminder is worth showing on whichever install
+the user still has open.
 """
 
 from __future__ import annotations
@@ -16,6 +22,7 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.fulfill.origin import ORIGIN_DEVICE_OFFLINE
 from agentcore.runtime.events.client_tool_reattach import (
     CHANNEL_EXTERNAL_MOUNT,
     CHANNEL_HOST,
@@ -202,6 +209,7 @@ class DesktopClientChannel:
                     request_id=request_id,
                     error_kind="ExternalMountError",
                     error_detail="挂载本机目录失败: no fulfiller（无履约方）",
+                    origin_offline_detail=f"挂载本机目录失败: {ORIGIN_DEVICE_OFFLINE}",
                 ),
             )
         except TimeoutError as e:
@@ -272,6 +280,9 @@ class DesktopClientChannel:
                     error_detail=(
                         f"本机 Host 操作失败（{op_name}）: no fulfiller（无履约方）"
                     ),
+                    origin_offline_detail=(
+                        f"本机 Host 操作失败（{op_name}）: {ORIGIN_DEVICE_OFFLINE}"
+                    ),
                 ),
             )
         except TimeoutError as e:
@@ -335,6 +346,9 @@ class DesktopClientChannel:
                     error_kind="McpOpError",
                     error_detail=(
                         f"本机 MCP 操作失败（{op_name}）: no fulfiller（无履约方）"
+                    ),
+                    origin_offline_detail=(
+                        f"本机 MCP 操作失败（{op_name}）: {ORIGIN_DEVICE_OFFLINE}"
                     ),
                 ),
             )

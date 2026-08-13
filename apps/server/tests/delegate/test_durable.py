@@ -355,6 +355,40 @@ async def test_resume_plan_continue_runs_only_the_tail():
     assert run_plans[0].payload["execution_id"] == "e"
 
 
+async def test_resume_plan_drops_direct_answer_register_from_finalize_batch():
+    """续跑不直出（drive 恒 finalize=False）⇒ 快照带回的收口批标记要回落。
+
+    否则恢复后才起跑的 worker 身份会说「正文原样呈给用户」，实际却回主管合成。
+    """
+    from agentcore.runtime.runs import build_run_plan
+
+    plan, _ = build_run_plan(
+        [{"role": "工程师", "task": "改一行"}],
+        valid_tools=set(),
+        id_prefix="del_solo",
+        parent_run_id="CEO",
+        depth=1,
+    )
+    plan.finalize = True  # 快照折回的收口批
+    provider = Provider(["OUT"])
+    t = tool(provider)
+    await t.resume_plan(
+        plan,
+        {},
+        decision=CheckpointDecision.CONTINUE,
+        note="",
+        checkpoint_run_ids=set(),
+        execution_id="e",
+        apply_kickoff_grant=True,
+    )
+    assert plan.finalize is False
+    worker_sys = next(
+        (m.content or "" for m in provider.requests[0].messages if m.role == "system"),
+        "",
+    )
+    assert "正文直达用户" not in worker_sys
+
+
 async def test_resume_plan_stop_skips_the_tail():
     plan = resume_plan()
     seed = {plan.nodes[0].run_id: RunState(phase=RunPhase.COMPLETED, content="S1OUT")}

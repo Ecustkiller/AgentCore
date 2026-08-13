@@ -150,8 +150,8 @@ async def apply_replan(
             user_id=(getattr(ctx, "user_id", "") or "") if ctx else "",
             conversation_id=getattr(tool, "_conversation_id", None)
             or (getattr(ctx, "conversation_id", None) if ctx else None),
-            user_message=getattr(tool, "_user_message", None),
             tool_context=ctx,
+            sink=getattr(tool, "_sink", None),
         )
         bare_gate = gate_bare_chat_requires_target(
             session_folder_id=getattr(tool, "_folder_id", None),
@@ -339,13 +339,15 @@ def _admit_replan_adds_against_coordination(
     """Seat/artifact admit for replan.adds; ``None`` when no session or admitted."""
     from agentcore.core.logging import get_logger
     from agentcore.runtime.coordination.append_guard import admit_added_nodes
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
     from agentcore.runtime.runs.plan import RunPlan as Plan
     from agentcore.workspace.write_claims import file_ownership_v2_enabled
 
     session = _replan_coordination_session(tool, plan)
     if session is None:
         return None
-    force = getattr(tool, "_delegate_force", False) is True
+    # replan 在入口重解析自己的 force（见 DelegateTool.replan）——不继承上一次 delegate。
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
     ownership = (
         session.ensure_file_ownership() if file_ownership_v2_enabled() else None
     )
@@ -379,6 +381,7 @@ def _declare_replan_adds_on_coordination(
 ) -> None:
     """Dispatch ownership for admitted replan.adds (replaces → transfer_all_from)."""
     from agentcore.runtime.coordination.append_guard import declare_plan_artifacts
+    from agentcore.runtime.delegate.force_scopes import GATE_SEAT_OVERLAP, force_allows
     from agentcore.runtime.runs.executor.context import _ancestors_by_id
     from agentcore.workspace.write_claims import file_ownership_v2_enabled
 
@@ -390,7 +393,7 @@ def _declare_replan_adds_on_coordination(
     session.total_workers = len(plan.nodes)
     if not file_ownership_v2_enabled() or not new_specs:
         return
-    force = getattr(tool, "_delegate_force", False) is True
+    force = force_allows(tool, GATE_SEAT_OVERLAP)
     declare_plan_artifacts(
         plan,
         session.ensure_file_ownership(),
@@ -447,6 +450,7 @@ async def finalize_stopped(
             results,
             execution_id=tool._base_tool_context.execution_id,
             backend=tool._base_tool_context.backend,
+            promotion_ledger=tool._base_tool_context.promotion_ledger,
         )
     accumulate_usage(tool, results)
     collect_ledger(tool, plan, results)

@@ -28,6 +28,24 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
     }
   });
 
+  it("allows the paired *_resolved settlement events when stopping/terminal", () => {
+    // 卡能在这个窗画出来（上一条），它的收口帧就只可能在同一个窗到：另一端拍板 /
+    // CEO 仲裁 / 超时兜底都没有本端的乐观收口可依，挡掉就永远停在 pending。
+    for (const wire of Object.values(INTERACTION_KIND_WIRE)) {
+      if (!wire.resolvedEvent) continue;
+      expect(allowsSseEvent("completed", wire.resolvedEvent)).toBe(true);
+      expect(allowsSseEvent("stopping", wire.resolvedEvent)).toBe(true);
+    }
+  });
+
+  it.each(TERMINAL_OR_STOPPING)(
+    "allows approval_resolved / stage_card_resolved in phase %s",
+    (phase) => {
+      expect(allowsSseEvent(phase, "approval_resolved")).toBe(true);
+      expect(allowsSseEvent(phase, "stage_card_resolved")).toBe(true);
+    },
+  );
+
   it("still blocks content mutations on stopping/terminal", () => {
     for (const phase of TERMINAL_OR_STOPPING) {
       expect(allowsSseEvent(phase, "content_delta")).toBe(false);
@@ -47,6 +65,13 @@ describe("allowsSseEvent — interaction *_required on stopping/terminal", () =>
     (phase) => {
       expect(allowsSseEvent(phase, "user_interjection")).toBe(true);
       expect(allowsSseEvent(phase, "turn_queued")).toBe(true);
+    },
+  );
+
+  it.each(TERMINAL_OR_STOPPING)(
+    "allows interaction_orphaned in phase %s (收尾 orphan 只出现在这里)",
+    (phase) => {
+      expect(allowsSseEvent(phase, "interaction_orphaned")).toBe(true);
     },
   );
 

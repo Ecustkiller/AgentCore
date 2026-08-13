@@ -44,10 +44,10 @@ def fs_storage(tmp_path: Path, monkeypatch):
 
 
 async def test_create_then_list_and_download(fs_storage):
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "report.md").write_text("done", encoding="utf-8")
 
-    ref = await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
+    ref = await create_snapshot(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
     listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
     assert [r.snapshot_id for r in listed] == [ref.snapshot_id]
 
@@ -58,40 +58,40 @@ async def test_create_then_list_and_download(fs_storage):
 
 
 async def test_restore_recovers_deleted_file(fs_storage):
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="c9")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="c9")
     (root / "keep.txt").write_text("v1", encoding="utf-8")
-    ref = await create_snapshot(user_id="u1", folder_id=None, conversation_id="c9")
+    ref = await create_snapshot(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c9")
 
     # User (or agent) wipes the file after the snapshot.
     (root / "keep.txt").unlink()
     assert not (root / "keep.txt").exists()
 
     await restore_snapshot(
-        user_id="u1", folder_id=None, conversation_id="c9", snapshot_id=ref.snapshot_id
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="c9", snapshot_id=ref.snapshot_id
     )
     assert (root / "keep.txt").read_text(encoding="utf-8") == "v1"
 
 
 async def test_project_snapshots_are_shared(fs_storage):
     """Sibling conversations in the same project share snapshot history."""
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "shared.txt").write_text("x", encoding="utf-8")
-    ref = await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
+    ref = await create_snapshot(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
 
     listed_c2 = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c2")
     assert ref.snapshot_id in {r.snapshot_id for r in listed_c2}
 
 
 async def test_label_is_preserved(fs_storage):
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "a.txt").write_text("x", encoding="utf-8")
-    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1", label="milestone")
+    await create_snapshot(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", label="milestone")
     listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
     assert listed[0].label == "milestone"
 
 
 async def test_read_unknown_snapshot_raises(fs_storage):
-    resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     with pytest.raises(SnapshotNotFound):
         await read_snapshot(
             user_id="u1", folder_id="f1", conversation_id="c1", snapshot_id="missing"
@@ -100,11 +100,11 @@ async def test_read_unknown_snapshot_raises(fs_storage):
 
 async def test_auto_snapshot_cap_prunes_oldest(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 3)
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="cap")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="cap")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
     refs = [
-        await create_snapshot(user_id="u1", folder_id=None, conversation_id="cap") for _ in range(5)
+        await create_snapshot(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="cap") for _ in range(5)
     ]
     listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="cap")
     # Only the 3 newest auto snapshots survive; the 2 oldest were pruned.
@@ -113,13 +113,13 @@ async def test_auto_snapshot_cap_prunes_oldest(fs_storage, monkeypatch):
 
 async def test_labeled_snapshots_survive_cap(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 1)
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="kept")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="kept")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
-    kept = await create_snapshot(user_id="u1", folder_id=None, conversation_id="kept", label="v1")
+    kept = await create_snapshot(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="kept", label="v1")
     # Several auto snapshots that would blow past the cap of 1.
     for _ in range(3):
-        await create_snapshot(user_id="u1", folder_id=None, conversation_id="kept")
+        await create_snapshot(user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="kept")
 
     listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="kept")
     labels = [r.snapshot_id for r in listed if r.label == "v1"]
@@ -132,20 +132,20 @@ async def test_system_baseline_cap_prunes_oldest(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 2)
     monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 10)
     monkeypatch.setattr(settings, "workspace_system_snapshot_retention_days", 30)
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="base")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="base")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
     refs = [
         await create_snapshot(
             user_id="u1",
-            folder_id=None,
+            folder_id=None, folder_rel_path=None,
             conversation_id="base",
             label=f"turn-baseline:m{i}",
         )
         for i in range(4)
     ]
     pin = await create_snapshot(
-        user_id="u1", folder_id=None, conversation_id="base", label="发版前"
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="base", label="发版前"
     )
     listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="base")
     ids = {r.snapshot_id for r in listed}
@@ -159,17 +159,17 @@ async def test_system_baseline_cap_prunes_oldest(fs_storage, monkeypatch):
 async def test_system_export_cap_prunes_oldest(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 5)
     monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 2)
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="exp")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="exp")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
     a = await create_snapshot(
-        user_id="u1", folder_id=None, conversation_id="exp", label="导出"
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="exp", label="导出"
     )
     b = await create_snapshot(
-        user_id="u1", folder_id=None, conversation_id="exp", label="导出到本地"
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="exp", label="导出到本地"
     )
     c = await create_snapshot(
-        user_id="u1", folder_id=None, conversation_id="exp", label="合回到本机"
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="exp", label="合回到本机"
     )
     listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="exp")
     ids = {r.snapshot_id for r in listed}
@@ -183,18 +183,18 @@ async def test_system_prune_keeps_pinned_over_cap(fs_storage, monkeypatch):
     monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 1)
     monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 1)
 
-    root = resolve_workspace_root(user_id="u1", folder_id=None, conversation_id="pin")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="pin")
     (root / "f.txt").write_text("x", encoding="utf-8")
 
     old_base = await create_snapshot(
         user_id="u1",
-        folder_id=None,
+        folder_id=None, folder_rel_path=None,
         conversation_id="pin",
         label="turn-baseline:old",
     )
     old_handoff = await create_snapshot(
         user_id="u1",
-        folder_id=None,
+        folder_id=None, folder_rel_path=None,
         conversation_id="pin",
         label="handoff:2026-01-01T00:00:00Z",
     )
@@ -209,13 +209,13 @@ async def test_system_prune_keeps_pinned_over_cap(fs_storage, monkeypatch):
 
     await create_snapshot(
         user_id="u1",
-        folder_id=None,
+        folder_id=None, folder_rel_path=None,
         conversation_id="pin",
         label="turn-baseline:new",
     )
     await create_snapshot(
         user_id="u1",
-        folder_id=None,
+        folder_id=None, folder_rel_path=None,
         conversation_id="pin",
         label="handoff:2026-01-02T00:00:00Z",
     )
@@ -227,10 +227,10 @@ async def test_system_prune_keeps_pinned_over_cap(fs_storage, monkeypatch):
 
 
 async def test_purge_snapshots_clears_history(fs_storage):
-    root = resolve_workspace_root(user_id="u1", folder_id="f1", conversation_id="c1")
+    root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "a.txt").write_text("x", encoding="utf-8")
-    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1")
-    await create_snapshot(user_id="u1", folder_id="f1", conversation_id="c1", label="v1")
+    await create_snapshot(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1")
+    await create_snapshot(user_id="u1", folder_id="f1", folder_rel_path="f1", conversation_id="c1", label="v1")
 
     await purge_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")
     listed = await list_snapshots(user_id="u1", folder_id="f1", conversation_id="c1")

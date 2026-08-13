@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.runtime.debate import DebateConfig
 from agentcore.runtime.debate.constants import FORM_LABELS
-from agentcore.runtime.events import run_completed, run_plan
+from agentcore.runtime.events import run_completed, run_failed, run_plan
 
 if TYPE_CHECKING:
-    from agentcore.runtime.debate import DebateResult
     from agentcore.runtime.debate.moderator import Moderator
     from agentcore.tools.builtin.debate.tool import DebateTool
 
@@ -96,37 +95,56 @@ def run_payload(node) -> dict[str, Any]:
     return payload
 
 
-def account_moderator(
+def settle_moderator_node(
     tool: DebateTool,
-    moderator: Moderator,
+    moderator: Moderator | None,
     moderator_run_id: str,
     model: str,
-    result: DebateResult,
+    *,
+    summary: str,
     duration_ms: int,
+    error: str = "",
 ) -> None:
-    """主持人节点收尾：emit run_completed（耗时 + 成本 + 「N 轮·收敛归因」概览，团队图据此
-    标完成），并把主持人自身 LLM 调用（议题 / 裁判 / 小结 / 简报）折算成一条主持人节点账目。"""
+    """主持人节点的**唯一终帧出口** —— 一帧必发、只发一次，用量两路都入账。
+
+    ``error`` 为空 → ``run_completed``（正常收场 / plan-only 记录计划即止）；非空 →
+    ``run_failed``（辩论中途崩溃）。此前只有成功分支发终帧，异常一路 ``return err(...)``
+    直接走掉，协作图上的主持人节点永久停在 running、主持人自身那几次 LLM 调用（议题 /
+    裁判 / 小结 / 简报）也整笔丢账——异常不是不花钱。
+
+    幂等：成功路径在 ``debate_result`` 之前提前调一次以钉住线序（``run_completed`` →
+    ``debate_result``，见 conformance 向量 ``debate/debate_single``），``_run_moderator``
+    的 ``finally`` 再兜一次；先到先发，后到即返回。
+    """
     from agentcore.llm.pricing import calculate_cost
+    from agentcore.llm.provider.protocol import TokenUsage
     from agentcore.runtime.costing import ROLE_ARENA
     from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
-    usage = moderator.usage
+    if tool._moderator_settled:
+        return
+    tool._moderator_settled = True
+
+    usage = moderator.usage if moderator is not None else TokenUsage()
     cost = calculate_cost(model, usage)
-    summary = result.node_summary
-    tool._sink.emit(
-        run_completed(
-            moderator_run_id,
-            moderator_run_id,
-            output_summary=summary,
-            duration_ms=duration_ms,
-            role="主持人",
-            model=model,
-            usage=usage.as_dict(),
-            cost=asdict(cost),
+    if error:
+        # run_failed 无 usage / cost 字段（全平台失败帧同形）：钱走 ``_acc`` 折回回合总账。
+        tool._sink.emit(run_failed(moderator_run_id, moderator_run_id, error))
+    else:
+        tool._sink.emit(
+            run_completed(
+                moderator_run_id,
+                moderator_run_id,
+                output_summary=summary,
+                duration_ms=duration_ms,
+                role="主持人",
+                model=model,
+                usage=usage.as_dict(),
+                cost=asdict(cost),
+            )
         )
-    )
     if usage.total_tokens <= 0:
-        return  # 无 LLM 用量（极端）则不另记账目，但主持人节点已 emit 完成态。
+        return  # 无 LLM 用量（极端）则不另记账目，但主持人节点已落终态。
     spec = RunSpec(
         run_id=moderator_run_id,
         agent_id=moderator_run_id,
@@ -134,11 +152,11 @@ def account_moderator(
         role="主持人",
     )
     state = RunState(
-        phase=RunPhase.COMPLETED,
+        phase=RunPhase.FAILED if error else RunPhase.COMPLETED,
         model=model,
         usage=usage.as_dict(),
         cost=asdict(cost),
-        rounds=moderator.llm_rounds,
+        rounds=moderator.llm_rounds if moderator is not None else 0,
     )
     tool._acc.add_run_cost(
         spec, state, parent_run_id=tool._captain_run_id, role=ROLE_ARENA

@@ -24,6 +24,7 @@ from agentcore.runtime.runs.serialize import (
     transcript_to_json,
 )
 from agentcore.runtime.runs.types import Deliverable, RunKind, RunPhase, RunPolicy, RunState
+from agentcore.tools.file_products import file_product, with_file_products_marker
 
 
 def _assistant_call(call_id: str, name: str, arguments: str) -> LLMMessage:
@@ -36,30 +37,43 @@ def _assistant_call(call_id: str, name: str, arguments: str) -> LLMMessage:
     )
 
 
+def _landed(call_id: str, content: str, *paths: str) -> LLMMessage:
+    """A tool result as the ENGINE stamps it: prose receipt + the tool's self-reported产物.
+
+    Producer side is the real one (``with_file_products_marker`` — what
+    ``tool_exec_call`` calls with ``ToolResult.file_products``), so these tests pin the
+    producer↔consumer format the same way the ``tool_failed`` trailer is pinned.
+    """
+    return _tool_result(
+        call_id, with_file_products_marker(content, [file_product(p) for p in paths])
+    )
+
+
 def test_files_touched_from_transcript_collects_produced_paths_in_order():
     transcript = [
         LLMMessage(role="user", content="建站"),
         _assistant_call("c1", "file_write", '{"path": "index.html", "content": "<html>"}'),
-        LLMMessage(role="tool", content="已写入", tool_call_id="c1"),
-        _assistant_call("c2", "web_search", '{"query": "x"}'),  # non-mutating → ignored
+        _landed("c1", "已写入", "index.html"),
+        _assistant_call("c2", "web_search", '{"query": "x"}'),  # produced nothing → ignored
+        _tool_result("c2", "搜索结果…"),
         _assistant_call(
             "c3", "str_replace", '{"path": "index.html", "old_string": "a", "new_string": "b"}'
         ),
-        LLMMessage(role="tool", content="已替换", tool_call_id="c3"),
+        _landed("c3", "已替换", "index.html"),
         _assistant_call("c4", "file_move", '{"source": "a.txt", "destination": "docs/b.txt"}'),
-        LLMMessage(role="tool", content="已移动", tool_call_id="c4"),
+        _landed("c4", "已移动", "docs/b.txt"),
         LLMMessage(role="assistant", content="完成"),
     ]
-    # index.html deduped (write + edit), file_move records its destination, web_search dropped.
+    # index.html deduped (write + edit), file_move reports its destination, search dropped.
     assert files_touched_from_transcript(transcript) == ["index.html", "docs/b.txt"]
 
 
 def test_files_touched_from_transcript_collects_file_append():
     transcript = [
         _assistant_call("c1", "file_write", '{"path": "doc.md", "content": "# Title"}'),
-        _tool_result("c1", "已写入"),
+        _landed("c1", "已写入", "doc.md"),
         _assistant_call("c2", "file_append", '{"path": "doc.md", "content": "\\n## Section"}'),
-        _tool_result("c2", "已追加"),
+        _landed("c2", "已追加", "doc.md"),
     ]
     assert files_touched_from_transcript(transcript) == ["doc.md"]
 
@@ -72,9 +86,38 @@ def test_files_touched_from_transcript_collects_file_copy():
             "file_copy",
             '{"source": "staging/out.pptx", "destination": "deliverables/deck.pptx"}',
         ),
-        _tool_result("c1", "已把 staging/out.pptx 复制到 deliverables/deck.pptx"),
+        _landed(
+            "c1",
+            "已把 staging/out.pptx 复制到 deliverables/deck.pptx",
+            "deliverables/deck.pptx",
+        ),
     ]
     assert files_touched_from_transcript(transcript) == ["deliverables/deck.pptx"]
+
+
+def test_file_products_from_transcript_keeps_kind_and_derived_from():
+    """台账带类型: a self-reported product carries its kind (+ export lineage)."""
+    from agentcore.runtime.runs.serialize import file_products_from_transcript
+
+    transcript = [
+        _assistant_call("c1", "file_write", '{"path": "报告.md", "content": "# 标题"}'),
+        _landed("c1", "已写入", "报告.md"),
+        _assistant_call("c2", "md_to_docx", '{"path": "报告.md"}'),
+        _tool_result(
+            "c2",
+            with_file_products_marker(
+                "已导出 报告.docx",
+                [file_product("报告.docx", derived_from="报告.md")],
+            ),
+        ),
+    ]
+    products = file_products_from_transcript(transcript)
+    assert [(p.path, p.kind, p.derived_from) for p in products] == [
+        ("报告.md", "md", None),
+        ("报告.docx", "docx", "报告.md"),
+    ]
+    # ``files_touched`` stays the path projection of the very same list.
+    assert files_touched_from_transcript(transcript) == ["报告.md", "报告.docx"]
 
 
 def test_landing_write_failure_kind_channel_dead_vs_write_failed():
@@ -105,21 +148,26 @@ def test_landing_write_failure_kind_channel_dead_vs_write_failed():
     assert landing_write_failure_kind([]) is None
 
 
-def test_files_touched_from_transcript_skips_malformed_and_pathless():
+def test_files_touched_ignores_prose_receipts_without_self_report():
+    """散文回执不是事实: only a self-reported product lands in the ledger.
+
+    A write whose result carries no product marker (older frame, non-landing tool,
+    a model echoing「已写入」in its own prose) contributes nothing — the ledger never
+    re-derives paths from call arguments.
+    """
     transcript = [
         _assistant_call("c1", "file_write", "not valid json"),
         _tool_result("c1", "已写入"),
-        _assistant_call("c2", "file_read", '{"path": "x"}'),  # read is not a product
+        _assistant_call("c2", "file_read", '{"path": "x"}'),  # read produces nothing
         _tool_result("c2", "内容"),
-        _assistant_call("c3", "file_write", '{"content": "no path here"}'),
-        _tool_result("c3", "已写入"),
+        LLMMessage(role="assistant", content="我已经写好了 report.md"),
     ]
     assert files_touched_from_transcript(transcript) == []
 
 
 def test_files_touched_skips_failed_or_denied_file_write():
-    # 执行成功口径: allowlist / 审批 / 熔断拒绝与执行失败均带 tool_failed 尾注 → 不记账；
-    # 无 tool result 的裸调用也不记账（意图不等于落盘）。
+    # 失败 / 被拒不入账: a write tool that failed reports NO product (allowlist / 审批 /
+    # 熔断拒绝与执行失败都只带 tool_failed 尾注)；无结果的裸调用同样不记账（意图不等于落盘）。
     from agentcore.runtime.engine.tool_exec import TOOL_FAILED_MARKER, with_tool_failed_marker
     from agentcore.runtime.runs.serialize import _TOOL_FAILED_MARKER, _tool_result_failed
 
@@ -127,7 +175,7 @@ def test_files_touched_skips_failed_or_denied_file_write():
         _assistant_call("c1", "file_write", '{"path": "ghost.md", "content": "x"}'),
         _tool_result("c1", with_tool_failed_marker("工具不在允许列表中，未执行。")),
         _assistant_call("c2", "file_write", '{"path": "ok.md", "content": "y"}'),
-        _tool_result("c2", "已写入 3 字节到 ok.md"),
+        _landed("c2", "已写入 3 字节到 ok.md", "ok.md"),
         _assistant_call("c3", "file_move", '{"source": "a", "destination": "b/out.txt"}'),
         _tool_result("c3", with_tool_failed_marker("未获用户授权，该操作未执行。")),
         _assistant_call("c4", "file_write", '{"path": "bare.md", "content": "z"}'),
@@ -144,60 +192,81 @@ def _tool_result(call_id: str, content: str) -> LLMMessage:
     return LLMMessage(role="tool", content=content, tool_call_id=call_id)
 
 
-def test_files_touched_harvests_code_execute_write_back_marker():
-    # 结构化写回通道: a code_execute RESULT's machine marker (sandbox copy-out paths)
-    # counts toward files_touched — a product landed by an executed script is visible to
-    # requires_files / the manifest WITHOUT parsing the fragile「已写回工作区」prose. This
-    # also pins the producer↔consumer format (render_written_files_marker is the producer).
-    from agentcore.tools.builtin.code_execute import render_written_files_marker
-
+def test_files_touched_harvests_code_execute_write_back():
+    # 间接落盘同一通道: a script's sandbox copy-out paths ride the SAME self-report as
+    # file_write, so a product landed by an executed script is visible to requires_files /
+    # the manifest WITHOUT parsing the fragile「已写回工作区」prose (文件名可含「、」).
     transcript = [
         _assistant_call("c1", "code_execute", '{"code": "make()", "language": "python"}'),
-        _tool_result(
-            "c1",
-            "stdout:\ndone\n\n已写回工作区：out/report.md\n"
-            + render_written_files_marker(["out/report.md"]),
-        ),
+        _landed("c1", "stdout:\ndone\n\n已写回工作区：out/report.md", "out/report.md"),
     ]
     assert files_touched_from_transcript(transcript) == ["out/report.md"]
 
 
 def test_files_touched_merges_code_execute_and_file_tools_first_seen_order():
-    from agentcore.tools.builtin.code_execute import render_written_files_marker
-
     transcript = [
         _assistant_call("c1", "file_write", '{"path": "a.txt", "content": "x"}'),
-        _tool_result("c1", "已写入"),
+        _landed("c1", "已写入", "a.txt"),
         _assistant_call("c2", "code_execute", '{"code": "gen()"}'),
-        _tool_result("c2", render_written_files_marker(["b.csv", "a.txt"])),
+        _landed("c2", "stdout:\n", "b.csv", "a.txt"),
     ]
     # First-seen order across both channels; a.txt landed by both → listed once.
     assert files_touched_from_transcript(transcript) == ["a.txt", "b.csv"]
 
 
 def test_files_touched_collects_multiple_code_execute_calls():
-    from agentcore.tools.builtin.code_execute import render_written_files_marker
-
     transcript = [
         _assistant_call("c1", "code_execute", "{}"),
-        _tool_result("c1", render_written_files_marker(["one.md"])),
+        _landed("c1", "stdout:\n", "one.md"),
         _assistant_call("c2", "code_execute", "{}"),
-        _tool_result("c2", render_written_files_marker(["two.md", "one.md"])),
+        _landed("c2", "stdout:\n", "two.md", "one.md"),
     ]
     assert files_touched_from_transcript(transcript) == ["one.md", "two.md"]
 
 
-def test_files_touched_skips_malformed_or_uncorrelated_write_back_marker():
-    # A truncated / malformed marker JSON is skipped (best-effort — file-tool intent
-    # still covers file_write); a marker sitting in a NON-code_execute result (e.g. a
-    # file_read echoing one back) is never counted — correlation is by tool_call_id.
+def test_files_touched_skips_malformed_marker_and_echoed_one():
+    # A truncated / malformed marker is skipped (best-effort: 宁可漏账也不臆造产物).
+    # An ECHOED marker (file_read returning a text that itself contains one) is stripped
+    # by the producer before the engine stamps this call's真实产物 — so nothing a tool
+    # merely READ can enter the ledger.
     transcript = [
         _assistant_call("c1", "code_execute", "{}"),
-        _tool_result("c1", '<!--agentcore:written_files:["broken'),  # truncated JSON
+        _tool_result("c1", '<!--agentcore:file_products:[{"path": "broken'),
         _assistant_call("c2", "file_read", '{"path": "notes.md"}'),
-        _tool_result("c2", '<!--agentcore:written_files:["ghost.md"]-->'),  # not code_execute
+        _landed("c2", '正文…<!--agentcore:file_products:[{"path": "ghost.md"}]-->'),
     ]
     assert files_touched_from_transcript(transcript) == []
+
+
+def test_file_products_marker_round_trip():
+    """Producer ↔ consumer: 尾注格式由两端函数钉死（形状同 tool_failed 尾注）。"""
+    from agentcore.tools.file_products import (
+        FILE_PRODUCTS_MARKER_PREFIX,
+        file_products_from_text,
+        render_file_products_marker,
+        strip_file_products_markers,
+    )
+
+    products = [
+        file_product("out/报告.docx", derived_from="out/报告.md"),
+        file_product("src/main.py"),
+        file_product("assets"),
+    ]
+    marker = render_file_products_marker(products)
+    assert marker.startswith(FILE_PRODUCTS_MARKER_PREFIX)
+    assert file_products_from_text(marker) == products
+    # kind 归一口径: 文档保留自身扩展名，源码 / 无扩展名收敛到大类。
+    assert [p.kind for p in products] == ["docx", "code", "file"]
+
+    stamped = with_file_products_marker("已导出", products)
+    assert stamped.startswith("已导出\n")
+    assert file_products_from_text(stamped) == products
+    # 盖章是幂等的: re-stamping strips the previous trailer instead of stacking one.
+    assert with_file_products_marker(stamped, products) == stamped
+    assert strip_file_products_markers(stamped) == "已导出"
+    # 无产物只清回显，不留空尾注。
+    assert with_file_products_marker(stamped, []) == "已导出"
+    assert file_products_from_text("plain output") == []
 
 
 def test_state_json_round_trips_files_touched():
@@ -453,6 +522,21 @@ def test_plan_json_round_trips_late_bound_placeholder_node():
     assert b.bind_after_deps is True  # the late-bind marker survives → still待定稿
     assert (b.role, b.task) == ("待定", "占位")  # placeholders intact
     assert b.depends_on == ["a"]
+
+
+def test_plan_json_round_trips_finalize_batch_marker():
+    # 单人直出：resume 折回同一张图时 worker 的身份口径不能变，所以收口批标记随快照走。
+    # 缺省批不写这个键（旧快照 / 既有 golden 字节不变）。
+    solo = RunPlan(nodes=[RunSpec(run_id="a", task="改一行", role="工程师")], finalize=True)
+    raw = plan_to_json(solo)
+    assert raw["finalize"] is True
+    restored = plan_from_json(raw)
+    assert restored.finalize is True
+    assert restored.solo_direct_answer() is True
+
+    plain = RunPlan(nodes=[RunSpec(run_id="a", task="改一行", role="工程师")])
+    assert "finalize" not in plan_to_json(plain)
+    assert plan_from_json(plan_to_json(plain)).solo_direct_answer() is False
 
 
 def test_spec_from_json_tolerates_unknown_and_missing_keys():

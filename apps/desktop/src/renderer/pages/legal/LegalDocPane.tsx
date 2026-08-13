@@ -12,7 +12,7 @@ export function LegalDocPane({
   docId: LegalDocId;
   onBack: () => void;
 }) {
-  const title = LEGAL_DOCS[docId].title;
+  const { title, updatedAt } = LEGAL_DOCS[docId];
 
   return (
     <div className="flex h-full w-full flex-col bg-background">
@@ -31,6 +31,12 @@ export function LegalDocPane({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
         <div className="mx-auto max-w-2xl">
+          <header className="mb-6 space-y-1">
+            <h1 className="text-xl font-semibold">{title}</h1>
+            <p className="text-xs text-muted-foreground">
+              更新日期：{updatedAt}
+            </p>
+          </header>
           <LegalDocBody docId={docId} />
         </div>
       </div>

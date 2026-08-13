@@ -22,7 +22,7 @@ function prepareNewConversationDraft(
     foldersStore.setDraftWorkspaceIntent({ kind: "quick_cloud" });
   } else if (folderId) {
     foldersStore.setDraftWorkspaceIntent({
-      kind: "project",
+      kind: "folder",
       folderId,
     });
   } else {

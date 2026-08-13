@@ -33,6 +33,7 @@ from agentcore.db.repositories import (
     CostEventRepository,
     HandoffJobRepository,
 )
+from agentcore.folders.placement import resolve_folder_placement
 from agentcore.runtime.events import (
     EventSink,
     error_event,
@@ -299,6 +300,7 @@ async def _run_apply(
         backend = build_workspace(
             user_id=user_id,
             folder_id=source_folder_id,
+            folder_rel_path=(await resolve_folder_placement(source_folder_id)).rel_path,
             conversation_id=source_conversation_id,
             sink=sink,
             local_binding=binding,

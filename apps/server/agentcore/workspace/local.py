@@ -675,7 +675,20 @@ class LocalWorkspace:
             stderr=str(value.get("stderr", "")),
             exit_code=int(value.get("exit_code", 0)),
             duration_ms=int(value.get("duration_ms", 0)),
+            written_files=self._out_written_files(value.get("written_files")),
         )
+
+    def _out_written_files(self, raw: Any) -> list[str] | None:
+        """产物写回: desktop-reported paths → workspace-relative (strip the D1a base).
+
+        Same in/out path convention as ``list`` / ``grep`` / ``index_files``: the
+        desktop answers root-relative, this side strips the subpath prefix. ``None``
+        (older desktop that never reports) stays ``None`` — 「没测量」和「测了没变化」
+        不是一回事，别把前者伪装成空清单。
+        """
+        if not isinstance(raw, list):
+            return None
+        return [self._out(str(p)) for p in raw if str(p).strip()]
 
     async def capture_turn_baseline(self, message_id: str) -> str | None:
         """Best-effort Local zip via desktop channel (never raises to block a turn).

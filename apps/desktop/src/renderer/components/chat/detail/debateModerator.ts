@@ -23,7 +23,7 @@ export function isThinkingLivePlaceholder(
 
 /** 当前回合辩论主持人 run id；非辩论 / 尚无法从投影推导 → null。 */
 export function resolveDebateModeratorRunId(
-  execution: Execution,
+  execution: Pick<Execution, "runs" | "debate">,
 ): string | null {
   const settled = execution.debate?.moderator_run_id;
   if (settled) return settled;

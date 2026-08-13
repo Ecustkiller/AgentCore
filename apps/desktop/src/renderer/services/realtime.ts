@@ -8,6 +8,11 @@ import type {
   FriendRequest,
   FriendRequestAction,
 } from "@/services/messaging";
+import {
+  type AiAttentionEvent,
+  applyAiAttention,
+  clearAiAttention,
+} from "@/stores/aiAttention";
 import { useAuthStore } from "@/stores/auth";
 import { useConversationStore } from "@/stores/conversation";
 import { useMessagingStore } from "@/stores/messaging";
@@ -91,11 +96,13 @@ interface ChatChangedEvent {
 interface MemoryUpdatedEvent {
   type: "memory_updated";
   conversation_id: string;
-  kind?: "episodic" | "semantic";
+  kind?: "episodic" | "semantic" | "quota";
   update?: {
     id: string;
     created_at: string;
-    kind?: "episodic" | "semantic";
+    /** 本次固化窗口最后一条消息的时刻（episodic 才有）——时间线锚点，见 `MemoryUpdate.anchorAt`。 */
+    anchor_at?: string | null;
+    kind?: "episodic" | "semantic" | "quota";
     summary?: string | null;
     items?: {
       action: string;
@@ -167,7 +174,10 @@ function handleFrame(frame: string): void {
         notifyInfo(
           kind === "episodic"
             ? "AI 刚刚记下了本场摘要"
-            : "AI 刚刚更新了你的记忆",
+            : kind === "quota"
+              ? // Never claim a write that was refused (审计 CTX-A2).
+                "常驻条目已满，有内容没能记下"
+              : "AI 刚刚更新了你的记忆",
         );
       }
     } else if (event.type === "shared_space_invite") {
@@ -207,6 +217,11 @@ function handleFrame(frame: string): void {
       if (e.chat_id) {
         void useMessagingStore.getState().fetchChats();
       }
+    } else if (event.type === "ai_attention") {
+      // 「某个对话在等你」(云对话多端同权 B2 · L1)：AI 停在阻塞卡上时 required、任一端
+      // 放行后 resolved。只送信号不送内容——落进 AiAttentionStore 点亮侧栏「等你」灯，
+      // 跨对话提醒（teamActivityNotifications）另订该 store 弹一条可跳转的提示。
+      applyAiAttention(event as AiAttentionEvent);
     }
     // "ready" and any other event types: no-op here.
   } catch {
@@ -306,4 +321,6 @@ export function stopRealtime(): void {
   }
   controller?.abort();
   controller = null;
+  // 「等你」提醒是本账号会话内的东西：管子一关（登出 / 关窗）即作废，别留给下一个账号。
+  clearAiAttention();
 }

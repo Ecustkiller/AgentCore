@@ -1,7 +1,4 @@
-import {
-  DeleteFolderDialog,
-  archiveConversationsBeforeDelete,
-} from "@/components/folders/DeleteFolderDialog";
+import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
 import { IconButton, SurfaceRow } from "@/components/ui";
 import {
   ContextMenu,
@@ -18,10 +15,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useArchiveConversation } from "@/hooks/useConversations";
-import { useDeleteFolder, usePermanentDeleteFolder } from "@/hooks/useFolders";
+import {
+  releaseFolderConversations,
+  useDeleteFolder,
+  usePermanentDeleteFolder,
+  useRestoreFolder,
+} from "@/hooks/useFolders";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
+import { folderAncestorNames } from "@/lib/folderTree";
 import { startNewConversation } from "@/lib/newConversation";
-import { notifyError } from "@/lib/toast";
+import { notifyError, notifyInfo } from "@/lib/toast";
 import type { FolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 import { useConversationStore } from "@/stores/conversation";
@@ -49,10 +52,13 @@ interface Props {
 }
 
 /**
- * Sidebar「项目」group header: left icon slot (cloud/local; hover overlays
- * chevron for collapse) + name + hover「+」new chat in project +「⋯».
+ * Sidebar folder-group header: left icon slot (cloud/local; hover overlays
+ * chevron for collapse) + name + hover「+」new chat in this folder +「⋯」.
  * Right-click and hover「⋯」share the same menu;「归档全部对话」maps to
  * batch conversation archive (no `Folder.archived`).
+ *
+ * A nested folder shows its ancestor breadcrumb under the name — the zone is
+ * flat, so「设计 / 图标」is the only thing telling two 图标 folders apart.
  */
 export function WorkspaceGroupHeader({
   folder,
@@ -66,6 +72,7 @@ export function WorkspaceGroupHeader({
   const archiveMutation = useArchiveConversation();
   const deleteFolderMutation = useDeleteFolder();
   const permanentDeleteMutation = usePermanentDeleteFolder();
+  const restoreFolderMutation = useRestoreFolder();
   const currentId = useConversationStore((s) => s.currentConversationId);
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
@@ -74,6 +81,11 @@ export function WorkspaceGroupHeader({
   const liveConvCount = convs.length;
   const groupIsLocal = useMemo(
     () => deriveGroupWorkspaceIsLocal(folder),
+    [folder],
+  );
+  /** 「设计 / 图标」— only for a nested folder; the zone itself stays flat. */
+  const ancestorLabel = useMemo(
+    () => folderAncestorNames(folder).join(" / "),
     [folder],
   );
 
@@ -85,51 +97,61 @@ export function WorkspaceGroupHeader({
     navigate("/files", { state: { focusWsId: `folder:${folder.id}` } });
   };
 
-  const newChatInProject = () => {
+  const newChatInFolder = () => {
     setMoreOpen(false);
     startNewConversation(navigate, folder.id);
   };
 
-  /** Quiet optional convert — same as Composer「导入本机项目到云」（非催债）. */
+  /** Quiet optional convert — same as Composer「导入本机文件夹到云」（非催债）. */
   const openImportToCloud = () => {
     setMoreOpen(false);
     useFoldersStore.getState().openImportToCloud({
       rootId: folder.localRootId ?? undefined,
-      projectName: folder.name,
+      folderName: folder.name,
     });
   };
 
   const handleArchiveAll = async () => {
     setMoreOpen(false);
-    if (convs.length === 0) return;
-    const ok = await archiveConversationsBeforeDelete(convs, {
-      archive: (id) => archiveMutation.mutateAsync(id),
-      dropRuntime: dropConversationRuntime,
-      currentId,
-      onLeaveActive: () => navigate("/"),
-    });
-    if (!ok) {
-      notifyError("批量归档失败");
-      return;
+    for (const { id } of convs) {
+      try {
+        await archiveMutation.mutateAsync(id);
+      } catch (err) {
+        notifyError(err, "批量归档失败");
+        return;
+      }
+      dropConversationRuntime(id);
+      if (id === currentId) navigate("/");
     }
   };
 
+  /**
+   * 撤销 is the main way back from a mistaken delete — most people notice within
+   * seconds and never open「最近删除」. The header unmounts the moment the folder
+   * leaves the sidebar, so the toast is raised from the awaited handler (not a
+   * `mutate` callback, which React Query drops for an unmounted observer).
+   */
   const confirmDeleteFolder = async () => {
-    if (convs.length > 0) {
-      const ok = await archiveConversationsBeforeDelete(convs, {
-        archive: (id) => archiveMutation.mutateAsync(id),
-        dropRuntime: dropConversationRuntime,
-        currentId,
-        onLeaveActive: () => navigate("/"),
-      });
-      if (!ok) {
-        notifyError("归档失败，项目未删除");
-        return;
-      }
+    const name = folder.name;
+    try {
+      await deleteFolderMutation.mutateAsync(folder.id);
+    } catch (err) {
+      notifyError(err, "删除文件夹失败");
+      return;
     }
-    deleteFolderMutation.mutate(folder.id, {
-      onSuccess: () => setDeleteOpen(false),
-      onError: (err) => notifyError(err, "删除项目失败"),
+    setDeleteOpen(false);
+    const leftActive = releaseFolderConversations(folder.id, {
+      dropRuntime: dropConversationRuntime,
+      currentId,
+    });
+    if (leftActive) navigate("/");
+    notifyInfo("已删除文件夹", {
+      description: name,
+      duration: 8000,
+      action: {
+        label: "撤销",
+        onClick: () => restoreFolderMutation.mutate({ id: folder.id, name }),
+      },
     });
   };
 
@@ -147,11 +169,15 @@ export function WorkspaceGroupHeader({
   const archiveLabel =
     liveConvCount > 0 ? `归档全部对话 (${liveConvCount})` : "归档全部对话";
 
+  const newChatLabel = groupIsLocal
+    ? "在此本机文件夹中新开对话"
+    : "在此文件夹中新开对话";
+
   const importMenuItem = groupIsLocal ? (
     <>
       <ContextMenuItem onSelect={openImportToCloud}>
         <Upload size={14} className="shrink-0" />
-        <span className="flex-1 truncate">导入本机项目到云</span>
+        <span className="flex-1 truncate">导入到「我的文件」</span>
       </ContextMenuItem>
       <ContextMenuSeparator />
     </>
@@ -161,7 +187,7 @@ export function WorkspaceGroupHeader({
     <>
       <DropdownMenuItem onSelect={openImportToCloud}>
         <Upload size={14} className="shrink-0" />
-        <span className="flex-1 truncate">导入本机项目到云</span>
+        <span className="flex-1 truncate">导入到「我的文件」</span>
       </DropdownMenuItem>
       <DropdownMenuSeparator />
     </>
@@ -170,7 +196,7 @@ export function WorkspaceGroupHeader({
   const menuItems = (
     <>
       {importMenuItem}
-      <ContextMenuItem onSelect={newChatInProject}>
+      <ContextMenuItem onSelect={newChatInFolder}>
         <Plus size={14} className="shrink-0" />
         <span className="flex-1 truncate">新建对话</span>
       </ContextMenuItem>
@@ -193,7 +219,7 @@ export function WorkspaceGroupHeader({
       <ContextMenuSeparator />
       <ContextMenuItem variant="danger" onSelect={() => setDeleteOpen(true)}>
         <Trash2 size={14} className="shrink-0" />
-        <span className="flex-1 truncate">删除项目…</span>
+        <span className="flex-1 truncate">删除文件夹…</span>
       </ContextMenuItem>
     </>
   );
@@ -201,7 +227,7 @@ export function WorkspaceGroupHeader({
   const dropdownItems = (
     <>
       {importDropdownItem}
-      <DropdownMenuItem onSelect={newChatInProject}>
+      <DropdownMenuItem onSelect={newChatInFolder}>
         <Plus size={14} className="shrink-0" />
         <span className="flex-1 truncate">新建对话</span>
       </DropdownMenuItem>
@@ -224,7 +250,7 @@ export function WorkspaceGroupHeader({
       <DropdownMenuSeparator />
       <DropdownMenuItem variant="danger" onSelect={() => setDeleteOpen(true)}>
         <Trash2 size={14} className="shrink-0" />
-        <span className="flex-1 truncate">删除项目…</span>
+        <span className="flex-1 truncate">删除文件夹…</span>
       </DropdownMenuItem>
     </>
   );
@@ -266,7 +292,14 @@ export function WorkspaceGroupHeader({
                   }`}
                 />
               </span>
-              <span className="min-w-0 flex-1 truncate">{folder.name}</span>
+              <span className="flex min-w-0 flex-1 flex-col justify-center">
+                <span className="truncate">{folder.name}</span>
+                {ancestorLabel && (
+                  <span className="truncate text-xs leading-tight text-sidebar-foreground/40">
+                    {ancestorLabel}
+                  </span>
+                )}
+              </span>
             </div>
             <span
               className={`flex shrink-0 items-center gap-0.5 ${
@@ -279,7 +312,7 @@ export function WorkspaceGroupHeader({
                 <DropdownMenuTrigger asChild>
                   <IconButton
                     tone="sidebar"
-                    aria-label="项目操作"
+                    aria-label="文件夹操作"
                     title="更多"
                     className={rowActionClass}
                     onClick={(e) => e.stopPropagation()}
@@ -297,16 +330,12 @@ export function WorkspaceGroupHeader({
               </DropdownMenu>
               <IconButton
                 tone="sidebar"
-                aria-label={
-                  groupIsLocal ? "在本机项目中新开对话" : "在云项目中新开对话"
-                }
-                title={
-                  groupIsLocal ? "在本机项目中新开对话" : "在云项目中新开对话"
-                }
+                aria-label={newChatLabel}
+                title={newChatLabel}
                 className={rowActionClass}
                 onClick={(e) => {
                   e.stopPropagation();
-                  newChatInProject();
+                  newChatInFolder();
                 }}
               >
                 <Plus size={13} />

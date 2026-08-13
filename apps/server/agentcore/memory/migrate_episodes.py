@@ -236,7 +236,7 @@ def _collect_disk_into(
         if not container.is_dir():
             continue
         try:
-            project_dirs = [p for p in sorted(container.iterdir()) if p.is_dir()]
+            folder_dirs = [p for p in sorted(container.iterdir()) if p.is_dir()]
         except OSError as e:
             logger.warning(
                 "memory.migrate_episodes_disk_scan_failed",
@@ -244,7 +244,7 @@ def _collect_disk_into(
                 error=str(e),
             )
             continue
-        for scope_dir in project_dirs:
+        for scope_dir in folder_dirs:
             _collect_disk_scope(
                 scopes, user_id=user_id, folder_id=scope_dir.name, scope_dir=scope_dir
             )

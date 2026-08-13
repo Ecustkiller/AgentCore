@@ -201,11 +201,14 @@ def enqueue_interjection_to_fifo(
                 agent_mentions=list(stashed.get("agent_mentions") or []),
                 requires_tools=bool(stashed.get("requires_tools")),
                 x_client_platform=stashed.get("x_client_platform"),
+                # Absent on a journal-restored stash (not a durable snapshot key)
+                # → unpinned, i.e. selection as it was before origin pinning.
+                origin_device_id=stashed.get("origin_device_id"),
                 llm_credentials=stashed.get("llm_credentials"),
                 llm_supports_tools=stashed.get("llm_supports_tools"),
                 interjection_id=interjection_id,
             ),
-            emit_live_queued=True,
+            on_live_sink=True,
         )
     except Exception as exc:  # noqa: BLE001 — surface as failed, never raise into CEO
         logger.exception(

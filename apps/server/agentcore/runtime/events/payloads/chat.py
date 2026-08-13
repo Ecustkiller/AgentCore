@@ -55,8 +55,11 @@ class ToolProgressPayload(WirePayload):
 
 # A running tool's coarse EXECUTION phase (工具执行阶段进度). Known values:
 # web_search → queued / querying / fallback; read_url → fetching / reading / blocked;
-# code_execute → executing. Kept as a widened `string` on the wire so the backend can add
-# phases without a client bump — an unknown value maps to a generic「处理中」.
+# code_execute / test_run → executing; git → git_queued (waiting behind another write on
+# the same repo) / git_credentials (PAT / gh token lookup) / git_remote (push·pull·fetch
+# network leg, create_pr's GitHub REST) / executing (local git command). Kept as a widened
+# `string` on the wire so the backend can add phases without a client bump — an unknown
+# value maps to a generic「处理中」.
 ToolPhase = Literal[
     "queued",
     "querying",
@@ -65,6 +68,9 @@ ToolPhase = Literal[
     "reading",
     "executing",
     "blocked",
+    "git_queued",
+    "git_credentials",
+    "git_remote",
 ]
 
 

@@ -157,7 +157,10 @@ async def test_change_password_single_commit():
         session=session,  # type: ignore[arg-type]
     )
     pair = await svc.change_password(
-        user_id=user.user_id, current_password=_PW, new_password="password456"
+        user_id=user.user_id,
+        current_password=_PW,
+        new_password="password456",
+        audience="product",
     )
     assert pair.access_token
     assert session.commits == 1

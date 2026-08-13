@@ -1,4 +1,4 @@
-﻿"""System standing-task templates (daily conversation review)."""
+"""System standing-task templates (daily conversation review)."""
 
 from datetime import UTC, datetime
 from types import SimpleNamespace

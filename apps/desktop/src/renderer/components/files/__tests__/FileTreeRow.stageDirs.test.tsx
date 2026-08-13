@@ -83,3 +83,17 @@ describe("FileTreeRow stage dir badges", () => {
     expect(screen.queryByText("调研约定文档 · 3 件")).toBeNull();
   });
 });
+
+describe("FileTreeRow 约定根呈现名", () => {
+  it("盘上 AgentCore/ 显示「AI 工作间」，不再与条目区同名", () => {
+    const { unmount } = renderDir("AgentCore", "AgentCore", 1);
+    expect(screen.getByText("AI 工作间")).toBeTruthy();
+    expect(screen.queryByText("AgentCore")).toBeNull();
+    unmount();
+
+    // 嵌套的同名目录不是约定根，保持磁盘真名。
+    renderDir("src/AgentCore", "AgentCore", 1);
+    expect(screen.getByText("AgentCore")).toBeTruthy();
+    expect(screen.queryByText("AI 工作间")).toBeNull();
+  });
+});

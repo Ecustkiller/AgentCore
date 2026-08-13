@@ -16,7 +16,7 @@ export function IconButton({
   children,
 }: {
   title: string;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent<HTMLButtonElement>) => void;
   spinning?: boolean;
   disabled?: boolean;
   children: React.ReactNode;

@@ -67,12 +67,12 @@ export type StartImportToCloudJobOpts = {
   root: FsRoot;
   /** Dialog-owned temp root → true; prefill shared binding → false. */
   ownsRoot: boolean;
-  projectName: string;
+  folderName: string;
   onImported?: (folderId: string) => void;
 };
 
 function showProgressToast(p: ImportToCloudProgress): void {
-  toast(formatImportToCloudProgress(p) || "导入到云…", {
+  toast(formatImportToCloudProgress(p) || "正在导入到「我的文件」…", {
     id: TOAST_ID,
     duration: Number.POSITIVE_INFINITY,
     icon: loadingIcon,
@@ -96,16 +96,16 @@ export function startImportToCloudJob(
 ): boolean {
   const store = useImportToCloudJobStore.getState();
   if (store.isRunning()) {
-    notifyInfo("导入到云进行中", {
-      description: "请等待当前任务完成或在进度提示中取消后再试",
+    notifyInfo("已有导入正在进行", {
+      description: "请等待当前导入完成，或在进度提示中取消后再试",
     });
     return false;
   }
 
   const controller = new AbortController();
   if (!store.begin(controller)) {
-    notifyInfo("导入到云进行中", {
-      description: "请等待当前任务完成或在进度提示中取消后再试",
+    notifyInfo("已有导入正在进行", {
+      description: "请等待当前导入完成，或在进度提示中取消后再试",
     });
     return false;
   }
@@ -117,7 +117,7 @@ export function startImportToCloudJob(
       const result = await runImportToCloud({
         root: opts.root,
         ownsRoot: opts.ownsRoot,
-        projectName: opts.projectName,
+        folderName: opts.folderName,
         signal: controller.signal,
         onProgress: showProgressToast,
       });
@@ -156,7 +156,7 @@ export function startImportToCloudJob(
       }
       const detail =
         e instanceof Error ? e.message : typeof e === "string" ? e : "";
-      toast.error("导入到云失败", {
+      toast.error("导入到「我的文件」失败", {
         id: TOAST_ID,
         description: detail || undefined,
         icon: errorIcon,

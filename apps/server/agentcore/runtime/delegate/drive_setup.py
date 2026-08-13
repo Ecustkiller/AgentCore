@@ -47,7 +47,12 @@ def setup_note_wall(
 
     prev_wall = tool._note_wall
     note_wall = NoteWall()
-    if prev_wall is not None and seed_completed is None:
+    # 继承与 seed 无关：一个 replan 续跑 / 同回合追加批【必然】带 seed_completed，而那恰恰
+    # 是最需要旧墙的批——续跑的 worker 要看见队友已广播的决定与认领，CEO 收尾也要拿这些
+    # 便签做对账。此前把「有 seed」当成「新批」而换成空墙，等于每次续跑都把团队共识清零。
+    # 存在 prev_wall 本身就意味着同一 CEO 回合的上一批（跨回合 / 耐久恢复走全新实例，
+    # prev_wall 为 None，自然不继承）。
+    if prev_wall is not None:
         inherited = note_wall.inherit(prev_wall.active_notes())
         for note in inherited:
             tool._sink.emit(
@@ -84,26 +89,20 @@ def setup_note_wall(
 
 
 def resolve_worker_gate(tool: DelegateTool) -> Any:
-    from agentcore.runtime.sandbox_approval import is_desktop_touch_tool, worker_gate_applies
+    """Hand workers whatever gate this turn has — never predict away the card.
 
-    gate = tool._approval_gate
-    if gate is None:
-        return None
-    if worker_gate_applies(tool._base_tool_context.backend):
-        return gate
-    # Cloud workspace: still share the turn gate when workers hold desktop-touch
-    # tools (MCP / Host). tool_exec narrows cloud prompts to those tools only so
-    # server-sandbox file ops stay historically ungated.
-    worker_tools = getattr(tool, "_tools", None)
-    if worker_tools is None:
-        return None
-    try:
-        names = list(worker_tools.names)
-    except Exception:  # noqa: BLE001 — registry shape varies in tests
-        return None
-    if any(is_desktop_touch_tool(n) for n in names):
-        return gate
-    return None
+    Upstream used to guess「这批 worker 用不上逐次卡」from ``backend.location`` (plus a
+    patched-in roster scan for desktop-touch / 恒确认 tools) and pass ``None``. That
+    guess has to duplicate the sandbox→approval table, and every miss silently
+    ungates: 恒确认 died here once, and ``file_write=ask`` on cloud never reached its
+    implementation because a worker holding only file tools got ``None`` right here.
+
+    ``None`` now means one thing only — this turn has nobody to ask. Whether a given
+    call needs a card is decided at the single chokepoint (``tool_exec_gates``),
+    which reads the same ``sandbox_approval`` table with the actual tool name, its
+    arguments and the session axes in hand.
+    """
+    return tool._approval_gate
 
 
 def build_drive_executor(

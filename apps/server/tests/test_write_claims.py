@@ -176,7 +176,13 @@ async def test_write_conflict_does_not_trip_run_circuit_breaker(tmp_path: Path):
             ),
         )
         _msgs, _terminal, attempts = await execute_tools(
-            [tc], reg, _ctx(tmp_path, run_id="b", coordinator=coordinator), EventSink()
+            [tc],
+            reg,
+            _ctx(tmp_path, run_id="b", coordinator=coordinator),
+            EventSink(),
+            # 云端沙箱上的 worker 写文件：按 sandbox_approval 免逐次卡。
+            approval_gate=None,
+            role="worker",
         )
         assert attempts[0].success is False
         assert attempts[0].contract_failure is True  # forwarded from the ToolResult

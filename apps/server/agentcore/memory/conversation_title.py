@@ -26,7 +26,6 @@ from typing import Protocol, TypedDict
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
-from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -191,11 +190,6 @@ class LLMTitleGenerator:
         from agentcore.config import settings
 
         self._selected = select_call(role, model or settings.platform_model)
-        # The most recent call's spend, surfaced for the cost ledger (Gap C). Stays
-        # zero until a call actually completes (empty-messages short-circuit /
-        # timeout / error never bill), so the caller bills iff total_tokens > 0.
-        self.last_usage: TokenUsage = TokenUsage()
-        self.last_model: str = ""
 
     async def generate(self, data: TitleInput) -> TitleResult:
         if not data.messages:
@@ -218,8 +212,6 @@ class LLMTitleGenerator:
             except TimeoutError:
                 logger.warning("title.timeout", conversation_id=data.conversation_id)
                 return None
-            self.last_usage = response.usage
-            self.last_model = response.model or self._selected.model or ""
             return _parse_title_result(response.content)
 
         result = await _call_once()

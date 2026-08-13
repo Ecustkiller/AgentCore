@@ -7,13 +7,21 @@ import json
 import re
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Any, Protocol
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
     AgentCoreError,
+    InferenceTokenExpiredError,
+    LLMAuthError,
     LLMError,
+    LLMInsufficientBalanceError,
+    LLMKeyRequiredError,
+    LLMQuotaExceededError,
+    LLMRateLimitError,
     LLMUpstreamError,
     OurServiceUnavailableError,
+    upstream_rate_limit_error,
 )
 
 # Keep in sync with ``db.errors.DATABASE_UNAVAILABLE_MESSAGE`` — do not import
@@ -243,10 +251,11 @@ def _extract_upstream_code(preview: str | None) -> str | None:
 
 @dataclass(frozen=True)
 class AgentCoreErrorEnvelope:
-    """Our wire envelope ``{"error":{"code","message"}}`` (catalogued code only)."""
+    """Our wire envelope ``{"error":{"code","message","context"}}`` (catalogued code only)."""
 
     code: str
     message: str | None
+    context: dict | None = None
 
 
 def parse_agentcore_error_envelope(
@@ -280,12 +289,103 @@ def parse_agentcore_error_envelope(
     message = str(raw_msg).strip() if raw_msg is not None else None
     if message == "":
         message = None
-    return AgentCoreErrorEnvelope(code=catalogued.value, message=message)
+    raw_ctx = err.get("context")
+    context = raw_ctx if isinstance(raw_ctx, dict) else None
+    return AgentCoreErrorEnvelope(code=catalogued.value, message=message, context=context)
 
 
 def is_llm_family_error_code(code: str) -> bool:
     """True when the catalogued code is the LLM_* upstream-family prefix."""
     return code.startswith("LLM_")
+
+
+class _EnvelopeLeafError(Protocol):
+    """Constructor shape every leaf in the table below has to offer.
+
+    ``message`` is optional because the envelope's is: a wire error whose
+    ``message`` is missing, null or blank parses to ``None`` (see
+    :func:`parse_agentcore_error_envelope`). Each leaf answers that with its own
+    default copy — the CTA the client routes on — so the table may only hold
+    classes that accept ``None`` rather than blanking the message.
+    """
+
+    def __call__(self, message: str | None = None, **details: Any) -> LLMError: ...
+
+
+# Envelope code → the leaf error it stands for. Only codes a client *branches* on
+# live here (key-config CTA, retry affordance, JWT remint): those are the ones a
+# flattened code silently mistranslates. Everything else keeps falling through to
+# the vendor-status heuristics, so this table never grows a case per HTTP status.
+# ``LLM_RATE_LIMIT`` is built separately — its copy derives from ``retry_after``,
+# not from the envelope message.
+_ENVELOPE_LEAF_ERRORS: dict[str, _EnvelopeLeafError] = {
+    ErrorCode.QUOTA_EXCEEDED: LLMQuotaExceededError,
+    ErrorCode.LLM_KEY_REQUIRED: LLMKeyRequiredError,
+    ErrorCode.LLM_KEY_INVALID: LLMAuthError,
+    ErrorCode.LLM_INSUFFICIENT_BALANCE: LLMInsufficientBalanceError,
+    ErrorCode.INFERENCE_TOKEN_EXPIRED: InferenceTokenExpiredError,
+}
+
+
+def _envelope_retry_after(context: dict) -> float | None:
+    raw = context.get("retry_after")
+    if raw is None:
+        return None
+    with contextlib.suppress(TypeError, ValueError):
+        return float(raw)
+    return None
+
+
+def inference_envelope_error(
+    *,
+    status: int,
+    body: bytes | str | None,
+) -> LLMError | None:
+    """Rebuild the typed error our ``/inference/`` hop already classified.
+
+    On that hop the envelope — not the HTTP status — is the truth source. The proxy
+    flattens every typed error onto 402 / 429 / 502, and it reports faults no vendor
+    status can express (an exhausted allowance, a missing BYOK key), so classifying
+    the response by its number reads quota exhaustion as vendor throttling and a
+    missing key as an empty wallet. The cloud leaf also phrased the copy with the
+    real provider label, so its ``message`` beats anything we could compose here.
+
+    Returns ``None`` when the body is not our envelope, or carries a code no client
+    branches on — the caller then falls back to the vendor-status heuristics, which
+    stay the only source of truth on a direct-to-vendor hop.
+    """
+    envelope = parse_agentcore_error_envelope(body)
+    if envelope is None:
+        return None
+    context = envelope.context or {}
+    # Prefer the vendor status / body the cloud leaf recorded: ours is only the
+    # relay's number (same reason its ``message`` names the vendor's real status).
+    upstream_status = context.get("upstream_status")
+    if not isinstance(upstream_status, int):
+        upstream_status = status
+    preview = context.get("upstream_body_preview")
+    if not isinstance(preview, str) or not preview.strip():
+        preview = body_preview(body)
+    details: dict[str, Any] = {
+        "upstream_status": upstream_status,
+        "upstream_body_preview": preview,
+    }
+    # Keeps the platform-vs-BYOK CTA split intact across the hop (平台LLM接入 §二).
+    raw_source = context.get("credential_source")
+    source: str | None = raw_source if raw_source in ("user", "platform") else None
+
+    if envelope.code == ErrorCode.LLM_RATE_LIMIT:
+        return upstream_rate_limit_error(
+            _envelope_retry_after(context),
+            credential_source=source,
+            **details,
+        )
+    leaf = _ENVELOPE_LEAF_ERRORS.get(envelope.code)
+    if leaf is None:
+        return None
+    if source is not None:
+        details["credential_source"] = source
+    return leaf(envelope.message, **details)
 
 
 def our_inference_service_5xx_error(
@@ -565,7 +665,6 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
     """Extract LLM upstream context for SSE / API payloads."""
     if not isinstance(exc, AgentCoreError):
         return None
-    from agentcore.core.errors import LLMRateLimitError
 
     status = exc.details.get("upstream_status")
     retry_after = exc.details.get("retry_after")
@@ -591,8 +690,7 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
             ctx["retry_after"] = float(retry_after)
     if credential_source in ("user", "platform"):
         ctx["credential_source"] = credential_source
-    if exc.details.get("sub2api_diagnosis"):
-        ctx["sub2api_diagnosis"] = exc.details["sub2api_diagnosis"]
-    if exc.details.get("sub2api_account"):
-        ctx["sub2api_account"] = exc.details["sub2api_account"]
+    # No Sub2API relay diagnosis here on purpose: it describes the *operator's*
+    # upstream accounts, and this dict is the user-visible SSE / REST error
+    # context. It stays on the log surface (``llm.upstream_error``).
     return ctx or None

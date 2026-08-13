@@ -547,7 +547,13 @@ class AuthService:
     # --- self-service account ops (账户设置: 改密码 / 改资料 / 注销) ---
 
     async def change_password(
-        self, *, user_id: str, current_password: str, new_password: str
+        self,
+        *,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+        audience: TokenAudience,
+        mfa_verified: bool = False,
     ) -> TokenPair:
         """Change a logged-in user's password (修改密码), verifying the current one.
 
@@ -556,6 +562,13 @@ class AuthService:
         devices must re-login) and mints a fresh pair for the current session so the
         active device stays signed in. Raises ``AuthenticationError`` if the current
         password is wrong, ``ValidationError`` if the new password is too weak/unchanged.
+
+        ``audience`` / ``mfa_verified`` describe the session doing the change and are
+        carried onto the replacement pair — the successor must be the *same kind* of
+        session, not a downgraded one. ``audience`` has no default on purpose: minting
+        a ``product`` pair for an admin console session silently 403s every
+        ``/v1/admin/*`` call afterwards (api/dependencies.py::_enforce_audience_bounds),
+        and dropping the ``mfa`` claim 428s them back to the enrollment wizard.
         """
         creds = await self._credentials.get_by_user_id(user_id)
         if creds is None or not verify_password(current_password, creds.password_hash):
@@ -569,7 +582,12 @@ class AuthService:
         )
         await self._refresh_tokens.revoke_all_for_user(user_id, commit=False)
         pair = await self._issue_tokens(
-            user_id, family=new_id(), now=datetime.now(UTC), commit=False
+            user_id,
+            family=new_id(),
+            now=datetime.now(UTC),
+            audience=audience,
+            mfa_verified=mfa_verified,
+            commit=False,
         )
         await self._commit()
         return pair
@@ -641,7 +659,10 @@ class AuthService:
         *,
         family: str,
         now: datetime,
-        audience: TokenAudience = "product",
+        # No default: an omitted audience mints a ``product`` pair, which locks an
+        # admin console session out of every ``/v1/admin/*`` route. Every caller
+        # must state which session it is minting for.
+        audience: TokenAudience,
         meta: SessionMeta | None = None,
         family_started_at: datetime | None = None,
         mfa_verified: bool = False,

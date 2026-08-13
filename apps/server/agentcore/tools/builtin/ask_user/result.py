@@ -198,7 +198,7 @@ def ask_user_daily_review_result(
         f"用户已确认复盘提案。服务端已落盘 {applied} 项"
         f"（跳过 {skipped}）{err_bit}。"
         "请用白话写一段短收尾说明落了什么；"
-        "禁止再调用 remember / file_write / update_project_profile 重复写入。"
+        "禁止再调用 remember / file_write / update_folder_profile 重复写入。"
     )
     return ToolResult(
         tool_call_id="",

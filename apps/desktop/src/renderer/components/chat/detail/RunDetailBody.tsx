@@ -296,8 +296,12 @@ export function RunDetailBody({
                         runId: run.id,
                         feedback: redirectFeedback.trim(),
                       });
-                      toast.success("已提交改方向请求", {
-                        description: "调度器将在下一步接管（当前为排队阶段）。",
+                      // 诚实：后端收到即取消这名队员在飞的工作，并优先带现场热续跑
+                      // （接不上才同角色换人重做）。别说成「还在排队、什么都没发生」
+                      // ——用户会据此以为可以再点一次。
+                      toast.success("已改方向：这名队员的在飞工作已取消", {
+                        description:
+                          "正带着你的新方向重跑；接不上现场就从头重做，这段要重新花时间和钱。",
                       });
                       setRedirectOpen(false);
                     } catch {

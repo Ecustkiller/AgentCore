@@ -86,14 +86,14 @@ async def build_workspace_overview(
         return (
             "<workspace_file_index>\n"
             "工作区当前为空（无文件路径可列）——若本回合为云端会话，这只是会话云端草稿尚无文件，"
-            "不是本机或已打开的仓库项目。若对话历史显示曾委派产出，仍须先 "
+            "不是本机或已打开的仓库工程。若对话历史显示曾委派产出，仍须先 "
             "file_list 核实后再回答；环境与绑定以本回合 `<workspace_context>` 为准。\n"
             "</workspace_file_index>"
         )
 
     sections: list[str] = []
     if profile_text:
-        sections.append(f"当前工作区项目概览：\n{profile_text}")
+        sections.append(f"当前工作区工程概览：\n{profile_text}")
 
     if paths:
         sparse_rows, remaining = partition_sparse_paths(
@@ -118,7 +118,7 @@ async def build_workspace_overview(
         if lines:
             file_intro = (
                 "以下为本对话工作区中相关文件路径索引（附件 / 本对话产出优先；"
-                "项目共享树不逐条展开）。列表仅为路径，不含正文内容；"
+                "工作区共享树不逐条展开）。列表仅为路径，不含正文内容；"
                 "需要了解某个文件的内容时，必须调用 file_read（或 grep）读取："
             )
             sections.append(f"{file_intro}\n" + "\n".join(lines))

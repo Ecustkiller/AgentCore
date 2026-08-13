@@ -120,9 +120,6 @@ export function formatAssistantErrorMessage(error: {
     (!message || /rate limited/i.test(message) || !message.includes("上游限流"))
       ? LLM_RATE_LIMIT_MESSAGE
       : message;
-  if (context?.sub2api_diagnosis && !text.includes(context.sub2api_diagnosis)) {
-    text = `${text}\n诊断：${context.sub2api_diagnosis}`;
-  }
   if (import.meta.env.DEV && context?.upstream_body_preview) {
     text = `${text} — ${context.upstream_body_preview}`;
   }
@@ -507,6 +504,8 @@ export interface DescribedError {
   action: ErrorAction | null;
   retriable: boolean;
   code?: string;
+  /** 只放用户自己能行动的事实。运营方中转账号的诊断（Sub2API）不进这里，也不进气泡
+   * ——平台模式下用户没有自己的 key，那说的是别人的账号。后端只写日志。 */
   context?: {
     upstream_status?: number;
     upstream_body_preview?: string | null;
@@ -514,8 +513,6 @@ export interface DescribedError {
     empty_diagnosis?: string;
     body_kind?: string;
     base_url?: string;
-    sub2api_diagnosis?: string;
-    sub2api_account?: string;
     retry_after?: number;
     credential_source?: "user" | "platform" | string | null;
   };
@@ -672,17 +669,10 @@ function resolveMessage(f: ErrorFacts): string {
   // Most coded errors carry a user-facing zh message (validation / conflict /
   // invalid key / insufficient balance …) — prefer it verbatim (single-sourced).
   if (f.serverMessage) {
-    let message = f.serverMessage;
-    if (
-      f.context?.sub2api_diagnosis &&
-      !message.includes(f.context.sub2api_diagnosis)
-    ) {
-      message = `${message}\n诊断：${f.context.sub2api_diagnosis}`;
-    }
     if (import.meta.env.DEV && f.context?.upstream_body_preview) {
-      return `${message} — ${f.context.upstream_body_preview}`;
+      return `${f.serverMessage} — ${f.context.upstream_body_preview}`;
     }
-    return message;
+    return f.serverMessage;
   }
   if (import.meta.env.DEV && f.context?.upstream_status) {
     const preview = f.context.upstream_body_preview

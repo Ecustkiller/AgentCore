@@ -19,6 +19,7 @@ from agentcore.tools.builtin.file_ops.path_hints import enrich_missing_path_mess
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
+    FileProductsContract,
     ToolRegistration,
     ToolSurface,
 )
@@ -50,6 +51,7 @@ class GrepTool:
     registration = ToolRegistration(
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_BOTH,
+        file_products=FileProductsContract.READ_ONLY,
     )
 
     @property

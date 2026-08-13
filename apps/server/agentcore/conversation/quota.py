@@ -17,6 +17,11 @@ its *next* turn rather than having an in-flight reply cut off (不腰斩进行�
 Spend is read from the ``cost_events`` ledger (the money truth source, 不变量
 #1), so the limit reflects 真实记账 rather than an estimate.
 
+The window SUM is account-wide, so **account-level** spend (AI 改写 / 文档
+description — ledger rows with no conversation) counts against the token and
+cost dimensions like any turn's. It does not move 日请求数: that dimension counts
+distinct assistant turns (``message_id``), and those rows belong to none.
+
 Limits resolve per user: ``QuotaLimits.for_user`` reads the override columns on
 the ``users`` row (NULL = inherit global ``quota_*``; an explicit ``0`` =
 unlimited for that dimension). ``is_unlimited`` collapses to all-unlimited so a
@@ -40,8 +45,8 @@ if TYPE_CHECKING:
 
 # Secondary weakened exit appended to platform-quota refusals (成本配额与计费 §〇·六
 # F6): platform额度耗尽 = 等重置 / 联系管理员为主, 「接入自己的 key」为次级出口 (byok
-# 回合不查配额, 是真正的绕过路径). The client maps QUOTA_EXCEEDED → 设置·模型配置 CTA.
-_BYOK_EXIT = "或接入自己的 key 继续（设置 · 模型配置）"
+# 回合不查配额, 是真正的绕过路径). The client maps QUOTA_EXCEEDED → 设置·服务商 CTA.
+_BYOK_EXIT = "或接入自己的 key 继续（设置 · 服务商）"
 
 
 @dataclass(frozen=True)

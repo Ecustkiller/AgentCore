@@ -353,6 +353,7 @@ def escalation_required(
     browser_login: bool | None = None,
     ownership_paths: list[str] | None = None,
     lock_owner_run_id: str | None = None,
+    timeout_seconds: float | None = None,
 ) -> SSEEvent:
     """``question`` is the worker's headline ask; ``questions`` is the optional
     structured-fork list (同 ask_user 的 questions) the card renders as choice/text so
@@ -363,6 +364,9 @@ def escalation_required(
     ``browser_login`` (narrow D16 exception): when true, the pending escalate allows
     user browser takeover while the turn is still running. Absent/false on old streams.
     ``ownership_paths`` / ``lock_owner_run_id``: write-lock conflict 结构化裁决（移交写权）。
+    ``timeout_seconds``: the wall-clock ceiling this suspend actually got. ABSENT is the
+    default deployment (D2 ``checkpoint_timeout_seconds=None``) = waits indefinitely, so a
+    client must NOT promise「未答则按假设继续」unless this field carries a value.
     """
     who = awaiting if awaiting in ("user", "ceo") else "user"
     payload: dict[str, Any] = {
@@ -385,6 +389,9 @@ def escalation_required(
     lock = (lock_owner_run_id or "").strip()
     if lock:
         payload["lock_owner_run_id"] = lock
+    # Only a real ceiling travels: absent ⇒ 无限期等待, which is what the card must say.
+    if isinstance(timeout_seconds, (int, float)) and timeout_seconds > 0:
+        payload["timeout_seconds"] = float(timeout_seconds)
     return SSEEvent(
         type=EventType.ESCALATION_REQUIRED,
         payload=payload,

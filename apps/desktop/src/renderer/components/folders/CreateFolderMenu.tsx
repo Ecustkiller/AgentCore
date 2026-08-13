@@ -13,12 +13,14 @@ import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 /**
- * 「新建项目」锚点级联：仅云端空白（§五：桌面不再主推本机文件夹/本机空白）。
- * 入口（chip / 侧栏 + / 命令面板）共用；AppShell 挂载 {@link CreateFolderMenuHost}。
+ * 「新建文件夹」锚点级联：在「我的文件」里建一个云端文件夹（顶层，或 `createFolderParent`
+ * 指定的那一层里）。入口（chip / 文件页 + / 命令面板）共用；AppShell 挂载
+ * {@link CreateFolderMenuHost}。打开本机文件夹是另一条路（§5.4：建容器只剩这两个动作）。
  */
 export function CreateFolderMenuHost() {
   const open = useFoldersStore((s) => s.createFolderOpen);
   const anchor = useFoldersStore((s) => s.createFolderAnchor);
+  const parent = useFoldersStore((s) => s.createFolderParent);
   const close = useFoldersStore((s) => s.closeCreateFolder);
   /** Swallow the outside-dismiss from the menu/dropdown that just opened us. */
   const ignoreOutsideUntil = useRef(0);
@@ -52,7 +54,13 @@ export function CreateFolderMenuHost() {
         onPointerDownOutside={guardOutside}
         onInteractOutside={guardOutside}
       >
-        {open ? <CreateFolderCascadePanel onClose={close} /> : null}
+        {open ? (
+          <CreateFolderCascadePanel
+            onClose={close}
+            parentId={parent?.id ?? null}
+            parentName={parent?.name ?? null}
+          />
+        ) : null}
       </PopoverContent>
     </Popover>
   );
@@ -83,8 +91,13 @@ function VirtualAnchor({ rect }: { rect: CreateFolderAnchorRect | null }) {
 
 export function CreateFolderCascadePanel({
   onClose,
+  parentId = null,
+  parentName = null,
 }: {
   onClose: () => void;
+  /** Nest inside this folder; null = 我的文件 top level. */
+  parentId?: string | null;
+  parentName?: string | null;
 }) {
   const createFolder = useCreateFolder();
   const [name, setName] = useState("");
@@ -100,7 +113,7 @@ export function CreateFolderCascadePanel({
       useConversationStore.getState().currentConversationId === null;
     if (draft) {
       useFoldersStore.getState().setDraftWorkspaceIntent({
-        kind: "project",
+        kind: "folder",
         folderId,
       });
     }
@@ -120,10 +133,11 @@ export function CreateFolderCascadePanel({
       const { folder } = await createFolder.mutateAsync({
         name: trimmed,
         mode: "cloud",
+        parentId,
       });
       finishCreated(folder);
     } catch (e) {
-      notifyError(e, "创建项目失败");
+      notifyError(e, "创建文件夹失败");
     } finally {
       setBusy(false);
     }
@@ -133,13 +147,15 @@ export function CreateFolderCascadePanel({
 
   return (
     <div className="w-72 p-3">
-      <div className="mb-2 text-xs font-medium text-foreground">新建云项目</div>
+      <div className="mb-2 text-xs font-medium text-foreground">
+        {parentName ? `在「${parentName}」里新建文件夹` : "新建文件夹"}
+      </div>
       <NamePane
         inputRef={nameRef}
         name={name}
         setName={setName}
         pending={pending}
-        hint="云端空间 · 团队共享"
+        hint={parentName ? `我的文件 · ${parentName}` : "我的文件 · 云端"}
         onSubmit={() => void handleSubmitCloud()}
       />
     </div>
@@ -174,8 +190,8 @@ function NamePane({
             onSubmit();
           }
         }}
-        placeholder="项目名称"
-        aria-label="项目名称"
+        placeholder="文件夹名称"
+        aria-label="文件夹名称"
         disabled={pending}
         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50"
       />

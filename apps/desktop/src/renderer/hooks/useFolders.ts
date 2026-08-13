@@ -5,16 +5,20 @@ import {
   useGroupedConversations,
 } from "@/hooks/useConversations";
 import { queryClient } from "@/lib/queryClient";
-import { conversationKeys } from "@/lib/queryKeys";
+import { conversationKeys, folderKeys, workspaceKeys } from "@/lib/queryKeys";
+import { notifyError, notifyInfo } from "@/lib/toast";
 import {
   type CreateFolderInput,
   type FolderMeta,
+  type FolderTrash,
   createFolder,
   deleteFolder,
+  listFolderTrash,
   permanentDeleteFolder,
+  restoreFolder,
   updateFolder,
 } from "@/services/folders";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 /**
  * Folders as React Query data — folders share the `/grouped` query (and its
@@ -65,7 +69,7 @@ export function useFolders(): FolderMeta[] {
   return useGroupedConversations().data?.folders ?? EMPTY_FOLDERS;
 }
 
-/** Create a project (= workspace), then add it to the cache. */
+/** Create a folder (= workspace), then add it to the cache. */
 export function useCreateFolder() {
   return useMutation({
     mutationFn: (input: CreateFolderInput) => createFolder(input),
@@ -75,11 +79,22 @@ export function useCreateFolder() {
   });
 }
 
-/** Rename a folder, optimistic with rollback on failure. */
+/**
+ * Rename or re-parent a folder, optimistic with rollback on failure.
+ *
+ * A move changes `relPath` for the folder *and its whole subtree*, which only
+ * the server can compute — the optimistic patch covers the name (what the row
+ * shows) and lets the refetched list settle the paths.
+ */
 export function useUpdateFolder() {
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string } }) =>
-      updateFolder(id, patch),
+    mutationFn: ({
+      id,
+      patch,
+    }: {
+      id: string;
+      patch: { name?: string; parentId?: string | null };
+    }) => updateFolder(id, patch),
     onMutate: ({ id, patch }) => {
       const prev = getFolders().find((f) => f.id === id) ?? null;
       const cachePatch: Partial<FolderMeta> = {};
@@ -92,7 +107,41 @@ export function useUpdateFolder() {
         patchFolderCache(ctx.prev.id, { name: ctx.prev.name });
       }
     },
+    onSuccess: (_data, { patch }) => {
+      if (patch.parentId === undefined) return;
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.grouped,
+      });
+    },
   });
+}
+
+/**
+ * The renderer-side fallout of a folder leaving the live list: its member
+ * conversations are gone from the sidebar already (soft-delete archives them
+ * server-side in one statement), so drop their cached rows and unload their
+ * runtime slices. Returns true when one of them was the conversation on screen —
+ * the caller owns the navigation away from it.
+ *
+ * Deliberately *not* an archive loop: routing these through the archive endpoint
+ * would stamp them as「用户主动归档」and the server could no longer tell which
+ * conversations to un-archive when the folder is restored.
+ */
+export function releaseFolderConversations(
+  folderId: string,
+  {
+    dropRuntime,
+    currentId,
+  }: { dropRuntime: (id: string) => void; currentId: string | null },
+): boolean {
+  let releasedActive = false;
+  for (const { id, folderId: owner } of getConversations()) {
+    if (owner !== folderId) continue;
+    removeConversationFromCache(id);
+    dropRuntime(id);
+    if (id === currentId) releasedActive = true;
+  }
+  return releasedActive;
 }
 
 /**
@@ -110,11 +159,59 @@ export function useDeleteFolder() {
       void queryClient.invalidateQueries({
         queryKey: conversationKeys.archived,
       });
+      void queryClient.invalidateQueries({ queryKey: folderKeys.trash });
+      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
     },
   });
 }
 
-/** 彻底删除项目 — hard-delete folder and all member chats. */
+/** 最近删除 — the recoverable projects + the retention window they live under. */
+export function useFolderTrash(enabled: boolean) {
+  return useQuery<FolderTrash>({
+    queryKey: folderKeys.trash,
+    queryFn: listFolderTrash,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Restore a deleted project (撤销删除 / 最近删除). Members that the delete
+ * archived come back with it, so every conversation view is refreshed.
+ *
+ * Pass the name it was deleted under: the server re-allocates the tree slot, so
+ * a project whose name was taken meanwhile returns as「名字 (2)」and the user is
+ * told rather than left to spot it in the sidebar.
+ *
+ * Both toasts belong to the hook because the usual trigger is the delete toast's
+ * 撤销 — by then the row that started this is unmounted, and React Query skips
+ * per-call callbacks for a dead observer. A project swept past retention answers
+ * 409 and that must always reach the user, never be retried or reconciled.
+ */
+export function useRestoreFolder() {
+  return useMutation({
+    mutationFn: ({ id }: { id: string; name: string }) => restoreFolder(id),
+    onError: (err) => notifyError(err, "恢复失败"),
+    onSuccess: (folder, { name }) => {
+      addFolderCache(folder);
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.grouped,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
+      void queryClient.invalidateQueries({ queryKey: folderKeys.trash });
+      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
+      if (folder.name !== name) {
+        notifyInfo("文件夹已恢复", {
+          description: `原名已被占用，已恢复为「${folder.name}」`,
+        });
+      }
+    },
+  });
+}
+
+/** 彻底删除文件夹 — hard-delete folder and all member chats. */
 export function usePermanentDeleteFolder() {
   return useMutation({
     mutationFn: (id: string) => permanentDeleteFolder(id),

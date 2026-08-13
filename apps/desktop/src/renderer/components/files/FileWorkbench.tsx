@@ -4,6 +4,18 @@ import { MemoryUpdatesView } from "@/components/files/MemoryUpdatesView";
 import { AgentCoreSection } from "@/components/files/fileWorkbench/AgentCoreSection";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
 import type { EntryOpenTarget } from "@/components/files/fileWorkbench/EntriesSection";
+import {
+  type FolderRailHost,
+  FolderRailNodes,
+  FolderRailRow,
+  folderWorkspaceFallback,
+} from "@/components/files/fileWorkbench/FolderRailNodes";
+import {
+  LocalFoldersRailHeader,
+  MyFilesRailHeader,
+  RailSectionHeader,
+  SharedSpacesRailHeader,
+} from "@/components/files/fileWorkbench/RailHeaders";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import {
   type Tab,
@@ -19,20 +31,25 @@ import {
 } from "@/components/files/fileWorkbench/storage";
 import { EmptyHint, InlineError } from "@/components/files/parts";
 import { PendingSharedInvites } from "@/components/files/sharedSpaces/PendingSharedInvites";
-import {
-  ProjectsRailHeader,
-  SharedSpaceSection,
-} from "@/components/files/sharedSpaces/SharedSpaceSection";
+import { SharedSpaceSection } from "@/components/files/sharedSpaces/SharedSpaceSection";
 import { SearchField } from "@/components/ui";
 import { getConversations, useConversations } from "@/hooks/useConversations";
-import { getFolders } from "@/hooks/useFolders";
+import { getFolders, useFolders } from "@/hooks/useFolders";
 import { useSharedSpaces } from "@/hooks/useSharedSpaces";
+import { hasLocalFiles } from "@/lib/capabilities";
+import { sortFoldersByRecentActivity } from "@/lib/draftWorkspaceFolders";
 import type { FileSource } from "@/lib/fileSource";
+import {
+  ancestorFolderIds,
+  buildFolderTree,
+  pruneFolderTree,
+} from "@/lib/folderTree";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { bareConversationScratchSubpath } from "@/services/bareScratchPath";
+import { dedupeFoldersByLocalBinding } from "@/services/folders";
 import {
   type SharedSpaceSummary,
   canWriteSharedSpace,
@@ -52,32 +69,9 @@ import {
 } from "@/services/sources/workspaceSource";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useConversationStore } from "@/stores/conversation";
+import { useFoldersStore } from "@/stores/folders";
 import { FileText, FolderOpen, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
-/** One row in the「项目」段 — personal `folder:` or multi-user `shared:`. */
-type ProjectRailItem =
-  | { kind: "folder"; ws: WorkspaceInfo; sortAt: number }
-  | { kind: "shared"; space: SharedSpaceSummary; sortAt: number };
-
-function msOrZero(iso: string | null | undefined): number {
-  if (!iso) return 0;
-  const t = Date.parse(iso);
-  return Number.isFinite(t) ? t : 0;
-}
-
-/** Best-effort「最近活跃」for a folder: max conversation `updatedAt` in that project. */
-function folderActivityMs(
-  folderId: string,
-  conversations: { folderId?: string | null; updatedAt: string }[],
-): number {
-  let max = 0;
-  for (const c of conversations) {
-    if (c.folderId !== folderId) continue;
-    max = Math.max(max, msOrZero(c.updatedAt));
-  }
-  return max;
-}
 
 /** Synthetic workspace id every memory leaf's tab lives under — they belong to no real
  * workspace (private per-user data), so they're resolved to {@link createMemorySource}
@@ -92,37 +86,41 @@ const MEMORY_WS = "__memory__";
 const RULES_WS = "__rules__";
 
 /**
- * The cross-project 文件 hub's **split** file UI (VSCode 式左树右详情) — the merged
- * left rail stacks every workspace (= folder, cloud + local) as a **flat,
- * collapsible section** ({@link WorkspaceSection}): a header (chevron + name +
- * cloud/local badge + create buttons) over its file tree (其自带 {@link FileSource})。
+ * The 文件 hub's **split** file UI (VSCode 式左树右详情). The left rail is four
+ * zones (双模式工作区 §5.4 — 界面上没有「项目」，容器只有文件夹):
+ *
+ * - **我的文件** — the cloud folder tree, nested for real by `rel_path`. A folder
+ *   row expands into its child folders, then its ``AgentCore/`` conventions, then
+ *   its files. Child folders are hidden from the parent's {@link FileTree}
+ *   (`hideRootDirs`) because their directories physically live inside it and
+ *   would otherwise appear twice.
+ * - **本机文件夹** — disk folders, most recently active first (VS Code 语义).
+ * - **共享空间** — member-based cloud spaces, a parallel container (§八).
+ * - **快速对话** — `conv:` scratch roots.
+ *
  * 段**默认折叠**（只露根标题），点标题展开/收起、展开态持久化（`expandedWs`）；折叠时不
- * 挂载 {@link FileTree}，故云端 eager 源的「整树递归拉取」推迟到展开时才发——工作区一多时
- * 既清爽又省掉打开页面即 N 次全量请求。全部平铺、无「home / 其他项目」分区——只靠
- * cloud/local 徽标区分（用户 2026-06 决定）；多人 `shared:` 并入「项目」段、角标「共享」
- * （定案 B）。每个 `folder:` 项目展开后固定挂约定树 ``AgentCore/`` 扁平条目
- * （无内容也显示），再是文件树；顶层同样挂全局 ``AgentCore/``（条目 + 最近更新），
- * 不再三分「记忆 / 规则 / 文档」夹。
- * 工作区一视同仁（工作区对称化 D1a 起不再有置顶的「我的工作区」默认壳——裸聊产文件时由服务端
- * 懒建一个 per 对话本地工作区，与云端裸聊同构）。The right pane is a **tab strip** — opening
- * files stacks tabs, each {@link FileDetail} stays mounted (hidden when inactive) so
+ * 挂载 {@link FileTree}，故云端 eager 源的「整树递归拉取」推迟到展开时才发——文件夹一多时
+ * 既清爽又省掉打开页面即 N 次全量请求。顶层另挂全局 ``AgentCore/``（条目 + 最近更新），
+ * 不再三分「记忆 / 规则 / 文档」夹。The right pane is a **tab strip** — opening files
+ * stacks tabs, each {@link FileDetail} stays mounted (hidden when inactive) so
  * switching never drops editor / draft state. The tree always stays visible (unlike
  * the swap-style {@link FileBrowser} used in narrow side panels).
  *
- * Workspace lifecycle (new file·folder / upload / reveal in OS / open chat /
- * clear cloud-scratch artifacts / delete conversation or delete project / rename)
- * lives on each root's **right-click menu** to keep the rail clean; the rail
- * header is a **name + path filter** (real-time, case-insensitive substring over
- * workspace names and, for expanded trees, file/folder names + relative paths;
- * session-only, not persisted — it's a search, not a preference). No content
- * full-text search. Reuses {@link FileTree} in its headerless `chrome={false}`
- * form so per-source CRUD / drag / fold all come for free.
+ * Rows come from the folder list rather than `/v1/workspaces`, so a folder just
+ * created shows up before the workspace list refetches; a folder with no
+ * workspace row yet falls back to {@link folderWorkspaceFallback}. Lifecycle
+ * (new file·folder / upload / reveal in OS / open chat / clear cloud-scratch
+ * artifacts / delete conversation or delete folder / rename) lives on each root's
+ * **right-click menu** to keep the rail clean; the rail header is a **name + path
+ * filter** (real-time, case-insensitive substring over folder names and, for
+ * expanded trees, file/folder names + relative paths; session-only, not persisted
+ * — it's a search, not a preference). No content full-text search.
  *
- * No longer the lens onto a *single* project's home — that page (`/folders/:id`) is
- * gone (双模式工作区 决策 #9, 端态 I): this is purely the file lens, and chats live
- * on `/conversations`. The two cross-link: a root's「查看对话」jumps here→there, and
- * `/conversations`「浏览文件」jumps there→here (via `focusWsId`, which expands +
- * highlights the target root).
+ * The two container actions §5.4 leaves are the zone headers' own: 我的文件「+」
+ * builds a cloud folder (nested via a row's「在此新建文件夹」), 本机文件夹「+」opens
+ * one off the disk. Chats live on `/conversations`; the two cross-link — a root's
+ * 「查看对话」jumps here→there, and「浏览文件」jumps there→here (via `focusWsId`,
+ * which expands + highlights the target root).
  */
 export function FileWorkbench({
   workspaces,
@@ -144,9 +142,9 @@ export function FileWorkbench({
    * Off for hosts that shouldn't surface it (e.g. side panels). */
   showMemory?: boolean;
   /** When navigated here with a target workspace (`/conversations`「浏览文件」),
-   * auto-expand + highlight + scroll to that section（段默认折叠，故主动展开那一个）。
-   * `focusKey` (= navigation key) makes re-focusing the same project on a later jump
-   * fire again. */
+   * auto-expand + highlight + scroll to that section（段默认折叠，故主动展开那一个；
+   * 嵌套文件夹连同祖先一起展开）。`focusKey` (= navigation key) makes re-focusing the
+   * same folder on a later jump fire again. */
   focusWsId?: string | null;
   /** When navigated here from a对话页「记忆已更新」card deep-link, open this exact memory
    * leaf as a tab (记忆更新对话内可见 §1.6). Gated on `focusKey` so it fires once per
@@ -170,7 +168,7 @@ export function FileWorkbench({
   const [filter, setFilter] = useState("");
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
-  // 最近更新 / 对话卡深链到项目条目时，强制展开该项目下的 AgentCore（一次性）。
+  // 最近更新 / 对话卡深链到文件夹条目时，强制展开该文件夹下的 AgentCore（一次性）。
   const [revealMemoryFolderId, setRevealMemoryFolderId] = useState<
     string | null
   >(null);
@@ -185,16 +183,18 @@ export function FileWorkbench({
     [sharedQuery.data],
   );
   const conversations = useConversations();
+  const folders = useFolders();
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
+  const openCreateFolder = useFoldersStore((s) => s.openCreateFolder);
 
   // AI 写入后服务端列表可能仍 stale（30s）——进中枢即拉新，避免「改动」有、左侧无。
   useEffect(() => {
     void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
   }, []);
 
-  /** Project + bare scratch only — `shared:` rows come from {@link useSharedSpaces}.
+  /** Folder + bare scratch only — `shared:` rows come from {@link useSharedSpaces}.
    * If the active bare chat already produced files but `/v1/workspaces` has not
    * listed `conv:<id>` yet, synthesize a rail row so the tree is reachable. */
   const personalWorkspaces = useMemo(() => {
@@ -223,6 +223,21 @@ export function FileWorkbench({
     return [synthetic, ...base];
   }, [workspaces, currentConversationId, conversations]);
 
+  /** Every rail row's workspace, folder rows included even when `/v1/workspaces`
+   * has not caught up with a folder the user just created. */
+  const railWorkspaces = useMemo(() => {
+    const known = new Set(personalWorkspaces.map((w) => w.wsId));
+    const extra = folders
+      .filter((f) => !known.has(`folder:${f.id}`))
+      .map(folderWorkspaceFallback);
+    return [...personalWorkspaces, ...extra];
+  }, [personalWorkspaces, folders]);
+
+  const railWorkspaceByWsId = useMemo(
+    () => new Map(railWorkspaces.map((w) => [w.wsId, w])),
+    [railWorkspaces],
+  );
+
   const toggleWs = useCallback((wsId: string) => {
     setExpandedWs((prev) => {
       const next = new Set(prev);
@@ -233,10 +248,11 @@ export function FileWorkbench({
     });
   }, []);
 
-  const expandWs = useCallback((wsId: string) => {
+  const expandWs = useCallback((...wsIds: string[]) => {
     setExpandedWs((prev) => {
-      if (prev.has(wsId)) return prev;
-      const next = new Set(prev).add(wsId);
+      if (wsIds.every((id) => prev.has(id))) return prev;
+      const next = new Set(prev);
+      for (const id of wsIds) next.add(id);
       saveExpandedWs(next);
       return next;
     });
@@ -304,7 +320,7 @@ export function FileWorkbench({
   // 故豁免，否则它会被立刻清掉。共享空间以 `shared:` ws_id 计。
   useEffect(() => {
     const liveWsIds = new Set([
-      ...personalWorkspaces.map((w) => w.wsId),
+      ...railWorkspaces.map((w) => w.wsId),
       ...sharedSpaces.map((s) => s.ws_id || sharedWsId(s.id)),
     ]);
     const live = tabs.filter(
@@ -316,7 +332,7 @@ export function FileWorkbench({
     if (activeKey && !live.some((t) => tabKey(t.wsId, t.path) === activeKey)) {
       setActiveKey(live.length ? tabKey(live[0].wsId, live[0].path) : null);
     }
-  }, [personalWorkspaces, sharedSpaces, tabs, activeKey]);
+  }, [railWorkspaces, sharedSpaces, tabs, activeKey]);
 
   // 从 /conversations「浏览文件」跳来：自动展开 + 高亮 + 滚入目标工作区（段默认折叠，故这里
   // 主动展开那一个）。每个 focusKey（导航键）只应用一次，但等到工作区列表就绪后才生效（冷进入
@@ -325,21 +341,26 @@ export function FileWorkbench({
     if (!focusWsId || !focusKey) return;
     if (appliedFocusRef.current === focusKey) return;
     const known =
-      personalWorkspaces.some((w) => w.wsId === focusWsId) ||
+      railWorkspaces.some((w) => w.wsId === focusWsId) ||
       sharedSpaces.some((s) => (s.ws_id || sharedWsId(s.id)) === focusWsId);
     if (!known) return;
     appliedFocusRef.current = focusKey;
     setFilter(""); // 清掉过滤，避免目标工作区被筛掉而看不到
-    expandWs(focusWsId);
+    // 嵌套文件夹要连同各层祖先一起展开，否则目标行仍藏在折叠的父级里。
+    const folderId = folderIdOf(focusWsId);
+    const ancestors = folderId
+      ? ancestorFolderIds(folders, folderId).map((id) => `folder:${id}`)
+      : [];
+    expandWs(...ancestors, focusWsId);
     setFlashWsId(focusWsId);
     const t = setTimeout(() => setFlashWsId(null), 1500);
     return () => clearTimeout(t);
-  }, [focusWsId, focusKey, personalWorkspaces, sharedSpaces, expandWs]);
+  }, [focusWsId, focusKey, railWorkspaces, sharedSpaces, folders, expandWs]);
 
   // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
   // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
-  // 项目画像叶子的双栏编辑器会在 workspaces 到位后自行解析项目名。内联开 tab 逻辑（与 openFile
-  // 同义）避免依赖在其后定义的 openFile。项目叶子额外展开对应项目 +「记忆」节点；主题叶再展「主题」。
+  // 文件夹画像叶子的双栏编辑器会在列表到位后自行解析文件夹名。内联开 tab 逻辑（与 openFile
+  // 同义）避免依赖在其后定义的 openFile。文件夹叶子额外展开对应文件夹 +「记忆」节点；主题叶再展「主题」。
   useEffect(() => {
     if (!openMemoryLeaf || !focusKey) return;
     if (appliedMemoryLeafRef.current === focusKey) return;
@@ -359,7 +380,7 @@ export function FileWorkbench({
   // N4-A：离线时本地源只读包装；云源仍解析但 UI 灰显（不隐藏）。
   const sourceByWs = useMemo(() => {
     const m = new Map<string, FileSource | null>();
-    for (const w of personalWorkspaces) {
+    for (const w of railWorkspaces) {
       const src = resolveWorkspaceSource(w, fsAvailable);
       if (offline && src && w.location === "local") {
         m.set(w.wsId, asReadOnlyFileSource(src));
@@ -384,7 +405,7 @@ export function FileWorkbench({
       }
     }
     return m;
-  }, [personalWorkspaces, sharedSpaces, fsAvailable, offline]);
+  }, [railWorkspaces, sharedSpaces, fsAvailable, offline]);
 
   // 记忆叶子的路径感知单一源（所有记忆叶子共用一例，按 tab path 解析作用域；与工作区源同构，
   // 故复用 FileDetail/编辑器）。
@@ -393,56 +414,54 @@ export function FileWorkbench({
   // 规则叶子的路径感知单一源（tab path 即文档 id；与记忆源同构，故复用 FileDetail/编辑器）。
   const documentSource = useMemo(() => createDocumentSource(), []);
 
-  // 工作区名匹配保留；已展开段也保留（否则按文件名筛时段落被名过滤藏掉，树内过滤无法露出）。
+  // 名字匹配保留；已展开段也保留（否则按文件名筛时段落被名过滤藏掉，树内过滤无法露出）。
   // 树内路径/文件名过滤由各段 FileTree 的 filterQuery 完成。
-  const visiblePersonal = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return personalWorkspaces;
-    return personalWorkspaces.filter(
-      (w) => w.name.toLowerCase().includes(q) || expandedWs.has(w.wsId),
+  const matchesFilter = useCallback(
+    (name: string, wsId: string) => {
+      const q = filter.trim().toLowerCase();
+      if (!q) return true;
+      return name.toLowerCase().includes(q) || expandedWs.has(wsId);
+    },
+    [filter, expandedWs],
+  );
+
+  /** 我的文件 = 云端文件夹的真嵌套树；命中项的祖先一并保留，否则深处的匹配会没了路径。 */
+  const cloudFolderNodes = useMemo(() => {
+    const tree = buildFolderTree(folders.filter((f) => f.mode === "cloud"));
+    if (!filter.trim()) return tree;
+    return pruneFolderTree(tree, (f) =>
+      matchesFilter(f.name, `folder:${f.id}`),
     );
-  }, [personalWorkspaces, filter, expandedWs]);
+  }, [folders, filter, matchesFilter]);
+
+  /** 本机文件夹 = 最近打开列表（VS Code 语义）：同一本机路径可能被多条文件夹记录绑定，去重后按最近活跃排。 */
+  const localFolders = useMemo(() => {
+    const local = dedupeFoldersByLocalBinding(
+      folders.filter((f) => f.mode === "local"),
+    );
+    return sortFoldersByRecentActivity(local, conversations).filter((f) =>
+      matchesFilter(f.name, `folder:${f.id}`),
+    );
+  }, [folders, conversations, matchesFilter]);
 
   const visibleShared = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return sharedSpaces;
-    return sharedSpaces.filter((s) => {
-      const wsId = s.ws_id || sharedWsId(s.id);
-      return s.name.toLowerCase().includes(q) || expandedWs.has(wsId);
-    });
-  }, [sharedSpaces, filter, expandedWs]);
+    return sharedSpaces.filter((s) =>
+      matchesFilter(s.name, s.ws_id || sharedWsId(s.id)),
+    );
+  }, [sharedSpaces, matchesFilter]);
 
   const treeFilterQuery = filter.trim();
 
-  /** folder: + shared: 混排进「项目」段（按最近活跃降序）。 */
-  const projectItems = useMemo(() => {
-    const items: ProjectRailItem[] = [];
-    for (const ws of visiblePersonal) {
-      if (!ws.wsId.startsWith("folder:")) continue;
-      const folderId = folderIdOf(ws.wsId);
-      items.push({
-        kind: "folder",
-        ws,
-        sortAt: folderId ? folderActivityMs(folderId, conversations) : 0,
-      });
-    }
-    for (const space of visibleShared) {
-      items.push({
-        kind: "shared",
-        space,
-        sortAt: msOrZero(space.updated_at),
-      });
-    }
-    items.sort((a, b) => b.sortAt - a.sortAt);
-    return items;
-  }, [visiblePersonal, visibleShared, conversations]);
-
   const scratches = useMemo(
-    () => visiblePersonal.filter((w) => w.wsId.startsWith("conv:")),
-    [visiblePersonal],
+    () =>
+      personalWorkspaces.filter(
+        (w) => w.wsId.startsWith("conv:") && matchesFilter(w.name, w.wsId),
+      ),
+    [personalWorkspaces, matchesFilter],
   );
 
   const railEmpty =
+    folders.length === 0 &&
     personalWorkspaces.length === 0 &&
     sharedSpaces.length === 0 &&
     !sharedQuery.isLoading;
@@ -520,6 +539,43 @@ export function FileWorkbench({
     setActiveKey(null);
   };
 
+  /** 本机文件夹段只在能读本机盘的宿主里出现（Web 版没有）。 */
+  const localFsAvailable = fsAvailable && hasLocalFiles();
+
+  /** One bundle every folder row reads from, instead of drilling a dozen props. */
+  const railHost: FolderRailHost = {
+    workspaceByWsId: railWorkspaceByWsId,
+    sourceByWs,
+    expandedWs,
+    onToggleWs: toggleWs,
+    onOpenFile: openFile,
+    activeTab,
+    flashWsId,
+    filterQuery: treeFilterQuery,
+    offline,
+    onCreateSubfolder: (parent, anchorEl) =>
+      openCreateFolder(anchorEl ?? null, { id: parent.id, name: parent.name }),
+    renderFolderRail: showMemory
+      ? (folder) => (
+          <AgentCoreSection
+            scope={{ kind: "folder", folderId: folder.id }}
+            memoryActivePath={
+              activeTab?.wsId === MEMORY_WS ? activeTab.path : null
+            }
+            documentActivePath={
+              activeTab?.wsId === RULES_WS ? activeTab.path : null
+            }
+            onOpenEntry={openEntry}
+            onEntryDeleted={closeEntry}
+            onEntryRenamed={renameEntryTab}
+            indent={14}
+            forceOpen={revealMemoryFolderId === folder.id}
+            onRevealApplied={clearMemoryReveal}
+          />
+        )
+      : undefined,
+  };
+
   return (
     <div className="flex h-full w-full">
       {/* Left: workspaces + their files as one multi-root tree (resizable). */}
@@ -527,20 +583,20 @@ export function FileWorkbench({
         style={{ width: railWidth }}
         className="flex shrink-0 flex-col border-r border-border"
       >
-        {/* Rail header: workspace name + in-tree path filter（新建走项目区 + 菜单；
+        {/* Rail header: name + in-tree path filter（新建走各段标题的「+」；
             段级 CRUD 在各 WorkspaceSection / SharedSpaceSection 右键菜单). */}
         <div className="flex h-12 shrink-0 items-center gap-1 border-b border-border px-2">
           <SearchField
             value={filter}
             onValueChange={setFilter}
-            placeholder="筛选工作区或文件…"
-            aria-label="按名称筛选工作区或文件"
+            placeholder="筛选文件夹或文件…"
+            aria-label="按名称筛选文件夹或文件"
             className="min-w-0 flex-1"
           />
         </div>
 
         {/* Pinned global ``AgentCore/`` flat entries + 最近更新.
-            Per-project convention tree mounts under each project folder. */}
+            Per-folder convention tree mounts under each folder row. */}
         {showMemory && (
           <div className="shrink-0 border-b border-border px-2 py-1">
             <AgentCoreSection
@@ -589,21 +645,53 @@ export function FileWorkbench({
         ) : railEmpty ? (
           <EmptyHint
             icon={<FolderOpen size={24} className="text-muted-foreground/40" />}
-            title="还没有工作区"
-            hint="新建项目或共享空间，或在对话里产生文件后，对应条目会出现在这里。"
+            title="还没有文件夹"
+            hint="在「我的文件」里新建文件夹、打开本机文件夹或新建共享空间；对话里产生的文件也会出现在这里。"
           />
         ) : (
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 py-1">
             {filter.trim() &&
-            projectItems.length === 0 &&
+            cloudFolderNodes.length === 0 &&
+            localFolders.length === 0 &&
+            visibleShared.length === 0 &&
             scratches.length === 0 ? (
               <p className="px-2 py-6 text-center text-xs text-muted-foreground">
-                没有匹配「{filter.trim()}」的工作区或已展开树中的文件
+                没有匹配「{filter.trim()}」的文件夹或已展开树中的文件
               </p>
             ) : (
               <>
-                {(projectItems.length > 0 || !filter.trim()) && (
-                  <ProjectsRailHeader
+                {(cloudFolderNodes.length > 0 || !filter.trim()) && (
+                  <MyFilesRailHeader />
+                )}
+                {cloudFolderNodes.length === 0 && !filter.trim() ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground/70">
+                    还没有文件夹，用右上角「+」建一个
+                  </p>
+                ) : (
+                  <FolderRailNodes nodes={cloudFolderNodes} host={railHost} />
+                )}
+
+                {localFsAvailable &&
+                  (localFolders.length > 0 || !filter.trim()) && (
+                    <LocalFoldersRailHeader />
+                  )}
+                {localFsAvailable &&
+                  (localFolders.length === 0 && !filter.trim() ? (
+                    <p className="px-2 py-2 text-xs text-muted-foreground/70">
+                      打开过的本机文件夹会出现在这里
+                    </p>
+                  ) : (
+                    localFolders.map((folder) => (
+                      <FolderRailRow
+                        key={folder.id}
+                        folder={folder}
+                        host={railHost}
+                      />
+                    ))
+                  ))}
+
+                {(visibleShared.length > 0 || !filter.trim()) && (
+                  <SharedSpacesRailHeader
                     onSharedCreated={(spaceId) => {
                       const wsId = sharedWsId(spaceId);
                       expandWs(wsId);
@@ -612,88 +700,34 @@ export function FileWorkbench({
                     }}
                   />
                 )}
-                {projectItems.length === 0 && !filter.trim() ? (
+                {visibleShared.length === 0 && !filter.trim() ? (
                   <p className="px-2 py-2 text-xs text-muted-foreground/70">
-                    还没有项目工作区
+                    还没有共享空间
                   </p>
                 ) : (
-                  projectItems.map((item) => {
-                    if (item.kind === "shared") {
-                      const { space } = item;
-                      const wsId = space.ws_id || sharedWsId(space.id);
-                      return (
-                        <SharedSpaceSection
-                          key={space.id}
-                          space={space}
-                          source={sourceByWs.get(wsId) ?? null}
-                          offlineUnavailable={offline}
-                          activePath={
-                            activeTab?.wsId === wsId ? activeTab.path : null
-                          }
-                          expanded={expandedWs.has(wsId)}
-                          onToggle={() => toggleWs(wsId)}
-                          onOpenFile={(path, name) =>
-                            openFile(wsId, path, name)
-                          }
-                          flashing={wsId === flashWsId}
-                          filterQuery={treeFilterQuery}
-                        />
-                      );
-                    }
-                    const { ws } = item;
-                    const folderId = folderIdOf(ws.wsId);
+                  visibleShared.map((space) => {
+                    const wsId = space.ws_id || sharedWsId(space.id);
                     return (
-                      <WorkspaceSection
-                        key={ws.wsId}
-                        ws={ws}
-                        source={sourceByWs.get(ws.wsId) ?? null}
-                        offlineCloud={offline && ws.location === "cloud"}
+                      <SharedSpaceSection
+                        key={space.id}
+                        space={space}
+                        source={sourceByWs.get(wsId) ?? null}
+                        offlineUnavailable={offline}
                         activePath={
-                          activeTab?.wsId === ws.wsId ? activeTab.path : null
+                          activeTab?.wsId === wsId ? activeTab.path : null
                         }
-                        expanded={expandedWs.has(ws.wsId)}
-                        onToggle={() => toggleWs(ws.wsId)}
-                        onOpenFile={(path, name) =>
-                          openFile(ws.wsId, path, name)
-                        }
-                        flashing={ws.wsId === flashWsId}
+                        expanded={expandedWs.has(wsId)}
+                        onToggle={() => toggleWs(wsId)}
+                        onOpenFile={(path, name) => openFile(wsId, path, name)}
+                        flashing={wsId === flashWsId}
                         filterQuery={treeFilterQuery}
-                        projectRail={
-                          showMemory && folderId ? (
-                            <AgentCoreSection
-                              scope={{
-                                kind: "project",
-                                folderId,
-                                projectName: ws.name,
-                              }}
-                              memoryActivePath={
-                                activeTab?.wsId === MEMORY_WS
-                                  ? activeTab.path
-                                  : null
-                              }
-                              documentActivePath={
-                                activeTab?.wsId === RULES_WS
-                                  ? activeTab.path
-                                  : null
-                              }
-                              onOpenEntry={openEntry}
-                              onEntryDeleted={closeEntry}
-                              onEntryRenamed={renameEntryTab}
-                              indent={14}
-                              forceOpen={revealMemoryFolderId === folderId}
-                              onRevealApplied={clearMemoryReveal}
-                            />
-                          ) : undefined
-                        }
                       />
                     );
                   })
                 )}
 
                 {(scratches.length > 0 || !filter.trim()) && (
-                  <div className="px-2 pb-0.5 pt-3 text-xs font-medium text-muted-foreground">
-                    快速对话
-                  </div>
+                  <RailSectionHeader label="快速对话" />
                 )}
                 {scratches.length === 0 && !filter.trim() ? (
                   <p className="px-2 py-2 text-xs text-muted-foreground/70">
@@ -752,7 +786,7 @@ export function FileWorkbench({
             inline
             icon={<FileText size={26} className="text-muted-foreground/40" />}
             title="选择一个文件"
-            hint="从左侧的项目树里点开文件，可同时打开多个、用标签页来回切换。"
+            hint="从左侧的文件夹树里点开文件，可同时打开多个、用标签页来回切换。"
           />
         ) : (
           <>
@@ -777,9 +811,9 @@ export function FileWorkbench({
                     : t.wsId === RULES_WS
                       ? documentSource
                       : (sourceByWs.get(t.wsId) ?? null);
-                // A project's 画像 leaf opens the two-pane 全局+本项目 editor instead of a
-                // lone file; resolve its live workspace name for the 归属 label (fall back
-                // to stripping the tab name if the workspace is gone).
+                // A folder's 画像 leaf opens the two-pane 全局+本文件夹 editor instead of
+                // a lone file; resolve its live folder name for the 归属 label (fall back
+                // to stripping the tab name if the folder is gone).
                 const projFolderId =
                   t.wsId === MEMORY_WS ? parseProjectProfilePath(t.path) : null;
                 const projName = projFolderId
@@ -805,7 +839,7 @@ export function FileWorkbench({
                         <MemoryProfileSplitEditor
                           source={src}
                           folderId={projFolderId}
-                          projectName={
+                          folderName={
                             projName ?? t.name.replace(/·画像\.md$/, "")
                           }
                           onClose={() => closeTab(key)}
@@ -828,7 +862,7 @@ export function FileWorkbench({
                           />
                         }
                         title="无法打开此文件"
-                        hint="它所属项目的文件源暂不可用。"
+                        hint="它所属文件夹的文件源暂不可用。"
                       />
                     )}
                   </div>

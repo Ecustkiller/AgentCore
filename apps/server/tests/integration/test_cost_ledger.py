@@ -5,12 +5,18 @@ via the ``session_factory`` fixture). Pins the two properties the turn finalize
 step depends on: the service envelope (user / conversation / message) is attached
 to every run row, and the write is idempotent by ``run_id`` so a retried turn
 never double-bills.
+
+Also pins the **account-level** row shape (AI 改写 / 文档 description): a ledger
+row that belongs to no conversation must persist, SUM into the account windows
+(用量页 / 仪表盘 / 配额), and stay out of every conversation- or message-scoped
+read — those are SQL-level properties, so only a real database can prove them.
 """
 
+import pytest
 from sqlalchemy import select
 
 from agentcore.core.types import new_id
-from agentcore.db.models import CostEvent
+from agentcore.db.models import CostCall, CostEvent
 from agentcore.db.repositories import CostEventRepository
 
 
@@ -146,8 +152,6 @@ async def test_record_runs_is_idempotent_by_run_id(session_factory):
 
 async def test_record_calls_is_idempotent_by_call_id(session_factory):
     """At-least-once drain retries must not double-bill the same call_id."""
-    from agentcore.db.models import CostCall
-
     user_id, conv_id, msg_id = new_id(), new_id(), new_id()
     run_id = new_id()
     call = _call(f"call_{new_id()}", run_id=run_id, model="deepseek-v4-flash", total=2500)
@@ -297,6 +301,233 @@ async def test_aggregate_by_model_groups_cost_calls(session_factory):
     platform_by = {r["model"]: r for r in platform}
     assert platform_by["deepseek-v4-pro"]["cost_total"] == 8000 + 99999
     assert platform_by["deepseek-v4-pro"]["calls"] == 3
+
+
+async def _seed_turn_and_account_level_spend(session_factory, *, username: str):
+    """One conversation turn + one account-level (no-conversation) call, same account.
+
+    Returns ``(user_id, conv_id, msg_id, turn_call, assist_call)``.
+    """
+    from dataclasses import asdict
+
+    from agentcore.db.repositories import UserRepository
+    from agentcore.llm.provider.protocol import TokenUsage
+    from agentcore.runtime.costing import (
+        PERSONA_REWRITE,
+        ROLE_ASSIST,
+        ROLE_CAPTAIN,
+        priced_call_cost,
+    )
+
+    conv_id, msg_id = new_id(), new_id()
+    async with session_factory() as session:
+        user = await UserRepository(session).create(
+            username=username, display_name=username
+        )
+    user_id = user.user_id
+
+    turn_call = priced_call_cost(
+        model="deepseek-v4-pro",
+        usage=TokenUsage(input_tokens=300, output_tokens=40),
+        role=ROLE_CAPTAIN,
+        run_id=new_id(),
+        persona="CEO",
+        call_id=f"call_{new_id()}",
+        credential_source="platform",
+    )
+    # AI 改写: no run tree, no conversation, no turn — only an account.
+    assist_call = priced_call_cost(
+        model="deepseek-v4-flash",
+        usage=TokenUsage(input_tokens=120, output_tokens=25),
+        role=ROLE_ASSIST,
+        persona=PERSONA_REWRITE,
+        call_id=f"call_{new_id()}",
+        credential_source="platform",
+    )
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        await repo.record_calls(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            calls=[asdict(turn_call)],
+            materialize_runs=True,
+        )
+        await repo.record_calls(
+            user_id=user_id,
+            conversation_id=None,
+            message_id=None,
+            calls=[asdict(assist_call)],
+            materialize_runs=True,
+        )
+    return user_id, conv_id, msg_id, turn_call, assist_call
+
+
+async def test_account_level_row_persists_without_a_conversation(session_factory):
+    """AI 改写 / 文档 description spend has no conversation and is billed anyway.
+
+    Before「放宽账本」the three ledger tables took ``conversation_id`` NOT NULL, so
+    the call meter dropped this spend rather than hang it on an unrelated chat.
+    The row now persists with NULL conversation + NULL message and the ``assist``
+    role — never a fabricated conversation id.
+    """
+    from agentcore.runtime.costing import ROLE_ASSIST
+
+    user_id, _conv, _msg, _turn, assist_call = await _seed_turn_and_account_level_spend(
+        session_factory, username="acct-level-write"
+    )
+
+    async with session_factory() as session:
+        call_row = (
+            await session.execute(
+                select(CostCall).where(CostCall.call_id == assist_call.call_id)
+            )
+        ).scalar_one()
+        event_row = (
+            await session.execute(
+                select(CostEvent).where(CostEvent.run_id == assist_call.run_id)
+            )
+        ).scalar_one()
+
+    for row in (call_row, event_row):
+        assert row.user_id == user_id
+        assert row.conversation_id is None
+        assert row.message_id is None
+        assert row.role == ROLE_ASSIST
+        assert row.persona == "AI 改写"
+    assert call_row.cost_total_nano == assist_call.cost_total_nano
+    # Materialized per-run aggregate mirrors the authoritative call detail.
+    assert event_row.cost_total_nano == assist_call.cost_total_nano
+
+
+async def test_account_level_row_sums_into_account_reads(session_factory):
+    """Every account-scoped read must see the no-conversation row.
+
+    These are the surfaces the decision was made for: 用量页 / 仪表盘 today+month
+    windows, the 7-day trend, the per-model split, and the admin per-user payroll.
+    Account-level spend counts as money but not as a 请求 — ``turns`` counts
+    distinct ``message_id`` and this row has none.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    user_id, _conv, _msg, turn_call, assist_call = (
+        await _seed_turn_and_account_level_spend(
+            session_factory, username="acct-level-read"
+        )
+    )
+    both = turn_call.cost_total_nano + assist_call.cost_total_nano
+    assert assist_call.cost_total_nano > 0  # else the test proves nothing
+    since = datetime.now(UTC) - timedelta(days=1)
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        window = await repo.aggregate_for_window(user_id=user_id, since=since)
+        daily = await repo.aggregate_daily_for_window(user_id=user_id, since=since)
+        by_model = await repo.aggregate_by_model_for_window(user_id=user_id, since=since)
+        by_user = await repo.aggregate_by_user_for_window(since=since)
+
+    assert window["cost"]["total"] == both
+    assert window["usage"]["input"] == 300 + 120
+    # 请求数 unmoved: the account-level row belongs to no assistant turn.
+    assert window["turns"] == 1
+    assert sum(daily.values()) == both
+
+    models = {row["model"]: row for row in by_model}
+    assert models["deepseek-v4-flash"]["cost_total"] == assist_call.cost_total_nano
+    assert models["deepseek-v4-pro"]["cost_total"] == turn_call.cost_total_nano
+
+    payroll = {row["user_id"]: row for row in by_user}
+    assert payroll[user_id]["cost_total"] == both
+    assert payroll[user_id]["turns"] == 1
+
+
+async def test_account_level_row_stays_out_of_conversation_reads(session_factory):
+    """No conversation may claim it, and no turn payroll may show it.
+
+    The exclusions are structural (equality / IN / NOT NULL filters), not a
+    special case — a row with no conversation simply cannot match one.
+    """
+    user_id, conv_id, msg_id, turn_call, _assist = (
+        await _seed_turn_and_account_level_spend(
+            session_factory, username="acct-level-scoped"
+        )
+    )
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        conversation = await repo.aggregate_for_conversation(conv_id, user_id=user_id)
+        payroll = list(await repo.list_for_message(msg_id, user_id=user_id))
+        roster = await repo.aggregate_cost_by_conversations([conv_id])
+        by_message = await repo.aggregate_cost_by_message_for_conversation(conv_id)
+
+    assert conversation["cost"]["total"] == turn_call.cost_total_nano
+    assert [row.run_id for row in payroll] == [turn_call.run_id]
+    assert roster == {conv_id: turn_call.cost_total_nano}
+    assert by_message == {msg_id: turn_call.cost_total_nano}
+
+
+async def test_account_level_spend_counts_against_quota(session_factory):
+    """额度数字会涨: ``enforce_quota`` SUMs the same account window.
+
+    A cap below the account-level spend must refuse the next turn (money is
+    money), while the 日请求数 dimension stays untouched — that one counts
+    assistant turns, and this spend produced none.
+    """
+    from dataclasses import asdict
+
+    from agentcore.conversation.quota import QuotaLimits, enforce_quota
+    from agentcore.core.errors import QuotaExceededError
+    from agentcore.llm.provider.protocol import TokenUsage
+    from agentcore.runtime.costing import PERSONA_DESCRIPTION, ROLE_ASSIST, priced_call_cost
+
+    user_id = new_id()
+    # 文档 description 自动补 — the account's only spend.
+    assist_call = priced_call_cost(
+        model="deepseek-v4-flash",
+        usage=TokenUsage(input_tokens=2000, output_tokens=400),
+        role=ROLE_ASSIST,
+        persona=PERSONA_DESCRIPTION,
+        call_id=f"call_{new_id()}",
+        credential_source="platform",
+    )
+    assert assist_call.cost_total_nano > 0
+
+    async with session_factory() as session:
+        await CostEventRepository(session).record_calls(
+            user_id=user_id,
+            conversation_id=None,
+            message_id=None,
+            calls=[asdict(assist_call)],
+            materialize_runs=True,
+        )
+
+    async with session_factory() as session:
+        repo = CostEventRepository(session)
+        with pytest.raises(QuotaExceededError) as excinfo:
+            await enforce_quota(
+                repo,
+                user_id,
+                limits=QuotaLimits(
+                    daily_tokens=0,
+                    monthly_cost_nano=0,
+                    daily_requests=0,
+                    daily_cost_nano=assist_call.cost_total_nano,
+                ),
+            )
+        assert excinfo.value.dimension == "daily_cost"
+
+        # 请求数 still zero — a 1-request cap must not fire on account-level spend.
+        await enforce_quota(
+            repo,
+            user_id,
+            limits=QuotaLimits(
+                daily_tokens=0,
+                monthly_cost_nano=0,
+                daily_requests=1,
+                daily_cost_nano=0,
+            ),
+        )
 
 
 async def test_materialize_message_runs_upserts_worker_role_and_run(session_factory):

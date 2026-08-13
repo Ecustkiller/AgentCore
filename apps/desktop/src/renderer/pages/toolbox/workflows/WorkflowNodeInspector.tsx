@@ -1,8 +1,76 @@
 import { Input, Textarea } from "@/components/ui";
-import type {
-  WorkflowDefNode,
-  WorkflowDefinition,
+import {
+  type WorkflowDefNode,
+  type WorkflowDefinition,
+  type WorkflowDeliverable,
+  renderSlotText,
+  slotKeysInText,
+  slotPlaceholder,
+  workflowSlotDefaults,
+  workflowSlots,
 } from "@/services/workflowDefinition";
+
+/**
+ * 只改 `form`，其余交付契约（artifacts / required_sections / strict …）逐字保留：
+ * 画布把整份 definition 原样 PATCH 回去，这里换成 `{ form }` 就等于用户改一次
+ * 交付形式便抹掉契约。清空输入也只撤 `form`，全空了才整体撤掉 deliverable。
+ */
+function withDeliverableForm(
+  current: WorkflowDeliverable | undefined,
+  form: string,
+): WorkflowDeliverable | undefined {
+  const next: WorkflowDeliverable = {};
+  for (const [key, value] of Object.entries(current ?? {})) {
+    if (key !== "form") next[key] = value;
+  }
+  if (form.trim()) next.form = form;
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
+/**
+ * 任务文本里的 `{{key}}` 解释给用户看：列出引用到的参数 + 按默认值的成文预览。
+ * 未声明的 key 如实标出来（它跑起来不会被替换），但不拦保存。
+ */
+function TaskSlotHints({
+  definition,
+  task,
+}: {
+  definition: WorkflowDefinition;
+  task: string;
+}) {
+  const keys = slotKeysInText(task);
+  if (keys.length === 0) return null;
+  const labels = new Map(
+    workflowSlots(definition).map((s) => [s.key, s.label]),
+  );
+  return (
+    <div className="space-y-1.5 rounded-lg border border-border p-2.5">
+      <p className="text-xs text-muted-foreground">
+        这段里的 {slotPlaceholder("参数")} 会在跑一次时换成当轮的值：
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {keys.map((key) => (
+          <span
+            key={key}
+            className="rounded-lg bg-muted px-1.5 py-0.5 text-xs text-foreground"
+          >
+            <code className="font-mono">{slotPlaceholder(key)}</code>
+            {labels.has(key) ? (
+              <span className="ml-1 text-muted-foreground">
+                {labels.get(key)}
+              </span>
+            ) : (
+              <span className="ml-1 text-warning">未声明</span>
+            )}
+          </span>
+        ))}
+      </div>
+      <p className="line-clamp-3 text-xs text-muted-foreground">
+        按默认值：{renderSlotText(task, workflowSlotDefaults(definition))}
+      </p>
+    </div>
+  );
+}
 
 export function WorkflowNodeInspector({
   definition,
@@ -17,7 +85,7 @@ export function WorkflowNodeInspector({
 
   if (!node) {
     return (
-      <div className="flex h-full flex-col justify-center px-4 text-sm text-muted-foreground">
+      <div className="p-4 text-sm text-muted-foreground">
         选中画布上的节点以编辑属性。
       </div>
     );
@@ -87,6 +155,7 @@ export function WorkflowNodeInspector({
           onChange={(e) => patch({ ...node, task: e.target.value })}
         />
       </label>
+      <TaskSlotHints definition={definition} task={node.task} />
       <label className="block" htmlFor="wf-deliverable">
         <span className="mb-1 block text-xs text-muted-foreground">
           交付形式（可选）
@@ -100,9 +169,10 @@ export function WorkflowNodeInspector({
           onChange={(e) =>
             patch({
               ...node,
-              deliverable: e.target.value.trim()
-                ? { form: e.target.value }
-                : undefined,
+              deliverable: withDeliverableForm(
+                node.deliverable,
+                e.target.value,
+              ),
             })
           }
         />

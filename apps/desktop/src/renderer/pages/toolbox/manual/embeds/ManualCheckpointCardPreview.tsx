@@ -16,12 +16,12 @@ const DEMO_ASK: AskUserContent = {
       default: "single",
       options: [
         {
-          label: "先做一个项目",
+          label: "先做一个试点",
           detail: "风险最低，两周可复盘",
           recommended: true,
         },
         {
-          label: "同业务线 3 个项目",
+          label: "同业务线 3 个试点",
           detail: "样本更足，运维压力略高",
         },
         {

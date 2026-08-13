@@ -21,9 +21,12 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.turn.interrupt import (
+    INTERRUPTED_EMPTY_USER_VISIBLE,
     TurnInterruptReason,
     close_turn_interrupted,
     compose_interrupt_body,
+    finish_reason_for,
+    normalize_interrupt_reason,
 )
 from agentcore.runtime.turn.runs import TurnRun, turn_runs
 
@@ -280,7 +283,8 @@ async def test_settle_prior_running_assistants_closes_zombies(monkeypatch):
     assert n == 1
     assert len(closed) == 1
     assert closed[0]["message_id"] == "m-zombie"
-    assert closed[0]["reason"] == TurnInterruptReason.PROCESS_KILL
+    # Finding a stale RUNNING row says the lease died, not that we saw a kill.
+    assert closed[0]["reason"] == TurnInterruptReason.LEASE_EXPIRED
     assert closed[0]["load_stream_state"] is True
 
 
@@ -979,3 +983,42 @@ def test_inject_drive_cancelled_copy():
     )
     assert "drive_cancelled" in text
     assert "调度中断，基于已完成部分收口" in text
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [TurnInterruptReason.LEASE_EXPIRED, TurnInterruptReason.PROCESS_KILL],
+)
+def test_crash_close_with_nothing_streamed_says_so(reason):
+    """案 519270db: a 19-minute team turn closed with 0 chars — the bubble said nothing.
+
+    StatusStrip chrome does not survive into history; an empty assistant message is
+    indistinguishable from「模型没回答」. Give it words.
+    """
+    assert compose_interrupt_body("", reason=reason) == INTERRUPTED_EMPTY_USER_VISIBLE
+
+
+def test_crash_close_with_streamed_text_is_left_alone():
+    """Guard against over-reach: partial content keeps the no-chrome-in-body rule."""
+    body = compose_interrupt_body("已经写了一半的终稿", reason=TurnInterruptReason.LEASE_EXPIRED)
+    assert body == "已经写了一半的终稿"
+    assert "中断说明" not in body
+
+
+def test_user_stop_with_nothing_streamed_stays_silent():
+    """The user pressed stop — they know why it ended; do not lecture them."""
+    assert compose_interrupt_body("", reason=TurnInterruptReason.USER_STOP) == ""
+
+
+def test_sweeper_reasons_do_not_claim_a_kill_nobody_saw():
+    """案 519270db 附带项：`process_kill` 曾是清扫兜底的默认值，两轮排查都被它带偏。
+
+    A lease that stopped beating is all the sweeper knows. The literal stays mapped
+    for historical rows and for callers that genuinely observed a termination.
+    """
+    assert normalize_interrupt_reason("no_dag") is TurnInterruptReason.LEASE_EXPIRED
+    assert normalize_interrupt_reason("") is TurnInterruptReason.LEASE_EXPIRED
+    assert normalize_interrupt_reason("whatever") is TurnInterruptReason.LEASE_EXPIRED
+    assert normalize_interrupt_reason("process_kill") is TurnInterruptReason.PROCESS_KILL
+    # Both are non-user terminations, so both still land on `interrupted`.
+    assert finish_reason_for(TurnInterruptReason.LEASE_EXPIRED) is FinishReason.INTERRUPTED

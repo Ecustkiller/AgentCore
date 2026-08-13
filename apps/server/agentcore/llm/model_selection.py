@@ -40,7 +40,9 @@ from agentcore.llm.resolve import ModelConfig, ModelOrigin
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-_BACKGROUND_PURPOSES = frozenset({"title", "memory", "compaction"})
+_BACKGROUND_PURPOSES = frozenset(
+    {"title", "memory", "compaction", "workflow.slots"}
+)
 
 __all__ = [
     "SelectedCall",

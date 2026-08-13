@@ -1,7 +1,9 @@
 """Cost & usage (团队工资单 + 账户仪表盘) schemas.
 
-Money is integer nano-CNY (1 CNY = 1e9) everywhere — never a float. Display yuan
-rides on ``cny_total`` (``nano / 1e9``; name kept, already 元 — not USD×FX).
+Money is integer nano (1 unit = 1e9) everywhere — never a float — denominated in
+each breakdown's own ``currency``. Billed spend is CNY off curated cards; BYOK
+estimates are USD off the community table. **Nothing is converted** (无 FX), so a
+client picks its symbol from ``currency``, never from the field name.
 Token fields use the ledger short keys (matching cost_events.tokens /
 RunState.usage), distinct from message_end's legacy ``*_tokens`` SSE shape.
 """
@@ -10,14 +12,20 @@ from pydantic import BaseModel
 
 
 class CostBreakdown(BaseModel):
-    """A run's / turn's / window's cost in integer nano-CNY (canonical)."""
+    """A run's / turn's / window's cost in integer nano-money (canonical).
+
+    Billed (``cost``) and BYOK-estimated (``estimated_cost``) spend are always two
+    separate breakdowns, each carrying its own ``currency`` — that is how a mixed
+    turn stays representable without FX.
+    """
 
     input: int
     cached: int
     output: int
     total: int
     currency: str = "CNY"
-    # Display yuan (元) = total / 1e9. Name ``cny_total`` kept; not FX from USD.
+    # Major units = total / 1e9, in ``currency`` (元 for CNY, dollars for USD).
+    # Legacy field name kept so clients don't break; it is not a CNY promise.
     cny_total: float
     # Which price layer produced these numbers (缺省 curated 兼容旧数据).
     pricing_source: str = "curated"

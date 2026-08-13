@@ -9,7 +9,7 @@ function byRecency(a: Conversation, b: Conversation): number {
 
 /**
  * Rail「置顶」zone (前端UX §一 方案C): every pinned conversation — 裸聊 and
- * foldered alike — floats above「项目」groups. No section title; the zone is
+ * foldered alike — floats above the folder groups. No section title; the zone is
  * absent when nothing is pinned. Pinned rows are excluded from
  * {@link WorkspaceGroups} / {@link RecentConversations} so each chat has one home.
  */

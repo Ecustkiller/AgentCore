@@ -23,6 +23,15 @@ export const INTERACTION_RESOLVE_TIMEOUT_MS = 15_000;
 export type InteractionSettleOrigin = "cloud" | "sidecar";
 
 /**
+ * 收口回执。`already_processed` = 这张卡在服务端**已经结了**——多端同权下先到先得，后到的
+ * 那端不能当作自己结的（会替用户认领一个他没做过的动作），也不能静静地什么都不发生。
+ *
+ * 回执只说「结了」，不带 `status` / `arbitrated_by`：升级卡撞上主管仲裁或超时兜底时同样返回
+ * 它，所以**谁结的**只能等带线材字段的 `*_resolved` 帧去证（B2 · 验收 5）。
+ */
+export type ResolveInteractionOutcome = "settled" | "already_processed";
+
+/**
  * Unified suspend-resume bridge (§18.2): a single endpoint settles any client-resolvable
  * paused interaction — a tool approval, a local-workspace op, a worker's blocking
  * escalation, or an interactive debate round. The body is discriminated on `kind`, so
@@ -53,7 +62,7 @@ export async function resolveInteraction(
   interactionId: string,
   body: ResolveInteractionBody,
   origin: InteractionSettleOrigin,
-): Promise<void> {
+): Promise<ResolveInteractionOutcome> {
   if (origin === "sidecar") {
     const sidecarTarget = getActiveSidecarTarget(conversationId);
     if (!sidecarTarget) {
@@ -73,11 +82,14 @@ export async function resolveInteraction(
     if (reply && reply.resolved === false) {
       throw new Error("交互请求不存在或已处理，请重试");
     }
-    return;
+    return "settled";
   }
-  await api.post(
+  const receipt = await api.post<{ status?: string } | null>(
     `/v1/conversations/${conversationId}/interactions/${interactionId}`,
     body,
     INTERACTION_RESOLVE_TIMEOUT_MS,
   );
+  return receipt?.status === "already_processed"
+    ? "already_processed"
+    : "settled";
 }

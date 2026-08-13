@@ -6,6 +6,7 @@ projection on the latest messages window) and the live firehose push.
 """
 
 from collections.abc import Sequence
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,12 +33,17 @@ class MemoryUpdateRepository:
         items: list[dict],
         kind: str = "semantic",
         summary: str | None = None,
+        anchor_at: datetime | None = None,
     ) -> MemoryUpdateRow:
         """Persist one memory-write notice and return the stored row (with id/created_at).
 
         ``kind`` is ``episodic`` (session summary tip) or ``semantic`` (diff card / explicit
         remember). Records ONLY real writes — callers never invent empty notices. Commits
         its own unit of work (offline pass / tool path, not a request transaction).
+
+        ``anchor_at`` is the last consolidated message's ``created_at`` — where the card
+        belongs in the thread, which ``created_at`` cannot say for a debounced pass.
+        Callers with no message window (semantic sweep, quota) leave it None.
         """
         row = MemoryUpdateRow(
             conversation_id=conversation_id,
@@ -45,6 +51,7 @@ class MemoryUpdateRepository:
             items=items,
             kind=kind,
             summary=summary,
+            anchor_at=anchor_at,
         )
         self._session.add(row)
         await self._session.commit()

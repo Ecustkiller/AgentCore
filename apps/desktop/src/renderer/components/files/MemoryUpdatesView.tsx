@@ -2,6 +2,7 @@ import { Centered, EmptyHint, InlineError } from "@/components/files/parts";
 import {
   MemoryUpdateItemRow,
   formatMemoryTime,
+  visibleMemoryUpdateItems,
 } from "@/components/memory/MemoryUpdateItemRow";
 import { listMemoryUpdates } from "@/services/memory";
 import { memoryLeafTabName } from "@/services/sources/memorySource";
@@ -76,7 +77,11 @@ export function MemoryUpdatesView({
                     {formatMemoryTime(entry.createdAt)}
                   </span>
                   <span className="text-xs text-muted-foreground">
-                    {entry.kind === "episodic" ? "本场摘要" : "画像更新"}
+                    {entry.kind === "episodic"
+                      ? "本场摘要"
+                      : entry.kind === "quota"
+                        ? "常驻已满"
+                        : "画像更新"}
                   </span>
                   <button
                     type="button"
@@ -94,7 +99,12 @@ export function MemoryUpdatesView({
                   </p>
                 ) : (
                   <ul className="mt-1.5 space-y-0.5">
-                    {entry.items.map((item, i) => (
+                    {entry.kind === "quota" && entry.summary ? (
+                      <li className="px-1.5 pb-1 text-xs text-muted-foreground">
+                        {entry.summary}
+                      </li>
+                    ) : null}
+                    {visibleMemoryUpdateItems(entry.items).map((item, i) => (
                       <MemoryUpdateItemRow
                         key={`${item.action}:${item.file}:${item.section}:${i}`}
                         item={item}

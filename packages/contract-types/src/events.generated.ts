@@ -56,9 +56,11 @@ export interface ToolProgressPayload {
 
 /** A running tool's coarse EXECUTION phase (工具执行阶段进度). Known values:
  * web_search → queued / querying / fallback; read_url → fetching / reading /
- * blocked; code_execute → executing. Kept as a widened `string` on the wire so
- * the backend can add phases without a client bump — an unknown value maps to a
- * generic「处理中」. */
+ * blocked; code_execute / test_run → executing; git → git_queued (waiting behind
+ * another write on the same repo) / git_credentials (PAT / gh token lookup) /
+ * git_remote (push·pull·fetch network leg, create_pr's GitHub REST) / executing
+ * (local git command). Kept as a widened `string` on the wire so the backend can
+ * add phases without a client bump — an unknown value maps to a generic「处理中」. */
 export type ToolPhase =
   | "queued"
   | "querying"
@@ -66,7 +68,10 @@ export type ToolPhase =
   | "fetching"
   | "reading"
   | "executing"
-  | "blocked";
+  | "blocked"
+  | "git_queued"
+  | "git_credentials"
+  | "git_remote";
 
 /** A running tool reported an EXECUTION phase — emitted between `tool_use_start` and
  * `tool_use_end` so the waiting UI shows a live, honest state instead of a bare spinner.
@@ -207,7 +212,7 @@ export interface AskAssumption {
  * native client action instead of a plain text answer (unknown/absent → plain option):
  * `open_local_project` / `register_local_project` / `bind_local_folder` are
  * **本机传统** wire enums（合法非默认；云协作仍推荐「导入到云 / 连接 Git」；≠离线；
- * 勿当默认主推；``create_project`` 仍只建云）；
+ * 勿当默认主推；``create_folder`` 仍只建云）；
  * `grant_readonly_folder` is a **legacy** session read-only mount under
  * ``external/<alias>/`` (orthogonal to binding); **new** read-only mounts use the
  * ``external_mount_readonly`` tool instead — do not newly emit this action for
@@ -681,6 +686,8 @@ export interface EscalationRequiredPayload {
   ownership_paths?: string[];
   /** 当前写权持有者 run_id。旧流缺字段按无。 */
   lock_owner_run_id?: string;
+  /** 本次挂起的墙钟上限（秒）——仅运维配了 checkpoint_timeout_seconds 才有值，届时回落 assumption 发 timed_out。缺省 = 默认的无限期等待（D2）：不答就不会自动继续。卡面文案据此二选一，不得无条件承诺「未答则按假设继续」。 */
+  timeout_seconds?: number;
 }
 
 /** 阻塞式求决策 settlement. Emitted by the suspending tool's awaiter ONLY; journaled.
@@ -829,13 +836,42 @@ export interface DeliveryAction {
  * ``rejected`` carries ``reason`` (e.g. ``citations_unverified``) and optional
  * ``detail`` for the file checklist. Draft is out of scope for block 1.
  * ``workspace_id``: landing desk when the plan node set ``target_folder_id``
- * (``folder:{id}``); omit → client falls back to the session birth desk. */
+ * (``folder:{id}``); omit → client falls back to the session birth desk.
+ * 
+ * ``kind`` / ``derived_from`` are the producing tool's OWN self-report
+ * (``tools/file_products.py``), carried verbatim from the run-level ledger:
+ * ``kind`` is the normalized product type (``md`` / ``docx`` / ``pdf`` / ``code``
+ * / ``image`` / ``file`` …); ``derived_from`` names the source this product was
+ * EXPORTED from (``md_to_docx``: docx ← 源 md), so a client can demote that source
+ * to 中间稿 the same way ``fold_exported_sources`` does server-side. Absent when the
+ * producer did not self-report — clients must NOT guess lineage from extensions or
+ * tool names, and must keep every accepted path reachable (fold ≠ drop). */
 export interface DeliveryArtifact {
   path: string;
   status: "accepted" | "rejected";
   reason?: string;
   detail?: string;
   workspace_id?: string;
+  kind?: string;
+  derived_from?: string;
+}
+
+/** One 成品归位 move on ``delivery_status.promoted``（AI 工作间 → 用户工作区）.
+ * 
+ * 归位是**移动**不是标记（标记离开产品 UI 那刻即失效：ZIP 里没有、合回本机也没有），
+ * so ``from`` no longer exists on disk and ``to`` is where the product lives now.
+ * The same payload's ``delivered_files`` / ``artifacts[].path`` are rewritten to
+ * ``to`` — this row is the only remaining link back to the old path (审计按旧路径
+ * 回查时的唯一线索).
+ * 
+ * 位置态，与 ``status=accepted``（质量态）正交：只有 accepted 的产物可归位，但归位
+ * 本身不改验收结论。**空数组是合法状态**（字段缺省即空）——多幕协作的中间幕本就
+ * 零归位，不得据此报错或拦收口。 */
+export interface DeliveryPromotion {
+  /** AI 工作间旧路径（已不存在） */
+  from: string;
+  /** 用户工作区新路径（现在的位置） */
+  to: string;
 }
 
 /** 交付状态（能力闸门与交付诚实性）: the structured delivery reconciliation a
@@ -846,7 +882,10 @@ export interface DeliveryArtifact {
  * blocking 缺口; blocked = 有 blocking 缺口且无落盘产物;
  * notes = 仍有 soft 提醒且非「仅 unverified_note」（如 path_hint；轻提醒，非「部分未满足」）。
  * ``artifacts``: path-level acceptance (accepted+rejected); ``delivered_files``
- * remains accepted-only for older clients. */
+ * remains accepted-only for older clients.
+ * ``promoted``: 这张对账卡上已 ``promote_product`` 归位的成品（``{from, to}``）。CEO 在
+ * 收口前调用后本事件按同 ``execution_id`` 重发，路径已改写为 ``to``；跨回合再归位时
+ * 旧行保留（旧路径的回查线索）。无归位时字段缺省（= 空数组，合法状态）。 */
 export interface DeliveryStatusPayload {
   execution_id: string;
   state: DeliveryState;
@@ -855,6 +894,7 @@ export interface DeliveryStatusPayload {
   gaps: DeliveryGap[];
   actions: DeliveryAction[];
   artifacts?: DeliveryArtifact[];
+  promoted?: DeliveryPromotion[];
 }
 
 /** Attachment metadata on a mid-flight interjection (no inline text body). */
@@ -951,7 +991,12 @@ export interface UsageBreakdown {
   cache_miss: number;
 }
 
-/** A run's / turn's cost in integer nano-CNY (1 CNY = 1e9). */
+/** A run's / turn's cost in integer nano-money (1 unit = 1e9).
+ * 
+ * ``currency`` labels ``input``/``cached``/``output``/``total`` — curated CNY or
+ * community-estimated USD, never converted (this product has no FX). Clients
+ * must read it to pick a symbol; inferring ¥ from ``pricing_source`` is how BYOK
+ * dollars once rendered as yuan at ~1/7 of the real amount. */
 export interface CostBreakdown {
   input: number;
   cached: number;
@@ -960,6 +1005,7 @@ export interface CostBreakdown {
   currency: string;
   pricing_source?: string;
   estimated_total?: number;
+  estimated_currency?: string;
 }
 
 /** 辩论形态成员集单源（``runtime.debate.types.DebateForm``）；wire / schema / 标签键同集。 */
@@ -1018,7 +1064,7 @@ export interface RunFailedPayload {
 export interface RunCancelledPayload {
   run_id: string;
   agent_id: string;
-  reason: "redirect" | "stop" | "user_stop";
+  reason: "redirect" | "stop" | "user_stop" | "worker_timeout";
   execution_id?: string;
 }
 
@@ -1854,6 +1900,15 @@ export interface McpOpRequiredPayload {
   args?: Record<string, unknown>;
 }
 
+/** 裸聊写盘自动建的云文件夹（双模式工作区 §5.4 裸聊行）——告知落点，不改会话归属。
+ * 
+ * ``name`` 是建桌那一刻的名字；用户当场改名后客户端以文件夹现名为准（按 ``folder_id``
+ * 查），本 payload 不追改名。 */
+export interface AutoFolderCreatedPayload {
+  folder_id: string;
+  name: string;
+}
+
 export interface HandoffSnapshotDonePayload {
   snapshot_id: string;
   conversation_id: string;
@@ -1988,6 +2043,7 @@ export type SSEPayloadMap = {
   external_mount_readonly_required: ExternalMountReadonlyRequiredPayload;
   host_op_required: HostOpRequiredPayload;
   mcp_op_required: McpOpRequiredPayload;
+  auto_folder_created: AutoFolderCreatedPayload;
   handoff_snapshot_done: HandoffSnapshotDonePayload;
   handoff_job_started: HandoffJobStartedPayload;
   handoff_apply_done: HandoffApplyDonePayload;

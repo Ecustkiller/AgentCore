@@ -126,6 +126,7 @@ class WaveScheduler:
         priority_reserve_hit: Callable[[], bool] | None = None,
         cancel_run_ids: Callable[[], frozenset[str]] | None = None,
         stop_run_ids: Callable[[], frozenset[str]] | None = None,
+        timeout_run_ids: Callable[[], frozenset[str]] | None = None,
         on_progress: OnProgress | None = None,
         on_node_done: OnNodeDone | None = None,
         on_boundary: OnBoundary | None = None,
@@ -173,6 +174,11 @@ class WaveScheduler:
           the executor emits ``run_cancelled(reason=user_stop)`` and absorbs without
           hot/cold follow-up. When omitted, all ``cancel_run_ids`` use redirect
           absorb (legacy / coordination).
+        - ``timeout_run_ids`` (optional) marks which cancel targets are hard-timeout
+          force-cancels: msg=``worker_timeout`` → ``run_cancelled(reason=worker_timeout)``,
+          absorbed + salvaged exactly like redirect but recorded as the timeout kill it
+          is (the cancel channel is shared with ``cancel_worker``, so without this the
+          face would claim the CEO re-tasked the worker).
         - ``on_progress`` fires after *each* node finishes with the completed-so-far
           map, so the host gets smooth progress (one increment per node).
         - ``on_node_done`` (optional, additive) fires once per *executed* node with
@@ -520,14 +526,23 @@ class WaveScheduler:
                 if cancel_run_ids is not None and running:
                     pending_cancel = cancel_run_ids()
                     stops = stop_run_ids() if stop_run_ids is not None else frozenset()
+                    timeouts = (
+                        timeout_run_ids() if timeout_run_ids is not None else frozenset()
+                    )
                     for target_id in pending_cancel:
                         for task, rid in list(running.items()):
-                            # msg=redirect|user_stop so executor.agent returns CANCELLED
-                            # instead of re-raising (整轮 stop uses bare cancel).
+                            # msg=redirect|user_stop|worker_timeout so executor.agent
+                            # returns CANCELLED instead of re-raising (整轮 stop uses bare
+                            # cancel) AND the wire reason names the real cause.
                             # Only claim absorb when *this* cancel took effect —
                             # if the task was already cancelling for stop/external,
                             # cancel() returns False and we must not swallow that.
-                            msg = "user_stop" if target_id in stops else "redirect"
+                            if target_id in stops:
+                                msg = "user_stop"
+                            elif target_id in timeouts:
+                                msg = "worker_timeout"
+                            else:
+                                msg = "redirect"
                             if (
                                 rid == target_id
                                 and rid not in cancelled_absorb_msg
@@ -559,7 +574,7 @@ class WaveScheduler:
                             result = task.result()
                         except asyncio.CancelledError as e:
                             reason = str(e.args[0]) if e.args else ""
-                            if reason in ("redirect", "user_stop"):
+                            if reason in ("redirect", "user_stop", "worker_timeout"):
                                 state = RunState(phase=RunPhase.CANCELLED)
                             else:
                                 raise

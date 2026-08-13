@@ -342,7 +342,13 @@ class SubmitDebateSteerRequest(BaseModel):
 
 
 class SubmitDebateSteerResponse(BaseModel):
-    ok: bool = True
+    ok: bool = Field(
+        True,
+        description=(
+            "False = 掌舵窗口已关（辩论没在跑，或已过末轮边界、正在结辩/出简报），"
+            "没有下一轮边界来捞它 —— 客户端须如实回执，不得显示「已发送·下一轮生效」。"
+        ),
+    )
     queued: int = Field(..., description="Pending steer count for this execution after enqueue.")
 
 
@@ -575,6 +581,17 @@ class RunError(BaseModel):
     message: str
 
 
+class AutoFolderNotice(BaseModel):
+    """The cloud folder a bare chat auto-created for this turn's file writes.
+
+    ``name`` is the name at creation time; the client shows the folder's current name
+    (looked up by ``folder_id``) since the notice itself offers a rename.
+    """
+
+    folder_id: str
+    name: str
+
+
 class RunsPayload(BaseModel):
     """Persisted turn replay payload for an assistant message.
 
@@ -606,6 +623,10 @@ class RunsPayload(BaseModel):
     # 预检警告（P2 DURABLE）：journaled ``turn_warning`` lifted like captain_context so a
     # plain-chat turn (no surface events) still replays the banner on reload. null when none.
     turn_warning: str | None = None
+    # 裸聊自动建文件夹告知（双模式工作区 §5.4）：lifted ``auto_folder_created`` payload
+    # (``folder_id`` / ``name``) so the landing notice — and its rename entry — survive a
+    # reload. null unless this turn minted the folder.
+    auto_folder: AutoFolderNotice | None = None
 
 
 class TurnCollabMetrics(BaseModel):
@@ -669,6 +690,11 @@ class MessageDetail(BaseModel):
     # the UsageBreakdown validator strips non-token keys, so clients cannot recover
     # origin from ``usage`` alone. null for ordinary user / assistant rows.
     origin: str | None = None
+    # 曾中断恢复 (messages.usage.recovered)：this assistant turn crashed mid-flight and
+    # was redriven by the lease sweeper, which finished it in place. Stamped at
+    # interrupt detection and carried through the finalize merge, so it stays true
+    # however the recovery ended — honesty over a silent「一次跑完」. null otherwise.
+    recovered: bool | None = None
     # 协作质量 (学·度量 §2.5, 诊断模式): orchestration signals nested in the usage column;
     # projected on read like ``rounds``. null for single-agent / pre-feature rows.
     collab: TurnCollabMetrics | None = None
@@ -757,12 +783,17 @@ class MemoryUpdateView(BaseModel):
     - ``semantic``: diff card; ``items`` lists add/update/remove bullets.
 
     Returned only with the LATEST messages window, and pushed live on the per-user firehose.
+
+    ``anchor_at`` is the last consolidated message's ``created_at`` — the thread position
+    the card describes, which ``created_at`` (when the debounced pass happened to run) does
+    not give. Null on older rows and on writes with no message window.
     """
 
     id: str
     kind: str = "semantic"
     summary: str | None = None
     items: list[MemoryUpdateItemView] = Field(default_factory=list)
+    anchor_at: datetime | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

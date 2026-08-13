@@ -14,34 +14,38 @@ def load_roster() -> tuple[type, ...]:
     from agentcore.tools.builtin.consult import ConsultTool
     from agentcore.tools.builtin.debate import DebateTool
     from agentcore.tools.builtin.delegate import DelegateTool
-    from agentcore.tools.builtin.project_fs import (
-        ListProjectDirTool,
-        ReadProjectFileTool,
+    from agentcore.tools.builtin.folder_fs import (
+        ListFolderDirTool,
+        ReadFolderFileTool,
     )
-    from agentcore.tools.builtin.projects import (
-        CreateProjectTool,
-        ListProjectsTool,
-        ResolveProjectTool,
+    from agentcore.tools.builtin.folders import (
+        CreateFolderTool,
+        DeleteFolderTool,
+        ListFoldersTool,
+        ResolveFolderTool,
     )
+    from agentcore.tools.builtin.promote_product import PromoteProductTool
     from agentcore.tools.builtin.read_image import ReadImageTool
     from agentcore.tools.builtin.remember import RememberTool
     from agentcore.tools.builtin.replan import ReplanTool
-    from agentcore.tools.builtin.update_project_profile import UpdateProjectProfileTool
+    from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
 
     return (
         DelegateTool,
         ReplanTool,
         DebateTool,
         ConsultTool,
-        ListProjectsTool,
-        ResolveProjectTool,
-        CreateProjectTool,
-        ListProjectDirTool,
-        ReadProjectFileTool,
+        ListFoldersTool,
+        ResolveFolderTool,
+        CreateFolderTool,
+        DeleteFolderTool,
+        ListFolderDirTool,
+        ReadFolderFileTool,
         RememberTool,
-        UpdateProjectProfileTool,
+        UpdateFolderProfileTool,
         AskUserTool,
         ReadImageTool,
         BoardOpsTool,
         BoardReadTool,
+        PromoteProductTool,
     )

@@ -97,8 +97,13 @@ def _format_available_dep_nodes(
     return "、".join(parts)
 
 
-def _recoverable_raw_id(run_id: str) -> str | None:
-    """Return the short raw suffix of a minted ``del_*`` / ``add_*`` run_id, else None."""
+def recoverable_raw_id(run_id: str) -> str | None:
+    """Return the short raw suffix of a minted ``del_*`` / ``add_*`` run_id, else None.
+
+    Public because the mint shape has a second reader outside the builder: fixing a
+    finished turn into a user workflow reverses the same prefix to recover the CEO's
+    declared ``tasks[].id`` (``agentcore.workflows.from_turn``).
+    """
     m = _MINT_PREFIX_RE.match(run_id or "")
     return m.group(1) if m else None
 
@@ -115,7 +120,7 @@ def _host_short_raw_index(
     aliases: dict[str, str] = {}
     ambiguous: dict[str, list[str]] = {}
     for n in nodes:
-        short = _recoverable_raw_id(n.run_id)
+        short = recoverable_raw_id(n.run_id)
         if not short:
             continue
         if short in ambiguous:
@@ -262,7 +267,6 @@ def build_run_plan(
     depth: int = 1,
     complexity_hint: str = "standard",
     existing_plan: RunPlan | None = None,
-    code_verified: bool = False,
     default_target_folder_id: str | None = None,
 ) -> tuple[RunPlan, list[str]]:
     """Build a RunPlan from raw delegate-tool task args.
@@ -287,11 +291,6 @@ def build_run_plan(
     known-set to host nodes ∪ this batch — same rule as :func:`build_added_nodes`.
     Returned plan still contains **only** the new batch nodes; pure new builds leave
     this ``None`` (behavior unchanged).
-
-    ``code_verified``：**非 kind**——kw 名历史遗留；修码等批跳过约定文档
-    ``artifact_dir`` 默认（S3：由 playbook ``repair_code`` 等驱动，不再绑 criteria
-    kind）。显式 ``artifact_dir`` / 约定文档路径 ``artifacts`` 仍优先。未改名以免牵动
-    builder/artifact_dir 全链。
 
     ``default_target_folder_id``: nested sub-team inheritance (§4.2b·3) — when a
     task omits ``target_folder_id``, stamp the parent worker's target desk.
@@ -353,7 +352,7 @@ def build_run_plan(
         apply_light_round_budgets(plan, complexity_hint=complexity_hint)
         from agentcore.runtime.runs.artifact_dir import apply_artifact_dir_to_plan
 
-        apply_artifact_dir_to_plan(plan, code_verified=code_verified)
+        apply_artifact_dir_to_plan(plan)
     return plan, errors
 
 
@@ -1057,6 +1056,7 @@ def _deliverable_from_dict(raw: dict[str, Any]) -> Deliverable:
     if form == "prose":
         artifacts = []  # path reconciliation meaningless for prose delivery
         artifact_dir = ""
+        workspace_native = False  # 纯文字交付无落点可言
     else:
         artifact_dir_raw = raw.get("artifact_dir", "")
         artifact_dir = (
@@ -1064,6 +1064,7 @@ def _deliverable_from_dict(raw: dict[str, Any]) -> Deliverable:
             if isinstance(artifact_dir_raw, str)
             else ""
         )
+        workspace_native = bool(raw.get("workspace_native", False))
     web_seam_scope = raw.get("web_seam_scope", "")
     if not isinstance(web_seam_scope, str):
         web_seam_scope = ""
@@ -1090,6 +1091,7 @@ def _deliverable_from_dict(raw: dict[str, Any]) -> Deliverable:
         form=form,  # type: ignore[arg-type]
         artifacts=artifacts,
         artifact_dir=artifact_dir,
+        workspace_native=workspace_native,
         web_seam_scope=web_seam_scope.strip(),
         placeholder_hard_exempt=placeholder_hard_exempt,
         placeholder_hard_exempt_artifacts=placeholder_hard_exempt_artifacts,
@@ -1111,6 +1113,7 @@ def _deliverable_has_content(deliverable: Deliverable) -> bool:
         or deliverable.output_format == "json"
         or deliverable.artifacts
         or deliverable.artifact_dir
+        or deliverable.workspace_native
         or deliverable.web_quality_scan
         or deliverable.visual_critic
     )

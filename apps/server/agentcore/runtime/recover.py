@@ -1,19 +1,16 @@
 """Single recover primitive: journal projection → seed WaveScheduler → settle / redrive.
 
-Resume (plan_review / team_preview / ask_user) and crash redrive both route here.
-The journal remains the唯一事实源; :class:`~agentcore.runtime.turn.state.TurnState`
-is the sole projection entry.
+Resume (plan_review / team_preview / ask_user) and crash redrive both route through
+:func:`recover_turn`. The journal remains the唯一事实源;
+:class:`~agentcore.runtime.turn.state.TurnState` is the sole projection entry.
 
-Backlog (not this iteration):
-- Write-tool idempotency keys — crash redrive may re-run in-flight workers
-  (``file_write`` overwrite semantics are accepted for now).
-- Cross-process Redis lease backend (Postgres this iteration).
+This module owns the user-driven resume side. The sweeper-driven crash entry
+(:func:`recover_expired_lease` — lease identity, badge, salvage) lives in
+:mod:`agentcore.runtime.recover_lease` and is re-exported here for callers.
 """
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
 from typing import TYPE_CHECKING, NamedTuple
 
 from agentcore.core.logging import get_logger
@@ -25,6 +22,7 @@ from agentcore.runtime.events import (
     plan_review_resolved,
     team_preview_resolved,
 )
+from agentcore.runtime.recover_lease import bind_recovered_turn, recover_expired_lease
 from agentcore.runtime.suspension import (
     AskUserSuspension,
     PlanReviewSuspension,
@@ -35,11 +33,12 @@ from agentcore.runtime.turn.state import TurnState
 from agentcore.tools.builtin.ask_user.schema import option_label
 
 if TYPE_CHECKING:
-    from agentcore.db.models.runs import TurnLeaseRow
     from agentcore.tools.builtin.debate import DebateTool
     from agentcore.tools.builtin.delegate import DelegateTool
 
 logger = get_logger(__name__)
+
+__all__ = ["SettledSuspension", "recover_expired_lease", "recover_turn"]
 
 
 class SettledSuspension(NamedTuple):
@@ -133,6 +132,7 @@ async def recover_turn(
         coordinate=True,
         coordination="wall",
     )
+    bind_recovered_turn(eid, sink)
     return SettledSuspension(delegate_result.output, None, delegate_result.effect)
 
 
@@ -485,206 +485,3 @@ async def _settle_resume(
         )
 
     raise ValueError(f"unknown suspension kind: {suspension.kind!r}")
-
-
-async def _await_crash_redrive_drive(execution_id: str) -> None:
-    """When crash redrive arms wall coordination, wait for the background drive.
-
-    ``resume_plan(coordinate=True)`` returns as soon as the scheduler is armed; the
-    sweeper must keep the recovering lease (+ heartbeat) until workers settle, else
-    the lease is released mid-flight and the next sweep reclaims a still-open DAG.
-
-    Called **outside** ``turn_lease_recover_timeout_seconds`` (that budget only
-    covers orphan + factory + arm).
-    """
-    from agentcore.runtime.coordination.session import active_coordination
-
-    session = active_coordination(execution_id)
-    task = getattr(session, "drive_task", None) if session is not None else None
-    if task is None or task.done():
-        return
-    await task
-
-
-async def recover_expired_lease(lease: TurnLeaseRow, state: TurnState) -> None:
-    """Background entry for the sweeper: orphan hot pending, then redrive unfinished DAG.
-
-    When crash redrive is unavailable (unwired factory / hard failure), degrade to an
-    honest ``interrupted`` terminal via lease salvage — never leave a fake pause.
-
-    Lease is released only after a successful recover or salvage. Salvage failure
-    re-orphans the row so the next sweep can retry (never delete without ``turn_end``).
-
-    ``turn_lease_recover_timeout_seconds`` only bounds orphan + factory +
-    ``recover_turn`` (to arm). After arm, heartbeat stays up while awaiting drive;
-    ``turn_lease_recover_max_attempts`` still caps ready cycles — no ready-only loop.
-    """
-    from agentcore.config import settings
-    from agentcore.core.types import new_id
-    from agentcore.runtime.coordination.session import cancel_coordination_on_user_stop
-    from agentcore.runtime.events import EventSink
-    from agentcore.runtime.interaction_orphan import orphan_turn_before_recover
-    from agentcore.runtime.leases.service import (
-        heartbeat_turn_lease,
-        lease_heartbeat_loop,
-        lease_owner_id,
-        orphan_turn_lease,
-        release_turn_lease,
-    )
-    from agentcore.runtime.leases.sweeper import salvage_interrupted_turn
-    from agentcore.runtime.turn.interrupt import TurnInterruptReason
-
-    message_id = lease.message_id
-    conversation_id = lease.conversation_id
-    meta = getattr(lease, "meta", None)
-    meta_dict = dict(meta) if isinstance(meta, dict) else {}
-    trace_id = getattr(lease, "trace_id", None)
-    if trace_id is None:
-        trace_id = meta_dict.get("trace_id")
-    attempts = int(meta_dict.get("recover_attempts") or 0)
-    should_release = False
-    lease_stop: asyncio.Event | None = None
-    heartbeat_task: asyncio.Task | None = None
-    # Prefer journal execution_id so timeout/cancel can stop leftover coordination.
-    eid: str | None = state.execution_id
-
-    def _stop_background() -> None:
-        """Hard-stop workers + drive before salvage (not ask_user soft_stop)."""
-        stop_eid = (eid or "").strip()
-        if not stop_eid:
-            return
-        with contextlib.suppress(Exception):
-            cancel_coordination_on_user_stop(execution_id=stop_eid)
-
-    async def _salvage(*, reason: str, event: str) -> bool:
-        logger.warning(
-            event,
-            message_id=message_id,
-            conversation_id=conversation_id,
-            attempts=attempts,
-        )
-        return await salvage_interrupted_turn(
-            message_id=message_id,
-            conversation_id=conversation_id,
-            trace_id=trace_id if isinstance(trace_id, str) else None,
-            reason=reason,
-        )
-
-    try:
-        # Cap ready loops: another claim after a hung/cancelled recover must not spin.
-        max_attempts = max(1, int(settings.turn_lease_recover_max_attempts))
-        if attempts > max_attempts:
-            should_release = await _salvage(
-                reason=TurnInterruptReason.REDRIVE_FAILED.value,
-                event="recover.lease_stalled",
-            )
-            return
-
-        # Heartbeat covers rebuild/arm and the post-arm await-drive window.
-        owner = lease_owner_id()
-        await heartbeat_turn_lease(message_id, owner_id=owner, phase="recovering")
-        lease_stop = asyncio.Event()
-        heartbeat_task = asyncio.create_task(
-            lease_heartbeat_loop(
-                message_id,
-                owner_id=owner,
-                interval_seconds=settings.turn_lease_heartbeat_seconds,
-                stop=lease_stop,
-                phase="recovering",
-            ),
-            name=f"recover-lease-hb-{message_id}",
-        )
-
-        timeout = float(settings.turn_lease_recover_timeout_seconds)
-
-        async def _arm_redrive() -> str | None:
-            """Orphan + factory + recover_turn to arm. Returns eid, or None if salvaged."""
-            nonlocal should_release, eid
-            # D6：先 orphan 热路 pending，再 recover 重驱
-            await orphan_turn_before_recover(
-                turn_id=message_id,
-                conversation_id=conversation_id,
-                trace_id=trace_id,
-            )
-            sink = EventSink()
-            from agentcore.runtime.recover_hooks import build_crash_delegate_tool
-
-            delegate_tool = await build_crash_delegate_tool(lease, state, sink=sink)
-            if delegate_tool is None:
-                logger.warning(
-                    "recover.lease_no_delegate",
-                    message_id=message_id,
-                )
-                should_release = await salvage_interrupted_turn(
-                    message_id=message_id,
-                    conversation_id=conversation_id,
-                    trace_id=trace_id if isinstance(trace_id, str) else None,
-                    reason=TurnInterruptReason.REDRIVE_FAILED.value,
-                )
-                return None
-            armed_eid = state.execution_id or new_id()
-            eid = armed_eid
-            await recover_turn(
-                state=state,
-                sink=sink,
-                delegate_tool=delegate_tool,
-                execution_id=armed_eid,
-            )
-            return armed_eid
-
-        try:
-            # Timeout only covers rebuild/arm — drive wait is outside this budget.
-            armed_eid = await asyncio.wait_for(_arm_redrive(), timeout=timeout)
-            if armed_eid is not None:
-                await _await_crash_redrive_drive(armed_eid)
-                logger.info("recover.lease_done", message_id=message_id)
-                should_release = True
-        except TimeoutError:
-            _stop_background()
-            should_release = await _salvage(
-                reason=TurnInterruptReason.REDRIVE_FAILED.value,
-                event="recover.lease_timeout",
-            )
-    except asyncio.CancelledError:
-        # Strong-ref gap / process teardown used to cancel after ready with no salvage.
-        logger.error(
-            "recover.lease_cancelled",
-            message_id=message_id,
-            attempts=attempts,
-        )
-        _stop_background()
-        with contextlib.suppress(Exception):
-            should_release = await salvage_interrupted_turn(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                trace_id=trace_id if isinstance(trace_id, str) else None,
-                reason=TurnInterruptReason.REDRIVE_FAILED.value,
-            )
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.error(
-            "recover.lease_failed",
-            message_id=message_id,
-            error=str(e),
-            exc_info=True,
-        )
-        _stop_background()
-        with contextlib.suppress(Exception):
-            should_release = await salvage_interrupted_turn(
-                message_id=message_id,
-                conversation_id=conversation_id,
-                trace_id=trace_id if isinstance(trace_id, str) else None,
-                reason=TurnInterruptReason.REDRIVE_FAILED.value,
-            )
-    finally:
-        if lease_stop is not None:
-            lease_stop.set()
-        if heartbeat_task is not None:
-            heartbeat_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await heartbeat_task
-        if should_release:
-            await release_turn_lease(message_id)
-        else:
-            with contextlib.suppress(Exception):
-                await orphan_turn_lease(message_id)

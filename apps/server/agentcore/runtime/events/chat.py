@@ -181,6 +181,9 @@ def _wire_cost(cost: dict[str, Any] | None) -> dict[str, Any] | None:
     }
     if cost.get("estimated_total") is not None:
         out["estimated_total"] = int(cost["estimated_total"])
+        # The estimate is USD off the community table while ``total`` stays CNY —
+        # ship its own currency so the client never labels one with the other's.
+        out["estimated_currency"] = str(cost.get("estimated_currency") or out["currency"])
     return out
 
 

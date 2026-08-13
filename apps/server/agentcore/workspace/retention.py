@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import asyncio
 import shutil
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy import update
 
@@ -31,21 +32,69 @@ from agentcore.db.repositories import (
 )
 from agentcore.folders.unbind import clear_folder_session_pointers
 from agentcore.workspace.handoff_reclaim import soft_delete_job_host
-from agentcore.workspace.locate import workspace_root_path, workspace_storage_key
+from agentcore.workspace.indexing.registry import drop_index_registry
+from agentcore.workspace.locate import (
+    folder_tombstone_path,
+    workspace_internal_root,
+    workspace_root_path,
+    workspace_storage_key,
+)
 from agentcore.workspace.locks import workspace_lock
 from agentcore.workspace.snapshots import purge_snapshots
+from agentcore.workspace.stage_dirs import INDEX_ZONE_NAME, internal_zone_path
 
 logger = get_logger(__name__)
 
 
-async def purge_folder_space(*, user_id: str, folder_id: str) -> None:
-    """Delete a project's shared workspace directory + snapshots."""
+def retention_cutoff() -> datetime:
+    """The instant a soft-delete becomes due for hard purge (``deleted_at <= cutoff``).
+
+    Single source for「什么时候真没了」: the sweep below selects against it, and the
+    project recycle bin uses it to refuse restores it could not honour. UTC-aware —
+    the columns are ``TIMESTAMPTZ`` and asyncpg binds a naive datetime as UTC, so a
+    naive local ``now()`` would shift the window by the dev box's offset.
+    """
+    return datetime.now(UTC) - timedelta(days=settings.workspace_retention_days)
+
+
+async def purge_folder_space(
+    *, user_id: str, folder_id: str, folder_rel_path: str | None
+) -> None:
+    """Delete a folder's directory, hidden zones and snapshots.
+
+    The tombstone area and the hidden zones are keyed by the stable id, so they are
+    always safe to remove. ``folder_rel_path`` is the visible-tree slot and must be
+    passed **only for a folder that is still live** (彻底删除): once soft-deleted,
+    that slot is released for reuse, and a stale one may well belong to a different
+    folder by now.
+    """
     key = workspace_storage_key(user_id=user_id, folder_id=folder_id, conversation_id="")
+    index_dir = internal_zone_path(
+        INDEX_ZONE_NAME,
+        root=Path(),
+        internal_root=workspace_internal_root(
+            user_id=user_id, folder_id=folder_id, conversation_id=""
+        ),
+    )
     async with workspace_lock(key):
-        shutil.rmtree(
-            workspace_root_path(user_id=user_id, folder_id=folder_id, conversation_id=""),
-            ignore_errors=True,
-        )
+        # Release the BM25 handle first — Windows refuses to rmtree an open SQLite file.
+        await drop_index_registry(index_dir)
+        targets = [
+            folder_tombstone_path(user_id=user_id, folder_id=folder_id),
+            workspace_internal_root(
+                user_id=user_id, folder_id=folder_id, conversation_id=""
+            ),
+        ]
+        if folder_rel_path:
+            targets.append(
+                workspace_root_path(
+                    user_id=user_id,
+                    folder_rel_path=folder_rel_path,
+                    conversation_id="",
+                )
+            )
+        for target in targets:
+            shutil.rmtree(target, ignore_errors=True)
         await purge_snapshots(user_id=user_id, folder_id=folder_id, conversation_id="")
 
 
@@ -56,11 +105,20 @@ async def _purge_conversation_space(
     if folder_id:
         return
     key = workspace_storage_key(user_id=user_id, folder_id=None, conversation_id=conversation_id)
+    internal_root = workspace_internal_root(
+        user_id=user_id, folder_id=None, conversation_id=conversation_id
+    )
     async with workspace_lock(key):
+        await drop_index_registry(
+            internal_zone_path(INDEX_ZONE_NAME, root=Path(), internal_root=internal_root)
+        )
         shutil.rmtree(
-            workspace_root_path(user_id=user_id, folder_id=None, conversation_id=conversation_id),
+            workspace_root_path(
+                user_id=user_id, folder_rel_path=None, conversation_id=conversation_id
+            ),
             ignore_errors=True,
         )
+        shutil.rmtree(internal_root, ignore_errors=True)
         await purge_snapshots(user_id=user_id, folder_id=None, conversation_id=conversation_id)
 
 
@@ -96,7 +154,7 @@ async def run_retention_sweep() -> dict[str, int]:
     if not settings.workspace_retention_enabled:
         return {"folders": 0, "conversations": 0, "handoff_hosts_aged": 0}
 
-    before = datetime.now() - timedelta(days=settings.workspace_retention_days)
+    before = retention_cutoff()
     limit = settings.workspace_retention_batch_limit
 
     # Open handoff hosts first: soft-delete so the conversation sweep below (or
@@ -109,18 +167,34 @@ async def run_retention_sweep() -> dict[str, int]:
     purged_folders = 0
     for folder in folders:
         try:
-            await purge_folder_space(user_id=folder.user_id, folder_id=folder.id)
+            # ``folder_rel_path=None`` on purpose: these rows are all soft-deleted,
+            # so their directory已经搬进墓碑区，而 ``rel_path`` 留的是删除那一刻的槽位。
+            # 那个槽位在删除后立刻被释放，30 天里很可能已经被用户新建的同名文件夹占
+            # 走——照着它 rmtree 等于删掉一个活着的文件夹。
+            await purge_folder_space(
+                user_id=folder.user_id,
+                folder_id=folder.id,
+                folder_rel_path=None,
+            )
         except Exception as e:
             logger.warning("retention.folder_purge_failed", folder_id=folder.id, error=str(e))
             continue
         async with async_session_factory() as session:
             # Clear membership on any remaining (archived) conversations before
             # the folder row disappears. Soft-pointers (auto desk / boards) via
-            # the shared fan-out — no user scope (global sweep).
+            # the shared fan-out — no user scope (global sweep). The archive
+            # provenance flag goes with it: nothing can restore this project now,
+            # so a lingering「因项目删除而归档」mark would name a folder that is gone.
+            # ``updated_at`` self-assigns to suppress the ORM ``onupdate`` — housekeeping
+            # must not restamp every chat and scramble the「已归档」recency order.
             await session.execute(
                 update(Conversation)
                 .where(Conversation.folder_id == folder.id)
-                .values(folder_id=None)
+                .values(
+                    folder_id=None,
+                    archived_by_folder_delete=False,
+                    updated_at=Conversation.updated_at,
+                )
             )
             await clear_folder_session_pointers(session, folder_id=folder.id)
             await session.commit()

@@ -105,6 +105,7 @@ async def test_loop_finalizes_plan_review_to_paused(monkeypatch):
         suspension_deleter=deleter,
         captain_run_id="cap",
         folder_id=_TEST_BIRTH_FOLDER_ID,
+        approval_gate=None,
     )
     reg = ToolRegistry()
     reg.register(delegate)
@@ -160,6 +161,7 @@ async def test_loop_finalizes_plan_review_to_paused(monkeypatch):
             out=ReactLoopOut(finish_override=finish_override),
             run_id="cap",
             role="captain",
+            approval_gate=None,
         )
     finally:
         captain_transcript.reset(ct_token)

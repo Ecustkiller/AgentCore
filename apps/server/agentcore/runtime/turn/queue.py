@@ -15,6 +15,11 @@ attach/recovery path); no new mechanism.
 
 Process-local (same posture as :mod:`.runs`). Restart drops
 the queue; durable recovery of queued content is out of scope for this slice.
+
+多端 (云对话多端同权 B2 · 验收 5): the enqueueing POST is not the only观察端 any more —
+every enqueue also signals ``turn_queued`` to端 following the conversation (see
+:func:`broadcast_turn_queued`). Still just a「变了」ping: content authority remains
+``GET …/queued-turns``, and the queue itself stays in-process.
 """
 
 from __future__ import annotations
@@ -40,6 +45,10 @@ class QueuedTurn:
     agent_mentions: list[dict[str, Any]] = field(default_factory=list)
     requires_tools: bool = False
     x_client_platform: str | None = None
+    # Which device sent this message. Captured at enqueue because the drain runs
+    # from the *previous* turn's done-callback: without the snapshot the queued
+    # turn would inherit that turn's device (see fulfill/origin.py).
+    origin_device_id: str | None = None
     user_id: str = ""
     # Preflight credentials resolved at enqueue time (billing gate already passed).
     llm_credentials: Any = None
@@ -62,43 +71,53 @@ class QueueStatus:
     queue_depth: int  # total pending after this enqueue
 
 
-def _try_emit_live_turn_queued(
+def broadcast_turn_queued(
     *,
     conversation_id: str,
     queue_id: str,
     position: int,
     queue_depth: int,
     degraded_from: str | None = None,
+    on_live_sink: bool = False,
 ) -> bool:
-    """Emit ``turn_queued`` on the live turn sink when present (multi-client UI).
+    """Signal「队列变了」to every端 following this conversation. Returns whether the
+    live turn sink also carried it.
 
-    No live sink → log only; never fabricate a broadcast (same posture as cancel).
+    Two legs, deliberately not the same one (云对话多端同权 B2 · 验收 5):
+
+    - **conversation signal lane** — always. It is the only path that reaches a端
+      parked on an idle conversation, and the only one that survives「入队时宿主刚好
+      收口了」(no sink to emit on at all).
+    - **live turn sink** (``on_live_sink=True``) — for enqueues whose originating
+      request has NO stream of its own to say it on: 协调升队 and 经典 steer 收口 leftover
+      both happen long after that POST returned its short confirm stream, so the发起端
+      can only learn about it through the turn it is currently watching. Classic FIFO
+      passes ``False``: its own queued POST already yields the frame, and re-emitting on
+      the live sink would show it twice on the same device (that device is usually
+      watching the very turn it queued behind).
+
+    A端 that is tailing the sink we just emitted on is skipped on the signal lane, so no
+    connection folds the frame twice either way.
     """
-    from agentcore.runtime.events import turn_queued
+    from agentcore.runtime.events import publish_conversation_signal, turn_queued
 
     from .runs import turn_runs
 
-    run = turn_runs.get(conversation_id)
-    if run is None or run.task.done():
-        logger.info(
-            "turn_queue.enqueued_no_live_sink",
-            conversation_id=conversation_id,
-            queue_id=queue_id,
-            position=position,
-            queue_depth=queue_depth,
-            degraded_from=degraded_from,
-        )
-        return False
-    run.sink.emit(
-        turn_queued(
-            queue_id=queue_id,
-            position=position,
-            queue_depth=queue_depth,
-            conversation_id=conversation_id,
-            degraded_from=degraded_from,
-        )
+    event = turn_queued(
+        queue_id=queue_id,
+        position=position,
+        queue_depth=queue_depth,
+        conversation_id=conversation_id,
+        degraded_from=degraded_from,
     )
-    return True
+    live_sink = None
+    if on_live_sink:
+        run = turn_runs.get(conversation_id)
+        if run is not None and not run.task.done():
+            live_sink = run.sink
+            live_sink.emit(event)
+    publish_conversation_signal(conversation_id, event, already_on_sink=live_sink)
+    return live_sink is not None
 
 
 class TurnQueue:
@@ -126,8 +145,9 @@ class TurnQueue:
         conversation_id: str,
         item: QueuedTurn,
         *,
-        emit_live_queued: bool = False,
+        on_live_sink: bool = False,
         degraded_from: str | None = None,
+        signal_watchers: bool = True,
     ) -> QueueStatus:
         """Enqueue, then close the「宿主已结束、drain 已 no-op」race window.
 
@@ -140,20 +160,32 @@ class TurnQueue:
         ourselves. ``schedule_drain`` is idempotent and ``_drain`` re-checks the slot,
         so double-arming is harmless.
 
-        ``emit_live_queued=True`` (协调升队等): also emit ``turn_queued`` on the live
-        turn sink so the bar is visible/cancellable for multi-client. Classic POST
-        waiting SSE and leftover ``degraded_from=steer`` honesty keep their own emit
-        paths (pass False; leftover still calls its dedicated helper).
+        Every enqueue signals ``turn_queued`` to the conversation's观察端 (see
+        :func:`broadcast_turn_queued` for why the live-sink leg is opt-in via
+        ``on_live_sink``). ``signal_watchers=False`` is for the one caller that must
+        order the signal itself: 经典 steer 收口 leftover sends ``user_interjection
+        (queued)`` first and only then the degraded ``turn_queued`` (双发次序是契约,
+        见 conformance ``single_agent_user_interjection_steer_queued``).
         """
         status = self.enqueue(conversation_id, item)
-        if emit_live_queued:
-            _try_emit_live_turn_queued(
+        if signal_watchers:
+            reached_live_sink = broadcast_turn_queued(
                 conversation_id=conversation_id,
                 queue_id=status.queue_id,
                 position=status.position,
                 queue_depth=status.queue_depth,
                 degraded_from=degraded_from,
+                on_live_sink=on_live_sink,
             )
+            if on_live_sink and not reached_live_sink:
+                logger.info(
+                    "turn_queue.enqueued_no_live_sink",
+                    conversation_id=conversation_id,
+                    queue_id=status.queue_id,
+                    position=status.position,
+                    queue_depth=status.queue_depth,
+                    degraded_from=degraded_from,
+                )
         from .runs import turn_runs
 
         existing = turn_runs.get(conversation_id)
@@ -288,6 +320,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
     import asyncio
 
     from agentcore.conversation.service import stream_chat
+    from agentcore.fulfill.origin import origin_device
     from agentcore.runtime.events import EventSink, turn_queue_started
 
     from .runs import turn_runs
@@ -306,22 +339,26 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
         assert item.started is not None
         item.started.set_result(sink)
     else:
-        # No waiter / disconnected mid-queue → detached (attach / recovery as before).
-        sink.detach(reason="queue_drain_no_waiter")
+        # No waiter / disconnected mid-queue → nobody subscribed; the turn runs detached
+        # and端 catch up via attach / 对话级订阅 (the hub hands them this sink on register).
+        sink.note_no_consumer(reason="queue_drain_no_waiter")
 
-    task = asyncio.create_task(
-        stream_chat(
-            conversation_id=conversation_id,
-            user_message=item.content,
-            user_id=item.user_id,
-            sink=sink,
-            attachments=item.attachments,
-            llm_credentials=item.llm_credentials,
-            llm_supports_tools=item.llm_supports_tools,
-            x_client_platform=item.x_client_platform,
-            agent_mentions=item.agent_mentions,
+    # Bind before create_task: the new task copies this context, so the queued
+    # message's own device — not the drain's ambient one — owns its CLIENT_TOOLs.
+    with origin_device(item.origin_device_id):
+        task = asyncio.create_task(
+            stream_chat(
+                conversation_id=conversation_id,
+                user_message=item.content,
+                user_id=item.user_id,
+                sink=sink,
+                attachments=item.attachments,
+                llm_credentials=item.llm_credentials,
+                llm_supports_tools=item.llm_supports_tools,
+                x_client_platform=item.x_client_platform,
+                agent_mentions=item.agent_mentions,
+            )
         )
-    )
     turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
 
 
@@ -333,6 +370,7 @@ def new_queued_turn(
     agent_mentions: list[dict[str, Any]] | None = None,
     requires_tools: bool = False,
     x_client_platform: str | None = None,
+    origin_device_id: str | None = None,
     llm_credentials: Any = None,
     llm_supports_tools: bool | None = None,
     interjection_id: str | None = None,
@@ -345,6 +383,7 @@ def new_queued_turn(
         agent_mentions=list(agent_mentions or []),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
+        origin_device_id=origin_device_id,
         user_id=user_id,
         llm_credentials=llm_credentials,
         llm_supports_tools=llm_supports_tools,

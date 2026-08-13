@@ -151,7 +151,11 @@ def test_no_landing_with_degraded_handoff_still_blocked():
     assert payload["state"] == "blocked"
     assert payload["delivered_files"] == []
     assert any(g.get("reason") == "degraded_handoff" for g in payload["gaps"])
-    assert all(g.get("severity") != "warning" for g in payload["gaps"] if g.get("reason") == "degraded_handoff")
+    assert all(
+        g.get("severity") != "warning"
+        for g in payload["gaps"]
+        if g.get("reason") == "degraded_handoff"
+    )
 
 
 def test_plan_cutoff_skip_suppressed_when_continue_from_ran():
@@ -275,8 +279,7 @@ def test_zero_landing_worker_keeps_role_soft_gap():
     assert "未把产物写入工作区" in gap["description"]
     # Batch criteria soft must not replace the worker-attributed row.
     assert not any(
-        g.get("role") == "验收" and g.get("reason") == "files_not_landed"
-        for g in payload["gaps"]
+        g.get("role") == "验收" and g.get("reason") == "files_not_landed" for g in payload["gaps"]
     )
 
 
@@ -476,9 +479,7 @@ def test_zero_landing_gap_attributes_write_failed_from_transcript():
         "w1": RunState(
             phase=RunPhase.FAILED,
             content="试过了",
-            error=(
-                "本队员本波未交卷：未把产物写入工作区：已尝试写盘但未成功落盘（工具失败）"
-            ),
+            error=("本队员本波未交卷：未把产物写入工作区：已尝试写盘但未成功落盘（工具失败）"),
             transcript=transcript,
         )
     }
@@ -492,9 +493,7 @@ def test_zero_landing_gap_attributes_write_failed_from_transcript():
     assert payload["state"] == "notes"
     assert "本队员本波未交卷" in gap["description"]
     assert "已尝试写盘但未成功" in gap["description"]
-    assert "而非粘在回复正文" in gap["description"] or "粘在回复正文" not in gap[
-        "description"
-    ]
+    assert "而非粘在回复正文" in gap["description"] or "粘在回复正文" not in gap["description"]
 
 
 def test_maybe_emit_sets_current_delivery_verdict():
@@ -562,20 +561,18 @@ def test_unresolved_write_ownership_forces_partial_delivery_status(monkeypatch):
     assert payload is not None
     assert payload["state"] == "partial"
     assert any(
-        isinstance(g, dict) and g.get("reason") == REASON_WRITE_OWNERSHIP
-        for g in payload["gaps"]
+        isinstance(g, dict) and g.get("reason") == REASON_WRITE_OWNERSHIP for g in payload["gaps"]
     )
     assert turn_has_unresolved_write_ownership()
 
     sink = EventSink()
-    maybe_emit_delivery_status(
-        sink, plan, results, execution_id="e-own-gap"
-    )
+    maybe_emit_delivery_status(sink, plan, results, execution_id="e-own-gap")
     verdict = current_delivery_verdict.get()
     assert verdict is not None
     assert verdict.state == "partial"
     clear_unresolved_write_ownership()
     current_delivery_verdict.set(None)
+
 
 def test_soft_unverified_note_only_is_delivered_not_notes():
     """轻 B：仅 unverified_note + 已落盘 → delivered（gaps 仍保留 soft 行）。"""
@@ -611,9 +608,7 @@ def test_unverified_note_mixed_with_path_hint_stays_notes():
             content="ok",
             files_touched=["findings.md"],
             file_acceptance=_accepted("findings.md"),
-            warnings=[
-                "含示例/虚构自注（1 处）：`findings.md` · 示例数据 · 「示例」。"
-            ],
+            warnings=["含示例/虚构自注（1 处）：`findings.md` · 示例数据 · 「示例」。"],
             delivery_gaps=[
                 {
                     "description": (
@@ -735,6 +730,7 @@ def test_declared_artifact_path_mismatch_is_notes_not_partial():
     assert payload["gaps"][0]["severity"] == "warning"
     assert payload["gaps"][0]["reason"] == "path_hint"
 
+
 def test_partial_writing_cutoff_summary_without_continue_writing():
     plan = _plan(RunSpec(run_id="w1", task="写成篇", role="撰稿人"))
     results = {
@@ -748,9 +744,7 @@ def test_partial_writing_cutoff_summary_without_continue_writing():
                     "reason": "token_budget",
                 }
             ],
-            warnings=[
-                "含示例/虚构自注（1 处）：`报告.md` · 示例数据 · 「待补」。"
-            ],
+            warnings=["含示例/虚构自注（1 处）：`报告.md` · 示例数据 · 「待补」。"],
         )
     }
     payload = build_delivery_status(plan, results, execution_id="e-mix")
@@ -758,17 +752,13 @@ def test_partial_writing_cutoff_summary_without_continue_writing():
     assert payload["state"] == "partial"
     assert "成篇未写完" in payload["summary"]
     assert "待核实备注" in payload["summary"]
-    assert "continue_writing" not in {
-        a.get("kind") for a in payload.get("actions") or []
-    }
+    assert "continue_writing" not in {a.get("kind") for a in payload.get("actions") or []}
 
 
 def test_no_bind_action_on_local_backend():
     plan = _plan(RunSpec(run_id="w1", task="运行脚本生成 course.pptx", role="工程师"))
     results = {"w1": RunState(phase=RunPhase.FAILED, error="超时")}
-    payload = build_delivery_status(
-        plan, results, execution_id="e4", backend=LocalBackend()
-    )
+    payload = build_delivery_status(plan, results, execution_id="e4", backend=LocalBackend())
     assert payload is not None
     assert payload["state"] == "blocked"
     assert payload["actions"] == []
@@ -963,6 +953,7 @@ async def test_execute_ignores_retired_completion_criteria_kind():
         base_tool_context=local_ctx(),
         permission_axes=recipe_to_axes(AutonomyPolicy.MANAGED),
         folder_id="test_birth",
+        approval_gate=None,
     )
     result = await t.execute(
         {
@@ -1216,9 +1207,7 @@ def test_cloud_delivered_adds_export_to_local():
             file_acceptance=_accepted("app/package.json", "app/src/main.ts"),
         )
     }
-    payload = build_delivery_status(
-        plan, results, execution_id="e-export", backend=ctx().backend
-    )
+    payload = build_delivery_status(plan, results, execution_id="e-export", backend=ctx().backend)
     assert payload is not None
     assert payload["state"] == "delivered"
     kinds = [a["kind"] for a in payload["actions"]]
@@ -1238,9 +1227,7 @@ def test_local_delivered_omits_export_to_local():
             file_acceptance=_accepted("app/package.json"),
         )
     }
-    payload = build_delivery_status(
-        plan, results, execution_id="e-local", backend=LocalBackend()
-    )
+    payload = build_delivery_status(plan, results, execution_id="e-local", backend=LocalBackend())
     assert payload is not None
     assert payload["state"] == "delivered"
     assert "export_to_local" not in {a["kind"] for a in payload["actions"]}
@@ -1348,6 +1335,59 @@ def test_clean_completed_artifacts_all_accepted():
     assert payload["artifacts"] == [{"path": "讲稿.md", "status": "accepted"}]
 
 
+def test_artifacts_carry_self_reported_kind_and_derived_from():
+    """导出件上线 wire：md + 派生 docx 都进 artifacts，行内带自报 kind / derived_from。
+
+    事故面：产物卡只认 ``artifacts``，导出的 .docx 不在表里就等于不存在（用户看到 md
+    判 AI 吹牛）。派生关系也必须随行走，客户端才能把源 md 折成中间稿。
+    """
+    from agentcore.tools.file_products import FileProduct
+
+    md = "抚养费起诉状-昝雯.md"
+    docx = "抚养费起诉状-昝雯.docx"
+    acceptance = build_file_acceptance(
+        [md, docx],
+        phase=RunPhase.COMPLETED,
+        products=[
+            FileProduct(path=md, kind="md"),
+            FileProduct(path=docx, kind="docx", derived_from=md),
+        ],
+    )
+    plan = _plan(RunSpec(run_id="w1", task="起草并导出 Word", role="文书撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="Word 已生成",
+            files_touched=[md, docx],
+            file_acceptance=acceptance,
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-export")
+    assert payload is not None
+    assert payload["artifacts"] == [
+        {"path": md, "status": "accepted", "kind": "md"},
+        {"path": docx, "status": "accepted", "kind": "docx", "derived_from": md},
+    ]
+    # 折叠是客户端呈现层的事：两份都仍是已交付文件。
+    assert payload["delivered_files"] == [md, docx]
+
+
+def test_artifacts_omit_product_meta_when_not_self_reported():
+    """没自报就不带字段——禁止按扩展名替工具补 kind / 猜派生关系。"""
+    plan = _plan(RunSpec(run_id="w1", task="写讲稿", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["讲稿.md"],
+            file_acceptance=_accepted("讲稿.md"),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-no-meta")
+    assert payload is not None
+    assert payload["artifacts"] == [{"path": "讲稿.md", "status": "accepted"}]
+
+
 def test_artifacts_workspace_id_from_target_folder_id():
     """delegate + target_folder_id + file_acceptance → artifacts[].workspace_id."""
     desk = "11111111-2222-3333-4444-555555555555"
@@ -1446,42 +1486,31 @@ def test_two_phase_predicate_and_playbook_stamp():
     assert is_two_phase_citation_deliverable(
         Deliverable(citation_mode="two_phase", form="files", artifacts=["a.md"])
     )
-    assert not is_two_phase_citation_deliverable(
-        Deliverable(form="files", artifacts=["a.md"])
-    )
+    assert not is_two_phase_citation_deliverable(Deliverable(form="files", artifacts=["a.md"]))
     assert not is_two_phase_citation_deliverable(None)
-    # 自由 delegate：声明/落盘在 research/ → 与 playbook 同口径（不扫 task 文）
-    research_path = f"{RESEARCH_PREFIX}pricing_summary.md"
-    assert is_two_phase_citation_deliverable(
-        Deliverable(form="files", artifacts=[research_path])
-    )
-    assert is_two_phase_citation_deliverable(
-        Deliverable(form="files"),
-        landed_paths=[research_path],
-    )
-    # reviews/ 与 research/ 同口径进 two_phase
+    # 路径入口已撤：约定文档落点由扫 role·task 的正则填出，不得当两阶段入口。
     from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
+    research_path = f"{RESEARCH_PREFIX}pricing_summary.md"
     reviews_path = f"{REVIEWS_PREFIX}legal_review.md"
-    assert is_two_phase_citation_deliverable(
+    assert not is_two_phase_citation_deliverable(
+        Deliverable(form="files", artifacts=[research_path])
+    )
+    assert not is_two_phase_citation_deliverable(
         Deliverable(form="files", artifacts=[reviews_path])
     )
+    assert not is_two_phase_citation_deliverable(
+        Deliverable(form="files", artifact_dir=RESEARCH_PREFIX)
+    )
+    # 显式盖戳仍进；immediate 仍退出
     assert is_two_phase_citation_deliverable(
-        Deliverable(form="files"),
-        landed_paths=[reviews_path],
+        Deliverable(citation_mode="two_phase", form="files", artifacts=[research_path])
     )
     assert not is_two_phase_citation_deliverable(
         Deliverable(
             citation_mode="immediate",
             form="files",
             artifacts=[research_path],
-        )
-    )
-    assert not is_two_phase_citation_deliverable(
-        Deliverable(
-            citation_mode="immediate",
-            form="files",
-            artifacts=[reviews_path],
         )
     )
 
@@ -1665,6 +1694,7 @@ def test_literature_worker_delivery_gap_evidence_deficit_depresses():
     # 不因接缝谓词再叠一条重复的验收缺口
     ev_gaps = [g for g in payload["gaps"] if g.get("reason") == "evidence_deficit"]
     assert len(ev_gaps) == 1
+
 
 def test_literature_adequate_evidence_stays_delivered():
     """学术源充足且无先验缺口 → 不误伤，仍可为 delivered。"""
@@ -2072,9 +2102,7 @@ def test_acceptance_counts_match_delivered_and_rejected():
     assert payload is not None
     accepted_n, rejected_n = acceptance_counts(results)
     assert accepted_n == len(payload["delivered_files"])
-    assert rejected_n == sum(
-        1 for a in payload["artifacts"] if a.get("status") == "rejected"
-    )
+    assert rejected_n == sum(1 for a in payload["artifacts"] if a.get("status") == "rejected")
     assert accepted_n + rejected_n == len(payload["artifacts"])
 
 
@@ -2134,3 +2162,184 @@ def test_b1_cancel_zero_emits_checklist_gap():
     assert turn_has_cancel_zero_output()
     clear_b1_closing_latches()
 
+
+# ── 成品归位（promoted）契约 ────────────────────────────────────────────────
+
+
+def _promotion_ledger():
+    from agentcore.tools.protocol import TurnPromotionLedger
+
+    return TurnPromotionLedger()
+
+
+def test_promoted_absent_when_nothing_was_promoted():
+    """零归位是合法状态：wire 上连 key 都不多一个，客户端按缺省空数组读。"""
+    from agentcore.runtime.events import delivery_status
+    from agentcore.runtime.events.payloads.run import DeliveryStatusPayload
+
+    plan = _plan(RunSpec(run_id="w1", task="写文件", role="工程师"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        )
+    }
+    payload = build_delivery_status(
+        plan, results, execution_id="e-no-promo", promotion_ledger=_promotion_ledger()
+    )
+    assert payload is not None
+    assert "promoted" not in payload
+
+    event = delivery_status(**payload)
+    assert "promoted" not in event.payload
+    model = DeliveryStatusPayload.model_validate(event.payload)
+    assert model.promoted == []
+
+
+def test_promoted_rows_ride_the_wire_as_from_to():
+    """``{from, to}``：``from`` 是关键字，模型用别名——wire 上必须是 ``from``。"""
+    from agentcore.runtime.events import delivery_status
+    from agentcore.runtime.events.payloads.run import DeliveryStatusPayload
+
+    event = delivery_status(
+        execution_id="e-promo",
+        state="delivered",
+        summary="已交付",
+        delivered_files=["讲稿.md"],
+        gaps=[],
+        actions=[],
+        artifacts=[{"path": "讲稿.md", "status": "accepted"}],
+        promoted=[{"from": "AgentCore/文档/工作稿/讲稿.md", "to": "讲稿.md"}],
+    )
+    assert event.payload["promoted"] == [{"from": "AgentCore/文档/工作稿/讲稿.md", "to": "讲稿.md"}]
+    model = DeliveryStatusPayload.model_validate(event.payload)
+    assert model.promoted[0].from_path == "AgentCore/文档/工作稿/讲稿.md"
+    assert model.promoted[0].to == "讲稿.md"
+
+
+def test_promoted_paths_are_rewritten_on_a_later_batch():
+    """同回合第二批的对账从 worker 台账重建，仍记旧路径——必须重映射到归位后的位置。"""
+    from agentcore.runtime.delegate.promotion import record_promotions
+    from agentcore.workspace.stage_dirs import DRAFTS_DIR
+
+    old = f"{DRAFTS_DIR}/讲稿.md"
+    ledger = _promotion_ledger()
+    record_promotions(ledger, [(old, "讲稿.md")])
+
+    plan = _plan(RunSpec(run_id="w1", task="改讲稿", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=[old],
+            file_acceptance=_accepted(old),
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-batch2", promotion_ledger=ledger)
+    assert payload is not None
+    assert payload["delivered_files"] == ["讲稿.md"]
+    assert [a["path"] for a in payload["artifacts"]] == ["讲稿.md"]
+    assert payload["promoted"] == [{"from": old, "to": "讲稿.md"}]
+
+
+@pytest.mark.asyncio
+async def test_availability_reinject_keeps_promoted_rows(monkeypatch):
+    """短问重发的是同一张卡（同 execution_id）：丢了 promoted 就抹掉旧路径的回查线索。"""
+    from agentcore.runtime.delegate.delivery_status import (
+        current_delivery_verdict,
+        maybe_reinject_recent_delivery_for_availability_ask,
+    )
+    from agentcore.runtime.delegate.promotion import turn_promotions
+    from agentcore.workspace.stage_dirs import DRAFTS_DIR
+
+    old = f"{DRAFTS_DIR}/讲稿.md"
+    journaled = {
+        "execution_id": "e-short-ask",
+        "state": "delivered",
+        "summary": "已交付",
+        "delivered_files": ["讲稿.md"],
+        "gaps": [],
+        "actions": [],
+        "artifacts": [{"path": "讲稿.md", "status": "accepted"}],
+        "promoted": [{"from": old, "to": "讲稿.md"}],
+    }
+
+    class _Repo:
+        def __init__(self, _session):
+            pass
+
+        async def find_latest_delivery_status(self, *, conversation_id, exclude_turn_id=None):
+            return dict(journaled)
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr("agentcore.db.base.async_session_factory", lambda: _Session())
+    monkeypatch.setattr("agentcore.db.repositories.TurnJournalRepository", _Repo)
+    current_delivery_verdict.set(None)
+
+    sink = EventSink()
+    ledger = _promotion_ledger()
+    ok = await maybe_reinject_recent_delivery_for_availability_ask(
+        sink,
+        conversation_id="conv-1",
+        user_message="好了吗？",
+        promotion_ledger=ledger,
+    )
+
+    assert ok is True
+    cards = [e.payload for e in sink.history_snapshot() if e.type == EventType.DELIVERY_STATUS]
+    assert cards[0]["promoted"] == [{"from": old, "to": "讲稿.md"}]
+    # 台账接手旧行，本回合再归位时重发才不会把它们抹掉。
+    assert turn_promotions(ledger) == [{"from": old, "to": "讲稿.md"}]
+    current_delivery_verdict.set(None)
+
+
+def test_maybe_emit_notes_reconciliation_for_the_accepted_gate():
+    """归位的 accepted 闸门读这一份对账（不重算验收）——发射时必须记进回合台账。"""
+    from agentcore.runtime.delegate.promotion import (
+        has_delivery_reconciliation,
+        promotable_paths,
+    )
+    from agentcore.runtime.runs.file_acceptance import (
+        build_file_acceptance,
+        path_rejections_from_contract_messages,
+    )
+
+    ledger = _promotion_ledger()
+    assert not has_delivery_reconciliation(ledger)
+
+    cite_msg = (
+        "`bad.md`：正文出现学位论文/期刊式著录标记（[D]）但未就地绑定本回合台账 #rN——"
+        "属于未核验或编造引用。"
+    )
+    acceptance = build_file_acceptance(
+        ["good.md", "bad.md"],
+        phase=RunPhase.COMPLETED,
+        path_rejections=path_rejections_from_contract_messages([cite_msg]),
+    )
+    plan = _plan(RunSpec(run_id="w1", task="写稿", role="撰写"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["good.md", "bad.md"],
+            file_acceptance=acceptance,
+        )
+    }
+    maybe_emit_delivery_status(
+        EventSink(),
+        plan,
+        results,
+        execution_id="e-gate",
+        promotion_ledger=ledger,
+    )
+    assert has_delivery_reconciliation(ledger)
+    # 只有 accepted 的进闸门；rejected 的不可归位。
+    assert promotable_paths(ledger) == ("good.md",)

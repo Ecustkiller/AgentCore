@@ -13,6 +13,10 @@ When preflight refuses (quota / BYOK missing), or the local workspace channel is
 already sticky-dead / dies during the closing turn, :func:`persist_harvest_fallback`
 pushes any existing synthesis draft / ALL_COMPLETED terminal body to the user
 as an assistant message — no second LLM call (A1 / channel-dead harvest).
+
+崩溃重驱恢复（D5 定案）走同一条收口，但**归属原回合**：``session.recovered_turn_id``
+是被中断的那条助手消息，这次收口续写它（不建合成用户消息、不新开助手消息），成果
+落回原气泡，原消息上的「曾中断恢复」标记由 ``recover`` 侧写入。
 """
 
 from __future__ import annotations
@@ -227,25 +231,43 @@ async def persist_harvest_fallback(
     session: CoordinationSession,
     kind: HarvestKind,
     error_message: str = "",
+    target_message_id: str | None = None,
 ) -> str:
-    """Persist structured fallback assistant row + best-effort push. Returns content."""
+    """Persist structured fallback assistant row + best-effort push. Returns content.
+
+    ``target_message_id`` (崩溃重驱恢复) closes the ORIGINAL turn in place instead of
+    appending a row: the same no-LLM body lands on that message with a terminal
+    status, so the recovered bubble stops spinning and no stray message appears.
+    """
+    from agentcore.core.message_merge import MESSAGE_STATUS_COMPLETE
     from agentcore.db.repositories import MessageRepository
 
     content = build_harvest_fallback_content(
         session, kind=kind, error_message=error_message
     )
-    await MessageRepository(db).create(
-        conversation_id=conversation_id,
-        role="assistant",
-        content=content,
-        metadata={
-            "origin": "execution_harvest_fallback",
-            "execution_id": execution_id,
-            "harvest_kind": kind,
-            "no_llm": True,
-            "channel_dead": _session_saw_channel_dead(session, content),
-        },
-    )
+    metadata = {
+        "origin": "execution_harvest_fallback",
+        "execution_id": execution_id,
+        "harvest_kind": kind,
+        "no_llm": True,
+        "channel_dead": _session_saw_channel_dead(session, content),
+    }
+    repo = MessageRepository(db)
+    if target_message_id:
+        await repo.upsert_assistant(
+            conversation_id=conversation_id,
+            message_id=target_message_id,
+            content=content,
+            metadata={**metadata, "status": MESSAGE_STATUS_COMPLETE, "paused": False},
+            merge=True,
+        )
+    else:
+        await repo.create(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=content,
+            metadata=metadata,
+        )
     logger.info(
         "coordination.harvest_fallback_persisted",
         conversation_id=conversation_id,
@@ -253,6 +275,7 @@ async def persist_harvest_fallback(
         harvest_kind=kind,
         content_chars=len(content),
         channel_dead=_session_saw_channel_dead(session, content),
+        target_message_id=target_message_id or "",
     )
     with contextlib.suppress(Exception):
         await notify_user(
@@ -277,6 +300,11 @@ async def run_harvest_closing_turn(
     execution_id: str,
 ) -> None:
     """Adopt the live execution and run a system closing CEO turn.
+
+    Ordinary detached drives get a fresh turn (synthetic user row + new assistant
+    reply). A crash-redriven drive (``session.recovered_turn_id``) instead CONTINUES
+    the interrupted turn: no synthetic user row, and the synthesis is written back
+    onto that assistant message under its own journal.
 
     Raises:
         HarvestDeferredError: another turn owns the conversation slot — do **not**
@@ -315,6 +343,8 @@ async def run_harvest_closing_turn(
 
     kind = harvest_closing_kind(session)
     user_text = _HARVEST_USER_TEXT[kind]
+    # 崩溃重驱恢复归属原回合 (D5)：这次收口是那条消息的续写，不是新回合。
+    recovered_turn_id = (getattr(session, "recovered_turn_id", "") or "").strip()
 
     async with async_session_factory() as db:
         conv = await ConversationRepository(db).get_by_id_unscoped(conversation_id)
@@ -343,7 +373,7 @@ async def run_harvest_closing_turn(
                 user=user,
                 cost_repo=CostEventRepository(db),
                 byok_missing_message=(
-                    "系统收口需要可用的模型凭证，请先在「设置 · 模型配置」中填入 API Key。"
+                    "系统收口需要可用的模型凭证，请先在「设置 · 服务商」中填入 API Key。"
                 ),
                 model_origin=selection.origin,
                 provider_id=selection.provider_id,
@@ -368,6 +398,7 @@ async def run_harvest_closing_turn(
                     session=session,
                     kind=kind,
                     error_message=e.message or str(e),
+                    target_message_id=recovered_turn_id or None,
                 )
             return
         # Channel already sticky-dead from the team wave: skip prepare/LLM and
@@ -387,6 +418,7 @@ async def run_harvest_closing_turn(
                     session=session,
                     kind=kind,
                     error_message=CHANNEL_DEAD_PREPARE_ABORT,
+                    target_message_id=recovered_turn_id or None,
                 )
             return
         local_binding = await resolve_local_binding(db, conv)
@@ -399,19 +431,30 @@ async def run_harvest_closing_turn(
             conversation_id, user_id=user_id
         )
         board_id = board.id if board else None
-        from agentcore.db.repositories import MessageRepository
+        from agentcore.db.repositories import MessageRepository, TurnJournalRepository
 
-        await MessageRepository(db).create(
-            conversation_id=conversation_id,
-            role="user",
-            content=user_text,
-            metadata={
-                "origin": "execution_harvest",
-                "execution_id": execution_id,
-                "harvest_kind": kind,
-            },
-        )
+        inherited_entries: list[dict] | None = None
+        if recovered_turn_id:
+            # Continuation: the interrupted turn's facts are the journal prefix this
+            # segment appends to, so finalize re-persists ONE stream (the recovery
+            # facts recover.py already wrote stay put) instead of overwriting at seq 0.
+            inherited_entries = await TurnJournalRepository(db).load(recovered_turn_id)
+        else:
+            await MessageRepository(db).create(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_text,
+                metadata={
+                    "origin": "execution_harvest",
+                    "execution_id": execution_id,
+                    "harvest_kind": kind,
+                },
+            )
         history = await load_chat_context(db, conversation_id, max_messages=40)
+        # The synthetic user row is passed to the pipeline as ``user_message``, so drop
+        # it from the window tail. Nothing was appended on the continuation path.
+        if not recovered_turn_id:
+            history = history[:-1] if history else []
 
     sink = EventSink()
     backend = await build_turn_backend(
@@ -440,7 +483,7 @@ async def run_harvest_closing_turn(
                     user_id=user_id,
                     folder_id=folder_id,
                     sink=sink,
-                    history=history[:-1] if history else [],
+                    history=history,
                     attachments=None,
                     backend=backend,
                     llm_credentials=llm_credentials,
@@ -451,6 +494,8 @@ async def run_harvest_closing_turn(
                     board_id=board_id,
                     llm_supports_tools=None,
                     x_client_platform=None,
+                    continue_message_id=recovered_turn_id or None,
+                    inherited_journal_entries=inherited_entries,
                 )
             except Exception as e:
                 if not _exc_is_channel_dead(e):
@@ -473,6 +518,7 @@ async def run_harvest_closing_turn(
                             session=session,
                             kind=kind,
                             error_message=str(e) or CHANNEL_DEAD_PREPARE_ABORT,
+                            target_message_id=recovered_turn_id or None,
                         )
                 return
             if _result_is_channel_dead_abort(result):
@@ -500,6 +546,7 @@ async def run_harvest_closing_turn(
                             session=session,
                             kind=kind,
                             error_message=err_text or CHANNEL_DEAD_PREPARE_ABORT,
+                            target_message_id=recovered_turn_id or None,
                         )
                 return
         finally:
@@ -527,6 +574,7 @@ async def run_harvest_closing_turn(
         conversation_id=conversation_id,
         execution_id=execution_id,
         harvest_kind=kind,
+        recovered_turn_id=recovered_turn_id,
     )
 
 

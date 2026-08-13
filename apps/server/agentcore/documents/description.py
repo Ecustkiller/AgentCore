@@ -21,13 +21,13 @@ from typing import Protocol
 
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
+from agentcore.costing import PERSONA_DESCRIPTION, ROLE_ASSIST
 from agentcore.documents.frontmatter import (
     FrontmatterError,
     parse_entry_frontmatter,
 )
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
-from agentcore.llm.provider.protocol import TokenUsage
 
 logger = get_logger(__name__)
 
@@ -156,8 +156,6 @@ class LLMDescriptionGenerator:
         from agentcore.config import settings
 
         self._selected = select_call(role, model or settings.platform_model)
-        self.last_usage: TokenUsage = TokenUsage()
-        self.last_model: str = ""
 
     async def generate(self, data: DescriptionInput) -> DescriptionResult:
         if not data.body.strip():
@@ -181,8 +179,6 @@ class LLMDescriptionGenerator:
                     "entry_description.timeout", document_id=data.document_id
                 )
                 return None
-            self.last_usage = response.usage
-            self.last_model = response.model or self._selected.model
             return _parse_description_result(response.content or "")
 
         first = await _call_once()
@@ -280,11 +276,21 @@ async def _mint_description_background(*, document_id: str, user_id: str) -> Non
 
 
 def schedule_description_generation(*, document_id: str, user_id: str) -> None:
-    """Fire-and-forget empty-description fill (sync schedule only)."""
+    """Fire-and-forget empty-description fill (sync schedule only).
+
+    ``user_id`` is bound so the per-call quota brake charges the right account.
+    A document belongs to no conversation, so the spend lands as an account-level
+    ledger row (``role=assist``, NULL conversation): it SUMs into 用量页 / 额度
+    without being mis-attributed to some unrelated chat (成本配额与计费 §三).
+    The context is bound *before* ``ensure_future`` so the background task
+    inherits it — ``create_task`` snapshots contextvars at creation.
+    """
     if document_id in _inflight:
         return
     _inflight.add(document_id)
-    with log_context(user_id=user_id):
+    with log_context(
+        user_id=user_id, cost_role=ROLE_ASSIST, persona=PERSONA_DESCRIPTION
+    ):
         task = asyncio.ensure_future(
             _mint_description_background(document_id=document_id, user_id=user_id)
         )

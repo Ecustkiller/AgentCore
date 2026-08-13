@@ -335,6 +335,7 @@ class DocumentRepository:
         """
         from agentcore.memory.always_quota import (
             AlwaysQuotaExceededError,
+            always_entry_chars,
             check_always_write,
         )
 
@@ -364,7 +365,13 @@ class DocumentRepository:
             if not decision.allowed:
                 usage = decision.usage
                 assert usage is not None
-                raise AlwaysQuotaExceededError(usage, decision.message)
+                raise AlwaysQuotaExceededError(
+                    usage,
+                    decision.message,
+                    file=name,
+                    scope=folder_id,
+                    attempted_chars=always_entry_chars(body),
+                )
         if note is None:
             note = Document(
                 id=new_id(),
@@ -413,7 +420,7 @@ class DocumentRepository:
     async def list_memory_project_scopes(self, user_id: str) -> list[str]:
         """``folder_id``s whose PROJECT memory layer holds a semantic (non-episodic) note.
 
-        Mirrors ``FileMemoryStore.project_scopes``: a project surfaces a「本项目记忆」node
+        Mirrors ``FileMemoryStore.project_scopes``: a folder surfaces a「本文件夹记忆」node
         only where there is a real note to edit — consolidation-pipeline rows
         (``memory_episodes`` / scope state) do not count. Notes carry ``role='rule'`` for
         the 偏好/画像/主题 core, so a rule-role project note is the「has semantic memory」signal.
@@ -482,6 +489,9 @@ class DocumentRepository:
         directory, not ``<rules>``). Ordered by ``name`` for a stable prefix (and by
         ``ai_maintained`` when both). When convention dirs exist, only nodes under those
         parents are returned (see ``_injectable_parent_filter``).
+
+        User-disputed entries are excluded here, which is also why they stop counting toward
+        the always quota: the pool measures what actually rides the prompt.
         """
         conditions: list[ColumnElement[bool]] = [
             Document.user_id == user_id,
@@ -490,6 +500,7 @@ class DocumentRepository:
             Document.apply_mode == "always",
             Document.kind == "document",
             Document.deleted_at.is_(None),
+            Document.disputed_at.is_(None),
         ]
         order: tuple[ColumnElement[Any], ...]
         if ai_maintained is None:
@@ -526,7 +537,8 @@ class DocumentRepository:
         """On-demand user-rule docs of one scope (``ai_maintained=false``, not memory topics).
 
         These ride the「规则目录」+ ``consult_rule`` — never the always ``<rules>`` budget.
-        Same convention-parent filter as :meth:`list_injectable_rules` for user rules.
+        Same convention-parent filter as :meth:`list_injectable_rules` for user rules,
+        and the same user-disputed exclusion (a disputed entry leaves the catalog too).
         """
         conditions: list[ColumnElement[bool]] = [
             Document.user_id == user_id,
@@ -536,6 +548,7 @@ class DocumentRepository:
             Document.ai_maintained.is_(False),
             Document.kind == "document",
             Document.deleted_at.is_(None),
+            Document.disputed_at.is_(None),
         ]
         parent_filter = await self._injectable_parent_filter(
             user_id, folder_id, ai_maintained=False
@@ -741,6 +754,28 @@ class DocumentRepository:
         except FrontmatterEditError:
             raise
         self._set_content_and_derive(doc, body)
+        await self._session.commit()
+        await self._session.refresh(doc)
+        return doc
+
+    async def set_disputed(
+        self, document_id: str, *, user_id: str, disputed: bool
+    ) -> Document | None:
+        """Mark / unmark one entry as user-disputed (纠错通道; body untouched).
+
+        Only the explicit user action reaches here — nothing infers a dispute from
+        conversation text. Marking never deletes: the row keeps its body so the user can
+        still read (and restore) what was wrong. Re-marking an already-marked entry keeps
+        the original timestamp, so「什么时候说的不对」stays honest.
+        """
+        doc = await self.get(document_id, user_id=user_id)
+        if doc is None or doc.kind != "document":
+            return None
+        if disputed:
+            if doc.disputed_at is None:
+                doc.disputed_at = datetime.now()
+        else:
+            doc.disputed_at = None
         await self._session.commit()
         await self._session.refresh(doc)
         return doc

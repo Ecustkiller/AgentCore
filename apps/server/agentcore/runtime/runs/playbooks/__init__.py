@@ -89,7 +89,8 @@ PLAYBOOKS: dict[str, Playbook] = {
             "【成文专线·B/重】仅用户明示成文且需正式长文/可提交"
             "（或已确认要审校满编）时用：调研→提纲→写作→审校"
             "（N 路并行调研汇拢成纲再成文；成篇验收钉死单一主文件 `.md`；"
-            "要 PDF/可分享则 md→md_to_pdf→handoff，禁 HTML 顶替/禁 reportlab 主路径）。"
+            "要 PDF/Word/可分享则 md→md_to_pdf|md_to_docx→handoff，"
+            "禁 HTML 顶替/禁 reportlab·python-docx 主路径）。"
             "讨论/形态未定勿首派；普通构想勿默认学术审校；"
             "一起弄懂/多路摸清/仅提论文开源当资料请用 parallel_brief"
         ),

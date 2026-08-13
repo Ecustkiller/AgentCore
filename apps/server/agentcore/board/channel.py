@@ -14,6 +14,11 @@ delivers fails as a :class:`BoardOpError` after the timeout, so a dropped / clos
 canvas never hangs the turn — the tool maps that to an error result the model can
 recover from (tell the user, retry, or proceed). No online fulfiller → immediate
 typed failure.
+
+Board ops edit a document, not the machine, so this channel is deliberately left
+off ``fulfill.hub.ORIGIN_PINNED_CHANNELS``: the canvas may well be open on the
+user's other install, and refusing to draw there would break a working product
+behaviour to guard against nothing.
 """
 
 from __future__ import annotations

@@ -91,13 +91,13 @@ def _wire_failing_consolidate(monkeypatch, *, fail: BaseException) -> dict:
             True,
         )
 
-    async def _history(_session, _cid, *, max_messages):
+    async def _history(_session, _cid, *, max_messages, after=None):
         return [
             SimpleNamespace(role="user", content="hi"),
             SimpleNamespace(role="assistant", content="正文"),
         ]
 
-    async def _actions(_session, _cid, *, max_turns):
+    async def _actions(_session, _cid, *, max_turns, after=None):
         return None
 
     async def _run_bg(user_id, *, purpose="memory", runner):

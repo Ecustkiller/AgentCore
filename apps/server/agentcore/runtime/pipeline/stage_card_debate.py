@@ -11,6 +11,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 
+from agentcore.attention import bind_attention_scope, reset_attention_scope
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.core.types import PermissionAxes, new_id
@@ -89,6 +90,12 @@ async def run_stage_card_debate_pipeline(
         permission_axes=(
             json.dumps(permission_axes.to_dict()) if permission_axes is not None else None
         ),
+    )
+    # 云对话多端同权 B2 §2.2: attention addressee for cards raised inside this run.
+    attention_token = bind_attention_scope(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=message_id,
     )
     roster_writer = SessionRosterWriter.wrap(session_saver)
     session_saver_wrapped = roster_writer.save if roster_writer is not None else None
@@ -279,6 +286,7 @@ async def run_stage_card_debate_pipeline(
             if roster_writer is not None:
                 await roster_writer.flush()
         current_audit_recorder.reset(audit_token)
+        reset_attention_scope(attention_token)
         turn_history.reset(history_token)
         turn_citations.reset(citations_token)
         turn_evidence_ledger.reset(ledger_token)

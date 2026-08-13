@@ -61,11 +61,24 @@ _ACTION_WRITE_MAP: dict[str, frozenset[str]] = {
     "remote": frozenset({"add"}),
 }
 _WRITE_SUBCOMMANDS = _ALWAYS_WRITE_SUBCOMMANDS | frozenset(_ACTION_WRITE_MAP)
+# Writes that never take ``.git/index.lock``: refs (``branch`` / ``tag``), config
+# (``remote add``), or the network alone (``push`` reads refs, ``create_pr`` is REST).
+# They stay outside the per-repo serializer (``repo_lock``) so they keep running
+# beside an index writer — and so ``push``'s remote round trip cannot park an
+# unrelated ``commit`` behind a minute of network. Everything else is serialized by
+# subtraction, so a newly allowlisted write queues by default.
+_NO_INDEX_LOCK_SUBCOMMANDS = frozenset({"branch", "tag", "remote", "push", "create_pr"})
+_INDEX_LOCK_SUBCOMMANDS = _WRITE_SUBCOMMANDS - _NO_INDEX_LOCK_SUBCOMMANDS
 # CEO may run this one write: one-shot「初始化并首提交」(user still approves via gate).
 _CEO_ALLOWED_WRITE_SUBCOMMANDS = frozenset({"init_baseline"})
 _NO_REPO_CODE = "no_repo"
+# Root ``.git`` exists but git refuses it as a work tree — never a soft ``no_repo``.
+_REPO_UNUSABLE_CODE = "repo_unusable"
 _DIRTY_SKIP_CODE = "dirty_skip"
 _ALREADY_REPO_CODE = "already_repo"
+# Another index-mutating git call still holds this repo after the bounded wait —
+# nothing ran, so this is queue pressure, never a git / repo fault.
+_REPO_BUSY_CODE = "repo_busy"
 _INIT_BASELINE_MESSAGE = "Initial commit (AgentCore baseline)"
 _INIT_BASELINE_AUTHOR_NAME = "AgentCore"
 _INIT_BASELINE_AUTHOR_EMAIL = "agentcore@local"
@@ -117,6 +130,19 @@ def git_call_is_write(arguments: dict[str, Any] | None = None) -> bool:
     return action in allowed_actions
 
 
+def git_call_needs_repo_lock(arguments: dict[str, Any] | None = None) -> bool:
+    """Whether this call must hold the per-repo lock (it will take ``index.lock``).
+
+    Read-only calls never qualify: ``GIT_OPTIONAL_LOCKS=0`` keeps them off the index
+    entirely. Action-gated verbs go through ``git_call_is_write`` first, so
+    ``stash list`` stays a free read while ``stash push`` queues.
+    """
+    args = arguments or {}
+    if not git_call_is_write(args):
+        return False
+    return str(args.get("subcommand", "")).strip().lower() in _INDEX_LOCK_SUBCOMMANDS
+
+
 _FORBIDDEN_PATTERNS = git_forbidden_subcommands()
 _PROTECTED_BRANCHES = git_protected_branches()
 _DIFF_OUTPUT_LIMIT = 16000
@@ -126,25 +152,80 @@ _BLAME_LINE_LIMIT = _STATUS_LINE_LIMIT
 # Per-subprocess ceiling. Engine outer = serial_ops × this + kill slack.
 _GIT_TIMEOUT = 20.0
 _GIT_KILL_SLACK = 5.0
-_NETWORK_SUBCOMMANDS = frozenset({"push", "pull", "fetch", "create_pr"})
+# Bounded wait for the per-repo serializer (``repo_lock``), charged to the engine
+# ceiling below for exactly the subcommands that queue — so queue time can never
+# push the caller past the outer ``wait_for`` (which would retire the git tool for
+# the round, far worse than any inner failure). Exhausting it is an honest
+# ``repo_busy``, never a git fault. Sized at one ``_GIT_TIMEOUT``: long enough to
+# absorb a sibling local write from the same round, short enough that queueing
+# behind a slow ``pull`` fails fast instead of burning the caller's whole budget.
+_GIT_REPO_LOCK_WAIT = _GIT_TIMEOUT
+# Wider ceiling for the one remote round trip a network subcommand makes.
+_GIT_NETWORK_TIMEOUT = 60.0
+# Account PAT lookup (DB session + row read + AES decrypt). Unbounded at the
+# store, so ``spawn._load_account_git_auth`` bounds it here — fail-soft: a timeout
+# means "no PAT", git then fails authentication honestly.
+_GIT_CREDENTIAL_TIMEOUT = 10.0
+# create_pr resolves a token through PAT → env → ``gh auth token``. One bound over
+# the whole chain (PAT lookup + the 8s ``gh`` probe), enforced by
+# ``spawn._resolve_pr_token`` — so a looser inner probe can never widen this.
+_GIT_TOKEN_RESOLVE_TIMEOUT = 18.0
+# One GitHub REST call; create_pr makes at most default-branch GET + create POST.
+_GITHUB_API_TIMEOUT = 30.0
+_GITHUB_API_CALLS = 2
+# Worst-case count of bounded (``_GIT_TIMEOUT``) git subprocesses run back to back
+# by one tool call, network round trip excluded. The workspace ``.git`` check costs
+# no subprocess, so a plain read is the primary command and nothing else.
+_SERIAL_GIT_OPS: dict[str, int] = {
+    # branch --show-current + commit + rev-parse --short HEAD
+    "commit": 3,
+    # branch --show-current (protected-branch refusal) + the primary command
+    "merge": 2,
+    "rebase": 2,
+    "cherry-pick": 2,
+    # init + add -A + commit + rev-parse --short + branch --show-current
+    "init_baseline": 5,
+    # branch --show-current + remote
+    "push": 2,
+    # remote
+    "pull": 1,
+    "fetch": 1,
+    # remote + remote get-url + branch --show-current
+    "create_pr": 3,
+}
+_DEFAULT_SERIAL_GIT_OPS = 1
+# Serial I/O a network subcommand does *outside* a git subprocess, at the ceiling
+# the code actually enforces. Every entry must be bounded somewhere in the call
+# path, or the engine ceiling below is a promise nothing keeps.
+_NETWORK_IO_BUDGET: dict[str, float] = {
+    # PAT lookup, then the git remote round trip.
+    "push": _GIT_CREDENTIAL_TIMEOUT + _GIT_NETWORK_TIMEOUT,
+    "pull": _GIT_CREDENTIAL_TIMEOUT + _GIT_NETWORK_TIMEOUT,
+    "fetch": _GIT_CREDENTIAL_TIMEOUT + _GIT_NETWORK_TIMEOUT,
+    # Token resolution, then GitHub REST (default-branch GET + create POST).
+    "create_pr": _GIT_TOKEN_RESOLVE_TIMEOUT + _GITHUB_API_CALLS * _GITHUB_API_TIMEOUT,
+}
+_NETWORK_SUBCOMMANDS = frozenset(_NETWORK_IO_BUDGET)
 
 
 def git_tool_timeout_seconds(arguments: dict[str, Any] | None = None) -> float:
     """Engine wall-clock ceiling for one ``git`` tool call (must outlive inner ops).
 
-    ``ensure_repo`` + primary command = 2; ``commit`` also probes branch and short SHA;
-    ``push``/``pull``/``fetch``/``create_pr``: ensure_repo + remotes + network op
-    (inner up to 60s) — outer must stay above the sum of bounded subprocesses.
+    ``serial_ops × _GIT_TIMEOUT`` covers the bounded subprocesses the subcommand
+    runs back to back; ``_NETWORK_IO_BUDGET`` adds the credential / remote /
+    GitHub-REST steps, which are I/O rather than git processes but sit on the same
+    serial path. Index-mutating calls also queue on the per-repo lock first, so
+    ``_GIT_REPO_LOCK_WAIT`` is charged to them — the whole point of bounding the
+    wait is that it fits inside the ceiling instead of eating into it.
+    ``_GIT_KILL_SLACK`` leaves room to kill / reap before the outer deadline.
     """
-    sub = str((arguments or {}).get("subcommand", "")).strip().lower()
-    if sub in _NETWORK_SUBCOMMANDS:
-        # ensure_repo (~2×20) + remote list (20) + network op (60) + slack
-        return 2 * _GIT_TIMEOUT + _GIT_TIMEOUT + 60.0 + _GIT_KILL_SLACK
-    if sub == "init_baseline":
-        # init + add -A + commit (+ optional status probe when already a repo)
-        return 4 * _GIT_TIMEOUT + _GIT_KILL_SLACK
-    serial = 4 if sub == "commit" else 2
-    return serial * _GIT_TIMEOUT + _GIT_KILL_SLACK
+    args = arguments or {}
+    sub = str(args.get("subcommand", "")).strip().lower()
+    budget = _SERIAL_GIT_OPS.get(sub, _DEFAULT_SERIAL_GIT_OPS) * _GIT_TIMEOUT
+    budget += _NETWORK_IO_BUDGET.get(sub, 0.0)
+    if git_call_needs_repo_lock(args):
+        budget += _GIT_REPO_LOCK_WAIT
+    return budget + _GIT_KILL_SLACK
 
 
 GIT_TOOL_PARAMETERS: dict[str, Any] = {

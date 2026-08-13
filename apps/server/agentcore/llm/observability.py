@@ -9,7 +9,9 @@ line, attributed by ``scenario`` / ``model`` / ``attempt`` and (via
 ``contextvars``) by ``trace_id`` / ``conversation_id`` / worker identity. This is
 the per-call layer the round/turn aggregates (``react.round_end`` /
 ``chat.turn_complete``) cannot give: per-model latency, finish_reason, and the
-chat-vs-worker-vs-title-vs-memory split.
+chat-vs-worker-vs-title-vs-memory split. Being that single point is also why the
+prompt-prefix-cache probe hangs here (``cost.prefix_cache``, 审计议题 D4): it needs
+the same per-call pairing of request messages with the provider's own usage split.
 
 Bodies (the actual prompt + completion) are the lever for prompt tuning but are
 large and sensitive, so they are OFF by default and only captured when
@@ -119,6 +121,25 @@ def log_llm_call(
         pricing_source=priced.pricing_source,
         **extra,
     )
+
+    # 审计议题 D4: pair the billed cache split above with WHY it came out that way — the
+    # provider matches ``system + history + user`` as one token prefix, so ``cache_hit_tokens``
+    # alone cannot tell a tail edit from plain history growth. Same seam on purpose: every
+    # path that lands one ``llm.call`` lands one ``cost.prefix_cache`` beside it. Observation
+    # only, and never allowed to break a call (same rule as metering below).
+    try:
+        from agentcore.observability.prefix_cache import observe_prefix_cache
+
+        observe_prefix_cache(
+            scenario=scenario,
+            model=model,
+            messages=messages,
+            input_tokens=u.input_tokens,
+            cache_hit_tokens=u.cache_hit_tokens,
+            cache_miss_tokens=u.cache_miss_tokens,
+        )
+    except Exception:  # noqa: BLE001 — observability must never break the LLM path
+        pass
 
     # Cloud in-process metering: enqueue a cost_calls detail when the ledger
     # drainer is running (API server lifespan). Sidecar never starts the drain —

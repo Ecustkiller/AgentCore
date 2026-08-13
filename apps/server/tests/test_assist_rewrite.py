@@ -178,3 +178,54 @@ async def test_resolve_assist_credentials_platform_missing_key_raises(monkeypatc
             user=_User(),  # type: ignore[arg-type]
             cost_repo=object(),  # type: ignore[arg-type]
         )
+
+
+# --- log context (per-call quota gate reads user_id off contextvars) ---
+
+
+async def test_rewrite_for_user_binds_billing_context(monkeypatch):
+    """The whole billing envelope this path has, bound around the call (STD-A2).
+
+    ``user_id`` — without it ``billing.call_quota`` skips the leaf gate entirely,
+    so the brake never braked an AI rewrite. ``cost_role`` / ``persona`` — the
+    call meter reads them off contextvars, and they are what make the resulting
+    ledger row an account-level ``assist`` line instead of a bogus captain run.
+    """
+    from agentcore.core.log_context import get_log_value
+    from agentcore.costing import PERSONA_REWRITE, ROLE_ASSIST
+
+    seen: dict[str, str] = {}
+
+    class _Provider:
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            seen["user_id"] = get_log_value("user_id")
+            seen["cost_role"] = get_log_value("cost_role")
+            seen["persona"] = get_log_value("persona")
+            seen["conversation_id"] = get_log_value("conversation_id")
+            return LLMResponse(content="改写后")
+
+    async def _fake_credentials(**kwargs):
+        return None
+
+    monkeypatch.setattr(rewrite_mod, "_resolve_assist_credentials", _fake_credentials)
+    monkeypatch.setattr(rewrite_mod, "build_provider", lambda creds: _Provider())
+    monkeypatch.setattr(rewrite_mod, "resolve_user_model", lambda creds: "deepseek-v4-flash")
+
+    class _User:
+        user_id = "u-42"
+
+    out = await rewrite_mod.rewrite_selection_for_user(
+        session=object(),  # type: ignore[arg-type]
+        user=_User(),  # type: ignore[arg-type]
+        cost_repo=object(),  # type: ignore[arg-type]
+        data=RewriteInput(selection="原文", instruction="改"),
+    )
+    assert out == "改写后"
+    assert seen["user_id"] == "u-42"
+    assert seen["cost_role"] == ROLE_ASSIST
+    assert seen["persona"] == PERSONA_REWRITE
+    # No conversation to bind — the ledger row is account-level, not mis-filed.
+    assert seen["conversation_id"] == ""
+    # Scoped bind: the ids must not leak past the call.
+    assert get_log_value("user_id") == ""
+    assert get_log_value("cost_role") == ""

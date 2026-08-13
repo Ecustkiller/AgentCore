@@ -154,6 +154,7 @@ async def bind_tool_context_to_landing_desk(
     backend = build_target_backend(
         user_id=context.user_id,
         folder_id=binding.folder_id,
+        folder_rel_path=binding.rel_path,
         conversation_id=context.conversation_id,
         sink=sink,
         local_binding=binding.local_binding,
@@ -192,12 +193,12 @@ async def ensure_bare_chat_auto_cloud_desk(
     turn_target_desk: Any,
     user_id: str,
     conversation_id: str | None = None,
-    user_message: str | None = None,
     conversation_title: str | None = None,
     tool_context: ToolContext | None = None,
     persisted_auto_desk_folder_id: str | None = None,
+    sink: Any = None,
 ) -> str | None:
-    """Silently create or reuse a cloud desk for bare-chat write tasks lacking a target.
+    """Create or reuse a cloud desk for bare-chat write tasks lacking a target.
 
     Trigger: no session ``folder_id`` + structural write-desk task + no effective
     target + no unique ``turn_target_desk``. Only cloud. Never rewrites conversation
@@ -205,6 +206,11 @@ async def ensure_bare_chat_auto_cloud_desk(
     mint so later turns reuse the same desk. At most one mint per turn
     (``auto_cloud_provisioned``). Does not ask the user. Returns provisioned /
     reused folder id, or ``None`` when skipped / failed.
+
+    A fresh mint emits ``auto_folder_created`` on ``sink`` so the user is TOLD where
+    their files landed and can rename it on the spot (双模式工作区 §5.4 裸聊行). That
+    is a notice, not a gate: the turn never waits on it. Reuse and race-loss stay
+    silent — the desk was already announced by the turn that minted it.
     """
     if session_folder_id:
         return None
@@ -261,11 +267,11 @@ async def ensure_bare_chat_auto_cloud_desk(
     title = conversation_title
     if not (isinstance(title, str) and title.strip()):
         title = await _load_conversation_title(user_id=user_id, conversation_id=conversation_id)
-    name = _auto_cloud_desk_name(conversation_title=title, user_message=user_message)
+    name = _auto_cloud_desk_name(conversation_title=title)
     try:
-        from agentcore.tools.builtin.projects import create_cloud_folder
+        from agentcore.tools.builtin.folders import create_cloud_folder
 
-        project = await create_cloud_folder(user_id=user_id, name=name)
+        created = await create_cloud_folder(user_id=user_id, name=name)
     except Exception as e:  # noqa: BLE001 — fall through to gate reject
         logger.warning(
             "delegate.auto_cloud_desk_provision_failed",
@@ -275,7 +281,7 @@ async def ensure_bare_chat_auto_cloud_desk(
         )
         return None
 
-    folder_id = project.get("id") if isinstance(project, dict) else None
+    folder_id = created.get("id") if isinstance(created, dict) else None
     if not isinstance(folder_id, str) or not folder_id.strip():
         logger.warning(
             "delegate.auto_cloud_desk_provision_failed",
@@ -290,8 +296,12 @@ async def ensure_bare_chat_auto_cloud_desk(
         conversation_id=conversation_id,
         folder_id=folder_id,
     )
+    announce = True
     if persist.outcome == "lost" and persist.effective_id:
         # Race: another turn wrote first — reuse winner, reclaim this turn's mint.
+        # The winning turn announces its own desk; a second notice here would name
+        # a folder this turn just threw away.
+        announce = False
         orphan_id = folder_id
         folder_id = persist.effective_id
         await _reclaim_orphan_auto_desk_folder(user_id=user_id, folder_id=orphan_id)
@@ -306,12 +316,17 @@ async def ensure_bare_chat_auto_cloud_desk(
     turn_target_desk.note_folder(folder_id)
     if tool_context is not None:
         await bind_tool_context_to_landing_desk(tool_context, folder_id=folder_id)
+    if announce and sink is not None:
+        from agentcore.runtime.events import auto_folder_created
+
+        sink.emit(auto_folder_created(folder_id=folder_id, name=name))
     logger.info(
         "delegate.auto_cloud_desk_provisioned",
         folder_id=folder_id,
         name=name,
         conversation_id=conversation_id,
         conversation_untouched=True,
+        announced=announce and sink is not None,
     )
     return folder_id
 
@@ -358,12 +373,13 @@ async def apply_target_desktop(
     )
     if binding is None:
         raise TargetDesktopError(
-            f"目标项目 `{target_folder_id}` 不存在或无权访问；请重新列/解析项目后再派。"
+            f"目标文件夹 `{target_folder_id}` 不存在或无权访问；请重新列/解析文件夹后再派。"
         )
 
     backend = build_target_backend(
         user_id=base_tool_context.user_id,
         folder_id=binding.folder_id,
+        folder_rel_path=binding.rel_path,
         conversation_id=base_tool_context.conversation_id,
         sink=sink,
         local_binding=binding.local_binding,

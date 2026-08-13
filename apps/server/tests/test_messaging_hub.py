@@ -174,6 +174,71 @@ async def test_online_presence_queries():
     assert hub.online_user_ids() == frozenset({"u2"})
 
 
+# --- device identity + per-surface presence (云对话多端同权 B2 L1) ---
+
+
+async def test_anonymous_connections_do_not_evict_each_other():
+    """Undeclared clients keep the pre-existing multi-connection behaviour."""
+    hub = ChatHub()
+    sub_a = hub.subscribe("u1")
+    sub_b = hub.subscribe("u1")
+
+    assert sub_a.device_id != sub_b.device_id
+    assert hub.connection_count("u1") == 2
+    await hub.publish(["u1"], {"type": "chat_message"})
+    assert (await sub_a.get())["type"] == "chat_message"
+    assert (await sub_b.get())["type"] == "chat_message"
+
+
+async def test_same_device_reconnect_replaces_previous_stream():
+    """One live stream per (user, device) — a reconnect must not leave a zombie."""
+    hub = ChatHub()
+    old = hub.subscribe("u1", device_id="dev-1", platform="android")
+    new = hub.subscribe("u1", device_id="dev-1", platform="android")
+
+    assert hub.connection_count("u1") == 1
+    # The superseded stream is closed so its route tears the response down.
+    assert await old.get() is None
+
+    await hub.publish(["u1"], {"type": "chat_message"})
+    assert (await new.get())["type"] == "chat_message"
+
+
+async def test_superseded_stream_teardown_keeps_its_replacement():
+    """The evicted connection's own unsubscribe must not drop the new one."""
+    hub = ChatHub()
+    old = hub.subscribe("u1", device_id="dev-1")
+    new = hub.subscribe("u1", device_id="dev-1")
+
+    hub.unsubscribe(old)  # late teardown of the superseded stream
+
+    assert hub.connection_count("u1") == 1
+    await hub.publish(["u1"], {"type": "chat_message"})
+    assert (await new.get())["type"] == "chat_message"
+
+
+async def test_online_platforms_reports_declared_surfaces():
+    hub = ChatHub()
+    assert hub.online_platforms("u1") == frozenset()
+
+    hub.subscribe("u1", device_id="d1", platform="desktop")
+    hub.subscribe("u1", device_id="d2", platform="Android")  # normalized
+    hub.subscribe("u1", device_id="d3")  # undeclared contributes nothing
+    hub.subscribe("u2", device_id="d4", platform="ios")
+
+    assert hub.online_platforms("u1") == frozenset({"desktop", "android"})
+    assert hub.online_platforms("u2") == frozenset({"ios"})
+
+
+async def test_online_platforms_clears_on_unsubscribe():
+    hub = ChatHub()
+    sub = hub.subscribe("u1", device_id="d1", platform="android")
+    assert hub.online_platforms("u1") == frozenset({"android"})
+
+    hub.unsubscribe(sub)
+    assert hub.online_platforms("u1") == frozenset()
+
+
 # --- SSE firehose generator (route helper) ---
 
 

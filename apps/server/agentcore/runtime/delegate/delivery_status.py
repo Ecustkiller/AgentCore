@@ -11,7 +11,8 @@
 ``delivered_files`` / CEO「已交付」= 仅 ``accepted``；cite-tier 等合同点名路径为
 ``rejected``，不得因 soft-COMPLETED 进入 delivered_files。主清单（桌面
 FileArtifactsCard）认 ``artifacts``（accepted+rejected），只走 ``file_acceptance``，
-不从 ``files_touched`` 合成验收行。
+不从 ``files_touched`` 合成验收行；每行随带工具自报的 ``kind`` / ``derived_from``
+（导出件 ← 源 md），客户端据此把源折成中间稿，口径同 ``fold_exported_sources``。
 
 刀1 / 方案 A：声明路径已落盘 → verdict 走交付成功路径；``degraded_handoff`` 仅
 notes/warning 备注，不整单硬失败、不拖文件 rejected。甲⁺：真无落盘 soft
@@ -54,12 +55,15 @@ from __future__ import annotations
 import re
 from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.runtime.turn.token_budget import REASON_QA_DEFERRED, REASON_TURN_TOKEN_BUDGET
+
+if TYPE_CHECKING:
+    from agentcore.tools.protocol import TurnPromotionLedger
 
 logger = get_logger(__name__)
 
@@ -90,9 +94,7 @@ REASON_EMPTY_HANDOFF_STORM = "empty_handoff_storm"
 REASON_CANCELLED = "cancelled"
 REASON_OVER_SEAT = "over_seat"
 _WRITING_CUTOFF_REASONS = frozenset({"token_budget", "worker_timeout"})
-_SOFT_GAP_REASONS = frozenset(
-    {REASON_UNVERIFIED_NOTE, REASON_PATH_HINT, REASON_FILES_NOT_LANDED}
-)
+_SOFT_GAP_REASONS = frozenset({REASON_UNVERIFIED_NOTE, REASON_PATH_HINT, REASON_FILES_NOT_LANDED})
 # Gaps that latch finish_guard draft acknowledgment (扩出文献 evidence_deficit /
 # 能力4：契约硬失败 / 节点 FAILED / rejected 产物 —— 不扩姿势 A 词表).
 _DRAFT_ACK_GAP_REASONS = frozenset(
@@ -202,8 +204,7 @@ def _continue_skipped_runs_action(roles: list[str]) -> dict[str, str]:
     return {
         "kind": "continue_skipped_runs",
         "description": (
-            f"因额度未跑（{extra}）——点此下一回合续跑未执行节点，"
-            "禁止假装本回合已全部完成"
+            f"因额度未跑（{extra}）——点此下一回合续跑未执行节点，禁止假装本回合已全部完成"
         ),
         "prompt": (
             "请续跑上一回合因 token 额度跳过、从未开跑的节点："
@@ -236,11 +237,27 @@ def _delivered_files(
     plan: RunPlan | None = None,
 ) -> list[str]:
     """Ordered, deduped accepted paths from ``file_acceptance`` only."""
-    return [
-        a["path"]
-        for a in _collect_artifacts(results, plan)
-        if a["status"] == "accepted"
-    ][:_MAX_FILES]
+    return [a["path"] for a in _collect_artifacts(results, plan) if a["status"] == "accepted"][
+        :_MAX_FILES
+    ]
+
+
+def _product_meta(raw: dict[str, Any]) -> dict[str, str]:
+    """The producer's self-reported ``kind`` / ``derived_from`` (empty when unreported).
+
+    Wire-side twin of the ledger fields ``build_file_acceptance`` stamps: ``kind``
+    lets the client label the product, ``derived_from`` lets it fold the source into
+    中间稿 (口径同 ``fold_exported_sources``). Guessing either from the extension is
+    exactly what the ledger redesign removed, so unreported stays unreported.
+    """
+    out: dict[str, str] = {}
+    kind = str(raw.get("kind") or "").strip()
+    if kind:
+        out["kind"] = kind
+    source = str(raw.get("derived_from") or "").strip()
+    if source:
+        out["derived_from"] = source
+    return out
 
 
 def _collect_artifacts(
@@ -253,6 +270,8 @@ def _collect_artifacts(
     When ``plan`` is given, stamp ``workspace_id=folder:{target_folder_id}`` from
     the matching node (omit when the node has no target — client falls back to
     session birth desk). Does not rewrite session ``folder_id``.
+    Self-reported ``kind`` / ``derived_from`` ride along so the client's 主清单 can
+    show the export and fold its source (see :func:`_product_meta`).
     """
     from agentcore.runtime.runs.file_acceptance import normalize_acceptance_row
     from agentcore.workspace.locate import format_workspace_id
@@ -266,9 +285,7 @@ def _collect_artifacts(
             tf = getattr(node, "target_folder_id", None)
             tf_s = str(tf).strip() if tf else ""
             if tf_s:
-                desk_by_run[rid] = format_workspace_id(
-                    folder_id=tf_s, conversation_id=""
-                )
+                desk_by_run[rid] = format_workspace_id(folder_id=tf_s, conversation_id="")
 
     by_path: dict[str, dict[str, Any]] = {}
     order: list[str] = []
@@ -282,6 +299,9 @@ def _collect_artifacts(
                 continue
             if workspace_id:
                 row = {**row, "workspace_id": workspace_id}
+            meta = _product_meta(raw)
+            if meta:
+                row = {**row, **meta}
             path = row["path"]
             if path not in by_path:
                 order.append(path)
@@ -430,9 +450,7 @@ def _node_gaps(plan: RunPlan, results: dict[str, RunState]) -> list[dict[str, An
         if state.phase is RunPhase.FAILED:
             err = (state.error or "").strip()
             desc = f"未完成（失败：{err}）" if err else "未完成（失败）"
-            gaps.append(
-                {"role": role, "description": desc, "reason": REASON_NODE_FAILED}
-            )
+            gaps.append({"role": role, "description": desc, "reason": REASON_NODE_FAILED})
         elif state.phase is RunPhase.SKIPPED:
             # Prefer first-class delivery_gaps (turn-ceiling honesty: 未目验 / 未跑
             # web_quality / {{…}}); fall back to a generic skip row.
@@ -445,9 +463,7 @@ def _node_gaps(plan: RunPlan, results: dict[str, RunState]) -> list[dict[str, An
                     continue
                 reason = str(row.get("reason") or "").strip()
                 severity = str(row.get("severity") or "").strip()
-                gaps.append(
-                    _annotate_gap(role, text, reason=reason, severity=severity)
-                )
+                gaps.append(_annotate_gap(role, text, reason=reason, severity=severity))
                 emitted = True
             if not emitted:
                 # 同图已有 continue_from / replaces 补派已跑 → 收掉吓人「计划收口跳过」。
@@ -484,9 +500,7 @@ def _count_empty_or_degraded_nodes(
         if state is None:
             continue
         role = str(node.role or node.agent_name or node.run_id)
-        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(
-            node.run_id, results
-        ):
+        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(node.run_id, results):
             terminal += 1
             emptyish += 1
             roles.append(role)
@@ -556,9 +570,7 @@ def _cancel_zero_output_checklist_gap(
         state = results.get(node.run_id)
         if state is None:
             continue
-        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(
-            node.run_id, results
-        ):
+        if state.phase is RunPhase.CANCELLED and not _has_completed_revision(node.run_id, results):
             cancelled_roles.append(str(node.role or node.agent_name or node.run_id))
     if not cancelled_roles:
         return None
@@ -583,9 +595,7 @@ def _soften_landed_degraded_gaps(
     for gap in gaps:
         reason = str(gap.get("reason") or "").strip()
         desc = str(gap.get("description") or "")
-        if reason == REASON_DEGRADED_HANDOFF or "交接说明不够完整" in desc or (
-            "降级合成" in desc
-        ):
+        if reason == REASON_DEGRADED_HANDOFF or "交接说明不够完整" in desc or ("降级合成" in desc):
             softened = dict(gap)
             softened["severity"] = "warning"
             softened["reason"] = REASON_DEGRADED_HANDOFF
@@ -707,11 +717,7 @@ def _member_files_not_landed_gap(
         text = zero_files_gap_message(landing_failure_kind=failure_kind)
     # 能力4：零落盘 soft 投影仍保留 node_failed reason → draft_ack 闩不断。
     src_reason = str(source.get("reason") or "").strip()
-    reason = (
-        REASON_NODE_FAILED
-        if src_reason == REASON_NODE_FAILED
-        else REASON_FILES_NOT_LANDED
-    )
+    reason = REASON_NODE_FAILED if src_reason == REASON_NODE_FAILED else REASON_FILES_NOT_LANDED
     return {
         "role": role,
         "description": text,
@@ -746,8 +752,7 @@ def _project_user_gaps(
     worker_roles = [r for r in role_order if r != _BATCH_ACCEPTANCE_ROLE]
     if worker_roles:
         projected = [
-            _member_files_not_landed_gap(role, zero_by_role[role], results)
-            for role in worker_roles
+            _member_files_not_landed_gap(role, zero_by_role[role], results) for role in worker_roles
         ]
         return [*projected, *other]
     return [_files_not_landed_gap(results), *other]
@@ -775,9 +780,7 @@ def _build_summary(
 ) -> str:
     """Human summary: separate 未完成 vs 待核实; writing cutoff → 成篇未写完."""
     warn_hits, warn_files = _warning_note_stats(warnings)
-    path_only = bool(warnings) and all(
-        g.get("reason") == REASON_PATH_HINT for g in warnings
-    )
+    path_only = bool(warnings) and all(g.get("reason") == REASON_PATH_HINT for g in warnings)
     degraded_only = bool(warnings) and all(
         g.get("reason") == REASON_DEGRADED_HANDOFF for g in warnings
     )
@@ -802,9 +805,7 @@ def _build_summary(
         return "无交付缺口"
 
     writing = any(g.get("reason") in _WRITING_CUTOFF_REASONS for g in blocking)
-    other_n = sum(
-        1 for g in blocking if g.get("reason") not in _WRITING_CUTOFF_REASONS
-    )
+    other_n = sum(1 for g in blocking if g.get("reason") not in _WRITING_CUTOFF_REASONS)
 
     if not delivered:
         if writing and other_n == 0:
@@ -836,6 +837,7 @@ def build_delivery_status(
     execution_id: str,
     backend: Any = None,
     criteria_gaps: list[str] | None = None,
+    promotion_ledger: TurnPromotionLedger | None = None,
 ) -> dict[str, Any] | None:
     """Build a ``delivery_status`` payload, or ``None`` when there is nothing to report.
 
@@ -844,6 +846,9 @@ def build_delivery_status(
     All inputs are the wrap-up signals the engine already computed; nothing here
     re-verifies the workspace. ``delivered_files`` = accepted only;
     ``artifacts`` carries path-level acceptance (accepted + rejected).
+
+    ``promotion_ledger`` (回合共享台账): 已归位路径在这里被重映射到新位置，
+    并带出 ``promoted`` 行；不传（旧调用 / 单测）则完全不涉及归位。
     """
     from agentcore.runtime.delegate.completion import (
         collect_verify_failure_gaps,
@@ -879,9 +884,7 @@ def build_delivery_status(
                 severity = ""
             if not text:
                 continue
-            raw_gaps.append(
-                _annotate_gap(role, text, reason=reason, severity=severity)
-            )
+            raw_gaps.append(_annotate_gap(role, text, reason=reason, severity=severity))
     # ①b 验证形工具失败（可用性诚实性 · 丙）——COMPLETED 但 browser_navigate /
     # test_run / verify 形 code_execute·terminal 失败 → 不得仍为 delivered。
     for role, rows in collect_verify_failure_gaps(plan, results):
@@ -905,9 +908,7 @@ def build_delivery_status(
         if not text:
             continue
         reason = str(row.get("reason") or REASON_EVIDENCE_DEFICIT).strip()
-        raw_gaps.append(
-            _annotate_gap("验收", text, reason=reason or REASON_EVIDENCE_DEFICIT)
-        )
+        raw_gaps.append(_annotate_gap("验收", text, reason=reason or REASON_EVIDENCE_DEFICIT))
     # ①c2 已声明复核落盘未对齐合格报告（案 thin-review A′）——blocking thin_review；
     # 不扫角色名；有 accepted 合格报告则豁免短 handoff。
     for row in collect_thin_review_gaps(plan.nodes, results):
@@ -916,9 +917,7 @@ def build_delivery_status(
             continue
         reason = str(row.get("reason") or REASON_THIN_REVIEW).strip()
         role = str(row.get("role") or "").strip() or "验收"
-        raw_gaps.append(
-            _annotate_gap(role, text, reason=reason or REASON_THIN_REVIEW)
-        )
+        raw_gaps.append(_annotate_gap(role, text, reason=reason or REASON_THIN_REVIEW))
     # ①d 未解写权冲突（案 ghost-owner P0-B）——denied_paths 仍被他人持锁 → blocking；
     # 不扫「定稿|闭环」正文；真源=账本结构化信号。
     from agentcore.runtime.closing_posture import (
@@ -932,11 +931,7 @@ def build_delivery_status(
     )
     if ownership_paths:
         shown = "、".join(f"`{p}`" for p in ownership_paths[:3])
-        more = (
-            f" 等 {len(ownership_paths)} 处"
-            if len(ownership_paths) > 3
-            else ""
-        )
+        more = f" 等 {len(ownership_paths)} 处" if len(ownership_paths) > 3 else ""
         raw_gaps.append(
             _annotate_gap(
                 "验收",
@@ -962,9 +957,7 @@ def build_delivery_status(
         from agentcore.runtime.closing_posture import note_empty_handoff_storm
 
         note_empty_handoff_storm()
-    cancel_gap = _cancel_zero_output_checklist_gap(
-        plan, results, files_landed=bool(delivered)
-    )
+    cancel_gap = _cancel_zero_output_checklist_gap(plan, results, files_landed=bool(delivered))
     if cancel_gap is not None:
         raw_gaps.append(cancel_gap)
         from agentcore.runtime.closing_posture import note_cancel_zero_output
@@ -1022,22 +1015,19 @@ def build_delivery_status(
         if needs_execution and not code_execution_enabled_for(backend):
             actions.append(cloud_exec_unavailable_delivery_action(backend))
 
-
     # 云端已交付文件：即使用户面 state=delivered，也提示导出到本机（找不到文件夹）。
     # 与 bind_local_folder 可并存但语义不同（导出产物 ≠ 绑定执行环境）。
-    if (
-        delivered
-        and backend is not None
-        and getattr(backend, "location", None) != "local"
-    ):
+    if delivered and backend is not None and getattr(backend, "location", None) != "local":
         actions.append(
             {
                 "kind": "export_to_local",
-                "description": (
-                    "产物在云端工作区——导出到本机文件夹后即可 npm install / 本地运行"
-                ),
+                "description": ("产物在云端工作区——导出到本机文件夹后即可 npm install / 本地运行"),
             }
         )
+
+    # 已归位的产物：本回合早前 promote_product 搬走的路径此刻仍以旧路径出现在
+    # worker 台账里（RunState 不会因搬家回写）。重映射后新卡不会复活已不存在的文件。
+    from agentcore.runtime.delegate.promotion import apply_turn_promotions
 
     rejected = [a for a in artifacts if a.get("status") == "rejected"]
     if not delivered and not gaps and not rejected:
@@ -1055,9 +1045,7 @@ def build_delivery_status(
         state = "delivered"
     elif not blocking and warnings:
         # 轻 B：仅 soft 自注（unverified_note）不降档；path_hint 等仍 notes。
-        non_self_note = [
-            g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE
-        ]
+        non_self_note = [g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE]
         state = "delivered" if not non_self_note and delivered else "notes"
     elif delivered:
         state = "partial"
@@ -1066,15 +1054,18 @@ def build_delivery_status(
 
     summary = _build_summary(delivered, blocking, warnings)
 
-    return {
-        "execution_id": execution_id,
-        "state": state,
-        "summary": summary,
-        "delivered_files": delivered,
-        "gaps": gaps,
-        "actions": actions,
-        "artifacts": artifacts,
-    }
+    return apply_turn_promotions(
+        {
+            "execution_id": execution_id,
+            "state": state,
+            "summary": summary,
+            "delivered_files": delivered,
+            "gaps": gaps,
+            "actions": actions,
+            "artifacts": artifacts,
+        },
+        promotion_ledger,
+    )
 
 
 def maybe_emit_delivery_status(
@@ -1085,6 +1076,7 @@ def maybe_emit_delivery_status(
     execution_id: str,
     backend: Any = None,
     criteria_gaps: list[str] | None = None,
+    promotion_ledger: TurnPromotionLedger | None = None,
 ) -> None:
     """Emit ``delivery_status`` when the reconciliation has substance. Never raises."""
     try:
@@ -1094,6 +1086,7 @@ def maybe_emit_delivery_status(
             execution_id=execution_id,
             backend=backend,
             criteria_gaps=criteria_gaps,
+            promotion_ledger=promotion_ledger,
         )
         if payload is None:
             return
@@ -1119,9 +1112,12 @@ def maybe_emit_delivery_status(
         note_verify_budget_from_delivery(gaps)
         # B′：token_budget / writing cutoff → CEO 综收软横幅 latch（真源=结构化 gaps）。
         note_cutoff_delivery_gap_from_delivery(gaps)
+        from agentcore.runtime.delegate.promotion import note_delivery_reconciliation
         from agentcore.runtime.events import delivery_status
 
         sink.emit(delivery_status(**payload))
+        # 成品归位的 accepted 闸门读这一份（CEO 收口时刻的最新对账）。
+        note_delivery_reconciliation(promotion_ledger, payload)
         artifacts = payload.get("artifacts") or []
         delivered_files = payload.get("delivered_files") or ()
         logger.info(
@@ -1199,6 +1195,7 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
     conversation_id: str,
     user_message: str,
     exclude_turn_id: str | None = None,
+    promotion_ledger: TurnPromotionLedger | None = None,
 ) -> bool:
     """On narrow availability short asks, re-emit the latest delivery_status onto this turn.
 
@@ -1233,29 +1230,35 @@ async def maybe_reinject_recent_delivery_for_availability_ask(
         raw_gaps = payload.get("gaps")
         raw_actions = payload.get("actions")
         raw_artifacts = payload.get("artifacts")
+        raw_promoted = payload.get("promoted")
         gaps: list[Any] = raw_gaps if isinstance(raw_gaps, list) else []
         actions: list[Any] = raw_actions if isinstance(raw_actions, list) else []
-        artifacts: list[Any] = (
-            raw_artifacts if isinstance(raw_artifacts, list) else []
-        )
+        artifacts: list[Any] = raw_artifacts if isinstance(raw_artifacts, list) else []
+        # 归位行随卡走：重发的是同一张卡（同 execution_id，fold 保最新），丢了 promoted
+        # 就把旧路径的回查线索抹了，且本回合再归位时会按空台账重发、二次抹除。
+        promoted: list[Any] = raw_promoted if isinstance(raw_promoted, list) else []
         files = list(verdict.delivered_files)
         summary = str(payload.get("summary") or "").strip() or (
             f"已交付 {len(files)} 个文件" if files else "无交付缺口"
         )
         current_delivery_verdict.set(verdict)
+        from agentcore.runtime.delegate.promotion import adopt_journaled_reconciliation
         from agentcore.runtime.events import delivery_status
 
-        sink.emit(
-            delivery_status(
-                execution_id=verdict.execution_id,
-                state=verdict.state,
-                summary=summary,
-                delivered_files=files,
-                gaps=[g for g in gaps if isinstance(g, dict)],
-                actions=[a for a in actions if isinstance(a, dict)],
-                artifacts=[a for a in artifacts if isinstance(a, dict)],
-            )
-        )
+        reinjected: dict[str, Any] = {
+            "execution_id": verdict.execution_id,
+            "state": verdict.state,
+            "summary": summary,
+            "delivered_files": files,
+            "gaps": [g for g in gaps if isinstance(g, dict)],
+            "actions": [a for a in actions if isinstance(a, dict)],
+            "artifacts": [a for a in artifacts if isinstance(a, dict)],
+            "promoted": [p for p in promoted if isinstance(p, dict)],
+        }
+        sink.emit(delivery_status(**reinjected))
+        # 复用的对账同样是本回合的 accepted 真源（上一回合验收过、仍在工作间的产物可归位）；
+        # 卡上已有的归位行一并接手，本回合再归位时才不会把它们抹掉。
+        adopt_journaled_reconciliation(promotion_ledger, reinjected)
         return True
     except Exception:  # noqa: BLE001 — short-ask side channel must never break the turn
         logger.warning(

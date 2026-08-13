@@ -142,7 +142,7 @@ async def test_complete_maps_401_403_to_auth_error(code):
             await provider.complete(_req())
         assert "DeepSeek" not in ei.value.message
         assert "invalid api key" not in ei.value.message
-        assert "设置 · 模型配置" in ei.value.message
+        assert "设置 · 服务商" in ei.value.message
         assert ei.value.details.get("upstream_status") == code
         assert "invalid api key" in (ei.value.details.get("upstream_body_preview") or "")
     finally:
@@ -192,7 +192,7 @@ async def test_complete_maps_key_expired_to_auth_error_with_upstream_in_preview(
             await provider.complete(_req())
         assert "CC Switch" not in ei.value.message
         assert "expired" not in ei.value.message.lower()
-        assert "设置 · 模型配置" in ei.value.message
+        assert "设置 · 服务商" in ei.value.message
         assert ei.value.details.get("upstream_status") == 401
         assert "expired" in (ei.value.details.get("upstream_body_preview") or "").lower()
     finally:
@@ -227,7 +227,7 @@ async def test_byok_auth_uses_product_copy_not_upstream_gateway_text():
         assert "revoked" not in ei.value.message.lower()
         assert "当前模型" not in ei.value.message
         assert "服务商" in ei.value.message
-        assert "设置 · 模型配置" in ei.value.message
+        assert "设置 · 服务商" in ei.value.message
         assert ei.value.details.get("upstream_status") == 401
         assert "revoked" in (ei.value.details.get("upstream_body_preview") or "").lower()
         assert ei.value.details.get("credential_source") == "user"
@@ -323,7 +323,7 @@ async def test_llm_auth_error_platform_default_message():
     assert "平台模型暂时不可用" in err.message
     assert "platform" not in err.message
     assert "CC Switch" not in err.message
-    assert "设置 · 模型配置" not in err.message  # BYOK remedy, not platform
+    assert "设置 · 服务商" not in err.message  # BYOK remedy, not platform
 
 
 async def test_complete_maps_model_not_allowed_403_to_client_error_not_auth():

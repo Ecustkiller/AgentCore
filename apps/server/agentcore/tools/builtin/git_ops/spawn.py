@@ -1,4 +1,4 @@
-"""Git subprocess spawn, reap, auth hints, repo probe.
+"""Git subprocess spawn, reap, bounded auth lookups, failure attribution.
 
 ServerWorkspace / Sidecar: same-process ``git`` under ``backend.root``.
 LocalWorkspace (no Path.root): route via ``WorkspaceOp.GIT_RUN`` on the bound
@@ -16,15 +16,28 @@ import subprocess
 import sys
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from agentcore.core.logging import get_logger
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.workspace.channel import WorkspaceOp
 from agentcore.workspace.protocol import WorkspaceError
 
 from . import policy as policy_mod
-from .policy import _GIT_KILL_SLACK, _GIT_TIMEOUT, _PROTECTED_BRANCHES
-from .results import _error, _git_failure, _ok
+from .phases import PHASE_CREDENTIALS, PHASE_LOCAL, report_phase
+from .policy import (
+    _GIT_CREDENTIAL_TIMEOUT,
+    _GIT_KILL_SLACK,
+    _GIT_TIMEOUT,
+    _GIT_TOKEN_RESOLVE_TIMEOUT,
+    _PROTECTED_BRANCHES,
+)
+from .results import _error, _ok
+
+if TYPE_CHECKING:
+    from agentcore.workspace.git_credentials import GitAuthMaterial
+
+logger = get_logger(__name__)
 
 # Bound for the duration of one GitTool.execute when LocalWorkspace has no Path.root.
 _git_channel: contextvars.ContextVar[Any] = contextvars.ContextVar(
@@ -147,18 +160,85 @@ def _looks_like_auth_failure(blob: str) -> bool:
     return any(m in lower for m in _AUTH_FAILURE_MARKERS)
 
 
+# Root ``.git`` is there but git will not operate it: dangling gitdir pointer, bare
+# repo, corrupt index / objects. Attribution for the optimistic path — the primary
+# command surfaces these instead of a pre-flight probe.
+_UNUSABLE_REPO_MARKERS = (
+    "not a git repository",
+    "not a work tree",
+    "must be run in a work tree",
+    "index file corrupt",
+    "bad index file",
+    "is corrupt",
+    "corrupt loose object",
+)
+
+_UNUSABLE_REPO_HINT = (
+    "工作区根有 .git，但 git 无法把它当作可用工作树"
+    "（gitdir 指向失效 / 裸仓 / 仓库损坏）——这不是「无仓库」，请人工检查后再试。"
+)
+
+
+def _looks_like_unusable_repo(blob: str) -> bool:
+    lower = blob.lower()
+    return any(m in lower for m in _UNUSABLE_REPO_MARKERS)
+
+
 def _is_cloud_backend(context: ToolContext) -> bool:
     """Cloud ServerWorkspace only — Local inherits OS / gh auth, do not inject PAT."""
     return getattr(context.backend, "location", None) == "server"
+
+
+async def _load_account_git_auth(
+    user_id: str, *, timeout: float = _GIT_CREDENTIAL_TIMEOUT
+) -> GitAuthMaterial | None:
+    """Bounded, fail-soft account PAT lookup (DB session + row read + decrypt).
+
+    The store is fail-soft on errors but unbounded in time, and it sits on the
+    serial path the engine ceiling budgets. A timeout is treated exactly like
+    "no PAT configured": git runs without injected credentials and fails
+    authentication honestly rather than the whole tool call dying here.
+    """
+    from agentcore.workspace.git_credentials import load_git_auth_for_user
+
+    try:
+        return await asyncio.wait_for(load_git_auth_for_user(user_id), timeout)
+    except TimeoutError:
+        logger.warning(
+            "git.credential_lookup_timeout", scope="account_pat", timeout_seconds=timeout
+        )
+        return None
+
+
+async def _resolve_pr_token(
+    user_id: str | None, *, timeout: float = _GIT_TOKEN_RESOLVE_TIMEOUT
+) -> tuple[str | None, bool]:
+    """Bounded GitHub token resolution; returns ``(token, timed_out)``.
+
+    One bound over the whole PAT → env → ``gh auth token`` chain. Unlike push,
+    create_pr cannot proceed without a token, so the caller reports the timeout
+    instead of silently blaming missing credentials.
+    """
+    from agentcore.workspace.github_pr import resolve_github_token
+
+    try:
+        token = await asyncio.wait_for(resolve_github_token(user_id=user_id), timeout)
+    except TimeoutError:
+        logger.warning(
+            "git.credential_lookup_timeout", scope="pr_token", timeout_seconds=timeout
+        )
+        return None, True
+    return token, False
 
 
 async def _cloud_network_extra_env(context: ToolContext) -> dict[str, str] | None:
     """Credential helper env for cloud push/fetch/pull when an account PAT exists."""
     if not _is_cloud_backend(context) or not context.user_id:
         return None
-    from agentcore.workspace.git_credentials import load_git_auth_for_user
-
-    auth = await load_git_auth_for_user(context.user_id)
+    # After the guards: a local workspace inherits OS / gh auth and looks nothing up,
+    # so it must never claim this phase.
+    report_phase(PHASE_CREDENTIALS)
+    auth = await _load_account_git_auth(context.user_id)
     if auth is None:
         return None
     # Inline credential helper via GIT_CONFIG_* (no disk write of the token).
@@ -217,33 +297,49 @@ async def _run_git_via_channel(
     )
 
 
+def _git_subprocess_env(cwd: str, extra_env: dict[str, str] | None) -> dict[str, str]:
+    """Env for a spawned ``git`` — kept identical to desktop ``gitRun``.
+
+    ``GIT_OPTIONAL_LOCKS=0`` stops read-only commands from refreshing the index, so
+    they never queue on ``.git/index.lock`` behind another git; ``GIT_CEILING_DIRECTORIES``
+    keeps repo discovery from climbing into a parent repo.
+    """
+    env = {
+        **os.environ,
+        "GIT_TERMINAL_PROMPT": "0",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_CEILING_DIRECTORIES": str(Path(cwd).resolve()),
+    }
+    if extra_env:
+        env.update(extra_env)
+    return env
+
+
 async def _run_git(
     args: list[str],
     *,
     cwd: str,
     timeout: float = _GIT_TIMEOUT,
     extra_env: dict[str, str] | None = None,
+    phase: str = PHASE_LOCAL,
 ) -> tuple[str, str, int]:
     """Run git command, return (stdout, stderr, exit_code).
 
     With a bound ``WorkspaceChannel`` (LocalWorkspace), issues ``git_run`` on the
-    desktop. Otherwise spawns local ``git`` under ``cwd`` with
-    ``GIT_CEILING_DIRECTORIES`` so discovery never climbs into a parent repo.
+    desktop. Otherwise spawns local ``git`` under ``cwd``.
     On timeout / cancel, reaps the process tree (Windows ``taskkill /T``).
+
+    ``phase`` is what the waiting UI is told while this command runs; the default
+    says「local git is executing」so only a caller that really is on the network leg
+    (``PHASE_REMOTE``) can claim it.
     """
+    report_phase(phase)
     channel = _git_channel.get()
     if channel is not None:
         # Local inherits OS / gh auth on the desktop — never inject cloud PAT env.
         return await _run_git_via_channel(args, channel=channel, timeout=timeout)
 
-    ceiling = str(Path(cwd).resolve())
-    env = {
-        **os.environ,
-        "GIT_TERMINAL_PROMPT": "0",
-        "GIT_CEILING_DIRECTORIES": ceiling,
-    }
-    if extra_env:
-        env.update(extra_env)
+    env = _git_subprocess_env(cwd, extra_env)
     proc = await asyncio.create_subprocess_exec(
         "git",
         *args,
@@ -297,19 +393,19 @@ def _no_repo_ok(start: float) -> ToolResult:
 async def _ensure_git_repo(
     cwd: str, start: float, *, write: bool
 ) -> ToolResult | None:
-    # Fast path: refuse before any git discovery that could surface a parent repo.
-    if not await _workspace_has_git_meta(cwd):
-        if write:
-            return _error(_NO_LOCAL_REPO_MSG, start)
-        return _no_repo_ok(start)
-    stdout, stderr, code = await _run_git(
-        ["rev-parse", "--is-inside-work-tree"], cwd=cwd
-    )
-    if code == 0 and stdout.strip() == "true":
+    """Decide the no-repo fork; never spawn git — the primary command is the probe.
+
+    Only the root ``.git`` check lives here, because it alone splits read-only soft
+    success (``no_repo``) from a write hard error, and it costs no subprocess. When
+    ``.git`` is present the caller runs optimistically: a broken repo fails on the
+    real command and ``_git_failure`` attributes it (``repo_unusable``), so a
+    corrupt repo can never be reported as "no repo".
+    """
+    if await _workspace_has_git_meta(cwd):
         return None
-    # Local ``.git`` exists but the probe failed: never soft-succeed as ``no_repo``.
-    # Timeout / corrupt / not-a-work-tree are honest errors on both read and write.
-    return await _git_failure(stdout, stderr, code or 1, start)
+    if write:
+        return _error(_NO_LOCAL_REPO_MSG, start)
+    return _no_repo_ok(start)
 
 
 async def _current_branch(cwd: str) -> str:

@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
+from agentcore.runtime.always_confirm import requires_always_confirm
 from agentcore.runtime.approvals import ApprovalDecision, ApprovalGate, tool_call_requires_approval
 from agentcore.runtime.events import EventSink, tool_use_end
 from agentcore.runtime.loop_controller import ToolAttempt
@@ -136,6 +136,21 @@ async def _check_safety_and_approval_gates(
 ) -> _ToolGateDenied | None:
     """P3 breaker + Local destructive baseline + approval authorize.
 
+    The single chokepoint for「这次调用要不要人批」. It runs in two independent steps
+    and never collapses them:
+
+    1. **要不要审批** — schema ``GRANTABLE`` / runtime-elevated git·terminal writes /
+       恒确认 / 熔断 FORCE, minus the exemptions in ``runtime.sandbox_approval``
+       (cloud-worker sandbox ungate, execution auto-pass) and the captain browser
+       short op. Nothing here reads ``approval_gate``: whether a caller happened to
+       hand one over says nothing about whether the *tool* is dangerous.
+    2. **有没有人可问** — only then does ``approval_gate is None`` matter, and it
+       means exactly one thing: this path has no user to ask (unattended job / ops
+       kill switch). A call that needs approval there is DENIED, not waved through.
+
+    Callers must therefore pass the turn's gate down verbatim and let this function
+    narrow — see :func:`~agentcore.runtime.delegate.drive_setup.resolve_worker_gate`.
+
     Returns a deny outcome, or ``None`` when the call may proceed to execute.
     """
     # P3 safety circuit breaker — last-line heuristic (not a security boundary).
@@ -168,16 +183,15 @@ async def _check_safety_and_approval_gates(
             f"工具 '{name}' 被安全熔断拒绝：{breaker.reason}"
             "请改用其他方案，不要原样重试该路径。"
         )
+        # ``denial`` steers the model and stays on ``result``; the user face is curated
+        # by code only (see tool_failure_face) — an order aimed at the model is not copy.
         sink.emit(
             tool_use_end(
                 tc.id,
                 name,
                 success=False,
                 output=denial,
-                failure=tool_failure_fields(
-                    code=ErrorCode.FORBIDDEN,
-                    product_message=denial,
-                ),
+                failure=tool_failure_fields(code="safety_breaker_deny"),
                 run_id=event_run_id,
             )
         )
@@ -248,9 +262,18 @@ async def _check_safety_and_approval_gates(
     else:
         args_for_gate = args
 
-    needs_approval = force_breaker or (
-        approval_gate is not None
-        and tool_call_requires_approval(name, tool_schema.approval, args)
+    # 恒确认 (git push / create_pr · host_package_install): the truth source lives
+    # in ``runtime.always_confirm`` — above BOTH the gate and every pre-authorize
+    # skip below — because it used to be private to ``ApprovalGate.authorize`` and
+    # anything short-circuiting earlier silently published to the remote.
+    always_confirm = isinstance(args, dict) and requires_always_confirm(name, args)
+    # 「这个工具要不要审批」必须先独立算完，**不得**以「有没有 gate 对象」为判据——否则
+    # 一个漏传 gate 的调用点连问都不问就放行（fail-open），而漏传恰恰看不出来。有没有人
+    # 可问是下一个问题（见下方 ``approval_gate is None`` 分支）。
+    needs_approval = (
+        force_breaker
+        or always_confirm
+        or tool_call_requires_approval(name, tool_schema.approval, args)
     )
     # CEO 短操作：captain 直调 browser_*（navigate/click/type/scroll/snapshot）
     # 不弹审批（force_breaker 仍拦）；screenshot 仅 worker，不走本分支。
@@ -267,43 +290,72 @@ async def _check_safety_and_approval_gates(
     # file-mutation class so 谨慎 prompts reversible writes on cloud too.
     # CEO / captain always keep full GRANTABLE gating — do not key off
     # backend.location alone.
-    if needs_approval and not force_breaker and approval_gate is not None and role == "worker":
+    if needs_approval and not force_breaker and role == "worker":
         from agentcore.runtime.sandbox_approval import cloud_worker_skips_per_call_gate
 
         if cloud_worker_skips_per_call_gate(
             context.backend,
             name,
-            permission_axes=approval_gate.permission_axes,
-            file_op_tools=approval_gate.file_op_tools,
+            arguments=args if isinstance(args, dict) else None,
+            # 会话权限轴随 gate 一起装配，所以无 gate 的路径（handoff job / 评测）本就
+            # 没有会话轴可读 —— 传 None 即历史云端免审口径，不在此另起一套判断。
+            permission_axes=(
+                approval_gate.permission_axes if approval_gate is not None else None
+            ),
+            file_op_tools=(
+                approval_gate.file_op_tools if approval_gate is not None else frozenset()
+            ),
         ):
             needs_approval = False
+    # Re-assert after every downgrade above: a 恒确认 call keeps its card no matter
+    # which skip a future branch adds here.
+    if always_confirm:
+        needs_approval = True
     if needs_approval:
         from agentcore.runtime.sandbox_approval import execution_tool_auto_passes
 
         if approval_gate is None:
-            # Forced destructive shape but no human gate available — fail closed.
-            denial = (
-                f"工具 '{name}' 触发安全熔断且当前路径无法人工确认，已拒绝执行。"
-                f"{breaker.reason if breaker else ''}"
-                "请改用其他方案。"
-            )
+            # 该问而没人可问 → fail closed。到这里 ``approval_gate is None`` 只剩一个
+            # 含义：这条路根本没有可询问的用户（无人值守作业 / 运维关闸），**不是**
+            # 「这条路不需要卡」——后者已在上面按 sandbox_approval 判掉了。
+            # Model face keeps「让用户在可确认的界面重试」; the user face must not — on an
+            # unattended path the reader IS the user and that surface does not exist.
+            if force_breaker:
+                no_gate_status = "circuit_breaker_no_gate"
+                no_gate_face = "safety_breaker_unattended"
+                denial = (
+                    f"工具 '{name}' 触发安全熔断且当前路径无法人工确认，已拒绝执行。"
+                    f"{breaker.reason if breaker else ''}"
+                    "请改用其他方案。"
+                )
+            elif always_confirm:
+                no_gate_status = "always_confirm_no_gate"
+                no_gate_face = "approval_unattended"
+                denial = (
+                    f"工具 '{name}' 必须由用户逐次确认，但当前路径弹不出确认卡，已拒绝执行。"
+                    "请改用其他方案，或让用户在可确认的界面重试。"
+                )
+            else:
+                no_gate_status = "grantable_no_gate"
+                no_gate_face = "approval_unattended"
+                denial = (
+                    f"工具 '{name}' 需要用户授权，但当前路径没有可询问的用户，已拒绝执行。"
+                    "请改用其他方案，或让用户在可确认的界面重试。"
+                )
             sink.emit(
                 tool_use_end(
                     tc.id,
                     name,
                     success=False,
                     output=denial,
-                    failure=tool_failure_fields(
-                        code=ErrorCode.FORBIDDEN,
-                        product_message=denial,
-                    ),
+                    failure=tool_failure_fields(code=no_gate_face),
                     run_id=event_run_id,
                 )
             )
             logger.info(
                 "tool.execute_end",
                 tool=name,
-                status="circuit_breaker_no_gate",
+                status=no_gate_status,
                 duration_ms=0,
             )
             return _ToolGateDenied(
@@ -339,6 +391,17 @@ async def _check_safety_and_approval_gates(
         if auto_pass:
             logger.info("approval.sandbox_auto_pass", tool=name)
         else:
+            if awaiting_approval:
+                # Only when a human will actually see the card: resolve id-only
+                # arguments (delete_folder → 文件夹路径) from the authoritative source
+                # so the user is not asked to approve a bare UUID.
+                from agentcore.runtime.approval_preview import enrich_approval_preview
+
+                args_for_gate = await enrich_approval_preview(
+                    tool_name=name,
+                    arguments=args_for_gate,
+                    user_id=context.user_id or "",
+                )
             decision = await approval_gate.authorize(
                 tool_name=name,
                 tool_call_id=tc.id,
@@ -353,16 +416,16 @@ async def _check_safety_and_approval_gates(
                     f"工具 '{name}' 未获用户授权，该操作未执行。"
                     "请改用其他方案或询问如何继续，不要再调用此工具。"
                 )
+                # The user just clicked 拒绝 (or let the card expire) — echoing the
+                # model's「不要再调用此工具」back at them reads as an order to the person
+                # who made the call. User face is curated by code only.
                 sink.emit(
                     tool_use_end(
                         tc.id,
                         name,
                         success=False,
                         output=denial,
-                        failure=tool_failure_fields(
-                            code=ErrorCode.FORBIDDEN,
-                            product_message=denial,
-                        ),
+                        failure=tool_failure_fields(code="approval_denied"),
                         run_id=event_run_id,
                     )
                 )

@@ -33,6 +33,7 @@ import {
   flushPendingFrames,
 } from "@/services/streamConversation";
 import {
+  beginLocalConversationStream,
   claimPrimaryStream,
   releasePrimaryStream,
 } from "@/services/turns/streamOwnership";
@@ -130,7 +131,7 @@ function newTraceId(): string {
 
 /**
  * 从列表 / folders 缓存解析「项目归属 + 本地 FS 绑定」，供 startTurn / resume 下发。
- * 绑定字段与寻址用 `rootId`/`subpath` 分离：仅当项目在 folders 缓存有 `localRootId` 时
+ * 绑定字段与寻址用 `rootId`/`subpath` 分离：仅当文件夹在 folders 缓存有 `localRootId` 时
  * 填入；裸聊 / 云项目 / 无绑定 → 二者为 null（键仍由调用方写入 RPC）。
  */
 function resolveProjectTurnBinding(conversationId: string): {
@@ -524,6 +525,8 @@ async function runSidecarTurn({
   });
 
   const primaryToken = claimPrimaryStream(conversationId);
+  // 本端在折这个会话 → 对话级订阅让位（云侧若也有 run，两边同折会叠字）。
+  const releaseLocalStream = beginLocalConversationStream(conversationId);
   try {
     // 开流门禁：已 abort / stopping|terminal → 不 invoke（H1）。
     // AbortSignal 只挡开流 / 表示 UI 观察结束——**禁止**据此 cancel 引擎（C1：断连 ≠
@@ -628,6 +631,7 @@ async function runSidecarTurn({
     clearActiveSidecarTurn(conversationId, turnId);
     claim.release();
     releasePrimaryStream(conversationId, primaryToken);
+    releaseLocalStream();
   }
 }
 

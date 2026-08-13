@@ -10,6 +10,7 @@ from agentcore.runtime.loop_controller import (
     ERROR_CLASS_PERMANENT,
     classify_segmented_write_reject,
 )
+from agentcore.tools.file_products import LANDING_TOOLS
 from agentcore.tools.registry import ToolRegistry
 
 # Marker in tool_use_start.arguments when JSON parse failed — must not look like a
@@ -19,36 +20,18 @@ _ARGS_PARSE_FAILED_MARKER: dict[str, Any] = {"__args_parse_failed__": True}
 # v1 taxonomy after ``sanitize_raw_tool_arguments`` (no ``residue`` — sanitize owns that).
 ArgsParseClass = Literal["truncated", "escape", "other"]
 
-# Write/landing tools: parse failures are usually「整篇正文塞进 tool JSON」— steer to
-# segmented writing, never disable the pen, never teach the user to escape quotes.
-_WRITE_PARSE_TOOLS = frozenset(
-    {"file_write", "file_append", "str_replace", "write_section", "file_move"}
-)
-
 # Orchestration tools: anti-wrap / anti-XML tip (keep regardless of class).
 _ORCH_PARSE_TOOLS = frozenset({"delegate", "ask_user"})
 
 # User-visible process-line copy for write-tool args parse failures (人话).
 _USER_WRITE_PARSE_MSG = "长文保存失败，改成分段写入继续。"
 
-# 工具失败机器尾注 (files_touched 成功口径 · 消费方见 runtime/runs/serialize.py):
+# 工具失败机器尾注 (落盘失败归因 · 消费方见 runtime/runs/serialize.py):
 # LLMMessage 无独立 success 字段；失败/拒绝路径在 tool content 末追加此 marker，让
-# files_touched_from_transcript 按 tool_call_id 关联后只记账「无失败尾注」的 file 工具结果。
-# 与 code_execute 的 ``<!--agentcore:written_files:…-->`` 同构：producer 在此、consumer 在
-# serialize，格式靠 round-trip 单测锁死。禁止用拒绝文案子串匹配。
+# landing_write_failure_kind 能按 tool_call_id 关联出「写盘尝试失败」而非零尝试。
+# 与产物自报尾注（tools/file_products.py）同构：producer 在此、consumer 在 serialize，
+# 格式靠 round-trip 单测锁死。禁止用拒绝文案子串匹配。
 TOOL_FAILED_MARKER = "<!--agentcore:tool_failed-->"
-
-# 写盘类工具名（与 serialize._FILE_PRODUCT_ARG 对齐）：miss / allowlist 分流用。
-_FILE_PRODUCT_TOOL_NAMES = frozenset(
-    {
-        "file_write",
-        "file_append",
-        "str_replace",
-        "write_section",
-        "file_move",
-        "file_copy",
-    }
-)
 
 # Aggregable tip length for ``tool.execute_end`` reason (status=error).
 _TOOL_ERROR_REASON_MAX = 200
@@ -213,7 +196,7 @@ def _classify_args_parse_failure(raw: str, exc: json.JSONDecodeError) -> ArgsPar
 
 def _strategy_for_args_parse(tool_name: str, parse_class: ArgsParseClass) -> str:
     """Family + class first-fail tip (model-facing). Landing never teaches user escaping."""
-    if tool_name in _WRITE_PARSE_TOOLS:
+    if tool_name in LANDING_TOOLS:
         trunc_hint = (
             "【信号】输出长度截断导致参数 JSON 未闭合（finish_reason=length 同类）——"
             if parse_class == "truncated"
@@ -286,6 +269,6 @@ def _format_args_parse_error(
         f"工具 '{tool_name}' 的参数不是合法 JSON（{detail}；失败位置 {pos}，附近片段：{snippet}）。"
     )
     model_msg = technical + _strategy_for_args_parse(tool_name, parse_class)
-    if tool_name in _WRITE_PARSE_TOOLS:
+    if tool_name in LANDING_TOOLS:
         return model_msg, _USER_WRITE_PARSE_MSG, parse_class
     return model_msg, model_msg, parse_class

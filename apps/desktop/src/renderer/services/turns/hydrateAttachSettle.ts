@@ -15,7 +15,9 @@ import {
   type ConversationRecovery,
   shouldHydrateLocalRecovery,
 } from "@/services/resume";
-import { getRuntime } from "@/stores/conversation";
+import { clearAiAttentionForConversation } from "@/stores/aiAttention";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
+import { syncConversationFollow } from "./conversationFollow";
 import { projectPausedRuns } from "./projectPausedRuns";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import {
@@ -44,6 +46,23 @@ export async function runHydrateAttachSettle(
     paused_count: recovery.pausedCount,
     branch: useLocal ? "local" : "cloud",
   });
+  // 对话级订阅（云对话多端同权 B2 · 验收 4）：云会话常驻一条 ``follow=true`` 订阅，
+  // 空闲只收心跳，另一端开跑的新回合在同一条流上自动重放 + 跟播。本机引擎在跑 / 有本机
+  // 未同步回合时不订（那些回合服务端没有 run）；纯云的冷挂起会话要订——另一端放行后的
+  // 续跑就是一个新 run。放在 abort 早退之前：订阅自带本端连接闸，忙时自己让位。
+  //
+  // 只跟当前打开的会话：观察泵是会话切片自己的（切走不卸），但订阅全局只留一条，
+  // 快速 A→B 时 A 迟到的 hydrate 不能把订阅从 B 抢回去。
+  if (
+    useConversationStore.getState().currentConversationId === conversationId
+  ) {
+    const followCloud = !recovery.sidecarLive && recovery.unsynced.length === 0;
+    syncConversationFollow(followCloud ? conversationId : null);
+    // 进了这个对话 → 页内快照（recovery / InteractionStore）接管权威，跨对话的「等你」
+    // 提醒交棒。这也是断线期间漏收 `ai_attention` resolved 的唯一兜底：没有跨对话挂起
+    // 快照接口，不清就会永远亮着一盏假灯。
+    clearAiAttentionForConversation(conversationId);
+  }
   // Live pump already claimed (session abort set) — attach* is idempotent via
   // isGenerating; settle must not rejoin over it either. Cold hydrate sets
   // isGenerating from isStreaming overlay but leaves abort null until attach.

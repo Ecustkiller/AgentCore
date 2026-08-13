@@ -5,7 +5,8 @@ import type { ManualChapterContent } from "../types";
 /**
  * 认识 AgentCore —— 第一章内容源。
  *
- * 口径：实用说明、不营销；上手四步与空态引导（DraftEmptyState）对齐。
+ * 口径：实用说明、不营销；上手步骤与空态引导（DraftEmptyState）对齐——平台代付、开箱即用，
+ * 第一步就是说目标，BYOK 只是可选升级，不占开头把人支去外部站点。
  */
 export const introChapter: ManualChapterContent = {
   id: "intro",
@@ -65,19 +66,8 @@ export const introChapter: ManualChapterContent = {
           type: "steps",
           items: [
             {
-              title: "接入额度后开聊",
-              desc: [
-                "到 https://jiurelay.com/ 免费自行配额度后，在 ",
-                {
-                  text: "设置 · 服务商",
-                  link: { kind: "go", to: APP_PATHS.more.providers },
-                },
-                " 接入即可；也可自带 API Key（BYOK，自担费用）。",
-              ],
-            },
-            {
               title: "说目标",
-              desc: "新建对话，用大白话描述你想要什么。空态页的建议任务可一键填入。",
+              desc: "新建对话，用大白话描述你想要什么——平台代付，打开就能聊，不用先接入模型。空态页的建议任务可一键填入。",
             },
             {
               title: "看它干活",
@@ -85,7 +75,7 @@ export const introChapter: ManualChapterContent = {
             },
             {
               title: "收结果",
-              desc: "CEO 汇总团队产出交给你。文件落在工作区——绑了本地文件夹就在你电脑上，没绑则在云端项目里。",
+              desc: "CEO 汇总团队产出交给你。文件落在工作区——打开的是本机文件夹就在你电脑上，否则在「我的文件」里。",
             },
           ],
         },
@@ -93,6 +83,18 @@ export const introChapter: ManualChapterContent = {
           type: "callout",
           variant: "tip",
           text: "想立刻看见多人协作，试试：「分三路并行调研：竞品定价、用户痛点、渠道策略，各自产出一页摘要后由你汇总成决策简报。」",
+        },
+        {
+          type: "callout",
+          variant: "info",
+          text: [
+            "可选升级（不做也不影响用）：想换成自己的模型，到 ",
+            {
+              text: "设置 · 服务商",
+              link: { kind: "go", to: APP_PATHS.more.providers },
+            },
+            " 接入服务商或自带 API Key（BYOK，自担费用）。平台额度临时不可用时会有公告，也可到 https://jiurelay.com/ 免费自配后从同一页接入。",
+          ],
         },
       ],
     },

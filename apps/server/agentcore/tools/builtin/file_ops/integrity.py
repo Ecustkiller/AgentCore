@@ -246,11 +246,16 @@ def format_artifact_manifest(
     *,
     path: str,
     content: str,
-    bytes_written: int,
+    chars_written: int,
     kind: str,
     action: str = "write",
 ) -> str:
-    """Success receipt = artifact manifest（作者以此验真，勿再 file_read 回读正文）。"""
+    """Success receipt = artifact manifest（作者以此验真，勿再 file_read 回读正文）。
+
+    规模按**字符**报（``WorkspaceBackend.write`` / ``append`` 返回的就是 chars）。
+    曾标成「字节」：中文正文字符数 ≈ UTF-8 字节数 / 3，作者据此判定「写少了」，
+    反而回读核对——正是本 manifest 要省掉的空转。
+    """
     from agentcore.core.secrets import redact_secrets
 
     lines = len((content or "").splitlines())
@@ -263,11 +268,11 @@ def format_artifact_manifest(
     )
     verb = "已写入" if action == "write" else "已追加"
     return (
-        f"{verb} {bytes_written} 字节到 {path}\n"
+        f"{verb} {chars_written} 字符到 {path}\n"
         f"【artifact manifest】\n"
         f"path: {path}\n"
         f"kind: {kind}\n"
-        f"bytes: {bytes_written}\n"
+        f"chars: {chars_written}\n"
         f"lines: {lines}\n"
         f"content_sha256: {content_sha256_short(content)}\n"
         f"title_tree:\n{tree_block}\n"
@@ -311,7 +316,7 @@ def _prepare_write_relpath(path: str) -> tuple[str, str]:
     return (
         actual,
         f"注意：请求路径已清理，实际写入 `{actual}`。"
-        "约定文档区（`AgentCore/文档/` 下 research/reviews/debate/项目）前缀之后"
+        "约定文档区（`AgentCore/文档/` 下 research/reviews/debate）前缀之后"
         "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
         "（规范化后常等同）。",
     )
@@ -321,7 +326,8 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
     """Chinese error when ``path`` violates ``context.write_scope``; else ``None``.
 
     ``project`` — no gate. ``none`` — reject all writes. ``explore_memory`` — path
-    must be under ``AgentCore/`` and must not be under ``AgentCore/文档/项目/``.
+    must be under ``AgentCore/``. Thick folder dossiers need no path clause here:
+    they are documents entries now, and no worker tool can write one.
     """
     scope = getattr(context, "write_scope", "project") or "project"
     if scope == "project":
@@ -334,7 +340,7 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
     if scope != "explore_memory":
         return None
 
-    from agentcore.workspace.stage_dirs import AGENTCORE_ROOT, PROJECT_DOCS_PREFIX
+    from agentcore.workspace.stage_dirs import AGENTCORE_ROOT
 
     norm = _norm_rel_path(path).lstrip("./")
     root_prefix = f"{AGENTCORE_ROOT}/"
@@ -344,13 +350,6 @@ def write_scope_rejection(context: ToolContext, path: str) -> str | None:
             f"（约定记忆与探索笔记）；拒绝路径 `{path}`。"
             f"请改写到 `{AGENTCORE_ROOT}/文档/research/` 等探索笔记路径，"
             "或待画像写入完成后再写用户工程文件。"
-        )
-    project_docs = PROJECT_DOCS_PREFIX.rstrip("/")
-    if norm == project_docs or norm.startswith(PROJECT_DOCS_PREFIX):
-        return (
-            f"冷启动探索写范围禁止写入 `{PROJECT_DOCS_PREFIX}`（厚约定文档）；"
-            f"拒绝路径 `{path}`。请写到 `{AGENTCORE_ROOT}/文档/research/` 等探索笔记，"
-            "厚约定文档留到探索收尾后。"
         )
     return None
 
