@@ -425,6 +425,160 @@ def test_separate_runs_in_one_conversation_do_not_diff_against_each_other(monkey
     assert worker is not None and worker.breach == BREACH_COLD_CHAIN
 
 
+# --- 跨回合链: the CEO's chain is the conversation, not the per-turn captain run ---------
+
+
+def _mute_probe_log(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "agentcore.observability.prefix_cache.logger",
+        type("_Spy", (), {"info": lambda self, event, **kw: None})(),
+    )
+
+
+def _ceo_turn(turn: str, run: str) -> None:
+    """Enter the log scope of one CEO turn — a FRESH captain run each time.
+
+    ``pipeline/run.py`` mints ``captain_run_id`` per user turn and uses it for both
+    ``run_id`` and ``agent_id``; ``cost_role`` stays ``captain`` (executor + turn entry).
+    """
+    bind_log_context(trace_id=turn, run_id=run, agent_id=run, cost_role="captain")
+
+
+def test_a_new_captain_run_each_turn_no_longer_restarts_the_ceo_chain(monkeypatch):
+    # 这是本次修的 bug：链 key 拼了 agent_id + run_id，而 CEO 每个用户回合都新铸一个 captain
+    # run，所以每回合首调结构上必然 cold_chain / reusable_tokens=0 —— 本模块存在的意义
+    # （跨回合比对）一次都没发生过。
+    _mute_probe_log(monkeypatch)
+    bind_log_context(conversation_id="conv-ceo")
+    _ceo_turn("t1", "captain-run-1")
+    turn_one = [_m("system", "SYS"), _m("user", "q1")]
+    observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=turn_one,
+        input_tokens=800,
+        cache_hit_tokens=0,
+        cache_miss_tokens=800,
+    )
+    _ceo_turn("t2", "captain-run-2")
+    probe = observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=[*turn_one, _m("assistant", "a1"), _m("user", "q2")],
+        input_tokens=1000,
+        cache_hit_tokens=760,
+        cache_miss_tokens=240,
+    )
+    assert probe is not None
+    assert probe.breach == BREACH_HISTORY_GROWTH
+    assert probe.chain_calls == 2
+    assert probe.reusable_tokens == 800  # turn 1's own measured prompt
+    assert probe.reusable_basis == BASIS_MEASURED
+    assert probe.forfeited_tokens == 40
+
+
+def test_a_delegated_run_never_lands_on_the_ceo_chain(monkeypatch):
+    # 合链只对 CEO 开；worker / 辩手 各自 run 的 ReAct 链必须保持隔离，否则它们会互相
+    # 「击穿」对方，把真实的击穿归因淹掉。
+    _mute_probe_log(monkeypatch)
+    bind_log_context(conversation_id="conv-team")
+    _ceo_turn("t1", "captain-run-1")
+    ceo_messages = [_m("system", "CEO-SYS"), _m("user", "q1")]
+    observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=ceo_messages,
+        input_tokens=800,
+        cache_hit_tokens=0,
+        cache_miss_tokens=800,
+    )
+    for role, run in (("member", "worker-1"), ("member", "worker-2"), ("arena", "debater-1")):
+        bind_log_context(run_id=run, agent_id=run, cost_role=role)
+        probe = observe_prefix_cache(
+            scenario="agent",
+            model="m",
+            messages=[_m("system", "WORKER-SYS"), _m("user", "task")],
+            input_tokens=300,
+            cache_hit_tokens=0,
+            cache_miss_tokens=300,
+        )
+        assert probe is not None and probe.breach == BREACH_COLD_CHAIN
+    # …and the CEO's own chain survived the workers running under the same conversation.
+    _ceo_turn("t2", "captain-run-2")
+    resumed = observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=[*ceo_messages, _m("assistant", "a1"), _m("user", "q2")],
+        input_tokens=1000,
+        cache_hit_tokens=800,
+        cache_miss_tokens=200,
+    )
+    assert resumed is not None and resumed.breach == BREACH_HISTORY_GROWTH
+
+
+def test_a_title_call_on_the_same_conversation_is_its_own_chain(monkeypatch):
+    # Background chrome (title / compaction / memory) rides the same conversation but is a
+    # different prompt shape — comparing it against the chat transcript would report a
+    # breach on every line, so ``scenario`` stays in the key.
+    _mute_probe_log(monkeypatch)
+    bind_log_context(conversation_id="conv-title")
+    _ceo_turn("t1", "captain-run-1")
+    observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=[_m("system", "SYS"), _m("user", "q1")],
+        input_tokens=800,
+        cache_hit_tokens=0,
+        cache_miss_tokens=800,
+    )
+    title = observe_prefix_cache(
+        scenario="title",
+        model="m",
+        messages=[_m("system", "TITLE-SYS"), _m("user", "q1")],
+        input_tokens=200,
+        cache_hit_tokens=0,
+        cache_miss_tokens=200,
+    )
+    assert title is not None and title.breach == BREACH_COLD_CHAIN
+
+
+def test_the_second_ceo_turn_names_the_section_that_broke_the_prefix(monkeypatch):
+    # 段级归因只在 breach=system_prompt 时才填，而 CEO 主路径以前永远停在 cold_chain ——
+    # 所以 breach_section 在生产里从未点亮过。合链后它才第一次可读。
+    _mute_probe_log(monkeypatch)
+    bind_log_context(conversation_id="conv-attr")
+    _ceo_turn("t1", "captain-run-1")
+    _record_ceo_turn(conversation_id="conv-attr", turn_id="t1", folder_catalog="A", tail="FILES-1")
+    observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=[_m("system", "SYS+FILES-1"), _m("user", "q1")],
+        input_tokens=800,
+        cache_hit_tokens=0,
+        cache_miss_tokens=800,
+    )
+    _ceo_turn("t2", "captain-run-2")
+    _record_ceo_turn(conversation_id="conv-attr", turn_id="t2", folder_catalog="A", tail="FILES-2")
+    probe = observe_prefix_cache(
+        scenario="chat",
+        model="m",
+        messages=[
+            _m("system", "SYS+FILES-2"),
+            _m("user", "q1"),
+            _m("assistant", "a1"),
+            _m("user", "q2"),
+        ],
+        input_tokens=1000,
+        cache_hit_tokens=0,
+        cache_miss_tokens=1000,
+    )
+    assert probe is not None
+    assert probe.breach == BREACH_SYSTEM_PROMPT
+    assert probe.breach_section == "workspace_context"
+    assert probe.changed_sections == ("workspace_context",)
+    assert probe.chain_calls == 2
+
+
 # --- 日志聚合: the three questions, answered from the emitted rows -----------------------
 
 

@@ -52,6 +52,7 @@ from dataclasses import dataclass
 
 from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
+from agentcore.costing.ledger import ROLE_CAPTAIN
 
 logger = get_logger(__name__)
 
@@ -270,6 +271,35 @@ class ChainState:
 
 _chains: OrderedDict[str, ChainState] = OrderedDict()
 
+# The chain scope of every ``cost_role=captain`` call. A constant, because the CEO's
+# transcript belongs to the CONVERSATION and outlives the run that carries any one turn.
+_CAPTAIN_CHAIN_SCOPE = "captain"
+
+
+def _chain_scope() -> str:
+    """Which continuously growing message list this call appends to.
+
+    The CEO is conversation-scoped: its transcript spans user turns while the run that
+    carries a turn does not (``runtime/pipeline/run.py`` mints a fresh captain run per
+    turn, with ``agent_id == run_id == captain_run_id``, and a resumed turn mints another
+    one). Scoping it to a run made every CEO turn its own chain, so turn N's opening call
+    — the one whose whole ``system + history`` prefix the provider should have been
+    holding — could only ever report ``cold_chain``.
+
+    Everything else is run-scoped: a worker / 辩手 / 续写 transcript dies with its run and
+    several of them run concurrently under one conversation, so they keep diffing only
+    against themselves. ``cost_role`` is the discriminator because it is bound on every
+    run path (``member`` / ``arena`` by default, ``captain`` only by the captain executor
+    and the CEO turn entry points) — no run may inherit ``captain`` by omission.
+
+    Honesty limit of the merge: two CEO turns overlapping in one conversation (a supersede)
+    now interleave on one chain and read as mutual rewrites. That is rare, and the
+    alternative — a chain that can never span turns — measures nothing at all.
+    """
+    if get_log_value("cost_role") == ROLE_CAPTAIN:
+        return _CAPTAIN_CHAIN_SCOPE
+    return "|".join((get_log_value("agent_id"), get_log_value("run_id")))
+
 
 @dataclass(frozen=True, slots=True)
 class PrefixCacheProbe:
@@ -455,10 +485,14 @@ def observe_prefix_cache(
 ) -> PrefixCacheProbe | None:
     """Probe this call against the previous one on the same chain and emit ``cost.prefix_cache``.
 
-    A "chain" is one continuously growing message list: the CEO's turns in a conversation, or
-    one delegated run's ReAct rounds. Keyed by conversation + scenario + agent + run so those
-    never diff against each other. Calls with no conversation identity (catalog probes, evals)
-    have no chain to compare against and are skipped rather than logged as permanent misses.
+    A "chain" is one continuously growing message list: the CEO's turns in a conversation,
+    or one delegated run's ReAct rounds. :func:`_chain_scope` decides which of the two this
+    call is, and ``scenario`` joins the key on both — a title / compaction / memory call
+    rides the same conversation but is a different prompt shape and comparing it against the
+    chat transcript would report a breach on every line.
+
+    Calls with no conversation identity (catalog probes, evals) have no chain to compare
+    against and are skipped rather than logged as permanent misses.
 
     Returns the probe (tests / callers), or ``None`` when nothing was measurable.
     """
@@ -467,14 +501,7 @@ def observe_prefix_cache(
     conversation_id = get_log_value("conversation_id")
     if not conversation_id:
         return None
-    chain_key = "|".join(
-        (
-            conversation_id,
-            scenario,
-            get_log_value("agent_id"),
-            get_log_value("run_id"),
-        )
-    )
+    chain_key = "|".join((conversation_id, scenario, _chain_scope()))
     digests, sizes = message_fingerprints(messages)
     probe = compute_probe(
         digests=digests,
