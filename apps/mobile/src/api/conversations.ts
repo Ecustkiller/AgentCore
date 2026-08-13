@@ -79,6 +79,9 @@ export interface MessageDetail {
   usage?: UsageBreakdown | null;
   /** ReAct 轮次（messages.rounds）. */
   rounds?: number | null;
+  /** 回合协作计数（`usage.collab`）：完成态团队条的「互相把关」一行。live 走 message_end；
+   *  这里是重载路径——message_end 是 DERIVED（不进 journal），历史只能从这列拿。 */
+  collab?: Schemas["TurnCollabMetrics"] | null;
   created_at: string;
 }
 
@@ -160,7 +163,10 @@ export async function setConversationArchived(
   }
 }
 
-/** Permanently delete a conversation and its messages (对话管理 · 删除). */
+/** Delete a conversation (对话管理 · 删除).
+ *
+ *  Server-side this is a **soft** delete:桌面可从「最近删除」保留期内恢复。手机暂无回收站
+ *  入口，故此处删完即消失——但**不要**据此对用户说「永久删除 / 无法恢复」。 */
 export async function deleteConversation(id: string): Promise<void> {
   const res = await apiFetch(`/v1/conversations/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`删除失败 (${res.status})`);
@@ -169,12 +175,16 @@ export async function deleteConversation(id: string): Promise<void> {
 /** Create a fresh cloud conversation and return its id (skeleton: no folder/mode).
  *  Optional ``permission_axes`` seeds this session (else account default recipe).
  *  Optional ``model_profile_id`` snapshots that combination at create (定案 B);
- *  omit to let the server write the then-current account default. */
+ *  omit to let the server write the then-current account default.
+ *  Optional ``client_request_id`` is the caller's idempotency key — the server answers a
+ *  repeat of the same key with the conversation it already created, so a double-fire
+ *  (双击 / 重试) can't leave a duplicate 会话 behind. */
 export async function createConversation(
   title?: string,
   opts?: {
     permission_axes?: Schemas["PermissionAxesModel"] | null;
     model_profile_id?: string | null;
+    client_request_id?: string | null;
   },
 ): Promise<string> {
   const res = await apiFetch("/v1/conversations", {
@@ -187,6 +197,9 @@ export async function createConversation(
         : {}),
       ...(opts?.model_profile_id
         ? { model_profile_id: opts.model_profile_id }
+        : {}),
+      ...(opts?.client_request_id
+        ? { client_request_id: opts.client_request_id }
         : {}),
     }),
   });
@@ -282,6 +295,7 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
     duration_ms: row.duration_ms ?? null,
     usage: row.usage ?? null,
     rounds: row.rounds ?? null,
+    collab: row.collab ?? null,
     created_at: row.created_at,
   };
 }

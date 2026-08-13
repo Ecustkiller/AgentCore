@@ -67,7 +67,10 @@ from agentcore.db.repositories import (
     UserLlmProviderRepository,
 )
 from agentcore.messaging import MessagingService
-from agentcore.middleware.csrf import clear_csrf_token, issue_csrf_token
+from agentcore.middleware.csrf import (
+    issue_csrf_token,
+    issue_csrf_token_for_cookie_session,
+)
 from agentcore.security.tokens import decode_access_token_claims
 from agentcore.shared_spaces.service import SharedSpaceService
 from agentcore.storage.assets import AssetStorage
@@ -171,14 +174,20 @@ def _set_auth_cookies(
         refresh_kwargs["max_age"] = settings.jwt_refresh_token_expire_days * 86400
     response.set_cookie(**access_kwargs)
     response.set_cookie(**refresh_kwargs)
+    # The handshake is where the token is handed out: this response opens or renews
+    # the session. Beyond this and the cold-start `/me` handshake below, nothing mints
+    # until a mutating request is rejected for lacking one (middleware/csrf.py).
     if settings.csrf_enabled:
-        issue_csrf_token(response, user_id, persist_session=persist)
+        issue_csrf_token(response, user_id)
 
 
 def _clear_auth_cookies(response: Response, *, user_id: str | None = None) -> None:
+    del user_id  # accepted for symmetry with _set_auth_cookies; nothing to revoke
     response.delete_cookie(ACCESS_TOKEN_COOKIE, path="/")
     response.delete_cookie(REFRESH_TOKEN_COOKIE, path=_refresh_cookie_path())
-    clear_csrf_token(response, user_id)
+    # No CSRF state to clear: the token is stateless and inert once the access
+    # cookie is gone (CSRF is only enforced for a request that authenticates as a
+    # session), and it is only ever carried in a response header, never a cookie.
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -378,18 +387,22 @@ async def token_revoke(
 
 @router.get("/me", response_model=UserResponse)
 async def me(
-    user: AuthUser,
+    request: Request,
     response: Response,
+    user: AuthUser,
     creds_repo: CredentialsRepository = Depends(get_credentials_repo),
     messaging: MessagingService = Depends(get_messaging_service),
 ):
-    # Re-establish the CSRF token for a session resumed via the access cookie: app
-    # cold-start calls /me (not login/refresh), so without this the client holds a
-    # valid session but no CSRF token and its first mutating request 403s. The token
-    # is stateless (security.sign_csrf_token) — cheap to re-mint, and any valid
-    # signature for this user verifies, so minting one here is safe and idempotent.
-    if settings.csrf_enabled:
-        issue_csrf_token(response, user.user_id)
+    # A read that mints, because it is the whole handshake a cold start gets: resuming
+    # on a still-live access cookie skips login *and* refresh, so /me is the only
+    # response that can arm the session before its first write — which otherwise 403s,
+    # every cold start. Renewal never covered desktop at all: its renderer delegates
+    # silent refresh to the main process over pure Bearer, so the re-arming handshake
+    # lands in a process holding no cookie session and cannot hand the token back.
+    # Still only /me: the token outlives every access cookie and cannot be revoked, so
+    # stamping ordinary reads would smear it across proxy access logs and error-report
+    # breadcrumbs (认证与会话.md §七). Bearer callers get none — they are never checked.
+    issue_csrf_token_for_cookie_session(request, response, user.user_id)
     # Official broadcast membership兜底 (leave forbidden; missed registration after
     # the official-chat migration). Best-effort — never block /me.
     try:

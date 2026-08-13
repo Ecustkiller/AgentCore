@@ -1,22 +1,30 @@
-"""Boot-time cloud sandbox health probe → ``code_execution_enabled_for`` gate."""
+"""Cloud sandbox health probe (boot + TTL refresh) → ``code_execution_enabled_for`` gate."""
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from agentcore.config import settings
-from agentcore.tools.builtin import code_execution_enabled_for
+from agentcore.tools.builtin import browser_execution_enabled_for, code_execution_enabled_for
 from agentcore.tools.sandbox.cloud_health import (
+    age_cloud_sandbox_health_for_tests,
     cloud_sandbox_health,
+    cloud_sandbox_health_failure,
+    pending_cloud_sandbox_refresh_for_tests,
     probe_cloud_sandbox_at_startup,
     set_cloud_sandbox_health_for_tests,
 )
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 from tests.delegate.conftest import LocalBackend
+
+# Well past any healthy TTL / unhealthy backoff window — the exact durations are
+# tuning knobs, "an aged verdict gets re-probed" is the contract under test.
+_WELL_PAST_TTL = 3600.0
 
 
 class _FakeSandbox:
@@ -26,15 +34,28 @@ class _FakeSandbox:
         ok: bool = True,
         raise_exc: BaseException | None = None,
         last_health_failure: tuple[str, str | None] | None = None,
+        gate: asyncio.Event | None = None,
     ):
-        self._ok = ok
-        self._raise = raise_exc
+        self.ok = ok
+        self.raise_exc = raise_exc
         self.last_health_failure = last_health_failure
+        # Blocks inside ``health_check`` so a test can observe an in-flight probe.
+        self.gate = gate
+        self.entered = asyncio.Event()
+        self.calls = 0
 
     async def health_check(self) -> bool:
-        if self._raise is not None:
-            raise self._raise
-        return self._ok
+        self.calls += 1
+        self.entered.set()
+        if self.gate is not None:
+            await self.gate.wait()
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        return self.ok
+
+
+class _CloudBackend:
+    location = "server"
 
 
 class _SandboxWithoutHealth:
@@ -144,3 +165,170 @@ def test_local_backend_ignores_unhealthy_cloud_probe(tmp_path: Path):
     assert code_execution_enabled_for(LocalBackend()) is True
     # Server backend with config off stays false regardless of probe.
     assert code_execution_enabled_for(ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())) is False
+
+
+# --- Post-boot rot: the verdict must expire, not last the process life ------------
+
+
+@pytest.mark.asyncio
+async def test_sandbox_broken_after_boot_is_detected_on_stale_read(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """AppArmor / runtime_root / userns regression AFTER boot must close the gate.
+
+    Boot says healthy, runsc then rots. A boot-only cache would keep assembling
+    code_execute + browser_* forever; the aged verdict has to be re-probed.
+    """
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    sandbox = _FakeSandbox(ok=True)
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: sandbox,
+    )
+    backend = _CloudBackend()
+
+    await probe_cloud_sandbox_at_startup()
+    assert cloud_sandbox_health() is True
+    assert code_execution_enabled_for(backend) is True
+    assert browser_execution_enabled_for(backend) is True
+
+    sandbox.ok = False
+    sandbox.last_health_failure = ("runsc_failed", "userns disabled")
+
+    # Stale read serves the cached verdict (no inline probe) and schedules the re-probe.
+    age_cloud_sandbox_health_for_tests(_WELL_PAST_TTL)
+    assert code_execution_enabled_for(backend) is True
+    task = pending_cloud_sandbox_refresh_for_tests()
+    assert task is not None
+    await task
+
+    assert sandbox.calls == 2
+    assert cloud_sandbox_health() is False
+    assert cloud_sandbox_health_failure() == ("runsc_failed", "userns disabled")
+    assert code_execution_enabled_for(backend) is False
+    assert browser_execution_enabled_for(backend) is False
+
+
+@pytest.mark.asyncio
+async def test_fresh_verdict_is_never_reprobed_per_call(monkeypatch: pytest.MonkeyPatch):
+    """A live verdict must not put a runsc start in front of every gate read."""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    sandbox = _FakeSandbox(ok=True)
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: sandbox,
+    )
+    backend = _CloudBackend()
+
+    await probe_cloud_sandbox_at_startup()
+    for _ in range(5):
+        assert code_execution_enabled_for(backend) is True
+        assert browser_execution_enabled_for(backend) is True
+    await asyncio.sleep(0)
+
+    assert sandbox.calls == 1
+    assert pending_cloud_sandbox_refresh_for_tests() is None
+
+
+@pytest.mark.asyncio
+async def test_refresh_in_flight_keeps_last_known_verdict(monkeypatch: pytest.MonkeyPatch):
+    """「探测失败」must not decay into「从未探过」mid-refresh — that would fail open."""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    gate = asyncio.Event()
+    sandbox = _FakeSandbox(ok=False, last_health_failure=("runsc_failed", "boom"))
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: sandbox,
+    )
+    backend = _CloudBackend()
+
+    await probe_cloud_sandbox_at_startup()
+    assert cloud_sandbox_health() is False
+
+    sandbox.entered.clear()
+    sandbox.gate = gate
+    sandbox.ok = True
+    age_cloud_sandbox_health_for_tests(_WELL_PAST_TTL)
+    assert code_execution_enabled_for(backend) is False
+    task = pending_cloud_sandbox_refresh_for_tests()
+    assert task is not None
+
+    await sandbox.entered.wait()
+    assert cloud_sandbox_health() is False
+    assert code_execution_enabled_for(backend) is False
+
+    gate.set()
+    await task
+    assert cloud_sandbox_health() is True
+    assert cloud_sandbox_health_failure() is None
+    assert code_execution_enabled_for(backend) is True
+
+
+@pytest.mark.asyncio
+async def test_unprobed_process_is_never_refreshed(monkeypatch: pytest.MonkeyPatch):
+    """No boot probe → stays ``None`` (config-only), and reads must not start one."""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    built: list[Any] = []
+
+    def _build() -> Any:
+        built.append(True)
+        raise AssertionError("an unprobed process must not probe from a gate read")
+
+    monkeypatch.setattr("agentcore.workspace.locate._default_server_sandbox", _build)
+    backend = _CloudBackend()
+
+    assert cloud_sandbox_health() is None
+    assert code_execution_enabled_for(backend) is True
+    await asyncio.sleep(0)
+
+    assert built == []
+    assert pending_cloud_sandbox_refresh_for_tests() is None
+
+
+@pytest.mark.asyncio
+async def test_unhealthy_backs_off_before_retrying(monkeypatch: pytest.MonkeyPatch):
+    """A broken host is retried (recovery is detected) but not hammered."""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    sandbox = _FakeSandbox(ok=False, last_health_failure=("runsc_failed", "boom"))
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: sandbox,
+    )
+    backend = _CloudBackend()
+
+    await probe_cloud_sandbox_at_startup()
+    for _ in range(5):
+        assert code_execution_enabled_for(backend) is False
+    await asyncio.sleep(0)
+    assert sandbox.calls == 1
+    assert pending_cloud_sandbox_refresh_for_tests() is None
+
+    sandbox.ok = True
+    age_cloud_sandbox_health_for_tests(_WELL_PAST_TTL)
+    assert code_execution_enabled_for(backend) is False
+    task = pending_cloud_sandbox_refresh_for_tests()
+    assert task is not None
+    await task
+
+    assert cloud_sandbox_health() is True
+    assert cloud_sandbox_health_failure() is None
+
+
+@pytest.mark.asyncio
+async def test_wedged_probe_times_out_instead_of_freezing_the_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """A hung ``health_check`` must resolve unhealthy, not pin the refresh forever."""
+    monkeypatch.setattr(settings, "gvisor_enabled", True)
+    monkeypatch.setattr("agentcore.tools.sandbox.cloud_health._PROBE_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        "agentcore.workspace.locate._default_server_sandbox",
+        lambda: _FakeSandbox(ok=True, gate=asyncio.Event()),
+    )
+
+    await probe_cloud_sandbox_at_startup()
+
+    assert cloud_sandbox_health() is False
+    failure = cloud_sandbox_health_failure()
+    assert failure is not None and failure[0] == "probe_timeout"
+    assert code_execution_enabled_for(_CloudBackend()) is False

@@ -263,3 +263,166 @@ export function moveMemoryBullet(
       message: r.message ?? null,
     }));
 }
+
+/**
+ * React Query keys of the two surfaces a 行级异议 changes, so every entry point can
+ * invalidate the ones it is not rendering (the「记忆已更新」card rejects a line that the
+ * 记忆动态 view is what shows and undoes).
+ */
+export const MEMORY_UPDATES_KEY = ["memory-updates"];
+export const MEMORY_DISPUTED_LINES_KEY = ["memory-disputed-lines"];
+
+export interface MemoryDisputeLineInput {
+  content: string;
+  section: string;
+  /** Omitted / null = the global layer (unlike a move, which needs a project). */
+  folderId?: string | null;
+  kind?: MemoryMoveKind;
+  topicSlug?: string | null;
+  baseline?: string | null;
+}
+
+export interface MemoryDisputeLineResult {
+  ok: boolean;
+  conflict: boolean;
+  version: string;
+  /**
+   * Id of the record just written — the handle {@link restoreMemoryLine} takes; empty when
+   * there is nothing to undo. Never a position: rejecting several lines and undoing an
+   * earlier one shifts the rest, so an index would put back somebody else's sentence.
+   */
+  lineId: string;
+}
+
+/**
+ * Reject ONE bullet the user was shown (纠错通道·行级「这条不对」).
+ *
+ * The line leaves the entry body — the rest of the entry keeps working. This is the
+ * sentence-level counterpart to the entry-level `disputed` flag on the documents API,
+ * which silences a whole file. Undo via {@link restoreMemoryLine}.
+ */
+export function disputeMemoryLine(
+  input: MemoryDisputeLineInput,
+): Promise<MemoryDisputeLineResult> {
+  return api
+    .post<{
+      ok: boolean;
+      conflict: boolean;
+      version: string;
+      line_id: string;
+    }>("/v1/users/me/memory/dispute-line", {
+      content: input.content,
+      section: input.section,
+      folder_id: input.folderId ?? null,
+      kind: input.kind ?? "profile",
+      topic_slug: input.topicSlug ?? null,
+      baseline: input.baseline ?? null,
+    })
+    .then((r) => ({
+      ok: r.ok,
+      conflict: r.conflict,
+      version: r.version,
+      lineId: r.line_id,
+    }));
+}
+
+export interface MemoryRestoreLineInput {
+  /** Record id from {@link disputeMemoryLine} / {@link listDisputedMemoryLines}. */
+  id: string;
+  folderId?: string | null;
+  kind?: MemoryMoveKind;
+  topicSlug?: string | null;
+}
+
+/**
+ * Undo one line-level rejection — the bullet goes back into its entry.
+ *
+ * An id the server no longer holds is a 422, not a best-effort restore of some other
+ * record: putting back a line the user did not name would be worse than doing nothing.
+ */
+export function restoreMemoryLine(
+  input: MemoryRestoreLineInput,
+): Promise<MemoryDisputeLineResult> {
+  return api
+    .post<{
+      ok: boolean;
+      conflict: boolean;
+      version: string;
+    }>("/v1/users/me/memory/restore-line", {
+      id: input.id,
+      folder_id: input.folderId ?? null,
+      kind: input.kind ?? "profile",
+      topic_slug: input.topicSlug ?? null,
+    })
+    .then((r) => ({
+      ok: r.ok,
+      conflict: r.conflict,
+      version: r.version,
+      lineId: "",
+    }));
+}
+
+export interface MemoryDisputedLine {
+  kind: MemoryMoveKind;
+  topicSlug: string | null;
+  folderId: string | null;
+  id: string;
+  section: string;
+  text: string;
+  disputedAt: string;
+}
+
+export interface MemoryDisputedLines {
+  lines: MemoryDisputedLine[];
+  /** How many records ONE entry keeps before the oldest stops being restorable. */
+  maxPerEntry: number;
+}
+
+/**
+ * Bullets the user rejected in one scope, newest state as stored.
+ *
+ * A rejected line is gone from the entry body, so this is the only place it can be read
+ * back from — without it a mis-click would be unrecoverable.
+ */
+export function listDisputedMemoryLines(
+  folderId?: string | null,
+): Promise<MemoryDisputedLines> {
+  const query = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : "";
+  return api
+    .get<{
+      lines: Array<{
+        kind: MemoryMoveKind;
+        topic_slug: string | null;
+        folder_id: string | null;
+        id: string;
+        section: string;
+        text: string;
+        disputed_at: string;
+      }>;
+      max_per_entry: number;
+    }>(`/v1/users/me/memory/disputed-lines${query}`)
+    .then((r) => ({
+      lines: r.lines.map((l) => ({
+        kind: l.kind,
+        topicSlug: l.topic_slug,
+        folderId: l.folder_id,
+        id: l.id,
+        section: l.section,
+        text: l.text,
+        disputedAt: l.disputed_at,
+      })),
+      maxPerEntry: r.max_per_entry,
+    }));
+}
+
+/**
+ * Empty the rejected-line list (「已移走的记忆」的清空入口).
+ *
+ * The lines stay rejected — only the ability to put them back goes, which is why the UI
+ * confirms first. Returns how many entries had records dropped.
+ */
+export function clearDisputedMemoryLines(): Promise<number> {
+  return api
+    .delete<{ cleared_entries: number }>("/v1/users/me/memory/disputed-lines")
+    .then((r) => r.cleared_entries);
+}

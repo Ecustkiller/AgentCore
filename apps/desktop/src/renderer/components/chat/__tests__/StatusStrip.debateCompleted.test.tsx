@@ -146,7 +146,8 @@ describe("StatusStrip · 辩论完成态 meta", () => {
 
     expect(screen.queryByText(/个 Agent/)).toBeNull();
     expect(screen.getByText(/2\/2 子任务/)).toBeTruthy();
-    // ¥ 归状态条：有真实花费时费用段可见（非「团队完成」独占）。
-    expect(screen.getByText(/¥/)).toBeTruthy();
+    // 费用段归状态条：有真实花费时可见（非「团队完成」独占）。
+    // fixture 是 USD 计价，按币种如实显示；旧断言写死 ¥，固化的正是「美元价表当人民币」那个 bug。
+    expect(screen.getByText(/\$/)).toBeTruthy();
   });
 });

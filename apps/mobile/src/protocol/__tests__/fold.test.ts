@@ -938,6 +938,132 @@ describe("extractTurnQueued", () => {
   });
 });
 
+// attach 增量重放的帧级替换：增量段里「还没说完的那一步」带整步文字、未被 process 行覆盖的
+// 通道带整路快照，都以 payload.replace=true 标出。语义是「换掉该通道末尾那个尚未闭合的块」
+// ——不是替换整路（会抹掉前面已闭合的步骤），也不是追加（会重复）。直播帧永不带。
+describe("fold · replace（attach 增量重放的整块替换帧）", () => {
+  const ceoReplay: SSEEvent[] = [
+    ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+    ev("content_delta", { delta: "第一步已经交代完了。" }),
+    ev("reasoning_delta", { delta: "先想清楚再往下写" }),
+    ev("content_delta", { delta: "第二步开" }),
+    ev("content_delta", {
+      delta: "第二步开了个头，还没说完。",
+      replace: true,
+    }),
+  ];
+
+  it("只换末尾开放块：已闭合的步骤原样不动", () => {
+    const turn = fold(ceoReplay);
+    expect(turn.process).toEqual([
+      { kind: "content", text: "第一步已经交代完了。" },
+      { kind: "reasoning", text: "先想清楚再往下写" },
+      { kind: "content", text: "第二步开了个头，还没说完。" },
+    ]);
+    expect(turn.content).toBe("第一步已经交代完了。第二步开了个头，还没说完。");
+    expect(turn.reasoning).toBe("先想清楚再往下写");
+  });
+
+  it("同一事件数组重复 fold 结果一致（fold 纯函数，不改事件）", () => {
+    expect(fold(ceoReplay)).toEqual(fold(ceoReplay));
+  });
+
+  it("连着两帧 replace 不累积：以最后一帧为准", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("content_delta", { delta: "开头" }),
+      ev("content_delta", { delta: "开头写到一半", replace: true }),
+      ev("content_delta", { delta: "开头写到一半又续了两句", replace: true }),
+    ]);
+    expect(turn.process).toEqual([
+      { kind: "content", text: "开头写到一半又续了两句" },
+    ]);
+    expect(turn.content).toBe("开头写到一半又续了两句");
+  });
+
+  it("末尾不是同类步（整路快照先到）：本帧全文自成新块", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("reasoning_delta", { delta: "在想" }),
+      ev("content_delta", { delta: "这一路的整段正文。", replace: true }),
+    ]);
+    expect(turn.process).toEqual([
+      { kind: "reasoning", text: "在想" },
+      { kind: "content", text: "这一路的整段正文。" },
+    ]);
+    expect(turn.content).toBe("这一路的整段正文。");
+    expect(turn.reasoning).toBe("在想");
+  });
+
+  it("思考通道同理：只换末尾那个未闭合的思考块", () => {
+    const turn = fold([
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("reasoning_delta", { delta: "第一段思考。" }),
+      ev("content_delta", { delta: "先说一句。" }),
+      ev("reasoning_delta", { delta: "第二段想" }),
+      ev("reasoning_delta", { delta: "第二段想到这里。", replace: true }),
+    ]);
+    expect(turn.process).toEqual([
+      { kind: "reasoning", text: "第一段思考。" },
+      { kind: "content", text: "先说一句。" },
+      { kind: "reasoning", text: "第二段想到这里。" },
+    ]);
+    expect(turn.reasoning).toBe("第一段思考。第二段想到这里。");
+    expect(turn.content).toBe("先说一句。");
+  });
+
+  const workerReplay: SSEEvent[] = [
+    ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+    ev("run_plan", {
+      execution_id: "exec1",
+      plan_type: "multi_agent",
+      task_summary: "调研",
+      agents: [{ id: "w1", role: "调研员", thinking: true }],
+      runs: [{ id: "r1", agent_id: "w1", task: "调研", depends_on: [] }],
+    }),
+    ev("run_started", {
+      run_id: "r1",
+      agent_id: "w1",
+      parent_run_id: null,
+      kind: "agent",
+    }),
+    ev("run_output_delta", {
+      run_id: "r1",
+      agent_id: "w1",
+      delta: "先给结论：",
+    }),
+    ev("run_reasoning_delta", {
+      run_id: "r1",
+      agent_id: "w1",
+      delta: "核一遍",
+    }),
+    ev("run_output_delta", { run_id: "r1", agent_id: "w1", delta: "细节一" }),
+    ev("run_output_delta", {
+      run_id: "r1",
+      agent_id: "w1",
+      delta: "细节一、细节二，还没写完。",
+      replace: true,
+    }),
+  ];
+
+  it("队员输出同理：只换末尾开放块，队员卡输出标量同步截换", () => {
+    const turn = fold(workerReplay);
+    const run = turn.runs.find((r) => r.id === "r1");
+    expect(run?.process).toEqual([
+      { kind: "content", text: "先给结论：" },
+      { kind: "reasoning", text: "核一遍" },
+      { kind: "content", text: "细节一、细节二，还没写完。" },
+    ]);
+    const agent = turn.agents.find((a) => a.id === "w1");
+    expect(agent?.output).toBe("先给结论：细节一、细节二，还没写完。");
+    expect(agent?.reasoning).toBe("核一遍");
+  });
+
+  it("队员侧同一事件数组重复 fold 结果一致", () => {
+    expect(fold(workerReplay)).toEqual(fold(workerReplay));
+  });
+});
+
 describe("extractEscalationSlots · browser_login transport", () => {
   it("maps wire browser_login → esc.browserLogin (transport-only)", () => {
     const slots = extractEscalationSlots([

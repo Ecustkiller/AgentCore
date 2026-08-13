@@ -1,10 +1,35 @@
 /**
- * Bridge handler 扩展测：health / navigate / command 六动作 / host_unavailable。
+ * Bridge handler 扩展测：health / navigate / command 六动作 / host_unavailable，
+ * 以及 token 滑动续期（长回合中途不掉线）与重复启动不作废在飞 token。
  */
 
 import { createServer } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("electron", () => ({
+  // 打包态：跳过 dev 凭证落盘，测试不碰 userData。
+  app: { isPackaged: true },
+  BrowserWindow: {
+    getFocusedWindow: () => null,
+    getAllWindows: () => [],
+  },
+  WebContentsView: vi.fn(),
+  session: {
+    fromPartition: vi.fn(() => ({
+      setPermissionRequestHandler: vi.fn(),
+      setPermissionCheckHandler: vi.fn(),
+      protocol: { handle: vi.fn() },
+      on: vi.fn(),
+    })),
+  },
+}));
+
+import {
+  getDesktopBrowserBridgeCredentials,
+  startDesktopBrowserBridge,
+  stopDesktopBrowserBridge,
+} from "../browser/bridge";
 import {
   type BridgeDispatch,
   type BridgeHostResult,
@@ -84,6 +109,26 @@ describe("createBridgeAuth", () => {
     expect(auth.validateToken(token)).toBe(true);
     expect(auth.validateToken("other")).toBe(false);
     now = 1_200;
+    expect(auth.validateToken(token)).toBe(false);
+  });
+
+  it("每次成功校验顺延到期；失效后不复活", () => {
+    let now = 1_000;
+    const auth = createBridgeAuth(() => now);
+    const token = auth.issueToken(100);
+    expect(auth.state.expiresAt).toBe(1_100);
+
+    now = 1_080;
+    expect(auth.validateToken(token)).toBe(true);
+    expect(auth.state.expiresAt).toBe(1_180);
+
+    now = 1_100;
+    expect(auth.validateToken("other")).toBe(false);
+    expect(auth.state.expiresAt).toBe(1_180); // 错 token 不续期
+
+    now = 1_180; // 闲置刚好满一个 TTL
+    expect(auth.validateToken(token)).toBe(false);
+    now = 1_181;
     expect(auth.validateToken(token)).toBe(false);
   });
 });
@@ -357,6 +402,84 @@ describe("handleBridgeRequest", () => {
       ok: false,
       code: "host_unavailable",
     });
+  });
+});
+
+describe("token 生命周期跟随使用（长回合中途不 401）", () => {
+  const TTL = 100;
+
+  async function command(
+    auth: ReturnType<typeof createBridgeAuth>,
+    token: string,
+    action: string,
+  ): Promise<number> {
+    const { req, res, statusCode } = mockReqRes({
+      method: "POST",
+      url: "/command",
+      headers: { authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        pageId: "sess-1",
+        conversationId: "c1",
+        action,
+        args: action === "navigate" ? { url: "https://example.com" } : {},
+      }),
+    });
+    await handleBridgeRequest(
+      req,
+      res,
+      (t) => auth.validateToken(t),
+      okDispatch(),
+    );
+    return statusCode();
+  }
+
+  it("navigate 成功后越过原到期时刻，后续 snapshot 仍放行", async () => {
+    let now = 1_000;
+    const auth = createBridgeAuth(() => now);
+    const token = auth.issueToken(TTL); // 绝对语义下 1_100 到期
+
+    now = 1_090;
+    expect(await command(auth, token, "navigate")).toBe(200);
+
+    // 凭证只在回合边界下发，本回合内补不上；绝对过期会让这一步开始 401。
+    now = 1_150;
+    expect(await command(auth, token, "snapshot")).toBe(200);
+
+    now = 1_240;
+    expect(await command(auth, token, "screenshot")).toBe(200);
+  });
+
+  it("闲置超过 TTL 才失效", async () => {
+    let now = 1_000;
+    const auth = createBridgeAuth(() => now);
+    const token = auth.issueToken(TTL);
+
+    now = 1_090;
+    expect(await command(auth, token, "navigate")).toBe(200);
+
+    now = 1_190; // 距上次成功校验刚好一个 TTL，其间无请求
+    expect(await command(auth, token, "snapshot")).toBe(401);
+  });
+});
+
+describe("startDesktopBrowserBridge 幂等", () => {
+  afterEach(async () => {
+    await stopDesktopBrowserBridge();
+  });
+
+  it("重复启动复用同一 token，不作废在飞请求", async () => {
+    const first = await startDesktopBrowserBridge();
+    const second = await startDesktopBrowserBridge();
+
+    expect(second.baseUrl).toBe(first.baseUrl);
+    expect(second.token).toBe(first.token);
+    expect(getDesktopBrowserBridgeCredentials()?.token).toBe(first.token);
+
+    // sidecar 按 rootId 分进程：另一进程持首个 token 的在飞请求必须仍被接受。
+    const res = await fetch(`${first.baseUrl}/health`, {
+      headers: { authorization: `Bearer ${first.token}` },
+    });
+    expect(res.status).toBe(200);
   });
 });
 

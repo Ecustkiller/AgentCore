@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, BASE_URL } from "../api";
+import { ApiError, BASE_URL, clearCsrfToken } from "../api";
 import {
   bootstrapAuth,
   changePassword,
   deleteAccount,
   deleteAvatar,
+  fetchMe,
   listSessions,
+  logout,
   revokeOtherSessions,
   revokeSession,
   updateProfile,
@@ -25,10 +27,14 @@ const backendUser = {
   created_at: "2024-01-01T00:00:00Z",
 };
 
-function json(body: unknown, status = 200): Response {
+function json(
+  body: unknown,
+  status = 200,
+  extraHeaders?: Record<string, string>,
+): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...extraHeaders },
   });
 }
 
@@ -48,11 +54,15 @@ beforeEach(() => {
   // health-probe branches deterministically, regardless of any local .env.local.
   vi.stubEnv("VITE_DEV_USERNAME", "");
   vi.stubEnv("VITE_DEV_PASSWORD", "");
+  // The CSRF token lives in api.ts module state — reset it so token assertions
+  // never depend on what a previous test happened to capture.
+  clearCsrfToken();
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+  clearCsrfToken();
 });
 
 describe("bootstrapAuth", () => {
@@ -176,6 +186,25 @@ interface Captured {
   url: string;
   method?: string;
   body: unknown;
+  headers: Record<string, string>;
+}
+
+/** Stub fetch with a per-URL handler, recording each request's headers. */
+function recordFetch(handler: Handler): Captured[] {
+  const calls: Captured[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({
+        url: String(input),
+        method: init?.method,
+        body: init?.body,
+        headers: { ...((init?.headers as Record<string, string>) ?? {}) },
+      });
+      return Promise.resolve(handler(String(input)));
+    }),
+  );
+  return calls;
 }
 
 /** Stub fetch, recording each call's url/method/parsed-body and replying with
@@ -190,6 +219,7 @@ function captureFetch(response: Response): Captured[] {
         method: init?.method,
         body:
           typeof init?.body === "string" ? JSON.parse(init.body) : init?.body,
+        headers: { ...((init?.headers as Record<string, string>) ?? {}) },
       });
       return Promise.resolve(response.clone());
     }),
@@ -297,6 +327,123 @@ describe("uploadAvatar", () => {
     });
 
     await expect(uploadAvatar(file)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it("sends the CSRF token — raw bytes are still a mutating cookie request", async () => {
+    const calls = recordFetch((url) =>
+      url.endsWith("/v1/auth/me")
+        ? json(backendUser, 200, { "X-CSRF-Token": "tok-from-me" })
+        : json({ ...backendUser, avatar_url: null }),
+    );
+    await fetchMe(); // hands the client its token, like login does
+
+    await uploadAvatar(
+      new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+    );
+
+    const upload = calls[1];
+    expect(upload.url).toContain("/v1/users/me/avatar");
+    expect(upload.headers["X-CSRF-Token"]).toBe("tok-from-me");
+    // …without losing the raw-bytes content type the backend decodes by.
+    expect(upload.headers["Content-Type"]).toBe("image/png");
+  });
+
+  it("refreshes the CSRF token from its own response headers", async () => {
+    const calls = recordFetch((url) =>
+      url.endsWith("/avatar")
+        ? json({ ...backendUser, avatar_url: null }, 200, {
+            "X-CSRF-Token": "tok-rotated",
+          })
+        : json({ status: "ok" }),
+    );
+
+    await uploadAvatar(
+      new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+    );
+    await revokeOtherSessions();
+
+    // The upload used to read the body and drop the headers, so the next write
+    // went out on whatever token login handed over — stale after any rotation.
+    expect(calls[1].headers["X-CSRF-Token"]).toBe("tok-rotated");
+  });
+
+  it("replays a CSRF-rejected upload once, on the token the 403 handed back", async () => {
+    let attempts = 0;
+    const calls = recordFetch((url) => {
+      if (!url.endsWith("/avatar")) return json({ status: "ok" });
+      attempts += 1;
+      return attempts === 1
+        ? json({ error: { code: "CSRF_FAILED", message: "无效令牌" } }, 403, {
+            "X-CSRF-Token": "tok-reissued",
+          })
+        : json({ ...backendUser, avatar_url: null });
+    });
+
+    await uploadAvatar(
+      new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+    );
+
+    // Without the replay this one raw-bytes write hard-fails on a stale token
+    // while every `api.*` write self-heals — "everything works except my picture".
+    expect(calls).toHaveLength(2);
+    expect(calls[0].headers["X-CSRF-Token"]).toBeUndefined();
+    expect(calls[1].headers["X-CSRF-Token"]).toBe("tok-reissued");
+  });
+
+  it("does not replay a 403 the server declined to re-arm", async () => {
+    const calls = recordFetch(() =>
+      json({ error: { code: "CSRF_FAILED", message: "无效令牌" } }, 403),
+    );
+
+    await expect(
+      uploadAvatar(
+        new File([new Uint8Array([1])], "a.png", { type: "image/png" }),
+      ),
+    ).rejects.toBeInstanceOf(ApiError);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("logout", () => {
+  /** Reply 403 CSRF_FAILED to the logout, 200 (+ token) to everything else. */
+  const refuseLogout: Handler = (url) =>
+    url.endsWith("/v1/auth/logout")
+      ? json(
+          {
+            error: {
+              code: "CSRF_FAILED",
+              message: "CSRF token missing or invalid. Re-login and retry.",
+            },
+          },
+          403,
+        )
+      : json({ status: "ok" }, 200, { "X-CSRF-Token": "tok-live" });
+
+  it("wipes local session state even when the server refuses the logout", async () => {
+    const calls = recordFetch(refuseLogout);
+    await revokeOtherSessions(); // captures tok-live
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    // A mutating call after logout must no longer carry the dead session's token:
+    // proof the local wipe ran instead of being skipped by the thrown 403.
+    await revokeOtherSessions();
+    const afterLogout = calls[calls.length - 1];
+    expect(afterLogout.url).toContain("/v1/auth/sessions/revoke-others");
+    expect(afterLogout.headers["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  it("still clears local state on a transport failure", async () => {
+    const calls = recordFetch((url) => {
+      if (url.endsWith("/v1/auth/logout")) throw new TypeError("offline");
+      return json({ status: "ok" }, 200, { "X-CSRF-Token": "tok-live" });
+    });
+    await revokeOtherSessions();
+
+    await expect(logout()).resolves.toBeUndefined();
+
+    await revokeOtherSessions();
+    expect(calls[calls.length - 1].headers["X-CSRF-Token"]).toBeUndefined();
   });
 });
 

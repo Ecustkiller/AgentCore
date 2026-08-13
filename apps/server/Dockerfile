@@ -162,7 +162,8 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/livez', timeout=3).status==200 else 1)"]
 
 # 默认启 API（python -m agentcore 从环境读 HOST/PORT/DEBUG；prod DEBUG=false →
-# 无 reload；默认 workers=1）。WEB_CONCURRENCY>1 仅在 RATE_LIMIT_BACKEND=memory
-# 时启动拒绝；生产样例用 redis 时可扩 worker（见部署拓扑 G5）。
+# 无 reload；默认 workers=1）。WEB_CONCURRENCY / UVICORN_WORKERS /
+# AGENTCORE_API_WORKERS > 1 一律启动拒绝（DEBUG 仅警告）：履约中枢与对话事件流是进程内
+# 单例，RATE_LIMIT_BACKEND=redis 只共享限流器、并不解锁（见部署拓扑 §六）。
 # 部署脚本以 `alembic upgrade head` 覆盖命令跑迁移。
 CMD ["python", "-m", "agentcore"]

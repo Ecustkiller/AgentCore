@@ -30,10 +30,13 @@ TURN_SCALE_SCENARIOS = frozenset({"chat", "agent"})
 # 429 / Retry-After: allow more attempts than generic I/O so short exponential
 # Retry-After chains (2→4→8…) are actually waited, not abandoned on the 3rd hit.
 RATE_LIMIT_MAX_RETRIES = 6
-# The Retry-After ceiling is NOT declared here: it also decides what the 429 error
-# tells the user, so it is single-sourced next to that copy as
-# ``core.errors.MAX_RETRY_AFTER``. Hour-scale headers (e.g. 3600) starve short outer
-# budgets (title 20s), so past the cap we neither sleep nor promise a retry.
+# The Retry-After ceiling is NOT declared here, and is not one number:
+# ``llm.provider.call_budget`` derives it from what is left of *this* call's patience
+# (``LLMRequest.retry_patience_seconds``), so a 45s fold waits out a cooldown a 20s
+# title must refuse — and a fold some turn is blocked on waits out nothing at all.
+# Callers with no patience fall back to the interactive ceiling
+# ``core.errors.MAX_RETRY_AFTER``, which is single-sourced next to the 429 copy
+# that quotes it. Hour-scale headers (e.g. 3600) are refused under every budget.
 
 
 def connect_retry_policy(scenario: str) -> tuple[int, float]:
@@ -126,6 +129,13 @@ class LLMRequest:
     scenario: str = "chat"
     # None = omit (provider default). False/True → DeepSeek V4 / Hy3 ``thinking.type``.
     thinking: bool | None = None
+    # Seconds of this call's wall clock that may be spent *asleep* waiting out a 429
+    # (``llm.provider.call_budget.complete_within_budget`` derives it from the
+    # caller's deadline and whether a turn is blocked on the call, then stamps it).
+    # ``0.0`` = fail on the first dated cooldown; ``None`` = no deadline at all, so
+    # the interactive ceiling applies. Honoured only for the silent-degrade
+    # scenarios — see ``call_budget.provider_retry_ceiling``.
+    retry_patience_seconds: float | None = None
 
 
 @dataclass

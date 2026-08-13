@@ -93,8 +93,15 @@ export async function mfaConfirm(code: string): Promise<MfaConfirmResponse> {
 }
 
 export async function logout(): Promise<void> {
-  await api.post("/v1/auth/logout");
-  clearCsrfToken();
+  // The token is purely local state, so dropping it must not hinge on the server
+  // call succeeding: callers log out locally either way (`.finally(setUnauthenticated)`),
+  // and a token kept past a failed logout is exactly what 403s the *next* session's
+  // mutating requests — including its logout, which strands the operator signed in.
+  try {
+    await api.post("/v1/auth/logout");
+  } finally {
+    clearCsrfToken();
+  }
 }
 
 /** Change the signed-in user's password; this session stays logged in. */

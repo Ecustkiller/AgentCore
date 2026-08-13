@@ -7,7 +7,7 @@
  * mock resolveSidecarRoot: local recovery must fire from main-process facts alone.
  */
 import { useInteractionStore } from "@/stores/interactions";
-import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
 import type { SidecarUnsyncedTurnSummary } from "@shared/sidecar-contract";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -34,6 +34,35 @@ vi.mock("@/services/sidecarRouting", async (importOriginal) => {
 import { loadRecovery, shouldHydrateLocalRecovery } from "@/services/resume";
 
 const CID = "conv-cold-start";
+const OTHER = "conv-elsewhere";
+
+/** A live-surfaced (SSE pause) shell — the frame /recovery may or may not have seen yet. */
+function liveResume(messageId: string, checkpointId: string): PendingResume {
+  return {
+    messageId,
+    conversationId: CID,
+    checkpointId,
+    kind: "ask_user",
+    userMessage: "q",
+    userMessageId: "u1",
+    steps: [],
+    pending: [],
+    workers: [],
+    tools: [],
+    primitive: "delegate",
+    motion: "",
+    form: "",
+    sides: [],
+    maxRounds: 0,
+    thorough: true,
+    question: "继续？",
+    context: "",
+    assumptions: [],
+    questions: [],
+    intent: "decision",
+    origin: "server",
+  };
+}
 
 function unsyncedSummary(
   over: Partial<SidecarUnsyncedTurnSummary> = {},
@@ -489,31 +518,75 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
     expect(useInteractionStore.getState().get("a-stale")).toBeUndefined();
   });
 
-  it("empty recovery snapshot does not wipe non-empty live frames", async () => {
-    // Live pause surfaced a card; stale/empty /recovery must not clear it.
+  it("在飞的空快照不清它发起后才浮现的 live 卡（pause 抢跑竞态）", async () => {
+    let settleGet!: (res: unknown) => void;
+    apiGet.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settleGet = resolve;
+        }),
+    );
+    vi.stubGlobal("window", { __WEB__: true });
+
+    // GET 已上路，此后才收到 live pause —— 这次快照读不到它的 durable 帧。
+    const loading = loadRecovery(CID);
+    await Promise.resolve();
+    usePausedTurnStore
+      .getState()
+      .addLiveResume(liveResume("m-live", "cp-live"));
+    settleGet({ live_running: false, paused: [], pending_interactions: [] });
+
+    const r = await loading;
+    expect(r.pausedCount).toBe(0);
+    const pending = usePausedTurnStore.getState().pending;
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.messageId).toBe("m-live");
+    expect(pending[0]?.checkpointId).toBe("cp-live");
+  });
+
+  it("卡浮现之后才发起的空快照是权威的：陈旧壳清掉", async () => {
+    // 另一端已拍板 → 服务端帧被消费。帧是「先落盘再发 *_required」的，所以一次晚于
+    // 这张卡浮现的快照必然看得见它——回空 = 真没了。
+    usePausedTurnStore
+      .getState()
+      .addLiveResume(liveResume("m-gone", "cp-gone"));
+
+    apiGet.mockResolvedValue({
+      live_running: false,
+      paused: [],
+      pending_interactions: [],
+    });
+    vi.stubGlobal("window", { __WEB__: true });
+
+    await loadRecovery(CID);
+    expect(usePausedTurnStore.getState().pending).toHaveLength(0);
+  });
+
+  it("云请求失败不得清 server 壳（未知 ≠ 帧没了）", async () => {
+    usePausedTurnStore.getState().addLiveResume(liveResume("m-cloud", "cp-c"));
+
+    const recoveryIpc = vi.fn(async () => ({
+      liveRunning: false,
+      unsynced: [],
+      paused: [],
+    }));
+    apiGet.mockRejectedValue(new Error("network down"));
+
+    vi.stubGlobal("window", {
+      __WEB__: false,
+      sidecarApi: { recovery: recoveryIpc },
+    });
+
+    const r = await loadRecovery(CID);
+    expect(r.cloudKnown).toBe(false);
+    // 本机侧答了「没有挂起」，但这张壳的帧在云上——那一路没问到，不许清。
+    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
+  });
+
+  it("其它会话的壳不受本会话快照影响", async () => {
     usePausedTurnStore.getState().addLiveResume({
-      messageId: "m-live",
-      conversationId: CID,
-      checkpointId: "cp-live",
-      kind: "ask_user",
-      userMessage: "q",
-      userMessageId: "u1",
-      steps: [],
-      pending: [],
-      workers: [],
-      tools: [],
-      primitive: "delegate",
-      motion: "",
-      form: "",
-      sides: [],
-      maxRounds: 0,
-      thorough: true,
-      question: "继续？",
-      context: "",
-      assumptions: [],
-      questions: [],
-      intent: "decision",
-      origin: "server",
+      ...liveResume("m-other", "cp-o"),
+      conversationId: OTHER,
     });
 
     apiGet.mockResolvedValue({
@@ -521,22 +594,10 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       paused: [],
       pending_interactions: [],
     });
+    vi.stubGlobal("window", { __WEB__: true });
 
-    vi.stubGlobal("window", {
-      __WEB__: true,
-      sidecarApi: {
-        recovery: vi.fn(async () => {
-          throw new Error("must not call local recovery on web");
-        }),
-      },
-    });
-
-    const r = await loadRecovery(CID);
-    expect(r.pausedCount).toBe(0);
-    const pending = usePausedTurnStore.getState().pending;
-    expect(pending).toHaveLength(1);
-    expect(pending[0]?.messageId).toBe("m-live");
-    expect(pending[0]?.checkpointId).toBe("cp-live");
+    await loadRecovery(CID);
+    expect(usePausedTurnStore.getState().pending).toHaveLength(1);
   });
 });
 

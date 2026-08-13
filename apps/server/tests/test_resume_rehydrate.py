@@ -334,6 +334,7 @@ async def test_finish_resume_joins_pre_pause_reasoning_multi_cycle():
             citations=[],
             collab={},
             continuation_count=0,
+            user_continuation_count=0,
             dispose_open_supervised=AsyncMock(return_value=None),
         ),
         debate_tool=MagicMock(usage={}, run_ledger=[], citations=[]),

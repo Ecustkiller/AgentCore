@@ -1,12 +1,37 @@
 """Cursor replay for ``GET …/stream`` with ``Last-Event-ID`` (流式回复持久化 §3.6 · P3).
 
-Builds a clear-then-fold replay segment: a synthetic ``message_start`` that opens +
-stamps the bubble, then **full** durable journal facts from the turn start (header
-value is observational only — clients clear-then-fold, so a ``> cursor`` tail would
-drop pre-cursor tool/team structure) + process-lane synthetic deltas interleaved in
+Builds an attach catch-up segment: a synthetic ``message_start`` (opens + stamps the
+bubble), then durable journal facts + process-lane synthetic deltas interleaved in
 journal order + single-block deltas for any still-open stream channels not already
-covered by ``process_*`` / ``run_process_*``. No ``id:`` on synthetic frames — they
-attach after the nearest durable seq.
+covered by ``process_*`` / ``run_process_*``.
+
+**Two段 shapes, one builder.** The judgement is always made over the WHOLE turn's rows —
+four of them have to see every row to be right (是否结构化回合 / 已被 ``run_process_*``
+覆盖的 run 集 / ``run_started`` 回填的 ``agent_id`` / ``message_final`` 拼出的 worker 全文).
+Only *shipping* is narrowed:
+
+- **全量段** (default, and the fallback whenever the cursor cannot be trusted): head
+  carries ``full_replay`` — the server's explicit「先重置本回合本地态，再折本段」order —
+  followed by the turn from seq 0.
+- **增量段** (:func:`_incremental_verdict` says yes): head carries NO ``full_replay``, so
+  the client keeps what it holds and folds the段 onto it; the body is the same event
+  stream filtered to the facts after the cursor. Real multi-agent turns journal 600+
+  rows (派单行到 15KB), and a phone returning to the foreground re-attaches constantly —
+  the full段 re-ships the whole scene every time. DB cost is unchanged (the read is one
+  ``(turn_id, seq)`` index scan); what the increment saves is bytes on the wire and the
+  client's re-fold.
+
+Text frames that carry a WHOLE block rather than an increment say so with
+``replace`` (see ``payloads.chat._REPLACE_DOC``): the still-open channel blocks
+synthesized from ``stream_state``, and — in an增量段 — the first post-cursor
+``process_*`` text row on each channel, whose step the client may已 hold half of
+(live deltas carry no ``id:``, so the cursor sits at an earlier durable fact).
+
+The reset是服务端的指令，不是客户端的猜测: a client used to compare the segment head's
+``message_id`` against whatever bubble was on screen to decide whether to clear, and a
+wrong guess folded the same body twice. :func:`mark_full_replay_segment` puts the same
+instruction on the head of the OTHER replay path (the sink's in-memory history), so both
+are client-observably identical.
 """
 
 from __future__ import annotations
@@ -133,8 +158,9 @@ def journal_rows_to_sse(rows: list[dict[str, Any]]) -> list[SSEEvent]:
     """Convert ``load_after`` rows into live-shaped SSE events (with ``seq`` on DURABLE).
 
     Process-lane facts are emitted as synthetic deltas **in journal order**, interleaved
-    with tool/team DURABLE events so clear-then-fold rebuilds the CEO / worker timelines
-    with correct interleaving (process progressive persistence invariant).
+    with tool/team DURABLE events so a client that reset on the segment head rebuilds the
+    CEO / worker timelines with correct interleaving (process progressive persistence
+    invariant).
     """
     final_outputs: dict[str, dict[str, str]] = {}
     agent_run_ids: dict[str, str] = {}
@@ -278,6 +304,141 @@ def _journal_covered_run_ids(rows: list[dict[str, Any]]) -> set[str]:
     return covered
 
 
+def _row_is_stamped(row: dict[str, Any]) -> bool:
+    """Whether a replay of this row would carry an SSE ``id:`` line.
+
+    That is the ONLY way a client can come to hold a given seq as its
+    ``Last-Event-ID``: DURABLE facts keep their seq on the live stream, and
+    ``process_*`` text steps keep theirs when a segment replays them. Everything else
+    (``llm_call`` and the other execution-only kinds, ``message_final``, ``turn_end``,
+    the structural ``process_*`` mirrors) produces no frame at all, so no client can
+    ever have named it.
+    """
+    kind = str(row.get("kind") or "")
+    if kind == FactKind.MESSAGE_FINAL.value or kind in EXECUTION_ONLY_KINDS:
+        return False
+    if kind.startswith(_PROCESS_PREFIX) or kind.startswith(_RUN_PROCESS_PREFIX):
+        payload = dict(row.get("payload") or {})
+        return _process_step_to_sse(kind, payload, seq=None, ts="") is not None
+    return kind in _DURABLE_KIND_VALUES
+
+
+def _incremental_verdict(rows: list[dict[str, Any]], *, after_seq: int) -> str | None:
+    """``None`` = safe to ship only the post-cursor facts; else the reason to send全量.
+
+    Incremental is a pure optimization on top of a path already proven correct, so the
+    bar is「能证明这次对得上」, not「想不出反例」. Three conditions, all cheap (the rows
+    are already in hand for the whole-turn judgements):
+
+    1. **``after_seq >= 1``** — both clients send ``Last-Event-ID: 0`` when they have no
+       cursor at all (``lastEventIds.get(id) ?? "0"``), so ``0`` cannot be read as「我有
+       seq 0 之前的一切」. Seq 0 is one row anyway; refusing it costs nothing.
+    2. **The turn has no ``turn_end`` row** — a settled turn (finished / paused) has been
+       through the wholesale ``TurnJournalRepository.record`` rewrite (delete-then-insert
+       renumbers the turn from 0) or is about to be, and a resumed turn inherits that
+       prefix, so a cursor minted before the rewrite may now name a different fact. The
+       ONLY replay that matters here is the short post-completion persist window, so
+       there is nothing to win by betting.
+    3. **``after_seq`` names a fact this turn actually stamped** (:func:`_row_is_stamped`)
+       — a cursor that matches no such row is stale (renumbered), foreign (it came from
+       an earlier turn on the same conversation: seq is per-turn, the clients keep the
+       cursor per-CONVERSATION), or fabricated.
+
+    Deliberately NOT built: a generation counter / journal-vs-cursor reconciliation.
+    The fallback is the whole story, so「说不准就整段重发」is both the cheap and the
+    correct answer.
+    """
+    if after_seq < 1:
+        return "no_cursor"
+    stamped = False
+    for row in rows:
+        if str(row.get("kind") or "") == KIND_TURN_END:
+            return "turn_settled"
+        seq = row.get("seq")
+        if seq is not None and int(seq) == after_seq:
+            stamped = _row_is_stamped(row)
+    if not stamped:
+        return "cursor_unknown"
+    return None
+
+
+def _slice_after_cursor(events: list[SSEEvent], *, after_seq: int) -> list[SSEEvent]:
+    """Keep the journal-derived events that land after ``after_seq``.
+
+    A frame's position is its own ``seq`` when it has one. The ``message_final`` splices
+    have none — they are the worker's full text spliced in front of the run's terminal
+    fact — so they inherit the position of the frame they lead, and travel with it.
+    """
+    kept: list[SSEEvent] = []
+    anchor: int | None = None
+    for event in reversed(events):
+        if event.seq is not None:
+            anchor = event.seq
+        if anchor is None or anchor > after_seq:
+            kept.append(event)
+    kept.reverse()
+    return kept
+
+
+def _text_channel(event: SSEEvent) -> str | None:
+    """The text channel a delta grows, or ``None`` for non-text frames."""
+    if event.type == EventType.CONTENT_DELTA:
+        return "captain:content"
+    if event.type == EventType.REASONING_DELTA:
+        return "captain:reasoning"
+    if event.type == EventType.RUN_OUTPUT_DELTA:
+        return f"{event.payload.get('run_id') or ''}:content"
+    if event.type == EventType.RUN_REASONING_DELTA:
+        return f"{event.payload.get('run_id') or ''}:reasoning"
+    return None
+
+
+def _closes_text_channel(event: SSEEvent) -> str | None:
+    """The channel a ``*_reset`` frame empties (its next delta starts a fresh block)."""
+    if event.type == EventType.CONTENT_RESET:
+        return "captain:content"
+    if event.type == EventType.RUN_OUTPUT_RESET:
+        return f"{event.payload.get('run_id') or ''}:content"
+    return None
+
+
+def _mark_block_replacements(events: list[SSEEvent]) -> list[SSEEvent]:
+    """Flag the first post-cursor text frame per channel as a whole-block replacement.
+
+    A journaled ``process_*`` step is written when it CLOSES, so the first one to land
+    after the cursor is the step the client was watching when it dropped: live deltas
+    carry no ``id:``, so the cursor sits at an earlier durable fact and the client's own
+    tail block holds a prefix of this same step. Appending would stutter the text;
+    ``replace`` swaps the block for its finished self. Every later frame on that channel
+    is genuinely new (two text steps of one kind are never adjacent — a tool / marker /
+    reset separates them, and it ships in this same段), so it stays a plain append.
+
+    A ``*_reset`` empties its channel, so whatever follows it is a fresh block too.
+    """
+    settled: set[str] = set()
+    out: list[SSEEvent] = []
+    for event in events:
+        closed = _closes_text_channel(event)
+        if closed is not None:
+            settled.add(closed)
+            out.append(event)
+            continue
+        channel = _text_channel(event)
+        if channel is None or channel in settled:
+            out.append(event)
+            continue
+        settled.add(channel)
+        out.append(
+            SSEEvent(
+                type=event.type,
+                payload={**event.payload, "replace": True},
+                timestamp=event.timestamp,
+                seq=event.seq,
+            )
+        )
+    return out
+
+
 def synthesize_segment_deltas(
     *,
     by_channel: dict[str, str],
@@ -290,14 +451,29 @@ def synthesize_segment_deltas(
 
     When journal already has ``process_*`` / ``run_process_*`` text, skip the matching
     flat channels so mid-run refresh does not duplicate or reorder narration.
+
+    Every frame here is a WHOLE still-open block (the channel's text so far), never an
+    increment, so all of them carry ``replace`` — an增量段 client may already hold part
+    of that block from live deltas. In a全量段 the client has just reset, so replacing
+    nothing and appending are the same fold; the flag describes the frame, not the段.
     """
     extra: list[SSEEvent] = []
     cap_reasoning = by_channel.get(CHANNEL_CAPTAIN_REASONING) or ""
     cap_content = by_channel.get(CHANNEL_CAPTAIN_CONTENT) or ""
     if cap_reasoning and not skip_captain_reasoning:
-        extra.append(SSEEvent(type=EventType.REASONING_DELTA, payload={"delta": cap_reasoning}))
+        extra.append(
+            SSEEvent(
+                type=EventType.REASONING_DELTA,
+                payload={"delta": cap_reasoning, "replace": True},
+            )
+        )
     if cap_content and not skip_captain_content:
-        extra.append(SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": cap_content}))
+        extra.append(
+            SSEEvent(
+                type=EventType.CONTENT_DELTA,
+                payload={"delta": cap_content, "replace": True},
+            )
+        )
 
     partial: dict[str, dict[str, str]] = {}
     for channel, text in by_channel.items():
@@ -323,6 +499,7 @@ def synthesize_segment_deltas(
                         "run_id": run_id,
                         "agent_id": agent_id,
                         "delta": texts["reasoning"],
+                        "replace": True,
                     },
                 )
             )
@@ -334,14 +511,15 @@ def synthesize_segment_deltas(
                         "run_id": run_id,
                         "agent_id": agent_id,
                         "delta": texts["content"],
+                        "replace": True,
                     },
                 )
             )
     return extra
 
 
-def replay_open_event(*, turn_id: str, conversation_id: str) -> SSEEvent:
-    """Synthesize the ``message_start`` that opens + stamps the replayed bubble.
+def replay_open_event(*, turn_id: str, conversation_id: str, full_replay: bool = True) -> SSEEvent:
+    """Synthesize the ``message_start`` that opens, stamps + RESETS the replayed bubble.
 
     ``message_start`` is EPHEMERAL (never journaled, so :func:`journal_rows_to_sse`
     cannot produce it) yet it is the ONLY frame carrying the server assistant
@@ -354,14 +532,72 @@ def replay_open_event(*, turn_id: str, conversation_id: str) -> SSEEvent:
     bound to a stale id whose submit 404s — the user had to leave the conversation and
     come back.
 
-    Idempotent by contract: both folds treat a repeated ``message_start`` carrying the
-    SAME ``message_id`` as「同回合重开」(keep the accumulated bubble); only a different id
-    opens a fresh one. ``trace_id=""`` suppresses the factory's ambient fill: the turn's
-    own trace is not in the journal projection, and stamping the *attach request's* trace
-    would point the bubble's log link at this GET instead of the turn; the clients'
-    truthy-guarded stamp then keeps whatever they already have.
+    ``full_replay=True`` is the segment's own instruction: everything after this frame is
+    the turn from its start, so the client resets what it holds for ``message_id``
+    (streamed content / reasoning / process timeline) and folds the segment as the whole
+    story. Without it the client had to GUESS from the id whether to clear — guessing
+    wrong folded the body twice. A plain (unflagged) repeat of the same ``message_id``
+    still means「同回合重开」and keeps the accumulated bubble — which is exactly what an
+    增量段 head wants: the stamp still binds durable cards to this turn, and the absence
+    of the flag is the server saying「你手里那半场是对的，往后接」.
+
+    ``trace_id=""`` suppresses the factory's ambient fill: the turn's own trace is not in
+    the journal projection, and stamping the *attach request's* trace would point the
+    bubble's log link at this GET instead of the turn; the clients' truthy-guarded stamp
+    then keeps whatever they already have.
     """
-    return message_start(turn_id, conversation_id=conversation_id, trace_id="")
+    return message_start(
+        turn_id, conversation_id=conversation_id, trace_id="", full_replay=full_replay
+    )
+
+
+def mark_full_replay_segment(
+    events: list[SSEEvent], *, turn_id: str | None, conversation_id: str
+) -> list[SSEEvent]:
+    """Put the ``full_replay`` instruction on the head of a sink-history replay segment.
+
+    The cursor path mints its own head (:func:`replay_open_event`); the no-cursor path
+    replays the turn's ORIGINAL live frames, whose ``message_start`` says nothing about
+    being a replay. Rewrite that frame into a flagged COPY — history entries share their
+    payload dict with the live event, so mutating in place would retro-flag the frame
+    other端 are still streaming — and synthesize a head when the snapshot has none (the
+    turn had not opened its bubble yet when this端 attached; the real ``message_start``
+    arrives on the live tail right after, unflagged, as 同回合重开).
+
+    Both replay paths therefore hand the client the same「先重置本回合本地态，再折本段」
+    instruction. Two cases have nothing to stamp:
+
+    - **An EMPTY segment.** ``full_replay`` orders the client to drop what it holds for
+      this ``message_id``, and the段 is what replaces it — with nothing in the段 the
+      client clears and never gets anything back. An empty ``history_snapshot()`` does
+      NOT mean the client holds nothing: on the resume-settled join the continuation's
+      sink was just created (empty history) while the client still holds the whole
+      pre-pause transcript, and this path never consults the journal, so the wipe is
+      unrecoverable. No frames to replay = no「本段是全量重放」to declare; the live
+      ``message_start`` arrives right after on the tail, unflagged, as 同回合重开.
+    - **``turn_id`` unset** — no bubble to address, so a segment for a turn the client
+      cannot key anything to anyway.
+    """
+    if not events:
+        return []
+    out: list[SSEEvent] = []
+    stamped = False
+    for event in events:
+        if not stamped and event.type == EventType.MESSAGE_START:
+            out.append(
+                SSEEvent(
+                    type=EventType.MESSAGE_START,
+                    payload={**event.payload, "full_replay": True},
+                    timestamp=event.timestamp,
+                    seq=event.seq,
+                )
+            )
+            stamped = True
+            continue
+        out.append(event)
+    if not stamped and turn_id:
+        out.insert(0, replay_open_event(turn_id=turn_id, conversation_id=conversation_id))
+    return out
 
 
 def replay_close_event(finish_reason: FinishReason) -> SSEEvent:
@@ -411,35 +647,30 @@ async def build_cursor_replay(
     memory_channels: dict[str, str],
     memory_agent_ids: dict[str, str],
 ) -> list[SSEEvent]:
-    """Full-turn durable journal + in-flight segment synthesis (clear-then-fold).
+    """Durable journal + in-flight segment synthesis, shipped全量 or 增量.
 
     Leads with the synthetic ``message_start`` (:func:`replay_open_event`) so the
     segment opens and STAMPS the bubble before any durable card lands on it —
     everything after it binds to ``turn_id``, the id a resume/approval submit uses.
+    The head carries ``full_replay`` on the全量 path only; on the增量 path its absence
+    is the instruction「别清，接着折」。
 
-    ``after_seq`` is the client's ``Last-Event-ID`` — kept for observability /
-    future cross-process cursors, but **not** used to filter rows. Clients reset
-    local process/execution before folding, so the replay must include
-    pre-cursor structure (tools / team graph / process narration), not only
-    ``seq > after_seq``.
+    ``after_seq`` is the client's ``Last-Event-ID``. It never narrows the **read**: the
+    whole turn is loaded and judged (structured-turn test, covered-run set, ``agent_id``
+    backfill, ``message_final`` splices all need every row, and a ``seq > cursor`` query
+    would silently flip them). It narrows only what is **shipped**, and only when
+    :func:`_incremental_verdict` can vouch for the cursor.
     """
     from agentcore.conversation.store import get_conversation_store
     from agentcore.core.logging import get_logger
     from agentcore.db.base import telemetry_session_factory
     from agentcore.db.repositories.runs import TurnJournalRepository
 
-    get_logger(__name__).debug(
-        "attach.cursor_replay",
-        turn_id=turn_id,
-        last_event_id=after_seq,
-    )
-
     async with telemetry_session_factory() as db:
-        # Full turn from seq 0 (``seq > -1``); header value is observational only.
+        # Full turn from seq 0 (``seq > -1``) — the判定 needs every row.
         rows = await TurnJournalRepository(db).load_after(turn_id, -1)
 
-    events = [replay_open_event(turn_id=turn_id, conversation_id=conversation_id)]
-    events.extend(journal_rows_to_sse(rows))
+    journal_events = journal_rows_to_sse(rows)
     skip_cap_content, skip_cap_reasoning = _journal_covers_captain_channels(rows)
     # Structured turns: never stitch 旁白 from flat segments (process_* is the source).
     # Prose-only keeps segment accelerate for captain content / reasoning.
@@ -449,7 +680,7 @@ async def build_cursor_replay(
 
     agent_ids = dict(memory_agent_ids)
     covered: set[str] = set(process_covered_runs)
-    for ev in events:
+    for ev in journal_events:
         if ev.type == EventType.RUN_STARTED and ev.payload.get("kind") == RunKind.AGENT.value:
             rid = ev.payload.get("run_id")
             if rid:
@@ -458,6 +689,30 @@ async def build_cursor_replay(
             rid = ev.payload.get("run_id")
             if rid:
                 covered.add(str(rid))
+
+    # Judgements above saw the whole turn; only shipping is narrowed from here.
+    skip_reason = _incremental_verdict(rows, after_seq=after_seq)
+    incremental = skip_reason is None
+    if incremental:
+        journal_events = _mark_block_replacements(
+            _slice_after_cursor(journal_events, after_seq=after_seq)
+        )
+    get_logger(__name__).debug(
+        "attach.cursor_replay",
+        turn_id=turn_id,
+        last_event_id=after_seq,
+        journal_rows=len(rows),
+        incremental=incremental,
+        full_replay_reason=skip_reason,
+        shipped_events=len(journal_events),
+    )
+
+    events = [
+        replay_open_event(
+            turn_id=turn_id, conversation_id=conversation_id, full_replay=not incremental
+        )
+    ]
+    events.extend(journal_events)
 
     by_channel = dict(memory_channels)
     if not by_channel:

@@ -24,6 +24,7 @@ import {
   LIST_FILES_SKIP_DIRS,
   SYSTEM_IGNORED_FILE_SUFFIXES,
   TRASH_REL,
+  VERSIONS_REL,
 } from "../workspaceIgnore";
 import { opErr, opOk, toPosix, trimLine } from "./result";
 import { resolveRgBinary } from "./rgBinary";
@@ -49,7 +50,7 @@ function productIgnoreGlobs(): string[] {
   for (const name of [...LIST_FILES_SKIP_DIRS].sort()) {
     globs.push(`!${name}`, `!**/${name}/**`);
   }
-  for (const zone of [INDEX_REL, TRASH_REL, BASELINES_REL]) {
+  for (const zone of [INDEX_REL, TRASH_REL, BASELINES_REL, VERSIONS_REL]) {
     globs.push(`!${zone}`, `!${zone}/**`);
   }
   const suffixes = [

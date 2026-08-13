@@ -228,7 +228,8 @@ class RedirectController:
         if self.tool._session_saver is not None:
             await self.tool._session_saver(committed)
         self.hot_revision_states[continuation_run_id] = rev_state
-        self.tool.note_continuation(continuation_run_id)
+        # 用户点的「立即改此人」——记进总数，同时标成用户促成，别算到队友互检头上。
+        self.tool.note_continuation(continuation_run_id, by_user=True)
         logger.info(
             "delegate.run_redirect_hot",
             execution_id=self.execution_id,

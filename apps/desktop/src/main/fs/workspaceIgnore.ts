@@ -12,8 +12,11 @@
  *   （与服务端 `file_list` / `list_tree` 对齐）。
  *   文件 UI（`listDir`）保持可见，避免 AI 生成的图片/压缩包在面板被藏掉。
  *
- * 同树旁路 `AgentCore/{index,trash,baselines}` 为路径感知系统噪音（禁止把裸名
- * `index`/`trash`/`baselines` 放进全局跳过集，以免误伤用户项目）。
+ * 同树旁路 `AgentCore/{index,trash,baselines,versions}` 为路径感知系统噪音（禁止把裸名
+ * `index`/`trash`/`baselines`/`versions` 放进全局跳过集，以免误伤用户项目）。
+ * 新增区名要同时改三处（服务端 `stage_dirs.py`、本文件、渲染层
+ * `services/sources/workspaceSource.ts` 内联副本）——同一门禁对账区名集与
+ * `AgentCore/<zone>` 路径形态，漏改任一处必红。
  */
 
 /** 与服务端 `stage_dirs.AGENTCORE_ROOT` 对齐。 */
@@ -23,11 +26,18 @@ export const AGENTCORE_ROOT = "AgentCore";
 export const ATTACHMENTS_DIR = "attachments";
 
 /** 与服务端 `stage_dirs.INTERNAL_ZONE_NAMES` 对齐。 */
-export const INTERNAL_ZONE_NAMES = new Set(["index", "trash", "baselines"]);
+export const INTERNAL_ZONE_NAMES = new Set([
+  "index",
+  "trash",
+  "baselines",
+  "versions",
+]);
 
 export const INDEX_REL = `${AGENTCORE_ROOT}/index`;
 export const TRASH_REL = `${AGENTCORE_ROOT}/trash`;
 export const BASELINES_REL = `${AGENTCORE_ROOT}/baselines`;
+/** 用户命名版本区（`versions/<id>/{meta.json,content.zip}`）——本地版「留版本」。 */
+export const VERSIONS_REL = `${AGENTCORE_ROOT}/versions`;
 
 /** 系统噪音目录（整棵子树）。↔ 服务端 `IGNORED_DIRS`（parity gate）。 */
 export const LIST_FILES_SKIP_DIRS = new Set([
@@ -146,7 +156,7 @@ function endsWithAny(name: string, suffixes: readonly string[]): boolean {
   return suffixes.some((suf) => lower.endsWith(suf));
 }
 
-/** True when relPath is `AgentCore/{index|trash|baselines}` or under it. */
+/** True when relPath is `AgentCore/{index|trash|baselines|versions}` or under it. */
 export function isInternalZoneRelPath(relPath: string): boolean {
   const p = relPath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!p || p === ".") return false;

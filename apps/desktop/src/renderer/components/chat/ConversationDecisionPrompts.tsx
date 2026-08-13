@@ -9,6 +9,7 @@
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { DelegationAuthorizationPrompt } from "./DelegationAuthorizationCard";
 import { ResumePrompt } from "./ResumePrompt";
+import { ResumeSettledNotices } from "./ResumeSettledNotices";
 import { RunConfirmPrompt } from "./RunConfirmPrompt";
 import { SettledElsewhereNotices } from "./SettledElsewhereNotices";
 
@@ -26,6 +27,9 @@ export function ConversationDecisionPrompts({
       {/* 卡被另一端拍板后留在原位的只读收口——不随 omitApproval 走，它交代的是
           决策区里刚消失的**任意**一张卡（含 ChatView 另挂的审批卡）。 */}
       <SettledElsewhereNotices />
+      {/* 点下去才发现这张卡早被处理过（冷 resume 幂等成功）——同样留在原位交代，
+          中性/信息态，不是故障。 */}
+      <ResumeSettledNotices />
       <ResumePrompt />
       <DelegationAuthorizationPrompt />
       {!omitApproval && <ApprovalPrompt />}

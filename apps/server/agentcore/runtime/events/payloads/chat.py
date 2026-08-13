@@ -18,10 +18,36 @@ class MessageStartPayload(WirePayload):
         "The turn's log correlation id (32-hex), for one-step log lookup. Omitted when the "
         "turn ran without a trace context (e.g. conformance vectors built outside a turn)."
     )
+    full_replay: bool | None = absent(
+        "This frame opens a FULL REPLAY of the turn (an attach catch-up segment), not a "
+        "live turn: the client MUST reset the local streaming state it holds for this "
+        "`message_id` (streamed content / reasoning / process timeline) and then fold the "
+        "frames that follow as the turn's whole story. Absent (or false) on a live first "
+        "frame and on a repeated same-id stamp, which stay「同回合重开」(keep the bubble). "
+        "The instruction is the server's — clients must not infer it by comparing the id "
+        "against whatever bubble is on screen."
+    )
+
+
+# 整块帧标记（attach 回放段专用，live 帧永不带）。放在正文类 delta 上：`delta` 不是一小段
+# 增量，而是该通道**末尾那个尚未闭合的文本块**的当前全文，客户端替换该块而不是往后追加。
+# 两个来源：① 仍在流、尚未落 journal 的通道全文（stream_state / 内存段合成）；② 增量段里
+# 跨游标那一步 process 行携带的整步全文——客户端手里可能已有它的前半截（live delta 不带
+# `id:`，游标停在更早的耐久事件上）。两者互斥（journal 已覆盖的通道不会再合成全文块）。
+# 客户端折法：该通道末尾是同类文本块就整块换掉（标量随之重算），否则当普通新块追加——
+# 故全量段（客户端刚被 `full_replay` 清空）带不带此标记结果一致。
+_REPLACE_DOC = (
+    "This frame carries the COMPLETE current text of the channel's last still-open text "
+    "block, not an increment: fold it by REPLACING that block (recomputing the scalar) "
+    "instead of appending. Absent on live frames and on plain incremental deltas. When "
+    "the channel's tail is not an open text block (a tool / marker step closed it), the "
+    "frame folds as an ordinary new block."
+)
 
 
 class ContentDeltaPayload(WirePayload):
     delta: str
+    replace: bool | None = absent(_REPLACE_DOC)
 
 
 # 为什么发这次 reset——客户端按它决定「清正文之外还留不留痕迹」：
@@ -43,6 +69,7 @@ class ContentResetPayload(WirePayload):
 
 class ReasoningDeltaPayload(WirePayload):
     delta: str
+    replace: bool | None = absent(_REPLACE_DOC)
 
 
 class ToolProgressPayload(WirePayload):
@@ -184,6 +211,13 @@ class ErrorContext(WirePayload):
     retry_after: float | None = absent(
         "上游 429 Retry-After 秒数（原始值；工程重试仍截断 ≤30s）。"
     )
+    recovery_at: str | None = absent(
+        "上游额度恢复的绝对时刻（ISO-8601 UTC，如 2026-08-14T16:00:00Z）；"
+        "文案不含时刻，由客户端按本机时区渲染。"
+    )
+    reset_at: str | None = absent(
+        "平台配额窗口翻篇的绝对时刻（ISO-8601 UTC）；同 recovery_at 由客户端本地化。"
+    )
     credential_source: str | None = absent(
         "LLM_KEY_INVALID CTA 分流：user=去设置换 Key；platform=接入自己的 Key / 联系管理员。"
     )
@@ -214,6 +248,14 @@ class TurnCollabMetrics(WirePayload):
     revises: int
     escalations: int
     audit_drops: int | None = absent("审计采集降级计数 (turn_metrics.audit_drops); 诊断模式 only.")
+    # 「谁做的」分层：下面两个是上面同名计数的**子集**，不是新指标。用户面把「队友互相
+    # 把关」算成 总数 − 用户那份，免得把用户自己点的操作说成队友互检；运营口径读总数不变。
+    boundary_yields_by_user: int | None = absent(
+        "boundary_yields 中由用户拍板造成的那部分 (plan_review checkpoint)。"
+    )
+    revises_by_user: int | None = absent(
+        "revises 中由用户「立即改此人」促成的那部分 (redirect 热修)。"
+    )
 
 
 class MessageEndPayload(WirePayload):

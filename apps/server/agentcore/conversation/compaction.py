@@ -15,16 +15,26 @@ Design (mirrors the offline memory consolidation pattern):
   Never use turn ``history_len`` (summary blocks inflate it). Self-throttle on success:
   the fold shrinks the foldable tail; next due needs another 16 foldable msgs or 32k
   tokens. Failure leaves the watermark untouched and arms a short in-process cooldown
-  (``compaction_failure_cooldown_seconds``) so neither trigger re-schedules until it
-  expires (``_inflight_tasks`` still dedupes in-flight).
+  (``compaction_failure_cooldown_seconds``, or the failure's own ``retry_after`` when
+  it is longer) so neither trigger re-schedules until it expires (``_inflight_tasks``
+  still dedupes in-flight).
 - **Near-ceiling (pre-turn, 定案⑦A)** — when last-turn ``input_tokens`` are near the
   model window (``compaction_near_context_ratio`` of ``context_length``, or absolute
   ``compaction_near_context_tokens`` when length is unknown), ``maybe_compact_near_ceiling``
   **awaits** fold pass(es) before history assemble so the upcoming turn sees the new
-  summary. Does not wait for the user to type ``/compact``. Bypass failure cooldown
-  (urgent). Honesty: rolling summary may drop process detail — hard identifiers are
-  kept best-effort; near-ceiling cannot shrink an already-mined recency window of
-  huge verbatim turns.
+  summary. Does not wait for the user to type ``/compact``. This is the one path with
+  a human blocked on it, so its passes run ``user_waiting``: a 429 fails on the spot
+  rather than being slept off (``llm.provider.call_budget``). Bypasses the *guessed*
+  failure cooldown (a retry might work, and a context at the ceiling is urgent) but
+  not an upstream-declared one (``_in_declared_cooldown``): a 429 that names the
+  moment its allowance returns has already answered「重试会不会成功」with no. Honesty:
+  rolling summary may drop process detail — hard identifiers are kept best-effort;
+  near-ceiling cannot shrink an already-mined recency window of huge verbatim turns.
+- **Cooldowns expire on their own terms** — a declared one is capped at
+  ``DECLARED_COOLDOWN_CAP_SECONDS`` (an upstream day reset must not freeze folding
+  for half a day while the chat keeps growing) and is void as soon as the account's
+  key or quota changes (``billing.allowance``), because the refusal it caches was
+  about that account's allowance and not about this conversation.
 - **Watermark** — ``compacted_through`` (the created_at of the last folded message)
   makes a re-fire idempotent and lets a long backlog fold INCREMENTALLY, oldest-first,
   across several passes until it catches up.
@@ -38,6 +48,13 @@ the pass is gated so a trivial fold never spends an LLM call, and ANY failure
 (LLM down, timeout, empty output, quota skip) leaves the stored state untouched
 and returns without raising — post-turn compaction is best-effort enrichment;
 near-ceiling is best-effort too (turn still proceeds if fold cannot run).
+
+Best-effort is not the same as unsaid. Once a chat outgrows the loader's fallback
+window, a fold that keeps failing stops being an unspent optimisation and starts
+deleting the model's early memory of the conversation, in silence, while the
+transcript on screen still shows every turn. ``conversation/context_gap`` decides
+when that has actually happened and :func:`declared_recovery_at` hands it the
+date upstream gave, so the composer can say so.
 """
 
 from __future__ import annotations
@@ -46,9 +63,11 @@ import asyncio
 import time
 from collections.abc import Sequence
 
-from agentcore.billing.gate import run_background_llm
+from agentcore.billing.allowance import allowance_epoch
+from agentcore.billing.gate import BackgroundLlmSkip, run_background_llm
 from agentcore.config import settings
 from agentcore.conversation.failure_visible import export_visible_text
+from agentcore.core.errors import recovery_at_iso
 from agentcore.core.logging import get_logger
 from agentcore.core.text import truncate_head_tail
 from agentcore.db.base import async_session_factory
@@ -59,10 +78,14 @@ from agentcore.db.repositories import (
     TurnMetricsRepository,
 )
 from agentcore.llm import LLMMessage
+from agentcore.llm.background_failure import (
+    declared_recovery_seconds as _declared_recovery_seconds,
+)
 from agentcore.llm.credentials import LLMCredentials
 from agentcore.llm.factory import build_provider
 from agentcore.llm.model_metadata import model_metadata_for
 from agentcore.llm.model_selection import build_selected_request, select_call
+from agentcore.llm.provider.call_budget import complete_within_budget
 from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
 
 logger = get_logger(__name__)
@@ -71,6 +94,11 @@ logger = get_logger(__name__)
 # Folding reads a window and writes structured prose — heavier than a title, so a
 # longer ceiling than the memory extract. On timeout we yield nothing; the state is
 # left intact and the next due turn retries (after failure cooldown).
+# On the post-turn path this doubles as the 429 patience the provider retries
+# against (``complete_within_budget``): a cooldown that fits in here is worth sitting
+# out, and losing the fold to a timeout afterwards costs no more than abandoning it
+# up front. The pre-turn path keeps the same deadline but spends none of it asleep —
+# nobody is watching the first case, and a whole turn is waiting on the second.
 _COMPACT_TIMEOUT_SECONDS = 45.0
 
 
@@ -187,8 +215,15 @@ async def _summarize(
     *,
     model: str,
     conversation_id: str,
+    user_waiting: bool = False,
 ) -> str:
-    """One flash, non-thinking call → the updated rolling summary ("" on failure)."""
+    """One flash, non-thinking call → the updated rolling summary ("" on failure).
+
+    ``user_waiting`` is the pre-turn near-ceiling path: same 45s deadline, but the
+    call may not spend any of it asleep on a ``Retry-After`` — a blocked turn would
+    pay that wait twice (once staring at nothing, once on the retry that no longer
+    fits). See ``llm.provider.call_budget``.
+    """
     system = _COMPACT_SYSTEM_PROMPT.replace(
         "__BUDGET__", str(settings.compaction_summary_char_budget)
     )
@@ -201,8 +236,11 @@ async def _summarize(
         stream=False,
     )
     try:
-        response = await asyncio.wait_for(
-            provider.complete(request), timeout=_COMPACT_TIMEOUT_SECONDS
+        response = await complete_within_budget(
+            provider,
+            request,
+            budget=_COMPACT_TIMEOUT_SECONDS,
+            user_waiting=user_waiting,
         )
     except TimeoutError:
         logger.warning("compaction.timeout", conversation_id=conversation_id)
@@ -237,7 +275,10 @@ async def _is_message_due(conversation_id: str) -> bool:
 
 
 async def compact_conversation(
-    conversation_id: str, *, trigger_input_tokens: int | None = None
+    conversation_id: str,
+    *,
+    trigger_input_tokens: int | None = None,
+    user_waiting: bool = False,
 ) -> bool:
     """Fold this conversation's older turns into its rolling summary. Never raises.
 
@@ -246,9 +287,16 @@ async def compact_conversation(
     verbatim, and folds the rest — but only when there is enough old material to be
     worth an LLM call (``compaction_min_fold_messages``); otherwise it no-ops without
     spending a call. Returns whether a new summary was written.
+
+    ``user_waiting`` marks the pass a turn is blocked on (near-ceiling, pre-turn):
+    it may not sit out an upstream cooldown, only fail fast and let the turn start.
     """
     if not settings.compaction_enabled:
         return False
+    # Whose allowance this pass runs on — resolved with the conversation, and needed
+    # again on the failure path so a cooldown can be retired when that account's key
+    # or quota changes. Stays None when the failure happened before the DB read.
+    user_id: str | None = None
     try:
         async with async_session_factory() as session:
             conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
@@ -289,24 +337,31 @@ async def compact_conversation(
                     fold_msgs,
                     model=model,
                     conversation_id=conversation_id,
+                    user_waiting=user_waiting,
                 )
             finally:
                 close = getattr(provider, "close", None)
                 if close is not None:
                     await close()
 
-        # No usable platform/BYOK key, platform quota exhausted, or auth failed
-        # both sides: skip WITHOUT advancing the watermark so a later pass can retry.
+        # No usable platform/BYOK key, platform allowance spent, or auth failed both
+        # sides: skip WITHOUT advancing the watermark so a later pass can retry. A
+        # refusal that dated its own recovery hands that date over here rather than
+        # leaving us to guess 90 seconds at a wall upstream measured in hours.
         bg = await run_background_llm(user_id, purpose="compaction", runner=_runner)
-        if bg is None:
-            _mark_failure_cooldown(conversation_id)
+        if isinstance(bg, BackgroundLlmSkip):
+            _mark_failure_cooldown(
+                conversation_id,
+                declared_recovery_in=bg.declared_recovery_in,
+                user_id=user_id,
+            )
             return False
         summary = bg.value
 
         # Empty output (timeout / error / refusal): leave the stored state intact and
         # let a later due turn retry after cooldown — never persist a blank summary.
         if not summary.strip():
-            _mark_failure_cooldown(conversation_id)
+            _mark_failure_cooldown(conversation_id, user_id=user_id)
             return False
 
         async with async_session_factory() as session:
@@ -327,7 +382,11 @@ async def compact_conversation(
         )
         return True
     except Exception as e:  # never break anything — the turn already completed
-        _mark_failure_cooldown(conversation_id)
+        _mark_failure_cooldown(
+            conversation_id,
+            declared_recovery_in=_declared_recovery_seconds(e),
+            user_id=user_id,
+        )
         logger.warning("compaction.failed", conversation_id=conversation_id, error=str(e))
         return False
 
@@ -337,34 +396,153 @@ async def compact_conversation(
 # consolidation / approvals). ``_inflight_tasks`` dedupes a burst of due turns onto
 # one pass per conversation and lets the near-ceiling pre-turn path await the same
 # task; ``_failure_cooldown_until`` blocks re-schedule after a failed pass;
-# ``_tasks`` holds references so a pass is not GC'd mid-flight and can be flushed
-# on shutdown.
+# ``_declared_ready_at`` is the subset of those cooldowns upstream itself dated;
+# ``_declared_recovery_at`` is that same date left UNCAPPED, for saying it out loud;
+# ``_cooldown_allowance`` remembers whose allowance each cooldown was armed against,
+# so a key swap or a quota bump retires it (see ``billing.allowance``); ``_tasks``
+# holds references so a pass is not GC'd mid-flight and can be flushed on shutdown.
 _inflight_tasks: dict[str, asyncio.Task] = {}
 _failure_cooldown_until: dict[str, float] = {}
+_declared_ready_at: dict[str, float] = {}
+_declared_recovery_at: dict[str, float] = {}
+_cooldown_allowance: dict[str, tuple[str, int]] = {}
 _tasks: set[asyncio.Task] = set()
 
 
-def _mark_failure_cooldown(conversation_id: str) -> None:
-    """Arm in-process failure cooldown for this conversation (no-op if disabled)."""
-    secs = settings.compaction_failure_cooldown_seconds
-    if secs <= 0:
+# An upstream-dated cooldown is worth obeying; it is not worth obeying literally.
+# The dates cluster at the platform day reset (median 12.9h), and honouring one
+# means this conversation stops being folded for half a day while it keeps growing —
+# a context that outgrows its window is a broken chat, whereas one wasted LLM call
+# per hour is a rounding error against the turns spent in the meantime. So an hour
+# is where taking upstream at its word stops paying: past it we re-ask, cheaply.
+DECLARED_COOLDOWN_CAP_SECONDS = 3600.0
+
+
+def _mark_failure_cooldown(
+    conversation_id: str,
+    *,
+    declared_recovery_in: float | None = None,
+    user_id: str | None = None,
+) -> None:
+    """Arm in-process failure cooldown for this conversation.
+
+    ``declared_recovery_in`` is the cooldown the *failure itself* supplied (see
+    :func:`_declared_recovery_seconds`); it wins over the configured guess whenever it
+    is longer, because 90 seconds is our estimate of「多久后重试才值得」while this is
+    upstream's own answer. It is remembered separately so the near-ceiling path can
+    tell a proven wall from a guessed one — and it holds even when the guess is
+    switched off, since sitting out a wall upstream dated is not a guess. It is also
+    capped at :data:`DECLARED_COOLDOWN_CAP_SECONDS`, and tied to ``user_id``'s
+    allowance epoch so it dies the moment that account's key or quota changes.
+
+    The cap is a *scheduling* decision — keep re-asking hourly rather than freeze a
+    growing chat for half a day — so the un-capped date is kept alongside it. What we
+    tell a user whose history has gone missing has to be upstream's actual answer:
+    「16:00 恢复」when the allowance really returns at 04:00 next day would send them
+    back at 16:05 to the same silence (:func:`declared_recovery_at`).
+    """
+    now = time.monotonic()
+    secs = float(settings.compaction_failure_cooldown_seconds)
+    dated: float | None = None
+    if declared_recovery_in is not None:
+        dated = min(float(declared_recovery_in), DECLARED_COOLDOWN_CAP_SECONDS)
+        secs = max(secs, dated)
+    if dated is None and secs <= 0:
         return
-    _failure_cooldown_until[conversation_id] = time.monotonic() + secs
+    if dated is not None:
+        _declared_ready_at[conversation_id] = now + dated
+        _declared_recovery_at[conversation_id] = now + float(declared_recovery_in or 0.0)
+    if secs > 0:
+        _failure_cooldown_until[conversation_id] = now + secs
+    if user_id:
+        _cooldown_allowance[conversation_id] = (user_id, allowance_epoch(user_id))
 
 
 def _clear_failure_cooldown(conversation_id: str) -> None:
     _failure_cooldown_until.pop(conversation_id, None)
+    _declared_ready_at.pop(conversation_id, None)
+    _declared_recovery_at.pop(conversation_id, None)
+    _cooldown_allowance.pop(conversation_id, None)
+
+
+def _allowance_moved_on(conversation_id: str) -> bool:
+    """True when the account changed its key / quota after this cooldown was armed.
+
+    Both cooldowns rest on the same premise —「上游现在不会接这个账号的调用」— and
+    that premise is about an account, not a conversation. When the user brings a new
+    key (exactly what the 429 copy tells them to do) or an operator lifts the quota,
+    the refusal we cached is about somebody else's allowance; obeying it would leave
+    the chat frozen behind a wall that no longer exists.
+    """
+    owner = _cooldown_allowance.get(conversation_id)
+    if owner is None:
+        return False
+    user_id, epoch = owner
+    return allowance_epoch(user_id) != epoch
 
 
 def _in_failure_cooldown(conversation_id: str) -> bool:
     """True while a prior failure cooldown is still active; expires lazily."""
+    if _allowance_moved_on(conversation_id):
+        _clear_failure_cooldown(conversation_id)
+        return False
     until = _failure_cooldown_until.get(conversation_id)
     if until is None:
         return False
     if time.monotonic() >= until:
-        _failure_cooldown_until.pop(conversation_id, None)
+        # This one always outlasts the dated cooldown (it is armed at the longer of
+        # the two), so its expiry retires the whole record — owner included.
+        _clear_failure_cooldown(conversation_id)
         return False
     return True
+
+
+def _in_declared_cooldown(conversation_id: str) -> float | None:
+    """Seconds still left of an upstream-dated cooldown, or ``None``; expires lazily.
+
+    The narrow subset of :func:`_in_failure_cooldown` that even the urgent
+    near-ceiling path must respect — here a retry is not a long shot, it is a call
+    upstream has already refused for the next N seconds. Capped at an hour, and
+    void once the account's allowance has changed under it.
+    """
+    if _allowance_moved_on(conversation_id):
+        _clear_failure_cooldown(conversation_id)
+        return None
+    ready_at = _declared_ready_at.get(conversation_id)
+    if ready_at is None:
+        return None
+    remaining = ready_at - time.monotonic()
+    if remaining <= 0:
+        _declared_ready_at.pop(conversation_id, None)
+        return None
+    return remaining
+
+
+def declared_recovery_at(conversation_id: str) -> str | None:
+    """ISO-8601 UTC instant upstream dated this conversation's folding to resume, or ``None``.
+
+    The honesty read of :func:`_mark_failure_cooldown`'s record, and the only one that
+    uses the *un-capped* date: it answers「什么时候能好」for a user, not「多久后重试才
+    值得」for the scheduler. ``None`` whenever we cannot answer without guessing — the
+    refusal never named a moment, that moment has passed, the account's allowance moved
+    on, or this process simply is not the one that took the refusal (the record is
+    in-process, same posture as the cooldowns it rides along with). Callers must treat
+    a ``None`` as「不知道」and say so, never as「马上就好」.
+
+    The instant travels un-worded (:func:`~agentcore.core.errors.utc_moment_iso`): the
+    reader's timezone is the client's to know, not ours to guess.
+    """
+    if _allowance_moved_on(conversation_id):
+        _clear_failure_cooldown(conversation_id)
+        return None
+    ready_at = _declared_recovery_at.get(conversation_id)
+    if ready_at is None:
+        return None
+    remaining = ready_at - time.monotonic()
+    if remaining <= 0:
+        _declared_recovery_at.pop(conversation_id, None)
+        return None
+    return recovery_at_iso(remaining)
 
 
 def near_context_ceiling(input_tokens: int, context_length: int | None) -> bool:
@@ -381,11 +559,15 @@ def near_context_ceiling(input_tokens: int, context_length: int | None) -> bool:
     return input_tokens >= settings.compaction_near_context_tokens
 
 
-def _spawn_compact(conversation_id: str, input_tokens: int) -> asyncio.Task | None:
+def _spawn_compact(
+    conversation_id: str, input_tokens: int, *, user_waiting: bool = False
+) -> asyncio.Task | None:
     """Arm one compact task; ``None`` if this conversation already has one in flight."""
     if conversation_id in _inflight_tasks:
         return None
-    task = asyncio.ensure_future(_run(conversation_id, input_tokens))
+    task = asyncio.ensure_future(
+        _run(conversation_id, input_tokens, user_waiting=user_waiting)
+    )
     _inflight_tasks[conversation_id] = task
     _tasks.add(task)
 
@@ -414,7 +596,7 @@ async def schedule_compaction_if_due(conversation_id: str, input_tokens: int) ->
     if not settings.compaction_enabled:
         return
     if _in_failure_cooldown(conversation_id):
-        logger.debug("compaction.cooldown_skip", conversation_id=conversation_id)
+        logger.debug("compaction.cooldown_skip", conversation_id=conversation_id, path="schedule")
         return
     if conversation_id in _inflight_tasks:
         return
@@ -442,13 +624,31 @@ async def ensure_compaction_before_turn(
 ) -> bool:
     """Await fold pass(es) when last-turn tokens are near the model window.
 
-    Never raises. Bypasses failure cooldown (near-ceiling is urgent). Returns
-    whether any pass wrote a new summary. Caps at ``compaction_near_max_passes``
-    so a long backlog still advances incrementally without unbounded pre-turn wait.
+    Never raises. Bypasses the guessed failure cooldown — near-ceiling is urgent and
+    the next attempt may well succeed — but yields to an upstream-dated one, which is
+    the same urgency meeting a refusal already issued: every turn until that moment
+    would otherwise block on a fold guaranteed to fail. Returns whether any pass wrote
+    a new summary. Caps at ``compaction_near_max_passes`` so a long backlog still
+    advances incrementally without unbounded pre-turn wait.
+
+    The passes it starts are marked ``user_waiting``: a turn is blocked on them, so
+    they fail on an upstream cooldown instead of sleeping through it. A pass already
+    in flight from the post-turn scheduler keeps the patience it was armed with —
+    adopting it is still better than folding twice against one watermark, and its own
+    ``wait_for`` bounds the wait either way.
     """
     if not settings.compaction_enabled:
         return False
     if not near_context_ceiling(input_tokens, context_length):
+        return False
+    declared_remaining = _in_declared_cooldown(conversation_id)
+    if declared_remaining is not None:
+        logger.debug(
+            "compaction.cooldown_skip",
+            conversation_id=conversation_id,
+            path="near_ceiling",
+            declared_remaining_sec=round(declared_remaining, 1),
+        )
         return False
 
     wrote_any = False
@@ -464,7 +664,7 @@ async def ensure_compaction_before_turn(
                 if not ok:
                     break
                 continue
-            task = _spawn_compact(conversation_id, input_tokens)
+            task = _spawn_compact(conversation_id, input_tokens, user_waiting=True)
             if task is None:
                 existing = _inflight_tasks.get(conversation_id)
                 if existing is None:
@@ -536,8 +736,12 @@ async def maybe_compact_near_ceiling(
         return False
 
 
-async def _run(conversation_id: str, input_tokens: int) -> bool:
-    return await compact_conversation(conversation_id, trigger_input_tokens=input_tokens)
+async def _run(
+    conversation_id: str, input_tokens: int, *, user_waiting: bool = False
+) -> bool:
+    return await compact_conversation(
+        conversation_id, trigger_input_tokens=input_tokens, user_waiting=user_waiting
+    )
 
 
 async def shutdown_compaction() -> None:

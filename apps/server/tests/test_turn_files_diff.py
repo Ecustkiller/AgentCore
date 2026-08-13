@@ -1,5 +1,7 @@
 """Tests for A1+ turn baseline / files diff (cloud + local)."""
 
+import os
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -11,6 +13,7 @@ from agentcore.workspace.handoff_diff import diff_archives, read_archive_entries
 from agentcore.workspace.turn_baseline import (
     LOCAL_BASELINE_MAX_FILES,
     local_baseline_path,
+    local_baselines_root,
     maybe_capture_turn_baseline,
 )
 from agentcore.workspace.turn_diff import (
@@ -135,9 +138,7 @@ async def test_local_diff_and_restore(tmp_path: Path):
     (root / "a.txt").write_text("new\n", encoding="utf-8")
     (root / "b.txt").write_text("added\n", encoding="utf-8")
 
-    diff = await compute_local_turn_files_diff(
-        workspace_root=root, message_id="m-diff"
-    )
+    diff = await compute_local_turn_files_diff(workspace_root=root, message_id="m-diff")
     assert diff.available is True
     assert diff.baseline_snapshot_id == "m-diff"
     by_path = {c.path: c for c in diff.changes}
@@ -159,17 +160,13 @@ async def test_local_diff_unavailable_without_zip(tmp_path: Path):
     root = tmp_path / "ws"
     root.mkdir()
     (root / "a.txt").write_text("x", encoding="utf-8")
-    diff = await compute_local_turn_files_diff(
-        workspace_root=root, message_id="missing"
-    )
+    diff = await compute_local_turn_files_diff(workspace_root=root, message_id="missing")
     assert diff.available is False
     assert diff.changes == []
 
 
 @pytest.mark.asyncio
-async def test_cloud_location_still_skips_without_snapshot_setting(
-    tmp_path: Path, monkeypatch
-):
+async def test_cloud_location_still_skips_without_snapshot_setting(tmp_path: Path, monkeypatch):
     """Server location without snapshot feature → None (unchanged cloud gate)."""
     from agentcore.config import settings
 
@@ -189,6 +186,132 @@ async def test_cloud_location_still_skips_without_snapshot_setting(
 def test_local_baseline_max_files_aligned_with_desktop_gate():
     # Keep in sync with apps/desktop/.../fs/constants.ts ARCHIVE_MAX_FILES.
     assert LOCAL_BASELINE_MAX_FILES == 20_000
+
+
+def test_local_baseline_retention_aligned_with_desktop_mirror():
+    """Desktop main cannot read settings — it mirrors these two in constants.ts.
+
+    Keep in sync with ``BASELINE_KEEP_MAX`` / ``BASELINE_MAX_AGE_MS``.
+    """
+    from agentcore.config.workspace import WorkspaceSettings
+
+    fields = WorkspaceSettings.model_fields
+    assert fields["workspace_local_baseline_max"].default == 20
+    assert fields["workspace_local_baseline_retention_days"].default == 30
+
+
+def _make_workspace(tmp_path: Path) -> Path:
+    root = tmp_path / "ws"
+    root.mkdir()
+    (root / "a.txt").write_text("x", encoding="utf-8")
+    return root
+
+
+def _stub_baseline(root: Path, snapshot_id: str, *, age_minutes: float) -> Path:
+    """A stand-in baseline zip with a controlled mtime (prune orders by mtime)."""
+    path = local_baseline_path(root, snapshot_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"PK\x03\x04stub")
+    stamp = time.time() - age_minutes * 60
+    os.utime(path, (stamp, stamp))
+    return path
+
+
+async def _capture(root: Path, message_id: str) -> str | None:
+    return await maybe_capture_turn_baseline(
+        user_id="u1",
+        folder_id=None,
+        conversation_id="c1",
+        message_id=message_id,
+        backend=SimpleNamespace(location="local"),
+        workspace_root=root,
+    )
+
+
+def _baseline_ids(root: Path) -> set[str]:
+    return {p.stem for p in local_baselines_root(root).glob("*.zip")}
+
+
+@pytest.mark.asyncio
+async def test_local_baseline_capture_prunes_beyond_count(tmp_path: Path, monkeypatch):
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "workspace_local_baseline_max", 3)
+    root = _make_workspace(tmp_path)
+    for i in range(5):
+        _stub_baseline(root, f"old-{i}", age_minutes=60 - i)
+
+    assert await _capture(root, "msg-new") == "msg-new"
+    # Newest three survive: this turn's baseline plus the two youngest olds.
+    assert _baseline_ids(root) == {"msg-new", "old-4", "old-3"}
+
+
+@pytest.mark.asyncio
+async def test_local_baseline_capture_prunes_expired(tmp_path: Path, monkeypatch):
+    from agentcore.config import settings
+
+    # Count cap wide open so only the TTL leg can delete anything.
+    monkeypatch.setattr(settings, "workspace_local_baseline_max", 100)
+    monkeypatch.setattr(settings, "workspace_local_baseline_retention_days", 30)
+    root = _make_workspace(tmp_path)
+    _stub_baseline(root, "stale", age_minutes=31 * 24 * 60)
+    _stub_baseline(root, "fresh", age_minutes=29 * 24 * 60)
+
+    assert await _capture(root, "msg-new") == "msg-new"
+    assert _baseline_ids(root) == {"msg-new", "fresh"}
+
+
+@pytest.mark.asyncio
+async def test_local_baseline_capture_keeps_this_turn_under_clock_skew(tmp_path: Path, monkeypatch):
+    """A future-dated zip must not push this turn's own baseline over the cap.
+
+    Restored backups / clock skew can leave an mtime ahead of now, which would
+    otherwise sort above the fresh capture and make the current turn the one
+    that gets pruned — i.e. exactly the turn the user can still roll back.
+    """
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "workspace_local_baseline_max", 1)
+    root = _make_workspace(tmp_path)
+    _stub_baseline(root, "future", age_minutes=-24 * 60)
+
+    assert await _capture(root, "msg-new") == "msg-new"
+    assert "msg-new" in _baseline_ids(root)
+
+
+@pytest.mark.asyncio
+async def test_local_baseline_prune_never_touches_named_versions(tmp_path: Path, monkeypatch):
+    from agentcore.config import settings
+
+    monkeypatch.setattr(settings, "workspace_local_baseline_max", 1)
+    monkeypatch.setattr(settings, "workspace_local_baseline_retention_days", 1)
+    root = _make_workspace(tmp_path)
+    _stub_baseline(root, "old", age_minutes=90 * 24 * 60)
+    version_dir = root / "AgentCore" / "versions" / "20250101T000000Z-abcd1234"
+    version_dir.mkdir(parents=True)
+    (version_dir / "content.zip").write_bytes(b"PK\x03\x04version")
+    (version_dir / "meta.json").write_text("{}", encoding="utf-8")
+    ancient = time.time() - 400 * 24 * 3600
+    for name in ("content.zip", "meta.json"):
+        os.utime(version_dir / name, (ancient, ancient))
+
+    assert await _capture(root, "msg-new") == "msg-new"
+    assert _baseline_ids(root) == {"msg-new"}
+    # User-named versions are never auto-pruned, however old they are.
+    assert (version_dir / "content.zip").is_file()
+    assert (version_dir / "meta.json").is_file()
+
+
+@pytest.mark.asyncio
+async def test_local_baseline_prune_failure_never_blocks_the_turn(tmp_path: Path, monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise OSError("baselines zone unreadable")
+
+    monkeypatch.setattr("agentcore.workspace.turn_baseline.prune_local_baselines", boom)
+    root = _make_workspace(tmp_path)
+
+    assert await _capture(root, "msg-new") == "msg-new"
+    assert local_baseline_path(root, "msg-new").is_file()
 
 
 @pytest.mark.asyncio

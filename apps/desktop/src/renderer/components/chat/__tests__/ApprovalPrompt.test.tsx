@@ -363,6 +363,38 @@ describe("ApprovalCard CTA (工具审批 A+B)", () => {
     expect(onceIdx).toBeLessThan(turnIdx);
   });
 
+  it("点之前先说清「本轮」有多大：同类、含队员、一个回合可能几十次", () => {
+    renderCard(card());
+    const notice = screen.getByTestId("turn-grant-scope-notice").textContent;
+    expect(notice).toContain("到这次回答结束前");
+    expect(notice).toContain("队员");
+    expect(notice).toContain("几十次");
+  });
+
+  it("文件类还要说出比按钮字面更宽的那部分（含 git 写入）", () => {
+    renderCard(
+      card({
+        toolName: "file_write",
+        arguments: { path: "a.txt", content: "x" },
+      }),
+    );
+    const notice = screen.getByTestId("turn-grant-scope-notice").textContent;
+    expect(notice).toContain("所有文件改动");
+    expect(notice).toContain("git 写入");
+  });
+
+  it("熔断一次性卡没有轮内授权 → 不出现「本轮」范围说明", () => {
+    renderCard(
+      card({
+        arguments: {
+          command: "rm -rf /",
+          force_one_shot: true,
+        },
+      }),
+    );
+    expect(screen.queryByTestId("turn-grant-scope-notice")).toBeNull();
+  });
+
   it("switching to 托管 patches cache and reloads permission change lines", async () => {
     seedSameToolApprovals(3);
     const managed = {

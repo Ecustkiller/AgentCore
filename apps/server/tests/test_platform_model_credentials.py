@@ -290,6 +290,22 @@ def _mock_keyless(monkeypatch):
             )
         ),
     )
+    # Keyless ⇒ no user combination either: a system preset, every slot follow-null.
+    from agentcore.llm.model_profiles import ExpandedProfile
+
+    monkeypatch.setattr(
+        "agentcore.llm.model_profiles.LlmModelProfileService.expand",
+        AsyncMock(
+            return_value=ExpandedProfile(
+                profile_id="preset",
+                name="平台预置",
+                kind="system",
+                main=ModelSelection(
+                    model="relay-b", origin="platform", provider_id=None
+                ),
+            )
+        ),
+    )
 
 
 @pytest.mark.asyncio

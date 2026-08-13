@@ -2,14 +2,23 @@ import { BASE_URL, api } from "@/services/api";
 import {
   type FilePreview,
   type WorkspaceEditDoc,
-  type WorkspaceFile,
+  type WorkspaceListing,
+  type WorkspaceSnapshot,
+  type WorkspaceTrashEntry,
   type WorkspaceWriteOutcome,
   authedFetch,
+  blobToBase64,
   decodePreviewResponse,
   encodePath,
+  listQuery,
   saveBlob,
+  toSnapshot,
+  toTrashEntry,
+  toWorkspaceFile,
 } from "@/services/workspaceHttp";
 import type { components } from "@/types/api.generated";
+
+export type { WorkspaceSnapshot, WorkspaceTrashEntry };
 
 type Schemas = components["schemas"];
 
@@ -54,15 +63,23 @@ const wsPath = (wsId: string): string =>
   `/v1/workspaces/${encodeURIComponent(wsId)}`;
 const wsUrl = (wsId: string): string => `${BASE_URL}${wsPath(wsId)}`;
 
-/** List a workspace's entries (recursive POSIX paths). */
+/**
+ * List one directory of a workspace (`dir` omitted / `"."` = root).
+ *
+ * Recursive pulls the whole subtree in one call; either way the server's entry
+ * ceiling can bite, so the caller gets `truncated` alongside the entries.
+ */
 export async function wsListFiles(
   wsId: string,
-  recursive = true,
-): Promise<WorkspaceFile[]> {
+  opts: { recursive?: boolean; dir?: string } = {},
+): Promise<WorkspaceListing> {
   const res = await api.get<Schemas["WorkspaceFileListResponse"]>(
-    `${wsPath(wsId)}/files?recursive=${recursive}`,
+    `${wsPath(wsId)}/files?${listQuery(opts)}`,
   );
-  return res.data.map((e) => ({ path: e.path, isDir: e.is_dir }));
+  return {
+    files: res.data.map(toWorkspaceFile),
+    truncated: res.truncated ?? false,
+  };
 }
 
 /**
@@ -169,6 +186,19 @@ export async function wsDownloadFile(
   await saveBlob(await res.blob(), filename);
 }
 
+/**
+ * Fetch a workspace file as a Blob — the raw-bytes twin of {@link wsDownloadFile}
+ * (which routes the same bytes into a save dialog). Mirrors
+ * `fetchWorkspaceFileBlob` on the conversation-keyed client; only addressing differs.
+ */
+export async function wsFetchFileBlob(
+  wsId: string,
+  path: string,
+): Promise<Blob> {
+  const res = await authedFetch(`${wsUrl(wsId)}/files/${encodePath(path)}`);
+  return res.blob();
+}
+
 /** Read a workspace file for read-only in-panel preview. */
 export async function wsReadFile(
   wsId: string,
@@ -178,22 +208,28 @@ export async function wsReadFile(
   return decodePreviewResponse(res, { path });
 }
 
+// --- Snapshots · AgentCore/trash, addressed by ws id ---
+//
+// The ws-id twins of the conversation-scoped calls in `services/workspace`: same
+// server service layer, same storage key, only the addressing differs. They exist
+// because the file hub browses workspaces without a conversation in hand — without
+// them 版本 / 软删区 / 导出 are only reachable by detouring through some chat's side
+// dock. The server refuses these (409) for local workspaces (files live on the
+// user's machine) and for `shared:` spaces (v1 = file CRUD only), so callers gate
+// the entry points instead of letting the user click into a 409.
+
 /** Server snapshot payload (`/v1/workspaces/{ws_id}/snapshots`). */
 type BackendSnapshot = Schemas["SnapshotSummary"];
 
-export interface WorkspaceSnapshot {
-  snapshotId: string;
-  label: string | null;
-  createdAt: string;
-  sizeBytes: number;
+/** List a workspace's snapshots (newest first). */
+export async function wsListSnapshots(
+  wsId: string,
+): Promise<WorkspaceSnapshot[]> {
+  const res = await api.get<Schemas["SnapshotListResponse"]>(
+    `${wsPath(wsId)}/snapshots`,
+  );
+  return res.data.map(toSnapshot);
 }
-
-const toSnapshot = (s: BackendSnapshot): WorkspaceSnapshot => ({
-  snapshotId: s.snapshot_id,
-  label: s.label,
-  createdAt: s.created_at,
-  sizeBytes: s.size_bytes,
-});
 
 /** Take a manual snapshot of a cloud workspace addressed by ws id. */
 export async function wsCreateSnapshot(
@@ -206,15 +242,54 @@ export async function wsCreateSnapshot(
   return toSnapshot(res);
 }
 
-/** blob → base64（分块，避免大文件撑爆调用栈）。 */
-async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
+/** Restore a cloud workspace to a snapshot (overlay over the current files). */
+export async function wsRestoreSnapshot(
+  wsId: string,
+  snapshotId: string,
+): Promise<void> {
+  await api.post(
+    `${wsPath(wsId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
+  );
+}
+
+/** Download a snapshot's zip archive and save it via the browser. */
+export async function wsDownloadSnapshot(
+  wsId: string,
+  snapshotId: string,
+): Promise<void> {
+  const res = await authedFetch(
+    `${wsUrl(wsId)}/snapshots/${encodeURIComponent(snapshotId)}/download`,
+  );
+  await saveBlob(await res.blob(), `workspace-${snapshotId}.zip`);
+}
+
+/** Snapshot the workspace's current files and download the lot as one zip. */
+export async function wsExportZip(wsId: string): Promise<void> {
+  const snap = await wsCreateSnapshot(wsId, "导出");
+  await wsDownloadSnapshot(wsId, snap.snapshotId);
+}
+
+/** List AgentCore/trash for a cloud workspace (newest first). */
+export async function wsListTrash(
+  wsId: string,
+): Promise<{ entries: WorkspaceTrashEntry[]; retentionDays: number }> {
+  const res = await api.get<Schemas["TrashListResponse"]>(
+    `${wsPath(wsId)}/trash`,
+  );
+  return {
+    entries: res.data.map(toTrashEntry),
+    retentionDays: res.retention_days,
+  };
+}
+
+/** Restore one AgentCore/trash entry to its original relative path. */
+export async function wsRestoreTrash(
+  wsId: string,
+  entryId: string,
+): Promise<void> {
+  await api.post(
+    `${wsPath(wsId)}/trash/${encodeURIComponent(entryId)}/restore`,
+  );
 }
 
 /**

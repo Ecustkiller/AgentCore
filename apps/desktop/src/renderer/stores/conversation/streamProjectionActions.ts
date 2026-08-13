@@ -77,12 +77,16 @@ export function createStreamProjectionActions(
   const patchConversation = createPatchConversation(set);
 
   return {
-    appendToLastMessage: (chunk, conversationId) =>
+    appendToLastMessage: (chunk, conversationId, opts) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last) return null;
-        const lane = foldContentDelta(messageLaneFromMessage(last), chunk);
+        const lane = foldContentDelta(
+          messageLaneFromMessage(last),
+          chunk,
+          opts?.replace,
+        );
         messages[messages.length - 1] = {
           ...last,
           content: lane.content,
@@ -106,12 +110,16 @@ export function createStreamProjectionActions(
         return { messages };
       }),
 
-    appendReasoningToLastMessage: (chunk, conversationId) =>
+    appendReasoningToLastMessage: (chunk, conversationId, opts) =>
       patchConversation(conversationId, (rt) => {
         const messages = [...rt.messages];
         const last = messages[messages.length - 1];
         if (!last) return null;
-        const lane = foldReasoningDelta(messageLaneFromMessage(last), chunk);
+        const lane = foldReasoningDelta(
+          messageLaneFromMessage(last),
+          chunk,
+          opts?.replace,
+        );
         messages[messages.length - 1] = {
           ...last,
           reasoning: lane.reasoning,

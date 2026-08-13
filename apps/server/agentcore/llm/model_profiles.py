@@ -10,8 +10,10 @@ are virtual well-known ids **projected** from
 :func:`agentcore.llm.catalog.platform_listable_model_ids` (recognition) /
 :func:`agentcore.llm.catalog.visible_platform_listable_model_ids` (list / select).
 Each listable platform model id → one system combo (main = that platform model;
-worker / background / vision follow-null). Display names come from
-:func:`agentcore.llm.catalog.platform_model_display_name`. Stable ids use
+worker / background / vision follow-null). Combo names come from
+:func:`agentcore.llm.catalog.platform_model_label` — display name **plus** curated
+badge, since a combo name is a lone string and the free / priced SKUs of one model
+share a display name. Stable ids use
 ``uuid5(NAMESPACE_URL, "agentcore:platform-preset:{model_id}")`` — no hardcoded
 product UUID table.
 
@@ -114,9 +116,9 @@ def is_system_profile_id(profile_id: str | None) -> bool:
 
 
 def _system_preset_display_name(model_id: str) -> str:
-    from agentcore.llm.catalog import platform_model_display_name
+    from agentcore.llm.catalog import platform_model_label
 
-    return platform_model_display_name(model_id)
+    return platform_model_label(model_id)
 
 
 def _visible_system_ids() -> list[str]:
@@ -619,7 +621,7 @@ class LlmModelProfileService:
 
     async def _expand_logical_fallback(self, user_id: str) -> ExpandedProfile:
         """Visible BYOK combo or provider-first; name/origin match runtime (no DB write)."""
-        from agentcore.llm.catalog import platform_model_display_name
+        from agentcore.llm.catalog import platform_model_label
 
         rows = await self._repo.list_for_user(user_id, include_implicit=False)
         if rows:
@@ -627,7 +629,7 @@ class LlmModelProfileService:
         main = await _provider_first_fallback(self._session, user_id)
         return ExpandedProfile(
             profile_id=main.provider_id or "",
-            name=platform_model_display_name(main.model),
+            name=platform_model_label(main.model),
             kind="implicit",
             main=main,
             worker=None,

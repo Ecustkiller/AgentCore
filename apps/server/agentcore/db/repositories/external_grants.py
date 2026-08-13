@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
-from agentcore.db.models import ConversationExternalGrant
+from agentcore.db.models import Conversation, ConversationExternalGrant
 
 
 class ExternalGrantRepository:
@@ -28,6 +28,31 @@ class ExternalGrantRepository:
         )
         return result.scalars().all()
 
+    async def list_root_ids_for_device(
+        self, *, user_id: str, device_id: str
+    ) -> list[str]:
+        """Root ids this device registered, across the user's live conversations.
+
+        Read on fulfill (re)connect to rebuild that session's declared roots. The
+        join scopes by owner so a device id guessed by another account cannot
+        widen its own routing, and skips soft-deleted conversations whose grants
+        are on their way out anyway.
+        """
+        result = await self._session.execute(
+            select(ConversationExternalGrant.root_id)
+            .join(
+                Conversation,
+                Conversation.id == ConversationExternalGrant.conversation_id,
+            )
+            .where(
+                ConversationExternalGrant.device_id == device_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .distinct()
+        )
+        return [row for row in result.scalars().all() if row]
+
     async def upsert(
         self,
         *,
@@ -36,8 +61,15 @@ class ExternalGrantRepository:
         alias: str,
         label: str,
         mode: str,
+        device_id: str | None = None,
     ) -> ConversationExternalGrant:
-        """Insert or refresh by ``root_id`` (alias stable on same root)."""
+        """Insert or refresh by ``root_id`` (alias stable on same root).
+
+        A re-registration from another install moves the binding: the folder is
+        on whichever machine just proved it can resolve the path. A call without
+        a device (non-desktop caller) leaves the existing binding alone rather
+        than erasing the only record of where the folder lives.
+        """
         result = await self._session.execute(
             select(ConversationExternalGrant).where(
                 ConversationExternalGrant.conversation_id == conversation_id,
@@ -49,6 +81,8 @@ class ExternalGrantRepository:
         if row is not None:
             row.label = label or row.label
             row.mode = mode
+            if device_id:
+                row.device_id = device_id
             row.updated_at = now
             await self._session.commit()
             await self._session.refresh(row)
@@ -61,6 +95,7 @@ class ExternalGrantRepository:
             root_id=root_id,
             label=label or alias,
             mode=mode,
+            device_id=device_id,
             created_at=now,
             updated_at=now,
         )

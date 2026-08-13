@@ -44,55 +44,18 @@ function finalizeRunningExecutionSlots(
 }
 
 /**
- * Clear-then-fold prep: drop every assistant after ``userMessageId`` from the
- * conversation slice **and** wipe their process/execution slots so a full journal
- * replay cannot double-fold tools / team graph (流式回复持久化 §3.6).
- */
-function clearAfterUserForReplay(
-  conversationId: string,
-  userMessageId: string,
-): void {
-  const rt = getRuntime(conversationId);
-  const idx = rt.messages.findIndex((m) => m.id === userMessageId);
-  if (idx === -1) return;
-  const exec = useExecutionStore.getState();
-  for (const m of rt.messages.slice(idx + 1)) {
-    if (m.role !== "assistant") continue;
-    exec.clearExecution(m.id);
-    if (m.serverMessageId && m.serverMessageId !== m.id) {
-      exec.clearExecution(m.serverMessageId);
-    }
-  }
-  const store = useConversationStore.getState();
-  store.truncateAfter(userMessageId, conversationId);
-  store.createAssistantMessage(conversationId);
-}
-
-/**
- * Clear-then-fold prep for any full-turn replay that lands on a turn we already
- * hold a partial of (rejoin / 对话级订阅让位后重连). Without it the replay appends
- * its transcript onto the partial and the reply reads twice.
- *
- * @returns whether a partial was actually reset (false = nothing to anchor on).
- */
-export function resetPartialTurnForReplay(conversationId: string): boolean {
-  const lastUser = lastUserMessageOf(conversationId);
-  if (!lastUser) return false;
-  clearAfterUserForReplay(conversationId, lastUser.id);
-  return true;
-}
-
-/**
  * Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b).
  *
  * Post-decoupling (slice 1a) a dropped connection no longer kills a turn — it
  * runs detached + persists — so a transport drop must RECONNECT, not resend (a
- * resend / regenerate would double-run a turn that is still alive). Resets the
- * partial assistant bubble (the replay re-sends the full transcript-so-far, so
- * keeping the partial would double it), then attaches: replay + live tail. On
- * `"none"` the run already finished — reload the persisted transcript (its reply
- * is saved). If reconnect itself drops, surface a banner explaining the drop
- * (no one-click reconnect; auto rejoin / reopen remain available).
+ * resend / regenerate would double-run a turn that is still alive). Attaches as-is:
+ * replay + live tail. On `"none"` the run already finished — reload the persisted
+ * transcript (its reply is saved). If reconnect itself drops, surface a banner
+ * explaining the drop (no one-click reconnect; auto rejoin / reopen remain available).
+ *
+ * **不在这里清屏。** 手上这半场要不要抹，由 attach 段首的 ``full_replay`` 说了算
+ * （``streamConversation.foldAttachSegment``）：服务端认得我们的游标时只补游标之后的
+ * 事实，抢先清掉上半场就再也补不回来了——那正是掉线重连后回合前半段永久消失的成因。
  *
  * Returns `true` when handled (reattached / reloaded a saved reply / banner shown);
  * `false` only when there is no turn to rejoin and nothing was persisted, so the
@@ -105,24 +68,6 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
   const store = useConversationStore.getState();
   store.clearError(conversationId);
 
-  // Keep REST/journal projection on the graph while attach catch-up buffers, so
-  // already-completed workers do not blank out then re-animate running→completed.
-  const priorAssistant = [...getRuntime(conversationId).messages]
-    .reverse()
-    .find((m) => m.role === "assistant");
-  const journalSnap = priorAssistant?.runs ?? null;
-
-  // Drop any partial assistant bubble + process/execution so the full journal
-  // replay rebuilds cleanly (clear-then-fold · §3.6).
-  clearAfterUserForReplay(conversationId, lastUser.id);
-
-  if (journalSnap) {
-    const mid = getRuntime(conversationId).messages.at(-1)?.id;
-    if (mid) {
-      useExecutionStore.getState().hydrateFromJournal(mid, journalSnap);
-    }
-  }
-
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
   beginTurnPreflight(conversationId);
@@ -130,8 +75,8 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
     const outcome = await attachConversation(conversationId, ac.signal);
     if (outcome === "attached") return true;
     // No live run — the detached turn already finished + persisted. Reload it so
-    // the placeholder is replaced by the saved reply. Clear generating first so
-    // the whole-window write gate does not reject the reload.
+    // the saved reply replaces whatever partial we still hold. Clear generating
+    // first so the whole-window write gate does not reject the reload.
     useConversationStore.getState().setGenerating(false, conversationId);
     await loadLatestWindow(conversationId);
     const last = getRuntime(conversationId).messages.at(-1);
@@ -313,8 +258,8 @@ export async function settleCloudRunningAssistant(
  * (send new turn); not a resume affordance.
  *
  * - Last message is user + liveRunning → bare attach (``message_start`` opens bubble).
- * - Last message is running assistant + liveRunning → clear-then-fold rejoin (overlay
- *   partial already painted; attach replaces it without double-fold).
+ * - Last message is running assistant + liveRunning → rejoin; the attach 段首 decides
+ *   whether that partial is reset or continued (never double-folded).
  * - Last message is running assistant but no live / pause → ghost → interrupted.
  */
 export async function attachOnOpen(conversationId: string): Promise<void> {

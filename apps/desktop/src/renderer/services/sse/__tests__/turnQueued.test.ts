@@ -1,6 +1,5 @@
 import { notifyInfo } from "@/lib/toast";
 import { handleMessageStreamEvent } from "@/services/sse/handlers/messageStream";
-import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,12 +10,7 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
-vi.mock("@/services/turns/reconcileQueuedTurns", () => ({
-  reconcileQueuedTurns: vi.fn(() => Promise.resolve()),
-}));
-
 const notifyInfoMock = vi.mocked(notifyInfo);
-const reconcileMock = vi.mocked(reconcileQueuedTurns);
 const CID = "conv-turn-queued";
 
 beforeEach(() => {
@@ -50,7 +44,7 @@ describe("turn_queued · live 对齐 fold（EPHEMERAL）", () => {
     expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
-  it("条上缺 queue_id → 触发 GET 对账（升队 / 多端）", () => {
+  it("条上缺 queue_id 也不回头拉：整队快照走设备通道自己会到", () => {
     handleMessageStreamEvent(
       {
         type: "turn_queued",
@@ -64,31 +58,7 @@ describe("turn_queued · live 对齐 fold（EPHEMERAL）", () => {
       },
       { conversationId: CID, source: "server" },
     );
-    expect(reconcileMock).toHaveBeenCalledWith(CID);
-  });
-
-  it("条上已有 queue_id（本端 midFlight upsert）→ 不对账", () => {
-    useQueuedTurnsStore.getState().upsert({
-      queueId: "q-local",
-      conversationId: CID,
-      content: "本端已写入",
-      position: 1,
-      queueDepth: 1,
-    });
-    handleMessageStreamEvent(
-      {
-        type: "turn_queued",
-        timestamp: "",
-        payload: {
-          queue_id: "q-local",
-          position: 1,
-          queue_depth: 1,
-          conversation_id: CID,
-        },
-      },
-      { conversationId: CID, source: "server" },
-    );
-    expect(reconcileMock).not.toHaveBeenCalled();
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });
 
   it("多条普通排队亦不弹 toast", () => {
@@ -335,8 +305,9 @@ describe("turn_queue_started · 契约出队清轻态", () => {
 });
 
 /**
- * 队里少一项，剩下几条的「第 N/M」就过期了——出队 / 取消可能来自另一端，本端算不出新序，
- * 只能拉 GET 权威（禁轮询：只在信号后拉；空队则一趟都不发）。
+ * 队里少一项，剩下几条的「第 N/M」就过期了——但本端不去拉：服务端每次改队都把整队
+ * 快照推给这个账号的每台在线设备（`turn_queue_snapshot`），序号在那边就已算好。
+ * 这条流只负责把出队 / 取消那一条即时摘掉，别让它在快照到达前还挂着。
  */
 describe("少一项后的重排（云对话多端同权 B2 · 验收 5）", () => {
   function queueTwo(): void {
@@ -356,7 +327,7 @@ describe("少一项后的重排（云对话多端同权 B2 · 验收 5）", () =
     });
   }
 
-  it("另一端取消中间一项 → 剩余条拉 GET 重排", () => {
+  it("另一端取消中间一项 → 本端只摘掉那条，不发请求", () => {
     queueTwo();
     handleMessageStreamEvent(
       {
@@ -366,10 +337,11 @@ describe("少一项后的重排（云对话多端同权 B2 · 验收 5）", () =
       },
       { conversationId: CID, source: "server" },
     );
-    expect(reconcileMock).toHaveBeenCalledWith(CID);
+    const left = useQueuedTurnsStore.getState().list(CID);
+    expect(left.map((e) => e.queueId)).toEqual(["q-b"]);
   });
 
-  it("出队开跑后仍有剩余 → 同样重排", () => {
+  it("出队开跑后仍有剩余 → 同样只摘掉出队那条", () => {
     queueTwo();
     handleMessageStreamEvent(
       {
@@ -383,25 +355,7 @@ describe("少一项后的重排（云对话多端同权 B2 · 验收 5）", () =
       },
       { conversationId: CID, source: "server" },
     );
-    expect(reconcileMock).toHaveBeenCalledWith(CID);
-  });
-
-  it("清空到空队 → 无序可重排，不发请求", () => {
-    useQueuedTurnsStore.getState().upsert({
-      queueId: "q-only",
-      conversationId: CID,
-      content: "唯一一条",
-      position: 1,
-      queueDepth: 1,
-    });
-    handleMessageStreamEvent(
-      {
-        type: "turn_queue_cancelled",
-        timestamp: "",
-        payload: { queue_id: "q-only", conversation_id: CID },
-      },
-      { conversationId: CID, source: "server" },
-    );
-    expect(reconcileMock).not.toHaveBeenCalled();
+    const left = useQueuedTurnsStore.getState().list(CID);
+    expect(left.map((e) => e.queueId)).toEqual(["q-b"]);
   });
 });

@@ -53,8 +53,8 @@ def zip_dir(
     """Archive a directory tree to in-memory zip bytes.
 
     Prunes VCS/dependency/cache noise (``IGNORED_DIRS``) and path-aware
-    ``AgentCore/{index,trash,baselines}``; skips symlinks so a snapshot can't
-    follow a link out of the tree. Paths are stored POSIX-relative to ``root``.
+    ``AgentCore/{index,trash,baselines,versions}``; skips symlinks so a snapshot
+    can't follow a link out of the tree. Paths are stored POSIX-relative to ``root``.
 
     Optional ``max_files`` / ``max_bytes`` (raw file bytes before zip) align with
     the desktop handoff gate; exceeding either raises :exc:`ArchiveLimitError`.

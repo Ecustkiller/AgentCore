@@ -25,6 +25,12 @@ const ENTRY = {
   deletedAt: "2026-08-01T00:00:00Z",
 };
 
+// Stable identity — the component reloads whenever the source object changes.
+const source = {
+  list: () => listTrash(CONV),
+  restore: (entryId: string) => restoreTrash(CONV, entryId),
+};
+
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -42,7 +48,7 @@ describe("TrashSection · restore", () => {
       .mockResolvedValueOnce({ entries: [ENTRY], retentionDays: 30 })
       .mockResolvedValueOnce({ entries: [], retentionDays: 30 });
 
-    render(<TrashSection conversationId={CONV} onRestored={onRestored} />);
+    render(<TrashSection source={source} onRestored={onRestored} />);
 
     await waitFor(() => {
       expect(screen.getByText("a.md")).toBeTruthy();
@@ -65,7 +71,7 @@ describe("TrashSection · restore", () => {
 
   it("empty state when trash has no entries", async () => {
     listTrash.mockResolvedValue({ entries: [], retentionDays: 14 });
-    render(<TrashSection conversationId={CONV} />);
+    render(<TrashSection source={source} />);
     await waitFor(() => {
       expect(screen.getByText(/软删区为空/)).toBeTruthy();
       expect(screen.getByText(/保留约 14 天/)).toBeTruthy();
@@ -76,7 +82,7 @@ describe("TrashSection · restore", () => {
     listTrash
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce({ entries: [ENTRY], retentionDays: 30 });
-    render(<TrashSection conversationId={CONV} />);
+    render(<TrashSection source={source} />);
     await waitFor(() => {
       expect(screen.getByText("加载软删区失败")).toBeTruthy();
     });
@@ -88,7 +94,7 @@ describe("TrashSection · restore", () => {
 
   it("cancel confirm skips restore", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
-    render(<TrashSection conversationId={CONV} />);
+    render(<TrashSection source={source} />);
     await waitFor(() => expect(screen.getByText("a.md")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "还原 a.md" }));
     expect(restoreTrash).not.toHaveBeenCalled();
@@ -96,7 +102,7 @@ describe("TrashSection · restore", () => {
 
   it("restore failure shows inline error", async () => {
     restoreTrash.mockRejectedValue(new Error("conflict"));
-    render(<TrashSection conversationId={CONV} />);
+    render(<TrashSection source={source} />);
     await waitFor(() => expect(screen.getByText("a.md")).toBeTruthy());
     fireEvent.click(screen.getByRole("button", { name: "还原 a.md" }));
     await waitFor(() => {

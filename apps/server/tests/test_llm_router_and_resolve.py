@@ -352,8 +352,8 @@ async def test_resolve_model_config_byok_with_background_slot(monkeypatch):
     assert chat.provider_id == "prov-1"
 
 
-async def test_resolve_model_config_background_platform_beats_profile_slot(monkeypatch):
-    """Platform catalog visible → background ignores BYOK profile background slot.
+def _mock_background_account(monkeypatch, *, background):
+    """Platform key live + visible, on a BYOK account whose combo has ``background``.
 
     Fixture models are curated-CNY listable ids (glm-5.2 / deepseek-v4-flash).
     """
@@ -369,20 +369,13 @@ async def test_resolve_model_config_background_platform_beats_profile_slot(monke
         name="当前配置",
         kind="user",
         main=ModelSelection(model="user-flash", origin="byok", provider_id="prov-1"),
-        background=ModelSelection(model="user-bg", origin="byok", provider_id="prov-1"),
+        background=background,
     )
     monkeypatch.setattr(
         "agentcore.llm.model_profiles.LlmModelProfileService.expand",
         AsyncMock(return_value=expanded),
     )
     row = _provider_row(default_model="user-flash")
-    user_creds = LLMCredentials(
-        api_key="sk-user",
-        base_url="https://user.example/v1",
-        default_model="user-flash",
-        source="user",
-        provider_id="prov-1",
-    )
     monkeypatch.setattr(
         "agentcore.db.repositories.UserLlmProviderRepository",
         lambda _s: SimpleNamespace(
@@ -390,7 +383,62 @@ async def test_resolve_model_config_background_platform_beats_profile_slot(monke
             first_for_user=AsyncMock(return_value=row),
         ),
     )
+    user_creds = LLMCredentials(
+        api_key="sk-user",
+        base_url="https://user.example/v1",
+        default_model="user-flash",
+        source="user",
+        provider_id="prov-1",
+    )
     monkeypatch.setattr("agentcore.llm.resolve._decrypt_provider", lambda _r, _u: user_creds)
+
+
+@pytest.mark.parametrize("purpose", ["title", "memory", "compaction", "workflow.slots"])
+async def test_resolve_model_config_background_explicit_byok_slot_beats_platform(
+    monkeypatch, purpose
+):
+    """显式把「后台任务」指向自带 Key 的服务商 → 用他的凭据与模型，不落平台默认。
+
+    平台 key 仍在且可见：「平台优先」防的是 BYOK 账号白嫖平台额度，用户花自己的钱
+    没有可白嫖的对象。model id 原样透传（不改写、不降档到 PLATFORM_BACKGROUND_MODEL）。
+    """
+    from agentcore.llm.resolve import ModelSelection
+
+    _mock_background_account(
+        monkeypatch,
+        background=ModelSelection(model="user-bg", origin="byok", provider_id="prov-1"),
+    )
+    cfg = await resolve_model_config(MagicMock(), "u1", purpose)
+    assert cfg is not None
+    assert cfg.source == "byok"
+    assert cfg.model == "user-bg"
+    assert cfg.api_key == "sk-user"
+    assert cfg.base_url == "https://user.example/v1"
+    assert cfg.provider_id == "prov-1"
+
+
+async def test_resolve_model_config_background_platform_wins_without_explicit_slot(
+    monkeypatch,
+):
+    """后台槽未设（跟随主模型）→ 平台优先原样保留，即便账号有可用 BYOK。"""
+    _mock_background_account(monkeypatch, background=None)
+    title = await resolve_model_config(MagicMock(), "u1", "title")
+    assert title is not None
+    assert title.source == "platform"
+    assert title.model == "deepseek-v4-flash"
+    assert title.api_key == "sk-platform"
+
+
+async def test_resolve_model_config_background_platform_slot_keeps_platform_default(
+    monkeypatch,
+):
+    """后台槽显式选了平台模型 → 仍走平台档（本次只改「指向自带 Key」那一支）。"""
+    from agentcore.llm.resolve import ModelSelection
+
+    _mock_background_account(
+        monkeypatch,
+        background=ModelSelection(model="glm-5.2", origin="platform", provider_id=None),
+    )
     title = await resolve_model_config(MagicMock(), "u1", "title")
     assert title is not None
     assert title.source == "platform"

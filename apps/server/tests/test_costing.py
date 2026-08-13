@@ -281,7 +281,14 @@ def test_collab_tally_starts_at_zero():
     # 协作质量 (学·度量 §2.5): a fresh accumulator carries a zeroed tally, so a plain
     # single-agent / no-boundary turn persists zeros (byte-for-byte unchanged behavior).
     acc = WorkerResultAccumulator()
-    assert acc.collab == {"boundary_yields": 0, "scope_signals": 0, "escalations": 0}
+    assert acc.collab == {
+        "boundary_yields": 0,
+        "boundary_yields_by_user": 0,
+        "scope_signals": 0,
+        "escalations": 0,
+    }
+    assert acc.continuations == []
+    assert acc.user_continuations == []
 
 
 def test_collab_tally_rolls_up_nested_subteams_via_merge():
@@ -294,9 +301,17 @@ def test_collab_tally_rolls_up_nested_subteams_via_merge():
 
     lead = WorkerResultAccumulator()
     lead.collab["boundary_yields"] += 1
+    # 子团队里那次让出是用户在计划复核上拍板的：总数照记，同时记进「用户促成」子集，
+    # 这样卷到 captain 后用户面仍减得掉，不会把用户自己的拍板说成队友互检。
+    lead.collab["boundary_yields_by_user"] += 1
     lead.collab["scope_signals"] += 3
     lead.collab["escalations"] += 4
 
     captain.merge(lead)
 
-    assert captain.collab == {"boundary_yields": 2, "scope_signals": 5, "escalations": 4}
+    assert captain.collab == {
+        "boundary_yields": 2,
+        "boundary_yields_by_user": 1,
+        "scope_signals": 5,
+        "escalations": 4,
+    }

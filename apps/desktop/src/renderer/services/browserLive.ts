@@ -1,4 +1,9 @@
-import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
+import {
+  BASE_URL,
+  captureCsrf,
+  notifyUnauthorized,
+  tryRefresh,
+} from "@/services/api";
 
 /**
  * L3「团队浏览器」M1 直播帧客户端 (提案 D13–D15)。
@@ -128,6 +133,7 @@ export function startBrowserLive(
         headers: { Accept: "text/event-stream" },
         signal,
       });
+      captureCsrf(response);
     } catch {
       return "reconnect"; // transport failure (offline / aborted)
     }

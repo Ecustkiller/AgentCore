@@ -3,21 +3,19 @@ import { create } from "zustand";
 /**
  * Live UX for post-turn cloud auto-backup (axis-3).
  * EPHEMERAL SSE drives this — reload clears the banner by design.
+ *
+ * 「打开快照面板」不再走 store：快照已并入常驻的「改动」tab，
+ * 失败提示直接 `showChanges()` 即可，无需跨组件的一次性打开请求。
  */
 type AutoSnapshotState = {
   /** Conversations whose latest auto-backup attempt failed. */
   failedByConversation: Record<string, true>;
-  /** When set, WorkspaceMode should open the snapshots slide-over for this id. */
-  openSnapshotsFor: string | null;
   markFailed: (conversationId: string) => void;
   clearFailed: (conversationId: string) => void;
-  requestOpenSnapshots: (conversationId: string) => void;
-  consumeOpenSnapshots: (conversationId: string) => void;
 };
 
-export const useAutoSnapshotStore = create<AutoSnapshotState>((set, get) => ({
+export const useAutoSnapshotStore = create<AutoSnapshotState>((set) => ({
   failedByConversation: {},
-  openSnapshotsFor: null,
   markFailed: (conversationId) =>
     set((s) => ({
       failedByConversation: {
@@ -32,10 +30,4 @@ export const useAutoSnapshotStore = create<AutoSnapshotState>((set, get) => ({
       delete next[conversationId];
       return { failedByConversation: next };
     }),
-  requestOpenSnapshots: (conversationId) =>
-    set({ openSnapshotsFor: conversationId }),
-  consumeOpenSnapshots: (conversationId) => {
-    if (get().openSnapshotsFor !== conversationId) return;
-    set({ openSnapshotsFor: null });
-  },
 }));

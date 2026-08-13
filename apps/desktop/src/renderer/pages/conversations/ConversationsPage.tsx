@@ -16,6 +16,7 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { folderAncestorNames } from "@/lib/folderTree";
 import { startNewConversation } from "@/lib/newConversation";
+import type { DeletedConversationMeta } from "@/services/conversations";
 import type { DeletedFolderMeta, FolderMeta } from "@/services/folders";
 import { UNGROUPED_KEY } from "@/stores/folders";
 import {
@@ -36,6 +37,7 @@ import { useNavigate } from "react-router-dom";
 import { ArchivedConversationManageRow } from "./ArchivedConversationManageRow";
 import { CollaborationTimelinePanel } from "./CollaborationTimeline";
 import { ConversationManageRow } from "./ConversationManageRow";
+import { DeletedConversationManageRow } from "./DeletedConversationManageRow";
 import { DeletedFolderManageRow } from "./DeletedFolderManageRow";
 import {
   ALL_KEY,
@@ -75,8 +77,9 @@ export function ConversationsPage() {
     setStaleOnly,
     isArchivedView,
     isTrashView,
-    trash,
+    trashCount,
     trashList,
+    deletedConversationList,
     retentionDays,
   } = useConversationList(selected, folderIds);
   const bulk = useConversationBulkSelect(list, selected, isArchivedView);
@@ -136,7 +139,7 @@ export function ConversationsPage() {
                   <FilterRow
                     icon={<Trash2 size={16} />}
                     label="最近删除"
-                    count={trash.length}
+                    count={trashCount}
                     selected={selected === TRASH_KEY}
                     onSelect={() => setSelected(TRASH_KEY)}
                   />
@@ -282,8 +285,9 @@ export function ConversationsPage() {
                 <CollaborationTimelinePanel folderId={selected} />
               )}
               {isTrashView ? (
-                <DeletedFoldersPane
-                  items={trashList}
+                <RecentlyDeletedPane
+                  conversations={deletedConversationList}
+                  folders={trashList}
                   searching={query.trim().length > 0}
                   retentionDays={retentionDays}
                 />
@@ -346,7 +350,9 @@ export function ConversationsPage() {
               {bulk.selectMode && bulk.selectedIds.size > 0 && (
                 <Card className="sticky bottom-0 mt-3 flex flex-wrap items-center gap-2 px-3 py-2 shadow-sm">
                   <span className="text-sm text-muted-foreground">
-                    已选 {bulk.selectedIds.size} 项
+                    {bulk.confirmBulkDelete
+                      ? `删除 ${bulk.selectedIds.size} 项？可在「最近删除」里恢复`
+                      : `已选 ${bulk.selectedIds.size} 项`}
                   </span>
                   <span className="flex-1" />
                   {isArchivedView ? (
@@ -372,7 +378,7 @@ export function ConversationsPage() {
                         variant="danger"
                         onClick={() => void bulk.handleBulkDelete()}
                       >
-                        确认永久删除
+                        确认删除
                       </Button>
                       <Button
                         variant="ghost"
@@ -387,7 +393,7 @@ export function ConversationsPage() {
                       onClick={() => bulk.setConfirmBulkDelete(true)}
                       icon={<Trash2 size={14} className="shrink-0" />}
                     >
-                      永久删除
+                      删除
                     </Button>
                   )}
                 </Card>
@@ -401,43 +407,64 @@ export function ConversationsPage() {
 }
 
 /**
- * 最近删除 pane — deleted projects instead of conversations, so no recency
- * grouping (the server already returns most-recently-deleted first) and no bulk
- * bar. 彻底删除 is deliberately absent: that lives behind the checkbox in the
- * delete dialog, where the user asked for it.
+ * 最近删除 pane — deleted conversations and deleted projects, neither of which is a
+ * live `Conversation`, so no recency grouping (the server already returns each list
+ * most-recently-deleted first) and no bulk bar. 彻底删除 is deliberately absent: that
+ * lives behind the checkbox in the folder delete dialog, where the user asked for it.
+ *
+ * Each section states what its restore does *not* bring back. A recycle bin that
+ * overstates its own reach is the thing this view exists to fix.
  */
-function DeletedFoldersPane({
-  items,
+function RecentlyDeletedPane({
+  conversations,
+  folders,
   searching,
   retentionDays,
 }: {
-  items: DeletedFolderMeta[];
+  conversations: DeletedConversationMeta[];
+  folders: DeletedFolderMeta[];
   searching: boolean;
   retentionDays: number | null;
 }) {
-  if (items.length === 0) {
+  if (conversations.length === 0 && folders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
         <Trash2 size={28} className="text-muted-foreground/40" />
         <p className="text-sm text-muted-foreground">
-          {searching ? "未找到匹配的文件夹" : "最近删除中没有文件夹"}
+          {searching ? "未找到匹配的对话或文件夹" : "最近删除是空的"}
         </p>
         {!searching && retentionDays !== null && (
           <p className="text-xs text-muted-foreground/70">
-            删除的文件夹会在这里保留 {retentionDays} 天，其间随时可以恢复
+            删除的对话和文件夹会在这里保留 {retentionDays} 天，其间随时可以恢复
           </p>
         )}
       </div>
     );
   }
   return (
-    <div className="space-y-1 pb-4">
-      <p className="px-1 pb-1 text-xs text-muted-foreground">
-        恢复会把文件夹和它一并归档的对话带回来；白板不会回到文件夹下，裸聊的自动云桌指针也不恢复（下回合自动重建）。
-      </p>
-      {items.map((f) => (
-        <DeletedFolderManageRow key={f.id} folder={f} />
-      ))}
+    <div className="space-y-4 pb-4">
+      {conversations.length > 0 && (
+        <div className="space-y-1">
+          <SectionLabel className="px-1">对话</SectionLabel>
+          <p className="px-1 pb-1 text-xs text-muted-foreground">
+            恢复会把对话连同全部消息带回原来的位置。删除时已撤销的公开分享链接不会一起回来，需要重新分享；本机裸聊的工作目录在系统回收站里，从那里还原。
+          </p>
+          {conversations.map((c) => (
+            <DeletedConversationManageRow key={c.id} conversation={c} />
+          ))}
+        </div>
+      )}
+      {folders.length > 0 && (
+        <div className="space-y-1">
+          <SectionLabel className="px-1">文件夹</SectionLabel>
+          <p className="px-1 pb-1 text-xs text-muted-foreground">
+            恢复会把文件夹和它一并归档的对话带回来；白板不会回到文件夹下，裸聊的自动云桌指针也不恢复（下回合自动重建）。
+          </p>
+          {folders.map((f) => (
+            <DeletedFolderManageRow key={f.id} folder={f} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

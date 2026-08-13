@@ -2,9 +2,15 @@ import { Badge, IconButton, SurfaceRow } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import {
   useDeleteConversation,
+  useRestoreConversation,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import {
+  DELETE_CONVERSATION_LABEL,
+  deleteConversationConfirmLabel,
+  notifyConversationDeleted,
+} from "@/lib/conversationDeleteCopy";
 import { timeAgo } from "@/lib/format";
 import { notifyError } from "@/lib/toast";
 import type { Conversation } from "@/stores/conversation";
@@ -27,6 +33,7 @@ export function ArchivedConversationManageRow({
   const navigate = useNavigate();
   const unarchiveMutation = useUnarchiveConversation();
   const deleteMutation = useDeleteConversation();
+  const restoreMutation = useRestoreConversation();
   const switchConversation = useConversationStore((s) => s.switchConversation);
   const dropConversationRuntime = useConversationStore(
     (s) => s.dropConversationRuntime,
@@ -58,6 +65,7 @@ export function ArchivedConversationManageRow({
   const handleDelete = async () => {
     setConfirmingDelete(false);
     const wasActive = conversation.id === currentId;
+    const title = conversation.title;
     try {
       await deleteMutation.mutateAsync(conversation.id);
     } catch (err) {
@@ -66,6 +74,11 @@ export function ArchivedConversationManageRow({
     }
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
+    // An archived chat restores straight back into 已归档 — the delete took it from
+    // there, so the undo must not quietly promote it to the live list.
+    notifyConversationDeleted(title, () =>
+      restoreMutation.mutate(conversation.id),
+    );
   };
 
   return (
@@ -124,7 +137,11 @@ export function ArchivedConversationManageRow({
         <div className="flex h-6 items-center gap-1">
           {confirmingDelete ? (
             <span className="flex items-center gap-0.5">
-              <SimpleTooltip label="确认永久删除（无法恢复）">
+              <SimpleTooltip
+                label={deleteConversationConfirmLabel(
+                  conversation.folderId ? "folder" : undefined,
+                )}
+              >
                 <IconButton
                   aria-label="确认删除对话"
                   onClick={() => void handleDelete()}
@@ -154,9 +171,9 @@ export function ArchivedConversationManageRow({
                   <ArchiveRestore size={13} />
                 </IconButton>
               </SimpleTooltip>
-              <SimpleTooltip label="永久删除">
+              <SimpleTooltip label={DELETE_CONVERSATION_LABEL}>
                 <IconButton
-                  aria-label="永久删除对话"
+                  aria-label={DELETE_CONVERSATION_LABEL}
                   onClick={() => setConfirmingDelete(true)}
                   className="size-6 text-muted-foreground hover:text-destructive"
                 >

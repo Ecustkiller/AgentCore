@@ -11,8 +11,10 @@ import {
   emptyFailureVisibleNotice,
   errorActionForCode,
   isEmptyResponseUserSurface,
+  isPausedFrameGone,
   resolveEmptyFailureNotice,
 } from "../errors";
+import { formatLocalMoment } from "../recoveryMoment";
 
 describe("errorActionForCode", () => {
   it("routes LLM_KEY_REQUIRED to 去配置", () => {
@@ -71,6 +73,63 @@ describe("describeStreamHttpError", () => {
       message: "请求失败 (500)",
       action: null,
     });
+  });
+
+  // 429 拒绝：后端只给结构化时刻 + 不含时刻的兜底句，本机时区的那句由前端出。
+  it("renders a refusal's recovery moment in the device's own zone", () => {
+    const err = new StreamHttpError(
+      429,
+      "QUOTA_EXCEEDED",
+      "平台模型额度已用完，本回合无法继续。",
+      { recovery_at: "2026-08-14T16:00:00Z", credential_source: "platform" },
+    );
+    const d = describeStreamHttpError(err);
+    expect(d.message).toBe(
+      `平台模型额度已用完，本回合无法继续。上游将于 ${formatLocalMoment("2026-08-14T16:00:00Z")} 恢复；或在「设置 · 服务商」接入自己的 API Key 立即继续。`,
+    );
+    expect(d.message).not.toContain("UTC");
+    expect(d.action).toEqual({
+      label: "接入自己的 Key",
+      href: MODEL_CONFIG_PATH,
+    });
+  });
+
+  it("relays the server's timeless fallback when no moment came with it", () => {
+    const fallback =
+      "上游限流，本回合无法继续。你的服务商额度恢复前重试仍会失败。";
+    const err = new StreamHttpError(429, "LLM_RATE_LIMIT", fallback);
+    expect(describeStreamHttpError(err).message).toBe(fallback);
+  });
+
+  // 冷 resume 真失效的两句话是后端单一源；错误条必须原样转述（哪一种失效用户看得到）。
+  it("relays the two frame-gone 404 messages verbatim, no remedy button", () => {
+    for (const msg of [
+      "这张卡已超过保留期被清理（挂起最多保留 7 天），请重新提问",
+      "该回合已被重新生成或删除，这张卡不再有效",
+    ]) {
+      expect(
+        describeStreamHttpError(new StreamHttpError(404, "NOT_FOUND", msg)),
+      ).toEqual({
+        message: msg,
+        action: null,
+      });
+    }
+  });
+});
+
+describe("isPausedFrameGone", () => {
+  it("owns 404 / 410 — 挂起帧不在了，不该把卡放回可点", () => {
+    expect(
+      isPausedFrameGone(new StreamHttpError(404, "NOT_FOUND", "已清理")),
+    ).toBe(true);
+    expect(isPausedFrameGone(new StreamHttpError(410))).toBe(true);
+  });
+
+  it("leaves transient refusals / drops alone (卡该恢复可编辑)", () => {
+    expect(isPausedFrameGone(new StreamHttpError(409))).toBe(false);
+    expect(isPausedFrameGone(new StreamHttpError(500))).toBe(false);
+    expect(isPausedFrameGone(new Error("network"))).toBe(false);
+    expect(isPausedFrameGone(undefined)).toBe(false);
   });
 });
 

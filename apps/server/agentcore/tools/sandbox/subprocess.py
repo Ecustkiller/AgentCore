@@ -402,14 +402,29 @@ async def _cleanup_tempdir(path: str) -> None:
 class SubprocessSandbox:
     """Restricted subprocess sandbox for MVP code execution."""
 
-    # Set by ``health_check`` on failure so the caller can log a concrete reason
-    # instead of the opaque probe-fail marker (mirrors ``GVisorSandbox``).
+    # Set by the probe on failure so the caller can log a concrete reason instead
+    # of the opaque probe-fail marker (mirrors ``GVisorSandbox``). Each probe is
+    # about one language, so these describe the latest probed language only.
     _last_health_failure: tuple[str, str | None] | None = None
+    # Same failure, classified into an exec-env reason code + the raw facts behind
+    # it, so ``ServerWorkspace`` can tell the model / user *why* rather than 「跑不了」.
+    _last_health_failure_code: str | None = None
+    _last_health_evidence: str | None = None
 
     @property
     def last_health_failure(self) -> tuple[str, str | None] | None:
-        """``(reason, detail)`` from the latest failed ``health_check``, else ``None``."""
+        """``(reason, detail)`` from the latest failed probe, else ``None``."""
         return self._last_health_failure
+
+    @property
+    def last_health_failure_code(self) -> str | None:
+        """Exec-env reason code for the latest failed probe, else ``None``."""
+        return self._last_health_failure_code
+
+    @property
+    def last_health_evidence(self) -> str | None:
+        """Compact exit / duration / stderr facts behind the latest failed probe."""
+        return self._last_health_evidence
 
     def capabilities(self) -> SandboxCapabilities:
         return SandboxCapabilities(
@@ -560,20 +575,67 @@ class SubprocessSandbox:
         return scan.files
 
     async def health_check(self) -> bool:
-        """Verify the sandbox can execute code, recording why when it cannot."""
+        """Protocol-level health: can this host run python?
+
+        Kept python-shaped for the callers that ask about the backend as a whole
+        (cloud boot probe / ``cloud_health``). Per-execution checks go through
+        ``probe_interpreter`` with the language they are about to run.
+        """
+        return await self.probe_interpreter("python")
+
+    async def probe_interpreter(self, language: str) -> bool:
+        """Verify ``language`` can run a minimal print, recording why when it cannot."""
+        from agentcore.tools.sandbox.exec_env import (
+            EXEC_ENV_PROBE_TIMEOUT_S,
+            PROBE_OK_TOKEN,
+            classify_probe_failure,
+            probe_evidence,
+            probe_snippet,
+        )
+
         self._last_health_failure = None
+        self._last_health_failure_code = None
+        self._last_health_evidence = None
+        snippet = probe_snippet(language)
+        if snippet is None:
+            # No probe exists for this language, and inventing a verdict for it
+            # would be a guess — let the real run answer (``execute`` already
+            # rejects unsupported languages by name).
+            return True
         try:
             result = await self.execute(
-                ExecutionRequest(code="print('ok')", language="python", timeout_seconds=5)
+                ExecutionRequest(
+                    code=snippet,
+                    language=language,  # type: ignore[arg-type]
+                    timeout_seconds=EXEC_ENV_PROBE_TIMEOUT_S,
+                )
             )
         except Exception as exc:  # noqa: BLE001 - the probe must never raise into callers
-            self._last_health_failure = ("raised", f"{type(exc).__name__}: {exc}"[:200])
+            # A launcher that refused / vanished surfaces as ``SandboxError`` text
+            # here, so the same taxonomy reads it (spawn denial vs missing binary).
+            raised = f"{type(exc).__name__}: {exc}"[:200]
+            self._last_health_failure = ("raised", raised)
+            self._last_health_failure_code = classify_probe_failure(
+                exit_code=None, duration_ms=None, stderr=raised
+            )
+            self._last_health_evidence = probe_evidence(stderr=raised)
             return False
-        if result.success and "ok" in result.stdout:
+        if result.success and PROBE_OK_TOKEN in result.stdout:
             return True
-        detail = (result.stderr or result.stdout or "").strip()[:200] or None
+        probe_stderr = result.stderr or result.stdout
+        detail = (probe_stderr or "").strip()[:200] or None
         self._last_health_failure = (
             f"exit={result.exit_code} duration_ms={result.duration_ms}",
             detail,
+        )
+        self._last_health_failure_code = classify_probe_failure(
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
+            stderr=probe_stderr,
+        )
+        self._last_health_evidence = probe_evidence(
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
+            stderr=probe_stderr,
         )
         return False

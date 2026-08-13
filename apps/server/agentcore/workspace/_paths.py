@@ -257,10 +257,10 @@ def is_access_denied_oserror(exc: BaseException) -> bool:
 
 
 def is_internal_zone_relpath(relpath: str) -> bool:
-    """True when ``relpath`` is ``AgentCore/{index|trash|baselines}`` or under it.
+    """True when ``relpath`` is ``AgentCore/{index|trash|baselines|versions}`` or under it.
 
-    Path-aware only — bare ``index`` / ``trash`` / ``baselines`` elsewhere
-    (user projects) are never treated as internal.
+    Path-aware only — bare ``index`` / ``trash`` / ``baselines`` / ``versions``
+    elsewhere (user projects) are never treated as internal.
     """
     p = relpath.replace("\\", "/").strip("/")
     if not p or p == ".":
@@ -273,12 +273,12 @@ def is_internal_zone_relpath(relpath: str) -> bool:
 
 
 def path_has_non_internal_entries(root: Path) -> bool:
-    """True when ``root`` has content outside ``AgentCore/{index,trash,baselines}``.
+    """True when ``root`` has content outside ``AgentCore/{index,trash,baselines,versions}``.
 
     Hub ``has_files`` / lazy index kicks use this so a tree that only holds
     internal zones (or an empty ``AgentCore/``) counts as empty. Does not create
-    ``root``. Bare top-level ``index`` / ``trash`` / ``baselines`` still count —
-    only the path-aware internal zones are skipped (via
+    ``root``. Bare top-level ``index`` / ``trash`` / ``baselines`` / ``versions``
+    still count — only the path-aware internal zones are skipped (via
     :func:`is_internal_zone_relpath`).
     """
     if not root.is_dir():

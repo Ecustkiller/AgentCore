@@ -13,6 +13,7 @@ from datetime import datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.billing.allowance import invalidate_allowance
 from agentcore.billing.preference import (
     platform_catalog_visible,
 )
@@ -196,6 +197,10 @@ class LlmProviderService:
                 ),
                 set_as_default=True,
             )
+        # A different upstream is being asked now: anything cached about the old one
+        # refusing this account (背景整理的申报冷却) no longer describes reality — and
+        # 「接入自己的 key」is the very exit the 429 copy offers.
+        invalidate_allowance(user_id, reason="byok_provider_changed")
         return self._view(row, enc=enc)
 
     async def update_provider(
@@ -239,6 +244,10 @@ class LlmProviderService:
 
         row = await self._repo.update(provider_id, user_id=user_id, **kwargs)  # type: ignore[arg-type]
         assert row is not None
+        # Only a credential-shaped edit changes what upstream would answer; renaming
+        # the 服务商 does not, so it must not retire a cooldown that still holds.
+        if kwargs.keys() & {"api_key_enc", "base_url", "default_model"}:
+            invalidate_allowance(user_id, reason="byok_provider_changed")
         return self._view(row, enc=self._encryptor())
 
     async def delete_provider(self, user_id: str, provider_id: str) -> None:
@@ -265,6 +274,7 @@ class LlmProviderService:
                 to_origin="platform",
             )
         await self._profiles.clear_provider_refs(user_id, provider_id)
+        invalidate_allowance(user_id, reason="byok_provider_changed")
 
     async def test_provider(self, user_id: str, provider_id: str) -> LlmProviderView:
         row = await self._repo.get(provider_id, user_id=user_id)

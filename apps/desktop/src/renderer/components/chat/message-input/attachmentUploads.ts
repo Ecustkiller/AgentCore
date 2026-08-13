@@ -56,6 +56,7 @@ export async function awaitAttachmentUpload(
     return {
       ok: false,
       reason: e instanceof Error ? e.message : "附件上传失败，请重试",
+      cause: e,
     };
   }
 }

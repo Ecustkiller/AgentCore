@@ -46,6 +46,7 @@ __all__ = [
     "resolve_background_user_fallback",
     "resolve_conversation_model_selection",
     "resolve_credentials",
+    "resolve_explicit_background_byok",
     "resolve_model_config",
     "resolve_provider_credentials",
     "resolve_turn_model",
@@ -358,6 +359,24 @@ def _model_config_from_creds(
     )
 
 
+async def resolve_explicit_background_byok(
+    session: AsyncSession,
+    user_id: str,
+    purpose: ModelPurpose = "title",
+) -> ModelConfig | None:
+    """The account combo's background slot when the user pointed it at their own key.
+
+    ``None`` means there is no such slot to honour: unset (follow_main), pointing at
+    platform, or its 服务商 has since been deleted / no longer decrypts. Callers keep
+    their own default path in that case. Model id is passed through as configured.
+    """
+    bg = await _resolve_background(session, user_id, allow_platform_origin=False)
+    if bg is None:
+        return None
+    creds, model = bg
+    return _model_config_from_creds(creds, model, purpose)
+
+
 async def resolve_background_user_fallback(
     session: AsyncSession,
     user_id: str,
@@ -371,10 +390,9 @@ async def resolve_background_user_fallback(
     """
     from agentcore.llm.model_selection import _model_for_purpose
 
-    bg = await _resolve_background(session, user_id, allow_platform_origin=False)
-    if bg is not None:
-        creds, model = bg
-        return _model_config_from_creds(creds, model, purpose)
+    explicit = await resolve_explicit_background_byok(session, user_id, purpose)
+    if explicit is not None:
+        return explicit
     row, chat_model, _origin = await _account_default(session, user_id)
     if row is not None:
         creds = _decrypt_provider(row, user_id)

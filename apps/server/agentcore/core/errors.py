@@ -52,43 +52,114 @@ class OurServiceUnavailableError(LLMError):
     retryable = True
 
 
-# Longest upstream ``Retry-After`` an interactive turn will actually sit out.
-# Single source for two decisions that must never drift apart: the provider retry
-# loop refuses to sleep past it (``llm.provider.openai_compatible``), and the 429
-# faces below refuse to keep advertising a retry nobody will attempt.
+# Longest upstream ``Retry-After`` an *interactive* turn will actually sit out, and
+# the single source for every 429 sentence below.
+#
+# A header-less 429 is judged against it too, and there the number compared is our
+# own backoff chain (2→4→8→16→32), which outgrows this line on the fifth attempt —
+# after ~30s already slept. That is what the 138 production give-ups logging 32 秒
+# were: our number, not an upstream cooldown sitting two seconds past the line, so
+# no widened per-call budget was ever going to rescue them (see
+# ``llm.provider.call_budget``). A caller with a wall clock of its own may derive a
+# different ceiling for ``retryable``; the copy below keeps this one, because a human
+# waiting on a turn is the only caller whose 429 ever becomes a sentence on screen.
 MAX_RETRY_AFTER = 30.0
 
+# Where a 429's cooldown number came from. A header-less 429 still needs *some*
+# number to pace the retry with, and that number is our own exponential backoff
+# (``openai_compatible._parse_retry_after``) — a fallback worth keeping, but never
+# one to read back as something upstream said: 138 production give-ups logged
+# ``retry_after_sec=32.0``, the last link of our own 2→4→8→16→32 chain, and were
+# then reasoned about as「上游只要 32 秒，放宽一点就能救回来」.
+#
+# So it also gates the copy: only ``RETRY_AFTER_FROM_HEADER`` may turn into a moment
+# a user reads. The other two are numbers we cannot attest, and a clock time derived
+# from one is an invention no upstream ever made.
+RETRY_AFTER_FROM_HEADER = "upstream_header"
+RETRY_AFTER_FROM_BACKOFF = "local_backoff"
+# Relayed to us as a plain number (our own ``/inference/`` hop rebuilds the leaf's
+# 429 from an envelope field): a cooldown we cannot attest either way.
+RETRY_AFTER_UNKNOWN = "unknown"
 
-def format_retry_after_moment(retry_after: float, *, now: datetime | None = None) -> str:
-    """Wall-clock UTC moment a ``retry_after``-second cooldown ends at.
 
-    Day-scale ``Retry-After`` values are upstream day resets, so the honest thing
-    to show is when service returns — never「等 16.6 小时」, which reads as a
-    promise no retry budget ever made. UTC is stamped explicitly (the quota gate's
-    「明日 0 点（UTC）重置」convention) instead of the server's local zone, which
-    is not the user's.
+def utc_moment_iso(moment: datetime) -> str:
+    """An absolute moment as the wire's ISO-8601 UTC instant (``2026-08-14T16:00:00Z``).
+
+    Moments a user acts on travel as data, never as prose the server pre-worded.
+    Copy used to stamp「8 月 14 日 16:00（UTC）」straight into the sentence, which is
+    accurate and unusable in one read: a user in UTC+8 waiting out a day reset has to
+    convert it to next-day 00:00 before knowing whether to wait or go to bed, and a
+    wrong conversion sends him back at 16:05 to the same wall. Stamping the server's
+    own zone instead would only swap whose zone is wrong. The client knows the
+    reader's zone, so it gets the instant and renders it there.
+    """
+    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def recovery_at_iso(retry_after: float, *, now: datetime | None = None) -> str:
+    """ISO-8601 UTC instant a ``retry_after``-second cooldown ends at.
+
+    Day-scale ``Retry-After`` values are upstream day resets, so what a user needs
+    is when service returns — never「等 16.6 小时」, which reads as a promise no
+    retry budget ever made.
     """
     base = now.astimezone(UTC) if now is not None else datetime.now(UTC)
-    moment = base + timedelta(seconds=retry_after)
-    return f"{moment.month} 月 {moment.day} 日 {moment:%H:%M}（UTC）"
+    return utc_moment_iso(base + timedelta(seconds=retry_after))
+
+
+# Every absolute moment a user-facing error may carry, and the only ``details``
+# keys the plain JSON error envelope forwards. They exist because the copy no
+# longer names a clock time, so a client that cannot read them degrades to a
+# thinner-but-true sentence — which is only tolerable while every live client
+# can, on both the SSE error context and the bare 429 body.
+WIRE_MOMENT_FIELDS = ("recovery_at", "reset_at")
+
+
+def wire_moments(exc: BaseException) -> dict[str, str]:
+    """The ISO-8601 UTC instants ``exc`` carries for a client to render locally."""
+    if not isinstance(exc, AgentCoreError):
+        return {}
+    return {
+        field: value
+        for field in WIRE_MOMENT_FIELDS
+        if isinstance(value := exc.details.get(field), str) and value
+    }
 
 
 class LLMRateLimitError(LLMError):
     """LLM API rate limit hit (429). User-facing zh message.
 
-    Retryable only while the cooldown fits an interactive turn. Past
-    :data:`MAX_RETRY_AFTER` the provider loop already refuses to retry, so the
-    error stops saying「请稍后再试」and names the moment upstream frees up
-    instead — otherwise the user obeys copy the engine has already overruled
-    and burns a handful of guaranteed-failing retries.
+    Two questions, deliberately keyed on two different numbers. ``retryable``
+    answers「*这次调用*等不等得起」and follows ``retry_ceiling`` — the caller's own
+    remaining budget, defaulting to the interactive one. The sentence answers
+    「用户该怎么办」and follows :data:`MAX_RETRY_AFTER` alone: past it the copy
+    stops saying「请稍后再试」and says plainly that retrying keeps failing until the
+    allowance returns — otherwise the user obeys copy the engine has already
+    overruled and burns a handful of guaranteed-failing retries. A background
+    one-shot may well retry a cooldown this copy calls hopeless; nobody reads that
+    copy, which is exactly why only silent-degrade callers are allowed their own
+    ceiling (see ``llm.provider.call_budget``).
+
+    The moment itself rides in ``recovery_at`` (ISO-8601 UTC) rather than in the
+    sentence, so the client can name it in the reader's own zone; a client that
+    cannot read it is left with copy that is thinner but still true.
 
     Inside the ceiling the copy still says「再试」but never「点重试」: the red
     error card carries no retry control (定案 A), so naming a button sends the
     user hunting for one. Re-sending the message is the real next step.
 
     Platform-funded turns take the ``QUOTA_EXCEEDED`` face for that same long
-    cooldown: build 429s through :func:`upstream_rate_limit_error` so the split
-    by credential source happens in one place.
+    *declared* cooldown: build 429s through :func:`upstream_rate_limit_error` so the
+    split by credential source happens in one place.
+
+    ``retry_after_source`` says whose number ``retry_after`` is — upstream's header,
+    our own backoff standing in for a missing one, or unattested — and it decides how
+    much this copy is allowed to claim. Only a declared cooldown may name a moment or
+    an allowance: on a header-less 429 the number is the last link of our own backoff
+    chain, and wording it as「额度将于 X 恢复」told users a minute-precise recovery
+    time upstream never mentioned, on a 429 that may have been plain throttling. What
+    is left to say there is what we actually know — we stopped retrying — plus, for a
+    platform key, the BYOK exit that genuinely does bypass the limit right now.
     """
 
     code = ErrorCode.LLM_RATE_LIMIT
@@ -99,11 +170,17 @@ class LLMRateLimitError(LLMError):
         retry_after: float | None = None,
         *,
         now: datetime | None = None,
+        retry_ceiling: float | None = None,
+        retry_after_source: str = RETRY_AFTER_UNKNOWN,
         **kwargs,
     ):
         self.retry_after = retry_after
-        if retry_after is not None and retry_after > MAX_RETRY_AFTER:
-            self.retryable = False
+        # Attribute, not ``details``: this is for our logs, not the wire envelope.
+        self.retry_after_source = retry_after_source
+        ceiling = MAX_RETRY_AFTER if retry_ceiling is None else retry_ceiling
+        self.retryable = not (retry_after is not None and retry_after > ceiling)
+        declared = retry_after if retry_after_source == RETRY_AFTER_FROM_HEADER else None
+        if declared is not None and declared > MAX_RETRY_AFTER:
             # BYOK: the throttled allowance is the user's own; unknown source
             # stays on the vaguer「上游额度」rather than guessing whose key it is.
             whose = (
@@ -111,12 +188,22 @@ class LLMRateLimitError(LLMError):
                 if kwargs.get("credential_source") == "user"
                 else "上游额度"
             )
+            message = f"上游限流，本回合无法继续。{whose}恢复前重试仍会失败。"
+            kwargs["recovery_at"] = recovery_at_iso(declared, now=now)
+        elif retry_after is not None and retry_after > MAX_RETRY_AFTER:
+            # Past the ceiling on a cooldown nobody declared: we gave up, and that is
+            # the whole of what we know. No moment, and no allowance either — a
+            # header-less 429 is as likely to be throttling as an exhausted quota.
             message = (
-                f"上游限流，本回合无法继续。{whose}将于 "
-                f"{format_retry_after_moment(retry_after, now=now)} 恢复，"
-                "在此之前重试仍会失败。"
+                "平台模型被上游限流，本回合无法继续。"
+                "可在「设置 · 服务商」接入自己的 API Key 立即继续，或稍后重新发送。"
+                if kwargs.get("credential_source") == "platform"
+                else "上游限流，本回合无法继续。请稍后重新发送。"
             )
         elif retry_after is not None and 0 < retry_after <= MAX_RETRY_AFTER:
+            # Provenance-agnostic on purpose: this names a wait, not a moment, and
+            # our backoff is as good a pacing hint as upstream's when we are about to
+            # sit the cooldown out anyway.
             message = f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试。"
         else:
             message = "上游限流，暂时无法继续本回合。请稍后再试。"
@@ -138,9 +225,18 @@ class LLMQuotaExceededError(LLMError):
     leaf side of that hop: same code, but an ``LLMError`` so the provider retry loop
     and the turn's error surfacing treat it like any other leaf failure.
 
-    Also the face a *vendor* 429 takes when a platform key draws a cooldown longer
-    than :data:`MAX_RETRY_AFTER` (:func:`upstream_rate_limit_error`): to the user
-    that is the same wall — an operator-owned allowance they cannot clear.
+    Also the face a *vendor* 429 takes when a platform key draws an upstream-declared
+    cooldown longer than :data:`MAX_RETRY_AFTER` (:func:`upstream_rate_limit_error`):
+    to the user that is the same wall — an operator-owned allowance they cannot clear.
+    A header-less 429 does not qualify, however long our own backoff grew: this face
+    asserts an exhausted allowance, and nothing there proves one.
+
+    ``retry_after_source`` carries the same provenance :class:`LLMRateLimitError`
+    does, for the same reason: this face is what a *background* caller meets when a
+    dated 429 outruns its budget, and the schedulers reading it (compaction folding,
+    memory consolidation) sit out a wall only when the number is upstream's own. The
+    quota-window face raised by ``billing.call_quota`` dates nothing and leaves it
+    unattested.
     """
 
     code = ErrorCode.QUOTA_EXCEEDED
@@ -152,7 +248,15 @@ class LLMQuotaExceededError(LLMError):
         "或在「设置 · 服务商」接入自己的 API Key。"
     )
 
-    def __init__(self, message: str | None = None, **kwargs):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        retry_after_source: str = RETRY_AFTER_UNKNOWN,
+        **kwargs,
+    ):
+        # Attribute, not ``details``: for our own scheduling, not the wire envelope.
+        self.retry_after_source = retry_after_source
         super().__init__(message or self._DEFAULT_MESSAGE, **kwargs)
 
 
@@ -161,33 +265,57 @@ def upstream_rate_limit_error(
     *,
     credential_source: str | None = None,
     now: datetime | None = None,
+    retry_ceiling: float | None = None,
+    retry_after_source: str = RETRY_AFTER_UNKNOWN,
     **details,
 ) -> LLMError:
     """Product face for an upstream 429, split by who funds the key.
 
-    Inside :data:`MAX_RETRY_AFTER` this is an ordinary retryable rate limit.
-    Past it the turn is not retried at all, and the two credential sources need
-    different exits: a platform-funded call hit an allowance wall the user cannot
-    clear, so it takes the ``QUOTA_EXCEEDED`` face (client suppresses retry and
-    offers「接入自己的 Key」); BYOK keeps the rate-limit face, since telling a user
-    who already brought their own key to bring one is nonsense. An unknown source
-    takes the BYOK-free conservative branch rather than guessing a platform wall.
+    ``retry_ceiling`` is what *this* call can sit out (default: the interactive
+    :data:`MAX_RETRY_AFTER`). While the cooldown fits inside it the 429 is an
+    ordinary retryable throttle and must stay an :class:`LLMRateLimitError` — at
+    that point the exception is the provider loop's own control flow rather than a
+    product face, and morphing it into a quota wall would make the loop skip the
+    retry it was about to perform.
+
+    The wall faces are what we raise when we *give up*, and then the two credential
+    sources need different exits: a platform-funded call hit an allowance the user
+    cannot clear, so it takes the ``QUOTA_EXCEEDED`` face (client suppresses retry
+    and offers「接入自己的 Key」); BYOK keeps the rate-limit face, since telling a
+    user who already brought their own key to bring one is nonsense. An unknown
+    source takes the BYOK-free conservative branch rather than guessing a platform
+    wall.
+
+    That quota face needs the cooldown to be upstream's own (``retry_after_source``):
+    it says an allowance ran out and dates its return, and a header-less 429 proves
+    neither — only that our backoff outgrew the ceiling. Those keep the rate-limit
+    face, which carries the same「接入自己的 Key」exit without the two claims.
     """
     if credential_source in ("user", "platform"):
         details["credential_source"] = credential_source
+    ceiling = MAX_RETRY_AFTER if retry_ceiling is None else retry_ceiling
+    declared = retry_after if retry_after_source == RETRY_AFTER_FROM_HEADER else None
     if (
-        retry_after is not None
-        and retry_after > MAX_RETRY_AFTER
+        declared is not None
+        and declared > ceiling
+        and declared > MAX_RETRY_AFTER
         and details.get("credential_source") == "platform"
     ):
         return LLMQuotaExceededError(
-            "平台模型额度已用完，本回合无法继续。上游将于 "
-            f"{format_retry_after_moment(retry_after, now=now)} 恢复；"
+            "平台模型额度已用完，本回合无法继续。请等待上游额度恢复，"
             "或在「设置 · 服务商」接入自己的 API Key 立即继续。",
-            retry_after=retry_after,
+            retry_after=declared,
+            recovery_at=recovery_at_iso(declared, now=now),
+            retry_after_source=retry_after_source,
             **details,
         )
-    return LLMRateLimitError(retry_after, now=now, **details)
+    return LLMRateLimitError(
+        retry_after,
+        now=now,
+        retry_ceiling=retry_ceiling,
+        retry_after_source=retry_after_source,
+        **details,
+    )
 
 
 class LLMTimeoutError(LLMError):
@@ -522,6 +650,10 @@ class QuotaExceededError(AgentCoreError):
     validation (422). ``dimension`` / ``used`` / ``limit`` ride along on the
     exception for logging and tests.
 
+    ``reset_at`` is the ISO-8601 UTC instant the exhausted window rolls over at
+    (:func:`utc_moment_iso`). It rides in the envelope rather than in the sentence
+    for the reason the 429 copy does: the reader's zone is the client's to know.
+
     Leaf-side twin (same code, inside the LLM family): :class:`LLMQuotaExceededError`.
     """
 
@@ -535,11 +667,15 @@ class QuotaExceededError(AgentCoreError):
         dimension: str = "",
         used: int = 0,
         limit: int = 0,
+        reset_at: str = "",
         **kwargs,
     ):
         self.dimension = dimension
         self.used = used
         self.limit = limit
+        self.reset_at = reset_at
+        if reset_at:
+            kwargs["reset_at"] = reset_at
         super().__init__(message, dimension=dimension, used=used, limit=limit, **kwargs)
 
 

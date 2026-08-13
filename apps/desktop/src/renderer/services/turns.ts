@@ -21,7 +21,6 @@ export {
 } from "./turns/conversationFollow";
 export { attachSidecarTurn } from "./turns/sidecarAttach";
 export { projectUnsyncedTurns } from "./turns/projectUnsynced";
-export { reconcileQueuedTurns } from "./turns/reconcileQueuedTurns";
 export {
   isPausedFrameGone,
   runRegenerate,

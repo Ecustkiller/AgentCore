@@ -7,6 +7,7 @@ import { ChevronRight } from "lucide-react";
  */
 export function ComposerMoreSheet({
   modelLabel,
+  modelPreset,
   permissionLabel,
   disabled,
   onClose,
@@ -15,6 +16,8 @@ export function ComposerMoreSheet({
   onAttach,
 }: {
   modelLabel: string;
+  /** 系统预置组合（区别于用户自建）。 */
+  modelPreset?: boolean;
   permissionLabel: string;
   disabled?: boolean;
   onClose: () => void;
@@ -31,12 +34,15 @@ export function ComposerMoreSheet({
         className="more-row"
         disabled={disabled}
         data-testid="composer-more-model"
-        aria-label={`模型组合：${modelLabel}`}
+        aria-label={`模型组合：${modelLabel}${modelPreset ? "（系统预置）" : ""}`}
         onClick={onOpenModel}
       >
         <div className="more-row-main">
           <span className="more-row-title">模型组合</span>
-          <span className="more-row-sub muted">{modelLabel}</span>
+          <span className="more-row-sub more-row-sub-badged muted">
+            <span className="more-row-sub-text">{modelLabel}</span>
+            {modelPreset && <span className="model-preset-badge">预置</span>}
+          </span>
         </div>
         <ChevronRight size={16} className="muted" aria-hidden />
       </button>

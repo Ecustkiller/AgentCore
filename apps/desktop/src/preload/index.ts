@@ -91,6 +91,8 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.checkoutArchive, { archiveBase64 }),
   saveFile: (suggestedName, bytes) =>
     ipcRenderer.invoke(FS_CHANNELS.saveFile, { suggestedName, bytes }),
+  openTempFile: (suggestedName, bytes) =>
+    ipcRenderer.invoke(FS_CHANNELS.openTempFile, { suggestedName, bytes }),
   previewArchive: (archiveBase64, openRelPath) =>
     ipcRenderer.invoke(FS_CHANNELS.previewArchive, {
       archiveBase64,
@@ -99,11 +101,6 @@ const fsApi: FsApi = {
   listRoots: () => ipcRenderer.invoke(FS_CHANNELS.listRoots),
   removeRoot: (rootId) =>
     ipcRenderer.invoke(FS_CHANNELS.removeRoot, { rootId }),
-  onRootsChanged: (cb) => {
-    const listener = () => cb();
-    ipcRenderer.on(FS_CHANNELS.rootsChanged, listener);
-    return () => ipcRenderer.removeListener(FS_CHANNELS.rootsChanged, listener);
-  },
   grantSessionReadonlyRoot: (conversationIdOrParams, mode) => {
     const params =
       typeof conversationIdOrParams === "string"
@@ -138,6 +135,12 @@ const fsApi: FsApi = {
   clearSessionReadonlyRoots: (conversationId) =>
     ipcRenderer.invoke(FS_CHANNELS.clearSessionReadonlyRoots, {
       conversationId,
+    }),
+  adoptSessionRootAlias: (conversationId, rootId, alias) =>
+    ipcRenderer.invoke(FS_CHANNELS.adoptSessionRootAlias, {
+      conversationId,
+      rootId,
+      alias,
     }),
   listDir: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.listDir, { rootId, relPath }),
@@ -191,6 +194,14 @@ const fsApi: FsApi = {
     ipcRenderer.invoke(FS_CHANNELS.listWorkspaceTrash, { rootId }),
   restoreWorkspaceTrash: (rootId, entryId) =>
     ipcRenderer.invoke(FS_CHANNELS.restoreWorkspaceTrash, { rootId, entryId }),
+  listWorkspaceVersions: (rootId, subpath) =>
+    ipcRenderer.invoke(FS_CHANNELS.listWorkspaceVersions, { rootId, subpath }),
+  deleteWorkspaceVersion: (rootId, subpath, versionId) =>
+    ipcRenderer.invoke(FS_CHANNELS.deleteWorkspaceVersion, {
+      rootId,
+      subpath,
+      versionId,
+    }),
   pickAndStageAttachment: (dest) =>
     ipcRenderer.invoke(FS_CHANNELS.pickAndStageAttachment, { dest }),
   stageFromRoot: (rootId, relPath, dest) =>
@@ -265,6 +276,10 @@ const sidecarApi: SidecarApi = {
     ipcRenderer.invoke(SIDECAR_CHANNELS.turnFilesDiff, req),
   restoreTurnBaseline: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.restoreTurnBaseline, req),
+  createWorkspaceVersion: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.createWorkspaceVersion, req),
+  restoreWorkspaceVersion: (req) =>
+    ipcRenderer.invoke(SIDECAR_CHANNELS.restoreWorkspaceVersion, req),
   listBrowserSessions: (req) =>
     ipcRenderer.invoke(SIDECAR_CHANNELS.listBrowserSessions, req),
   onEvent: (cb) => {

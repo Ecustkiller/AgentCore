@@ -18,6 +18,7 @@ import { InlineCreateRow, InlineInput, InlineRow } from "./FileTreeInline";
 import { FileTreeRowMenu } from "./FileTreeRowMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
+import { FileRowMeta, TruncatedNotice } from "./parts";
 import type { useFileTreeData } from "./useFileTreeData";
 
 export interface FileTreeRowProps {
@@ -111,6 +112,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
                   >
                     <FileTypeIcon name={node.name} size={13} />
                     <span className="min-w-0 flex-1 truncate">{node.name}</span>
+                    <FileRowMeta node={node} />
                   </Button>
                 </SimpleTooltip>
               </SurfaceRow>
@@ -221,6 +223,8 @@ export function FileTreeRow(props: FileTreeRowProps) {
                       {stageCaption}
                     </span>
                   )}
+                  {/* 工作间行是刻意压低的次要行，不给它挂元信息。 */}
+                  {!isWorkroom && <FileRowMeta node={node} />}
                 </Button>
               </SimpleTooltip>
             </SurfaceRow>
@@ -278,6 +282,12 @@ export function FileTreeRow(props: FileTreeRowProps) {
                 depth={depth + 1}
               />
             ))}
+          {data.truncatedOf(node.path) && (
+            <TruncatedNotice
+              indent={(depth + 1) * 14 + 8 + indentBase}
+              shown={children?.length ?? 0}
+            />
+          )}
         </ul>
       )}
     </li>

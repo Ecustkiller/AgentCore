@@ -2,6 +2,7 @@
 import { apiUrl, authHeader } from "@/api/client";
 import { pumpSSEForTests } from "@/api/stream";
 import { StreamHttpError } from "@/lib/errors";
+import type { RecoveryMomentContext } from "@/lib/recoveryMoment";
 import type { SSEEvent } from "@agentcore/contract-types";
 
 async function streamErrorFromResponse(
@@ -9,17 +10,23 @@ async function streamErrorFromResponse(
 ): Promise<StreamHttpError> {
   let code: string | undefined;
   let serverMessage: string | undefined;
+  let context: RecoveryMomentContext | undefined;
   try {
     const body = (await response.json()) as {
-      error?: { code?: string; message?: string };
+      error?: {
+        code?: string;
+        message?: string;
+        context?: RecoveryMomentContext;
+      };
       detail?: { code?: string; message?: string };
     };
     code = body.error?.code ?? body.detail?.code;
     serverMessage = body.error?.message ?? body.detail?.message;
+    context = body.error?.context;
   } catch {
     /* non-JSON */
   }
-  return new StreamHttpError(response.status, code, serverMessage);
+  return new StreamHttpError(response.status, code, serverMessage, context);
 }
 
 export async function resolveStageCardStream(

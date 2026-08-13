@@ -74,6 +74,9 @@ export type RunFrame =
       runId: string;
       agentId: string;
       delta: string;
+      /** attach 增量重放的帧级替换：`delta` 是这一路末尾未闭合块的全文，换块而非追加。
+       * 直播帧永不带（缺省 = 追加）。 */
+      replace?: boolean;
     }
   // 草稿丢弃的 worker 对偶（content_reset 之于 CEO）：清这个 worker 已累积的草稿产出，
   // 重写版从干净态重累积（reasoning 保留）。reason 决定是否留痕：仅 finish_guard
@@ -91,6 +94,8 @@ export type RunFrame =
       runId: string;
       agentId: string;
       delta: string;
+      /** 见 `run_output_delta.replace`。 */
+      replace?: boolean;
     }
   | {
       t: number;
@@ -325,6 +330,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         delta: p.delta,
+        ...(p.replace ? { replace: true as const } : {}),
       };
     }
     case "run_output_reset": {
@@ -345,6 +351,7 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         runId: p.run_id,
         agentId: p.agent_id,
         delta: p.delta,
+        ...(p.replace ? { replace: true as const } : {}),
       };
     }
     case "run_tool_progress": {

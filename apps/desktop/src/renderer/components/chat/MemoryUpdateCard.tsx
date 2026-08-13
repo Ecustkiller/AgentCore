@@ -7,7 +7,12 @@ import {
 import { Card } from "@/components/ui";
 import { countPillMuted, statusCardChrome } from "@/components/ui/tone-presets";
 import { getConversations } from "@/hooks/useConversations";
+import { queryClient } from "@/lib/queryClient";
 import { cn } from "@/lib/utils";
+import {
+  MEMORY_DISPUTED_LINES_KEY,
+  MEMORY_UPDATES_KEY,
+} from "@/services/memory";
 import {
   memoryLeafTabName,
   parseProjectMemoryFolderId,
@@ -126,6 +131,14 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
     });
   };
 
+  // This card is the main way in to「这条不对」, but what shows the result — 记忆动态 and its
+  // 已移走的记忆 list — lives in another route with its own cache. Without this the user
+  // rejects a line here, goes looking for it there, and finds nothing.
+  const memoryChanged = () => {
+    void queryClient.invalidateQueries({ queryKey: MEMORY_UPDATES_KEY });
+    void queryClient.invalidateQueries({ queryKey: MEMORY_DISPUTED_LINES_KEY });
+  };
+
   const hasAnyTarget = items.some((it) => it.target);
   const scopeOverview = memoryScopeOverview(items);
   // A quota card is not a change log: its summary IS the message (什么没写进来、为什么),
@@ -186,6 +199,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
                 item={item}
                 onOpenLeaf={openLeaf}
                 projectFolderId={projectFolderId}
+                onMemoryChanged={memoryChanged}
               />
             ))}
           </ul>

@@ -97,9 +97,7 @@ describe("searchIndex", () => {
     expect(quick?.haystack).toContain("jiurelay.com");
     const quickBody = quick?.body ?? "";
     expect(quickBody).toContain("说目标");
-    expect(quickBody.indexOf("说目标")).toBeLessThan(
-      quickBody.indexOf("BYOK"),
-    );
+    expect(quickBody.indexOf("说目标")).toBeLessThan(quickBody.indexOf("BYOK"));
 
     const what = entries.find((e) => e.itemId === "what");
     expect(what?.haystack).toContain("协作，是更高级的智能");

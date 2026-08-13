@@ -17,90 +17,8 @@
  * （后者纯函数、被 headless 单测直接调，混入 dialog 会破坏可测性）。
  * `requiresOpenConfirm` 为纯函数、单独可测。
  */
+import { isSafeOpenExt } from "@shared/openable-ext";
 import { BrowserWindow, dialog } from "electron";
-
-/**
- * 「已知安全、打开即查看不执行」的扩展名白名单（白名单姿态——红队 2026-06-30）。文档 / 媒体 /
- * 图片 / 纯文本数据 / 压缩包：用 OS 关联打开 = 走查看器，不会经文件关联执行代码。**刻意不含**
- * 脚本 / 源码（.js/.py/.ps1… 多数在 Windows 双击即被解释器执行）与宏启用文档（.docm/.xlsm…）。
- * 不在表内者一律弹确认（含未知扩展名 / 无扩展名 / 危险类型）——漏掉某个安全类型只是「多弹一次
- * 窗」（安全失败），绝不会「漏放一个危险类型」（黑名单通病）。
- */
-const SAFE_OPEN_EXTS: ReadonlySet<string> = new Set([
-  // 纯文本 / 标记 / 数据 / 配置
-  "txt",
-  "text",
-  "md",
-  "markdown",
-  "rst",
-  "log",
-  "csv",
-  "tsv",
-  "json",
-  "yaml",
-  "yml",
-  "toml",
-  "ini",
-  "xml",
-  "rtf",
-  // 文档（**不含**宏启用格式 docm/xlsm/pptm/xlsb）
-  "pdf",
-  "doc",
-  "docx",
-  "xls",
-  "xlsx",
-  "ppt",
-  "pptx",
-  "odt",
-  "ods",
-  "odp",
-  "epub",
-  // 图片
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "svg",
-  "ico",
-  "tif",
-  "tiff",
-  "heic",
-  "heif",
-  "avif",
-  // 音频
-  "mp3",
-  "wav",
-  "flac",
-  "aac",
-  "ogg",
-  "oga",
-  "m4a",
-  "opus",
-  "wma",
-  // 视频
-  "mp4",
-  "m4v",
-  "mov",
-  "avi",
-  "mkv",
-  "webm",
-  "mpg",
-  "mpeg",
-  "wmv",
-  "flv",
-  // 压缩包（打开 = 进归档查看器，不执行内容）
-  "zip",
-  "gz",
-  "tgz",
-  "bz2",
-  "tar",
-  "7z",
-  "rar",
-  "xz",
-  "zst",
-]);
 
 /**
  * 本会话「允许运行」flag（bash native 兜底 + 聊天 RunConfirm「本会话都允许」共享）。
@@ -134,16 +52,12 @@ function baseName(relPath: string): string {
 /**
  * 用 OS 默认程序打开此路径前是否需要主侧确认（纯函数、可单测）。
  *
- * 关键：先按 **Windows 的规矩**规整文件名再取扩展名——Windows 解析前会抹掉文件名末尾的点与
- * 空格（`evil.exe.` / `evil.exe ` 实际执行 `evil.exe`），故先 trim 末尾 `.`/空格再判，否则
- * 「假装无害」的名字会骗过分类（红队 E2）。规整后无明确扩展名（无扩展名 / dotfile）→ 需确认
- * （无法判定安全，安全失败）。仅当扩展名落在 {@link SAFE_OPEN_EXTS} 才静默直开。
+ * 判定表是 {@link isSafeOpenExt}（`shared/openable-ext.ts` 单一真相源，含 Windows 尾点 /
+ * 空格规整、无扩展名即判不安全）。本地路径的策略是「名单外弹确认、确认后仍可开」——字节是
+ * 用户自己放进盘里的，可信度足够；云端临时副本走 `fs/openTemp.ts` 的硬拒，无确认逃生口。
  */
 export function requiresOpenConfirm(relPath: string): boolean {
-  const normalized = baseName(relPath).replace(/[ .]+$/, "");
-  const dot = normalized.lastIndexOf(".");
-  if (dot <= 0) return true; // 无明确扩展名 / dotfile → 无法判定安全 → 确认
-  return !SAFE_OPEN_EXTS.has(normalized.slice(dot + 1).toLowerCase());
+  return !isSafeOpenExt(relPath);
 }
 
 function activeWindow(): BrowserWindow | null {

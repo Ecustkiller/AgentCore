@@ -6,7 +6,9 @@ import {
   type FileSource,
   baseName,
 } from "@/lib/fileSource";
+import { formatBytes } from "@/lib/format";
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
+import { notifyInfo } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
   copyWorkspaceFile,
@@ -14,6 +16,7 @@ import {
   deleteWorkspaceFile,
   downloadWorkspaceFile,
   exportWorkspaceMdToDocx,
+  fetchWorkspaceFileBlob,
   listWorkspaceFiles,
   moveWorkspaceFile,
   openWorkspaceInBrowser,
@@ -25,6 +28,7 @@ import {
 import type {
   WorkspaceEditDoc,
   WorkspaceFile,
+  WorkspaceListing,
   FilePreview as WorkspacePreview,
   WorkspaceWriteOutcome,
 } from "@/services/workspaceHttp";
@@ -36,6 +40,7 @@ import {
   wsDeleteFile,
   wsDownloadFile,
   wsExportMdToDocx,
+  wsFetchFileBlob,
   wsListFileIndex,
   wsListFiles,
   wsMoveFile,
@@ -44,6 +49,8 @@ import {
   wsUploadFile,
   wsWriteFileText,
 } from "@/services/workspaces";
+import { OPEN_TEMP_FILE_MAX_BYTES } from "@shared/ipc-contract";
+import { isSafeOpenExt } from "@shared/openable-ext";
 import { createLocalRootSource } from "./localRootSource";
 
 /** Map the cloud preview wire shape into the unified {@link FilePreviewResult}. */
@@ -150,7 +157,10 @@ const CLOUD_READONLY_CAPS = {
  * behaviour. `listFileIndex` is optional: only the ws-id client exposes the @ index.
  */
 interface CloudFileClient {
-  listFiles(recursive: boolean): Promise<WorkspaceFile[]>;
+  listFiles(opts: {
+    recursive?: boolean;
+    dir?: string;
+  }): Promise<WorkspaceListing>;
   read(path: string): Promise<WorkspacePreview>;
   readForEdit(path: string): Promise<WorkspaceEditDoc>;
   writeText(
@@ -163,15 +173,50 @@ interface CloudFileClient {
   copy(src: string, dst: string): Promise<void>;
   delete(path: string): Promise<void>;
   download(path: string, filename: string): Promise<void>;
+  /** Raw bytes (no save dialog) — backs 「用本机默认应用打开」's temp copy. */
+  fetchBytes(path: string): Promise<Blob>;
   exportMdToDocx(path: string): Promise<{ path: string; warnings: string[] }>;
   listFileIndex?(): Promise<string[]>;
 }
 
-/** Path-aware `AgentCore/{index,trash,baselines}` — mirrors main `isInternalZoneRelPath`. */
+/**
+ * 云端文件「用本机默认应用打开」：取字节 → 主进程落**只读**临时副本 → 系统默认程序。
+ *
+ * 与本地源同名方法效果不同——本地开的是磁盘上的真实文件，云端开的是本机副本，外部改动
+ * 不回写云端。同一个菜单项两种语义，故成功后必须提示，否则用户会以为在外部改完就生效了。
+ * 超限（{@link OPEN_TEMP_FILE_MAX_BYTES}）在取到字节后就地拦下并指向「下载」，省掉一次
+ * 注定被主进程拒掉的大块 IPC 拷贝。
+ */
+async function openCloudFileWithOsDefaultApp(
+  client: CloudFileClient,
+  path: string,
+): Promise<void> {
+  const openTempFile = window.fsApi?.openTempFile;
+  if (!openTempFile) throw new Error("此环境不支持用本机应用打开");
+  const blob = await client.fetchBytes(path);
+  if (blob.size > OPEN_TEMP_FILE_MAX_BYTES) {
+    throw new Error(
+      `文件超过 ${formatBytes(OPEN_TEMP_FILE_MAX_BYTES)}，请改用「下载」后再打开`,
+    );
+  }
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const result = await openTempFile(baseName(path), bytes);
+  if (!result.ok) throw new Error(result.message);
+  notifyInfo("已用本机默认应用打开", {
+    description: "打开的是只读副本，在外部改动不会同步回云端。",
+  });
+}
+
+/**
+ * Path-aware `AgentCore/{index,trash,baselines,versions}` — mirrors main
+ * `isInternalZoneRelPath`. Inlined on purpose (renderer must not import the
+ * main-process module); the zone list is held to the server's by
+ * `check_workspace_ignore_parity.py`, so add new zones here too.
+ */
 function isInternalZonePath(path: string): boolean {
   const p = path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!p || p === ".") return false;
-  for (const zone of ["index", "trash", "baselines"] as const) {
+  for (const zone of ["index", "trash", "baselines", "versions"] as const) {
     const prefix = `AgentCore/${zone}`;
     if (p === prefix || p.startsWith(`${prefix}/`)) return true;
   }
@@ -185,18 +230,9 @@ function toFileNodes(files: WorkspaceFile[]): FileNode[] {
       path: f.path,
       name: baseName(f.path),
       isDir: f.isDir,
+      sizeBytes: f.sizeBytes,
+      mtimeMs: f.mtimeMs,
     }));
-}
-
-/** Direct children of `dir` from a flat listing (root when `dir` is ""). */
-function oneLevelFrom(all: FileNode[], dir: string): FileNode[] {
-  const prefix = dir ? `${dir}/` : "";
-  return all.filter((n) => {
-    if (isInternalZonePath(n.path)) return false;
-    if (!n.path.startsWith(prefix)) return false;
-    const rest = n.path.slice(prefix.length);
-    return rest.length > 0 && !rest.includes("/");
-  });
 }
 
 /**
@@ -205,11 +241,12 @@ function oneLevelFrom(all: FileNode[], dir: string): FileNode[] {
  * byte-for-byte identical on everything but addressing.
  *
  * Listing strategy (fc35aece): do **not** eager-`listTree` via recursive REST.
- * Server recursive list is hard-capped (~100, alphabetical); a large `site/` tree
- * can push root-level AI zips/media out of the budget so the file panel looks
- * empty while「改动」still sees the paths. Root uses non-recursive list; subdirs
- * best-effort filter a recursive call (same cap). Omit `listTree` so {@link
- * FileTree} stays lazy and always hits the root non-recursive path first.
+ * Every level — root and each expanded subdirectory — asks the server for that one
+ * directory. Subdirs used to filter a *recursive* call locally, which shared the
+ * root's entry budget: past ~100 files the tail of the alphabet and everything deep
+ * simply did not exist in the panel. Omit `listTree` so {@link FileTree} stays lazy.
+ * `listDirBounded` carries the server's `truncated` bit up so a level that really
+ * did hit the ceiling says so instead of looking complete.
  */
 function makeCloudSource(
   key: string,
@@ -217,11 +254,11 @@ function makeCloudSource(
   client: CloudFileClient,
   caps: typeof CLOUD_CAPS | typeof CLOUD_READONLY_CAPS = CLOUD_CAPS,
 ): FileSource {
-  const listDir = async (dir: string): Promise<FileNode[]> => {
-    if (!dir) {
-      return toFileNodes(await client.listFiles(false));
-    }
-    return oneLevelFrom(toFileNodes(await client.listFiles(true)), dir);
+  const listDirBounded = async (
+    dir: string,
+  ): Promise<{ entries: FileNode[]; truncated: boolean }> => {
+    const res = await client.listFiles({ recursive: false, dir: dir || "." });
+    return { entries: toFileNodes(res.files), truncated: res.truncated };
   };
 
   const fileIndex = client.listFileIndex;
@@ -229,7 +266,8 @@ function makeCloudSource(
     id: `workspace:${key}`,
     label,
     caps,
-    listDir,
+    listDir: async (dir) => (await listDirBounded(dir)).entries,
+    listDirBounded,
     // Feeds the @ index (文件中枢统一 F4) — flat, files-only, server-pruned/capped.
     ...(fileIndex ? { listFileIndex: fileIndex } : {}),
     read: (path) => client.read(path).then(adaptPreview),
@@ -258,6 +296,16 @@ function makeCloudSource(
     delete: (path) => client.delete(path),
     writeBytes: (path, body) => client.upload(path, body),
     download: (path, filename) => client.download(path, filename),
+    // 桌面专属「用本机默认应用打开」：条件挂载同 previewArchive —— web 运行时不实现
+    // `openTempFile`，入口便整个不出现。谓词收白名单：云端字节是 AI 产出的，名单外类型
+    // 连入口都不给（主进程另有硬拒的强制面），与本地源「名单外仍可开 + 确认」刻意不同。
+    ...(window.fsApi?.openTempFile
+      ? {
+          openWithOsDefaultApp: (path: string) =>
+            openCloudFileWithOsDefaultApp(client, path),
+          canOpenWithOsDefaultApp: (path: string) => isSafeOpenExt(path),
+        }
+      : {}),
     // 写能力跟 caps.edit：无 edit 时不挂 copy / export（菜单与快捷键都靠「方法是否存在」+ canMutate）
     ...(caps.edit
       ? {
@@ -278,7 +326,7 @@ export function createWorkspaceSource(
   label = "工作区",
 ): FileSource {
   const source = makeCloudSource(conversationId, label, {
-    listFiles: (recursive) => listWorkspaceFiles(conversationId, recursive),
+    listFiles: (opts) => listWorkspaceFiles(conversationId, opts),
     read: (path) => readWorkspaceFile(conversationId, path),
     readForEdit: (path) => readWorkspaceFileForEdit(conversationId, path),
     writeText: (path, input) =>
@@ -290,6 +338,7 @@ export function createWorkspaceSource(
     delete: (path) => deleteWorkspaceFile(conversationId, path),
     download: (path, filename) =>
       downloadWorkspaceFile(conversationId, path, filename),
+    fetchBytes: (path) => fetchWorkspaceFileBlob(conversationId, path),
     exportMdToDocx: (path) => exportWorkspaceMdToDocx(conversationId, path),
   });
   // 桌面专属 HTML 完整效果出口（web stub 不提供 → 面板源码 + 下载兜底）。
@@ -316,7 +365,7 @@ export function createCloudWorkspaceSource(
     wsId,
     label,
     {
-      listFiles: (recursive) => wsListFiles(wsId, recursive),
+      listFiles: (q) => wsListFiles(wsId, q),
       read: (path) => wsReadFile(wsId, path),
       readForEdit: (path) => wsReadFileForEdit(wsId, path),
       writeText: (path, input) => wsWriteFileText(wsId, path, input),
@@ -326,6 +375,7 @@ export function createCloudWorkspaceSource(
       copy: (src, dst) => wsCopyFile(wsId, src, dst),
       delete: (path) => wsDeleteFile(wsId, path),
       download: (path, filename) => wsDownloadFile(wsId, path, filename),
+      fetchBytes: (path) => wsFetchFileBlob(wsId, path),
       exportMdToDocx: (path) => wsExportMdToDocx(wsId, path),
       listFileIndex: () => wsListFileIndex(wsId),
     },

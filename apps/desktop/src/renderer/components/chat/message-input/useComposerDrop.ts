@@ -20,8 +20,11 @@ import {
 /** Soft attach errors: auto-dismiss (Slack / Linear style), not sticky form validation. */
 const DROP_ERROR_MS = 4000;
 
+/**
+ * 生成中不拦附加：发送路径本就支持带附件的插话 / 排队（``useComposerSend`` 的
+ * mid-flight 分支会跑 ``settleAttachments``），拦住只会让粘贴 / 拖入静默失败。
+ */
 export function useComposerDrop(
-  isGenerating: boolean,
   attachments: PendingAttachment[],
   setAttachments: Dispatch<SetStateAction<PendingAttachment[]>>,
   conversationId: string | null = null,
@@ -149,14 +152,11 @@ export function useComposerDrop(
     [attachDroppedFile],
   );
 
-  const handleDragOver = useCallback(
-    (e: React.DragEvent) => {
-      if (isGenerating || !e.dataTransfer.types.includes("Files")) return;
-      e.preventDefault();
-      setDragOver(true);
-    },
-    [isGenerating],
-  );
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setDragOver(true);
+  }, []);
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
@@ -166,14 +166,13 @@ export function useComposerDrop(
   // 粘贴入框: Ctrl/Cmd+V 文件或截图 → 与 drop 同驻留链（桌面无 path 时 preload 走字节旁路）。
   const handlePaste = useCallback(
     (e: React.ClipboardEvent) => {
-      if (isGenerating) return;
       const files = collectClipboardFiles(e.clipboardData);
       if (files.length === 0) return;
       e.preventDefault();
       clearDropError();
       void attachFiles(files);
     },
-    [isGenerating, attachFiles, clearDropError],
+    [attachFiles, clearDropError],
   );
 
   const handleDrop = useCallback(
@@ -181,7 +180,6 @@ export function useComposerDrop(
       if (!e.dataTransfer.types.includes("Files")) return;
       e.preventDefault();
       setDragOver(false);
-      if (isGenerating) return;
       // New drop attempt: clear prior soft error so feedback matches this action.
       clearDropError();
       const dropped: File[] = [];
@@ -203,7 +201,7 @@ export function useComposerDrop(
       if (sawDir) flashDropError("文件夹请用 @ 引用，拖拽仅支持文件");
       await attachFiles(dropped);
     },
-    [isGenerating, attachFiles, clearDropError, flashDropError],
+    [attachFiles, clearDropError, flashDropError],
   );
 
   return {

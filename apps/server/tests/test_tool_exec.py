@@ -11,6 +11,7 @@ from agentcore.core.errors import SandboxError
 from agentcore.core.types import ToolCategory, ToolEffect
 from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 from agentcore.runtime.engine.tool_exec import execute_tools
+from agentcore.runtime.engine.tool_failure_face import DEFAULT_TOOL_FAILURE_MESSAGE
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.tools.builtin.code_execute import CodeExecuteTool
 from agentcore.tools.builtin.test_run import TestRunTool
@@ -26,8 +27,7 @@ def _ctx(backend=None) -> ToolContext:
         execution_id="e",
         run_id="s",
         agent_id="a",
-        backend=backend
-        or ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
+        backend=backend or ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
     )
 
@@ -200,9 +200,7 @@ async def test_parallel_crash_does_not_cancel_sibling(registry: tuple[ToolRegist
 async def test_crash_emits_failed_tool_use_end(registry: tuple[ToolRegistry, _OkTool]):
     reg, _ok_b = registry
     sink = EventSink()
-    await execute_tools(
-        [_call("c1", "crash")], reg, _ctx(), sink, approval_gate=None, run_id="r1"
-    )
+    await execute_tools([_call("c1", "crash")], reg, _ctx(), sink, approval_gate=None, run_id="r1")
 
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
@@ -254,7 +252,7 @@ async def test_tool_result_error_keeps_model_detail_and_curated_failure():
     assert ends[0].payload["result"]
     assert "FoldersCloudError" in ends[0].payload["result"]
     assert ends[0].payload["failure"] == {
-        "message": "工具执行失败，请稍后重试。",
+        "message": DEFAULT_TOOL_FAILURE_MESSAGE,
         "code": "TOOL_ERROR",
     }
 
@@ -262,9 +260,7 @@ async def test_tool_result_error_keeps_model_detail_and_curated_failure():
 async def test_success_tool_use_end_omits_failure(registry: tuple[ToolRegistry, _OkTool]):
     reg, _ok_b = registry
     sink = EventSink()
-    await execute_tools(
-        [_call("c1", "ok_a")], reg, _ctx(), sink, approval_gate=None, run_id="r1"
-    )
+    await execute_tools([_call("c1", "ok_a")], reg, _ctx(), sink, approval_gate=None, run_id="r1")
     ends = [e for e in sink._history if e.type == EventType.TOOL_USE_END]  # noqa: SLF001
     assert len(ends) == 1
     assert ends[0].payload["status"] == "success"
@@ -1240,6 +1236,7 @@ async def test_parallel_distinct_path_file_reads_not_coalesced(tmp_path: Path):
     assert "AAA" in by_id["r1"]
     assert "BBB" in by_id["r2"]
 
+
 async def test_ceo_str_replace_miss_still_audience_deny():
     """CEO 面缺写盘工具仍走 audience_deny / delegate 提示。"""
     reg = ToolRegistry()
@@ -1539,6 +1536,7 @@ async def test_grantable_without_gate_is_denied_not_run():
     路的 gate 漏传了，从前会因为「GRANTABLE 判定挂在 gate 存在性上」直接执行；现在先算
     「要不要审批」，再看「有没有人可问」，问不到就拒。
     """
+
     class _DesktopBackend:
         location = "local"
         root_label = "ws"

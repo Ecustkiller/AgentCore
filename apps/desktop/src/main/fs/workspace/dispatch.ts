@@ -30,6 +30,7 @@ import {
   opReadLines,
 } from "./read";
 import { opErr, opOk } from "./result";
+import { resolveSessionMode, sessionRootAccessError } from "./sessionRoot";
 import { opEnsureTurnBaseline } from "./turnBaseline";
 import {
   opAppend,
@@ -43,8 +44,11 @@ import {
   opWriteBytes,
 } from "./write";
 
-/** Session-root access mode (W3 readonly / organize). Permanent roots have neither. */
-export type SessionRootMode = "readonly" | "organize";
+export {
+  resolveSessionMode,
+  sessionRootAccessError,
+  type SessionRootMode,
+} from "./sessionRoot";
 
 function normalizeRevealPaths(raw: unknown): ReadonlySet<string> | undefined {
   if (!Array.isArray(raw) || raw.length === 0) return undefined;
@@ -59,46 +63,6 @@ function normalizeRevealPaths(raw: unknown): ReadonlySet<string> | undefined {
   }
   return out.size > 0 ? out : undefined;
 }
-
-const ORGANIZE_ALLOWED_OPS = new Set<WorkspaceOpName>([
-  "read",
-  "read_bytes",
-  "read_lines",
-  "list",
-  "exists",
-  "list_tree",
-  "index_files",
-  "grep",
-  "probe_exec",
-  "process_read",
-  "process_list",
-  "process_stop",
-  "move",
-  "copy",
-  "mkdir",
-  "delete",
-  "diagnostics",
-  "git_repo_status",
-]);
-
-const ORGANIZE_DENIED_OPS = new Set<WorkspaceOpName>([
-  "write",
-  "append",
-  "write_bytes",
-  "replace",
-  "execute",
-  "process_start",
-  "archive",
-  "ensure_turn_baseline",
-  "git_scm",
-  "git_run",
-]);
-
-const READONLY_MSG = "会话授权目录为只读，不能写入；请把产出写到对话工作区";
-const ORGANIZE_DENY_MSG =
-  "整理授权不允许此操作（仅 list/read/grep/stat + move/copy/mkdir + 回收站删除）";
-const PERMANENT_EXTERNAL_MSG =
-  "区外目录禁止永久删除；请使用可逆删除（进回收站）";
 
 /** Collect path-like args for a reserved-device preflight (before any op touches disk). */
 function pathArgsForReservedCheck(
@@ -165,48 +129,6 @@ function firstReservedDevicePath(
 ): string | null {
   for (const p of pathArgsForReservedCheck(op, args)) {
     if (pathHasWindowsReservedDeviceName(p)) return p;
-  }
-  return null;
-}
-
-/** Resolve session-root mode (missing mode on sessionOnly → readonly). */
-export function resolveSessionMode(root: StoredRoot): SessionRootMode | null {
-  if (root.mode === "organize" || root.mode === "readonly") return root.mode;
-  if (root.sessionOnly) return "readonly";
-  return null;
-}
-
-/**
- * Mode + op whitelist for session external roots.
- * Returns an error envelope when denied; ``null`` when allowed (or not a session root).
- */
-export function sessionRootAccessError(
-  root: StoredRoot,
-  op: WorkspaceOpName,
-  args: Record<string, unknown>,
-): WorkspaceOpResult | null {
-  const mode = resolveSessionMode(root);
-  if (mode === null) return null;
-
-  if (mode === "readonly") {
-    if (
-      ORGANIZE_DENIED_OPS.has(op) ||
-      op === "move" ||
-      op === "copy" ||
-      op === "mkdir" ||
-      op === "delete"
-    ) {
-      return opErr("OutsideWorkspace", READONLY_MSG);
-    }
-    return null;
-  }
-
-  // organize
-  if (op === "delete" && Boolean(args.permanent)) {
-    return opErr("OutsideWorkspace", PERMANENT_EXTERNAL_MSG);
-  }
-  if (ORGANIZE_DENIED_OPS.has(op) || !ORGANIZE_ALLOWED_OPS.has(op)) {
-    return opErr("OutsideWorkspace", ORGANIZE_DENY_MSG);
   }
   return null;
 }
@@ -636,6 +558,7 @@ export async function executeWorkspaceOp(
             revealArchives: Boolean(args.reveal_archives),
             externalNs: resolveSessionMode(root) !== null,
           },
+          args.cap == null ? undefined : Number(args.cap),
         );
       case "exists":
         return await opExists(root, String(args.path ?? ""));

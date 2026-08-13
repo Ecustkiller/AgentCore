@@ -445,6 +445,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
               message: displayError.message,
               upstreamStatus: message.error?.context?.upstream_status,
               emptyDiagnosis,
+              conversationId,
             })}
           </p>
           {supportDiagnosticText && (

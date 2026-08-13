@@ -1,4 +1,4 @@
-import { BASE_URL, api } from "@/services/api";
+import { ApiError, BASE_URL, api } from "@/services/api";
 import type { SidecarInference } from "@shared/sidecar-contract";
 
 /**
@@ -85,6 +85,8 @@ export interface ResolveSidecarInferenceOptions {
  * 取不到（会话过期 / 服务端不可达等）时由调用方诚实失败：开跑前 force remint 一次仍无票
  * → `INFERENCE_TOKEN_EXPIRED`，不发 startTurn / resume RPC。引擎 `build_turn_router` 亦硬拒
  * 空凭据——无「回落 sidecar 本机平台模型」退路；本机工作区回合亦不得改道云端链路。
+ *
+ * **例外**：铸票被 CSRF 拒（`CSRF_FAILED`）原样上抛，不回落 `null`——见下方 catch。
  */
 export async function resolveSidecarInference(
   options?: ResolveSidecarInferenceOptions,
@@ -109,8 +111,15 @@ export async function resolveSidecarInference(
       model: cached.model,
     };
   } catch (err) {
-    console.error("[sidecar] 取推理令牌失败", err);
     cached = null;
+    // CSRF 拒是**别的**故障：安全中间件把铸票请求挡在处理器之前，这枚推理票既没过期也没被
+    // 撤。吞成 `null` 会让调用方报 `INFERENCE_TOKEN_EXPIRED`，用户读到「推理凭证失效」——
+    // 照着这句去重登、去查服务商配置都修不好它。原样上抛，交给统一错误映射说出真因（可自愈
+    // 的那种 403 已在 api 层自动重放过一次，能到这里的是后端拒绝补票的那种）。
+    if (err instanceof ApiError && err.code === "CSRF_FAILED") {
+      throw err;
+    }
+    console.error("[sidecar] 取推理令牌失败", err);
     return null;
   }
 }

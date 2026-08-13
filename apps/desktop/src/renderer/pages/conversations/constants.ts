@@ -1,3 +1,4 @@
+import type { DeletedConversationMeta } from "@/services/conversations";
 import type { DeletedFolderMeta } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 import { UNGROUPED_KEY } from "@/stores/folders";
@@ -6,19 +7,21 @@ import { UNGROUPED_KEY } from "@/stores/folders";
 export const ALL_KEY = "__all__";
 /** Synthetic left-pane filter key for the「已归档」view (归档对话). */
 export const ARCHIVED_KEY = "__archived__";
-/** Synthetic left-pane filter key for the「最近删除」view (已删文件夹回收站). */
+/** Synthetic left-pane filter key for the「最近删除」view (已删对话 + 已删文件夹). */
 export const TRASH_KEY = "__trash__";
 
 /** Stable empty list so the archived view keeps a constant reference until data. */
 export const EMPTY_CONVERSATIONS: Conversation[] = [];
 /** Stable empty list so the trash view keeps a constant reference until data. */
 export const EMPTY_DELETED_FOLDERS: DeletedFolderMeta[] = [];
+/** Same, for the deleted-conversations half of「最近删除」. */
+export const EMPTY_DELETED_CONVERSATIONS: DeletedConversationMeta[] = [];
 
 /**
- * How long a deleted project still has, phrased from the server's `purge_at`.
- * That timestamp is the *earliest* the sweeper may purge (it runs on a cadence),
- * so the day count floors rather than rounds — never promise more time than the
- * server committed to.
+ * How long a deleted project or conversation still has, phrased from the server's
+ * `purge_at`. That timestamp is the *earliest* the sweeper may purge (it runs on a
+ * cadence), so the day count floors rather than rounds — never promise more time
+ * than the server committed to.
  */
 export function retentionRemainingLabel(
   purgeAt: string,

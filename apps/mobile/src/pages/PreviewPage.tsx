@@ -13,6 +13,7 @@ import {
   extractRunToolCalls,
   extractStageCardTraces,
   extractToolPhases,
+  extractTurnCollab,
   extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
@@ -113,6 +114,7 @@ export function PreviewPage() {
         workerToolPhases,
         evidenceLedger: debateEvidenceLedger,
         elapsedMs: turnElapsedMs(events),
+        collab: extractTurnCollab(events),
       }
     : undefined;
 

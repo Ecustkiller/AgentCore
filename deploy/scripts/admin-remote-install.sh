@@ -27,6 +27,18 @@ sudo systemctl reload nginx
 LOCAL_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: ${OFFICE_HOST}" http://127.0.0.1:8090/ || true)"
 echo "nginx reloaded; local probe :8090 → HTTP ${LOCAL_CODE}"
 
+# admin 现在打自己域的 /api（见 office-admin.conf 顶部：避免与 web 客户端共用 cookie），
+# 反代不通 = 控制台整站不可用，所以这里硬校验而非只打印。
+API_CODE="$(curl -sS -o /dev/null -w '%{http_code}' -H "Host: ${OFFICE_HOST}" http://127.0.0.1:8090/api/version || true)"
+echo "local probe :8090/api/version → HTTP ${API_CODE}"
+if [[ "$API_CODE" != "200" ]]; then
+  echo "ERROR: admin 的 /api/ 反代不通（HTTP ${API_CODE}）——控制台会整站登不进去。"
+  echo "  查：后端是否在 127.0.0.1:8000；office-admin.conf 的 location /api/ 是否装上。"
+  exit 1
+fi
+
+# admin 走自有 /api 后已是同源，这条 CORS 条目对它不再是必需品；保留是为了回滚安全
+# （把 API 指回产品域时立刻可用），且 allowlist 里多一个自家 origin 不构成风险。
 [[ -f "$ENVF" ]] || { echo "ERROR: $ENVF missing"; exit 1; }
 if grep -qF "$OFFICE_HOST" "$ENVF"; then
   echo "CORS already includes $ORIGIN"

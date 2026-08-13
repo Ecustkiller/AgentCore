@@ -108,7 +108,11 @@ async def test_root_revoked_mid_turn_reads_as_root_not_held_not_no_fulfiller():
         backend = _local(ROOT)
         raise_if_local_workspace_fulfiller_absent(user_id=USER, backend=backend)
 
-        hub.update_roots(USER, "dev-mid-turn", ["some-other-root"])
+        # The device reconnects without the root (revoked while it was away):
+        # re-registering the same (user, device) replaces the session.
+        session = hub.register(
+            USER, "dev-mid-turn", caps=["workspace"], roots=["some-other-root"]
+        )
 
         t0 = time.monotonic()
         with pytest.raises(WorkspaceIOError) as ei:

@@ -18,10 +18,14 @@ export interface MessageStartPayload {
   conversation_id: string;
   /** The turn's log correlation id (32-hex), for one-step log lookup. Omitted when the turn ran without a trace context (e.g. conformance vectors built outside a turn). */
   trace_id?: string;
+  /** This frame opens a FULL REPLAY of the turn (an attach catch-up segment), not a live turn: the client MUST reset the local streaming state it holds for this `message_id` (streamed content / reasoning / process timeline) and then fold the frames that follow as the turn's whole story. Absent (or false) on a live first frame and on a repeated same-id stamp, which stay「同回合重开」(keep the bubble). The instruction is the server's — clients must not infer it by comparing the id against whatever bubble is on screen. */
+  full_replay?: boolean;
 }
 
 export interface ContentDeltaPayload {
   delta: string;
+  /** This frame carries the COMPLETE current text of the channel's last still-open text block, not an increment: fold it by REPLACING that block (recomputing the scalar) instead of appending. Absent on live frames and on plain incremental deltas. When the channel's tail is not an open text block (a tool / marker step closed it), the frame folds as an ordinary new block. */
+  replace?: boolean;
 }
 
 /** Why a `content_reset` / `run_output_reset` fired. Folds render the
@@ -45,6 +49,8 @@ export interface ContentResetPayload {
 
 export interface ReasoningDeltaPayload {
   delta: string;
+  /** This frame carries the COMPLETE current text of the channel's last still-open text block, not an increment: fold it by REPLACING that block (recomputing the scalar) instead of appending. Absent on live frames and on plain incremental deltas. When the channel's tail is not an open text block (a tool / marker step closed it), the frame folds as an ordinary new block. */
+  replace?: boolean;
 }
 
 /** The CEO captain is composing a tool call's ARGUMENTS (bubble-scoped twin of
@@ -589,6 +595,8 @@ export interface RunOutputDeltaPayload {
   run_id: string;
   agent_id: string;
   delta: string;
+  /** This frame carries the COMPLETE current text of the channel's last still-open text block, not an increment: fold it by REPLACING that block (recomputing the scalar) instead of appending. Absent on live frames and on plain incremental deltas. When the channel's tail is not an open text block (a tool / marker step closed it), the frame folds as an ordinary new block. */
+  replace?: boolean;
 }
 
 export interface RunOutputResetPayload {
@@ -601,6 +609,8 @@ export interface RunReasoningDeltaPayload {
   run_id: string;
   agent_id: string;
   delta: string;
+  /** This frame carries the COMPLETE current text of the channel's last still-open text block, not an increment: fold it by REPLACING that block (recomputing the scalar) instead of appending. Absent on live frames and on plain incremental deltas. When the channel's tail is not an open text block (a tool / marker step closed it), the frame folds as an ordinary new block. */
+  replace?: boolean;
 }
 
 export interface RunToolProgressPayload {
@@ -959,6 +969,27 @@ export interface ResumeDeferredPayload {
   message_id: string;
   conversation_id: string;
   busy_reason: "wrap_up" | "live_turn";
+}
+
+/** Cold resume that found its frame already consumed. EPHEMERAL — idempotent success.
+ * 
+ * The conclusion is durable in ``paused_turn_outcomes``, stamped by whoever won the
+ * atomic claim on the paused frame; this frame relays THAT decision — which card
+ * (``kind`` + ``checkpoint_id``), what was decided (``decision``) and when
+ * (``decided_at``) — never the decision the caller itself just submitted.
+ * 
+ * ``turn_status`` answers a separate question: where the TURN stands (the assistant
+ * row's ``usage.status``), so a client knows whether to close out its streaming
+ * bubble. ``running`` means the continuation is still going and the bubble stays
+ * open; this connection then carries its stream when the run is on this server. */
+export interface ResumeSettledPayload {
+  message_id: string;
+  conversation_id: string;
+  kind: "ask_user" | "plan_review" | "team_preview";
+  checkpoint_id: string;
+  decision: string;
+  decided_at: string;
+  turn_status: "running" | "complete" | "incomplete" | "failed" | "unknown";
 }
 
 /** 执行转后台（``execution_detached``）：附着回合已收口，团队继续跑。 */
@@ -1475,6 +1506,10 @@ export interface TurnCollabMetrics {
   escalations: number;
   /** 审计采集降级计数 (turn_metrics.audit_drops); 诊断模式 only. */
   audit_drops?: number;
+  /** boundary_yields 中由用户拍板造成的那部分 (plan_review checkpoint)。 */
+  boundary_yields_by_user?: number;
+  /** revises 中由用户「立即改此人」促成的那部分 (redirect 热修)。 */
+  revises_by_user?: number;
 }
 
 /** Turn token totals (long-key form, contrast `UsageBreakdown` short keys on runs). */
@@ -1508,6 +1543,10 @@ export interface ErrorContext {
   base_url?: string;
   /** 上游 429 Retry-After 秒数（原始值；工程重试仍截断 ≤30s）。 */
   retry_after?: number;
+  /** 上游额度恢复的绝对时刻（ISO-8601 UTC，如 2026-08-14T16:00:00Z）；文案不含时刻，由客户端按本机时区渲染。 */
+  recovery_at?: string;
+  /** 平台配额窗口翻篇的绝对时刻（ISO-8601 UTC）；同 recovery_at 由客户端本地化。 */
+  reset_at?: string;
   /** LLM_KEY_INVALID CTA 分流：user=去设置换 Key；platform=接入自己的 Key / 联系管理员。 */
   credential_source?: string;
 }
@@ -2003,6 +2042,7 @@ export type SSEPayloadMap = {
   turn_queue_started: TurnQueueStartedPayload;
   turn_queue_cancelled: TurnQueueCancelledPayload;
   resume_deferred: ResumeDeferredPayload;
+  resume_settled: ResumeSettledPayload;
   execution_detached: ExecutionDetachedPayload;
   execution_completed: ExecutionCompletedPayload;
   debate_result: DebateResultPayload;

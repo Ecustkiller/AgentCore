@@ -15,6 +15,7 @@ import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { TRASH_REL, isInternalZoneRelPath } from "../workspaceIgnore";
 import { opErr, opOk } from "./result";
+import { isSessionGrantRoot } from "./sessionRoot";
 import { applyTextReplace } from "./textReplace";
 
 /** 原子写：同目录临时文件 + rename，避免进程中断在用户真实磁盘上留下半截文件。 */
@@ -321,9 +322,23 @@ export async function opDelete(
       ? opErr("OutsideWorkspace", relPath)
       : opErr("PathNotFound", relPath);
   }
-  // Hard-delete only for internal zones (index/trash/baselines) — not whole AgentCore/.
-  const hard = permanent || isInternalZoneRelPath(relPath);
   try {
+    // 会话授权根（区外目录）一律可逆：内部区硬删是产品自己工作区的语义，用户文件夹下的
+    // `AgentCore/{index,trash,baselines}` 是用户自己的东西，普通 delete 不得递归永久删。
+    // 系统回收站不可用时诚实报错——不在用户文件夹里新建 `AgentCore/trash/` 落盘。
+    if (isSessionGrantRoot(root)) {
+      try {
+        await shell.trashItem(real.path);
+        return opOk(null);
+      } catch (e) {
+        return opErr(
+          "WorkspaceIOError",
+          `系统回收站不可用，已放弃删除（区外目录只做可逆删除，不在你的文件夹里建软删区）：${toReason(e)}`,
+        );
+      }
+    }
+    // Hard-delete only for internal zones (index/trash/baselines) — not whole AgentCore/.
+    const hard = permanent || isInternalZoneRelPath(relPath);
     if (hard) {
       await fs.rm(real.path, { recursive: true, force: false });
       return opOk(null);

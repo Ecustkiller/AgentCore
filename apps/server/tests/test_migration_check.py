@@ -33,16 +33,20 @@ def _isolate_settings(monkeypatch):
     monkeypatch.setattr(settings, "debug", False)
 
 
+def _at_head_conn(head: str) -> MagicMock:
+    """Fake connection: revision compare says at-head, schema compare says clean."""
+    conn = MagicMock()
+    conn.run_sync = AsyncMock(side_effect=[{head}, ([], [])])
+    return conn
+
+
 async def test_prod_skips_auto_upgrade(_isolate_settings, monkeypatch):
     """debug=false must never call alembic upgrade — only the drift notice path."""
     monkeypatch.setattr(settings, "debug", False)
     upgrade = AsyncMock()
     monkeypatch.setattr(mc, "_auto_upgrade_dev", upgrade)
     monkeypatch.setattr(mc, "_script_heads", lambda: {"aaa"})
-
-    conn = MagicMock()
-    conn.run_sync = AsyncMock(return_value={"aaa"})
-    monkeypatch.setattr(mc, "engine", _engine_with_connects(_async_cm(conn)))
+    monkeypatch.setattr(mc, "engine", _engine_with_connects(_async_cm(_at_head_conn("aaa"))))
 
     await mc.check_migrations()
     upgrade.assert_not_awaited()
@@ -54,10 +58,7 @@ async def test_debug_attempts_auto_upgrade(_isolate_settings, monkeypatch):
     upgrade = AsyncMock()
     monkeypatch.setattr(mc, "_auto_upgrade_dev", upgrade)
     monkeypatch.setattr(mc, "_script_heads", lambda: {"bbb"})
-
-    conn = MagicMock()
-    conn.run_sync = AsyncMock(return_value={"bbb"})
-    monkeypatch.setattr(mc, "engine", _engine_with_connects(_async_cm(conn)))
+    monkeypatch.setattr(mc, "engine", _engine_with_connects(_async_cm(_at_head_conn("bbb"))))
 
     await mc.check_migrations()
     upgrade.assert_awaited_once()
@@ -127,6 +128,73 @@ async def test_auto_upgrade_logs_info_on_actual_upgrade(_isolate_settings, monke
         from_revisions=["old"],
         to_revisions=["new"],
     )
+
+
+def _live_columns_from_orm(drop: tuple[str, str] | None = None) -> dict:
+    """Inspector payload mirroring the ORM exactly, optionally minus one column."""
+    from agentcore.db.base import Base
+
+    live = {}
+    for table_name, table in Base.metadata.tables.items():
+        names = [c.name for c in table.columns]
+        if drop is not None and drop[0] == table_name:
+            names = [n for n in names if n != drop[1]]
+        live[(None, table_name)] = [{"name": n} for n in names]
+    return live
+
+
+def _inspector_returning(live: dict) -> MagicMock:
+    inspector = MagicMock()
+    inspector.get_multi_columns = MagicMock(return_value=live)
+    return inspector
+
+
+def test_schema_gaps_clean_when_live_matches_orm(monkeypatch):
+    """A schema carrying every mapped table/column reports nothing."""
+    monkeypatch.setattr(
+        mc, "inspect", lambda conn: _inspector_returning(_live_columns_from_orm())
+    )
+
+    assert mc._schema_gaps(MagicMock()) == ([], [])
+
+
+def test_schema_gaps_reports_column_the_orm_maps_but_db_lacks(monkeypatch):
+    """The shape a revision compare cannot see: model column with no migration."""
+    from agentcore.db.base import Base
+
+    table_name, table = next(iter(Base.metadata.tables.items()))
+    column_name = next(iter(table.columns)).name
+    monkeypatch.setattr(
+        mc,
+        "inspect",
+        lambda conn: _inspector_returning(
+            _live_columns_from_orm(drop=(table_name, column_name))
+        ),
+    )
+
+    missing_tables, missing_columns = mc._schema_gaps(MagicMock())
+
+    assert missing_tables == []
+    assert missing_columns == [f"{table_name}.{column_name}"]
+
+
+async def test_check_migrations_reports_orm_ahead_at_head(_isolate_settings, monkeypatch):
+    """At head with a missing column still errors — the 2026-08-13 local outage."""
+    monkeypatch.setattr(mc, "_script_heads", lambda: {"head"})
+
+    conn = MagicMock()
+    conn.run_sync = AsyncMock(
+        side_effect=[{"head"}, ([], ["conversation_external_grants.device_id"])]
+    )
+    monkeypatch.setattr(mc, "engine", _engine_with_connects(_async_cm(conn)))
+
+    with patch.object(mc.logger, "error") as error_log:
+        await mc.check_migrations()
+
+    assert error_log.call_args.args == ("db.schema_orm_ahead",)
+    assert error_log.call_args.kwargs["missing_columns"] == [
+        "conversation_external_grants.device_id"
+    ]
 
 
 async def test_check_migrations_never_raises_on_db_error(_isolate_settings, monkeypatch):

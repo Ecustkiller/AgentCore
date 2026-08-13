@@ -54,6 +54,18 @@ export interface WorkspaceTrashEntry {
 }
 
 /**
+ * 工作区 ``AgentCore/versions`` 条目（用户命名版本 = 本地版「留版本」）。
+ * 字段与云端 ``SnapshotSummary`` 一一对位（`name` ↔ `label`），只是本地按盘上
+ * 目录寻址而非快照 id。
+ */
+export interface WorkspaceVersionEntry {
+  versionId: string;
+  name: string;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+/**
  * Fs IPC 失败判别码——renderer 按码分支（如懒物化工作区对 `not_found`），
  * **禁止**匹配 `reason` 中文文案。
  */
@@ -222,13 +234,19 @@ export const FS_CHANNELS = {
   ensureDefaultRoot: "fs:ensureDefaultRoot",
   listRoots: "fs:listRoots",
   removeRoot: "fs:removeRoot",
-  /** 主进程 → renderer：永久授权根集合已变更（新增 / 移除后持久化成功）。 */
-  rootsChanged: "fs:rootsChanged",
   /** W3: session-scoped read-only root for one conversation. */
   grantSessionReadonlyRoot: "fs:grantSessionReadonlyRoot",
   listSessionReadonlyRoots: "fs:listSessionReadonlyRoots",
   revokeSessionReadonlyRoot: "fs:revokeSessionReadonlyRoot",
   clearSessionReadonlyRoots: "fs:clearSessionReadonlyRoots",
+  /**
+   * 把服务端回执里的别名写到会话授权根上（`external/<别名>/` 的唯一真相源）。
+   *
+   * 别名是服务端登记这条授权时 mint 的命名空间，模型与 UI 见到的都是它；桌面建根
+   * 时不再自算一份。不写下来，本机引擎的 externalMounts 快照就没有这个挂载点，
+   * `external/<别名>/` 恒定 PathNotFound。
+   */
+  adoptSessionRootAlias: "fs:adoptSessionRootAlias",
   listDir: "fs:listDir",
   listFiles: "fs:listFiles",
   readFile: "fs:readFile",
@@ -253,6 +271,10 @@ export const FS_CHANNELS = {
   listWorkspaceTrash: "fs:listWorkspaceTrash",
   /** 还原一条 AgentCore/trash 条目到原相对路径。 */
   restoreWorkspaceTrash: "fs:restoreWorkspaceTrash",
+  /** 列出本地工作区 AgentCore/versions 用户命名版本（创建/恢复走 sidecar）。 */
+  listWorkspaceVersions: "fs:listWorkspaceVersions",
+  /** 删除一个用户命名版本（命名版本永不自动清理，只有显式删）。 */
+  deleteWorkspaceVersion: "fs:deleteWorkspaceVersion",
   /** 引用即驻留：系统文件选择器 → 写入工作区 attachments/ 或暂存。 */
   pickAndStageAttachment: "fs:pickAndStageAttachment",
   /** 从已授权根相对路径驻留。 */
@@ -288,6 +310,13 @@ export const FS_CHANNELS = {
    * 导出 / IM 附件 / 图表·白板导出）统一走本通道；web 端保留 anchor 方案。
    */
   saveFile: "fs:saveFile",
+  /**
+   * 云端文件「用本机默认应用打开」：renderer 把已取到的字节交主进程，落**只读**临时副本后
+   * `shell.openPath`。云端工作区文件在服务器上、本机无实体，这是它唯一的本机打开路径
+   * （与本地源的 {@link FS_CHANNELS.openPath} 分工：后者开的是用户盘上的真实文件）。
+   * 副本只读 = 外部程序改动不会静默丢失（Word 显示「只读」逼另存为）；本期不做回写。
+   */
+  openTempFile: "fs:openTempFile",
 } as const;
 
 /** {@link FsApi.checkoutArchive} 结果。 */
@@ -321,6 +350,25 @@ export type SaveFileResult =
 export type PreviewArchiveResult =
   | { ok: true; fileCount: number }
   | { ok: false; reason: "error"; message: string };
+
+/**
+ * {@link FsApi.openTempFile} 字节上限（64 MiB）。够覆盖 Office / PDF / 图片的常规体量，
+ * 又不至于把内存与临时盘撑爆；超限由 renderer 引导走「下载」（用户主动另存为无此限）。
+ */
+export const OPEN_TEMP_FILE_MAX_BYTES = 64 * 1024 * 1024;
+
+/**
+ * {@link FsApi.openTempFile} 结果。`unsupported_type` = 扩展名不在安全白名单
+ * （见 `shared/openable-ext.ts`；**无确认逃生口**——字节来源是 AI 产出）；
+ * `too_large` = 超 {@link OPEN_TEMP_FILE_MAX_BYTES}。
+ */
+export type OpenTempFileResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason: "unsupported_type" | "too_large" | "error";
+      message: string;
+    };
 
 /** Electron `app.getPath` keys accepted as grant_* well-known roots. */
 export type GrantSessionWellKnown = "desktop" | "downloads" | "documents";
@@ -413,15 +461,20 @@ export interface FsApi {
    * 桌面端 `saveBlob` 的落盘后端——见 {@link FS_CHANNELS.saveFile} 的为什么。
    */
   saveFile(suggestedName: string, bytes: Uint8Array): Promise<SaveFileResult>;
+  /**
+   * 云端文件「用本机默认应用打开」：把 `bytes` 写进独占临时目录、置只读，再
+   * `shell.openPath`。不弹对话框、不登记根、绝对路径不回传 renderer。
+   *
+   * 主进程按 `shared/openable-ext.ts` 白名单**硬拒**名单外扩展名（renderer 门控被绕过
+   * 时的强制面），并对 `suggestedName` 做与 {@link saveFile} 同款净化。optional：web
+   * 预览运行时不实现，云端源据此条件挂载 `openWithOsDefaultApp`。
+   */
+  openTempFile?(
+    suggestedName: string,
+    bytes: Uint8Array,
+  ): Promise<OpenTempFileResult>;
   listRoots(): Promise<FsRoot[]>;
   removeRoot(rootId: string): Promise<void>;
-  /**
-   * 订阅永久授权根集合变更；返回取消订阅函数。
-   *
-   * 履约通道据此把最新 root 集合重新声明给服务端（在场闸按 root 判断能否执行本机
-   * 操作），无需轮询 {@link listRoots}。
-   */
-  onRootsChanged(cb: () => void): () => void;
   /**
    * W3/P1: session root (readonly | organize) bound to conversation.
    * Accepts legacy `(conversationId, mode?)` or a params object with optional
@@ -438,6 +491,15 @@ export interface FsApi {
     rootId: string,
   ): Promise<boolean>;
   clearSessionReadonlyRoots(conversationId: string): Promise<void>;
+  /**
+   * 采纳服务端回执里的权威别名（见 {@link FS_CHANNELS.adoptSessionRootAlias}）。
+   * 返回该根的别名是否已与服务端一致；根不存在 / 不属于该对话 → false。
+   */
+  adoptSessionRootAlias(
+    conversationId: string,
+    rootId: string,
+    alias: string,
+  ): Promise<boolean>;
   listDir(rootId: string, relPath: string): Promise<FsResult<FsEntry[]>>;
   /** 递归列出根内的全部文件（用于 @ 提及检索；忽略常见无关目录，有数量上限）。 */
   listFiles(rootId: string): Promise<FsResult<FsFileRef[]>>;
@@ -540,6 +602,21 @@ export interface FsApi {
   listWorkspaceTrash(rootId: string): Promise<FsResult<WorkspaceTrashEntry[]>>;
   /** 还原一条 AgentCore/trash 条目到原相对路径。 */
   restoreWorkspaceTrash(rootId: string, entryId: string): Promise<FsResult>;
+  /**
+   * 列出本地工作区 ``AgentCore/versions`` 用户命名版本（新 → 旧）。
+   * `subpath` = 工作区在授权根内的相对子路径（裸聊 scratch / 项目子目录），
+   * 根自身传 `""`。创建 / 恢复不在这里——它们走 sidecar（zip/unzip 只一份实现）。
+   */
+  listWorkspaceVersions(
+    rootId: string,
+    subpath: string,
+  ): Promise<FsResult<WorkspaceVersionEntry[]>>;
+  /** 删除一个用户命名版本（不可撤销；命名版本永不自动清理）。 */
+  deleteWorkspaceVersion(
+    rootId: string,
+    subpath: string,
+    versionId: string,
+  ): Promise<FsResult>;
   /**
    * 引用即驻留：打开系统文件选择器，复制进对话工作区 ``attachments/``（有 dest）
    * 或主进程暂存（无 dest）。取消选择返回 ``null``。

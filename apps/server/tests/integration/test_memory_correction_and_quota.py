@@ -14,6 +14,7 @@ import uuid
 import pytest
 
 from agentcore.config import settings
+from agentcore.db.models.documents import MAX_DISPUTED_LINES
 from agentcore.db.repositories import (
     DocumentRepository,
     MemoryUpdateRepository,
@@ -21,6 +22,13 @@ from agentcore.db.repositories import (
 )
 from agentcore.memory import DocumentMemoryStore, assemble_injected_rules
 from agentcore.memory.always_quota import memory_write_conversation_id
+from agentcore.memory.dispute_line import (
+    DisputeLineError,
+    DisputeLineOk,
+    dispute_memory_line,
+    restore_memory_line,
+)
+from agentcore.memory.document_store import EditorBodyMemoryStore
 from agentcore.memory.injection import load_memory_topics
 from agentcore.memory.rules_injection import _scope_on_demand_user_rules
 from agentcore.memory.store import CORE_MEMORY_FILE, topic_path
@@ -176,6 +184,121 @@ async def test_disputed_always_entry_stops_spending_quota(client):
     await client.patch(f"/v1/documents/{doc['id']}", json={"disputed": True})
     after = (await client.get("/v1/documents/always-quota")).json()["used_chars"]
     assert after == before - len("12345")
+
+
+async def test_disputed_line_leaves_body_and_injection_but_stays_recoverable(
+    session_factory,
+):
+    """行级：只有被否的那一句离开正文，同条目其余内容照常注入，且能放回。
+
+    Entry-level dispute silences a whole file; this is the sentence-level cut. The two
+    assertions that matter are the ones a wrong implementation would break silently:
+    the entry's frontmatter must survive the rewrite (derived columns are recomputed from
+    it), and the neighbouring bullet must still reach the prompt.
+    """
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        inner = DocumentMemoryStore(session=session)
+        store = EditorBodyMemoryStore(inner)
+        await repo.save_memory_note(
+            uid,
+            CORE_MEMORY_FILE,
+            "## 关于用户的事实\n- 用户在腾讯工作\n- 用户住在深圳\n",
+            None,
+            role="rule",
+            apply_mode="always",
+        )
+
+        result = await dispute_memory_line(
+            store,
+            repo,
+            user_id=uid,
+            content="用户在腾讯工作",
+            section="关于用户的事实",
+        )
+        assert isinstance(result, DisputeLineOk)
+        assert result.line_id
+
+        note = await repo.get_memory_note(uid, CORE_MEMORY_FILE, None)
+        assert note is not None
+        assert "用户在腾讯工作" not in note.content
+        assert "用户住在深圳" in note.content
+        # Frontmatter is the sole source for apply / description — a body rewrite that
+        # drops it would silently demote the entry out of always-injection.
+        assert note.content.startswith("---")
+        assert note.apply_mode == "always"
+        assert [row["text"] for row in note.disputed_lines] == ["用户在腾讯工作"]
+
+        injected = await assemble_injected_rules(
+            inner, repo, uid, folder_id=None, enabled=True
+        )
+        assert "用户在腾讯工作" not in injected
+        assert "用户住在深圳" in injected
+
+        restored = await restore_memory_line(
+            store, repo, user_id=uid, file=CORE_MEMORY_FILE, line_id=result.line_id
+        )
+        assert isinstance(restored, DisputeLineOk)
+        back = await repo.get_memory_note(uid, CORE_MEMORY_FILE, None)
+        assert back is not None
+        assert "用户在腾讯工作" in back.content
+        assert back.disputed_lines == []
+        assert "用户在腾讯工作" in await assemble_injected_rules(
+            inner, repo, uid, folder_id=None, enabled=True
+        )
+
+
+async def test_disputed_line_record_is_capped_and_clearable(session_factory):
+    """行级记录有上界，也有一个显式的清空出口。
+
+    「AI 重新学回同一件事 → 用户再否一次」是设计文档自己承认的稳态循环，所以它的产物必须有界：
+    过了上限最老的记录出队（正文里那句话本来就已经不在了，出队只是不再能放回它），而用户不打算
+    放回任何一条时可以一次清掉。
+    """
+    uid = str(uuid.uuid4())
+    async with session_factory() as session:
+        repo = DocumentRepository(session)
+        store = EditorBodyMemoryStore(DocumentMemoryStore(session=session))
+        overflow = MAX_DISPUTED_LINES + 3
+        bullets = "".join(f"- 事实{i}\n" for i in range(overflow))
+        await repo.save_memory_note(
+            uid,
+            CORE_MEMORY_FILE,
+            f"## 关于用户的事实\n{bullets}",
+            None,
+            role="rule",
+            apply_mode="always",
+        )
+
+        first_id = ""
+        for i in range(overflow):
+            result = await dispute_memory_line(
+                store,
+                repo,
+                user_id=uid,
+                content=f"事实{i}",
+                section="关于用户的事实",
+            )
+            assert isinstance(result, DisputeLineOk)
+            first_id = first_id or result.line_id
+
+        note = await repo.get_memory_note(uid, CORE_MEMORY_FILE, None)
+        assert note is not None
+        assert len(note.disputed_lines) == MAX_DISPUTED_LINES
+        # The oldest aged out; every rejected line is still gone from the body.
+        assert [row["text"] for row in note.disputed_lines][:1] == ["事实3"]
+        assert "事实0" not in note.content
+        aged_out = await restore_memory_line(
+            store, repo, user_id=uid, file=CORE_MEMORY_FILE, line_id=first_id
+        )
+        assert isinstance(aged_out, DisputeLineError)
+
+        assert await repo.clear_memory_disputed_lines(uid) == 1
+        emptied = await repo.get_memory_note(uid, CORE_MEMORY_FILE, None)
+        assert emptied is not None and emptied.disputed_lines == []
+        # Clearing drops the undo records only — the corrections themselves stand.
+        assert "事实4" not in emptied.content
 
 
 # --- ② 为检索而写的描述 -----------------------------------------------------------------------

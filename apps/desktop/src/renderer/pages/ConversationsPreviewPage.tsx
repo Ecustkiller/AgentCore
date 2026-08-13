@@ -5,6 +5,7 @@ import {
   CONVERSATIONS_PREVIEW_SCENES,
   buildCollaborationTimelineMock,
   buildConversationsPreviewArchived,
+  buildConversationsPreviewConversationTrash,
   buildConversationsPreviewGrouped,
   buildConversationsPreviewTrash,
 } from "@/preview/conversationsScenes";
@@ -24,6 +25,10 @@ function seedPreviewCaches() {
     buildConversationsPreviewArchived(),
   );
   queryClient.setQueryData(folderKeys.trash, buildConversationsPreviewTrash());
+  queryClient.setQueryData(
+    conversationKeys.trash,
+    buildConversationsPreviewConversationTrash(),
+  );
   queryClient.setQueryData(
     conversationKeys.collaborationTimeline(PREVIEW_FOLDER_ID),
     buildCollaborationTimelineMock(PREVIEW_FOLDER_ID),

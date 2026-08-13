@@ -5,13 +5,17 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import and_, case, delete, distinct, func, select, update
+from sqlalchemy.dialects.postgresql import Insert as PgInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
 from agentcore.db.models import (
+    PAUSED_TURN_EXPIRED,
+    PAUSED_TURN_SETTLED,
     Conversation,
     HandoffJob,
+    PausedTurnOutcomeRow,
     PausedTurnRow,
     RunSessionRow,
     TurnJournalRow,
@@ -238,9 +242,50 @@ class RunSessionRepository:
         return int(result.rowcount or 0)
 
 
+# 结算方 for the disposition nobody drove: the retention sweep, not a device.
+_SWEEP_SETTLER = "retention_sweep"
+
+
+def _outcome_upsert(
+    *,
+    message_id: str,
+    conversation_id: str,
+    frame: dict | None,
+    outcome: str,
+    decision: str,
+    settled_by: str,
+) -> PgInsert:
+    """The stamp a frame's consumer writes in its own transaction.
+
+    Card identity (``checkpoint_id`` / ``card_kind``) is read off the consumed frame,
+    so it always describes the pause cycle that actually ended — never an earlier peek.
+    Upsert, because a turn can pause → be settled → pause again → be settled again, and
+    only the latest conclusion answers for the card as it stands now.
+    """
+    data = frame if isinstance(frame, dict) else {}
+    values: dict[str, object] = {
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "outcome": outcome,
+        "card_kind": str(data.get("kind") or ""),
+        "checkpoint_id": str(data.get("checkpoint_id") or ""),
+        "decision": decision,
+        "settled_by": settled_by,
+        "decided_at": datetime.now(UTC),
+    }
+    return (
+        pg_insert(PausedTurnOutcomeRow)
+        .values(**values)
+        .on_conflict_do_update(
+            index_elements=["message_id"],
+            set_={k: v for k, v in values.items() if k != "message_id"},
+        )
+    )
+
+
 class PausedTurnRepository:
     """Durable store for turns suspended at a plan_review checkpoint (结构化挂起
-    turn 级落盘).
+    turn 级落盘) — plus the terminal outcome of every frame it hands out.
 
     Write is an upsert keyed by the turn's ``message_id`` (re-pausing the same turn
     after a resume-then-pause overwrites in place). The read path either claims one
@@ -248,6 +293,14 @@ class PausedTurnRepository:
     ``/resume`` calls can't both continue the same turn) or lists a conversation's
     pending paused turns for reopen. ``trace_id`` is set on first insert only so it
     keeps pointing at the originating interaction.
+
+    **Frame ⊕ outcome.** Winning the atomic claim is what「结了这张卡」means, so the
+    winner stamps its conclusion (:class:`PausedTurnOutcomeRow`) in the very
+    transaction that consumed the frame — decision, moment, ``checkpoint_id``, settler.
+    The TTL sweep stamps ``expired`` the same way. A frame row and its outcome never
+    coexist: ``upsert`` (save / claim rollback) clears the outcome because the card is
+    pending again. Everyone who lost the race reads the winner's row instead of
+    re-deriving「谁结的」from a journal whose last entry is usually their own prewrite.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -278,6 +331,12 @@ class PausedTurnRepository:
             )
         )
         await self._session.execute(stmt)
+        # A pending frame and a terminal outcome are mutually exclusive states of one
+        # card: a re-pause (or a rolled-back claim) means nobody has decided it yet, so
+        # a conclusion left by an earlier cycle must not survive to answer for this one.
+        await self._session.execute(
+            delete(PausedTurnOutcomeRow).where(PausedTurnOutcomeRow.message_id == message_id)
+        )
         await self._session.commit()
 
     async def get(self, message_id: str) -> PausedTurnRow | None:
@@ -286,23 +345,66 @@ class PausedTurnRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_outcome(
+        self, message_id: str, *, conversation_id: str
+    ) -> PausedTurnOutcomeRow | None:
+        """How this turn's paused card ended, or ``None`` if nothing ended it.
+
+        Conversation-scoped (IDOR-safe): an id from another conversation reads as a
+        card that never existed here.
+        """
+        result = await self._session.execute(
+            select(PausedTurnOutcomeRow).where(
+                PausedTurnOutcomeRow.message_id == message_id,
+                PausedTurnOutcomeRow.conversation_id == conversation_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def claim(
-        self, message_id: str, *, conversation_id: str | None = None
+        self,
+        message_id: str,
+        *,
+        conversation_id: str | None = None,
+        decision: str,
+        settled_by: str = "",
     ) -> PausedTurnRow | None:
-        """Atomically read-and-delete one paused turn for resume.
+        """Atomically read-and-delete one paused turn for resume, stamping the outcome.
 
         DELETE ... RETURNING means only ONE caller wins the row (a second concurrent
-        ``/resume`` gets ``None`` → 404), so a paused turn is never resumed twice.
-        Scoped to ``conversation_id`` when given so a frame is only ever claimed
-        within the conversation the caller has already proven it owns (IDOR-safe — a
-        guessed ``message_id`` from another conversation won't match, so it is neither
-        returned nor deleted). Returns the row (detached values) or ``None``.
+        ``/resume`` finds it gone), so a paused turn is never resumed twice. Scoped to
+        ``conversation_id`` when given so a frame is only ever claimed within the
+        conversation the caller has already proven it owns (IDOR-safe — a guessed
+        ``message_id`` from another conversation won't match, so it is neither returned
+        nor deleted). Returns the row (detached values) or ``None``.
+
+        ``decision`` is what the winner is about to apply; it lands in the same
+        transaction as the delete, so there is no instant where the frame is gone and
+        the conclusion is not yet readable. ``settled_by`` records 结算方 (the origin
+        device) for the same reason — a loser must be able to tell「另一端决定的」from
+        「我自己刚提交过」without consulting a journal it has already written to.
+
+        The frame's own ``checkpoint_id`` / ``kind`` are the authority for the stamped
+        card identity (not the caller's earlier peek, which may have read a different
+        pause cycle). A frame carrying no ``checkpoint_id`` cannot be settled: the CHECK
+        rejects it, the transaction rolls back, and the frame survives for a retry.
         """
         stmt = delete(PausedTurnRow).where(PausedTurnRow.message_id == message_id)
         if conversation_id is not None:
             stmt = stmt.where(PausedTurnRow.conversation_id == conversation_id)
         result = await self._session.execute(stmt.returning(PausedTurnRow))
         row = result.scalar_one_or_none()
+        if row is not None:
+            await self._session.execute(
+                _outcome_upsert(
+                    message_id=row.message_id,
+                    conversation_id=row.conversation_id,
+                    frame=row.frame,
+                    outcome=PAUSED_TURN_SETTLED,
+                    decision=decision,
+                    settled_by=settled_by,
+                )
+            )
         await self._session.commit()
         return row
 
@@ -340,6 +442,11 @@ class PausedTurnRepository:
         caller can tell「this really was a pending card」from「already gone」without a
         second query — the attention signal needs the frame's user / conversation to
         clear the badge, and only the winner of the delete may send it.
+
+        Records NO outcome: a bare drop states nothing about how the card ended, so a
+        later「继续」on it reads as a turn that is simply not there. Any caller that IS
+        settling a decision must use :meth:`claim` (or stamp its own conclusion) —
+        otherwise it consumes the frame while telling the other端 nothing.
         """
         result = await self._session.execute(
             delete(PausedTurnRow)
@@ -350,37 +457,56 @@ class PausedTurnRepository:
         await self._session.commit()
         return row
 
-    async def delete_stale(self, *, before: datetime, limit: int) -> int:
+    async def delete_stale(self, *, before: datetime, limit: int) -> list[tuple[str, str]]:
         """Delete up to ``limit`` paused turns idle since before ``before`` (TTL sweep).
 
         ``updated_at`` advances on re-pause (resume → pause again), so an actively
-        re-paused turn stays alive while one abandoned past the window is pruned. Also
-        clears each pruned turn's ``turn_journal`` rows — the journal-so-far is stored
-        there (唯一事实源, §8.3) and would otherwise orphan, since an abandoned pause
-        never produces a message to project onto. Batched (one transaction) so a sweep
-        never holds one huge lock; returns the number of paused turns removed.
+        re-paused turn stays alive while one abandoned past the window is pruned. Each
+        pruned turn is stamped ``expired`` in the same transaction — that stamp is how a
+        later「继续」learns the card was swept rather than settled or regenerated; it is
+        the sweep's half of the frame ⊕ outcome pair. Its ``turn_journal`` rows go too:
+        the journal-so-far is stored there (唯一事实源, §8.3) and nothing will ever
+        continue this turn to consume it. Batched (one transaction) so a sweep never
+        holds one huge lock.
+
+        Returns the pruned ``(message_id, conversation_id)`` pairs, not just a count:
+        the frame is only half of a pause — the assistant row still carries the
+        ``usage.paused`` latch, and the sweep has to clear it or the client keeps
+        painting a decision card whose frame is gone.
         """
-        stale_ids = (
-            (
-                await self._session.execute(
-                    select(PausedTurnRow.message_id)
-                    .where(PausedTurnRow.updated_at < before)
-                    .limit(limit)
+        stale = (
+            await self._session.execute(
+                select(
+                    PausedTurnRow.message_id,
+                    PausedTurnRow.conversation_id,
+                    PausedTurnRow.frame,
+                )
+                .where(PausedTurnRow.updated_at < before)
+                .limit(limit)
+            )
+        ).all()
+        if not stale:
+            return []
+        stale_ids = [row[0] for row in stale]
+        for message_id, conversation_id, frame in stale:
+            await self._session.execute(
+                _outcome_upsert(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    frame=frame,
+                    outcome=PAUSED_TURN_EXPIRED,
+                    decision="",
+                    settled_by=_SWEEP_SETTLER,
                 )
             )
-            .scalars()
-            .all()
-        )
-        if not stale_ids:
-            return 0
         await self._session.execute(
             delete(TurnJournalRow).where(TurnJournalRow.turn_id.in_(stale_ids))
         )
-        result = await self._session.execute(
+        await self._session.execute(
             delete(PausedTurnRow).where(PausedTurnRow.message_id.in_(stale_ids))
         )
         await self._session.commit()
-        return result.rowcount or 0
+        return [(str(row[0]), str(row[1])) for row in stale]
 
 
 class TurnJournalRepository:

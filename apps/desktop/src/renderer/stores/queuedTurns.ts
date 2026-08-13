@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-/** 同对话 FIFO 排队项（live · GET 权威 + turn_queued 信号；进程内，重启丢）。 */
+/** 同对话 FIFO 排队项（live · 设备通道快照为权威；进程内，重启丢）。 */
 export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
@@ -24,7 +24,7 @@ interface QueuedTurnsState {
   byConversation: Record<string, QueuedTurnEntry[]>;
   upsert: (entry: QueuedTurnEntry) => void;
   remove: (conversationId: string, queueId: string) => QueuedTurnEntry | null;
-  /** GET 对账权威替换（空数组 = 清会话条）。 */
+  /** 快照权威替换（空数组 = 清会话条）。 */
   replaceConversation: (
     conversationId: string,
     entries: QueuedTurnEntry[],

@@ -2,6 +2,7 @@ import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import { StreamHttpError } from "@/lib/errors";
+import type { RecoveryMomentContext } from "@/lib/recoveryMoment";
 // SSE transport for the mobile client (前端技术与架构 §七).
 //
 // The backend streams a turn as a POST returning text/event-stream (api/sse.py):
@@ -23,23 +24,30 @@ import { StreamHttpError } from "@/lib/errors";
 import type { CheckpointDecision, SSEEvent } from "@agentcore/contract-types";
 
 /** Build a {@link StreamHttpError} from a non-OK response. A refused turn (e.g.
- *  402 LLM_KEY_REQUIRED / 429 quota) arrives as plain JSON `{error:{code,message}}`,
- *  not an SSE stream — pull those out so ChatPage can offer「去配置」. */
+ *  402 LLM_KEY_REQUIRED / 429 quota) arrives as plain JSON
+ *  `{error:{code,message,context}}`, not an SSE stream — pull those out so ChatPage
+ *  can offer「去配置」and render the refusal's recovery moment in the user's own zone. */
 async function streamErrorFromResponse(
   response: Response,
 ): Promise<StreamHttpError> {
   let code: string | undefined;
   let serverMessage: string | undefined;
+  let context: RecoveryMomentContext | undefined;
   try {
     const body = (await response.json()) as {
-      error?: { code?: string; message?: string };
+      error?: {
+        code?: string;
+        message?: string;
+        context?: RecoveryMomentContext;
+      };
     };
     code = body.error?.code;
     serverMessage = body.error?.message;
+    context = body.error?.context;
   } catch {
     /* non-JSON body — keep status-only phrasing */
   }
-  return new StreamHttpError(response.status, code, serverMessage);
+  return new StreamHttpError(response.status, code, serverMessage, context);
 }
 
 /** Raised when the SSE body goes silent too long (dead socket / proxy drop). */

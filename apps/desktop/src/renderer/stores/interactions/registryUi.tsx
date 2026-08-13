@@ -91,7 +91,11 @@ export function renderTimelineInteractionCard(
     case "approval": {
       if (!node.approval_id) return null;
       return (
-        <ApprovalTrace key={node.approval_id} approvalId={node.approval_id} />
+        <ApprovalTrace
+          key={node.approval_id}
+          approvalId={node.approval_id}
+          messageId={ctx?.messageId ?? ""}
+        />
       );
     }
     case "delegation_authorization": {

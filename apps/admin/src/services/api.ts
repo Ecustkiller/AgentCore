@@ -1,9 +1,15 @@
-// HTTP client for the admin console. The admin app is a *separate origin* from
-// the API (独立 web 控制台), so every request is credentialed (cookies ride along
-// cross-origin via SameSite=Lax + CORS allow-credentials) — see README for the
-// CORS/cookie setup. Mirrors the desktop renderer's api.ts: typed ApiError over
-// the backend's `{error:{code,message}}` contract, a NetworkError for transport
-// failures, and a single refresh-then-replay on 401.
+// HTTP client for the admin console. In production the console is served from its
+// own domain alongside its own `/api` reverse proxy, so requests are SAME-origin and
+// the session cookie is first-party. That is deliberate, not incidental: the auth
+// cookie carries no `domain=` and lands on whichever API host is called, so pointing
+// the console at the product API would hand both SPAs one shared access cookie and
+// let the later login silently take over the earlier one (deploy/nginx/office-admin.conf).
+// Local dev is still cross-origin (:5174 → :8000, same-site localhost), so requests
+// are credentialed and a CORS allowlist entry is kept either way — see README.
+// Mirrors the desktop renderer's api.ts: typed ApiError over the backend's
+// `{error:{code,message}}` contract, a NetworkError for transport failures, and a
+// single replay of the failed request — after a refresh on 401, and straight away
+// on the CSRF 403 that hands back a usable token.
 
 import { clientHeaders } from "@/lib/clientBuildInfo";
 
@@ -49,11 +55,25 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   onUnauthorized = handler;
 }
 
+// SameSite is not CSRF protection, so mutating requests must echo a token the
+// backend minted. It arrives on the `X-CSRF-Token` header of the handshake
+// responses (login / refresh, plus the cold-start `/me` — the only handshake a
+// still-live access cookie gets) and of the very 403 that rejects a request for
+// lacking one, so both fetch sites below capture it unconditionally, before
+// branching on ok/error — that re-arm is what makes the 403 recoverable by
+// retrying the same request.
 let csrfToken: string | null = null;
 
-function captureCsrf(response: Response): void {
+/**
+ * Take the token off any response carrying one, and report whether this response
+ * carried it. On a rejection that answer is the backend's own verdict on whether
+ * the session just re-armed, which is what {@link request} replays on.
+ */
+function captureCsrf(response: Response): boolean {
   const token = response.headers.get("X-CSRF-Token");
-  if (token) csrfToken = token;
+  if (!token) return false;
+  csrfToken = token;
+  return true;
 }
 
 export function clearCsrfToken(): void {
@@ -109,23 +129,27 @@ async function request<T>(
   retry = false,
 ): Promise<T> {
   const method = (options.method ?? "GET").toUpperCase();
+  // `...options` must come *before* `headers`: spread after, a caller passing any
+  // headers at all would replace the whole merged object and silently drop the
+  // CSRF token and Content-Type with it.
+  const fetchInit: RequestInit = {
+    credentials: "include",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...clientHeaders(),
+      ...csrfHeaders(method),
+      ...options.headers,
+    },
+  };
   let response: Response;
   try {
-    response = await fetch(`${BASE_URL}${path}`, {
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        ...clientHeaders(),
-        ...csrfHeaders(method),
-        ...options.headers,
-      },
-      ...options,
-    });
+    response = await fetch(`${BASE_URL}${path}`, fetchInit);
   } catch (cause) {
     throw new NetworkError(cause);
   }
 
-  captureCsrf(response);
+  const rearmed = captureCsrf(response);
 
   if (response.ok) {
     // 204/empty bodies: don't choke on an absent JSON payload.
@@ -140,7 +164,24 @@ async function request<T>(
     onUnauthorized?.();
   }
 
-  throw new ApiError(response.status, await response.text());
+  const error = new ApiError(response.status, await response.text());
+
+  // A CSRF 403 that hands a token back is the backend certifying this session
+  // re-armed itself, so the same request replays cleanly — 401 parity, sharing the
+  // one `retry` flag so a rejection that survives the replay stops there. The
+  // backend withholds the token precisely when replaying would be wrong (the token
+  // was signed for another session, and the write would land on whoever owns the
+  // cookie now); that 403 keeps surfacing to the operator.
+  if (
+    response.status === 403 &&
+    error.code === "CSRF_FAILED" &&
+    rearmed &&
+    !retry
+  ) {
+    return request<T>(path, options, true);
+  }
+
+  throw error;
 }
 
 export const api = {
@@ -166,6 +207,16 @@ export const api = {
 /** A user-facing zh message for any thrown api error (backend msg → status → net). */
 export function errorMessage(err: unknown): string {
   if (err instanceof ApiError) {
+    // The one backend message that is English ("CSRF token missing or invalid.
+    // Re-login and retry.") and whose fix is a *client* action, so it is phrased
+    // here rather than passed through. The rejections that re-seed the token are
+    // already replayed above, so what still reaches the operator is the session
+    // that cannot re-arm — looping on that behind their back would dress a dead
+    // session up as an action that worked. Repeating it by hand stays cheap, and
+    // neither a reload nor a re-login is the missing step.
+    if (err.code === "CSRF_FAILED") {
+      return "安全校验未通过，请重试";
+    }
     if (err.serverMessage) return err.serverMessage;
     if (err.status === 403) return "需要管理员权限";
     if (err.status === 401) return "登录已失效，请重新登录";
@@ -173,4 +224,17 @@ export function errorMessage(err: unknown): string {
   }
   if (err instanceof NetworkError) return "无法连接后端，请确认服务已启动";
   return "发生未知错误";
+}
+
+/**
+ * The backend's own message, else a form-specific `fallback` ("保存失败，请重试") —
+ * for pages that want their own phrasing instead of the generic status wording.
+ *
+ * Errors {@link errorMessage} deliberately re-phrases (CSRF) still win: a page that
+ * reached for `serverMessage` directly would put the backend's English string on
+ * screen, which is how the console used to show "CSRF token missing or invalid."
+ */
+export function errorMessageOr(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && err.code === "CSRF_FAILED") return errorMessage(err);
+  return err instanceof ApiError ? (err.serverMessage ?? fallback) : fallback;
 }

@@ -2,8 +2,11 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from typing import Any, cast
 
 from sqlalchemy import and_, case, delete, func, select, update
+from sqlalchemy.engine import CursorResult
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agentcore.core.types import new_id
@@ -21,7 +24,12 @@ from agentcore.db.models import (
 )
 
 from ._audit_cascade import delete_audit_for_conversation
-from ._base import _ilike_pattern, _sum_int, commit_or_flush
+from ._base import (
+    HIDDEN_CONVERSATION_MODES,
+    _ilike_pattern,
+    _sum_int,
+    commit_or_flush,
+)
 from ._journal_cascade import delete_journal_for_conversation
 
 
@@ -40,6 +48,7 @@ class ConversationRepository:
         permission_axes: dict | None = None,
         deep_research_auto: bool | None = None,
         model_profile_id: str | None = None,
+        client_request_id: str | None = None,
         commit: bool = True,
     ) -> Conversation:
         # Omit title when not provided so the DB server_default ('') applies.
@@ -58,6 +67,10 @@ class ConversationRepository:
         #
         # ``model_profile_id``: HTTP create snapshots account default (or client
         # pick). Internal callers may omit (NULL) — expand still falls back.
+        #
+        # ``client_request_id`` is the caller's idempotency key; passing one makes
+        # this insert racy-by-design against the partial unique index, so HTTP
+        # callers go through :meth:`create_idempotent` rather than here.
         #
         # Pass ``commit=False`` when pairing with HandoffJobRepository.create or
         # StandingTaskRepository.attach_conversation.
@@ -79,10 +92,87 @@ class ConversationRepository:
             conv.deep_research_auto = bool(deep_research_auto)
         if model_profile_id is not None:
             conv.model_profile_id = model_profile_id
+        if client_request_id is not None:
+            conv.client_request_id = client_request_id
         self._session.add(conv)
         await commit_or_flush(self._session, commit=commit)
         await self._session.refresh(conv)
         return conv
+
+    async def get_by_client_request_id(
+        self, *, user_id: str, client_request_id: str
+    ) -> Conversation | None:
+        """The conversation this user's idempotency key already created, if any.
+
+        Deliberately **not** filtered by ``deleted_at``: this predicate has to match
+        ``uq_conversations_user_client_request`` exactly, or a key whose conversation
+        was since deleted would miss here, fail the insert on the still-live index
+        row, and then miss the re-query too — a request that can only 500.
+        """
+        result = await self._session.execute(
+            select(Conversation).where(
+                Conversation.user_id == user_id,
+                Conversation.client_request_id == client_request_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_idempotent(
+        self,
+        *,
+        user_id: str,
+        client_request_id: str,
+        title: str | None = None,
+        folder_id: str | None = None,
+        local_container_root_id: str | None = None,
+        permission_axes: dict | None = None,
+        model_profile_id: str | None = None,
+    ) -> tuple[Conversation, bool]:
+        """Create a conversation once per ``client_request_id``; returns ``(conv, created)``.
+
+        Two layers, because one send can arrive twice on very different clocks: a
+        user re-pressing「新建」seconds later is caught by the lookup, while two
+        sockets racing 14ms apart both miss it and only the unique index can pick a
+        winner. The loser's ``IntegrityError`` is not an error — it means the other
+        request already did the work, so we roll back and hand back its row.
+
+        ``created=False`` marks the second (and later) arrival for the caller's log.
+        """
+        existing = await self.get_by_client_request_id(
+            user_id=user_id, client_request_id=client_request_id
+        )
+        if existing is not None:
+            return existing, False
+        try:
+            # SAVEPOINT: losing the race must cost this request its INSERT and
+            # nothing else. A plain ``session.rollback()`` also expires every
+            # object the caller still holds — including the authenticated user
+            # the route reads right after, which then reloads outside the async
+            # context and 500s the request the constraint just saved.
+            async with self._session.begin_nested():
+                conv = await self.create(
+                    user_id=user_id,
+                    title=title,
+                    folder_id=folder_id,
+                    local_container_root_id=local_container_root_id,
+                    permission_axes=permission_axes,
+                    model_profile_id=model_profile_id,
+                    client_request_id=client_request_id,
+                    commit=False,
+                )
+        except IntegrityError:
+            # READ COMMITTED gives the re-query a fresh snapshot, so the winner's
+            # row is visible here even though this transaction started before it
+            # committed.
+            winner = await self.get_by_client_request_id(
+                user_id=user_id, client_request_id=client_request_id
+            )
+            if winner is None:
+                # Some other constraint failed — not our race; let it surface.
+                raise
+            return winner, False
+        await self._session.commit()
+        return conv, True
 
     async def set_permission_axes(
         self,
@@ -566,25 +656,45 @@ class ConversationRepository:
         return conv
 
     async def soft_delete(self, conversation_id: str, *, user_id: str) -> bool:
-        """Owner-scoped soft delete (user-facing). ``user_id`` mandatory (SEC-002);
-        account-wide deletion uses :meth:`soft_delete_all_for_user`."""
-        conv = await self.get_by_id(conversation_id, user_id=user_id)
-        if conv:
-            conv.deleted_at = datetime.now()
-            # 现场跟随对话：软删也清 run_sessions，避免唤回已删对话的现场。
-            from agentcore.db.repositories.runs import RunSessionRepository
+        """Owner-scoped soft delete (user-facing, recoverable from 最近删除).
 
-            await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
-            await self._session.commit()
-            return True
-        return False
+        ``user_id`` mandatory (SEC-002); account-wide deletion uses
+        :meth:`soft_delete_all_for_user`.
+
+        Two properties the recycle bin rests on, both invisible until a chat comes
+        back:
+
+        * ``deleted_at`` is UTC-aware. The column is ``TIMESTAMPTZ`` and asyncpg binds
+          a naive datetime as UTC, so a naive local ``now()`` would shift the stamp by
+          the box's offset — and「删除于」/「还剩几天」are rendered straight off it.
+        * ``updated_at`` self-assigns to suppress the ORM ``onupdate``. Restamping here
+          would overwrite the chat's real last-activity time with the moment it was
+          deleted, so a restore would land it in「今天」instead of the recency group it
+          actually belongs to — and the original is unrecoverable once overwritten.
+        """
+        conv = await self.get_by_id(conversation_id, user_id=user_id)
+        if not conv:
+            return False
+        # 现场跟随对话：软删也清 run_sessions，避免唤回已删对话的现场。
+        from agentcore.db.repositories.runs import RunSessionRepository
+
+        await RunSessionRepository(self._session).delete_for_conversation(conversation_id)
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+            .values(deleted_at=datetime.now(UTC), updated_at=Conversation.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        await self._session.commit()
+        return True
 
     async def soft_delete_all_for_user(self, user_id: str) -> int:
         """Soft-delete every live conversation owned by a user (账户注销级联).
 
         One bulk update so deleting an account doesn't N+1 over its history; already
         soft-deleted rows are skipped. Returns the number newly soft-deleted. The
-        retention sweeper later reclaims their workspaces just like any soft delete.
+        retention sweeper later reclaims their workspaces just like any soft delete —
+        which is why the stamp is UTC-aware here too (see :meth:`soft_delete`).
         """
         # Collect ids first so we can cascade-clear run_sessions for those chats.
         ids_result = await self._session.execute(
@@ -604,10 +714,105 @@ class ConversationRepository:
         result = await self._session.execute(
             update(Conversation)
             .where(Conversation.id.in_(conv_ids))
-            .values(deleted_at=datetime.now())
+            .values(deleted_at=datetime.now(UTC))
         )
         await self._session.commit()
         return int(result.rowcount or 0)
+
+    async def list_deleted_by_user(
+        self, user_id: str, *, not_before: datetime, limit: int
+    ) -> Sequence[Conversation]:
+        """Soft-deleted chats still inside the retention window (最近删除), newest first.
+
+        ``not_before`` is the same cutoff :meth:`list_purgeable` selects against, so a
+        chat is listed as restorable only while the sweeper is still forbidden to purge
+        it — the bin never offers a recovery it cannot honour.
+
+        Hidden infrastructure rows (``handoff`` / ``standing``) are excluded, matching
+        every other user-facing read: those are soft-deleted by machine paths
+        (handoff reclaim), and the user has no idea what they are. No ``delete_origin``
+        discriminator is needed beyond that — unlike folders, nothing machine-driven
+        soft-deletes a *visible* chat.
+        """
+        if limit <= 0:
+            return []
+        result = await self._session.execute(
+            select(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_not(None),
+                Conversation.deleted_at > not_before,
+                Conversation.mode.notin_(HIDDEN_CONVERSATION_MODES),
+            )
+            .order_by(Conversation.deleted_at.desc(), Conversation.created_at.desc())
+            .limit(limit)
+        )
+        return result.scalars().all()
+
+    async def get_deleted_by_id(
+        self, conversation_id: str, *, user_id: str
+    ) -> Conversation | None:
+        """One soft-deleted chat regardless of retention window (owner-scoped).
+
+        Unbounded by design: the restore route needs an expired chat to still resolve
+        so it can answer 409「已过保留期」instead of an indistinguishable 404.
+        """
+        result = await self._session.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_not(None),
+                Conversation.mode.notin_(HIDDEN_CONVERSATION_MODES),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def restore(
+        self, conversation_id: str, *, user_id: str, not_before: datetime
+    ) -> Conversation | None:
+        """Un-delete a chat; ``None`` when there was nothing restorable.
+
+        A single conditional UPDATE guarded on rowcount, carrying the retention
+        predicate: losing the race against the purge sweeper simply restores nothing
+        and surfaces as a failure — no reconciliation, no retry.
+
+        The chat keeps everything the delete left alone, which is everything except
+        ``deleted_at``: ``folder_id``, ``pinned``, ``archived`` and its real
+        ``updated_at`` all come back untouched, so it reappears in the group and the
+        recency bucket it left from. Two things do **not** come back, and the UI says
+        so rather than pretending: public share links (cascade-revoked at delete time,
+        by design — a stale snapshot must not outlive the delete) and the run sessions
+        cleared with it. A chat whose project was soft-deleted meanwhile keeps pointing
+        at it and reads as 未分组 until that project is restored too.
+        """
+        result = await self._session.execute(
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+                Conversation.deleted_at.is_not(None),
+                Conversation.deleted_at > not_before,
+                Conversation.mode.notin_(HIDDEN_CONVERSATION_MODES),
+            )
+            # Plain Core UPDATE: ``rowcount`` is the whole decision, so the ORM's
+            # RETURNING-based session sync stays out of it. ``updated_at`` self-assigns
+            # for the same reason it does in ``soft_delete`` — restoring a chat is not
+            # activity on it.
+            .values(deleted_at=None, updated_at=Conversation.updated_at)
+            .execution_options(synchronize_session=False)
+        )
+        if cast("CursorResult[Any]", result).rowcount != 1:
+            return None
+        await self._session.commit()
+        # populate_existing: the route's pre-check already holds this row in the
+        # identity map, and ``expire_on_commit=False`` would hand back a stale copy
+        # still carrying ``deleted_at``.
+        refreshed = await self._session.execute(
+            select(Conversation)
+            .where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+            .execution_options(populate_existing=True)
+        )
+        return refreshed.scalar_one_or_none()
 
     async def list_purgeable(self, *, before: datetime, limit: int) -> Sequence[Conversation]:
         """Soft-deleted conversations whose ``deleted_at`` is at/older than ``before``.

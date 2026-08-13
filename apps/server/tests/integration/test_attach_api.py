@@ -20,7 +20,7 @@ import uvicorn
 from agentcore.main import app
 from agentcore.runtime.events import EventSink, content_delta
 from agentcore.runtime.turn.runs import turn_runs
-from tests.integration.conftest import register_and_login
+from tests.integration.conftest import csrf_echo_hooks, register_and_login
 
 
 async def _new_conversation(client: httpx.AsyncClient, title: str) -> str:
@@ -93,7 +93,7 @@ async def live_server(session_factory):
 async def live_client(live_server):
     """An httpx client bound to the live uvicorn server (real sockets, real
     disconnect), not the in-memory ASGITransport."""
-    async with httpx.AsyncClient(base_url=live_server) as c:
+    async with httpx.AsyncClient(base_url=live_server, event_hooks=csrf_echo_hooks()) as c:
         yield c
 
 

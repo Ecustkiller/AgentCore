@@ -10,12 +10,14 @@ import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
-from typing import Literal
+from typing import Literal, NamedTuple
 
 import httpx
 
 from agentcore.core.errors import (
     MAX_RETRY_AFTER,
+    RETRY_AFTER_FROM_BACKOFF,
+    RETRY_AFTER_FROM_HEADER,
     InferenceTokenExpiredError,
     LLMAuthError,
     LLMClientClosedError,
@@ -44,6 +46,7 @@ from agentcore.llm.errors import (
     upstream_client_error,
     upstream_error,
 )
+from agentcore.llm.provider.call_budget import provider_retry_ceiling
 from agentcore.llm.provider.protocol import (
     BACKOFF_MULTIPLIER,
     CONNECT_INITIAL_BACKOFF,
@@ -134,61 +137,123 @@ def _usage_from(usage_data: dict) -> TokenUsage:
     return TokenUsage.from_openai_wire(usage_data)
 
 
-def _parse_retry_after(raw: str | None, backoff: float) -> float:
+class RetryAfter(NamedTuple):
+    """A 429's cooldown, kept inseparable from whose number it is.
+
+    ``seconds`` is what control flow acts on and may well be ours; ``declared`` is
+    the only value that may be logged as something upstream said, and is ``None``
+    whenever the header was absent, unusable or already expired.
+    """
+
+    seconds: float
+    declared: float | None
+
+    @property
+    def source(self) -> str:
+        return RETRY_AFTER_FROM_HEADER if self.declared is not None else RETRY_AFTER_FROM_BACKOFF
+
+
+def _parse_retry_after(raw: str | None, backoff: float) -> RetryAfter:
     """Parse an HTTP ``Retry-After`` header (RFC 7231): either delta-seconds or an
     HTTP-date. Any absent/malformed value falls back to ``backoff`` so a 429 never
     escapes the retry/error mapping as a generic 502 (audit 01 F9).
 
-    Returns the **raw** parsed seconds (may be hour-scale). Callers must pass it
-    through :func:`_retry_wait` before sleeping — ``wait_sec`` in logs is the
-    clamped sleep, not this raw value.
+    That fallback is *our* exponential backoff, so it comes back tagged: ``seconds``
+    paces the retry, ``declared`` stays ``None``. Logs that flatten the two lose the
+    difference between「上游要我们等 32 秒」and「上游没说，我们自己退到了 32 秒」—
+    which is how 138 header-less production give-ups got read as a near-miss on the
+    ceiling. ``declared`` may be hour-scale: callers pass ``seconds`` through
+    :func:`_retry_wait` before sleeping, so ``wait_sec`` in logs is the clamped sleep.
     """
     if raw is None:
-        return backoff
+        return RetryAfter(backoff, None)
     raw = raw.strip()
     if not raw:
-        return backoff
+        return RetryAfter(backoff, None)
     try:
-        return float(raw)
+        declared = float(raw)
     except ValueError:
         pass
+    else:
+        return RetryAfter(declared, declared)
     try:
         when = parsedate_to_datetime(raw)
     except (TypeError, ValueError):
-        return backoff
+        return RetryAfter(backoff, None)
     if when is None:
-        return backoff
+        return RetryAfter(backoff, None)
     now = datetime.now(when.tzinfo or UTC)
     delta = (when - now).total_seconds()
-    return delta if delta > 0 else backoff
+    return RetryAfter(delta, delta) if delta > 0 else RetryAfter(backoff, None)
 
 
-def _retry_wait(retry_after: float | None, backoff: float) -> tuple[float, float | None]:
-    """Map a parsed Retry-After (or None) to the seconds we will actually sleep.
+def _retry_wait(
+    retry_after: float | None, backoff: float, *, ceiling: float | None = None
+) -> float:
+    """Map a cooldown (or None) to the seconds we will actually sleep.
 
-    Returns ``(wait_sec, retry_after_sec)`` where ``wait_sec`` is what
-    ``asyncio.sleep`` uses and ``retry_after_sec`` is the raw header value when
-    present (for logs). Callers must refuse retry via
-    :func:`_rate_limit_should_retry` when raw exceeds ``MAX_RETRY_AFTER``;
-    this helper only clamps sleep for accepted retries (legacy absurd branch
-    still falls back to ``backoff`` if invoked).
+    Callers must refuse retry via :func:`_rate_limit_should_retry` under the same
+    ``ceiling``; this helper only clamps sleep for accepted retries (legacy absurd
+    branch still falls back to ``backoff`` if invoked). ``ceiling`` defaults to the
+    interactive one. It hands back no second「for the logs」value on purpose:
+    whether a number is upstream's rides on :attr:`RetryAfter.declared` /
+    :attr:`LLMRateLimitError.retry_after_source`, never on having survived a clamp.
     """
+    limit = _MAX_RETRY_AFTER if ceiling is None else ceiling
     if retry_after is None:
-        return backoff, None
-    if retry_after > _MAX_RETRY_AFTER:
-        return backoff, retry_after
-    return (retry_after if retry_after > 0 else backoff), retry_after
+        return backoff
+    if retry_after > limit:
+        return backoff
+    return retry_after if retry_after > 0 else backoff
 
 
-def _rate_limit_should_retry(retry_after: float | None) -> bool:
-    """Whether a 429 is worth retrying under interactive turn budgets.
+def _rate_limit_should_retry(
+    retry_after: float | None, *, ceiling: float | None = None
+) -> bool:
+    """Whether a 429 is worth sitting out on the budget this call has left.
 
     Upstream sometimes returns ``Retry-After: 3600``. Blind exponential backoff
-    still burns ~1min of empty retries and looks like a hung worker. Cooldowns
-    longer than ``MAX_RETRY_AFTER`` fail immediately so the UI can surface
-    rate-limit instead of spinning.
+    still burns ~1min of empty retries and looks like a hung worker. ``ceiling``
+    comes from :func:`~agentcore.llm.provider.call_budget.retry_after_ceiling` —
+    the caller's remaining wall clock, or the interactive ``MAX_RETRY_AFTER`` when
+    there is no deadline — and anything past it fails immediately so the UI can
+    surface rate-limit instead of spinning.
     """
-    return not (retry_after is not None and retry_after > _MAX_RETRY_AFTER)
+    limit = _MAX_RETRY_AFTER if ceiling is None else ceiling
+    return not (retry_after is not None and retry_after > limit)
+
+
+def _cooldown_fields(seconds: float | None, source: str | None) -> dict[str, object]:
+    """The 429 provenance triple every rate-limit log line carries.
+
+    ``retry_after_sec`` keeps the plain meaning its name promises — the cooldown
+    *upstream stated* — and is ``None`` when upstream stated none, so a reader (or a
+    saved query) filtering on it can no longer pick up numbers we generated.
+    ``cooldown_sec`` is what the decision was actually made on, whoever's number it is.
+    """
+    return {
+        "retry_after_sec": seconds if source == RETRY_AFTER_FROM_HEADER else None,
+        "cooldown_sec": seconds,
+        "cooldown_source": source,
+    }
+
+
+def _error_cooldown(error: Exception) -> tuple[float | None, str | None]:
+    """``(cooldown seconds, provenance)`` of a caught error — ``(None, None)`` when it
+    carries no cooldown at all (plain 5xx / transport retries)."""
+    if isinstance(error, LLMRateLimitError):
+        return error.retry_after, error.retry_after_source
+    return None, None
+
+
+def _no_retry_reason(source: str | None) -> str:
+    """Why we stopped: upstream's cooldown outran the budget, or our own next backoff
+    did. The second case used to log as the first, which reads as upstream's fault."""
+    return (
+        "backoff_exceeds_budget"
+        if source == RETRY_AFTER_FROM_BACKOFF
+        else "retry_after_too_large"
+    )
 
 
 class OpenAICompatibleProvider:
@@ -285,7 +350,9 @@ class OpenAICompatibleProvider:
     async def complete(self, request: LLMRequest) -> LLMResponse:
         payload = self._build_payload(request, stream=False)
         start = time.monotonic()
-        data = await self._request_with_retry(payload, scenario=request.scenario)
+        data = await self._request_with_retry(
+            payload, scenario=request.scenario, patience=request.retry_patience_seconds
+        )
         latency_ms = int((time.monotonic() - start) * 1000)
 
         choice = data["choices"][0]
@@ -391,9 +458,19 @@ class OpenAICompatibleProvider:
         # 5xx retry in between does not reset or inflate it.
         connect_max, connect_backoff = connect_retry_policy(request.scenario)
         yielded_ephemeral = False
+        started = time.monotonic()
         self._ensure_client_open()
 
         for attempt in range(_IO_ATTEMPT_CEILING):
+            # Same per-attempt narrowing as the unary loop. Streaming turns are the
+            # interactive ones and carry no patience, so this is normally the
+            # unchanged ``MAX_RETRY_AFTER`` — and a request that arrived carrying one
+            # anyway is refused there rather than quietly re-timing the turn.
+            ceiling = provider_retry_ceiling(
+                scenario=request.scenario,
+                patience=request.retry_patience_seconds,
+                elapsed=time.monotonic() - started,
+            )
             committed = False
             lines_seen = 0
             has_content = False
@@ -425,6 +502,8 @@ class OpenAICompatibleProvider:
                         response.headers,
                         body=body,
                         attempt=attempt,
+                        scenario=request.scenario,
+                        retry_ceiling=ceiling,
                     )
                     async for line in response.aiter_lines():
                         lines_seen += 1
@@ -573,30 +652,32 @@ class OpenAICompatibleProvider:
                     attempt, max_attempts=max_attempts
                 ):
                     raise
-                retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
+                retry_after, cooldown_source = _error_cooldown(e)
                 if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after
+                    retry_after, ceiling=ceiling
                 ):
                     logger.info(
                         "llm.rate_limit_no_retry",
                         provider=self._name,
+                        scenario=request.scenario,
                         attempt=attempt + 1,
-                        retry_after_sec=retry_after,
+                        **_cooldown_fields(retry_after, cooldown_source),
+                        ceiling_sec=ceiling,
                         stream=True,
-                        reason="retry_after_too_large",
+                        reason=_no_retry_reason(cooldown_source),
                     )
                     raise
                 if yielded_ephemeral:
                     yield LLMChunk(stream_reset=True)
                     yielded_ephemeral = False
-                wait, raw_retry_after = _retry_wait(retry_after, backoff)
+                wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
                 logger.info(
                     "llm.call_retried",
                     provider=self._name,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                     wait_sec=wait,
-                    retry_after_sec=raw_retry_after,
+                    **_cooldown_fields(retry_after, cooldown_source),
                     stream=True,
                     reason=type(e).__name__,
                 )
@@ -771,6 +852,8 @@ class OpenAICompatibleProvider:
         *,
         body: bytes | None = None,
         attempt: int = 0,
+        scenario: str = "chat",
+        retry_ceiling: float | None = None,
     ) -> None:
         # Sidecar→cloud hop: our own error envelope is the first truth source, and
         # the status-based classification below is the fallback for answers we did
@@ -779,7 +862,9 @@ class OpenAICompatibleProvider:
         # code turns an exhausted quota into vendor throttling and a missing BYOK
         # key into an empty wallet — see ``inference_envelope_error``.
         if self._is_inference_hop:
-            envelope_error = inference_envelope_error(status=status_code, body=body)
+            envelope_error = inference_envelope_error(
+                status=status_code, body=body, retry_ceiling=retry_ceiling
+            )
             if envelope_error is not None:
                 if headers.get("x-upstream-retried"):
                     # The cloud leaf already spent a retry budget on this fault.
@@ -794,19 +879,25 @@ class OpenAICompatibleProvider:
                 )
                 raise envelope_error
         if status_code == 429:
-            retry_after = _parse_retry_after(headers.get("retry-after"), backoff)
-            if not _rate_limit_should_retry(retry_after):
+            cooldown = _parse_retry_after(headers.get("retry-after"), backoff)
+            if not _rate_limit_should_retry(cooldown.seconds, ceiling=retry_ceiling):
                 # The refusal now rides on the error itself, so the retry loop
-                # short-circuits before its own guard could log this.
+                # short-circuits before its own guard could log this. ``ceiling_sec``
+                # is why we refused: a header inside it is waited out instead.
                 logger.info(
                     "llm.rate_limit_no_retry",
                     provider=self._name,
+                    scenario=scenario,
                     attempt=attempt + 1,
-                    retry_after_sec=retry_after,
-                    reason="retry_after_too_large",
+                    **_cooldown_fields(cooldown.seconds, cooldown.source),
+                    ceiling_sec=_MAX_RETRY_AFTER if retry_ceiling is None else retry_ceiling,
+                    reason=_no_retry_reason(cooldown.source),
                 )
             raise upstream_rate_limit_error(
-                retry_after, credential_source=self._credential_source
+                cooldown.seconds,
+                credential_source=self._credential_source,
+                retry_ceiling=retry_ceiling,
+                retry_after_source=cooldown.source,
             )
         if status_code in (401, 403):
             logger.warning(
@@ -1017,13 +1108,22 @@ class OpenAICompatibleProvider:
         )
         raise await self._log_sub2api_diagnosis(final) from err
 
-    async def _request_with_retry(self, payload: dict, *, scenario: str = "chat") -> dict:
+    async def _request_with_retry(
+        self, payload: dict, *, scenario: str = "chat", patience: float | None = None
+    ) -> dict:
         last_error: Exception | None = None
         backoff = _INITIAL_BACKOFF
         # Mirrors ``stream``: connect-class failures keep their own budget/backoff.
         connect_max, connect_backoff = connect_retry_policy(scenario)
+        started = time.monotonic()
         self._ensure_client_open()
         for attempt in range(_IO_ATTEMPT_CEILING):
+            # Recomputed each attempt: a 429 we already slept off spent part of the
+            # caller's wall clock, so the next cooldown is judged against what is
+            # actually left rather than the patience we started with.
+            ceiling = provider_retry_ceiling(
+                scenario=scenario, patience=patience, elapsed=time.monotonic() - started
+            )
             try:
                 self._ensure_client_open()
                 response = await self._client.post(
@@ -1037,7 +1137,13 @@ class OpenAICompatibleProvider:
                 ):
                     continue
                 self._raise_for_status(
-                    response.status_code, backoff, response.headers, body=body, attempt=attempt
+                    response.status_code,
+                    backoff,
+                    response.headers,
+                    body=body,
+                    attempt=attempt,
+                    scenario=scenario,
+                    retry_ceiling=ceiling,
                 )
                 try:
                     return response.json()
@@ -1068,27 +1174,29 @@ class OpenAICompatibleProvider:
                     attempt, max_attempts=max_attempts
                 ):
                     raise
-                retry_after = e.retry_after if isinstance(e, LLMRateLimitError) else None
+                retry_after, cooldown_source = _error_cooldown(e)
                 if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after
+                    retry_after, ceiling=ceiling
                 ):
                     logger.info(
                         "llm.rate_limit_no_retry",
                         provider=self._name,
+                        scenario=scenario,
                         attempt=attempt + 1,
-                        retry_after_sec=retry_after,
+                        **_cooldown_fields(retry_after, cooldown_source),
+                        ceiling_sec=ceiling,
                         stream=False,
-                        reason="retry_after_too_large",
+                        reason=_no_retry_reason(cooldown_source),
                     )
                     raise
-                wait, raw_retry_after = _retry_wait(retry_after, backoff)
+                wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
                 logger.info(
                     "llm.call_retried",
                     provider=self._name,
                     attempt=attempt + 1,
                     max_attempts=max_attempts,
                     wait_sec=wait,
-                    retry_after_sec=raw_retry_after,
+                    **_cooldown_fields(retry_after, cooldown_source),
                     stream=False,
                     reason=type(e).__name__,
                 )

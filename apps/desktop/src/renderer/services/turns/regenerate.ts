@@ -74,17 +74,21 @@ function isResumeRequestRefused(err: unknown): boolean {
 }
 
 /**
- * Paused frame is gone / already settled — keep the card dropped and show a
- * plain banner (no one-click resume retry). 冷路提交（`submitInteraction`）也用它
- * 分辨「这张卡已经被结掉了」与「这次没发出去」：前者不能把卡放回可点，否则另一端早点掉的
- * 卡会被一点再点、次次 404。Covers cloud resume 404/410,
- * product copy「挂起的回合不存在或已处理」, and sidecar PAUSED_TURN_NOT_FOUND.
+ * 挂起帧真的不在了——保持卡已丢的状态，只出一条横幅（不给一键重试：重试必然再失败）。
+ *
+ * 「已被别人处理」**不再**走这条路：云端幂等成功现在回 200 + EPHEMERAL `resume_settled`，
+ * 由 SSE 侧把卡收成结果态。留在这里的是诚实失效——云端 404/410（超保留期被清理 / 回合已
+ * 重新生成或删除）与 sidecar 的 `PAUSED_TURN_NOT_FOUND`（本地引擎尚未跟进幂等契约）。
+ * 唯一用处是决定「这次拒绝要不要把乐观丢掉的壳放回去」：帧不存在就不该放回。
  */
 export function isPausedFrameGone(err: unknown): boolean {
   if (!(err instanceof StreamError)) return false;
   if (err.kind === "http" && (err.status === 404 || err.status === 410)) {
     return true;
   }
+  // sidecar：JSON-RPC 的 code 过不了 IPC（只剩 message），所以本地引擎那条
+  // `PAUSED_TURN_NOT_FOUND(-32003)` 只能靠它自己的文案认。云端已不再发这句
+  // （幂等成功走 `resume_settled`，真失效的 404 另有两句更准的话）。
   const msg = `${err.serverMessage ?? ""} ${err.message ?? ""}`;
   if (msg.includes("挂起的回合不存在或已处理")) return true;
   if (msg.includes("PAUSED_TURN_NOT_FOUND") || /-32003\b/.test(msg)) {
@@ -152,6 +156,19 @@ export async function runRegenerate(
   }
 }
 
+export interface RunResumeOptions {
+  /** team_preview（delegate）continue 修正；缺省 / 空 = 全员按原案开工。 */
+  corrections?: TeamPreviewResumeCorrections;
+  /**
+   * 这张卡所属的会话。缺省 = 当前打开的那个。
+   *
+   * 调用方**知道**卡属于哪个会话时必须显式传：卡不在当前会话里（画布 / 浮窗，或用户已经
+   * 切走）时，本函数挂的错误横幅与调用方清的错误横幅会落在两条不同的会话上，红条从此
+   * 清不掉。
+   */
+  conversationId?: string;
+}
+
 /**
  * Continue a durably-paused turn (结构化挂起 2b resume) and stream the continuation.
  *
@@ -177,13 +194,14 @@ export async function runResume(
   decision: PlanReviewUserDecision,
   note: string,
   selected: string[] = [],
-  corrections?: TeamPreviewResumeCorrections,
+  opts: RunResumeOptions = {},
 ): Promise<void> {
   const store = useConversationStore.getState();
-  const conversationId = store.currentConversationId;
+  const conversationId = opts.conversationId ?? store.currentConversationId;
   if (!conversationId) {
     throw new Error("resume blocked: no active conversation");
   }
+  const corrections = opts.corrections;
   // D9：冷卡与 live 可合法共存。冷卡在位时不抹 generating，直接发 resume
   // （忙槽由服务端收下决策并推 EPHEMERAL `resume_deferred`）。无冷卡的中途流式仍拦截。
   const liveGeneratingAtStart = getRuntime(conversationId).isGenerating;

@@ -4,6 +4,11 @@ Implements :class:`BrowserSession` by POSTing ``/command`` to the desktop Bridge
 (Electron main LocalChromiumHost). Never falls back to gVisor (C4): if the Bridge
 is unreachable the session reports ``host_unavailable``.
 
+Bridge ``401`` is **not** unavailability: the host is alive, its token just is not
+accepted any more. It reports ``bridge_unauthorized`` instead — credentials are only
+handed out on turn boundaries (initialize / startTurn / resume), so unlike a 503 this
+cannot clear by retrying inside the same turn.
+
 Live screencast (D13/D14): when the Hub attaches viewers it calls
 :meth:`start_screencast`, which polls Bridge ``screenshot`` and feeds
 ``BrowserFrameListener`` (jpeg base64 + width/height). :meth:`stop_screencast`
@@ -25,6 +30,7 @@ from agentcore.config import settings
 from agentcore.runtime.browser.desktop_bridge import (
     bridge_command_url,
     bridge_request_headers,
+    desktop_bridge_unauthorized,
     ensure_desktop_bridge_health,
     parse_bridge_error,
 )
@@ -40,6 +46,21 @@ from agentcore.tools.sandbox.browser.protocol import (
 
 # Screencast polls should fail fast; tool commands keep the longer timeout.
 _SCREENCAST_POLL_TIMEOUT_S = 5.0
+
+# Bridge rejected our token (idle-expired / re-issued) — distinct from an unreachable
+# or window-less host, which stays ``host_unavailable``.
+BRIDGE_UNAUTHORIZED_CODE = "bridge_unauthorized"
+_BRIDGE_UNAUTHORIZED_MSG = (
+    f"{BRIDGE_UNAUTHORIZED_CODE}: 本机浏览器 Bridge 凭证已失效，本回合浏览器操作无法继续"
+)
+_HOST_UNAVAILABLE_MSG = "host_unavailable: DesktopBrowserBridge 不可达"
+
+
+def _health_gate_failure(*, detail: str = "") -> tuple[str, str]:
+    """Message + code for a refused health gate — a 401 probe is not a dead host."""
+    if desktop_bridge_unauthorized():
+        return _BRIDGE_UNAUTHORIZED_MSG, BRIDGE_UNAUTHORIZED_CODE
+    return f"{_HOST_UNAVAILABLE_MSG}{detail}", "host_unavailable"
 
 
 class LocalBridgeSession:
@@ -81,9 +102,7 @@ class LocalBridgeSession:
         if self._screencast_task is not None and not self._screencast_task.done():
             return
         if not ensure_desktop_bridge_health():
-            raise BrowserDriverCrashedError(
-                "host_unavailable: DesktopBrowserBridge 不可达"
-            )
+            raise BrowserDriverCrashedError(_health_gate_failure()[0])
         self._screencast_task = asyncio.create_task(
             self._screencast_loop(), name=f"local-screencast:{self.session_id}"
         )
@@ -107,11 +126,8 @@ class LocalBridgeSession:
         if not self._alive:
             raise BrowserDriverCrashedError("local bridge session closed")
         if not ensure_desktop_bridge_health():
-            return BrowserCommandResult(
-                ok=False,
-                error="host_unavailable: DesktopBrowserBridge 不可达",
-                data={},
-            )
+            msg, code = _health_gate_failure()
+            return BrowserCommandResult(ok=False, error=msg, data={"code": code})
         self.last_used = time.time()
         args = dict(command.args or {})
         # 甲：相对路径 → workspace://（与用户完整预览同源）；工具层通常已改写，此处纵深。
@@ -222,7 +238,15 @@ class LocalBridgeSession:
             err, code = parse_bridge_error(
                 err_body if isinstance(err_body, dict) else None, http_status=exc.code
             )
-            if code == "host_unavailable" or exc.code in (401, 503):
+            if exc.code == 401:
+                # Host is up; only the token is stale. Session stays alive so the next
+                # turn (fresh credentials) can keep using this tab.
+                return {
+                    "ok": False,
+                    "error": _BRIDGE_UNAUTHORIZED_MSG,
+                    "code": BRIDGE_UNAUTHORIZED_CODE,
+                }
+            if code == "host_unavailable" or exc.code == 503:
                 raise BrowserSessionError(f"host_unavailable: {err}") from exc
             return {"ok": False, "error": err, "code": code}
         except (URLError, TimeoutError, OSError) as exc:
@@ -235,9 +259,8 @@ class LocalBridgeSession:
 async def open_local_bridge_session(request: BrowserSessionRequest) -> LocalBridgeSession:
     """Factory entry for Registry when ``host_kind=local``."""
     if not ensure_desktop_bridge_health(force=True):
-        raise BrowserSessionError(
-            "host_unavailable: DesktopBrowserBridge 不可达（未配置或探活失败）"
-        )
+        msg, code = _health_gate_failure(detail="（未配置或探活失败）")
+        raise BrowserSessionError(msg, code=code)
     sid = (request.session_id or "").strip()
     if not sid:
         # Registry normally assigns session_id before factory; keep a stable fallback.

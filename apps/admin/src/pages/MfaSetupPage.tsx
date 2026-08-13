@@ -1,16 +1,12 @@
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
-import { ApiError, clearCsrfToken, errorMessage } from "@/services/api";
+import { clearCsrfToken, errorMessage } from "@/services/api";
 import { logout, mfaConfirm, mfaSetup } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { Check, Copy, ShieldCheck } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
 import { toast } from "sonner";
-
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
 
 type Phase = "setup" | "recovery";
 
@@ -38,7 +34,7 @@ export function MfaSetupPage() {
         const payload = await mfaSetup();
         if (!cancelled) setSecret(payload.secret);
       } catch (err) {
-        if (!cancelled) setError(errMsg(err, errorMessage(err)));
+        if (!cancelled) setError(errorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -81,7 +77,7 @@ export function MfaSetupPage() {
       setRecoveryCodes(result.recovery_codes);
       setPhase("recovery");
     } catch (err) {
-      setError(errMsg(err, errorMessage(err)));
+      setError(errorMessage(err));
       setSubmitting(false);
     }
   };

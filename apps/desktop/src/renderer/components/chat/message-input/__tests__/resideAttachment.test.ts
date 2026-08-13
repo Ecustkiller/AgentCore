@@ -225,7 +225,8 @@ describe("ensureAttachmentResident", () => {
         },
       }),
     };
-    upload.mockRejectedValue(new Error("409 conflict"));
+    const denied = new Error("409 conflict");
+    upload.mockRejectedValue(denied);
 
     const res = await ensureAttachmentResident("c1", {
       name: "a.bin",
@@ -237,6 +238,8 @@ describe("ensureAttachmentResident", () => {
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.reason).toContain("409");
+    // 原始错误留在 cause 上：后端 ApiError 的 code / serverMessage 只有它带得动。
+    expect(res.cause).toBe(denied);
   });
 
   it("web fileBlob draft PUTs to attachments/ on ensure", async () => {
@@ -328,6 +331,27 @@ describe("prepareBrowserFileAttachment", () => {
     expect(res.fileBlob).toBeUndefined();
     expect(res.text).toBe("hello");
     expect(upload).toHaveBeenCalledWith("c9", "attachments/notes.txt", file);
+  });
+
+  it("云端 PUT 失败：原始错误随结果带出，不只剩一句 message", async () => {
+    getBinding.mockResolvedValue({
+      mode: "cloud",
+      scope: "conversation",
+      rootId: null,
+      source: "container",
+    });
+    const refused = new Error("文件超出 26214400 字节的上传上限");
+    upload.mockRejectedValue(refused);
+
+    const res = await prepareBrowserFileAttachment(
+      "c9",
+      new File(["hello"], "notes.txt", { type: "text/plain" }),
+    );
+
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.reason).toBe("文件超出 26214400 字节的上传上限");
+    expect(res.cause).toBe(refused);
   });
 
   it("safeBrowserFileName strips path and leading dots", () => {

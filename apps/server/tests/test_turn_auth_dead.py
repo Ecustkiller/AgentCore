@@ -176,7 +176,9 @@ async def test_run_background_llm_skips_when_auth_dead(monkeypatch):
         mark_turn_auth_dead(LLMAuthError(provider_name="platform"))
         runner = AsyncMock()
         result = await gate_mod.run_background_llm("u1", purpose="title", runner=runner)
-        assert result is None
+        assert result == gate_mod.BackgroundLlmSkip(
+            reason=gate_mod.BackgroundSkipReason.TURN_AUTH_DEAD
+        )
         runner.assert_not_awaited()
     finally:
         reset_turn_auth_dead(token)

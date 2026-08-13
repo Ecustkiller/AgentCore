@@ -29,10 +29,12 @@ def code_execution_enabled_for(backend: WorkspaceBackend | None) -> bool:
     tools behind ONE predicate (not a per-tool special-case) is what makes the
     production-security posture cover the class consistently.
 
-    When cloud execution is config-enabled, a boot-time sandbox ``health_check`` result
+    When cloud execution is config-enabled, the sandbox ``health_check`` verdict
     (``tools.sandbox.cloud_health``) also gates this predicate: a failed probe withholds
-    the class so registry registration and ``workspace_context`` stay truthful. An
-    unprobed process (tests, lifespan not run, config off) keeps config-only semantics.
+    the class so registry registration and ``workspace_context`` stay truthful. The
+    verdict is TTL-refreshed in the background on read, so a sandbox that rots after
+    boot is caught rather than trusted for the process life. An unprobed process
+    (tests, lifespan not run, config off) keeps config-only semantics.
 
     Does **not** fold ``command=ask`` withhold — callers that stamp capability lines or
     build registries must use :func:`execution_class_enabled_for` so ask / backend /
@@ -90,9 +92,9 @@ def _browser_sandbox_host_ready() -> bool:
 
     ``code_execute_cloud_enabled`` subprocess path does NOT enable browsers.
     Netns is orthogonal to ``GVisorSandbox.health_check`` (``network_mode=none``):
-    a failed boot / sticky probe withholds browser_* so the model never first-fails
-    then trips the circuit. ``None`` (tests / unbooted) keeps status quo — do not
-    withhold.
+    a failed boot / refreshed / sticky probe withholds browser_* so the model never
+    first-fails then trips the circuit. ``None`` (tests / unbooted) keeps status quo —
+    do not withhold.
     """
     if not settings.gvisor_enabled:
         return False

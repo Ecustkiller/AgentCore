@@ -15,6 +15,7 @@ import {
   type PausedTurnEntry,
   type PendingResume,
   type ResumeOrigin,
+  beginPausedSnapshot,
   usePausedTurnStore,
 } from "@/stores/pausedTurns";
 import type { components } from "@/types/api.generated";
@@ -150,6 +151,8 @@ async function loadCloudRecovery(conversationId: string): Promise<{
 export async function loadRecovery(
   conversationId: string,
 ): Promise<ConversationRecovery> {
+  // 观察起点要在发请求**之前**取：这之后才浮现的挂起卡，本次快照读不到，回空也不能清。
+  const since = beginPausedSnapshot();
   if (!hasLocalEngine()) {
     try {
       const cloud = await loadCloudRecovery(conversationId);
@@ -159,6 +162,7 @@ export async function loadRecovery(
           summary,
           origin: "server" as const,
         })),
+        { since, confirmed: ["server"] },
       );
       hydratePendingInteractions(
         conversationId,
@@ -188,6 +192,7 @@ export async function loadRecovery(
   }
 
   let sidecarLive = false;
+  let sidecarKnown = false;
   let turnId: string | undefined;
   let unsynced: SidecarUnsyncedTurnSummary[] = [];
   let sidecarPaused: PausedTurnSummary[] = [];
@@ -201,6 +206,7 @@ export async function loadRecovery(
     .recovery({ conversationId })
     .then((recovery) => {
       sidecarLive = recovery.liveRunning;
+      sidecarKnown = true;
       turnId = recovery.turnId;
       unsynced = recovery.unsynced ?? [];
       sidecarPaused = (recovery.paused ?? []) as unknown as PausedTurnSummary[];
@@ -234,7 +240,13 @@ export async function loadRecovery(
   }
 
   const merged = mergePausedWithOrigin(sidecarPaused, cloudPaused);
-  usePausedTurnStore.getState().setForConversation(conversationId, merged);
+  // 只有真被问到的那一路才有权清自己来源的壳：一路挂了 ≠ 它那边的帧没了。
+  const confirmed: ResumeOrigin[] = [];
+  if (sidecarKnown) confirmed.push("sidecar");
+  if (cloudKnown) confirmed.push("server");
+  usePausedTurnStore
+    .getState()
+    .setForConversation(conversationId, merged, { since, confirmed });
   if (merged.length > 0) {
     finalizeGeneratingForPausedConversation(conversationId);
   }

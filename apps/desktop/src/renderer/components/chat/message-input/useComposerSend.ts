@@ -7,6 +7,7 @@ import {
   resolveDefaultDelivery,
 } from "@/lib/composerDelivery";
 import { confirmSendDespitePendingIfNeeded } from "@/lib/composerPendingHint";
+import { pinDraftRequestId, resolveDraftRequestId } from "@/lib/draftRequestId";
 import { isReadOnlyOffline } from "@/lib/offlineMode";
 import { redirectLocalWorkspaceAskAction } from "@/lib/redirectLocalWorkspaceAsk";
 import { notifyError } from "@/lib/toast";
@@ -26,16 +27,20 @@ import { resolveSidecarRoot } from "@/services/sidecarRouting";
 import type { OutgoingAgentMention } from "@/services/streamConversation";
 import { sendTurn } from "@/services/turns";
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
-import { restoreComposerDraft, useComposerDraftStore } from "@/stores/composer";
+import {
+  draftKeyFor,
+  restoreComposerDraft,
+  useComposerDraftStore,
+} from "@/stores/composer";
+import {
+  acquireComposerSendLatch,
+  moveComposerSendLatch,
+  releaseComposerSendLatch,
+  useComposerSendPhase,
+} from "@/stores/composerSend";
 import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
-import {
-  type Dispatch,
-  type SetStateAction,
-  useCallback,
-  useRef,
-  useState,
-} from "react";
+import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { forgetAttachmentUpload } from "./attachmentUploads";
 import type {
@@ -95,11 +100,13 @@ export function useComposerSend({
 }) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const navigate = useNavigate();
-  /** 短时门闩：ack 前防连点重复 mid-flight 入队。 */
-  const midFlightSendingRef = useRef(false);
-  /** 门闩 + 按钮 in-flight 态：附件收尾期间发送键要看得出「在发」，且不可连点。 */
-  const sendingRef = useRef(false);
-  const [isSending, setIsSending] = useState(false);
+  // 门闩 + 按钮 in-flight 态存在 store 里、与草稿同键：组件重挂载（聊天 ⇄ 画布、居中
+  // 草稿 → 底栏、路由重建）不再把闸归零，也不再丢「在发」的视觉态。
+  const activeConversationId = useConversationStore(
+    (s) => s.currentConversationId,
+  );
+  const sendPhase = useComposerSendPhase(draftKeyFor(activeConversationId));
+  const isSending = sendPhase !== null;
 
   const toOutgoingMentions = useCallback(
     (pending: PendingAgentMention[]): OutgoingAgentMention[] =>
@@ -141,6 +148,7 @@ export function useComposerSend({
 
       const activeConvId =
         useConversationStore.getState().currentConversationId;
+      const draftKey = draftKeyFor(activeConvId);
 
       // 挂起弱提示：有待确认卡时先二次确认（同会话确认一次后不再弹）；正规续跑/
       // 提交卡不受影响。生成中再发走 mid-flight，不套本确认。
@@ -158,14 +166,18 @@ export function useComposerSend({
       // steer（经典/协调）不经 addMessage——主时间线由 InterjectionTimeline 投影
       // execution.userInterjections（user_interjection SSE · DURABLE）。
       if (isGenerating && activeConvId) {
-        if (midFlightSendingRef.current) return;
-        midFlightSendingRef.current = true;
-        setIsSending(true);
+        if (!acquireComposerSendLatch(draftKey, "sending")) return;
         try {
           const pending = attachments;
-          const settled = await settleAttachments(activeConvId, pending);
+          const settled = await settleAttachments(
+            activeConvId,
+            pending,
+            "midflight",
+          );
           if (!settled.ok) {
-            notifyError(new Error(settled.reason), "附件驻留失败");
+            // 原始错误优先：后端 ApiError 带着 code / serverMessage，包成
+            // `new Error(reason)` 就只剩通用兜底文案了。
+            notifyError(settled.cause ?? settled.reason, "附件驻留失败");
             dropStaleAttachments(settled.staleIds);
             return;
           }
@@ -184,8 +196,7 @@ export function useComposerSend({
             // received：主时间线走 user_interjection SSE 投影（含经典 durable 气泡）。
           }
         } finally {
-          midFlightSendingRef.current = false;
-          setIsSending(false);
+          releaseComposerSendLatch(draftKey);
         }
         return;
       }
@@ -200,9 +211,19 @@ export function useComposerSend({
         return;
       }
 
-      if (sendingRef.current) return;
-      sendingRef.current = true;
-      setIsSending(true);
+      // 草稿首发先闩「建会话中」：这段等待里输入框已经清空，界面必须自己说得清在干嘛。
+      const initialPhase = activeConvId ? "sending" : "creating";
+      if (!acquireComposerSendLatch(draftKey, initialPhase)) return;
+      // 门闩键随 promote 迁移（`__draft__` → 新会话 id），故不是常量。
+      let latchKey = draftKey;
+      // 只放一次：回合上路后就提前放闸（见下），此后 finally 不能再放——那时闸可能
+      // 已经属于下一次发送，替它放掉就等于把防连点闸打开。
+      let latchHeld = true;
+      const releaseLatch = () => {
+        if (!latchHeld) return;
+        latchHeld = false;
+        releaseComposerSendLatch(latchKey);
+      };
       try {
         const pending = attachments;
         const store = useConversationStore.getState();
@@ -227,6 +248,14 @@ export function useComposerSend({
           // 新建拍快照：POST 带 last-used（或草稿所选，已写入 last_profile_id）；
           // 省略则服务端写入当时账号默认。勿再 create 后 PATCH。
           const inheritedProfileId = getLastUsedProfileId()?.trim() || null;
+          // 幂等键跟草稿走：同一份草稿重复发送复用同一个键，服务端命中同键返回已建好的
+          // 那条会话，「以为没发出去又按一次」不会再建出第二条。
+          const clientRequestId = resolveDraftRequestId(draftKey);
+          // 清空输入框排在创建 POST 之前：按下发送到 POST 返回之间界面若毫无变化（文字
+          // 还在、没气泡、没跳转），用户就会再按一次——线上重复建会话的 3.7s / 5.6s 两例
+          // 正是这个形状。等待期间的进行中态见 ComposerCreatingNotice；创建失败时下面把
+          // 整份草稿（正文 + 附件 + 点名）原样还回。
+          clearComposer();
           try {
             const permissionAxes = await resolveDefaultPermissionAxes();
             const conv = await api.post<{
@@ -238,6 +267,7 @@ export function useComposerSend({
               folder_id: targetFolderId,
               local_container_root_id: localContainerRootId,
               permission_axes: permissionAxes,
+              client_request_id: clientRequestId,
               ...(inheritedProfileId
                 ? { model_profile_id: inheritedProfileId }
                 : {}),
@@ -258,12 +288,24 @@ export function useComposerSend({
             });
             // 首发落地动画：仅在草稿 promote 成新对话时武装 dock-flip（中间→底栏）。切换到
             // 已有对话不走这里，故不会误触发动画——这正是修掉「输入框跳动」的关键。必须在
-            // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号。
+            // switchConversation 前武装，让 conversationId 翻转的那一帧就带上信号；
+            // navigate 也必须留在两者之后（见下），三者的先后顺序不要改。
             useComposerDraftStore.getState().armDockFlip();
             useConversationStore.getState().switchConversation(conv.id);
             createdNew = true;
             useFoldersStore.getState().resetDraftWorkspaceIntent();
+            // 门闩跟着 draftKey 迁移，别在翻转的那一帧漏出一个可点的发送键。
+            latchKey = draftKeyFor(conv.id);
+            moveComposerSendLatch(draftKey, latchKey, "sending");
           } catch (err) {
+            // 建会话失败：仍是草稿态，把先前清掉的草稿原样还给用户（参照下面附件驻留
+            // 失败的回滚），并把这次的幂等键钉回草稿——重试要复用它才命中服务端幂等。
+            restoreComposerDraft(null, {
+              value: trimmed,
+              attachments: pending,
+              agentMentions,
+            });
+            pinDraftRequestId(draftKey, clientRequestId);
             notifyError(err, "新建对话失败");
             return;
           }
@@ -318,7 +360,11 @@ export function useComposerSend({
         // armed here sees the new turn land.
         onDispatch?.();
 
-        const settled = await settleAttachments(conversationId, pending);
+        const settled = await settleAttachments(
+          conversationId,
+          pending,
+          "send",
+        );
         if (!settled.ok) {
           // 不留假气泡：撤掉乐观气泡，把草稿（正文 + 附件 + 点名）还给用户重试，
           // 只摘掉主进程暂存已失效、留着也发不出去的那几条。
@@ -333,7 +379,7 @@ export function useComposerSend({
             agentMentions,
           });
           for (const id of settled.staleIds) forgetAttachmentUpload(id);
-          notifyError(new Error(settled.reason), "附件驻留失败");
+          notifyError(settled.cause ?? settled.reason, "附件驻留失败");
           return;
         }
         for (const a of pending) forgetAttachmentUpload(a.id);
@@ -359,8 +405,7 @@ export function useComposerSend({
 
         // in-flight 态只覆盖「点击 → 回合已上路」这一段。回合本身的流式由生成态接管，
         // 否则整轮生成期间「排队 / 插队」都会被误锁。
-        sendingRef.current = false;
-        setIsSending(false);
+        releaseLatch();
 
         await sendTurn({
           conversationId,
@@ -371,8 +416,7 @@ export function useComposerSend({
           delivery: "steer",
         });
       } finally {
-        sendingRef.current = false;
-        setIsSending(false);
+        releaseLatch();
       }
     },
     [
@@ -395,5 +439,9 @@ export function useComposerSend({
     ],
   );
 
-  return { handleSend, isSending };
+  return {
+    handleSend,
+    isSending,
+    isCreatingConversation: sendPhase === "creating",
+  };
 }

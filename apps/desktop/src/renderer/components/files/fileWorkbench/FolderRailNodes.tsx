@@ -1,3 +1,4 @@
+import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
 import type { Tab } from "@/components/files/fileWorkbench/storage";
 import type { FileSource } from "@/lib/fileSource";
@@ -16,6 +17,8 @@ export interface FolderRailHost {
   activeTab: Tab | null;
   flashWsId: string | null;
   filterQuery: string;
+  /** 树内兄弟排序（名称 / 大小 / 修改时间），中枢顶栏统一选、所有根共用。 */
+  sortBy: FileSortBy;
   offline: boolean;
   /** 在此新建文件夹 — a real nested folder, not a bare `mkdir`. */
   onCreateSubfolder: (parent: FolderMeta, anchorEl?: Element | null) => void;
@@ -61,6 +64,7 @@ export function FolderRailRow({
       onOpenFile={(path, name) => host.onOpenFile(wsId, path, name)}
       flashing={wsId === host.flashWsId}
       filterQuery={host.filterQuery}
+      sortBy={host.sortBy}
       folderRail={host.renderFolderRail?.(folder)}
       nested={
         children.length > 0 ? (

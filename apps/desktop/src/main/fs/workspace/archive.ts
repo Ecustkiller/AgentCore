@@ -10,7 +10,12 @@ import {
 } from "../constants";
 import { toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
-import { BASELINES_REL, INDEX_REL, TRASH_REL } from "../workspaceIgnore";
+import {
+  BASELINES_REL,
+  INDEX_REL,
+  TRASH_REL,
+  VERSIONS_REL,
+} from "../workspaceIgnore";
 import { opErr, opOk } from "./result";
 
 // --- 本地→云交接打包 op（双模式工作区 P2e / e1）---
@@ -25,7 +30,12 @@ async function loadIgnore(rootAbs: string): Promise<Ignore> {
   const ig = ignore();
   // 默认跳过集按目录规则加入（"name/" 匹配整棵子树）+ *.db。
   ig.add([...LIST_FILES_SKIP_DIRS].map((d) => `${d}/`));
-  ig.add([`${INDEX_REL}/`, `${TRASH_REL}/`, `${BASELINES_REL}/`]);
+  ig.add([
+    `${INDEX_REL}/`,
+    `${TRASH_REL}/`,
+    `${BASELINES_REL}/`,
+    `${VERSIONS_REL}/`,
+  ]);
   ig.add(["*.db"]);
   try {
     ig.add(await fs.readFile(join(rootAbs, ".gitignore"), "utf-8"));

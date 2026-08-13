@@ -625,8 +625,10 @@ class LoopController(
                         )
 
                         eid = meta.get("execution_id")
+                        reason = meta.get("code")
                         mark_and_emit_exec_env_dead_user_notice(
-                            execution_id=str(eid).strip() if eid else None
+                            execution_id=str(eid).strip() if eid else None,
+                            reason_code=str(reason).strip() if reason else None,
                         )
             # Exec-env idle hangs / probe fails: retire code_execute+test_run
             # after N consecutive hits (disaster wall is not this path).
@@ -653,8 +655,10 @@ class LoopController(
                     )
 
                     eid = (attempt.meta or {}).get("execution_id")
+                    reason = (attempt.meta or {}).get("code")
                     mark_and_emit_exec_env_dead_user_notice(
-                        execution_id=str(eid).strip() if eid else None
+                        execution_id=str(eid).strip() if eid else None,
+                        reason_code=str(reason).strip() if reason else None,
                     )
             elif attempt.success and attempt.tool_name in EXEC_ENV_TIMEOUT_FAMILY:
                 self._exec_env_timeout_hits = 0

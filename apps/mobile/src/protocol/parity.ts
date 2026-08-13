@@ -219,6 +219,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     surface:
       "ResumeCard ·「放行已记下…」（本端发起）／RemoteSettledCards ·「已由另一端处理」（另一端放行）；ChatPage appendEventToTurn 同连接等待（fold no-op）",
   },
+  resume_settled: {
+    verdict: "simplified",
+    reason:
+      "冷 resume 撞上已被消费的挂起帧（EPHEMERAL 幂等成功：200 + 本帧取代旧 404）；不落 journal、不进 ProjectedTurn，两端 fold 均 no-op。手机沿用既有收口：ChatPage resume() 的流正常收尾后 markColdResolved 撤卡，不读 kind/decision/decided_at/turn_status。桌面已用本帧出中性信息态收口条（ResumeSettledNotices）；手机本轮不做 UI，缺口记在锚 B 同名键上",
+  },
   execution_detached: {
     verdict: "internal",
     reason: "异步团队转后台：v1 fold no-op；UI 呈现另行委派",
@@ -299,7 +304,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     reason:
       "服务端 message_id 开泡；fold 清正文/process；同 execution_id 暂留 runs/agents（旧 journal 生长）；换 eid 由 run_plan 重置（新 prev 链）",
   },
-  message_end: { verdict: "ported", surface: "ChatPage · 收尾 + 回合总账" },
+  message_end: {
+    verdict: "ported",
+    surface:
+      "ChatPage · 收尾 + 回合总账 + TeamView · 互相把关一行 (collab 计数，extractTurnCollab)",
+  },
 
   // —— 纯管线 / 派生（非用户面）——
   turn_warning: { verdict: "ported", surface: "ChatPage · 预检警告条" },
@@ -489,6 +498,11 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface: "RemoteSettledCards ·「已由另一端处理」（B2 P1 · 验收 5）",
     reason:
       "同样只收「本端此刻正摆着」的卡（visibleCardIds 门控，排除重放）+ answeredByAPerson 同口径排除无人参与的收口；桌面 8s 自退，手机改「知道了」手动收——手机常在后台，自退会让用户回来只看到卡凭空消失",
+  },
+  ResumeSettledNotices: {
+    verdict: "simplified",
+    reason:
+      "冷 resume 撞上已被消费的挂起帧（EPHEMERAL `resume_settled`）后的收口痕迹：桌面在原位留一条中性信息态只读条，说清这张卡何时以什么决策结的 + 本回合最终去向，8 秒自退（`turn_status=running` 不出条，紧接着就是续跑实时流；线材里没有处理方，故绝口不提「谁」）。手机沿用既有收口：ChatPage resume() 的流正常收尾后 markColdResolved 直接撤卡，不读 decision/decided_at/turn_status，也不留痕迹——差距在非 running 收尾时卡凭空消失，用户拿不到「这张卡早就结了、结果是什么」的交代。手机 RemoteSettledCards 不承接本条：那条是「另一端的人拍的」归属语义，借来会替用户认领一个没发生过的动作",
   },
   ResumePrompt: {
     verdict: "ported",
@@ -771,7 +785,11 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     reason: "桌面 #/preview 离线 onboarding 场景页；手机无对等预览路由",
   },
   LoginPage: { verdict: "ported", surface: "LoginPage" },
-  FilesPage: { verdict: "ported", surface: "FilesPage / WorkspacesPage" },
+  FilesPage: {
+    verdict: "ported",
+    surface:
+      "FilesPage（会话别名寻址）/ WorkspacesPage → WorkspaceFilesPage（工作区 id 寻址）；云工作区已从只读升级为可写：上传 / 改名 / 移动 / 删除 / 新建文件夹 / 文本文件 CAS 编辑（冲突「载入最新版 · 仍然覆盖」二选一）+ TrashSection 软删区还原。本机工作区仍只读——字节在用户电脑上、服务端一律 409，故列表直接过滤且整个不注入写契约（而非摆一排必然失败的禁用按钮），配「请在桌面端打开」提示",
+  },
   MessagesPage: { verdict: "ported", surface: "MessagesPage（IM）+ im/*" },
   ServiceUnavailablePage: {
     verdict: "ported",
@@ -1015,10 +1033,15 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
     reason:
       "「最近删除」文件夹列表行渲染叶（ConversationsPage 拆件，非独立面）",
   },
+  "conversations/DeletedConversationManageRow": {
+    verdict: "simplified",
+    reason:
+      "「最近删除」的已删对话那半。与同视图的文件夹行（上一条记 internal 的纯渲染叶）刻意不同裁：手机上删对话同样是软删、行还在库里，但既没有回收站也没有「撤销」toast，用户面事实就是「删了找不回来」——这是能力缺口，不是 chrome 差异，故记 simplified 让报告列出，勿改回 internal。恢复只认 access session，无手机侧障碍，后置纯属未做",
+  },
   "conversations/CollaborationTimeline": {
     verdict: "simplified",
     reason:
-      "桌面项目协作时间线+阶段产物；手机有意不挂文件页（文件页只做浏览/上传），暂无独立入口",
+      "桌面项目协作时间线+阶段产物；手机有意不挂文件页——文件页虽已从只读升级为可写（浏览/预览/上传 + 改名/移动/删除/新建文件夹/CAS 编辑/软删区还原），承载的仍只是「这个工作区里的文件」，项目级协作聚合另说，暂无独立入口",
   },
   TurnDetailPage: {
     verdict: "simplified",

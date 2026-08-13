@@ -57,6 +57,17 @@ const HIGHLIGHT_PLUGINS: ComponentPropsWithoutRef<
 /** Consecutive same-tool approval prompts before nudging full_trust. */
 const FULL_TRUST_HINT_AFTER = 3;
 
+/**
+ * 点「本轮内…」之前必须先知道批出去的是多大范围：一个回合能跑几十次工具、派出多名队员，
+ * 而被覆盖的调用之后不会再弹卡（痕迹在过程线的 ApprovalTrace 上）。此刻用户在等放行，
+ * 所以只给一句——不是一堵字墙，也不是二次确认。
+ */
+const TURN_GRANT_SCOPE_NOTICE =
+  "「本轮内」= 到这次回答结束前同类操作都不再问你，队员发起的也算；一个回合可能有几十次调用。";
+/** 文件类授权比按钮字面更宽（对齐后端 file-class：含 git 写入）。 */
+const FILE_CLASS_SCOPE_NOTICE =
+  "「所有文件改动」含新建 / 改写 / 删除 / 移动与 git 写入。";
+
 /** Gate-injected meta on ``approval.arguments`` — not tool args; strip from card preview. */
 const APPROVAL_GATE_META_KEYS = new Set([
   "circuit_breaker_hint",
@@ -379,6 +390,9 @@ export function ApprovalCard({
   const showTurnGrantButtons = !forceOneShot;
   const preferTurnGrant =
     showTurnGrantButtons && isExecution && supportsTurnGrant(approval.toolName);
+  /** 有「本轮内…」按钮才说范围；熔断一次性卡没有轮内授权，不该出现「本轮」字样。 */
+  const showScopeNotice =
+    showTurnGrantButtons && (supportsTurnGrant(approval.toolName) || isFileOp);
   const headline = primaryArg(approval.toolName, approval.arguments);
   const argEntries = Object.entries(approval.arguments).filter(
     ([key]) => !isApprovalGateMetaKey(key),
@@ -631,7 +645,21 @@ export function ApprovalCard({
         </div>
       </div>
 
-      <div className="mt-2.5 flex flex-wrap items-center gap-1.5 pl-6">
+      {showScopeNotice && (
+        <p
+          className="mt-2.5 pl-6 text-xs text-muted-foreground"
+          data-testid="turn-grant-scope-notice"
+        >
+          {TURN_GRANT_SCOPE_NOTICE}
+          {isFileOp ? FILE_CLASS_SCOPE_NOTICE : ""}
+        </p>
+      )}
+      <div
+        className={cn(
+          "flex flex-wrap items-center gap-1.5 pl-6",
+          showScopeNotice ? "mt-1.5" : "mt-2.5",
+        )}
+      >
         {preferTurnGrant ? (
           <>
             {turnGrantButton}

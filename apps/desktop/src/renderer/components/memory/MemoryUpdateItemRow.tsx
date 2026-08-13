@@ -5,7 +5,9 @@ import { ApiError } from "@/services/api";
 import {
   type MemoryMoveDirection,
   type MemoryMoveKind,
+  disputeMemoryLine,
   moveMemoryBullet,
+  restoreMemoryLine,
 } from "@/services/memory";
 import type { MemoryUpdateItem } from "@/stores/conversation";
 import { ChevronRight, Loader2 } from "lucide-react";
@@ -28,6 +30,12 @@ import { useState } from "react";
  * P2-a: folder-scope pill shows `本文件夹 · {名}` (falls back to「本文件夹」when the
  * folder name is unknown). P2-b: optional「移到本文件夹 / 移到全局」on add/update rows
  * when a current folder is known and the section allows the move.
+ *
+ *「这条不对」sits on the same control row (纠错通道·行级). It belongs HERE rather than only
+ * in the memory editor because this card is where the user meets the sentence — sending him
+ * to a file to reject what he is already looking at is what made the entry-level channel a
+ * choice between collateral damage and giving up. One click, no confirm dialog: the line he
+ * sees is exactly the line that goes, and the toast carries 撤销.
  */
 
 const ACTION_META: Record<
@@ -139,18 +147,37 @@ export function canMoveMemoryItem(
   return true;
 }
 
+/**
+ * Whether this row may be rejected line-by-line (纠错通道·行级).
+ *
+ * Wider than a move: no folder needed (global rows qualify) and 偏好 is fair game — the
+ * scope invariants that block a move are about WHERE a line may live, not about whether
+ * the user is allowed to say it is wrong. `remove` rows are already out of memory, and
+ * quota rows report pool state rather than remembered content.
+ */
+export function canDisputeMemoryItem(item: MemoryUpdateItem): boolean {
+  if (item.action === "remove") return false;
+  if (QUOTA_ACTIONS.has(item.action)) return false;
+  return Boolean((item.content ?? "").trim());
+}
+
 export function MemoryUpdateItemRow({
   item,
   onOpenLeaf,
   projectFolderId,
-  onMoved,
+  onMemoryChanged,
 }: {
   item: MemoryUpdateItem;
   onOpenLeaf: (target: string, projectId?: string | null) => void;
   /** Current folder — enables「移到本文件夹」for global rows. */
   projectFolderId?: string | null;
-  /** Fired after a successful move (feed may refetch). */
-  onMoved?: () => void;
+  /**
+   * Fired after this row changed memory — a move, a rejection, or its undo. Every host
+   * must pass it: the surfaces that show the result (记忆动态 and its 已移走的记忆 list)
+   * are usually NOT the one the user clicked in, and stale caches make a landed change
+   * look like it did nothing.
+   */
+  onMemoryChanged?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const meta = ACTION_META[item.action] ?? {
@@ -182,7 +209,7 @@ export function MemoryUpdateItemRow({
         return;
       }
       notifyInfo(direction === "to_project" ? "已移到本文件夹" : "已移到全局");
-      onMoved?.();
+      onMemoryChanged?.();
     } catch (e) {
       notifyActionError(
         "搬层失败",
@@ -193,8 +220,79 @@ export function MemoryUpdateItemRow({
     }
   };
 
-  const moveControls =
-    showToProject || showToGlobal ? (
+  // Which layer this line actually lives in — a rejection targets its source, unlike a
+  // move, whose folderId names the destination.
+  const disputeFolderId =
+    item.scope === "project"
+      ? (item.projectId ?? projectFolderId ?? null)
+      : null;
+
+  const undoDispute = async (
+    lineId: string,
+    kind: MemoryMoveKind,
+    topicSlug: string | null,
+  ) => {
+    try {
+      await restoreMemoryLine({
+        id: lineId,
+        kind,
+        topicSlug,
+        folderId: disputeFolderId,
+      });
+      notifyInfo("已放回这条记忆");
+      onMemoryChanged?.();
+    } catch (e) {
+      notifyActionError(
+        "恢复失败",
+        e instanceof ApiError ? (e.serverMessage ?? e.message) : e,
+      );
+    }
+  };
+
+  const runDispute = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const { kind, topicSlug } = moveKindFromItem(item);
+      const result = await disputeMemoryLine({
+        content: item.content,
+        section: item.section || (kind === "topic" ? "要点" : ""),
+        folderId: disputeFolderId,
+        kind,
+        topicSlug,
+      });
+      if (result.conflict) {
+        notifyInfo("记忆刚被更新，请刷新后再试");
+        return;
+      }
+      // Wording stays inside the honest boundary: the line stops being used, but nothing
+      // here prevents the AI learning the same thing again from a later conversation.
+      notifyInfo("这条不再用了", {
+        description: "已从记忆里移走，同一条目的其他内容照常生效",
+        action: result.lineId
+          ? {
+              label: "撤销",
+              onClick: () => {
+                void undoDispute(result.lineId, kind, topicSlug);
+              },
+            }
+          : undefined,
+      });
+      onMemoryChanged?.();
+    } catch (e) {
+      notifyActionError(
+        "操作失败",
+        e instanceof ApiError ? (e.serverMessage ?? e.message) : e,
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const showDispute = canDisputeMemoryItem(item);
+
+  const rowControls =
+    showToProject || showToGlobal || showDispute ? (
       <div className="mt-1 flex flex-wrap items-center gap-2">
         {showToProject && (
           <button
@@ -220,6 +318,20 @@ export function MemoryUpdateItemRow({
             className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
           >
             移到全局
+          </button>
+        )}
+        {showDispute && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              void runDispute();
+            }}
+            title="把这句话从记忆里移走（可撤销）"
+            className="text-xs text-muted-foreground underline-offset-2 hover:text-destructive hover:underline disabled:opacity-50"
+          >
+            这条不对
           </button>
         )}
         {busy && (
@@ -266,7 +378,7 @@ export function MemoryUpdateItemRow({
             className="mt-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
           />
         </button>
-        {moveControls ? <div className="pl-14">{moveControls}</div> : null}
+        {rowControls ? <div className="pl-14">{rowControls}</div> : null}
       </li>
     );
   }
@@ -279,7 +391,7 @@ export function MemoryUpdateItemRow({
         </span>
         <div className="min-w-0 flex-1">
           {metaBlock}
-          {moveControls}
+          {rowControls}
         </div>
       </div>
     </li>

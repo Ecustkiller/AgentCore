@@ -40,7 +40,7 @@ Public import paths stay stable via re-exports below
 
 from __future__ import annotations
 
-from .b1 import clear_b1_closing_latches
+from .b1 import clear_b1_closing_latches, reset_turn_scoped_closing_state
 from .browser import (
     claims_browser_open_or_login,
     clear_browser_assembled,
@@ -190,6 +190,7 @@ __all__ = [
     "pre_pause_for_user_visible_continuity",
     "reconcile_resume_closing",
     "reconcile_unresolved_write_ownership_latch",
+    "reset_turn_scoped_closing_state",
     "resume_continuity_steer",
     "rewrite_stale_ask_after_dispatch",
     "run_ids_for_write_ownership_scan",

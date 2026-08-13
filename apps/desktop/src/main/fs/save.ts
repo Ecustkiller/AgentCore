@@ -14,20 +14,41 @@ import { basename, dirname, join } from "node:path";
 import type { SaveFileResult } from "@shared/ipc-contract";
 import { BrowserWindow, app, dialog } from "electron";
 
+/** 净化后文件名的长度上限（足够长的名字在各平台都安全，又不至于顶到 260 路径限）。 */
+const MAX_FILENAME_LEN = 150;
+
+/** 超出这个长度的「扩展名」多半不是扩展名（点后是正文），截断时不值得为它让位。 */
+const MAX_EXT_LEN = 21;
+
+/**
+ * 超长时截断但**保住扩展名**：扩展名决定 OS 文件关联，砍掉它会让存下来的文件双击打不开，
+ * 也会让 {@link ../openTemp.ts} 的白名单判定与 renderer 侧（按原始名判）不一致。
+ */
+function truncateKeepingExt(name: string): string {
+  if (name.length <= MAX_FILENAME_LEN) return name;
+  const dot = name.lastIndexOf(".");
+  const ext = dot > 0 ? name.slice(dot) : "";
+  if (!ext || ext.length > MAX_EXT_LEN) return name.slice(0, MAX_FILENAME_LEN);
+  // 截断点可能又落在空格/点上（Windows 不接受结尾点/空格）——再修一次尾。
+  const stem = name
+    .slice(0, MAX_FILENAME_LEN - ext.length)
+    .replace(/[\s.]+$/, "");
+  return stem ? stem + ext : name.slice(0, MAX_FILENAME_LEN);
+}
+
 /**
  * 把（可能来自服务端 Content-Disposition / 用户数据的）建议文件名净化成安全的
  * 单段 basename：剥路径分隔、Windows 保留字符与控制字符，去首尾点/空格（Windows
- * 不接受结尾点/空格），限长，空则回退 "download"。仅用于对话框 defaultPath 预填；
- * 最终写入路径完全由用户在对话框里选定。
+ * 不接受结尾点/空格），限长（保留扩展名），空则回退 "download"。用于对话框
+ * defaultPath 预填（最终路径由用户选定）与临时副本的落盘名。
  */
 export function sanitizeFilename(name: string): string {
   const cleaned = name
     .replace(/[/\\]+/g, "_")
     // biome-ignore lint/suspicious/noControlCharactersInRegex: 剥离文件名中的控制字符正是本意
     .replace(/[<>:"|?*\u0000-\u001f]/g, "_")
-    .replace(/^[\s.]+|[\s.]+$/g, "")
-    .slice(0, 150);
-  return cleaned || "download";
+    .replace(/^[\s.]+|[\s.]+$/g, "");
+  return truncateKeepingExt(cleaned) || "download";
 }
 
 /**

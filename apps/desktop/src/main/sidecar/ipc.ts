@@ -3,6 +3,7 @@ import {
   type SidecarAttachRequest,
   type SidecarAttachResponse,
   type SidecarCancelRequest,
+  type SidecarCreateWorkspaceVersionRequest,
   type SidecarDebateSteerRequest,
   type SidecarListBrowserSessionsRequest,
   type SidecarListBrowserSessionsResult,
@@ -11,6 +12,7 @@ import {
   type SidecarRecoveryResponse,
   type SidecarRespondRequest,
   type SidecarRestoreTurnBaselineRequest,
+  type SidecarRestoreWorkspaceVersionRequest,
   type SidecarResumeRequest,
   type SidecarRunRedirectRequest,
   type SidecarRunStopRequest,
@@ -21,6 +23,7 @@ import {
   type SidecarWarmAccountRulesMemoryRequest,
   type SidecarWarmCodeIndexRequest,
   type SidecarWarmMcpDiscoverRequest,
+  type SidecarWorkspaceVersionResult,
 } from "@shared/sidecar-contract";
 import { app, ipcMain } from "electron";
 import { getStoredRoot } from "../fs-service";
@@ -318,6 +321,50 @@ export function registerSidecarIpc(): void {
         req.subpath,
       );
       await manager.restoreTurnBaseline(req, workspaceRoot);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.createWorkspaceVersion,
+    async (
+      _e,
+      req: SidecarCreateWorkspaceVersionRequest,
+    ): Promise<SidecarWorkspaceVersionResult> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.createWorkspaceVersion,
+        req,
+        ["rootId", "name"],
+        ["subpath"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      return manager.createWorkspaceVersion(req, workspaceRoot);
+    },
+  );
+
+  ipcMain.handle(
+    SIDECAR_CHANNELS.restoreWorkspaceVersion,
+    async (
+      _e,
+      req: SidecarRestoreWorkspaceVersionRequest,
+    ): Promise<SidecarWorkspaceVersionResult> => {
+      assertSidecarShape(
+        SIDECAR_CHANNELS.restoreWorkspaceVersion,
+        req,
+        ["rootId", "versionId"],
+        ["subpath"],
+      );
+      const root = await getStoredRoot(req.rootId);
+      if (!root) throw new Error("本地目录未授权或已移除");
+      const workspaceRoot = await resolveWorkspaceRoot(
+        root.absPath,
+        req.subpath,
+      );
+      return manager.restoreWorkspaceVersion(req, workspaceRoot);
     },
   );
 

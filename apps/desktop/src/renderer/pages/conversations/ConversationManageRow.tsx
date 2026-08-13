@@ -19,10 +19,16 @@ import {
   useDeleteConversation,
   useDuplicateConversation,
   useRenameConversation,
+  useRestoreConversation,
   useTogglePin,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import {
+  DELETE_CONVERSATION_LABEL,
+  deleteConversationConfirmLabel,
+  notifyConversationDeleted,
+} from "@/lib/conversationDeleteCopy";
 import { timeAgo } from "@/lib/format";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import {
@@ -90,6 +96,7 @@ export function ConversationManageRow({
 
   const renameMutation = useRenameConversation();
   const deleteMutation = useDeleteConversation();
+  const restoreMutation = useRestoreConversation();
   const pinMutation = useTogglePin();
   const duplicateMutation = useDuplicateConversation();
   const archiveMutation = useArchiveConversation();
@@ -122,9 +129,9 @@ export function ConversationManageRow({
   const showActions = hovered || confirmingDelete || moreOpen;
   const preview = conversation.lastMessagePreview?.replace(/\s+/g, " ").trim();
   const relative = timeAgo(conversation.updatedAt);
-  const deleteConfirmLabel = conversation.folderId
-    ? "确认永久删除（文件夹里的文件会保留）"
-    : "确认永久删除（无法恢复）";
+  const deleteConfirmLabel = deleteConversationConfirmLabel(
+    conversation.folderId ? "folder" : undefined,
+  );
 
   useEffect(() => {
     if (editing) {
@@ -189,6 +196,7 @@ export function ConversationManageRow({
   const handleDelete = async () => {
     setConfirmingDelete(false);
     const wasActive = conversation.id === currentId;
+    const title = conversation.title;
     try {
       await deleteMutation.mutateAsync(conversation.id);
     } catch (err) {
@@ -197,6 +205,9 @@ export function ConversationManageRow({
     }
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
+    notifyConversationDeleted(title, () =>
+      restoreMutation.mutate(conversation.id),
+    );
   };
 
   const handleDuplicate = () => {
@@ -445,7 +456,9 @@ export function ConversationManageRow({
                         }}
                       >
                         <Trash2 size={14} className="shrink-0" />
-                        <span className="flex-1 truncate">永久删除</span>
+                        <span className="flex-1 truncate">
+                          {DELETE_CONVERSATION_LABEL}
+                        </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -508,7 +521,7 @@ export function ConversationManageRow({
           onSelect={() => setConfirmingDelete(true)}
         >
           <Trash2 size={14} className="shrink-0" />
-          <span className="flex-1 truncate">永久删除</span>
+          <span className="flex-1 truncate">{DELETE_CONVERSATION_LABEL}</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

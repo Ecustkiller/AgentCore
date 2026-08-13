@@ -19,7 +19,9 @@ the oracle never invents behavior the product doesn't already have:
   时间线 — the CEO's own steps), parity with ``process_timeline()`` (which only goes
   None for a turn with no structural step);
 - ``content`` / ``reasoning`` accumulate the captain bubble's deltas (present even in
-  a multi-agent turn — the CEO speaks above the graph);
+  a multi-agent turn — the CEO speaks above the graph); a delta flagged ``replace``
+  carries a WHOLE open block (attach 回放段) and swaps the channel's tail block instead
+  of appending — same rule on the per-run ``run_output_delta`` / ``run_reasoning_delta``;
 - ``status`` / ``interactions[]`` fold the gate state machine (a gate *_required pauses,
   its *_resolved resumes when no gate remains pending; a paused turn's stream may end
   at the *_required). Full interaction lifecycle (pending|resolved|orphaned) is projected
@@ -246,8 +248,11 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             # 跨回合流：message_id 变化 = 新助手气泡 → 清空正文/过程时间线；
             # 同 execution_id 的 runs/agents 保留，使第二回合追加帧继续生长同一张协作图。
             # 同 message_id = 挂起恢复重开同一气泡 → 保留已累积正文（pause→resume）。
+            # full_replay = attach 回放段段首：服务端明说「这段是本回合全量重放」，
+            # 无条件重置本回合流式态再折后续帧——不靠 id 与屏上气泡比对猜（猜错叠正文）。
             mid = str(p.get("message_id") or "")
-            if last_message_id is None or (mid and mid != last_message_id):
+            new_bubble = last_message_id is None or (mid and mid != last_message_id)
+            if p.get("full_replay") or new_bubble:
                 content = ""
                 reasoning = ""
                 process = []
@@ -258,13 +263,21 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 last_message_id = mid
 
         elif etype == "content_delta":
+            # replace = 整块帧（attach 回放段专用）：delta 是该通道末尾那个仍开放的文本块的
+            # 当前全文，不是增量。末尾确实是开放正文块就整块换掉（标量退掉旧块再接新块），
+            # 否则（工具/标记步已把它闭合、或本回合还没正文）当普通新块折。
             delta = p.get("delta") or ""
-            content += delta
-            if delta:
-                if process and process[-1].get("kind") == "content":
-                    process[-1]["text"] += delta
-                else:
-                    process.append({"kind": "content", "text": delta})
+            tail = process[-1] if process and process[-1].get("kind") == "content" else None
+            if p.get("replace") and tail is not None:
+                content = content.removesuffix(tail["text"]) + delta
+                tail["text"] = delta
+            else:
+                content += delta
+                if delta:
+                    if tail is not None:
+                        tail["text"] += delta
+                    else:
+                        process.append({"kind": "content", "text": delta})
 
         elif etype == "content_reset":
             # 草稿丢弃信号：引擎丢弃已流式的这一版正文、发 content_reset（reason 说明为何）。
@@ -281,12 +294,17 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "reasoning_delta":
             delta = p.get("delta") or ""
-            reasoning += delta
-            if delta:
-                if process and process[-1].get("kind") == "reasoning":
-                    process[-1]["text"] += delta
-                else:
-                    process.append({"kind": "reasoning", "text": delta})
+            tail = process[-1] if process and process[-1].get("kind") == "reasoning" else None
+            if p.get("replace") and tail is not None:
+                reasoning = reasoning.removesuffix(tail["text"]) + delta
+                tail["text"] = delta
+            else:
+                reasoning += delta
+                if delta:
+                    if tail is not None:
+                        tail["text"] += delta
+                    else:
+                        process.append({"kind": "reasoning", "text": delta})
 
         elif etype == "tool_use_start":
             # A delegated worker's call (run-scoped) belongs to its run node, not the
@@ -524,16 +542,22 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     run["receivedContext"] = list(p.get("blocks") or [])
 
         elif etype == "run_output_delta":
+            # 同 content_delta 的 replace 语义，作用在这个 worker 的正文通道上。
             ag = agent_by_id(p.get("agent_id", ""))
-            if ag:
-                ag["output"] += p.get("delta") or ""
             run = run_by_id(p.get("run_id", ""))
-            if run is not None:
-                delta = p.get("delta") or ""
-                if delta:
-                    steps = run["process"]
-                    if steps and steps[-1].get("kind") == "content":
-                        steps[-1]["text"] += delta
+            delta = p.get("delta") or ""
+            steps = run["process"] if run is not None else None
+            tail = steps[-1] if steps and steps[-1].get("kind") == "content" else None
+            if p.get("replace") and tail is not None:
+                if ag:
+                    ag["output"] = ag["output"].removesuffix(tail["text"]) + delta
+                tail["text"] = delta
+            else:
+                if ag:
+                    ag["output"] += delta
+                if delta and steps is not None:
+                    if tail is not None:
+                        tail["text"] += delta
                     else:
                         steps.append({"kind": "content", "text": delta})
 
@@ -556,15 +580,20 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "run_reasoning_delta":
             ag = agent_by_id(p.get("agent_id", ""))
-            if ag:
-                ag["reasoning"] += p.get("delta") or ""
             run = run_by_id(p.get("run_id", ""))
-            if run is not None:
-                delta = p.get("delta") or ""
-                if delta:
-                    steps = run["process"]
-                    if steps and steps[-1].get("kind") == "reasoning":
-                        steps[-1]["text"] += delta
+            delta = p.get("delta") or ""
+            steps = run["process"] if run is not None else None
+            tail = steps[-1] if steps and steps[-1].get("kind") == "reasoning" else None
+            if p.get("replace") and tail is not None:
+                if ag:
+                    ag["reasoning"] = ag["reasoning"].removesuffix(tail["text"]) + delta
+                tail["text"] = delta
+            else:
+                if ag:
+                    ag["reasoning"] += delta
+                if delta and steps is not None:
+                    if tail is not None:
+                        tail["text"] += delta
                     else:
                         steps.append({"kind": "reasoning", "text": delta})
 

@@ -3,6 +3,9 @@ import {
   appendReasoningStep,
   appendReworkStep,
   dropTrailingContentSteps,
+  openBlockText,
+  replaceTrailingContentStep,
+  replaceTrailingReasoningStep,
 } from "@/lib/processTimeline";
 import type { DebateNarrativeRound, DebateResultPayload } from "@/types/events";
 import type { RunFrame } from "./frames";
@@ -103,6 +106,23 @@ function runFromPlan(plan: ExecutionPlan, id: string): RunNode | null {
     escalations: [],
     process: [],
   };
+}
+
+/**
+ * attach 增量重放的帧级替换（`run_*_delta.replace`）应用到一路 chunks：`openText` 是
+ * 该路末尾未闭合块的旧全文（块边界以 run 的 `process` 为准），裁掉它再接上新全文。
+ *
+ * chunks 只被 `.join("")` 消费（全文 / 尾部预览 / 字数），块结构由 `process` 承载，
+ * 所以这里合并成「已闭合前缀 + 开放块」两片即可，两者折完保持一致。
+ */
+function chunksWithOpenBlockReplaced(
+  chunks: string[],
+  openText: string,
+  text: string,
+): string[] {
+  const joined = chunks.join("");
+  const settled = joined.slice(0, joined.length - openText.length);
+  return settled ? [settled, text] : [text];
 }
 
 function addAgent(s: FoldState, a: AgentState): void {
@@ -269,9 +289,23 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
     }
     case "run_output_delta": {
       const agent = s.agentIndex.get(f.agentId);
-      if (agent) agent.outputChunks.push(f.delta);
       const runId = f.runId || agent?.currentRunId;
       const run = runId ? s.runIndex.get(runId) : undefined;
+      // attach 增量重放：本帧带的是这一路末尾未闭合块的全文（那一步还没说完），整块换掉；
+      // 前面已闭合的步骤不动。CEO 侧同语义见 `foldContentDelta`。
+      if (f.replace && f.delta) {
+        const open = openBlockText(run?.process, "content");
+        if (agent) {
+          agent.outputChunks = chunksWithOpenBlockReplaced(
+            agent.outputChunks,
+            open,
+            f.delta,
+          );
+        }
+        if (run) run.process = replaceTrailingContentStep(run.process, f.delta);
+        break;
+      }
+      if (agent) agent.outputChunks.push(f.delta);
       if (run && f.delta) {
         run.process = appendContentStep(run.process, f.delta);
       }
@@ -299,9 +333,23 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
     }
     case "run_reasoning_delta": {
       const agent = s.agentIndex.get(f.agentId);
-      if (agent) agent.reasoningChunks.push(f.delta);
       const runId = f.runId || agent?.currentRunId;
       const run = runId ? s.runIndex.get(runId) : undefined;
+      if (f.replace && f.delta) {
+        const open = openBlockText(run?.process, "reasoning");
+        if (agent) {
+          agent.reasoningChunks = chunksWithOpenBlockReplaced(
+            agent.reasoningChunks,
+            open,
+            f.delta,
+          );
+        }
+        if (run) {
+          run.process = replaceTrailingReasoningStep(run.process, f.delta);
+        }
+        break;
+      }
+      if (agent) agent.reasoningChunks.push(f.delta);
       if (run && f.delta) {
         run.process = appendReasoningStep(run.process, f.delta);
       }

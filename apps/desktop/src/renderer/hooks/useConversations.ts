@@ -7,12 +7,16 @@ import { previewFromOpenedWindow } from "@/lib/conversationListPreview";
 import { purgeConversationRuntimeState } from "@/lib/purgeConversationRuntimeState";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
+import { notifyError } from "@/lib/toast";
 import {
+  type ConversationTrash,
   deleteConversation as apiDeleteConversation,
   duplicateConversation as apiDuplicateConversation,
   renameConversation as apiRenameConversation,
+  restoreConversation as apiRestoreConversation,
   setConversationArchived as apiSetArchived,
   setConversationPinned as apiSetPinned,
+  listConversationTrash,
   listConversations,
   listGrouped,
 } from "@/services/conversations";
@@ -207,7 +211,8 @@ export function useRenameConversation() {
 }
 
 /** Soft-delete a conversation server-side, then drop it from the cache (delete
- * first so a failed delete leaves the row in place). */
+ * first so a failed delete leaves the row in place). The chat is recoverable from
+ *「最近删除」for the retention window, so that list is refreshed too. */
 export function useDeleteConversation() {
   return useMutation({
     mutationFn: (id: string) => apiDeleteConversation(id),
@@ -223,6 +228,52 @@ export function useDeleteConversation() {
       // In-memory runtime buckets (pausedTurns / interactions /
       // backgroundTasks / processes / terminals / toolOutput).
       purgeConversationRuntimeState(id);
+      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
+      void queryClient.invalidateQueries({ queryKey: conversationKeys.trash });
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
+    },
+  });
+}
+
+/** 最近删除 — the recoverable conversations + the retention window they live under.
+ * Twin of `useFolderTrash`; the「最近删除」view shows both lists. */
+export function useConversationTrash(enabled: boolean) {
+  return useQuery<ConversationTrash>({
+    queryKey: conversationKeys.trash,
+    queryFn: listConversationTrash,
+    enabled,
+    staleTime: 30_000,
+  });
+}
+
+/**
+ * Restore a deleted conversation (撤销删除 /「最近删除」).
+ *
+ * The lists are invalidated rather than patched: the whole promise is that the chat
+ * returns to *its* place — project group, pin, archive side, recency bucket — and only
+ * a refetch of the server-ordered list can put it there. Optimistically prepending it
+ * would land it at the top, which is exactly what restore must not do.
+ *
+ * The failure toast belongs to the hook because the usual trigger is the delete
+ * toast's 撤销 — by then the row that started this is unmounted, and React Query skips
+ * per-call callbacks for a dead observer, so a row-owned handler would swallow the
+ * error silently. Success needs no toast: the chat reappearing in the sidebar is the
+ * confirmation.
+ */
+export function useRestoreConversation() {
+  return useMutation({
+    mutationFn: (id: string) => apiRestoreConversation(id),
+    onError: (err) => notifyError(err, "恢复失败"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.grouped,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: conversationKeys.archived,
+      });
+      void queryClient.invalidateQueries({ queryKey: conversationKeys.trash });
       void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
     },
   });

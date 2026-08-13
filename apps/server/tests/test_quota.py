@@ -125,6 +125,92 @@ async def test_monthly_message_carries_admin_and_byok_exit():
     assert "接入自己的 key" in ei.value.message
 
 
+# ---- when the window rolls over -------------------------------------------------
+#
+# 「明日 0 点（UTC）重置」read literally by a UTC+8 user pointed at 08:00 the next
+# morning — eight hours off the moment his allowance actually returned. The copy now
+# says only that a reset is coming; the instant rides in ``reset_at`` for the client
+# to put on the reader's own clock.
+
+
+async def test_daily_refusals_carry_the_next_utc_midnight():
+    repo = _FakeRepo(today=_agg(input_=600, output=500, turns=1))
+    limits = QuotaLimits(daily_tokens=1000, monthly_cost_nano=0, daily_requests=0)
+    with pytest.raises(QuotaExceededError) as ei:
+        await enforce_quota(repo, "u1", now=_NOW, limits=limits)
+    assert ei.value.reset_at == "2026-06-16T00:00:00Z"
+    assert ei.value.details["reset_at"] == "2026-06-16T00:00:00Z"
+
+
+async def test_monthly_refusal_carries_the_first_of_next_month():
+    repo = _FakeRepo(month=_agg(cost_total=200 * NANO_PER_CNY))
+    limits = QuotaLimits(0, monthly_cost_nano=10 * NANO_PER_CNY, daily_requests=0)
+    with pytest.raises(QuotaExceededError) as ei:
+        await enforce_quota(repo, "u1", now=_NOW, limits=limits)
+    assert ei.value.reset_at == "2026-07-01T00:00:00Z"
+
+
+async def test_december_rolls_into_next_year_not_month_13():
+    repo = _FakeRepo(month=_agg(cost_total=200 * NANO_PER_CNY))
+    limits = QuotaLimits(0, monthly_cost_nano=10 * NANO_PER_CNY, daily_requests=0)
+    with pytest.raises(QuotaExceededError) as ei:
+        await enforce_quota(
+            repo, "u1", now=datetime(2026, 12, 31, 23, 59, tzinfo=UTC), limits=limits
+        )
+    assert ei.value.reset_at == "2027-01-01T00:00:00Z"
+
+
+async def test_the_429_body_hands_the_client_a_moment_it_can_localise():
+    """闸门是唯一只经 REST 429 见用户的那条路：时刻掉在这一层就没有第二次机会。
+
+    句子里已经不写钟点了，所以信封必须带上瞬间——REST 挂在 ``error`` 上（SSE / 推理叶
+    另挂 ``error.context``），客户端据此按读者本机时区成文。
+    """
+    import json
+
+    from agentcore.main import agentcore_error_handler
+
+    repo = _FakeRepo(month=_agg(cost_total=200 * NANO_PER_CNY))
+    limits = QuotaLimits(0, monthly_cost_nano=10 * NANO_PER_CNY, daily_requests=0)
+    with pytest.raises(QuotaExceededError) as ei:
+        await enforce_quota(repo, "u1", now=_NOW, limits=limits)
+
+    response = await agentcore_error_handler(None, ei.value)
+    body = json.loads(bytes(response.body))
+    assert body["error"]["code"] == "QUOTA_EXCEEDED"
+    assert body["error"]["reset_at"] == "2026-07-01T00:00:00Z"
+    # 白名单：用量口径 / 内部计数只进日志，不搭这趟车。
+    assert set(body["error"]) == {"code", "message", "reset_at"}
+
+
+async def test_no_refusal_states_a_clock_time_the_reader_has_to_convert():
+    """服务端不知道读者在哪个时区，就不许在句子里写钟点。"""
+    for limits, repo in (
+        (
+            QuotaLimits(daily_tokens=1000, monthly_cost_nano=0, daily_requests=0),
+            _FakeRepo(today=_agg(input_=600, output=500)),
+        ),
+        (
+            QuotaLimits(0, 0, daily_requests=200),
+            _FakeRepo(today=_agg(turns=200)),
+        ),
+        (
+            QuotaLimits(0, 0, 0, daily_cost_nano=2 * NANO_PER_CNY),
+            _FakeRepo(today=_agg(cost_total=3 * NANO_PER_CNY)),
+        ),
+        (
+            QuotaLimits(0, monthly_cost_nano=10 * NANO_PER_CNY, daily_requests=0),
+            _FakeRepo(month=_agg(cost_total=200 * NANO_PER_CNY)),
+        ),
+    ):
+        with pytest.raises(QuotaExceededError) as ei:
+            await enforce_quota(repo, "u1", now=_NOW, limits=limits)
+        assert "UTC" not in ei.value.message
+        assert "0 点" not in ei.value.message
+        assert "额度重置后可继续" in ei.value.message
+        assert ei.value.reset_at.endswith("Z")
+
+
 async def test_zero_dimension_is_unlimited():
     repo = _FakeRepo(today=_agg(input_=10**9, output=10**9, turns=1))
     limits = QuotaLimits(daily_tokens=0, monthly_cost_nano=0, daily_requests=10)

@@ -17,6 +17,7 @@ import time
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.tools.builtin.long_running import (
     long_running_command_match,
@@ -31,10 +32,20 @@ from agentcore.tools.registration import (
     ToolSurface,
 )
 from agentcore.workspace.channel import WorkspaceOp
+from agentcore.workspace.limits import (
+    is_channel_dead_detail,
+    is_liveness_timeout_detail,
+)
 from agentcore.workspace.protocol import WorkspaceError
 
 _ALLOWED_SUBCOMMANDS = frozenset({"start", "read", "stop", "list"})
 _APPROVAL_SUBCOMMANDS = frozenset({"start"})
+
+# Stable user-facing failure codes (twin of the engine's curated copy table).
+# ``terminal`` runs on the user's own machine, so a failure here is something they can
+# often act on — the face must say which kind it was.
+_LOCAL_WORKSPACE_REQUIRED = "local_workspace_required"
+_WORKSPACE_IO_ERROR = "workspace_io_error"
 
 # Spawn / first-chunk ceiling when ``wait_for`` is absent (channel + engine).
 _FAST_TIMEOUT_SECONDS = 60.0
@@ -134,14 +145,55 @@ def terminal_op_timeout_seconds(arguments: dict[str, Any] | None) -> float:
     return clamp_wait_timeout_seconds(arguments.get("wait_timeout_seconds")) + slack
 
 
-def _error(error: str, start: float) -> ToolResult:
+def _error(
+    error: str,
+    start: float,
+    *,
+    code: str | None = None,
+    contract_failure: bool = False,
+) -> ToolResult:
+    """Failed ``ToolResult`` with elapsed timing and a stable user-facing code.
+
+    ``code`` rides ``metadata["code"]`` — the twin of the engine's curated user copy
+    (``runtime/engine/tool_failure_face``). Without one every terminal failure collapses
+    into the same info-free sentence, whatever actually went wrong.
+
+    ``contract_failure`` marks a deterministic argument rejection so the run-scoped tool
+    circuit breaker skips it (see :class:`~agentcore.tools.protocol.ToolResult`).
+    """
     return ToolResult(
         tool_call_id="",
         success=False,
         output="",
         error=error,
         duration_ms=int((time.monotonic() - start) * 1000),
+        metadata={"code": code} if code else {},
+        contract_failure=contract_failure,
     )
+
+
+def _arg_error(error: str, start: float) -> ToolResult:
+    """Reject a malformed call: coded ``VALIDATION_ERROR``, off the breaker tally.
+
+    A subcommand typo or a missing ``process_id`` is fixed by writing the next call
+    differently — it says nothing about whether ``terminal`` works. Counting these as
+    transient failures disabled the whole tool after three model typos.
+    """
+    return _error(error, start, code=ErrorCode.VALIDATION_ERROR, contract_failure=True)
+
+
+def _workspace_error(e: WorkspaceError, start: float) -> ToolResult:
+    """Map a desktop-side op failure, keeping the kind the desktop already told us.
+
+    The channel distinguishes sticky channel-dead from a single-op settle timeout from a
+    plain I/O failure; ``str(e)`` alone flattens all three into one sentence.
+    """
+    detail = str(e) or e.__class__.__name__
+    if is_channel_dead_detail(detail):
+        return _error(detail, start, code="workspace_channel_dead")
+    if is_liveness_timeout_detail(detail):
+        return _error(detail, start, code="liveness_timeout")
+    return _error(detail, start, code=_WORKSPACE_IO_ERROR)
 
 
 def _format_process_output(
@@ -257,13 +309,14 @@ class TerminalTool:
                 "需本机终端时：**推荐**引导 Composer「导入到云 / 连接 Git」"
                 "或诚实说明本回合无法托管；本机传统 open/bind 合法非默认（≠离线）。",
                 start,
+                code=_LOCAL_WORKSPACE_REQUIRED,
             )
 
         subcommand = str(arguments.get("subcommand", "")).strip().lower()
         if not subcommand:
-            return _error("subcommand 为必填参数", start)
+            return _arg_error("subcommand 为必填参数", start)
         if subcommand not in _ALLOWED_SUBCOMMANDS:
-            return _error(f"子命令 '{subcommand}' 不在允许列表中", start)
+            return _arg_error(f"子命令 '{subcommand}' 不在允许列表中", start)
 
         try:
             if subcommand == "start":
@@ -274,14 +327,14 @@ class TerminalTool:
                 return await self._cmd_stop(arguments, context, start)
             return await self._cmd_list(context, start)
         except WorkspaceError as e:
-            return _error(str(e) or e.__class__.__name__, start)
+            return _workspace_error(e, start)
 
     async def _cmd_start(
         self, arguments: dict[str, Any], context: ToolContext, start: float
     ) -> ToolResult:
         command = str(arguments.get("command") or "").strip()
         if not command:
-            return _error("start 需要 command 参数", start)
+            return _arg_error("start 需要 command 参数", start)
 
         wait_for = str(arguments.get("wait_for") or "").strip()
         # 就绪验收闸：长驻 CLI 无 wait_for → 拒启动，逼模型带 ready 信号。
@@ -324,7 +377,7 @@ class TerminalTool:
     ) -> ToolResult:
         process_id = str(arguments.get("process_id") or "").strip()
         if not process_id:
-            return _error("read 需要 process_id 参数", start)
+            return _arg_error("read 需要 process_id 参数", start)
 
         args: dict[str, Any] = {"process_id": process_id}
         wait_for = str(arguments.get("wait_for") or "").strip()
@@ -337,7 +390,7 @@ class TerminalTool:
             try:
                 args["tail_lines"] = int(arguments["tail_lines"])
             except (TypeError, ValueError):
-                return _error("tail_lines 必须是整数", start)
+                return _arg_error("tail_lines 必须是整数", start)
 
         assert context.workspace_channel is not None
         value = await context.workspace_channel.request(
@@ -352,7 +405,7 @@ class TerminalTool:
     ) -> ToolResult:
         process_id = str(arguments.get("process_id") or "").strip()
         if not process_id:
-            return _error("stop 需要 process_id 参数", start)
+            return _arg_error("stop 需要 process_id 参数", start)
 
         assert context.workspace_channel is not None
         value = await context.workspace_channel.request(
@@ -365,7 +418,7 @@ class TerminalTool:
         assert context.workspace_channel is not None
         value = await context.workspace_channel.request(WorkspaceOp.PROCESS_LIST, {})
         if not isinstance(value, dict):
-            return _error("桌面返回了无效的 process_list 结果", start)
+            return _error("桌面返回了无效的 process_list 结果", start, code=_WORKSPACE_IO_ERROR)
         processes = value.get("processes") or []
         if not isinstance(processes, list):
             processes = []
@@ -387,7 +440,7 @@ class TerminalTool:
         had_wait_for: bool,
     ) -> ToolResult:
         if not isinstance(value, dict) or not value.get("process_id"):
-            return _error(f"桌面返回了无效的 {subcommand} 结果", start)
+            return _error(f"桌面返回了无效的 {subcommand} 结果", start, code=_WORKSPACE_IO_ERROR)
         duration_ms = int((time.monotonic() - start) * 1000)
         # stop：目标就是退出，不加「就绪判定」脚注。
         if subcommand == "stop":

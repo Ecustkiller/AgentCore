@@ -1,3 +1,4 @@
+import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { uiGet, uiSet } from "@/lib/uiStorage";
 
 /** `ws_id = conv:<conversationId>` → its conversation id (scratch workspace). */
@@ -135,6 +136,19 @@ export function saveAgentCoreExpanded(set: Set<string>): void {
   saveStringSet(AGENTCORE_EXPANDED_KEY, set);
 }
 
+// 树的排序依据：**偏好**（跨会话保留），与筛选框那种瞬态搜索相对。整个中枢一个值，
+// 不按工作区分开——用户想的是「我要按时间看文件」，不是「这个夹按时间那个夹按名字」。
+const SORT_KEY = "files-sort-by";
+
+export function loadFileSort(): FileSortBy {
+  const raw = uiGet<unknown>(SORT_KEY);
+  return raw === "size" || raw === "mtime" ? raw : "name";
+}
+
+export function saveFileSort(by: FileSortBy): void {
+  uiSet(SORT_KEY, by);
+}
+
 export interface Tab {
   wsId: string;
   path: string;
@@ -144,4 +158,20 @@ export interface Tab {
 /** Stable per-file key (a workspace's path is unique within it). */
 export function tabKey(wsId: string, path: string): string {
   return `${wsId}:${path}`;
+}
+
+/**
+ * Synthetic tab paths for a workspace's **non-file** panels (版本 / 软删区). They ride
+ * the real ws id — unlike the memory / rules synthetic workspaces — so a workspace
+ * that disappears takes its panels' tabs with it, and so 打开 goes through the same
+ * `onOpenFile(path, name)` seam every rail row already has. The double-underscore
+ * shape keeps them from colliding with a real workspace-relative path (照
+ * `MEMORY_UPDATES_PATH`).
+ */
+export const WS_VERSIONS_PATH = "__ws_versions__";
+export const WS_TRASH_PATH = "__ws_trash__";
+
+/** Tab label for a workspace panel — the panel kind plus which workspace it is. */
+export function workspacePanelTabName(path: string, wsName: string): string {
+  return path === WS_VERSIONS_PATH ? `版本 · ${wsName}` : `软删区 · ${wsName}`;
 }

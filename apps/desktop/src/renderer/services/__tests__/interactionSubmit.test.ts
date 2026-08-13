@@ -95,11 +95,15 @@ describe("submitInteraction path table", () => {
       cold: { messageId: "srv-m1", decision: "continue", note: "" },
     });
     expect(result).toBe("ok");
+    // 会话 id 显式传下去：横幅挂/清必须落在同一条会话上（卡未必属于当前打开的会话）。
     expect(resumeMock).toHaveBeenCalledWith(
       "srv-m1",
       "continue",
       "",
       undefined,
+      {
+        conversationId: "c1",
+      },
     );
     expect(store().get("cp1")?.status).toBe("resolved");
   });
@@ -123,6 +127,7 @@ describe("submitInteraction path table", () => {
       "continue",
       "先做公开竞品",
       undefined,
+      { conversationId: "c1" },
     );
     expect(store().get("tp1")?.status).toBe("resolved");
   });
@@ -141,9 +146,13 @@ describe("submitInteraction path table", () => {
       },
     });
     expect(result).toBe("ok");
-    expect(resumeMock).toHaveBeenCalledWith("srv-ask", "continue", "选 A", [
-      "a",
-    ]);
+    expect(resumeMock).toHaveBeenCalledWith(
+      "srv-ask",
+      "continue",
+      "选 A",
+      ["a"],
+      { conversationId: "c1" },
+    );
   });
 
   it("cold path: runResume failure does not markResolved", async () => {
@@ -354,14 +363,21 @@ describe("submitInteraction · 已经结了的回执", () => {
     expect(store().get("a-blank")?.settledElsewhere).toBeUndefined();
   });
 
-  it("冷路挂起帧已不在 → 卡不放回可点（否则一点再点、次次 404）", async () => {
+  /**
+   * 冷路的 404 现在只剩「诚实失效」这一种：帧被上一次续跑吃掉时服务端回 200 +
+   * `resume_settled`，压根不到这条路。所以这里不能再洗成「已经处理过了」——那是替一次
+   * 真失效编一个好听的结局；卡该作废（灰掉），横幅留着说清是清理还是重新生成。
+   */
+  it("冷路帧真失效 → 卡作废（不冒充「已处理」、也不放回可点）", async () => {
     store().upsertRequired({
       kind: "plan_review",
       conversationId: "c1",
       messageId: "m1",
       payload: { checkpoint_id: "pr-gone", steps: [], pending: [] },
     });
-    resumeMock.mockRejectedValue(new Error("挂起的回合不存在或已处理"));
+    resumeMock.mockRejectedValue(
+      new Error("这次暂停已超过保留期被清理，无法继续"),
+    );
     frameGoneMock.mockReturnValue(true);
 
     const result = await submitInteraction({
@@ -371,11 +387,11 @@ describe("submitInteraction · 已经结了的回执", () => {
       cold: { messageId: "srv-pr", decision: "continue", note: "" },
     });
 
-    expect(result).toBe("already_settled");
-    expect(store().get("pr-gone")?.status).toBe("resolved");
-    expect(store().get("pr-gone")?.settledByReceipt).toBe(true);
-    // runResume 为这次失败挂的错误横幅由这句更贴切的收口取代。
-    expect(clearError).toHaveBeenCalledWith("c1");
+    expect(result).toBe("orphaned");
+    expect(store().get("pr-gone")?.status).toBe("orphaned");
+    expect(store().get("pr-gone")?.settledByReceipt).toBeUndefined();
+    // runResume 挂的失效横幅是这次唯一诚实的解释，不许被清掉。
+    expect(clearError).not.toHaveBeenCalled();
   });
 
   it("冷路帧还在的失败仍放回可点（这次没发出去，不是卡结了）", async () => {

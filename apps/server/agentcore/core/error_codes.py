@@ -45,6 +45,9 @@ class ErrorCode(StrEnum):
     # ── Auth / quota / rate ──────────────────────────────────────────────
     AUTH_ERROR = "AUTH_ERROR"
     FORBIDDEN = "FORBIDDEN"
+    # Cookie-session mutating request without a usable X-CSRF-Token (HTTP 403,
+    # emitted by CsrfMiddleware before the route runs).
+    CSRF_FAILED = "CSRF_FAILED"
     ADMIN_PRODUCT_FORBIDDEN = "ADMIN_PRODUCT_FORBIDDEN"
     MFA_REQUIRED = "MFA_REQUIRED"
     MFA_SETUP_REQUIRED = "MFA_SETUP_REQUIRED"

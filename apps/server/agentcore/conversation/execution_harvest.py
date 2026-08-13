@@ -54,7 +54,8 @@ from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.limits import (
     CHANNEL_DEAD_PREPARE_ABORT,
     CHANNEL_DEAD_USER_VISIBLE,
-    EXEC_ENV_DEAD_USER_VISIBLE,
+    EXEC_ENV_DEAD_BODY_MARKER,
+    exec_env_dead_user_visible,
     is_channel_dead_detail,
 )
 from agentcore.workspace.protocol import WorkspaceIOError
@@ -209,9 +210,12 @@ def build_harvest_fallback_content(
     if _session_saw_channel_dead(session, body):
         parts.append(CHANNEL_DEAD_USER_VISIBLE)
     if getattr(session, "exec_env_dead", False) or (
-        body and "本机暂时跑不了命令" in body
+        body and EXEC_ENV_DEAD_BODY_MARKER in body
     ):
-        parts.append(EXEC_ENV_DEAD_USER_VISIBLE)
+        # Same classified cause the live notice gave (None → cause-free fallback).
+        parts.append(
+            exec_env_dead_user_visible(getattr(session, "exec_env_dead_reason", None))
+        )
     if body:
         parts.append(body)
     else:
@@ -450,7 +454,7 @@ async def run_harvest_closing_turn(
                     "harvest_kind": kind,
                 },
             )
-        history = await load_chat_context(db, conversation_id, max_messages=40)
+        history = await load_chat_context(db, conversation_id)
         # The synthetic user row is passed to the pipeline as ``user_message``, so drop
         # it from the window tail. Nothing was appended on the continuation path.
         if not recovered_turn_id:

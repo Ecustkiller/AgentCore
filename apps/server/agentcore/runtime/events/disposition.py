@@ -160,6 +160,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
         Disposition.EPHEMERAL,
         "冷 resume × live deferred ack——传输态；槽空后同连接续跑，reload 无需重放",
     ),
+    EventType.RESUME_SETTLED: (
+        Disposition.EPHEMERAL,
+        "冷 resume 幂等成功 ack（帧已被消费）——传输态；决策事实本身已在 journal，reload 无需重放",
+    ),
     EventType.EXECUTION_DETACHED: (
         Disposition.DURABLE,
         "执行转后台（回合收口/CEO 提前收口仍有队员在跑）——重放「团队后台继续」态",

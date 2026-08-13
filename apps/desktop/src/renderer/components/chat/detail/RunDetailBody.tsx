@@ -1,19 +1,17 @@
 import { Markdown } from "@/components/chat/Markdown";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
 import { ProcessTimeline } from "@/components/chat/message-bubble/ProcessTimeline";
+import { RunInterveneControls } from "@/components/graph/RunInterveneControls";
 import {
   executionGraphCapabilities,
   runActCapabilities,
 } from "@/components/graph/planCapabilities";
-import { isStoppableRunStatus } from "@/components/graph/runStopActions";
 import { Button } from "@/components/ui";
 import { useRunLlmWindow } from "@/hooks/useRunLlmWindow";
 import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { filterInjectInEdges } from "@/lib/causalInject";
-import { detectReviewConcern } from "@/lib/reviewConcern";
 import type { AgentAuditEvent } from "@/services/audit";
 import { permissionAxesShortLabel } from "@/services/permissionAxes";
-import { submitRunRedirect } from "@/services/runRedirect";
 import { useComposerDraftStore } from "@/stores/composer";
 import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
@@ -23,11 +21,8 @@ import {
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath, useUIStore } from "@/stores/ui";
-import { Pencil, RotateCcw, Shield, Square } from "lucide-react";
-import { useState } from "react";
+import { Pencil, Shield, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { toast } from "sonner";
-import { RunMemberStopButton } from "./RunMemberStopButton";
 import { WorkerContextSection } from "./WorkerContextSection";
 import {
   buildModeratorLedger,
@@ -121,10 +116,6 @@ export function RunDetailBody({
       false,
   );
 
-  const [redirectOpen, setRedirectOpen] = useState(false);
-  const [redirectFeedback, setRedirectFeedback] = useState("");
-  const [redirectSubmitting, setRedirectSubmitting] = useState(false);
-
   const run = execution?.runs.find((s) => s.id === runId);
   const agent = run
     ? execution?.agents.find((a) => a.id === run.agentId)
@@ -145,13 +136,54 @@ export function RunDetailBody({
   if (!execution || !run || !agent) return null;
 
   const output = agent.outputChunks.join("");
-  const canRedirect =
-    turnInteractive &&
-    agent.status === "working" &&
-    runCaps.runRedirect &&
-    conversationId != null;
-  const canStopMember =
-    conversationId != null && isStoppableRunStatus(run.status);
+  // 回合级动作，与「按人」那两枚并排；不属于某一位队员，captain 详情里也照出。
+  const turnActions =
+    agent.status === "working" ? (
+      <>
+        <Button
+          variant="ghost"
+          className="h-7 text-primary hover:bg-primary/10"
+          icon={<Pencil size={13} />}
+          onClick={() => {
+            useComposerDraftStore
+              .getState()
+              .fill(`【协作中调整】关于「${agent.role}」：`, "append");
+          }}
+        >
+          记下改法（跑完后发送）
+        </Button>
+        <Button
+          variant="ghost"
+          className="h-7 text-destructive hover:bg-destructive/10"
+          icon={<Square size={13} />}
+          onClick={() => useConversationStore.getState().stopGeneration()}
+        >
+          停止整轮
+        </Button>
+      </>
+    ) : null;
+  // 按人干预（只改这个人 / 只停这个人）：队员跑完后这两件事确实做不到，但入口不隐藏
+  // ——`RunInterveneControls` 会变灰并说明原因，而不是让用户以为自己找错了地方。
+  //
+  // captain 除外（手机早有这道护栏）：主管这一路就是这条对话本身，「只停这位队员」对它
+  // 无意义，引擎的计划里也没有它——出了按钮就是许一个必然落空的愿。要停就停整轮，那枚
+  // 按钮仍在。
+  const isCaptainRun = run.kind === "captain";
+  const intervene =
+    conversationId != null && !isCaptainRun ? (
+      <RunInterveneControls
+        conversationId={conversationId}
+        executionId={execution.id}
+        runId={run.id}
+        runStatus={run.status}
+        role={agent.role}
+        redirectCapable={runCaps.runRedirect}
+        output={output}
+        trailing={turnActions}
+      />
+    ) : isCaptainRun && turnActions ? (
+      <div className="flex flex-wrap items-center gap-2">{turnActions}</div>
+    ) : null;
   const thinkingLive = isThinkingLivePlaceholder(agent);
 
   const isModerator = isDebateModeratorRun(execution, run.id);
@@ -226,119 +258,15 @@ export function RunDetailBody({
                   ? "辩论主持中——下方台账会随轮次更新焦点与小结。"
                   : "正在实时输出——下方内容会边写边更新。"}
           </p>
-          <div className="flex flex-wrap gap-2">
-            {canRedirect && (
-              <Button
-                variant="ghost"
-                className="h-7 text-primary hover:bg-primary/10"
-                icon={<RotateCcw size={13} />}
-                onClick={() => {
-                  const concern = detectReviewConcern(output);
-                  setRedirectFeedback(
-                    concern != null
-                      ? "请按以下方向调整："
-                      : `请按以下方向调整「${agent.role}」的产出：`,
-                  );
-                  setRedirectOpen(true);
-                }}
-              >
-                立即改此人
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              className="h-7 text-primary hover:bg-primary/10"
-              icon={<Pencil size={13} />}
-              onClick={() => {
-                useComposerDraftStore
-                  .getState()
-                  .fill(`【协作中调整】关于「${agent.role}」：`, "append");
-              }}
-            >
-              记下改法（跑完后发送）
-            </Button>
-            {canStopMember && conversationId != null && (
-              <RunMemberStopButton
-                conversationId={conversationId}
-                executionId={execution.id}
-                runId={run.id}
-                runStatus={run.status}
-              />
-            )}
-            <Button
-              variant="ghost"
-              className="h-7 text-destructive hover:bg-destructive/10"
-              icon={<Square size={13} />}
-              onClick={() => useConversationStore.getState().stopGeneration()}
-            >
-              停止整轮
-            </Button>
-          </div>
-          {redirectOpen && canRedirect && (
-            <div className="space-y-2 border-t border-primary/15 pt-2">
-              <textarea
-                className="min-h-[4.5rem] w-full resize-y rounded-lg border border-border bg-background px-2.5 py-2 text-sm text-foreground outline-none ring-primary/30 focus:ring-2"
-                value={redirectFeedback}
-                onChange={(e) => setRedirectFeedback(e.target.value)}
-                placeholder="具体、可执行的修改方向…"
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  variant="primary"
-                  className="h-7"
-                  disabled={redirectSubmitting || !redirectFeedback.trim()}
-                  onClick={async () => {
-                    if (!conversationId || !redirectFeedback.trim()) return;
-                    setRedirectSubmitting(true);
-                    try {
-                      await submitRunRedirect(conversationId, {
-                        executionId: execution.id,
-                        runId: run.id,
-                        feedback: redirectFeedback.trim(),
-                      });
-                      // 诚实：后端收到即取消这名队员在飞的工作，并优先带现场热续跑
-                      // （接不上才同角色换人重做）。别说成「还在排队、什么都没发生」
-                      // ——用户会据此以为可以再点一次。
-                      toast.success("已改方向：这名队员的在飞工作已取消", {
-                        description:
-                          "正带着你的新方向重跑；接不上现场就从头重做，这段要重新花时间和钱。",
-                      });
-                      setRedirectOpen(false);
-                    } catch {
-                      toast.error("提交失败，请稍后重试");
-                    } finally {
-                      setRedirectSubmitting(false);
-                    }
-                  }}
-                >
-                  提交改方向
-                </Button>
-                <Button
-                  variant="ghost"
-                  className="h-7"
-                  onClick={() => setRedirectOpen(false)}
-                >
-                  取消
-                </Button>
-              </div>
-            </div>
-          )}
+          {intervene}
         </div>
       )}
 
-      {/* 排队中也可单人停止——不提前展开「正在实时输出」banner，只露停止入口。 */}
-      {canStopMember &&
-        agent.status !== "working" &&
-        conversationId != null && (
-          <div className="mb-4">
-            <RunMemberStopButton
-              conversationId={conversationId}
-              executionId={execution.id}
-              runId={run.id}
-              runStatus={run.status}
-            />
-          </div>
-        )}
+      {/* 队员不在跑时同样露出按人干预入口——排队中可停，已终局则变灰并说明原因。
+          默默消失会让用户以为自己找错了地方，下次就不再来找。 */}
+      {agent.status !== "working" && intervene && (
+        <div className="mb-4">{intervene}</div>
+      )}
 
       <Section title={taskSection.title}>
         <CollapsibleSpeech

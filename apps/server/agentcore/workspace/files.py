@@ -20,9 +20,12 @@ from typing import Literal, NoReturn
 
 from agentcore.config import settings
 from agentcore.core.errors import PayloadTooLargeError, ValidationError
-from agentcore.workspace.limits import is_file_too_large_detail
+from agentcore.workspace.limits import (
+    WORKSPACE_BROWSE_LIST_MAX,
+    is_file_too_large_detail,
+)
 from agentcore.workspace.locate import build_server_workspace
-from agentcore.workspace.protocol import DirEntry, WorkspaceIOError
+from agentcore.workspace.protocol import DirListing, WorkspaceIOError
 from agentcore.workspace.server import ServerWorkspace
 
 
@@ -55,9 +58,17 @@ async def list_files(
     folder_id: str | None,
     folder_rel_path: str | None,
     conversation_id: str,
-    recursive: bool = False
-) -> list[DirEntry]:
-    """List entries in the conversation's workspace (top level or recursive)."""
+    path: str = ".",
+    recursive: bool = False,
+) -> DirListing:
+    """List one directory of the conversation's workspace (or its whole tree).
+
+    ``path`` (workspace-relative, ``"."`` = root) lets the file panel expand a
+    subdirectory with a listing of its own instead of pulling — and locally
+    filtering — the whole tree, which is what made deep files unreachable once a
+    workspace outgrew the cap. Uses the browse ceiling, and the returned
+    ``truncated`` must reach the UI: a cut tree may never look complete.
+    """
     backend = _backend(
         user_id=user_id,
         folder_id=folder_id,
@@ -65,7 +76,7 @@ async def list_files(
         conversation_id=conversation_id,
     )
     pattern = "**/*" if recursive else "*"
-    return await backend.list(".", pattern)
+    return await backend.list(path or ".", pattern, cap=WORKSPACE_BROWSE_LIST_MAX)
 
 
 async def list_file_index(

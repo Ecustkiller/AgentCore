@@ -10,7 +10,6 @@ import {
   isContinuableAssistant,
   isEmptyInterruptedAssistant,
 } from "@/lib/composerContinueHint";
-import { cn } from "@/lib/utils";
 import {
   useBackgroundTasksStore,
   useHandoffArmed,
@@ -41,6 +40,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ComposerCloudBridgeHint } from "./ComposerCloudBridgeHint";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
+import { ComposerCreatingNotice } from "./ComposerCreatingNotice";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
@@ -237,12 +237,7 @@ export function TurnComposer({
       : handleAttachmentFolderHint,
   });
 
-  const drop = useComposerDrop(
-    isGenerating,
-    attachments,
-    setAttachments,
-    conversationId,
-  );
+  const drop = useComposerDrop(attachments, setAttachments, conversationId);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -272,7 +267,7 @@ export function TurnComposer({
     ),
   });
 
-  const { handleSend, isSending } = useComposerSend({
+  const { handleSend, isSending, isCreatingConversation } = useComposerSend({
     value,
     setValue,
     attachments,
@@ -474,12 +469,9 @@ export function TurnComposer({
     </>
   );
 
+  // 生成中照常可附加：插话 / 排队本就带附件走，禁用只会让人以为坏了。
   const attachButton = (
-    <ComposerAttachButton
-      disabled={isGenerating}
-      onAttach={onPaperclipClick}
-      iconOnly={!isBar}
-    />
+    <ComposerAttachButton onAttach={onPaperclipClick} iconOnly={!isBar} />
   );
 
   const leftCluster = (
@@ -689,6 +681,9 @@ export function TurnComposer({
         onRemoveAgent={removeAgentMention}
       />
 
+      {/* 建会话中：草稿首发按下发送就清空输入框，这条顶住创建 POST 那段等待。 */}
+      <ComposerCreatingNotice show={isCreatingConversation} />
+
       {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
       <ComposerConnectionNotice />
 
@@ -764,11 +759,9 @@ export function TurnComposer({
 
 /** 附件按钮：bar「＋」菜单内带文案；card 底栏仅图标。点菜单内项时先关菜单再选文件。 */
 function ComposerAttachButton({
-  disabled,
   onAttach,
   iconOnly = true,
 }: {
-  disabled?: boolean;
   onAttach: () => void;
   iconOnly?: boolean;
 }) {
@@ -779,12 +772,7 @@ function ComposerAttachButton({
   };
   if (iconOnly) {
     return (
-      <IconButton
-        size="md"
-        onClick={onClick}
-        disabled={disabled}
-        aria-label="附加文件"
-      >
+      <IconButton size="md" onClick={onClick} aria-label="附加文件">
         <Paperclip size={16} />
       </IconButton>
     );
@@ -793,12 +781,8 @@ function ComposerAttachButton({
     <button
       type="button"
       onClick={onClick}
-      disabled={disabled}
       aria-label="附加文件"
-      className={cn(
-        "inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground",
-        disabled && "cursor-not-allowed opacity-60",
-      )}
+      className="inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
     >
       <Paperclip size={14} className="shrink-0" aria-hidden />
       <span>附加文件</span>

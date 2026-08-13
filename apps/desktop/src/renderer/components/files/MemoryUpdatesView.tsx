@@ -1,12 +1,17 @@
 import { Centered, EmptyHint, InlineError } from "@/components/files/parts";
+import { DisputedLinesSection } from "@/components/memory/DisputedLinesSection";
 import {
   MemoryUpdateItemRow,
   formatMemoryTime,
   visibleMemoryUpdateItems,
 } from "@/components/memory/MemoryUpdateItemRow";
-import { listMemoryUpdates } from "@/services/memory";
+import {
+  MEMORY_DISPUTED_LINES_KEY,
+  MEMORY_UPDATES_KEY,
+  listMemoryUpdates,
+} from "@/services/memory";
 import { memoryLeafTabName } from "@/services/sources/memorySource";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, History, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -32,8 +37,9 @@ export function MemoryUpdatesView({
   onOpenLeaf: (path: string, name: string, projectId?: string | null) => void;
 }) {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const updates = useQuery({
-    queryKey: ["memory-updates"],
+    queryKey: MEMORY_UPDATES_KEY,
     queryFn: () => listMemoryUpdates(),
     staleTime: 30_000,
   });
@@ -49,6 +55,12 @@ export function MemoryUpdatesView({
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
+        {/* Outside the empty branch below: a user may have rejected lines without ever
+            having a consolidation pass listed here, and that is exactly when he most
+            needs to find them again. */}
+        <div className="mx-auto max-w-3xl px-6 pt-4 empty:hidden">
+          <DisputedLinesSection />
+        </div>
         {updates.isLoading ? (
           <Centered>
             <Loader2
@@ -109,7 +121,13 @@ export function MemoryUpdatesView({
                         key={`${item.action}:${item.file}:${item.section}:${i}`}
                         item={item}
                         projectFolderId={item.projectId}
-                        onMoved={() => void updates.refetch()}
+                        onMemoryChanged={() => {
+                          void updates.refetch();
+                          // A row's「这条不对」lands in the rejected list too.
+                          void queryClient.invalidateQueries({
+                            queryKey: MEMORY_DISPUTED_LINES_KEY,
+                          });
+                        }}
                         onOpenLeaf={(target, projectId) =>
                           onOpenLeaf(
                             target,

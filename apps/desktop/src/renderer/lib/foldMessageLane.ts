@@ -34,7 +34,10 @@ import {
   appendToolStep,
   appendUserInterjectionStep,
   dropTrailingContentSteps,
+  openBlockText,
   promoteScalarContentIntoProcess,
+  replaceTrailingContentStep,
+  replaceTrailingReasoningStep,
   resolveToolStep,
   resolveToolStepPhase,
 } from "./processTimeline";
@@ -60,12 +63,29 @@ export function messageLaneFromMessage(msg: {
   };
 }
 
+/**
+ * `replace` = attach 增量重放的帧级替换语义：本帧带的是这条通道**末尾那个尚未闭合的
+ * 文本块**的全文（还没说完的那一步），整块换掉而非追加。只出现在重放段，直播帧永不带。
+ *
+ * 精确到「末尾那个块」——前面已闭合的步骤（被工具 / 标记 / 思考切开的那些）一个不动。
+ * 标量 `content` 是整路拼接，其尾巴恰是这个开放块的文本（每个 delta 同时进标量与该步；
+ * `content_reset` 同时清标量与尾部 content 步），所以按块长裁掉再接新文即保持一致。
+ */
 export function foldContentDelta(
   state: MessageLaneState,
   delta: string,
+  replace = false,
 ): MessageLaneState {
   const d = delta || "";
   if (!d) return state;
+  if (replace) {
+    const open = openBlockText(state.process, "content");
+    return {
+      ...state,
+      content: state.content.slice(0, state.content.length - open.length) + d,
+      process: replaceTrailingContentStep(state.process, d),
+    };
+  }
   return {
     ...state,
     content: state.content + d,
@@ -89,12 +109,23 @@ export function foldContentReset(
   };
 }
 
+/** `replace`：思考通道的同款帧级替换语义，见 {@link foldContentDelta}。 */
 export function foldReasoningDelta(
   state: MessageLaneState,
   delta: string,
+  replace = false,
 ): MessageLaneState {
   const d = delta || "";
   if (!d) return state;
+  if (replace) {
+    const open = openBlockText(state.process, "reasoning");
+    return {
+      ...state,
+      reasoning:
+        state.reasoning.slice(0, state.reasoning.length - open.length) + d,
+      process: replaceTrailingReasoningStep(state.process, d),
+    };
+  }
   return {
     ...state,
     reasoning: state.reasoning + d,

@@ -301,6 +301,8 @@ async def react_loop(
     delivery_idle_narrow_active = False
     # 检索预算临界（剩 ≤2）一次性 reflection，缓解同轮 fan-out 超订。
     retrieval_critical_warned = False
+    # 上次埋点过的分工具用量 (web_search, read_url)：只在变化时记一行。
+    retrieval_spend_logged: tuple[int, int] | None = None
     # Mutable allowlist: light-repair / delivery-idle / wind_down may narrow it.
     live_allowed: list[str] | None = (
         list(allowed_tool_names) if allowed_tool_names is not None else None
@@ -1290,8 +1292,7 @@ async def react_loop(
                     _guard.end_grace_round()
             # Retrieval budget exhausted → enter wind-down early (don't wait for
             # wall-clock TIMEOUT while the worker can no longer search).
-            # Critical (remaining ≤2, still open) → one-shot reflection so the next
-            # think round does not fan-out more calls than slots left.
+            # Still open → refresh the balance the worker plans against next round.
             rb = getattr(tool_context, "retrieval_budget", None)
             if (
                 role == "worker"
@@ -1307,29 +1308,51 @@ async def react_loop(
                     limit=rb.limit,
                     used=rb.used,
                 )
-            elif (
-                role == "worker"
-                and rb is not None
-                and not retrieval_critical_warned
-            ):
+            if role == "worker" and rb is not None and wind_down_active:
+                # 收尾窗口已禁检索：上一轮那条余额播报会跟「禁止再检索」自相矛盾。
                 from agentcore.runtime.runs.retrieval_budget import (
-                    format_retrieval_budget_critical_prompt,
-                    is_retrieval_budget_critical,
+                    drop_retrieval_budget_awareness,
                 )
 
-                if is_retrieval_budget_critical(rb.remaining, limit=rb.limit):
-                    retrieval_critical_warned = True
-                    critical_msg = format_retrieval_budget_critical_prompt(
-                        remaining=rb.remaining, limit=rb.limit
-                    )
-                    messages.append(LLMMessage(role="user", content=critical_msg))
-                    logger.info(
-                        "engine.retrieval_budget_critical",
-                        run_id=run_id,
-                        remaining=rb.remaining,
-                        limit=rb.limit,
-                        used=rb.used,
-                    )
+                drop_retrieval_budget_awareness(messages)
+            elif role == "worker" and rb is not None:
+                # 预算感知 (BATS): a worker that already spent slots sees its balance
+                # + per-tool spend every round, else it searches blind. Never spent →
+                # no injection (多数 worker 一次都不检索，注入是纯噪音). Critical (剩 ≤2)
+                # rides the same single message.
+                from agentcore.runtime.runs.retrieval_budget import (
+                    sync_retrieval_budget_awareness,
+                )
+
+                awareness = sync_retrieval_budget_awareness(messages, rb)
+                if awareness is not None:
+                    if awareness.critical and not retrieval_critical_warned:
+                        retrieval_critical_warned = True
+                        logger.info(
+                            "engine.retrieval_budget_critical",
+                            run_id=run_id,
+                            remaining=awareness.remaining,
+                            limit=awareness.limit,
+                            used=awareness.used,
+                        )
+                    spend = (awareness.searches, awareness.reads)
+                    # Trajectory rows only when the split moved (a row per round would
+                    # repeat itself); the ``final=True`` row at exit is the one that
+                    # 分工具用量分布 aggregates on.
+                    if spend != retrieval_spend_logged:
+                        retrieval_spend_logged = spend
+                        logger.info(
+                            "engine.retrieval_budget_awareness",
+                            run_id=run_id,
+                            round=round_idx,
+                            limit=awareness.limit,
+                            used=awareness.used,
+                            searches=awareness.searches,
+                            reads=awareness.reads,
+                            remaining=awareness.remaining,
+                            critical=awareness.critical,
+                            final=False,
+                        )
             continue
 
         result = await ceiling_finalize(
@@ -1369,6 +1392,28 @@ async def react_loop(
         return _exit(*result)
     finally:
         _export_terminal_state()
+        # 分工具用量分布的落账行：轮尾埋点跑不到末轮（末轮搜完就交卷 / 被取消 / 撞硬顶），
+        # 每个花过额度的 worker 在这里留一行最终分项，一行一 run 直接聚合。
+        rb_exit = getattr(tool_context, "retrieval_budget", None)
+        if role == "worker" and rb_exit is not None and rb_exit.used > 0:
+            from agentcore.runtime.runs.retrieval_budget import (
+                is_retrieval_budget_critical,
+            )
+
+            logger.info(
+                "engine.retrieval_budget_awareness",
+                run_id=run_id,
+                round=round_idx,
+                limit=rb_exit.limit,
+                used=rb_exit.used,
+                searches=rb_exit.searches_used,
+                reads=rb_exit.reads_used,
+                remaining=rb_exit.remaining,
+                critical=is_retrieval_budget_critical(
+                    rb_exit.remaining, limit=rb_exit.limit
+                ),
+                final=True,
+            )
         if steer_cid:
             from agentcore.runtime.turn.runs import turn_runs
             from agentcore.runtime.turn.steer import (

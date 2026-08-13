@@ -287,6 +287,10 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
 
 
+# 按人干预的受理结果——「引擎够不够得着这个 run」由服务端答，客户端不再靠 turnLive 猜。
+RunInterveneReason = Literal["queued", "no_live_drive", "unknown_run"]
+
+
 class SubmitRunRedirectRequest(BaseModel):
     """User mid-flight steer for one running worker (中间可见性 Phase 2a).
 
@@ -302,6 +306,22 @@ class SubmitRunRedirectRequest(BaseModel):
 class SubmitRunRedirectResponse(BaseModel):
     ok: bool = True
     queued: int = Field(..., description="Pending redirect count for this execution after enqueue.")
+    accepted: bool = Field(
+        True,
+        description=(
+            "Engine took this steer into a live drive loop. False = nothing was queued; "
+            "the client must not claim the worker is being redirected."
+        ),
+    )
+    reason: RunInterveneReason = Field(
+        "queued",
+        description=(
+            "queued | no_live_drive (batch left the engine) | unknown_run (not in the live plan)."
+        ),
+    )
+    detail: str = Field(
+        "", description="One user-facing sentence; all clients render this verbatim."
+    )
 
 
 class SubmitRunStopRequest(BaseModel):
@@ -323,6 +343,22 @@ class SubmitRunStopRequest(BaseModel):
 class SubmitRunStopResponse(BaseModel):
     ok: bool = True
     queued: int = Field(..., description="Pending stop count for this execution after enqueue.")
+    accepted: bool = Field(
+        True,
+        description=(
+            "Engine took this stop into a live drive loop. False = nothing was queued; "
+            "the client must not claim the worker is being stopped."
+        ),
+    )
+    reason: RunInterveneReason = Field(
+        "queued",
+        description=(
+            "queued | no_live_drive (batch left the engine) | unknown_run (not in the live plan)."
+        ),
+    )
+    detail: str = Field(
+        "", description="One user-facing sentence; all clients render this verbatim."
+    )
 
 
 class SubmitDebateSteerRequest(BaseModel):
@@ -642,6 +678,10 @@ class TurnCollabMetrics(BaseModel):
     revises: int = 0
     escalations: int = 0
     audit_drops: int = 0
+    # 上面两项的**子集**（用户拍板的 checkpoint 边界 / 用户点「立即改此人」的返工）。
+    # 用户面拿总数减掉它才是「队友互相把关」；运营口径仍读总数。旧行缺省 0。
+    boundary_yields_by_user: int = 0
+    revises_by_user: int = 0
 
 
 class MessageDetail(BaseModel):

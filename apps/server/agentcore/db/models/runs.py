@@ -1,9 +1,10 @@
 """Run/turn durability + telemetry models.
 
 HandoffJob (本地→云交接), RunSessionRow (recoverable worker runs), PausedTurnRow
-(结构化挂起 durable resume), TurnJournalRow (§8.3 唯一事实源), TurnMetricsRow
-(运营观测 telemetry), TurnLeaseRow (durable RUNNING ownership for crash recover),
-TurnStreamStateRow (流式在飞通道快照 · 流式回复持久化 §3.1).
+(结构化挂起 durable resume) + PausedTurnOutcomeRow (谁把那张卡结了 / 怎么结的),
+TurnJournalRow (§8.3 唯一事实源), TurnMetricsRow (运营观测 telemetry), TurnLeaseRow
+(durable RUNNING ownership for crash recover), TurnStreamStateRow (流式在飞通道快照 ·
+流式回复持久化 §3.1).
 """
 
 from datetime import datetime
@@ -179,6 +180,69 @@ class PausedTurnRow(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+    )
+
+
+# A paused frame's TERMINAL disposition. ``paused_turns`` says a card is still
+# waiting; this says what ended it — and it is written by whoever atomically consumed
+# the frame, in the same transaction that consumed it.
+PAUSED_TURN_SETTLED = "settled"
+PAUSED_TURN_EXPIRED = "expired"
+
+
+class PausedTurnOutcomeRow(Base):
+    """What ended a paused turn's card — written by the party that consumed the frame.
+
+    ``claim`` is DELETE ... RETURNING, so exactly one caller wins a paused frame. The
+    winner used to leave nothing behind but the hole, and every other caller had to
+    infer「谁结的这张卡」from the last ``*_resolved`` in ``turn_journal`` — which, on
+    the claim-race path, is usually the loser's OWN prewrite. This row is the winner's
+    conclusion, stamped inside the winning transaction: the decision it applied, when,
+    on which ``checkpoint_id``, and who settled it. A loser reads it instead of guessing.
+
+    The TTL sweep stamps the other terminal disposition (``expired``) the same way, so
+    「遗弃超期」 and 「回合已重新生成」 are told apart by this column rather than by
+    whether an assistant row happens to still exist.
+
+    Frame ⊕ outcome: a ``paused_turns`` row and its outcome never coexist. Saving /
+    restoring a frame clears the outcome (the card is pending again); consuming a frame
+    writes one. Absent row + absent frame ⇒ the turn was regenerated / deleted (its
+    outcome went with the message — app-level cascade in ``MessageRepository``).
+    """
+
+    __tablename__ = "paused_turn_outcomes"
+    __table_args__ = (
+        # Only a settled card's ``checkpoint_id`` ever reaches a client (the
+        # ``resume_settled`` frame keys the card on it, and an empty one would be
+        # discarded whole). An ``expired`` row carries no id to the wire, so the
+        # constraint stays off the TTL sweep's back — one malformed legacy frame must
+        # not be able to wedge the sweep forever.
+        CheckConstraint(
+            f"outcome <> '{PAUSED_TURN_SETTLED}' OR checkpoint_id <> ''",
+            name="ck_paused_turn_outcomes_settled_checkpoint",
+        ),
+        # Kept for conversation-scoped reads (IDOR-safe lookup pairs it with the PK).
+        Index("ix_paused_turn_outcomes_conversation", "conversation_id"),
+    )
+
+    # The paused turn's assistant ``message_id`` — same key as the frame it replaces.
+    message_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False))
+    # PAUSED_TURN_SETTLED (someone continued the turn) | PAUSED_TURN_EXPIRED (TTL swept).
+    outcome: Mapped[str] = mapped_column(String(16))
+    # The suspension kind the card was (ask_user / plan_review / team_preview), taken
+    # off the consumed frame — the wire ``resume_settled.kind``.
+    card_kind: Mapped[str] = mapped_column(String(32), server_default=text("''"))
+    # The consumed frame's interaction id. Never blank on a settled row (see the check).
+    checkpoint_id: Mapped[str] = mapped_column(String(64), server_default=text("''"))
+    # The decision the winner actually applied (continue / stop / adjust / …). Empty
+    # for an expired card — nobody decided it.
+    decision: Mapped[str] = mapped_column(String(32), server_default=text("''"))
+    # 结算方: the origin device that settled it, or a server-side actor label for a
+    # settlement no device drove (TTL sweep). Empty when the caller had no device.
+    settled_by: Mapped[str] = mapped_column(String(64), server_default=text("''"))
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=text("now()")
     )
 
 

@@ -567,13 +567,13 @@ def test_delivery_gaps_on_soft_accept_and_partial_meta():
 @pytest.mark.asyncio
 async def test_retrieval_budget_rework_refill():
     rb = RetrievalBudgetState(limit=2)
-    assert await rb.try_reserve()
-    assert await rb.try_reserve()
-    assert not await rb.try_reserve()
+    assert await rb.try_reserve("web_search")
+    assert await rb.try_reserve("web_search")
+    assert not await rb.try_reserve("web_search")
     remaining = await rb.refill(1)
     assert remaining == 1
     assert rb.limit == 3
-    assert await rb.try_reserve()
+    assert await rb.try_reserve("web_search")
 
 
 @pytest.mark.asyncio
@@ -584,7 +584,7 @@ async def test_retrieval_budget_rework_refill_respects_cap_and_wind_down():
     assert rework_refill_slots(original_limit=4, wind_down_entered=True) == 0
     rb = RetrievalBudgetState(limit=4)
     for _ in range(4):
-        assert await rb.try_reserve()
+        assert await rb.try_reserve("web_search")
     slice_n = rework_refill_slots(original_limit=4, wind_down_entered=False)
     assert slice_n == 2
     remaining = await rb.refill_within_cap(slice_n, cap=4)
@@ -596,7 +596,7 @@ async def test_retrieval_budget_rework_refill_respects_cap_and_wind_down():
 async def test_retrieval_budget_exhausted_triggers_wind_down_flag():
     """Exhausted budget → remaining 0 (loop arms wind-down at round boundary)."""
     rb = RetrievalBudgetState(limit=1)
-    assert await rb.try_reserve()
+    assert await rb.try_reserve("web_search")
     assert rb.remaining == 0
     # The loop checks remaining<=0; here we only pin the predicate.
     assert rb.limit > 0 and rb.remaining <= 0

@@ -5,8 +5,10 @@
 // (`pnpm conformance`). It is a brand-new mobile implementation — NOT shared with
 // desktop's `projectExecution` — but behaviorally aligned to the same golden.
 //
-// Exhaustive `switch` + `assertNever` (支柱2): a new backend SSE type added to
-// @agentcore/contract-types breaks this build until it is handled here.
+// Exhaustive `switch` (支柱2): a new backend SSE type added to @agentcore/contract-types
+// breaks this build until it is handled here. That check is COMPILE-time only — at
+// runtime an unhandled type is ignored, because an already-installed old build will
+// always meet events newer than itself and fold runs on the render path.
 
 import { mergeEvidenceLedger } from "@/lib/evidenceLedger";
 import type {
@@ -85,14 +87,93 @@ import type {
   TurnStatus,
 } from "@agentcore/protocol-conformance";
 import {
+  type CollabCounts,
   FINISH_TO_STATUS,
   MARKER_STANDIN_TOOLS,
   ORCHESTRATION_TOOLS,
 } from "@agentcore/protocol-fold-kit";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
-function assertNever(x: never): never {
-  throw new Error(`fold: unhandled SSE event type: ${JSON.stringify(x)}`);
+const warnedUnhandledTypes = new Set<string>();
+
+/** 正文 / 思考两类文本步（`ProcessStep` 里唯二带 `text` 的成员）。 */
+type TextStep = Extract<ProcessStep, { text: string }>;
+
+/**
+ * 该通道末尾那个「尚未闭合」的文本块 = `steps` 尾部那条同类文本步。别的步（工具 / 思考 /
+ * 各类标记）一压上来这一块就闭合了，后续 delta 另起一块。追加与替换共用这条判定，两条路径
+ * 对「同一块」的认定才不会分叉。
+ */
+function openTextStep(
+  steps: ProcessStep[],
+  kind: TextStep["kind"],
+): TextStep | null {
+  const last = steps[steps.length - 1];
+  if (!last || !("text" in last)) return null;
+  return last.kind === kind ? last : null;
+}
+
+function pushTextStep(
+  steps: ProcessStep[],
+  kind: TextStep["kind"],
+  text: string,
+): void {
+  if (kind === "content") steps.push({ kind: "content", text });
+  else steps.push({ kind: "reasoning", text });
+}
+
+/** 直播增量：接到末尾那个未闭合的块上（没有就新起一块）。 */
+function appendTextStep(
+  steps: ProcessStep[],
+  kind: TextStep["kind"],
+  text: string,
+): void {
+  const open = openTextStep(steps, kind);
+  if (open) open.text += text;
+  else pushTextStep(steps, kind, text);
+}
+
+/**
+ * 帧级替换（正文类 delta 的 `replace` 帧 · attach 增量重放段里携带全文而非增量的那几帧）：
+ * 把末尾那个尚未闭合的块整体换成 `full`，已闭合的步骤一律不动——替换整路文本会抹掉前面已
+ * 闭合的步骤，无脑追加又会重复。尾部不是同类文本步 = 该通道上一块已被别的步闭合，本帧全文
+ * 自成新块。返回被换掉的旧文本，供调用方同步修正累计标量。
+ */
+function replaceTextStep(
+  steps: ProcessStep[],
+  kind: TextStep["kind"],
+  full: string,
+): string {
+  const open = openTextStep(steps, kind);
+  if (!open) {
+    if (full) pushTextStep(steps, kind, full);
+    return "";
+  }
+  const previous = open.text;
+  open.text = full;
+  return previous;
+}
+
+/**
+ * 标量侧的同一次替换：截掉旧块再接全文。累计标量的尾部恒等于末尾那个未闭合的块——清标量的
+ * 每个分支（`message_start` 换泡 / `content_reset` / `run_output_reset` / checkpoint 吸收
+ * 同轮导语）都同时弹掉尾部同类步，两边不会错位。
+ */
+function replaceTail(scalar: string, previous: string, full: string): string {
+  return scalar.slice(0, scalar.length - previous.length) + full;
+}
+
+/**
+ * 编译期穷尽闸（支柱2）：漏处理一个事件类型，这里的 `never` 形参就收不下，构建失败。
+ *
+ * 运行期只记一次告警：已装在用户手机上的旧版 App 必然会收到比它新的事件类型，
+ * 而 fold 跑在渲染路径上——抛出去就是白屏。忽略单个未知事件是唯一可接受的降级。
+ */
+function noteUnhandledEvent(x: never): void {
+  const type = String(x);
+  if (warnedUnhandledTypes.has(type)) return;
+  warnedUnhandledTypes.add(type);
+  console.warn(`fold: unhandled SSE event type: ${type}`);
 }
 
 /** Drop a `team` marker fixing the collaboration graph's chronological slot in the CEO
@@ -495,13 +576,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
     const type = ev.type;
     switch (type) {
       case "content_delta": {
-        const d = (ev.payload as ContentDeltaPayload).delta || "";
-        content += d;
-        if (d) {
-          const last = process[process.length - 1];
-          if (last && last.kind === "content") last.text += d;
-          else process.push({ kind: "content", text: d });
+        const p = ev.payload as ContentDeltaPayload;
+        const d = p.delta || "";
+        if (p.replace === true) {
+          const previous = replaceTextStep(process, "content", d);
+          content = replaceTail(content, previous, d);
+          break;
         }
+        content += d;
+        if (d) appendTextStep(process, "content", d);
         break;
       }
       // 草稿丢弃信号：引擎丢弃已流式的这一版正文、发 content_reset（reason 说明为何）。该事件
@@ -523,13 +606,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "reasoning_delta": {
-        const d = (ev.payload as ReasoningDeltaPayload).delta || "";
-        reasoning += d;
-        if (d) {
-          const last = process[process.length - 1];
-          if (last && last.kind === "reasoning") last.text += d;
-          else process.push({ kind: "reasoning", text: d });
+        const p = ev.payload as ReasoningDeltaPayload;
+        const d = p.delta || "";
+        if (p.replace === true) {
+          const previous = replaceTextStep(process, "reasoning", d);
+          reasoning = replaceTail(reasoning, previous, d);
+          break;
         }
+        reasoning += d;
+        if (d) appendTextStep(process, "reasoning", d);
         break;
       }
       case "tool_use_start": {
@@ -732,16 +817,18 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "run_output_delta": {
         const p = ev.payload as RunOutputDeltaPayload;
         const ag = agentById(p.agent_id);
-        if (ag) ag.output += p.delta || "";
         const run = runById(p.run_id);
-        if (run) {
-          const d = p.delta || "";
-          if (d) {
-            const last = run.process[run.process.length - 1];
-            if (last && last.kind === "content") last.text += d;
-            else run.process.push({ kind: "content", text: d });
-          }
+        const d = p.delta || "";
+        if (p.replace === true) {
+          // 队员卡的输出标量与该 run 时间线上的正文块是同一路累加，一起换掉末尾那一块。
+          const previous = run
+            ? replaceTextStep(run.process, "content", d)
+            : "";
+          if (ag) ag.output = replaceTail(ag.output, previous, d);
+          break;
         }
+        if (ag) ag.output += d;
+        if (run && d) appendTextStep(run.process, "content", d);
         break;
       }
       // 草稿丢弃信号的 worker 对偶（content_reset 之于 CEO）：引擎丢弃 worker 卡片已流式的这
@@ -770,16 +857,17 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "run_reasoning_delta": {
         const p = ev.payload as RunReasoningDeltaPayload;
         const ag = agentById(p.agent_id);
-        if (ag) ag.reasoning += p.delta || "";
         const run = runById(p.run_id);
-        if (run) {
-          const d = p.delta || "";
-          if (d) {
-            const last = run.process[run.process.length - 1];
-            if (last && last.kind === "reasoning") last.text += d;
-            else run.process.push({ kind: "reasoning", text: d });
-          }
+        const d = p.delta || "";
+        if (p.replace === true) {
+          const previous = run
+            ? replaceTextStep(run.process, "reasoning", d)
+            : "";
+          if (ag) ag.reasoning = replaceTail(ag.reasoning, previous, d);
+          break;
         }
+        if (ag) ag.reasoning += d;
+        if (run && d) appendTextStep(run.process, "reasoning", d);
         break;
       }
       case "run_tool_progress": {
@@ -1158,6 +1246,10 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
       case "turn_queue_cancelled":
       // 冷 resume × live deferred（EPHEMERAL）：同连接等待槽空；fold no-op。
       case "resume_deferred":
+      // 冷 resume 撞上已被消费的挂起帧（EPHEMERAL 幂等成功，200 取代旧 404）：只报事实
+      //（谁的裁决 / 何时落的 / 回合去向），决策本身早已在 journal 里；不落 journal、不进
+      // ProjectedTurn，fold no-op。turn_status=running 时同连接紧接着续流那次续跑。
+      case "resume_settled":
       // L3 团队浏览器直播 (D13/D14): ephemeral 直播侧信道——base64 jpeg 帧 + 粗粒度通道状态，
       // 从不落 turn journal，喂桌面工作区直播面板。手机 fold no-op（与桌面 conformanceFold 同款枚举）。
       case "browser_live_frame":
@@ -1263,7 +1355,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       default:
-        assertNever(type);
+        noteUnhandledEvent(type);
+        break;
     }
   }
 
@@ -1460,6 +1553,23 @@ export function extractPrevExecutionIds(
     if (executionId && prev) map.set(executionId, prev);
   }
   return map;
+}
+
+/**
+ * 回合协作计数（`message_end.collab`）→ 完成态团队条的「互相把关」一行。
+ *
+ * Transport-only sibling of {@link fold}：{@link ProjectedTurn} 是 conformance 裁判态，
+ * 加字段要动后端 oracle + 重出 golden，而这只是条呈现旁路（桌面同样挂在 `message.collab`
+ * 上，不进投影）。**只覆盖 live 流**——`message_end` 是 DERIVED、不进 journal，回放的收口
+ * 帧只带 finish_reason；历史读 REST `MessageDetail.collab`（messages.usage 列）。
+ */
+export function extractTurnCollab(events: SSEEvent[]): CollabCounts | null {
+  let collab: CollabCounts | null = null;
+  for (const ev of events) {
+    if (ev.type !== "message_end") continue;
+    collab = (ev.payload as MessageEndPayload).collab ?? null;
+  }
+  return collab;
 }
 
 /** 幕授权来源 → 列表/锚点短文案。 */

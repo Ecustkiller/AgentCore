@@ -25,6 +25,7 @@ function renderDir(path: string, name: string, fileCount: number) {
   const data = {
     childrenOf: (dir: string) => map.get(dir),
     statusOf: () => "ready" as const,
+    truncatedOf: () => false,
     ensureDir: noop,
     reload: noop,
   };

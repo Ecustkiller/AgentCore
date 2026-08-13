@@ -47,6 +47,14 @@ function toConversation(c: BackendConversation): Conversation {
     permissionAxes: normalizeAxes(c.permission_axes ?? undefined),
     modelProfileId: c.model_profile_id ?? null,
     contextCompacted: c.context_compacted ?? false,
+    ...(c.context_gap
+      ? {
+          contextGap: {
+            droppedMessages: c.context_gap.dropped_messages,
+            recoveryAt: c.context_gap.recovery_at ?? null,
+          },
+        }
+      : {}),
   };
 }
 
@@ -93,13 +101,78 @@ export async function listGrouped(): Promise<{
   return { folders, conversations };
 }
 
-/** Soft-delete a conversation server-side. */
+/**
+ * Soft-delete a conversation server-side — recoverable from「最近删除」for the
+ * retention window (see {@link listConversationTrash}).
+ *
+ * The two side effects below are *not* part of that recovery and never claim to be:
+ * a 裸聊's local scratch goes to the OS recycle bin (restore it from there), and this
+ * device's session roots are dropped.
+ */
 export async function deleteConversation(id: string): Promise<void> {
   await api.delete(`/v1/conversations/${id}`);
   // 裸聊本地 scratch → 系统回收站（软删）；项目共享目录不动。
   void trashBareConversationScratch(id);
   // W3: drop conversation session roots on this device (server grant rows cleared too).
   void window.fsApi?.clearSessionReadonlyRoots?.(id);
+}
+
+/** One recoverable conversation in「最近删除」. */
+export interface DeletedConversationMeta {
+  id: string;
+  title: string;
+  /** The project it will return to (null = 裸聊). */
+  folderId: string | null;
+  messageCount: number;
+  deletedAt: string;
+  /** Earliest moment the retention sweeper may purge it (server-computed). */
+  purgeAt: string;
+}
+
+/** The conversation recycle bin plus the retention window it is governed by. */
+export interface ConversationTrash {
+  items: DeletedConversationMeta[];
+  retentionDays: number;
+}
+
+type BackendDeletedConversation = Schemas["DeletedConversationSummary"];
+
+function toDeletedConversation(
+  c: BackendDeletedConversation,
+): DeletedConversationMeta {
+  return {
+    id: c.id,
+    title: c.title?.trim() || UNTITLED,
+    folderId: c.folder_id ?? null,
+    messageCount: c.message_count ?? 0,
+    deletedAt: c.deleted_at,
+    purgeAt: c.purge_at,
+  };
+}
+
+/** 最近删除 — conversations the user deleted that are still inside the retention window. */
+export async function listConversationTrash(): Promise<ConversationTrash> {
+  const res = await api.get<Schemas["DeletedConversationListResponse"]>(
+    "/v1/conversations/trash",
+  );
+  return {
+    items: res.data.map(toDeletedConversation),
+    retentionDays: res.retention_days,
+  };
+}
+
+/**
+ * Restore a deleted conversation. Past the retention window the server answers 409
+ * (「该对话已被清理」) — a real window, not something to retry around.
+ *
+ * The returned row is the live conversation, back in the project / pin / archive
+ * state it was deleted in.
+ */
+export async function restoreConversation(id: string): Promise<Conversation> {
+  const res = await api.post<BackendConversation>(
+    `/v1/conversations/trash/${id}/restore`,
+  );
+  return toConversation(res);
 }
 
 /** Persist a new conversation title. */

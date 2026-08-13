@@ -24,6 +24,16 @@ NAME_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z0-9_]+)+$")
 
 # Lightweight field schemas for high-value events (docs / debugging).
 KEY_FIELDS: dict[str, dict[str, str]] = {
+    "llm.rate_limit_no_retry": {
+        "provider": "str",
+        "scenario": "str",
+        "attempt": "int",
+        "retry_after_sec": "float",
+        "cooldown_sec": "float",
+        "cooldown_source": "str",
+        "ceiling_sec": "float",
+        "reason": "str",
+    },
     "chat.turn_start": {
         "preview": "str",
         "chars": "int",
@@ -81,12 +91,39 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "detail": "str",
     },
+    "conversation.created": {
+        "user_id": "str",
+        "conversation_id": "str",
+        "folder_id": "str",
+        "client_request_id": "str",
+        "idempotent_hit": "bool",
+    },
+    "chat.title_degraded": {
+        "conversation_id": "str",
+        "reason": "str",
+        "title_chars": "int",
+    },
     "fulfill.no_fulfiller": {
         "reason": "str",
         "channel": "str",
         "root_id": "str",
         "origin_device": "str",
         "devices": "int",
+        "user": "str",
+        "conversation_id": "str",
+    },
+    "fulfill.reconnect_grace": {
+        "channel": "str",
+        "root_id": "str",
+        "origin_device": "str",
+        "request_id": "str",
+        "grace_seconds": "float",
+        "user": "str",
+        "conversation_id": "str",
+    },
+    "fulfill.grace_expired": {
+        "channel": "str",
+        "request_id": "str",
         "user": "str",
         "conversation_id": "str",
     },
@@ -258,6 +295,16 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "tokens": "int",
         "token_budget": "int",
     },
+    "engine.retrieval_budget_awareness": {
+        "round": "int",
+        "limit": "int",
+        "used": "int",
+        "searches": "int",
+        "reads": "int",
+        "remaining": "int",
+        "critical": "bool",
+        "final": "bool",
+    },
     "llm.call": {
         "scenario": "str",
         "model": "str",
@@ -382,6 +429,14 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     },
     "auth.mfa_enrolled": {"user_id": "str"},
     "auth.mfa_recovery_used": {"user_id": "str"},
+    "security.csrf_rejected": {
+        "path": "str",
+        "method": "str",
+        "reason": "str",
+        "user_id": "str",
+        "client_platform": "str",
+        "client_version": "str",
+    },
     "llm_provider.key_updated": {"user_id": "str", "provider_id": "str"},
     "llm_provider.deleted": {"user_id": "str", "provider_id": "str"},
     "sidecar.turn_cancel_requested": {
@@ -420,6 +475,12 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "error": "str",
     },
+    "billing.background_quota_skip": {
+        "user_id": "str",
+        "purpose": "str",
+        "error": "str",
+        "declared_recovery_sec": "float",
+    },
     "billing.call_quota_refused": {
         "user_id": "str",
         "dimension": "str",
@@ -428,12 +489,25 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "model": "str",
         "scenario": "str",
     },
+    "memory.consolidation_failed": {
+        "conversation_id": "str",
+        "error": "str",
+        "error_type": "str",
+        "reason": "str",
+    },
     "memory.consolidation_window_dropped": {
         "conversation_id": "str",
         "error": "str",
         "error_type": "str",
         "reason": "str",
         "window_through": "str",
+    },
+    "server.started": {
+        "host": "str",
+        "port": "int",
+        "turn_lease_enabled": "bool",
+        "version": "str",
+        "git_sha": "str",
     },
     "rate_limit.redis_fail_open": {
         "prefix": "str",
@@ -500,6 +574,13 @@ HISTORICAL_COMPAT: dict[str, str] = {
 }
 
 KEY_DESC: dict[str, str] = {
+    "llm.rate_limit_no_retry": (
+        "429 冷却超出本次调用能等的上限，放弃重试。cooldown_sec / cooldown_source = 判定所依据的"
+        "冷却及其来源：upstream_header（上游声明，reason=retry_after_too_large）/ local_backoff"
+        "（上游没带头，这个数是我们自己的退避链，reason=backoff_exceeds_budget）；"
+        "retry_after_sec 只记上游声明值，无头时为 null；"
+        "ceiling_sec = 该上限（后台一次性调用按剩余预算算，交互回合为 30s）"
+    ),
     "chat.turn_start": "回合起点（preview/chars/history）",
     "chat.turn_complete": "回合收尾（含 Phase-0 延迟：prepare/assemble/ttft_*；model/credential_source）",
     "chat.resume_complete": "暂停恢复回合收尾（终态带协作计数；STOP 终结不带）",
@@ -507,9 +588,25 @@ KEY_DESC: dict[str, str] = {
         "regenerate 早退拒绝（会话不存在 / 目标非用户消息或已删除）；排前端传错 id"
     ),
     "chat.prepare_phase": "prepare/assemble 分段耗时（phase + ms；每 phase 一行）",
+    "conversation.created": (
+        "POST /v1/conversations 受理一次新建；client_request_id 为空表示该客户端没传幂等键，"
+        "idempotent_hit=true 表示这次重复请求原样返回了首次那条（没新建、没跑回合）"
+    ),
+    "chat.title_degraded": (
+        "侧栏标题落的是首条消息裁出来的降级短标题、不是模型产出；"
+        "reason=rate_limit/timeout/empty_model_title/gate_* 归因，"
+        "mint_no_write 为 REST auto-title 兜底那次"
+    ),
     "fulfill.no_fulfiller": (
         "回合中途派单落空（reason=desktop_offline 桌面未连接 / root_not_held 桌面在线未声明该 root；"
-        "第三态来源设备离线另见 fulfill.origin_offline）"
+        "第三态来源设备离线另见 fulfill.origin_offline）；紧跟 fulfill.reconnect_grace 者未结算"
+    ),
+    "fulfill.reconnect_grace": (
+        "派单落空但该设备刚刚还在线（SSE 重连盲窗）：op 挂住不结算，等重连 rehang 重推；"
+        "grace_seconds 为本次上限（已卡在该 op 自身 deadline 之内）"
+    ),
+    "fulfill.grace_expired": (
+        "重连宽限到点设备仍没回来：按当下真实状态重派一次，仍落空则结算原有 typed 失败"
     ),
     "desktop.mcp_list_ok": "MCP list 成功（duration_ms / tool_count）",
     "desktop.mcp_list_degraded": "MCP list 超时或降级（带 duration_ms）",
@@ -537,6 +634,9 @@ KEY_DESC: dict[str, str] = {
     "engine.loop_nudge": "收敛治理：循环提醒",
     "engine.loop_finalize": "收敛治理：强制收尾",
     "engine.ceiling_finalize": "收敛治理：硬顶强制收尾（reason=max_rounds 轮预算耗尽 / token_budget）",
+    "engine.retrieval_budget_awareness": (
+        "检索余额注入（分项用量变化记一行；final=true 是每个 worker run 的最终 searches/reads）"
+    ),
     "llm.call": "单次 LLM 调用（latency/tokens/cost_nano）",
     "llm.request": "LLM prompt 截断脱敏（需 LOG_LLM_BODIES）",
     "llm.response": "LLM 回复截断脱敏（需 LOG_LLM_BODIES）",
@@ -563,6 +663,10 @@ KEY_DESC: dict[str, str] = {
     "auth.login_failed": "敏感操作审计：登录失败（password/unknown/locked/mfa/role；无明文凭据）",
     "auth.mfa_enrolled": "敏感操作审计：Admin MFA 绑定确认成功",
     "auth.mfa_recovery_used": "敏感操作审计：Admin MFA 恢复码成功消费",
+    "security.csrf_rejected": (
+        "Cookie 会话变更请求被 CSRF 拒（403）；reason=missing/malformed/expired/"
+        "signature_mismatch，带 user_id 可归因到会话"
+    ),
     "llm_provider.key_updated": "敏感操作审计：BYOK API Key 轮换保存（无明文）",
     "llm_provider.deleted": "敏感操作审计：BYOK 服务商（含密钥）删除",
     "sidecar.turn_cancel_requested": (
@@ -578,6 +682,10 @@ KEY_DESC: dict[str, str] = {
     "billing.background_platform_auth_fallback": (
         "后台 chrome 平台 key 被上游 auth 拒绝后一次回落用户 BYOK"
     ),
+    "billing.background_quota_skip": (
+        "后台 chrome 平台额度用尽而跳过（静默降级，不冒泡用户面）；"
+        "declared_recovery_sec = 上游自己申报的恢复秒数，空表示这次拒绝没给日期"
+    ),
     "billing.call_quota_refused": (
         "逐调用配额闸拒绝一次平台代付上游调用（云内联与 sidecar 代理同粒度）"
     ),
@@ -585,6 +693,14 @@ KEY_DESC: dict[str, str] = {
     "compaction.failed": "长对话压缩失败（顶层异常；不推水位）",
     "compaction.timeout": "长对话压缩 LLM 超时（空摘要；不推水位）",
     "compaction.schedule_failed": "压缩调度 due 判定异常",
+    "memory.consolidation_failed": (
+        "consolidation 失败但保留水位（下轮重选）；error_type = 异常类名，"
+        "与 reason 对照可定位是哪一层把上游异常包装丢了分类"
+    ),
+    "server.started": (
+        "服务端启动完成；version（包元数据 semver）+ git_sha（构建期注入）"
+        "标明该进程构建来源，与 GET /version 同源"
+    ),
     "memory.consolidation_window_dropped": (
         "不可重试 consolidation 失败：推进水位并丢弃本窗口（防 sweeper 无限重选）"
     ),

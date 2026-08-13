@@ -1,6 +1,7 @@
 import { type FileNode, type FileSource, parentDir } from "@/lib/fileSource";
 import { isAgentCoreRootDir } from "@/lib/stageDirs";
 import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import type { FileSortBy } from "./fileTreeTypes";
 
 export type DirStatus = "loading" | "ready" | "error";
 
@@ -13,12 +14,39 @@ function siblingRank(node: FileNode): number {
   return node.isDir ? 0 : 1;
 }
 
-/** Dirs first, then by name — the canonical tree ordering (mutates + returns). */
-export function sortNodes(nodes: FileNode[]): FileNode[] {
+/** 降序比较一项可缺失的数值元信息（大 / 新在前；缺失沉底）。 */
+function compareDescNullable(
+  a: number | null | undefined,
+  b: number | null | undefined,
+): number {
+  const av = a ?? null;
+  const bv = b ?? null;
+  if (av === null && bv === null) return 0;
+  if (av === null) return 1;
+  if (bv === null) return -1;
+  return bv - av;
+}
+
+/**
+ * Dirs first, then by the chosen key — the canonical tree ordering (mutates +
+ * returns). Name is always the tie-break, so equal sizes / timestamps still land
+ * in a stable, readable order.
+ */
+export function sortNodes(
+  nodes: FileNode[],
+  by: FileSortBy = "name",
+): FileNode[] {
   return nodes.sort((a, b) => {
     const rankA = siblingRank(a);
     const rankB = siblingRank(b);
-    return rankA !== rankB ? rankA - rankB : a.name.localeCompare(b.name);
+    if (rankA !== rankB) return rankA - rankB;
+    const keyed =
+      by === "size"
+        ? compareDescNullable(a.sizeBytes, b.sizeBytes)
+        : by === "mtime"
+          ? compareDescNullable(a.mtimeMs, b.mtimeMs)
+          : 0;
+    return keyed !== 0 ? keyed : a.name.localeCompare(b.name);
   });
 }
 
@@ -28,7 +56,10 @@ export function sortNodes(nodes: FileNode[]): FileNode[] {
  * an entry too (empty if it has no listed children) so the tree can render it as
  * a known-empty folder rather than a perpetual spinner.
  */
-export function bucketTree(nodes: FileNode[]): Map<string, FileNode[]> {
+export function bucketTree(
+  nodes: FileNode[],
+  by: FileSortBy = "name",
+): Map<string, FileNode[]> {
   const map = new Map<string, FileNode[]>([["", []]]);
   const bucket = (dir: string): FileNode[] => {
     let arr = map.get(dir);
@@ -42,7 +73,7 @@ export function bucketTree(nodes: FileNode[]): Map<string, FileNode[]> {
     bucket(parentDir(n.path)).push(n);
     if (n.isDir) bucket(n.path);
   }
-  for (const arr of map.values()) sortNodes(arr);
+  for (const arr of map.values()) sortNodes(arr, by);
   return map;
 }
 
@@ -50,6 +81,11 @@ export interface FileTreeData {
   /** Direct children of a directory, or undefined if not loaded yet. */
   childrenOf: (dir: string) => FileNode[] | undefined;
   statusOf: (dir: string) => DirStatus | undefined;
+  /**
+   * 这一层是否被后端条目上限截断（源不报告即为 false）。UI 必须把它显示出来——
+   * 悄悄少几十个文件，用户读到的是「我的文件没了」。
+   */
+  truncatedOf: (dir: string) => boolean;
   /** Load a directory's children if not already loaded/loading (lazy sources). */
   ensureDir: (dir: string) => void;
   /** Reload one directory — eager sources reload the whole tree. */
@@ -70,10 +106,17 @@ export interface FileTreeData {
  * identical. Data lives in refs (mutated in place) with a version bump to
  * re-render, avoiding a fresh Map allocation per directory load.
  */
-export function useFileTreeData(source: FileSource): FileTreeData {
+export function useFileTreeData(
+  source: FileSource,
+  sortBy: FileSortBy = "name",
+): FileTreeData {
   const eager = !!source.listTree;
   const childrenRef = useRef<Map<string, FileNode[]>>(new Map());
   const statusRef = useRef<Map<string, DirStatus>>(new Map());
+  const truncatedRef = useRef<Set<string>>(new Set());
+  // Read by the loaders so changing the sort never invalidates them (that would
+  // re-run the mount effect and refetch the whole tree just to reorder it).
+  const sortRef = useRef(sortBy);
   const [, bump] = useReducer((n: number) => n + 1, 0);
 
   const loadEager = useCallback(async () => {
@@ -83,7 +126,7 @@ export function useFileTreeData(source: FileSource): FileTreeData {
     bump();
     try {
       const all = await listTree();
-      childrenRef.current = bucketTree(all);
+      childrenRef.current = bucketTree(all, sortRef.current);
       const status = new Map<string, DirStatus>();
       for (const dir of childrenRef.current.keys()) status.set(dir, "ready");
       statusRef.current = status;
@@ -98,7 +141,15 @@ export function useFileTreeData(source: FileSource): FileTreeData {
       statusRef.current.set(dir, "loading");
       bump();
       try {
-        childrenRef.current.set(dir, sortNodes(await source.listDir(dir)));
+        // Prefer the bounded reader so a capped level can say so; sources that
+        // enumerate in full only implement `listDir` and stay un-truncated.
+        const bounded = source.listDirBounded;
+        const res = bounded
+          ? await bounded(dir)
+          : { entries: await source.listDir(dir), truncated: false };
+        childrenRef.current.set(dir, sortNodes(res.entries, sortRef.current));
+        if (res.truncated) truncatedRef.current.add(dir);
+        else truncatedRef.current.delete(dir);
         statusRef.current.set(dir, "ready");
       } catch {
         statusRef.current.set(dir, "error");
@@ -112,10 +163,18 @@ export function useFileTreeData(source: FileSource): FileTreeData {
   useEffect(() => {
     childrenRef.current = new Map();
     statusRef.current = new Map();
+    truncatedRef.current = new Set();
     bump();
     if (eager) void loadEager();
     else void loadDir("");
   }, [eager, loadEager, loadDir]);
+
+  // Switching the sort key reorders what's already in memory — never a refetch.
+  useEffect(() => {
+    sortRef.current = sortBy;
+    for (const arr of childrenRef.current.values()) sortNodes(arr, sortBy);
+    bump();
+  }, [sortBy]);
 
   const ensureDir = useCallback(
     (dir: string) => {
@@ -142,9 +201,13 @@ export function useFileTreeData(source: FileSource): FileTreeData {
     [],
   );
   const statusOf = useCallback((dir: string) => statusRef.current.get(dir), []);
+  const truncatedOf = useCallback(
+    (dir: string) => truncatedRef.current.has(dir),
+    [],
+  );
 
   return useMemo(
-    () => ({ childrenOf, statusOf, ensureDir, reload }),
-    [childrenOf, statusOf, ensureDir, reload],
+    () => ({ childrenOf, statusOf, truncatedOf, ensureDir, reload }),
+    [childrenOf, statusOf, truncatedOf, ensureDir, reload],
   );
 }

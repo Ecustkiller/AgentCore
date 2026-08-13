@@ -32,13 +32,16 @@ from .conversations import (
     MessageBookmark,
 )
 from .devices import PushDeviceRow
-from .documents import Document
+from .documents import DisputedLine, Document
 from .feedback import FeedbackRow
 from .llm_profiles import LlmModelProfile
 from .memory_pipeline import MemoryEpisode, MemoryScopeState
 from .notices import ProductNoticeDismissalRow, ProductNoticeRow
 from .runs import (
+    PAUSED_TURN_EXPIRED,
+    PAUSED_TURN_SETTLED,
     HandoffJob,
+    PausedTurnOutcomeRow,
     PausedTurnRow,
     RunSessionRow,
     TurnJournalRow,
@@ -74,6 +77,7 @@ __all__ = [
     "CostEvent",
     "CostLedgerOutbox",
     "Credentials",
+    "DisputedLine",
     "Document",
     "FeedbackRow",
     "Folder",
@@ -84,6 +88,9 @@ __all__ = [
     "MemoryUpdateRow",
     "Message",
     "MessageBookmark",
+    "PAUSED_TURN_EXPIRED",
+    "PAUSED_TURN_SETTLED",
+    "PausedTurnOutcomeRow",
     "PausedTurnRow",
     "ProductNoticeDismissalRow",
     "ProductNoticeRow",

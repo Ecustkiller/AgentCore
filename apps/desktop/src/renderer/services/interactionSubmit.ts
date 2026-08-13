@@ -6,7 +6,6 @@ import type { PlanReviewUserDecision } from "@/services/planReview";
 import type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
 import { isPausedFrameGone, runResume } from "@/services/turns";
 import { useComposerDraftStore } from "@/stores/composer";
-import { useConversationStore } from "@/stores/conversation";
 import {
   INTERACTION_SUBMIT_PATH,
   useInteractionStore,
@@ -129,9 +128,12 @@ export interface ColdSubmitArgs {
  * fallback — do not require a pausedTurns frame to submit when IX has the entry.
  * Dedup = caller local submitting + Interaction beginSubmit when tracked.
  *
- * 「已经结了」的回执（`already_processed` / 404）→ `already_settled`：卡收起来不再可点
+ * 热路「已经结了」的回执（`already_processed` / 404）→ `already_settled`：卡收起来不再可点
  * （多端同权下另一端可能早就点掉了，放回可点只会一点再点、次次 404），但**不认领**结果与
  * 处理方——回执证不了人（升级卡的 404 也可能是主管接管仲裁），归属只认线材帧。
+ *
+ * 冷路没有这一档：云端幂等成功现在回 200 + EPHEMERAL `resume_settled`（SSE 侧把卡收成
+ * 结果态），所以走到这里的 404 是诚实失效，按作废处理。
  */
 export async function submitInteraction(args: {
   id: string;
@@ -230,49 +232,50 @@ export async function submitInteraction(args: {
         : {}),
     };
     const hasCorrections = Object.keys(corrections).length > 0;
-    if (hasCorrections) {
-      await runResume(
-        args.cold.messageId,
-        args.cold.decision,
-        args.cold.note,
-        args.cold.selected,
-        corrections,
-      );
-    } else {
-      await runResume(
-        args.cold.messageId,
-        args.cold.decision,
-        args.cold.note,
-        args.cold.selected,
-      );
-    }
-    store.markResolved({
-      kind: args.kind,
-      id: args.id,
-      resolution: {
-        decision: args.cold.decision,
-        note: args.cold.note,
-        selected: args.cold.selected ?? [],
-        ...(hasCorrections ? corrections : {}),
+    // 会话 id 显式传：卡可能不属于当前打开的会话（画布 / 浮窗 / 用户已切走），
+    // 让 runResume 挂横幅与下面清横幅落在同一条会话上。
+    await runResume(
+      args.cold.messageId,
+      args.cold.decision,
+      args.cold.note,
+      args.cold.selected,
+      {
+        conversationId: args.conversationId,
+        ...(hasCorrections ? { corrections } : {}),
       },
-    });
+    );
+    // 帧早被上一次续跑吃掉时（`resume_settled`）这次点击并不是那条 settlement——
+    // SSE 侧已经按 journal 的事实收好卡了，别再用本端刚点的决策盖回去冒充结果。
+    if (!useInteractionStore.getState().get(args.id)?.resumeSettled) {
+      store.markResolved({
+        kind: args.kind,
+        id: args.id,
+        resolution: {
+          decision: args.cold.decision,
+          note: args.cold.note,
+          selected: args.cold.selected ?? [],
+          ...(hasCorrections ? corrections : {}),
+        },
+      });
+    }
     return "ok";
   } catch (err) {
     if (isInteractionOrphanedError(err)) {
       store.markOrphaned(args.id);
       return "orphaned";
     }
-    // 挂起帧已经不在了（另一端先续跑了 / 本机帧已结）。放回可点等于请用户一点再点、次次
-    // 404，所以这里收口：卡收起来，只说「结了」。runResume 已经为这次失败挂了错误横幅——
-    // 那条被这句更贴切的收口取代，别让一次正常的多端抢先看着像故障。
+    // 挂起帧真的没了（超保留期被清理 / 回合已重新生成或删除；sidecar 的
+    // PAUSED_TURN_NOT_FOUND 同）。「已被别人处理」不再走这里——那条现在是 200 +
+    // `resume_settled`，由 SSE 侧收成结果态。这里剩下的是诚实失效：卡作废（不是「被答了」，
+    // 更不是「这次没发出去」），放回可点只会请用户一点再点、次次 404。runResume 挂的横幅
+    // 已经说清了到底是哪种失效，保留它。
     if (isPausedFrameGone(err)) {
-      store.markSettledByReceipt({
+      store.markOrphaned(args.id, {
         kind: args.kind,
-        id: args.id,
         conversationId: args.conversationId,
+        messageId: args.cold.messageId,
       });
-      useConversationStore.getState().clearError(args.conversationId);
-      return "already_settled";
+      return "orphaned";
     }
     if (tracked) store.reopen(args.id);
     throw err;

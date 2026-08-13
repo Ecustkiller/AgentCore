@@ -35,10 +35,11 @@ import { loadExpanded, saveExpanded } from "./fileTreeExpanded";
 import { computeFileTreeFilter } from "./fileTreeFilter";
 import type {
   ClipboardEntry,
+  FileSortBy,
   FileTreeChromeState,
   FileTreeHandle,
 } from "./fileTreeTypes";
-import { Centered, EmptyHint, InlineError } from "./parts";
+import { Centered, EmptyHint, InlineError, TruncatedNotice } from "./parts";
 import { useFileTreeData } from "./useFileTreeData";
 
 export { dedupeName } from "./dedupeName";
@@ -84,6 +85,10 @@ interface FileTreeProps {
    * 若树里再列一遍，同一个文件夹会出现两次（且树里那份没有归属/记忆入口）。
    */
   hideRootDirs?: readonly string[];
+  /**
+   * 兄弟排序依据（默认按名称）。只重排已在内存里的层，不会重新拉取。
+   */
+  sortBy?: FileSortBy;
 }
 
 export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
@@ -100,10 +105,11 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       emptyText = "空文件夹",
       filterQuery = "",
       hideRootDirs,
+      sortBy = "name",
     },
     ref,
   ) {
-    const data = useFileTreeData(source);
+    const data = useFileTreeData(source, sortBy);
     const [expanded, setExpanded] = useState<Set<string>>(() =>
       loadExpanded(source.id),
     );
@@ -663,6 +669,12 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
               onReloadDir={(dir) => data.reload(dir)}
             />
           ))}
+          {data.truncatedOf("") && (
+            <TruncatedNotice
+              indent={indent + 8}
+              shown={loadedRootChildren?.length ?? 0}
+            />
+          )}
         </ul>
       );
 

@@ -30,6 +30,16 @@ _RESOLVE_ADAPTER: TypeAdapter[ResolveInteractionRequest] = TypeAdapter(
 )
 
 
+def _intervene_ack_fields(ack: Any) -> dict[str, Any]:
+    """按人干预回执的线材形（与 REST ``SubmitRunStop/RedirectResponse`` 同字段）。"""
+    return {
+        "queued": ack.queued,
+        "accepted": ack.accepted,
+        "reason": ack.reason,
+        "detail": ack.detail,
+    }
+
+
 class HandlerMixin:
     async def _on_initialize(self, request_id: Any, params: dict[str, Any]) -> None:
         root_raw = str(params.get("workspaceRoot") or "").strip()
@@ -1126,7 +1136,7 @@ class HandlerMixin:
         )
 
     async def _on_run_redirect(self, request_id: Any, params: dict[str, Any]) -> None:
-        from agentcore.runtime.runs.redirect_queue import enqueue_redirect, peek_redirect_count
+        from agentcore.runtime.runs.intervene import accept_run_redirect
 
         execution_id = str(params.get("executionId") or "").strip()
         run_id = str(params.get("runId") or "").strip()
@@ -1141,16 +1151,16 @@ class HandlerMixin:
                 )
             )
             return
-        enqueue_redirect(
+        ack = accept_run_redirect(
             execution_id=execution_id,
             run_id=run_id,
             feedback=feedback,
             conversation_id=conversation_id,
         )
-        await self._reply(request_id, {"ok": True, "queued": peek_redirect_count(execution_id)})
+        await self._reply(request_id, {"ok": True, **_intervene_ack_fields(ack)})
 
     async def _on_run_stop(self, request_id: Any, params: dict[str, Any]) -> None:
-        from agentcore.runtime.runs.stop_queue import enqueue_stop, peek_stop_count
+        from agentcore.runtime.runs.intervene import accept_run_stop
 
         execution_id = str(params.get("executionId") or "").strip()
         conversation_id = str(params.get("conversationId") or "").strip()
@@ -1167,12 +1177,12 @@ class HandlerMixin:
                 )
             )
             return
-        enqueue_stop(
+        ack = accept_run_stop(
             execution_id=execution_id,
             run_id=run_id,
             conversation_id=conversation_id,
         )
-        await self._reply(request_id, {"ok": True, "queued": peek_stop_count(execution_id)})
+        await self._reply(request_id, {"ok": True, **_intervene_ack_fields(ack)})
 
     async def _on_debate_steer(self, request_id: Any, params: dict[str, Any]) -> None:
         from agentcore.runtime.debate.steer_queue import enqueue_steer, peek_steer_count
@@ -1361,3 +1371,91 @@ class HandlerMixin:
             await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
             return
         await self._reply(request_id, {"ok": True, "snapshot_id": snapshot_id})
+
+    async def _on_create_workspace_version(
+        self, request_id: Any, params: dict[str, Any]
+    ) -> None:
+        """命名版本 · 创建：zip 本机工作区到 ``AgentCore/versions/<id>/``。
+
+        用户显式动作，与 best-effort 的回合基线分轨：任何失败都回 error，绝不
+        静默成功让用户以为版本已留下。
+        """
+        if self._root is None:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_REQUEST, "sidecar not initialized")
+            )
+            return
+        from agentcore.storage._archive import ArchiveLimitError
+        from agentcore.workspace.versions import (
+            InvalidVersionNameError,
+            create_workspace_version,
+        )
+
+        try:
+            version = await create_workspace_version(
+                workspace_root=self._root, name=str(params.get("name") or "")
+            )
+        except InvalidVersionNameError as e:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_PARAMS, str(e))
+            )
+            return
+        except ArchiveLimitError as e:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    f"工作区过大，无法留版本（{e.reason}）："
+                    f"{e.file_count} 个文件 / {e.total_bytes} 字节",
+                )
+            )
+            return
+        except Exception as e:
+            logger.warning(
+                "sidecar.create_workspace_version_failed", error=str(e), exc_info=True
+            )
+            await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
+            return
+        await self._reply(request_id, version.to_wire())
+
+    async def _on_restore_workspace_version(
+        self, request_id: Any, params: dict[str, Any]
+    ) -> None:
+        """命名版本 · 恢复：overlay 解压回工作区（不清空，不经云 restoreSnapshot）。"""
+        if self._root is None:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_REQUEST, "sidecar not initialized")
+            )
+            return
+        version_id = str(params.get("versionId") or "").strip()
+        if not version_id:
+            await self._send(
+                protocol.make_error(
+                    request_id,
+                    protocol.INVALID_PARAMS,
+                    "restoreWorkspaceVersion requires versionId",
+                )
+            )
+            return
+        from agentcore.workspace.versions import (
+            InvalidVersionIdError,
+            VersionNotFoundError,
+            restore_workspace_version,
+        )
+
+        try:
+            version = await restore_workspace_version(
+                workspace_root=self._root, version_id=version_id
+            )
+        except (InvalidVersionIdError, VersionNotFoundError) as e:
+            await self._send(
+                protocol.make_error(request_id, protocol.INVALID_PARAMS, str(e))
+            )
+            return
+        except Exception as e:
+            logger.warning(
+                "sidecar.restore_workspace_version_failed", error=str(e), exc_info=True
+            )
+            await self._send(protocol.make_error(request_id, protocol.INTERNAL_ERROR, str(e)))
+            return
+        await self._reply(request_id, {"ok": True, **version.to_wire()})

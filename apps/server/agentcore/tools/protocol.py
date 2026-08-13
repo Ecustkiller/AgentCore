@@ -172,6 +172,11 @@ class RetrievalBudgetState:
     before a live call and refunded on cache hits / uncharged results so parallel
     tool_exec calls cannot overshoot ``limit``.
 
+    ``used_by_tool`` splits the same shared pool by tool name — bookkeeping only,
+    reserve / refund semantics are unchanged. Feeds the per-round budget-awareness
+    injection and the 分工具用量分布 telemetry (下一阶段据此决定是否拆池). Mutated
+    under the same lock as ``used`` so parallel calls keep ``∑ used_by_tool == used``.
+
     ``consecutive_empty_searches`` tracks live empty SERPs in this run so the
     search tool can require a strategy change after a streak (成篇质量定案).
 
@@ -182,6 +187,7 @@ class RetrievalBudgetState:
 
     limit: int
     used: int = 0
+    used_by_tool: dict[str, int] = field(default_factory=dict)
     consecutive_empty_searches: int = 0
     evidence_gap: bool = False
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
@@ -189,6 +195,17 @@ class RetrievalBudgetState:
     @property
     def remaining(self) -> int:
         return max(0, self.limit - self.used)
+
+    @property
+    def searches_used(self) -> int:
+        """Charged ``web_search`` calls (names mirror ``RETRIEVAL_TOOL_NAMES``,
+        which lives in runtime.runs.retrieval_budget and imports this module)."""
+        return self.used_by_tool.get("web_search", 0)
+
+    @property
+    def reads_used(self) -> int:
+        """Charged ``read_url`` calls."""
+        return self.used_by_tool.get("read_url", 0)
 
     def note_search_empty(self) -> int:
         """Record an empty SERP; return the new consecutive-empty streak."""
@@ -203,19 +220,28 @@ class RetrievalBudgetState:
         """Sticky-set academic literature evidence-gap (never clears mid-run)."""
         self.evidence_gap = True
 
-    async def try_reserve(self) -> bool:
-        """Reserve one slot. False ⇒ exhausted (caller must not run the tool)."""
+    async def try_reserve(self, tool: str) -> bool:
+        """Reserve one slot for ``tool``. False ⇒ exhausted (caller must not run it).
+
+        ``tool`` only splits the ledger; the pool stays shared across retrieval tools.
+        """
         async with self._lock:
             if self.used >= self.limit:
                 return False
             self.used += 1
+            self.used_by_tool[tool] = self.used_by_tool.get(tool, 0) + 1
             return True
 
-    async def refund(self) -> None:
-        """Return a reserved slot (cache hit / uncharged call)."""
+    async def refund(self, tool: str) -> None:
+        """Return a reserved slot (cache hit / uncharged call), split ledger included."""
         async with self._lock:
             if self.used > 0:
                 self.used -= 1
+            spent = self.used_by_tool.get(tool, 0)
+            if spent > 1:
+                self.used_by_tool[tool] = spent - 1
+            elif spent == 1:
+                del self.used_by_tool[tool]
 
     async def refill(self, extra: int) -> int:
         """Grant ``extra`` additional retrieval slots (contract rework slice).

@@ -407,8 +407,14 @@ class TurnRunRegistry:
             self._repark_resume_deferred(waiter)
             return
 
+        # The deferred wake is this card's claim winner, so it states the conclusion it
+        # is about to apply — the settlement was prewritten back when the click arrived,
+        # but only the claim can say「这张卡是这一次、这台设备结的」.
         suspension = await claim_paused_turn(
-            waiter.message_id, conversation_id=waiter.conversation_id
+            waiter.message_id,
+            conversation_id=waiter.conversation_id,
+            decision=str(waiter.checkpoint_response.decision),
+            settled_by=waiter.origin_device_id or "",
         )
         if suspension is None:
             logger.warning(
@@ -421,7 +427,10 @@ class TurnRunRegistry:
             turn_queue.schedule_drain(waiter.conversation_id)
             return
 
-        sink = EventSink()
+        # Bound up-front (the pipeline re-binds the same id later): the registry's
+        # ``sink.message_id`` is how a repeat submit of this cold card recognises its
+        # own continuation and joins it instead of racing a second claim.
+        sink = EventSink(message_id=waiter.message_id)
         for warning in waiter.preflight_warnings:
             sink.emit(turn_warning(warning))
 

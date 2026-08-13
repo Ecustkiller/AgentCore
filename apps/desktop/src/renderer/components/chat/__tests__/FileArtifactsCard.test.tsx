@@ -377,6 +377,7 @@ describe("FileArtifactsCard — A1 查看改动", () => {
 });
 
 describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
+  // 工作稿是约定目录（`stageDirs`），落在它下面的行走「在文件页查看」入口而非工作区预览。
   const WORKROOM = "AgentCore/文档/工作稿";
   const product = {
     path: "起诉状.docx",
@@ -412,7 +413,7 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
     // 归位是移动：只显示新路径，AI 工作间里的旧路径已失效。
     const productRow = screen.getByTitle("在工作区预览 起诉状.docx");
     expect(
-      screen.queryByTitle(`在工作区预览 ${WORKROOM}/起诉状.docx`),
+      screen.queryByTitle(`在文件页查看约定文档 ${WORKROOM}/起诉状.docx`),
     ).toBeNull();
     fireEvent.click(productRow);
     expect(showFile).toHaveBeenCalledWith(
@@ -423,7 +424,7 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
 
     // 两组各自成列，过程材料不混进成品。
     const materialRow = screen.getByTitle(
-      `在工作区预览 ${WORKROOM}/取证清单.md`,
+      `在文件页查看约定文档 ${WORKROOM}/取证清单.md`,
     );
     expect(productRow.closest("ul")).not.toBe(materialRow.closest("ul"));
   });
@@ -440,7 +441,7 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
     expect(screen.getByText("过程材料")).toBeTruthy();
     expect(screen.getByTitle("在工作区预览 起诉状.docx")).toBeTruthy();
     expect(
-      screen.getByTitle(`在工作区预览 ${WORKROOM}/取证清单.md`),
+      screen.getByTitle(`在文件页查看约定文档 ${WORKROOM}/取证清单.md`),
     ).toBeTruthy();
     expect(screen.queryByText(/未归位|尚未|无成品|本轮没有/)).toBeNull();
   });
@@ -470,7 +471,9 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
       screen.getByTitle("在工作区预览 起诉状.docx").closest("ul"),
     );
     expect(rejectedList).not.toBe(
-      screen.getByTitle(`在工作区预览 ${WORKROOM}/取证清单.md`).closest("ul"),
+      screen
+        .getByTitle(`在文件页查看约定文档 ${WORKROOM}/取证清单.md`)
+        .closest("ul"),
     );
   });
 });

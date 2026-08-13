@@ -288,7 +288,7 @@
   padding: 0;
   border: none;
   background: transparent;
-  color: var(--primary);
+  color: var(--accent);
   font-size: 0.85rem;
   font-weight: 600;
 }
@@ -298,5 +298,5 @@
   margin-top: 0.65rem;
   font-size: 0.85rem;
   font-weight: 600;
-  color: var(--primary);
+  color: var(--accent);
 }

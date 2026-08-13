@@ -7,6 +7,7 @@
  */
 
 import { MfaSetupPage } from "@/pages/MfaSetupPage";
+import { clearCsrfToken } from "@/services/api";
 import { logout, mfaConfirm, mfaSetup } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import {
@@ -84,6 +85,9 @@ describe("MfaSetupPage", () => {
     await enrollToRecoveryPhase();
     fireEvent.click(screen.getByRole("button", { name: /重新登录/ }));
     expect(useAuthStore.getState().status).toBe("unauthenticated");
+    // The revoked session's CSRF token dies with it; keeping it would 403 the first
+    // mutating request of the *next* login, logout included.
+    expect(vi.mocked(clearCsrfToken)).toHaveBeenCalled();
   });
 
   it("offers retry and sign-out instead of a dead screen when the secret cannot load", async () => {

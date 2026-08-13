@@ -99,18 +99,21 @@ async def list_workspace_files(
     conversation_id: str,
     user: AuthUser,
     recursive: bool = Query(False),
+    path: str = Query(".", description="工作区相对目录（`.` = 根）"),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     session: AsyncSession = Depends(get_db),
 ):
-    """List the files in the conversation's scratch workspace (top level or recursive)."""
+    """List one directory of the conversation's scratch workspace (or its tree)."""
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
-    entries = await list_files(
+    listing = await list_files(
         **await _workspace_coords(user.user_id, conv, session),
+        path=path,
         recursive=recursive,
     )
     return WorkspaceFileListResponse(
-        data=[WorkspaceFileEntry.model_validate(e) for e in entries],
-        total=len(entries),
+        data=[WorkspaceFileEntry.model_validate(e) for e in listing.entries],
+        total=len(listing.entries),
+        truncated=listing.truncated,
     )
 
 

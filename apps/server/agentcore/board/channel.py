@@ -12,8 +12,9 @@ State is in-process (single-worker posture, same as the approval gate / workspac
 channel); front with Redis to scale to multiple workers. A reply the desktop never
 delivers fails as a :class:`BoardOpError` after the timeout, so a dropped / closed
 canvas never hangs the turn — the tool maps that to an error result the model can
-recover from (tell the user, retry, or proceed). No online fulfiller → immediate
-typed failure.
+recover from (tell the user, retry, or proceed). No online fulfiller → typed
+failure, immediate unless the device dropped seconds ago (bounded reconnect grace
+inside the same timeout — ``fulfill/grace.py``).
 
 Board ops edit a document, not the machine, so this channel is deliberately left
 off ``fulfill.hub.ORIGIN_PINNED_CHANNELS``: the canvas may well be open on the
@@ -119,6 +120,7 @@ class BoardChannel:
                     request_id=request_id,
                     error_kind="BoardOpError",
                     error_detail="board op batch failed: no fulfiller（无履约方）",
+                    deadline_seconds=self.timeout_seconds,
                 ),
             )
         except TimeoutError as e:
@@ -173,6 +175,7 @@ class BoardChannel:
                     request_id=request_id,
                     error_kind="BoardReadError",
                     error_detail="board read failed: no fulfiller（无履约方）",
+                    deadline_seconds=self.timeout_seconds,
                 ),
             )
         except TimeoutError as e:

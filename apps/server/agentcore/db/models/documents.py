@@ -18,14 +18,21 @@ different values on orthogonal metadata axes:
   while the row and its body stay put. **DB-only**, same reason as ``ai_maintained``: the
   AI owns the body, so a frontmatter flag would be cleared by the next rewrite — exactly
   the failure this channel exists to prevent.
+- ``disputed_lines`` (§纠错通道·行级): the same channel at bullet granularity — what the
+  user saw was one sentence, so one sentence is what he gets to reject. The line moves out
+  of ``content`` into this column instead of being flagged in place, because a bullet has
+  no identity that survives a rewrite. Entry-level and line-level coexist: the former
+  silences a whole entry, the latter one line of it.
 
 ``parent_id`` is the intra-tree parent; ``kind`` is the node type (folder / document;
 ``upload`` / ``base`` reserved). Soft-deleted (``deleted_at``); CAS via SHA-256 of the body.
 """
 
 from datetime import datetime
+from typing import TypedDict
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Index, String, Text, text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +49,44 @@ DOCUMENT_ROLES = ("rule", "general", "attachment")
 # Injection strategies — two live values only (``conditional`` removed; was a dead reserved
 # value with zero rows). Missing frontmatter ``apply`` defaults to ``on_demand``.
 DOCUMENT_APPLY_MODES = ("always", "on_demand")
+
+
+class DisputedLine(TypedDict):
+    """One bullet the user rejected, as stored in ``Document.disputed_lines``.
+
+    The shape is a type, not a convention: the row is written in one place
+    (:func:`new_disputed_line`) and read in three (undo, the recovery list, and the
+    entry's own body write), and every reader needs ``text`` to be there — a record
+    nobody can restore from is the one failure this channel must not have.
+
+    ``id`` is what an undo addresses. Position cannot be: rejecting three lines and then
+    undoing the first shifts every later index down by one, so an index-addressed undo
+    would put back a DIFFERENT line while the toast said it put back this one. The whole
+    case for「一键、不弹确认」rests on the undo being exact.
+    """
+
+    id: str
+    section: str
+    text: str
+    disputed_at: str
+
+
+# Upper bound per entry (see ``disputed_lines``). The channel's own honest boundary is that
+# the AI can re-learn a rejected fact and the user rejects it again — a steady loop with no
+# natural end, so the record it produces needs an end of its own. Past the cap the OLDEST
+# record is dropped rather than the new rejection refused: the correction stands either way
+# (the line is out of the body), only the option of putting a long-forgotten one back expires.
+MAX_DISPUTED_LINES = 50
+
+
+def new_disputed_line(*, section: str, text: str) -> DisputedLine:
+    """Mint one record — the single place a ``disputed_lines`` element is created."""
+    return DisputedLine(
+        id=_new_uuid(),
+        section=section,
+        text=text,
+        disputed_at=datetime.now().isoformat(),
+    )
 
 
 class Document(Base):
@@ -109,6 +154,17 @@ class Document(Base):
     # correction is traceable and reversible (no silent physical delete). Never set by AI.
     disputed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    # 行级纠错通道: bullets the user marked wrong one line at a time (:class:`DisputedLine`,
+    # capped at ``MAX_DISPUTED_LINES``). The line is REMOVED from ``content`` when disputed
+    # and re-inserted on undo — deliberately not a flag on the bullet in place: a bullet has
+    # no identity in the BODY that survives a consolidation rewrite, and the mark must (same
+    # reason ``disputed_at`` is a column, not frontmatter). The record row does carry an
+    # ``id``, because the AI never rewrites this column — that id is how an undo names the
+    # line. Moving the text out also means the next consolidation cannot read it back in.
+    # Never written by AI.
+    disputed_lines: Mapped[list[DisputedLine]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
     # Node name within its parent. For memory notes this is the store-relative path
     # (e.g. "画像.md", "主题/部署.md") so the (user, path, scope) seam maps 1:1 to a row.

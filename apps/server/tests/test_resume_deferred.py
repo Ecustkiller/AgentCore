@@ -50,10 +50,16 @@ async def test_busy_reason_wrap_up_vs_live_turn():
 
 async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
     """busy → register deferred → host ends → claim+resume starts; waiter gets sink."""
-    claimed: list[str] = []
+    claimed: list[tuple[str, str, str]] = []
 
-    async def fake_claim(message_id: str, conversation_id: str | None = None):
-        claimed.append(message_id)
+    async def fake_claim(
+        message_id: str,
+        conversation_id: str | None = None,
+        *,
+        decision: str = "",
+        settled_by: str = "",
+    ):
+        claimed.append((message_id, decision, settled_by))
         return object()  # truthy suspension stand-in
 
     async def fake_resume_chat(**_kwargs):
@@ -80,6 +86,7 @@ async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
             message_id="paused-1",
             busy_reason="live_turn",
             checkpoint_response=_checkpoint(),
+            origin_device_id="dev-deferred",
             started=started,
         )
     )
@@ -95,7 +102,9 @@ async def test_busy_deferred_wakes_on_slot_empty(monkeypatch):
         if claimed:
             break
         await asyncio.sleep(0.025)
-    assert claimed == ["paused-1"]
+    # 延后唤醒同样是这张卡的结算方：claim 里带上它要施加的决策与结算设备，
+    # 否则落败方读到的结论会缺掉正是这一次续跑的那份。
+    assert claimed == [("paused-1", "continue", "dev-deferred")]
     for _ in range(40):
         if turn_runs.get(cid) is None:
             break
@@ -112,7 +121,7 @@ async def test_wake_failure_unwinds_waiter_and_schedules_drain(monkeypatch):
     """
     drained: list[str] = []
 
-    async def boom_claim(_message_id: str, conversation_id: str | None = None):
+    async def boom_claim(_message_id: str, **_kwargs):
         raise RuntimeError("claim exploded")
 
     monkeypatch.setattr(
@@ -220,7 +229,7 @@ async def test_repark_does_not_evict_a_waiter_registered_while_armed(monkeypatch
     """Slot re-taken between arm and run: re-park must not clobber the newer card."""
     claimed: list[str] = []
 
-    async def fake_claim(message_id: str, conversation_id: str | None = None):
+    async def fake_claim(message_id: str, **_kwargs):
         claimed.append(message_id)
         return object()
 
@@ -277,7 +286,7 @@ async def test_fifo_yields_to_deferred_then_drains(monkeypatch):
     async def fake_start_queued(_conversation_id: str, item: QueuedTurn) -> None:
         started_queue.append(item.content)
 
-    async def fake_claim(message_id: str, conversation_id: str | None = None):
+    async def fake_claim(message_id: str, **_kwargs):
         return object()
 
     async def fake_resume_chat(**_kwargs):

@@ -2,7 +2,7 @@ import type { FsApi, FsResult, WorkspaceOpResult } from "@shared/ipc-contract";
 import type { LogApi } from "@shared/log-contract";
 import type { ProcessApi } from "@shared/process-contract";
 import type { PtyApi } from "@shared/pty-contract";
-import type { SidecarApi } from "@shared/sidecar-contract";
+import type { SidecarApi, SidecarInterveneAck } from "@shared/sidecar-contract";
 import type { UpdaterApi } from "@shared/updater-contract";
 import type { WindowApi } from "@shared/window-contract";
 
@@ -28,7 +28,6 @@ const fsApi: FsApi = {
   ensureDefaultRoot: async () => ({ id: "web-preview", name: "Web 预览" }),
   listRoots: async () => [],
   removeRoot: async () => {},
-  onRootsChanged: () => () => {},
   grantSessionReadonlyRoot: async () => ({
     ok: false as const,
     reason: "not_found" as const,
@@ -37,6 +36,7 @@ const fsApi: FsApi = {
   listSessionReadonlyRoots: async () => [],
   revokeSessionReadonlyRoot: async () => false,
   clearSessionReadonlyRoots: async () => {},
+  adoptSessionRootAlias: async () => false,
   listDir: async () => ({ ok: true, data: [] }),
   listFiles: async () => ({ ok: true, data: [] }),
   readFile: async () => fail(),
@@ -65,6 +65,8 @@ const fsApi: FsApi = {
   trashPath: async () => fail(),
   listWorkspaceTrash: async () => fail(),
   restoreWorkspaceTrash: async () => fail(),
+  listWorkspaceVersions: async () => fail(),
+  deleteWorkspaceVersion: async () => fail(),
   pickAndStageAttachment: async () => null,
   stageFromRoot: async () => fail(),
   stageDroppedFile: async () => fail(),
@@ -87,14 +89,22 @@ const fsApi: FsApi = {
   // createWorkspaceSource 据此不在 web 端挂「在浏览器打开」。
 };
 
+/** web 预览里没有本地引擎，按人干预到不了任何驱动循环——如实说，别回「已入队」。 */
+const UNREACHABLE_INTERVENE_ACK: SidecarInterveneAck = {
+  accepted: false,
+  reason: "no_live_drive",
+  detail: "web-preview",
+  queued: 0,
+};
+
 const sidecarApi: SidecarApi = {
   startTurn: async () => {
     throw new Error("sidecar unavailable in web preview");
   },
   cancel: async () => {},
   respond: async () => ({ resolved: false }),
-  runRedirect: async () => {},
-  runStop: async () => ({ queued: 0 }),
+  runRedirect: async () => UNREACHABLE_INTERVENE_ACK,
+  runStop: async () => UNREACHABLE_INTERVENE_ACK,
   debateSteer: async () => ({ accepted: false }),
   resume: async () => {
     throw new Error("sidecar unavailable in web preview");
@@ -120,6 +130,12 @@ const sidecarApi: SidecarApi = {
     deleted: 0,
   }),
   restoreTurnBaseline: async () => {
+    throw new Error("sidecar unavailable in web preview");
+  },
+  createWorkspaceVersion: async () => {
+    throw new Error("sidecar unavailable in web preview");
+  },
+  restoreWorkspaceVersion: async () => {
     throw new Error("sidecar unavailable in web preview");
   },
   listBrowserSessions: async () => ({

@@ -1,6 +1,7 @@
 import { ClearScratchDialog } from "@/components/files/ClearScratchDialog";
 import { CloneRepoDialog } from "@/components/files/CloneRepoDialog";
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
+import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
 import { DeleteFolderDialog } from "@/components/folders/DeleteFolderDialog";
 import { Button } from "@/components/ui";
@@ -15,6 +16,7 @@ import {
   getConversations,
   useDeleteConversation,
   useRenameConversation,
+  useRestoreConversation,
 } from "@/hooks/useConversations";
 import {
   getFolders,
@@ -25,13 +27,17 @@ import {
   useUpdateFolder,
 } from "@/hooks/useFolders";
 import { removeConversationScratch } from "@/hooks/useWorkspaces";
+import {
+  deleteConversationConfirmLabel,
+  notifyConversationDeleted,
+} from "@/lib/conversationDeleteCopy";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
 import type { FileSource } from "@/lib/fileSource";
 import { queryClient } from "@/lib/queryClient";
 import { workspaceKeys } from "@/lib/queryKeys";
 import { notifyActionError, notifyError, notifyInfo } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import type { WorkspaceInfo } from "@/services/workspaces";
+import { type WorkspaceInfo, wsExportZip } from "@/services/workspaces";
 import {
   useConversationGenerating,
   useConversationStore,
@@ -41,6 +47,7 @@ import {
   ChevronDown,
   ChevronRight,
   Cloud,
+  Download,
   Eraser,
   FilePlus,
   Folder,
@@ -49,6 +56,8 @@ import {
   FolderSearch,
   GitBranch,
   HardDrive,
+  History,
+  Loader2,
   MessageSquare,
   Pencil,
   Trash2,
@@ -57,7 +66,13 @@ import {
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { conversationIdOf, folderIdOf } from "./storage";
+import {
+  WS_TRASH_PATH,
+  WS_VERSIONS_PATH,
+  conversationIdOf,
+  folderIdOf,
+  workspacePanelTabName,
+} from "./storage";
 
 /**
  * One workspace root = a **collapsible section**: a header (chevron + name +
@@ -86,6 +101,7 @@ export function WorkspaceSection({
   showLocationBadge = true,
   offlineCloud = false,
   filterQuery = "",
+  sortBy,
 }: {
   ws: WorkspaceInfo;
   source: FileSource | null;
@@ -115,6 +131,8 @@ export function WorkspaceSection({
   offlineCloud?: boolean;
   /** Forwarded to {@link FileTree} for path/name filter (hub search box). */
   filterQuery?: string;
+  /** Forwarded to {@link FileTree}: 名称 / 大小 / 修改时间排序（中枢顶栏统一选）。 */
+  sortBy?: FileSortBy;
 }) {
   const conversationId = conversationIdOf(ws.wsId);
   const folderId = folderIdOf(ws.wsId);
@@ -134,10 +152,12 @@ export function WorkspaceSection({
   const [clearScratchOpen, setClearScratchOpen] = useState(false);
   const [clearingScratch, setClearingScratch] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(ws.name);
 
   const deleteMutation = useDeleteConversation();
+  const restoreConversationMutation = useRestoreConversation();
   const renameMutation = useRenameConversation();
   const renameFolderMutation = useUpdateFolder();
   const deleteFolderMutation = useDeleteFolder();
@@ -156,6 +176,16 @@ export function WorkspaceSection({
     !offlineCloud &&
     !!source?.caps.edit &&
     !ws.wsId.startsWith("shared:");
+  /**
+   * 版本 / 软删区 / 导出 ZIP —— 服务端对本机工作区与共享空间一律 409，所以入口按能力
+   * 位 + ws 种类先行门控，不让用户点进一个必然失败的动作。本机工作区的版本与回收站是
+   * 另一条轨（盘上版本区 / 系统回收站），不在这里冒充。
+   */
+  const canSnapshot =
+    !isLocal &&
+    !offlineCloud &&
+    !!source?.caps.snapshots &&
+    !ws.wsId.startsWith("shared:");
   const scratchGenerating = useConversationGenerating(conversationId ?? "");
 
   const folder = folderId
@@ -166,9 +196,9 @@ export function WorkspaceSection({
   const liveFolderConvs = () =>
     folderId ? getConversations().filter((c) => c.folderId === folderId) : [];
 
-  const deleteConfirmLabel = isLocal
-    ? "确认永久删除（本地磁盘文件会保留）"
-    : "确认永久删除（无法恢复）";
+  const deleteConfirmLabel = deleteConversationConfirmLabel(
+    isLocal ? "local" : undefined,
+  );
 
   useEffect(() => {
     if (flashing) rootRef.current?.scrollIntoView({ block: "nearest" });
@@ -222,6 +252,22 @@ export function WorkspaceSection({
     navigate(`/conversations/${conversationId}`);
   };
 
+  /** 版本 / 软删区在右侧详情区开成一个标签页（与打开文件同一个出口）。 */
+  const openPanel = (path: string) =>
+    onOpenFile(path, workspacePanelTabName(path, ws.name));
+
+  const exportZip = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await wsExportZip(ws.wsId);
+    } catch (e) {
+      notifyActionError("导出工作区失败", e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   /** Inline rename, for both flavours of root: a `conv:` scratch renames the
    * conversation, a `folder:` row renames the folder itself (§5.4 用户起名). */
   const canRename = !!conversationId || !!folderId;
@@ -260,6 +306,7 @@ export function WorkspaceSection({
     if (!conversationId) return;
     setConfirmingDelete(false);
     const wasActive = conversationId === currentId;
+    const title = ws.name;
     try {
       await deleteMutation.mutateAsync(conversationId);
     } catch (err) {
@@ -268,6 +315,9 @@ export function WorkspaceSection({
     }
     dropConversationRuntime(conversationId);
     if (wasActive) navigate("/");
+    notifyConversationDeleted(title, () =>
+      restoreConversationMutation.mutate(conversationId),
+    );
   };
 
   /** Mirrors the sidebar's delete: 撤销 toast raised from the awaited handler,
@@ -457,6 +507,7 @@ export function WorkspaceSection({
       indent={14 + depth * 12}
       activePath={activePath}
       filterQuery={filterQuery}
+      sortBy={sortBy}
       hideRootDirs={hideRootDirs}
       onOpenFile={onOpenFile}
       emptyText="还没有文件——对话里 AI 产出的文件会落在这里"
@@ -503,6 +554,33 @@ export function WorkspaceSection({
                     <span className="flex-1 truncate">克隆仓库</span>
                   </ContextMenuItem>
                 )}
+                <ContextMenuSeparator />
+              </>
+            )}
+            {canSnapshot && (
+              <>
+                <ContextMenuItem onSelect={() => openPanel(WS_VERSIONS_PATH)}>
+                  <History size={14} className="shrink-0" />
+                  <span className="flex-1 truncate">版本…</span>
+                </ContextMenuItem>
+                <ContextMenuItem onSelect={() => openPanel(WS_TRASH_PATH)}>
+                  <Trash2 size={14} className="shrink-0" />
+                  <span className="flex-1 truncate">软删区…</span>
+                </ContextMenuItem>
+                <ContextMenuItem
+                  disabled={exporting}
+                  // 打包要等一次快照 + 一次下载，菜单关掉后动作仍在跑（故不 preventDefault）。
+                  onSelect={() => void exportZip()}
+                >
+                  {exporting ? (
+                    <Loader2 size={14} className="shrink-0 animate-spin" />
+                  ) : (
+                    <Download size={14} className="shrink-0" />
+                  )}
+                  <span className="flex-1 truncate">
+                    {exporting ? "导出 ZIP（进行中）" : "导出 ZIP"}
+                  </span>
+                </ContextMenuItem>
                 <ContextMenuSeparator />
               </>
             )}

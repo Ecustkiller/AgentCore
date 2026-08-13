@@ -90,12 +90,18 @@ async def add_grant(
     label: str,
     alias_hint: str | None = None,
     mode: ExternalMountMode | str = "readonly",
+    device_id: str | None = None,
 ) -> ExternalMount:
     """Register or refresh a conversation grant. Same ``root_id`` updates label/mode.
 
     Upgrading readonly → organize (or the reverse) on the same root keeps the
     alias stable; the product still requires a fresh authorization card before
     the client calls this with the new mode.
+
+    ``device_id`` records which install holds the folder (see
+    ``fulfill/declare.py``) so the binding outlives that device's fulfill
+    session. It is not part of the mount the engine sees — a mount is addressed
+    by ``root_id``, and picking the machine is the hub's job.
     """
     resolved_mode = normalize_mount_mode(mode if isinstance(mode, str) else mode)
 
@@ -153,6 +159,7 @@ async def add_grant(
                     alias=alias,
                     label=label or alias,
                     mode=resolved_mode,
+                    device_id=device_id,
                 )
                 mount = _row_to_mount(row)
         except IntegrityError as exc:

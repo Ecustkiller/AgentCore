@@ -8,7 +8,6 @@ export {
   stopDesktopBrowserBridge,
   getDesktopBrowserBridgeInfo,
   getDesktopBrowserBridgeCredentials,
-  rotateDesktopBrowserBridgeCredentials,
 } from "./bridge";
 export {
   closeAllLocalBrowserPages,

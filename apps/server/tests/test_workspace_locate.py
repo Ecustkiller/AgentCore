@@ -10,6 +10,10 @@ from pathlib import Path
 import pytest
 
 from agentcore.config import settings
+from agentcore.fulfill.local_roots import (
+    install_local_root_declarer,
+    uninstall_local_root_declarer,
+)
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import (
     InteractionRegistry,
@@ -135,6 +139,46 @@ def test_build_local_workspace_defaults_to_shared_registry_and_timeout():
     assert chan.registry is default_interaction_registry()
     assert chan.timeout_seconds == settings.workspace_op_timeout_seconds
     assert ws.root_label == "workspace"
+
+
+class _RecordingDeclarer:
+    """Stand-in for the sidecar bridge's fulfiller-session root declaration."""
+
+    def __init__(self) -> None:
+        self.roots: list[str] = []
+
+    def declare_root(self, root_id: str) -> None:
+        self.roots.append(root_id)
+
+
+def test_build_local_workspace_declares_the_root_on_the_local_fulfiller():
+    """Sidecar: whoever builds the desk owns telling the in-process hub about it."""
+    declarer = _RecordingDeclarer()
+    install_local_root_declarer(declarer)
+    try:
+        build_local_workspace(
+            binding=LocalBinding(root_id="root-target"),
+            user_id="u1",
+            conversation_id="c1",
+        )
+    finally:
+        uninstall_local_root_declarer(declarer)
+    assert declarer.roots == ["root-target"]
+
+
+def test_build_local_workspace_declares_nothing_in_cloud_processes():
+    """No declarer installed (cloud API): the desktop already declared its roots."""
+    declarer = _RecordingDeclarer()
+    install_local_root_declarer(declarer)
+    uninstall_local_root_declarer(declarer)
+
+    build_local_workspace(
+        binding=LocalBinding(root_id="root-target"),
+        user_id="u1",
+        conversation_id="c1",
+    )
+
+    assert declarer.roots == []
 
 
 def test_build_workspace_picks_local_when_bound():

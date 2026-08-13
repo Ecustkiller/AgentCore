@@ -53,6 +53,7 @@ from agentcore.folders.tree_ops import (
     restore_folder_tree,
     soft_delete_folder_tree,
 )
+from agentcore.fulfill.declare import declare_receipt_root
 from agentcore.security.tokens import create_folders_token
 from agentcore.workspace.locks import WorkspaceBusyError
 from agentcore.workspace.retention import retention_cutoff
@@ -101,9 +102,14 @@ async def create_folder(
     Cloud projects become a real directory under ``parent_id``; a name already
     taken among live siblings gets a numeric suffix rather than a 409 — the name
     is now a path segment, and two of them cannot share one directory.
+
+    Registering a local binding also declares that root on the caller's fulfill
+    session (``fulfill/declare.py``) — including the reuse branch, where the row
+    is old but *this* install may be new to the folder.
     """
     if body.mode == "local":
         assert body.local_root_id is not None  # validated by CreateFolderRequest
+        declare_receipt_root(user.user_id, body.local_root_id)
         existing = await repo.find_active_by_local_binding(
             user_id=user.user_id,
             local_root_id=body.local_root_id,

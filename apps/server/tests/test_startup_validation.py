@@ -31,6 +31,7 @@ def prod_settings(monkeypatch):
     monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
     monkeypatch.setattr(settings, "cookie_secure", True)
     monkeypatch.setattr(settings, "cookie_samesite", "none")
+    monkeypatch.setattr(settings, "csrf_enabled", True)
     # G5: isolate from host WEB_CONCURRENCY / UVICORN_WORKERS.
     monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
     monkeypatch.delenv("UVICORN_WORKERS", raising=False)
@@ -205,6 +206,34 @@ def test_cors_wildcard_warns_in_debug(monkeypatch):
     assert "credentials" in detail["detail"].lower()
 
 
+def test_csrf_disabled_warns_but_boots(prod_settings, monkeypatch):
+    """CSRF_ENABLED=false silently removes the only defense for cookie-session
+    clients, so boot has to say so out loud — but it still boots: the only party this
+    ever stopped was a self-hoster mid-deploy, for whom a dead server is worse."""
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(prod_settings, "billing_mode", "platform")
+    monkeypatch.setattr(prod_settings, "csrf_enabled", False)
+    monkeypatch.setattr("agentcore.main.logger", spy)
+
+    _validate_production_security()  # no raise
+
+    assert "CSRF_ENABLED=true" in spy.get("security.csrf_disabled")["detail"]
+
+
+def test_debug_skips_csrf_guard(monkeypatch):
+    # Local dev may turn CSRF off (e.g. hand-driven curl); only a served server must not.
+    monkeypatch.setattr(settings, "debug", True)
+    monkeypatch.setattr(settings, "jwt_secret_key", _GOOD_JWT)
+    monkeypatch.setattr(settings, "allow_insecure_jwt_secret", False)
+    monkeypatch.setattr(settings, "csrf_enabled", False)
+    monkeypatch.delenv("WEB_CONCURRENCY", raising=False)
+    monkeypatch.delenv("UVICORN_WORKERS", raising=False)
+    monkeypatch.delenv("AGENTCORE_API_WORKERS", raising=False)
+    _validate_production_security()  # no raise
+
+
 def test_cors_explicit_origins_boots(prod_settings, monkeypatch):
     monkeypatch.setattr(prod_settings, "billing_mode", "platform")
     monkeypatch.setattr(
@@ -215,7 +244,7 @@ def test_cors_explicit_origins_boots(prod_settings, monkeypatch):
     _validate_production_security()  # no raise
 
 
-# --- G5 short-term: single-worker / memory rate-limit guardrails ---------------------
+# --- 单进程假设：多 worker 一律拒启（跟播 / 履约中枢无跨进程扇出）------------------
 
 
 def test_multi_worker_memory_rate_limit_refuses_boot_in_production(
@@ -224,18 +253,23 @@ def test_multi_worker_memory_rate_limit_refuses_boot_in_production(
     monkeypatch.setattr(prod_settings, "billing_mode", "platform")
     monkeypatch.setattr(prod_settings, "rate_limit_backend", "memory")
     monkeypatch.setenv("WEB_CONCURRENCY", "4")
-    with pytest.raises(RuntimeError, match="RATE_LIMIT_BACKEND"):
+    with pytest.raises(RuntimeError, match="cross-process"):
         _validate_production_security()
 
 
-def test_multi_worker_redis_rate_limit_allows_boot_in_production(
+def test_multi_worker_refuses_boot_even_with_redis_rate_limit(
     prod_settings, monkeypatch
 ):
-    """Shared DB outbox + redis rate limit unlocks multi-worker API."""
+    """redis 只共享限流器：履约中枢与对话事件流仍是进程内单例。
+
+    这条守的是**静默**失效——跟播落到没跑该回合的 worker 上只会一直心跳，客户端
+    分辨不出它和「对话真空闲」的区别，所以宁可启动就拒，不放行等它悄悄坏。
+    """
     monkeypatch.setattr(prod_settings, "billing_mode", "platform")
     monkeypatch.setattr(prod_settings, "rate_limit_backend", "redis")
     monkeypatch.setenv("AGENTCORE_API_WORKERS", "2")
-    _validate_production_security()  # no raise
+    with pytest.raises(RuntimeError, match="cross-process"):
+        _validate_production_security()
 
 
 def test_multi_worker_warns_in_debug(monkeypatch):
@@ -249,7 +283,7 @@ def test_multi_worker_warns_in_debug(monkeypatch):
     monkeypatch.setenv("UVICORN_WORKERS", "3")
     monkeypatch.setattr("agentcore.main.get_logger", lambda _name: spy)
     _validate_production_security()  # no raise
-    detail = spy.get("security.rate_limit_memory_multi_worker")
+    detail = spy.get("deploy.multi_worker_refused")
     assert detail["workers"] == 3
     assert detail["rate_limit_backend"] == "memory"
 

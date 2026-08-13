@@ -195,7 +195,7 @@ class LLMDescriptionGenerator:
 
 async def _mint_description_core(*, document_id: str, user_id: str) -> str | None:
     """Re-read → generate → empty-only write. Never raises; never blocks the saver."""
-    from agentcore.billing.gate import run_background_llm
+    from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
     from agentcore.core.errors import LLMAuthError
     from agentcore.db.base import async_session_factory
     from agentcore.db.repositories import DocumentRepository
@@ -232,7 +232,8 @@ async def _mint_description_core(*, document_id: str, user_id: str) -> str | Non
         try:
             bg = await run_background_llm(user_id, purpose="title", runner=_runner)
         except LLMAuthError:
-            # Exhausted inside gate normally returns None; stray raise → leave empty.
+            # Exhausted inside gate normally comes back as a skip; stray raise →
+            # leave empty.
             logger.info("entry_description.auth_exhausted", document_id=document_id)
             return None
         except Exception as e:
@@ -244,7 +245,9 @@ async def _mint_description_core(*, document_id: str, user_id: str) -> str | Non
             )
             return None
 
-        minted = (bg.value.description if bg is not None else "").strip()
+        minted = (
+            bg.value.description if isinstance(bg, BackgroundLlmResult) else ""
+        ).strip()
         if not minted:
             return None
 

@@ -5,7 +5,12 @@ Split by concern under ``agentcore.security.*``; this package re-exports the
 historical flat import path ``from agentcore.security import X``.
 """
 
-from agentcore.security.csrf import sign_csrf_token, verify_csrf_token
+from agentcore.security.csrf import (
+    CsrfRejectReason,
+    csrf_reject_reason,
+    sign_csrf_token,
+    verify_csrf_token,
+)
 from agentcore.security.keys import KeyEncryptor
 from agentcore.security.passwords import hash_password, verify_password
 from agentcore.security.refresh import (
@@ -30,12 +35,14 @@ from agentcore.security.tokens import (
 )
 
 __all__ = [
+    "CsrfRejectReason",
     "KeyEncryptor",
     "create_access_token",
     "create_account_token",
     "create_folders_token",
     "create_inference_token",
     "create_mfa_pending_token",
+    "csrf_reject_reason",
     "decode_access_token",
     "decode_access_token_claims",
     "decode_access_token_family",

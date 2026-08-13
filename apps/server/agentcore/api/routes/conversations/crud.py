@@ -9,6 +9,7 @@ PATCH …/folder — sessions keep their birth project for life.
 """
 
 import json
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, Query, Response
 
@@ -27,6 +28,8 @@ from agentcore.api.schemas import (
     ConversationListResponse,
     ConversationSummary,
     CreateConversationRequest,
+    DeletedConversationListResponse,
+    DeletedConversationSummary,
     FolderGroup,
     GroupedConversationsResponse,
     PermissionAxesUpdate,
@@ -34,15 +37,17 @@ from agentcore.api.schemas import (
     UpdateConversationRequest,
     conversation_summary_from_orm,
 )
+from agentcore.config import settings
 from agentcore.conversation.common import (
     default_permission_axes_for_user,
     mint_title_if_empty,
 )
+from agentcore.conversation.context_gap import visible_window_messages
 from agentcore.conversation.export import (
     conversation_to_json,
     conversation_to_markdown,
 )
-from agentcore.core.errors import NotFoundError
+from agentcore.core.errors import ConflictError, NotFoundError
 from agentcore.core.logging import get_logger
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import (
@@ -52,6 +57,7 @@ from agentcore.db.repositories import (
     MessageRepository,
     TurnJournalRepository,
 )
+from agentcore.workspace.retention import retention_cutoff
 
 from ._helpers import _get_owned_conversation
 
@@ -59,17 +65,51 @@ logger = get_logger(__name__)
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
+# Recycle-bin page size, mirroring the project bin: a human-scale list with no paging
+# UI to spend a cursor on; this only bounds a pathological account.
+_TRASH_LIST_LIMIT = 200
 
-def _summary_with_count(conv: Conversation, counts: dict[str, int]) -> ConversationSummary:
+
+def _summary_with_count(
+    conv: Conversation,
+    counts: dict[str, int],
+    unfolded: dict[str, int] | None = None,
+) -> ConversationSummary:
     """Build a conversation summary, filling ``message_count`` from a counts map.
 
     The list/grouped endpoints precompute counts in one query (see
     ``MessageRepository.counts_for_conversations``) and pass the map here so the
     sidebar gets each chat's count without an N+1; absent ids default to 0.
+
+    ``unfolded`` is the same trick for the un-folded backlog (:func:`_unfolded_counts`),
+    and only its keys get a ``context_gap`` verdict — a conversation left out was never
+    a candidate, which is not the same as one proven intact.
     """
-    return conversation_summary_from_orm(
-        conv, message_count=counts.get(conv.id, 0)
-    )
+    if unfolded is not None and conv.id in unfolded:
+        return conversation_summary_from_orm(
+            conv,
+            message_count=counts.get(conv.id, 0),
+            unfolded_messages=unfolded[conv.id],
+        )
+    return conversation_summary_from_orm(conv, message_count=counts.get(conv.id, 0))
+
+
+async def _unfolded_counts(msg_repo: MessageRepository, counts: dict[str, int]) -> dict[str, int]:
+    """Un-folded backlog per conversation, for the few chats it could matter for.
+
+    A chat cannot be hiding history it never had: un-folded ≤ total, so anything at
+    or under the smallest window the loader ever falls back to is intact by
+    arithmetic alone. Screening on the counts we already have keeps the second query
+    off the overwhelmingly common sidebar — every chat short — and narrows it to the
+    handful of long ones when it does run.
+    """
+    floor = visible_window_messages(has_summary=False)
+    candidates = [cid for cid, n in counts.items() if n > floor]
+    if not candidates:
+        return {}
+    unfolded = await msg_repo.unfolded_counts_for_conversations(candidates)
+    # Absent = every message already folded; say 0 rather than「没算过」.
+    return {cid: unfolded.get(cid, 0) for cid in candidates}
 
 
 @router.post("", response_model=ConversationSummary, status_code=201)
@@ -79,36 +119,85 @@ async def create_conversation(
     repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
 ):
-    # A non-null target folder must be one of the user's own live folders (else
-    # 404), mirroring the move endpoint so a chat can never be born in someone
-    # else's or a deleted folder.
-    if body.folder_id is not None:
-        folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
-        if not folder:
-            raise NotFoundError("文件夹不存在")
-    # Session permission axes: explicit body wins; else seed from user recipe default.
-    if body.permission_axes is not None:
-        axes = body.permission_axes.to_axes().to_dict()
-    else:
-        axes = (await default_permission_axes_for_user(repo._session, user.user_id)).to_dict()
-    # 新建拍快照：显式 profile 钉住；省略则写入当时账号默认（非活跟随）。
-    from agentcore.llm.model_profiles import LlmModelProfileService
+    """Create a conversation; optionally idempotent on ``client_request_id``.
 
-    profile_svc = LlmModelProfileService(repo._session)
-    if "model_profile_id" in body.model_fields_set and body.model_profile_id is not None:
-        await profile_svc.ensure_profile_usable(user.user_id, body.model_profile_id)
-        pin = body.model_profile_id
-    else:
-        pin = await profile_svc.snapshot_default_profile_id(user.user_id)
-    conv = await repo.create(
-        user_id=user.user_id,
-        title=body.title,
-        folder_id=body.folder_id,
+    One send used to be able to create two identical chats (a double-tap, or two
+    sockets firing 14ms apart), each of which then ran a full turn and billed for
+    it. A client that mints a ``client_request_id`` per send gets exactly one
+    conversation back for that key — the repeat returns the first one, same 201,
+    same body. Omitting the key keeps the old behaviour verbatim: no heuristic
+    (same title / same user / N seconds) ever stands in for an explicit key.
+    """
+    client_request_id = (body.client_request_id or "").strip() or None
+    conv = None
+    created = True
+
+    if client_request_id is not None:
+        # Answer the repeat here, before the folder check and the profile
+        # snapshot: it already has its conversation, and re-running those only
+        # risks failing it for a reason the first request never hit (a profile
+        # deleted in between) while spending queries on a result we discard.
+        conv = await repo.get_by_client_request_id(
+            user_id=user.user_id, client_request_id=client_request_id
+        )
+        created = conv is None
+
+    if conv is None:
+        # A non-null target folder must be one of the user's own live folders (else
+        # 404), mirroring the move endpoint so a chat can never be born in someone
+        # else's or a deleted folder.
+        if body.folder_id is not None:
+            folder = await folder_repo.get_by_id(body.folder_id, user_id=user.user_id)
+            if not folder:
+                raise NotFoundError("文件夹不存在")
+        # Session permission axes: explicit body wins; else seed from user recipe default.
+        if body.permission_axes is not None:
+            axes = body.permission_axes.to_axes().to_dict()
+        else:
+            axes = (await default_permission_axes_for_user(repo._session, user.user_id)).to_dict()
+        # 新建拍快照：显式 profile 钉住；省略则写入当时账号默认（非活跟随）。
+        from agentcore.llm.model_profiles import LlmModelProfileService
+
+        profile_svc = LlmModelProfileService(repo._session)
+        if "model_profile_id" in body.model_fields_set and body.model_profile_id is not None:
+            await profile_svc.ensure_profile_usable(user.user_id, body.model_profile_id)
+            pin = body.model_profile_id
+        else:
+            pin = await profile_svc.snapshot_default_profile_id(user.user_id)
         # Project chats inherit the project's workspace — never write session-level
         # local_* / container columns. 裸聊 keeps desktop local-first intent.
-        local_container_root_id=(body.local_container_root_id if body.folder_id is None else None),
-        permission_axes=axes,
-        model_profile_id=pin,
+        container_root = body.local_container_root_id if body.folder_id is None else None
+        if client_request_id is None:
+            conv = await repo.create(
+                user_id=user.user_id,
+                title=body.title,
+                folder_id=body.folder_id,
+                local_container_root_id=container_root,
+                permission_axes=axes,
+                model_profile_id=pin,
+            )
+        else:
+            conv, created = await repo.create_idempotent(
+                user_id=user.user_id,
+                client_request_id=client_request_id,
+                title=body.title,
+                folder_id=body.folder_id,
+                local_container_root_id=container_root,
+                permission_axes=axes,
+                model_profile_id=pin,
+            )
+
+    # The create itself was invisible in production: the 8 duplicate-conversation
+    # reports over 7 days could only be reconstructed from what the chats later
+    # did. One line per accepted POST makes「一次发送建出两条」countable, and
+    # ``idempotent_hit`` measures how often the key is actually saving a run.
+    logger.info(
+        "conversation.created",
+        user_id=user.user_id,
+        conversation_id=conv.id,
+        folder_id=conv.folder_id,
+        client_request_id=client_request_id,
+        idempotent_hit=not created,
     )
     return conversation_summary_from_orm(conv)
 
@@ -171,8 +260,9 @@ async def list_conversations(
         user.user_id, limit=page_size, offset=offset, archived=archived
     )
     counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
+    unfolded = await _unfolded_counts(msg_repo, counts)
     return ConversationListResponse(
-        data=[_summary_with_count(c, counts) for c in conversations],
+        data=[_summary_with_count(c, counts, unfolded) for c in conversations],
         total=total,
         page=page,
         page_size=page_size,
@@ -194,11 +284,12 @@ async def list_conversations_grouped(
     folders = await folder_repo.list_by_user(user.user_id)
     conversations = await conv_repo.list_all_by_user(user.user_id)
     counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
+    unfolded = await _unfolded_counts(msg_repo, counts)
 
     buckets: dict[str, list[ConversationSummary]] = {f.id: [] for f in folders}
     ungrouped: list[ConversationSummary] = []
     for conv in conversations:
-        summary = _summary_with_count(conv, counts)
+        summary = _summary_with_count(conv, counts, unfolded)
         if conv.folder_id in buckets:
             buckets[conv.folder_id].append(summary)
         else:
@@ -217,6 +308,95 @@ async def list_conversations_grouped(
             for f in folders
         ],
         ungrouped=ungrouped,
+    )
+
+
+# --- 最近删除 (conversation recycle bin) ---
+# Declared ahead of the ``/{conversation_id}`` matchers: FastAPI resolves in
+# registration order, so a literal ``/trash`` segment must be registered first to win.
+#
+# Not to be confused with ``/{conversation_id}/trash`` (``routes/conversations/trash.py``),
+# which is the workspace's own file soft-delete area — this one is the deleted *chats*
+# themselves, the twin of ``/folders/trash``.
+
+
+def _conversation_purge_at(conv: Conversation) -> datetime:
+    """When the retention sweeper may hard-purge this soft-deleted conversation."""
+    assert conv.deleted_at is not None
+    return conv.deleted_at + timedelta(days=settings.workspace_retention_days)
+
+
+@router.get("/trash", response_model=DeletedConversationListResponse)
+async def list_deleted_conversations(
+    user: AuthUser,
+    repo: ConversationRepository = Depends(get_conversation_repo),
+    msg_repo: MessageRepository = Depends(get_message_repo),
+):
+    """列出可恢复的已删对话（最近删除）。
+
+    Delete has always been a soft delete — the rows never went anywhere — but nothing
+    ever listed them, so「删了就没了」was true in practice. Same retention window and
+    same cutoff as the project bin: a chat is offered here only while the sweeper is
+    still forbidden to purge it.
+    """
+    conversations = await repo.list_deleted_by_user(
+        user.user_id, not_before=retention_cutoff(), limit=_TRASH_LIST_LIMIT
+    )
+    counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
+    return DeletedConversationListResponse(
+        data=[
+            DeletedConversationSummary.from_conversation(
+                c,
+                purge_at=_conversation_purge_at(c),
+                message_count=counts.get(c.id, 0),
+            )
+            for c in conversations
+        ],
+        total=len(conversations),
+        retention_days=settings.workspace_retention_days,
+    )
+
+
+@router.post("/trash/{conversation_id}/restore", response_model=ConversationSummary)
+async def restore_deleted_conversation(
+    conversation_id: str,
+    user: AuthUser,
+    repo: ConversationRepository = Depends(get_conversation_repo),
+    msg_repo: MessageRepository = Depends(get_message_repo),
+):
+    """恢复一个已删对话：回到删除前的项目分组、置顶 / 归档状态与最近活动位置。
+
+    Past retention the answer is 409, never a silent success — the transcript may
+    already be gone. Losing the race with the purge sweep between the lookup and the
+    conditional UPDATE surfaces the same way (「该对话已被清理」); that window is
+    reported honestly rather than reconciled.
+
+    Public share links revoked by the delete stay revoked (see
+    :meth:`ConversationRepository.restore`) — the client says so instead of implying a
+    live link came back.
+    """
+    conv = await repo.get_deleted_by_id(conversation_id, user_id=user.user_id)
+    if not conv:
+        raise NotFoundError("对话不存在或不在最近删除中")
+    if conv.deleted_at <= retention_cutoff():
+        raise ConflictError(
+            f"该对话已超过 {settings.workspace_retention_days} 天保留期，无法恢复"
+        )
+
+    restored = await repo.restore(
+        conversation_id, user_id=user.user_id, not_before=retention_cutoff()
+    )
+    if restored is None:
+        raise ConflictError("该对话已被清理，无法恢复")
+    logger.info(
+        "conversation.restored",
+        conversation_id=conversation_id,
+        user_id=user.user_id,
+        folder_id=restored.folder_id,
+    )
+    counts = await msg_repo.counts_for_conversations([conversation_id])
+    return conversation_summary_from_orm(
+        restored, message_count=counts.get(conversation_id, 0)
     )
 
 
@@ -266,6 +446,12 @@ async def auto_title_conversation(
         from agentcore.conversation.common import fallback_title
 
         title = fallback_title(body.user_message)
+        logger.info(
+            "chat.title_degraded",
+            conversation_id=conversation_id,
+            reason="mint_no_write",
+            title_chars=len(title),
+        )
         updated = await repo.update_title_if_empty(conversation_id, title)
         if updated is not None and updated.title:
             title = str(updated.title)
@@ -352,9 +538,7 @@ async def update_conversation(
             profile_id = await profile_svc.snapshot_default_profile_id(user.user_id)
         else:
             await profile_svc.ensure_profile_usable(user.user_id, profile_id)
-        updated = await repo.set_model_profile(
-            conversation_id, profile_id, user_id=user.user_id
-        )
+        updated = await repo.set_model_profile(conversation_id, profile_id, user_id=user.user_id)
         if updated:
             conv = updated
     return conversation_summary_from_orm(conv)
@@ -367,6 +551,14 @@ async def delete_conversation(
     repo: ConversationRepository = Depends(get_conversation_repo),
     share_repo: ConversationShareRepository = Depends(get_conversation_share_repo),
 ):
+    """软删对话：保留期内可从「最近删除」恢复（``POST …/trash/{id}/restore``）。
+
+    What the restore brings back is the conversation row and its transcript, in the
+    project / pin / archive state it left in. What it does **not** bring back is
+    listed below: the share links this cascade revokes, and the live sandbox / grant
+    side-state torn down with it. Those are one-way on purpose, and the client says so
+    — the copy on the confirm and in the bin must not out-promise this function.
+    """
     deleted = await repo.soft_delete(conversation_id, user_id=user.user_id)
     if not deleted:
         raise NotFoundError("对话不存在")

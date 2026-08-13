@@ -301,7 +301,7 @@ async def refresh_folder_explore_from_snapshot(
 
 
 async def _default_refresh_runner(pending: _PendingRefresh) -> bool:
-    from agentcore.billing.gate import run_background_llm
+    from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
     from agentcore.llm.credentials import LLMCredentials
     from agentcore.llm.factory import build_provider
     from agentcore.llm.resolve import resolve_turn_model as resolve_user_model
@@ -323,7 +323,7 @@ async def _default_refresh_runner(pending: _PendingRefresh) -> bool:
             await provider.close()
 
     bg = await run_background_llm(pending.user_id, purpose="memory", runner=_runner)
-    if bg is None:
+    if not isinstance(bg, BackgroundLlmResult):
         logger.info(
             "memory.explore_refresh_skipped_no_credentials",
             user_id=pending.user_id,

@@ -16,12 +16,14 @@ import fnmatch
 import os
 import shutil
 import tempfile
+from collections import deque
 from collections.abc import Awaitable, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
+from agentcore.tools.sandbox.exec_env import ExecEnvProbeMemo, ExecEnvProbeVerdict
 from agentcore.tools.sandbox.protocol import (
     ExecutionRequest,
     ExecutionResult,
@@ -32,6 +34,7 @@ from agentcore.workspace._paths import (
     is_ignored_dir_entry,
     is_ignored_file_name,
     is_system_ignored_file_name,
+    normalize_glob,
     path_has_non_internal_entries,
     resolve_safe_path,
 )
@@ -61,6 +64,7 @@ from agentcore.workspace.protocol import (
     AmbiguousMatch,
     CodeSearchResult,
     DirEntry,
+    DirListing,
     GrepQuery,
     GrepResult,
     IndexFileEntry,
@@ -105,6 +109,9 @@ from agentcore.workspace.trash import (
     trash_dest_under_target,
 )
 
+# AI-facing ``list`` default — a directory dump this size already crowds the
+# model's context, and ``file_list`` says so when it bites (mirrors desktop
+# ``WORKSPACE_LIST_MAX``). The file panel passes ``WORKSPACE_BROWSE_LIST_MAX``.
 _MAX_LIST_ENTRIES = 100
 _MAX_INDEX_FILES = 5000  # @ mention flat index cap (mirrors desktop LIST_FILES_CAP)
 
@@ -213,13 +220,83 @@ def _read_bytes_with_mtime_sync(path: Path) -> tuple[bytes, int]:
     return path.read_bytes(), path.stat().st_mtime_ns // 1_000_000
 
 
-def _glob_entries_sync(base: Path, pattern: str, *, cap: int) -> list[Path]:
-    """Directory glob — must run off the asyncio event-loop thread.
+def _list_entries_sync(
+    base: Path,
+    *,
+    base_rel: str,
+    name_pattern: str,
+    recursive: bool,
+    cap: int,
+) -> tuple[list[DirEntry], bool]:
+    """Bounded directory listing — must run off the asyncio event-loop thread.
 
-    Recursive ``**/*`` walks (and sorts) the entire tree before the cap applies, so
-    a cloned repo is a full-tree stat storm, not a bounded listing.
+    Replaces ``sorted(base.glob(pattern))[:cap]``, which sorted and stat'd the
+    whole tree and then spent the budget on ``.git`` / ``node_modules`` entries it
+    was about to filter out — which is how a cloned repo listed as empty. Here the
+    ignore rules prune *as the walk descends*, and the walk is breadth-first so a
+    deep subtree can never push a top-level sibling out of the budget.
+
+    Walks one entry past ``cap`` so the caller can say「还有更多」rather than cut
+    silently; ``stat`` runs here too (it used to run per entry on the event loop).
     """
-    return sorted(base.glob(pattern))[:cap]
+    prefix = "" if base_rel in ("", ".") else base_rel.replace("\\", "/").strip("/")
+    collected: list[DirEntry] = []
+    truncated = False
+    queue: deque[tuple[Path, str]] = deque([(base, prefix)])
+
+    while queue and not truncated:
+        dir_path, parent_rel = queue.popleft()
+        try:
+            with os.scandir(dir_path) as scan:
+                children = sorted(scan, key=lambda c: c.name)
+        except OSError as e:
+            if is_access_denied_oserror(e):
+                continue  # one unreadable subtree must not fail the whole listing
+            raise
+        for child in children:
+            name = child.name
+            try:
+                is_dir = child.is_dir()
+                # Never descend a symlinked dir: the tree may loop back on itself.
+                descend = is_dir and not child.is_symlink()
+            except OSError as e:
+                if is_access_denied_oserror(e):
+                    continue
+                raise
+            if is_dir:
+                if is_ignored_dir_entry(parent_rel=parent_rel, name=name):
+                    continue
+            elif is_system_ignored_file_name(name):
+                continue
+            rel = f"{parent_rel}/{name}" if parent_rel else name
+            if recursive and descend:
+                queue.append((Path(child.path), rel))
+            if not fnmatch.fnmatch(name, name_pattern):
+                continue
+            if len(collected) >= cap:
+                truncated = True
+                break
+            # Soft meta for UI subtitles — never fail the whole listing on stat.
+            size_bytes: int | None = None
+            mtime_ms: int | None = None
+            try:
+                st = child.stat()
+                mtime_ms = st.st_mtime_ns // 1_000_000
+                if not is_dir:
+                    size_bytes = int(st.st_size)
+            except OSError:
+                pass
+            collected.append(
+                DirEntry(
+                    path=rel,
+                    is_dir=is_dir,
+                    size_bytes=size_bytes,
+                    mtime_ms=mtime_ms,
+                )
+            )
+
+    collected.sort(key=lambda e: e.path)
+    return collected, truncated
 
 
 def _copy_sync(source: Path, dest: Path) -> None:
@@ -331,9 +408,12 @@ class ServerWorkspace:
         # When True, AI list_tree / channel list keep archive suffixes visible
         # (file_list pattern targets zip/rar/…). Default False.
         self.ai_list_reveal_archives: bool = False
-        # Once-per-backend exec-env probe (sidecar SubprocessSandbox).
-        self._exec_env_probed: bool = False
-        self._exec_env_alive: bool = True
+        # Exec-env probe memo. Sidecar's SubprocessSandbox answers per language
+        # (a host missing python can still run node), while gVisor's health check
+        # smoke-runs the runsc runtime and keeps one backend-wide verdict. Each
+        # verdict carries its classified reason + raw facts so every later
+        # fail-fast repeats the same honest cause instead of a generic「跑不了」.
+        self._exec_env_probe = ExecEnvProbeMemo()
 
     def set_lock_waiting_hook(self, hook: Callable[[bool], None] | None) -> None:
         """Register UX callback for contended mutation-lock waits (不得静默等锁)."""
@@ -808,73 +888,39 @@ class ServerWorkspace:
             await self._emit_shared_mutation(path, "file_written")
             return True, new_ms
 
-    async def list(self, directory: str, pattern: str) -> list[DirEntry]:
+    async def list(
+        self, directory: str, pattern: str, *, cap: int | None = None
+    ) -> DirListing:
         if self._external_needs_channel(directory):
             bridge = self._require_external_bridge()
             bridge.ai_list_reveal_archives = self.ai_list_reveal_archives
-            return await bridge.list(directory, pattern)
+            return await bridge.list(directory, pattern, cap=cap)
         await self._gate_shared(directory, write=False)
         base = self._safe(directory)
         if not base.is_dir():
             # Declared stage / attachments trees: writes mkdir parents — missing
             # means latent empty, not a guess failure. File-at-path still errors.
             if not base.exists() and is_declared_latent_dir(directory):
-                return []
+                return DirListing(entries=[], truncated=False)
             raise NotADirectory(directory)
+        # Entry paths are built from the list root's model-facing path, so nested
+        # ``**/*`` hits keep their real parent: treating ``AgentCore/index`` as a
+        # bare ``index`` would leak internal zones into the user file UI.
+        base_rel = self._model_path(base, logical=directory)
         try:
-            entries = await asyncio.to_thread(
-                _glob_entries_sync, base, pattern, cap=_MAX_LIST_ENTRIES
+            # UI REST shares ``list`` — only system noise is pruned here; AI
+            # ``file_list`` applies AI-noise filtering in the tool layer.
+            entries, truncated = await asyncio.to_thread(
+                _list_entries_sync,
+                base,
+                base_rel=base_rel,
+                name_pattern=normalize_glob(pattern) or "*",
+                recursive="**" in pattern,
+                cap=cap if cap and cap > 0 else _MAX_LIST_ENTRIES,
             )
-            out: list[DirEntry] = []
-            for entry in entries:
-                # Per-entry parent — recursive ``**/*`` yields nested paths; using the
-                # list-root as parent_rel would treat ``AgentCore/index`` as bare
-                # ``index`` and leak internal zones into the user file UI.
-                entry_rel = self._model_path(entry, logical=directory).replace(
-                    "\\", "/"
-                ).strip("/")
-                if not entry_rel or entry_rel == ".":
-                    continue
-                if "/" in entry_rel:
-                    parent_rel, entry_name = entry_rel.rsplit("/", 1)
-                else:
-                    parent_rel, entry_name = "", entry_rel
-                # Name-first ignore — avoid touching locked noise dirs (e.g. Windows
-                # ``.pytest_tmp``) before ``is_dir`` / ``is_file``.
-                if is_ignored_dir_entry(parent_rel=parent_rel, name=entry_name):
-                    continue
-                try:
-                    is_dir = entry.is_dir()
-                    is_file = entry.is_file()
-                except OSError as e:
-                    if is_access_denied_oserror(e):
-                        continue
-                    raise WorkspaceIOError(str(e)) from e
-                if is_file and is_system_ignored_file_name(entry_name):
-                    continue
-                # Soft meta for UI subtitles — never fail the whole listing on stat.
-                size_bytes: int | None = None
-                mtime_ms: int | None = None
-                try:
-                    st = entry.stat()
-                    mtime_ms = st.st_mtime_ns // 1_000_000
-                    if not is_dir:
-                        size_bytes = int(st.st_size)
-                except OSError:
-                    pass
-                # UI REST shares ``list`` — only system noise; AI ``file_list``
-                # applies AI-noise filtering in the tool layer.
-                out.append(
-                    DirEntry(
-                        path=entry_rel,
-                        is_dir=is_dir,
-                        size_bytes=size_bytes,
-                        mtime_ms=mtime_ms,
-                    )
-                )
-            return out
         except OSError as e:
             raise WorkspaceIOError(str(e)) from e
+        return DirListing(entries=entries, truncated=truncated)
 
     async def exists(self, path: str) -> bool:
         """True iff ``path`` is an existing regular file (unfiltered by AI-noise)."""
@@ -1347,39 +1393,26 @@ class ServerWorkspace:
         # whole sandbox run (code_execute / test_run). Whole-turn lock used to
         # cover this; without it, execute would race sibling turns' writes.
         async with self._mutation_lock("."):
-            from agentcore.tools.sandbox.exec_env import probe_failure_result
+            from agentcore.tools.sandbox.exec_env import probe_snippet
+            from agentcore.tools.sandbox.protocol import InterpreterProbe
 
-            if not self._exec_env_probed:
-                self._exec_env_probed = True
-                try:
-                    self._exec_env_alive = bool(await self._sandbox.health_check())
-                except Exception:
-                    self._exec_env_alive = False
-                    from agentcore.core.logging import get_logger
-
-                    get_logger(__name__).info(
-                        "sandbox.health_check_failed",
-                        error="health_check raised",
-                        location=self.location,
+            # Scope the self-check to the language this request asked for, but
+            # only where the probe actually starts an interpreter. gVisor answers
+            # ``health_check`` by smoke-running the runsc runtime — that is not a
+            # language question, and it is cloud's only runtime health signal, so
+            # it keeps one backend-wide verdict (``language=None``).
+            sandbox = self._sandbox
+            language = (
+                req.language if isinstance(sandbox, InterpreterProbe) else None
+            )
+            if language is None or probe_snippet(language) is not None:
+                verdict = self._exec_env_probe.get(language)
+                if verdict is None:
+                    verdict = self._exec_env_probe.record(
+                        language, await self._probe_exec_env(language)
                     )
-                if not self._exec_env_alive:
-                    from agentcore.core.logging import get_logger
-
-                    # Carry the sandbox's own failure reason — the sticky marker
-                    # returned to the model is deliberately opaque, so without this
-                    # a dead exec env leaves no way to tell timeout from missing
-                    # interpreter from AV interference.
-                    failure = getattr(self._sandbox, "last_health_failure", None)
-                    reason, detail = failure if failure else (None, None)
-                    get_logger(__name__).info(
-                        "sandbox.exec_env_probe_failed",
-                        location=self.location,
-                        reason=reason,
-                        detail=detail,
-                    )
-                    return probe_failure_result()
-            elif not self._exec_env_alive:
-                return probe_failure_result()
+                if not verdict.alive:
+                    return verdict.failure_result(language=language)
             self._mark_mutated()
             env = dict(req.env or {})
             env.update(build_external_env(self._mounts))
@@ -1392,3 +1425,55 @@ class ServerWorkspace:
             return await self._sandbox.execute(
                 replace(req, cwd=cwd, env=env or None)
             )
+
+    async def _probe_exec_env(self, language: str | None) -> ExecEnvProbeVerdict:
+        """Ask the sandbox whether it can run ``language`` (``None`` = the runtime).
+
+        Carries the sandbox's own failure reason: the probe already knew whether
+        this was a timeout, a missing interpreter or a refused spawn, and that
+        verdict rides the tool result instead of dying in the log. Sandboxes that
+        classify nothing (gVisor, a check that raised) keep the unclassified
+        fallback rather than borrowing a cause.
+        """
+        from agentcore.core.logging import get_logger
+        from agentcore.tools.sandbox.exec_env import (
+            EXEC_ENV_PROBE_ALIVE,
+            EXEC_ENV_PROBE_FAIL_CODE,
+        )
+        from agentcore.tools.sandbox.protocol import InterpreterProbe
+
+        sandbox = self._sandbox
+        try:
+            if language is not None and isinstance(sandbox, InterpreterProbe):
+                alive = bool(await sandbox.probe_interpreter(language))
+            else:
+                alive = bool(await sandbox.health_check())
+        except Exception:
+            alive = False
+            get_logger(__name__).info(
+                "sandbox.health_check_failed",
+                error="health_check raised",
+                location=self.location,
+                language=language,
+            )
+        if alive:
+            return EXEC_ENV_PROBE_ALIVE
+        failure = getattr(sandbox, "last_health_failure", None)
+        reason, detail = failure if failure else (None, None)
+        verdict = ExecEnvProbeVerdict(
+            alive=False,
+            code=(
+                getattr(sandbox, "last_health_failure_code", None)
+                or EXEC_ENV_PROBE_FAIL_CODE
+            ),
+            evidence=getattr(sandbox, "last_health_evidence", None) or "",
+        )
+        get_logger(__name__).info(
+            "sandbox.exec_env_probe_failed",
+            location=self.location,
+            language=language,
+            code=verdict.code,
+            reason=reason,
+            detail=detail,
+        )
+        return verdict

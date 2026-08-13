@@ -5,7 +5,10 @@ most recent), root / caps matching, queue-full unhealthy close, and
 ``deliver_client_tool`` outcomes including the origin pin that keeps disk /
 command ops on the machine that started the turn, and the three-way naming of a
 selection miss (origin offline / root not held / no fulfiller) that a log read
-has to be able to tell apart.
+has to be able to tell apart. Also the departure memory + grace window that let
+delivery tell a reconnecting desktop from an absent one, and the observer
+sessions (browser clients, no caps) that read account state off the same stream
+without ever counting as a machine an op could land on.
 No DB, no HTTP — plain async tests (asyncio_mode=auto).
 """
 
@@ -14,11 +17,13 @@ from __future__ import annotations
 import asyncio
 
 from agentcore.api.routes.fulfill import _format_event, _fulfill_stream
-from agentcore.fulfill import dispatch
+from agentcore.fulfill import dispatch, grace
 from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
 from agentcore.fulfill.hub import (
     _FULFILLER_QUEUE_MAXSIZE,
+    FULFILL_CHANNELS,
     ORIGIN_PINNED_CHANNELS,
+    RECENT_PRESENCE_SECONDS,
     FulfillerHub,
     FulfillerIdentity,
     FulfillerSession,
@@ -164,14 +169,15 @@ async def test_find_root_none_matches_any_capable_unless_pinned():
     )
 
 
-async def test_update_roots_without_reconnect():
+async def test_declare_root_widens_without_reconnect():
+    """A registration receipt binds one root; the ones already held stay held."""
     hub = FulfillerHub()
     session = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
-    assert hub.update_roots("u1", "d1", ["r2", "r3"]) is True
-    assert session.roots == {"r2", "r3"}
-    assert hub.find("u1", root_id="r1", channel="workspace") is None
+    assert hub.declare_root("u1", "d1", "r2") is True
+    assert session.roots == {"r1", "r2"}
+    assert hub.find("u1", root_id="r1", channel="workspace") is session
     assert hub.find("u1", root_id="r2", channel="workspace") is session
-    assert hub.update_roots("u1", "missing", ["r9"]) is False
+    assert hub.declare_root("u1", "missing", "r9") is False
 
 
 async def test_queue_full_closes_session():
@@ -450,6 +456,109 @@ async def test_rooted_op_ignores_the_pin():
     )
     assert result is DeliverResult.DELIVERED
     assert (await holder.get())["type"] == "workspace_op_required"
+
+
+async def test_seen_recently_remembers_a_device_that_just_dropped():
+    """The reconnect blind window: hub empty, machine still very much there."""
+    hub = FulfillerHub()
+    session = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+    assert hub.seen_recently("u1", device_id="d1") is True
+
+    hub.unregister(session)
+    assert hub.find("u1", root_id="r1", channel="workspace") is None
+    assert hub.seen_recently("u1", device_id="d1") is True
+    assert hub.seen_recently("u1") is True
+    # Older than the presence window = plainly gone, not reconnecting.
+    assert hub.seen_recently("u1", device_id="d1", within=0.0) is False
+    assert hub.seen_recently("u1", within=0.0) is False
+
+
+async def test_seen_recently_is_false_for_a_client_that_never_connected():
+    hub = FulfillerHub()
+    hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+    assert hub.seen_recently("u1", device_id="never") is False
+    assert hub.seen_recently("someone-else") is False
+    # A live session answers for its own device only — the pin still decides
+    # whether a peer may take the op.
+    assert hub.seen_recently("u1", device_id="d1") is True
+
+
+async def test_observer_session_receives_account_state_but_fulfils_nothing():
+    """The browser client: same stream, no caps — reads state, runs no op."""
+    hub = FulfillerHub()
+    observer = hub.register("u1", "web-1", caps=[], roots=[], platform="web")
+
+    assert hub.connection_count("u1") == 1
+    assert observer.can_fulfil is False
+    # Account-owned state reaches every install, this one included.
+    assert hub.broadcast("u1", {"type": "turn_queue_snapshot"}) == 1
+    assert (await observer.get())["type"] == "turn_queue_snapshot"
+    # Nothing routes to it, on any channel, rooted or not.
+    for channel in sorted(FULFILL_CHANNELS):
+        assert hub.find("u1", root_id=None, channel=channel) is None
+        assert hub.has_fulfiller("u1", root_id=None, channel=channel) is False
+
+
+async def test_observer_presence_never_stands_in_for_a_desktop():
+    """A web tab open is not "the machine is reconnecting" — don't park ops on it."""
+    hub = FulfillerHub()
+    observer = hub.register("u1", "web-1", caps=[], roots=[])
+
+    # Live: the account has a connection, but nothing that could take the op, so
+    # a rootless miss must fail honestly instead of waiting out the grace.
+    assert hub.seen_recently("u1") is False
+    assert hub.seen_recently("u1", device_id="web-1") is False
+
+    # Gone: no departure mark either, or the same wait returns for a full minute.
+    hub.unregister(observer)
+    assert hub.seen_recently("u1") is False
+    assert hub.seen_recently("u1", device_id="web-1") is False
+
+
+async def test_observer_alongside_a_desktop_leaves_delivery_untouched():
+    """Opening the web client must not change what a desktop-owning account sees."""
+    hub = FulfillerHub()
+    hub.register("u1", "web-1", caps=[], roots=[])
+    desktop = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+
+    assert hub.find("u1", root_id="r1", channel="workspace") is desktop
+    assert hub.seen_recently("u1") is True
+    # And the desktop's own reconnect window still opens when it drops.
+    hub.unregister(desktop)
+    assert hub.seen_recently("u1", device_id="d1") is True
+
+
+def test_presence_window_outlasts_the_grace_it_authorizes():
+    """Holding an op longer than a device counts as "just here" is incoherent."""
+    assert RECENT_PRESENCE_SECONDS >= grace.RECONNECT_GRACE_SECONDS
+
+
+def test_grace_window_never_outlives_the_op_deadline():
+    """Waiting must never convert an honest failure into a timeout."""
+    assert grace.window_for(None) == grace.RECONNECT_GRACE_SECONDS
+    # Roomy channel deadline: the full grace still fits under it.
+    assert grace.window_for(60.0) == grace.RECONNECT_GRACE_SECONDS
+    assert grace.window_for(60.0) < 60.0
+    # Tight deadline: clamped, and a 1s op keeps today's immediate failure.
+    assert grace.window_for(5.0) == 4.0
+    assert grace.window_for(1.0) <= 0.0
+
+
+async def test_hold_expires_once_and_release_cancels_it():
+    fired: list[str] = []
+    assert grace.hold("req-1", seconds=0.01, on_expire=lambda: fired.append("req-1"))
+    assert grace.is_held("req-1") is True
+    await asyncio.sleep(0.05)
+    assert fired == ["req-1"]
+    assert grace.is_held("req-1") is False
+
+    assert grace.hold("req-2", seconds=0.01, on_expire=lambda: fired.append("req-2"))
+    assert grace.release("req-2") is True
+    await asyncio.sleep(0.05)
+    assert fired == ["req-1"]
+    assert grace.release("req-2") is False
+    # A non-positive window is not a hold at all — the caller settles now.
+    assert grace.hold("req-3", seconds=0.0, on_expire=lambda: fired.append("req-3")) is False
 
 
 async def test_unknown_caps_filtered_on_register():

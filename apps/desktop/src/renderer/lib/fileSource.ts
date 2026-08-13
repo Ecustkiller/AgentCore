@@ -18,6 +18,15 @@ export interface FileNode {
   /** 显示名 = path 的最后一段。 */
   name: string;
   isDir: boolean;
+  /**
+   * 字节数；目录、以及源没给出这项元信息时为 null/缺省。
+   *
+   * 与 `mtimeMs` 一样是**可选**的：不是每个源都统计得起（合成源如记忆叶子根本没有盘上
+   * 实体）。UI 一律按「有就显示、没有就不显示」处理，绝不拿 0 冒充「空文件」。
+   */
+  sizeBytes?: number | null;
+  /** 最近修改时间（epoch 毫秒，与写回 CAS 基线同一口径）；不可得为 null/缺省。 */
+  mtimeMs?: number | null;
 }
 
 /** 一次「读以预览」的结果——两种后端能返回的并集（superset）。 */
@@ -63,11 +72,13 @@ export interface FileSourceCaps {
   watch: boolean;
   /** 字节跨边界传输，故上传/下载有意义（云端工作区）。 */
   transfer: boolean;
-  /** 面板内文本编辑经 `writeBytes` 回写。 */
+  /** 面板内文本编辑经 `readForEdit` / `writeText` 回写（带写前 CAS，见二者注释）。 */
   edit: boolean;
   /**
    * 轴3 快照（备份 / 版本 / 恢复）对该源可用（云端工作区为真，本地源为假）。对话工作区
-   * 面板据此门控快照入口（见 WorkspacePanel）；文件中枢暂不挂快照面。
+   * 面板与文件中枢都据此门控版本 / 软删区 / 导出 ZIP 入口（见 WorkspacePanel、
+   * fileWorkbench/WorkspaceSection）——服务端对本机工作区与共享空间一律 409，故先行门控，
+   * 不让用户点进一个必然失败的动作。
    */
   snapshots: boolean;
 }
@@ -81,6 +92,15 @@ export interface FileSource {
 
   /** 列举一个目录的直接子项（`dir` 为 "" 即根）。 */
   listDir(dir: string): Promise<FileNode[]>;
+  /**
+   * 同 `listDir`，但额外说清这一层**是否被上限截断**（后端有条目上限）。
+   *
+   * 存在的理由：静默截断在文件树上读作「我的文件没了」。提供本方法的源，UI 会在该层
+   * 显式提示「还有更多未显示」；不提供的源（枚举天然完整）按未截断处理，行为不变。
+   */
+  listDirBounded?(
+    dir: string,
+  ): Promise<{ entries: FileNode[]; truncated: boolean }>;
   /**
    * 把整棵子树作为扁平数组列出（递归）。仅「能廉价枚举全部」的源提供（服务端
    * 工作区）；用于一次性建树 + 全部展开/折叠。懒加载源省略它（UI 回退到展开时
@@ -149,15 +169,29 @@ export interface FileSource {
   exportMdToDocx?(path: string): Promise<{ path: string; warnings: string[] }>;
 
   /**
-   * 系统集成（桌面本地源专属，云端源不实现 → UI 据「方法是否存在」门控菜单，组件内不按源分支）。
+   * 系统集成（桌面专属 → UI 据「方法是否存在」门控菜单，组件内不按源分支）。
    *
-   * 仅本地源有意义：文件在用户机器上、有真实 OS 路径；云端工作区文件在服务器上，故这三者一律省略。
-   * 绝对路径全程只在主进程出现（reveal/copy 在主进程完成），不下发 renderer——沿用 IPC 契约的安全约束。
+   * `reveal` / `copyOsPath` / `openShellAtPath` 仅本地源有意义：文件在用户机器上、有真实 OS
+   * 路径；云端工作区文件在服务器上，故这几者一律省略。绝对路径全程只在主进程出现，不下发
+   * renderer——沿用 IPC 契约的安全约束。
    */
   /** 在系统文件管理器中定位该路径（资源管理器 / 访达）。`""` = 工作区根本身。失败抛异常。 */
   revealInOsFileManager?(path: string): Promise<void>;
-  /** 用系统默认程序打开该文件（PDF/Office/压缩包等 in-app 打不开的类型）。失败抛异常。 */
+  /**
+   * 用系统默认程序打开该文件（PDF/Office/压缩包等 in-app 打不开的类型）。失败抛异常。
+   *
+   * 两源语义不同：本地源开的是**磁盘上的真实文件**（改动即时生效）；云端源开的是落临时目录
+   * 的**只读副本**（本机无实体），外部改动不回写——故云端源实现须在打开后提示这一点。
+   */
   openWithOsDefaultApp?(path: string): Promise<void>;
+  /**
+   * 该路径是否允许「用默认程序打开」（同步谓词，UI 门控用；**不提供 = 视为允许**）。
+   *
+   * 存在的理由：云端文件字节是 AI 产出的，扩展名不在安全白名单时连入口都不该出现（弹框确认
+   * 对这个来源不构成防线）；本地文件是用户自己放的，保持「名单外仍可开、主进程弹一次确认」。
+   * 策略差异由各源自己表达，UI 只问谓词，不按源分支。
+   */
+  canOpenWithOsDefaultApp?(path: string): boolean;
   /**
    * 「在浏览器打开」该文件的真实效果（主给 HTML：完整 JS + 多文件相对资源）。本地源
    * 直接用系统默认程序打开磁盘文件；云端源先把工作区快照解压到临时目录再打开。桌面
@@ -180,6 +214,21 @@ export interface FileSource {
   openShellAtPath?(path: string): Promise<void>;
   /** 把该路径的绝对路径写入系统剪贴板（写入在主进程完成）。失败抛异常。 */
   copyOsPath?(path: string): Promise<void>;
+}
+
+/**
+ * 该路径此刻是否该显示「用默认程序打开」入口——三处 UI（右键菜单 / 预览头 / Markdown
+ * 编辑器头）共用，免得各自重写「谓词缺省视为允许」而漂移。
+ *
+ * 两问合一：源实现了 {@link FileSource.openWithOsDefaultApp} 吗？该源对这个路径放行吗
+ * （{@link FileSource.canOpenWithOsDefaultApp} 不提供 = 允许，故本地源行为不变）。
+ */
+export function canOpenPathWithOsDefaultApp(
+  source: FileSource,
+  path: string,
+): boolean {
+  if (!source.openWithOsDefaultApp) return false;
+  return source.canOpenWithOsDefaultApp?.(path) ?? true;
 }
 
 /** 是否 HTML 文件路径（.html/.htm）。文件视图的「网页源码」横幅与产物卡「直达完整预览」共用判定。 */

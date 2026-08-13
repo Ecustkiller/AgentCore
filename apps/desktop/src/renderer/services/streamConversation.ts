@@ -1,9 +1,12 @@
 import { clientHeaders } from "@/lib/clientBuildInfo";
-import { StreamError } from "@/lib/errors";
+import { StreamError, streamErrorFromResponse } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
 import {
+  ApiError,
   BASE_URL,
+  captureCsrf,
   getCsrfHeaders,
+  isReplayableCsrfRejection,
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
@@ -14,7 +17,6 @@ import {
   flushPendingFrames,
 } from "@/services/sse/dispatch";
 import { traceTurnMilestone } from "@/services/turnTrace";
-import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import {
   beginLocalConversationStream,
   claimPrimaryStream,
@@ -27,8 +29,9 @@ import {
 } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
-import type { SSEEvent } from "@/types/events";
+import type { MessageStartPayload, SSEEvent } from "@/types/events";
 import { unstable_batchedUpdates } from "react-dom";
+import { resetPartialTurnForReplay } from "./turns/replayReset";
 
 /** SSE comment after attach journal replay (+ hot re-hang); mirrors server
  * ``sse._ATTACH_CAUGHT_UP``. Not an EventType — pump-level only. */
@@ -67,37 +70,6 @@ async function fetchWithConnectTimeout(
     clearTimeout(timer);
     userSignal?.removeEventListener("abort", onUserAbort);
   }
-}
-
-/** Build a {@link StreamError} from a non-OK response. A refused turn (e.g. 429
- * for quota / rate limit) arrives as a plain JSON `{error:{code,message}}` body
- * with a `Retry-After` header — not an SSE stream — so pull those out for precise
- * UI phrasing. Falls back to status-only when the body isn't the expected shape. */
-async function streamErrorFromResponse(
-  response: Response,
-): Promise<StreamError> {
-  let code: string | undefined;
-  let serverMessage: string | undefined;
-  try {
-    const body = (await response.json()) as {
-      error?: { code?: string; message?: string };
-      detail?: { code?: string; message?: string } | string;
-    };
-    code = body.error?.code;
-    serverMessage = body.error?.message;
-    if (!code && typeof body.detail === "object" && body.detail) {
-      code = body.detail.code;
-      serverMessage = body.detail.message ?? serverMessage;
-    }
-  } catch {
-    /* non-JSON body — keep status-only phrasing */
-  }
-  const header = Number(response.headers.get("Retry-After"));
-  return new StreamError("http", response.status, {
-    code,
-    serverMessage,
-    retryAfter: Number.isFinite(header) && header > 0 ? header : undefined,
-  });
 }
 
 /** Latest journal seq seen on this conversation's SSE (for Last-Event-ID). */
@@ -255,28 +227,45 @@ export async function pumpSseBody(
   }
 }
 
-/** Apply buffered attach catch-up events in one React batch (avoid per-frame worker
- * running→completed paint during clear-then-fold replay).
+/**
+ * Fold one buffered attach catch-up段 in a single React batch — resetting this turn's
+ * local state first **only when the segment head says so** (实时重连续看 · 流式回复
+ * 持久化 §3.6 · P3).
  *
- * ``clearPartial`` (default) wipes the tail assistant's execution first so a full
- * journal replay cannot double-fold the partial we already painted. A catch-up段
- * for a turn we never saw (对话级订阅接到另一端开的新回合) has no partial to clear —
- * clearing there would wipe the *previous* turn's team graph, so callers pass false. */
-export function flushAttachCatchUp(
+ * 服务端在段首 ``message_start`` 上表态，客户端照做，绝不自己猜：
+ *
+ * - 带 ``full_replay`` = 全量段（本段就是这一回合的全部）→ 先重置本回合已折的一切（正文
+ *   气泡 + 执行槽），再整段重折，否则正文折两遍。
+ * - 不带（增量段 / 没有段首的段）=「你手里那半场是对的，往后接」→ 一个字都不许清。断线重连
+ *   时客户端手上的上半场只在自己内存里，清了就永远回不来了——服务端这一段只带游标之后的事实。
+ *   另端刚开的新回合同理（本端从没见过它，清只会抹掉上一回合的团队图）。
+ *
+ * 段首认段内首个 ``message_start``（``resume_settled`` 之类的 lead 帧可能排在它前面）。空段
+ * 没有段首，也就没有「全量」可言：服务端刻意不给空段盖标记，正是不让客户端清空后无米下锅。
+ *
+ * 一次性成批写出，避免逐帧把已完成的 worker 再演一遍 running→completed。
+ */
+export function foldAttachSegment(
   conversationId: string,
-  events: SSEEvent[],
-  opts: { clearPartial?: boolean } = {},
+  segment: SSEEvent[],
 ): void {
+  const head = segment.find((e) => e.type === "message_start");
+  const fullReplay =
+    (head?.payload as MessageStartPayload | undefined)?.full_replay === true;
   unstable_batchedUpdates(() => {
-    const last = getRuntime(conversationId).messages.at(-1);
-    if (opts.clearPartial !== false && last?.role === "assistant") {
-      const { clearExecution } = useExecutionStore.getState();
-      clearExecution(last.id);
-      if (last.serverMessageId && last.serverMessageId !== last.id) {
-        clearExecution(last.serverMessageId);
+    // 没有锚点（消息窗里还没有那条用户提问）时 reset 落空 → 仍清尾泡执行槽兜底。
+    if (fullReplay) {
+      resetPartialTurnForReplay(conversationId);
+      const last = getRuntime(conversationId).messages.at(-1);
+      if (last?.role === "assistant") {
+        const { clearExecution } = useExecutionStore.getState();
+        clearExecution(last.id);
+        if (last.serverMessageId && last.serverMessageId !== last.id) {
+          clearExecution(last.serverMessageId);
+        }
       }
     }
-    for (const event of events) {
+    for (const event of segment) {
       dispatchSSEEvent(event, {
         conversationId,
         source: "server",
@@ -294,16 +283,17 @@ export type AttachOutcome = "attached" | "none";
 /**
  * Re-attach to a conversation's in-flight turn and 续看 it live (C1 · slice 1b).
  *
- * Always sends ``Last-Event-ID`` (last journal seq, or ``0`` when none) so the
- * backend takes the journal-backed full-turn replay path (流式回复持久化 §3.6 ·
- * P3). Callers that clear-then-fold (``rejoinLiveTurn``) truncate the bubble /
- * process / execution before attach — the replay segment folds into the empty
- * placeholder.
+ * Always sends ``Last-Event-ID`` (last journal seq on this conversation's SSE, or
+ * ``0`` when none) — the server reads it as「我看到这里为止」and answers with either
+ * the whole turn or just the facts after it (流式回复持久化 §3.6 · P3).
  *
- * Catch-up: buffer journal replay (+ hot re-hang) until ``: attach-caught-up``,
- * then one-shot fold so already-completed workers do not paint running→completed
- * again on refresh. Older servers without the comment flush the buffer when the
- * stream ends (degraded: still one paint, no live boundary).
+ * Catch-up: buffer journal replay (+ hot re-hang) until ``: attach-caught-up``, then
+ * one-shot fold through {@link foldAttachSegment} — the段首 decides whether that fold
+ * clears this turn's local state first. **调用方不得抢在 attach 之前清屏**：段是不是
+ * 全量只有服务端知道，抢清后若来的是增量段，本回合上半场就永久没了。
+ *
+ * Older servers without the comment flush the buffer when the stream ends
+ * (degraded: still one paint, no live boundary).
  *
  * **回合级** attach（不带 ``follow``）：无 live run 时服务端回 204 → ``"none"``，回合
  * 收口即断流。调用方（``rejoinLiveTurn``）靠这个 204 判「回合已结束、去读持久化」，
@@ -318,19 +308,24 @@ export async function attachConversation(
   const primaryToken = claimPrimaryStream(conversationId);
   const releaseLocalStream = beginLocalConversationStream(conversationId);
 
-  const doFetch = (signal: AbortSignal) => {
+  const doFetch = async (signal: AbortSignal): Promise<Response> => {
     const headers: Record<string, string> = {
       Accept: "text/event-stream",
       ...clientHeaders(),
     };
-    // Always present → journal-backed full replay (header value observational).
+    // 恒带：``0`` = 本端没有游标（服务端据此回整段），否则报出看到的最后一个 journal seq。
     headers["Last-Event-ID"] = lastEventIds.get(conversationId) ?? "0";
-    return fetch(`${BASE_URL}/v1/conversations/${conversationId}/stream`, {
-      method: "GET",
-      credentials: "include",
-      headers,
-      signal,
-    });
+    const response = await fetch(
+      `${BASE_URL}/v1/conversations/${conversationId}/stream`,
+      {
+        method: "GET",
+        credentials: "include",
+        headers,
+        signal,
+      },
+    );
+    captureCsrf(response); // token rides every response, streams included
+    return response;
   };
 
   try {
@@ -351,16 +346,11 @@ export async function attachConversation(
       }
     }
     if (response.status === 204) {
-      // 无 live turn 仍对账：清幽灵条 / 对齐他端仍在队的项。
-      void reconcileQueuedTurns(conversationId);
       return "none";
     }
     if (!response.ok) {
       throw await streamErrorFromResponse(response);
     }
-
-    // SSE 重连成功：队列 EPHEMERAL 可能已漏；GET 权威刷新条。
-    void reconcileQueuedTurns(conversationId);
 
     const catchUp: SSEEvent[] = [];
     let catchingUp = true;
@@ -378,13 +368,13 @@ export async function attachConversation(
         if (!catchingUp) return;
         if (comment !== ATTACH_CAUGHT_UP_COMMENT) return;
         catchingUp = false;
-        flushAttachCatchUp(conversationId, catchUp);
+        foldAttachSegment(conversationId, catchUp);
         catchUp.length = 0;
       },
     );
     // Legacy server: no caught-up comment — flush whatever we buffered (whole stream).
     if (catchingUp && catchUp.length > 0) {
-      flushAttachCatchUp(conversationId, catchUp);
+      foldAttachSegment(conversationId, catchUp);
     }
 
     if (getRuntime(conversationId).isGenerating) {
@@ -421,8 +411,8 @@ async function runMessageStream(
   const primaryToken = claimPrimaryStream(conversationId);
   const releaseLocalStream = beginLocalConversationStream(conversationId);
 
-  const doFetch = (signal: AbortSignal) =>
-    fetch(`${BASE_URL}${path}`, {
+  const doFetch = async (signal: AbortSignal): Promise<Response> => {
+    const response = await fetch(`${BASE_URL}${path}`, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -434,6 +424,9 @@ async function runMessageStream(
       body,
       signal,
     });
+    captureCsrf(response);
+    return response;
+  };
 
   try {
     traceTurnMilestone(conversationId, "fetch_start", { path });
@@ -442,10 +435,14 @@ async function runMessageStream(
       status: response.status,
       ok: response.ok,
     });
+    // One replay for the whole call, shared by both recoveries below: a server
+    // that keeps refusing costs one extra attempt, never a loop of turn starts.
+    let replayed = false;
     if (response.status === 401) {
       const outcome = await tryRefresh();
       if (outcome === "renewed") {
         response = await fetchWithConnectTimeout(doFetch, signal);
+        replayed = true;
       } else if (outcome === "auth_dead") {
         notifyUnauthorized();
         throw new StreamError("auth");
@@ -455,6 +452,26 @@ async function runMessageStream(
       if (response.status === 401) {
         notifyUnauthorized();
         throw new StreamError("auth");
+      }
+    }
+
+    // Re-sending a POST that *starts a turn* is safe only because of what the
+    // verdict proves: the CSRF middleware refused this request before any handler
+    // ran, so there is no turn to double-start, and the refusal carried a usable
+    // replacement token (`doFetch` absorbed it, and rebuilds its headers per
+    // attempt so the replay presents it). A 403 that withheld that token is the
+    // server declining to re-arm us and must stay a failure — the client never
+    // second-guesses that from the status alone. See {@link isReplayableCsrfRejection}.
+    if (!replayed && response.status === 403) {
+      const refusal = new ApiError(
+        response.status,
+        await response.clone().text(),
+        response.headers,
+      );
+      if (isReplayableCsrfRejection(response, refusal)) {
+        logEvent("info", "auth.csrf_replay", { path, via: "message_stream" });
+        replayed = true;
+        response = await fetchWithConnectTimeout(doFetch, signal);
       }
     }
 

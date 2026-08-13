@@ -364,6 +364,34 @@ export interface SidecarRestoreTurnBaselineRequest {
   snapshotId: string;
 }
 
+/**
+ * 本地「留版本」· 创建：zip 工作区落 `AgentCore/versions/<id>/`。
+ *
+ * 与回合基线分轨：基线是 best-effort（失败静默返空），命名版本是用户显式动作 ——
+ * 失败以 reject 上抛，UI 必须如实报错。列举 / 删除不走 sidecar（`fsApi` 更轻）。
+ */
+export interface SidecarCreateWorkspaceVersionRequest {
+  rootId: string;
+  subpath?: string;
+  /** 用户输入的版本名（非空、≤200 字）；空名由 Python 侧拒绝。 */
+  name: string;
+}
+
+/** Wire shape mirrors cloud ``SnapshotSummary`` (snake_case; `name` ↔ `label`)。 */
+export interface SidecarWorkspaceVersionResult {
+  version_id: string;
+  name: string;
+  created_at: string;
+  size_bytes: number;
+}
+
+/** 本地「留版本」· 恢复：overlay 解压回工作区（不清空，不经云 restoreSnapshot）。 */
+export interface SidecarRestoreWorkspaceVersionRequest {
+  rootId: string;
+  subpath?: string;
+  versionId: string;
+}
+
 /** Local hydrate: list live browser sessions from sidecar Registry (not cloud). */
 export interface SidecarListBrowserSessionsRequest {
   rootId: string;
@@ -593,6 +621,21 @@ export interface SidecarCancelRequest {
   reason?: "user_stop" | "abort_signal" | "attach_abort";
 }
 
+/**
+ * 按人干预回执 —— 引擎有没有真收下这次「只停这位队员 / 立即改此人」。
+ *
+ * `accepted=false` = **什么都没入队**（驱动循环已退出、run 不在当前计划里、或本地 sidecar
+ * 不可达）；`queued` 只是这条 execution 的排队计数，不能拿它冒充受理成功。字段与云端
+ * `run-stop` / `run-redirect` 响应同形，渲染层两条路只写一份处理。
+ */
+export interface SidecarInterveneAck {
+  accepted: boolean;
+  reason: string;
+  /** 面向用户的一句话（由引擎给出）。 */
+  detail: string;
+  queued: number;
+}
+
 /** 用户中途改某个 worker 的方向（中间可见性 Phase 2a）。 */
 export interface SidecarRunRedirectRequest {
   rootId: string;
@@ -711,6 +754,8 @@ export const SIDECAR_CHANNELS = {
   attach: "sidecar:attach",
   turnFilesDiff: "sidecar:turnFilesDiff",
   restoreTurnBaseline: "sidecar:restoreTurnBaseline",
+  createWorkspaceVersion: "sidecar:createWorkspaceVersion",
+  restoreWorkspaceVersion: "sidecar:restoreWorkspaceVersion",
   listBrowserSessions: "sidecar:listBrowserSessions",
   event: "sidecar:event",
   fulfill: "sidecar:fulfill",
@@ -728,8 +773,8 @@ export interface SidecarApi {
   startTurn(req: SidecarStartTurnRequest): Promise<SidecarTurnResult>;
   cancel(req: SidecarCancelRequest): Promise<void>;
   respond(req: SidecarRespondRequest): Promise<{ resolved: boolean }>;
-  runRedirect(req: SidecarRunRedirectRequest): Promise<void>;
-  runStop(req: SidecarRunStopRequest): Promise<{ queued: number }>;
+  runRedirect(req: SidecarRunRedirectRequest): Promise<SidecarInterveneAck>;
+  runStop(req: SidecarRunStopRequest): Promise<SidecarInterveneAck>;
   /** `accepted=false` = 引擎未收（掌舵窗口已关 / sidecar 不可达）；调用方须如实回执。 */
   debateSteer(req: SidecarDebateSteerRequest): Promise<{ accepted: boolean }>;
   /** 续跑一个持久挂起的本地回合；Promise 在续跑结束时 resolve（同 `startTurn` 携最终结果，
@@ -767,6 +812,14 @@ export interface SidecarApi {
   ): Promise<SidecarTurnFilesDiffResult>;
   /** A2′ 本机回退到回合基线（unzip 覆盖，不经云）。 */
   restoreTurnBaseline(req: SidecarRestoreTurnBaselineRequest): Promise<void>;
+  /** 本地留版本：zip 工作区为一个命名版本；失败 reject（用户显式动作，不静默）。 */
+  createWorkspaceVersion(
+    req: SidecarCreateWorkspaceVersionRequest,
+  ): Promise<SidecarWorkspaceVersionResult>;
+  /** 本地恢复命名版本：overlay 解压（不清空，不经云 restoreSnapshot）。 */
+  restoreWorkspaceVersion(
+    req: SidecarRestoreWorkspaceVersionRequest,
+  ): Promise<SidecarWorkspaceVersionResult>;
   /** Local hydrate: list browser sessions from sidecar Registry. */
   listBrowserSessions(
     req: SidecarListBrowserSessionsRequest,

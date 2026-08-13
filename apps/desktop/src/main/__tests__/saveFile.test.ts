@@ -52,6 +52,25 @@ describe("sanitizeFilename", () => {
   it("超长截断到 150 字符", () => {
     expect(sanitizeFilename("x".repeat(300)).length).toBe(150);
   });
+
+  it("超长截断时保住扩展名（砍掉扩展名会让文件双击打不开）", () => {
+    const out = sanitizeFilename(`${"报告".repeat(200)}.docx`);
+    expect(out.length).toBe(150);
+    expect(out.endsWith(".docx")).toBe(true);
+  });
+
+  it("点后过长时不当扩展名，按原样硬截", () => {
+    const out = sanitizeFilename(`a.${"b".repeat(300)}`);
+    expect(out.length).toBe(150);
+    expect(out.startsWith("a.bbb")).toBe(true);
+  });
+
+  it("截断点落在空格上时不留结尾空格", () => {
+    // 主名截断点（150 − ".docx".length = 145）正好落在空格上。
+    const out = sanitizeFilename(`${"x".repeat(144)} ${"y".repeat(20)}.docx`);
+    expect(out.endsWith(".docx")).toBe(true);
+    expect(/[\s.]\.docx$/.test(out)).toBe(false);
+  });
 });
 
 describe("saveBytesToDisk", () => {

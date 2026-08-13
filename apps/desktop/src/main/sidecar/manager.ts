@@ -4,14 +4,17 @@ import {
   type SidecarAttachRequest,
   type SidecarAttachResponse,
   type SidecarCancelRequest,
+  type SidecarCreateWorkspaceVersionRequest,
   type SidecarDebateSteerRequest,
   type SidecarInference,
+  type SidecarInterveneAck,
   type SidecarListBrowserSessionsRequest,
   type SidecarListBrowserSessionsResult,
   type SidecarRecoveryRequest,
   type SidecarRecoveryResponse,
   type SidecarRespondRequest,
   type SidecarRestoreTurnBaselineRequest,
+  type SidecarRestoreWorkspaceVersionRequest,
   type SidecarResumeRequest,
   type SidecarRunRedirectRequest,
   type SidecarRunStopRequest,
@@ -21,6 +24,7 @@ import {
   type SidecarTurnFilesDiffResult,
   type SidecarTurnResult,
   type SidecarWarmAccountRulesMemoryResult,
+  type SidecarWorkspaceVersionResult,
   buildSidecarResumeRpcParams,
 } from "@shared/sidecar-contract";
 import { BrowserWindow, type WebContents } from "electron";
@@ -31,6 +35,7 @@ import { listMcpToolsValue } from "../mcp-service";
 import { listUnsyncedSummaries, sidecarDataDir } from "../outbox-writeback";
 import { SidecarEventBuffer } from "../sidecar-event-buffer";
 import { SidecarClient } from "./client";
+import { buildExternalMounts } from "./externalMounts";
 import { readLocalPausedRecovery } from "./recovery";
 import {
   type SpawnConfig,
@@ -66,6 +71,17 @@ const ACCOUNT_WARM_RENEW_MARGIN_MS = 15_000;
  * 失败不再永久锁死该键——退避过后下个回合会重试。
  */
 const ACCOUNT_WARM_RETRY_BACKOFF_MS = 30_000;
+
+/**
+ * 本地引擎够不着时的按人干预回执：没有活的驱动循环，请求哪儿也没去。
+ * 与引擎自己给的「驱动已退出」同一句口径——用户不需要区分是进程沉睡还是循环结束。
+ */
+const UNREACHABLE_INTERVENE_ACK = {
+  accepted: false,
+  reason: "no_live_drive",
+  detail: "本地引擎没在跑这批工作，这次操作没有生效。",
+  queued: 0,
+} as const satisfies SidecarInterveneAck;
 
 /**
  * 服务端快照缓存键 `(user_id, folder_id)` 的桌面侧镜像（`folderId` 空白/缺省 = 裸聊，
@@ -331,16 +347,9 @@ export class SidecarManager {
       attaching: false,
     });
     try {
-      const sessionRoots = listSessionRoots(req.conversationId);
-      const externalMounts = sessionRoots
-        .filter((r) => r.alias && r.absPath)
-        .map((r) => ({
-          alias: r.alias as string,
-          rootId: r.id,
-          label: r.name,
-          absPath: r.absPath,
-          mode: r.mode === "organize" ? "organize" : "readonly",
-        }));
+      const externalMounts = buildExternalMounts(
+        listSessionRoots(req.conversationId),
+      );
       const result = await entry.client.request("startTurn", {
         turnId: req.turnId,
         conversationId: req.conversationId,
@@ -586,6 +595,40 @@ export class SidecarManager {
     });
   }
 
+  /** 本地留版本：ensure sidecar → `createWorkspaceVersion`（zip 只在 Python 侧）。 */
+  async createWorkspaceVersion(
+    req: SidecarCreateWorkspaceVersionRequest,
+    workspaceRoot: string,
+  ): Promise<SidecarWorkspaceVersionResult> {
+    const entry = this.ensure(
+      req.rootId,
+      req.subpath ?? "",
+      workspaceRoot,
+      undefined,
+    );
+    await entry.ready;
+    return entry.client.request("createWorkspaceVersion", {
+      name: req.name,
+    }) as Promise<SidecarWorkspaceVersionResult>;
+  }
+
+  /** 本地恢复命名版本：ensure sidecar → `restoreWorkspaceVersion`（overlay unzip）。 */
+  async restoreWorkspaceVersion(
+    req: SidecarRestoreWorkspaceVersionRequest,
+    workspaceRoot: string,
+  ): Promise<SidecarWorkspaceVersionResult> {
+    const entry = this.ensure(
+      req.rootId,
+      req.subpath ?? "",
+      workspaceRoot,
+      undefined,
+    );
+    await entry.ready;
+    return entry.client.request("restoreWorkspaceVersion", {
+      versionId: req.versionId,
+    }) as Promise<SidecarWorkspaceVersionResult>;
+  }
+
   /** Local hydrate: ensure sidecar → `listBrowserSessions`（同进程 Registry）。 */
   async listBrowserSessions(
     req: SidecarListBrowserSessionsRequest,
@@ -646,16 +689,9 @@ export class SidecarManager {
       attaching: false,
     });
     try {
-      const sessionRoots = listSessionRoots(req.conversationId);
-      const externalMounts = sessionRoots
-        .filter((r) => r.alias && r.absPath)
-        .map((r) => ({
-          alias: r.alias as string,
-          rootId: r.id,
-          label: r.name,
-          absPath: r.absPath,
-          mode: r.mode === "organize" ? "organize" : "readonly",
-        }));
+      const externalMounts = buildExternalMounts(
+        listSessionRoots(req.conversationId),
+      );
       const result = await entry.client.request("resume", {
         ...buildSidecarResumeRpcParams(
           req,
@@ -789,36 +825,53 @@ export class SidecarManager {
     });
   }
 
-  /** 用户中途改某个 worker 的方向（队列入队；Step 2 由 scheduler 消费）。 */
-  async runRedirect(req: SidecarRunRedirectRequest): Promise<void> {
-    const entry = this.entries.get(entryKey(req.rootId, req.subpath));
-    if (!entry) return;
-    try {
-      await entry.client.request("runRedirect", {
-        conversationId: req.conversationId,
-        executionId: req.executionId,
-        runId: req.runId,
-        feedback: req.feedback,
-      });
-    } catch {
-      // sidecar 不可达时静默——与 cancel 一致。
-    }
+  /** 用户中途改某个 worker 的方向（本地引擎受理后即取消在飞工作 + 重跑）。 */
+  async runRedirect(
+    req: SidecarRunRedirectRequest,
+  ): Promise<SidecarInterveneAck> {
+    return this.intervene(req, "runRedirect", {
+      conversationId: req.conversationId,
+      executionId: req.executionId,
+      runId: req.runId,
+      feedback: req.feedback,
+    });
   }
 
-  /** 用户中途停某个 / 全部 worker（不杀回合；队列入队）。 */
-  async runStop(req: SidecarRunStopRequest): Promise<{ queued: number }> {
+  /** 用户中途停某个 / 全部 worker（不杀回合）。 */
+  async runStop(req: SidecarRunStopRequest): Promise<SidecarInterveneAck> {
+    return this.intervene(req, "runStop", {
+      conversationId: req.conversationId,
+      executionId: req.executionId,
+      runId: req.runId ?? null,
+    });
+  }
+
+  /**
+   * 按人干预的共同提交路径：把本地引擎的受理回执原样带回渲染层。
+   *
+   * 引擎沉睡 / RPC 失败都是「没有活的驱动循环」——以前这里静默吞掉，UI 照样弹
+   * 「引擎将停下这位队员」，而实际上什么都没发生。
+   */
+  private async intervene(
+    req: { rootId: string; subpath?: string },
+    method: "runRedirect" | "runStop",
+    params: Record<string, unknown>,
+  ): Promise<SidecarInterveneAck> {
     const entry = this.entries.get(entryKey(req.rootId, req.subpath));
-    if (!entry) return { queued: 0 };
+    if (!entry) return UNREACHABLE_INTERVENE_ACK;
     try {
-      const reply = (await entry.client.request("runStop", {
-        conversationId: req.conversationId,
-        executionId: req.executionId,
-        runId: req.runId ?? null,
-      })) as { queued?: number } | null;
-      return { queued: Number(reply?.queued ?? 0) };
+      const reply = (await entry.client.request(method, params)) as Partial<
+        Record<keyof SidecarInterveneAck, unknown>
+      > | null;
+      if (reply == null) return UNREACHABLE_INTERVENE_ACK;
+      return {
+        accepted: reply.accepted === true,
+        reason: String(reply.reason ?? "no_live_drive"),
+        detail: String(reply.detail ?? ""),
+        queued: Number(reply.queued ?? 0),
+      };
     } catch {
-      // sidecar 不可达时静默——与 runRedirect 一致。
-      return { queued: 0 };
+      return UNREACHABLE_INTERVENE_ACK;
     }
   }
 

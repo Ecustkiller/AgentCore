@@ -307,7 +307,7 @@ async def run_standing_task_job(
                 role="user",
                 content=user_message,
             )
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id)
             await StandingTaskRunRepository(session).set_conversation_and_message(
                 run_id,
                 conversation_id=conversation_id,

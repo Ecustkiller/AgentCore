@@ -269,18 +269,38 @@ class DelegateTool:
             n += child.continuation_count
         return n
 
-    def note_continuation(self, run_id: str) -> None:
+    @property
+    def user_continuation_count(self) -> int:
+        """上面那批里用户亲手促成的子集（「立即改此人」的 redirect 热修）。
+
+        用户面的「队友互相把关」= ``continuation_count - user_continuation_count``：
+        用户自己点的返工不是队友互检。运营口径 ``revises`` 仍取总数，不受影响。
+        """
+        n = len(self._acc.user_continuations)
+        for child in self._children:
+            n += child.user_continuation_count
+        return n
+
+    def note_continuation(self, run_id: str, *, by_user: bool = False) -> None:
         """Record a successful continuation for turn_metrics.revises.
 
         Lives on the accumulator so a nested lead's 续派 rolls up the SAME merge path
         as usage / ledger / collab — the tool object it happened on is discarded.
+
+        ``by_user`` 标出这次返工是谁要的：队友续派（``continue_from``）缺省为否，
+        用户点「立即改此人」的 redirect 热修传真。
         """
         self._acc.continuations.append(run_id)
+        if by_user:
+            self._acc.user_continuations.append(run_id)
 
     @property
     def collab(self) -> dict[str, int]:
         """Turn-level 协作质量 tally (学·度量 §2.5): boundary_yields / scope_signals /
-        escalations, rolled up across this turn's batches (and nested sub-teams)."""
+        escalations, rolled up across this turn's batches (and nested sub-teams).
+
+        ``boundary_yields_by_user`` 是 ``boundary_yields`` 的子集（用户拍板的
+        ``checkpoint`` 那部分），供用户面剔除，不改总数口径。"""
         return self._acc.collab
 
     @property

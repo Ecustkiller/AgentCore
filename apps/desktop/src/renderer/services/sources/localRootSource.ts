@@ -105,6 +105,8 @@ export function createLocalRootSource(
           path: outPath(e.relPath),
           name: e.name,
           isDir: e.kind === "dir",
+          sizeBytes: e.size,
+          mtimeMs: e.modifiedMs,
         }),
       );
     },

@@ -50,6 +50,7 @@ from agentcore.db.models import (
     CostEvent,
     MemoryUpdateRow,
     Message,
+    PausedTurnOutcomeRow,
     PausedTurnRow,
     TurnJournalRow,
     TurnMetricsRow,
@@ -228,6 +229,12 @@ async def _purge_one(session: AsyncSession, conversation_id: str) -> None:
     )
     await session.execute(
         delete(PausedTurnRow).where(PausedTurnRow.conversation_id == conversation_id)
+    )
+    # A frame's terminal outcome is the other half of the same pause — it goes with it.
+    await session.execute(
+        delete(PausedTurnOutcomeRow).where(
+            PausedTurnOutcomeRow.conversation_id == conversation_id
+        )
     )
     await session.execute(
         delete(ConversationShare).where(ConversationShare.conversation_id == conversation_id)

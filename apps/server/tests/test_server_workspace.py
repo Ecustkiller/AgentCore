@@ -168,8 +168,9 @@ async def test_list_missing_declared_stage_dir_returns_empty(tmp_path: Path):
     """约定出口尚未落盘：list → []（不预创建、不抛 NotADirectory）。"""
     from agentcore.workspace.stage_dirs import RESEARCH_DIR
 
-    entries = await _ws(tmp_path).list(RESEARCH_DIR, "*")
-    assert entries == []
+    listing = await _ws(tmp_path).list(RESEARCH_DIR, "*")
+    assert listing.entries == []
+    assert listing.truncated is False
     assert not (tmp_path / "AgentCore").exists()
 
 
@@ -182,6 +183,46 @@ async def test_list_missing_undeclared_under_agentcore_still_raises(tmp_path: Pa
     """AgentCore/ 下非约定子树仍报错（口径不得扩成整棵 AgentCore 前缀）。"""
     with pytest.raises(NotADirectory):
         await _ws(tmp_path).list("AgentCore/not-a-stage", "*")
+
+
+async def test_list_reports_truncation_instead_of_cutting_silently(tmp_path: Path):
+    """命中上限必须自报，且更高的 cap 能取回全部——静默切树 = 用户读作「文件没了」。"""
+    for i in range(120):
+        (tmp_path / f"f{i:03d}.txt").write_text("x", encoding="utf-8")
+
+    capped = await _ws(tmp_path).list(".", "*", cap=100)
+    assert len(capped.entries) == 100
+    assert capped.truncated is True
+
+    full = await _ws(tmp_path).list(".", "*", cap=2000)
+    assert len(full.entries) == 120
+    assert full.truncated is False
+
+
+async def test_list_per_directory_reaches_deep_files_past_the_cap(tmp_path: Path):
+    """深层目录逐层列举不受同级兄弟数量牵连（旧路径靠「拉全树再本地过滤」而丢深层）。"""
+    for i in range(150):
+        (tmp_path / f"a{i:03d}.txt").write_text("x", encoding="utf-8")
+    deep = tmp_path / "zzz" / "nested"
+    deep.mkdir(parents=True)
+    (deep / "target.md").write_text("found", encoding="utf-8")
+
+    listing = await _ws(tmp_path).list("zzz/nested", "*", cap=100)
+    assert [e.path for e in listing.entries] == ["zzz/nested/target.md"]
+    assert listing.truncated is False
+
+
+async def test_list_budget_is_not_spent_on_ignored_subtrees(tmp_path: Path):
+    """忽略目录在下潜时就剪掉：否则 node_modules 吃光预算，克隆仓库列举成空。"""
+    noise = tmp_path / "node_modules" / "pkg"
+    noise.mkdir(parents=True)
+    for i in range(200):
+        (noise / f"n{i:03d}.js").write_text("x", encoding="utf-8")
+    (tmp_path / "README.md").write_text("hi", encoding="utf-8")
+
+    listing = await _ws(tmp_path).list(".", "**/*", cap=100)
+    assert [e.path for e in listing.entries] == ["README.md"]
+    assert listing.truncated is False
 
 
 # --- replace ---

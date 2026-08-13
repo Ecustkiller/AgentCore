@@ -40,7 +40,7 @@ _VENDOR_BASE = "http://example.invalid/v1"
 # Verbatim copy the quota gate raises (conversation/quota.py, 成本配额 F6): the
 # 「接入自己的 key」exit is the CTA, so it must survive the hop word for word.
 _QUOTA_MESSAGE = (
-    "本月额度已用完（约 ¥12.00 / ¥12.00），下月 1 日（UTC）重置；"
+    "本月额度已用完（约 ¥12.00 / ¥12.00），额度重置后可继续；"
     "测试需要可联系管理员提额，或接入自己的 key 继续（设置 · 服务商）。"
 )
 _KEY_MISSING_MESSAGE = "请先在「设置 · 服务商」中填入你的 API Key，再发起对话。"

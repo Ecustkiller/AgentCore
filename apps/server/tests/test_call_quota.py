@@ -285,6 +285,9 @@ async def test_refusal_is_the_sidecar_leaf_twin_and_never_retried(gate):
     # The gate's own copy reaches the user (reset window + BYOK exit), not a generic one.
     assert "今日额度" in err.message
     assert "接入自己的 key" in err.message
+    # …and so does the instant it resets at: the copy no longer names one, so losing
+    # it on this hop would leave the leaf face alone unable to say when the wall lifts.
+    assert err.details["reset_at"].endswith("Z")
 
 
 async def test_refusal_chains_the_route_level_quota_error(gate):
@@ -358,8 +361,9 @@ async def test_unknown_user_does_not_block_the_call(gate):
 async def test_background_chrome_degrades_instead_of_raising(monkeypatch):
     """标题/记忆等后台 chrome 恒不因配额抛错——中途拒也只降级（gate.py 契约）。
 
-    The pre-call gate already returns ``None`` when quota is spent; a refusal that
-    lands one step later must not turn best-effort chrome into a raised 429.
+    The pre-call gate already withholds credentials when quota is spent; a refusal
+    that lands one step later must not turn best-effort chrome into a raised 429 —
+    it comes back as a skip that names the quota as the cause.
     """
     from agentcore.billing import gate as gate_mod
     from agentcore.llm.credentials import LLMCredentials
@@ -374,4 +378,9 @@ async def test_background_chrome_degrades_instead_of_raising(monkeypatch):
 
     monkeypatch.setattr(gate_mod, "resolve_and_gate_background", _resolve)
 
-    assert await gate_mod.run_background_llm("u1", purpose="title", runner=_runner) is None
+    outcome = await gate_mod.run_background_llm("u1", purpose="title", runner=_runner)
+    assert outcome == gate_mod.BackgroundLlmSkip(
+        reason=gate_mod.BackgroundSkipReason.QUOTA_EXCEEDED
+    )
+    # An undated refusal must not invent a recovery moment.
+    assert outcome.declared_recovery_in is None

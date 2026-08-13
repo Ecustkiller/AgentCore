@@ -141,6 +141,7 @@ class DesktopClientChannel:
                     request_id=request_id,
                     error_kind="DesktopNotifyError",
                     error_detail="桌面通知失败: no fulfiller（无履约方）",
+                    deadline_seconds=self.timeout_seconds,
                 ),
             )
         except TimeoutError as e:
@@ -210,6 +211,7 @@ class DesktopClientChannel:
                     error_kind="ExternalMountError",
                     error_detail="挂载本机目录失败: no fulfiller（无履约方）",
                     origin_offline_detail=f"挂载本机目录失败: {ORIGIN_DEVICE_OFFLINE}",
+                    deadline_seconds=deadline,
                 ),
             )
         except TimeoutError as e:
@@ -283,6 +285,7 @@ class DesktopClientChannel:
                     origin_offline_detail=(
                         f"本机 Host 操作失败（{op_name}）: {ORIGIN_DEVICE_OFFLINE}"
                     ),
+                    deadline_seconds=deadline,
                 ),
             )
         except TimeoutError as e:
@@ -350,6 +353,7 @@ class DesktopClientChannel:
                     origin_offline_detail=(
                         f"本机 MCP 操作失败（{op_name}）: {ORIGIN_DEVICE_OFFLINE}"
                     ),
+                    deadline_seconds=deadline,
                 ),
             )
         except TimeoutError as e:

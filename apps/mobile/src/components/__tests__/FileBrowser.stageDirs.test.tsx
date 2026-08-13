@@ -11,16 +11,19 @@ vi.mock("@/api/client", () => ({
 describe("FileBrowser stage dir badges", () => {
   it("约定约定文档目录显示徽章，普通目录零噪音", async () => {
     const source = {
-      list: async () => [
-        { path: "AgentCore", is_dir: true },
-        { path: "AgentCore/文档", is_dir: true },
-        { path: "AgentCore/文档/research", is_dir: true },
-        { path: "AgentCore/文档/research/a.md", is_dir: false },
-        { path: "AgentCore/文档/research/b.md", is_dir: false },
-        { path: "AgentCore/文档/debate", is_dir: true },
-        { path: "AgentCore/文档/debate/x.md", is_dir: false },
-        { path: "src", is_dir: true },
-      ],
+      list: async () => ({
+        entries: [
+          { path: "AgentCore", is_dir: true },
+          { path: "AgentCore/文档", is_dir: true },
+          { path: "AgentCore/文档/research", is_dir: true },
+          { path: "AgentCore/文档/research/a.md", is_dir: false },
+          { path: "AgentCore/文档/research/b.md", is_dir: false },
+          { path: "AgentCore/文档/debate", is_dir: true },
+          { path: "AgentCore/文档/debate/x.md", is_dir: false },
+          { path: "src", is_dir: true },
+        ],
+        truncated: false,
+      }),
       download: vi.fn(),
     };
     render(

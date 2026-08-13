@@ -601,10 +601,14 @@ def _reload_interrupted_partial() -> list[SSEEvent]:
 
 
 def _reload_cursor_structure() -> list[SSEEvent]:
-    """游标重连结构完整（P3/P4）：clear-then-fold 全量 journal 回放——游标前的工具行必须在场，
-    正文为单块（segment 合成同构），无叠字。钉住 process 工具步 + 正文。"""
+    """游标重连结构完整（P3/P4）：全量 journal 回放——游标前的工具行必须在场，正文为单块
+    （segment 合成同构），无叠字。钉住 process 工具步 + 正文。
+
+    段首取自服务端回放合成器本体（:func:`replay_open_event`，带 ``full_replay``）：清空指令
+    由段首帧下达，客户端据此重置本回合流式态后重折，不再拿 id 与屏上气泡比对自己猜。
+    """
     return [
-        message_start("m1", conversation_id=_CONV),
+        replay_open_event(turn_id="m1", conversation_id=_CONV),
         reasoning_delta("我先搜索。"),
         tool_use_start("tc1", "web_search", {"query": "AgentCore"}),
         tool_use_end("tc1", "web_search", success=True, output="找到 3 条结果。"),
@@ -619,7 +623,8 @@ def _reload_cursor_paused_ask() -> list[SSEEvent]:
 
     ``message_start`` 是 EPHEMERAL、不落 journal，却是前端拿到服务端 ``message_id`` 的
     唯一盖章点——耐久卡的「继续」正按这个 id 提交（``POST …/messages/{id}/resume``）。故回放
-    段由 :func:`replay_open_event` 开场：盖章在耐久卡之前，卡才绑得到本回合气泡。
+    段由 :func:`replay_open_event` 开场：盖章在耐久卡之前，卡才绑得到本回合气泡；同一帧的
+    ``full_replay`` 即「本段是全量重放，先重置本回合本地态」的显式指令。
 
     开场帧与收口帧都取自服务端回放合成器本体（不手抄），回放段形状一变、导出的 golden 就变，
     契约漂移门禁即红。
@@ -641,10 +646,35 @@ def _reload_cursor_paused_ask() -> list[SSEEvent]:
     ]
 
 
+def _reload_cursor_incremental() -> list[SSEEvent]:
+    """游标重连 · 增量段（P3 真增量）：段首**不带** ``full_replay`` → 客户端不清空、往后接。
+
+    前半场是客户端已经折过的 live 流：思考 → 工具 → 半截正文。它的 ``Last-Event-ID`` 停在
+    ``tool_use_end`` 那条耐久事件上——正文 delta 不带 ``id:``，所以游标天然落在文本块中间。
+
+    重连后服务端只补游标之后的事实。那一步正文在 journal 里是**整步全文**（process 步闭合
+    才落盘），客户端手里却只有它的前半截，于是该帧带 ``replace``：整块换掉、不是往后追加。
+    金标钉死两件事——不清空（思考/工具行仍在），且正文是「根据搜索，答案如下。」而不是把
+    「根据搜索，」叠两遍。
+    """
+    return [
+        message_start("m1", conversation_id=_CONV),
+        reasoning_delta("我先搜索。"),
+        tool_use_start("tc1", "web_search", {"query": "AgentCore"}),
+        tool_use_end("tc1", "web_search", success=True, output="找到 3 条结果。"),
+        # 客户端只收到这半截就断了（游标仍停在 tool_use_end）。
+        content_delta("根据搜索，"),
+        # —— 重连：增量段开场，段首无 full_replay ——
+        replay_open_event(turn_id="m1", conversation_id=_CONV, full_replay=False),
+        content_delta("根据搜索，答案如下。", replace=True),
+        message_end(FinishReason.END_TURN, input_tokens=1500, output_tokens=200, cost=_COST),
+    ]
+
+
 def _mid_run_refresh_ceo_narration() -> list[SSEEvent]:
     """运行中刷新（process 渐进持久化）：CEO 旁白→工具→旁白→交付，保序交织。
 
-    Attach / clear-then-fold 回放须还原同一 process 序；``messages.content`` 在交付轮
+    Attach 全量重放须还原同一 process 序；``messages.content`` 在交付轮
     才累加终稿（向量里末段 content 即交付，前段旁白也在 content_delta 里——与 live 同构，
     deliverable_only 裁剪是服务端 finalize 契约，不在本 fold 向量里模拟）。
     """
@@ -806,6 +836,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "reload_cursor_paused_ask": (
         "游标重连耐久卡（SSE-A1）：回放段以 message_start 盖章开场 → 待答 ask_user 卡绑本回合",
         _reload_cursor_paused_ask,
+    ),
+    "reload_cursor_incremental": (
+        "游标重连增量段（P3）：段首无 full_replay → 不清空；跨游标那步正文带 replace 整块换、不叠字",
+        _reload_cursor_incremental,
     ),
     "mid_run_refresh_ceo_narration": (
         "运行中刷新：CEO 旁白→工具→旁白→交付 process 保序（process 渐进持久化）",

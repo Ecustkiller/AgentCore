@@ -2,13 +2,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiPost = vi.fn();
 
-vi.mock("@/services/api", () => ({
-  BASE_URL: "https://api.test.example",
-  api: {
-    post: (...args: unknown[]) => apiPost(...args),
-  },
-}));
+// Keep the real ApiError: the module branches on it (`instanceof`) to tell a CSRF
+// refusal apart from an ordinary mint failure.
+vi.mock("@/services/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/services/api")>("@/services/api");
+  return {
+    ...actual,
+    BASE_URL: "https://api.test.example",
+    api: {
+      post: (...args: unknown[]) => apiPost(...args),
+    },
+  };
+});
 
+import { ApiError } from "@/services/api";
 import {
   clearSidecarInference,
   resolveSidecarInference,
@@ -128,6 +136,31 @@ describe("inferenceToken", () => {
     await expect(
       resolveSidecarInference({ force: true, conversationId: "c1" }),
     ).resolves.toBeNull();
+  });
+
+  it("rethrows a CSRF refusal instead of passing it off as a missing token", async () => {
+    // The api layer already replayed the self-healable kind, so a CSRF 403 that
+    // gets here is the one the backend refused to re-arm. Swallowing it to null
+    // makes the caller say「推理凭证失效」— a cause the user can't act on.
+    apiPost.mockRejectedValue(
+      new ApiError(
+        403,
+        JSON.stringify({
+          error: {
+            code: "CSRF_FAILED",
+            message: "CSRF token missing or invalid. Re-login and retry.",
+          },
+        }),
+      ),
+    );
+
+    const err = await resolveSidecarInference({
+      force: true,
+      conversationId: "c1",
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).code).toBe("CSRF_FAILED");
   });
 
   it("clearSidecarInference drops cache so next resolve remints", async () => {

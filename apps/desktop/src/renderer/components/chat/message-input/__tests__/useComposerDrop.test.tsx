@@ -34,6 +34,9 @@ import { useComposerDrop } from "../useComposerDrop";
 const describeMock = vi.mocked(describeFileAttachment);
 const residentMock = vi.mocked(residentAttachmentForFile);
 
+/** paste-<日期>-<时刻>-<唯一段>.png */
+const PASTE_NAME = /^paste-\d{8}-\d{6}-[0-9a-z]+\.png$/;
+
 function fileNamed(name: string, type = "text/plain"): File {
   return new File(["x"], name, { type });
 }
@@ -49,12 +52,7 @@ function deferred() {
 /** 真 React state，这样 chip 的 patch（函数式更新）能被观察到。 */
 function useDropHarness(conversationId: string | null) {
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const drop = useComposerDrop(
-    false,
-    attachments,
-    setAttachments,
-    conversationId,
-  );
+  const drop = useComposerDrop(attachments, setAttachments, conversationId);
   return { attachments, drop };
 }
 
@@ -239,7 +237,7 @@ describe("useComposerDrop 附加即上传", () => {
     expect(pasteEvent.preventDefault).toHaveBeenCalled();
     expect(residentMock).toHaveBeenCalled();
     const pastedFile = residentMock.mock.calls[0][1] as File;
-    expect(pastedFile.name).toMatch(/^paste-\d{8}-\d{6}\.png$/);
+    expect(pastedFile.name).toMatch(PASTE_NAME);
   });
 });
 
@@ -300,7 +298,7 @@ describe("collectClipboardFiles / normalizeClipboardFileName", () => {
       type: "image/png",
     });
     const n = normalizeClipboardFileName(f);
-    expect(n.name).toMatch(/^paste-\d{8}-\d{6}\.png$/);
+    expect(n.name).toMatch(PASTE_NAME);
     expect(n.type).toBe("image/png");
   });
 
@@ -309,21 +307,45 @@ describe("collectClipboardFiles / normalizeClipboardFileName", () => {
     expect(normalizeClipboardFileName(f).name).toBe("notes.txt");
   });
 
-  it("dedupes files + items referring to the same image", () => {
-    const png = new File([new Uint8Array([1, 2])], "image.png", {
-      type: "image/png",
-      lastModified: 42,
-    });
-    const collected = collectClipboardFiles({
-      files: [png] as unknown as FileList,
-      items: [
-        {
-          kind: "file",
+  it("同一秒粘两张截图：文件名不撞（撞名 = 落盘静默覆盖 = 丢图）", () => {
+    const shot = () =>
+      new File([new Uint8Array([1])], "image.png", { type: "image/png" });
+    expect(normalizeClipboardFileName(shot()).name).not.toBe(
+      normalizeClipboardFileName(shot()).name,
+    );
+  });
+
+  it("同一张图既在 files 又在 items：只出一个附件，且不重读剪贴板", () => {
+    // 浏览器里 items.getAsFile() 是现读现造：内容与名字相同，lastModified 却是构造
+    // 那一刻。传同一个 File 实例只能证明 mock，证不了剪贴板真实行为。
+    const bytes = new Uint8Array([1, 2]);
+    const getAsFile = vi.fn(
+      () =>
+        new File([bytes], "image.png", {
           type: "image/png",
-          getAsFile: () => png,
-        },
-      ],
+          lastModified: 1042,
+        }),
+    );
+    const collected = collectClipboardFiles({
+      files: [
+        new File([bytes], "image.png", { type: "image/png", lastModified: 42 }),
+      ] as unknown as FileList,
+      items: [{ kind: "file", type: "image/png", getAsFile }],
     } as unknown as DataTransfer);
     expect(collected).toHaveLength(1);
+    // 大图再解一次码就是可感知的卡顿，何况本就多余。
+    expect(getAsFile).not.toHaveBeenCalled();
+  });
+
+  it("files 为空时仍从 items 捞截图（部分环境截图只在 items）", () => {
+    const png = new File([new Uint8Array([1, 2])], "image.png", {
+      type: "image/png",
+    });
+    const collected = collectClipboardFiles({
+      files: [] as unknown as FileList,
+      items: [{ kind: "file", type: "image/png", getAsFile: () => png }],
+    } as unknown as DataTransfer);
+    expect(collected).toHaveLength(1);
+    expect(collected[0].name).toMatch(PASTE_NAME);
   });
 });

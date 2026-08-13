@@ -19,6 +19,7 @@ export function asReadOnlyFileSource(source: FileSource): FileSource {
       snapshots: false,
     },
     listDir: (dir) => source.listDir(dir),
+    listDirBounded: source.listDirBounded?.bind(source),
     listTree: source.listTree?.bind(source),
     listFileIndex: source.listFileIndex?.bind(source),
     read: (path) => source.read(path),
@@ -44,6 +45,7 @@ export function asReadOnlyFileSource(source: FileSource): FileSource {
     watch: source.watch?.bind(source),
     revealInOsFileManager: source.revealInOsFileManager?.bind(source),
     openWithOsDefaultApp: source.openWithOsDefaultApp?.bind(source),
+    canOpenWithOsDefaultApp: source.canOpenWithOsDefaultApp?.bind(source),
     openInAppPreview: source.openInAppPreview?.bind(source),
   };
 }

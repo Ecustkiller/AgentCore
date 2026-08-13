@@ -326,3 +326,40 @@ describe("MarkdownFileEditor host", () => {
     expect(screen.queryByText("完成")).toBeNull(); // never entered review
   });
 });
+
+describe("MarkdownFileEditor 「用默认程序打开」入口门控", () => {
+  const label = "用默认程序打开";
+
+  it("源不带谓词（本地源）→ 照旧出现，行为不变", async () => {
+    await renderLoaded(makeSource({ openWithOsDefaultApp: vi.fn() }));
+    expect(screen.getByLabelText(label)).toBeTruthy();
+  });
+
+  it("谓词放行 → 出现并调用源方法；谓词拒绝（白名单外）→ 入口不渲染", async () => {
+    const openWithOsDefaultApp = vi.fn(async () => {});
+    await renderLoaded(
+      makeSource({
+        openWithOsDefaultApp,
+        canOpenWithOsDefaultApp: () => true,
+      }),
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText(label));
+    });
+    expect(openWithOsDefaultApp).toHaveBeenCalledWith("a.md");
+
+    cleanup();
+    await renderLoaded(
+      makeSource({
+        openWithOsDefaultApp: vi.fn(),
+        canOpenWithOsDefaultApp: () => false,
+      }),
+    );
+    expect(screen.queryByLabelText(label)).toBeNull();
+  });
+
+  it("源没有 openWithOsDefaultApp（web 云端源）→ 入口不渲染", async () => {
+    await renderLoaded(makeSource({ canOpenWithOsDefaultApp: () => true }));
+    expect(screen.queryByLabelText(label)).toBeNull();
+  });
+});

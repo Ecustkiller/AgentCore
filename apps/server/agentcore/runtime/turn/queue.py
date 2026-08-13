@@ -18,8 +18,15 @@ the queue; durable recovery of queued content is out of scope for this slice.
 
 多端 (云对话多端同权 B2 · 验收 5): the enqueueing POST is not the only观察端 any more —
 every enqueue also signals ``turn_queued`` to端 following the conversation (see
-:func:`broadcast_turn_queued`). Still just a「变了」ping: content authority remains
-``GET …/queued-turns``, and the queue itself stays in-process.
+:func:`broadcast_turn_queued`), a「变了」ping for whoever is watching this turn.
+
+The *content* goes somewhere else: every mutation pushes the whole queue to the
+user's online devices over their fulfill channel
+(:func:`~agentcore.fulfill.user_signal.push_queue_snapshot`). A queue belongs to
+the account, and its holder is usually looking at another conversation — or at
+another machine — so the display stream cannot be where it is learned. That push
+is why there is no client-side queue reconciliation any more: the snapshot lands
+on its own, positions already renumbered. The queue itself stays in-process.
 """
 
 from __future__ import annotations
@@ -138,7 +145,54 @@ class TurnQueue:
             position=depth,
             queue_depth=depth,
         )
+        self.push_snapshot(conversation_id, user_id=item.user_id)
         return QueueStatus(queue_id=item.queue_id, position=depth, queue_depth=depth)
+
+    def push_snapshot(self, conversation_id: str, *, user_id: str) -> None:
+        """Send the queue's current content to this user's online devices.
+
+        Called after every change, emptying included —「队里已经没有了」is a fact a
+        client cannot infer from silence. ``user_id`` comes from the item that was
+        just added or removed: an empty queue no longer knows whose it was.
+        """
+        from agentcore.fulfill.user_signal import push_queue_snapshot
+
+        push_queue_snapshot(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            items=self._items_of(conversation_id),
+        )
+
+    def snapshot_frames(self, user_id: str) -> list[dict[str, Any]]:
+        """Every non-empty queue this user owns, as connect-time fulfill frames.
+
+        A device that was offline while the queue changed has no other way to
+        learn it — the pushes it missed are gone, and this is the same frame it
+        would have received. Ownership is per item, so one process serving many
+        accounts never hands one user's queue to another's device.
+        """
+        from agentcore.fulfill.user_signal import queue_snapshot_frame
+
+        frames: list[dict[str, Any]] = []
+        for conversation_id, q in self._queues.items():
+            if not q or q[0].user_id != user_id:
+                continue
+            frames.append(
+                queue_snapshot_frame(conversation_id, self._items_of(conversation_id))
+            )
+        return frames
+
+    def _items_of(self, conversation_id: str) -> list[dict[str, Any]]:
+        """Pending entries as wire dicts, FIFO, 1-based ``position`` recomputed."""
+        return [
+            {
+                "queue_id": item.queue_id,
+                "content": item.content,
+                "position": idx,
+                "interjection_id": item.interjection_id,
+            }
+            for idx, item in enumerate(self.list_pending(conversation_id), start=1)
+        ]
 
     def enqueue_and_ensure_drain(
         self,
@@ -217,6 +271,8 @@ class TurnQueue:
                 conversation_id=conversation_id,
                 dropped=n,
             )
+            assert q is not None
+            self.push_snapshot(conversation_id, user_id=q[0].user_id)
         return n
 
     def cancel(self, conversation_id: str, queue_id: str) -> QueuedTurn | None:
@@ -240,6 +296,7 @@ class TurnQueue:
                 queue_id=queue_id,
                 remaining=len(q),
             )
+            self.push_snapshot(conversation_id, user_id=item.user_id)
             return item
         return None
 
@@ -251,6 +308,7 @@ class TurnQueue:
         item = q.popleft()
         if not q:
             self._queues.pop(conversation_id, None)
+        self.push_snapshot(conversation_id, user_id=item.user_id)
         return item
 
     def schedule_drain(self, conversation_id: str) -> None:

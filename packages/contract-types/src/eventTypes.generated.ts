@@ -50,6 +50,7 @@ export type SSEEventType =
   | "question_posted"
   | "reasoning_delta"
   | "resume_deferred"
+  | "resume_settled"
   | "run_cancelled"
   | "run_completed"
   | "run_context"

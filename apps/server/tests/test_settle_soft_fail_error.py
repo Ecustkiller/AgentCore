@@ -45,6 +45,7 @@ async def test_settle_soft_fail_persists_error_on_result_and_journal():
         citations=[],
         collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
         continuation_count=0,
+        user_continuation_count=0,
         dispose_open_supervised=AsyncMock(),
     )
     debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
@@ -105,6 +106,7 @@ async def test_finish_resume_soft_fail_stamps_last_turn_error():
             citations=[],
             collab={},
             continuation_count=0,
+            user_continuation_count=0,
             dispose_open_supervised=AsyncMock(),
         ),
         debate_tool=SimpleNamespace(usage={}, run_ledger=[], citations=[]),

@@ -271,15 +271,41 @@ async def test_classify_url_bad_scheme():
 
 
 async def test_classify_url_blocked_hosts():
-    assert await _classify_url("http://localhost/x") is _URLBlock.BLOCKED_HOST
     assert await _classify_url("http://foo.internal/") is _URLBlock.BLOCKED_HOST
     assert await _classify_url("http://db.local/") is _URLBlock.BLOCKED_HOST
+    assert (
+        await _classify_url("http://metadata.google.internal/") is _URLBlock.BLOCKED_HOST
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://localhost/x",
+        "http://localhost:5173/",
+        "http://127.0.0.1:8000/",
+        "http://127.1.2.3/",
+        "http://[::1]:8080/",
+        "http://0.0.0.0:3000/",
+    ],
+)
+async def test_classify_url_loopback_family_is_one_reason(url: str):
+    """本机地址是一个意图，不该分裂成 BLOCKED_HOST / PRIVATE_IP 两条路两句话。"""
+    assert await _classify_url(url) is _URLBlock.LOOPBACK_HOST
 
 
 async def test_classify_url_literal_private_ip():
-    assert await _classify_url("http://127.0.0.1:8000/") is _URLBlock.PRIVATE_IP
     assert await _classify_url("http://169.254.169.254/latest/") is _URLBlock.PRIVATE_IP
     assert await _classify_url("http://10.1.2.3/") is _URLBlock.PRIVATE_IP
+
+
+async def test_loopback_stays_in_the_clone_guard_reject_set():
+    """拆出独立拒绝类型 ≠ 放宽边界：git clone 守卫按 PRIVATE_IP_BLOCKS 判，必须仍覆盖回环。"""
+    from agentcore.core.net import PRIVATE_IP_BLOCKS
+
+    assert _URLBlock.LOOPBACK_HOST in PRIVATE_IP_BLOCKS
+    for url in ("http://localhost/o/r.git", "http://127.0.0.1/o/r.git"):
+        assert await _classify_url(url) in PRIVATE_IP_BLOCKS
 
 
 async def test_classify_url_public_literal_ip_ok():
@@ -294,9 +320,28 @@ def test_is_fake_ip_proxy_signature_detects_clash_placeholder():
 
 
 def test_private_ip_block_appends_fake_proxy_hint():
-    assert _private_ip_block("127.0.0.1") is _URLBlock.PRIVATE_IP
+    assert _private_ip_block("10.0.0.1") is _URLBlock.PRIVATE_IP
     assert _private_ip_block("198.18.0.21") is _URLBlock.PRIVATE_IP_FAKE_PROXY
     assert _private_ip_block("10.0.0.1", "198.18.0.5") is _URLBlock.PRIVATE_IP_FAKE_PROXY
+
+
+def test_private_ip_block_names_loopback_only_when_every_answer_is_local():
+    assert _private_ip_block("127.0.0.1") is _URLBlock.LOOPBACK_HOST
+    assert _private_ip_block("::1") is _URLBlock.LOOPBACK_HOST
+    # Public + loopback in one answer is a rebinding attempt — keep it reading as SSRF.
+    assert _private_ip_block("93.184.216.34", "127.0.0.1") is _URLBlock.PRIVATE_IP
+
+
+async def test_classify_url_hostname_resolving_to_loopback(monkeypatch):
+    """*.localhost / hosts 文件里的本地开发域名：走 DNS 也归到同一个回环理由。"""
+
+    async def _fake_dns(_host, _port=None):
+        return ["127.0.0.1"]
+
+    import agentcore.core.net as net
+
+    monkeypatch.setattr(net, "_getaddrinfo", _fake_dns)
+    assert await _classify_url("http://app.test:5173/") is _URLBlock.LOOPBACK_HOST
 
 
 async def test_classify_url_fake_ip_proxy_signature(monkeypatch):
@@ -567,12 +612,137 @@ async def test_read_url_snippet_falls_back_to_body_when_no_meta(monkeypatch):
 
 
 async def test_read_url_rejects_private_without_network():
-    result = await ReadUrlTool().execute({"url": "http://127.0.0.1:9999/"}, _ctx())
+    result = await ReadUrlTool().execute({"url": "http://10.1.2.3:9999/"}, _ctx())
     assert result.success is False
     assert _URLBlock.PRIVATE_IP.value in (result.error or "")
+    assert result.metadata.get("code") == "private_address_blocked"
     # Environmental SSRF refusals count toward the run breaker (not policy_failure).
     assert result.metadata.get("policy_failure") is not True
     assert "收口" in (result.error or "") or "停止" in (result.error or "")
+
+
+@pytest.mark.parametrize(
+    "url", ["http://127.0.0.1:9999/", "http://localhost:5173/health", "http://0.0.0.0:8080/"]
+)
+async def test_read_url_loopback_reroutes_instead_of_closing(url: str):
+    """本机地址：给可执行改道（browser / terminal curl），不给「停止深读、收口写作」。"""
+    result = await ReadUrlTool().execute({"url": url}, _ctx())
+    err = result.error or ""
+
+    assert result.success is False  # 边界不变：仍然拒绝
+    assert result.metadata.get("code") == "loopback_host"
+    # 确定性策略拒绝，改道即可成功 —— 不烧 run 熔断额度。
+    assert result.metadata.get("policy_failure") is True
+    # 那条为公网空转设计的收口话术不能出现在本机地址上。
+    assert "不要再空转外网深读" not in err
+    assert "基于已有材料收口写作" not in err
+    # 改道指引必须点名两个真跑在用户机器上的工具。
+    assert "browser" in err
+    assert "terminal" in err and "curl" in err
+
+
+async def test_read_url_loopback_refusal_survives_dns_rebinding(monkeypatch):
+    """连接时才暴露的回环（DNS 重绑 / 本地开发域名）走同一条改道，不是「出网受限」。"""
+    from agentcore.core.net import PinnedAddressError
+
+    async def _allow(_url: str):
+        return None
+
+    async def _rebound(_client, _method, url, **_kwargs):
+        raise PinnedAddressError(
+            _URLBlock.LOOPBACK_HOST.value,
+            request=httpx.Request("GET", url),
+            block=_URLBlock.LOOPBACK_HOST,
+        )
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _rebound)
+    result = await ReadUrlTool().execute({"url": "https://app.example/"}, _ctx())
+    err = result.error or ""
+    assert result.success is False
+    assert result.metadata.get("code") == "loopback_host"
+    assert result.metadata.get("policy_failure") is True
+    assert "不要再空转外网深读" not in err
+    assert "browser" in err and "terminal" in err
+
+
+@pytest.mark.parametrize(
+    ("block", "code"),
+    [
+        (_URLBlock.BAD_SCHEME, "VALIDATION_ERROR"),
+        (_URLBlock.BLOCKED_HOST, "blocked_host"),
+        (_URLBlock.DNS_FAIL, "dns_resolve_failed"),
+        (_URLBlock.PRIVATE_IP, "private_address_blocked"),
+        (_URLBlock.PRIVATE_IP_FAKE_PROXY, "fake_ip_proxy_blocked"),
+    ],
+)
+async def test_read_url_pre_flight_blocks_carry_distinct_codes(monkeypatch, block, code):
+    """DNS 失败 / 私有 IP / 保留域名各有语义，用户面不该塌成同一句。"""
+
+    async def _blocked(_url: str):
+        return block
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _blocked)
+    result = await ReadUrlTool().execute({"url": "https://example.com/x"}, _ctx())
+    assert result.success is False
+    assert result.metadata.get("code") == code
+    assert result.metadata.get("policy_failure") is not True
+
+
+def _status_error(code: int) -> httpx.HTTPStatusError:
+    req = httpx.Request("GET", "https://example.com/x")
+    return httpx.HTTPStatusError(
+        "boom", request=req, response=httpx.Response(code, request=req)
+    )
+
+
+@pytest.mark.parametrize(
+    ("exc", "code"),
+    [
+        (_status_error(401), "site_access_denied"),
+        (_status_error(403), "site_access_denied"),
+        (_status_error(429), "site_access_denied"),
+        (_status_error(451), "site_access_denied"),
+        (_status_error(404), "NOT_FOUND"),
+        (_status_error(500), "http_status_error"),
+        (EgressError("站点近期连续访问失败，已临时熔断"), "egress_circuit_open"),
+        (httpx.ConnectTimeout("connect timed out"), "site_unreachable"),
+        (httpx.ConnectError("refused"), "site_unreachable"),
+        (httpx.ReadTimeout("slow"), "read_timeout"),
+    ],
+)
+async def test_read_url_fetch_failures_carry_distinct_codes(monkeypatch, exc, code):
+    """抓取失败各有语义（反爬 / 404 / 熔断 / 连不上 / 读超时），别都塞同一个 code。"""
+
+    async def _allow(_url: str):
+        return None
+
+    async def _raise(_client, _method, _url, **_kwargs):
+        raise exc
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _allow)
+    monkeypatch.setattr(read_url_mod, "_safe_request", _raise)
+    result = await ReadUrlTool().execute({"url": "https://example.com/x"}, _ctx())
+    assert result.success is False
+    assert result.metadata.get("code") == code
+    # 这些仍是环境类硬失败：继续计入 run 熔断（不是 policy_failure）。
+    assert result.metadata.get("policy_failure") is not True
+
+
+async def test_safe_request_redirect_block_keeps_value_error_contract(monkeypatch):
+    """逐跳拦截仍是 ValueError（download_url 按前缀分支），但带上了拒绝原因。"""
+    from agentcore.tools.builtin.web.read_url import BlockedRedirectError, _safe_request
+
+    async def _blocked(_url: str):
+        return _URLBlock.PRIVATE_IP
+
+    monkeypatch.setattr(read_url_mod, "_classify_url", _blocked)
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(BlockedRedirectError) as ei:
+            await _safe_request(client, "GET", "https://example.com/x")
+    assert isinstance(ei.value, ValueError)
+    assert str(ei.value).startswith("URL blocked")
+    assert ei.value.block is _URLBlock.PRIVATE_IP
 
 
 async def test_read_url_retire_latch_blocks_fetch_after_disable(monkeypatch):

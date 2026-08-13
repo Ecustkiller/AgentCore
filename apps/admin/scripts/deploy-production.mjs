@@ -4,8 +4,9 @@
  *
  *   pnpm -C apps/admin deploy:production
  *
- * API URL：优先 AGENTCORE_APP_API_URL / VITE_API_URL / AGENTCORE_APP_HOST；
- * 未覆盖时由 apps/admin/.env.production 烘焙（与桌面端同口径）。
+ * API URL：admin 打**自己域**下的 /api（AGENTCORE_OFFICE_API_URL 可覆盖），刻意不跟
+ * 桌面 / 手机共用 AGENTCORE_APP_API_URL —— 那正是两个 SPA 共用一份 access cookie、
+ * 后登录者顶替先登录者的根因（详见 deploy/nginx/office-admin.conf 顶部注释）。
  * 须先 loadDeployEnv()，再解析主机——否则 deploy/.env.deploy.local 里的
  * AGENTCORE_* 不会生效。
  */
@@ -26,6 +27,10 @@ const APP_HOST = process.env.AGENTCORE_APP_HOST || "app.fashitianxia.xyz";
 const OFFICE_HOST =
   process.env.AGENTCORE_OFFICE_HOST || "office.fashitianxia.xyz";
 const API_URL =
+  process.env.AGENTCORE_OFFICE_API_URL || `https://${OFFICE_HOST}/api`;
+// 契约探针走产品域：后端是同一个进程，/version 的 git_sha 与走哪个入口无关。首次部署时
+// office 的 /api/ 反代恰恰还没装上（它就是这次要装的），拿它探活会锁死自己。
+const CONTRACT_PROBE_URL =
   process.env.AGENTCORE_APP_API_URL ||
   process.env.VITE_API_URL ||
   `https://${APP_HOST}/api`;
@@ -34,7 +39,7 @@ const NGINX_CONF = join(REPO_ROOT, "deploy/nginx/office-admin.conf");
 const REMOTE_SCRIPT = join(REPO_ROOT, "deploy/scripts/admin-remote-install.sh");
 
 // Guard against shipping a frontend newer than the live backend (前后端版本漂移).
-await assertBackendContractSatisfied({ apiBaseUrl: API_URL });
+await assertBackendContractSatisfied({ apiBaseUrl: CONTRACT_PROBE_URL });
 
 const buildEnv = {
   ...process.env,

@@ -2,15 +2,11 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
 import { Spinner } from "@/components/ui/Spinner";
-import { ApiError } from "@/services/api";
+import { errorMessageOr } from "@/services/api";
 import { changePassword, updateProfile } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { toast } from "sonner";
-
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
 
 /** One settings block: heading + a real `<form>`, so Enter submits it. */
 function FormSection({
@@ -84,7 +80,7 @@ function ProfileSection() {
       setEmail(updated.email ?? "");
       toast.success("资料已更新");
     } catch (e) {
-      setError(errMsg(e, "保存失败，请重试"));
+      setError(errorMessageOr(e, "保存失败，请重试"));
     } finally {
       setSaving(false);
     }
@@ -174,7 +170,7 @@ function PasswordSection() {
       reset();
       toast.success("密码已更新，其他设备需重新登录");
     } catch (e) {
-      setError(errMsg(e, "修改失败，请重试"));
+      setError(errorMessageOr(e, "修改失败，请重试"));
     } finally {
       setSaving(false);
     }

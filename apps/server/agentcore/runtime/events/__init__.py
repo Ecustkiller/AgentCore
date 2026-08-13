@@ -71,6 +71,7 @@ from agentcore.runtime.events.journal_config import (
     _JOURNAL_EVENT_TYPES,
     _JOURNAL_SURFACE_TYPES,
 )
+from agentcore.runtime.events.resume import resume_deferred, resume_settled
 from agentcore.runtime.events.run import (
     batch_metrics,
     coordination_wait,
@@ -80,7 +81,6 @@ from agentcore.runtime.events.run import (
     execution_detached,
     graph_append,
     plan_revised,
-    resume_deferred,
     run_cancelled,
     run_completed,
     run_context,
@@ -197,6 +197,7 @@ __all__ = [
     "turn_queue_started",
     "turn_queue_cancelled",
     "resume_deferred",
+    "resume_settled",
     "execution_detached",
     "execution_completed",
     "run_completed",

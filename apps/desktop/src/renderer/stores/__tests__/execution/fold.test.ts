@@ -141,6 +141,33 @@ describe("projectExecution (fold)", () => {
     });
   });
 
+  // attach 增量重放的帧级替换：wire 的 `replace` 必须过到帧上，否则整步全文会被当成增量追加。
+  it("frameFromEvent carries run_output_delta.replace onto the frame", () => {
+    const withReplace = frameFromEvent({
+      type: "run_output_delta",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      payload: {
+        run_id: "run-1",
+        agent_id: "agent-1",
+        delta: "整步全文",
+        replace: true,
+      },
+    } as SSEEvent);
+    expect(withReplace).toMatchObject({
+      kind: "run_output_delta",
+      delta: "整步全文",
+      replace: true,
+    });
+    // 直播帧不带标记 → 字段不出现（保持既有帧形逐字不变）。
+    expect(
+      frameFromEvent({
+        type: "run_output_delta",
+        timestamp: "2026-01-01T00:00:00.000Z",
+        payload: { run_id: "run-1", agent_id: "agent-1", delta: "增量" },
+      } as SSEEvent),
+    ).not.toHaveProperty("replace");
+  });
+
   it("accumulates streamed output deltas per agent", () => {
     const frames: RunFrame[] = [
       started("agent-1", "run-1"),

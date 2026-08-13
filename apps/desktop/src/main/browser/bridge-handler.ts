@@ -10,6 +10,7 @@
 import { randomBytes } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
+/** 默认**闲置** TTL：每次校验通过顺延，不是 token 的绝对寿命。 */
 const DEFAULT_TTL_MS = 5 * 60_000;
 
 export const BRIDGE_ACTIONS = [
@@ -26,27 +27,46 @@ export type BridgeAction = (typeof BRIDGE_ACTIONS)[number];
 
 export interface BridgeAuthState {
   token: string | null;
+  /** 绝对到期时刻；每次校验通过顺延 {@link BridgeAuthState.idleTtlMs}。 */
   expiresAt: number;
+  /** 当前 token 的闲置 TTL，滑动续期按它顺延。 */
+  idleTtlMs: number;
 }
 
+/**
+ * Bridge token 鉴权：**滑动续期**——每次校验通过就把到期时间顺延一个 TTL，
+ * 即 TTL 是「闲置上限」而非绝对寿命。
+ *
+ * 凭证只在回合边界（initialize / startTurn / resume）下发，本回合内无法补发；
+ * 绝对过期会让跑满一个 TTL 的长回合从中途开始 401（前面的 navigate 过、后面的
+ * snapshot 挂），且重试必然继续失败。跟随使用续期后，只有真闲置超过 TTL 才失效。
+ */
 export function createBridgeAuth(now: () => number = Date.now): {
   state: BridgeAuthState;
   issueToken: (ttlMs?: number) => string;
   validateToken: (token: string | undefined | null) => boolean;
 } {
-  const state: BridgeAuthState = { token: null, expiresAt: 0 };
+  const state: BridgeAuthState = {
+    token: null,
+    expiresAt: 0,
+    idleTtlMs: DEFAULT_TTL_MS,
+  };
   return {
     state,
     issueToken(ttlMs = DEFAULT_TTL_MS) {
       const token = randomBytes(32).toString("hex");
       state.token = token;
+      state.idleTtlMs = ttlMs;
       state.expiresAt = now() + ttlMs;
       return token;
     },
     validateToken(token) {
       if (!token || !state.token) return false;
-      if (now() >= state.expiresAt) return false;
-      return token === state.token;
+      const at = now();
+      if (at >= state.expiresAt) return false;
+      if (token !== state.token) return false;
+      state.expiresAt = at + state.idleTtlMs;
+      return true;
     },
   };
 }

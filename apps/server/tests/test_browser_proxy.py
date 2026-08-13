@@ -28,13 +28,15 @@ async def test_public_ip_literal_allowed():
 async def test_private_and_metadata_literals_refused(host: str):
     ip, reason = await resolve_dial_target(host, 80)
     assert ip is None
-    assert reason in ("PRIVATE_IP", "BLOCKED_HOST", "BAD_SCHEME")
+    assert reason in ("PRIVATE_IP", "LOOPBACK_HOST", "BLOCKED_HOST", "BAD_SCHEME")
 
 
 @pytest.mark.asyncio
 async def test_blocked_hostname_refused():
+    # ``localhost`` refuses as LOOPBACK_HOST (core.net names the local-machine reason
+    # separately); reserved internal names stay BLOCKED_HOST. Both still refuse.
     ip, reason = await resolve_dial_target("localhost", 80)
-    assert ip is None and reason == "BLOCKED_HOST"
+    assert ip is None and reason == "LOOPBACK_HOST"
     ip2, reason2 = await resolve_dial_target("metadata.google.internal", 80)
     assert ip2 is None and reason2 == "BLOCKED_HOST"
 

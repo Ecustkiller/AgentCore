@@ -21,6 +21,7 @@ import {
   requiresOpenConfirm,
 } from "./execGate";
 import { coerceIpcBytes } from "./ipcBytes";
+import { openTempFileFromBytes } from "./openTemp";
 import { readFile, readTextFile, writeTextFile } from "./preview";
 import { resolveGrantAbsPath } from "./resolveGrantAbsPath";
 import {
@@ -37,6 +38,7 @@ import {
   setRoot,
 } from "./roots";
 import { saveBytesToDisk } from "./save";
+import { adoptSessionRootAlias } from "./sessionAlias";
 import { copyPath, openWithDefaultApp, reveal, trashPath } from "./shell";
 import {
   type StageDest,
@@ -53,6 +55,10 @@ import { closeWatchersForRoot, unwatchDir, watchDir } from "./watch";
 import { workspaceOp } from "./workspace/dispatch";
 import { opErr } from "./workspace/result";
 import { listWorkspaceTrash, restoreWorkspaceTrash } from "./workspaceTrash";
+import {
+  deleteWorkspaceVersion,
+  listWorkspaceVersions,
+} from "./workspaceVersions";
 
 function parseStageDest(p: unknown): StageDest | undefined {
   if (!isRecord(p)) return undefined;
@@ -102,6 +108,11 @@ async function realpathOrSelf(absPath: string): Promise<string> {
 /**
  * Given an absolute path, create or upgrade a conversation-scoped session root.
  * Returns FsRoot (id/name/alias/mode only — never absPath).
+ *
+ * A new root carries **no alias**: `external/<alias>/` is the server's namespace,
+ * derived by its own rules from the label, and the desktop learns the answer from
+ * the registration receipt ({@link FS_CHANNELS.adoptSessionRootAlias}). Guessing
+ * one here only produced a second candidate to reconcile away.
  */
 async function createOrUpgradeSessionRoot(
   conversationId: string,
@@ -110,19 +121,6 @@ async function createOrUpgradeSessionRoot(
 ): Promise<FsRoot> {
   const absPath = await realpathOrSelf(absPathIn);
   const name = basename(absPath) || absPath;
-  const aliasBase =
-    name.replace(/[^\w.-]+/g, "_").replace(/^[^A-Za-z]/, "d_") || "folder";
-  const taken = new Set(
-    listSessionRoots(conversationId)
-      .map((r) => r.alias)
-      .filter(Boolean) as string[],
-  );
-  let alias = aliasBase.slice(0, 64);
-  let n = 2;
-  while (taken.has(alias)) {
-    alias = `${aliasBase.slice(0, 60)}_${n}`;
-    n += 1;
-  }
 
   // Same abs path: upgrade/downgrade mode (re-auth card already shown by client).
   const same = listSessionRoots(conversationId).find(
@@ -151,13 +149,11 @@ async function createOrUpgradeSessionRoot(
     sessionOnly: true,
     conversationId,
     mode,
-    alias,
   });
   await saveSessionGrants();
   return {
     id,
     name,
-    alias,
     mode,
     sessionOnly: true,
   };
@@ -292,6 +288,21 @@ export function registerFsIpc(): void {
     );
   });
 
+  // 云端文件「用本机默认应用打开」：落只读临时副本后 shell.openPath。白名单外扩展名在
+  // openTempFileFromBytes 里**硬拒**——字节是 AI 产出的，native 确认框对这个来源不构成防线，
+  // 所以这里不像 openPath 那样留确认逃生口。
+  ipcMain.handle(FS_CHANNELS.openTempFile, async (_e, p: unknown) => {
+    const bytes = isRecord(p) ? coerceIpcBytes(p.bytes) : null;
+    if (!isRecord(p) || typeof p.suggestedName !== "string" || !bytes) {
+      return {
+        ok: false as const,
+        reason: "error" as const,
+        message: INVALID_ARGS,
+      };
+    }
+    return openTempFileFromBytes(p.suggestedName, bytes);
+  });
+
   // 「在浏览器打开」：解压 zip 到临时目录并用系统默认程序打开指定文件（§八.7 预览侧）。
   ipcMain.handle(FS_CHANNELS.previewArchive, async (_e, p: unknown) => {
     if (
@@ -383,6 +394,26 @@ export function registerFsIpc(): void {
         mode: r.mode === "organize" ? "organize" : "readonly",
         sessionOnly: true,
       }));
+    },
+  );
+
+  // 登记回执里的别名落到本机根上——新建的根在此之前没有别名。本机引擎按这张表把
+  // `external/<别名>/` 解析成绝对路径，模型那边的别名来自服务端的授权列表，两边只有
+  // 同一个来源才对得上。
+  ipcMain.handle(
+    FS_CHANNELS.adoptSessionRootAlias,
+    async (_e, p: unknown): Promise<boolean> => {
+      const args = requireStringFields(p, [
+        "conversationId",
+        "rootId",
+        "alias",
+      ]);
+      if (!args) return false;
+      return adoptSessionRootAlias(
+        args.conversationId,
+        args.rootId,
+        args.alias,
+      );
     },
   );
 
@@ -584,6 +615,18 @@ export function registerFsIpc(): void {
     const args = requireStringFields(p, ["rootId", "entryId"]);
     if (!args) return invalidFsResult();
     return restoreWorkspaceTrash(args.rootId, args.entryId);
+  });
+
+  ipcMain.handle(FS_CHANNELS.listWorkspaceVersions, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId", "subpath"]);
+    if (!args) return invalidFsResult();
+    return listWorkspaceVersions(args.rootId, args.subpath);
+  });
+
+  ipcMain.handle(FS_CHANNELS.deleteWorkspaceVersion, (_e, p: unknown) => {
+    const args = requireStringFields(p, ["rootId", "subpath", "versionId"]);
+    if (!args) return invalidFsResult();
+    return deleteWorkspaceVersion(args.rootId, args.subpath, args.versionId);
   });
 
   ipcMain.handle(FS_CHANNELS.pickAndStageAttachment, (_e, p: unknown) => {

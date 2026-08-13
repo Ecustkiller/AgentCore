@@ -19,6 +19,17 @@ honestly rather than run the user's shell command on a second install.
 Backpressure: fulfillment frames must not be silently shed. A full queue marks
 the session unhealthy — it is closed so the client reconnects (and is removed
 from the hub). Contrast ``ChatHub``, which drops the oldest undelivered event.
+
+Departures are remembered for a short while (:meth:`FulfillerHub.seen_recently`):
+a desktop's SSE drops and re-opens many times a day, and during that gap the hub
+is honestly empty even though the machine never went anywhere. Delivery uses the
+memory to tell "reconnecting" from "no client at all" — never to route an op.
+
+Not every session is a fulfiller. The same stream carries account-owned state to
+every install (``fulfill/user_signal.py``), and a browser client that can execute
+nothing still wants it, so it connects declaring no caps. Selection and presence
+both skip such a session (:attr:`FulfillerSession.can_fulfil`): being connected
+is not the same fact as being able to run the user's shell command.
 """
 
 from __future__ import annotations
@@ -80,6 +91,16 @@ def origin_pinned(channel: str, *, root_id: str | None) -> bool:
 # only a genuinely stuck client trips the health gate.
 _FULFILLER_QUEUE_MAXSIZE = 128
 
+# How long after a disconnect a device still counts as "just here". Production
+# desktops re-open the fulfill SSE in 1–4s (tail into the teens), so a minute is
+# several times the observed worst case while a machine that has been away
+# longer reads as plainly absent — which is what fail-fast is for.
+RECENT_PRESENCE_SECONDS = 60.0
+
+# Departure marks are only ever read inside the window above; prune once the map
+# grows past this so a long-lived process cannot accumulate dead devices.
+_LAST_SEEN_PRUNE_THRESHOLD = 512
+
 
 @dataclass
 class FulfillerIdentity:
@@ -128,9 +149,24 @@ class FulfillerSession:
     def roots(self) -> set[str]:
         return self.identity.roots
 
-    def update_roots(self, roots: Iterable[str]) -> None:
-        """Replace the declared root set without reconnecting."""
-        self.identity.roots = {r for r in roots if r}
+    @property
+    def can_fulfil(self) -> bool:
+        """Whether this connection can execute anything (declared ≥1 channel).
+
+        The browser client opens the same stream to read the account state it
+        also carries — its queue, its settled cards — and declares no channels
+        at all. :meth:`FulfillerHub.find` already skips it, being cap-filtered;
+        this is what keeps the *presence* answers honest too, so an account
+        whose only open client is a web tab is not read as a machine that is
+        about to come back.
+        """
+        return bool(self.identity.caps)
+
+    def add_root(self, root_id: str) -> None:
+        """Widen the declared root set by one id (a registration receipt landed)."""
+        rid = (root_id or "").strip()
+        if rid:
+            self.identity.roots.add(rid)
 
     def offer(self, event: dict[str, Any]) -> bool:
         """Enqueue ``event``. Returns ``False`` when the queue is full (unhealthy).
@@ -179,6 +215,8 @@ class FulfillerHub:
         self._by_user: dict[str, set[FulfillerSession]] = {}
         # (user_id, device_id) → session (at most one live connection per device).
         self._by_device: dict[tuple[str, str], FulfillerSession] = {}
+        # (user_id, device_id) → monotonic time of the last disconnect.
+        self._last_seen: dict[tuple[str, str], float] = {}
 
     def register(
         self,
@@ -232,25 +270,92 @@ class FulfillerHub:
             if not conns:
                 self._by_user.pop(session.user_id, None)
         session.close()
+        if session.can_fulfil:
+            now = time.monotonic()
+            self._last_seen[key] = now
+            self._prune_last_seen(now)
         logger.info(
             "fulfill.unregister",
             user=session.user_id,
             device=session.device_id,
         )
 
-    def update_roots(self, user_id: str, device_id: str, roots: Iterable[str]) -> bool:
-        """Update an online session's root set. Returns ``False`` when not online."""
+    def _prune_last_seen(self, now: float) -> None:
+        """Drop departure marks nobody can still read (bounded memory)."""
+        if len(self._last_seen) <= _LAST_SEEN_PRUNE_THRESHOLD:
+            return
+        cutoff = now - RECENT_PRESENCE_SECONDS
+        self._last_seen = {k: ts for k, ts in self._last_seen.items() if ts > cutoff}
+
+    def seen_recently(
+        self,
+        user_id: str,
+        *,
+        device_id: str | None = None,
+        within: float | None = None,
+    ) -> bool:
+        """True when this device (or any of the user's) was connected just now.
+
+        Online counts as seen; otherwise the last disconnect must be no older
+        than ``within`` (default :data:`RECENT_PRESENCE_SECONDS`). This answers
+        "is a client reconnecting right now?", nothing else — a caller that got
+        ``None`` from :meth:`find` still has no one to hand the op to.
+
+        Only sessions that could fulfil something count (:attr:`
+        FulfillerSession.can_fulfil`). An observer — the browser client, here for
+        the account state alone — is a real connection that is nonetheless not a
+        machine coming back, and answering "yes" for it would park every local op
+        of a desktop-less account for the whole grace before the same failure.
+        """
+        limit = RECENT_PRESENCE_SECONDS if within is None else within
+        now = time.monotonic()
+        if device_id is not None:
+            live = self._by_device.get((user_id, device_id))
+            if live is not None and live.can_fulfil:
+                return True
+            seen = self._last_seen.get((user_id, device_id))
+            return seen is not None and (now - seen) <= limit
+        if any(s.can_fulfil for s in self._by_user.get(user_id, ())):
+            return True
+        return any(
+            (now - seen) <= limit
+            for (uid, _device), seen in self._last_seen.items()
+            if uid == user_id
+        )
+
+    def declare_root(self, user_id: str, device_id: str, root_id: str) -> bool:
+        """Bind one root to a live session. Returns ``False`` when not online.
+
+        Called from the registration receipts that mint a root (external grant,
+        workspace bind): the response only means「这台设备能履约这个根」if the hub
+        learned it in the same request, before the turn issues its first op.
+        """
         session = self._by_device.get((user_id, device_id))
         if session is None:
             return False
-        session.update_roots(roots)
+        session.add_root(root_id)
         logger.info(
-            "fulfill.roots_updated",
+            "fulfill.root_declared",
             user=user_id,
             device=device_id,
+            root_id=root_id,
             roots=len(session.roots),
         )
         return True
+
+    def broadcast(self, user_id: str, event: dict[str, Any]) -> int:
+        """Push ``event`` to every live session of ``user_id``. Returns delivery count.
+
+        For state a *user* owns rather than a turn (their queue, their pending
+        cards): every online install of the account gets the same frame, and each
+        decides what to do with it. Unhealthy sessions are closed by
+        :meth:`deliver` exactly as on the routed path.
+        """
+        delivered = 0
+        for session in tuple(self._by_user.get(user_id, ())):
+            if self.deliver(session, event):
+                delivered += 1
+        return delivered
 
     def get_session(self, user_id: str, device_id: str) -> FulfillerSession | None:
         """Return the live session for ``(user_id, device_id)``, if any."""

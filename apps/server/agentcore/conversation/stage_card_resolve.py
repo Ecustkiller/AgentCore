@@ -204,7 +204,7 @@ async def run_stage_card_start_debate(
             role="user",
             content=user_text,
         )
-        history = await load_chat_context(session, conversation_id, max_messages=40)
+        history = await load_chat_context(session, conversation_id)
 
     backend = await build_turn_backend(
         user_id=user_id,
@@ -370,7 +370,7 @@ async def run_stage_card_research_first(
             role="user",
             content=user_text,
         )
-        history = await load_chat_context(session, conversation_id, max_messages=40)
+        history = await load_chat_context(session, conversation_id)
 
     backend = await build_turn_backend(
         user_id=user_id,

@@ -47,7 +47,27 @@ describe("pickAndGrantOrganizeFolder", () => {
     vi.mocked(api.post).mockReset();
     window.fsApi = {
       grantSessionReadonlyRoot: vi.fn(),
+      adoptSessionRootAlias: vi.fn(async () => true),
     } as unknown as typeof window.fsApi;
+  });
+
+  it("把回执里的权威别名写回本机根", async () => {
+    const { api } = await import("@/services/api");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "咨询", alias: "d_", mode: "organize" },
+    });
+    vi.mocked(api.post).mockResolvedValue({
+      grant: { alias: "ext_2wcyoa", namespace: "external/ext_2wcyoa" },
+    });
+
+    await pickAndGrantOrganizeFolder("conv-1", { path: "C:\\咨询" });
+
+    expect(window.fsApi.adoptSessionRootAlias).toHaveBeenCalledWith(
+      "conv-1",
+      "r1",
+      "ext_2wcyoa",
+    );
   });
 
   it("always requests mode=organize (readonly→write still goes through this confirm path)", async () => {
@@ -79,6 +99,39 @@ describe("pickAndGrantOrganizeFolder", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.displayLabel).toBe("桌面 › 咨询");
+  });
+
+  it("授权没成时不登记（服务端不该记下这台机器没有的根）", async () => {
+    const { api } = await import("@/services/api");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: false,
+      reason: "not_found",
+      message: "找不到该目录",
+    });
+
+    await pickAndGrantOrganizeFolder("conv-1", { path: "C:\\missing" });
+
+    expect(api.post).not.toHaveBeenCalled();
+  });
+
+  it("别名没写下来 → 撤回授权并回失败（没有别名就没有可用挂载）", async () => {
+    const { api } = await import("@/services/api");
+    const { revokeExternalGrant } = await import("@/lib/revokeExternalGrant");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "咨询", mode: "organize" },
+    });
+    vi.mocked(api.post).mockResolvedValue({
+      grant: { alias: "ext_2wcyoa", namespace: "external/ext_2wcyoa" },
+    });
+    vi.mocked(window.fsApi.adoptSessionRootAlias).mockResolvedValue(false);
+
+    const result = await pickAndGrantOrganizeFolder("conv-1", {
+      path: "C:\\咨询",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(revokeExternalGrant).toHaveBeenCalledWith("conv-1", "r1");
   });
 
   it("maps not_found without picker/cancel", async () => {

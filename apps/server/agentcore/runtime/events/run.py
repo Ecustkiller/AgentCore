@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 from agentcore.core.types import new_id
 from agentcore.runtime.events.types import EventType, SSEEvent
@@ -176,11 +176,19 @@ def run_context(run_id: str, agent_id: str, blocks: list[dict[str, Any]]) -> SSE
     )
 
 
-def run_output_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.RUN_OUTPUT_DELTA,
-        payload={"run_id": run_id, "agent_id": agent_id, "delta": delta},
-    )
+def run_output_delta(
+    run_id: str, agent_id: str, delta: str, *, replace: bool = False
+) -> SSEEvent:
+    """Grow this worker's 正文 by ``delta``.
+
+    ``replace`` is set ONLY by the attach replay builders (see
+    :mod:`agentcore.runtime.events.attach_replay`): ``delta`` is then the whole current
+    text of this run's last still-open output block, not an increment.
+    """
+    payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "delta": delta}
+    if replace:
+        payload["replace"] = True
+    return SSEEvent(type=EventType.RUN_OUTPUT_DELTA, payload=payload)
 
 
 def run_output_reset(run_id: str, agent_id: str, reason: ResetReason) -> SSEEvent:
@@ -198,11 +206,14 @@ def run_output_reset(run_id: str, agent_id: str, reason: ResetReason) -> SSEEven
     )
 
 
-def run_reasoning_delta(run_id: str, agent_id: str, delta: str) -> SSEEvent:
-    return SSEEvent(
-        type=EventType.RUN_REASONING_DELTA,
-        payload={"run_id": run_id, "agent_id": agent_id, "delta": delta},
-    )
+def run_reasoning_delta(
+    run_id: str, agent_id: str, delta: str, *, replace: bool = False
+) -> SSEEvent:
+    """Grow this worker's 思考 by ``delta`` (``replace`` — see :func:`run_output_delta`)."""
+    payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "delta": delta}
+    if replace:
+        payload["replace"] = True
+    return SSEEvent(type=EventType.RUN_REASONING_DELTA, payload=payload)
 
 
 def run_phase(
@@ -684,23 +695,6 @@ def turn_queue_cancelled(*, queue_id: str, conversation_id: str) -> SSEEvent:
     return SSEEvent(
         type=EventType.TURN_QUEUE_CANCELLED,
         payload={"queue_id": queue_id, "conversation_id": conversation_id},
-    )
-
-
-def resume_deferred(
-    *,
-    message_id: str,
-    conversation_id: str,
-    busy_reason: Literal["wrap_up", "live_turn"],
-) -> SSEEvent:
-    """冷 resume × live deferred ack——settlement 已预写；槽空后同连接 claim + 续跑。"""
-    return SSEEvent(
-        type=EventType.RESUME_DEFERRED,
-        payload={
-            "message_id": message_id,
-            "conversation_id": conversation_id,
-            "busy_reason": busy_reason,
-        },
     )
 
 

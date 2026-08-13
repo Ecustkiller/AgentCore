@@ -171,6 +171,10 @@ class EventType(StrEnum):
     # 冷 resume × live（deferred）：点继续时槽仍 busy → settlement 预写后同连接先发本帧，
     # 槽空后再 claim + 续跑。busy_reason=wrap_up|live_turn。EPHEMERAL——对齐 turn_queued。
     RESUME_DEFERRED = "resume_deferred"
+    # 冷 resume 幂等成功：帧已被那次续跑消费（turn_journal 里已有 settlement 事实）→ 本次
+    # 「继续」不再 404，先发本帧告知谁的决策 / 何时 / 回合当前状态；续跑仍在跑则同连接续流。
+    # EPHEMERAL——传输态，对齐 resume_deferred（settlement 事实本身在 journal，不重复落盘）。
+    RESUME_SETTLED = "resume_settled"
     # 异步团队产出投递（批次 1）：执行与附着回合解耦后的一等状态。
     # DURABLE——落宿主 turn journal；前端 v1 静态「后台运行中」/完成后刷新（实时通道二期）。
     EXECUTION_DETACHED = "execution_detached"

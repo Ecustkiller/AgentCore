@@ -6,11 +6,21 @@ import asyncio
 
 from agentcore.api import sse
 from agentcore.core.log_context import log_context
-from agentcore.runtime.events import EventSink, content_delta, tool_use_start
+from agentcore.runtime.events import (
+    EventSink,
+    content_delta,
+    content_reset,
+    message_start,
+    tool_use_start,
+)
 from agentcore.runtime.events.attach_replay import (
+    _incremental_verdict,
+    _mark_block_replacements,
+    _slice_after_cursor,
     _turn_end_close_event,
     build_cursor_replay,
     journal_rows_to_sse,
+    mark_full_replay_segment,
     replay_open_event,
     synthesize_segment_deltas,
 )
@@ -237,6 +247,7 @@ async def test_attach_cursor_path_replays_full_journal_then_segments(monkeypatch
     # The stamp opens the segment (before any durable fact) and carries no ``id:``.
     assert frames[0].startswith("event: message_start")
     assert '"message_id": "m1"' in frames[0]
+    assert '"full_replay": true' in frames[0]
     assert "\nid: " not in frames[0]
     assert "FROM_HISTORY" not in joined
     assert "FROM_SEGMENT" not in joined
@@ -365,9 +376,17 @@ def test_replay_open_event_carries_the_turn_id_without_seq():
     with log_context(trace_id="attach-request-trace"):
         ev = replay_open_event(turn_id="m1", conversation_id="c1")
     assert ev.type == EventType.MESSAGE_START
-    assert ev.payload == {"message_id": "m1", "conversation_id": "c1"}
+    # full_replay is the segment's own「先重置本回合本地态再折」instruction — without it
+    # the client had to guess from the id and a wrong guess folded the body twice.
+    assert ev.payload == {"message_id": "m1", "conversation_id": "c1", "full_replay": True}
     # Synthetic frame — no journal seq, so it never rewrites the client's cursor.
     assert ev.seq is None
+
+
+def test_live_message_start_is_not_flagged_as_replay():
+    """Live 首帧不带 full_replay：只有回放段才下达重置指令。"""
+    ev = message_start("m1", conversation_id="c1", trace_id="")
+    assert "full_replay" not in ev.payload
 
 
 async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeypatch):
@@ -394,7 +413,11 @@ async def test_build_cursor_replay_stamps_bubble_before_the_durable_card(monkeyp
     )
 
     assert events[0].type == EventType.MESSAGE_START
-    assert events[0].payload == {"message_id": "m1", "conversation_id": "c1"}
+    assert events[0].payload == {
+        "message_id": "m1",
+        "conversation_id": "c1",
+        "full_replay": True,
+    }
     types = [e.type for e in events]
     assert types.index(EventType.MESSAGE_START) < types.index(EventType.PLAN_REVIEW_REQUIRED)
     # paused survives to the close frame → the client routes to the durable resume card.
@@ -414,7 +437,11 @@ async def test_build_cursor_replay_stamps_even_with_empty_journal(monkeypatch):
 
 
 async def test_build_cursor_replay_stamp_is_identical_on_reattach(monkeypatch):
-    """Re-attach replays the SAME message_id — folds treat it as 同回合重开, not a new bubble."""
+    """Re-attach replays the SAME message_id — folds treat it as 同回合重开, not a new bubble.
+
+    Only the ``full_replay`` order differs by段 kind (full vs incremental); the id the
+    durable cards bind to is the same one every time.
+    """
     rows = [
         {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "进行中"}, "ts": "t0"},
     ]
@@ -431,5 +458,424 @@ async def test_build_cursor_replay_stamp_is_identical_on_reattach(monkeypatch):
         for cursor in (-1, 1)
     ]
 
-    assert first[0].payload == second[0].payload == {"message_id": "m1", "conversation_id": "c1"}
-    assert [e.type for e in first] == [e.type for e in second]
+    assert first[0].payload["message_id"] == second[0].payload["message_id"] == "m1"
+    assert first[0].payload["conversation_id"] == second[0].payload["conversation_id"] == "c1"
+    assert first[0].payload["full_replay"] is True
+    assert "full_replay" not in second[0].payload
+
+
+# --- 清空指令由段首下达：两条 attach 回放路径必须同令 -------------------------------
+# 服务端从不声明「这段是全量重放」时，客户端只能拿段首 message_start 的 id 跟屏上气泡比对、
+# 自己猜要不要清——猜错就把正文折两遍（已出过线上 bug）。现在 full_replay 是显式指令，
+# 带 Last-Event-ID 的 journal 游标路径与不带 header 的 sink 内存历史路径都必须带上它。
+
+
+def test_mark_full_replay_flags_the_history_head_without_touching_the_live_frame():
+    """History entries share their payload dict with the live event — flag a COPY."""
+    live = message_start("m1", conversation_id="c1", trace_id="tr1")
+    segment = mark_full_replay_segment(
+        [live, content_delta("已答一半")], turn_id="m1", conversation_id="c1"
+    )
+
+    assert segment[0].payload == {
+        "message_id": "m1",
+        "conversation_id": "c1",
+        "trace_id": "tr1",
+        "full_replay": True,
+    }
+    # 正在流的其它端不能被回溯打上「这是重放」——否则它们会莫名清空重折。
+    assert "full_replay" not in live.payload
+    assert segment[1] is not None and segment[1].payload["delta"] == "已答一半"
+
+
+def test_mark_full_replay_synthesizes_a_head_when_history_has_none():
+    """Attached before the turn opened its bubble: the段 still carries the reset order."""
+    segment = mark_full_replay_segment(
+        [content_delta("旁白")], turn_id="m1", conversation_id="c1"
+    )
+
+    assert segment[0].type == EventType.MESSAGE_START
+    assert segment[0].payload == {
+        "message_id": "m1",
+        "conversation_id": "c1",
+        "full_replay": True,
+    }
+    assert [e.type for e in segment[1:]] == [EventType.CONTENT_DELTA]
+
+
+def test_mark_full_replay_flags_only_the_segment_head():
+    """A second same-id stamp keeps meaning 同回合重开 — only the head orders a reset."""
+    segment = mark_full_replay_segment(
+        [
+            message_start("m1", conversation_id="c1", trace_id=""),
+            content_delta("一段"),
+            message_start("m1", conversation_id="c1", trace_id=""),
+        ],
+        turn_id="m1",
+        conversation_id="c1",
+    )
+
+    assert segment[0].payload.get("full_replay") is True
+    assert "full_replay" not in segment[2].payload
+
+
+def test_mark_full_replay_without_a_turn_id_stamps_nothing():
+    """No bound message_id = no bubble to reset; never invent one out of thin air."""
+    segment = mark_full_replay_segment([content_delta("x")], turn_id=None, conversation_id="c1")
+
+    assert [e.type for e in segment] == [EventType.CONTENT_DELTA]
+
+
+def test_an_empty_segment_orders_no_reset():
+    """空段不下清空指令 —— 一句 reset 后面什么都不跟，等于把客户端的正文擦了不还。
+
+    空 ``history_snapshot()`` ≠ 客户端手里为空。resume settled join 正是这样：用户第二次
+    点「继续」，续跑的 sink 刚建、历史空着，而客户端握着暂停前的整轮正文；这条路又只走
+    sink 历史、不查 journal，清掉就再也补不回来。没有帧要重放，就不存在「本段是全量重放」
+    这回事——真 ``message_start`` 随后会从 live 尾巴上不带标记地到达（同回合重开）。
+    """
+    assert mark_full_replay_segment([], turn_id="m1", conversation_id="c1") == []
+    # 有内容却缺段首仍要补（上一期的意图不变）：那是「气泡还没开就接上了」。
+    assert (
+        mark_full_replay_segment([content_delta("旁白")], turn_id="m1", conversation_id="c1")[
+            0
+        ].type
+        == EventType.MESSAGE_START
+    )
+
+
+async def test_attach_with_an_empty_history_goes_straight_to_the_boundary():
+    """端到端：无游标 + 空历史 → 第一帧就是追平边界，不是凭空的 full_replay 段首。"""
+    sink = EventSink()
+    sink._message_id = "m1"
+    sink._conversation_id = "c1"
+
+    gen = sse._attach_generator(sink, last_event_id=None)
+    try:
+        first = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+    finally:
+        await gen.aclose()
+
+    assert first == ": attach-caught-up\n\n"
+
+
+async def test_attach_without_cursor_leads_with_the_same_reset_instruction():
+    """No-header path (sink history): client-observably the same段首 as the cursor path."""
+    sink = EventSink()
+    sink._message_id = "m1"
+    sink._conversation_id = "c1"
+    sink.emit(message_start("m1", conversation_id="c1", trace_id="tr1"))
+    sink.emit(content_delta("已答一半"))
+
+    gen = sse._attach_generator(sink, last_event_id=None)
+    try:
+        head = await asyncio.wait_for(gen.__anext__(), timeout=2.0)
+    finally:
+        await gen.aclose()
+
+    assert head.startswith("event: message_start")
+    assert '"full_replay": true' in head
+    # 段首照旧盖章：耐久卡仍绑本回合 message_id，trace 链接也不丢。
+    assert '"message_id": "m1"' in head
+    assert '"trace_id": "tr1"' in head
+
+
+# --- 真增量：判定照旧看全表，只把「发什么」收窄到游标之后 ---------------------------
+# 真实多 Agent 回合 journal 已观测到 ≥605 行、派单行 15KB，手机回前台每次重连都在重传
+# 一整场。判定仍必须扫全表（是否结构化 / 已覆盖 run 集 / agent_id 回填 / message_final
+# 拼 worker 全文四处，只看增量会翻面），过滤发生在产出事件之后。
+
+
+def _structured_multi_agent_rows() -> list[dict]:
+    """一条典型结构化回合：四处全表判定的依据全在游标**之前**。"""
+    return [
+        {
+            "seq": 0,
+            "kind": "run_started",
+            "payload": {"run_id": "w1", "agent_id": "ag1", "kind": "agent"},
+            "ts": "t0",
+        },
+        # 覆盖 w1 的 run_process 文本（游标前）→ 合成段不得再补 w1 的扁平通道全文。
+        {
+            "seq": 1,
+            "kind": "run_process_content",
+            "payload": {"kind": "content", "text": "worker 旁白", "run_id": "w1"},
+            "ts": "t0",
+        },
+        # 有 process_* → 结构化回合（游标前）→ 合成段不得拼 CEO 扁平旁白。
+        {
+            "seq": 2,
+            "kind": "process_content",
+            "payload": {"kind": "content", "text": "CEO 旁白"},
+            "ts": "t0",
+        },
+        {
+            "seq": 3,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t1", "tool_name": "web_search", "arguments": {}},
+            "ts": "t1",
+        },
+        {
+            "seq": 4,
+            "kind": "tool_use_end",
+            "payload": {
+                "tool_call_id": "t1",
+                "tool_name": "web_search",
+                "status": "success",
+                "result": "ok",
+            },
+            "ts": "t1",
+        },
+        # payload 没有 agent_id：只能由游标前那条 run_started 回填。
+        {
+            "seq": 5,
+            "kind": "run_process_content",
+            "payload": {"kind": "content", "text": "worker 续写", "run_id": "w1"},
+            "ts": "t2",
+        },
+        {
+            "seq": 6,
+            "kind": "message_final",
+            "payload": {"run_id": "w1", "content": "worker 全文", "reasoning": "worker 思考"},
+            "ts": "t2",
+        },
+        {"seq": 7, "kind": "run_completed", "payload": {"run_id": "w1"}, "ts": "t3"},
+    ]
+
+
+async def test_increment_ships_only_post_cursor_facts_but_judges_on_the_whole_turn(
+    monkeypatch,
+):
+    """四处全表判定在过滤之后仍然成立 —— 这条是最容易回归的一条。
+
+    游标停在 seq 3（``tool_use_start``）。段里只该有 seq>3 的事实，但：结构化判定、
+    已覆盖 run 集、``agent_id`` 回填、``message_final`` 拼 worker 全文，依据全在游标之前，
+    若改成只读增量就会分别退化成「拼扁平旁白 / 重复 worker 正文 / agent_id 空 / 正文整段丢」。
+    """
+    _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
+
+    events = await build_cursor_replay(
+        turn_id="m1",
+        conversation_id="c1",
+        after_seq=3,
+        memory_channels={
+            CHANNEL_CAPTAIN_CONTENT: "FROM_SEGMENT",
+            run_output_channel("w1"): "FROM_SEGMENT_W1",
+        },
+        memory_agent_ids={},
+    )
+
+    assert [e.type for e in events] == [
+        EventType.MESSAGE_START,
+        EventType.TOOL_USE_END,
+        EventType.RUN_OUTPUT_DELTA,  # seq 5 的 run_process 步
+        EventType.RUN_REASONING_DELTA,  # message_final 拼的 worker 思考
+        EventType.RUN_OUTPUT_DELTA,  # message_final 拼的 worker 全文
+        EventType.RUN_COMPLETED,
+    ]
+    # 增量段：段首不下清空指令。
+    assert "full_replay" not in events[0].payload
+    # 游标前的结构不重发（工具起始 / CEO 旁白 / worker 前半段）。
+    bodies = [e.payload.get("delta") for e in events]
+    assert "CEO 旁白" not in bodies
+    assert "worker 旁白" not in bodies
+    assert not any(e.type == EventType.TOOL_USE_START for e in events)
+    # ① 结构化判定：扁平 captain 通道仍被跳过（判定源 process_content 在游标前）。
+    # ② 已覆盖 run 集：w1 的扁平通道仍被跳过（判定源 run_process_content 在游标前）。
+    assert not any((e.payload.get("delta") or "").startswith("FROM_SEGMENT") for e in events)
+    # ③ agent_id 回填：判定源 run_started 在游标前，仍要填上。
+    assert events[2].payload == {
+        "run_id": "w1",
+        "agent_id": "ag1",
+        "delta": "worker 续写",
+        # ④ 跨游标那步 process 行是整步全文 → 整块替换，不往客户端半截后面追加。
+        "replace": True,
+    }
+    # ⑤ message_final 拼出的 worker 全文照旧在终态帧之前落地。
+    assert events[3].payload["delta"] == "worker 思考"
+    assert events[4].payload["delta"] == "worker 全文"
+
+
+async def test_increment_marks_only_the_first_frame_of_each_channel(monkeypatch):
+    """一个通道只有段内第一帧是「整块换」；其后的文本步是真·新块，照常追加。"""
+    _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=3, memory_channels={}, memory_agent_ids={}
+    )
+
+    w1_content = [
+        e
+        for e in events
+        if e.type == EventType.RUN_OUTPUT_DELTA and e.payload.get("run_id") == "w1"
+    ]
+    assert [e.payload.get("replace") for e in w1_content] == [True, None]
+    # 另一个通道（思考）独立计数：它自己的第一帧照样是整块换。
+    reasoning = [e for e in events if e.type == EventType.RUN_REASONING_DELTA]
+    assert [e.payload.get("replace") for e in reasoning] == [True]
+
+
+async def test_full_segment_journal_rows_carry_no_replace(monkeypatch):
+    """全量段客户端刚被清空，每条 process 行都是新块——不带 replace（语义留给整块帧）。"""
+    _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=-1, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert events[0].payload["full_replay"] is True
+    assert all("replace" not in e.payload for e in events)
+
+
+def test_synthesized_open_blocks_always_declare_themselves_whole():
+    """stream_state 合成的都是「该通道到此为止的全文」，不是增量——恒带 replace。"""
+    events = synthesize_segment_deltas(
+        by_channel={
+            CHANNEL_CAPTAIN_REASONING: "思考中",
+            CHANNEL_CAPTAIN_CONTENT: "答一半",
+            run_output_channel("w1"): "worker 半截",
+        },
+        agent_run_ids={"w1": "ag1"},
+        covered_run_ids=set(),
+    )
+
+    assert [e.payload.get("replace") for e in events] == [True, True, True]
+
+
+# --- 保守条件：说不准就整段重发（全量那条路已被上一期证明正确）---------------------
+
+
+def test_cursor_zero_is_the_no_cursor_sentinel_not_a_position():
+    """两端在没有游标时都发 ``Last-Event-ID: 0``，不能读成「我有 seq 0 之前的一切」。"""
+    rows = [{"seq": 0, "kind": "tool_use_start", "payload": {}, "ts": "t0"}]
+    assert _incremental_verdict(rows, after_seq=0) == "no_cursor"
+    assert _incremental_verdict(rows, after_seq=-1) == "no_cursor"
+
+
+def test_settled_turn_falls_back_to_full_replay():
+    """有 turn_end = 回合已收口/挂起：整回合重编号过（或即将），旧游标不可信。"""
+    rows = [
+        {"seq": 1, "kind": "tool_use_start", "payload": {}, "ts": "t0"},
+        {"seq": 2, "kind": "turn_end", "payload": {"finish_reason": "paused"}, "ts": None},
+    ]
+    assert _incremental_verdict(rows, after_seq=1) == "turn_settled"
+
+
+def test_cursor_that_names_no_stamped_fact_falls_back_to_full_replay():
+    """游标必须指向本回合真的盖过 ``id:`` 的那条事实。
+
+    对不上的三种来源都在这里被挡掉：重编号后的陈旧值、上一回合留下的外来值（seq 按回合
+    计数，两端却按**会话**存游标）、以及压根没上过线的执行事实。
+    """
+    rows = [
+        {"seq": 1, "kind": "llm_call", "payload": {"run_id": "r1"}, "ts": "t0"},
+        {"seq": 2, "kind": "message_final", "payload": {"run_id": "w1"}, "ts": "t0"},
+        {"seq": 3, "kind": "process_tool", "payload": {"kind": "tool", "id": "t1"}, "ts": "t0"},
+        {
+            "seq": 4,
+            "kind": "tool_use_start",
+            "payload": {"tool_call_id": "t1", "tool_name": "x", "arguments": {}},
+            "ts": "t0",
+        },
+    ]
+
+    assert _incremental_verdict(rows, after_seq=1) == "cursor_unknown"  # 执行事实不上线
+    assert _incremental_verdict(rows, after_seq=2) == "cursor_unknown"  # 只做拼接源
+    assert _incremental_verdict(rows, after_seq=3) == "cursor_unknown"  # 结构镜像不产帧
+    assert _incremental_verdict(rows, after_seq=9) == "cursor_unknown"  # 越界 / 外来
+    assert _incremental_verdict(rows, after_seq=4) is None  # 真盖过 id 的耐久事实
+
+
+def test_process_text_rows_are_stampable_cursors():
+    """回放段会给 process 文本步打 ``id:``，所以下一次重连的游标可能正停在这种行上。"""
+    rows = [
+        {"seq": 1, "kind": "process_content", "payload": {"kind": "content", "text": "x"}},
+    ]
+    assert _incremental_verdict(rows, after_seq=1) is None
+
+
+async def test_conservative_fallback_replays_the_whole_turn(monkeypatch):
+    """退回全量 = 回到上一期那条路：段首带 full_replay，游标前的结构一条不少。"""
+    _patch_journal_repo(
+        monkeypatch,
+        _structured_multi_agent_rows()
+        + [{"seq": 8, "kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": None}],
+    )
+
+    events = await build_cursor_replay(
+        turn_id="m1", conversation_id="c1", after_seq=3, memory_channels={}, memory_agent_ids={}
+    )
+
+    assert events[0].payload["full_replay"] is True
+    assert any(e.type == EventType.TOOL_USE_START for e in events)
+    assert any((e.payload.get("delta") or "") == "CEO 旁白" for e in events)
+    assert events[-1].type == EventType.MESSAGE_END
+
+
+# --- 过滤本身：拼接帧跟着它引导的那条终态帧走 --------------------------------------
+
+
+def test_slice_keeps_message_final_splices_with_their_terminal():
+    """``message_final`` 拼出的全文帧没有 seq，位置就是它引导的终态帧的位置。"""
+    events = journal_rows_to_sse(
+        [
+            {
+                "seq": 1,
+                "kind": "run_started",
+                "payload": {"run_id": "w1", "agent_id": "ag1", "kind": "agent"},
+                "ts": "t0",
+            },
+            {
+                "seq": 2,
+                "kind": "message_final",
+                "payload": {"run_id": "w1", "content": "全文", "reasoning": ""},
+                "ts": "t0",
+            },
+            {"seq": 3, "kind": "run_completed", "payload": {"run_id": "w1"}, "ts": "t0"},
+        ]
+    )
+
+    # 终态帧在游标之后 → 拼接帧跟着一起发。
+    kept = _slice_after_cursor(events, after_seq=1)
+    assert [e.type for e in kept] == [EventType.RUN_OUTPUT_DELTA, EventType.RUN_COMPLETED]
+    # 终态帧在游标之前 → 拼接帧也不重发（客户端早已收过 worker 全文）。
+    assert _slice_after_cursor(events, after_seq=3) == []
+
+
+def test_replace_marking_restarts_after_a_channel_reset():
+    """``*_reset`` 把通道清空了，之后那帧是干净的新块，不该再声称「整块换」。"""
+    marked = _mark_block_replacements(
+        [
+            content_delta("第一块"),
+            content_reset("finish_guard"),
+            content_delta("重写版"),
+        ]
+    )
+
+    assert marked[0].payload.get("replace") is True
+    assert "replace" not in marked[2].payload
+
+
+async def test_attach_stream_ships_an_incremental_segment_end_to_end(monkeypatch):
+    """端到端：带可信游标的 attach 收到不带 full_replay 的段 + 只有游标后的帧。"""
+    sink = EventSink()
+    sink._message_id = "m1"
+    sink.emit(content_delta("FROM_HISTORY"))
+    _patch_journal_repo(monkeypatch, _structured_multi_agent_rows())
+
+    gen = sse._attach_generator(sink, last_event_id=3)
+    frames: list[str] = []
+    try:
+        for _ in range(3):
+            frames.append(await asyncio.wait_for(gen.__anext__(), timeout=2.0))
+    finally:
+        await gen.aclose()
+
+    joined = "".join(frames)
+    assert frames[0].startswith("event: message_start")
+    assert "full_replay" not in frames[0]
+    assert '"message_id": "m1"' in frames[0]
+    assert "FROM_HISTORY" not in joined
+    assert "CEO 旁白" not in joined
+    assert "tool_use_end" in joined
+    assert "\nid: 4\n" in joined

@@ -394,6 +394,10 @@ class CoordinationSession:
     channel_dead_user_notice_emitted: bool = False
     # Sticky: code_execute/test_run family retired on exec-env hangs / probe fail.
     exec_env_dead: bool = False
+    # Classified probe reason (``exec_env_no_interpreter`` / ``…_probe_timeout`` /
+    # ``…_spawn_denied``), so the harvest fallback repeats the same honest cause
+    # the live notice gave. None = unclassified (idle hang / unreadable probe).
+    exec_env_dead_reason: str | None = None
     # One-shot host content_delta for EXEC_ENV_DEAD_USER_VISIBLE already emitted.
     exec_env_dead_user_notice_emitted: bool = False
     # Note-wall coordination mode for this batch (``wall`` | ``none``). Used by idle

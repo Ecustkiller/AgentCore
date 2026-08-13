@@ -39,7 +39,9 @@ export function CollaborationTimelinePanel({
   const dossierQ = useQuery({
     queryKey: ["folder-dossier-snapshot", folderId],
     queryFn: async () => {
-      const files = await wsListFiles(`folder:${folderId}`, true);
+      const { files } = await wsListFiles(`folder:${folderId}`, {
+        recursive: true,
+      });
       const paths = files.filter((f) => !f.isDir).map((f) => f.path);
       return {
         research: stageFiles(paths, `${RESEARCH_DIR}/`),

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.billing.gate import run_background_llm
+from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
 from agentcore.core.errors import LLMAuthError
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
@@ -68,10 +69,64 @@ def log_cost_recorded(conversation_id: str, message_id: str | None, cost_runs: l
     )
 
 
+# Markdown / list decoration a pasted task card opens with ("## 1. **目标**"),
+# dropped so the degraded label reads as a topic rather than as punctuation.
+# An ASCII enumerator must be followed by space so「1.5 亿的预算」keeps its number;
+# 「1、」 needs no such guard (a Chinese enumeration comma is never a decimal point).
+_TITLE_DECORATION_RE = re.compile(r"^(?:[\s>#*\-+•·]|\d+[.)]\s|\d+、)*")
+# Where a clause ends. Cutting here leaves a phrase; cutting at the raw character
+# cap leaves half a word — which is what turned a task card into a sidebar label
+# that read as a torn-off sentence.
+_TITLE_BOUNDARY_CHARS = "。．.！!？?；;，,、 "
+# A boundary this early would trade half a sentence for two words; below it the
+# blunt character cut carries more meaning.
+_TITLE_MIN_CHARS = TITLE_MAX_CHARS // 2
+_TITLE_TRAILING = " 　。．.！!？?；;，,、:：-—_*#"
+
+
 def fallback_title(user_message: str) -> str:
-    """Naive title: the first user message, truncated."""
-    title = user_message.strip()
-    return title[:TITLE_MAX_CHARS] + "…" if len(title) > TITLE_MAX_CHARS else title
+    """A readable short label for when the title model never produced one.
+
+    The model is best-effort, so every failure — 429, timeout, spent allowance —
+    lands here, and this string is what the user actually lives with in the
+    sidebar. Slicing the first 30 characters off a pasted task card produced a
+    label torn out of mid-sentence; instead take the message's first meaningful
+    line (its topic, minus markdown decoration) and, if that still overflows, end
+    it at the last clause boundary that fits.
+
+    Anything left behind — later lines as much as a mid-line cut — keeps the
+    trailing ``…``. That marker is not decoration: ``auto_cloud_desk_name`` reads
+    it to tell「这是用户原话的一截」from a name, and dropping it on a task card
+    whose first line happens to be short would quietly turn a user's own words
+    (身份证 / 电话 / 住址 and all) into a real directory segment.
+    """
+    line, dropped = _first_meaningful_line(user_message)
+    title = re.sub(r"\s+", " ", line).strip()
+    if len(title) > TITLE_MAX_CHARS:
+        head = title[:TITLE_MAX_CHARS]
+        boundary = max(head.rfind(ch) for ch in _TITLE_BOUNDARY_CHARS)
+        title = head[:boundary] if boundary >= _TITLE_MIN_CHARS else head
+        dropped = True
+    title = title.rstrip(_TITLE_TRAILING) or title
+    return f"{title}…" if title and dropped else title
+
+
+def _first_meaningful_line(user_message: str) -> tuple[str, bool]:
+    """``(line, more_followed)`` — the first line that still says something.
+
+    ``more_followed`` reports whether later lines carried content, so the caller
+    can mark the label as a fragment. Stripped decoration does not count as
+    dropped content: "## 季度复盘" is a whole topic, not half of one.
+
+    Falls back to the whole message when every line is pure decoration (a rule, a
+    bare bullet), so the caller never gets "" for a message that plainly has text.
+    """
+    lines = user_message.splitlines()
+    for index, line in enumerate(lines):
+        candidate = _TITLE_DECORATION_RE.sub("", line).strip()
+        if candidate:
+            return candidate, any(rest.strip() for rest in lines[index + 1 :])
+    return user_message.strip(), False
 
 
 # Turn-log message previews: enough of the user prompt / assistant reply to triage
@@ -190,21 +245,23 @@ async def generate_title(
         result = await LLMTitleGenerator(provider, model=model).generate(
             TitleInput(conversation_id=conversation_id, messages=messages)
         )
-        title = result.title or fallback
-        return TitleResult(title=title)
+        if result.title:
+            return result
+        return TitleResult(title=fallback, degraded_reason="empty_model_title")
     except LLMAuthError:
         # Must surface so ``run_background_llm`` can try user BYOK once.
         raise
     except Exception as e:
         from agentcore.llm.background_failure import classify_background_llm_failure
 
+        reason = classify_background_llm_failure(e)
         logger.warning(
             "chat.title_failed",
             conversation_id=conversation_id,
             error=str(e),
-            reason=classify_background_llm_failure(e),
+            reason=reason,
         )
-        return TitleResult(title=fallback)
+        return TitleResult(title=fallback, degraded_reason=reason)
 
 
 async def _read_conversation_title(conversation_id: str) -> str | None:
@@ -256,14 +313,28 @@ async def _mint_title_core(
                 await provider.close()
 
         result = await run_background_llm(user_id, purpose="title", runner=_runner)
-        # No platform/BYOK key, platform quota exhausted, or auth failed both sides
-        # → degrade to truncation.
-        minted_title = (
-            result.value.title if result is not None else fallback_title(user_message)
-        )
+        # Any gate refusal (no platform/BYOK key, platform allowance spent, auth
+        # failed both sides) → degrade to truncation. A sidebar label is not worth
+        # scheduling a retry for, so the refusal's own detail is not consulted here.
+        if isinstance(result, BackgroundLlmResult):
+            minted_title = result.value.title
+            degraded_reason = result.value.degraded_reason
+        else:
+            minted_title = fallback_title(user_message)
+            degraded_reason = f"gate_{result.reason.value}"
 
         if not minted_title:
             return None
+        if degraded_reason:
+            # The write below is the same either way, so a degraded label is
+            # invisible downstream — this line is the only place the sidebar's
+            # 「一段正文当标题」can be counted and attributed upstream.
+            logger.info(
+                "chat.title_degraded",
+                conversation_id=conversation_id,
+                reason=degraded_reason,
+                title_chars=len(minted_title),
+            )
 
         async with async_session_factory() as session:
             updated = await ConversationRepository(session).update_title_if_empty(

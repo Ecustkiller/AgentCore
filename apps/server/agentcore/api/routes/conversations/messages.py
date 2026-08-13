@@ -721,9 +721,34 @@ async def attach_stream(
     events, all in the SAME event shape as the original stream, so the client folds it
     through one dispatch path.
 
-    With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
-    synthetic deltas (header value observational — clients clear-then-fold), then live
-    tail. Without the header (same-process fast path): the sink's own in-memory history.
+    With ``Last-Event-ID`` (P3): journal-backed durable replay + stream_state synthetic
+    deltas, then live tail. Without the header (same-process fast path): the sink's own
+    in-memory history.
+
+    A non-empty catch-up段 opens with a ``message_start``, and that frame states which
+    kind of段 follows (nothing to replay = no head at all: a reset order with no body
+    behind it would clear local state nothing brings back):
+
+    - ``full_replay: true`` — RESET the local streaming state held for that
+      ``message_id`` (content / reasoning / process timeline); the段 is the turn's whole
+      story. Always the case without the header, and the fallback whenever the cursor
+      cannot be trusted (no cursor / turn already settled / cursor names no fact this
+      turn ever stamped).
+    - no ``full_replay`` — an INCREMENTAL段: keep what you hold for this turn and fold
+      the段 onto it. Only the facts after ``Last-Event-ID`` are shipped, so structural
+      pairs may look「不完整」(a ``tool_use_end`` whose start was pre-cursor) — that is
+      correct, the client has the前文.
+
+    Clients must act on the flag instead of comparing the id against the bubble on
+    screen: guessing wrong folds the body twice. A live first frame (and any plain
+    same-id re-stamp) omits it and keeps meaning「同回合重开」.
+
+    **Cursor contract**: ``Last-Event-ID`` is the last SSE ``id:`` this client folded FOR
+    THIS TURN. A client that discards its local turn state (clear-then-fold rejoin, fresh
+    bubble) must send ``0`` / omit the header, otherwise it asks for an increment it has
+    no prefix for. Text deltas carry no ``id:``, so the cursor lags into the middle of a
+    text block; the段 therefore marks whole-block frames with ``replace`` (see the
+    ``content_delta`` / ``run_output_delta`` payloads).
 
     ``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an
     idle conversation holds the connection (heartbeats) instead of 204ing, and每个新回合

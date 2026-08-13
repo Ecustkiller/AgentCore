@@ -190,6 +190,36 @@ async def test_list_profiles_projects_multiple_models(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_system_preset_names_distinguish_free_and_priced_skus(monkeypatch):
+    """One display_name, two badges → combo names must differ (ids stay separate)."""
+    monkeypatch.setattr(
+        "agentcore.llm.catalog.platform_listable_model_ids",
+        lambda: ["deepseek-v4-flash-free", "deepseek-v4-flash"],
+    )
+    monkeypatch.setattr(
+        "agentcore.billing.preference.platform_billing_selectable",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        "agentcore.billing.preference.is_platform_available",
+        lambda: True,
+    )
+    svc = LlmModelProfileService(MagicMock())
+    svc._default_id = AsyncMock(return_value=None)  # type: ignore[method-assign]
+    svc._repo.list_for_user = AsyncMock(return_value=[])  # type: ignore[method-assign]
+
+    views = await svc.list_profiles("u1")
+    assert [v.main.model for v in views] == ["deepseek-v4-flash-free", "deepseek-v4-flash"]
+    assert [v.name for v in views] == ["DeepSeek V4 Flash · 免费额度", "DeepSeek V4 Flash"]
+    assert views[0].id != views[1].id
+
+    # A conversation pinned to the free preset must name the free tier when expanded.
+    expanded = await svc.expand("u1", views[0].id)
+    assert expanded.main.model == "deepseek-v4-flash-free"
+    assert expanded.name == "DeepSeek V4 Flash · 免费额度"
+
+
+@pytest.mark.asyncio
 async def test_expand_none_and_dangling_fall_back_to_platform_default(monkeypatch):
     monkeypatch.setattr(
         "agentcore.llm.catalog.platform_listable_model_ids",

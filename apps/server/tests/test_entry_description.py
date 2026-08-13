@@ -9,6 +9,11 @@ import agentcore.billing.gate as gate_mod
 import agentcore.db.base as db_base
 import agentcore.db.repositories as repos_mod
 import agentcore.documents.description as desc_mod
+from agentcore.billing.gate import (
+    BackgroundLlmResult,
+    BackgroundLlmSkip,
+    BackgroundSkipReason,
+)
 from agentcore.documents.description import (
     DESCRIPTION_MAX_CHARS,
     DescriptionInput,
@@ -239,7 +244,7 @@ async def test_mint_writes_only_when_empty(monkeypatch):
             return SimpleNamespace(description=description)
 
     async def _bg(user_id, *, purpose, runner):
-        return SimpleNamespace(
+        return BackgroundLlmResult(
             value=DescriptionResult(description="AI拟的摘要"),
             credentials=SimpleNamespace(source="platform", default_model="deepseek-v4-flash"),
         )
@@ -294,7 +299,7 @@ async def test_mint_regenerates_after_clear(monkeypatch):
             return SimpleNamespace(description=description)
 
     async def _bg(user_id, *, purpose, runner):
-        return SimpleNamespace(
+        return BackgroundLlmResult(
             value=DescriptionResult(description="清空后重生成"),
             credentials=SimpleNamespace(source="platform", default_model="m"),
         )
@@ -343,7 +348,7 @@ async def test_mint_skips_when_content_changed(monkeypatch):
     async def _bg(user_id, *, purpose, runner):
         # Simulate a concurrent save while the LLM runs.
         state["content"] = "---\napply: always\n---\nv2\n"
-        return SimpleNamespace(
+        return BackgroundLlmResult(
             value=DescriptionResult(description="针对 v1"),
             credentials=SimpleNamespace(source="platform", default_model="m"),
         )
@@ -381,7 +386,7 @@ async def test_mint_llm_unavailable_leaves_empty(monkeypatch):
             raise AssertionError("must not write when LLM unavailable")
 
     async def _bg(*_a, **_k):
-        return None
+        return BackgroundLlmSkip(reason=BackgroundSkipReason.NO_CREDENTIALS)
 
     monkeypatch.setattr(db_base, "async_session_factory", lambda: _SessionCM())
     monkeypatch.setattr(repos_mod, "DocumentRepository", _Repo)

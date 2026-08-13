@@ -1,11 +1,15 @@
 import { api } from "@/services/api";
 import { getActiveSidecarTarget } from "@/services/sidecarRouting";
+import type { InterveneAck } from "@agentcore/protocol-fold-kit";
 
 export interface SubmitRunRedirectParams {
   executionId: string;
   runId: string;
   feedback: string;
 }
+
+/** 服务端回执：受理与否 + 一句话原因（`queued` 只是排队计数，不代表这次被受理）。 */
+export type RunRedirectAck = InterveneAck & { queued: number };
 
 /**
  * Redirect one in-flight worker (中间可见性 Phase 2a).
@@ -16,14 +20,17 @@ export interface SubmitRunRedirectParams {
  * `continue_run` from its salvaged transcript when continuable, else a
  * same-role `_redir` handoff from scratch (`runtime/delegate/drive_redirect.py`).
  * Nothing about it is「排队等下一步」——say so in any UI confirmation.
+ *
+ * 回执 `accepted` 说的是引擎有没有真收下：够不着这个 run 时它是 false，此时**什么都
+ * 没发生**，界面不许说「已改方向」。
  */
 export async function submitRunRedirect(
   conversationId: string,
   params: SubmitRunRedirectParams,
-): Promise<void> {
+): Promise<RunRedirectAck> {
   const sidecarTarget = getActiveSidecarTarget(conversationId);
   if (sidecarTarget) {
-    await window.sidecarApi.runRedirect({
+    return window.sidecarApi.runRedirect({
       rootId: sidecarTarget.rootId,
       subpath: sidecarTarget.subpath,
       conversationId,
@@ -31,13 +38,15 @@ export async function submitRunRedirect(
       runId: params.runId,
       feedback: params.feedback,
     });
-    return;
   }
-  await api.post(`/v1/conversations/${conversationId}/run-redirect`, {
-    execution_id: params.executionId,
-    run_id: params.runId,
-    feedback: params.feedback,
-  });
+  return api.post<RunRedirectAck>(
+    `/v1/conversations/${conversationId}/run-redirect`,
+    {
+      execution_id: params.executionId,
+      run_id: params.runId,
+      feedback: params.feedback,
+    },
+  );
 }
 
 /** Why a run reached a terminal dead end the user is asked to accept (跑一半改方向 Step 4):

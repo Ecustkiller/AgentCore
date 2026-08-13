@@ -7,8 +7,12 @@ import {
   NetworkError,
   api,
   bootstrapRequest,
+  captureCsrf,
   clearCsrfToken,
   fetchWithTimeout,
+  getCsrfHeaders,
+  isReplayableCsrfRejection,
+  notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
 import { clearSidecarFoldersAuth } from "@/services/foldersToken";
@@ -98,14 +102,38 @@ export async function register(input: RegisterInput): Promise<AuthUser> {
   return user;
 }
 
+/**
+ * End the session: ask the server to revoke it, then drop every credential this
+ * process still holds.
+ *
+ * The local wipe is deliberately NOT conditional on the server call. It used to
+ * sit behind a bare `await`, so a refused logout (403 CSRF was the biggest single
+ * cluster in production logs) skipped all of it and left the app holding the
+ * previous user's CSRF token, sidecar credentials, permission cache and
+ * AgentTown session — while the UI still dropped to the login screen, so the
+ * next account silently inherited them. Server-side revocation is best-effort
+ * from here; the local state is the part this process actually owns.
+ */
 export async function logout(): Promise<void> {
-  await api.post("/v1/auth/logout");
-  clearCsrfToken();
-  clearSidecarInference(); // session ended → next login re-mints
-  clearSidecarFoldersAuth();
-  clearSidecarAccountAuth();
-  clearDefaultPermissionAxesCache();
-  void clearAgentTownSession();
+  try {
+    await api.post("/v1/auth/logout");
+  } catch (err) {
+    // Never rethrown: the caller's job is to drop to login either way. Logged so
+    // "session may still be live server-side" stays visible in desktop.jsonl.
+    logEvent("warn", "auth.logout", {
+      result: "server_revoke_failed",
+      reason: err instanceof NetworkError ? "network" : "http",
+      status: err instanceof ApiError ? err.status : undefined,
+      code: err instanceof ApiError ? err.code : undefined,
+    });
+  } finally {
+    clearCsrfToken();
+    clearSidecarInference(); // session ended → next login re-mints
+    clearSidecarFoldersAuth();
+    clearSidecarAccountAuth();
+    clearDefaultPermissionAxesCache();
+    void clearAgentTownSession();
+  }
 }
 
 /** List the caller's active login devices (one row per refresh-token family). */
@@ -163,21 +191,56 @@ export async function updateProfile(update: ProfileUpdate): Promise<AuthUser> {
  * multipart) and re-encodes them to a square WebP, so we POST the File directly —
  * the shared `api` helper can't be used as it JSON-encodes the body. Returns the
  * refreshed user (its `avatarUrl` carries a content-hash cache-buster, so the new
- * picture shows immediately). Mirrors `api.ts`'s refresh-once-on-401 policy.
+ * picture shows immediately). Mirrors `api.ts`'s recovery policy — refresh-once
+ * on 401 and the same one-shot CSRF-403 replay, so the one raw-bytes write that
+ * bypasses `api.*` is not the single button that hard-fails on a stale token.
  */
 export async function uploadAvatar(file: File): Promise<AuthUser> {
-  const send = (): Promise<Response> =>
-    fetch(`${BASE_URL}/v1/users/me/avatar`, {
+  const send = async (): Promise<Response> => {
+    const res = await fetch(`${BASE_URL}/v1/users/me/avatar`, {
       method: "POST",
       credentials: "include",
-      headers: { "Content-Type": file.type || "application/octet-stream" },
+      headers: {
+        "Content-Type": file.type || "application/octet-stream",
+        // A mutating cookie-auth request: the CSRF header is not optional just
+        // because the body is raw bytes instead of JSON (backend 403s otherwise).
+        ...getCsrfHeaders("POST"),
+      },
       body: file,
     });
+    captureCsrf(res);
+    return res;
+  };
   let res: Response;
+  // One replay for the whole call, shared by both recoveries — the same bound as
+  // `request`'s `retry` flag, so a server that keeps rejecting costs one extra
+  // attempt, never a loop.
+  let replayed = false;
   try {
     res = await send();
-    if (res.status === 401 && (await tryRefresh()) === "renewed") {
-      res = await send();
+    if (res.status === 401) {
+      const outcome = await tryRefresh();
+      if (outcome === "renewed") {
+        res = await send();
+        replayed = true;
+        if (res.status === 401) {
+          notifyUnauthorized({ reason: "replay_still_401", via: "avatar" });
+        }
+      } else if (outcome === "auth_dead") {
+        notifyUnauthorized({ reason: "refresh_auth_dead", via: "avatar" });
+      }
+      // `transient` falls through to the ApiError below — a flaky refresh must
+      // never read as session death.
+    }
+    // Safe to resend: the verdict only holds when the rejection came out of
+    // middleware before the handler ran, so the server never stored a picture.
+    if (!replayed && !res.ok) {
+      const rejected = new ApiError(
+        res.status,
+        await res.clone().text(),
+        res.headers,
+      );
+      if (isReplayableCsrfRejection(res, rejected)) res = await send();
     }
   } catch (cause) {
     throw new NetworkError(cause);

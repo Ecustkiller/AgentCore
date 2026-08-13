@@ -3,24 +3,11 @@
  * @vitest-environment node
  */
 import { describe, expect, it } from "vitest";
-import type { StoredRoot } from "../fs/roots";
-
-/** Mirror of sidecar-service mapping (keep in sync with startTurn / resume). */
-function mapExternalMounts(sessionRoots: StoredRoot[]) {
-  return sessionRoots
-    .filter((r) => r.alias && r.absPath)
-    .map((r) => ({
-      alias: r.alias as string,
-      rootId: r.id,
-      label: r.name,
-      absPath: r.absPath,
-      mode: r.mode === "organize" ? "organize" : "readonly",
-    }));
-}
+import { buildExternalMounts } from "../sidecar/externalMounts";
 
 describe("sidecar externalMounts mode", () => {
   it("preserves organize mode on mapped mounts", () => {
-    const mounts = mapExternalMounts([
+    const mounts = buildExternalMounts([
       {
         id: "r1",
         name: "Desktop",
@@ -43,7 +30,7 @@ describe("sidecar externalMounts mode", () => {
   });
 
   it("defaults missing mode to readonly", () => {
-    const mounts = mapExternalMounts([
+    const mounts = buildExternalMounts([
       {
         id: "r2",
         name: "reports",

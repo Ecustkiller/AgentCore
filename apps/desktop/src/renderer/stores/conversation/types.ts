@@ -178,6 +178,23 @@ export interface Conversation {
    * true 时展示轻提示；不携带摘要正文。
    */
   contextCompacted?: boolean;
+  /**
+   * 压缩没跟上，早期对话已掉出上下文窗口（`ConversationSummary.context_gap`）。
+   * 非空 = 后端已证明「这一轮 AI 读不到那段」，展示降级提示；缺省 = 完好或未计算，保持安静。
+   */
+  contextGap?: ConversationContextGap;
+}
+
+/**
+ * 「AI 现在看不见的那段早期对话」（后端 `ContextGapModel`）。
+ *
+ * `droppedMessages` 是窗口切掉的真实条数（原文仍在时间线上，只是没进模型上下文）；
+ * `recoveryAt` 是上游自报的恢复时刻，ISO8601 UTC 瞬间（如 `2026-08-14T16:00:00Z`），
+ * 由前端按用户本机时区成文；缺省 = 上游没给日期，只能说「稍后自动重试」，不得自行编时间。
+ */
+export interface ConversationContextGap {
+  droppedMessages: number;
+  recoveryAt?: string | null;
 }
 
 export interface MessageAttachmentMeta {
@@ -285,6 +302,11 @@ export interface Message {
       /** Provider endpoint root for BYOK empty-response 排查包. */
       base_url?: string;
       credential_source?: "user" | "platform" | string | null;
+      /** 上游额度恢复的绝对时刻（ISO8601 UTC，如 `2026-08-14T16:00:00Z`）。后端句子里
+       * 不再带时刻，红卡按用户本机时区成文（`lib/recoveryMoment`）。 */
+      recovery_at?: string | null;
+      /** 平台配额闸门的重置时刻（ISO8601 UTC），同上。 */
+      reset_at?: string | null;
     };
   };
   /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction rating on this assistant

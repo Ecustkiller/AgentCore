@@ -5,12 +5,6 @@ import { streamConversation } from "../streamConversation";
 // 发送即有流：POST …/messages 恒返回 SSE（含 turn_queued → 同连接续流）。
 // 旧 HTTP 202 JSON 已退役——非 2xx 走错误路径，2xx 一律进泵。
 
-// 本文件只断言发送这一跳；turn_queued 触发的排队条对账 GET 另有覆盖
-// （turnQueued.test.ts / reconcileQueuedTurns.test.ts），此处 mock 掉以免混入 fetch 计数。
-vi.mock("@/services/turns/reconcileQueuedTurns", () => ({
-  reconcileQueuedTurns: vi.fn(() => Promise.resolve()),
-}));
-
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
 });

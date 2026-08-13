@@ -5,6 +5,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { AgentNodeCardFace } from "./agentNode/AgentNodeFace";
+import { AgentNodeInterveneBar } from "./agentNode/AgentNodeInterveneBar";
 import { AgentNodePeek } from "./agentNode/AgentNodePeek";
 import { SubTeamFoldChip } from "./agentNode/SubTeamFoldChip";
 import { buildAgentNodePresentation } from "./agentNode/presentation";
@@ -68,6 +69,8 @@ export function AgentNode({ data }: NodeProps) {
               onToggle={d.onToggleUnitExpand}
             />
           )}
+          {/* 按人干预（只改这个人 / 只停这个人）——挂卡上，跟随注意力出现。 */}
+          <AgentNodeInterveneBar d={d} />
         </div>
       </div>
       <Handle

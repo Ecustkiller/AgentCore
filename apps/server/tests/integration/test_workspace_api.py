@@ -150,6 +150,25 @@ async def test_upload_list_download_roundtrip(client, _fs_data_dir):
     assert r.status_code == 404
 
 
+async def test_list_one_directory_and_report_truncation(client, _fs_data_dir):
+    """按目录列举 + 明确 truncated：文件树逐层展开靠它，静默截断读作「文件没了」。"""
+    await register_and_login(client, "wslister")
+    conv_id = await _new_conversation(client)
+
+    base = f"/v1/conversations/{conv_id}/workspace/files"
+    await client.put(f"{base}/root.txt", content=b"r")
+    await client.put(f"{base}/deep/nested/target.md", content=b"t")
+
+    r = await client.get(base, params={"path": "deep/nested"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert [e["path"] for e in body["data"]] == ["deep/nested/target.md"]
+    assert body["truncated"] is False
+
+    r = await client.get(base)
+    assert {e["path"] for e in r.json()["data"]} == {"root.txt", "deep"}
+
+
 async def test_delete_and_move_workspace_files(client, _fs_data_dir):
     await register_and_login(client, "wsmover")
     conv_id = await _new_conversation(client)

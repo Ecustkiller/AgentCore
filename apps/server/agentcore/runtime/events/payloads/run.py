@@ -7,7 +7,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from agentcore.runtime.events.payloads._base import WirePayload, absent
-from agentcore.runtime.events.payloads.chat import ResetReason
+from agentcore.runtime.events.payloads.chat import _REPLACE_DOC, ResetReason
 from agentcore.runtime.events.payloads.shared import CostBreakdown, RunDebrief, UsageBreakdown
 from agentcore.runtime.runs.types import RunKind
 
@@ -174,6 +174,7 @@ class RunOutputDeltaPayload(WirePayload):
     run_id: str
     agent_id: str
     delta: str
+    replace: bool | None = absent(_REPLACE_DOC)
 
 
 class RunOutputResetPayload(WirePayload):
@@ -187,6 +188,7 @@ class RunReasoningDeltaPayload(WirePayload):
     run_id: str
     agent_id: str
     delta: str
+    replace: bool | None = absent(_REPLACE_DOC)
 
 
 class RunToolProgressPayload(WirePayload):
@@ -498,6 +500,29 @@ class ResumeDeferredPayload(WirePayload):
     message_id: str
     conversation_id: str
     busy_reason: Literal["wrap_up", "live_turn"]
+
+
+class ResumeSettledPayload(WirePayload):
+    """Cold resume that found its frame already consumed. EPHEMERAL — idempotent success.
+
+    The conclusion is durable in ``paused_turn_outcomes``, stamped by whoever won the
+    atomic claim on the paused frame; this frame relays THAT decision — which card
+    (``kind`` + ``checkpoint_id``), what was decided (``decision``) and when
+    (``decided_at``) — never the decision the caller itself just submitted.
+
+    ``turn_status`` answers a separate question: where the TURN stands (the assistant
+    row's ``usage.status``), so a client knows whether to close out its streaming
+    bubble. ``running`` means the continuation is still going and the bubble stays
+    open; this connection then carries its stream when the run is on this server.
+    """
+
+    message_id: str
+    conversation_id: str
+    kind: Literal["ask_user", "plan_review", "team_preview"]
+    checkpoint_id: str
+    decision: str
+    decided_at: str
+    turn_status: Literal["running", "complete", "incomplete", "failed", "unknown"]
 
 
 class ExecutionDetachedPayload(WirePayload):

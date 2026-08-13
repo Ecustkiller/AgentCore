@@ -362,23 +362,13 @@ async def prepare_fresh_turn(
             )
             if ok:
                 base_tool_context.turn_target_desk.note_folder(auto_desk)
-    from agentcore.runtime.closing_posture import (
-        clear_b1_closing_latches,
-        clear_cloud_web_verify_gap,
-        clear_cutoff_delivery_gap,
-        clear_unresolved_write_ownership,
-    )
+    from agentcore.runtime.closing_posture import reset_turn_scoped_closing_state
     from agentcore.runtime.coordination.session import current_execution_id
-    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
 
     bound_execution_id = base_tool_context.execution_id
     execution_id_token = current_execution_id.set(bound_execution_id)
-    # Fresh turn: prior batch delivery verdict must not leak into finish_guard.
-    current_delivery_verdict.set(None)
-    clear_cloud_web_verify_gap()
-    clear_cutoff_delivery_gap()
-    clear_unresolved_write_ownership()
-    clear_b1_closing_latches()
+    # Fresh turn: nothing a prior batch latched may reach this turn's finish_guard.
+    reset_turn_scoped_closing_state()
 
     # Pillar B: if a background execution is already live for this conversation,
     # adopt it so the CEO wait path / interjection routing share one registry key.

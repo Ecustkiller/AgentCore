@@ -20,6 +20,7 @@ from agentcore.runtime.delegate.drive_setup import (
 )
 from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
 from agentcore.runtime.events import run_skipped
+from agentcore.runtime.runs.drive_reach import register_drive, unregister_drive
 from agentcore.runtime.runs.types import RunPhase, RunState
 from agentcore.tools.protocol import ToolResult
 
@@ -86,17 +87,20 @@ def _materialise_turn_token_budget_skips(
             page_qa_ids.append(node.run_id)
     if skipped_ids:
         nested = current_nested_envelope()
-        logger.info(
-            "delegate.turn_token_ceiling_skip"
-            if skip_reason == REASON_TURN_TOKEN_BUDGET
-            else "delegate.turn_auth_dead_skip",
-            skipped=len(skipped_ids),
-            spent=current_turn_tokens(),
-            ceiling=resolve_turn_token_ceiling(),
-            nested_envelope=nested.envelope if nested else None,
-            nested_baseline=nested.baseline if nested else None,
-            depth=getattr(tool, "_depth", None),
-        )
+        # 事件名必须是字面量：`scripts/sync_log_event_registry.py` 静态扫参数，条件表达式
+        # 会让这两个名字整个从 catalog 里消失（dev 每次调用刷未注册告警）。
+        fields = {
+            "skipped": len(skipped_ids),
+            "spent": current_turn_tokens(),
+            "ceiling": resolve_turn_token_ceiling(),
+            "nested_envelope": nested.envelope if nested else None,
+            "nested_baseline": nested.baseline if nested else None,
+            "depth": getattr(tool, "_depth", None),
+        }
+        if skip_reason == REASON_TURN_TOKEN_BUDGET:
+            logger.info("delegate.turn_token_ceiling_skip", **fields)
+        else:
+            logger.info("delegate.turn_auth_dead_skip", **fields)
     tool._pending_light_website_qa_ids = page_qa_ids
 
 
@@ -625,6 +629,9 @@ async def _drive_body(
     nested_budget_token = reseed_nested_delegation_budget(
         int(getattr(tool, "_depth", 0) or 0)
     )
+    # 从这里到 post-wave drain 之间，本循环会按波排干 stop / redirect 队列——「引擎够得着
+    # 这个 run」的窗口正是这一段，登记给 run-stop / run-redirect 路由据实回话。
+    reach_token = register_drive(execution_id, plan)
     try:
         results = await WaveScheduler(tool._max_parallel or resolve_max_parallel()).run(
             plan,
@@ -656,6 +663,7 @@ async def _drive_body(
         )
         redirects.audit_ignored_redirects()
     finally:
+        unregister_drive(execution_id, reach_token)
         if nested_budget_token is not None:
             reset_budget(nested_budget_token)
         # Revoke AFTER waves + post-wave drain so late workers still see the grant

@@ -1,7 +1,12 @@
 import { invalidateAllSharedSpaces } from "@/hooks/useSharedSpaces";
 import { queryClient } from "@/lib/queryClient";
 import { notifyInfo } from "@/lib/toast";
-import { BASE_URL, notifyUnauthorized, tryRefresh } from "@/services/api";
+import {
+  BASE_URL,
+  captureCsrf,
+  notifyUnauthorized,
+  tryRefresh,
+} from "@/services/api";
 import { toMemoryUpdate } from "@/services/messages";
 import type {
   ChatMessageDetail,
@@ -239,6 +244,7 @@ async function runStream(signal: AbortSignal): Promise<StreamOutcome> {
       headers: { Accept: "text/event-stream" },
       signal,
     });
+    captureCsrf(response); // 全会话长连接，每次重连都是一次刷新令牌的机会
   } catch {
     return "reconnect"; // transport failure (offline / aborted)
   }

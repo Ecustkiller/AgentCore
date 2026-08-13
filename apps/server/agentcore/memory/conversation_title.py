@@ -16,7 +16,6 @@ message if the model output is still empty, the call times out (no retry), or
 the call fails.
 """
 
-import asyncio
 import json
 import re
 from collections.abc import Sequence
@@ -26,6 +25,7 @@ from typing import Protocol, TypedDict
 from agentcore.core.logging import get_logger
 from agentcore.llm import LLMMessage, LLMProvider
 from agentcore.llm.model_selection import build_selected_request, select_call
+from agentcore.llm.provider.call_budget import complete_within_budget
 
 logger = get_logger(__name__)
 
@@ -37,9 +37,9 @@ _MSG_MAX_CHARS = 600
 # Best-effort sidebar label: cap the call so a stalled model can't hold the
 # post-turn tail for the provider's full 120s default. On timeout we degrade to
 # the truncated-first-message fallback — no worse than an empty model reply.
-# Sized above one capped 429 retry (``MAX_RETRY_AFTER`` / backoff) + a fast title
-# completion; hour-scale Retry-After is ignored by the LLM gateway, not by raising
-# this ceiling (see openai_compatible._retry_wait).
+# This is also the 429 budget the provider retries against (``complete_within_budget``),
+# so a cooldown a title could never sit out inside 20s is refused here instead of
+# being slept off into a guaranteed timeout.
 _TITLE_TIMEOUT_SECONDS = 20.0
 
 
@@ -60,9 +60,17 @@ class TitleInput:
 
 @dataclass(frozen=True)
 class TitleResult:
-    """Sidebar title from the first-turn minting call."""
+    """Sidebar title from the first-turn minting call.
+
+    ``degraded_reason`` is set when ``title`` is the truncated-first-message
+    fallback rather than something the model produced. The caller persists both
+    kinds through the same write, so without this flag a degraded label is
+    indistinguishable from a real one once it reaches the sidebar — which is how
+    a rate-limited mint went unnoticed in production.
+    """
 
     title: str
+    degraded_reason: str | None = None
 
 
 class TitleGenerator(Protocol):
@@ -206,8 +214,8 @@ class LLMTitleGenerator:
         async def _call_once() -> TitleResult | None:
             """One timed complete. ``None`` = timeout (caller must not retry)."""
             try:
-                response = await asyncio.wait_for(
-                    self._provider.complete(request), timeout=_TITLE_TIMEOUT_SECONDS
+                response = await complete_within_budget(
+                    self._provider, request, budget=_TITLE_TIMEOUT_SECONDS
                 )
             except TimeoutError:
                 logger.warning("title.timeout", conversation_id=data.conversation_id)

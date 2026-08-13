@@ -1,4 +1,5 @@
 import { FileTree, type FileTreeHandle } from "@/components/files/FileTree";
+import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { IconButton } from "@/components/files/parts";
 import { SharedSpaceEventsDialog } from "@/components/files/sharedSpaces/SharedSpaceEventsDialog";
 import { SharedSpaceMembersDialog } from "@/components/files/sharedSpaces/SharedSpaceMembersDialog";
@@ -53,6 +54,7 @@ export function SharedSpaceSection({
   flashing,
   offlineUnavailable = false,
   filterQuery = "",
+  sortBy,
 }: {
   space: SharedSpaceSummary;
   source: FileSource | null;
@@ -65,6 +67,8 @@ export function SharedSpaceSection({
   offlineUnavailable?: boolean;
   /** Forwarded to {@link FileTree} for path/name filter (hub search box). */
   filterQuery?: string;
+  /** Forwarded to {@link FileTree}: 名称 / 大小 / 修改时间排序（中枢顶栏统一选）。 */
+  sortBy?: FileSortBy;
 }) {
   const meId = useAuthStore((s) => s.user?.id ?? null);
   const canWrite = canWriteSharedSpace(space.my_role);
@@ -271,6 +275,7 @@ export function SharedSpaceSection({
       indent={14}
       activePath={activePath}
       filterQuery={filterQuery}
+      sortBy={sortBy}
       onOpenFile={onOpenFile}
       emptyText={
         canWrite

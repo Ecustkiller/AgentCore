@@ -384,8 +384,12 @@ class WorkerResultAccumulator:
         # ``scope_signals`` = escalate kind=scope count (漂移); ``escalations`` = total
         # worker→captain escalations. The revise count (返工 的另一半) is read off the revise
         # tool's run_ledger, not here.
+        # ``*_by_user`` 是同一批事件里「用户亲手促成的那部分」的**子集**计数，不是新指标：
+        # 运营口径 (turn_metrics / admin / decision_spine) 照旧读总数，用户面的「队友互相
+        # 把关」减掉它，才不会把用户自己点的操作说成队友互检。
         self.collab: dict[str, int] = {
             "boundary_yields": 0,
+            "boundary_yields_by_user": 0,
             "scope_signals": 0,
             "escalations": 0,
         }
@@ -393,6 +397,8 @@ class WorkerResultAccumulator:
         # merge 的对象】上。挂在 delegate 工具实例上时，``absorb_children`` 合并完账目就
         # ``_children.clear()``，lead 子团队的续派随子工具一起消失，revises 系统性少计。
         self.continuations: list[str] = []
+        # 上面那批里由用户「立即改此人」促成的子集（redirect 热修）；队友续派不入。
+        self.user_continuations: list[str] = []
     def add_usage(self, usage: Mapping[str, int]) -> None:
         """Fold one run's (or sub-team's) short-key token usage into the total."""
         for key in self.usage:
@@ -446,5 +452,6 @@ class WorkerResultAccumulator:
         self.run_ledger.extend(other.run_ledger)
         merge_citations(self.citations, other.citations)
         self.continuations.extend(other.continuations)
+        self.user_continuations.extend(other.user_continuations)
         for key in self.collab:
             self.collab[key] += other.collab.get(key, 0)

@@ -240,6 +240,10 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
             await self._on_list_browser_sessions(request_id, params)
         elif method == "restoreTurnBaseline":
             await self._on_restore_turn_baseline(request_id, params)
+        elif method == "createWorkspaceVersion":
+            await self._on_create_workspace_version(request_id, params)
+        elif method == "restoreWorkspaceVersion":
+            await self._on_restore_workspace_version(request_id, params)
         elif method == "warmCodeIndex":
             await self._on_warm_code_index(request_id, params)
         elif method == "warmMcpDiscover":
@@ -277,8 +281,14 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
 
         Root-scoped ``workspace`` frames (a worker desk bound to the turn's local
         root) are only routed to a session that declares the root — the same rule
-        the cloud desktop satisfies with ``POST /v1/fulfill/roots``. The sidecar's
-        own file ops never take this path (direct ``Path`` I/O).
+        the cloud desktop satisfies by registering the root with the API process
+        (``agentcore.fulfill.declare``). The sidecar's own file ops never take
+        this path (direct ``Path`` I/O).
+
+        This is the turn's *own* desk only. A desk on another project (cross-desk
+        delegate, ``folder_id``-scoped reads, bare chat with no binding at all)
+        resolves a root this call never sees; those declare themselves as their
+        workspace is built (``agentcore.fulfill.local_roots``).
         """
         raw = params.get("localRootId")
         root = str(raw).strip() if isinstance(raw, str) else ""

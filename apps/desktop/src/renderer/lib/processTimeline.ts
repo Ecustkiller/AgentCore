@@ -64,6 +64,54 @@ export function appendContentStep(
 }
 
 /**
+ * The existing full text of the timeline's trailing OPEN text block on `kind`'s lane
+ * — i.e. the last step when it is a `content` / `reasoning` step of that lane, else `""`
+ * (the lane's last block was closed by a tool / marker / the other lane's step).
+ *
+ * The block boundary the attach 增量重放 `replace` semantics talk about: the deltas that
+ * folded into this step are exactly the tail of the lane's concatenated scalar.
+ */
+export function openBlockText(
+  process: ProcessStep[] | undefined,
+  kind: "content" | "reasoning",
+): string {
+  const last = process?.[process.length - 1];
+  if (!last) return "";
+  if (last.kind !== "content" && last.kind !== "reasoning") return "";
+  return last.kind === kind ? last.text : "";
+}
+
+/**
+ * Replace the trailing OPEN content block's whole text (attach 增量重放 `replace`):
+ * the frame carries the full text of the step that is still being written, so the
+ * block is swapped rather than grown. Earlier (closed) steps are untouched. Opens a
+ * new content step when the lane has no open block — mirrors {@link appendContentStep}
+ * for the same "last step isn't mine" case.
+ */
+export function replaceTrailingContentStep(
+  process: ProcessStep[] | undefined,
+  text: string,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  const last = steps[steps.length - 1];
+  if (last?.kind === "content") steps[steps.length - 1] = { ...last, text };
+  else steps.push({ kind: "content", text });
+  return steps;
+}
+
+/** Reasoning-lane twin of {@link replaceTrailingContentStep}. */
+export function replaceTrailingReasoningStep(
+  process: ProcessStep[] | undefined,
+  text: string,
+): ProcessStep[] {
+  const steps = process ? [...process] : [];
+  const last = steps[steps.length - 1];
+  if (last?.kind === "reasoning") steps[steps.length - 1] = { ...last, text };
+  else steps.push({ kind: "reasoning", text });
+  return steps;
+}
+
+/**
  * Drop the trailing content step(s) from the timeline (交付前核验回炉 content_reset):
  * the model's done-round draft failed the light verification (e.g. fabricated
  * citations), so its just-streamed reply text is discarded and rewritten. Mirrors the

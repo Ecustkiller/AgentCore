@@ -14,6 +14,7 @@ import {
   type EscalationUserDecision,
   decideEscalation,
 } from "@/api/interaction";
+import { submitRunRedirect, submitRunStop } from "@/api/runControl";
 import {
   BrowserLoginDecisionCard,
   type BrowserLoginSubmitKind,
@@ -37,6 +38,7 @@ import {
   noteRemoteSettlementFromReceipt,
   unmarkLocalSettlement,
 } from "@/lib/remoteSettlement";
+import { markRunStopSent, useRunStopSent } from "@/lib/runStopPending";
 import { formatDuration } from "@/lib/time";
 import type { EscalationSlotEsc, RunToolCall } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
@@ -55,6 +57,18 @@ import type {
   RunStatus,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
+import {
+  COLLAB_SUMMARY_TOOLTIP,
+  type CollabCounts,
+  type InterveneGate,
+  formatCollabSummary,
+  interveneAckText,
+  parallelSaving,
+  parallelSavingText,
+  parallelSavingTooltip,
+  runRedirectGate,
+  runStopGate,
+} from "@agentcore/protocol-fold-kit";
 import { type ReactNode, useMemo, useState } from "react";
 import "./TeamView.css";
 
@@ -68,6 +82,16 @@ function actSectionLabel(act: ProjectedAct | undefined, actId: string): string {
   if (act?.title?.trim()) return act.title.trim();
   if (act?.kind) return ACT_KIND_LABEL[act.kind] ?? act.kind;
   return actId;
+}
+
+/** 这名队员属于哪一幕（缺省 act-1；单幕图退回唯一那幕）——按幕开关「改方向」。 */
+function actKindOf(
+  actById: ReadonlyMap<string, ProjectedAct>,
+  run: ProjectedRun,
+): ActKind | null {
+  const act = actById.get(run.actId || "act-1");
+  if (act) return act.kind;
+  return actById.size === 1 ? ([...actById.values()][0]?.kind ?? null) : null;
 }
 
 type CheckpointDecision = NonNullable<ProjectedRun["checkpoint"]>["decision"];
@@ -328,13 +352,21 @@ function teamStripFace(args: {
   return { title: "团队完成", mark: "ok", phase: false };
 }
 
+/**
+ * 完工的一行账：子任务 / 用时 / 并行省下 / ¥。
+ *
+ * 「用时」旁边给出并行省下的那段（`saving`，与桌面同一句、同一个数），否则这条账单只剩
+ * 「更慢、更贵」——找一支团队换来的东西一处都没写。只派一个人 / 没省到时 saving 为 null，
+ * 什么都不说。
+ */
 function teamStripMeta(args: {
   workers: readonly ProjectedRun[];
   progress: { completed: number; total: number };
   status: TurnStatus | null | undefined;
   elapsedMs: number;
+  saving: ReturnType<typeof parallelSaving>;
 }): string {
-  const { workers, progress, status, elapsedMs } = args;
+  const { workers, progress, status, elapsedMs, saving } = args;
   const bits: string[] = [];
   // 「N 个 Agent」已删——与图/列表上成员重复；保留子任务 n/m。
   bits.push(`${progress.completed}/${progress.total} 子任务`);
@@ -344,6 +376,7 @@ function teamStripMeta(args: {
   if (elapsedMs > 0 && status !== "running") {
     bits.push(`用时 ${formatDuration(elapsedMs)}`);
   }
+  if (saving) bits.push(parallelSavingText(saving, formatDuration));
   const money = aggregateWorkerCost(workers);
   if (money) {
     if (money.nano > 0) {
@@ -375,13 +408,15 @@ export function TeamView({
   acts = [],
   teamNotes = [],
   status,
-  conversationId: _conversationId = null,
+  conversationId = null,
+  executionId = null,
   pendingEscalations: _pendingEscalations,
   escalationsInteractive: _escalationsInteractive = false,
   runToolCalls,
   workerToolPhases,
   evidenceLedger = [],
   elapsedMs = 0,
+  collab = null,
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -393,8 +428,10 @@ export function TeamView({
   /** Turn lifecycle from ProjectedTurn — drives team-notes default expand/collapse. */
   status?: TurnStatus | null;
   /** 阻塞式求决策 (②): present on a live multi-agent turn so a worker's pending escalation
-   *  renders as an actionable answer card. */
+   *  renders as an actionable answer card. 也是按人干预（只停/只改这一个队员）的提交对象。 */
   conversationId?: string | null;
+  /** 本图 execution id（`run_plan.execution_id`）——按人干预的提交目标；缺省则不出干预条。 */
+  executionId?: string | null;
   /** runId → pending escalation id from ProjectedTurn.interactions (P3 · 按 id 精确提交). */
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream (else read-only). */
@@ -410,6 +447,9 @@ export function TeamView({
   /** 回合墙钟跨度（`turnElapsedMs(turn.events)`）：条上「用时」。与桌面同量——绝不用队员时长求和
    *  顶替，那是工时，并行越多越大，会把省时显示成更慢。缺省 0 = 不显示用时。 */
   elapsedMs?: number;
+  /** 回合协作计数（live `message_end.collab` / 历史 REST `MessageDetail.collab`，旁路不入
+   *  ProjectedTurn）：条上「互相把关」一行；全 0 / 缺省则不渲染。 */
+  collab?: CollabCounts | null;
 }) {
   // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
@@ -442,7 +482,20 @@ export function TeamView({
     workers,
     progress,
   });
-  const stripMeta = teamStripMeta({ workers, progress, status, elapsedMs });
+  // 并行省时只在完工面上说（strip.mark === "ok" ≡ 桌面非 stopped 的 CompletedStrip）：
+  // 进行中还没有终局跨度，失败 / 已停止 / 待确认的半程谈「省下」不合适。
+  const saving =
+    strip.mark === "ok" ? parallelSaving({ elapsedMs, runs: workers }) : null;
+  const stripMeta = teamStripMeta({
+    workers,
+    progress,
+    status,
+    elapsedMs,
+    saving,
+  });
+  // 队友互相把关（原「纠偏/漂移/唤回/上报」四个负面内部计数）——同一批事实的收益口径，
+  // 与桌面同一句。全 0 时 formatCollabSummary 返回 null，这里就不渲染。
+  const collabSummary = formatCollabSummary(collab);
   const showDebateEntry = isDebate;
   const synthesisBlurbs = workers
     .filter((r) => r.status === "completed" && !!r.outputSummary)
@@ -538,7 +591,25 @@ export function TeamView({
                 ) : null}
               </div>
               {stripMeta ? (
-                <div className="team-strip-meta">{stripMeta}</div>
+                <div
+                  className="team-strip-meta"
+                  title={
+                    saving
+                      ? parallelSavingTooltip(saving, formatDuration)
+                      : undefined
+                  }
+                >
+                  {stripMeta}
+                </div>
+              ) : null}
+              {collabSummary ? (
+                <div
+                  className="team-strip-collab"
+                  data-testid="team-strip-collab"
+                  title={COLLAB_SUMMARY_TOOLTIP}
+                >
+                  {collabSummary}
+                </div>
               ) : null}
             </div>
             {!isDebate && (
@@ -618,6 +689,9 @@ export function TeamView({
             agents={agents}
             runs={runs}
             toolCalls={runToolCalls?.get(selectedRun.id) ?? []}
+            conversationId={conversationId}
+            executionId={executionId}
+            redirectCapable={actKindOf(actById, selectedRun) !== "debate"}
             onSelect={setSelectedRunId}
             onClose={() => setSelectedRunId(null)}
           />
@@ -1078,6 +1152,9 @@ function RunDetailPanel({
   agents,
   runs,
   toolCalls,
+  conversationId,
+  executionId,
+  redirectCapable,
   onSelect,
   onClose,
 }: {
@@ -1085,6 +1162,11 @@ function RunDetailPanel({
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
   toolCalls: RunToolCall[];
+  /** 按人干预的提交对象；任一为空（历史草稿 / 无图）则不出干预条。 */
+  conversationId: string | null;
+  executionId: string | null;
+  /** 本幕是否开放「改方向」（辩论幕不开放：辩手须独立对抗）。 */
+  redirectCapable: boolean;
   onSelect: (runId: string) => void;
   onClose: () => void;
 }) {
@@ -1160,6 +1242,16 @@ function RunDetailPanel({
           isChild={isChild}
           continuationIndex={continuationIndexOf(runs, run)}
         />
+
+        {run.kind !== "captain" && conversationId && executionId ? (
+          <RunInterveneBar
+            conversationId={conversationId}
+            executionId={executionId}
+            run={run}
+            role={name}
+            redirectCapable={redirectCapable}
+          />
+        ) : null}
 
         <RunSection title={roundFocus != null ? "本轮焦点" : "任务"}>
           <Markdown content={roundFocus ?? run.task} evidence />
@@ -1307,6 +1399,201 @@ function RunDetailPanel({
         )}
       </div>
     </Modal>
+  );
+}
+
+/**
+ * 按人干预条（只改这个人的方向 / 只停这个人）—— 点开队员就在手边，不必再翻到底。
+ *
+ * 手机上这两件事此前**一处都没有**：列表按人显示每个队员在干什么，能操作的却只有整轮
+ * 停止。现在提到队员详情最上方，一次点击（点卡）即可达。
+ *
+ * 不可用时**变灰并把原因写出来**，绝不隐藏——手机没有 hover，原因必须是看得见的一行字
+ * （判定与文案与桌面共用 `protocol-fold-kit/runIntervene`，两端说同一句）。
+ */
+function RunInterveneBar({
+  conversationId,
+  executionId,
+  run,
+  role,
+  redirectCapable,
+}: {
+  conversationId: string;
+  executionId: string;
+  run: ProjectedRun;
+  role: string;
+  redirectCapable: boolean;
+}) {
+  const [composerOpen, setComposerOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<"stop" | "redirect" | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  // 停止请求已发出：不假装 run 已停（状态由引擎的后续帧改），只把按钮切成请求中。
+  // 存在组件外，关掉详情再打开仍算数——否则同一个 run 上可以反复发同一条请求。
+  const stopSent = useRunStopSent(executionId, run.id, run.status);
+
+  const stopGate = runStopGate(run.status);
+  const redirectGate = runRedirectGate(run.status);
+  const reason = redirectCapable
+    ? (redirectGate.reason ?? stopGate.reason)
+    : stopGate.reason;
+  const stopping = stopSent || busy === "stop";
+
+  async function stopMember() {
+    if (!stopGate.enabled || busy) return;
+    setBusy("stop");
+    setErr(null);
+    try {
+      const ack = await submitRunStop(conversationId, {
+        executionId,
+        runId: run.id,
+      });
+      // 引擎够不着这个 run 时什么都没入队——不许留下「停止请求中…」，那是许一个空愿。
+      if (ack.accepted) markRunStopSent(executionId, run.id);
+      else setErr(interveneAckText(ack));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "停止失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function submitRedirect() {
+    const feedback = draft.trim();
+    if (!feedback || busy) return;
+    setBusy("redirect");
+    setErr(null);
+    try {
+      const ack = await submitRunRedirect(conversationId, {
+        executionId,
+        runId: run.id,
+        feedback,
+      });
+      if (!ack.accepted) {
+        setErr(interveneAckText(ack));
+        return;
+      }
+      setComposerOpen(false);
+      setDraft("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "提交失败");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="rd-intervene">
+      <div className="rd-intervene-actions">
+        {redirectCapable && (
+          <InterveneButton
+            gate={redirectGate}
+            label="改这个人的方向"
+            tone="primary"
+            disabled={busy != null}
+            onPress={() => {
+              setComposerOpen((v) => !v);
+              if (!composerOpen && !draft) {
+                setDraft(`请按以下方向调整「${role}」的产出：`);
+              }
+            }}
+          />
+        )}
+        <InterveneButton
+          gate={stopGate}
+          label={stopping ? "停止请求中…" : "停止这位队员"}
+          tone="neutral"
+          disabled={busy != null || stopping}
+          onPress={() => void stopMember()}
+        />
+      </div>
+
+      {/* 只在能点的时候才说这两件事分别意味着什么；点不动时上面的原因行才是要读的。 */}
+      {stopGate.enabled && !stopping ? (
+        <p className="rd-intervene-note">
+          只作用于这一位队员，主 Agent 与这轮对话继续（不是「停止整轮」）。
+        </p>
+      ) : null}
+      {stopping ? (
+        <p className="rd-intervene-note">
+          停止请求已发出，等引擎确认后这位队员的状态才会变。
+        </p>
+      ) : null}
+      {reason ? <p className="rd-intervene-why">{reason}</p> : null}
+
+      {composerOpen && redirectGate.enabled ? (
+        <div className="rd-intervene-composer">
+          <textarea
+            className="run-escalation-note"
+            rows={3}
+            value={draft}
+            disabled={busy === "redirect"}
+            placeholder="具体、可执行的修改方向…"
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          <div className="run-escalation-actions">
+            <button
+              type="button"
+              className="esc-btn esc-btn-primary"
+              disabled={busy === "redirect" || !draft.trim()}
+              onClick={() => void submitRedirect()}
+            >
+              提交改方向
+            </button>
+            <button
+              type="button"
+              className="esc-btn esc-btn-neutral"
+              disabled={busy === "redirect"}
+              onClick={() => setComposerOpen(false)}
+            >
+              取消
+            </button>
+          </div>
+          <p className="rd-intervene-note">
+            提交后这位队员在飞的工作立刻取消，带着你的新方向重跑——接不上现场就从头重做，
+            这一段要重新花时间和钱。
+          </p>
+        </div>
+      ) : null}
+
+      {err ? <p className="run-error">{err}</p> : null}
+    </div>
+  );
+}
+
+/**
+ * 不可用走 `aria-disabled` 而非原生 `disabled`：真 disabled 的按钮读屏会整枚跳过，用户
+ * 连「这里本来有个入口」都不知道。原因写在 `aria-label` 与旁边那行字里，两处都读得到。
+ * 原生 `disabled` 只留给「请求已在飞」这类真忙态。
+ */
+function InterveneButton({
+  gate,
+  label,
+  tone,
+  disabled,
+  onPress,
+}: {
+  gate: InterveneGate;
+  label: string;
+  tone: "primary" | "neutral";
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  const unavailable = !gate.enabled;
+  return (
+    <button
+      type="button"
+      className={`esc-btn esc-btn-${tone}${unavailable ? " esc-btn-unavailable" : ""}`}
+      disabled={disabled && !unavailable}
+      aria-disabled={unavailable || undefined}
+      aria-label={unavailable ? `${label}（${gate.reason}）` : label}
+      onClick={() => {
+        if (unavailable) return;
+        onPress();
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

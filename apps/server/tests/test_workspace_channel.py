@@ -23,9 +23,16 @@ import asyncio
 
 import pytest
 
+from agentcore.fulfill import grace
 from agentcore.fulfill.dispatch import DeliverResult
+from agentcore.fulfill.dispatch import deliver_client_tool as _real_deliver_client_tool
 from agentcore.runtime.events import EventType, SSEEvent
-from agentcore.runtime.interaction import InteractionKind, InteractionRegistry
+from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
+from agentcore.runtime.interaction import (
+    InteractionKind,
+    InteractionRegistry,
+    default_interaction_registry,
+)
 from agentcore.tools.sandbox.protocol import ExecutionRequest
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp, index_io_mode
 from agentcore.workspace.limits import LOCAL_ROOT_NOT_HELD
@@ -37,10 +44,14 @@ from agentcore.workspace.protocol import (
     PathNotFound,
     WorkspaceIOError,
 )
+from tests.client_tool_fulfill_testutil import await_fulfill_event, install_test_hub
 
 pytestmark = pytest.mark.anyio
 
 CONV = "conv-1"
+# Own conversation id: the reconnect case drives the process-wide registry that
+# ``rehang_pending_client_tools`` reads, so it must not share pending entries.
+CONV_RECONNECT = "conv-1-reconnect"
 USER = "user-ws-channel"
 ROOT_ID = "root-abc"
 
@@ -174,12 +185,30 @@ async def test_list_parses_dir_entries():
             {"path": "readme.md", "is_dir": False},  # optional meta absent → None
         ],
     }
-    entries, _ = await _round_trip(local.list(".", "*"), registry, response)
-    assert [(e.path, e.is_dir, e.size_bytes, e.mtime_ms) for e in entries] == [
+    listing, _ = await _round_trip(local.list(".", "*"), registry, response)
+    assert [(e.path, e.is_dir, e.size_bytes, e.mtime_ms) for e in listing] == [
         ("src", True, None, 1000),
         ("src/main.py", False, 42, 2000),
         ("readme.md", False, None, None),
     ]
+    # Bare-array answer = a desktop from before the cap became honest.
+    assert listing.truncated is False
+
+
+async def test_list_reports_desktop_truncation():
+    """A capped desktop listing must arrive as truncated, not as a complete tree."""
+    local, registry = _make()
+    response = {
+        "ok": True,
+        "value": {
+            "entries": [{"path": "a.txt", "is_dir": False}],
+            "truncated": True,
+        },
+    }
+    listing, event = await _round_trip(local.list(".", "*", cap=1), registry, response)
+    assert event.payload["args"]["cap"] == 1
+    assert [e.path for e in listing] == ["a.txt"]
+    assert listing.truncated is True
 
 
 async def test_index_files_parses_paths_and_truncation():
@@ -477,7 +506,11 @@ async def test_op_timeout_log_includes_path(monkeypatch):
 
 
 async def test_no_fulfiller_fail_fast_without_wall_clock_wait(monkeypatch):
-    """No online fulfiller: settle immediately, no full timeout wait."""
+    """No online fulfiller *and* none seen lately: settle now, no timeout wait.
+
+    The hub has never heard of this user's devices, so the reconnect grace below
+    does not engage — a genuinely clientless account keeps its immediate answer.
+    """
     monkeypatch.setattr(
         "agentcore.fulfill.dispatch.deliver_client_tool",
         lambda *a, **k: DeliverResult.NO_FULFILLER,
@@ -524,6 +557,134 @@ async def test_root_not_held_settles_with_the_authorization_copy(monkeypatch):
     assert "无履约方" not in detail
     assert elapsed < 0.5
     assert channel._dead is False  # noqa: SLF001
+
+
+def _use_real_dispatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo the module-wide deliver stub — these cases assert real hub routing."""
+    monkeypatch.setattr(
+        "agentcore.fulfill.dispatch.deliver_client_tool", _real_deliver_client_tool
+    )
+
+
+async def _await_pending(registry: InteractionRegistry, conversation_id: str, task):
+    """The op's still-open registry entry (fails loudly if it settled instead)."""
+    for _ in range(2000):
+        pending = registry.list_pending(conversation_id)
+        if pending:
+            return pending[0]
+        if task.done():
+            raise AssertionError(f"op settled instead of waiting: {task.result()!r}")
+        await asyncio.sleep(0)
+    raise AssertionError("op never suspended")
+
+
+async def test_op_dispatched_into_a_reconnect_blind_window_survives_it(monkeypatch):
+    """桌面 SSE 刚断开（1–4s 后就回来）：op 挂住等重连，别当场判无履约方。"""
+    _use_real_dispatch(monkeypatch)
+    hub, session = install_test_hub(
+        monkeypatch,
+        user_id=USER,
+        device_id="desk-1",
+        roots=[ROOT_ID],
+        caps={"workspace"},
+    )
+    hub.unregister(session)  # the SSE dropped; the machine never went anywhere
+
+    registry = default_interaction_registry()
+    for leftover in list(registry.list_pending(CONV_RECONNECT)):
+        registry.discard(leftover.id)
+    channel = WorkspaceChannel(
+        user_id=USER,
+        conversation_id=CONV_RECONNECT,
+        registry=registry,
+        timeout_seconds=30.0,
+        root_id=ROOT_ID,
+    )
+    task = asyncio.create_task(channel.request(WorkspaceOp.READ, {"path": "notes.md"}))
+    try:
+        pending = await _await_pending(registry, CONV_RECONNECT, task)
+        # Held, not settled — a settled Future is nothing left to re-hang.
+        assert grace.is_held(pending.id) is True
+
+        back = hub.register(USER, "desk-1", caps=["workspace"], roots=[ROOT_ID])
+        assert rehang_pending_client_tools(USER) == 1
+        frame = await await_fulfill_event(back)
+        assert frame["type"] == "workspace_op_required"
+        assert frame["payload"]["request_id"] == pending.id
+        assert grace.is_held(pending.id) is False
+
+        assert registry.resolve(
+            pending.id,
+            {"ok": True, "value": "notes"},
+            conversation_id=CONV_RECONNECT,
+        )
+        assert await asyncio.wait_for(task, timeout=1.0) == "notes"
+        assert channel._dead is False  # noqa: SLF001
+        assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
+    finally:
+        task.cancel()
+        for leftover in list(registry.list_pending(CONV_RECONNECT)):
+            registry.discard(leftover.id)
+
+
+async def test_desktop_that_left_long_ago_gets_no_grace(monkeypatch):
+    """宽限只给「刚刚还在」的设备；早已离线 = 与今天完全一样，立刻失败。"""
+    _use_real_dispatch(monkeypatch)
+    monkeypatch.setattr("agentcore.fulfill.hub.RECENT_PRESENCE_SECONDS", 0.0)
+    hub, session = install_test_hub(
+        monkeypatch,
+        user_id=USER,
+        device_id="desk-1",
+        roots=[ROOT_ID],
+        caps={"workspace"},
+    )
+    hub.unregister(session)
+
+    channel = WorkspaceChannel(
+        user_id=USER,
+        conversation_id=CONV,
+        registry=InteractionRegistry(),
+        timeout_seconds=30.0,
+        root_id=ROOT_ID,
+    )
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(WorkspaceIOError, match="无履约方"):
+        await channel.request(WorkspaceOp.READ, {"path": "gone.txt"})
+    assert asyncio.get_running_loop().time() - t0 < 0.5
+    assert channel._dead is False  # noqa: SLF001
+
+
+async def test_grace_expiry_settles_with_the_same_answer_well_inside_the_deadline(
+    monkeypatch,
+):
+    """设备没回来：宽限到点就按原文案结算，绝不拖到 channel deadline。"""
+    _use_real_dispatch(monkeypatch)
+    hub, session = install_test_hub(
+        monkeypatch,
+        user_id=USER,
+        device_id="desk-1",
+        roots=[ROOT_ID],
+        caps={"workspace"},
+    )
+    hub.unregister(session)
+
+    # 1.2s deadline → 0.2s grace (clamped by the settle slack), so the wait is
+    # observable and the failure still lands as a settle, not a timeout.
+    channel = WorkspaceChannel(
+        user_id=USER,
+        conversation_id=CONV,
+        registry=InteractionRegistry(),
+        timeout_seconds=1.2,
+        root_id=ROOT_ID,
+    )
+    t0 = asyncio.get_running_loop().time()
+    with pytest.raises(WorkspaceIOError, match="无履约方"):
+        await channel.request(WorkspaceOp.READ, {"path": "never-back.txt"})
+    elapsed = asyncio.get_running_loop().time() - t0
+    assert 0.15 <= elapsed < 1.0
+    # Settled, not hung: the sticky-dead streak is for liveness timeouts only.
+    assert channel._dead is False  # noqa: SLF001
+    assert channel._consecutive_settle_timeouts == 0  # noqa: SLF001
 
 
 async def test_delivered_op_stays_open_until_resolve():

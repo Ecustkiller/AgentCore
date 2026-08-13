@@ -18,6 +18,30 @@ type SuspensionKind = components["schemas"]["SuspensionKind"];
 /** Where the durable paused frame lives — drives resume routing in {@link runResume}. */
 export type ResumeOrigin = "sidecar" | "server";
 
+const ALL_ORIGINS: readonly ResumeOrigin[] = ["sidecar", "server"];
+
+/**
+ * 观察序号（单调递增），用来判定「某次 /recovery 快照看得见哪些本地壳」。
+ *
+ * 服务端**先落盘挂起帧、再发 `*_required`**（见 ask_user 工具：`saved` 为真才
+ * `sink.emit(required)`），所以一次快照只要是在某张卡浮现**之后**才发起的，就必然
+ * 读得到它的 durable 帧——这样的快照回空 = 帧真被消费掉了，壳该清。反过来，快照在
+ * 卡浮现前就上了路，回空只说明它太早，那正是 live pause 抢跑竞态，不许清。
+ *
+ * 用序号而不是时间戳：不受时钟精度 / 回拨影响，同一毫秒内的先后也分得清。
+ */
+let observationSeq = 0;
+
+const nextObservationSeq = (): number => ++observationSeq;
+
+/**
+ * 取一次快照的观察起点——**发请求之前**调用。此后才进入本地的壳，这次快照都看不见，
+ * 因而不受它的空结果处置。
+ */
+export function beginPausedSnapshot(): number {
+  return observationSeq;
+}
+
 /**
  * A turn that paused at a plan_review / ask_user checkpoint, was DURABLY persisted,
  * then lost its live SSE — client disconnect / server restart (结构化挂起 2b). On
@@ -121,6 +145,9 @@ export interface PendingResume {
   browserLogin?: boolean;
   /** Where the durable frame lives — drives {@link runResume} sidecar vs server routing. */
   origin: ResumeOrigin;
+  /** 这张壳进入本地时的{@link beginPausedSnapshot 观察序号}；由 store 自己盖，外部构造
+   * 的 {@link PendingResume}（如 InteractionStore 直投的卡）没有 → 视作最早。 */
+  surfacedSeq?: number;
 }
 
 /** `steps` / `pending` arrive as loose JSON dicts (backend ``list[dict]``); map
@@ -282,12 +309,24 @@ export type PausedTurnEntry = {
 
 interface PausedTurnState {
   pending: PendingResume[];
-  /** Replace one conversation's pending resumes (from the recovery snapshot on reopen),
+  /**
+   * Replace one conversation's pending resumes (from the recovery snapshot on reopen),
    * leaving other conversations' entries untouched. Each entry carries its own
-   * {@link ResumeOrigin} so a mixed cloud+sidecar session routes resume correctly. */
+   * {@link ResumeOrigin} so a mixed cloud+sidecar session routes resume correctly.
+   *
+   * 快照只对**它看得见的**壳有处置权：本地壳被清掉需同时满足「它那一路真被问到了」
+   * 与「它在快照发起前就已浮现」。两条各挡一种误清——请求失败 ≠ 帧没了；卡刚浮现时
+   * 在飞的快照本就来不及看见它（live pause 抢跑竞态）。
+   */
   setForConversation: (
     conversationId: string,
     entries: PausedTurnEntry[],
+    opts?: {
+      /** {@link beginPausedSnapshot} 在发请求前取的观察起点；缺省 = 「刚看过」。 */
+      since?: number;
+      /** 这次真问到了哪些落盘源（请求成功）；缺省 = 两路都问到了。 */
+      confirmed?: readonly ResumeOrigin[];
+    },
   ) => void;
   /** 挂起即收口 (②): add/replace ONE turn's resume entry the moment its LIVE stream ENDS
    * at a checkpoint (message_end finish_reason=paused). Built from the *_required payload
@@ -412,37 +451,36 @@ function entryFromSummary(
 export const usePausedTurnStore = create<PausedTurnState>((set) => ({
   pending: [],
 
-  setForConversation: (conversationId, entries) =>
-    set((state) => {
-      const others = state.pending.filter(
-        (p) => p.conversationId !== conversationId,
-      );
-      const existing = state.pending.filter(
-        (p) => p.conversationId === conversationId,
-      );
-      // Empty recovery must not wipe live-surfaced frames (open race: pause
-      // lands / surfaces before durable snapshot catches up). Non-empty recovery
-      // still replaces so reopen stays authoritative.
-      if (entries.length === 0 && existing.length > 0) {
-        return state;
-      }
-      return {
-        pending: [
-          ...others,
-          ...entries.map(({ summary, origin }) =>
-            entryFromSummary(conversationId, summary, origin),
-          ),
-        ],
-      };
-    }),
-
-  addLiveResume: (entry) =>
+  setForConversation: (conversationId, entries, opts) => {
+    const since = opts?.since ?? observationSeq;
+    const confirmed = opts?.confirmed ?? ALL_ORIGINS;
+    const incoming = entries.map(({ summary, origin }) => ({
+      ...entryFromSummary(conversationId, summary, origin),
+      surfacedSeq: nextObservationSeq(),
+    }));
+    const restated = new Set(incoming.map((p) => p.messageId));
     set((state) => ({
       pending: [
-        ...state.pending.filter((p) => p.messageId !== entry.messageId),
-        entry,
+        ...state.pending.filter((p) => {
+          if (p.conversationId !== conversationId) return true;
+          if (restated.has(p.messageId)) return false; // 快照带了新版本
+          if (!confirmed.includes(p.origin)) return true; // 那一路没问到 = 未知
+          return (p.surfacedSeq ?? 0) > since; // 快照发起后才浮现 → 它看不见
+        }),
+        ...incoming,
       ],
-    })),
+    }));
+  },
+
+  addLiveResume: (entry) => {
+    const surfaced = { ...entry, surfacedSeq: nextObservationSeq() };
+    set((state) => ({
+      pending: [
+        ...state.pending.filter((p) => p.messageId !== surfaced.messageId),
+        surfaced,
+      ],
+    }));
+  },
 
   remove: (messageId) =>
     set((state) => ({

@@ -220,16 +220,15 @@ async def run_one_tool(
     # Legacy write-args projection bait: reject before allowlist/not_found.
     landed_name_err = landed_status_name_rejection(name or raw_name)
     if landed_name_err:
+        # ``landed_name_err`` teaches the model the read-then-rewrite path; user face
+        # is curated by code only.
         sink.emit(
             tool_use_end(
                 tc.id,
                 name or raw_name,
                 success=False,
                 output=landed_name_err,
-                failure=tool_failure_fields(
-                    code="landed_status_name",
-                    product_message=landed_name_err,
-                ),
+                failure=tool_failure_fields(code="landed_status_name"),
                 run_id=event_run_id,
             )
         )
@@ -318,6 +317,9 @@ async def run_one_tool(
         error_msg, status, policy_failure = _missing_tool_feedback(
             missing, raw_name=raw_name, registry=registry
         )
+        # ``error_msg`` carries role/assembly steering (CEO vs worker, 勿空转重试) —
+        # model-only. The user face is curated by code: a gated-off tool reads as
+        # out-of-scope, an unknown name as a step we routed around.
         sink.emit(
             tool_use_end(
                 tc.id,
@@ -326,7 +328,6 @@ async def run_one_tool(
                 output=error_msg,
                 failure=tool_failure_fields(
                     code=ErrorCode.TOOL_NOT_FOUND if status == "not_found" else "allowlist_deny",
-                    product_message=error_msg,
                 ),
                 run_id=event_run_id,
             )
@@ -379,7 +380,7 @@ async def run_one_tool(
     budget_state = context.retrieval_budget
     budget_reserved = False
     if name in RETRIEVAL_TOOL_NAMES and budget_state is not None:
-        if not await budget_state.try_reserve():
+        if not await budget_state.try_reserve(name):
             exhausted = budget_exhausted_output()
             sink.emit(
                 tool_use_end(
@@ -475,7 +476,7 @@ async def run_one_tool(
         # attempt so a tool that keeps timing out trips convergence governance.
         # Liveness (hang) ≠ capacity contract — steer forbids identical retry.
         if budget_reserved and budget_state is not None:
-            await budget_state.refund()
+            await budget_state.refund(name)
         duration_ms = int((time.monotonic() - started) * 1000)
         ceiling = timeout if timeout is not None else 0.0
         timeout_msg = (
@@ -531,7 +532,7 @@ async def run_one_tool(
         # result so the loop can adapt; SUSPEND terminals are unaffected (they return
         # normally, never raise).
         if budget_reserved and budget_state is not None:
-            await budget_state.refund()
+            await budget_state.refund(name)
         duration_ms = int((time.monotonic() - started) * 1000)
         # Always carry the exception type: some builtins (e.g. NotImplementedError)
         # stringify to "" and the model would see a blank reason and retry blindly.
@@ -579,7 +580,7 @@ async def run_one_tool(
 
     # 缓存命中 / A3 拒绝等不计预算：reserved slot refunded when not charged.
     if budget_reserved and budget_state is not None and not charges_retrieval_budget(result):
-        await budget_state.refund()
+        await budget_state.refund(name)
 
     if result.success:
         output = result.output

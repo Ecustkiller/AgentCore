@@ -1,14 +1,18 @@
-import { StreamError } from "@/lib/errors";
+import { StreamError, streamErrorFromResponse } from "@/lib/errors";
 import {
   type ChangeType,
   type HandoffApplySelection,
   type HandoffFileChange,
   sha256HexFromBase64,
 } from "@/lib/handoff-review";
+import { logEvent } from "@/lib/log";
 import {
+  ApiError,
   BASE_URL,
   api,
+  captureCsrf,
   getCsrfHeaders,
+  isReplayableCsrfRejection,
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
@@ -150,8 +154,8 @@ async function consumeWorkspaceStream<T>(
   onEvent: (event: SSEEvent) => T | undefined,
 ): Promise<T> {
   const hasBody = opts.body !== undefined;
-  const doFetch = () =>
-    fetch(`${BASE_URL}${path}`, {
+  const doFetch = async (): Promise<Response> => {
+    const response = await fetch(`${BASE_URL}${path}`, {
       method: "POST",
       credentials: "include",
       headers: {
@@ -162,14 +166,20 @@ async function consumeWorkspaceStream<T>(
       body: hasBody ? JSON.stringify(opts.body) : undefined,
       signal: opts.signal,
     });
+    captureCsrf(response); // SSE responses carry the rotated token too
+    return response;
+  };
 
   let response: Response;
   try {
     response = await doFetch();
+    // 两条自愈共用一次重发预算：401 刷新重放与 CSRF 403 重放合计最多多发一次。
+    let replayed = false;
     if (response.status === 401) {
       const outcome = await tryRefresh();
       if (outcome === "renewed") {
         response = await doFetch();
+        replayed = true;
       } else if (outcome === "auth_dead") {
         notifyUnauthorized();
         throw new StreamError("auth");
@@ -181,12 +191,30 @@ async function consumeWorkspaceStream<T>(
         throw new StreamError("auth");
       }
     }
+    // 交接 POST 会起云端作业，重发之所以不会派两份，全在判据本身：CSRF 中间件在 handler
+    // 之前就拒了，服务端从未受理这次派发，且回发了新令牌（`doFetch` 已吸收；它每次调用重算
+    // header，重发才带得上新令牌）。没回发令牌的 403 是服务端刻意不重新武装，原样失败。
+    // 论证见 {@link isReplayableCsrfRejection}。
+    if (!replayed && response.status === 403) {
+      const refusal = new ApiError(
+        response.status,
+        await response.clone().text(),
+        response.headers,
+      );
+      if (isReplayableCsrfRejection(response, refusal)) {
+        logEvent("info", "auth.csrf_replay", { path, via: "workspace_stream" });
+        replayed = true;
+        response = await doFetch();
+      }
+    }
   } catch (err) {
     if (err instanceof StreamError) throw err;
     if (err instanceof DOMException && err.name === "AbortError") throw err;
     throw new StreamError("network");
   }
-  if (!response.ok) throw new StreamError("http", response.status);
+  // 与聊天 SSE 同一条收口：解析 `{error:{code,message}}` 体，否则同一个后端拒绝
+  //（CSRF 403 / 配额 429 …）在交接链路上只剩一句「操作失败（403）」。
+  if (!response.ok) throw await streamErrorFromResponse(response);
 
   const reader = response.body?.getReader();
   if (!reader) throw new StreamError("network");

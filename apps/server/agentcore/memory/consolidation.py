@@ -26,7 +26,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 
-from agentcore.billing.gate import run_background_llm
+from agentcore.billing.gate import BackgroundLlmSkip, BackgroundSkipReason, run_background_llm
 from agentcore.config import settings
 from agentcore.conversation.history import load_recent_history
 from agentcore.conversation.store.merge import (
@@ -38,7 +38,7 @@ from agentcore.conversation.store.merge import (
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
-from agentcore.db.errors import is_schema_error
+from agentcore.db.errors import is_pool_timeout_error, is_schema_error
 from agentcore.db.repositories import (
     ConversationRepository,
     MemoryUpdateRepository,
@@ -392,13 +392,23 @@ class _EpisodicDigest:
 
 
 def _consolidation_failure_retryable(exc: BaseException) -> bool:
-    """True only for AgentCoreError with retryable=True (upstream blip / rate / timeout).
+    """True when a later sweep could still get this window through — keep the watermark.
 
-    Bare exceptions (AttributeError, …) and non-retryable AgentCoreError are treated as
-    deterministic — advancing the watermark stops the sweeper from re-burning LLM on them.
+    Two shapes qualify. ``AgentCoreError`` with ``retryable=True`` is the failure
+    saying so itself (upstream blip / rate / timeout). A primary-pool checkout
+    timeout is the other: it is our own saturation, the window was never even shown
+    to the LLM, and it drains on its own. ``sqlalchemy.exc.TimeoutError`` is not an
+    ``AgentCoreError``, so reading the flag alone filed it under *deterministic* and
+    advanced the watermark past a window nothing had read — the only way this path
+    loses data rather than just delaying it.
+
+    Everything else (AttributeError-class bugs, non-retryable AgentCoreError) stays
+    deterministic: advancing the watermark stops the sweeper re-burning LLM on them.
     """
     from agentcore.core.errors import AgentCoreError
 
+    if is_pool_timeout_error(exc):
+        return True
     return isinstance(exc, AgentCoreError) and bool(exc.retryable)
 
 
@@ -411,10 +421,48 @@ _SHARED_UPSTREAM_REASONS = frozenset(
     {"rate_limit", "quota_skip", "provider_unavailable", "upstream_unstable"}
 )
 
+# The same split for refusals the gate *returns* (:class:`BackgroundLlmSkip`), which
+# arrive as their own vocabulary rather than a classifier bucket. Only
+# ``QUOTA_EXCEEDED`` may stop the whole sweep: it is the mid-flight refusal — admission
+# had already cleared the allowance, then the per-call gate or upstream itself turned
+# the call down, which is the platform key everyone shares saying no (the
+# ``upstream_rate_limit_error`` 429 wears exactly this face). The other three are
+# decided from this account's own config before upstream is ever touched, and the
+# sweep gate is process-global with no allowance epoch behind it: arming it on a
+# keyless account — a permanent state that re-arms every sweep and never reaches the
+# LLM success that retires it — would starve every *other* user's memory indefinitely.
+_SHARED_SKIP_REASONS = frozenset({BackgroundSkipReason.QUOTA_EXCEEDED})
 
-def _mark_conversation_failure_cooldown(conversation_id: str, *, reason: str) -> None:
-    """Arm in-process per-conversation cooldown (no-op if disabled)."""
-    secs = settings.memory_consolidation_failure_cooldown_seconds
+# An upstream-dated refusal is worth obeying; it is not worth obeying literally.
+# Platform quota dates cluster at the day reset (median ~12.7h) while this gate is
+# process-wide and — unlike compaction's per-conversation one — remembers no allowance
+# epoch, so taking one at its word would freeze every account's memory for half a day
+# over one account's wall, and keep freezing it after the key swap or quota bump that
+# ended the wall early. Past an hour, re-asking costs one call per sweep, which is a
+# rounding error against the wall it is probing.
+_DECLARED_COOLDOWN_CAP_SECONDS = 3600.0
+
+
+def _capped_declared_recovery(declared_recovery_in: float | None) -> float | None:
+    """Upstream's own「多久后重试才值得」, clamped to :data:`_DECLARED_COOLDOWN_CAP_SECONDS`."""
+    if declared_recovery_in is None or declared_recovery_in <= 0:
+        return None
+    return min(float(declared_recovery_in), _DECLARED_COOLDOWN_CAP_SECONDS)
+
+
+def _mark_conversation_failure_cooldown(
+    conversation_id: str, *, reason: str, declared_recovery_in: float | None = None
+) -> None:
+    """Arm in-process per-conversation cooldown (no-op if disabled and undated).
+
+    A ``declared_recovery_in`` wins over the configured guess whenever it is longer,
+    and holds even when the guess is switched off — sitting out a wall upstream dated
+    is not a guess.
+    """
+    secs = float(settings.memory_consolidation_failure_cooldown_seconds)
+    dated = _capped_declared_recovery(declared_recovery_in)
+    if dated is not None:
+        secs = max(secs, dated)
     if secs <= 0:
         return
     until = time.monotonic() + secs
@@ -423,7 +471,8 @@ def _mark_conversation_failure_cooldown(conversation_id: str, *, reason: str) ->
         "memory.consolidation_backoff",
         scope="conversation",
         reason=reason,
-        cooldown_seconds=float(secs),
+        cooldown_seconds=secs,
+        declared_recovery_sec=declared_recovery_in,
         resume_at_monotonic=until,
         conversation_id=conversation_id,
         streak=0,
@@ -445,14 +494,29 @@ def _in_conversation_failure_cooldown(conversation_id: str) -> bool:
     return True
 
 
-def _mark_shared_failure_cooldown(*, reason: str) -> None:
-    """Arm exponential shared-upstream cooldown (capped); abort further consolidations."""
+def _mark_shared_failure_cooldown(
+    *, reason: str, declared_recovery_in: float | None = None
+) -> None:
+    """Arm exponential shared-upstream cooldown (capped); abort further consolidations.
+
+    ``declared_recovery_in`` wins over the exponential guess whenever it is longer.
+    The ladder needs four refused rounds to climb from 5 minutes to 30, and each rung
+    is a sweep spent re-asking a question upstream has already answered; a dated
+    refusal lets the gate open at the ceiling instead of burning its way up. It also
+    holds when the ladder is configured off, and is clamped by
+    :data:`_DECLARED_COOLDOWN_CAP_SECONDS`.
+    """
     global _shared_failure_cooldown_until, _shared_failure_streak
     base = settings.memory_consolidation_shared_failure_cooldown_base_seconds
     max_s = settings.memory_consolidation_shared_failure_cooldown_max_seconds
-    if base <= 0 or max_s <= 0:
+    secs = 0.0
+    if base > 0 and max_s > 0:
+        secs = float(min(base * (2**_shared_failure_streak), max_s))
+    dated = _capped_declared_recovery(declared_recovery_in)
+    if dated is not None:
+        secs = max(secs, dated)
+    if secs <= 0:
         return
-    secs = float(min(base * (2**_shared_failure_streak), max_s))
     _shared_failure_streak += 1
     until = time.monotonic() + secs
     _shared_failure_cooldown_until = until
@@ -461,9 +525,28 @@ def _mark_shared_failure_cooldown(*, reason: str) -> None:
         scope="sweep",
         reason=reason,
         cooldown_seconds=secs,
+        declared_recovery_sec=declared_recovery_in,
         resume_at_monotonic=until,
         conversation_id="",
         streak=_shared_failure_streak,
+    )
+
+
+def _mark_skip_cooldown(conversation_id: str, *, skip: BackgroundLlmSkip) -> None:
+    """Back off after a refusal the gate *returned* — it never reaches ``except``.
+
+    Routes by :data:`_SHARED_SKIP_REASONS` and hands the refusal's own recovery date
+    to whichever layer takes it, so the wall upstream already named is not re-derived
+    from a streak.
+    """
+    reason = str(skip.reason)
+    if skip.reason in _SHARED_SKIP_REASONS:
+        _mark_shared_failure_cooldown(
+            reason=reason, declared_recovery_in=skip.declared_recovery_in
+        )
+        return
+    _mark_conversation_failure_cooldown(
+        conversation_id, reason=reason, declared_recovery_in=skip.declared_recovery_in
     )
 
 
@@ -593,7 +676,15 @@ async def consolidate_conversation(
                         await provider.close()
 
                 bg = await run_background_llm(user_id, purpose="memory", runner=_episodic_runner)
-                if bg is None:
+                if isinstance(bg, BackgroundLlmSkip):
+                    # Refused (no key / allowance spent / auth) rather than raised, so
+                    # this never reaches the ``except`` arm that arms the backoff — and
+                    # the watermark cannot stand in for one. Leaving it put is right:
+                    # it is what keeps the window from being lost. But that is also
+                    # precisely what puts this conversation back in the pending set
+                    # every 300s, each time for another call upstream has already
+                    # refused. Only a cooldown stops that.
+                    _mark_skip_cooldown(conversation_id, skip=bg)
                     return False
                 credentials = bg.credentials
                 digest = bg.value
@@ -686,6 +777,9 @@ async def consolidate_conversation(
                 "memory.consolidation_failed",
                 conversation_id=conversation_id,
                 error=str(e),
+                # One error text lands in different reason buckets when a layer
+                # re-wraps the exception; the class name tells those apart.
+                error_type=type(e).__name__,
                 reason=reason,
             )
             # Layered backoff (retryable path only — watermark already handles

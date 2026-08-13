@@ -1,7 +1,10 @@
 /**
  * Vector-script mock backend for desktop e2e (proposal §三–§五).
  *
- * §八 CSRF: issue X-CSRF-Token on login/me; accept any echoed token (no HMAC verify).
+ * §八 CSRF: X-CSRF-Token rides the same three responses production issues it on —
+ * login, refresh, and the 403 that rejects a session holding no usable token — and
+ * mutating requests on a cookie session are **verified**, not just echoed, so a
+ * client path that forgets the header 403s here exactly as it would in production.
  * Network seam only — SSE bodies come from conformance fixtures via scripts.ts.
  */
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -167,7 +170,6 @@ function json(
   cors(req, res);
   const headers: Record<string, string> = {
     "Content-Type": "application/json; charset=utf-8",
-    "X-CSRF-Token": CSRF,
     ...extraHeaders,
   };
   res.writeHead(status, headers);
@@ -177,6 +179,44 @@ function json(
 function isAuthed(req: IncomingMessage): boolean {
   const cookie = req.headers.cookie ?? "";
   return cookie.includes("ac_access=");
+}
+
+const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+/** Mirrors middleware/csrf.py `_EXEMPT_PREFIXES` (login/register/refresh/token). */
+const CSRF_EXEMPT_PREFIXES = [
+  "/v1/auth/login",
+  "/v1/auth/register",
+  "/v1/auth/refresh",
+  "/v1/auth/token",
+];
+
+function csrfRejected(
+  req: IncomingMessage,
+  method: string,
+  path: string,
+): boolean {
+  if (CSRF_SAFE_METHODS.has(method)) return false;
+  if (CSRF_EXEMPT_PREFIXES.some((p) => path.startsWith(p))) return false;
+  if (!isAuthed(req)) return false; // no cookie session → nothing to protect
+  return req.headers["x-csrf-token"] !== CSRF;
+}
+
+function csrfFailed(req: IncomingMessage, res: ServerResponse): void {
+  cors(req, res);
+  // Production re-arms the client on the rejection itself, so retrying the same
+  // request works (middleware/csrf.py).
+  res.writeHead(403, {
+    "Content-Type": "application/json; charset=utf-8",
+    "X-CSRF-Token": CSRF,
+  });
+  res.end(
+    JSON.stringify({
+      error: {
+        code: "CSRF_FAILED",
+        message: "CSRF token missing or invalid. Re-login and retry.",
+      },
+    }),
+  );
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -226,7 +266,6 @@ function beginSse(req: IncomingMessage, res: ServerResponse): void {
     "Content-Type": "text/event-stream; charset=utf-8",
     "Cache-Control": "no-cache, no-transform",
     Connection: "keep-alive",
-    "X-CSRF-Token": CSRF,
   });
   // Flush headers immediately so the client leaves the connect-timeout window.
   res.write(": connected\n\n");
@@ -390,8 +429,10 @@ async function route(
 
   if (method === "POST" && path === "/v1/auth/login") {
     await readBody(req);
+    // The handshake is where the token is handed out — see §八.
     json(req, res, 200, loginOk(), {
       "Set-Cookie": COOKIE,
+      "X-CSRF-Token": CSRF,
     });
     return;
   }
@@ -403,7 +444,10 @@ async function route(
       });
       return;
     }
-    json(req, res, 200, statusOk(), { "Set-Cookie": COOKIE });
+    json(req, res, 200, statusOk(), {
+      "Set-Cookie": COOKIE,
+      "X-CSRF-Token": CSRF,
+    });
     return;
   }
 
@@ -412,6 +456,11 @@ async function route(
     json(req, res, 401, {
       error: { code: "unauthenticated", message: "not logged in" },
     });
+    return;
+  }
+
+  if (csrfRejected(req, method, path)) {
+    csrfFailed(req, res);
     return;
   }
 

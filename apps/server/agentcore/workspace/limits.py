@@ -15,6 +15,13 @@ WORKSPACE_READ_MAX_BYTES = 5 * 1024 * 1024  # 5 MiB — mirrors desktop Local
 # the liveness wall-clock on a multi-MiB PDF that still fits the read ceiling.
 OFFICE_EXTRACT_MAX_BYTES = 2 * 1024 * 1024  # 2 MiB
 
+# Entry ceiling for the **file panel** listing (REST ``/files``), far above the
+# AI-facing ``_MAX_LIST_ENTRIES``: browsing is not a context budget, and a user
+# who imported a repo must be able to reach their files. The desktop lists one
+# directory at a time, so this only binds on a single enormous directory (or a
+# whole-tree pull) — and the response carries ``truncated`` when it does.
+WORKSPACE_BROWSE_LIST_MAX = 2000
+
 # Exact detail string shared with desktop ``opErr("WorkspaceIOError", …)``.
 FILE_TOO_LARGE_DETAIL = "文件过大，无法读取"
 
@@ -65,9 +72,35 @@ CHANNEL_DEAD_USER_VISIBLE = (
 
 # Quiet user-visible line when code_execute/test_run family retires on hangs
 # (mirrors CHANNEL_DEAD_USER_VISIBLE — no card, one-shot content_delta).
-EXEC_ENV_DEAD_USER_VISIBLE = (
-    "本机暂时跑不了命令。请检查桌面或安全软件后重试；我将基于已有材料收口。"
-)
+#
+# This is the *unclassified* fallback: it states the fact and stops there. It
+# used to say「请检查桌面或安全软件」, which was wrong twice over — the desktop
+# channel is normally alive (the same turn keeps reading files / running terminal
+# through it), and security software only ever fits the spawn-denied branch below.
+EXEC_ENV_DEAD_USER_VISIBLE = "本机暂时跑不了命令。我将基于已有材料收口。"
+
+# Opening clause every variant below shares — harvest fallback detects the fact in
+# an already-written body with it, so the wording may grow a cause but not lose this.
+EXEC_ENV_DEAD_BODY_MARKER = "本机暂时跑不了命令"
+
+# Per-reason lines, keyed by the exec-env probe codes classified in
+# ``tools/sandbox/exec_env.py`` (kept as literals so this constants module stays
+# import-free; a test pins the keys to that code set). Each keeps the shared
+# 「本机暂时跑不了命令」opening so harvest detection stays keyed on one phrase.
+EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE: dict[str, str] = {
+    "exec_env_no_interpreter": (
+        "本机暂时跑不了命令：这台电脑上没找到 Python（跑一句最短的命令就退出了）。"
+        "装好 Python 并加入 PATH 后可以重试；我将基于已有材料收口。"
+    ),
+    "exec_env_probe_timeout": (
+        "本机暂时跑不了命令：最短的一句命令 5 秒内都没跑完，本机启动得太慢。"
+        "稍后重试通常就好；我将基于已有材料收口。"
+    ),
+    "exec_env_spawn_denied": (
+        "本机暂时跑不了命令：系统拒绝启动运行命令的进程（权限被拒）。"
+        "这类拦截通常来自安全软件或权限策略，放行后可以重试；我将基于已有材料收口。"
+    ),
+}
 
 # Prepare / turn-start abort when the local channel is already sticky-dead —
 # no LLM, no "收口" framing (nothing ran yet). Keep ``channel dead`` so
@@ -93,6 +126,17 @@ WORKSPACE_CHANNEL_DEAD_RETIRE_STEER = (
     "请向用户说明「本地文件暂时连不上」，基于已有信息收口或请用户检查桌面连接后重试；"
     "禁止再调用文件工具，也禁止再派需要读写本地文件的队员。"
 )
+
+
+def exec_env_dead_user_visible(code: str | None = None) -> str:
+    """User-visible exec-env-dead line for a classified probe reason code.
+
+    Unknown / absent code → the fallback, which claims no cause. Never guess a
+    remedy the evidence does not support (the old「请检查桌面或安全软件」).
+    """
+    return EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE.get(
+        (code or "").strip(), EXEC_ENV_DEAD_USER_VISIBLE
+    )
 
 
 def is_file_too_large_detail(detail: str | None) -> bool:

@@ -7,6 +7,7 @@ import {
   getLastModelProfileId,
   profileDisplayLabel,
   profileSlotsSummary,
+  resolveDisplayProfile,
   setLastModelProfileId,
   slotDisplayName,
 } from "@/api/modelProfiles";
@@ -205,6 +206,16 @@ describe("profileDisplayLabel", () => {
 
   it("falls back to the account default name", () => {
     expect(profileDisplayLabel(list, null)).toBe("GLM-5.2");
+  });
+
+  it("resolves the whole profile so callers can read kind", () => {
+    expect(resolveDisplayProfile(list, "u1")?.kind).toBe("user");
+    expect(resolveDisplayProfile(list, null)?.kind).toBe("system");
+    expect(resolveDisplayProfile(null, null)).toBeNull();
+  });
+
+  it("falls back to the account default when the snapshot id is unknown", () => {
+    expect(resolveDisplayProfile(list, "gone")?.id).toBe("def");
   });
 });
 

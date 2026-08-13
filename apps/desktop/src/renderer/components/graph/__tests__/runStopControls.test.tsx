@@ -37,8 +37,11 @@ vi.mock("@/stores/conversation", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
+
+/** 引擎受理了这次停止（服务端回执的正常形）。 */
+const ACCEPTED = { queued: 1, accepted: true, reason: "queued", detail: "" };
 
 const plan: ExecutionPlan = {
   id: "exec-stop",
@@ -126,7 +129,7 @@ function renderNodeFace(d: AgentNodeData = nodeData()) {
 describe("graph run-stop entries", () => {
   beforeEach(() => {
     submitRunStop.mockReset();
-    submitRunStop.mockResolvedValue({ queued: 1 });
+    submitRunStop.mockResolvedValue(ACCEPTED);
     useRunStopPendingStore.getState().reset();
     seedRunningExecution();
   });
@@ -160,6 +163,8 @@ describe("graph run-stop entries", () => {
     expect(screen.getByText(/^已完成/)).toBeTruthy();
   });
 
+  // 卡面本身仍是纯展示（状态/活动预览不被按钮挤占）；按人干预挂在卡外的
+  // AgentNodeInterveneBar 上，跟随悬停/选中出现（见 agentNodeInterveneBar.test.tsx）。
   it("node face has no stop/redirect action buttons", () => {
     renderNodeFace();
     expect(screen.queryByRole("button", { name: "停止这个" })).toBeNull();
@@ -188,6 +193,29 @@ describe("graph run-stop entries", () => {
     });
     expect(screen.getByRole("button", { name: "停止请求中…" })).toBeTruthy();
     expect(useExecutionStore.getState().byId[MID]?.status).toBe("running");
+  });
+
+  // 整队停止同样按服务端回答：引擎手里已经没有这批工作时，不留「停止请求中…」。
+  it("team entry clears pending when the engine has no live drive", async () => {
+    submitRunStop.mockResolvedValue({
+      queued: 0,
+      accepted: false,
+      reason: "no_live_drive",
+      detail: "这批工作已经不在引擎手里了，没有能停的在跑队员。",
+    });
+    wrap(<GraphTeamStopControl />);
+
+    fireEvent.click(screen.getByRole("button", { name: "停止任务" }));
+
+    await waitFor(() => {
+      expect(submitRunStop).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "停止请求中…" })).toBeNull();
+    });
+    expect(useRunStopPendingStore.getState().isPending("exec-stop", null)).toBe(
+      false,
+    );
   });
 
   it("team entry hides when no active workers remain", () => {

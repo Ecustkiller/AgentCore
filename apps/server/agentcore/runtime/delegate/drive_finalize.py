@@ -147,6 +147,10 @@ def handle_pending_boundary(
     # 协作质量 tally (学·度量 §2.5, 首计划存活): a supervised boundary handed control back
     # to the captain mid-plan — the opening plan did not run start-to-finish untouched.
     tool._acc.collab["boundary_yields"] += 1
+    # CHECKPOINT 是把方向盘交回给**用户**（plan_review 拍板）；BIND / SCOPE 才是队伍
+    # 内部自己让出的边界。用户面只认后者，所以在这里就把用户那份单独记出来。
+    if reason is BoundaryReason.CHECKPOINT:
+        tool._acc.collab["boundary_yields_by_user"] += 1
     logger.info(
         "delegate.yielded",
         call=call_idx,

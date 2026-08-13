@@ -49,14 +49,21 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   addMessage: (message: Message, conversationId?: string | null) => void;
-  appendToLastMessage: (chunk: string, conversationId?: string | null) => void;
+  /** `replace`（attach 增量重放）：`chunk` 是末尾未闭合正文块的全文，换块而非追加。 */
+  appendToLastMessage: (
+    chunk: string,
+    conversationId?: string | null,
+    opts?: { replace?: boolean },
+  ) => void;
   resetStreamingContent: (
     reason: ResetReason,
     conversationId?: string | null,
   ) => void;
+  /** `replace`：同 {@link ConversationState.appendToLastMessage}，作用于思考通道。 */
   appendReasoningToLastMessage: (
     chunk: string,
     conversationId?: string | null,
+    opts?: { replace?: boolean },
   ) => void;
   setComposingTool: (
     tool: { toolName: string; chars: number } | null,
@@ -144,6 +151,9 @@ export interface ConversationState {
         body_kind?: string;
         base_url?: string;
         credential_source?: "user" | "platform" | string | null;
+        /** 额度恢复 / 配额重置的绝对时刻（ISO8601 UTC）——红卡按本机时区成文。 */
+        recovery_at?: string | null;
+        reset_at?: string | null;
       };
     },
     conversationId?: string | null,

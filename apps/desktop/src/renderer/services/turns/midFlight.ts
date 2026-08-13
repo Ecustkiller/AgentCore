@@ -1,8 +1,13 @@
 import type { MessageDelivery } from "@/lib/composerDelivery";
+import { streamErrorFromResponse } from "@/lib/errors";
+import { logEvent } from "@/lib/log";
 import { notifyError } from "@/lib/toast";
 import {
+  ApiError,
   BASE_URL,
+  captureCsrf,
   getCsrfHeaders,
+  isReplayableCsrfRejection,
   notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
@@ -177,18 +182,24 @@ export async function sendMidFlightMessage(
     });
   };
 
-  const doFetch = (signal: AbortSignal) =>
-    fetch(`${BASE_URL}/v1/conversations/${conversationId}/messages`, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "text/event-stream",
-        ...getCsrfHeaders("POST"),
+  const doFetch = async (signal: AbortSignal): Promise<Response> => {
+    const response = await fetch(
+      `${BASE_URL}/v1/conversations/${conversationId}/messages`,
+      {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...getCsrfHeaders("POST"),
+        },
+        body: JSON.stringify(body),
+        signal,
       },
-      body: JSON.stringify(body),
-      signal,
-    });
+    );
+    captureCsrf(response); // token rides every response, streams included
+    return response;
+  };
 
   // 对话级订阅让位（B2）：本条 POST 一发出，服务端就在同一会话上排出了新回合——
   // 若 follow 流还开着，drain 后同一回合会被折两次。primary claim 要等 drain 才拿
@@ -198,16 +209,39 @@ export async function sendMidFlightMessage(
 
   try {
     let response = await doFetch(ac.signal);
+    // 两条自愈共用一次重发预算：服务端持续拒绝也只多发一次，绝不叠成三次。
+    let replayed = false;
     if (response.status === 401) {
       const outcome = await tryRefresh();
       if (outcome === "renewed") {
         response = await doFetch(ac.signal);
+        replayed = true;
       } else if (outcome === "auth_dead") {
         notifyUnauthorized();
         return { kind: "error" };
       } else {
         notifyError(new Error("network"), "发送失败");
         return { kind: "error" };
+      }
+    }
+    // 重发一条会插话 / 起回合的 POST，安全性全由判据本身保证：CSRF 中间件在任何 handler
+    // 之前就拒了，服务端从未受理这条消息（不会双开回合、不会重复插话），且这次拒绝回发了
+    // 新令牌——`doFetch` 已吸收，且它每次调用重算 header，重发才带得上。没回发令牌的 403
+    // 是服务端刻意不重新武装（令牌属于别的会话），必须原样失败。论证见
+    // {@link isReplayableCsrfRejection}。
+    if (!replayed && response.status === 403) {
+      const refusal = new ApiError(
+        response.status,
+        await response.clone().text(),
+        response.headers,
+      );
+      if (isReplayableCsrfRejection(response, refusal)) {
+        logEvent("info", "auth.csrf_replay", {
+          conversation_id: conversationId,
+          via: "mid_flight",
+        });
+        replayed = true;
+        response = await doFetch(ac.signal);
       }
     }
     if (response.status === 409) {
@@ -236,7 +270,9 @@ export async function sendMidFlightMessage(
       return { kind: "error" };
     }
     if (!response.ok) {
-      notifyError(new Error(`HTTP ${response.status}`), "发送失败");
+      // 解析 `{error:{code,message}}`，让同一个后端拒绝（CSRF 403、限流 …）在插话
+      // 链路上和聊天主链路读到同一句话，而不是一句「HTTP 403」。
+      notifyError(await streamErrorFromResponse(response), "发送失败");
       return { kind: "error" };
     }
 

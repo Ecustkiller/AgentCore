@@ -12,6 +12,7 @@ import { apiUrl, authHeader, fetchWithAuthRefresh } from "@/api/client";
 import type { MessageAttachment } from "@/lib/attachments";
 import { StreamHttpError } from "@/lib/errors";
 import type { MessageDelivery } from "@/lib/messageDelivery";
+import type { RecoveryMomentContext } from "@/lib/recoveryMoment";
 import type {
   SSEEvent,
   TurnQueuedPayload,
@@ -61,16 +62,22 @@ async function streamErrorFromResponse(
 ): Promise<StreamHttpError> {
   let code: string | undefined;
   let serverMessage: string | undefined;
+  let context: RecoveryMomentContext | undefined;
   try {
     const body = (await response.json()) as {
-      error?: { code?: string; message?: string };
+      error?: {
+        code?: string;
+        message?: string;
+        context?: RecoveryMomentContext;
+      };
     };
     code = body.error?.code;
     serverMessage = body.error?.message;
+    context = body.error?.context;
   } catch {
     /* keep status-only */
   }
-  return new StreamHttpError(response.status, code, serverMessage);
+  return new StreamHttpError(response.status, code, serverMessage, context);
 }
 
 /** Minimal SSE pump（与 stream.ts 同形；仅 data: 帧）。 */

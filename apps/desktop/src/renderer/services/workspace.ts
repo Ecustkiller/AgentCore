@@ -3,14 +3,25 @@ import { BASE_URL, api } from "@/services/api";
 import {
   type FilePreview,
   type WorkspaceEditDoc,
-  type WorkspaceFile,
+  type WorkspaceListing,
+  type WorkspaceSnapshot,
+  type WorkspaceTrashEntry,
   type WorkspaceWriteOutcome,
   authedFetch,
+  blobToBase64,
   decodePreviewResponse,
   encodePath,
+  listQuery,
   saveBlob,
+  toSnapshot,
+  toTrashEntry,
+  toWorkspaceFile,
 } from "@/services/workspaceHttp";
 import type { components } from "@/types/api.generated";
+
+// Snapshot / trash shapes moved to the neutral wire module (both clients speak
+// them); re-exported so existing `@/services/workspace` importers keep working.
+export type { WorkspaceSnapshot, WorkspaceTrashEntry };
 
 type Schemas = components["schemas"];
 
@@ -28,15 +39,23 @@ const filesBase = (conversationId: string): string =>
 
 // --- Files (bring files in / take results out: 文件进出) ---
 
-/** List the conversation's workspace entries (recursive POSIX paths). */
+/**
+ * List one directory of the conversation's workspace (`dir` omitted / `"."` = root).
+ *
+ * Recursive pulls the whole subtree in one call; either way the server's entry
+ * ceiling can bite, so the caller gets `truncated` alongside the entries.
+ */
 export async function listWorkspaceFiles(
   conversationId: string,
-  recursive = true,
-): Promise<WorkspaceFile[]> {
+  opts: { recursive?: boolean; dir?: string } = {},
+): Promise<WorkspaceListing> {
   const res = await api.get<Schemas["WorkspaceFileListResponse"]>(
-    `/v1/conversations/${conversationId}/workspace/files?recursive=${recursive}`,
+    `/v1/conversations/${conversationId}/workspace/files?${listQuery(opts)}`,
   );
-  return res.data.map((e) => ({ path: e.path, isDir: e.is_dir }));
+  return {
+    files: res.data.map(toWorkspaceFile),
+    truncated: res.truncated ?? false,
+  };
 }
 
 /** Upload (create/overwrite) a workspace file from raw bytes. */
@@ -196,23 +215,8 @@ export async function writeWorkspaceFileText(
 
 // --- Snapshots (axis-3 persistence: backup / kept versions / download) ---
 
-export interface WorkspaceSnapshot {
-  snapshotId: string;
-  /** A user-pinned name (手动留版本), or null for an automatic post-turn backup. */
-  label: string | null;
-  createdAt: string;
-  sizeBytes: number;
-}
-
 /** Server snapshot payload (`/snapshots`), generated from OpenAPI. */
 type BackendSnapshot = Schemas["SnapshotSummary"];
-
-const toSnapshot = (s: BackendSnapshot): WorkspaceSnapshot => ({
-  snapshotId: s.snapshot_id,
-  label: s.label,
-  createdAt: s.created_at,
-  sizeBytes: s.size_bytes,
-});
 
 /** List the conversation's workspace snapshots (newest first). */
 export async function listSnapshots(
@@ -247,24 +251,6 @@ export async function restoreSnapshot(
 }
 
 // --- AgentCore/trash (soft-delete restore; not OS recycle bin) ---
-
-export interface WorkspaceTrashEntry {
-  entryId: string;
-  originalPath: string;
-  name: string;
-  isDir: boolean;
-  deletedAt: string;
-}
-
-type BackendTrashEntry = Schemas["TrashEntrySummary"];
-
-const toTrashEntry = (e: BackendTrashEntry): WorkspaceTrashEntry => ({
-  entryId: e.entry_id,
-  originalPath: e.original_path,
-  name: e.name,
-  isDir: e.is_dir,
-  deletedAt: e.deleted_at,
-});
 
 /** List AgentCore/trash for a cloud conversation workspace (newest first). */
 export async function listTrash(
@@ -306,17 +292,6 @@ export async function exportWorkspaceZip(
 ): Promise<void> {
   const snap = await createSnapshot(conversationId, "导出");
   await downloadSnapshot(conversationId, snap.snapshotId);
-}
-
-/** blob → base64（分块，避免大文件撑爆调用栈）。 */
-async function blobToBase64(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
-  }
-  return btoa(binary);
 }
 
 export type ExportWorkspaceToLocalResult =

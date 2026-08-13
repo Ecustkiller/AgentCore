@@ -200,7 +200,10 @@ async def _auto_resume_durable_pause(
         selected=[],
     )
     suspension = await claim_paused_turn(
-        frame.message_id, conversation_id=conversation_id
+        frame.message_id,
+        conversation_id=conversation_id,
+        decision=CheckpointDecision.CONTINUE.value,
+        settled_by="demo_tape_director",
     )
     if suspension is None:
         return False

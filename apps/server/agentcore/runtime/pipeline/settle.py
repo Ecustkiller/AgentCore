@@ -148,6 +148,9 @@ async def settle_successful_turn(
     collab = {
         **delegate_tool.collab,
         "revises": delegate_tool.continuation_count,
+        # 上一行的子集：用户点「立即改此人」促成的那几次。运营口径读 revises 总数不变；
+        # 用户面减掉这份，才不会把用户自己的操作说成队友互检。
+        "revises_by_user": delegate_tool.user_continuation_count,
         "audit_drops": audit_recorder.drops,
     }
     sink.emit(

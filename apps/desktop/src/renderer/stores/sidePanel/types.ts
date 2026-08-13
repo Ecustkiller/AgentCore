@@ -65,8 +65,9 @@ export const SIDE_PANEL_MAX_FLOATS = MAX_FLOATS;
 export const WORKSPACE_TAB_ID = "workspace";
 
 /**
- * Reserved id of the conditional 「改动」 tab（有本对话 AI 文件改动 / Local 基线或深链时出现；
- * 出现后位次第二、不可销毁、可 detach；前端UX设计.md §十 · P0c）。
+ * Reserved id of the fixed 「改动」 tab（常驻第二位、不可销毁、可 detach；
+ * 前端UX设计.md §十 · P0c）。改动 / 快照同属一个「回退与留版本」面，
+ * 故不再按「本对话有无改动」条件挂载——空态由面板自身表达。
  */
 export const CHANGES_TAB_ID = "changes";
 
@@ -266,7 +267,7 @@ export interface SidePanelState {
   open: boolean;
   /** Docked width in px, clamped to [280, 动态上限] (persisted)；上限见 sidePanelMaxWidth()。 */
   width: number;
-  /** Open content tabs (session-level; 固定 工作区 / 条件「改动」/ 指挥台 不在此数组). */
+  /** Open content tabs (session-level; 固定 工作区 / 改动 / 条件「指挥台」不在此数组). */
   tabs: DetailTab[];
   /**
    * Active dock tab: `WORKSPACE_TAB_ID` / `CHANGES_TAB_ID` / `COMMAND_TAB_ID`
@@ -285,8 +286,8 @@ export interface SidePanelState {
    */
   focusSurface: SidePanelFocusSurface;
   /**
-   * 「改动」tab 聚焦的回合（产物卡「查看改动」写入）；亦作深链期间强制挂 tab 的信号。
-   * 切对话时应清掉（避免旧 messageId 在无改动对话上空挂）。
+   * 「改动」tab 聚焦的回合（产物卡「查看改动」写入）。
+   * 切对话时应清掉（避免旧 messageId 在新对话上错误聚焦）。
    */
   changesFocusMessageId: string | null;
   /**
@@ -371,7 +372,7 @@ export interface SidePanelState {
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
   /**
-   * 揭示面板并激活「改动」tab（无 tab 时先挂再聚焦）；可选聚焦某回合。
+   * 揭示面板并激活常驻「改动」tab；可选聚焦某回合。
    */
   showChanges: (messageId?: string | null) => void;
   /** 清除改动深链聚焦（切对话时调用）。 */

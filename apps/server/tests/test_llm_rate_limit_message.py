@@ -6,6 +6,12 @@ nobody will wait out — and that the exit offered matches the payer.
 
 They also pin that no branch names a「重试」button: the red error card has none
 (定案 A), and the settings exit is「服务商」, the page keys actually live on.
+
+And that no branch puts a clock time in the sentence: where upstream declared one, the
+recovery moment travels as an ISO-8601 UTC instant for the client to render in the
+reader's own timezone, and where it did not, nothing is dated at all. The copy stays
+true either way (a UTC wall clock read literally cost a China user a whole day of
+waiting for an allowance that returned at local midnight).
 """
 
 from datetime import UTC, datetime
@@ -16,9 +22,11 @@ import pytest
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
     MAX_RETRY_AFTER,
+    RETRY_AFTER_FROM_HEADER,
+    LLMError,
     LLMQuotaExceededError,
     LLMRateLimitError,
-    format_retry_after_moment,
+    recovery_at_iso,
     upstream_rate_limit_error,
 )
 from agentcore.llm.errors import error_context_from
@@ -33,7 +41,19 @@ from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 # Longest cooldown seen in production: an upstream UTC day reset (16.6h).
 _DAY_RESET = 59760.0
 _NOW = datetime(2026, 8, 13, 8, 48, tzinfo=UTC)
-_MOMENT = "8 月 14 日 01:24（UTC）"
+_RECOVERY_AT = "2026-08-14T01:24:00Z"
+
+
+def _declared_429(retry_after: float, **kwargs) -> LLMError:
+    """A 429 whose cooldown upstream actually stated in a ``Retry-After`` header.
+
+    Only a declared cooldown may date a recovery (see ``RETRY_AFTER_FROM_HEADER``),
+    so the moment-bearing branches all start here; the unattested ones are pinned
+    separately in :func:`test_an_undeclared_cooldown_dates_nothing`.
+    """
+    return upstream_rate_limit_error(
+        retry_after, now=_NOW, retry_after_source=RETRY_AFTER_FROM_HEADER, **kwargs
+    )
 
 
 def test_rate_limit_error_zh_message_short_retry():
@@ -95,15 +115,14 @@ def test_exactly_at_ceiling_keeps_the_retryable_seconds_copy(source):
 
 @pytest.mark.parametrize("source", [None, "user", "platform"])
 def test_just_past_ceiling_stops_promising_a_retry(source):
-    err = upstream_rate_limit_error(
-        MAX_RETRY_AFTER + 0.1, credential_source=source, now=_NOW
-    )
+    err = _declared_429(MAX_RETRY_AFTER + 0.1, credential_source=source)
     assert err.retryable is False
     # The copy the user obeyed 2–4 times before: gone on every branch.
     assert "请稍后再试" not in err.message
     assert "点重试" not in err.message
-    # Replaced by a concrete recovery moment on every branch.
-    assert "（UTC）" in err.message
+    # The moment left the sentence on every branch and rides structured instead.
+    assert "UTC" not in err.message
+    assert err.details["recovery_at"] == recovery_at_iso(MAX_RETRY_AFTER + 0.1, now=_NOW)
 
 
 # ---- the three branches past the ceiling ------------------------------------
@@ -112,14 +131,12 @@ def test_just_past_ceiling_stops_promising_a_retry(source):
 def test_platform_day_reset_takes_the_quota_face():
     """Operator-funded allowance wall: reuse QUOTA_EXCEEDED so the client drops the
     retry button and offers the BYOK exit — no new code, no new CTA."""
-    err = upstream_rate_limit_error(
-        _DAY_RESET, credential_source="platform", now=_NOW, upstream_status=429
-    )
+    err = _declared_429(_DAY_RESET, credential_source="platform", upstream_status=429)
     assert isinstance(err, LLMQuotaExceededError)
     assert err.code == ErrorCode.QUOTA_EXCEEDED
     assert err.retryable is False
     assert err.message == (
-        f"平台模型额度已用完，本回合无法继续。上游将于 {_MOMENT} 恢复；"
+        "平台模型额度已用完，本回合无法继续。请等待上游额度恢复，"
         "或在「设置 · 服务商」接入自己的 API Key 立即继续。"
     )
     # 设置里并列「模型」与「服务商」——从来没有叫「模型配置」的页。
@@ -128,46 +145,68 @@ def test_platform_day_reset_takes_the_quota_face():
     assert ctx is not None
     assert ctx["credential_source"] == "platform"
     assert ctx["retry_after"] == _DAY_RESET
+    assert ctx["recovery_at"] == _RECOVERY_AT
 
 
 def test_byok_day_reset_keeps_the_rate_limit_face_without_a_key_cta():
     """Telling a user who already brought their own key to bring one is nonsense."""
-    err = upstream_rate_limit_error(_DAY_RESET, credential_source="user", now=_NOW)
+    err = _declared_429(_DAY_RESET, credential_source="user")
     assert isinstance(err, LLMRateLimitError)
     assert err.code == ErrorCode.LLM_RATE_LIMIT
     assert err.retryable is False
-    assert err.message == (
-        f"上游限流，本回合无法继续。你的服务商额度将于 {_MOMENT} 恢复，在此之前重试仍会失败。"
-    )
+    assert err.message == "上游限流，本回合无法继续。你的服务商额度恢复前重试仍会失败。"
     assert "API Key" not in err.message
     ctx = error_context_from(err)
     assert ctx is not None
     assert ctx["credential_source"] == "user"
+    assert ctx["recovery_at"] == _RECOVERY_AT
 
 
 def test_unknown_source_day_reset_takes_the_conservative_branch():
     """Unknown payer: rate-limit face, no retry, and no BYOK CTA guessed into it."""
-    err = upstream_rate_limit_error(_DAY_RESET, credential_source=None, now=_NOW)
+    err = _declared_429(_DAY_RESET, credential_source=None)
     assert isinstance(err, LLMRateLimitError)
     assert err.code == ErrorCode.LLM_RATE_LIMIT
     assert err.retryable is False
-    assert err.message == (
-        f"上游限流，本回合无法继续。上游额度将于 {_MOMENT} 恢复，在此之前重试仍会失败。"
-    )
+    assert err.message == "上游限流，本回合无法继续。上游额度恢复前重试仍会失败。"
     assert "API Key" not in err.message
     assert "credential_source" not in err.details
 
 
-def test_recovery_moment_is_a_wall_clock_not_an_hour_promise():
-    assert format_retry_after_moment(_DAY_RESET, now=_NOW) == _MOMENT
+def test_recovery_at_is_structured_never_a_duration_nor_a_utc_clock():
+    """The one number a user can act on, and the one shape he can act on it in.
+
+    「等 16.6 小时」was never a promise the retry budget made; a pre-worded UTC clock
+    was a promise in the wrong timezone. So: no duration in the copy, no clock in the
+    copy, and the instant itself on the envelope for the client to localise.
+    """
+    assert recovery_at_iso(_DAY_RESET, now=_NOW) == _RECOVERY_AT
     for err in (
-        upstream_rate_limit_error(_DAY_RESET, credential_source="platform", now=_NOW),
-        upstream_rate_limit_error(_DAY_RESET, credential_source="user", now=_NOW),
-        upstream_rate_limit_error(_DAY_RESET, credential_source=None, now=_NOW),
+        _declared_429(_DAY_RESET, credential_source="platform"),
+        _declared_429(_DAY_RESET, credential_source="user"),
+        _declared_429(_DAY_RESET, credential_source=None),
     ):
-        assert _MOMENT in err.message
+        assert err.details["recovery_at"] == _RECOVERY_AT
         assert "16.6" not in err.message
         assert "小时" not in err.message
+        assert "UTC" not in err.message
+        assert "01:24" not in err.message
+
+
+@pytest.mark.parametrize("source", [None, "user", "platform"])
+def test_an_undeclared_cooldown_dates_nothing(source):
+    """The other half of the same rule, now that the moment rides structured.
+
+    Dropping the clock from the copy makes ``recovery_at`` the only place a
+    recovery time is stated — so a cooldown upstream never declared must leave it
+    empty rather than let the client localise our own backoff into a confident
+    「恢复于 X」the vendor never said.
+    """
+    err = upstream_rate_limit_error(_DAY_RESET, credential_source=source, now=_NOW)
+    assert err.retryable is False
+    assert "recovery_at" not in err.details
+    assert "UTC" not in err.message
+    assert "恢复" not in err.message
 
 
 def test_short_cooldown_never_reaches_the_quota_face():
@@ -198,6 +237,15 @@ def _day_reset_429(request: httpx.Request) -> httpx.Response:
     )
 
 
+def _headerless_429(request: httpx.Request) -> httpx.Response:
+    """The production shape behind the 138 give-ups: a 429 that states nothing."""
+    return httpx.Response(429, content=b'{"error":"rate_limited"}')
+
+
+async def _no_sleep(seconds: float) -> None:
+    """Run the 2→4→8→16 backoff chain without spending 30 real seconds on it."""
+
+
 def _req() -> LLMRequest:
     return LLMRequest(
         messages=[LLMMessage(role="user", content="hi")],
@@ -215,7 +263,44 @@ async def test_provider_429_on_platform_key_raises_the_quota_face():
             await provider.complete(_req())
         assert ei.value.retryable is False
         assert ei.value.details["credential_source"] == "platform"
-        assert "（UTC）" in ei.value.message
+        assert ei.value.details["recovery_at"].endswith("Z")
+    finally:
+        await provider.close()
+
+
+async def test_a_headerless_429_on_a_platform_key_dates_nothing(monkeypatch):
+    """生产那 138 条走完整条链路：上游一个字没说，用户面就不许出现一个恢复时刻。
+
+    这条走的是 provider 真路径而非直接构造，因为编造发生在接缝上：``_parse_retry_after``
+    在无头 429 上兜底成我们自己的退避值，第五次的 32 秒越过上限被放弃，而下游只看见一个
+    「32」——照旧算出「上游将于 17:44 恢复」这种精确到分钟的时刻，外加一句同样没有根据的
+    「额度已用完」（无头 429 也可能只是限速）。留下的只能是已知事实 + BYOK 出口：接自己的
+    key 确实能立刻绕过限流。
+    """
+    monkeypatch.setattr(
+        "agentcore.llm.provider.openai_compatible.asyncio.sleep",
+        _no_sleep,
+    )
+    provider = await _mock_provider(
+        _headerless_429, name="platform", base_url="http://example.invalid/v1"
+    )
+    try:
+        with pytest.raises(LLMRateLimitError) as ei:
+            await provider.complete(_req())
+        err = ei.value
+        # 无从证明是额度用尽，就不摆那张额度墙的脸。
+        assert not isinstance(err, LLMQuotaExceededError)
+        assert err.code == ErrorCode.LLM_RATE_LIMIT
+        assert err.retryable is False
+        assert err.details["credential_source"] == "platform"
+        # 核心：没有时刻可发——连客户端都没法本地化出一个我们编的钟点。
+        assert "recovery_at" not in err.details
+        assert error_context_from(err).get("recovery_at") is None
+        # 也不猜「额度用完」，不承诺恢复。
+        assert "额度" not in err.message
+        assert "恢复" not in err.message
+        # 保留的那个入口：接自己的 key 是真能立即继续的。
+        assert "设置 · 服务商" in err.message
     finally:
         await provider.close()
 

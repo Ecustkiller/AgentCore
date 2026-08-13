@@ -52,6 +52,32 @@ class PermissionAxesModel(BaseModel):
         )
 
 
+class ContextGapModel(BaseModel):
+    """早期对话没能进摘要、也已滑出原文窗口——这一轮 AI 确实读不到它们。
+
+    The failure half of ``context_compacted``: that flag says folding HAS run, and a
+    bool cannot tell a healthy rolling summary apart from folding that kept failing
+    until the chat outgrew its window. Present only when the loss is provable from
+    stored state (``conversation/context_gap.py``); absent means either intact or
+    not computed, and a client must stay quiet on both rather than warn on a guess.
+
+    Wording obligations for whoever renders this (same honesty bar as the memory
+    always-quota card): name what did not happen and what the user can do, never let
+    it read as a capability lost for good. Nothing was deleted — the transcript is
+    whole on screen, and the backlog folds itself in incrementally once folding can
+    run again. ``recovery_at`` is upstream's own date when it gave one; its absence
+    means「不知道，会自动重试」and must not be dressed up as a deadline.
+    """
+
+    # Stored rows the window cut — exact, not an estimate (same arithmetic as the loader).
+    dropped_messages: int
+    # ISO-8601 UTC instant ("2026-08-14T16:00:00Z") from the upstream 429 that dated its
+    # own recovery — the same instant the turn's 429 envelope carries as ``recovery_at``.
+    # Never pre-worded: the client renders it in the reader's timezone, which the server
+    # has no way to know (core.errors.utc_moment_iso).
+    recovery_at: str | None = None
+
+
 class CreateConversationRequest(BaseModel):
     title: str | None = None
     # File the new chat into a project at creation. Born into that project's
@@ -66,6 +92,10 @@ class CreateConversationRequest(BaseModel):
     permission_axes: PermissionAxesModel | None = None
     # 新建拍快照：显式 uuid = 钉该组合；省略 = 服务端写入当时账号默认（非活跟随）。
     model_profile_id: str | None = None
+    # 幂等键：客户端为「这一次发送」自铸一个 id（重试 / 重按都复用同一个）。同一用户
+    # 同一个键只会建出一条会话，第二次起原样返回首次那条（201，body 同形）。省略 =
+    # 保持旧行为，一次请求建一条——老客户端不受影响。
+    client_request_id: str | None = Field(None, min_length=1, max_length=100)
 
 
 class ConversationSummary(BaseModel):
@@ -91,6 +121,8 @@ class ConversationSummary(BaseModel):
     # True iff ORM has both compaction_summary and compacted_through.
     # Flag only — never expose rolling-summary text to clients.
     context_compacted: bool = False
+    # 压缩没跟上，早期对话已经掉出窗口（见 ContextGapModel）。null = 完好或本端点未计算。
+    context_gap: ContextGapModel | None = None
 
     model_config = {"from_attributes": True}
 
@@ -108,8 +140,15 @@ def conversation_summary_from_orm(
     conv: object,
     *,
     message_count: int | None = None,
+    unfolded_messages: int | None = None,
 ) -> ConversationSummary:
-    """Assemble ``ConversationSummary`` with ``context_compacted`` (no summary body)."""
+    """Assemble ``ConversationSummary`` with ``context_compacted`` (no summary body).
+
+    ``unfolded_messages`` (messages the rolling summary does not cover yet) turns on
+    the ``context_gap`` half: omit it on endpoints that do not count messages and the
+    field stays null, which clients read as「未计算」and keep quiet about — a cheaper
+    default than making every conversation write pay for a count nobody reads.
+    """
     summary = ConversationSummary.model_validate(conv)
     compacted = bool(
         getattr(conv, "compaction_summary", None)
@@ -118,7 +157,64 @@ def conversation_summary_from_orm(
     updates: dict[str, object] = {"context_compacted": compacted}
     if message_count is not None:
         updates["message_count"] = message_count
+    if unfolded_messages is not None:
+        from agentcore.conversation.context_gap import context_gap_for
+
+        gap = context_gap_for(conv, unfolded_messages=unfolded_messages)
+        if gap is not None:
+            updates["context_gap"] = ContextGapModel(
+                dropped_messages=gap.dropped_messages,
+                recovery_at=gap.recovery_at,
+            )
     return summary.model_copy(update=updates)
+
+
+class DeletedConversationSummary(BaseModel):
+    """One recoverable conversation in「最近删除」."""
+
+    id: str
+    title: str | None
+    # The project it will return to. A project that was itself deleted meanwhile is
+    # still named here — the chat comes back pointing at it and reads as 未分组 until
+    # that project is restored too.
+    folder_id: str | None = None
+    message_count: int = 0
+    created_at: datetime
+    deleted_at: datetime
+    # When the retention sweeper is entitled to purge this chat for good. Server-owned
+    # arithmetic, same as the project bin: a client must never re-derive「还剩几天」from
+    # ``deleted_at`` plus a hard-coded window. The sweep runs on a cadence, so this is
+    # the earliest possible purge, not a promise.
+    purge_at: datetime
+
+    @classmethod
+    def from_conversation(
+        cls, conv, *, purge_at: datetime, message_count: int = 0
+    ) -> "DeletedConversationSummary":
+        assert conv.deleted_at is not None  # repo only returns soft-deleted rows
+        return cls(
+            id=conv.id,
+            title=conv.title,
+            folder_id=conv.folder_id,
+            message_count=message_count,
+            created_at=conv.created_at,
+            deleted_at=conv.deleted_at,
+            purge_at=purge_at,
+        )
+
+
+class DeletedConversationListResponse(BaseModel):
+    """Recoverable conversations, most recently deleted first.
+
+    Hidden infrastructure hosts (handoff / standing) never appear, nor do chats already
+    past retention — those are no longer restorable, and listing them would promise a
+    recovery the sweeper is entitled to refuse. ``retention_days`` mirrors
+    ``workspace_retention_days``, the same window the project bin runs on.
+    """
+
+    data: list[DeletedConversationSummary]
+    total: int
+    retention_days: int
 
 
 class ConversationListResponse(BaseModel):

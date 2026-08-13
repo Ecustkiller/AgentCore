@@ -12,6 +12,7 @@ import { useCoordinationWaitChrome } from "@/components/chat/useCoordinationWait
 import { failureDetailSentence } from "@/components/graph/agentNode/shared";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { COLLAB_SUMMARY_TOOLTIP } from "@/lib/collabSummary";
 import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
 import {
   COST_UNPRICED_LABEL,
@@ -32,6 +33,11 @@ import {
   useActiveExecField,
 } from "@/stores/execution";
 import type { ExecutionDetachedPayload } from "@/types/events";
+import {
+  parallelSaving,
+  parallelSavingText,
+  parallelSavingTooltip,
+} from "@agentcore/protocol-fold-kit";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -207,8 +213,8 @@ function StripControls({
         </SimpleTooltip>
       )}
       {collabSummary && (
-        <SimpleTooltip label="本回合协作质量信号（明细见诊断）">
-          <span className="ml-0.5 max-w-[14rem] truncate text-xs text-muted-foreground">
+        <SimpleTooltip label={COLLAB_SUMMARY_TOOLTIP}>
+          <span className="ml-0.5 max-w-[18rem] truncate text-xs text-muted-foreground">
             {collabSummary}
           </span>
         </SimpleTooltip>
@@ -453,6 +459,13 @@ function CompletedStrip({
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
+  // 「用时 40s」单独看不出找一支团队换来了什么。同一批数据里另有一个数：各队员时长之和 =
+  // 这些活一个接一个做要多久。两个数并排，并行省下的那段才看得见。只派一个人 / 没省到时
+  // parallelSaving 返回 null，这里就什么都不说。停止态不挂（半途终止谈「省下」不合适）。
+  const saving = stopped
+    ? null
+    : parallelSaving({ elapsedMs: ms, runs: execution.runs });
+
   // 子任务失败只靠 meta（n/m）+ 图节点色 + 右坞详情；完成/停止态不再挂红条复述。
   // 交付 unmet（partial/blocked）由气泡轻提示承担，完成态条保持中性「团队完成」。
 
@@ -494,8 +507,21 @@ function CompletedStrip({
           <span className="text-muted-foreground">
             {` · ${completed}/${total} 子任务${
               duration ? ` · 用时 ${duration}` : ""
-            }${costSegment}`}
+            }`}
           </span>
+          {saving && (
+            <SimpleTooltip
+              label={parallelSavingTooltip(saving, formatDuration)}
+            >
+              <span
+                className="text-success"
+                data-testid="status-strip-parallel-saving"
+              >
+                {` · ${parallelSavingText(saving, formatDuration)}`}
+              </span>
+            </SimpleTooltip>
+          )}
+          <span className="text-muted-foreground">{costSegment}</span>
         </span>
         {/* 硬停 + 本回合动过工作区 → 露出改动入口（无改动不渲染；真 diff 在右坞）。 */}
         {stopped ? <StoppedTurnFileChangesChip execution={execution} /> : null}

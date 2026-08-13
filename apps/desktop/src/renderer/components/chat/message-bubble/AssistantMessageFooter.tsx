@@ -11,7 +11,10 @@ import {
 import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
-import { formatCollabSummary } from "@/lib/collabSummary";
+import {
+  COLLAB_SUMMARY_TOOLTIP,
+  formatCollabSummary,
+} from "@/lib/collabSummary";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
 import {
@@ -443,9 +446,11 @@ export function AssistantMessageFooter({
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         {collabSummary && (
-          <span className="text-xs text-muted-foreground/70">
-            {collabSummary}
-          </span>
+          <SimpleTooltip label={COLLAB_SUMMARY_TOOLTIP}>
+            <span className="text-xs text-muted-foreground/70">
+              {collabSummary}
+            </span>
+          </SimpleTooltip>
         )}
         <MessageUsageSummary
           rounds={message.rounds}

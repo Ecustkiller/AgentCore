@@ -83,14 +83,17 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
     expect(pickCostMoney({ total: 100, estimated_total: 999 })).toEqual({
       nano: 100,
       estimated: false,
+      currency: "CNY",
     });
     expect(pickCostMoney({ total: 0, estimated_total: 999 })).toEqual({
       nano: 999,
       estimated: true,
+      currency: "CNY",
     });
     expect(pickCostMoney({ total: 0 })).toEqual({
       nano: 0,
       estimated: false,
+      currency: "CNY",
     });
   });
 
@@ -98,7 +101,24 @@ describe("formatDisplayCost / pickCostMoney (BYOK ≈)", () => {
     expect(pickCostMoney({ total: 100, pricing_source: "curated" })).toEqual({
       nano: 100,
       estimated: false,
+      currency: "CNY",
     });
+  });
+
+  // 一个回合可以记账人民币、估算美元：估算走 estimated_currency，缺省才回落记账币种。
+  // 不做汇率换算，所以币种必须随金额一起交给调用方，否则会拿 ¥ 的符号去印 $ 的数。
+  it("carries the estimate's own currency, falling back to the billed one", () => {
+    expect(
+      pickCostMoney({
+        total: 0,
+        currency: "CNY",
+        estimated_total: 999,
+        estimated_currency: "USD",
+      }),
+    ).toEqual({ nano: 999, estimated: true, currency: "USD" });
+    expect(
+      pickCostMoney({ total: 0, currency: "USD", estimated_total: 999 }),
+    ).toEqual({ nano: 999, estimated: true, currency: "USD" });
   });
 
   it("appends 自带密钥·估算 caption for estimates", () => {

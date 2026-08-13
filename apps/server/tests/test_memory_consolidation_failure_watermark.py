@@ -1,21 +1,28 @@
 """Non-retryable consolidation failures advance memory_synced_at (stop sweeper loops).
 
 Mirrors the abnormal-turn skip posture: deterministic failures drop the window;
-retryable AgentCoreError leaves the watermark so the next sweep re-selects.
+retryable AgentCoreError leaves the watermark so the next sweep re-selects. A pool
+checkout timeout counts as retryable even though it is no AgentCoreError — it is the
+one failure here that would otherwise drop a window nothing had read.
 
 Retryable failures are layered: shared upstream (rate limit / 5xx / quota) arms a
 whole-sweep cooldown and aborts the rest of the batch; conversation-local
-retryables (e.g. timeout) only cool down that conversation id.
+retryables (e.g. timeout) only cool down that conversation id. Refusals the billing
+gate *returns* instead of raising bypass the classifier entirely and must arm the
+same two layers themselves.
 """
 
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.exc import TimeoutError as SATimeoutError
 
+from agentcore.billing.gate import BackgroundLlmSkip, BackgroundSkipReason
 from agentcore.core.errors import LLMAuthError, LLMRateLimitError, LLMTimeoutError, LLMUpstreamError
 from agentcore.memory import consolidation
 
@@ -110,6 +117,27 @@ def _wire_failing_consolidate(monkeypatch, *, fail: BaseException) -> dict:
     monkeypatch.setattr(consolidation, "load_recent_history", _history)
     monkeypatch.setattr(consolidation, "_load_conversation_action_inventory", _actions)
     monkeypatch.setattr(consolidation, "run_background_llm", _run_bg)
+    return state
+
+
+def _wire_skipping_consolidate(monkeypatch, *, skip: BackgroundLlmSkip) -> dict:
+    """Same fakes, except the billing gate *returns* a refusal instead of raising.
+
+    Nothing propagates, so ``consolidate_conversation``'s ``except`` arm — the only
+    place that classifies a failure and arms a cooldown — never runs. ``gate_calls``
+    counts admissions so a test can show the sweeper is no longer re-burning them.
+    """
+    state = _wire_failing_consolidate(
+        monkeypatch, fail=AssertionError("gate returns a skip; the runner must not run")
+    )
+    gate_calls: list[str] = []
+
+    async def _run_bg(user_id, *, purpose="memory", runner):
+        gate_calls.append(user_id)
+        return skip
+
+    monkeypatch.setattr(consolidation, "run_background_llm", _run_bg)
+    state["gate_calls"] = gate_calls
     return state
 
 
@@ -220,11 +248,44 @@ async def test_retryable_emits_consolidation_failed_only(monkeypatch):
     assert "memory.consolidation_failed" in spy.events
     assert "memory.consolidation_window_dropped" not in spy.events
     assert state["synced_at"] is None
+    failed = spy.kwargs[spy.events.index("memory.consolidation_failed")]
+    assert failed["error_type"] == "LLMUpstreamError"
     # Shared upstream also arms sweep backoff (separate event).
     assert "memory.consolidation_backoff" in spy.events
     backoff = spy.kwargs[spy.events.index("memory.consolidation_backoff")]
     assert backoff["scope"] == "sweep"
     assert backoff["reason"] == "upstream_unstable"
+
+
+@pytest.mark.asyncio
+async def test_consolidation_failed_names_the_exception_class(monkeypatch):
+    """同一句「上游限流」文案落进 reason=other 时，error_type 指出它是哪个异常类。
+
+    生产签名：绝大多数限流文案报 other（裸/被包装的异常），少数报 rate_limit
+    （真 LLMRateLimitError）。分类照旧按异常类型判，不看文案——这里只断言
+    error_type 把两者区分开来，供下一个日志窗口定位包装层。
+    """
+    state = _wire_failing_consolidate(monkeypatch, fail=RuntimeError("上游限流，请稍后再试"))
+
+    # Watermark write fails → non-retryable failure reports as a plain failure
+    # instead of claiming a dropped window.
+    class _WriteFailsRepo(consolidation.ConversationRepository):
+        async def set_memory_synced_at(self, conversation_id, synced_at):
+            raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(consolidation, "ConversationRepository", _WriteFailsRepo)
+    spy = _SpyLogger()
+    monkeypatch.setattr(consolidation, "logger", spy)
+
+    await consolidation.consolidate_conversation("c-fail")
+
+    assert "memory.consolidation_window_dropped" not in spy.events
+    failed = spy.kwargs[spy.events.index("memory.consolidation_failed")]
+    assert failed["error_type"] == "RuntimeError"
+    assert failed["reason"] == "other"  # 文案不参与分类；无「含限流字样就判 rate_limit」兜底
+    assert state["synced_at"] is None
+    # Non-retryable → no backoff armed (observability-only change, posture unchanged).
+    assert "memory.consolidation_backoff" not in spy.events
 
 
 @pytest.mark.asyncio
@@ -401,6 +462,153 @@ def test_shared_cooldown_expires_lazily(monkeypatch):
     consolidation._shared_failure_streak = 3
     assert not consolidation._in_shared_failure_cooldown()
     assert consolidation._shared_failure_cooldown_until == 0.0
+
+
+@pytest.mark.asyncio
+async def test_quota_skip_arms_sweep_cooldown_and_stops_the_reburn(monkeypatch):
+    """配额拒绝是「被返回而非被抛出」的——照样要退避，否则 sweeper 每 300s 白烧一次。"""
+    state = _wire_skipping_consolidate(
+        monkeypatch, skip=BackgroundLlmSkip(reason=BackgroundSkipReason.QUOTA_EXCEEDED)
+    )
+    spy = _SpyLogger()
+    monkeypatch.setattr(consolidation, "logger", spy)
+    monkeypatch.setattr(
+        consolidation.settings,
+        "memory_consolidation_shared_failure_cooldown_base_seconds",
+        300,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        consolidation.settings,
+        "memory_consolidation_shared_failure_cooldown_max_seconds",
+        1800,
+        raising=True,
+    )
+
+    changed = await consolidation.consolidate_conversation("c-fail")
+
+    assert changed is False
+    # Watermark stays put: the window is deferred, never dropped.
+    assert state["synced_at"] is None
+    assert _pending(state) == ["c-fail"]
+    assert consolidation._in_shared_failure_cooldown()
+    assert "c-fail" not in consolidation._failure_cooldown_until
+    backoff = spy.kwargs[spy.events.index("memory.consolidation_backoff")]
+    assert backoff["scope"] == "sweep"
+    assert backoff["reason"] == "quota_exceeded"
+    assert backoff["cooldown_seconds"] == 300.0
+
+    # Still pending is exactly why a cooldown is needed: without one the next pass
+    # spends another admission on an upstream that has already said no.
+    assert await consolidation.consolidate_conversation("c-fail") is False
+    assert state["gate_calls"] == ["u-fail"]
+
+
+@pytest.mark.asyncio
+async def test_quota_skip_declared_recovery_beats_the_exponential_ladder(monkeypatch):
+    """上游自报 12.7h 恢复：直接开到封顶，不再从 5 分钟一级级爬——但也不照单全收。"""
+    declared = 12.7 * 3600
+    state = _wire_skipping_consolidate(
+        monkeypatch,
+        skip=BackgroundLlmSkip(
+            reason=BackgroundSkipReason.QUOTA_EXCEEDED, declared_recovery_in=declared
+        ),
+    )
+    spy = _SpyLogger()
+    monkeypatch.setattr(consolidation, "logger", spy)
+    monkeypatch.setattr(
+        consolidation.settings,
+        "memory_consolidation_shared_failure_cooldown_base_seconds",
+        300,
+        raising=True,
+    )
+    monkeypatch.setattr(
+        consolidation.settings,
+        "memory_consolidation_shared_failure_cooldown_max_seconds",
+        1800,
+        raising=True,
+    )
+
+    await consolidation.consolidate_conversation("c-fail")
+
+    assert state["synced_at"] is None
+    backoff = spy.kwargs[spy.events.index("memory.consolidation_backoff")]
+    # Outlasts both the 300s first rung and the 1800s ladder ceiling …
+    assert backoff["cooldown_seconds"] == consolidation._DECLARED_COOLDOWN_CAP_SECONDS
+    # … yet is still clamped: a process-wide gate may not sit out half a day.
+    assert backoff["cooldown_seconds"] < declared
+    assert backoff["declared_recovery_sec"] == pytest.approx(declared)
+    remaining = consolidation._shared_failure_cooldown_until - time.monotonic()
+    assert remaining == pytest.approx(consolidation._DECLARED_COOLDOWN_CAP_SECONDS, abs=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "reason",
+    [
+        BackgroundSkipReason.NO_CREDENTIALS,
+        BackgroundSkipReason.AUTH_REJECTED,
+        BackgroundSkipReason.TURN_AUTH_DEAD,
+    ],
+)
+async def test_account_shaped_skips_stay_conversation_local(monkeypatch, reason):
+    """没 key / key 被拒是这个账号自己的墙，进程级 sweep 闸会连带饿死其他所有用户。"""
+    state = _wire_skipping_consolidate(monkeypatch, skip=BackgroundLlmSkip(reason=reason))
+    spy = _SpyLogger()
+    monkeypatch.setattr(consolidation, "logger", spy)
+    monkeypatch.setattr(
+        consolidation.settings,
+        "memory_consolidation_failure_cooldown_seconds",
+        600,
+        raising=True,
+    )
+
+    await consolidation.consolidate_conversation("c-fail")
+
+    assert state["synced_at"] is None
+    assert not consolidation._in_shared_failure_cooldown()
+    assert consolidation._in_conversation_failure_cooldown("c-fail")
+    backoff = spy.kwargs[spy.events.index("memory.consolidation_backoff")]
+    assert backoff["scope"] == "conversation"
+    assert backoff["reason"] == reason.value
+
+
+@pytest.mark.asyncio
+async def test_pool_timeout_keeps_watermark_and_stays_pending(monkeypatch):
+    """池超时是瞬时基建故障：判成确定性失败就会推进水位、把整窗真丢掉。"""
+    state = _wire_failing_consolidate(
+        monkeypatch,
+        fail=SATimeoutError(
+            "QueuePool limit of size 5 overflow 10 reached, connection timed out"
+        ),
+    )
+    spy = _SpyLogger()
+    monkeypatch.setattr(consolidation, "logger", spy)
+    assert _pending(state) == ["c-fail"]
+
+    changed = await consolidation.consolidate_conversation("c-fail")
+
+    assert changed is False
+    assert state["synced_at"] is None
+    assert _pending(state) == ["c-fail"]  # window survives for the next sweep
+    assert "memory.consolidation_window_dropped" not in spy.events
+    assert "memory.consolidation_failed" in spy.events
+    # Local saturation, not an upstream wall: cool this id, let the sweep continue.
+    assert not consolidation._in_shared_failure_cooldown()
+    assert consolidation._in_conversation_failure_cooldown("c-fail")
+
+
+def test_pool_timeout_is_retryable_through_the_cause_chain():
+    """sqlalchemy.exc.TimeoutError 不是 AgentCoreError，被包一层后也必须仍判可重试。"""
+    pool_timeout = SATimeoutError("QueuePool limit of size 5 overflow 10 reached")
+    assert consolidation._consolidation_failure_retryable(pool_timeout)
+
+    wrapped = RuntimeError("consolidation session failed")
+    wrapped.__cause__ = pool_timeout
+    assert consolidation._consolidation_failure_retryable(wrapped)
+
+    # Unchanged: a plain bug is still deterministic, so the watermark still advances.
+    assert not consolidation._consolidation_failure_retryable(AttributeError("boom"))
 
 
 def test_persistence_defaults_include_consolidation_cooldowns():

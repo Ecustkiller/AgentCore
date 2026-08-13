@@ -1,9 +1,8 @@
 import {
   classifySnapshotLabel,
-  groupSnapshotsByKind,
-  isSystemSnapshotLabel,
   snapshotDisplayHint,
   snapshotDisplayTitle,
+  visibleSnapshots,
 } from "@/components/workspace/snapshotDisplay";
 import { describe, expect, it } from "vitest";
 
@@ -14,14 +13,14 @@ describe("snapshotDisplay", () => {
   });
 
   it("recognizes system labels", () => {
-    expect(isSystemSnapshotLabel("导出")).toBe(true);
-    expect(isSystemSnapshotLabel("导出到本地")).toBe(true);
-    expect(isSystemSnapshotLabel("浏览器预览")).toBe(true);
-    expect(isSystemSnapshotLabel("合回到本机")).toBe(true);
-    expect(isSystemSnapshotLabel("turn-baseline:msg-1")).toBe(true);
-    expect(isSystemSnapshotLabel("handoff:2026-08-11T12:00:00Z")).toBe(true);
-    expect(isSystemSnapshotLabel("发版前")).toBe(false);
     expect(classifySnapshotLabel("导出")).toBe("system");
+    expect(classifySnapshotLabel("导出到本地")).toBe("system");
+    expect(classifySnapshotLabel("浏览器预览")).toBe("system");
+    expect(classifySnapshotLabel("合回到本机")).toBe("system");
+    expect(classifySnapshotLabel("turn-baseline:msg-1")).toBe("system");
+    expect(classifySnapshotLabel("handoff:2026-08-11T12:00:00Z")).toBe(
+      "system",
+    );
   });
 
   it("rewrites opaque system titles and keeps Chinese exact labels", () => {
@@ -36,17 +35,17 @@ describe("snapshotDisplay", () => {
     expect(snapshotDisplayHint("导出")).toBeNull();
   });
 
-  it("groups while preserving input order within each kind", () => {
-    const grouped = groupSnapshotsByKind([
+  it("hides turn baselines and transport byproducts, keeps handoff", () => {
+    const visible = visibleSnapshots([
       { id: "1", label: "发版前" },
       { id: "2", label: null },
       { id: "3", label: "导出" },
-      { id: "4", label: "再留一版" },
-      { id: "5", label: null },
-      { id: "6", label: "turn-baseline:m1" },
+      { id: "4", label: "turn-baseline:m1" },
+      { id: "5", label: "handoff:2026-01-01T00:00:00Z" },
+      { id: "6", label: "导出到本地" },
+      { id: "7", label: "浏览器预览" },
+      { id: "8", label: "合回到本机" },
     ]);
-    expect(grouped.kept.map((s) => s.id)).toEqual(["1", "4"]);
-    expect(grouped.auto.map((s) => s.id)).toEqual(["2", "5"]);
-    expect(grouped.system.map((s) => s.id)).toEqual(["3", "6"]);
+    expect(visible.map((s) => s.id)).toEqual(["1", "2", "5"]);
   });
 });

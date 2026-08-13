@@ -1,10 +1,17 @@
 import { hasNativeSave } from "@/lib/capabilities";
+import { logEvent } from "@/lib/log";
 import {
   ApiError,
   NetworkError,
+  captureCsrf,
   getCsrfHeaders,
+  isReplayableCsrfRejection,
+  notifyUnauthorized,
   tryRefresh,
 } from "@/services/api";
+import type { components } from "@/types/api.generated";
+
+type Schemas = components["schemas"];
 
 /**
  * Neutral HTTP primitives + wire types shared by every workspace/file REST client
@@ -12,7 +19,7 @@ import {
  * (`services/workspace`), the ws-id-scoped client (`services/workspaces`), the 消息
  * chat-files client (`services/messaging`) and conversation export
  * (`services/conversations`) all build their own URLs and reuse these for the
- * cross-cutting concerns — cookie auth + refresh-once, blob save, path encoding,
+ * cross-cutting concerns — cookie auth + one-shot recovery, blob save, path encoding,
  * and the binary/too-large preview decode. Kept here (not in any one scoped client)
  * so no scoped module depends on a sibling just to borrow a helper.
  */
@@ -23,32 +30,83 @@ export function encodePath(path: string): string {
 }
 
 /**
- * Fetch with the app's cookie auth + refresh-once policy, for the raw-bytes
+ * Fetch with the app's cookie auth + one-shot recovery policy, for the raw-bytes
  * endpoints (upload/download/zip) that bypass the JSON `api` helper. Mirrors
- * `api.request`'s 401→refresh→replay so a stale access token doesn't surface as a
- * spurious failure.
+ * `api.request`'s 401→refresh→replay **and** its CSRF-403 replay, off the same
+ * exported verdict: without the latter, a missing or rotated CSRF token has every
+ * `api.*` write self-heal while attachment uploads alone hard-fail, which reads
+ * to the user as "everything works except this one button".
+ *
+ * Deliberately *not* mirrored: a 5xx here does not trip the availability gate.
+ * One failed file preview must not drag the whole app onto the offline retry
+ * screen — the asymmetry is the point.
  */
 export async function authedFetch(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
-  const withCsrf = {
-    credentials: "include" as const,
-    ...init,
-    headers: { ...getCsrfHeaders(method), ...init.headers },
-  };
-  let res: Response;
-  try {
-    res = await fetch(url, withCsrf);
-    if (res.status === 401 && (await tryRefresh()) === "renewed") {
-      res = await fetch(url, withCsrf);
+  // Headers are built per attempt, never hoisted: both recoveries below land
+  // after the CSRF token moved (the 403 hands back a replacement; a refresh
+  // rotates it), so a replay reusing the rejected attempt's headers would just
+  // present the token the server has already replaced.
+  const send = async (): Promise<Response> => {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        credentials: "include",
+        ...init,
+        headers: { ...getCsrfHeaders(method), ...init.headers },
+      });
+    } catch (cause) {
+      throw new NetworkError(cause);
     }
-  } catch (cause) {
-    throw new NetworkError(cause);
+    captureCsrf(res); // token rides every response — never read the body only
+    return res;
+  };
+
+  let res = await send();
+  // One replay for the whole call — the same bound as `request`'s `retry` flag,
+  // so a server that keeps rejecting costs one extra attempt, never a loop.
+  let replayed = false;
+
+  if (res.status === 401) {
+    const outcome = await tryRefresh();
+    if (outcome === "renewed") {
+      res = await send();
+      replayed = true;
+      // Refused again while holding a token the server just minted: the session
+      // really is gone, and nothing else would say so. `describeError` maps every
+      // 401 to `null` — deliberately, because auth failures are supposed to
+      // redirect — so the toast stays silent too, and this branch is exactly the
+      // silent black hole the rest of this function exists to close.
+      if (res.status === 401) {
+        notifyUnauthorized({
+          reason: "replay_still_401",
+          via: "workspace_http",
+        });
+      }
+    } else if (outcome === "auth_dead") {
+      // Otherwise the session dies right here in silence: no login redirect, no
+      // prompt, just a download that failed.
+      notifyUnauthorized({
+        reason: "refresh_auth_dead",
+        via: "workspace_http",
+      });
+    }
+    // `transient` falls through to the ApiError below — a flaky refresh must
+    // never read as session death.
   }
-  if (!res.ok) throw new ApiError(res.status, await res.text());
-  return res;
+
+  if (res.ok) return res;
+
+  const error = new ApiError(res.status, await res.text(), res.headers);
+  if (replayed || !isReplayableCsrfRejection(res, error)) throw error;
+
+  logEvent("info", "auth.csrf_replay", { method, via: "workspace_http" });
+  res = await send();
+  if (res.ok) return res;
+  throw new ApiError(res.status, await res.text(), res.headers);
 }
 
 /**
@@ -101,6 +159,45 @@ export interface WorkspaceFile {
   /** Workspace-relative POSIX path. */
   path: string;
   isDir: boolean;
+  /** Byte size; null for directories and for entries the server could not stat. */
+  sizeBytes: number | null;
+  /** Last-modified epoch ms (same clock as the edit CAS baseline); null when unknown. */
+  mtimeMs: number | null;
+}
+
+/** Wire entry → {@link WorkspaceFile} (会话 / ws-id 两个客户端同一口径)。 */
+export function toWorkspaceFile(
+  e: Schemas["WorkspaceFileEntry"],
+): WorkspaceFile {
+  return {
+    path: e.path,
+    isDir: e.is_dir,
+    sizeBytes: e.size_bytes ?? null,
+    mtimeMs: e.mtime_ms ?? null,
+  };
+}
+
+/**
+ * 一次工作区列举的结果：条目 + 是否被服务端条数上限截断。
+ *
+ * `truncated` 必须一路带到 UI——被悄悄砍掉的树在用户眼里就是「我的文件没了」，
+ * 上限可以存在，但必须说出来。
+ */
+export interface WorkspaceListing {
+  files: WorkspaceFile[];
+  truncated: boolean;
+}
+
+/** `?recursive=&path=` for the two `/files` listing clients (会话 / ws-id 同一口径)。 */
+export function listQuery(opts: {
+  recursive?: boolean;
+  dir?: string;
+}): string {
+  const params = new URLSearchParams({
+    recursive: String(opts.recursive ?? false),
+  });
+  if (opts.dir) params.set("path", opts.dir);
+  return params.toString();
 }
 
 /**
@@ -297,4 +394,56 @@ export interface WorkspaceWriteOutcome {
   ok: boolean;
   mtimeMs: number;
   conflict: boolean;
+}
+
+// --- Snapshots / AgentCore-trash wire shapes (会话 · ws-id 两个客户端共用) ---
+
+/** One persisted workspace snapshot (a kept version, or an automatic backup). */
+export interface WorkspaceSnapshot {
+  snapshotId: string;
+  /** A user-pinned name (手动留版本), or null for an automatic post-turn backup. */
+  label: string | null;
+  createdAt: string;
+  sizeBytes: number;
+}
+
+export function toSnapshot(s: Schemas["SnapshotSummary"]): WorkspaceSnapshot {
+  return {
+    snapshotId: s.snapshot_id,
+    label: s.label,
+    createdAt: s.created_at,
+    sizeBytes: s.size_bytes,
+  };
+}
+
+/** One reversible soft-delete under ``AgentCore/trash`` (not the OS recycle bin). */
+export interface WorkspaceTrashEntry {
+  entryId: string;
+  originalPath: string;
+  name: string;
+  isDir: boolean;
+  deletedAt: string;
+}
+
+export function toTrashEntry(
+  e: Schemas["TrashEntrySummary"],
+): WorkspaceTrashEntry {
+  return {
+    entryId: e.entry_id,
+    originalPath: e.original_path,
+    name: e.name,
+    isDir: e.is_dir,
+    deletedAt: e.deleted_at,
+  };
+}
+
+/** blob → base64（分块，避免大文件撑爆调用栈）。 */
+export async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
 }

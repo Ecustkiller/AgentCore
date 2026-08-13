@@ -8,6 +8,7 @@ import pytest
 from agentcore.api.routes.conversations import files as files_mod
 from agentcore.api.routes.conversations.files import _file_workspace_folder_id
 from agentcore.folders.placement import FolderPlacement
+from agentcore.workspace.protocol import DirListing
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +45,8 @@ async def test_list_uses_auto_desk_not_scratch():
     conv = SimpleNamespace(id="c1", folder_id=None, auto_desk_folder_id="desk-1")
     conv_repo = SimpleNamespace(get_by_id=AsyncMock(return_value=conv))
 
-    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=[])) as listed:
+    listing = DirListing(entries=[])
+    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=listing)) as listed:
         await files_mod.list_workspace_files(
             conversation_id="c1",
             user=user,
@@ -110,7 +112,8 @@ async def test_list_birth_folder_unchanged():
     conv = SimpleNamespace(id="c1", folder_id="birth-f", auto_desk_folder_id="desk-ignored")
     conv_repo = SimpleNamespace(get_by_id=AsyncMock(return_value=conv))
 
-    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=[])) as listed:
+    listing = DirListing(entries=[])
+    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=listing)) as listed:
         await files_mod.list_workspace_files(
             conversation_id="c1",
             user=user,
@@ -127,7 +130,8 @@ async def test_list_bare_without_auto_desk_stays_scratch():
     conv = SimpleNamespace(id="c1", folder_id=None, auto_desk_folder_id=None)
     conv_repo = SimpleNamespace(get_by_id=AsyncMock(return_value=conv))
 
-    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=[])) as listed:
+    listing = DirListing(entries=[])
+    with patch.object(files_mod, "list_files", new=AsyncMock(return_value=listing)) as listed:
         await files_mod.list_workspace_files(
             conversation_id="c1",
             user=user,

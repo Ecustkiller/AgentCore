@@ -24,6 +24,16 @@ class WorkspaceSettings(BaseModel):
     workspace_system_other_snapshot_max: int = 10
     workspace_system_snapshot_retention_days: int = 30
 
+    # Local turn baseline zips (``AgentCore/baselines/<message_id>.zip``, sidecar +
+    # desktop channel): same D+C shape as the cloud system caps above, pruned right
+    # after a new baseline lands. The count is looser because the disk is the user's
+    # own and each kept zip is one more turn that can still roll back; it is still
+    # capped, since a whole-tree zip per turn otherwise accumulates forever. Either
+    # knob at ``0`` disables that leg (never "delete every restore point").
+    # Desktop main mirrors both values in ``fs/constants.ts`` — it cannot read settings.
+    workspace_local_baseline_max: int = 20
+    workspace_local_baseline_retention_days: int = 30
+
     workspace_retention_enabled: bool = True
     # Soft-deleted workspace grace before hard purge. Also the open-handoff Diff
     # window (§7.6): unapplied/undiscarded cloud hosts stay until finished_at +

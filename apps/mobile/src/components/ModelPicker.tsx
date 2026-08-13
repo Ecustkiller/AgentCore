@@ -187,6 +187,9 @@ function ProfileRow({
         <span className="model-name-row">
           <span className="model-name">{profile.name}</span>
           {profile.is_default && <span className="model-free-tier">默认</span>}
+          {profile.kind === "system" && (
+            <span className="model-preset-badge">预置</span>
+          )}
         </span>
         <span className="model-sub muted">{summary}</span>
       </div>

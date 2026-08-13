@@ -87,5 +87,10 @@ async def enforce_call_quota(
                 scenario=scenario or "",
             )
             # Leaf-family twin: same code / CTA, but an LLMError so the turn's
-            # error surfacing treats it exactly like the sidecar's 429 hop.
-            raise LLMQuotaExceededError(e.message) from e
+            # error surfacing treats it exactly like the sidecar's 429 hop. The
+            # window's reset instant rides across too — the copy no longer names
+            # one, so dropping it here would leave this face alone unable to say
+            # when the wall lifts.
+            raise LLMQuotaExceededError(
+                e.message, **({"reset_at": e.reset_at} if e.reset_at else {})
+            ) from e

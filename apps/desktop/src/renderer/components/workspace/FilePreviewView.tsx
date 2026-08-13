@@ -7,8 +7,12 @@ import { Button, IconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useFileAudit } from "@/hooks/useFileAudit";
 import {
+  type EditEncoding,
+  type EditEol,
   type FilePreviewResult,
   type FileSource,
+  type FileVersion,
+  canOpenPathWithOsDefaultApp,
   isHtmlPath,
   isMarkdownPath,
 } from "@/lib/fileSource";
@@ -16,6 +20,7 @@ import { notifyActionError, notifyError } from "@/lib/toast";
 import { LocalFsError } from "@/services/sources/localRootSource";
 import { useConversationStore } from "@/stores/conversation";
 import {
+  AlertTriangle,
   AppWindow,
   ChevronLeft,
   Download,
@@ -30,11 +35,27 @@ import {
 import { useCallback, useEffect, useState } from "react";
 
 /**
+ * 一次编辑会话：进编辑时 `readForEdit` 拿到的全文 + 写前 CAS 基线 + 原文编码/换行。
+ * 存在即「正在编辑」——没有基线就不可能进编辑态，故不会出现无基线的盲写。
+ */
+interface EditSession {
+  /** 进入编辑（或上次成功保存）时的正文，脏标以此为准。 */
+  baseText: string;
+  version: FileVersion;
+  encoding: EditEncoding;
+  eol: EditEol;
+}
+
+/**
  * In-panel preview of one file from a {@link FileSource}, with opt-in editing for
  * whole text files. Takes over the files section (with a back arrow); a header
  * download button (when the source can transfer) pulls the raw file. Binary /
- * oversized files fall back to a download-only notice. Saving writes the buffer
- * back through the source's `writeBytes` (gated by `caps.edit`).
+ * oversized files fall back to a download-only notice.
+ *
+ * 编辑走的是**带 CAS 的编辑契约**（`readForEdit` 取全文 + 版本基线 → `writeText` 写前比对），
+ * 与 `MarkdownFileEditor` 同一套：同回合 Agent 正在写同一个文件时，保存返回冲突而不是盲
+ * 覆盖，用户拿到「重新加载 / 仍然覆盖」的明确选择。故编辑入口门控 `readForEdit + writeText`
+ * 而非裸 `writeBytes`（后者无基线，必然静默覆盖）。
  *
  * HTML 与其他文本文件一致显示源码（C+ 决策：面板内静态快照已取消，页面效果只在真浏览器
  * 环境呈现）——顶部横幅指路完整效果出口，CTA 按能力递进：「打开完整预览」（内置浏览器
@@ -57,9 +78,16 @@ export function FilePreviewView({
   const [downloading, setDownloading] = useState(false);
   const [openingInBrowser, setOpeningInBrowser] = useState(false);
   const [openingPreview, setOpeningPreview] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [edit, setEdit] = useState<EditSession | null>(null);
+  const [opening, setOpening] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  // 冲突未决时的**磁盘当前版本**：既是横幅的开关，也是「仍然覆盖」重写时的基线。
+  const [conflictVersion, setConflictVersion] = useState<FileVersion | null>(
+    null,
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const editing = edit !== null;
   const isHtml = isHtmlPath(name);
   const isMarkdown = isMarkdownPath(name);
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -69,7 +97,9 @@ export function FilePreviewView({
     setResult(null);
     setError(false);
     setMissing(false);
-    setEditing(false);
+    setEdit(null);
+    setConflictVersion(null);
+    setSaveError(null);
     try {
       setResult(await source.read(path));
     } catch (err) {
@@ -110,7 +140,8 @@ export function FilePreviewView({
     }
   };
 
-  // 系统集成（仅本地源实现这两个方法 → 按存在性显隐，不按源分支）。
+  // 系统集成（reveal 仅本地源有；外部打开两源都有但云端过白名单谓词 → 按能力显隐，不按源分支）。
+  const canOpenExternal = canOpenPathWithOsDefaultApp(source, path);
   const onReveal = async () => {
     try {
       await source.revealInOsFileManager?.(path);
@@ -153,44 +184,103 @@ export function FilePreviewView({
   };
 
   // Editing is offered only for a whole text file on a source that can write it
-  // back: a truncated preview would drop its tail on save, so oversized/binary
-  // stay read-only (download).
+  // back **with a baseline**: a truncated preview would drop its tail on save, so
+  // oversized/binary stay read-only (download); a source without the CAS pair
+  // could only ever clobber, so it doesn't get an edit affordance at all.
   const canEdit =
     result?.kind === "text" &&
     !result.truncated &&
     source.caps.edit &&
-    !!source.writeBytes;
-  const dirty = editing && result?.kind === "text" && draft !== result.text;
+    !!source.readForEdit &&
+    !!source.writeText;
+  const dirty = edit !== null && draft !== edit.baseText;
+
+  // 进/重进编辑：预览可能被截断或做过换行归一，故正文与基线都取自 `readForEdit`，
+  // 保证保存写回的是「读到什么就写什么」。
+  const openEditSession = useCallback(async () => {
+    const readForEdit = source.readForEdit;
+    if (opening || !readForEdit) return;
+    setOpening(true);
+    try {
+      const doc = await readForEdit(path);
+      if (doc.encoding === "gbk") {
+        // GBK 回写未启用：不进编辑态，免得白编辑一场存不下（与 md 编辑器同一判定）。
+        notifyError("此文件为 GBK 编码，暂不支持回写，只能只读查看");
+        return;
+      }
+      setDraft(doc.text);
+      setEdit({
+        baseText: doc.text,
+        version: doc.version,
+        encoding: doc.encoding,
+        eol: doc.eol,
+      });
+      setConflictVersion(null);
+      setSaveError(null);
+    } catch (e) {
+      notifyActionError("无法打开编辑", e);
+    } finally {
+      setOpening(false);
+    }
+  }, [opening, source, path]);
 
   const startEdit = () => {
-    if (result?.kind === "text" && !result.truncated) {
-      setDraft(result.text);
-      setEditing(true);
-    }
+    if (canEdit) void openEditSession();
   };
 
-  const onSave = useCallback(async () => {
-    if (saving || !source.writeBytes) return;
-    setSaving(true);
-    try {
-      await source.writeBytes(path, new Blob([draft]));
-      setResult({ kind: "text", text: draft, truncated: false });
-      setEditing(false);
-    } catch {
-      notifyError("保存失败");
-    } finally {
-      setSaving(false);
-    }
-  }, [saving, source, path, draft]);
+  const onSave = useCallback(
+    async (force = false) => {
+      const writeText = source.writeText;
+      if (saving || !edit || !writeText) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        // 冲突后的「仍然覆盖」以**磁盘当前版本**为基线重写——明确的覆盖，不是盲写。
+        const outcome = await writeText(path, {
+          content: draft,
+          encoding: edit.encoding,
+          eol: edit.eol,
+          baseline: force ? conflictVersion : edit.version,
+        });
+        if (outcome.ok) {
+          setResult({ kind: "text", text: draft, truncated: false });
+          setEdit(null);
+          setConflictVersion(null);
+        } else if (outcome.reason === "conflict") {
+          setConflictVersion(outcome.version);
+          setSaveError("磁盘上的文件已被改动");
+        } else if (outcome.reason === "denied") {
+          setSaveError("没有写入权限，无法保存");
+        } else if (outcome.reason === "locked") {
+          setSaveError("文件被其他程序占用，无法保存");
+        } else {
+          setSaveError(outcome.message ?? "保存失败");
+        }
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [saving, source, path, draft, edit, conflictVersion],
+  );
 
-  // Confirm before discarding unsaved edits (back to list, or cancel editing).
+  // Confirm before discarding unsaved edits (back to list, cancel editing, or
+  // taking the disk version on a conflict).
   const requestClose = () => {
     if (dirty && !window.confirm("有未保存的改动，确定放弃并返回？")) return;
     onClose();
   };
   const cancelEdit = () => {
     if (dirty && !window.confirm("有未保存的改动，确定放弃编辑？")) return;
-    setEditing(false);
+    setEdit(null);
+    setConflictVersion(null);
+    setSaveError(null);
+  };
+  const reloadFromDisk = () => {
+    if (dirty && !window.confirm("有未保存的改动，确定放弃并重新加载？"))
+      return;
+    void openEditSession();
   };
 
   // Ctrl/Cmd+S saves while editing (and swallows the browser's save dialog).
@@ -247,8 +337,16 @@ export function FilePreviewView({
           <>
             {canEdit && (
               <SimpleTooltip label="编辑">
-                <IconButton onClick={startEdit} aria-label="编辑">
-                  <Pencil size={14} />
+                <IconButton
+                  disabled={opening}
+                  onClick={startEdit}
+                  aria-label="编辑"
+                >
+                  {opening ? (
+                    <Loader2 size={14} className="animate-spin" />
+                  ) : (
+                    <Pencil size={14} />
+                  )}
                 </IconButton>
               </SimpleTooltip>
             )}
@@ -282,7 +380,7 @@ export function FilePreviewView({
                 </IconButton>
               </SimpleTooltip>
             )}
-            {!isHtml && source.openWithOsDefaultApp && (
+            {!isHtml && canOpenExternal && (
               <SimpleTooltip label="用默认程序打开">
                 <IconButton
                   onClick={() => void onOpenExternal()}
@@ -320,6 +418,36 @@ export function FilePreviewView({
           </>
         )}
       </div>
+
+      {/* 冲突三态与 md 编辑器同一套语汇：说明「会覆盖」+ 两个明确出口，绝不静默落盘。 */}
+      {conflictVersion && (
+        <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-foreground">
+          <AlertTriangle size={14} className="shrink-0 text-destructive" />
+          <span>磁盘上的文件已被改动，保存会覆盖磁盘版本。</span>
+          <Button
+            variant="danger"
+            onClick={reloadFromDisk}
+            className="h-auto px-0 py-0 underline-offset-2 hover:underline"
+          >
+            重新加载
+          </Button>
+          <Button
+            variant="danger"
+            disabled={saving}
+            onClick={() => void onSave(true)}
+            className="h-auto px-0 py-0 underline-offset-2 hover:underline"
+          >
+            仍然覆盖
+          </Button>
+        </div>
+      )}
+
+      {saveError && !conflictVersion && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span>{saveError}</span>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         {editing ? (
@@ -368,7 +496,16 @@ export function FilePreviewView({
                 <Markdown content={result.text} />
               </div>
             ) : (
-              <FilePreviewBody result={result} name={name} />
+              <FilePreviewBody
+                result={result}
+                name={name}
+                onOpenWithOsDefaultApp={
+                  canOpenExternal ? () => void onOpenExternal() : undefined
+                }
+                onDownload={
+                  source.download ? () => void onDownload() : undefined
+                }
+              />
             )}
             {conversationId && <FileAuditSection state={fileAuditState} />}
           </>

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import { join, relative } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import {
+  LIST_FILES_CAP,
   LIST_FILES_MAX_DEPTH,
   WORKSPACE_LIST_MAX,
   WORKSPACE_READ_MAX,
@@ -79,12 +80,19 @@ export async function opRead(
   }
 }
 
+/**
+ * 列举一个目录（`pattern` 含 `**` 则递归）。
+ *
+ * 返回 `{ entries, truncated }`：条数上限存在就必须说出来——静默切掉的树在用户/模型
+ * 眼里就是「文件没了」。多收一条再切，以此判断是否真有剩余。
+ */
 export async function opList(
   root: StoredRoot,
   directory: string,
   pattern: string,
   revealPaths?: ReadonlySet<string>,
   listOptions?: AiListSkipOptions,
+  cap?: number,
 ): Promise<WorkspaceOpResult> {
   const baseAbs = resolveLexical(root, directory);
   if (!baseAbs) return opErr("OutsideWorkspace", directory);
@@ -95,7 +103,7 @@ export async function opList(
     if (baseReal.code === "out_of_root") {
       return opErr("OutsideWorkspace", directory);
     }
-    return opOk([]);
+    return opOk({ entries: [], truncated: false });
   }
   let baseStat: import("node:fs").Stats | undefined;
   try {
@@ -109,6 +117,12 @@ export async function opList(
 
   const recursive = pattern.includes("**");
   const re = globToRegExp(pattern);
+  const limit = Math.min(
+    cap && cap > 0 ? Math.floor(cap) : WORKSPACE_LIST_MAX,
+    LIST_FILES_CAP,
+  );
+  // Collect one past the limit so "hit the cap" can be told from "that's all".
+  const probe = limit + 1;
   type ListEntry = {
     path: string;
     is_dir: boolean;
@@ -126,7 +140,7 @@ export async function opList(
     relFromBase: string,
     depth: number,
   ): Promise<void> => {
-    if (results.length >= WORKSPACE_LIST_MAX) return;
+    if (results.length >= probe) return;
     let dirents: import("node:fs").Dirent[];
     try {
       dirents = await fs.readdir(absDir, { withFileTypes: true });
@@ -136,7 +150,7 @@ export async function opList(
     }
     dirents.sort((a, b) => a.name.localeCompare(b.name));
     for (const d of dirents) {
-      if (results.length >= WORKSPACE_LIST_MAX) break;
+      if (results.length >= probe) break;
       const isDir = d.isDirectory();
       const parentRel = relFromBase
         ? listBaseRel
@@ -189,7 +203,10 @@ export async function opList(
 
   await walk(baseReal.path, "", 0);
   results.sort((a, b) => a.path.localeCompare(b.path));
-  return opOk(results.slice(0, WORKSPACE_LIST_MAX));
+  return opOk({
+    entries: results.slice(0, limit),
+    truncated: results.length > limit,
+  });
 }
 
 function splitLinesLikePython(text: string): string[] {

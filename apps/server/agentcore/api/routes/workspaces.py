@@ -98,6 +98,7 @@ from agentcore.workspace.files import (
     write_file_text,
 )
 from agentcore.workspace.git import CloneError, clone_repo
+from agentcore.workspace.limits import WORKSPACE_BROWSE_LIST_MAX
 from agentcore.workspace.locate import (
     WorkspaceCoords,
     build_server_workspace,
@@ -281,10 +282,10 @@ def _storage_key(user_id: str, target: _WsTarget) -> str:
     )
 
 
-async def _list_shared_entries(space_id: str, *, recursive: bool) -> list:
+async def _list_shared_entries(space_id: str, *, path: str, recursive: bool):
     backend = build_shared_workspace(space_id)
     pattern = "**/*" if recursive else "*"
-    return await backend.list(".", pattern)
+    return await backend.list(path or ".", pattern, cap=WORKSPACE_BROWSE_LIST_MAX)
 
 
 async def _shared_upload(space_id: str, path: str, data: bytes) -> int:
@@ -423,25 +424,30 @@ async def list_workspace_files(
     ws_id: str,
     user: AuthUser,
     recursive: bool = Query(False),
+    path: str = Query(".", description="工作区相对目录（`.` = 根）"),
     conv_repo: ConversationRepository = Depends(get_conversation_repo),
     folder_repo: FolderRepository = Depends(get_folder_repo),
     shared_svc: SharedSpaceService = Depends(get_shared_space_service),
 ):
-    """List files in a cloud workspace (top level or recursive)."""
+    """List one directory of a cloud workspace (or its whole tree)."""
     target = await _resolve_owned_workspace(
         ws_id, user.user_id, conv_repo, folder_repo, shared_svc
     )
     _require_cloud(target)
     if target.space_id:
-        entries = await _list_shared_entries(target.space_id, recursive=recursive)
+        listing = await _list_shared_entries(
+            target.space_id, path=path, recursive=recursive
+        )
     else:
-        entries = await list_files(
+        listing = await list_files(
             **_workspace_coords(user.user_id, target),
+            path=path,
             recursive=recursive,
         )
     return WorkspaceFileListResponse(
-        data=[WorkspaceFileEntry.model_validate(e) for e in entries],
-        total=len(entries),
+        data=[WorkspaceFileEntry.model_validate(e) for e in listing.entries],
+        total=len(listing.entries),
+        truncated=listing.truncated,
     )
 
 

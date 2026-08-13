@@ -13,9 +13,17 @@ stale reading (成本配额与计费 §一).
 
 Background product chrome (title / memory / compaction) resolves
 platform-first via ``resolve_and_gate_background``: platform spend always passes
-``enforce_quota`` (no BYOK freeload); quota exhaustion returns ``None`` so
+``enforce_quota`` (no BYOK freeload); quota exhaustion yields no credentials so
 best-effort callers degrade instead of 429-ing the user turn. ``run_background_llm``
-keeps that contract when the per-call gate refuses mid-flight.
+keeps that contract when the per-call gate refuses mid-flight. An account that
+explicitly pointed its background slot at its own key resolves BYOK up front (its
+own spend — nothing to freeload), so it never sees the platform cap at all.
+
+A refusal is returned, not raised, and it **says why**: ``run_background_llm``
+answers with :class:`BackgroundLlmResult` or :class:`BackgroundLlmSkip`, never a
+bare ``None``. Some refusals name the moment upstream frees up (a platform-funded
+429 whose ``Retry-After`` outran the call's budget), and flattening that into an
+empty value left callers guessing a cooldown upstream had already dated for them.
 
 Auth-rejected platform keys fall back **once** to user BYOK through
 ``run_background_llm`` — the sole chrome entry that may retry after
@@ -27,6 +35,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +54,7 @@ from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import CostEventRepository, UserLlmProviderRepository, UserRepository
 from agentcore.llm.background_failure import (
     classify_background_llm_failure,
+    declared_recovery_seconds,
     is_config_shaped_background_failure,
 )
 from agentcore.llm.credentials import LLMCredentials
@@ -73,6 +83,41 @@ class BackgroundLlmResult[T]:
 
     value: T
     credentials: LLMCredentials
+
+
+class BackgroundSkipReason(StrEnum):
+    """Why background chrome got no value — one member per refusal site in the gate.
+
+    ``NO_CREDENTIALS`` also covers an allowance already spent at admission:
+    ``resolve_and_gate_background`` answers「没有可用凭据」for both a keyless account
+    and an exhausted platform quota (it logs ``billing.background_quota_skip`` for
+    the latter). ``QUOTA_EXCEEDED`` is the narrower mid-flight refusal — the per-call
+    gate or upstream turning down a call this gate had already admitted.
+    """
+
+    TURN_AUTH_DEAD = "turn_auth_dead"
+    NO_CREDENTIALS = "no_credentials"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    AUTH_REJECTED = "auth_rejected"
+
+
+@dataclass(frozen=True)
+class BackgroundLlmSkip:
+    """A refusal said out loud: why there is no value, and when that may change.
+
+    ``declared_recovery_in`` is upstream's own answer to「多久之后重试才值得」in
+    seconds, and is set **only** when the refusal named a moment — a platform-funded
+    429 whose ``Retry-After`` outran the call's budget wears the ``QUOTA_EXCEEDED``
+    face (``upstream_rate_limit_error``) and brings that date along. Every other
+    refusal leaves it ``None`` rather than guessing: the caller's own cooldown
+    estimate is the honest fallback, and it already exists.
+    """
+
+    reason: BackgroundSkipReason
+    declared_recovery_in: float | None = None
+
+
+type BackgroundLlmOutcome[T] = BackgroundLlmResult[T] | BackgroundLlmSkip
 
 
 async def maybe_mark_byok_provider_error(
@@ -212,14 +257,16 @@ async def resolve_and_gate_background(
     *,
     purpose: ModelPurpose = "title",
 ) -> LLMCredentials | None:
-    """Resolve background credentials (platform-first) and gate platform spend.
+    """Resolve background credentials (own-key slot, else platform-first) and gate spend.
 
     Returns credentials to pass to ``build_provider``, or ``None`` when the caller
     should skip the LLM (no usable key, or platform quota exhausted). Never raises
     quota errors — background paths are best-effort product chrome.
 
     When ``source=platform``, ``enforce_quota`` always runs (even if the account
-    has a BYOK key) so background cannot freeload past the platform cap.
+    has a BYOK key) so background cannot freeload past the platform cap. A resolve
+    that already landed on the user's own key skips the quota gate — that is their
+    spend, not the platform's.
 
     Prefer ``run_background_llm`` at call sites that actually invoke the model: it
     adds the single platform-``LLMAuthError`` → user BYOK retry.
@@ -279,7 +326,7 @@ async def run_background_llm[T](
     *,
     purpose: ModelPurpose = "title",
     runner: Callable[[LLMCredentials], Awaitable[T]],
-) -> BackgroundLlmResult[T] | None:
+) -> BackgroundLlmOutcome[T]:
     """Platform-first background LLM with one BYOK retry on platform ``LLMAuthError``.
 
     Flow:
@@ -287,12 +334,19 @@ async def run_background_llm[T](
     2. Run ``runner(credentials)``.
     3. On ``LLMAuthError`` **and** ``credentials.source == "platform"``: resolve
        user BYOK once via ``resolve_and_gate_background_user_fallback`` and re-run.
-    4. Missing credentials on either side, or BYOK also auth-fails → ``None``.
-    5. On ``LLMQuotaExceededError``: the per-call gate found the platform quota
-       spent after step 1 admitted the call. Same decision as step 1's own quota
-       skip, just seen a moment later — degrade to ``None`` rather than raise, so
-       chrome keeps the "never 429s the user turn" contract.
+    4. Missing credentials on either side, or BYOK also auth-fails →
+       :class:`BackgroundLlmSkip`.
+    5. On ``LLMQuotaExceededError``: the platform allowance is spent after step 1
+       admitted the call — the per-call gate saying so, or upstream answering a
+       day-scale 429 through the platform quota face. Same decision as step 1's own
+       quota skip, just seen a moment later: skip rather than raise, so chrome keeps
+       the "never 429s the user turn" contract. When that refusal named the moment
+       it lifts, the skip carries it as ``declared_recovery_in``.
     6. Any other runner exception propagates unchanged.
+
+    Every refusal is a ``BackgroundLlmSkip`` — best-effort callers stay silent
+    either way, but the ones that schedule a retry can now read *why* and *when*
+    instead of re-deriving a cooldown the refusal already stated.
 
     No process-local auth circuit breaker — each call re-resolves. Call sites must
     re-raise ``LLMAuthError`` from their generators so this entry can see it.
@@ -309,32 +363,37 @@ async def run_background_llm[T](
             user_id=user_id,
             purpose=purpose,
         )
-        return None
+        return BackgroundLlmSkip(reason=BackgroundSkipReason.TURN_AUTH_DEAD)
 
     async with async_session_factory() as session:
         primary = await resolve_and_gate_background(session, user_id, purpose=purpose)
     if primary is None:
-        return None
+        return BackgroundLlmSkip(reason=BackgroundSkipReason.NO_CREDENTIALS)
 
     try:
         value = await runner(primary)
         return BackgroundLlmResult(value=value, credentials=primary)
     except LLMQuotaExceededError as e:
-        # Quota ran out between resolve and call (per-call gate, billing.call_quota).
+        # Quota ran out between resolve and call (per-call gate, billing.call_quota),
+        # or upstream answered a cooldown too long for this call to sit out.
+        declared = declared_recovery_seconds(e)
         logger.info(
             "billing.background_quota_skip",
             user_id=user_id,
             purpose=purpose,
             error=str(e),
+            declared_recovery_sec=declared,
         )
-        return None
+        return BackgroundLlmSkip(
+            reason=BackgroundSkipReason.QUOTA_EXCEEDED, declared_recovery_in=declared
+        )
     except LLMAuthError as e:
         await maybe_mark_byok_provider_error(
             user_id=user_id, purpose=purpose, credentials=primary, exc=e
         )
         if primary.source != "platform":
             # Already on user BYOK — do not bounce back to platform.
-            return None
+            return BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
     except Exception as e:
         await maybe_mark_byok_provider_error(
             user_id=user_id, purpose=purpose, credentials=primary, exc=e
@@ -351,7 +410,7 @@ async def run_background_llm[T](
             session, user_id, purpose=purpose
         )
     if fallback is None:
-        return None
+        return BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
 
     try:
         value = await runner(fallback)
@@ -360,7 +419,7 @@ async def run_background_llm[T](
         await maybe_mark_byok_provider_error(
             user_id=user_id, purpose=purpose, credentials=fallback, exc=e
         )
-        return None
+        return BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
     except Exception as e:
         await maybe_mark_byok_provider_error(
             user_id=user_id, purpose=purpose, credentials=fallback, exc=e

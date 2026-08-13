@@ -24,10 +24,16 @@ import {
   useDeleteConversation,
   useDuplicateConversation,
   useRenameConversation,
+  useRestoreConversation,
   useTogglePin,
   useUnarchiveConversation,
 } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import {
+  DELETE_CONVERSATION_LABEL,
+  deleteConversationConfirmLabel,
+  notifyConversationDeleted,
+} from "@/lib/conversationDeleteCopy";
 import { shouldShowConversationCloudIcon } from "@/lib/conversationWorkspaceMode";
 import { visibleMessageText } from "@/lib/errors";
 import { notifyError, notifyInfo } from "@/lib/toast";
@@ -166,6 +172,7 @@ export function ConversationItem({
   );
   const renameMutation = useRenameConversation();
   const deleteMutation = useDeleteConversation();
+  const restoreMutation = useRestoreConversation();
   const pinMutation = useTogglePin();
   const duplicateMutation = useDuplicateConversation();
   const archiveMutation = useArchiveConversation();
@@ -189,9 +196,9 @@ export function ConversationItem({
   const isActive = conversation.id === currentId;
   const currentFolderId = conversation.folderId ?? null;
   const showRowActions = hovered || confirmingDelete || moreOpen;
-  const deleteConfirmLabel = currentFolderId
-    ? "确认永久删除（文件夹里的文件会保留）"
-    : "确认永久删除（无法恢复）";
+  const deleteConfirmLabel = deleteConversationConfirmLabel(
+    currentFolderId ? "folder" : undefined,
+  );
 
   const status: "running" | "awaiting" | null =
     awaitingInteraction || awaitingResume || awaitingAttention
@@ -255,6 +262,7 @@ export function ConversationItem({
   const handleDelete = async () => {
     setConfirmingDelete(false);
     const wasActive = conversation.id === currentId;
+    const title = conversation.title;
     try {
       await deleteMutation.mutateAsync(conversation.id);
     } catch (err) {
@@ -263,6 +271,11 @@ export function ConversationItem({
     }
     dropConversationRuntime(conversation.id);
     if (wasActive) navigate("/");
+    // Raised from the awaited handler, not a `mutate` callback: this row unmounts
+    // the moment the conversation leaves the sidebar cache.
+    notifyConversationDeleted(title, () =>
+      restoreMutation.mutate(conversation.id),
+    );
   };
 
   const togglePin = () => {
@@ -316,7 +329,7 @@ export function ConversationItem({
     }
   };
 
-  const requestPermanentDelete = () => {
+  const requestDelete = () => {
     setMoreOpen(false);
     setConfirmingDelete(true);
   };
@@ -552,10 +565,12 @@ export function ConversationItem({
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         variant="danger"
-                        onSelect={requestPermanentDelete}
+                        onSelect={requestDelete}
                       >
                         <Trash2 size={14} className="shrink-0" />
-                        <span className="flex-1 truncate">永久删除</span>
+                        <span className="flex-1 truncate">
+                          {DELETE_CONVERSATION_LABEL}
+                        </span>
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -630,9 +645,9 @@ export function ConversationItem({
           <span className="flex-1 truncate">导出 JSON</span>
         </ContextMenuItem>
         <ContextMenuSeparator />
-        <ContextMenuItem variant="danger" onSelect={requestPermanentDelete}>
+        <ContextMenuItem variant="danger" onSelect={requestDelete}>
           <Trash2 size={14} className="shrink-0" />
-          <span className="flex-1 truncate">永久删除</span>
+          <span className="flex-1 truncate">{DELETE_CONVERSATION_LABEL}</span>
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

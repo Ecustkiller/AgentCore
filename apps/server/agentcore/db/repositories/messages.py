@@ -12,6 +12,7 @@ from agentcore.db.models import (
     Conversation,
     Message,
     MessageBookmark,
+    PausedTurnOutcomeRow,
     PausedTurnRow,
     TurnLeaseRow,
 )
@@ -337,6 +338,33 @@ class MessageRepository:
         )
         return {row[0]: row[1] for row in result.all()}
 
+    async def unfolded_counts_for_conversations(
+        self, conversation_ids: Sequence[str]
+    ) -> dict[str, int]:
+        """Messages each conversation's rolling summary does NOT cover yet.
+
+        Everything newer than that conversation's own ``compacted_through`` — the whole
+        chat where compaction has never written a watermark. Joining the watermark in
+        keeps this to one query for the whole list instead of a per-conversation read,
+        the same shape as :meth:`counts_for_conversations`, which the caller pairs it
+        with to tell an un-folded backlog apart from a merely long chat
+        (``conversation/context_gap.py``). Ids with no un-folded messages are absent
+        from the map (callers default them to 0).
+        """
+        if not conversation_ids:
+            return {}
+        result = await self._session.execute(
+            select(Message.conversation_id, func.count())
+            .join(Conversation, Conversation.id == Message.conversation_id)
+            .where(
+                Message.conversation_id.in_(conversation_ids),
+                (Conversation.compacted_through.is_(None))
+                | (Message.created_at > Conversation.compacted_through),
+            )
+            .group_by(Message.conversation_id)
+        )
+        return {row[0]: row[1] for row in result.all()}
+
     async def search(
         self,
         user_id: str,
@@ -610,7 +638,9 @@ class MessageRepository:
         (conversation branching is a separate, later feature). Each dropped
         message's ``turn_journal`` replay stream goes with it (§8.3 唯一事实源 — it
         could never project without its message). Any matching ``paused_turns`` frame
-        is dropped too — otherwise resume would find a frame whose journal is gone.
+        is dropped too — otherwise resume would find a frame whose journal is gone —
+        together with the frame's recorded outcome: a card whose turn no longer exists
+        must read as「已重新生成」, not go on reporting the decision that once settled it.
 
         Pass ``commit=False`` when pairing with :meth:`update_content` in one txn.
         """
@@ -628,6 +658,12 @@ class MessageRepository:
             delete(PausedTurnRow).where(
                 PausedTurnRow.conversation_id == conversation_id,
                 PausedTurnRow.message_id.in_(dropped_ids),
+            )
+        )
+        await self._session.execute(
+            delete(PausedTurnOutcomeRow).where(
+                PausedTurnOutcomeRow.conversation_id == conversation_id,
+                PausedTurnOutcomeRow.message_id.in_(dropped_ids),
             )
         )
         await self._session.execute(
@@ -662,7 +698,9 @@ class MessageRepository:
         id touches neither row). Messages have no soft-delete column, so this is a
         physical delete; its ``turn_journal`` replay stream is dropped with it (§8.3
         唯一事实源), and any matching ``paused_turns`` frame is dropped too (otherwise
-        resume would find a frame whose journal is gone), but the append-only ``cost_events`` ledger is intentionally left
+        resume would find a frame whose journal is gone) along with that frame's
+        recorded outcome (a deleted turn reports「已重新生成或删除」, never its old
+        decision), but the append-only ``cost_events`` ledger is intentionally left
         intact (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
         """
         await delete_journal_for_message(self._session, conversation_id, message_id)
@@ -671,6 +709,12 @@ class MessageRepository:
             delete(PausedTurnRow).where(
                 PausedTurnRow.message_id == message_id,
                 PausedTurnRow.conversation_id == conversation_id,
+            )
+        )
+        await self._session.execute(
+            delete(PausedTurnOutcomeRow).where(
+                PausedTurnOutcomeRow.message_id == message_id,
+                PausedTurnOutcomeRow.conversation_id == conversation_id,
             )
         )
         await self._session.execute(

@@ -264,9 +264,14 @@ async def test_extraction_skipped_when_there_is_nothing_to_parameterize(monkeypa
 
 
 async def test_missing_credentials_degrade_to_no_slots(monkeypatch):
-    """无凭据 / 配额耗尽：``run_background_llm`` 给 None，照常拿回一份无槽位 definition。"""
+    """无凭据 / 配额耗尽：``run_background_llm`` 给 skip，照常拿回一份无槽位 definition。"""
+    from agentcore.billing.gate import BackgroundLlmSkip, BackgroundSkipReason
+
     monkeypatch.setattr(
-        "agentcore.billing.gate.run_background_llm", AsyncMock(return_value=None)
+        "agentcore.billing.gate.run_background_llm",
+        AsyncMock(
+            return_value=BackgroundLlmSkip(reason=BackgroundSkipReason.NO_CREDENTIALS)
+        ),
     )
     original = _plain_definition()
     assert await suggest_slots_for_definition(original, user_id="u1") == (original, [])

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from sqlalchemy.exc import IntegrityError
 
-from agentcore.billing.gate import run_background_llm
+from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
 from agentcore.config import settings
 from agentcore.conversation.common import generate_title as mint_title
 from agentcore.conversation.common import log_cost_recorded
@@ -1047,7 +1047,7 @@ class CloudStore:
                 bg = await run_background_llm(
                     user_id, purpose="title", runner=_title_runner
                 )
-                if bg is not None and bg.value:
+                if isinstance(bg, BackgroundLlmResult) and bg.value:
                     async with async_session_factory() as session:
                         updated = await ConversationRepository(session).update_title_if_empty(
                             conversation_id, bg.value

@@ -19,8 +19,9 @@ pnpm dev            # http://localhost:5174
 控制台跑在 `:5174`、后端在 `:8000`——不同 origin 但同站（localhost），故：
 
 - 后端须把本 origin 加入 `cors_allow_origins`（默认已含 `http://localhost:5174`），`allow_credentials=True`。
-- 请求一律 `credentials: "include"`；cookie 为 `SameSite=Lax`（同站可跨 origin 携带）。
-- 生产：控制台部署在**独立 origin**（可自托管；建议再加身份门），按需收紧 `COOKIE_SECURE` / `COOKIE_SAMESITE`。
+- 请求一律 `credentials: "include"`；dev 下 cookie 用 `SameSite=Lax` 就够——Lax 只挡跨**站**，`:5174` 与 `:8000` 同站，跨 origin 照样携带。
+- 生产：控制台部署在**独立域**并挂**自己的 `/api` 反代**（可自托管；建议再加身份门），与自己的 API **同源** → 第一方 cookie。这不是省事，是必须：auth cookie 不带 `domain=`、落在被访问的 API 主机上，控制台若改指产品域的 API，两个 SPA 就共用一份 access cookie，后登录者顶替先登录者。`COOKIE_SAMESITE=none` + `COOKIE_SECURE=true` 仍是生产硬要求，但那是为桌面 `app://` 跨站（`none` 缺 Secure 会被浏览器丢弃，后端启动期 fail-closed 拦这组配错）。
+- SameSite 从来不是 CSRF 防护：改动类请求须回显后端下发的 `X-CSRF-Token`，由 `src/services/api.ts` 统一附带。后端只在登录/续期、以及「因缺令牌被拒」的那条 403 上下发，前端对任意响应无条件收下；403 `CSRF_FAILED` **带回新令牌**时原样自动重放一次（与 401 的刷新重放同构，共用 retry 标志防循环）。后端对「令牌签给了别的会话」故意不补发——重放会把这次写落到当前 cookie 主人的账号上——那类不重放，直接提示用户（刷新页面或重新登录也救不了）。
 
 ## 类型
 

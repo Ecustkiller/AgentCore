@@ -8,6 +8,10 @@ Local (desktop channel ``LocalWorkspace``): same zip path on the user disk via
 
 失败 / 超限 / 超时只打日志，绝不阻断回合；桌面降级 A1 工具参数预览。
 
+保留：本地基线区在每次捕获后顺带清理（:func:`prune_local_baselines`，数量上限 ∧ TTL，
+对齐云端 D+C），清理失败同样只打日志。用户命名版本区 ``AgentCore/versions`` 永不自动
+清理，不在本模块视野内。
+
 **分轨（脚本破坏可回滚 P0a）**：常规 :func:`maybe_capture_turn_baseline` 仍永不阻断。
 仅 Local 破坏性删路径经 :func:`ensure_local_baseline_for_destructive` 在无还原点时
 由调用方升为 FORCE_APPROVAL / DENY——本模块仍只返回 ``None``/``False``，不抛不拦。
@@ -16,7 +20,9 @@ Local (desktop channel ``LocalWorkspace``): same zip path on the user disk via
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from stat import S_ISREG
 from typing import Any
 
 from agentcore.config import settings
@@ -35,9 +41,14 @@ LOCAL_BASELINE_MAX_BYTES = 100 * 1024 * 1024  # 100 MiB raw
 LOCAL_BASELINE_TIMEOUT_S = 60.0
 
 
+def local_baselines_root(workspace_root: Path) -> Path:
+    """``AgentCore/baselines`` under the bound workspace root (not created)."""
+    return workspace_root / Path(*BASELINES_REL.split("/"))
+
+
 def local_baseline_path(workspace_root: Path, snapshot_id: str) -> Path:
     """``AgentCore/baselines/{snapshot_id}.zip`` under the bound workspace root."""
-    return workspace_root / Path(*BASELINES_REL.split("/")) / f"{snapshot_id}.zip"
+    return local_baselines_root(workspace_root) / f"{snapshot_id}.zip"
 
 
 def local_baseline_ready(workspace_root: Path, snapshot_id: str) -> bool:
@@ -49,6 +60,77 @@ def local_baseline_ready(workspace_root: Path, snapshot_id: str) -> bool:
         return path.is_file() and path.stat().st_size > 0
     except OSError:
         return False
+
+
+def prune_local_baselines(
+    workspace_root: Path,
+    *,
+    keep: int,
+    max_age_days: int,
+    keep_id: str | None = None,
+    now: datetime | None = None,
+) -> list[str]:
+    """Delete baseline zips beyond the newest ``keep`` or older than the TTL.
+
+    Same D+C policy as the cloud system snapshot caps (``snapshot_kinds``), on
+    file mtime — the zip stem is a message id, not a timestamp. ``keep`` /
+    ``max_age_days`` at ``0`` disable that leg; ``keep_id`` (the baseline just
+    captured) is never deleted. Returns the deleted snapshot ids.
+
+    Only ``AgentCore/baselines/*.zip`` is read: the sibling ``versions`` zone is
+    user-named and never auto-pruned. Unlike the cloud path there is nothing to
+    pin — the local zone has no DB, and a pruned turn simply loses its restore
+    entry (the panel scans the zone to decide what it can offer).
+
+    Raises ``OSError`` when the zone itself cannot be read; a single zip that
+    resists deletion (Windows sharing violation) is skipped, not fatal.
+    """
+    keep_cap = keep if keep > 0 else None
+    max_age = timedelta(days=max_age_days) if max_age_days > 0 else None
+    if keep_cap is None and max_age is None:
+        return []
+
+    root = local_baselines_root(workspace_root)
+    try:
+        children = list(root.iterdir())
+    except FileNotFoundError:
+        return []
+
+    dated: list[tuple[float, Path]] = []
+    for child in children:
+        if child.suffix != ".zip":
+            continue
+        try:
+            st = child.stat()
+        except OSError:
+            continue
+        if not S_ISREG(st.st_mode):
+            continue
+        dated.append((st.st_mtime, child))
+    # Newest first; the name breaks mtime ties so the survivors are deterministic.
+    dated.sort(key=lambda item: (item[0], item[1].name), reverse=True)
+
+    cutoff = (_aware(now) - max_age).timestamp() if max_age is not None else None
+    removed: list[str] = []
+    for index, (mtime, path) in enumerate(dated):
+        if keep_id is not None and path.stem == keep_id:
+            continue
+        beyond_cap = keep_cap is not None and index >= keep_cap
+        too_old = cutoff is not None and mtime < cutoff
+        if not (beyond_cap or too_old):
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            continue
+        removed.append(path.stem)
+    return removed
+
+
+def _aware(now: datetime | None) -> datetime:
+    if now is None:
+        return datetime.now(UTC)
+    return now if now.tzinfo is not None else now.replace(tzinfo=UTC)
 
 
 class _LocalBackendMarker:
@@ -296,4 +378,50 @@ async def _capture_local_baseline(
         size_bytes=size,
         path=str(dest),
     )
+    await _prune_local_baselines_best_effort(
+        workspace_root=workspace_root,
+        conversation_id=conversation_id,
+        message_id=message_id,
+    )
     return message_id
+
+
+async def _prune_local_baselines_best_effort(
+    *,
+    workspace_root: Path,
+    conversation_id: str,
+    message_id: str,
+) -> None:
+    """Cap the baselines zone after it grew. Never raises — capture already won.
+
+    Pruning on capture (rather than on read) mirrors the cloud path, where
+    ``create_snapshot`` prunes right after writing: capture is the only moment
+    the zone grows on either local write track, and the zone has no product
+    "list" op to hang cleanup off — the sidecar opens one zip by id, and the
+    desktop panel discovers baselines through the generic directory listing.
+    """
+    try:
+        removed = await asyncio.to_thread(
+            prune_local_baselines,
+            workspace_root,
+            keep=settings.workspace_local_baseline_max,
+            max_age_days=settings.workspace_local_baseline_retention_days,
+            keep_id=message_id,
+        )
+    except Exception:
+        logger.warning(
+            "turn.local_baseline_prune_failed",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            exc_info=True,
+        )
+        return
+    if removed:
+        logger.info(
+            "turn.local_baseline_pruned",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            removed_count=len(removed),
+            keep=settings.workspace_local_baseline_max,
+            retention_days=settings.workspace_local_baseline_retention_days,
+        )

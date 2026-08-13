@@ -148,6 +148,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='auth.session_revoked'),
     EventSpec(name='auth.sessions_revoke_all'),
     EventSpec(name='auth.sessions_revoke_others'),
+    EventSpec(name='billing.allowance_invalidated'),
     EventSpec(
         name='billing.background_byok_provider_error',
         description=(
@@ -166,7 +167,19 @@ EVENTS: list[EventSpec] = [
         name='billing.background_platform_auth_fallback',
         description='后台 chrome 平台 key 被上游 auth 拒绝后一次回落用户 BYOK',
     ),
-    EventSpec(name='billing.background_quota_skip'),
+    EventSpec(
+        name='billing.background_quota_skip',
+        description=(
+            '后台 chrome 平台额度用尽而跳过（静默降级，不冒泡用户面）；declared_recovery_sec = 上游'
+            '自己申报的恢复秒数，空表示这次拒绝没给日期'
+        ),
+        fields={
+            'declared_recovery_sec': FieldType('float'),
+            'error': FieldType('str'),
+            'purpose': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='billing.background_skip_turn_auth_dead'),
     EventSpec(
         name='billing.call_quota_refused',
@@ -303,6 +316,18 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='chat.stream_segment_flush_failed'),
     EventSpec(name='chat.thumbnail_failed'),
     EventSpec(name='chat.thumbnail_store_failed'),
+    EventSpec(
+        name='chat.title_degraded',
+        description=(
+            '侧栏标题落的是首条消息裁出来的降级短标题、不是模型产出；reason=rate_limit/timeout/empt'
+            'y_model_title/gate_* 归因，mint_no_write 为 REST auto-title 兜底那次'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'reason': FieldType('str'),
+            'title_chars': FieldType('int'),
+        },
+    ),
     EventSpec(name='chat.title_failed'),
     EventSpec(name='chat.title_schedule_failed'),
     EventSpec(
@@ -411,7 +436,22 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='contract.web_quality_soft_accept'),
     EventSpec(name='contract.write_pass'),
     EventSpec(name='contract.write_pass_exhausted'),
+    EventSpec(
+        name='conversation.created',
+        description=(
+            'POST /v1/conversations 受理一次新建；client_request_id 为空表示该客户端没传幂等键，ide'
+            'mpotent_hit=true 表示这次重复请求原样返回了首次那条（没新建、没跑回合）'
+        ),
+        fields={
+            'client_request_id': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'folder_id': FieldType('str'),
+            'idempotent_hit': FieldType('bool'),
+            'user_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='conversation.permission_axes_changed'),
+    EventSpec(name='conversation.restored'),
     EventSpec(name='conversation_log.read'),
     EventSpec(name='conversation_log.read_failed'),
     EventSpec(name='conversation_log.search'),
@@ -627,6 +667,7 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='db.pool_tracker_no_timeout_hook'),
+    EventSpec(name='db.schema_orm_ahead'),
     EventSpec(name='debate.artifacts_cleanup_failed'),
     EventSpec(name='debate.artifacts_persist_failed'),
     EventSpec(name='debate.artifacts_persisted'),
@@ -836,8 +877,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.thrash_note_failed'),
     EventSpec(name='delegate.thrash_rebrand_rejected'),
     EventSpec(name='delegate.turn_auth_dead_rejected'),
+    EventSpec(name='delegate.turn_auth_dead_skip'),
     EventSpec(name='delegate.turn_target_desk_inherited'),
     EventSpec(name='delegate.turn_token_ceiling_rejected'),
+    EventSpec(name='delegate.turn_token_ceiling_skip'),
     EventSpec(
         name='delegate.yielded',
         description='委派中途让出（replan 边界）',
@@ -887,6 +930,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='demo_tape.turn_index_out_of_range'),
     EventSpec(name='demo_tape.unbound_after_last_turn'),
     EventSpec(name='demo_tape.unhandled_pause_type'),
+    EventSpec(name='deploy.multi_worker_refused'),
     EventSpec(name='desktop.external_mount_request'),
     EventSpec(name='desktop.external_mount_timeout'),
     EventSpec(name='desktop.host_op_request'),
@@ -983,6 +1027,22 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.llm_failed_terminal'),
     EventSpec(name='engine.loop_finalize', description='收敛治理：强制收尾'),
     EventSpec(name='engine.loop_nudge', description='收敛治理：循环提醒'),
+    EventSpec(
+        name='engine.retrieval_budget_awareness',
+        description=(
+            '检索余额注入（分项用量变化记一行；final=true 是每个 worker run 的最终 searches/reads）'
+        ),
+        fields={
+            'critical': FieldType('bool'),
+            'final': FieldType('bool'),
+            'limit': FieldType('int'),
+            'reads': FieldType('int'),
+            'remaining': FieldType('int'),
+            'round': FieldType('int'),
+            'searches': FieldType('int'),
+            'used': FieldType('int'),
+        },
+    ),
     EventSpec(name='engine.retrieval_budget_critical'),
     EventSpec(name='engine.retrieval_budget_wind_down'),
     EventSpec(name='engine.team_gate_nudge'),
@@ -1081,10 +1141,22 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='friend.request_rejected'),
     EventSpec(name='fulfill.delivered'),
     EventSpec(
+        name='fulfill.grace_expired',
+        description='重连宽限到点设备仍没回来：按当下真实状态重派一次，仍落空则结算原有 typed 失败',
+        fields={
+            'channel': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'request_id': FieldType('str'),
+            'user': FieldType('str'),
+        },
+    ),
+    EventSpec(name='fulfill.grant_roots_seeded'),
+    EventSpec(
         name='fulfill.no_fulfiller',
         description=(
             '回合中途派单落空（reason=desktop_offline 桌面未连接 / root_not_held 桌面在线未声明该 r'
-            'oot；第三态来源设备离线另见 fulfill.origin_offline）'
+            'oot；第三态来源设备离线另见 fulfill.origin_offline）；紧跟 fulfill.reconnect_grace 者'
+            '未结算'
         ),
         fields={
             'channel': FieldType('str'),
@@ -1097,9 +1169,28 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(name='fulfill.origin_offline'),
+    EventSpec(name='fulfill.paused_card_settled_pushed'),
     EventSpec(name='fulfill.queue_full_close'),
+    EventSpec(name='fulfill.queue_snapshot_pushed'),
+    EventSpec(name='fulfill.receipt_device_offline'),
+    EventSpec(
+        name='fulfill.reconnect_grace',
+        description=(
+            '派单落空但该设备刚刚还在线（SSE 重连盲窗）：op 挂住不结算，等重连 rehang 重推；grace_s'
+            'econds 为本次上限（已卡在该 op 自身 deadline 之内）'
+        ),
+        fields={
+            'channel': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'grace_seconds': FieldType('float'),
+            'origin_device': FieldType('str'),
+            'request_id': FieldType('str'),
+            'root_id': FieldType('str'),
+            'user': FieldType('str'),
+        },
+    ),
     EventSpec(name='fulfill.register'),
-    EventSpec(name='fulfill.roots_updated'),
+    EventSpec(name='fulfill.root_declared'),
     EventSpec(name='fulfill.unregister'),
     EventSpec(name='git.binary_ok'),
     EventSpec(name='git.binary_unavailable'),
@@ -1188,7 +1279,26 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm.empty_response'),
     EventSpec(name='llm.inference_envelope_relay'),
     EventSpec(name='llm.inference_unary_bypass'),
-    EventSpec(name='llm.rate_limit_no_retry'),
+    EventSpec(
+        name='llm.rate_limit_no_retry',
+        description=(
+            '429 冷却超出本次调用能等的上限，放弃重试。cooldown_sec / cooldown_source = 判定所依据'
+            '的冷却及其来源：upstream_header（上游声明，reason=retry_after_too_large）/ local_backo'
+            'ff（上游没带头，这个数是我们自己的退避链，reason=backoff_exceeds_budget）；retry_after'
+            '_sec 只记上游声明值，无头时为 null；ceiling_sec = 该上限（后台一次性调用按剩余预算算，'
+            '交互回合为 30s）'
+        ),
+        fields={
+            'attempt': FieldType('int'),
+            'ceiling_sec': FieldType('float'),
+            'cooldown_sec': FieldType('float'),
+            'cooldown_source': FieldType('str'),
+            'provider': FieldType('str'),
+            'reason': FieldType('str'),
+            'retry_after_sec': FieldType('float'),
+            'scenario': FieldType('str'),
+        },
+    ),
     EventSpec(
         name='llm.request',
         description='LLM prompt 截断脱敏（需 LOG_LLM_BODIES）',
@@ -1205,6 +1315,7 @@ EVENTS: list[EventSpec] = [
             'scenario': FieldType('str'),
         },
     ),
+    EventSpec(name='llm.retry_patience_ignored'),
     EventSpec(name='llm.router.close_failed'),
     EventSpec(name='llm.stream_aborted'),
     EventSpec(name='llm.stream_partial_disconnect'),
@@ -1260,7 +1371,19 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='memory.consolidated'),
     EventSpec(name='memory.consolidation_backoff'),
     EventSpec(name='memory.consolidation_deferred_open_turn'),
-    EventSpec(name='memory.consolidation_failed'),
+    EventSpec(
+        name='memory.consolidation_failed',
+        description=(
+            'consolidation 失败但保留水位（下轮重选）；error_type = 异常类名，与 reason 对照可定位'
+            '是哪一层把上游异常包装丢了分类'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'error': FieldType('str'),
+            'error_type': FieldType('str'),
+            'reason': FieldType('str'),
+        },
+    ),
     EventSpec(name='memory.consolidation_run_failed'),
     EventSpec(name='memory.consolidation_skipped_abnormal_turn'),
     EventSpec(name='memory.consolidation_skipped_no_credentials'),
@@ -1397,6 +1520,12 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='presence.audience_failed'),
     EventSpec(name='presence.broadcast'),
     EventSpec(name='presence.broadcast_failed'),
+    EventSpec(name='promote_product.done'),
+    EventSpec(name='promote_product.journal_lookup_failed'),
+    EventSpec(name='promote_product.move_failed'),
+    EventSpec(name='promote_product.no_delivery_payload'),
+    EventSpec(name='promote_product.reconciliation_from_journal'),
+    EventSpec(name='promote_product.republish_failed'),
     EventSpec(
         name='push.fcm_configured',
         description='FCM sender 装配成功；project_id 须与真机注册的 Firebase 项目一致',
@@ -1506,6 +1635,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='replan.applied'),
     EventSpec(name='replan.rejected'),
     EventSpec(name='research.ledger_anchor_inject_failed'),
+    EventSpec(name='resume.already_settled'),
+    EventSpec(name='resume.claim_unresolved'),
     EventSpec(name='resume.deferred'),
     EventSpec(name='resume.deferred_failed'),
     EventSpec(name='resume.deferred_joined'),
@@ -1553,7 +1684,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='run.user_stop_cancelled'),
     EventSpec(name='run_outcome.accepted'),
     EventSpec(name='run_redirect.queued'),
+    EventSpec(name='run_redirect.unreachable'),
     EventSpec(name='run_stop.queued'),
+    EventSpec(name='run_stop.unreachable'),
     EventSpec(name='sandbox.artifact_payload_invalid'),
     EventSpec(name='sandbox.cloud_health_failed'),
     EventSpec(name='sandbox.cloud_health_ok'),
@@ -1581,11 +1714,39 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='searxng.unreachable'),
     EventSpec(name='security.cookie_insecure'),
     EventSpec(name='security.cors_wildcard_credentials'),
-    EventSpec(name='security.csrf_rejected'),
+    EventSpec(name='security.csrf_disabled'),
+    EventSpec(
+        name='security.csrf_rejected',
+        description=(
+            'Cookie 会话变更请求被 CSRF 拒（403）；reason=missing/malformed/expired/signature_misma'
+            'tch，带 user_id 可归因到会话'
+        ),
+        fields={
+            'client_platform': FieldType('str'),
+            'client_version': FieldType('str'),
+            'method': FieldType('str'),
+            'path': FieldType('str'),
+            'reason': FieldType('str'),
+            'user_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='security.insecure_jwt_secret'),
     EventSpec(name='security.rate_limit_redis_fallback'),
     EventSpec(name='server.shutdown'),
-    EventSpec(name='server.started'),
+    EventSpec(
+        name='server.started',
+        description=(
+            '服务端启动完成；version（包元数据 semver）+ git_sha（构建期注入）标明该进程构建来源，'
+            '与 GET /version 同源'
+        ),
+        fields={
+            'git_sha': FieldType('str'),
+            'host': FieldType('str'),
+            'port': FieldType('int'),
+            'turn_lease_enabled': FieldType('bool'),
+            'version': FieldType('str'),
+        },
+    ),
     EventSpec(name='session.load_failed'),
     EventSpec(name='session.persist_failed'),
     EventSpec(name='session.retention_swept'),
@@ -1600,6 +1761,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='shared_space.cleanup_account'),
     EventSpec(name='shared_space.deleted'),
     EventSpec(name='shared_space.pending_cleared_on_block'),
+    EventSpec(name='sidecar.create_workspace_version_failed'),
     EventSpec(name='sidecar.dispatch_failed'),
     EventSpec(name='sidecar.exiting'),
     EventSpec(name='sidecar.fulfill_bound'),
@@ -1632,6 +1794,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='sidecar.paused_stale_claims_recovered'),
     EventSpec(name='sidecar.ready'),
     EventSpec(name='sidecar.restore_turn_baseline_failed'),
+    EventSpec(name='sidecar.restore_workspace_version_failed'),
     EventSpec(name='sidecar.resume_failed'),
     EventSpec(name='sidecar.resume_settlement_prewrite_failed'),
     EventSpec(name='sidecar.run_session_load_failed'),
@@ -1806,6 +1969,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='turn.interrupt_close_failed'),
     EventSpec(name='turn.interrupt_closed'),
     EventSpec(name='turn.local_baseline_failed'),
+    EventSpec(name='turn.local_baseline_prune_failed'),
+    EventSpec(name='turn.local_baseline_pruned'),
     EventSpec(name='turn.local_baseline_skipped'),
     EventSpec(name='turn.local_baseline_snapshot'),
     EventSpec(name='turn.prior_running_list_failed'),

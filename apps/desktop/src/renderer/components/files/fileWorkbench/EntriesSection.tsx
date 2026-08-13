@@ -42,7 +42,8 @@ import {
   Trash2,
   Undo2,
 } from "lucide-react";
-import { type ReactNode, forwardRef } from "react";
+import { type ReactNode, forwardRef, useState } from "react";
+import { DisputeEntryDialog } from "./DisputeEntryDialog";
 
 /** Which layer a section renders: GLOBAL entries, or one project's. */
 export type EntryScope =
@@ -276,6 +277,8 @@ export function EntriesSection({
 }) {
   const queryClient = useQueryClient();
   const folderId = scope.kind === "folder" ? scope.folderId : null;
+  const [disputing, setDisputing] = useState<DocumentNode | null>(null);
+  const [disputeBusy, setDisputeBusy] = useState(false);
 
   const entries = useQuery({
     queryKey: [...ENTRIES_QUERY_KEY, folderId ?? "global"],
@@ -361,8 +364,24 @@ export function EntriesSection({
     try {
       await setDocumentDisputed(doc.id, disputed);
       await refresh();
+      return true;
     } catch (e) {
       notifyError(e, disputed ? "标记失败" : "撤销标记失败");
+      return false;
+    }
+  };
+
+  // Marking goes through {@link DisputeEntryDialog} first: the mark is entry-level while
+  // the user usually means one sentence, so the other lines it silences get named before
+  // the click lands. Undo needs no such warning — it only gives usage back.
+  const confirmDispute = async () => {
+    const doc = disputing;
+    if (!doc || disputeBusy) return;
+    setDisputeBusy(true);
+    try {
+      if (await setDisputed(doc, true)) setDisputing(null);
+    } finally {
+      setDisputeBusy(false);
     }
   };
 
@@ -425,11 +444,11 @@ export function EntriesSection({
             </ContextMenuItem>
           ) : (
             <ContextMenuItem
-              title="AI 不再使用这条，内容保留，可随时恢复"
-              onSelect={() => void setDisputed(doc, true)}
+              title="停用整个条目：AI 不再使用，内容保留，可随时恢复"
+              onSelect={() => setDisputing(doc)}
             >
               <ThumbsDown size={14} className="shrink-0" />
-              <span className="flex-1 truncate">这条不对</span>
+              <span className="flex-1 truncate">这条不对…</span>
             </ContextMenuItem>
           )}
           <ContextMenuItem
@@ -562,6 +581,15 @@ export function EntriesSection({
             : renderPlaceholderRow(row.leaf),
         )
       )}
+
+      <DisputeEntryDialog
+        doc={disputing}
+        busy={disputeBusy}
+        onOpenChange={(open) => {
+          if (!open) setDisputing(null);
+        }}
+        onConfirm={() => void confirmDispute()}
+      />
     </div>
   );
 }

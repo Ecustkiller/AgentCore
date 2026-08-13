@@ -13,7 +13,9 @@ export { LIST_FILES_SKIP_DIRS } from "./workspaceIgnore";
 // 整文读取上限：云 ServerWorkspace 与桌面 Local 对齐 ``WORKSPACE_READ_MAX``（5 MiB）；
 // 超限早失败为容量合同（工具层 ``contract_failure``），与活性墙钟超时分离。
 export const WORKSPACE_READ_MAX = 5 * 1024 * 1024; // 5 MiB
-export const WORKSPACE_LIST_MAX = 100; // 与 ServerWorkspace.list 的 _MAX_LIST_ENTRIES 对齐
+// AI 面单次列举默认上限，与 ServerWorkspace.list 的 _MAX_LIST_ENTRIES 对齐。
+// 命中即在 op 结果里回 `truncated: true`——上限可以有，静默不行。
+export const WORKSPACE_LIST_MAX = 100;
 export const GREP_MAX_LINE = 300; // 截断超长命中行（如压缩产物），与服务端对齐
 export const GREP_MAX_FILES = 5000; // 单次 grep 最多打开文件数
 export const GREP_MAX_RESULTS_CAP = 200; // 结果硬上限
@@ -23,6 +25,14 @@ export const GREP_MAX_FILE_BYTES = 2 * 1024 * 1024;
 // 本地→云交接打包（双模式工作区 P2e / e1）上限：防超大仓把整树读入内存/撑爆通道回填。
 export const ARCHIVE_MAX_FILES = 20000; // 最多打包文件数
 export const ARCHIVE_MAX_BYTES = 100 * 1024 * 1024; // 原始字节上限（zip 前）100 MiB
+
+// 回合基线 zip（`AgentCore/baselines/<message_id>.zip`）保留策略：一回合一份整树 zip，
+// 不清理就在用户磁盘上永久堆积。数量上限 ∧ TTL，捕获落盘后顺带清理（对齐云端 D+C）。
+// 主进程读不到服务端配置，只能逐值镜像 `settings.workspace_local_baseline_{max,
+// retention_days}`（`apps/server/agentcore/config/workspace.py`）。用户命名版本区
+// `AgentCore/versions` 永不自动清理，不在此策略内。
+export const BASELINE_KEEP_MAX = 20;
+export const BASELINE_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 天
 
 // 本地代码执行（P2c）：镜像服务端 SubprocessSandbox。命令/扩展名一一对齐；
 // 进程 cwd = 绑定的本地根（让代码与文件工具同目录，呼应服务端 cwd=workspace）。

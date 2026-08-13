@@ -1,6 +1,8 @@
 import {
+  mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rm,
   stat,
@@ -16,7 +18,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // fs-service imports electron at module load (for IPC wiring it doesn't run
 // here). Stub it so the dependency-free executeWorkspaceOp can be imported.
 vi.mock("electron", () => ({
-  app: { getPath: () => tmpdir() },
+  // getVersion / isPackaged: the baseline prune path logs via log-service.
+  app: {
+    getPath: () => tmpdir(),
+    getVersion: () => "0.0.0-test",
+    isPackaged: true,
+  },
   dialog: {},
   ipcMain: { handle: vi.fn() },
   BrowserWindow: { getFocusedWindow: () => null, getAllWindows: () => [] },
@@ -29,6 +36,7 @@ vi.mock("electron", () => ({
 
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
 import { type StoredRoot, executeWorkspaceOp } from "../fs-service";
+import { BASELINE_KEEP_MAX } from "../fs/constants";
 
 // Discriminated-union accessors that fail loudly on the wrong branch.
 const valOf = (r: WorkspaceOpResult): unknown => {
@@ -303,14 +311,19 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
     await run("write", { path: "hello.txt", content: "hi" });
     await run("mkdir", { path: "subdir" });
     expect(valOf(await run("read", { path: "hello.txt" }))).toBe("hi");
-    const entries = valOf(
+    const listing = valOf(
       await run("list", { directory: ".", pattern: "*" }),
     ) as {
-      path: string;
-      is_dir: boolean;
-      size_bytes: number | null;
-      mtime_ms: number | null;
-    }[];
+      entries: {
+        path: string;
+        is_dir: boolean;
+        size_bytes: number | null;
+        mtime_ms: number | null;
+      }[];
+      truncated: boolean;
+    };
+    expect(listing.truncated).toBe(false);
+    const entries = listing.entries;
     const hello = entries.find((e) => e.path === "hello.txt");
     expect(hello).toMatchObject({
       is_dir: false,
@@ -335,7 +348,7 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
       directory: "not-yet-mkdir",
       pattern: "*",
     });
-    expect(valOf(listRes)).toEqual([]);
+    expect(valOf(listRes)).toEqual({ entries: [], truncated: false });
 
     const treeRes = valOf(
       await run("list_tree", {
@@ -658,6 +671,80 @@ describe("executeWorkspaceOp (本地工作区写类 op，P2b)", () => {
         message_id: "../evil",
       });
       expect(r.ok).toBe(false);
+    });
+  });
+
+  describe("ensure_turn_baseline 保留策略", () => {
+    const baselineDir = () => join(dir, "AgentCore", "baselines");
+
+    // 落一份占位基线并把 mtime 拨到指定分钟前（负数 = 未来），清理按 mtime 排序。
+    const seedBaseline = async (name: string, ageMinutes: number) => {
+      await mkdir(baselineDir(), { recursive: true });
+      const path = join(baselineDir(), name);
+      await writeFile(path, "stub");
+      const when = new Date(Date.now() - ageMinutes * 60_000);
+      await utimes(path, when, when);
+    };
+    const baselineNames = async () => (await readdir(baselineDir())).sort();
+
+    it("清掉超出数量上限的旧基线", async () => {
+      await run("write", { path: "a.txt", content: "x" });
+      const seeded = BASELINE_KEEP_MAX + 5;
+      const oldName = (i: number) => `old-${String(i).padStart(2, "0")}.zip`;
+      for (let i = 0; i < seeded; i++) {
+        await seedBaseline(oldName(i), (seeded - i) * 5);
+      }
+      valOf(await run("ensure_turn_baseline", { message_id: "msg-new" }));
+
+      const names = await baselineNames();
+      expect(names).toHaveLength(BASELINE_KEEP_MAX);
+      expect(names).toContain("msg-new.zip");
+      expect(names).toContain(oldName(seeded - 1)); // 最年轻的老基线
+      expect(names).not.toContain(oldName(0)); // 最老的
+    });
+
+    it("清掉超龄基线（未超数量上限也删）", async () => {
+      await run("write", { path: "a.txt", content: "x" });
+      await seedBaseline("stale.zip", 31 * 24 * 60);
+      await seedBaseline("fresh.zip", 29 * 24 * 60);
+      valOf(await run("ensure_turn_baseline", { message_id: "msg-new" }));
+
+      expect(await baselineNames()).toEqual(["fresh.zip", "msg-new.zip"]);
+    });
+
+    it("本回合基线不会被未来时间戳的旧 zip 挤掉", async () => {
+      // 还原过的备份 / 时钟偏移会留下超前 mtime，排序上压在新基线之上。
+      await run("write", { path: "a.txt", content: "x" });
+      for (let i = 0; i < BASELINE_KEEP_MAX; i++) {
+        await seedBaseline(
+          `future-${String(i).padStart(2, "0")}.zip`,
+          -24 * 60,
+        );
+      }
+      valOf(await run("ensure_turn_baseline", { message_id: "msg-new" }));
+
+      expect(await baselineNames()).toContain("msg-new.zip");
+    });
+
+    it("绝不碰用户命名版本区", async () => {
+      await run("write", { path: "a.txt", content: "x" });
+      const versionDir = join(
+        dir,
+        "AgentCore",
+        "versions",
+        "20250101T000000Z-abcd1234",
+      );
+      await mkdir(versionDir, { recursive: true });
+      await writeFile(join(versionDir, "content.zip"), "version");
+      await writeFile(join(versionDir, "meta.json"), "{}");
+      const ancient = new Date(Date.now() - 400 * 24 * 3600 * 1000);
+      await utimes(join(versionDir, "content.zip"), ancient, ancient);
+      await seedBaseline("ancient.zip", 400 * 24 * 60);
+
+      valOf(await run("ensure_turn_baseline", { message_id: "msg-new" }));
+
+      expect(await baselineNames()).toEqual(["msg-new.zip"]);
+      expect(await readdir(versionDir)).toEqual(["content.zip", "meta.json"]);
     });
   });
 });

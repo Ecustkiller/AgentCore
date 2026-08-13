@@ -1496,7 +1496,17 @@ export interface paths {
         /** List Conversations */
         get: operations["list_conversations_v1_conversations_get"];
         put?: never;
-        /** Create Conversation */
+        /**
+         * Create Conversation
+         * @description Create a conversation; optionally idempotent on ``client_request_id``.
+         *
+         *     One send used to be able to create two identical chats (a double-tap, or two
+         *     sockets firing 14ms apart), each of which then ran a full turn and billed for
+         *     it. A client that mints a ``client_request_id`` per send gets exactly one
+         *     conversation back for that key — the repeat returns the first one, same 201,
+         *     same body. Omitting the key keeps the old behaviour verbatim: no heuristic
+         *     (same title / same user / N seconds) ever stands in for an explicit key.
+         */
         post: operations["create_conversation_v1_conversations_post"];
         delete?: never;
         options?: never;
@@ -1527,6 +1537,60 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/conversations/trash": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Conversations
+         * @description 列出可恢复的已删对话（最近删除）。
+         *
+         *     Delete has always been a soft delete — the rows never went anywhere — but nothing
+         *     ever listed them, so「删了就没了」was true in practice. Same retention window and
+         *     same cutoff as the project bin: a chat is offered here only while the sweeper is
+         *     still forbidden to purge it.
+         */
+        get: operations["list_deleted_conversations_v1_conversations_trash_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/trash/{conversation_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Deleted Conversation
+         * @description 恢复一个已删对话：回到删除前的项目分组、置顶 / 归档状态与最近活动位置。
+         *
+         *     Past retention the answer is 409, never a silent success — the transcript may
+         *     already be gone. Losing the race with the purge sweep between the lookup and the
+         *     conditional UPDATE surfaces the same way (「该对话已被清理」); that window is
+         *     reported honestly rather than reconciled.
+         *
+         *     Public share links revoked by the delete stay revoked (see
+         *     :meth:`ConversationRepository.restore`) — the client says so instead of implying a
+         *     live link came back.
+         */
+        post: operations["restore_deleted_conversation_v1_conversations_trash__conversation_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/conversations/{conversation_id}": {
         parameters: {
             query?: never;
@@ -1538,7 +1602,16 @@ export interface paths {
         get: operations["get_conversation_v1_conversations__conversation_id__get"];
         put?: never;
         post?: never;
-        /** Delete Conversation */
+        /**
+         * Delete Conversation
+         * @description 软删对话：保留期内可从「最近删除」恢复（``POST …/trash/{id}/restore``）。
+         *
+         *     What the restore brings back is the conversation row and its transcript, in the
+         *     project / pin / archive state it left in. What it does **not** bring back is
+         *     listed below: the share links this cascade revokes, and the live sandbox / grant
+         *     side-state torn down with it. Those are one-way on purpose, and the client says so
+         *     — the copy on the confirm and in the bin must not out-promise this function.
+         */
         delete: operations["delete_conversation_v1_conversations__conversation_id__delete"];
         options?: never;
         head?: never;
@@ -2297,9 +2370,15 @@ export interface paths {
          *
          *     Settlement 预写 (D8)：① peek frame → ② busy 则 deferred（预写后 ``resume_deferred``，
          *     槽空再 claim）/ idle 则立即 claim → ③ ``*_resolved`` 落库成功 → ④ claim → ⑤ resume
-         *     pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。Claim 竞争失败按现状
-         *     404。settlement 落库后 pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
-         *     同 ``message_id`` 重复提交走幂等 join：跳过第二次预写，两条 SSE 共享同一次续跑。
+         *     pipeline。settlement 写失败 ⇒ 5xx、不 claim、frame 保留可重试。settlement 落库后
+         *     pipeline 取消/失败 ⇒ interrupted_after_decision（D1：不复活决策卡）。
+         *
+         *     同 ``message_id`` 重复提交一律**幂等成功**，不再 404：忙槽窗口内 join 已 park 的
+         *     waiter（跳过第二次预写，两条 SSE 共享同一次续跑）；帧已被那次续跑消费（peek 扑空 /
+         *     claim 竞争落败）则走 :func:`_resume_of_consumed_frame` —— 200 + ``resume_settled``
+         *     事实帧（带的是**赢家**的决策：claim 赢家把结论与删帧写在同一事务里），本机在跑就同
+         *     连接续流。谁也没消费掉这张卡（没有结论行）才是真失效（404，文案区分「超保留期清理」
+         *     与「回合已重新生成」）。
          *
          *     ``body.selected`` carries the user's ask_user picks (ignored for plan_review).
          *     Gated like ``send_message`` (it spends tokens): rate limit → ownership → BYOK/quota
@@ -2471,9 +2550,11 @@ export interface paths {
          * Submit Run Redirect
          * @description Queue a mid-flight redirect for one worker in the current delegate batch.
          *
-         *       The CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the
-         *     user直控 channel (Step 2: WaveScheduler cancels the run and cold re-starts with
-         *       ``steer``). Step 1 only enqueues and logs from the drive loop.
+         *     The CEO is blocked inside ``delegate`` — this endpoint is the user直控 channel
+         *     (WaveScheduler cancels the run, then hot ``continue_run`` or cold ``_redir``接手).
+         *
+         *     The response says whether the engine actually took it (``accepted``): a run the
+         *     live plan can't reach never enters the queue, and never reports success.
          */
         post: operations["submit_run_redirect_v1_conversations__conversation_id__run_redirect_post"];
         delete?: never;
@@ -2495,10 +2576,13 @@ export interface paths {
          * Submit Run Stop
          * @description Queue a mid-flight stop for one or all workers in the current delegate batch.
          *
-         *     The CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the
-         *     user直控 channel (same posture as ``run-redirect``). Unlike redirect, stop never
-         *     triggers hot revision or cold ``_redir``; WaveScheduler cancels / withdraws
-         *     targets so drive converges and the CEO keeps the turn.
+         *     The CEO is blocked inside ``delegate`` — this endpoint is the user直控 channel
+         *     (same posture as ``run-redirect``). Unlike redirect, stop never triggers hot
+         *     revision or cold ``_redir``; WaveScheduler cancels / withdraws targets so drive
+         *     converges and the CEO keeps the turn.
+         *
+         *     Not fire-and-forget: the response says whether the engine actually took it
+         *     (``accepted``) — 够不着的 run 上不入队，也不拿整条执行的排队计数冒充成功。
          */
         post: operations["submit_run_stop_v1_conversations__conversation_id__run_stop_post"];
         delete?: never;
@@ -2670,9 +2754,34 @@ export interface paths {
          *     events, all in the SAME event shape as the original stream, so the client folds it
          *     through one dispatch path.
          *
-         *     With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
-         *     synthetic deltas (header value observational — clients clear-then-fold), then live
-         *     tail. Without the header (same-process fast path): the sink's own in-memory history.
+         *     With ``Last-Event-ID`` (P3): journal-backed durable replay + stream_state synthetic
+         *     deltas, then live tail. Without the header (same-process fast path): the sink's own
+         *     in-memory history.
+         *
+         *     A non-empty catch-up段 opens with a ``message_start``, and that frame states which
+         *     kind of段 follows (nothing to replay = no head at all: a reset order with no body
+         *     behind it would clear local state nothing brings back):
+         *
+         *     - ``full_replay: true`` — RESET the local streaming state held for that
+         *       ``message_id`` (content / reasoning / process timeline); the段 is the turn's whole
+         *       story. Always the case without the header, and the fallback whenever the cursor
+         *       cannot be trusted (no cursor / turn already settled / cursor names no fact this
+         *       turn ever stamped).
+         *     - no ``full_replay`` — an INCREMENTAL段: keep what you hold for this turn and fold
+         *       the段 onto it. Only the facts after ``Last-Event-ID`` are shipped, so structural
+         *       pairs may look「不完整」(a ``tool_use_end`` whose start was pre-cursor) — that is
+         *       correct, the client has the前文.
+         *
+         *     Clients must act on the flag instead of comparing the id against the bubble on
+         *     screen: guessing wrong folds the body twice. A live first frame (and any plain
+         *     same-id re-stamp) omits it and keeps meaning「同回合重开」.
+         *
+         *     **Cursor contract**: ``Last-Event-ID`` is the last SSE ``id:`` this client folded FOR
+         *     THIS TURN. A client that discards its local turn state (clear-then-fold rejoin, fresh
+         *     bubble) must send ``0`` / omit the header, otherwise it asks for an increment it has
+         *     no prefix for. Text deltas carry no ``id:``, so the cursor lags into the middle of a
+         *     text block; the段 therefore marks whole-block frames with ``replace`` (see the
+         *     ``content_delta`` / ``run_output_delta`` payloads).
          *
          *     ``follow=true`` (对话级订阅) makes the subscription track the **conversation**: an
          *     idle conversation holds the connection (heartbeats) instead of 204ing, and每个新回合
@@ -2757,6 +2866,10 @@ export interface paths {
          * @description Bind a 裸聊's scratch workspace to a desktop FS root (switch to local).
          *
          *     Project conversations inherit an immutable project binding — returns 409.
+         *
+         *     Binding also declares the root on the caller's fulfill session: the user can
+         *     send the next message immediately, and the presence gate refuses a local turn
+         *     whose bound root no online device claims (``fulfill/declare.py``).
          */
         put: operations["bind_workspace_v1_conversations__conversation_id__workspace_binding_put"];
         post?: never;
@@ -2896,6 +3009,11 @@ export interface paths {
          *
          *     Called after desktop mint (silent ``external_mount_readonly`` or user-confirmed
          *     organize grant). Body carries ``root_id`` / label / mode only — never absolute paths.
+         *
+         *     The response doubles as the device's declaration for this root: the caller's
+         *     ``X-Client-Device`` is bound onto its live fulfill session *and* stored on the
+         *     grant (``fulfill/declare.py``), so the very first ``external/<alias>/`` op of
+         *     the resuming turn has a machine to route to.
          */
         post: operations["grant_external_folder_v1_conversations__conversation_id__workspace_external_grants_post"];
         /**
@@ -2917,7 +3035,7 @@ export interface paths {
         };
         /**
          * List Workspace Files
-         * @description List the files in the conversation's scratch workspace (top level or recursive).
+         * @description List one directory of the conversation's scratch workspace (or its tree).
          */
         get: operations["list_workspace_files_v1_conversations__conversation_id__workspace_files_get"];
         put?: never;
@@ -3460,6 +3578,10 @@ export interface paths {
          *     Cloud projects become a real directory under ``parent_id``; a name already
          *     taken among live siblings gets a numeric suffix rather than a 409 — the name
          *     is now a path segment, and two of them cannot share one directory.
+         *
+         *     Registering a local binding also declares that root on the caller's fulfill
+         *     session (``fulfill/declare.py``) — including the reuse branch, where the row
+         *     is old but *this* install may be new to the folder.
          */
         post: operations["create_folder_v1_folders_post"];
         delete?: never;
@@ -3636,32 +3758,13 @@ export interface paths {
          * @description Open this device's fulfillment channel (server→client SSE).
          *
          *     Query params: ``device_id`` (required), ``caps`` (comma-separated channel
-         *     names), ``roots`` (comma-separated root ids, may be empty). Platform comes
-         *     from ``X-Client-Platform``.
+         *     names), ``roots`` (the device's permanent authorized roots, may be empty).
+         *     Platform comes from ``X-Client-Platform``. Conversation grants bound to this
+         *     device are added from storage — the client does not re-declare them.
          */
         get: operations["fulfill_stream_v1_fulfill_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/fulfill/roots": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Update Fulfill Roots
-         * @description Update the root set declared by an online fulfiller without reconnecting.
-         */
-        post: operations["update_fulfill_roots_v1_fulfill_roots_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5221,6 +5324,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/users/me/memory/dispute-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dispute My Memory Line
+         * @description Reject one bullet the user was shown — the line moves out of the entry (纠错通道·行级).
+         *
+         *     Declared before ``/files/{kind}`` so the static segment wins the route match. Holds the
+         *     per-user memory lock. Only an explicit user click reaches here; nothing infers a
+         *     rejection from conversation text.
+         */
+        post: operations["dispute_my_memory_line_v1_users_me_memory_dispute_line_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/disputed-lines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List My Disputed Lines
+         * @description Bullets the user rejected, so the editor can show and undo them.
+         *
+         *     Rejected lines are gone from the body — without this surface a mistaken click would be
+         *     unrecoverable, which is exactly the trap the entry-level channel avoided by never
+         *     deleting. ``folder_id`` omitted covers EVERY layer (global + each project with memory)
+         *     rather than the global one alone: a line rejected in a project layer must be findable
+         *     from the one place the editor lists them, or「可撤销」is only true for a few seconds.
+         *     Declared before ``/files/{kind}`` so the static segment wins the route match.
+         */
+        get: operations["list_my_disputed_lines_v1_users_me_memory_disputed_lines_get"];
+        put?: never;
+        post?: never;
+        /**
+         * Clear My Disputed Lines
+         * @description Empty the rejected-line list (「已移走的记忆」的清空入口).
+         *
+         *     The lines stay rejected — bodies are not touched. What goes is the ability to put them
+         *     back, which is why this is an explicit, confirmed action rather than something the cap
+         *     does for the user. Declared before ``/files/{kind}`` so the static segment wins.
+         */
+        delete: operations["clear_my_disputed_lines_v1_users_me_memory_disputed_lines_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/users/me/memory/files/{kind}": {
         parameters: {
             query?: never;
@@ -5290,6 +5452,29 @@ export interface paths {
         get: operations["list_my_memory_projects_v1_users_me_memory_projects_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/me/memory/restore-line": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore My Memory Line
+         * @description Undo one line-level dispute — the bullet goes back into the entry.
+         *
+         *     An ``id`` that is no longer on file is a 422, never a best-effort restore of some other
+         *     record: putting back a line the user did not name would be worse than doing nothing.
+         */
+        post: operations["restore_my_memory_line_v1_users_me_memory_restore_line_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5769,7 +5954,7 @@ export interface paths {
         };
         /**
          * List Workspace Files
-         * @description List files in a cloud workspace (top level or recursive).
+         * @description List one directory of a cloud workspace (or its whole tree).
          */
         get: operations["list_workspace_files_v1_workspaces__ws_id__files_get"];
         put?: never;
@@ -7875,6 +8060,29 @@ export interface components {
          */
         CommandAxis: "ask" | "kickoff" | "auto";
         /**
+         * ContextGapModel
+         * @description 早期对话没能进摘要、也已滑出原文窗口——这一轮 AI 确实读不到它们。
+         *
+         *     The failure half of ``context_compacted``: that flag says folding HAS run, and a
+         *     bool cannot tell a healthy rolling summary apart from folding that kept failing
+         *     until the chat outgrew its window. Present only when the loss is provable from
+         *     stored state (``conversation/context_gap.py``); absent means either intact or
+         *     not computed, and a client must stay quiet on both rather than warn on a guess.
+         *
+         *     Wording obligations for whoever renders this (same honesty bar as the memory
+         *     always-quota card): name what did not happen and what the user can do, never let
+         *     it read as a capability lost for good. Nothing was deleted — the transcript is
+         *     whole on screen, and the backlog folds itself in incrementally once folding can
+         *     run again. ``recovery_at`` is upstream's own date when it gave one; its absence
+         *     means「不知道，会自动重试」and must not be dressed up as a deadline.
+         */
+        ContextGapModel: {
+            /** Dropped Messages */
+            dropped_messages: number;
+            /** Recovery At */
+            recovery_at?: string | null;
+        };
+        /**
          * ConversationCost
          * @description A conversation's cumulative spend (``GET /conversations/{id}/cost``).
          */
@@ -8040,6 +8248,7 @@ export interface components {
              * @default false
              */
             context_compacted: boolean;
+            context_gap?: components["schemas"]["ContextGapModel"] | null;
             /**
              * Created At
              * Format: date-time
@@ -8177,6 +8386,8 @@ export interface components {
         };
         /** CreateConversationRequest */
         CreateConversationRequest: {
+            /** Client Request Id */
+            client_request_id?: string | null;
             /** Folder Id */
             folder_id?: string | null;
             /** Local Container Root Id */
@@ -8442,6 +8653,55 @@ export interface components {
         DeleteAccountRequest: {
             /** Password */
             password: string;
+        };
+        /**
+         * DeletedConversationListResponse
+         * @description Recoverable conversations, most recently deleted first.
+         *
+         *     Hidden infrastructure hosts (handoff / standing) never appear, nor do chats already
+         *     past retention — those are no longer restorable, and listing them would promise a
+         *     recovery the sweeper is entitled to refuse. ``retention_days`` mirrors
+         *     ``workspace_retention_days``, the same window the project bin runs on.
+         */
+        DeletedConversationListResponse: {
+            /** Data */
+            data: components["schemas"]["DeletedConversationSummary"][];
+            /** Retention Days */
+            retention_days: number;
+            /** Total */
+            total: number;
+        };
+        /**
+         * DeletedConversationSummary
+         * @description One recoverable conversation in「最近删除」.
+         */
+        DeletedConversationSummary: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Message Count
+             * @default 0
+             */
+            message_count: number;
+            /**
+             * Purge At
+             * Format: date-time
+             */
+            purge_at: string;
+            /** Title */
+            title: string | null;
         };
         /**
          * DeletedFolderListResponse
@@ -9741,6 +10001,106 @@ export interface components {
             last_read_message_id: string;
         };
         /**
+         * MemoryClearDisputedLinesResult
+         * @description How many entries had their rejected-line records dropped.
+         */
+        MemoryClearDisputedLinesResult: {
+            /** Cleared Entries */
+            cleared_entries: number;
+        };
+        /**
+         * MemoryDisputeLineRequest
+         * @description Reject ONE bullet (「这条不对」at sentence granularity, 纠错通道·行级).
+         *
+         *     The line leaves the body and is kept in the entry's disputed record, so the rest of the
+         *     entry keeps working — unlike the entry-level ``disputed`` flag on the documents API,
+         *     which silences everything in the file. ``folder_id`` omitted = the global layer.
+         */
+        MemoryDisputeLineRequest: {
+            /** Baseline */
+            baseline?: string | null;
+            /**
+             * Content
+             * @description Bullet text to reject
+             */
+            content: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /**
+             * Kind
+             * @default profile
+             * @enum {string}
+             */
+            kind: "preferences" | "profile" | "topic";
+            /**
+             * Section
+             * @description ## section name the bullet sits under
+             * @default
+             */
+            section: string;
+            /** Topic Slug */
+            topic_slug?: string | null;
+        };
+        /** MemoryDisputeLineResult */
+        MemoryDisputeLineResult: {
+            /**
+             * Conflict
+             * @default false
+             */
+            conflict: boolean;
+            /**
+             * Line Id
+             * @default
+             */
+            line_id: string;
+            /** Ok */
+            ok: boolean;
+            /**
+             * Version
+             * @default
+             */
+            version: string;
+        };
+        /**
+         * MemoryDisputedLineView
+         * @description One rejected bullet, addressable for undo by ``(kind, topic_slug, id)``.
+         */
+        MemoryDisputedLineView: {
+            /**
+             * Disputed At
+             * @default
+             */
+            disputed_at: string;
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "preferences" | "profile" | "topic";
+            /**
+             * Section
+             * @default
+             */
+            section: string;
+            /** Text */
+            text: string;
+            /** Topic Slug */
+            topic_slug?: string | null;
+        };
+        /** MemoryDisputedLinesResponse */
+        MemoryDisputedLinesResponse: {
+            /** Lines */
+            lines: components["schemas"]["MemoryDisputedLineView"][];
+            /**
+             * Max Per Entry
+             * @default 50
+             */
+            max_per_entry: number;
+        };
+        /**
          * MemoryFileResponse
          * @description One memory leaf's body + its CAS tag (a single editor leaf's load payload).
          */
@@ -9844,6 +10204,27 @@ export interface components {
             enabled: boolean;
             /** Version */
             version: string;
+        };
+        /**
+         * MemoryRestoreLineRequest
+         * @description Undo one line-level dispute by the record's stable ``id``.
+         *
+         *     Never by position: rejecting several lines and undoing an earlier one shifts the rest,
+         *     so an index would put back a different line than the one the user pointed at.
+         */
+        MemoryRestoreLineRequest: {
+            /** Folder Id */
+            folder_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Kind
+             * @default profile
+             * @enum {string}
+             */
+            kind: "preferences" | "profile" | "topic";
+            /** Topic Slug */
+            topic_slug?: string | null;
         };
         /**
          * MemoryTopicsResponse
@@ -12146,6 +12527,18 @@ export interface components {
         /** SubmitRunRedirectResponse */
         SubmitRunRedirectResponse: {
             /**
+             * Accepted
+             * @description Engine took this steer into a live drive loop. False = nothing was queued; the client must not claim the worker is being redirected.
+             * @default true
+             */
+            accepted: boolean;
+            /**
+             * Detail
+             * @description One user-facing sentence; all clients render this verbatim.
+             * @default
+             */
+            detail: string;
+            /**
              * Ok
              * @default true
              */
@@ -12155,6 +12548,13 @@ export interface components {
              * @description Pending redirect count for this execution after enqueue.
              */
             queued: number;
+            /**
+             * Reason
+             * @description queued | no_live_drive (batch left the engine) | unknown_run (not in the live plan).
+             * @default queued
+             * @enum {string}
+             */
+            reason: "queued" | "no_live_drive" | "unknown_run";
         };
         /**
          * SubmitRunStopRequest
@@ -12177,6 +12577,18 @@ export interface components {
         /** SubmitRunStopResponse */
         SubmitRunStopResponse: {
             /**
+             * Accepted
+             * @description Engine took this stop into a live drive loop. False = nothing was queued; the client must not claim the worker is being stopped.
+             * @default true
+             */
+            accepted: boolean;
+            /**
+             * Detail
+             * @description One user-facing sentence; all clients render this verbatim.
+             * @default
+             */
+            detail: string;
+            /**
              * Ok
              * @default true
              */
@@ -12186,6 +12598,13 @@ export interface components {
              * @description Pending stop count for this execution after enqueue.
              */
             queued: number;
+            /**
+             * Reason
+             * @description queued | no_live_drive (batch left the engine) | unknown_run (not in the live plan).
+             * @default queued
+             * @enum {string}
+             */
+            reason: "queued" | "no_live_drive" | "unknown_run";
         };
         /** SubmitShowQuizRequest */
         SubmitShowQuizRequest: {
@@ -12399,6 +12818,11 @@ export interface components {
              */
             boundary_yields: number;
             /**
+             * Boundary Yields By User
+             * @default 0
+             */
+            boundary_yields_by_user: number;
+            /**
              * Escalations
              * @default 0
              */
@@ -12408,6 +12832,11 @@ export interface components {
              * @default 0
              */
             revises: number;
+            /**
+             * Revises By User
+             * @default 0
+             */
+            revises_by_user: number;
             /**
              * Scope Signals
              * @default 0
@@ -12659,16 +13088,6 @@ export interface components {
             name?: string | null;
             /** Parent Id */
             parent_id?: string | null;
-        };
-        /**
-         * UpdateFulfillRootsRequest
-         * @description ``POST /v1/fulfill/roots`` — refresh roots without reconnecting the SSE.
-         */
-        UpdateFulfillRootsRequest: {
-            /** Device Id */
-            device_id: string;
-            /** Roots */
-            roots?: string[];
         };
         /**
          * UpdateLlmModelProfileRequest
@@ -13173,12 +13592,24 @@ export interface components {
             /** Truncated */
             truncated: boolean;
         };
-        /** WorkspaceFileListResponse */
+        /**
+         * WorkspaceFileListResponse
+         * @description One directory of a workspace (or its whole tree when ``recursive``).
+         *
+         *     ``truncated`` is True when the listing hit the server's entry ceiling and
+         *     entries were left out — clients must show that rather than render the short
+         *     list as the complete contents. Defaults False so older clients keep working.
+         */
         WorkspaceFileListResponse: {
             /** Data */
             data: components["schemas"]["WorkspaceFileEntry"][];
             /** Total */
             total: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
         };
         /** WorkspaceListResponse */
         WorkspaceListResponse: {
@@ -16152,6 +16583,74 @@ export interface operations {
             };
         };
     };
+    list_deleted_conversations_v1_conversations_trash_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedConversationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_deleted_conversation_v1_conversations_trash__conversation_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_conversation_v1_conversations__conversation_id__get: {
         parameters: {
             query?: never;
@@ -18643,6 +19142,8 @@ export interface operations {
         parameters: {
             query?: {
                 recursive?: boolean;
+                /** @description 工作区相对目录（`.` = 根） */
+                path?: string;
             };
             header?: {
                 authorization?: string | null;
@@ -20247,43 +20748,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_fulfill_roots_v1_fulfill_roots_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path?: never;
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateFulfillRootsRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatusResponse"];
                 };
             };
             /** @description Validation Error */
@@ -23775,6 +24239,111 @@ export interface operations {
             };
         };
     };
+    dispute_my_memory_line_v1_users_me_memory_dispute_line_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryDisputeLineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDisputeLineResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_my_disputed_lines_v1_users_me_memory_disputed_lines_get: {
+        parameters: {
+            query?: {
+                folder_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDisputedLinesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_my_disputed_lines_v1_users_me_memory_disputed_lines_delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryClearDisputedLinesResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_my_memory_file_v1_users_me_memory_files__kind__get: {
         parameters: {
             query?: {
@@ -23910,6 +24479,43 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MemoryProjectsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_my_memory_line_v1_users_me_memory_restore_line_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MemoryRestoreLineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryDisputeLineResult"];
                 };
             };
             /** @description Validation Error */
@@ -24875,6 +25481,8 @@ export interface operations {
         parameters: {
             query?: {
                 recursive?: boolean;
+                /** @description 工作区相对目录（`.` = 根） */
+                path?: string;
             };
             header?: {
                 authorization?: string | null;

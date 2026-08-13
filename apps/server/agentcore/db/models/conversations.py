@@ -25,6 +25,20 @@ from ._helpers import _new_uuid
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        # 一次发送只落一条会话。客户端并发多发 / 用户重按「新建」会把同一个意图发成
+        # 两个 POST（线上实测最短间隔 14ms），两条各跑一整轮、双倍计费。客户端自铸
+        # 的 ``client_request_id`` 是唯一去重依据（与 IM 的 ``client_msg_id`` 同款），
+        # 唯一索引本身是并发下的最终裁判：先查后插会在两个连接间漏过。
+        # 局部索引跳过不带键的行——老客户端不传键，必须照常一次一条地新建。
+        Index(
+            "uq_conversations_user_client_request",
+            "user_id",
+            "client_request_id",
+            unique=True,
+            postgresql_where=text("client_request_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
     user_id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), index=True)
@@ -138,6 +152,10 @@ class Conversation(Base):
         DateTime(timezone=True), nullable=True
     )
     compaction_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Client-minted idempotency key for「新建会话」(see the partial unique index above).
+    # NULL = the caller did not send one (every client before this column shipped),
+    # and those rows are exempt from the constraint rather than deduped by a guess.
+    client_request_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
@@ -469,6 +487,12 @@ class ConversationExternalGrant(Base):
     alias: Mapped[str] = mapped_column(String(64), nullable=False)
     # Desktop authorized-root handle (never an absolute path).
     root_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Which install holds the folder — captured from the registering request's
+    # ``X-Client-Device``. Routing a mount op is「哪台机器上有这个目录」, and only
+    # this row knows: the device's fulfill session is rebuilt on every reconnect,
+    # so the binding is re-seeded from here (``GET /v1/fulfill``). NULL = the
+    # registration carried no device (pre-binding rows, non-desktop callers).
+    device_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     label: Mapped[str] = mapped_column(String(500), nullable=False, server_default=text("''"))
     # "readonly" | "organize"
     mode: Mapped[str] = mapped_column(

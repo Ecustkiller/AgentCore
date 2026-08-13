@@ -18,7 +18,7 @@ from agentcore.api.schemas import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.db.repositories import AgentAuditEventRepository, ConversationRepository
-from agentcore.runtime.runs.redirect_queue import enqueue_redirect, peek_redirect_count
+from agentcore.runtime.runs.intervene import accept_run_redirect
 
 from ._helpers import _require_owned_conversation
 
@@ -36,26 +36,41 @@ async def submit_run_redirect(
 ):
     """Queue a mid-flight redirect for one worker in the current delegate batch.
 
-    The CEO is blocked inside ``delegate`` — this fire-and-forget endpoint is the
-  user直控 channel (Step 2: WaveScheduler cancels the run and cold re-starts with
-    ``steer``). Step 1 only enqueues and logs from the drive loop.
+    The CEO is blocked inside ``delegate`` — this endpoint is the user直控 channel
+    (WaveScheduler cancels the run, then hot ``continue_run`` or cold ``_redir``接手).
+
+    The response says whether the engine actually took it (``accepted``): a run the
+    live plan can't reach never enters the queue, and never reports success.
     """
     await _require_owned_conversation(conversation_id, user.user_id, conv_repo)
-    enqueue_redirect(
+    ack = accept_run_redirect(
         execution_id=body.execution_id,
         run_id=body.run_id,
         feedback=body.feedback,
         conversation_id=conversation_id,
     )
-    queued = peek_redirect_count(body.execution_id)
-    logger.info(
-        "run_redirect.queued",
-        conversation_id=conversation_id,
-        execution_id=body.execution_id,
-        run_id=body.run_id,
-        queued=queued,
+    if ack.accepted:
+        logger.info(
+            "run_redirect.queued",
+            conversation_id=conversation_id,
+            execution_id=body.execution_id,
+            run_id=body.run_id,
+            queued=ack.queued,
+        )
+    else:
+        logger.info(
+            "run_redirect.unreachable",
+            conversation_id=conversation_id,
+            execution_id=body.execution_id,
+            run_id=body.run_id,
+            reason=ack.reason,
+        )
+    return SubmitRunRedirectResponse(
+        queued=ack.queued,
+        accepted=ack.accepted,
+        reason=ack.reason,
+        detail=ack.detail,
     )
-    return SubmitRunRedirectResponse(queued=queued)
 
 
 @router.post(

@@ -10,6 +10,7 @@ import {
   looksLikeAccountTokenFailure,
   resolveSidecarAccountAuth,
 } from "@/services/accountToken";
+import { ApiError } from "@/services/api";
 import {
   clearSidecarFoldersAuth,
   looksLikeFoldersTokenFailure,
@@ -583,6 +584,11 @@ async function runSidecarTurn({
   } catch (err) {
     // 无票 / remint 失败：已带产品码，勿再包成通用 sidecar 文案或标 recoverable 改道云端。
     if (err instanceof StreamError && err.code === "INFERENCE_TOKEN_EXPIRED") {
+      throw err;
+    }
+    // 换票时被 CSRF 中间件拒（后端不补票的那种，见 inferenceToken）：本地引擎没病，别记坏
+    // 这个根、也别把安全拒绝套成「本地引擎出错：API 403 …」。原样上抛走统一错误映射。
+    if (err instanceof ApiError && err.code === "CSRF_FAILED") {
       throw err;
     }
     // 用户停止：与云链路一致地抛 AbortError（调用方据此不出错误横幅）。

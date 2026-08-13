@@ -197,7 +197,9 @@ describe("StatusStrip · FailureStrip error detail", () => {
     // hand something in — that reason is ours to act on, not theirs.
     expect(container.textContent).not.toContain("结构闸");
     expect(container.textContent).not.toContain(".audit.json");
-    expect(screen.getByText(failureDetailSentence("format", null))).toBeTruthy();
+    expect(
+      screen.getByText(failureDetailSentence("format", null)),
+    ).toBeTruthy();
   });
 
   it("files already saved before the failure keep that fact", () => {

@@ -53,6 +53,14 @@ from .path_hints import enrich_missing_path_message
 
 _DEFAULT_READ_LINES = 500
 
+# Non-recursive ``file_list`` hit the backend's entry ceiling. The recursive branch
+# already footers its own elision through ``_render_file_tree``; this is the flat
+# branch's equivalent — a bounded listing is fine, a silent one is not.
+_LIST_TRUNCATED_NOTE = (
+    "（本层条目已达单次列举上限，还有更多未列出：可用 pattern 收窄，"
+    "或 recursive=true 配合 max_depth 逐层查看。）"
+)
+
 
 def _empty_list_message(directory: str) -> str:
     """Empty ``file_list`` body — latent declared dirs get auto-create copy."""
@@ -722,8 +730,11 @@ class FileListTool:
                 # ``external/<alias>/`` archives, or pattern-targeted archives.
                 seen: set[str] = set()
                 entries: list[DirEntry] = []
+                list_truncated = False
                 for pat in patterns:
-                    for dir_entry in await context.backend.list(directory, pat):
+                    listing = await context.backend.list(directory, pat)
+                    list_truncated = list_truncated or listing.truncated
+                    for dir_entry in listing.entries:
                         if dir_entry.path in seen:
                             continue
                         if dir_entry.is_dir or not should_hide_ai_noise_from_list(
@@ -759,6 +770,10 @@ class FileListTool:
                         output = _empty_list_message(str(directory))
                 else:
                     output = _empty_list_message(str(directory))
+                # A capped listing must say so even when every surviving entry was
+                # AI noise — otherwise「空目录」is a flat lie about a full directory.
+                if list_truncated:
+                    output += f"\n\n{_LIST_TRUNCATED_NOTE}"
         except OutsideWorkspace:
             return _error(
                 _outside_workspace_msg(directory, location=context.backend.location),

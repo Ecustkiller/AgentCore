@@ -8,13 +8,11 @@ import {
   exportWorkspaceToLocal,
   exportWorkspaceZip,
 } from "@/services/workspace";
-import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { useConversationStore } from "@/stores/conversation";
 import {
   Download,
   FolderDown,
   FolderOpen,
-  History,
   Loader2,
   Trash2,
   X,
@@ -23,18 +21,19 @@ import { useEffect, useState } from "react";
 import { ExternalMountsSection } from "./ExternalMountsSection";
 import { FilesSection } from "./FilesSection";
 import { SharedMountsSection } from "./SharedMountsSection";
-import { SnapshotsSection } from "./SnapshotsSection";
 import { LocalTrashSection, TrashSection } from "./TrashSection";
 import { WorkspaceClientTools } from "./WorkspaceClientTools";
 import { WorkspaceModeBar } from "./WorkspaceModeBar";
 
 /**
- * Workspace mode of the conversation side panel — the file-in/out + persistence
- * surface for a conversation's project space (双模式工作区). Files are the panel's
- * always-on body; this view injects two workspace-level affordances into the files
- * toolbar's single header row (FileBrowser owns that row): 云端/本地选择器 (leading)
- * plus one on-demand entry (trailing) — 快照 opens a slide-over (backup / kept
- * versions / restore). The shell (SidePanel) owns the frame / resize / close.
+ * Workspace mode of the conversation side panel — the file-in/out surface for a
+ * conversation's project space (双模式工作区). Files are the panel's always-on body;
+ * this view injects workspace-level affordances into the files toolbar's single
+ * header row (FileBrowser owns that row): 云端/本地选择器 (leading) plus 导出 / 软删区
+ * (trailing). The shell (SidePanel) owns the frame / resize / close.
+ *
+ * 快照（备份 / 留版本 / 回退）不在此面板——它与文件改动同属「回退与留版本」一件事，
+ * 已并入常驻的「改动」tab（ConversationChangesPanel）。
  *
  * 交接（把活交给云端团队）已下沉为对话时间线里的「后台云端任务」卡（交接「方案 B」/
  * `BackgroundTaskCard`），完成后就地内联评审应用，不再占用工作区侧栏的独立入口。
@@ -44,20 +43,8 @@ import { WorkspaceModeBar } from "./WorkspaceModeBar";
  */
 export function WorkspaceMode() {
   const conversationId = useConversationStore((s) => s.currentConversationId);
-  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const openSnapshotsFor = useAutoSnapshotStore((s) => s.openSnapshotsFor);
-  const autoSnapshotFailed = useAutoSnapshotStore((s) =>
-    conversationId ? Boolean(s.failedByConversation[conversationId]) : false,
-  );
-
-  useEffect(() => {
-    if (!conversationId || openSnapshotsFor !== conversationId) return;
-    setTrashOpen(false);
-    setSnapshotsOpen(true);
-    useAutoSnapshotStore.getState().consumeOpenSnapshots(conversationId);
-  }, [conversationId, openSnapshotsFor]);
 
   // 与文件中枢同一份数据 + 同一个解析器：对话→其工作区(WorkspaceInfo)→FileSource。本地走桌面
   // IPC、云端走 REST，故 Agent 在本地写的文件这里也能列出（修复「写在本地、读在云端」）。
@@ -132,8 +119,8 @@ export function WorkspaceMode() {
 
   return (
     <div className="relative flex h-full flex-col">
-      {/* 单行面板头：云端选择器（leading）+ 文件操作 + 快照（trailing）合到 FilesSection
-          的工具栏一行（文件操作经其内部 FileTree 的 ref 驱动），不再单独占一行。 */}
+      {/* 单行面板头：云端选择器（leading）+ 文件操作 + 导出 / 软删区（trailing）合到
+          FilesSection 的工具栏一行（文件操作经其内部 FileTree 的 ref 驱动），不再单独占一行。 */}
       <div className="min-h-0 flex-1">
         <FilesSection
           source={source}
@@ -157,29 +144,7 @@ export function WorkspaceMode() {
                       <Download size={14} />
                     )}
                   </IconButton>
-                  <IconButton
-                    title={
-                      autoSnapshotFailed ? "快照（最近自动备份失败）" : "快照"
-                    }
-                    onClick={() => {
-                      setTrashOpen(false);
-                      setSnapshotsOpen(true);
-                    }}
-                  >
-                    <History
-                      size={14}
-                      className={
-                        autoSnapshotFailed ? "text-warning" : undefined
-                      }
-                    />
-                  </IconButton>
-                  <IconButton
-                    title="软删区"
-                    onClick={() => {
-                      setSnapshotsOpen(false);
-                      setTrashOpen(true);
-                    }}
-                  >
+                  <IconButton title="软删区" onClick={() => setTrashOpen(true)}>
                     <Trash2 size={14} />
                   </IconButton>
                 </>
@@ -197,32 +162,6 @@ export function WorkspaceMode() {
       {isCloudWorkspace ? (
         <SharedMountsSection conversationId={conversationId} />
       ) : null}
-
-      {/* 快照：从常驻 tab 降级为按需 slide-over（低频 / 恢复型操作）。 */}
-      {snapshotsOpen && (
-        <div className="absolute inset-0 z-20 flex">
-          <Button
-            variant="ghost"
-            aria-label="关闭快照"
-            onClick={() => setSnapshotsOpen(false)}
-            className="min-w-0 flex-1 rounded-none bg-overlay/40 p-0"
-          />
-          <div className="flex w-[85%] max-w-[420px] flex-col border-l border-border bg-card shadow-lg animate-dropdown-in">
-            <div className="flex h-9 shrink-0 items-center gap-1.5 border-b border-border pl-3 pr-1">
-              <History size={13} className="shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate text-xs font-medium">
-                快照
-              </span>
-              <IconButton title="关闭" onClick={() => setSnapshotsOpen(false)}>
-                <X size={14} />
-              </IconButton>
-            </div>
-            <div className="min-h-0 flex-1">
-              <SnapshotsSection conversationId={conversationId} />
-            </div>
-          </div>
-        </div>
-      )}
 
       {trashOpen && (
         <div className="absolute inset-0 z-20 flex">

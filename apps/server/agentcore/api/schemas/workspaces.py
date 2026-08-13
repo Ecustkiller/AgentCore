@@ -177,8 +177,16 @@ class WorkspaceFileEntry(BaseModel):
 
 
 class WorkspaceFileListResponse(BaseModel):
+    """One directory of a workspace (or its whole tree when ``recursive``).
+
+    ``truncated`` is True when the listing hit the server's entry ceiling and
+    entries were left out — clients must show that rather than render the short
+    list as the complete contents. Defaults False so older clients keep working.
+    """
+
     data: list[WorkspaceFileEntry]
     total: int
+    truncated: bool = False
 
 
 class WorkspaceFileIndexResponse(BaseModel):

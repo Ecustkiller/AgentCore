@@ -1,4 +1,5 @@
 import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
+import type { ResumeSettledTurnStatus } from "@/lib/resumeSettled";
 import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type { InteractionStatus } from "@/types/interactionExt";
 import {
@@ -57,6 +58,18 @@ export interface InteractionEntry {
    * Settlement is locked — UI keeps submitting and hides cancel-改口.
    */
   resumeDeferred?: { busyReason: ResumeDeferredBusyReason };
+  /**
+   * 冷卡「继续」落在一张已被上一次续跑吃掉的帧上（EPHEMERAL `resume_settled`）。
+   *
+   * 与 {@link settledByReceipt} 的差别在于**能说出多少**：这一帧带着 journal 里那条
+   * settlement 的事实（决策 / 落定时刻 / 回合当前状态），所以卡可以收成一句说得清的
+   * 结果态，而不只是「已经结了」。仍然说不出的是**谁**——线材里没有处理方，不认领归属。
+   */
+  resumeSettled?: {
+    decision: string;
+    decidedAt: string;
+    turnStatus: ResumeSettledTurnStatus;
+  };
   /**
    * 这张卡是**另一端**（手机 / 另一台桌面）拍板收口的（云对话多端同权 B2 · 验收 2）。
    *

@@ -11,14 +11,19 @@ from pathlib import Path
 import pytest
 
 from agentcore.runtime.browser.desktop_bridge import (
+    desktop_bridge_unauthorized,
     ensure_desktop_bridge_health,
     probe_desktop_bridge_sync,
     reset_desktop_bridge_health_for_tests,
     set_desktop_bridge_health_for_tests,
 )
-from agentcore.runtime.browser.local_session import LocalBridgeSession, open_local_bridge_session
+from agentcore.runtime.browser.local_session import (
+    BRIDGE_UNAUTHORIZED_CODE,
+    LocalBridgeSession,
+    open_local_bridge_session,
+)
 from agentcore.runtime.browser.registry import BrowserSessionRegistry
-from agentcore.tools.builtin.browser import BrowserNavigateTool
+from agentcore.tools.builtin.browser import BrowserNavigateTool, BrowserSnapshotTool
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.browser.protocol import BrowserSessionError, BrowserSessionRequest
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
@@ -32,6 +37,9 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
     # Shared across requests in one server instance.
     navigations: list[dict] = []
     fail_host = False
+    # 回合中途 token 过期：前 N 次 POST 正常，之后一律 401（None = 从不过期）。
+    expire_after_posts: int | None = None
+    post_count = 0
 
     def log_message(self, *_args):  # noqa: D401 - silence test noise
         return
@@ -39,6 +47,13 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
     def _auth_ok(self) -> bool:
         auth = self.headers.get("Authorization", "")
         return auth == f"Bearer {self.server.token}"  # type: ignore[attr-defined]
+
+    def _token_expired(self) -> bool:
+        cls = self.__class__
+        if cls.expire_after_posts is None:
+            return False
+        cls.post_count += 1
+        return cls.post_count > cls.expire_after_posts
 
     def _json(self, status: int, body: dict) -> None:
         raw = json.dumps(body).encode("utf-8")
@@ -58,7 +73,7 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
         self._json(404, {"ok": False, "error": "not_found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if not self._auth_ok():
+        if not self._auth_ok() or self._token_expired():
             self._json(401, {"ok": False, "error": "unauthorized"})
             return
         length = int(self.headers.get("Content-Length") or 0)
@@ -109,6 +124,8 @@ def fake_bridge(monkeypatch):
     reset_desktop_bridge_health_for_tests()
     _FakeBridgeHandler.navigations = []
     _FakeBridgeHandler.fail_host = False
+    _FakeBridgeHandler.expire_after_posts = None
+    _FakeBridgeHandler.post_count = 0
     server = HTTPServer(("127.0.0.1", 0), _FakeBridgeHandler)
     token = "test-bridge-token-abc"
     server.token = token  # type: ignore[attr-defined]
@@ -280,6 +297,105 @@ async def test_tool_host_unavailable_when_bridge_returns_503(fake_bridge, tmp_pa
     result = await tool.execute({"url": "https://example.com/"}, ctx)
     assert not result.success
     assert result.metadata and result.metadata.get("code") == "host_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_mid_turn_token_expiry_reports_bridge_unauthorized(fake_bridge):
+    """长回合洞：navigate 过了、token 中途失效 → snapshot 401。宿主活着，不得报不可用。"""
+    from agentcore.tools.sandbox.browser.protocol import BrowserCommand
+
+    set_desktop_bridge_health_for_tests(True)
+    _FakeBridgeHandler.expire_after_posts = 1
+
+    sess = LocalBridgeSession(conversation_id="c1", session_id="sess-expiry")
+    first = await sess.send(
+        BrowserCommand(action="navigate", args={"url": "https://example.com/"})
+    )
+    assert first.ok
+
+    second = await sess.send(BrowserCommand(action="snapshot", args={}))
+    assert not second.ok
+    assert second.data.get("code") == BRIDGE_UNAUTHORIZED_CODE
+    assert "host_unavailable" not in (second.error or "")
+    # 宿主没挂：会话保持存活，下一回合换新凭证还能接着用这个标签页。
+    assert sess.alive
+
+
+@pytest.mark.asyncio
+async def test_connection_refused_stays_host_unavailable(fake_bridge):
+    """拆 401 不得殃及真·不可达：连接被拒仍是 host_unavailable，且判死会话。"""
+    from agentcore.tools.sandbox.browser.protocol import BrowserCommand
+
+    set_desktop_bridge_health_for_tests(True)
+    fake_bridge["server"].shutdown()
+    fake_bridge["server"].server_close()
+
+    sess = LocalBridgeSession(conversation_id="c1", session_id="sess-down")
+    result = await sess.send(BrowserCommand(action="snapshot", args={}))
+    assert not result.ok
+    assert result.data.get("code") == "host_unavailable"
+    assert not sess.alive
+
+
+@pytest.mark.asyncio
+async def test_probe_401_reports_bridge_unauthorized(fake_bridge, monkeypatch):
+    """探活拿到 401 同样是「凭据失效」：宿主活着，会话面不得折叠成 host_unavailable。"""
+    from agentcore.tools.sandbox.browser.protocol import BrowserCommand
+
+    assert probe_desktop_bridge_sync() is True
+    assert desktop_bridge_unauthorized() is False
+
+    monkeypatch.setenv("AGENTCORE_BROWSER_BRIDGE_TOKEN", "stale-token")
+    assert probe_desktop_bridge_sync() is False
+    assert desktop_bridge_unauthorized() is True
+
+    sess = LocalBridgeSession(conversation_id="c1", session_id="sess-stale-probe")
+    result = await sess.send(BrowserCommand(action="snapshot", args={}))
+    assert not result.ok
+    assert result.data.get("code") == BRIDGE_UNAUTHORIZED_CODE
+    assert "host_unavailable" not in (result.error or "")
+
+    with pytest.raises(BrowserSessionError) as excinfo:
+        await open_local_bridge_session(
+            BrowserSessionRequest(conversation_id="c1", host_kind="local", session_id="s-stale")
+        )
+    assert excinfo.value.code == BRIDGE_UNAUTHORIZED_CODE
+    assert "host_unavailable" not in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_tool_mid_turn_401_maps_to_bridge_unauthorized(fake_bridge, tmp_path: Path):
+    """工具面 metadata code 决定用户文案：401 必须与 host_unavailable 分开。"""
+    set_desktop_bridge_health_for_tests(True)
+    _FakeBridgeHandler.expire_after_posts = 1
+
+    async def factory(req: BrowserSessionRequest):
+        return await open_local_bridge_session(req)
+
+    reg = BrowserSessionRegistry(factory=factory)
+    ws = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+
+    class _LocalWs:
+        location = "local"
+
+        def __getattr__(self, name):
+            return getattr(ws, name)
+
+    ctx = ToolContext.create(
+        execution_id="e1",
+        run_id="r1",
+        agent_id="w1",
+        backend=_LocalWs(),  # type: ignore[arg-type]
+        user_id="u1",
+        conversation_id="c-local",
+    )
+    nav = await BrowserNavigateTool(registry=reg).execute({"url": "https://example.com/"}, ctx)
+    assert nav.success, nav.error
+
+    snap = await BrowserSnapshotTool(registry=reg).execute({}, ctx)
+    assert not snap.success
+    assert snap.metadata and snap.metadata.get("code") == BRIDGE_UNAUTHORIZED_CODE
+    assert "host_unavailable" not in (snap.error or "")
 
 
 @pytest.mark.asyncio

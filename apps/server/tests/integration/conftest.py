@@ -41,6 +41,7 @@ from agentcore.db.repositories import (
 )
 from agentcore.db.repositories.chat import OFFICIAL_CHAT_ID, OFFICIAL_CHAT_TITLE
 from agentcore.main import app
+from agentcore.middleware.csrf import CSRF_HEADER
 from agentcore.security import hash_password
 from agentcore.security.keys import KeyEncryptor
 
@@ -112,12 +113,46 @@ def _test_encryption_key(monkeypatch) -> Iterator[None]:
     yield
 
 
-# Cookie-session integration tests predate CSRF; keep them green unless marked @pytest.mark.csrf.
 @pytest.fixture(autouse=True)
-def _disable_csrf_unless_marked(monkeypatch, request):
-    if request.node.get_closest_marker("csrf") or "test_csrf" in request.module.__name__:
-        return
-    monkeypatch.setattr(settings, "csrf_enabled", False)
+def _enforce_csrf(monkeypatch) -> None:
+    """Pin CSRF **on** for the whole integration suite.
+
+    It used to be pinned *off* for everything but ``@pytest.mark.csrf``, which meant
+    ~450 cookie-session tests exercised a request path production never serves: no
+    middleware ordering, exemption-prefix or token-refresh regression could fail
+    here. The clients below echo the token the way apps/desktop and apps/admin do,
+    so enforcement costs the suite nothing. Also isolates from a local ``.env`` that
+    sets ``CSRF_ENABLED=false``.
+    """
+    monkeypatch.setattr(settings, "csrf_enabled", True)
+
+
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+
+def csrf_echo_hooks() -> dict[str, list]:
+    """httpx event hooks that make a test client behave like a compliant cookie-session
+    client: remember whatever ``X-CSRF-Token`` the server hands out (login, refresh, or
+    the 403 that re-arms) and echo it on mutating requests.
+
+    A test that passes its own ``X-CSRF-Token`` wins (the hook never overwrites), so
+    bad-token cases stay expressible; use ``naive_client`` for the no-token case.
+    """
+    held: dict[str, str] = {}
+
+    async def _on_request(request: httpx.Request) -> None:
+        if request.method in _SAFE_METHODS or CSRF_HEADER in request.headers:
+            return
+        token = held.get("token")
+        if token:
+            request.headers[CSRF_HEADER] = token
+
+    async def _on_response(response: httpx.Response) -> None:
+        token = response.headers.get(CSRF_HEADER)
+        if token:
+            held["token"] = token
+
+    return {"request": [_on_request], "response": [_on_response]}
 
 
 # Per-process schema so concurrent test runs never DROP/CREATE the *same* schema
@@ -218,6 +253,16 @@ async def session_factory() -> AsyncIterator[async_sessionmaker]:
 @pytest_asyncio.fixture
 async def client(session_factory) -> AsyncIterator[httpx.AsyncClient]:
     transport = ASGITransport(app=app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test", event_hooks=csrf_echo_hooks()
+    ) as c:
+        yield c
+
+
+@pytest_asyncio.fixture
+async def naive_client(session_factory) -> AsyncIterator[httpx.AsyncClient]:
+    """A client that does *not* echo the CSRF token — for asserting enforcement."""
+    transport = ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
@@ -229,7 +274,9 @@ def new_client(session_factory) -> Callable:
     @asynccontextmanager
     async def _make() -> AsyncIterator[httpx.AsyncClient]:
         transport = ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://test", event_hooks=csrf_echo_hooks()
+        ) as c:
             yield c
 
     return _make

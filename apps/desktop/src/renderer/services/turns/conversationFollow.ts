@@ -17,25 +17,27 @@
  * - **切会话不硬卸正在跟播的泵**（对齐 ``hydrateAttachSettle`` 的既有设计）：切走时
  *   若正跟着一个回合，等它收口的下一个心跳再关，否则气泡会冻在流式态。
  *
- * SSE 只带回合事件、**不带用户消息正文**，所以另一端开的新回合折之前要先把消息窗
- * 拉齐一次，不然屏幕上只会冒出一个没有提问的助手气泡。
+ * 两个正交的决定，各有各的依据：
+ *
+ * - **分段与清不清**由服务端说了算。重放段段首的 ``message_start`` 带 ``full_replay``，即
+ *   「这是本回合的全量重放」——照做重置再折。本端不再拿段首 id 去比屏幕上的气泡猜这一轮
+ *   是不是自己的（猜错就把正文折两遍）。
+ * - **补不补历史**由本地事实说了算。SSE 只带回合事件、**不带用户消息正文**，所以本地没有
+ *   这一轮上下文时要先把消息窗拉齐一次，不然屏幕上只会冒出一个没有提问的助手气泡。
  */
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import { logEvent } from "@/lib/log";
-import { BASE_URL, tryRefresh } from "@/services/api";
+import { BASE_URL, captureCsrf, tryRefresh } from "@/services/api";
 import { loadLatestWindow } from "@/services/messages";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import {
   ATTACH_CAUGHT_UP_COMMENT,
-  flushAttachCatchUp,
+  foldAttachSegment,
   peekLastEventId,
   pumpSseBody,
 } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { MessageStartPayload, SSEEvent } from "@/types/events";
-import { unstable_batchedUpdates } from "react-dom";
-import { reconcileQueuedTurns } from "./reconcileQueuedTurns";
-import { resetPartialTurnForReplay } from "./recovery";
 import {
   hasLocalConversationStream,
   subscribeLocalConversationStream,
@@ -52,6 +54,8 @@ type FollowSlot = {
   closeWhenIdle: boolean;
   /** 本端自有连接占用中 → 让位；闲下来由订阅回调唤醒。 */
   suspended: boolean;
+  /** 这次连接是退避重连 → 连上确认空闲后补一次窗口对账（见 ``reconcileAfterReconnect``）。 */
+  needsReconcile: boolean;
   attempts: number;
   ac: AbortController | null;
   unsubBusy: () => void;
@@ -133,29 +137,43 @@ function honorDeferredClose(slot: FollowSlot): void {
   stopSlot(slot, "deferred_switch_away");
 }
 
-function segmentTurnId(segment: SSEEvent[]): string | undefined {
+/** 段首 ``message_start`` 的 payload（``undefined`` = 这一段没有段首：只带
+ * ``resume_settled`` lead / 队列信号 / hot 卡重挂的段）。 */
+function segmentStart(segment: SSEEvent[]): MessageStartPayload | undefined {
   const start = segment.find((e) => e.type === "message_start");
-  return start
-    ? ((start.payload as MessageStartPayload).message_id ?? undefined)
-    : undefined;
+  return start ? (start.payload as MessageStartPayload) : undefined;
 }
 
 /**
- * 这段 catch-up 是不是本端**已经在跟**的那个回合？
+ * 折这一段之前要不要先把消息窗拉齐？
  *
- * 是 → 让位重连 / 刷新回来的整段重放，必须 clear-then-fold（否则正文会被追加两遍）。
- * 否 → 另一端开的回合（或本端挂着的过期气泡），走「拉齐窗口再折」。
+ * 判据是**本地事实**——本地有没有这一轮的上下文，而不是「这一轮是不是我的」（那只能猜）。
+ * SSE 只带回合事件、不带用户消息正文：本地找不到这条回合 id 的助手气泡，就说明这轮是别处
+ * 开的、它的提问只在 REST 里，直接折只会冒出一个没有提问的助手气泡。
+ *
+ * 找的是**整个消息窗里有没有这条回合 id**，不是末条气泡是不是它：末尾挂着一个尚未盖上
+ * 服务端 id 的占位泡时，这一轮的上下文照样在屏幕上。
  */
-function holdsSegmentTurn(
+function needsWindowBackfill(
   conversationId: string,
-  segment: SSEEvent[],
+  turnId: string | undefined,
 ): boolean {
-  const rt = getRuntime(conversationId);
-  if (!rt.isGenerating) return false;
-  const turnId = segmentTurnId(segment);
-  if (!turnId) return true; // 无 message_start 的续播段 = 当前回合的后续
-  const tail = [...rt.messages].reverse().find((m) => m.role === "assistant");
-  return !!tail && (tail.serverMessageId === turnId || tail.id === turnId);
+  if (!turnId) return false; // 没有段首身份 → 没有哪一轮的历史要补
+  return !getRuntime(conversationId).messages.some(
+    (m) =>
+      m.role === "assistant" &&
+      (m.serverMessageId === turnId || m.id === turnId),
+  );
+}
+
+/**
+ * 这帧 ``message_start`` 是重放段的段首（``full_replay``），还是直播帧？
+ *
+ * 同一条连接上的每个 run 都从自己的重放段开始，段首必带这个标记（服务端会把历史段首改写成
+ * 带标记的副本，历史里没有就补一帧合成段首），所以「开新段」这件事只认它，不去猜。
+ */
+function opensFullReplaySegment(event: SSEEvent): boolean {
+  return (event.payload as MessageStartPayload).full_replay === true;
 }
 
 async function foldCatchUpSegment(
@@ -163,31 +181,51 @@ async function foldCatchUpSegment(
   segment: SSEEvent[],
 ): Promise<void> {
   const conversationId = slot.conversationId;
-  if (holdsSegmentTurn(conversationId, segment)) {
-    unstable_batchedUpdates(() => {
-      resetPartialTurnForReplay(conversationId);
-      flushAttachCatchUp(conversationId, segment);
-    });
-    return;
+  const start = segmentStart(segment);
+  if (needsWindowBackfill(conversationId, start?.message_id)) {
+    // 别处开的回合：先把消息窗拉齐，用户那条提问只在 REST 里。挂着的过期
+    // 「生成中」先落下，否则整窗写入被 loadLatestWindow 的门禁挡掉。
+    if (getRuntime(conversationId).isGenerating) {
+      useConversationStore.getState().setGenerating(false, conversationId);
+    }
+    try {
+      await loadLatestWindow(conversationId, { softRefresh: true });
+    } catch {
+      /* best-effort：窗口没拉到也照样跟播，只是缺那条用户气泡 */
+    }
+    // 拉窗口期间本端自有连接开张 → 整段交给它重放（同一段首指令），这里折了只会闪一下。
+    if (slot.stopped || slot.suspended) return;
   }
-  // 另一端开的新回合：先把消息窗拉齐，用户那条提问只在 REST 里。挂着的过期
-  // 「生成中」先落下，否则整窗写入被 loadLatestWindow 的门禁挡掉。
-  if (getRuntime(conversationId).isGenerating) {
-    useConversationStore.getState().setGenerating(false, conversationId);
-  }
-  try {
-    await loadLatestWindow(conversationId, { softRefresh: true });
-  } catch {
-    /* best-effort：窗口没拉到也照样跟播，只是缺那条用户气泡 */
-  }
-  // 拉窗口期间本端自有连接开张 → 整段交给它重放（它做 clear-then-fold），这里折了只会闪一下。
+  // 清不清由段首说了算——与回合级 attach 同一份判断，两条路不得各自解读。
+  foldAttachSegment(conversationId, segment);
+}
+
+/**
+ * 退避重连后补一次窗口对账。
+ *
+ * 服务端只重放**仍在跑**的 run：断线期间另一端整跑完的那个回合已经收口，重连后
+ * 一帧都不会补发，本端屏幕上就一直缺着它，直到用户切走再切回。IM firehose 早就
+ * 每次 (re)connect 都 ``catchUp``（``services/realtime.ts``），这条流对齐它。
+ *
+ * 只在**确认服务端此刻没东西可重放**时才拉（``openGate`` 的空段分支）——有 catch-up
+ * 段时 ``foldCatchUpSegment`` 自己会拉窗口或 clear-then-fold，这里再拉会打架。
+ */
+async function reconcileAfterReconnect(slot: FollowSlot): Promise<void> {
+  if (!slot.needsReconcile) return;
+  slot.needsReconcile = false;
   if (slot.stopped || slot.suspended) return;
-  flushAttachCatchUp(conversationId, segment, { clearPartial: false });
+  // 本端还挂着「生成中」：自有连接 / recovery 正在管这个回合，别用整窗写入去插一脚。
+  if (getRuntime(slot.conversationId).isGenerating) return;
+  try {
+    await loadLatestWindow(slot.conversationId, { softRefresh: true });
+  } catch {
+    /* best-effort：对账没拉到就等下一次重连 / 用户切换 */
+  }
 }
 
 type ConnectionOutcome = "ok" | "retry" | "stop";
 
-function followFetch(
+async function followFetch(
   conversationId: string,
   signal: AbortSignal,
 ): Promise<Response> {
@@ -195,12 +233,14 @@ function followFetch(
     Accept: "text/event-stream",
     ...clientHeaders(),
   };
-  // 连上时若已有 live run，服务端据此走 journal 整段重放（值本身是观察性的）。
+  // 恒带：``0`` = 本端没有游标（服务端据此回整段），否则报出看到的最后一个 journal seq。
   headers["Last-Event-ID"] = peekLastEventId(conversationId) ?? "0";
-  return fetch(
+  const response = await fetch(
     `${BASE_URL}/v1/conversations/${conversationId}/stream?follow=true`,
     { method: "GET", credentials: "include", headers, signal },
   );
+  captureCsrf(response); // 长订阅也带令牌，丢了就等着下一次写请求 403
+  return response;
 }
 
 /**
@@ -208,8 +248,8 @@ function followFetch(
  *
  * 分段规则跟着服务端 ``_attach_frames``：每个回合 = 重放段 → ``: attach-caught-up``
  * → 直播段。首段整段缓冲到边界再一次性折（避免已完成的 worker 再演一遍
- * running→completed）；此后每见到一个「本端没在跟」的 ``message_start`` 就重新收拢
- * 缓冲，拉齐窗口再折。
+ * running→completed）；此后每见到一个带 ``full_replay`` 的 ``message_start`` 就重新收拢
+ * 缓冲，补完历史再折。
  */
 async function pumpFollowBody(
   slot: FollowSlot,
@@ -221,6 +261,8 @@ async function pumpFollowBody(
   let releasing = false;
   /** 在飞的折（拉窗口是异步的）——断流后要等它落地再让外层重连，否则两条连接会交叉折。 */
   let releasePending: Promise<void> | null = null;
+  /** 在飞的重连对账（同上，整窗写入也不能跨到下一条连接去）。 */
+  let reconcilePending: Promise<void> | null = null;
 
   const releaseBuffer = (): void => {
     if (releasing) return;
@@ -250,6 +292,7 @@ async function pumpFollowBody(
     if (!buffering || releasing) return;
     if (buffer.length === 0) {
       buffering = false; // 没有 catch-up 段可折（空闲连接 / 已折过）
+      reconcilePending = reconcileAfterReconnect(slot);
       return;
     }
     releaseBuffer();
@@ -265,11 +308,8 @@ async function pumpFollowBody(
           buffer.push(event);
           return;
         }
-        // 下一个回合起跑：本端没在跟它 → 收拢缓冲，拉齐窗口再折。
-        if (
-          event.type === "message_start" &&
-          !holdsSegmentTurn(conversationId, [event])
-        ) {
+        // 下一个回合的重放段起头 → 收拢缓冲，按段折。
+        if (event.type === "message_start" && opensFullReplaySegment(event)) {
           buffering = true;
           buffer.push(event);
           openGate();
@@ -294,6 +334,7 @@ async function pumpFollowBody(
   } finally {
     // 折是异步的（要先拉消息窗）。不等它落地就回到外层重连，两条连接会交叉折同一回合。
     await releasePending;
+    await reconcilePending;
   }
 }
 
@@ -328,8 +369,6 @@ async function runFollowConnection(
     logEvent("info", "conversation.follow_open", {
       conversation_id: conversationId,
     });
-    // （重）连成功：让位 / 掉线期间的 EPHEMERAL 排队帧可能已漏，GET 权威刷新排队条。
-    void reconcileQueuedTurns(conversationId);
     await pumpFollowBody(slot, response);
     return "ok";
   } catch {
@@ -359,6 +398,8 @@ async function runFollowLoop(slot: FollowSlot): Promise<void> {
       return;
     }
     if (slot.suspended) continue; // 让位导致的断流：立刻回到等待，不退避
+    // 真断线（非让位、非首连）：退避期间另一端可能整跑完一个回合，连上后要对账。
+    slot.needsReconcile = true;
     const delay = Math.min(
       RECONNECT_BASE_MS * 2 ** slot.attempts,
       RECONNECT_MAX_MS,
@@ -374,6 +415,7 @@ function startSlot(conversationId: string): void {
     stopped: false,
     closeWhenIdle: false,
     suspended: hasLocalConversationStream(conversationId),
+    needsReconcile: false, // 首连不对账：hydrateAttachSettle 刚拉过窗口
     attempts: 0,
     ac: null,
     unsubBusy: () => {},
@@ -391,6 +433,9 @@ function startSlot(conversationId: string): void {
  *
  * 同时只留一条订阅——每访问一个会话就多挂一条空闲 SSE 会吃光连接池。切走的那条若正在
  * 跟播则延后到回合收口再关。
+ *
+ * 只管当前会话的回合跟播。跨会话的账号态（队列、被别处结掉的挂起卡）走设备长连接
+ * （``accountStateIngress``），不由这条订阅的开合去猜。
  */
 export function syncConversationFollow(conversationId: string | null): void {
   if (typeof window !== "undefined" && window.__WEB_PREVIEW__) return;

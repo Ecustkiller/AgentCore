@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import secrets
 from datetime import UTC, datetime
+from enum import StrEnum
+from functools import lru_cache
 
 from agentcore.config import settings
 
@@ -22,25 +24,47 @@ _CSRF_TOKEN_VERSION = "v1"
 _CSRF_KEY_INFO = b"agentcore.csrf.v1"
 
 
-def _csrf_signing_key() -> bytes:
+class CsrfRejectReason(StrEnum):
+    """Why a presented token was refused — the ``reason`` on ``security.csrf_rejected``.
+
+    Four values rather than missing/invalid: "the client never had a token"
+    (:attr:`MISSING`), "the token aged out" (:attr:`EXPIRED`) and "the token was
+    signed for another session or under another key" (:attr:`SIGNATURE_MISMATCH`)
+    are three different faults with three different fixes, and collapsing them
+    left the production rejections unattributable.
+    """
+
+    MISSING = "missing"
+    MALFORMED = "malformed"
+    EXPIRED = "expired"
+    SIGNATURE_MISMATCH = "signature_mismatch"
+
+
+@lru_cache(maxsize=2)
+def _derive_signing_key(jwt_secret: str) -> bytes:
     """Derive a dedicated CSRF signing key from the JWT secret (domain separation,
-    so one secret never directly signs two distinct token formats)."""
-    return hmac.new(
-        settings.jwt_secret_key.encode("utf-8"), _CSRF_KEY_INFO, hashlib.sha256
-    ).digest()
+    so one secret never directly signs two distinct token formats).
+
+    Memoised on the secret itself rather than globally, so a rotated (or
+    monkeypatched) value is never served a stale key.
+    """
+    return hmac.new(jwt_secret.encode("utf-8"), _CSRF_KEY_INFO, hashlib.sha256).digest()
 
 
 def _csrf_sign(message: str) -> str:
-    digest = hmac.new(_csrf_signing_key(), message.encode("utf-8"), hashlib.sha256).digest()
+    key = _derive_signing_key(settings.jwt_secret_key)
+    digest = hmac.new(key, message.encode("utf-8"), hashlib.sha256).digest()
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def sign_csrf_token(user_id: str, *, ttl_seconds: int | None = None) -> str:
     """Mint a stateless, HMAC-signed CSRF token bound to ``user_id``.
 
-    The lifetime defaults to the refresh-token window; since every login/refresh
-    re-issues a token long before then, expiry is never the binding constraint in a
-    live session.
+    The lifetime defaults to the refresh-token window because that is the session's
+    own outer bound: the token is only re-issued when the session is opened or
+    renewed (``middleware.csrf``), so anything shorter would expire under a client
+    that is idle but still logged in. An aged-out token costs one 403, which
+    re-arms the client.
     """
     ttl = (
         ttl_seconds
@@ -53,24 +77,38 @@ def sign_csrf_token(user_id: str, *, ttl_seconds: int | None = None) -> str:
     return f"{_CSRF_TOKEN_VERSION}.{nonce}.{exp}.{sig}"
 
 
-def verify_csrf_token(user_id: str, token: str) -> bool:
-    """Return True iff ``token`` is a valid, unexpired CSRF token for ``user_id``.
+def csrf_reject_reason(user_id: str, token: str) -> CsrfRejectReason | None:
+    """Return why ``token`` is unacceptable for ``user_id``, or ``None`` if it is valid.
 
     Constant-time signature check, no server state. ``user_id`` comes from the
     verified access-token cookie, which binds the token to that session (another
     user's token recomputes to a different signature and fails).
+
+    The signature is checked *before* the expiry so the reported reason is
+    attributable: only a token we really minted for this session can be reported as
+    :attr:`~CsrfRejectReason.EXPIRED`, and anything forged, tampered with, or bound
+    to a different session lands on :attr:`~CsrfRejectReason.SIGNATURE_MISMATCH`.
     """
+    if not token:
+        return CsrfRejectReason.MISSING
     parts = token.split(".")
     if len(parts) != 4:
-        return False
+        return CsrfRejectReason.MALFORMED
     version, nonce, exp_raw, sig = parts
     if version != _CSRF_TOKEN_VERSION:
-        return False
+        return CsrfRejectReason.MALFORMED
     try:
         exp = int(exp_raw)
     except ValueError:
-        return False
-    if exp < int(datetime.now(UTC).timestamp()):
-        return False
+        return CsrfRejectReason.MALFORMED
     expected = _csrf_sign(f"{version}.{user_id}.{nonce}.{exp}")
-    return hmac.compare_digest(expected, sig)
+    if not hmac.compare_digest(expected, sig):
+        return CsrfRejectReason.SIGNATURE_MISMATCH
+    if exp < int(datetime.now(UTC).timestamp()):
+        return CsrfRejectReason.EXPIRED
+    return None
+
+
+def verify_csrf_token(user_id: str, token: str) -> bool:
+    """Return True iff ``token`` is a valid, unexpired CSRF token for ``user_id``."""
+    return csrf_reject_reason(user_id, token) is None

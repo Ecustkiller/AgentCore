@@ -2,11 +2,12 @@ import { logEvent } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import { parseResumeDeferredPayload } from "@/lib/resumeDeferred";
+import { parseResumeSettledPayload } from "@/lib/resumeSettled";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
+import { settleConsumedResume } from "@/services/turns/consumedResume";
 import { notifySteerDegradedToQueue } from "@/services/turns/queuedNotify";
-import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import {
   completeTurnPhase,
   getRuntime,
@@ -22,6 +23,7 @@ import {
 } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { useInteractionStore } from "@/stores/interactions";
+import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
 import type {
   AutoFolderCreatedPayload,
@@ -57,16 +59,6 @@ function finalizeTurnTrace(conversationId: string): void {
   traceTurnEnd(conversationId, lastA?.process);
 }
 
-/**
- * 队里少了一项后，剩下几条的「第 N/M」全都过期了——GET 权威重排（禁轮询，只在信号后拉）。
- *
- * 出队 / 取消可能来自另一端，本端无从算出新序；空队则无可重排，不发这一趟请求。
- */
-function renumberRemainingQueue(conversationId: string): void {
-  if (useQueuedTurnsStore.getState().list(conversationId).length === 0) return;
-  void reconcileQueuedTurns(conversationId);
-}
-
 export function handleMessageStreamEvent(
   event: SSEEvent,
   ctx: DispatchContext,
@@ -75,36 +67,27 @@ export function handleMessageStreamEvent(
 
   switch (event.type) {
     case "turn_queued": {
-      // EPHEMERAL =「队列变了」信号；内容权威是 GET。
-      // 本端发送路径已在 midFlight ack 时 upsert（低延迟）；条上已有该
-      // queue_id 则不再 GET。缺 id = 协调升队 / 多端 / 他端排队 → 对账拉内容。
-      // 普通排队：条即反馈，不 toast。steer 降级须 toast（条 alone 看不出降级）。
+      // EPHEMERAL =「队列变了」信号。内容与排序都由设备通道的整队快照负责
+      // （`accountStateIngress`），本帧只管这条流上说得出、快照说不出的那件事：
+      // 普通排队条即反馈不 toast，steer 降级必须 toast（光看条看不出降级）。
       const p = event.payload as TurnQueuedPayload;
       if (p.degraded_from === "steer") {
         notifySteerDegradedToQueue();
-      }
-      const known = useQueuedTurnsStore
-        .getState()
-        .list(conversationId)
-        .some((e) => e.queueId === p.queue_id);
-      if (!known) {
-        void reconcileQueuedTurns(conversationId);
       }
       return true;
     }
     case "turn_queue_started": {
       // EPHEMERAL：FIFO 出队开跑（新回合 sink 首帧，先于 message_start）。
       // 按 queue_id 清 QueuedTurnsBar；用户泡由 midFlight 在本帧前补插。
+      // 剩下几条的序号由随后到达的整队快照重排。
       const p = event.payload as TurnQueueStartedPayload;
       useQueuedTurnsStore.getState().remove(conversationId, p.queue_id);
-      renumberRemainingQueue(conversationId);
       return true;
     }
     case "turn_queue_cancelled": {
       // EPHEMERAL：多端同步清排队 UI（本地 cancel 已清则幂等 no-op）。
       const p = event.payload as TurnQueueCancelledPayload;
       clearQueuedTurnLocally(conversationId, p.queue_id);
-      renumberRemainingQueue(conversationId);
       return true;
     }
     case "resume_deferred": {
@@ -116,6 +99,30 @@ export function handleMessageStreamEvent(
           messageId: p.message_id,
           busyReason: p.busy_reason,
         });
+      }
+      return true;
+    }
+    case "resume_settled": {
+      // EPHEMERAL：这张卡的帧已被上一次续跑吃掉，服务端回 200 + 事实帧而不是 404。
+      // 卡收成结果态（记下决策 / 落定时刻 / 回合状态，但不认领处理方）；壳一并丢掉——
+      // 本帧就是「帧不在了」的证据。
+      const p = parseResumeSettledPayload(event.payload);
+      if (!p) return true;
+      const cid = p.conversation_id || conversationId;
+      useInteractionStore.getState().markResumeSettled({
+        id: p.checkpoint_id,
+        kind: p.kind,
+        conversationId: cid,
+        messageId: p.message_id,
+        decision: p.decision,
+        decidedAt: p.decided_at,
+        turnStatus: p.turn_status,
+      });
+      usePausedTurnStore.getState().removeByCheckpoint(p.checkpoint_id);
+      // running = 同连接紧接着就是那次续跑的实时流：什么都别做，让它照常流下去
+      //（用户点了「继续」，AI 正在继续，他就该无缝看着它继续）。
+      if (p.turn_status !== "running") {
+        settleConsumedResume(cid, p.message_id);
       }
       return true;
     }
@@ -212,10 +219,9 @@ export function handleMessageStreamEvent(
     }
     case "content_delta": {
       ensureStreamingAssistant(conversationId);
-      queueContentDelta(
-        conversationId,
-        (event.payload as ContentDeltaPayload).delta,
-      );
+      // `replace`（attach 增量重放）：这帧带的是末尾未闭合正文块的全文，换块而非追加。
+      const p = event.payload as ContentDeltaPayload;
+      queueContentDelta(conversationId, p.delta, p.replace);
       return true;
     }
     case "content_reset": {
@@ -231,10 +237,8 @@ export function handleMessageStreamEvent(
     case "reasoning_delta": {
       ensureStreamingAssistant(conversationId);
       // rAF 合批思考流 (流式性能): 与正文共用一条 rAF、同点 flush，避免逐 token 写 store。
-      queueReasoningDelta(
-        conversationId,
-        (event.payload as ReasoningDeltaPayload).delta,
-      );
+      const p = event.payload as ReasoningDeltaPayload;
+      queueReasoningDelta(conversationId, p.delta, p.replace);
       return true;
     }
     case "tool_progress": {

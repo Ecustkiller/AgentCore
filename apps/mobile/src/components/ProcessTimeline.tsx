@@ -37,6 +37,7 @@ import type {
   ProjectedTeamNote,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
+import type { CollabCounts } from "@agentcore/protocol-fold-kit";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import "@/components/ProcessTimeline.css";
 
@@ -104,6 +105,8 @@ export interface TeamProjection {
    *  worker's pending escalation can render as an actionable answer card. All optional — a
    *  read-only / history team simply omits them. */
   conversationId?: string | null;
+  /** 本图 execution id — 按人干预（只停 / 只改这一个队员）的提交目标。 */
+  executionId?: string | null;
   /** runId → pending escalation id from ProjectedTurn.interactions (P3). */
   pendingEscalations?: Map<string, string>;
   /** Live turn → the pending escalation is answerable over the open stream. */
@@ -119,6 +122,9 @@ export interface TeamProjection {
   evidenceLedger?: EvidenceLedgerEntry[];
   /** 回合墙钟跨度（`turnElapsedMs(events)`，与桌面同量）：条上「用时」。缺省 0 = 不显示。 */
   elapsedMs?: number;
+  /** 回合协作计数（live = `message_end.collab`；历史 = REST `MessageDetail.collab`）：条上
+   *  「互相把关」一行。不入 ProjectedTurn（旁路，同桌面 `message.collab`）。 */
+  collab?: CollabCounts | null;
 }
 
 /** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,

@@ -1,4 +1,5 @@
 import type { AuthRefreshResult } from "@/services/api";
+import type { FsRoot } from "@shared/ipc-contract";
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,20 +7,22 @@ const {
   getDeviceIdMock,
   tryRefreshMock,
   notifyUnauthorizedMock,
-  apiPostMock,
   isWebRuntimeMock,
+  isWebPreviewMock,
 } = vi.hoisted(() => ({
   getDeviceIdMock: vi.fn(async () => "device-test-1"),
   tryRefreshMock: vi.fn(async (): Promise<AuthRefreshResult> => "renewed"),
   notifyUnauthorizedMock: vi.fn(),
-  apiPostMock: vi.fn(
-    async (..._args: unknown[]): Promise<unknown> => undefined,
-  ),
   isWebRuntimeMock: vi.fn(() => false),
+  isWebPreviewMock: vi.fn(() => false),
 }));
 
 vi.mock("@/lib/capabilities", () => ({
   isWebRuntime: () => isWebRuntimeMock(),
+}));
+
+vi.mock("@/lib/preview", () => ({
+  isWebPreview: () => isWebPreviewMock(),
 }));
 
 vi.mock("@/lib/clientBuildInfo", () => ({
@@ -33,8 +36,8 @@ vi.mock("@/services/deviceIdentity", () => ({
 
 vi.mock("@/services/api", () => ({
   BASE_URL: "http://localhost:8000",
-  api: { post: (...args: unknown[]) => apiPostMock(...args) },
   getCsrfHeaders: () => ({}),
+  captureCsrf: () => undefined,
   tryRefresh: () => tryRefreshMock(),
   notifyUnauthorized: () => notifyUnauthorizedMock(),
 }));
@@ -65,21 +68,20 @@ function sseResponse(opts: { end?: boolean } = {}): Response {
   );
 }
 
+/** One declared query param off a `GET /v1/fulfill` call (`""` = declared empty). */
+function declared(call: unknown[] | undefined, param: string): string | null {
+  return new URL(String(call?.[0])).searchParams.get(param);
+}
+
 /** Roots declared on one `GET /v1/fulfill` call (`""` = declared empty). */
 function declaredRoots(call: unknown[] | undefined): string | null {
-  return new URL(String(call?.[0])).searchParams.get("roots");
+  return declared(call, "roots");
 }
 
 describe("fulfillStream", () => {
-  const listRoots = vi.fn(async () => [{ id: "root-a", name: "A" }]);
-  /** Latest `fs:rootsChanged` subscriber, so a test can fire the grant event. */
-  let rootsChangedCb: (() => void) | null = null;
-  const onRootsChanged = vi.fn((cb: () => void) => {
-    rootsChangedCb = cb;
-    return () => {
-      rootsChangedCb = null;
-    };
-  });
+  const listRoots = vi.fn(
+    async (): Promise<FsRoot[]> => [{ id: "root-a", name: "proj" }],
+  );
 
   beforeEach(() => {
     vi.useRealTimers();
@@ -87,19 +89,12 @@ describe("fulfillStream", () => {
     getDeviceIdMock.mockReset().mockResolvedValue("device-test-1");
     tryRefreshMock.mockReset().mockResolvedValue("renewed");
     notifyUnauthorizedMock.mockReset();
-    apiPostMock.mockReset().mockResolvedValue(undefined);
     isWebRuntimeMock.mockReset().mockReturnValue(false);
-    listRoots.mockReset().mockResolvedValue([{ id: "root-a", name: "A" }]);
-    rootsChangedCb = null;
-    onRootsChanged.mockClear();
-    (
-      window as unknown as {
-        fsApi: {
-          listRoots: typeof listRoots;
-          onRootsChanged: typeof onRootsChanged;
-        };
-      }
-    ).fsApi = { listRoots, onRootsChanged };
+    isWebPreviewMock.mockReset().mockReturnValue(false);
+    listRoots.mockReset().mockResolvedValue([{ id: "root-a", name: "proj" }]);
+    (window as unknown as { fsApi: { listRoots: typeof listRoots } }).fsApi = {
+      listRoots,
+    };
     vi.stubGlobal("fetch", vi.fn());
   });
 
@@ -259,89 +254,24 @@ describe("fulfillStream", () => {
     vi.mocked(Math.random).mockRestore();
   });
 
-  it("POSTs /v1/fulfill/roots on fs:rootsChanged (no reconnect, no polling)", async () => {
+  it("只声明永久根：会话授权根由服务端按登记绑到本设备", async () => {
     vi.useFakeTimers();
-    const encoder = new TextEncoder();
-    const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValue(
-      new Response(
-        new ReadableStream({
-          start(controller) {
-            controller.enqueue(encoder.encode('data: {"type":"ready"}\n\n'));
-          },
-        }),
-        { status: 200, headers: { "Content-Type": "text/event-stream" } },
-      ),
-    );
-
-    startFulfillStream();
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-    // catch-up POST on connect
-    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: ["root-a"],
-    });
-    const postsAfterConnect = apiPostMock.mock.calls.length;
-    const fetchesAfterConnect = fetchMock.mock.calls.length;
-
-    listRoots.mockResolvedValue([
-      { id: "root-a", name: "A" },
-      { id: "root-b", name: "B" },
-    ]);
-    // Nothing re-declares until the main process reports the grant change.
-    await vi.advanceTimersByTimeAsync(30_000);
-    expect(apiPostMock.mock.calls.length).toBe(postsAfterConnect);
-
-    rootsChangedCb?.();
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(apiPostMock.mock.calls.length).toBeGreaterThan(postsAfterConnect);
-    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: ["root-a", "root-b"],
-    });
-    // no reconnect solely for roots change
-    expect(fetchMock.mock.calls.length).toBe(fetchesAfterConnect);
-
-    stopFulfillStream();
-  });
-
-  it("授权根读不出来时保持既有声明，不上报空集", async () => {
-    vi.useFakeTimers();
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockImplementation(async () => sseResponse());
+    // `listRoots` 是永久根语义（设置页 / 附件源 / sidecar 路由消费的同一份），
+    // 会话授权根不在其中——它随 `external-grants` 登记落到服务端那侧的绑定里。
+    listRoots.mockResolvedValue([
+      { id: "root-a", name: "proj" },
+      { id: "root-b", name: "docs" },
+    ]);
 
     startFulfillStream();
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
     await Promise.resolve();
-    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: ["root-a"],
-    });
-    const postsAfterConnect = apiPostMock.mock.calls.length;
 
-    // 主进程读授权根失败（IPC 挂了）——这不等于「用户撤了权」
-    listRoots.mockRejectedValue(new Error("IPC 不可用"));
-    rootsChangedCb?.();
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(apiPostMock).not.toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: [],
-    });
-    expect(apiPostMock.mock.calls.length).toBe(postsAfterConnect);
-    expect(warn).toHaveBeenCalled();
-
+    expect(declaredRoots(fetchMock.mock.calls[0])).toBe("root-a,root-b");
     stopFulfillStream();
-    warn.mockRestore();
   });
 
   it("读取失败时重连仍声明上次已知 roots", async () => {
@@ -366,17 +296,14 @@ describe("fulfillStream", () => {
     // 重连的 GET 会整体替换 hub 里的 session：读不到就不能把 roots 缩成空集
     expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(declaredRoots(fetchMock.mock.calls[1])).toBe("root-a");
-    expect(apiPostMock).not.toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: [],
-    });
+    expect(warn).toHaveBeenCalled();
 
     stopFulfillStream();
     warn.mockRestore();
     vi.mocked(Math.random).mockRestore();
   });
 
-  it("用户撤销全部授权 → 如实上报空集，重连也声明空集", async () => {
+  it("用户撤销全部永久根 → 重连如实声明空集", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockImplementation(async () => sseResponse());
@@ -385,23 +312,10 @@ describe("fulfillStream", () => {
     await vi.advanceTimersByTimeAsync(0);
     await Promise.resolve();
     await Promise.resolve();
-    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: ["root-a"],
-    });
-
-    listRoots.mockResolvedValue([]);
-    rootsChangedCb?.();
-    await vi.advanceTimersByTimeAsync(0);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(apiPostMock).toHaveBeenCalledWith("/v1/fulfill/roots", {
-      device_id: "device-test-1",
-      roots: [],
-    });
+    expect(declaredRoots(fetchMock.mock.calls[0])).toBe("root-a");
 
     // 撤权后再连：上次已知集合不得把真实空集盖回去
+    listRoots.mockResolvedValue([]);
     stopFulfillStream();
     startFulfillStream();
     await vi.advanceTimersByTimeAsync(0);
@@ -413,8 +327,98 @@ describe("fulfillStream", () => {
     stopFulfillStream();
   });
 
-  it("no-ops on web runtime", async () => {
+  it("web 客户端连上同一条流，只当账号态观察者：不声明 caps / roots", async () => {
     isWebRuntimeMock.mockReturnValue(true);
+    // 浏览器里 fsApi 是无害桩（listRoots 恒空），但观察者根本不该去问它：
+    // 「读不到根」与「不承接本地 op」是两件事，只有后者是 web 的事实。
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async () => sseResponse());
+
+    startFulfillStream();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(fetchMock).toHaveBeenCalled();
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toContain("http://localhost:8000/v1/fulfill?");
+    // 空 caps = 服务端选机永不选中本端；空 roots = 不声明任何本地根。
+    expect(declared(call, "caps")).toBe("");
+    expect(declaredRoots(call)).toBe("");
+    expect(declared(call, "device_id")).toMatch(/^web-/);
+    expect(listRoots).not.toHaveBeenCalled();
+    // 设备身份是 Electron 专属；web 连接 id 不得走那条路（否则会漏进 X-Client-Device）。
+    expect(getDeviceIdMock).not.toHaveBeenCalled();
+
+    stopFulfillStream();
+  });
+
+  it("web 观察者收账号态帧（队列快照 / 挂起卡结算）", async () => {
+    isWebRuntimeMock.mockReturnValue(true);
+    const encoder = new TextEncoder();
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                [
+                  'data: {"type":"ready"}\n\n',
+                  'data: {"type":"turn_queue_snapshot","payload":{"conversation_id":"c1","items":[]}}\n\n',
+                  'data: {"type":"paused_card_settled","payload":{"checkpoint_id":"cp1"}}\n\n',
+                ].join(""),
+              ),
+            );
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "text/event-stream" } },
+      ),
+    );
+
+    const frames: unknown[] = [];
+    const unsub = onFulfillFrame((f) => frames.push(f));
+    startFulfillStream();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(frames).toEqual([
+      { type: "ready" },
+      {
+        type: "turn_queue_snapshot",
+        payload: { conversation_id: "c1", items: [] },
+      },
+      { type: "paused_card_settled", payload: { checkpoint_id: "cp1" } },
+    ]);
+    unsub();
+    stopFulfillStream();
+  });
+
+  it("web 观察者重连沿用同一个连接 id（服务端一台一条，不叠会话）", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    isWebRuntimeMock.mockReturnValue(true);
+    const fetchMock = vi.mocked(fetch);
+    fetchMock.mockImplementation(async () => sseResponse({ end: true }));
+
+    startFulfillStream();
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(declared(fetchMock.mock.calls[1], "device_id")).toBe(
+      declared(fetchMock.mock.calls[0], "device_id"),
+    );
+
+    stopFulfillStream();
+    vi.mocked(Math.random).mockRestore();
+  });
+
+  it("no-ops under the offline preview (no backend behind #/preview)", async () => {
+    isWebRuntimeMock.mockReturnValue(true);
+    isWebPreviewMock.mockReturnValue(true);
     const fetchMock = vi.mocked(fetch);
     startFulfillStream();
     await flushMicrotasks();

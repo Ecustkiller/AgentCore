@@ -25,7 +25,7 @@ import {
   minimizeBrowserWindow,
   registerFloatWindowIpc,
 } from "./float-window";
-import { registerFsIpc } from "./fs-service";
+import { registerFsIpc, sweepOpenTempOrphans } from "./fs-service";
 import { registerHostIpc } from "./host-service";
 import {
   registerLocalStoreIpc,
@@ -368,6 +368,9 @@ app.whenReady().then(async () => {
   // 清理上次会话遗留的孤儿会话文件（写盘后 meta 未落即退出）。内部走 meta 锁，
   // 与渲染进程的缓存写入串行，故不 await、不阻塞首屏。
   void sweepOrphanLocalStoreFiles();
+  // 上次会话遗留的只读临时副本（fs:openTempFile）：副本得活到外部程序读完，只能等下次
+  // 启动回收；只扫早于本次启动的目录，正在被打开的那份碰不到。
+  void sweepOpenTempOrphans();
 
   app.on("activate", () => {
     // 只看主窗：真 OS 浮窗存活时仍应能重建主窗。

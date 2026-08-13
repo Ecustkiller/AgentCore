@@ -170,24 +170,25 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
 
   for (const ev of events) {
     switch (ev.type) {
-      case "content_delta":
-        messageLane = foldContentDelta(
-          messageLane,
-          (ev.payload as ContentDeltaPayload).delta,
-        );
+      // `replace`（attach 增量重放的帧级替换）：带标记的帧携带的是末尾那个尚未闭合的
+      // 文本块的全文，换块而非追加——与生产 fold 同一实现（`foldContentDelta`），
+      // 游标增量段的向量（reload_cursor_incremental）就钉这条。
+      case "content_delta": {
+        const p = ev.payload as ContentDeltaPayload;
+        messageLane = foldContentDelta(messageLane, p.delta, p.replace);
         break;
+      }
       case "content_reset":
         messageLane = foldContentReset(
           messageLane,
           (ev.payload as ContentResetPayload).reason,
         );
         break;
-      case "reasoning_delta":
-        messageLane = foldReasoningDelta(
-          messageLane,
-          (ev.payload as ReasoningDeltaPayload).delta,
-        );
+      case "reasoning_delta": {
+        const p = ev.payload as ReasoningDeltaPayload;
+        messageLane = foldReasoningDelta(messageLane, p.delta, p.replace);
         break;
+      }
       case "tool_use_start":
         messageLane = foldToolUseStart(
           messageLane,
@@ -474,6 +475,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "turn_queue_started":
       case "turn_queue_cancelled":
       case "resume_deferred":
+      case "resume_settled":
       case "browser_live_frame":
       case "browser_live_status":
       case "batch_metrics":

@@ -29,7 +29,7 @@ const NOTICE_TTL_MS = 8_000;
 type SettledNotice = { id: string; label: string };
 
 /** 卡名（用产品既有称呼，不另造词）。 */
-const CARD_NAME: Record<InteractionEntry["kind"], string> = {
+export const INTERACTION_CARD_NAME: Record<InteractionEntry["kind"], string> = {
   approval: "工具审批",
   delegation_authorization: "委派授权",
   escalation: "拍板请求",
@@ -41,7 +41,7 @@ const CARD_NAME: Record<InteractionEntry["kind"], string> = {
 };
 
 export function settledElsewhereLabel(entry: InteractionEntry): string {
-  const name = CARD_NAME[entry.kind] ?? "确认";
+  const name = INTERACTION_CARD_NAME[entry.kind] ?? "确认";
   if (entry.kind !== "approval") return name;
   const raw =
     typeof entry.payload.tool_name === "string" ? entry.payload.tool_name : "";

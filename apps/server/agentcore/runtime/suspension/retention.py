@@ -8,6 +8,11 @@ catches the *disconnected, never-resumed* remainder — a turn that paused, lost
 client, and was never continued. A row's ``updated_at`` advances on re-pause
 (resume → pause again), so an actively re-paused turn stays alive; one left alone
 for the retention window is pruned.
+
+Pruning is itself a terminal disposition, so the sweep records it (``expired``)
+exactly like a claim records a settlement: a「继续」that arrives afterwards is told
+its card aged out, instead of that answer being inferred from whether an assistant
+row happens to still exist.
 """
 
 from __future__ import annotations
@@ -20,6 +25,7 @@ from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.errors import is_schema_error
 from agentcore.db.repositories import PausedTurnRepository
+from agentcore.runtime.suspension.persistence import clear_message_pause_latch
 
 logger = get_logger(__name__)
 
@@ -29,7 +35,12 @@ async def run_paused_turn_retention_sweep() -> int:
 
     Batched (``paused_turn_sweep_batch_limit`` per round) so a large backlog is
     cleared without one huge transaction. The cutoff is tz-aware UTC, matching how
-    ``paused_turns.updated_at`` is stamped (``datetime.now(UTC)`` / server ``now()``)."""
+    ``paused_turns.updated_at`` is stamped (``datetime.now(UTC)`` / server ``now()``).
+
+    Each pruned turn is stamped ``expired`` (so a later「继续」is answered「超保留期
+    清理」) and loses its ``usage.paused`` latch: the frame and the latch are two halves
+    of one pause, and a client that reopens on the leftover latch renders a decision
+    card whose「继续」can no longer land."""
     if not settings.structured_suspension_persist_enabled:
         return 0
     before = datetime.now(UTC) - timedelta(days=settings.paused_turn_retention_days)
@@ -38,9 +49,14 @@ async def run_paused_turn_retention_sweep() -> int:
     async with async_session_factory() as session:
         repo = PausedTurnRepository(session)
         while True:
-            deleted = await repo.delete_stale(before=before, limit=limit)
-            total += deleted
-            if deleted < limit:
+            swept = await repo.delete_stale(before=before, limit=limit)
+            total += len(swept)
+            for message_id, conversation_id in swept:
+                await clear_message_pause_latch(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                )
+            if len(swept) < limit:
                 break
     if total:
         logger.info("suspension.retention_swept", deleted=total)

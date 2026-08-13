@@ -60,7 +60,21 @@ class PinnedAddressError(httpx.ConnectError):
     Subclasses ``httpx.ConnectError`` so existing ``except httpx.NetworkError`` paths
     (e.g. the egress breaker in ``read_url._safe_request``) catch it unchanged; its
     ``str()`` is the honest, model-facing reason (see :func:`describe_net_error`).
+
+    ``block`` keeps the :class:`URLBlock` that caused the refusal, so a caller can map a
+    connect-time block to the same stable failure code as the pre-flight one instead of
+    re-parsing the message.
     """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        request: httpx.Request | None = None,
+        block: URLBlock | None = None,
+    ) -> None:
+        super().__init__(message, request=request)
+        self.block = block
 
 
 def web_timeout(read: float = WEB_READ_TIMEOUT) -> httpx.Timeout:
@@ -107,6 +121,24 @@ def is_loopback_host(host: str) -> bool:
         return True
     try:
         return ipaddress.ip_address(h).is_loopback
+    except ValueError:
+        return False
+
+
+def is_local_machine_host(host: str) -> bool:
+    """True when ``host`` names the *caller's own machine* as a request target.
+
+    :func:`is_loopback_host` (``localhost`` / ``127.0.0.0/8`` / ``::1``) plus the
+    unspecified addresses ``0.0.0.0`` / ``::``, which a user typing a bind address means
+    the same way. One predicate so a refusal keeps one reason instead of splitting the
+    same intent across ``BLOCKED_HOST`` (hostnames) and ``PRIVATE_IP`` (literals).
+
+    Classification only — the reject set (:func:`ip_is_safe`) is unchanged.
+    """
+    if is_loopback_host(host):
+        return True
+    try:
+        return ipaddress.ip_address((host or "").strip().lower().rstrip(".")).is_unspecified
     except ValueError:
         return False
 
@@ -211,7 +243,10 @@ def describe_net_error(
 # One definition, shared by read_url (the tool) and the favicon proxy (a route),
 # so both apply identical private-network protection with no drift.
 
-_BLOCKED_HOSTNAMES = {"localhost", "0.0.0.0", "metadata.google.internal"}
+# ``localhost`` / ``0.0.0.0`` are NOT here: they are the same refusal as a 127.x / ::1
+# literal (:data:`URLBlock.LOOPBACK_HOST`), and splitting one intent across two reasons
+# is what produced two different sentences for one situation.
+_BLOCKED_HOSTNAMES = {"metadata.google.internal"}
 # Clash/Mihomo 默认 fake-ip-range = 198.18.0.1/16；198.18.0.0/15 为 RFC 2544 保留段。
 _FAKE_IP_NET = ipaddress.ip_network("198.18.0.0/15")
 
@@ -225,6 +260,10 @@ class URLBlock(Enum):
 
     BAD_SCHEME = "[ERROR] 仅支持 http/https 链接"
     BLOCKED_HOST = "[ERROR] 该主机名禁止访问（本地/内网保留域名）"
+    LOOPBACK_HOST = (
+        "[ERROR] 该地址指向本机回环 / 本地监听地址（localhost、127.x、::1、0.0.0.0），"
+        "服务端进程访问不到用户本机上的服务，已拒绝"
+    )
     DNS_FAIL = (
         "[ERROR] 无法解析该域名（DNS 解析失败或网络不可达）。"
         "请确认链接拼写正确且可公网访问；若反复出现，可能是当前环境出网受限。"
@@ -238,7 +277,12 @@ class URLBlock(Enum):
     )
 
 
-PRIVATE_IP_BLOCKS = frozenset({URLBlock.PRIVATE_IP, URLBlock.PRIVATE_IP_FAKE_PROXY})
+# Every refusal that means「目标不是公网可达地址」. Callers gate on this set to decide
+# whether to refuse (``workspace.git`` clone guard), so LOOPBACK_HOST belongs here:
+# naming the loopback reason separately must not narrow anyone's reject set.
+PRIVATE_IP_BLOCKS = frozenset(
+    {URLBlock.PRIVATE_IP, URLBlock.PRIVATE_IP_FAKE_PROXY, URLBlock.LOOPBACK_HOST}
+)
 
 
 def is_fake_ip_proxy_signature(ip: str) -> bool:
@@ -250,9 +294,16 @@ def is_fake_ip_proxy_signature(ip: str) -> bool:
 
 
 def private_ip_block(*ips: str) -> URLBlock:
-    """Pick the SSRF private-IP refusal; append fake-IP proxy hint when the signature matches."""
+    """Pick the address-level refusal: fake-IP proxy > loopback > generic private.
+
+    Loopback only when *every* blocked address is the local machine: an answer that
+    mixes a public IP with a loopback one is a rebinding attempt, and must keep reading
+    as an SSRF block rather than「你本机的服务」.
+    """
     if any(is_fake_ip_proxy_signature(ip) for ip in ips):
         return URLBlock.PRIVATE_IP_FAKE_PROXY
+    if ips and all(is_local_machine_host(ip) for ip in ips):
+        return URLBlock.LOOPBACK_HOST
     return URLBlock.PRIVATE_IP
 
 
@@ -313,6 +364,8 @@ async def classify_url(url: str) -> URLBlock | None:
         hostname = (parsed.hostname or "").strip().rstrip(".").lower()
         if not hostname:
             return URLBlock.BAD_SCHEME
+        if is_local_machine_host(hostname):
+            return URLBlock.LOOPBACK_HOST
         if hostname in _BLOCKED_HOSTNAMES:
             return URLBlock.BLOCKED_HOST
         if hostname.endswith(".local") or hostname.endswith(".internal"):
@@ -376,11 +429,14 @@ async def _resolve_pinned_ip(host: str, port: int, *, request: httpx.Request) ->
     try:
         addrs = await _getaddrinfo(host, port)
     except OSError as e:
-        raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request) from e
+        raise PinnedAddressError(
+            URLBlock.DNS_FAIL.value, request=request, block=URLBlock.DNS_FAIL
+        ) from e
     if not addrs:
-        raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request)
+        raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request, block=URLBlock.DNS_FAIL)
     if not all(ip_is_safe(a) for a in addrs):
-        raise PinnedAddressError(private_ip_block(*addrs).value, request=request)
+        block = private_ip_block(*addrs)
+        raise PinnedAddressError(block.value, request=request, block=block)
     return addrs[0]
 
 
@@ -411,13 +467,16 @@ class PinnedIPTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         host = request.url.host
         if not host:
-            raise PinnedAddressError(URLBlock.DNS_FAIL.value, request=request)
+            raise PinnedAddressError(
+                URLBlock.DNS_FAIL.value, request=request, block=URLBlock.DNS_FAIL
+            )
 
         literal = _literal_ip(host)
         if literal is not None:
             # No DNS step to race; just enforce the same private/reserved policy.
             if not ip_is_safe(literal):
-                raise PinnedAddressError(private_ip_block(literal).value, request=request)
+                block = private_ip_block(literal)
+                raise PinnedAddressError(block.value, request=request, block=block)
             return await self._inner.handle_async_request(request)
 
         port = request.url.port or (443 if request.url.scheme == "https" else 80)
@@ -451,6 +510,7 @@ __all__ = [
     "describe_net_error",
     "ip_is_safe",
     "is_fake_ip_proxy_signature",
+    "is_local_machine_host",
     "is_loopback_host",
     "is_safe_url",
     "private_ip_block",

@@ -195,6 +195,7 @@ TS_EXPORTS: tuple[TsExport, ...] = (
     TsInterface(run.TurnQueueStartedPayload),
     TsInterface(run.TurnQueueCancelledPayload),
     TsInterface(run.ResumeDeferredPayload),
+    TsInterface(run.ResumeSettledPayload),
     TsInterface(run.ExecutionDetachedPayload),
     TsInterface(run.ExecutionCompletedPayload),
 
@@ -431,6 +432,7 @@ EVENT_PAYLOAD_MODELS: dict[EventType, type[BaseModel]] = {
     EventType.TURN_QUEUE_STARTED: run.TurnQueueStartedPayload,
     EventType.TURN_QUEUE_CANCELLED: run.TurnQueueCancelledPayload,
     EventType.RESUME_DEFERRED: run.ResumeDeferredPayload,
+    EventType.RESUME_SETTLED: run.ResumeSettledPayload,
     EventType.EXECUTION_DETACHED: run.ExecutionDetachedPayload,
     EventType.EXECUTION_COMPLETED: run.ExecutionCompletedPayload,
     EventType.DEBATE_RESULT: debate.DebateResultPayload,

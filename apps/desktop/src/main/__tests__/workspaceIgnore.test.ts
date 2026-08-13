@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   AGENTCORE_ROOT,
   INDEX_REL,
+  INTERNAL_ZONE_NAMES,
   LIST_FILES_SKIP_DIRS,
+  VERSIONS_REL,
   isAttachmentPath,
   isInternalZoneRelPath,
   shouldSkipAiListEntry,
@@ -44,11 +46,28 @@ describe("workspaceIgnore", () => {
     expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/baselines/m.zip`)).toBe(
       true,
     );
+    expect(isInternalZoneRelPath(VERSIONS_REL)).toBe(true);
+    expect(
+      isInternalZoneRelPath(`${AGENTCORE_ROOT}/versions/v1/content.zip`),
+    ).toBe(true);
     expect(isInternalZoneRelPath(AGENTCORE_ROOT)).toBe(false);
     expect(isInternalZoneRelPath(`${AGENTCORE_ROOT}/规则/x.md`)).toBe(false);
     expect(shouldSkipDirName("index", AGENTCORE_ROOT)).toBe(true);
+    expect(shouldSkipDirName("versions", AGENTCORE_ROOT)).toBe(true);
     expect(shouldSkipDirName("规则", AGENTCORE_ROOT)).toBe(false);
     expect(shouldSkipDirName("index", "")).toBe(false);
+    // 裸名 versions（用户项目里的目录）不得误伤
+    expect(shouldSkipDirName("versions", "")).toBe(false);
+    expect(LIST_FILES_SKIP_DIRS.has("versions")).toBe(false);
+  });
+
+  it("internal zone names mirror server stage_dirs.INTERNAL_ZONE_NAMES", () => {
+    expect([...INTERNAL_ZONE_NAMES].sort()).toEqual([
+      "baselines",
+      "index",
+      "trash",
+      "versions",
+    ]);
   });
 
   it("skips system file suffixes (UI + AI)", () => {

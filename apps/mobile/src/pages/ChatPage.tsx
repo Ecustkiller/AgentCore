@@ -12,7 +12,7 @@ import {
 import { sendMidFlightMessage } from "@/api/midFlight";
 import {
   getLastModelProfileId,
-  profileDisplayLabel,
+  resolveDisplayProfile,
   setLastModelProfileId,
   useModelProfiles,
 } from "@/api/modelProfiles";
@@ -48,6 +48,7 @@ import {
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
 import { CollapsibleUserText } from "@/components/CollapsibleUserText";
+import { ComposerModelBar } from "@/components/ComposerModelBar";
 import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
@@ -80,6 +81,7 @@ import {
   kindFromColdResolvedEvent,
   listColdPending,
   markColdDeferred,
+  markColdOrphaned,
   markColdResolved,
   markColdSubmitting,
   rekeyColdMessageId,
@@ -101,10 +103,17 @@ import {
   describeStreamHttpError,
   emptyChatCopy,
   errorActionForCode,
+  isPausedFrameGone,
   resolveEmptyFailureNotice,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
-import { planFollowSegment, turnMessageId } from "@/lib/followTurns";
+import {
+  type FollowTurnCursor,
+  planFollowIdle,
+  planFollowSegment,
+  readSegmentHead,
+  turnMessageId,
+} from "@/lib/followTurns";
 import { placeMemoryUpdates } from "@/lib/memoryAnchors";
 import {
   type MessageDelivery,
@@ -127,6 +136,7 @@ import {
   dropRunningAssistantTail,
   removeLiveTurn,
 } from "@/lib/reconnectLiveTurn";
+import { withLocalRecoveryMoment } from "@/lib/recoveryMoment";
 import {
   createHarvestRefreshScheduler,
   dropSettledLiveTurns,
@@ -167,6 +177,7 @@ import {
   extractRunToolCalls,
   extractStageCardTraces,
   extractToolPhases,
+  extractTurnCollab,
   extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
@@ -301,7 +312,12 @@ function extractTurnChrome(events: SSEEvent[]): {
     if (e.type === "error") {
       const p = e.payload as ErrorPayload;
       errorCode = p.code;
-      errorMessage = p.message;
+      // 429 / 配额闸门的恢复时刻在这里就换成本机时区（下游的红卡 / 空泡文案 / 收尾提示
+      // 都读这一份），拿不到结构化时刻则原样是服务端那句。
+      errorMessage = withLocalRecoveryMoment(p.message, {
+        code: p.code,
+        context: p.context,
+      });
       emptyDiagnosis = p.context?.empty_diagnosis;
       bodyKind = p.context?.body_kind;
       baseUrl = p.context?.base_url;
@@ -602,6 +618,18 @@ function summarize(p: ProjectedTurn): string | null {
   return null;
 }
 
+/** 本回合最后一张图的 `execution_id`（按人干预的提交目标）——跨回合续接时以新图为准。 */
+function teamExecutionId(process: ProjectedTurn["process"]): string | null {
+  for (let i = process.length - 1; i >= 0; i -= 1) {
+    const step = process[i];
+    if (step.kind === "team" && step.execution_id) return step.execution_id;
+    if (step.kind === "graph_append" && step.execution_id) {
+      return step.execution_id;
+    }
+  }
+  return null;
+}
+
 function extractTurnWarning(events: SSEEvent[]): string | null {
   for (const e of events) {
     if (e.type === "turn_warning") {
@@ -691,6 +719,11 @@ function AssistantBubble({
     () => extractEvidenceLedger(turn.events),
     [turn.events],
   );
+  // 回合协作计数（收尾才有）：完成态团队条的「互相把关」一行；旁路读原始事件。
+  const turnCollab = useMemo(
+    () => extractTurnCollab(turn.events),
+    [turn.events],
+  );
   const graphAppendActKinds = useMemo(
     () => extractGraphAppendActKinds(turn.events),
     [turn.events],
@@ -715,12 +748,14 @@ function AssistantBubble({
         teamNotes: p.teamNotes,
         status: p.status,
         conversationId,
+        executionId: teamExecutionId(p.process),
         pendingEscalations,
         escalationsInteractive: live,
         runToolCalls,
         workerToolPhases,
         evidenceLedger: debateEvidenceLedger,
         elapsedMs: turnElapsedMs(turn.events),
+        collab: turnCollab,
       }
     : undefined;
   const empty =
@@ -936,10 +971,15 @@ function HistoryAssistant({
             acts: p.acts,
             teamNotes: p.teamNotes,
             status: p.status,
+            conversationId,
+            executionId: teamExecutionId(p.process),
             runToolCalls: extractRunToolCalls(events),
             // 辩论场级 `#eN`（勿写入 Message.evidence_ledger 语义）
             evidenceLedger: extractEvidenceLedger(events),
             elapsedMs: turnElapsedMs(events),
+            // 重载路径只能读 REST 列：message_end 是 DERIVED，journal 回放的收口帧只带
+            // finish_reason，`collab` 落在 messages.usage 里（与桌面 m.collab 同源）。
+            collab: m.collab ?? null,
           }
         : undefined;
     return {
@@ -956,7 +996,7 @@ function HistoryAssistant({
       foldedProcess: p.process,
       chrome: extractTurnChrome(events),
     };
-  }, [m.runs]);
+  }, [m.runs, m.collab, conversationId]);
   // REST process 权威；旧 journal 未落 user_interjection marker 时用 fold 回放补位。
   const restProcess = m.runs?.process ?? undefined;
   const process = (() => {
@@ -1160,6 +1200,12 @@ export function ChatPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  // 创建会话在途时手里捧着的那份草稿：按下发送就收走输入框并把它摆成气泡（不等 POST 回来），
+  // 失败时整份还回输入框。
+  const [draftPending, setDraftPending] = useState<{
+    text: string;
+    attachments: MessageAttachment[];
+  } | null>(null);
   /** 诚实停止过渡：stopping 时 UI 不先于后端进终态；与 sending 合成 busy。 */
   const [stopPhase, setStopPhase] = useState<StopUiPhase>("idle");
   const [error, setError] = useState<ChatError | null>(null);
@@ -1267,13 +1313,14 @@ export function ChatPage() {
   /** 对话级订阅（`follow`）的连接槽——与本端自发流互斥，见 {@link claimLocalStream}。 */
   const followRef = useRef<AbortController | null>(null);
   /** 该订阅正在跟播的回合；`message_id` 变 = 另一端起了新回合，另开气泡。 */
-  const followTurnRef = useRef<{
-    messageId: string | null;
-    /** `null` = 该回合本端已折完，这一段是多余重放，静音丢到下一个 `message_id`。 */
-    turnId: string | null;
-  } | null>(null);
+  const followTurnRef = useRef<FollowTurnCursor | null>(null);
   /** 下一条订阅的首个回合段该认领的既有气泡（断线重连 / 重开续看），而不是新开一个。 */
   const followAdoptRef = useRef<string | null>(null);
+  /**
+   * 这条订阅是**重连**挂上的（手点重连 / 回前台 / 服务端关流后重挂）。断线期间另一端整跑完
+   * 的回合不会被重放（服务端只重放仍在跑的 run），所以连上确认空闲后要补一次消息窗对账。
+   */
+  const followReconnectedRef = useRef(false);
   /** 挂订阅时本端认为「有回合在跑」——空闲信号即证伪：撤空转气泡 + 回读终稿。 */
   const expectLiveRunRef = useRef(false);
   /** 重挂订阅的代号（回前台 / 手动重连 / 本端自发流让位后归位）。 */
@@ -1322,6 +1369,17 @@ export function ChatPage() {
   /** 主路 + mid-flight 在途数；>0 则 sending。 */
   const inflightRef = useRef(0);
   const stopPhaseRef = useRef<StopUiPhase>("idle");
+  /**
+   * 「正在建会话」的同步栓。不能用 `busy`（`sending` 是 React 派生态，`setSending` 要到下一帧
+   * 才生效）：同一帧里的两次提交（双击 / Enter 连按 / 触摸+点击双触发）会一起穿过闸门各建一条
+   * 会话——线上 7 天 8 起重复会话就是这么来的（最短间隔 14ms）。栓在第一个 await 之前置位。
+   */
+  const creatingConversationRef = useRef(false);
+  /**
+   * 建会话的幂等键，生命周期跟着这份草稿走：同一份草稿重发（失败重试）复用同一把，服务端同键
+   * 只会给回同一条会话；发送成功或用户把草稿清空后轮换。
+   */
+  const draftRequestIdRef = useRef<string | null>(null);
 
   const markStreamStart = () => {
     inflightRef.current += 1;
@@ -1394,6 +1452,7 @@ export function ChatPage() {
     followRef.current = null;
     followTurnRef.current = null;
     followAdoptRef.current = null;
+    followReconnectedRef.current = false;
     expectLiveRunRef.current = false;
     abortRef.current = null;
     setFollowRunning(false);
@@ -1688,6 +1747,10 @@ export function ChatPage() {
       setError(null);
       setQueueDroppedHint(null);
       setSending(false);
+      // 全新的草稿面：栓、在途草稿、幂等键一起归零（上一份草稿已经落成会话或被丢弃）。
+      creatingConversationRef.current = false;
+      draftRequestIdRef.current = null;
+      setDraftPending(null);
       resetFollowState();
       clearStopping();
       setPaused([]);
@@ -1718,6 +1781,9 @@ export function ChatPage() {
     setError(null);
     setQueueDroppedHint(null);
     setSending(false);
+    // 会话已经落地：在途草稿交棒给 pendingFirstSend 的首发气泡。
+    creatingConversationRef.current = false;
+    setDraftPending(null);
     resetFollowState();
     setPaused([]);
     clearColdInteractions();
@@ -1904,6 +1970,8 @@ export function ChatPage() {
         // 失效。用连接时长挡热循环：老后端不认 follow，会立刻 204 结束。
         if (followRef.current !== ac) return;
         if (Date.now() - openedAt >= FOLLOW_REHANG_MIN_MS) {
+          // 关流到重挂之间另一端可能整跑完一个回合：重挂后确认空闲时补一次消息窗对账。
+          followReconnectedRef.current = true;
           setFollowEpoch((e) => e + 1);
         }
       } catch (e) {
@@ -1934,10 +2002,7 @@ export function ChatPage() {
   routeFollowEventRef.current = (cid, event) => {
     const plan = planFollowSegment({
       cursor: followTurnRef.current,
-      messageId:
-        event.type === "message_start"
-          ? String((event.payload as MessageStartPayload).message_id || "")
-          : "",
+      head: readSegmentHead(event),
       adoptTurnId: followAdoptRef.current,
       turns,
       newTurnId: () => crypto.randomUUID(),
@@ -1947,21 +2012,23 @@ export function ChatPage() {
     // 不必为它回读；不知道 = 另一端刚起的回合，本端快照里没有它的用户泡。
     const expected = expectLiveRunRef.current;
     if (plan.action !== "continue") {
-      // 收到回合就说明「有没有在跑」已有答案，续看姿势到此为止。
+      // 收到回合就说明「有没有在跑」已有答案，续看姿势到此为止；这一段自带整段内容，
+      // 重连对账也不必再补（`open` 分支下面自己会回读消息窗）。
       followAdoptRef.current = null;
       expectLiveRunRef.current = false;
+      followReconnectedRef.current = false;
     }
     const turnId = plan.cursor.turnId;
-    if (plan.action === "adopt" && turnId) {
+    if (plan.action === "reset") {
+      // 服务端明令：这一段是本回合的全量重放，先清掉已折的帧再整段重折。
       setTurns((t) => clearLiveTurnEvents(t, turnId));
-    } else if (plan.action === "open" && turnId) {
+    } else if (plan.action === "open") {
       openFollowedTurn(cid, turnId, { reloadTranscript: !expected });
     }
-    if (plan.action === "adopt" || plan.action === "open") {
+    if (plan.action !== "continue") {
       setActiveTurn(turnId);
       setFollowRunning(true);
     }
-    if (!turnId) return; // 多余重放，已折过
     appendEventToTurn(turnId, event);
     // 订阅不随回合收口断流，所以 busy 只能由终态帧解除（本端自发流是靠流结束）。
     if (event.type === "message_end") setFollowRunning(false);
@@ -1979,18 +2046,33 @@ export function ChatPage() {
   };
 
   /**
-   * 订阅报「连上来时没有回合在跑」（旧 204 的对话级等价物）。本端没在等回合就是常态——
-   * 停在空闲对话上正该如此，什么都不做。本端在等（重连 / 重开续看）则说明回合在我们连上之前
-   * 就收口了：撤掉等不到终态的空转气泡，回读持久化终稿。
+   * 订阅报「连上来时没有回合在跑」（旧 204 的对话级等价物）。本端在等回合（重连 / 重开续看）
+   * 说明它在我们连上之前就收口了：撤掉等不到终态的空转气泡，回读持久化终稿。本端没在等则通常
+   * 是常态（停在空闲对话上），只有重连挂上的那次要补一趟消息窗对账——见 {@link planFollowIdle}。
    */
   const settleFollowIdleRef = useRef<(cid: string) => void>(() => {});
   settleFollowIdleRef.current = (cid) => {
-    const adopt = followAdoptRef.current;
+    const plan = planFollowIdle({
+      expectLiveRun: expectLiveRunRef.current,
+      adoptTurnId: followAdoptRef.current,
+      reconnected: followReconnectedRef.current,
+      localStreamActive: abortRef.current !== null,
+    });
     followAdoptRef.current = null;
-    if (!expectLiveRunRef.current) return;
+    followReconnectedRef.current = false;
+    if (plan.kind === "none") return;
+    if (plan.kind === "reconcile") {
+      // 只补消息窗：`dropFolded` 撤掉内容已随这次回读进 history 的已收口气泡（history 与 turns
+      // 是简单拼接，留着就是双份），仍在折的气泡一个不动。
+      void reloadTranscript(cid, { dropFolded: true });
+      return;
+    }
     expectLiveRunRef.current = false;
     setFollowRunning(false);
-    void reloadTranscript(cid, { staleTurnId: adopt, dropFolded: true });
+    void reloadTranscript(cid, {
+      staleTurnId: plan.staleTurnId,
+      dropFolded: true,
+    });
   };
 
   /**
@@ -2043,6 +2125,8 @@ export function ChatPage() {
     const cid = conversationId;
     abortRef.current?.abort();
     followRef.current?.abort();
+    // 冻结期间另一端可能整跑完一个回合——它不会被重放，只能靠空闲时的消息窗对账补上。
+    followReconnectedRef.current = true;
     const rejoinTurnId = activeTurnIdRef.current;
     if (rejoinTurnId) {
       // 同步摆好「续看」姿势：解冻后本端流的收尾会立刻让订阅归位，那时快照还没回来——
@@ -2070,6 +2154,8 @@ export function ChatPage() {
     expectLiveRunRef.current = false;
     followAdoptRef.current = null;
     followTurnRef.current = null;
+    // 这趟回读就是重连对账，别让订阅的空闲信号再补一次。
+    followReconnectedRef.current = false;
     setFollowRunning(false);
     void reloadTranscript(cid, {
       staleTurnId: activeTurnIdRef.current,
@@ -2299,25 +2385,43 @@ export function ChatPage() {
   // routes to /c/:id where the remounted page POST+streams the message (via pendingFirstSend).
   // Keeps the empty-shell-conversation cost off「新建」— the row only exists once you commit.
   async function startDraft() {
-    const text = input.trim();
+    const raw = input;
+    const text = raw.trim();
     if (!hasSendableDraft(text, attachments) || conversationId || busy) return;
+    // 同步栓：必须在第一个 await 之前置位，否则同帧的第二次提交照样进得来（见 ref 注释）。
+    if (creatingConversationRef.current) return;
+    creatingConversationRef.current = true;
     const outgoing = attachments;
+    if (!draftRequestIdRef.current) {
+      draftRequestIdRef.current = crypto.randomUUID();
+    }
+    const clientRequestId = draftRequestIdRef.current;
     setError(null);
     setSending(true);
+    // 先收草稿、先摆气泡：手机上创建 + 首发要走两趟网，等 POST 回来才有反应会让人以为没发出去。
+    setInput("");
+    setAttachments([]);
+    setAttachError(null);
+    setDraftPending({ text, attachments: outgoing });
     try {
       // 定案 B: snapshot chosen / last-used profile at create (omit → server writes then-default).
       const id = await createConversation(undefined, {
         ...(permissionDraftTouched ? { permission_axes: permissionAxes } : {}),
         ...(currentProfileId ? { model_profile_id: currentProfileId } : {}),
+        client_request_id: clientRequestId,
       });
       pendingFirstSend = { id, text, attachments: outgoing };
-      setInput("");
-      setAttachments([]);
-      setAttachError(null);
+      // 这份草稿到此为止：下一份草稿换新键。
+      draftRequestIdRef.current = null;
       navigate(`/c/${id}`, { replace: true });
     } catch (e) {
+      // 整份还给用户（键留着：重发的还是同一份草稿，服务端同键不会再建一条）。
+      setInput(raw);
+      setAttachments(outgoing);
+      setDraftPending(null);
       setError({ text: e instanceof Error ? e.message : "创建会话失败" });
       setSending(false);
+      creatingConversationRef.current = false;
     }
   }
 
@@ -2571,22 +2675,22 @@ export function ChatPage() {
     });
   }
 
-  // Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b). Resets
-  // the partial bubble (the replay re-sends the full transcript-so-far), marks it for the
-  // conversation subscription to 认领, and re-hangs that subscription — the replay refills
-  // the bubble and the live tail carries on. 回合真的已经收口时不再有 204 兜底，改由订阅的
-  // 空闲信号收口（settleFollowIdle：撤气泡 + 回读终稿）。一再失败就出手动「重连」。
+  // Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b). Marks the
+  // partial bubble for the conversation subscription to 认领 and re-hangs that subscription —
+  // the replay段 的段首自带全量重放标记，气泡由它清（本端不再抢着先清，重连到一半也不会白屏）；
+  // 清完整段重折，live tail 接着跑。回合真的已经收口时不再有 204 兜底，改由订阅的空闲信号收口
+  // （settleFollowIdle：撤气泡 + 回读终稿）。一再失败就出手动「重连」。
   // 出队开跑后队尾可能是新 turn——目标须跟 activeTurnIdRef（与投影约定一致），禁 turns[-1]。
   function reconnect() {
     if (!conversationId) return;
     setError(null);
     clearStopping();
-    // SSE 重连后对账排队条（权威 GET）。
+    // SSE 重连后对账排队条（权威 GET）；消息窗对账在订阅报空闲时补（planFollowIdle）。
     reconcileQueuedRef.current(conversationId);
+    followReconnectedRef.current = true;
     const reconnectTurnId = activeTurnIdRef.current;
     if (reconnectTurnId) {
       setActiveTurn(reconnectTurnId);
-      setTurns((t) => clearLiveTurnEvents(t, reconnectTurnId));
       followAdoptRef.current = reconnectTurnId;
       expectLiveRunRef.current = true;
       setFollowRunning(true);
@@ -2754,17 +2858,20 @@ export function ChatPage() {
         }
       }
     } catch (err) {
-      // 挂起帧已经不在了 = 另一端先放行了这张卡（先到先得）。别复活它、更别当掉线去重连：
-      // 收口成「已由另一端处理」，否则用户只会一点再点、次次 404。
-      if (err instanceof StreamHttpError && err.status === 404) {
+      // 挂起帧真的不在了（超保留期被清理 / 回合已重新生成或删除）。「已由另一端处理」不再走
+      // 这条路——那种幂等成功现在回 200 + EPHEMERAL `resume_settled`，流正常收尾后由上面按结果
+      // 收卡。这里剩的是诚实失效：卡作废（不是「被答了」），也不放回可点——放回只会请用户一点
+      // 再点、次次 404。到底是哪一种由后端那两句话说清，挂上错误条别丢。别当掉线去重连。
+      // 对齐桌面 isPausedFrameGone + interactionSubmit 的 markOrphaned 分支。
+      if (isPausedFrameGone(err)) {
         for (const entry of coldTargets) {
-          noteRemoteSettlementFromReceipt({
-            interactionId: entry.id,
-            conversationId,
+          markColdOrphaned(entry.id, {
             kind: entry.kind,
+            conversationId,
+            messageId: entry.messageId,
           });
-          markColdResolved({ kind: entry.kind, id: entry.id });
         }
+        setError({ text: describeStreamHttpError(err).message });
         return;
       }
       for (const entry of coldTargets) {
@@ -2841,11 +2948,15 @@ export function ChatPage() {
     }
   }
 
-  // 当前组合：会话快照 → account default 展示名 → placeholder（「＋」菜单展示）。
-  const modelLabel =
-    profileDisplayLabel(modelProfiles, currentProfileId) ?? "默认组合";
+  // 当前组合：会话快照 → account default → placeholder（composer 上方常驻 + 「＋」菜单）。
+  const currentProfile = resolveDisplayProfile(modelProfiles, currentProfileId);
+  const modelLabel = currentProfile?.name ?? "默认组合";
+  const modelIsPreset = currentProfile?.kind === "system";
   const permissionLabel = axesShortLabel(permissionAxes);
-  const composerLocked = history === null || stopPhase === "stopping";
+  // 建会话在途：草稿已经收进 draftPending 摆成气泡，composer 停在「发送中」等这一趟走完。
+  const creatingConversation = draftPending !== null;
+  const composerLocked =
+    history === null || stopPhase === "stopping" || creatingConversation;
   const hasDraft = hasSendableDraft(input, attachments);
   const trailing = composerTrailingSlots({
     busy,
@@ -2853,6 +2964,13 @@ export function ChatPage() {
     voiceSupported: voice.isSupported,
     voiceActive: voice.isRecording || voice.state === "processing",
   });
+
+  // 幂等键跟草稿走：用户自己把草稿清空 → 下次发送换新键（提交时的清空不算，那份还在飞）。
+  useEffect(() => {
+    if (!hasDraft && !creatingConversationRef.current) {
+      draftRequestIdRef.current = null;
+    }
+  }, [hasDraft]);
 
   // Auto-grow textarea (cap ~5 lines) so multi-line drafts don't steal the button row.
   // useLayoutEffect + assign `el.value = input` so the dep is real (not a fake trigger)
@@ -2947,6 +3065,7 @@ export function ChatPage() {
           {history !== null &&
             history.length === 0 &&
             turns.length === 0 &&
+            !creatingConversation &&
             !error &&
             (() => {
               // 平台代付、开箱即用：无「先接入模型」门，keyless 直接进欢迎态。
@@ -3009,6 +3128,24 @@ export function ChatPage() {
               </div>
             );
           })}
+          {/* 建会话在途的那份草稿：先摆气泡再等 POST，按下发送立刻看得见自己发了什么。 */}
+          {draftPending && (
+            <div className="turn" data-testid="draft-pending-turn">
+              {draftPending.text ? (
+                <div className="bubble user">
+                  <CollapsibleUserText contentKey={draftPending.text}>
+                    {draftPending.text}
+                  </CollapsibleUserText>
+                  <AttachmentChips items={draftPending.attachments} />
+                </div>
+              ) : (
+                <div className="bubble user">
+                  <AttachmentChips items={draftPending.attachments} />
+                </div>
+              )}
+              <p className="muted hint">正在创建会话…</p>
+            </div>
+          )}
           {/* 锚不到更晚用户消息的记忆卡 (③ §1.6): 最近一轮的固化结果，留在线程尾部。卡自己
               会滤掉空更新，所以最常见的「没有」情况什么也不渲染。 */}
           <MemoryUpdateCard updates={memoryAnchors.tail} />
@@ -3206,7 +3343,7 @@ export function ChatPage() {
       )}
 
       {/* 生成中有草稿：插队入口收到行外轻链（对齐桌面 Ctrl+Enter，不挤主槽）。 */}
-      {trailing.showSteerHint && (
+      {!creatingConversation && trailing.showSteerHint && (
         <div
           className="composer-delivery-hint"
           data-testid="composer-delivery-hint"
@@ -3227,6 +3364,13 @@ export function ChatPage() {
           </button>
         </div>
       )}
+
+      <ComposerModelBar
+        label={modelLabel}
+        preset={modelIsPreset}
+        disabled={history === null || busy}
+        onOpen={() => setPickerOpen(true)}
+      />
 
       <div className="composer">
         <input
@@ -3264,56 +3408,71 @@ export function ChatPage() {
             void onSubmit();
           }}
         />
+        {/* 建会话在途：还没有 run 可停，主槽摆不可点的「发送中」，别拿 Stop 骗人。 */}
+        {creatingConversation && (
+          <button
+            type="button"
+            className="send-btn"
+            disabled
+            aria-label="发送中"
+            title="发送中"
+            data-testid="draft-sending-btn"
+          >
+            <Loader2 size={18} className="voice-spin" aria-hidden />
+          </button>
+        )}
         {/* 态敏主槽：空闲空草稿=麦；有字=发送；生成中=Stop（有草稿时主发=queue，行外插队）。 */}
-        {trailing.row.map((slot) => {
-          if (slot === "send") {
+        {!creatingConversation &&
+          trailing.row.map((slot) => {
+            if (slot === "send") {
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  className="send-btn"
+                  onClick={() => void onSubmit()}
+                  disabled={history === null || !hasDraft}
+                  aria-label="发送"
+                  title="发送"
+                >
+                  <Send size={18} aria-hidden />
+                </button>
+              );
+            }
+            if (slot === "stop") {
+              return (
+                <button
+                  key={slot}
+                  type="button"
+                  className={`stop${stopPhase === "stopping" ? " stopping" : ""}`}
+                  onClick={stop}
+                  aria-label={stopButtonLabel(stopPhase)}
+                  title={stopButtonLabel(stopPhase)}
+                  aria-busy={stopPhase === "stopping"}
+                >
+                  {stopPhase === "stopping" ? (
+                    <Loader2 size={18} className="voice-spin" aria-hidden />
+                  ) : (
+                    <Square size={16} aria-hidden />
+                  )}
+                </button>
+              );
+            }
             return (
-              <button
+              <VoiceButton
                 key={slot}
-                type="button"
-                className="send-btn"
-                onClick={() => void onSubmit()}
-                disabled={history === null || !hasDraft}
-                aria-label="发送"
-                title="发送"
-              >
-                <Send size={18} aria-hidden />
-              </button>
+                state={voice.state}
+                disabled={composerLocked}
+                onClick={voice.toggle}
+              />
             );
-          }
-          if (slot === "stop") {
-            return (
-              <button
-                key={slot}
-                type="button"
-                className={`stop${stopPhase === "stopping" ? " stopping" : ""}`}
-                onClick={stop}
-                aria-label={stopButtonLabel(stopPhase)}
-                title={stopButtonLabel(stopPhase)}
-                aria-busy={stopPhase === "stopping"}
-              >
-                {stopPhase === "stopping" ? (
-                  <Loader2 size={18} className="voice-spin" aria-hidden />
-                ) : (
-                  <Square size={16} aria-hidden />
-                )}
-              </button>
-            );
-          }
-          return (
-            <VoiceButton
-              key={slot}
-              state={voice.state}
-              disabled={composerLocked}
-              onClick={voice.toggle}
-            />
-          );
-        })}
+          })}
       </div>
 
       {moreOpen && (
         <ComposerMoreSheet
           modelLabel={modelLabel}
+          modelPreset={modelIsPreset}
           permissionLabel={permissionLabel}
           disabled={history === null || busy}
           onClose={() => setMoreOpen(false)}

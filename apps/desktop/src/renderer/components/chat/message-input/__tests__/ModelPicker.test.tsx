@@ -223,6 +223,25 @@ describe("ModelPicker", () => {
     expect(screen.getByText("研究")).toBeTruthy();
   });
 
+  it("marks the collapsed chip as 预置 only for system profiles", () => {
+    mockProfiles(profiles());
+    const { unmount } = renderPicker();
+    // 折叠态（下拉未展开，「系统预置」分组标题不在）就能看出跑的是平台预置组合。
+    expect(screen.queryByText("系统预置")).toBeNull();
+    expect(screen.getByText("预置")).toBeTruthy();
+    expect(screen.getByLabelText("模型组合：GLM-5.2（预置）")).toBeTruthy();
+    unmount();
+
+    // 用户自建组合不挂标识。
+    useConversationStore.setState({ currentConversationId: "c1", byId: {} });
+    useConversationsMock.mockReturnValue([
+      conv({ id: "c1", modelProfileId: "user-research" }),
+    ]);
+    renderPicker();
+    expect(screen.getByText("研究")).toBeTruthy();
+    expect(screen.queryByText("预置")).toBeNull();
+  });
+
   it("lists system + user profiles and a manage link without follow-default", () => {
     mockProfiles(profiles());
     renderPicker();

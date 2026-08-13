@@ -97,10 +97,13 @@ from .common import StatusResponse
 from .conversations import (
     AutoTitleRequest,
     AutoTitleResponse,
+    ContextGapModel,
     ConversationListResponse,
     ConversationSummary,
     CreateConversationRequest,
     CreateFolderRequest,
+    DeletedConversationListResponse,
+    DeletedConversationSummary,
     DeletedFolderListResponse,
     DeletedFolderSummary,
     FolderGroup,
@@ -134,7 +137,6 @@ from .feedback import (
     UpdateFeedbackStatusRequest,
 )
 from .files import RewriteRequest, RewriteResponse
-from .fulfill import UpdateFulfillRootsRequest
 from .git_credentials import (
     GitCredentialView,
     UpsertGitCredentialRequest,
@@ -400,9 +402,12 @@ __all__ = [
     "AdminConversationReplay",
     # conversations + folders
     "CreateConversationRequest",
+    "ContextGapModel",
     "ConversationSummary",
     "conversation_summary_from_orm",
     "ConversationListResponse",
+    "DeletedConversationSummary",
+    "DeletedConversationListResponse",
     "UpdateConversationRequest",
     "PermissionAxesUpdate",
     "AutoTitleRequest",
@@ -593,8 +598,6 @@ __all__ = [
     "DeviceRegistration",
     "DeviceSummary",
     "DeviceListResponse",
-    # fulfill
-    "UpdateFulfillRootsRequest",
     # feedback
     "CreateFeedbackRequest",
     "FeedbackSummary",

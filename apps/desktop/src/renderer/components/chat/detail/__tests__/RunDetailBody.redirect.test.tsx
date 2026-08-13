@@ -22,6 +22,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const submitRunRedirect = vi.fn();
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
+const toastWarning = vi.fn();
+
+/** 引擎受理了这次干预（服务端回执的正常形）。 */
+const ACCEPTED = { queued: 1, accepted: true, reason: "queued", detail: "" };
 
 vi.mock("@/services/runRedirect", () => ({
   submitRunRedirect: (...args: unknown[]) => submitRunRedirect(...args),
@@ -74,6 +78,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: (...args: unknown[]) => toastSuccess(...args),
     error: (...args: unknown[]) => toastError(...args),
+    warning: (...args: unknown[]) => toastWarning(...args),
   },
 }));
 
@@ -170,9 +175,10 @@ function submitDirection(text: string): void {
 describe("RunDetailBody 改方向确认文案", () => {
   beforeEach(() => {
     submitRunRedirect.mockReset();
-    submitRunRedirect.mockResolvedValue(undefined);
+    submitRunRedirect.mockResolvedValue(ACCEPTED);
     toastSuccess.mockReset();
     toastError.mockReset();
+    toastWarning.mockReset();
   });
 
   it("说清在飞工作已取消 + 正在重跑 + 要重新花钱，不谎报「还在排队」", async () => {
@@ -200,6 +206,27 @@ describe("RunDetailBody 改方向确认文案", () => {
     // 后端立刻取消 + 热续跑：不得再暗示「什么都没发生 / 还在排队」。
     expect(copy).not.toContain("排队");
     expect(copy).not.toContain("下一步接管");
+  });
+
+  it("引擎够不着这个 run：照回执原话说，不谎报「已改方向」", async () => {
+    submitRunRedirect.mockResolvedValue({
+      queued: 0,
+      accepted: false,
+      reason: "no_live_drive",
+      detail: "这批工作的引擎已经退出，改不到了。",
+    });
+    wrap(<RunDetailBody messageId="m1" runId="r1" />);
+
+    submitDirection("改成只看国内竞品");
+
+    await waitFor(() => expect(toastWarning).toHaveBeenCalled());
+    expect(toastSuccess).not.toHaveBeenCalled();
+
+    const [, opts] = toastWarning.mock.calls[0] as [
+      string,
+      { description?: string },
+    ];
+    expect(opts?.description).toBe("这批工作的引擎已经退出，改不到了。");
   });
 
   it("提交失败仍走错误提示，不留假成功", async () => {

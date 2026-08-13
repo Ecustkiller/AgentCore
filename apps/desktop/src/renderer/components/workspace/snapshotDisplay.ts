@@ -1,10 +1,15 @@
 /**
- * Snapshot list presentation helpers (axis-3: auto backup / kept version / system).
+ * Cloud snapshot presentation helpers (axis-3: auto backup / kept version / system),
+ * consumed by the 「改动」 tab timeline (`changesTimeline.ts`).
  *
  * System labels are written by product paths (turn baseline, handoff, export /
  * merge) — they share the same storage as user pins but should not read as
  * 「留版本」. Backend prune policy mirrors this classification
  * (`workspace/snapshot_kinds.py`: baseline max 5, other system max 10, TTL 30d).
+ *
+ * Timeline visibility is a separate axis on top of the classification: hidden rows
+ * still exist, still count against prune policy, and stay restorable through
+ * their own surface — see {@link isHiddenSnapshotLabel}.
  */
 
 export type SnapshotKind = "kept" | "auto" | "system";
@@ -17,7 +22,7 @@ const SYSTEM_EXACT_LABELS = new Set([
   "合回到本机",
 ]);
 
-export function isSystemSnapshotLabel(label: string): boolean {
+function isSystemSnapshotLabel(label: string): boolean {
   if (SYSTEM_EXACT_LABELS.has(label)) return true;
   if (label.startsWith("turn-baseline:")) return true;
   if (label.startsWith("handoff:")) return true;
@@ -30,7 +35,27 @@ export function classifySnapshotLabel(label: string | null): SnapshotKind {
   return "kept";
 }
 
-/** Row title shown in the snapshots panel. */
+/**
+ * Labels withheld from the timeline. Two reasons, one outcome: `turn-baseline:`
+ * is the same object the 「改动」 tab already lists per turn with file-level diff,
+ * and the export / preview / merge labels are transport byproducts nobody asked
+ * to keep. `handoff:` stays visible — 「本机交接」 is a milestone with no
+ * equivalent elsewhere.
+ */
+function isHiddenSnapshotLabel(label: string | null): boolean {
+  if (!label) return false;
+  if (label.startsWith("turn-baseline:")) return true;
+  return SYSTEM_EXACT_LABELS.has(label);
+}
+
+/** Timeline-visible subset — see {@link isHiddenSnapshotLabel}. */
+export function visibleSnapshots<T extends { label: string | null }>(
+  snaps: readonly T[],
+): T[] {
+  return snaps.filter((s) => !isHiddenSnapshotLabel(s.label));
+}
+
+/** Card title shown on a timeline version entry. */
 export function snapshotDisplayTitle(label: string | null): string {
   if (!label) return "自动备份";
   if (label.startsWith("turn-baseline:")) return "回合开始前";
@@ -45,19 +70,4 @@ export function snapshotDisplayHint(label: string | null): string | null {
     return label;
   }
   return null;
-}
-
-export function groupSnapshotsByKind<T extends { label: string | null }>(
-  snaps: readonly T[],
-): { kept: T[]; auto: T[]; system: T[] } {
-  const kept: T[] = [];
-  const auto: T[] = [];
-  const system: T[] = [];
-  for (const s of snaps) {
-    const kind = classifySnapshotLabel(s.label);
-    if (kind === "kept") kept.push(s);
-    else if (kind === "auto") auto.push(s);
-    else system.push(s);
-  }
-  return { kept, auto, system };
 }

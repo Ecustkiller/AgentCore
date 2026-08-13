@@ -3,6 +3,7 @@ import { buildAgentNodePresentation } from "../presentation";
 import {
   type AgentNodeData,
   buildRevisionBadge,
+  failureDetailSentence,
   revisionFaceHint,
   revisionFeedbackSummary,
   revisionVersionBadge,
@@ -394,11 +395,12 @@ describe("buildAgentNodePresentation revision face", () => {
     expect(failed.statusFace.cls).toContain("destructive");
   });
 
-  it("surfaces llm abort as 模型中断 on face + full error in peek", () => {
+  it("surfaces llm abort as 模型中断 on face + curated sentence in peek", () => {
     const p = buildAgentNodePresentation(
       baseNode({
         status: "failed",
         error: "模型响应中断，已保留已生成内容，可继续。",
+        failureKind: "model",
         outputPreview: "",
       }),
     );
@@ -406,8 +408,38 @@ describe("buildAgentNodePresentation revision face", () => {
     expect(p.statusFace.cls).toContain("destructive");
     expect(p.peekActivity).toEqual({
       heading: "失败原因",
-      text: "模型响应中断，已保留已生成内容，可继续。",
+      text: failureDetailSentence("model", null),
     });
+  });
+
+  it("never leaks raw run.error into the peek (infra / 结构闸 text)", () => {
+    const gateError =
+      "结构闸：缺少 audit JSON 产物：`AgentCore/文档/reviews/x.audit.json`";
+    const p = buildAgentNodePresentation(
+      baseNode({
+        status: "failed",
+        error: gateError,
+        failureKind: "format",
+        outputPreview: "",
+      }),
+    );
+    expect(p.peekActivity?.text).toBe(failureDetailSentence("format", null));
+    expect(p.peekActivity?.text).not.toContain("结构闸");
+    expect(p.peekActivity?.text).not.toContain(".audit.json");
+  });
+
+  it("peek keeps the saved-files fact when the run landed products", () => {
+    const p = buildAgentNodePresentation(
+      baseNode({
+        status: "failed",
+        error: "ConnectError: upstream 503",
+        failureKind: "call",
+        productLanded: true,
+        outputPreview: "",
+      }),
+    );
+    expect(p.peekActivity?.text).toBe(failureDetailSentence("call", true));
+    expect(p.peekActivity?.text).not.toContain("ConnectError");
   });
 
   it("surfaces quality failureKind as 未达标 even when error lacks keywords", () => {

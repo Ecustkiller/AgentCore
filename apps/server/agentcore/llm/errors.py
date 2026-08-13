@@ -22,6 +22,7 @@ from agentcore.core.errors import (
     LLMUpstreamError,
     OurServiceUnavailableError,
     upstream_rate_limit_error,
+    wire_moments,
 )
 
 # Keep in sync with ``db.errors.DATABASE_UNAVAILABLE_MESSAGE`` — do not import
@@ -340,6 +341,7 @@ def inference_envelope_error(
     *,
     status: int,
     body: bytes | str | None,
+    retry_ceiling: float | None = None,
 ) -> LLMError | None:
     """Rebuild the typed error our ``/inference/`` hop already classified.
 
@@ -353,6 +355,10 @@ def inference_envelope_error(
     Returns ``None`` when the body is not our envelope, or carries a code no client
     branches on — the caller then falls back to the vendor-status heuristics, which
     stay the only source of truth on a direct-to-vendor hop.
+
+    ``retry_ceiling`` rides through to the rebuilt 429 so a budgeted call decides
+    the same way on this hop as it would talking to a vendor directly; the cloud
+    leaf's own「already retried」opt-out is applied by the caller afterwards.
     """
     envelope = parse_agentcore_error_envelope(body)
     if envelope is None:
@@ -378,6 +384,7 @@ def inference_envelope_error(
         return upstream_rate_limit_error(
             _envelope_retry_after(context),
             credential_source=source,
+            retry_ceiling=retry_ceiling,
             **details,
         )
     leaf = _ENVELOPE_LEAF_ERRORS.get(envelope.code)
@@ -671,10 +678,12 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
     if isinstance(exc, LLMRateLimitError) and retry_after is None:
         retry_after = getattr(exc, "retry_after", None)
     credential_source = exc.details.get("credential_source")
+    moments = wire_moments(exc)
 
     if (
         status is None
         and retry_after is None
+        and not moments
         and not isinstance(exc, LLMRateLimitError)
         and credential_source not in ("user", "platform")
     ):
@@ -688,6 +697,7 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
     if retry_after is not None:
         with contextlib.suppress(TypeError, ValueError):
             ctx["retry_after"] = float(retry_after)
+    ctx.update(moments)
     if credential_source in ("user", "platform"):
         ctx["credential_source"] = credential_source
     # No Sub2API relay diagnosis here on purpose: it describes the *operator's*

@@ -1,4 +1,5 @@
 import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
+import type { ResumeSettledTurnStatus } from "@/lib/resumeSettled";
 import type { ResumeOrigin } from "@/stores/pausedTurns";
 import type {
   InteractionKind,
@@ -6,6 +7,7 @@ import type {
 } from "@/types/interactionExt";
 import { create } from "zustand";
 import {
+  type ColdResumeKind,
   type InteractionEntry,
   idFromRequiredPayload,
   idFromResolvedPayload,
@@ -45,6 +47,21 @@ interface InteractionState {
     id: string;
     /** 本端没登记过这张卡时（recovery 后冷路）建桩用，别留个无主条目。 */
     conversationId?: string;
+  }) => void;
+  /**
+   * 冷 resume 的帧已被上一次续跑吃掉（EPHEMERAL `resume_settled`）：
+   * 卡收成结果态，并记下 journal 那条 settlement 说得出的事实
+   * （见 {@link InteractionEntry.resumeSettled}）。处理方仍不认领。
+   */
+  markResumeSettled: (input: {
+    /** `checkpoint_id` —— 三种冷卡的 id 字段都是它。 */
+    id: string;
+    kind: ColdResumeKind;
+    conversationId: string;
+    messageId: string;
+    decision: string;
+    decidedAt: string;
+    turnStatus: ResumeSettledTurnStatus;
   }) => void;
   /**
    * Mark orphaned (SSE interaction_orphaned or local sidecar death).
@@ -233,6 +250,37 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
         status: "resolved",
         resumeDeferred: undefined,
         settledByReceipt: true,
+      });
+      return { byId: next };
+    });
+  },
+
+  markResumeSettled: ({
+    id,
+    kind,
+    conversationId,
+    messageId,
+    decision,
+    decidedAt,
+    turnStatus,
+  }) => {
+    set((state) => {
+      const prev = state.byId.get(id);
+      // 作废的卡不复活：orphan 说的是「没人能再收答复」，与本帧说的「已经有人决定过」
+      // 冲突时以先落地的终态为准，别把一张灰卡改写成结果态。
+      if (prev?.status === "orphaned") return {};
+      const next = mapCopy(state.byId);
+      next.set(id, {
+        ...(prev ?? {
+          id,
+          kind,
+          conversationId,
+          messageId,
+          payload: {},
+        }),
+        status: "resolved",
+        resumeDeferred: undefined,
+        resumeSettled: { decision, decidedAt, turnStatus },
       });
       return { byId: next };
     });

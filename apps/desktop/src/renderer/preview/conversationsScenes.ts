@@ -1,4 +1,5 @@
 import type { GroupedConversations } from "@/hooks/useConversations";
+import type { ConversationTrash } from "@/services/conversations";
 import type { FolderMeta, FolderTrash } from "@/services/folders";
 import type { Conversation } from "@/stores/conversation";
 
@@ -129,7 +130,7 @@ const MOCK_ARCHIVED: Conversation[] = [
     title: "一次性实验对话",
     updatedAt: daysAgo(90),
     messageCount: 2,
-    lastMessagePreview: "可以永久删除。",
+    lastMessagePreview: "这条线索没走通，先归档。",
     folderId: null,
     archived: true,
   },
@@ -162,6 +163,37 @@ const MOCK_TRASH: FolderTrash = {
   ],
 };
 
+const MOCK_CONVERSATION_TRASH: ConversationTrash = {
+  retentionDays: 30,
+  items: [
+    {
+      id: "c-gone-1",
+      title: "误删的定价讨论",
+      folderId: "folder-product",
+      messageCount: 24,
+      deletedAt: hoursAgo(1),
+      purgeAt: daysAhead(30),
+    },
+    {
+      // 原文件夹也在回收站里 → 行上要说清「恢复后先回到未分组」。
+      id: "c-gone-2",
+      title: "官网改版对齐",
+      folderId: "folder-gone-cloud",
+      messageCount: 7,
+      deletedAt: daysAgo(2),
+      purgeAt: daysAhead(28),
+    },
+    {
+      id: "c-gone-3",
+      title: "随手记的想法",
+      folderId: null,
+      messageCount: 3,
+      deletedAt: daysAgo(29),
+      purgeAt: new Date(Date.now() + 8 * 3_600_000).toISOString(),
+    },
+  ],
+};
+
 export type ConversationsPreviewScene = {
   id: string;
   title: string;
@@ -188,7 +220,7 @@ export const CONVERSATIONS_PREVIEW_SCENES: readonly ConversationsPreviewScene[] 
     {
       id: "conversations-trash",
       title: "最近删除",
-      description: "已删文件夹 · 保留期倒计时 + 恢复",
+      description: "已删对话 + 已删文件夹 · 保留期倒计时 + 恢复",
     },
   ] as const;
 
@@ -266,4 +298,8 @@ export function buildConversationsPreviewArchived(): Conversation[] {
 
 export function buildConversationsPreviewTrash(): FolderTrash {
   return MOCK_TRASH;
+}
+
+export function buildConversationsPreviewConversationTrash(): ConversationTrash {
+  return MOCK_CONVERSATION_TRASH;
 }

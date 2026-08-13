@@ -2,6 +2,8 @@
  * DesktopBrowserBridge（L8）——本机 loopback HTTP + 主进程签发短时 token。
  *
  * 仅绑定 127.0.0.1；无 Bearer token / 过期 / 错 token → 401。
+ * token 滑动续期（见 bridge-handler ``createBridgeAuth``）：TTL 是闲置上限，
+ * 一路在用的 token 不会在回合中途失效。
  * 动作：`GET /health`、`POST /navigate`、`POST /command`（与 browser_* 对齐）。
  * Local live 帧：server Hub attach 后周期 POST screenshot（frame_b64+width+height）。
  * 鉴权/handler 纯逻辑见 bridge-handler.ts（可单测）。
@@ -36,21 +38,38 @@ export interface DesktopBrowserBridge {
   /** 当前有效 token（主进程签发；勿入 renderer）。 */
   token: string;
   close: () => Promise<void>;
-  /** 轮换 token（sidecar 重连时可调）。 */
-  rotateToken: () => string;
 }
 
-let running: {
+interface RunningBridge {
   server: Server;
   auth: ReturnType<typeof createBridgeAuth>;
   port: number;
-} | null = null;
+}
+
+let running: RunningBridge | null = null;
 
 const DEV_BRIDGE_FILE = "browser-bridge.dev.json";
-/** 打包版短 TTL；未打包 dogfood / probe 用长 TTL，避免 dump 文件几分钟就 401。 */
-function bridgeTokenTtlMs(): number {
+/**
+ * 闲置 TTL（滑动续期，非绝对寿命）。打包版短、未打包 dogfood / probe 长——
+ * 后者的 dump 文件可能久置不用，没有请求来续期。
+ */
+function bridgeTokenIdleTtlMs(): number {
   // vitest 加载 main 图时 electron.app 可能为 undefined——勿在模块顶层读。
   return app?.isPackaged ? 5 * 60_000 : 60 * 60_000;
+}
+
+/**
+ * 当前 token；仅在从未签发 / 已闲置过期时才重签。
+ *
+ * 重签立刻作废在飞请求，而 sidecar 按 rootId 分进程、可并发持旧 token 在跑，
+ * 故所有「取当前凭证」的路径都必须走这里，禁止无条件 issueToken。
+ */
+function activeToken(current: RunningBridge): string {
+  const { auth } = current;
+  if (auth.state.token && Date.now() < auth.state.expiresAt) {
+    return auth.state.token;
+  }
+  return auth.issueToken(bridgeTokenIdleTtlMs());
 }
 
 /** 未打包时落盘凭证，供本机 sidecar probe；打包版 / 未就绪 → no-op。 */
@@ -82,30 +101,23 @@ function clearDevBridgeCredentials(): void {
 }
 
 /**
- * 启动 Bridge（127.0.0.1 随机端口）。幂等：已启动则轮换 token 并返回现 endpoint。
+ * 启动 Bridge（127.0.0.1 随机端口）。幂等：已启动则复用现 endpoint 与现有 token
+ * （不重签——重签会作废其它 sidecar 进程的在飞请求）。
  */
 export async function startDesktopBrowserBridge(): Promise<DesktopBrowserBridge> {
   if (running) {
-    const token = running.auth.issueToken(bridgeTokenTtlMs());
+    const token = activeToken(running);
     const baseUrl = `http://127.0.0.1:${running.port}`;
     dumpDevBridgeCredentials(baseUrl, token);
     return {
       baseUrl,
       token,
       close: stopDesktopBrowserBridge,
-      rotateToken: () => {
-        if (!running) {
-          throw new Error("DesktopBrowserBridge: not running");
-        }
-        const t = running.auth.issueToken(bridgeTokenTtlMs());
-        dumpDevBridgeCredentials(`http://127.0.0.1:${running.port}`, t);
-        return t;
-      },
     };
   }
 
   const auth = createBridgeAuth();
-  const token = auth.issueToken(bridgeTokenTtlMs());
+  const token = auth.issueToken(bridgeTokenIdleTtlMs());
 
   const server = createServer((req, res) => {
     void handleBridgeRequest(
@@ -136,14 +148,6 @@ export async function startDesktopBrowserBridge(): Promise<DesktopBrowserBridge>
     baseUrl,
     token,
     close: stopDesktopBrowserBridge,
-    rotateToken: () => {
-      if (!running) {
-        throw new Error("DesktopBrowserBridge: not running");
-      }
-      const t = running.auth.issueToken(bridgeTokenTtlMs());
-      dumpDevBridgeCredentials(baseUrl, t);
-      return t;
-    },
   };
 }
 
@@ -178,27 +182,8 @@ export function getDesktopBrowserBridgeCredentials(): {
   token: string;
 } | null {
   if (!running || !running.auth.state.token) return null;
-  // 过期则轮换，避免 sidecar 拿到已失效 token。
-  const token =
-    Date.now() >= running.auth.state.expiresAt
-      ? running.auth.issueToken(bridgeTokenTtlMs())
-      : running.auth.state.token;
-  if (!token) return null;
-  const out = {
-    baseUrl: `http://127.0.0.1:${running.port}`,
-    token,
-  };
-  dumpDevBridgeCredentials(out.baseUrl, out.token);
-  return out;
-}
-
-/** Sidecar 重连：轮换 token 并返回新凭证。 */
-export function rotateDesktopBrowserBridgeCredentials(): {
-  baseUrl: string;
-  token: string;
-} | null {
-  if (!running) return null;
-  const token = running.auth.issueToken(bridgeTokenTtlMs());
+  // 闲置过期才重签，避免 sidecar 拿到已失效 token；在用的 token 由校验侧滑动续期。
+  const token = activeToken(running);
   const out = {
     baseUrl: `http://127.0.0.1:${running.port}`,
     token,

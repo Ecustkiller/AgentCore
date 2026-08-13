@@ -2,11 +2,19 @@ import { getTokens } from "@/api/client";
 import {
   type DownloadedFile,
   type FileNode,
-  type WorkspaceFileEntry,
+  type WorkspaceListing,
   buildTree,
 } from "@/api/workspace";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
+import {
+  type EntryChange,
+  FileEntryActions,
+} from "@/components/fileBrowser/FileEntryActions";
+import { FileTextEditor } from "@/components/fileBrowser/FileTextEditor";
+import { NewFolderDialog } from "@/components/fileBrowser/NewFolderDialog";
+import type { FileBrowserOps } from "@/components/fileBrowser/ops";
+import { isInsideDir, joinPath } from "@/components/fileBrowser/paths";
 import { FILE_NOT_IN_CLOUD_TREE } from "@/lib/fileDownloadError";
 import { canShareFiles, downloadBlob, shareOrDownloadFile } from "@/lib/share";
 import {
@@ -34,8 +42,10 @@ import {
   FileJson,
   FileText,
   Folder,
+  FolderPlus,
   Image as ImageIcon,
   type LucideIcon,
+  MoreVertical,
   RefreshCw,
   Search,
   Upload,
@@ -51,7 +61,7 @@ import { useNavigate } from "react-router-dom";
 
 /** The injected data source: how to list the tree and fetch one file's bytes. */
 export interface FileBrowserSource {
-  list: () => Promise<WorkspaceFileEntry[]>;
+  list: () => Promise<WorkspaceListing>;
   download: (path: string) => Promise<DownloadedFile>;
 }
 
@@ -265,6 +275,7 @@ export function FileBrowser({
   emptyHint = "此文件夹还没有文件。",
   openPath = null,
   onUpload,
+  ops,
 }: {
   source: FileBrowserSource;
   cwd: string;
@@ -276,9 +287,14 @@ export function FileBrowser({
   openPath?: string | null;
   /** Optional empty-state CTA — typically opens the parent page's hidden upload input. */
   onUpload?: () => void;
+  /** 写能力（改名/移动/删除/新建文件夹/编辑）。不给 = 只读浏览，一个写入口都不显示。 */
+  ops?: FileBrowserOps;
 }) {
   const navigate = useNavigate();
   const [tree, setTree] = useState<Map<string, FileNode[]> | null>(null);
+  // 服务端条目上限吃掉了树的一部分。整树一次拉取时命中上限，深层文件会整片消失，
+  // 界面却看不出少了东西——必须明说，不能让用户以为文件丢了。
+  const [truncated, setTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<FileNode | null>(null);
   const [openMissing, setOpenMissing] = useState<string | null>(null);
@@ -286,6 +302,12 @@ export function FileBrowser({
   const [localReload, setLocalReload] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [pullDy, setPullDy] = useState(0);
+  // 写动作：正在操作的条目、新建文件夹对话框、以及一行结果回执（成功/失败都要说出来）。
+  const [acting, setActing] = useState<FileNode | null>(null);
+  const [newFolder, setNewFolder] = useState(false);
+  const [newFolderBusy, setNewFolderBusy] = useState(false);
+  const [newFolderError, setNewFolderError] = useState<string | null>(null);
+  const [opStatus, setOpStatus] = useState<string | null>(null);
   const openedRef = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
   const pullStartY = useRef<number | null>(null);
@@ -296,9 +318,11 @@ export function FileBrowser({
   // biome-ignore lint/correctness/useExhaustiveDependencies: source identity is the intentional reset trigger
   useEffect(() => {
     setTree(null);
+    setTruncated(false);
     setError(null);
     setQuery("");
     setOpenMissing(null);
+    setOpStatus(null);
     openedRef.current = false;
   }, [source]);
 
@@ -309,8 +333,10 @@ export function FileBrowser({
     setRefreshing(true);
     source
       .list()
-      .then((entries) => {
-        if (!cancelled) setTree(buildTree(entries));
+      .then((listing) => {
+        if (cancelled) return;
+        setTree(buildTree(listing.entries));
+        setTruncated(listing.truncated);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -322,6 +348,7 @@ export function FileBrowser({
         }
         setError(e instanceof Error ? e.message : "加载文件列表失败");
         setTree(new Map());
+        setTruncated(false);
       })
       .finally(() => {
         if (!cancelled) setRefreshing(false);
@@ -331,10 +358,11 @@ export function FileBrowser({
     };
   }, [source, reloadKey, localReload, navigate]);
 
-  // Clear cwd filter when navigating folders.
+  // Clear cwd filter (and any stale write receipt) when navigating folders.
   // biome-ignore lint/correctness/useExhaustiveDependencies: cwd change is the intentional clear trigger
   useEffect(() => {
     setQuery("");
+    setOpStatus(null);
   }, [cwd]);
 
   // 一键直达：树就绪后，把请求的文件落到其目录并打开预览。只跑一次（openedRef 守门），
@@ -367,6 +395,31 @@ export function FileBrowser({
 
   function refresh() {
     setLocalReload((k) => k + 1);
+  }
+
+  // A rename / move / delete landed: say what happened, drop a preview that now points at
+  // a path which moved or is gone, and re-list so the tree matches the cloud again.
+  function onEntryChange(change: EntryChange) {
+    setActing(null);
+    setOpStatus(change.message);
+    if (viewing && isInsideDir(viewing.path, change.from)) setViewing(null);
+    refresh();
+  }
+
+  async function onCreateFolder(name: string) {
+    if (!ops) return;
+    setNewFolderBusy(true);
+    setNewFolderError(null);
+    try {
+      await ops.createDir(joinPath(cwd, name));
+      setNewFolder(false);
+      setOpStatus(`已新建文件夹「${name}」`);
+      refresh();
+    } catch (e) {
+      setNewFolderError(e instanceof Error ? e.message : "新建文件夹失败");
+    } finally {
+      setNewFolderBusy(false);
+    }
   }
 
   function onTouchStart(e: ReactTouchEvent) {
@@ -431,6 +484,19 @@ export function FileBrowser({
               </button>
             )}
           </div>
+          {ops && (
+            <button
+              type="button"
+              className="file-refresh"
+              aria-label="新建文件夹"
+              onClick={() => {
+                setNewFolderError(null);
+                setNewFolder(true);
+              }}
+            >
+              <FolderPlus size={16} aria-hidden />
+            </button>
+          )}
           <button
             type="button"
             className="file-refresh"
@@ -555,6 +621,12 @@ export function FileBrowser({
         {emptyFilter && (
           <p className="muted hint">当前目录没有匹配「{query.trim()}」的项</p>
         )}
+        {truncated && (
+          <p className="muted hint">
+            文件很多，本次只取回了一部分，深层文件可能还没显示出来。
+          </p>
+        )}
+        {opStatus && <p className="muted hint">{opStatus}</p>}
         {filtered.map((node) => {
           const Icon = fileIcon(node.name, node.isDir);
           const stage = node.isDir ? stageDirMeta(node.path) : null;
@@ -568,46 +640,82 @@ export function FileBrowser({
           // Stage badge wins for dirs; otherwise optional mtime subtitle.
           const subtitle = stageCaption ? null : fileSubtitle(node);
           return (
-            <button
-              key={node.path}
-              type="button"
-              className="file-row"
-              title={stage?.tooltip}
-              onClick={() =>
-                node.isDir ? onCwdChange(node.path) : setViewing(node)
-              }
-            >
-              <span
-                className={`file-icon${node.isDir ? "" : " file-icon-doc"}`}
-                aria-hidden
+            <div key={node.path} className="file-row-item">
+              <button
+                type="button"
+                className="file-row"
+                title={stage?.tooltip}
+                onClick={() =>
+                  node.isDir ? onCwdChange(node.path) : setViewing(node)
+                }
               >
-                <Icon size={16} />
-              </span>
-              <span className="file-row-main">
-                <span className="file-name">{node.name}</span>
-                {subtitle && <span className="file-sub">{subtitle}</span>}
-              </span>
-              {stageCaption && (
-                <span className="file-tag" title={stage?.tooltip}>
-                  {stageCaption}
+                <span
+                  className={`file-icon${node.isDir ? "" : " file-icon-doc"}`}
+                  aria-hidden
+                >
+                  <Icon size={16} />
                 </span>
-              )}
-              {node.isDir && (
-                <span className="file-chevron" aria-hidden>
-                  <ChevronRight size={18} />
+                <span className="file-row-main">
+                  <span className="file-name">{node.name}</span>
+                  {subtitle && <span className="file-sub">{subtitle}</span>}
                 </span>
+                {stageCaption && (
+                  <span className="file-tag" title={stage?.tooltip}>
+                    {stageCaption}
+                  </span>
+                )}
+                {node.isDir && (
+                  <span className="file-chevron" aria-hidden>
+                    <ChevronRight size={18} />
+                  </span>
+                )}
+              </button>
+              {ops && (
+                <button
+                  type="button"
+                  className="file-row-more"
+                  aria-label={`${node.name} 的更多操作`}
+                  onClick={() => {
+                    setOpStatus(null);
+                    setActing(node);
+                  }}
+                >
+                  <MoreVertical size={18} aria-hidden />
+                </button>
               )}
-            </button>
+            </div>
           );
         })}
       </div>
 
       {error && <div className="error bar">{error}</div>}
 
+      {ops && acting && tree && (
+        <FileEntryActions
+          entry={acting}
+          ops={ops}
+          tree={tree}
+          onClose={() => setActing(null)}
+          onDone={onEntryChange}
+        />
+      )}
+
+      {ops && newFolder && (
+        <NewFolderDialog
+          parentLabel={cwd || "根目录"}
+          busy={newFolderBusy}
+          error={newFolderError}
+          onClose={() => setNewFolder(false)}
+          onCreate={(name) => void onCreateFolder(name)}
+        />
+      )}
+
       {viewing && (
         <FileViewer
           node={viewing}
           download={source.download}
+          ops={ops}
+          onSaved={refresh}
           onClose={() => setViewing(null)}
         />
       )}
@@ -625,18 +733,28 @@ type View =
 
 /** Full-screen preview for one file: Markdown reading view, text in a <pre>, images
  *  full-width, anything else a clear download-only notice. Bytes are fetched once via the
- *  injected `download`; 分享/下载 reuse them. */
+ *  injected `download`; 分享/下载 reuse them.
+ *
+ *  编辑 lives here rather than in the row menu: whether a file is editable text is decided
+ *  by what actually came back (content type + size), not by guessing from its extension in
+ *  a list — one judgement, made where the bytes are. */
 function FileViewer({
   node,
   download,
+  ops,
+  onSaved,
   onClose,
 }: {
   node: FileNode;
   download: (path: string) => Promise<DownloadedFile>;
+  /** Present = the workspace is writable; enables 编辑 for text/Markdown. */
+  ops?: Pick<FileBrowserOps, "readForEdit" | "writeText">;
+  onSaved?: () => void;
   onClose: () => void;
 }) {
   const [view, setView] = useState<View>({ kind: "loading" });
   const [file, setFile] = useState<DownloadedFile | null>(null);
+  const [editing, setEditing] = useState(false);
 
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -682,6 +800,7 @@ function FileViewer({
   // Capability is stable for the session; compute once so the 分享 action only shows
   // where the OS sheet can actually take a file (else 下载 is the path).
   const sharable = canShareFiles();
+  const editable = view.kind === "text" || view.kind === "markdown";
 
   function save() {
     if (file) downloadBlob(file.blob, file.filename);
@@ -702,6 +821,15 @@ function FileViewer({
           {node.name}
         </span>
         <span className="bar-right viewer-actions">
+          {ops && editable && (
+            <button
+              type="button"
+              className="link"
+              onClick={() => setEditing(true)}
+            >
+              编辑
+            </button>
+          )}
           {sharable && (
             <button
               type="button"
@@ -746,6 +874,23 @@ function FileViewer({
           </div>
         )}
       </div>
+
+      {ops && editing && (
+        <FileTextEditor
+          path={node.path}
+          name={node.name}
+          ops={ops}
+          onClose={() => setEditing(false)}
+          onSaved={(text) => {
+            // Keep the preview showing what was just written instead of the bytes
+            // fetched before the save (no second download).
+            setView((v) =>
+              v.kind === "markdown" || v.kind === "text" ? { ...v, text } : v,
+            );
+            onSaved?.();
+          }}
+        />
+      )}
     </Modal>
   );
 }

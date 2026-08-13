@@ -468,13 +468,14 @@ async def test_stream_retries_502_before_any_sse_line(monkeypatch):
 
 def test_parse_retry_after_seconds_and_fallbacks():
     # Delta-seconds (the DeepSeek case) parses straight through (raw; sleep clamps later).
-    assert _parse_retry_after("120", 2.0) == 120.0
-    assert _parse_retry_after(" 5 ", 2.0) == 5.0
+    assert _parse_retry_after("120", 2.0).seconds == 120.0
+    assert _parse_retry_after(" 5 ", 2.0).seconds == 5.0
     # audit 01 F9: absent / blank / malformed must fall back to backoff, never raise
     # (a raised ValueError used to escape the retry path and surface as a generic 502).
-    assert _parse_retry_after(None, 2.0) == 2.0
-    assert _parse_retry_after("", 2.0) == 2.0
-    assert _parse_retry_after("not-a-date", 2.0) == 2.0
+    # Whose number that is stays visible — see test_llm_retry_after_provenance.py.
+    assert _parse_retry_after(None, 2.0).seconds == 2.0
+    assert _parse_retry_after("", 2.0).seconds == 2.0
+    assert _parse_retry_after("not-a-date", 2.0).seconds == 2.0
 
 
 def test_parse_retry_after_http_date():
@@ -483,23 +484,22 @@ def test_parse_retry_after_http_date():
 
     # An HTTP-date value (RFC 7231) resolves to a positive delta, not a ValueError.
     future = format_datetime(datetime.now(UTC) + timedelta(seconds=60))
-    delta = _parse_retry_after(future, 2.0)
+    delta = _parse_retry_after(future, 2.0).seconds
     assert 0 < delta <= 60
     # A past HTTP-date has a non-positive delta → fall back to backoff.
     past = format_datetime(datetime.now(UTC) - timedelta(seconds=60))
-    assert _parse_retry_after(past, 2.0) == 2.0
+    assert _parse_retry_after(past, 2.0).seconds == 2.0
 
 
 def test_retry_wait_honors_small_retry_after_and_ignores_absurd():
     # Interactive budgets: honor modest Retry-After; absurd values must not
     # become wait_sec if somehow slept (helper still clamps), and must refuse retry.
-    assert _retry_wait(5.0, 2.0) == (5.0, 5.0)
-    assert _retry_wait(None, 2.0) == (2.0, None)
-    wait, raw = _retry_wait(3600.0, 2.0)
-    assert raw == 3600.0
+    assert _retry_wait(5.0, 2.0) == 5.0
+    assert _retry_wait(None, 2.0) == 2.0
+    wait = _retry_wait(3600.0, 2.0)
     assert wait == 2.0
     assert wait <= _MAX_RETRY_AFTER
-    assert _retry_wait(_MAX_RETRY_AFTER, 2.0) == (_MAX_RETRY_AFTER, _MAX_RETRY_AFTER)
+    assert _retry_wait(_MAX_RETRY_AFTER, 2.0) == _MAX_RETRY_AFTER
     assert _rate_limit_should_retry(5.0) is True
     assert _rate_limit_should_retry(None) is True
     assert _rate_limit_should_retry(_MAX_RETRY_AFTER) is True

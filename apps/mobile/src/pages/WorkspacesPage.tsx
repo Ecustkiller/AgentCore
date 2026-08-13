@@ -7,9 +7,10 @@ import { Brain, ChevronRight, Cloud, Folder, ScrollText } from "lucide-react";
 // (/files/:wsId). The mobile counterpart of the desktop 文件 hub, minus the desktop-only
 // halves: LOCAL workspaces live on the user's machine (reached over desktop IPC; the server
 // refuses file ops with 409), so the phone hides them — a 减法 boundary, surfaced as a note
-// when the user has local-only workspaces. Folder lifecycle (新建/重命名/删除/绑定本地) stays a
-// desktop task; the phone is a read/browse + upload lens. Re-fetches on each visit (the tab
-// remounts), so files just produced in a chat appear without a manual refresh.
+// when the user has local-only workspaces. A workspace's *contents* are editable on the phone
+// (see WorkspaceFilesPage), but the workspace **lifecycle** — 新建 / 重命名 / 删除 a workspace,
+// 绑定本机文件夹 — stays a desktop task, so this list has no management actions. Re-fetches on
+// each visit (the tab remounts), so files just produced in a chat appear without a refresh.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 

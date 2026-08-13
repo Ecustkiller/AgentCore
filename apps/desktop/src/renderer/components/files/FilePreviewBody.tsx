@@ -1,7 +1,7 @@
-import { IconButton } from "@/components/ui";
+import { Button, IconButton } from "@/components/ui";
 import type { FilePreviewResult } from "@/lib/fileSource";
 import { formatBytes } from "@/lib/format";
-import { FileText, Minus, Plus, X } from "lucide-react";
+import { Download, ExternalLink, FileText, Minus, Plus, X } from "lucide-react";
 import { type WheelEvent, useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -19,13 +19,21 @@ function clampZoom(n: number): number {
  * truncation banner), an inline image (zoom + lightbox), PDF iframe, or a
  * non-previewable fallback (binary / too-large). Surrounding chrome (header,
  * download / edit actions) belongs to the caller; this draws content only.
+ *
+ * 例外是 binary / too-large 的兜底面：那儿「请下载或用系统默认程序打开」是**唯一**出路，
+ * 只写一句话等于让用户自己去找头部图标。调用方把两个出口（同一套能力门控，缺哪个就少
+ * 哪个按钮）传进来，兜底面直接给可点的主按钮。
  */
 export function FilePreviewBody({
   result,
   name,
+  onOpenWithOsDefaultApp,
+  onDownload,
 }: {
   result: FilePreviewResult;
   name: string;
+  onOpenWithOsDefaultApp?: () => void;
+  onDownload?: () => void;
 }) {
   if (result.kind === "text") {
     return (
@@ -84,6 +92,27 @@ export function FilePreviewBody({
           ? "文件过大，不在面板内预览，请下载或用系统默认程序打开。"
           : (result.reason ?? "无法在面板内预览，请下载或用系统默认程序打开。")}
       </p>
+      {(onOpenWithOsDefaultApp || onDownload) && (
+        <div className="mt-1 flex items-center gap-2">
+          {onOpenWithOsDefaultApp && (
+            <Button
+              onClick={onOpenWithOsDefaultApp}
+              icon={<ExternalLink size={13} />}
+            >
+              用默认程序打开
+            </Button>
+          )}
+          {onDownload && (
+            <Button
+              variant={onOpenWithOsDefaultApp ? "neutral" : "primary"}
+              onClick={onDownload}
+              icon={<Download size={13} />}
+            >
+              下载
+            </Button>
+          )}
+        </div>
+      )}
       {meta && <p className="text-xs text-muted-foreground/60">{meta}</p>}
     </div>
   );

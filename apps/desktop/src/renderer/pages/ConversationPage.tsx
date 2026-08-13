@@ -8,7 +8,6 @@ import { SidePanel } from "@/components/layout/SidePanel";
 import { SidePanelToggle } from "@/components/layout/SidePanelToggle";
 import { Button } from "@/components/ui";
 import { logEvent } from "@/lib/log";
-import { reconcileExternalGrants } from "@/lib/reconcileExternalGrants";
 import {
   decideWarmOpenAction,
   fetchMessageWindow,
@@ -22,7 +21,6 @@ import {
 } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
 import { runHydrateAttachSettle } from "@/services/turns";
-import { reconcileQueuedTurns } from "@/services/turns/reconcileQueuedTurns";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import {
   type MemoryUpdate,
@@ -313,19 +311,6 @@ export function ConversationPage() {
   useEffect(() => {
     if (!id) return;
     void useBookmarkStore.getState().hydrateForConversation(id);
-  }, [id]);
-
-  // W3: reconcile desktop session roots ↔ server external-grants on open
-  // (补登记 / 清孤儿). Paths stay on desktop; best-effort, never blocks hydrate.
-  useEffect(() => {
-    if (!id) return;
-    void reconcileExternalGrants(id);
-  }, [id]);
-
-  // 排队条对账：开会话 / 切会话拉 GET 快照（EPHEMERAL 事件只作变了信号）。
-  useEffect(() => {
-    if (!id) return;
-    void reconcileQueuedTurns(id);
   }, [id]);
 
   // Page-scoped shortcuts for the single side panel: Ctrl/Cmd+I shows / hides it

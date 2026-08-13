@@ -197,7 +197,7 @@ async def run_workflow_job(
                 role="user",
                 content=user_message,
             )
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id)
 
         from agentcore.conversation.turn_runner import (
             run_mechanism_direct_and_persist,

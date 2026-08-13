@@ -34,6 +34,12 @@ logger = get_logger(__name__)
 # None = never probed this credential generation → local gate withholds until probe.
 _desktop_bridge_healthy: bool | None = None
 
+# The last probe of this credential generation got HTTP 401: the Bridge answered, it
+# just rejected this token. Kept apart from an unreachable host so callers say
+# ``bridge_unauthorized`` instead of ``host_unavailable`` (same split as
+# ``local_session._post_command``). The gate withholds either way.
+_desktop_bridge_unauthorized: bool = False
+
 # Turn-level override (set by sidecar handlers). When ``_turn_override_active``,
 # env is ignored for URL/token resolution.
 _turn_override_active: bool = False
@@ -64,9 +70,16 @@ def desktop_bridge_health() -> bool | None:
     return _desktop_bridge_healthy
 
 
+def desktop_bridge_unauthorized() -> bool:
+    """Whether the last probe was refused with ``401`` (stale token, live host)."""
+    return _desktop_bridge_unauthorized
+
+
 def reset_desktop_bridge_health_for_tests() -> None:
-    global _desktop_bridge_healthy, _turn_override_active, _turn_url, _turn_token
+    global _desktop_bridge_healthy, _desktop_bridge_unauthorized
+    global _turn_override_active, _turn_url, _turn_token
     _desktop_bridge_healthy = None
+    _desktop_bridge_unauthorized = False
     _turn_override_active = False
     _turn_url = None
     _turn_token = None
@@ -74,8 +87,9 @@ def reset_desktop_bridge_health_for_tests() -> None:
 
 def set_desktop_bridge_health_for_tests(healthy: bool | None) -> None:
     """Inject a probe result for unit tests (``None`` = unprobed)."""
-    global _desktop_bridge_healthy
+    global _desktop_bridge_healthy, _desktop_bridge_unauthorized
     _desktop_bridge_healthy = healthy
+    _desktop_bridge_unauthorized = False
 
 
 def apply_desktop_bridge_from_turn(raw: Any) -> None:
@@ -86,8 +100,10 @@ def apply_desktop_bridge_from_turn(raw: Any) -> None:
     - Calling this always clears sticky health so a previous ``False`` cannot pin the process.
     """
     global _turn_override_active, _turn_url, _turn_token, _desktop_bridge_healthy
+    global _desktop_bridge_unauthorized
     _turn_override_active = True
     _desktop_bridge_healthy = None
+    _desktop_bridge_unauthorized = False
     if not isinstance(raw, dict):
         _turn_url = None
         _turn_token = None
@@ -106,8 +122,13 @@ def apply_desktop_bridge_from_turn(raw: Any) -> None:
 
 
 def probe_desktop_bridge_sync(*, timeout_s: float = 1.5) -> bool:
-    """Synchronous ``GET /health`` against the Desktop Bridge. Never raises."""
-    global _desktop_bridge_healthy
+    """Synchronous ``GET /health`` against the Desktop Bridge. Never raises.
+
+    A ``401`` answer is recorded apart from an unreachable host
+    (:func:`desktop_bridge_unauthorized`) — the health verdict is ``False`` either way.
+    """
+    global _desktop_bridge_healthy, _desktop_bridge_unauthorized
+    _desktop_bridge_unauthorized = False
     url = desktop_bridge_url()
     token = desktop_bridge_token()
     if not url or not token:
@@ -123,7 +144,16 @@ def probe_desktop_bridge_sync(*, timeout_s: float = 1.5) -> bool:
         with urlopen(req, timeout=timeout_s) as resp:  # noqa: S310 - loopback only
             body = resp.read().decode("utf-8", errors="replace")
             ok = resp.status == 200 and "desktop-browser-bridge" in body
-    except (HTTPError, URLError, TimeoutError, OSError) as exc:
+    except HTTPError as exc:
+        _desktop_bridge_unauthorized = exc.code == 401
+        logger.info(
+            "browser.desktop_bridge_probe_failed",
+            reason=type(exc).__name__,
+            detail=str(exc)[:200],
+            http_status=exc.code,
+        )
+        ok = False
+    except (URLError, TimeoutError, OSError) as exc:
         logger.info(
             "browser.desktop_bridge_probe_failed",
             reason=type(exc).__name__,

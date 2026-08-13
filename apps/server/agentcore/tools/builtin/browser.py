@@ -29,6 +29,7 @@ from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.browser.keyframes import KeyframeTracker
+from agentcore.runtime.browser.local_session import BRIDGE_UNAUTHORIZED_CODE
 from agentcore.runtime.browser.navigate_target import (
     RELATIVE_PATH_UNSUPPORTED_MSG,
     classify_navigate_target,
@@ -454,6 +455,9 @@ class _BrowserToolBase:
 
         if not result.ok:
             err = result.error or "未知错误"
+            # Bridge token 失效 ≠ 宿主挂掉，用户面文案不同（local_session 已分码）。
+            if (result.data or {}).get("code") == BRIDGE_UNAUTHORIZED_CODE:
+                return _error(err, start, code=BRIDGE_UNAUTHORIZED_CODE)
             if "host_unavailable" in err or (result.data or {}).get("code") == "host_unavailable":
                 return _error(
                     err if err.startswith("host_unavailable") else f"host_unavailable: {err}",

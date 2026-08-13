@@ -20,14 +20,18 @@ const infoIcon = <Info size={16} className="text-primary" />;
  *
  * - Pass a plain string to show a client-side message verbatim (e.g. input
  *   validation that never hit the server).
- * - Pass `context` to title the toast (e.g. "重命名失败") with the backend's
- *   resolved detail as the description; omit it to show the detail as the title.
+ * - Pass `context` to title the toast (e.g. "重命名失败") with the resolved detail
+ *   as the description; omit it to show the detail as the title. Holds for a
+ *   verbatim string too — a titled call must not lose either half.
  * - An error whose code maps to a remedy (e.g. a missing key → 去配置) gets a
  *   one-click action button that navigates there.
  */
 export function notifyError(err: unknown, context?: string): void {
   if (typeof err === "string") {
-    toast.error(err, { icon: errorIcon });
+    toast.error(context ?? err, {
+      description: context ? err : undefined,
+      icon: errorIcon,
+    });
     return;
   }
   const described = describeError(err);

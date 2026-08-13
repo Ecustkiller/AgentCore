@@ -31,12 +31,9 @@ export function handleWorkspaceEvent(
       notifyWarning("本回合自动备份失败", {
         description: "回合已完成；重要节点请手动留版本。",
         action: {
-          label: "查看快照",
+          label: "查看改动",
           onClick: () => {
-            useSidePanelStore.getState().showWorkspace();
-            useAutoSnapshotStore
-              .getState()
-              .requestOpenSnapshots(conversationId);
+            useSidePanelStore.getState().showChanges();
           },
         },
       });

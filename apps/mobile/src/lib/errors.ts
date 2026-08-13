@@ -3,6 +3,10 @@
  * `lib/errors.ts` · RetryBanner「去配置」). Shared code catalog from
  * `@agentcore/contract-types` so both clients route the same BYOK codes.
  */
+import {
+  type RecoveryMomentContext,
+  withLocalRecoveryMoment,
+} from "@/lib/recoveryMoment";
 import { KEY_CONFIG_ERROR_CODES } from "@agentcore/contract-types";
 
 /** One-click remedy that routes the user to fix the cause (not a retry). */
@@ -16,18 +20,39 @@ export const MODEL_CONFIG_PATH = "/more/model";
 
 /**
  * A non-OK SSE channel response that arrived as plain JSON
- * `{ error: { code, message } }` (e.g. 402 LLM_KEY_REQUIRED before the stream
- * opens) rather than an event stream.
+ * `{ error: { code, message, context } }` (e.g. 402 LLM_KEY_REQUIRED before the
+ * stream opens) rather than an event stream.
+ *
+ * `context` carries the structured fields the copy no longer spells out — notably
+ * the absolute recovery / reset moment a 429 refusal is waiting on
+ * ({@link withLocalRecoveryMoment}).
  */
 export class StreamHttpError extends Error {
   constructor(
     public status: number,
     public code?: string,
     public serverMessage?: string,
+    public context?: RecoveryMomentContext,
   ) {
     super(serverMessage ?? `请求失败 (${status})`);
     this.name = "StreamHttpError";
   }
+}
+
+/**
+ * 冷 resume 被拒，且挂起帧真的不在了——**诚实失效**，不是「已被别人处理」。
+ *
+ * 「已被别人处理」不再走这条路：服务端把那种幂等成功改成了 200 + EPHEMERAL
+ * `resume_settled`，由 SSE 侧按 journal 的事实收卡。留给 404/410 的只剩两种真失效——挂起
+ * 超保留期被清理、回合已重新生成或删除——两句话都在 `serverMessage` 里，交给
+ * {@link describeStreamHttpError} 原样呈现，别替后端改口。
+ *
+ * 唯一用途：决定这次拒绝要不要把卡放回可点。帧不在就不该放回——放回只会请用户一点再点、
+ * 次次 404。对齐桌面 `services/turns/regenerate.ts` · `isPausedFrameGone`。
+ */
+export function isPausedFrameGone(err: unknown): err is StreamHttpError {
+  if (!(err instanceof StreamHttpError)) return false;
+  return err.status === 404 || err.status === 410;
 }
 
 /** Map a backend error `code` to the model-config remedy, or null. */
@@ -67,7 +92,12 @@ export function errorActionForCode(
   return null;
 }
 
-/** zh message + optional「去配置」 for a refused SSE turn. */
+/**
+ * zh message + optional「去配置」 for a refused SSE turn.
+ *
+ * 429 / 配额闸门的时刻由 {@link withLocalRecoveryMoment} 按本机时区补上；服务端只下发不含
+ * 时刻的兜底句，拿不到结构化时刻就原样转述它。
+ */
 export function describeStreamHttpError(err: StreamHttpError): {
   message: string;
   action: ErrorAction | null;
@@ -83,7 +113,11 @@ export function describeStreamHttpError(err: StreamHttpError): {
     message = `请求失败 (${err.status})`;
   }
   return {
-    message,
+    message: withLocalRecoveryMoment(message, {
+      code: err.code,
+      context: err.context,
+    }),
+    // 分流仍读服务端原文：本地时刻文案是渲染结果，不是判据。
     action: errorActionForCode(err.code, { message: err.serverMessage }),
   };
 }

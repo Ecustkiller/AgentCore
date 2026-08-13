@@ -30,21 +30,14 @@ import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useBrowserRegion } from "@/components/workspace/BrowserLivePanel";
 import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
-import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
-import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
-import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
-import { hasLocalFiles } from "@/lib/capabilities";
-import { conversationHasRestorableEntry } from "@/lib/conversationFileChanges";
-import { gitTrackHasWork } from "@/lib/gitRepoStatus";
 import { notifyError } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
   useActiveMessageContent,
   useConversationStore,
 } from "@/stores/conversation";
-import { runtimeOf } from "@/stores/conversation/runtime";
 import {
   type ExecutionRuntime,
   projectRuntime,
@@ -116,8 +109,8 @@ function isDetailTabLive(
 
 /**
  * The conversation's single right-docked surface (前端UX设计.md §十 · 方案 B):
- * `[工作区*] [改动?] | 内容 tabs | [+]`，画布态另出条件「指挥台」。
- * 「改动」有本对话 AI 文件改动 / Local 回合基线（或深链）才挂，挂后不可关。
+ * `[工作区*] [改动*] | 内容 tabs | [+]`，画布态另出条件「指挥台」。
+ * 「改动」与「工作区」同为常驻固定 tab：不可关、可 detach 为浮窗。
  */
 export function SidePanel() {
   const open = useSidePanelStore((s) => s.open);
@@ -141,9 +134,6 @@ export function SidePanel() {
   const bindTerminalSession = useSidePanelStore((s) => s.bindTerminalSession);
   const openFileTab = useSidePanelStore((s) => s.openFileTab);
   const showBrowser = useSidePanelStore((s) => s.showBrowser);
-  const changesFocusMessageId = useSidePanelStore(
-    (s) => s.changesFocusMessageId,
-  );
   const clearChangesFocus = useSidePanelStore((s) => s.clearChangesFocus);
   const floatingIds = useMemo(
     () => new Set(floats.map((f) => f.tabId)),
@@ -160,9 +150,6 @@ export function SidePanel() {
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
-  const messages = useConversationStore(
-    (s) => runtimeOf(s, currentConversationId).messages,
-  );
   const spawnSession = useUserTerminalStore((s) => s.spawnSession);
 
   // 流式性能 (白屏卡死修复·Stage 3 收窄订阅): gate this dock on the SET of live tabs, not on
@@ -175,32 +162,6 @@ export function SidePanel() {
       .map((t) => t.id)
       .join("\u0001"),
   );
-  // Local zip 基线（不依赖 file_*）→ 脚本删后仍能挂「改动」进 restore。
-  const localBaselineIds = useLocalTurnBaselineIds(
-    currentConversationId,
-    messages,
-  );
-  // Boolean selector：byId 每 token 变，但 true/false 不变则不重渲顶栏；messages / 基线变则换 selector。
-  const hasRestorableSelector = useCallback(
-    (s: { byId: Record<string, ExecutionRuntime> }) =>
-      conversationHasRestorableEntry(messages, s.byId, localBaselineIds),
-    [messages, localBaselineIds],
-  );
-  const hasRestorable = useExecutionStore(hasRestorableSelector);
-  const wsMode = useWorkspaceModeState(currentConversationId);
-  const canGit =
-    hasLocalFiles() &&
-    !!wsMode?.effective.isLocal &&
-    !!wsMode.effective.rootId &&
-    !wsMode.effective.rootMissing;
-  const { status: gitStatus } = useGitRepoStatus(
-    canGit ? wsMode?.effective.rootId : null,
-    canGit,
-  );
-  const changesTabVisible =
-    hasRestorable ||
-    changesFocusMessageId != null ||
-    gitTrackHasWork(gitStatus);
   // 图上指挥 (前端UX设计.md §6.2): fixed 指挥台 tab + auto-surface (openPanel + badge,
   // never steals active tab). Hook runs before the `open` early-return so its effect
   // can reveal the panel even while closed. Inert in chat mode (`active` is false).
@@ -227,7 +188,7 @@ export function SidePanel() {
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceInDock = !floatingIds.has(WORKSPACE_TAB_ID);
-  const changesInDock = changesTabVisible && !floatingIds.has(CHANGES_TAB_ID);
+  const changesInDock = !floatingIds.has(CHANGES_TAB_ID);
   const workspaceActive = workspaceInDock && activeTabId === WORKSPACE_TAB_ID;
   const changesActive = changesInDock && activeTabId === CHANGES_TAB_ID;
   const commandActive = command.show && activeTabId === COMMAND_TAB_ID;
@@ -253,13 +214,6 @@ export function SidePanel() {
     clearFloats,
     closeConversationScopedTabs,
   ]);
-
-  // 「改动」不可见时若仍激活 → 回工作区。
-  useEffect(() => {
-    if (!changesTabVisible && activeTabId === CHANGES_TAB_ID) {
-      setActiveTab(WORKSPACE_TAB_ID);
-    }
-  }, [changesTabVisible, activeTabId, setActiveTab]);
 
   // 终端「有活动」时自动补壳：用户关掉后记 dismiss，活动清零后才允许再次自动浮出。
   // 不含 canOpenPty——仅「能开 shell」不应强行挂 tab（否则关不掉）。

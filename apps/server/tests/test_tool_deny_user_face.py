@@ -8,6 +8,10 @@ had just clicked 拒绝 was answered with「不要再调用此工具」, and an 
 Each case pins both halves: the model face byte-for-byte (those imperatives earn their keep —
 without them the model retries the identical call) and the user face as curated copy.
 
+Coverage is the whole family, not the reported instances: approval / fuse / allow-list /
+budget / liveness denials, plus the name paths (unknown tool, off-surface tool, landed-status
+bait) and the one authored ``product_message`` that is meant to stay.
+
 收尾窗口 deny lives in ``react_loop`` and is pinned by
 ``test_worker_cutoff.test_wind_down_breach_journals_denied_tool``.
 """
@@ -16,6 +20,7 @@ import asyncio
 from pathlib import Path
 from typing import Any
 
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.provider.protocol import ToolCall, ToolCallFunction
 from agentcore.runtime.approvals import ApprovalDecision
@@ -46,6 +51,8 @@ DENY_FACE_CODES = (
     "liveness_timeout",
     "timeout",
     "retrieval_budget_exhausted",
+    "landed_status_name",
+    ErrorCode.TOOL_NOT_FOUND,
 )
 
 
@@ -232,9 +239,7 @@ async def test_safety_breaker_deny_keeps_steer_off_the_user_face():
 
     assert tool.executed is False
     model, user = _faces(sink)
-    assert model == (
-        f"工具 'git' 被安全熔断拒绝：{hit.reason}请改用其他方案，不要原样重试该路径。"
-    )
+    assert model == (f"工具 'git' 被安全熔断拒绝：{hit.reason}请改用其他方案，不要原样重试该路径。")
     assert_user_face_clean(user)
     assert user == _CURATED_BY_CODE["safety_breaker_deny"]
 
@@ -308,6 +313,103 @@ async def test_retrieval_budget_exhausted_keeps_ledger_talk_off_the_user_face():
     assert model == BUDGET_EXHAUSTED_FEEDBACK
     assert_user_face_clean(user)
     assert user == _CURATED_BY_CODE["retrieval_budget_exhausted"]
+
+
+async def test_unknown_tool_name_keeps_the_did_you_mean_steer_off_the_user_face():
+    """Hallucinated name: the model gets the naming rule, the user just hears we moved on."""
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "quux_tool")],
+        _registry(_Stub("grep", category=ToolCategory.FILESYSTEM)),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+
+    model, user = _faces(sink)
+    assert model == ("Tool 'quux_tool' not found。请使用合法工具名原样重试，勿夹带协议标签。")
+    assert_user_face_clean(user)
+    assert user == _CURATED_BY_CODE[ErrorCode.TOOL_NOT_FOUND]
+
+
+async def test_tool_off_this_surface_keeps_role_steer_off_the_user_face():
+    """Declared but not assembled here: 「CEO 派给 worker」is our org chart, not theirs."""
+    from agentcore.tools.registration import (
+        execution_class_tool_names,
+        worker_only_tool_names,
+    )
+
+    # Precondition — if the roster moves, this test should say so rather than drift.
+    assert "code_execute" in worker_only_tool_names() & execution_class_tool_names()
+
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "code_execute")],
+        _registry(_Stub("grep", category=ToolCategory.FILESYSTEM)),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+
+    model, user = _faces(sink)
+    assert model == (
+        "工具 'code_execute' 当前工具面不可用。"
+        "若你是 CEO：写盘/跑代码/跑测试须 `delegate` 派给 worker，勿亲自调用。"
+        "若你是 worker：本回合未装配执行类工具（见 `<workspace_context>` 的"
+        "「本回合执行能力」），勿空转重试。"
+    )
+    assert_user_face_clean(user)
+    assert user == _CURATED_BY_CODE["allowlist_deny"]
+
+
+async def test_landed_status_bait_keeps_the_rewrite_recipe_off_the_user_face():
+    """``_write_landed`` imitation: the model needs the read-then-rewrite recipe; the user doesn't."""
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "_write_landed", '{"path":"a.md","status":"landed"}')],
+        _registry(_Stub("grep", category=ToolCategory.FILESYSTEM)),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+
+    model, user = _faces(sink)
+    assert model == (
+        "拒绝：`_write_landed` 是请求窗里的「已落盘」压缩状态，不是可调用工具。"
+        "勿仿调该名称。改稿：先 file_read 取盘上真文，再 str_replace（优先）或 file_write。"
+    )
+    assert_user_face_clean(user)
+    assert user == _CURATED_BY_CODE["landed_status_name"]
+
+
+async def test_write_args_parse_failure_is_the_one_legitimate_authored_face():
+    """The lone surviving ``product_message`` — authored human copy, not the model's steer.
+
+    Landing tools get a short line for the person and the segmented-write recipe for the
+    model. Pinned here so the split cannot quietly collapse back into one string.
+    """
+    from agentcore.runtime.engine.tool_exec_args import _USER_WRITE_PARSE_MSG
+
+    tool = _Stub("file_write", category=ToolCategory.FILESYSTEM)
+    sink = EventSink()
+    await execute_tools(
+        [_call("c1", "file_write", '{"path": "a.md", "content": "abc')],
+        _registry(tool),
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+
+    assert tool.executed is False
+    model, user = _faces(sink)
+    assert user == _USER_WRITE_PARSE_MSG
+    assert_user_face_clean(user)
+    # Recipe stays model-side, verbatim.
+    assert "改为短骨架 + 按节 file_append / str_replace 分段落盘" in model
 
 
 async def test_liveness_timeout_keeps_retry_ban_off_the_user_face():

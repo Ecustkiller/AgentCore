@@ -6,7 +6,8 @@
       "type": "message_start",
       "payload": {
         "message_id": "m1",
-        "conversation_id": "conv_demo"
+        "conversation_id": "conv_demo",
+        "full_replay": true
       },
       "timestamp": "2026-01-01T00:00:00.001Z"
     },

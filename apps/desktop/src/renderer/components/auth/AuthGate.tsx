@@ -163,8 +163,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // 会话补正：离线只读壳是用缓存身份进的，服务端从未确认过这条会话，握手时才下发的东西
   // （首当其冲是 CSRF 令牌）一样都没有——于是读请求全通、写请求全 403，用户看到的是
   // 「点了没反应」。恢复联通只翻连接状态位，会话仍是半成品，所以这里重跑**同一条**权威
-  // bootstrap 把握手补完，而不是单独去补某个令牌。每个 online 边沿最多一次：补正失败会
-  // 重新落回离线只读，下一个边沿再试。
+  // bootstrap 把握手补完，而不是单独去补某个令牌：bootstrap 打的 `/v1/auth/me` 本身就是
+  // 一次握手，响应带回 CSRF 令牌、由 api 层的 captureCsrf 收下，跑完这条会话才真的武装好
+  // （否则补正只是刷新了身份，第一条写请求照样 403）。每个 online 边沿最多一次：补正失败
+  // 会重新落回离线只读，下一个边沿再试。
   const sessionVerified = useAuthStore((s) => s.sessionVerified);
   const conn = useServerHealthStore((s) => s.status);
   useEffect(() => {

@@ -89,6 +89,14 @@
   overflow-wrap: anywhere;
 }
 
+/* 队友互相把关：收益轻信号，比 meta 再淡一档，不与「用时 / ¥」抢那一行 */
+.team-strip-collab {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .team-strip-progress {
   flex-shrink: 0;
   padding-top: 2px;

@@ -26,10 +26,16 @@ _PERMANENT_EXTERNAL_MSG = "区外目录禁止永久删除；请使用可逆删�
 
 ExternalMountMode = Literal["readonly", "organize"]
 
-# Desktop / engine op names allowed under organize mode (read + organize mutations).
-ORGANIZE_ALLOWED_OPS: frozenset[str] = frozenset(
+# Op policy for session external mounts. These three sets are the single source of
+# truth mirrored by the desktop dispatch gate
+# (``apps/desktop/src/main/fs/workspace/sessionRoot.ts``); both ends are whitelists so
+# a newly added ``WorkspaceOp`` is denied until classified, never silently allowed.
+# ``tests/test_external_op_parity.py`` asserts the mirror **and** exhaustiveness over
+# ``WorkspaceOp`` — a new op makes it red on both ends.
+
+# Read-side ops (no mutation): allowed under readonly *and* organize.
+READONLY_ALLOWED_OPS: frozenset[str] = frozenset(
     {
-        # read
         "read",
         "read_bytes",
         "read_lines",
@@ -39,19 +45,19 @@ ORGANIZE_ALLOWED_OPS: frozenset[str] = frozenset(
         "index_files",
         "grep",
         "diagnostics",  # 内环语言服务只读诊断
+        "probe_exec",  # 解释器探测，与绑定根内容无关
         "process_read",
         "process_list",
         "process_stop",
-        # organize mutations
-        "move",
-        "copy",
-        "mkdir",
-        "delete",
+        "git_repo_status",  # 只读 git 摘要（桌面 UI chip）
     }
 )
 
 # Mutating ops organize may perform (workspace-layer semantic names).
 ORGANIZE_MUTATION_OPS: frozenset[str] = frozenset({"move", "copy", "mkdir", "delete"})
+
+# Desktop / engine op names allowed under organize mode (read + organize mutations).
+ORGANIZE_ALLOWED_OPS: frozenset[str] = READONLY_ALLOWED_OPS | ORGANIZE_MUTATION_OPS
 
 # Explicit denials under organize (defense in depth; also absent from ALLOWED).
 ORGANIZE_DENIED_OPS: frozenset[str] = frozenset(
@@ -63,6 +69,9 @@ ORGANIZE_DENIED_OPS: frozenset[str] = frozenset(
         "execute",
         "process_start",
         "archive",
+        "ensure_turn_baseline",
+        "git_scm",
+        "git_run",
     }
 )
 
@@ -248,32 +257,6 @@ def external_mutation_allowed(
         return readonly_write_error(label)
     if op in ORGANIZE_DENIED_OPS or op not in ORGANIZE_MUTATION_OPS:
         return organize_deny_error(label, op)
-    return None
-
-
-def desktop_op_allowed(
-    mode: ExternalMountMode,
-    op: str,
-    *,
-    permanent: bool = False,
-) -> str | None:
-    """Desktop dispatch gate: mode + op whitelist. None = allow."""
-    if mode == "readonly":
-        if op in ORGANIZE_ALLOWED_OPS and op not in ORGANIZE_MUTATION_OPS:
-            return None
-        # read-side process_stop etc. already in ALLOWED; anything else → readonly msg
-        if op in ORGANIZE_MUTATION_OPS or op in ORGANIZE_DENIED_OPS:
-            return _READONLY_MSG
-        if op not in ORGANIZE_ALLOWED_OPS:
-            return _READONLY_MSG
-        return None
-    # organize
-    if permanent and op == "delete":
-        return _PERMANENT_EXTERNAL_MSG
-    if op in ORGANIZE_DENIED_OPS:
-        return _ORGANIZE_DENY_MSG
-    if op not in ORGANIZE_ALLOWED_OPS:
-        return _ORGANIZE_DENY_MSG
     return None
 
 

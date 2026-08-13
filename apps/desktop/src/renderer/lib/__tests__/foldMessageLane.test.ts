@@ -11,6 +11,7 @@ import {
   messageLaneFromMessage,
 } from "@/lib/foldMessageLane";
 import type {
+  ProcessStep,
   ToolUseEndPayload,
   ToolUseProgressPayload,
   ToolUseStartPayload,
@@ -25,6 +26,19 @@ const startPayload = (
   arguments: { query: "深圳天气" },
   ...over,
 });
+
+/** 一条通道的步骤拼接值——标量（`content` / `reasoning`）必须与它逐字相等。 */
+const laneText = (
+  process: ProcessStep[],
+  kind: "content" | "reasoning",
+): string => {
+  let text = "";
+  for (const step of process) {
+    if (step.kind !== "content" && step.kind !== "reasoning") continue;
+    if (step.kind === kind) text += step.text;
+  }
+  return text;
+};
 
 describe("foldMessageLane", () => {
   it("foldContentDelta appends content and process step", () => {
@@ -69,6 +83,95 @@ describe("foldMessageLane", () => {
     const next = foldReasoningDelta(base, "hmm");
     expect(next.reasoning).toBe("hmm");
     expect(next.process).toEqual([{ kind: "reasoning", text: "hmm" }]);
+  });
+
+  // attach 增量重放的帧级替换（`replace`）：重放段里「还没说完的那一步」带的是整步全文，
+  // 追加会看到重复。换掉的只能是末尾那个尚未闭合的块——前面已闭合的步骤一个不动，
+  // 且整路拼接的标量必须与步骤数组保持一致。
+  it("foldContentDelta(replace) swaps the open content block, keeps settled steps", () => {
+    const base = messageLaneFromMessage({
+      content: "第一段结论。半句还没",
+      process: [
+        { kind: "content", text: "第一段结论。" },
+        { kind: "reasoning", text: "再核一下" },
+        {
+          kind: "tool",
+          id: "call_1",
+          tool_name: "web_search",
+          arguments: {},
+          result: "ok",
+          status: "success",
+        },
+        { kind: "content", text: "半句还没" },
+      ],
+    });
+    const next = foldContentDelta(base, "半句还没说完，这是整步全文。", true);
+    expect(next.process).toEqual([
+      { kind: "content", text: "第一段结论。" },
+      { kind: "reasoning", text: "再核一下" },
+      {
+        kind: "tool",
+        id: "call_1",
+        tool_name: "web_search",
+        arguments: {},
+        result: "ok",
+        status: "success",
+      },
+      { kind: "content", text: "半句还没说完，这是整步全文。" },
+    ]);
+    expect(next.content).toBe("第一段结论。半句还没说完，这是整步全文。");
+    expect(next.content).toBe(laneText(next.process, "content"));
+  });
+
+  // 通道上没有开放块（末步是工具 / 标记）→ 没什么可换，开新块并接上标量。
+  it("foldContentDelta(replace) opens a new block when the lane has none open", () => {
+    const base = messageLaneFromMessage({
+      content: "开场白。",
+      process: [
+        { kind: "content", text: "开场白。" },
+        { kind: "reasoning", text: "想一下" },
+      ],
+    });
+    const next = foldContentDelta(base, "接着说。", true);
+    expect(next.process).toEqual([
+      { kind: "content", text: "开场白。" },
+      { kind: "reasoning", text: "想一下" },
+      { kind: "content", text: "接着说。" },
+    ]);
+    expect(next.content).toBe("开场白。接着说。");
+    expect(next.content).toBe(laneText(next.process, "content"));
+  });
+
+  it("foldReasoningDelta(replace) swaps the open reasoning block only", () => {
+    const base = messageLaneFromMessage({
+      content: "",
+      reasoning: "先拆解。想到一半",
+      process: [
+        { kind: "reasoning", text: "先拆解。" },
+        {
+          kind: "tool",
+          id: "call_1",
+          tool_name: "web_search",
+          arguments: {},
+          result: "ok",
+          status: "success",
+        },
+        { kind: "reasoning", text: "想到一半" },
+      ],
+    });
+    const next = foldReasoningDelta(base, "想到一半，这是整步全文。", true);
+    expect(next.process.map((s) => s.kind)).toEqual([
+      "reasoning",
+      "tool",
+      "reasoning",
+    ]);
+    expect(next.process[0]).toEqual({ kind: "reasoning", text: "先拆解。" });
+    expect(next.process[2]).toEqual({
+      kind: "reasoning",
+      text: "想到一半，这是整步全文。",
+    });
+    expect(next.reasoning).toBe("先拆解。想到一半，这是整步全文。");
+    expect(next.reasoning).toBe(laneText(next.process, "reasoning"));
   });
 
   // 工具执行阶段进度 (联网搜索前端展示优化)

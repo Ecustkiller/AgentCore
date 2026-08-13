@@ -225,7 +225,10 @@ async def select_model_config(
     ``run_background_llm``) is the authorization choke point.
 
     Background purposes (title/memory/compaction) are **platform-first**
-    product chrome when :func:`platform_catalog_visible`. BYOK is the fallback when
+    product chrome when :func:`platform_catalog_visible` — *unless* the user pointed
+    the combo's background slot at their own key, which outranks the platform default:
+    「平台优先」 exists to stop BYOK accounts freeloading platform quota, and an account
+    spending its own key has nothing to freeload. Otherwise BYOK is the fallback when
     the platform gate is off **or** upstream auth rejection via ``run_background_llm``.
     Chat purpose stays user-key-first unless the account default is an explicit
     platform pointer.
@@ -240,12 +243,16 @@ async def select_model_config(
         _model_config_from_creds,
         platform_llm_credentials,
         resolve_background_user_fallback,
+        resolve_explicit_background_byok,
     )
 
     is_background = purpose in _BACKGROUND_PURPOSES
 
     if is_background:
         if platform_catalog_visible():
+            explicit = await resolve_explicit_background_byok(session, user_id, purpose)
+            if explicit is not None:
+                return explicit
             platform_model = _model_for_purpose(
                 purpose, chat_model=settings.platform_model
             )

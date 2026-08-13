@@ -60,19 +60,20 @@ def _isolate_coordination_registry():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_b1_closing_latches():
-    """Clear turn-scoped B1 closing latches around every test.
+def _isolate_turn_scoped_closing_state():
+    """Give every test the turn-entry reset that prepare / resume wire perform.
 
-    ``note_empty_handoff_storm`` / ``note_cancel_zero_output`` / over-seat latches are
-    ContextVars set as side effects of delivery_status emission. Without a reset,
-    later ``finish_guard`` / ``closing_honesty_rework`` calls in the same worker
-    inherit a stale storm and inject spurious「超席/空交接」reworks (xdist flake).
+    Storm latches and ``current_delivery_verdict`` are ContextVars set as side effects
+    of delivery_status emission. Tests that drive the engine loop directly skip
+    ``prepare``, so without this they inherit the previous test's latches and
+    ``finish_guard`` injects spurious「超席/空交接」or 缺口承认 reworks depending on
+    collection order. Calls the same owner as production so the two cannot drift.
     """
-    from agentcore.runtime.closing_posture import clear_b1_closing_latches
+    from agentcore.runtime.closing_posture import reset_turn_scoped_closing_state
 
-    clear_b1_closing_latches()
+    reset_turn_scoped_closing_state()
     yield
-    clear_b1_closing_latches()
+    reset_turn_scoped_closing_state()
 
 
 @pytest.fixture(autouse=True)

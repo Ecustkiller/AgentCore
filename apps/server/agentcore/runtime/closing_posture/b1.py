@@ -18,11 +18,15 @@ from .cancel_zero import (
     clear_cancel_zero_output,
     turn_has_cancel_zero_output,
 )
+from .cloud_web import clear_cloud_web_verify_gap
 from .core import (
     claims_draft_acknowledgment,
     claims_posture_a,
 )
-from .cutoff import turn_has_cutoff_delivery_gap
+from .cutoff import (
+    clear_cutoff_delivery_gap,
+    turn_has_cutoff_delivery_gap,
+)
 from .empty_handoff import (
     clear_empty_handoff_storm,
     turn_has_empty_handoff_storm,
@@ -39,6 +43,7 @@ from .verify_budget import (
     _verify_budget_hollow_rework,
     clear_verify_budget_exhausted,
 )
+from .write_ownership import clear_unresolved_write_ownership
 
 
 def clear_b1_closing_latches() -> None:
@@ -52,6 +57,25 @@ def clear_b1_closing_latches() -> None:
     clear_empty_handoff_storm()
     clear_cancel_zero_output()
     clear_verify_budget_exhausted()
+
+
+def reset_turn_scoped_closing_state() -> None:
+    """Forget everything a previous turn latched, so ``finish_guard`` judges this one.
+
+    The single owner of「新回合必须忘掉什么」。Both turn entries (prepare / resume wire)
+    and the test isolation fixture call this — when the list lived inline at each site
+    it drifted: the fixture cleared only the B1 latches, so a leaked
+    ``current_delivery_verdict`` made unrelated tests demand a 缺口承认 depending on
+    collection order. Add a new turn-scoped latch here, not at the call sites.
+    """
+    # Lazy: delivery_status imports this package, so a module-level import cycles.
+    from agentcore.runtime.delegate.delivery_status import current_delivery_verdict
+
+    current_delivery_verdict.set(None)
+    clear_cloud_web_verify_gap()
+    clear_cutoff_delivery_gap()
+    clear_unresolved_write_ownership()
+    clear_b1_closing_latches()
 
 
 def _partial_storm_rework(content: str) -> str | None:
@@ -108,4 +132,5 @@ __all__ = [
     "_partial_storm_rework",
     "_verify_budget_hollow_rework",
     "clear_b1_closing_latches",
+    "reset_turn_scoped_closing_state",
 ]

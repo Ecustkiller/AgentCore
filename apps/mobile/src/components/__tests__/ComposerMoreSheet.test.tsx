@@ -46,4 +46,37 @@ describe("ComposerMoreSheet", () => {
     fireEvent.click(screen.getByTestId("composer-more-attach"));
     expect(onAttach).toHaveBeenCalled();
   });
+
+  it("marks a system preset combination", () => {
+    render(
+      <ComposerMoreSheet
+        modelLabel="GLM-5.2"
+        modelPreset
+        permissionLabel="少打断"
+        onClose={vi.fn()}
+        onOpenModel={vi.fn()}
+        onOpenPermission={vi.fn()}
+        onAttach={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("预置")).toBeTruthy();
+    expect(screen.getByLabelText("模型组合：GLM-5.2（系统预置）")).toBeTruthy();
+  });
+
+  it("leaves user-built combinations unmarked", () => {
+    render(
+      <ComposerMoreSheet
+        modelLabel="写作强档"
+        permissionLabel="少打断"
+        onClose={vi.fn()}
+        onOpenModel={vi.fn()}
+        onOpenPermission={vi.fn()}
+        onAttach={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("预置")).toBeNull();
+    expect(screen.getByLabelText("模型组合：写作强档")).toBeTruthy();
+  });
 });

@@ -1,5 +1,6 @@
 import { clientHeaders } from "@/lib/clientBuildInfo";
 import { logEvent } from "@/lib/log";
+import type { RecoveryMomentFields } from "@/lib/recoveryMoment";
 import type { AuthRefreshResult } from "../../shared/outbox-contract";
 
 export type { AuthRefreshResult };
@@ -43,6 +44,9 @@ export class ApiError extends Error {
   readonly serverMessage?: string;
   /** Seconds to wait before retrying, from a `Retry-After` header (e.g. 429s). */
   readonly retryAfter?: number;
+  /** 额度恢复 / 配额重置的绝对时刻（ISO8601 UTC）——429 的句子不再自带时刻，由渲染层
+   * 按用户本机时区成文（`lib/recoveryMoment`）。 */
+  readonly recoveryMoment?: RecoveryMomentFields;
 
   constructor(
     public status: number,
@@ -57,11 +61,17 @@ export class ApiError extends Error {
     // code/serverMessage undefined and callers fall back to status phrasing.
     try {
       const parsed = JSON.parse(body) as {
-        error?: { code?: string; message?: string };
+        error?: { code?: string; message?: string } & RecoveryMomentFields;
         detail?: { code?: string; message?: string } | string;
       };
       this.code = parsed.error?.code;
       this.serverMessage = parsed.error?.message;
+      if (parsed.error) {
+        this.recoveryMoment = {
+          recovery_at: parsed.error.recovery_at,
+          reset_at: parsed.error.reset_at,
+        };
+      }
       // FastAPI HTTPException(detail={code, message}) — P1 interaction 410/409.
       if (!this.code && typeof parsed.detail === "object" && parsed.detail) {
         this.code = parsed.detail.code;
@@ -115,7 +125,22 @@ export function notifyUnauthorized(fields?: Record<string, unknown>): void {
 
 let csrfToken: string | null = null;
 
-function captureCsrf(response: Response): void {
+/**
+ * Absorb an `X-CSRF-Token` off any response that carries one.
+ *
+ * The server hands it out on the handshake (login / refresh / the cold-start
+ * `/me` probe) and on the 403 that rejects a session holding no usable token —
+ * nothing else. Reading it unconditionally is what makes that 403 recoverable:
+ * every token-bearing write now replays the rejected request itself off the
+ * shared {@link isReplayableCsrfRejection} verdict — `api.*`, the workspace file
+ * client (`workspaceHttp.authedFetch`), the POST-SSE turn/handoff streams and the
+ * raw-bytes avatar upload alike. What is left calling `fetch` directly are the
+ * GET streams, which carry no token at all and only arm the *next* write. A path
+ * that reads the body but drops the headers leaves the client unarmed and 403ing
+ * every write on a live session, which reads to the user as "the app ignores my
+ * clicks".
+ */
+export function captureCsrf(response: Pick<Response, "headers">): void {
   const token = response.headers.get("X-CSRF-Token");
   if (token) csrfToken = token;
 }
@@ -133,6 +158,37 @@ function csrfHeaders(method: string): Record<string, string> {
   if (!csrfToken) return {};
   if (method === "GET" || method === "HEAD" || method === "OPTIONS") return {};
   return { "X-CSRF-Token": csrfToken };
+}
+
+/**
+ * A 403 the server itself re-armed us against — replaying it is the whole fix.
+ *
+ * The token lives only in this module's memory, so the first write of a cold
+ * start has none to send and eats a `CSRF_FAILED`. That rejection happens in
+ * middleware, before any handler runs, and carries a usable token that
+ * {@link captureCsrf} has already absorbed — so the same request sent again
+ * succeeds, with no risk of doubling a side effect the server never performed.
+ * Without the replay the user pays for that with one failed click per launch.
+ *
+ * A rejection that carries **no** token is the server deliberately declining to
+ * re-arm us: the presented token was signed for a different session, so a replay
+ * would only succeed as *that* session. Those must keep failing. The header's
+ * presence is the backend's own "this is self-healable" verdict — the client
+ * never second-guesses it from the status or the message.
+ *
+ * Exported as the single source of that verdict: the raw-bytes file client
+ * (`workspaceHttp.authedFetch`) sends differently but must decide identically,
+ * so it reuses this instead of re-deriving an equivalent check that can drift.
+ */
+export function isReplayableCsrfRejection(
+  response: Response,
+  error: ApiError,
+): boolean {
+  return (
+    error.status === 403 &&
+    error.code === "CSRF_FAILED" &&
+    response.headers.get("X-CSRF-Token") !== null
+  );
 }
 
 // Invoked when a request looks like a backend outage (transport failure or 5xx)
@@ -252,15 +308,18 @@ async function request<T>(
 ): Promise<T> {
   const url = `${BASE_URL}${path}`;
   const method = (options.method ?? "GET").toUpperCase();
+  // `headers` is merged AFTER spreading `options`: caller headers must add to the
+  // defaults, never replace the object wholesale — a single `headers` in the
+  // options would otherwise silently drop CSRF + Content-Type + client build info.
   const fetchInit: RequestInit = {
     credentials: "include",
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...clientHeaders(),
       ...csrfHeaders(method),
       ...options.headers,
     },
-    ...options,
   };
   let response: Response;
   try {
@@ -297,7 +356,10 @@ async function request<T>(
     if (!retry) {
       const outcome = await tryRefresh();
       if (outcome === "renewed") {
-        return request<T>(path, options, true);
+        // Carry the deadline into the replay: a bootstrapRequest that loses it
+        // strands the auth gate on "加载中…" against a hung backend, which is the
+        // exact failure BOOTSTRAP_TIMEOUT_MS exists to bound.
+        return request<T>(path, options, true, timeoutMs);
       }
       if (outcome === "transient") {
         onServiceUnavailable?.();
@@ -316,7 +378,23 @@ async function request<T>(
     onServiceUnavailable?.();
   }
 
-  throw new ApiError(response.status, await response.text(), response.headers);
+  const error = new ApiError(
+    response.status,
+    await response.text(),
+    response.headers,
+  );
+
+  // Missing or stale CSRF token, and the rejection handed back a fresh one: send
+  // the request again carrying it. Bounded by the same `retry` flag as the 401
+  // replay above, so a server that keeps rejecting costs one extra attempt, never
+  // a loop. Unlike the refresh, this needs no auth-path opt-out — resending the
+  // identical request cannot recurse.
+  if (!retry && isReplayableCsrfRejection(response, error)) {
+    logEvent("info", "auth.csrf_replay", { path, method });
+    return request<T>(path, options, true, timeoutMs);
+  }
+
+  throw error;
 }
 
 /** Auth-gate bootstrap REST calls — same as {@link request} but bounded in time. */
@@ -338,15 +416,16 @@ async function requestWithStatus<T>(
 ): Promise<{ data: T; status: number }> {
   const url = `${BASE_URL}${path}`;
   const method = (options.method ?? "GET").toUpperCase();
+  // Caller headers merge into the defaults — see {@link request}.
   const fetchInit: RequestInit = {
     credentials: "include",
+    ...options,
     headers: {
       "Content-Type": "application/json",
       ...clientHeaders(),
       ...csrfHeaders(method),
       ...options.headers,
     },
-    ...options,
   };
   let response: Response;
   try {
@@ -390,7 +469,19 @@ async function requestWithStatus<T>(
     onServiceUnavailable?.();
   }
 
-  throw new ApiError(response.status, await response.text(), response.headers);
+  const error = new ApiError(
+    response.status,
+    await response.text(),
+    response.headers,
+  );
+
+  // Same one-shot CSRF replay as {@link request} — see the rationale there.
+  if (!retry && isReplayableCsrfRejection(response, error)) {
+    logEvent("info", "auth.csrf_replay", { path, method });
+    return requestWithStatus<T>(path, options, true);
+  }
+
+  throw error;
 }
 
 export const api = {

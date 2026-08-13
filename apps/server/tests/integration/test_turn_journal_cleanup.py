@@ -5,6 +5,10 @@ Pins the app-level cascade (no DB FK) that keeps the §18.3 唯一事实源 from
 a conversation hard-delete, a regenerate/edit truncate (``delete_after``), and a
 single-message delete each drop the matching turn_journal rows — while a
 cross-conversation id (IDOR) touches neither the message nor its journal.
+
+A paused turn's frame AND its recorded outcome ride the same cascade: a turn that is
+regenerated away must read as「已重新生成」, never answer a「继续」with the decision
+its previous life was settled by.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -80,8 +84,53 @@ async def _seed_paused(s, *, cid: str, mid: str, uid: str | None = None) -> None
         message_id=mid,
         conversation_id=cid,
         user_id=uid or str(uuid4()),
-        frame={"kind": "plan_review", "message_id": mid},
+        frame={"kind": "plan_review", "checkpoint_id": "ck1", "message_id": mid},
     )
+
+
+async def _seed_settled(s, *, cid: str, mid: str) -> None:
+    """A pause that was already answered — frame gone, the winner's conclusion left."""
+    await _seed_paused(s, cid=cid, mid=mid)
+    await PausedTurnRepository(s).claim(mid, conversation_id=cid, decision="continue")
+
+
+async def test_delete_by_id_clears_the_settled_conclusion(session_factory):
+    """回合被删掉，卡的结论也随之走——否则重新生成后那张卡会答出上一轮的决策。"""
+    cid, mid = str(uuid4()), str(uuid4())
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=mid)
+        await _seed_settled(s, cid=cid, mid=mid)
+        assert await PausedTurnRepository(s).get_outcome(mid, conversation_id=cid) is not None
+
+    async with session_factory() as s:
+        assert await MessageRepository(s).delete_by_id(mid, conversation_id=cid) is True
+
+    async with session_factory() as s:
+        assert await PausedTurnRepository(s).get_outcome(mid, conversation_id=cid) is None
+
+
+async def test_delete_after_clears_only_truncated_conclusions(session_factory):
+    cid = str(uuid4())
+    keep, drop = str(uuid4()), str(uuid4())
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=keep)
+        await _seed_turn(s, cid=cid, mid=drop)
+        await _seed_settled(s, cid=cid, mid=keep)
+        await _seed_settled(s, cid=cid, mid=drop)
+        await s.execute(update(Message).where(Message.id == keep).values(created_at=t0))
+        await s.execute(
+            update(Message).where(Message.id == drop).values(created_at=t0 + timedelta(minutes=1))
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        assert await MessageRepository(s).delete_after(cid, after_created_at=t0) == 1
+
+    async with session_factory() as s:
+        repo = PausedTurnRepository(s)
+        assert await repo.get_outcome(keep, conversation_id=cid) is not None
+        assert await repo.get_outcome(drop, conversation_id=cid) is None
 
 
 async def test_delete_by_id_clears_paused_turn(session_factory):

@@ -5,6 +5,8 @@ import {
   isRetriableStreamError,
   streamErrorAction,
 } from "@/lib/errors";
+import { formatLocalMoment } from "@/lib/recoveryMoment";
+import { captureCsrf, clearCsrfToken } from "@/services/api";
 import { useConversationStore } from "@/stores/conversation";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as dispatchMod from "../sse/dispatch";
@@ -24,14 +26,29 @@ afterEach(() => {
 
 describe("describeStreamError", () => {
   it("surfaces the backend's verbatim message for a 429 (quota reset / cool-down)", () => {
+    // 后端句子里已不含时刻（只给结构化 reset_at）；没时刻时原样透出这句。
     const err = new StreamError("http", 429, {
       code: "QUOTA_EXCEEDED",
       serverMessage:
-        "已达每日 token 上限（2,000,000 / 2,000,000），明日 0 点（UTC）重置。",
+        "已达每日 token 上限（2,000,000 / 2,000,000），额度重置后可继续。",
     });
     expect(describeStreamError(err)).toBe(
-      "已达每日 token 上限（2,000,000 / 2,000,000），明日 0 点（UTC）重置。",
+      "已达每日 token 上限（2,000,000 / 2,000,000），额度重置后可继续。",
     );
+  });
+
+  it("appends the platform gate's reset moment in the user's own timezone", () => {
+    const err = new StreamError("http", 429, {
+      code: "QUOTA_EXCEEDED",
+      serverMessage:
+        "已达每日 token 上限（2,000,000 / 2,000,000），额度重置后可继续。",
+      recoveryMoment: { reset_at: "2026-08-14T16:00:00Z" },
+    });
+    const local = formatLocalMoment("2026-08-14T16:00:00Z");
+    expect(describeStreamError(err)).toBe(
+      `已达每日 token 上限（2,000,000 / 2,000,000），额度重置后可继续。额度将于 ${local} 重置。`,
+    );
+    expect(describeStreamError(err)).not.toContain("UTC");
   });
 
   it("falls back to a cool-down message for a 429 with only Retry-After", () => {
@@ -181,6 +198,7 @@ describe("streamConversation (refused turn)", () => {
               error: {
                 code: "RATE_LIMITED",
                 message: "操作过于频繁，请约 42 秒后再发送。",
+                reset_at: "2026-08-14T16:00:00Z",
               },
             }),
             {
@@ -209,12 +227,136 @@ describe("streamConversation (refused turn)", () => {
     expect(streamErr.code).toBe("RATE_LIMITED");
     expect(streamErr.serverMessage).toBe("操作过于频繁，请约 42 秒后再发送。");
     expect(streamErr.retryAfter).toBe(42);
+    // 结构化时刻原样收下（ISO8601 UTC），成文留给渲染层按本机时区做。
+    expect(streamErr.recoveryMoment?.reset_at).toBe("2026-08-14T16:00:00Z");
     expect(fetchMock.mock.calls[0]?.[1]?.headers).toEqual(
       expect.objectContaining({
         "X-Client-Platform": expect.any(String),
         "X-Client-Version": expect.any(String),
       }),
     );
+  });
+});
+
+/**
+ * 起回合的 POST 也吃 CSRF 403 自愈（与 `api.request` / `authedFetch` 同一条判据）。
+ * 缺这条时的形状：离线转在线后会话半武装，读请求全通、写请求全 403，用户点发送「没反应」。
+ *
+ * 「重发一条会起回合的 POST」之所以不是隐患，全由 `isReplayableCsrfRejection` 保证——
+ * 它只在 middleware 前置拒绝、handler 从未执行、且服务端回发了新令牌时才为真。故这里
+ * 两条用例分别钉住「回发了令牌 → 重放一次且带新令牌」与「没回发 → 只发一次、原样失败」。
+ */
+describe("streamConversation (CSRF 403 自愈)", () => {
+  /** 后端 middleware/csrf.py 的拒绝体，抵达客户端时的样子。 */
+  const CSRF_BODY = JSON.stringify({
+    error: {
+      code: "CSRF_FAILED",
+      message: "CSRF token missing or invalid. Re-login and retry.",
+    },
+  });
+
+  /** 一次被拒的写；`reissued` = 这次拒绝随手回发的替换令牌。 */
+  const csrfRejection = (reissued?: string): Response =>
+    new Response(CSRF_BODY, {
+      status: 403,
+      headers: {
+        "Content-Type": "application/json",
+        ...(reissued ? { "X-CSRF-Token": reissued } : {}),
+      },
+    });
+
+  /** 一条立即收口的 SSE 流（重放成功后要真的被当流读完）。 */
+  const sseTurn = (): Response =>
+    new Response(
+      'data: {"type":"message_end","timestamp":"t","payload":{"finish_reason":"end_turn"}}\n\n',
+      { status: 200, headers: { "Content-Type": "text/event-stream" } },
+    );
+
+  /**
+   * 按序回放脚本响应；`/v1/auth/refresh` 单独作答，让真实的 `tryRefresh`（及它带的
+   * 令牌轮换）照跑。`sentTokens` 记录每次发往回合端点时实际带上的 `X-CSRF-Token`，
+   * 长度即预算所约束的尝试次数；脚本用尽仍再发 = 重放成环，直接炸。
+   */
+  function stubFetch(
+    responses: Response[],
+    refresh?: () => Response,
+  ): { sentTokens: (string | undefined)[] } {
+    const queue = [...responses];
+    const sentTokens: (string | undefined)[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: unknown, init?: RequestInit) => {
+        if (String(input).includes("/v1/auth/refresh")) {
+          return Promise.resolve(
+            refresh?.() ?? new Response(null, { status: 503 }),
+          );
+        }
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        sentTokens.push(headers["X-CSRF-Token"]);
+        const next = queue.shift();
+        if (!next)
+          throw new Error(`第 ${sentTokens.length} 次发送：重放成环了`);
+        return Promise.resolve(next);
+      }),
+    );
+    return { sentTokens };
+  }
+
+  const send = () =>
+    streamConversation({
+      conversationId: "c1",
+      content: "hi",
+      delivery: "steer",
+    });
+
+  afterEach(() => {
+    clearCsrfToken();
+  });
+
+  it("可自愈的 403 重放一次，第二次带上服务端回发的新令牌", async () => {
+    vi.spyOn(dispatchMod, "dispatchSSEEvent").mockImplementation(() => {});
+    captureCsrf(
+      new Response(null, { headers: { "X-CSRF-Token": "tok-stale" } }),
+    );
+    const { sentTokens } = stubFetch([
+      csrfRejection("tok-reissued"),
+      sseTurn(),
+    ]);
+
+    await expect(send()).resolves.toBeUndefined();
+
+    // doFetch 每次调用重算 header——重放靠这个才带得上刚换发的令牌。
+    expect(sentTokens).toEqual(["tok-stale", "tok-reissued"]);
+  });
+
+  it("没回发令牌的 403 只发一次，原样失败", async () => {
+    // 无 header = 服务端刻意不重新武装（呈上的令牌签给了别的会话），重发只会以
+    // *那个*会话的身份起回合，所以必须保持失败。
+    const { sentTokens } = stubFetch([csrfRejection()]);
+
+    const err = await send().catch((e: unknown) => e);
+
+    expect(sentTokens).toHaveLength(1);
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).status).toBe(403);
+    expect((err as StreamError).code).toBe("CSRF_FAILED");
+  });
+
+  it("与 401 刷新重放共用一份预算（一次调用最多发两次）", async () => {
+    // 刷新成功后的重放又吃到可自愈 403：再重放就是第三次发送，共享预算不允许。
+    const { sentTokens } = stubFetch(
+      [new Response(null, { status: 401 }), csrfRejection("tok-late")],
+      () =>
+        new Response(null, {
+          status: 200,
+          headers: { "X-CSRF-Token": "tok-rotated" },
+        }),
+    );
+
+    const err = await send().catch((e: unknown) => e);
+
+    expect((err as StreamError).status).toBe(403);
+    expect(sentTokens).toEqual([undefined, "tok-rotated"]);
   });
 });
 

@@ -135,6 +135,7 @@ def _patch_pipeline(monkeypatch, provider: _ScriptedProvider, registry: ToolRegi
         dispose_open_supervised=_noop_dispose,
         collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
         continuation_count=0,
+        user_continuation_count=0,
     )
     fake_debate = SimpleNamespace(usage={}, run_ledger=[], citations=[])
 

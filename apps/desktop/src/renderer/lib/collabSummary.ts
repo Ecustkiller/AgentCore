@@ -1,22 +1,11 @@
-import type { TurnCollabMetrics } from "@/types/events";
-
-const ORCHESTRATION_PARTS: Array<{
-  key: "boundary_yields" | "scope_signals" | "revises" | "escalations";
-  label: string;
-}> = [
-  { key: "boundary_yields", label: "纠偏" },
-  { key: "scope_signals", label: "漂移" },
-  { key: "revises", label: "唤回" },
-  { key: "escalations", label: "上报" },
-];
-
-/** Compact non-diagnostic footer line for turn-level orchestration signals. */
-export function formatCollabSummary(
-  collab: TurnCollabMetrics | undefined,
-): string | null {
-  if (!collab) return null;
-  const segments = ORCHESTRATION_PARTS.filter(
-    ({ key }) => (collab[key] ?? 0) > 0,
-  ).map(({ key, label }) => `${label} ${collab[key]} 次`);
-  return segments.length > 0 ? segments.join(" · ") : null;
-}
+/**
+ * 协作收益轻信号（气泡脚 + 完成态状态条）。
+ *
+ * 实现在 `@agentcore/protocol-fold-kit`：这行文案手机端要一字不差地说同一句、同一个数，
+ * 与「用时」同理（那次两端各写一份，结果分叉成 40s / 2m10s）。这里只做转出口，让桌面调用方
+ * 继续 import `@/lib/collabSummary`。
+ */
+export {
+  COLLAB_SUMMARY_TOOLTIP,
+  formatCollabSummary,
+} from "@agentcore/protocol-fold-kit";

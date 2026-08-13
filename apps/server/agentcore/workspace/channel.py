@@ -27,9 +27,11 @@ channel sticky-dead for the turn (sibling inflight settle + later ops fail-fast)
 so a dropped desktop never hangs the turn on cascaded deadlines. Concurrent
 desktop round-trips are capped (``max_inflight``, default 16); extras queue before
 suspend, and queue wait rides the outer tool wall clock. No online fulfiller →
-immediate typed failure (no deadline wait), named the way the turn-start presence
-gate would have named it: a desktop that is online but no longer declares this
-root reads as 未声明持有本会话的本地目录, not 无履约方.
+typed failure without waiting out the deadline, named the way the turn-start
+presence gate would have named it: a desktop that is online but no longer declares
+this root reads as 未声明持有本会话的本地目录, not 无履约方. The one delay is a
+desktop whose SSE dropped seconds ago — that op waits out a bounded reconnect
+grace inside its own deadline (``fulfill/grace.py``) instead of failing blind.
 """
 
 from __future__ import annotations
@@ -202,7 +204,8 @@ class WorkspaceChannel:
     bound to one desktop FS ``root_id``. ``request`` is the only entry point;
     ``LocalWorkspace`` builds the JSON-safe ``args`` and interprets the returned
     ``value`` per op. Delivery goes through the fulfill hub — no online fulfiller
-    fails immediately with a typed ``WorkspaceIOError`` (no deadline wait).
+    fails with a typed ``WorkspaceIOError`` without burning the deadline (a
+    just-dropped desktop first gets its reconnect grace, see ``fulfill/grace.py``).
 
     Sticky dead: **consecutive** transport ``TimeoutError``s on **real** workspace
     ops (desktop liveness hang, N=2) mark the channel dead for the rest of the turn —
@@ -341,10 +344,12 @@ class WorkspaceChannel:
             deliver_root: str | None = rid if rid else None
 
             def _emit_op_required() -> None:
-                """Push to fulfill hub; settle immediately when nobody can run it.
+                """Push to fulfill hub; settle when nobody can run it.
 
                 The absence is named, not lumped: origin device gone, root no
-                longer held, or no fulfiller at all.
+                longer held, or no fulfiller at all. A desktop that just dropped
+                its SSE holds the op for a bounded grace inside ``deadline``
+                instead (``fulfill/grace.py``).
                 """
                 push_client_tool_required(
                     user_id=self.user_id,
@@ -373,6 +378,7 @@ class WorkspaceChannel:
                         f"local workspace op '{op_name}' failed: "
                         f"{LOCAL_ROOT_NOT_HELD}"
                     ),
+                    deadline_seconds=deadline,
                 )
 
             self._inflight.add(request_id)

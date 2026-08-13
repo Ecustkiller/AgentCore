@@ -65,8 +65,8 @@ def main() -> None:
     # bound (and must not print a false "another instance" error).
     if multiprocessing.current_process().name == "MainProcess":
         ensure_port_available(settings.host, settings.port)
-        # G5: refuse memory rate-limit + multi-worker before uvicorn binds (same
-        # check runs again in lifespan). Redis + shared DB outbox may scale.
+        # Refuse multi-worker before uvicorn binds (same check runs again in
+        # lifespan): fulfill hub + conversation event stream are process-local.
         _validate_single_process_assumptions()
 
     uvicorn.run(
@@ -77,7 +77,7 @@ def main() -> None:
         reload=reload,
         # Pin single worker when not reloading (reload mode is already one child).
         # Operators wrapping the image may still set WEB_CONCURRENCY etc.; startup
-        # allows multi-worker only with RATE_LIMIT_BACKEND=redis (+ shared DB outbox).
+        # refuses those outright until cross-process fan-out lands.
         workers=1 if not reload else None,
         # Watch only the app package, not the whole cwd: apps/server also holds
         # test artifacts (.pytmp/.pytest_*) full of .py fixtures whose churn would

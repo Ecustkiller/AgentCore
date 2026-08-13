@@ -107,6 +107,27 @@ class DirEntry:
 
 
 @dataclass(frozen=True)
+class DirListing:
+    """Bounded result of ``list`` — the entries plus whether the cap cut the rest.
+
+    Iterates (and measures) as its ``entries`` so call sites that only browse the
+    listing stay unchanged. Anything that shows the listing to a **user or the
+    model** must read ``truncated`` and say so: a listing that silently stops at
+    the cap reads as "my files are gone", which is the one thing a file view may
+    never imply.
+    """
+
+    entries: list[DirEntry]
+    truncated: bool = False
+
+    def __iter__(self):
+        return iter(self.entries)
+
+    def __len__(self) -> int:
+        return len(self.entries)
+
+
+@dataclass(frozen=True)
 class ReadLinesResult:
     """Bounded slice from ``read_lines`` — 1-based inclusive line range."""
 
@@ -304,8 +325,17 @@ class WorkspaceBackend(Protocol):
         """
         ...
 
-    async def list(self, directory: str, pattern: str) -> list[DirEntry]:
-        """List entries under ``directory`` matching glob ``pattern`` (capped).
+    async def list(
+        self, directory: str, pattern: str, *, cap: int | None = None
+    ) -> DirListing:
+        """List entries under ``directory`` matching glob ``pattern`` (bounded).
+
+        ``pattern`` containing ``**`` recurses; noise dirs are pruned as the walk
+        descends so a ``.git`` / ``node_modules`` subtree cannot spend the budget
+        on entries that are about to be filtered out. ``cap`` overrides the
+        backend default (the AI-facing ceiling); the file panel passes its own,
+        larger browse ceiling. The result reports ``truncated`` — callers that
+        render the listing must pass that on instead of cutting silently.
 
         Raises ``OutsideWorkspace`` / ``NotADirectory`` / ``WorkspaceIOError``.
         """

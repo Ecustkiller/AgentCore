@@ -1,5 +1,6 @@
+import { CSRF_FAILED_MESSAGE, StreamError, describeError } from "@/lib/errors";
 import { buildReviewRows, buildSelections } from "@/lib/handoff-review";
-import { BASE_URL, api } from "@/services/api";
+import { BASE_URL, api, captureCsrf, clearCsrfToken } from "@/services/api";
 import { performWorkspaceOp } from "@/services/workspaceOps";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -45,6 +46,15 @@ function sseResponse(events: unknown[]): Response {
 const postedBody = (fetchMock: ReturnType<typeof vi.fn>, call = 0) =>
   JSON.parse((fetchMock.mock.calls[call][1] as RequestInit).body as string);
 
+/** 第 `call` 次发送实际带上的 CSRF 令牌（未带 = undefined）。 */
+const sentToken = (
+  fetchMock: ReturnType<typeof vi.fn>,
+  call: number,
+): string | undefined => {
+  const init = fetchMock.mock.calls[call][1] as RequestInit;
+  return (init.headers as Record<string, string>)["X-CSRF-Token"];
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -58,6 +68,8 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // 令牌活在 api 模块的内存里，跨用例会串。
+  clearCsrfToken();
 });
 
 describe("dispatchHandoffJob", () => {
@@ -96,6 +108,102 @@ describe("dispatchHandoffJob", () => {
       jobId: "job-1",
       jobConversationId: "job-conv-1",
     });
+  });
+});
+
+describe("交接流失败收口", () => {
+  it("parses the refusal body so a CSRF 403 reads like everywhere else", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: "CSRF_FAILED",
+            message: "CSRF token missing or invalid. Re-login and retry.",
+          },
+        }),
+        { status: 403, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const err = await dispatchHandoffJob("c1", "调研竞品").catch(
+      (e: unknown) => e,
+    );
+
+    // Used to throw on the status alone: same backend refusal, different words.
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).code).toBe("CSRF_FAILED");
+    expect(describeError(err)?.message).toBe(CSRF_FAILED_MESSAGE);
+  });
+});
+
+/**
+ * 交接 POST 也吃 CSRF 403 自愈（与 `api.request` / `authedFetch` 同一条判据）。
+ *
+ * 「重发一条会派云端作业的 POST」之所以不会派两份，全由 `isReplayableCsrfRejection`
+ * 保证——它只在 middleware 前置拒绝、handler 从未执行、且服务端回发了新令牌时才为真。
+ */
+describe("交接流 CSRF 403 自愈", () => {
+  const CSRF_BODY = JSON.stringify({
+    error: {
+      code: "CSRF_FAILED",
+      message: "CSRF token missing or invalid. Re-login and retry.",
+    },
+  });
+
+  /** 一次被拒的派发；`reissued` = 这次拒绝随手回发的替换令牌。 */
+  const csrfRejection = (reissued?: string): Response =>
+    new Response(CSRF_BODY, {
+      status: 403,
+      headers: {
+        "Content-Type": "application/json",
+        ...(reissued ? { "X-CSRF-Token": reissued } : {}),
+      },
+    });
+
+  it("可自愈的 403 重放一次，第二次带上服务端回发的新令牌", async () => {
+    captureCsrf(
+      new Response(null, { headers: { "X-CSRF-Token": "tok-stale" } }),
+    );
+    fetchMock
+      .mockResolvedValueOnce(csrfRejection("tok-reissued"))
+      .mockResolvedValueOnce(
+        sseResponse([
+          {
+            type: "handoff_job_started",
+            payload: {
+              job_id: "job-1",
+              conversation_id: "c1",
+              job_conversation_id: "job-conv-1",
+            },
+          },
+        ]),
+      );
+
+    const started = await dispatchHandoffJob("c1", "调研竞品");
+
+    expect(started).toEqual({
+      jobId: "job-1",
+      jobConversationId: "job-conv-1",
+    });
+    // doFetch 每次调用重算 header——重放靠这个才带得上刚换发的令牌。
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sentToken(fetchMock, 0)).toBe("tok-stale");
+    expect(sentToken(fetchMock, 1)).toBe("tok-reissued");
+  });
+
+  it("没回发令牌的 403 只发一次，原样失败", async () => {
+    // 无 header = 服务端刻意不重新武装（呈上的令牌签给了别的会话），重发只会以
+    // *那个*会话的身份派活，所以必须保持失败。
+    fetchMock.mockResolvedValueOnce(csrfRejection());
+
+    const err = await dispatchHandoffJob("c1", "调研竞品").catch(
+      (e: unknown) => e,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(StreamError);
+    expect((err as StreamError).status).toBe(403);
+    expect((err as StreamError).code).toBe("CSRF_FAILED");
   });
 });
 

@@ -3,6 +3,9 @@
  * for desktop + mobile. Does **not** ship `fold(events)→ProjectedTurn`.
  *
  * 「用时」跨度（{@link turnElapsedMs}）也在这里：它是同名指标，两端算的必须是同一个量。
+ * 同理还有回合收益口径（`teamGain`：并行省时 + 队友互相把关）与按人干预的可用性判定
+ * （`runIntervene`：能不能只停 / 只改这一个队员，不能时给哪句原因）——同一句文案、同一个数，
+ * 两端各写一份就是在给「用时」那次分叉留同样的缝。
  *
  * Allowed under cross-platform-frontend: protocol constants yes; shared fold
  * implementation no. Gate remains `pnpm conformance`.
@@ -27,3 +30,26 @@ export {
   turnElapsedMs,
   type TimedWireEvent,
 } from "./turnElapsed";
+
+export {
+  interveneAckText,
+  isLiveRunStatus,
+  runRedirectGate,
+  runStopGate,
+  type InterveneAck,
+  type InterveneGate,
+  type InterveneRunStatus,
+} from "./runIntervene";
+
+export {
+  COLLAB_SUMMARY_TOOLTIP,
+  PARALLEL_SAVING_MIN_MS,
+  formatCollabSummary,
+  parallelSaving,
+  parallelSavingText,
+  parallelSavingTooltip,
+  serialWorkMs,
+  type CollabCounts,
+  type ParallelSaving,
+  type WorkerDurationRun,
+} from "./teamGain";

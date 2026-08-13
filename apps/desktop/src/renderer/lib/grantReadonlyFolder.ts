@@ -1,3 +1,4 @@
+import { adoptServerAlias } from "@/lib/adoptServerAlias";
 import { hasLocalFiles } from "@/lib/capabilities";
 import type { GrantFolderHints } from "@/lib/grantFolderHints";
 import { revokeExternalGrant } from "@/lib/revokeExternalGrant";
@@ -31,6 +32,8 @@ export type GrantReadonlyResult =
       message: string;
     };
 
+const ALIAS_STORE_FAILED = "授权已登记但本机没能记下挂载名，请重试";
+
 const RESOLVE_FAIL_FALLBACK: Record<
   Exclude<GrantSessionReadonlyRootFailReason, "invalid">,
   string
@@ -40,6 +43,8 @@ const RESOLVE_FAIL_FALLBACK: Record<
   not_directory: "路径指向的是文件，不是目录",
   ambiguous: "匹配到多个目录，请说得更具体",
 };
+
+type ExternalGrantBody = { grant: { alias: string; namespace: string } };
 
 function describeGrantError(e: unknown): string {
   if (e instanceof ApiError && e.status === 404) {
@@ -93,26 +98,35 @@ export async function pickAndGrantReadonlyFolder(
       };
     }
     const root = granted.root;
+    let body: ExternalGrantBody;
+    // 只兜 POST：登记不上就撤回本机授权，别让这台机器留着服务端不知道的根。
+    // 这一趟同时把根绑到本设备的履约会话上（服务端 `fulfill/declare.py`），所以
+    // 回执一到，同一轮里紧接着下发的 `external/<别名>/` 操作就有机器可路由。
     try {
-      const body = await api.post<{
-        grant: { alias: string; namespace: string };
-      }>(`/v1/conversations/${conversationId}/workspace/external-grants`, {
-        root_id: root.id,
-        label: root.name,
-        alias_hint: root.alias ?? root.name,
-      });
-      invalidateExternalGrants(conversationId);
-      return {
-        ok: true,
-        root,
-        alias: body.grant.alias,
-        namespace: body.grant.namespace,
-        displayLabel: granted.displayLabel,
-      };
+      body = await api.post<ExternalGrantBody>(
+        `/v1/conversations/${conversationId}/workspace/external-grants`,
+        {
+          root_id: root.id,
+          label: root.name,
+        },
+      );
     } catch (e) {
       await revokeExternalGrant(conversationId, root.id);
       throw e;
     }
+    // 别名只有这一个来源。存不下就没有可用的挂载（本机引擎按它解析路径），当作授权失败。
+    if (!(await adoptServerAlias(conversationId, root.id, body.grant.alias))) {
+      await revokeExternalGrant(conversationId, root.id);
+      return { ok: false, reason: "error", message: ALIAS_STORE_FAILED };
+    }
+    invalidateExternalGrants(conversationId);
+    return {
+      ok: true,
+      root,
+      alias: body.grant.alias,
+      namespace: body.grant.namespace,
+      displayLabel: granted.displayLabel,
+    };
   } catch (e) {
     return { ok: false, reason: "error", message: describeGrantError(e) };
   }

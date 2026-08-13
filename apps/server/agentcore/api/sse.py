@@ -42,8 +42,10 @@ async def release_request_db_before_sse(session: AsyncSession) -> None:
 # streamConversation.ts) so a slow-but-alive turn is never mistaken for a drop.
 _HEARTBEAT_INTERVAL_S = 15.0
 
-# Marks the end of clear-then-fold replay (+ hot re-hang) so clients can buffer
-# and apply the catch-up segment in one paint, then live-tail. Comment frame —
+# Marks the end of the full-replay segment (+ hot re-hang) so clients can buffer
+# and apply the catch-up segment in one paint, then live-tail. The segment's own
+# head (``message_start.full_replay``) is what orders the reset; this only bounds
+# where the catch-up stops and the live tail starts. Comment frame —
 # not an EventType (no journal / conformance). Desktop + mobile pump parsers
 # recognize the same token; older clients ignore unknown ``:`` comments.
 _ATTACH_CAUGHT_UP = ": attach-caught-up\n\n"
@@ -198,19 +200,33 @@ async def _catch_up_replay(sink: EventSink, *, last_event_id: int | None) -> lis
 
     ``last_event_id is None`` → same-process fast path: the sink's own in-memory
     history (plus the synthetic ``message_end`` when the turn already finished).
-    Otherwise the journal-backed full-turn replay + stream_state synthetic deltas.
+    Otherwise the journal-backed replay + stream_state synthetic deltas.
 
-    The header value stays observational: clients clear-then-fold the catch-up段, so a
-    ``seq > cursor`` tail would drop the pre-cursor structure (tools / team graph /
-    process narration) they just cleared. Per-端 cursors are already independent (each
-    connection carries its own header and gets its own replay); making the replay
-    *incremental* is a client-contract change, not a server switch.
+    Whether the段 is FULL or INCREMENTAL is the server's call, stated on its head: a
+    ``message_start`` with ``full_replay`` orders「重置本回合本地态再折本段」, one without
+    it means「你手里那半场是对的，往后接」, and an EMPTY段 says nothing at all (a reset
+    with no replacement body would wipe state the client cannot get back). The history
+    path is always full and is normalized by ``mark_full_replay_segment``; the cursor
+    path mints its own head and ships the increment only when
+    :func:`~agentcore.runtime.events.attach_replay._incremental_verdict` can vouch for
+    the cursor (otherwise it falls back to the same full段). Either way a client must
+    never have to infer the reset from the id on screen.
+
+    Per-端 cursors are independent: each connection carries its own header and gets its
+    own段, so one端 catching up incrementally says nothing about the others.
     """
-    if last_event_id is None:
-        return sink.history_snapshot()
-    from agentcore.runtime.events.attach_replay import build_cursor_replay
+    from agentcore.runtime.events.attach_replay import (
+        build_cursor_replay,
+        mark_full_replay_segment,
+    )
 
     turn_id = sink._message_id
+    if last_event_id is None:
+        return mark_full_replay_segment(
+            sink.history_snapshot(),
+            turn_id=turn_id,
+            conversation_id=sink.conversation_id or "",
+        )
     if not turn_id:
         return []
     agent_ids = sink._checkpointer.run_agent_ids() if sink._checkpointer is not None else {}
@@ -229,8 +245,14 @@ async def _attach_frames(
     *,
     last_event_id: int | None = None,
     ambient: ConversationWatcher | None = None,
+    lead: SSEEvent | None = None,
 ) -> AsyncIterator[str]:
     """Replay → hot re-hang → ``: attach-caught-up`` → live tail, for ONE run.
+
+    A non-empty replay段 opens with a ``message_start`` that says whether it is a full
+    replay (see :func:`_catch_up_replay`), so the client resets this turn's local state
+    — or knowingly keeps it — on the head rather than guessing from the id. Nothing to
+    replay ships nothing: straight to the boundary comment and the live tail.
 
     ``sub`` must already be subscribed (the caller does it synchronously, before the
     replay snapshot, so nothing emitted in between is lost). Shared by the single-turn
@@ -239,8 +261,16 @@ async def _attach_frames(
     ``ambient`` is the conversation watcher when this is a对话级订阅: its signals are
     merged into the live tail (a signal arriving during the replay段 flushes right after
     the boundary comment, never into the catch-up段).
+
+    ``lead`` is a frame that belongs to this connection rather than to the run (the
+    ``resume_settled`` ack). The replay snapshot is taken BEFORE it ships: yielding
+    first would hand control back to the client mid-attach, and anything the run
+    emitted in that window would arrive twice — once in the snapshot, once live.
     """
-    for event in await _catch_up_replay(sink, last_event_id=last_event_id):
+    replay = await _catch_up_replay(sink, last_event_id=last_event_id)
+    if lead is not None:
+        yield _format_sse(lead)
+    for event in replay:
         yield _format_sse(event)
     # Hot re-hang: after journal/history replay (DURABLE-only for cursor path),
     # re-emit still-open answerable hot cards (approval / delegation / user
@@ -274,8 +304,9 @@ async def _attach_generator(
     attaching neither evicts nor starves whoever else is watching, and dropping it only
     unsubscribes this one connection (it never cancels the turn).
 
-    With ``Last-Event-ID`` (P3): journal-backed full-turn durable replay + stream_state
-    synthetic deltas, emit ``: attach-caught-up``, then live tail.
+    With ``Last-Event-ID`` (P3): journal-backed durable replay (full turn, or only the
+    post-cursor facts when the cursor checks out) + stream_state synthetic deltas, emit
+    ``: attach-caught-up``, then live tail.
     """
     sub = sink.subscribe(label="attach")
     try:
@@ -565,6 +596,53 @@ def sse_resume_deferred_response(
             busy_reason=busy_reason,
             started=started,
         ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+async def _resume_settled_generator(
+    settled: SSEEvent,
+    *,
+    sink: EventSink | None,
+) -> AsyncIterator[str]:
+    """Emit ``resume_settled``, then join the continuation that already claimed the frame.
+
+    ``sink`` is that continuation's live sink (``None`` once it has finished): this
+    connection becomes one more observer of it — replay then tail, exactly like the
+    attach endpoint — so a second submit of the same cold card shares the running
+    resume instead of racing it. Dropping this connection only unsubscribes; the run
+    is detached and keeps going.
+    """
+    if sink is None:
+        yield _format_sse(settled)
+        return
+    sub = sink.subscribe(label="resume_settled_join")
+    try:
+        async for frame in _attach_frames(sink, sub, lead=settled):
+            yield frame
+        sink.unsubscribe(sub, reason="sse_resume_settled_end")
+    except (asyncio.CancelledError, GeneratorExit):
+        sink.unsubscribe(sub, reason="sse_resume_settled_disconnect")
+        raise
+
+
+def sse_resume_settled_response(
+    settled: SSEEvent,
+    *,
+    sink: EventSink | None = None,
+) -> StreamingResponse:
+    """SSE for a cold resume whose frame was already consumed (幂等成功, never 404).
+
+    Always leads with the ``resume_settled`` facts; when the continuation is still
+    running (``sink``) the same connection then streams it.
+    """
+    return StreamingResponse(
+        _resume_settled_generator(settled, sink=sink),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

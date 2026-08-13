@@ -14,6 +14,7 @@ objects (``User``) and the repository's quota sentinel convention.
 
 from datetime import datetime
 
+from agentcore.billing.allowance import invalidate_allowance
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.models import User
 from agentcore.db.repositories import UserRepository
@@ -95,6 +96,10 @@ class AdminService:
             await self._users.set_status(user_id, status)
         if quota:
             await self._users.set_quota(user_id, **quota)
+            # Raising a cap is the operator's answer to「额度用完了」: background work
+            # that cached an upstream refusal must stop obeying it immediately, not
+            # after the cooldown it armed against the old allowance runs out.
+            invalidate_allowance(user_id, reason="quota_changed")
 
         refreshed = await self._users.get_by_id(user_id)
         if refreshed is None:  # pragma: no cover - row was just read above

@@ -865,7 +865,7 @@ def test_platform_listable_public_api_and_visibility_gate(monkeypatch):
 
 
 def test_system_preset_display_name_matches_catalog_enrichment(monkeypatch):
-    """Profiles derive display names via catalog — same path as catalog rows."""
+    """Profiles derive combo names via catalog — same enrichment path as catalog rows."""
     from agentcore.llm.model_profiles import (
         _system_preset_display_name,
         platform_preset_id,
@@ -879,6 +879,20 @@ def test_system_preset_display_name_matches_catalog_enrichment(monkeypatch):
     )
     presets = system_presets()
     assert presets[platform_preset_id("glm-5.2")] == "glm-5.2"
-    assert _system_preset_display_name("glm-5.2") == catalog.platform_model_display_name(
-        "glm-5.2"
+    assert _system_preset_display_name("glm-5.2") == catalog.platform_model_label("glm-5.2")
+
+
+def test_platform_model_label_folds_badge_into_one_string():
+    """Lone-label surfaces need the badge — (display_name, badge) is the unique key."""
+    assert catalog.platform_model_display_name("deepseek-v4-flash-free") == (
+        catalog.platform_model_display_name("deepseek-v4-flash")
+    )
+    assert catalog.platform_model_label("deepseek-v4-flash-free") == (
+        "DeepSeek V4 Flash · 免费额度"
+    )
+    # No curated badge → unchanged (no dangling separator).
+    assert catalog.platform_model_label("deepseek-v4-flash") == "DeepSeek V4 Flash"
+    assert catalog.platform_model_label("glm-5.2") == "GLM-5.2"
+    assert catalog.platform_model_label("deepseek-v4-flash-free") != (
+        catalog.platform_model_label("deepseek-v4-flash")
     )

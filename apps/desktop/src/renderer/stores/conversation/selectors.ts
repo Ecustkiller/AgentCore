@@ -1,7 +1,11 @@
 import type { ErrorAction } from "@/lib/errors";
+import type { ProcessStep } from "@/types/events";
 import { activeRuntime, runtimeOf } from "./runtime";
 import { useConversationStore } from "./store";
 import type { ConversationRuntime, MemoryUpdate, Message } from "./types";
+
+/** Stable empty process — a fresh `[]` per call would re-render every subscriber. */
+const NO_PROCESS: ProcessStep[] = [];
 
 export const useActiveMessages = (): Message[] =>
   useConversationStore((s) => activeRuntime(s).messages);
@@ -19,6 +23,21 @@ export const useActiveMessageContent = (messageId: string | null): string =>
         "")
       : "",
   );
+
+/**
+ * 某条消息的过程线（本会话内按 client / server id 任一命中）。缺失 → 稳定空数组。
+ * 供时间线痕迹行读「这一回合 CEO 自己调了什么」，不必订阅整个 messages。
+ */
+export const useActiveMessageProcess = (
+  messageId: string | null,
+): ProcessStep[] =>
+  useConversationStore((s) => {
+    if (!messageId) return NO_PROCESS;
+    const found = activeRuntime(s).messages.find(
+      (m) => m.id === messageId || m.serverMessageId === messageId,
+    );
+    return found?.process ?? NO_PROCESS;
+  });
 
 export const useActiveMemoryUpdates = (): MemoryUpdate[] =>
   useConversationStore((s) => activeRuntime(s).memoryUpdates);

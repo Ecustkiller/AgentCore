@@ -50,11 +50,13 @@ from pydantic import BaseModel, Field
 
 from agentcore.api.dependencies import (
     AuthUser,
+    get_document_repo,
     get_memory_store,
     get_memory_update_repo,
 )
 from agentcore.api.schemas import MemoryUpdateItemView
-from agentcore.db.repositories import MemoryUpdateRepository
+from agentcore.db.models.documents import MAX_DISPUTED_LINES
+from agentcore.db.repositories import DocumentRepository, MemoryUpdateRepository
 from agentcore.memory import (
     CORE_MEMORY_FILE,
     NAVIGATION_MEMORY_FILE,
@@ -66,6 +68,14 @@ from agentcore.memory import (
     split_global_core,
     topic_path,
     topic_slug,
+)
+from agentcore.memory.dispute_line import (
+    DisputeLineConflict,
+    DisputeLineError,
+    DisputeLineOk,
+    dispute_memory_line,
+    resolve_memory_file,
+    restore_memory_line,
 )
 from agentcore.memory.document_store import EditorBodyMemoryStore
 from agentcore.memory.locks import user_memory_lock
@@ -224,6 +234,68 @@ class MemoryMoveBulletResult(BaseModel):
     message: str | None = None
 
 
+class MemoryDisputeLineRequest(BaseModel):
+    """Reject ONE bullet (「这条不对」at sentence granularity, 纠错通道·行级).
+
+    The line leaves the body and is kept in the entry's disputed record, so the rest of the
+    entry keeps working — unlike the entry-level ``disputed`` flag on the documents API,
+    which silences everything in the file. ``folder_id`` omitted = the global layer.
+    """
+
+    content: str = Field(..., min_length=1, description="Bullet text to reject")
+    section: str = Field("", description="## section name the bullet sits under")
+    folder_id: str | None = None
+    kind: Literal["preferences", "profile", "topic"] = "profile"
+    topic_slug: str | None = None
+    baseline: str | None = None
+
+
+class MemoryRestoreLineRequest(BaseModel):
+    """Undo one line-level dispute by the record's stable ``id``.
+
+    Never by position: rejecting several lines and undoing an earlier one shifts the rest,
+    so an index would put back a different line than the one the user pointed at.
+    """
+
+    id: str = Field(..., min_length=1)
+    folder_id: str | None = None
+    kind: Literal["preferences", "profile", "topic"] = "profile"
+    topic_slug: str | None = None
+
+
+class MemoryDisputeLineResult(BaseModel):
+    ok: bool
+    conflict: bool = False
+    version: str = ""
+    # Id of the new record row, so the client can offer an immediate undo. "" = none.
+    line_id: str = ""
+
+
+class MemoryDisputedLineView(BaseModel):
+    """One rejected bullet, addressable for undo by ``(kind, topic_slug, id)``."""
+
+    kind: Literal["preferences", "profile", "topic"]
+    topic_slug: str | None = None
+    folder_id: str | None = None
+    id: str
+    section: str = ""
+    text: str
+    disputed_at: str = ""
+
+
+class MemoryDisputedLinesResponse(BaseModel):
+    lines: list[MemoryDisputedLineView]
+    # Per-entry cap on kept records — the surface states its own bound rather than letting
+    # the oldest silently age out unannounced.
+    max_per_entry: int = MAX_DISPUTED_LINES
+
+
+class MemoryClearDisputedLinesResult(BaseModel):
+    """How many entries had their rejected-line records dropped."""
+
+    cleared_entries: int
+
+
 @router.get("", response_model=MemoryResponse)
 async def get_my_memory(
     user: AuthUser, store: EditorBodyMemoryStore = Depends(_editor_memory_store)
@@ -328,6 +400,151 @@ async def move_my_memory_bullet(
         ok=True,
         source_version=result.source_version,
         target_version=result.target_version,
+    )
+
+
+def _dispute_target(
+    body: MemoryDisputeLineRequest | MemoryRestoreLineRequest,
+) -> str:
+    resolved = resolve_memory_file(kind=body.kind, topic_slug=body.topic_slug)
+    if isinstance(resolved, DisputeLineError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "memory_dispute_rejected", "message": resolved.message},
+        )
+    return resolved
+
+
+@router.post("/dispute-line", response_model=MemoryDisputeLineResult)
+async def dispute_my_memory_line(
+    body: MemoryDisputeLineRequest,
+    user: AuthUser,
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> MemoryDisputeLineResult:
+    """Reject one bullet the user was shown — the line moves out of the entry (纠错通道·行级).
+
+    Declared before ``/files/{kind}`` so the static segment wins the route match. Holds the
+    per-user memory lock. Only an explicit user click reaches here; nothing infers a
+    rejection from conversation text.
+    """
+    async with user_memory_lock(user.user_id):
+        result = await dispute_memory_line(
+            store,
+            repo,
+            user_id=user.user_id,
+            content=body.content,
+            section=body.section,
+            scope=body.folder_id,
+            kind=body.kind,
+            topic_slug=body.topic_slug,
+            baseline=body.baseline,
+        )
+    if isinstance(result, DisputeLineError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "memory_dispute_rejected", "message": result.message},
+        )
+    if isinstance(result, DisputeLineConflict):
+        return MemoryDisputeLineResult(ok=False, conflict=True, version=result.version)
+    assert isinstance(result, DisputeLineOk)
+    return MemoryDisputeLineResult(
+        ok=True, version=result.version, line_id=result.line_id
+    )
+
+
+@router.post("/restore-line", response_model=MemoryDisputeLineResult)
+async def restore_my_memory_line(
+    body: MemoryRestoreLineRequest,
+    user: AuthUser,
+    store: EditorBodyMemoryStore = Depends(_editor_memory_store),
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> MemoryDisputeLineResult:
+    """Undo one line-level dispute — the bullet goes back into the entry.
+
+    An ``id`` that is no longer on file is a 422, never a best-effort restore of some other
+    record: putting back a line the user did not name would be worse than doing nothing.
+    """
+    file = _dispute_target(body)
+    async with user_memory_lock(user.user_id):
+        result = await restore_memory_line(
+            store,
+            repo,
+            user_id=user.user_id,
+            file=file,
+            line_id=body.id,
+            scope=body.folder_id,
+        )
+    if isinstance(result, DisputeLineError):
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "memory_dispute_rejected", "message": result.message},
+        )
+    assert isinstance(result, DisputeLineOk)
+    return MemoryDisputeLineResult(ok=True, version=result.version)
+
+
+@router.get("/disputed-lines", response_model=MemoryDisputedLinesResponse)
+async def list_my_disputed_lines(
+    user: AuthUser,
+    folder_id: str | None = None,
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> MemoryDisputedLinesResponse:
+    """Bullets the user rejected, so the editor can show and undo them.
+
+    Rejected lines are gone from the body — without this surface a mistaken click would be
+    unrecoverable, which is exactly the trap the entry-level channel avoided by never
+    deleting. ``folder_id`` omitted covers EVERY layer (global + each project with memory)
+    rather than the global one alone: a line rejected in a project layer must be findable
+    from the one place the editor lists them, or「可撤销」is only true for a few seconds.
+    Declared before ``/files/{kind}`` so the static segment wins the route match.
+    """
+    scopes: list[str | None] = (
+        [folder_id]
+        if folder_id
+        else [None, *await repo.list_memory_project_scopes(user.user_id)]
+    )
+    lines: list[MemoryDisputedLineView] = []
+    for scope in scopes:
+        for note in await repo.list_memory_notes(user.user_id, scope):
+            for entry in note.disputed_lines:
+                slug = topic_slug(note.name) if is_topic_path(note.name) else None
+                kind: Literal["preferences", "profile", "topic"] = (
+                    "topic"
+                    if slug is not None
+                    else (
+                        "preferences"
+                        if note.name == PREFERENCES_MEMORY_FILE
+                        else "profile"
+                    )
+                )
+                lines.append(
+                    MemoryDisputedLineView(
+                        kind=kind,
+                        topic_slug=slug,
+                        folder_id=scope,
+                        id=entry["id"],
+                        section=entry["section"],
+                        text=entry["text"],
+                        disputed_at=entry["disputed_at"],
+                    )
+                )
+    return MemoryDisputedLinesResponse(lines=lines)
+
+
+@router.delete("/disputed-lines", response_model=MemoryClearDisputedLinesResult)
+async def clear_my_disputed_lines(
+    user: AuthUser,
+    repo: DocumentRepository = Depends(get_document_repo),
+) -> MemoryClearDisputedLinesResult:
+    """Empty the rejected-line list (「已移走的记忆」的清空入口).
+
+    The lines stay rejected — bodies are not touched. What goes is the ability to put them
+    back, which is why this is an explicit, confirmed action rather than something the cap
+    does for the user. Declared before ``/files/{kind}`` so the static segment wins.
+    """
+    return MemoryClearDisputedLinesResult(
+        cleared_entries=await repo.clear_memory_disputed_lines(user.user_id)
     )
 
 

@@ -2,11 +2,14 @@ import type { PausedTurnSummary } from "@/api/turn";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearColdInteractions,
+  getColdInteraction,
   getColdInteractionSnapshot,
   markColdDeferred,
+  markColdOrphaned,
   markColdResolved,
   markColdSubmitting,
   rekeyColdMessageId,
+  reopenColdPending,
   upsertColdRequired,
 } from "../coldInteractions";
 import {
@@ -238,6 +241,61 @@ describe("coldResume · live Interaction authority", () => {
     expect(visible[0]?.interactionStatus).toBe("submitting");
     expect(visible[0]?.deferredBusyReason).toBe("live_turn");
     expect(visible[0]?.message_id).toBe("m-deferred");
+  });
+
+  // ChatPage.resume() 的 isPausedFrameGone 分支：挂起帧真的不在了（超保留期被清理 / 回合已
+  // 重新生成或删除）。「已由另一端处理」不走这里——那种幂等成功是 200 + `resume_settled`。
+  it("挂起帧真失效 → 卡作废（非 resolved）、不放回可点、恢复壳也不补画", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-gone",
+      payload: { checkpoint_id: "cp-gone", question: "放行？" },
+    });
+    markColdSubmitting({
+      kind: "ask_user",
+      id: "cp-gone",
+      resolution: { decision: "continue" },
+    });
+
+    markColdOrphaned("cp-gone", {
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-gone",
+    });
+    // 作废 ≠ 被答了：resolved 会让这张卡冒充「你这次点击生效了」。
+    expect(getColdInteraction("cp-gone")?.status).toBe("orphaned");
+    expect(getColdInteraction("cp-gone")?.status).not.toBe("resolved");
+
+    // 放回可点只会请用户一点再点、次次 404 —— reopen 对作废卡必须无效。
+    reopenColdPending("cp-gone");
+    expect(getColdInteraction("cp-gone")?.status).toBe("orphaned");
+
+    const shell: PausedTurnSummary = {
+      message_id: "m-gone",
+      checkpoint_id: "cp-gone",
+      kind: "ask_user",
+      user_message: "",
+      user_message_id: "",
+      question: "放行？",
+      context: "",
+      form: "",
+      headline: "",
+      motion: "",
+      primitive: "delegate",
+      max_rounds: 0,
+      thorough: true,
+      browser_login: false,
+      steps: [],
+      pending: [],
+    };
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [shell],
+      hosts: [{ role: "assistant", id: "m-gone", serverMessageId: "m-gone" }],
+    });
+    expect(visible).toEqual([]);
   });
 });
 

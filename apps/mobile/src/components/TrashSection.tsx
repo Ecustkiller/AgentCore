@@ -1,24 +1,37 @@
-import {
-  type WorkspaceTrashEntry,
-  listTrash,
-  restoreTrash,
-} from "@/api/workspace";
+import type { WorkspaceTrashEntry } from "@/api/workspace";
 // Cloud AgentCore/trash list + one-click restore (对齐桌面 TrashSection 语义).
 //
-// Conversation FilesPage only — not OS recycle bin, no Local trash / batch / hard-delete.
+// The one soft-delete surface on the phone — both file pages route here, so a delete made
+// from either is undone in the same place. Not the OS recycle bin; no Local trash / batch /
+// hard-delete.
 import { useCallback, useEffect, useState } from "react";
 
 /**
- * AgentCore/trash list + restore for a conversation cloud workspace.
+ * How to reach one cloud workspace's soft-delete zone.
+ *
+ * Injected (like `FileBrowserSource`) because the same trash is addressable two ways:
+ * `/v1/conversations/{id}/trash` from a chat, `/v1/workspaces/{ws_id}/trash` from the
+ * 文件 tab. Callers must keep the object stable (`useMemo`) — it drives the reload effect.
+ */
+export interface TrashSource {
+  list: () => Promise<{
+    entries: WorkspaceTrashEntry[];
+    retentionDays: number;
+  }>;
+  restore: (entryId: string) => Promise<void>;
+}
+
+/**
+ * AgentCore/trash list + restore for a cloud workspace.
  *
  * Empty / loading / error+retry; restore confirms then refreshes the list.
  * Parent bumps the file-tree `reloadKey` via `onRestored`.
  */
 export function TrashSection({
-  conversationId,
+  source,
   onRestored,
 }: {
-  conversationId: string;
+  source: TrashSource;
   /** After a successful restore — parent should refresh the live file tree. */
   onRestored?: () => void;
 }) {
@@ -32,7 +45,7 @@ export function TrashSection({
     setLoading(true);
     setError(false);
     try {
-      const res = await listTrash(conversationId);
+      const res = await source.list();
       setEntries(res.entries);
       setRetentionDays(res.retentionDays);
     } catch {
@@ -40,7 +53,7 @@ export function TrashSection({
     } finally {
       setLoading(false);
     }
-  }, [conversationId]);
+  }, [source]);
 
   useEffect(() => {
     void reload();
@@ -89,7 +102,7 @@ export function TrashSection({
             {entries.map((e) => (
               <TrashRow
                 key={e.entryId}
-                conversationId={conversationId}
+                restore={source.restore}
                 entry={e}
                 onRestored={() => {
                   setStatusMsg("已还原");
@@ -107,12 +120,12 @@ export function TrashSection({
 }
 
 function TrashRow({
-  conversationId,
+  restore,
   entry,
   onRestored,
   onError,
 }: {
-  conversationId: string;
+  restore: (entryId: string) => Promise<void>;
   entry: WorkspaceTrashEntry;
   onRestored: () => void;
   onError: (msg: string) => void;
@@ -124,7 +137,7 @@ function TrashRow({
     if (!window.confirm(`还原「${entry.originalPath}」到原路径？`)) return;
     setBusy(true);
     try {
-      await restoreTrash(conversationId, entry.entryId);
+      await restore(entry.entryId);
       onRestored();
     } catch (e) {
       onError(e instanceof Error ? `还原失败：${e.message}` : "还原失败");

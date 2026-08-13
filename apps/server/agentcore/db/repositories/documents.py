@@ -33,12 +33,13 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from sqlalchemy import Select, and_, or_, select, update
+from sqlalchemy import Select, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from agentcore.core.types import new_id
-from agentcore.db.models import Document
+from agentcore.db.models import DisputedLine, Document
+from agentcore.db.models.documents import MAX_DISPUTED_LINES
 from agentcore.documents.frontmatter import (
     FrontmatterEditError,
     FrontmatterError,
@@ -779,6 +780,107 @@ class DocumentRepository:
         await self._session.commit()
         await self._session.refresh(doc)
         return doc
+
+    async def dispute_memory_line(
+        self,
+        user_id: str,
+        name: str,
+        folder_id: str | None,
+        *,
+        new_content: str,
+        line: DisputedLine,
+    ) -> Document | None:
+        """Move one bullet out of a note's body into ``disputed_lines`` — one transaction.
+
+        The caller (``memory.dispute_line``) owns the markdown work and hands in the body
+        with the line already gone plus the record to file; this method only has to land
+        both columns together. Splitting them would risk the two failure modes that matter:
+        a recorded line still riding the prompt, or a line dropped from the body with no
+        trace of where it went.
+
+        Past ``MAX_DISPUTED_LINES`` the oldest record falls off the front (see the model):
+        the body edit still lands — refusing「这条不对」because an old undo is still on file
+        would leave a line the user just rejected in the prompt.
+
+        ``new_content`` is the **editor body** (no frontmatter), the same shape
+        ``EditorBodyMemoryStore`` hands the markdown layer; the stored frontmatter block is
+        re-attached here exactly as ``save_memory_note`` does. The always-pool quota is not
+        consulted: removing text only shrinks it.
+        """
+        note = await self.get_memory_note(user_id, name, folder_id)
+        if note is None:
+            return None
+        body = _memory_note_body_for_write(
+            new_content, existing=note.content, apply_mode=note.apply_mode
+        )
+        apply_mode, description = _derive_indexes(body)
+        note.content = body
+        note.apply_mode = apply_mode
+        note.description = description
+        # Reassign rather than append: JSONB columns need a new object to be seen as dirty.
+        note.disputed_lines = [*note.disputed_lines, line][-MAX_DISPUTED_LINES:]
+        await self._session.commit()
+        await self._session.refresh(note)
+        return note
+
+    async def restore_memory_line(
+        self,
+        user_id: str,
+        name: str,
+        folder_id: str | None,
+        *,
+        new_content: str,
+        line_id: str,
+    ) -> Document | None:
+        """Undo one line-level dispute: body gets the bullet back, record drops it.
+
+        Addressed by ``line_id``, never by position — an undo that missed would put back a
+        line the user never asked for, while the toast said otherwise. An id that is no
+        longer on file returns ``None`` (the caller reports it) instead of dropping some
+        neighbouring row.
+
+        The always-pool quota is deliberately NOT enforced here. The user is taking back
+        his own correction, and refusing that because the pool is now full would strand the
+        line in a place he cannot read it from — quota pressure is the consolidation pass's
+        problem, not the undo button's. ``new_content`` is the editor body, as above.
+        """
+        note = await self.get_memory_note(user_id, name, folder_id)
+        if note is None:
+            return None
+        kept = [row for row in note.disputed_lines if row["id"] != line_id]
+        if len(kept) == len(note.disputed_lines):
+            return None
+        body = _memory_note_body_for_write(
+            new_content, existing=note.content, apply_mode=note.apply_mode
+        )
+        apply_mode, description = _derive_indexes(body)
+        note.content = body
+        note.apply_mode = apply_mode
+        note.description = description
+        note.disputed_lines = kept
+        await self._session.commit()
+        await self._session.refresh(note)
+        return note
+
+    async def clear_memory_disputed_lines(self, user_id: str) -> int:
+        """Drop every rejected-line record this user holds; returns the entries cleared.
+
+        Bodies are untouched: the lines stay rejected (that is the user's correction), only
+        the undo records go. This is the deliberate way out of a list the user has no
+        intention of restoring from — the cap keeps it bounded, this empties it now.
+        """
+        result = await self._session.execute(
+            update(Document)
+            .where(
+                Document.user_id == user_id,
+                func.jsonb_array_length(Document.disputed_lines) > 0,
+            )
+            .values(disputed_lines=[])
+            .returning(Document.id)
+        )
+        cleared = len(result.all())
+        await self._session.commit()
+        return cleared
 
     async def apply_description_if_empty(
         self,

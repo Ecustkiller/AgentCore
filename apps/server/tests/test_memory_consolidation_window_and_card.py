@@ -136,8 +136,12 @@ def _wire(monkeypatch, store: _FakeMessageStore) -> dict:
         return None
 
     async def _run_bg(user_id, *, purpose="memory", runner):
+        from agentcore.billing.gate import BackgroundLlmResult
+
         value = await runner(SimpleNamespace(source="platform", default_model="m"))
-        return SimpleNamespace(value=value, credentials=SimpleNamespace(source="platform"))
+        return BackgroundLlmResult(
+            value=value, credentials=SimpleNamespace(source="platform")
+        )
 
     async def _append_episode(_store, **kwargs):
         state["episodes"].append(kwargs["summary"])

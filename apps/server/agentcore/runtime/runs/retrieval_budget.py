@@ -6,12 +6,17 @@ resolved limit is 0. Runtime counter lives on ``ToolContext.retrieval_budget``
 ``tool_exec`` (orthogonal to LoopController / team_gate). Cache hits and A3
 query-contract rejects do not consume budget. CEO / delegate schema 不可配置该
 字段；额度只来自统一常量（辩手有约定文档窄例外由辩论内部 writer 补写）。
+
+预算感知：花过额度的 worker 每轮由 :func:`sync_retrieval_budget_awareness` 注入一条
+当前余额（含分工具已用），临界告知并进同一条——不改共享池语义，只让模型别盲搜。
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.tools.protocol import RetrievalBudgetState
 
 if TYPE_CHECKING:
@@ -23,20 +28,25 @@ __all__ = [
     "BUDGET_EXHAUSTED_FEEDBACK",
     "DEFAULT_RETRIEVAL_BUDGET",
     "DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER",
+    "RETRIEVAL_BUDGET_AWARENESS_PREFIX",
     "RETRIEVAL_BUDGET_CRITICAL_REMAINING",
     "RETRIEVAL_TOOL_NAMES",
+    "RetrievalBudgetAwareness",
     "RetrievalBudgetState",
     "apply_retrieval_budgets",
     "apply_retrieval_budgets_to_specs",
     "budget_exhausted_output",
     "charges_retrieval_budget",
     "default_retrieval_budget",
+    "drop_retrieval_budget_awareness",
     "exclude_retrieval_tools",
+    "format_retrieval_budget_awareness_prompt",
     "format_retrieval_budget_critical_prompt",
     "format_retrieval_budget_line",
     "is_retrieval_budget_critical",
     "parse_retrieval_budget",
     "rework_refill_slots",
+    "sync_retrieval_budget_awareness",
 ]
 
 # Tools that share one per-run retrieval budget (web_search + read_url combined).
@@ -53,6 +63,10 @@ DEFAULT_RETRIEVAL_BUDGET_DEBATER_WITH_DOSSIER = 2
 
 # 同轮超订缓解：剩余槽位 ≤ 此值时经 reflection 注入提前告知，避免当轮 fan-out 超订被挡回。
 RETRIEVAL_BUDGET_CRITICAL_REMAINING = 2
+
+# 预算感知（BATS 实测：知不知道余额比额度大小更决定效果）每轮只留一条，靠此前缀识别并替换旧的。
+# 必须与 wind_down 的「检索预算已用尽」收尾指令区分开——那条不归本路径管，不能被顺手删掉。
+RETRIEVAL_BUDGET_AWARENESS_PREFIX = "[系统提示] 检索余额"
 
 BUDGET_EXHAUSTED_FEEDBACK = (
     "检索预算已尽：请基于证据台账中现有材料交付，并在交接（handoff）中如实标注检索缺口"
@@ -169,13 +183,117 @@ def is_retrieval_budget_critical(remaining: int, *, limit: int) -> bool:
     return 0 < remaining <= RETRIEVAL_BUDGET_CRITICAL_REMAINING
 
 
-def format_retrieval_budget_critical_prompt(*, remaining: int, limit: int) -> str:
-    """``[系统提示]`` steer when retrieval slots are critically low (同轮超订缓解)."""
+def _spend_clause(searches: int | None, reads: int | None) -> str:
+    """``；已用 N 次：web_search a · read_url b`` — empty when no split is known."""
+    if searches is None or reads is None:
+        return ""
+    return f"；已用 {searches + reads} 次：web_search {searches} · read_url {reads}"
+
+
+def format_retrieval_budget_critical_prompt(
+    *, remaining: int, limit: int, searches: int | None = None, reads: int | None = None
+) -> str:
+    """``[系统提示]`` steer when retrieval slots are critically low (同轮超订缓解).
+
+    Also the 临界轮的余额播报：分项用量并进同一条，不另发一段预算文字。
+    """
     return (
-        f"[系统提示] 检索预算仅剩 {remaining} 次（本 run 上限 {limit} 次 "
-        "web_search/read_url，缓存命中不计）。下一轮请只发起不超过剩余次数的检索调用，"
+        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：仅剩 {remaining} 次"
+        f"（本 run 上限 {limit} 次 web_search/read_url，共用一池、缓存命中不计"
+        f"{_spend_clause(searches, reads)}）。"
+        "下一轮请只发起不超过剩余次数的检索调用，"
         "优先深读最关键来源；勿并行扇出超过剩余槽位的查询——超订会被挡回并浪费本轮。"
         "若现有证据已够，请直接基于台账交付并在交接中标注检索缺口。"
+    )
+
+
+def format_retrieval_budget_awareness_prompt(
+    *, remaining: int, limit: int, searches: int, reads: int
+) -> str:
+    """Per-round balance readout for a worker that already spent slots."""
+    return (
+        f"{RETRIEVAL_BUDGET_AWARENESS_PREFIX}：已用 {searches + reads} 次"
+        f"（web_search {searches} · read_url {reads}），剩余 {remaining} 次"
+        f"（本 run 上限 {limit} 次 web_search/read_url，共用一池、缓存命中不计）。"
+        "请按剩余额度规划：先明确这一轮要验证什么再检索，避免重复查询与低价值扇出；"
+        "额度用尽后只能基于台账现有证据交付，并在交接中标注检索缺口。"
+    )
+
+
+@dataclass(frozen=True)
+class RetrievalBudgetAwareness:
+    """What :func:`sync_retrieval_budget_awareness` injected this round (供埋点读)."""
+
+    text: str
+    critical: bool
+    limit: int
+    used: int
+    remaining: int
+    searches: int
+    reads: int
+
+
+def _is_awareness_message(msg: LLMMessage) -> bool:
+    return (
+        msg.role == "user"
+        and isinstance(msg.content, str)
+        and msg.content.startswith(RETRIEVAL_BUDGET_AWARENESS_PREFIX)
+    )
+
+
+def drop_retrieval_budget_awareness(messages: list[LLMMessage]) -> bool:
+    """Remove the balance message; True ⇒ transcript changed.
+
+    Called on its own once the run stops searching (wind_down / exhausted), where a
+    lingering "还剩 N 次" would contradict the 收尾 instruction.
+    """
+    if not any(_is_awareness_message(m) for m in messages):
+        return False
+    messages[:] = [m for m in messages if not _is_awareness_message(m)]
+    return True
+
+
+def sync_retrieval_budget_awareness(
+    messages: list[LLMMessage], state: RetrievalBudgetState
+) -> RetrievalBudgetAwareness | None:
+    """Refresh the single balance message at the tail; ``None`` ⇒ nothing injected.
+
+    预算感知（BATS）：花过额度的 worker 每轮都要看到「已用多少 / 还剩多少」，否则只能盲搜。
+    Skipped for a worker that never spent a slot（生产上多数 worker 一次都不检索，注入是纯
+    噪音）、关闭额度（``limit <= 0``）、以及已耗尽（收尾话术归 wind_down，行为不变）。
+    临界（剩余 ≤ :data:`RETRIEVAL_BUDGET_CRITICAL_REMAINING`）与提前告知合并成同一条。
+    Refreshing = drop the stale copy then append, so the transcript never carries two
+    contradicting balances and the current one stays adjacent to the next think round.
+    """
+    drop_retrieval_budget_awareness(messages)
+    limit = state.limit
+    used = state.used
+    if limit <= 0 or used <= 0:
+        return None
+    remaining = state.remaining
+    if remaining <= 0:
+        return None
+    searches = state.searches_used
+    reads = state.reads_used
+    critical = is_retrieval_budget_critical(remaining, limit=limit)
+    text = (
+        format_retrieval_budget_critical_prompt(
+            remaining=remaining, limit=limit, searches=searches, reads=reads
+        )
+        if critical
+        else format_retrieval_budget_awareness_prompt(
+            remaining=remaining, limit=limit, searches=searches, reads=reads
+        )
+    )
+    messages.append(LLMMessage(role="user", content=text))
+    return RetrievalBudgetAwareness(
+        text=text,
+        critical=critical,
+        limit=limit,
+        used=used,
+        remaining=remaining,
+        searches=searches,
+        reads=reads,
     )
 
 

@@ -2,7 +2,7 @@
 
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 describe("FilePreviewBody", () => {
   it("image: shows mime·size, zoom controls, and opens lightbox on click", () => {
@@ -76,5 +76,40 @@ describe("FilePreviewBody", () => {
     expect(
       screen.getByText("无法在面板内预览，请下载或用系统默认程序打开"),
     ).toBeTruthy();
+  });
+
+  it("兜底面：两条出路都给可点主按钮（binary / too-large 同款）", () => {
+    const onOpenWithOsDefaultApp = vi.fn();
+    const onDownload = vi.fn();
+    const { rerender } = render(
+      <FilePreviewBody
+        name="sheet.xlsx"
+        result={{ kind: "binary", mime: "application/vnd.ms-excel", size: 20 }}
+        onOpenWithOsDefaultApp={onOpenWithOsDefaultApp}
+        onDownload={onDownload}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "用默认程序打开" }));
+    expect(onOpenWithOsDefaultApp).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    expect(onDownload).toHaveBeenCalledTimes(1);
+
+    // 不能外部打开（web / 白名单外）时只剩下载，且它接手主按钮位。
+    rerender(
+      <FilePreviewBody
+        name="big.bin"
+        result={{ kind: "too-large" }}
+        onDownload={onDownload}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "用默认程序打开" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "下载" }));
+    expect(onDownload).toHaveBeenCalledTimes(2);
+  });
+
+  it("兜底面：两个出口都不可用 → 只留说明，不渲染空按钮", () => {
+    render(<FilePreviewBody name="big.bin" result={{ kind: "too-large" }} />);
+    expect(screen.getByText("文件过大")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

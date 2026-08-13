@@ -2077,6 +2077,55 @@ dialog.run-detail::backdrop {
   gap: 8px;
 }
 
+/* 按人干预条（只改这个人 / 只停这个人）——队员详情最上方，点开队员就在手边。
+   不可用的那枚变灰但**留在原位**：入口消失会让用户以为自己找错了地方。 */
+.rd-intervene {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.rd-intervene-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.esc-btn-unavailable,
+.esc-btn-unavailable:disabled {
+  color: var(--muted);
+  background: transparent;
+  border-color: var(--border);
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.rd-intervene-note {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.rd-intervene-why {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.rd-intervene-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
 /* 轮次 / 修订链 track (chips; current is non-interactive + accented) */
 .rd-chain {
   display: flex;
@@ -3032,6 +3081,43 @@ dialog.run-detail::backdrop {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* 当前模型组合：composer 上方独立一行，窄屏下不跟主输入区抢宽度。 */
+.composer-model-bar {
+  display: flex;
+  align-items: center;
+  margin: 0 12px 6px;
+}
+
+.composer-model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.composer-model-chip:disabled {
+  opacity: 0.55;
+}
+
+.composer-model-icon {
+  flex: 0 0 auto;
+}
+
+.composer-model-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .composer {
   display: flex;
   align-items: flex-end;
@@ -3793,6 +3879,19 @@ dialog.sheet::backdrop {
   text-overflow: ellipsis;
 }
 
+/* 带徽章的副行：名字自己省略号，徽章不被裁掉。 */
+.more-row-sub-badged {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.more-row-sub-badged .more-row-sub-text {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 dialog.sheet.permission-sheet,
 .permission-sheet {
   max-height: 85vh;
@@ -3975,8 +4074,19 @@ dialog.sheet.model-sheet,
   padding: 1px 6px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--primary);
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
+  border-radius: 999px;
+}
+
+/* 系统预置：中性调，与强调色的「默认」分开读（对齐桌面 chip 语汇）。 */
+.model-preset-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--muted);
+  background: color-mix(in oklch, var(--muted) 12%, transparent);
   border-radius: 999px;
 }
 
@@ -4709,6 +4819,111 @@ dialog.viewer::backdrop {
   color: var(--fg);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- 云工作区写操作（改名 / 移动 / 删除 / 新建文件夹 / 编辑） --- */
+/* 行 = 打开区 + 行尾「⋯」。手机上没有右键也没有可见的长按提示，所以管理入口必须占一个
+   可点的位置；.file-row 的样式不动，只由 .file-row-item 负责并排。 */
+.file-row-item {
+  display: flex;
+  align-items: center;
+}
+
+.file-row-item > .file-row {
+  flex: 1;
+  min-width: 0;
+}
+
+.file-row-more {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 10px;
+}
+
+.file-row-more:active {
+  background: var(--panel);
+}
+
+.move-picker-crumb {
+  padding: 8px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+
+.move-picker-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.move-picker-confirm {
+  width: 100%;
+  min-height: 48px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.file-editor-body {
+  display: flex;
+  padding: 0;
+}
+
+.file-editor-text {
+  flex: 1;
+  width: 100%;
+  padding: 12px 16px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+  border: none;
+  border-radius: 0;
+  resize: none;
+}
+
+.file-editor-text:focus {
+  outline: none;
+}
+
+.file-editor-note {
+  padding: 8px 16px;
+  margin: 0;
+}
+
+/* 写冲突：这次没写进去，等用户裁决——不是错误红，也不能是无声的灰。 */
+.file-editor-conflict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--warning-border);
+}
+
+.file-editor-conflict-msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fg);
+}
+
+.file-editor-conflict-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 /* --- 历史对话抽屉 (ConversationDrawer · 手机端对话页重设计) --- */

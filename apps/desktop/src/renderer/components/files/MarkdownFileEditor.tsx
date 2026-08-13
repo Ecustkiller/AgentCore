@@ -28,6 +28,7 @@ import type {
   FileSource,
   FileVersion,
 } from "@/lib/fileSource";
+import { canOpenPathWithOsDefaultApp } from "@/lib/fileSource";
 import { notifyActionError } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { ApiError } from "@/services/api";
@@ -381,7 +382,8 @@ export function MarkdownFileEditor({
     [content, conflict, readOnly, doSave],
   );
 
-  // 系统集成（仅本地源实现这两个方法 → 按存在性显隐，不按源分支）。
+  // 系统集成（reveal 仅本地源有；外部打开两源都有但云端过白名单谓词 → 按能力显隐，不按源分支）。
+  const canOpenExternal = canOpenPathWithOsDefaultApp(source, path);
   const onReveal = async () => {
     try {
       await source.revealInOsFileManager?.(path);
@@ -420,7 +422,7 @@ export function MarkdownFileEditor({
         {saveState === "saved" && !dirty && (
           <span className="shrink-0 text-xs text-muted-foreground">已保存</span>
         )}
-        {source.openWithOsDefaultApp && (
+        {canOpenExternal && (
           <SimpleTooltip label="用默认程序打开">
             <IconButton
               onClick={() => void onOpenExternal()}

@@ -53,6 +53,21 @@ describe("contentBuffer FIFO flush", () => {
     ]);
   });
 
+  // attach 增量重放的替换帧：并进前一块就会把「换掉末尾未闭合块」变成「接在它后面」。
+  // 反向合并是安全的——先换成 A 再追加 B == 换成 A+B，所以替换块后面的追加照常并入。
+  it("keeps a replace chunk out of the preceding append chunk", () => {
+    queueContentDelta(CONV, "半句还没");
+    queueContentDelta(CONV, "半句还没说完的整步全文", true);
+    queueContentDelta(CONV, "，还有尾巴");
+    flushPendingContent(CONV);
+
+    const msg = rt().messages[0];
+    expect(msg.content).toBe("半句还没说完的整步全文，还有尾巴");
+    expect(msg.process).toEqual([
+      { kind: "content", text: "半句还没说完的整步全文，还有尾巴" },
+    ]);
+  });
+
   it("does not reorder interleaved chunks (regression: old buckets flushed content first)", () => {
     queueReasoningDelta(CONV, "R1");
     queueContentDelta(CONV, "C1");

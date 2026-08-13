@@ -44,6 +44,18 @@ describe("asReadOnlyFileSource (N4-A)", () => {
     if (!write.ok) expect(write.reason).toBe("denied");
   });
 
+  it("forwards the OS-open pair (方法 + 谓词) so离线包装不吞掉入口门控", () => {
+    const canOpenWithOsDefaultApp = vi.fn(() => false);
+    const ro = asReadOnlyFileSource({
+      ...stubSource(),
+      openWithOsDefaultApp: vi.fn(async () => {}),
+      canOpenWithOsDefaultApp,
+    });
+    expect(typeof ro.openWithOsDefaultApp).toBe("function");
+    expect(ro.canOpenWithOsDefaultApp?.("a.exe")).toBe(false);
+    expect(canOpenWithOsDefaultApp).toHaveBeenCalledWith("a.exe");
+  });
+
   it("still lists and reads", async () => {
     const base = stubSource();
     const ro = asReadOnlyFileSource(base);

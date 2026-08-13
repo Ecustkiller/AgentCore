@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from agentcore.config import settings
+from agentcore.core.error_codes import ErrorCode
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.runtime.approvals import tool_call_requires_approval
 from agentcore.runtime.engine import resolve_tool_timeout
@@ -31,6 +32,7 @@ from agentcore.tools.protocol import ToolContext
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
 from agentcore.workspace.local import LocalWorkspace
+from agentcore.workspace.protocol import PathNotFound, WorkspaceIOError
 from agentcore.workspace.server import ServerWorkspace
 from tests.client_tool_fulfill_testutil import await_captured_event
 
@@ -356,6 +358,83 @@ async def test_missing_channel_errors():
     result = await TerminalTool().execute({"subcommand": "list"}, _ctx(None))
     assert not result.success
     assert "本地" in (result.error or "")
+    # Not a parameter mistake: the environment genuinely has no desktop to host on.
+    assert result.metadata.get("code") == "local_workspace_required"
+    assert result.contract_failure is False
+
+
+# --- failure face:每条失败路径带稳定 code，参数错不进 run 熔断累计 -----------------
+
+
+class _RaisingChannel:
+    """Stand-in channel whose op always fails with a given ``WorkspaceError``."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def request(self, *_args: Any, **_kwargs: Any) -> Any:
+        raise self._exc
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"subcommand": "restart"},
+        {"subcommand": "start"},
+        {"subcommand": "read"},
+        {"subcommand": "stop"},
+        {"subcommand": "read", "process_id": "p1", "tail_lines": "abc"},
+    ],
+)
+async def test_argument_rejections_are_coded_and_off_the_breaker_tally(arguments):
+    """确定性参数错误 = contract_failure：模型改写调用即可，不该 3 次就禁掉 terminal。"""
+    channel, _registry = _channel()
+    result = await TerminalTool().execute(arguments, _ctx(channel))
+    assert result.success is False
+    assert result.metadata.get("code") == ErrorCode.VALIDATION_ERROR
+    assert result.contract_failure is True
+    from tests.client_tool_fulfill_testutil import DELIVERED_EVENTS
+
+    assert not DELIVERED_EVENTS  # 参数校验失败不该开通道
+    _drain()
+
+
+@pytest.mark.parametrize(
+    ("exc", "code"),
+    [
+        (PathNotFound("cwd 不存在"), "workspace_io_error"),
+        (WorkspaceIOError("进程不存在或已清理"), "workspace_io_error"),
+        (
+            WorkspaceIOError("local workspace op 'process_start' timed out（活性挂起）"),
+            "liveness_timeout",
+        ),
+        (
+            WorkspaceIOError("local workspace channel dead（活性挂起）"),
+            "workspace_channel_dead",
+        ),
+    ],
+)
+async def test_workspace_error_keeps_the_desktop_kind(exc, code):
+    """桌面/通道已经分好的 kind 不该被 ``str(e)`` 拍平成同一句话。"""
+    result = await TerminalTool().execute(
+        {"subcommand": "stop", "process_id": "p1"}, _ctx(_RaisingChannel(exc))
+    )
+    assert result.success is False
+    assert result.metadata.get("code") == code
+    assert result.contract_failure is False
+
+
+async def test_malformed_desktop_result_is_coded_as_workspace_io():
+    channel, registry = _channel()
+    tool = TerminalTool()
+    result, _event = await _round_trip(
+        tool.execute({"subcommand": "list"}, _ctx(channel)),
+        registry,
+        {"ok": True, "value": "not-a-dict"},
+    )
+    assert result.success is False
+    assert result.metadata.get("code") == "workspace_io_error"
 
 
 async def test_local_workspace_reuses_channel_for_tools():

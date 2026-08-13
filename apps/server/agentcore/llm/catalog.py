@@ -250,6 +250,22 @@ def platform_model_display_name(model_id: str) -> str:
     return model_metadata_for(model_id).display_name
 
 
+def platform_model_label(model_id: str) -> str:
+    """Display name with the curated badge folded in, for one-string surfaces.
+
+    Curated uniqueness is ``(display_name, badge)``, so the bare display name repeats
+    across SKUs of one model (free vs priced Flash). Surfaces that render a lone label
+    with no badge slot — e.g. 模型组合名 — must use this to stay distinguishable;
+    catalog rows carry ``badge`` as its own field and keep using
+    :func:`platform_model_display_name`.
+    """
+    meta = model_metadata_for(model_id)
+    badge = (meta.badge or "").strip()
+    if not badge:
+        return meta.display_name
+    return f"{meta.display_name} · {badge}"
+
+
 def _platform_entry(model_id: str) -> ModelCatalogEntry:
     """One platform-billed catalog row (nominal-price ledger, F4). Caller must pass
     a listable (curated) model id — see :func:`platform_listable_model_ids`.

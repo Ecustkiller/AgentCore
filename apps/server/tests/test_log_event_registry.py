@@ -44,6 +44,15 @@ def test_catalog_covers_key_runtime_events():
     assert len(names) >= 100
 
 
+def test_catalog_registers_failure_and_build_provenance_fields():
+    """两个定性字段登记在册：包装层归因 + 线上版本归属（勿手改 catalog，跑同步脚本）。"""
+    reg = get_registry()
+    assert "error_type" in reg.requires("memory.consolidation_failed").fields
+    started = reg.requires("server.started").fields
+    assert "version" in started
+    assert "git_sha" in started
+
+
 def test_event_spec_rejects_bare_name():
     with pytest.raises(ValueError, match="component.action"):
         EventSpec(name="bare")

@@ -20,6 +20,7 @@ export {
 export {
   useActiveMessages,
   useActiveMessageContent,
+  useActiveMessageProcess,
   useActiveMemoryUpdates,
   useActiveGenerating,
   useActiveExecutionVia,

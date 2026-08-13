@@ -32,8 +32,8 @@ import { Link, useNavigate } from "react-router-dom";
  *
  * 数据源：`GET /v1/users/me/llm-model-profiles`。选择即写：已有会话
  * `PATCH … model_profile_id`；新会话先记草稿 + last_profile_id，首发
- * `POST /v1/conversations` 带 `model_profile_id` 拍快照。触发器单行只显示组合名
- * （与同排徽章等高），主 · Worker 摘要在 tooltip 与下拉每一行里。
+ * `POST /v1/conversations` 带 `model_profile_id` 拍快照。触发器单行显示组合名
+ * （与同排徽章等高）+ 系统预置的「预置」徽章，主 · Worker 摘要在 tooltip 与下拉每一行里。
  */
 
 function GroupLabel({ children }: { children: React.ReactNode }) {
@@ -41,6 +41,15 @@ function GroupLabel({ children }: { children: React.ReactNode }) {
     <div className="px-2.5 pt-1.5 pb-0.5 text-xs font-medium text-muted-foreground">
       {children}
     </div>
+  );
+}
+
+/** 「预置」标识：下拉选项行与折叠态 chip 共用，勿各写一套。 */
+function PresetBadge() {
+  return (
+    <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
+      预置
+    </span>
   );
 }
 
@@ -74,11 +83,7 @@ function ProfileRow({
               默认
             </span>
           )}
-          {profile.kind === "system" && (
-            <span className="shrink-0 rounded bg-muted px-1 py-0.5 text-xs text-muted-foreground">
-              预置
-            </span>
-          )}
+          {profile.kind === "system" && <PresetBadge />}
         </div>
         {summary && (
           <div className="mt-0.5 truncate text-xs text-muted-foreground">
@@ -227,15 +232,18 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
   }
 
   const label = displayProfile?.name ?? "选择组合";
+  // 折叠态就要看出是平台预置：不展开下拉误以为跑的是自配组合，是线上报障来源。
+  const isPreset = displayProfile?.kind === "system";
   const hint = "切换本会话使用的模型组合（当前回合起生效）";
   // 单行 chip 与同排徽章对齐，主·Worker 摘要退到 tooltip（下拉每行仍常驻）。
-  const tooltip = summary ? (
+  // 组合名领衔：chip 宽度容不下带档位后缀的预置名（「… · 免费额度」必被截掉），
+  // 而免费档与付费档的裸名一字不差，截断处正好是唯一能分辨两者的地方。
+  const tooltip = (
     <span className="flex flex-col gap-0.5">
+      <span className="font-medium">{label}</span>
       <span>{hint}</span>
-      <span className="opacity-70">{summary}</span>
+      {summary && <span className="opacity-70">{summary}</span>}
     </span>
-  ) : (
-    hint
   );
 
   return (
@@ -245,7 +253,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
           type="button"
           disabled={disabled || pending}
           onClick={() => setOpen((v) => !v)}
-          aria-label={`模型组合：${label}`}
+          aria-label={`模型组合：${label}${isPreset ? "（预置）" : ""}`}
           aria-expanded={open}
           className={`inline-flex h-8 max-w-40 items-center gap-1 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground ${
             disabled || pending ? "cursor-not-allowed opacity-60" : ""
@@ -257,6 +265,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
             <Bot size={14} className="shrink-0" />
           )}
           <span className="truncate">{label}</span>
+          {isPreset && <PresetBadge />}
           <ChevronDown size={12} className="shrink-0 opacity-60" />
         </button>
       </SimpleTooltip>

@@ -252,7 +252,7 @@ def slots_note(slots: list[dict[str, str]]) -> str:
 
 async def _ask_model(steps: str, *, user_id: str) -> str:
     """一次背景模型调用；无凭据 / 配额耗尽 → ``""``（调用方按无槽位处理）。"""
-    from agentcore.billing.gate import run_background_llm
+    from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
     from agentcore.llm.factory import build_provider
     from agentcore.llm.model_selection import build_selected_request, select_call
     from agentcore.llm.resolve import resolve_turn_model
@@ -280,4 +280,4 @@ async def _ask_model(steps: str, *, user_id: str) -> str:
             await provider.close()
 
     bg = await run_background_llm(user_id, purpose=_PURPOSE, runner=_runner)
-    return bg.value if bg is not None else ""
+    return bg.value if isinstance(bg, BackgroundLlmResult) else ""

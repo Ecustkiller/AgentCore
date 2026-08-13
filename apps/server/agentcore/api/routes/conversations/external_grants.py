@@ -17,6 +17,7 @@ from agentcore.api.schemas import (
 )
 from agentcore.core.errors import NotFoundError
 from agentcore.db.repositories import ConversationRepository
+from agentcore.fulfill.declare import declare_receipt_root
 from agentcore.workspace import grant_store
 from agentcore.workspace.external_mounts import external_ns
 
@@ -65,14 +66,21 @@ async def grant_external_folder(
 
     Called after desktop mint (silent ``external_mount_readonly`` or user-confirmed
     organize grant). Body carries ``root_id`` / label / mode only — never absolute paths.
+
+    The response doubles as the device's declaration for this root: the caller's
+    ``X-Client-Device`` is bound onto its live fulfill session *and* stored on the
+    grant (``fulfill/declare.py``), so the very first ``external/<alias>/`` op of
+    the resuming turn has a machine to route to.
     """
     await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
+    device_id = declare_receipt_root(user.user_id, body.root_id)
     mount = await grant_store.add_grant(
         conversation_id,
         root_id=body.root_id,
         label=body.label,
         alias_hint=body.alias_hint,
         mode=body.mode,
+        device_id=device_id,
     )
     return ExternalGrantResponse(grant=_item(mount))
 

@@ -11,6 +11,7 @@ from agentcore.api.schemas import BindLocalWorkspaceRequest, WorkspaceBindingRes
 from agentcore.core.errors import ConflictError, NotFoundError
 from agentcore.db.models import Conversation
 from agentcore.db.repositories import ConversationRepository, FolderRepository
+from agentcore.fulfill.declare import declare_receipt_root
 
 from ._helpers import _get_owned_conversation
 
@@ -82,9 +83,14 @@ async def bind_workspace(
     """Bind a 裸聊's scratch workspace to a desktop FS root (switch to local).
 
     Project conversations inherit an immutable project binding — returns 409.
+
+    Binding also declares the root on the caller's fulfill session: the user can
+    send the next message immediately, and the presence gate refuses a local turn
+    whose bound root no online device claims (``fulfill/declare.py``).
     """
     conv = await _get_owned_conversation(conversation_id, user.user_id, conv_repo)
     _reject_project_rebind(conv)
+    declare_receipt_root(user.user_id, body.root_id)
     await conv_repo.set_local_binding(conversation_id, root_id=body.root_id, subpath=None)
     conv = await conv_repo.get_by_id(conversation_id, user_id=user.user_id)
     if not conv:

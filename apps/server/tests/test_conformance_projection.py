@@ -95,6 +95,26 @@ def test_single_agent_tool_timeline(projected):
     assert p["content"] == "根据搜索，答案如下。"
 
 
+def test_reload_cursor_incremental_keeps_prefix_and_swaps_the_open_block(projected):
+    """游标增量段：段首无 full_replay → 不清空；replace 帧整块换掉半截正文、不叠字。
+
+    手工推导（不抄 golden）：前半场 live 折出 [reasoning, tool, content("根据搜索，")]。
+    增量段段首是同 id 且不带 full_replay，按「同回合重开」处理——三步都留着。随后那帧
+    ``content_delta`` 带 replace，且末尾正是开放的正文块，故整块换成整步全文；标量与块
+    同步，正文只出现一次。
+    """
+    p = projected["reload_cursor_incremental"]
+    assert p["status"] == "completed"
+    # 不清空：游标之前的思考 + 工具行仍在（若段首误带 full_replay，这两步会被清掉）。
+    assert [s["kind"] for s in p["process"]] == ["reasoning", "tool", "content"]
+    assert p["reasoning"] == "我先搜索。"
+    assert p["process"][1]["id"] == "tc1"
+    assert p["process"][1]["status"] == "success"
+    # 不叠字：既不是「根据搜索，根据搜索，答案如下。」也不是只剩半截。
+    assert p["content"] == "根据搜索，答案如下。"
+    assert p["process"][2] == {"kind": "content", "text": "根据搜索，答案如下。"}
+
+
 def test_single_agent_error(projected):
     p = projected["single_agent_error"]
     assert p["status"] == "failed"

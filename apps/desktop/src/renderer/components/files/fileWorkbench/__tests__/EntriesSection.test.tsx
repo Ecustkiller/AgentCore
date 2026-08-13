@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/services/documents", () => ({
   listScopeEntries: vi.fn(),
   getAlwaysQuota: vi.fn(),
+  getDocument: vi.fn(),
   createRuleDocument: vi.fn(),
   deleteDocument: vi.fn(),
   renameDocument: vi.fn(),
@@ -34,6 +35,7 @@ import {
   type DocumentNode,
   createRuleDocument,
   getAlwaysQuota,
+  getDocument,
   listScopeEntries,
   setDocumentDisputed,
   updateDocumentApplyMode,
@@ -101,7 +103,25 @@ function renderScope(scope: "global" | "folder" = "global") {
   return { onOpen, onDeleted, onRenamed, onOpenUpdates };
 }
 
+/** A 偏好.md body: three remembered lines, only one of which the user disputes. */
+const PREFERENCES_BODY = `---
+apply: always
+description: 沟通与工作习惯
+---
+# 用户记忆
+> 本文件由 AI 自动维护，你可随时编辑或删除任何条目。
+
+## 沟通偏好
+- 你喜欢简洁的回答 <!-- ts:2026-07-19 -->
+- 中文优先，术语保留英文原词
+
+## 工作习惯
+- 先给结论再给理由 <!-- ts:2026-08-01 -->
+`;
+
 beforeEach(() => {
+  // Call history must not leak: the dispute tests assert that nothing was marked.
+  vi.clearAllMocks();
   vi.mocked(listScopeEntries).mockResolvedValue([]);
   vi.mocked(getAlwaysQuota).mockResolvedValue({
     usedChars: 100,
@@ -110,6 +130,9 @@ beforeEach(() => {
     globalChars: 100,
     projectChars: 0,
   });
+  vi.mocked(getDocument).mockResolvedValue(
+    entryDetail({ id: "g1", name: "偏好.md", content: PREFERENCES_BODY }),
+  );
 });
 
 afterEach(() => {
@@ -459,19 +482,18 @@ describe("EntriesSection (global)", () => {
 
   it("lets the user mark an entry wrong and undo it from the row menu", async () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
-      entry({ id: "g1", name: "过时偏好.md", applyMode: "always" }),
+      entry({ id: "g1", name: "偏好.md", applyMode: "always" }),
     ]);
     vi.mocked(setDocumentDisputed).mockResolvedValue(
-      entry({
-        id: "g1",
-        name: "过时偏好.md",
-        disputedAt: "2026-07-19T12:00:00Z",
-      }),
+      entry({ id: "g1", name: "偏好.md", disputedAt: "2026-07-19T12:00:00Z" }),
     );
     renderScope("global");
 
-    fireEvent.contextMenu(await screen.findByText("过时偏好.md"));
-    fireEvent.click(await screen.findByText("这条不对"));
+    fireEvent.contextMenu(await screen.findByText("偏好.md"));
+    fireEvent.click(await screen.findByText("这条不对…"));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "停用整个条目" }),
+    );
     await waitFor(() =>
       expect(setDocumentDisputed).toHaveBeenCalledWith("g1", true),
     );
@@ -481,19 +503,99 @@ describe("EntriesSection (global)", () => {
     vi.mocked(listScopeEntries).mockResolvedValue([
       entry({
         id: "g1",
-        name: "过时偏好.md",
+        name: "偏好.md",
         applyMode: "always",
         disputedAt: "2026-07-19T12:00:00Z",
       }),
     ]);
     renderScope("global");
 
-    fireEvent.contextMenu(await screen.findByText("过时偏好.md"));
-    expect(screen.queryByText("这条不对")).toBeNull();
+    fireEvent.contextMenu(await screen.findByText("偏好.md"));
+    expect(screen.queryByText("这条不对…")).toBeNull();
+    // Undo only gives usage back, so it needs no warning about collateral.
     fireEvent.click(await screen.findByText("恢复使用"));
     await waitFor(() =>
       expect(setDocumentDisputed).toHaveBeenCalledWith("g1", false),
     );
+  });
+
+  // The user comes here from a memory card that showed ONE sentence; the mark is
+  // entry-level. Naming the entry and counting the lines that go with it is the whole
+  // point of the confirm step — without it the click is a blind 误伤.
+  it("names the entry and counts the lines the mark will take down with it", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "偏好.md", aiMaintained: true }),
+    ]);
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("偏好.md"));
+    fireEvent.click(await screen.findByText("这条不对…"));
+
+    expect(await screen.findByText("停用整个「偏好.md」？")).toBeTruthy();
+    expect(await screen.findByText("里面这 3 条会一起停用：")).toBeTruthy();
+    expect(screen.getByText("你喜欢简洁的回答")).toBeTruthy();
+    expect(screen.getByText("中文优先，术语保留英文原词")).toBeTruthy();
+    expect(screen.getByText("先给结论再给理由")).toBeTruthy();
+    expect(getDocument).toHaveBeenCalledWith("g1");
+    // 停用 ≠ 删除: the always cost stops, the text stays, the mark is undoable.
+    expect(screen.getByText(/不再占用常驻额度/)).toBeTruthy();
+    expect(screen.getByText(/内容保留在这里/)).toBeTruthy();
+    // Nothing happens until the user confirms.
+    expect(setDocumentDisputed).not.toHaveBeenCalled();
+  });
+
+  it("does not cry collateral for an entry that holds a single line", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "语气.md" }),
+    ]);
+    vi.mocked(getDocument).mockResolvedValue(
+      entryDetail({
+        id: "g1",
+        name: "语气.md",
+        content: "## 沟通偏好\n- 你喜欢简洁的回答\n",
+      }),
+    );
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("语气.md"));
+    fireEvent.click(await screen.findByText("这条不对…"));
+
+    expect(
+      await screen.findByText("里面只有这 1 条，停用它就是停用整个条目："),
+    ).toBeTruthy();
+  });
+
+  it("backs out without marking anything when the user cancels", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "偏好.md" }),
+    ]);
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("偏好.md"));
+    fireEvent.click(await screen.findByText("这条不对…"));
+    expect(await screen.findByText("里面这 3 条会一起停用：")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "取消" }));
+
+    await waitFor(() =>
+      expect(screen.queryByText("里面这 3 条会一起停用：")).toBeNull(),
+    );
+    expect(setDocumentDisputed).not.toHaveBeenCalled();
+  });
+
+  it("still says the mark is entry-level when the body cannot be read", async () => {
+    vi.mocked(listScopeEntries).mockResolvedValue([
+      entry({ id: "g1", name: "偏好.md" }),
+    ]);
+    vi.mocked(getDocument).mockRejectedValue(new ApiError(404, "missing"));
+    renderScope("global");
+
+    fireEvent.contextMenu(await screen.findByText("偏好.md"));
+    fireEvent.click(await screen.findByText("这条不对…"));
+
+    expect(await screen.findByText(/读不到条目内容/)).toBeTruthy();
+    // No invented count, and the entry-level consequence is still stated.
+    expect(screen.queryByText(/里面这 \d+ 条/)).toBeNull();
+    expect(screen.getByText(/停用仍然落在整个条目上/)).toBeTruthy();
   });
 
   it("shows calm unavailable when documents API is missing", async () => {

@@ -143,14 +143,23 @@ export function defaultProfile(
   return list.data.find((p) => p.is_default) ?? list.data[0] ?? null;
 }
 
+/**
+ * Combination a conversation actually runs on: snapshot → account default.
+ * Callers需要 `kind`（预置 vs 自建）时用它，别只取名字。
+ */
+export function resolveDisplayProfile(
+  list: LlmModelProfileListResponse | null,
+  conversationProfileId: string | null | undefined,
+): LlmModelProfileView | null {
+  return findProfile(list, conversationProfileId) ?? defaultProfile(list);
+}
+
 /** Badge label: conversation snapshot name, else account default name. */
 export function profileDisplayLabel(
   list: LlmModelProfileListResponse | null,
   conversationProfileId: string | null | undefined,
 ): string | null {
-  const override = findProfile(list, conversationProfileId);
-  if (override) return override.name;
-  return defaultProfile(list)?.name ?? null;
+  return resolveDisplayProfile(list, conversationProfileId)?.name ?? null;
 }
 
 // --- last-used profile (新对话继承上次选择) ---------------------------------------------

@@ -1,5 +1,6 @@
 import {
   useArchivedConversations,
+  useConversationTrash,
   useConversations,
 } from "@/hooks/useConversations";
 import { useFolderTrash, useFolders } from "@/hooks/useFolders";
@@ -11,6 +12,7 @@ import {
   ALL_KEY,
   ARCHIVED_KEY,
   EMPTY_CONVERSATIONS,
+  EMPTY_DELETED_CONVERSATIONS,
   EMPTY_DELETED_FOLDERS,
   STALE_DAYS,
   TRASH_KEY,
@@ -84,11 +86,21 @@ export function useConversationList(selected: string, folderIds: Set<string>) {
   const archived = archivedQuery.data ?? EMPTY_CONVERSATIONS;
 
   // Fetched unconditionally like the archived list — the left rail shows a count
-  // badge for「最近删除」whether or not that view is the selected one.
+  // badge for「最近删除」whether or not that view is the selected one. Deleted chats
+  // and deleted projects are two trips into one view; the badge counts both.
   const isTrashView = selected === TRASH_KEY;
   const trashQuery = useFolderTrash(true);
   const trash = trashQuery.data?.items ?? EMPTY_DELETED_FOLDERS;
-  const retentionDays = trashQuery.data?.retentionDays ?? null;
+  const convTrashQuery = useConversationTrash(true);
+  const deletedConversations =
+    convTrashQuery.data?.items ?? EMPTY_DELETED_CONVERSATIONS;
+  // Both bins run on the same server-side ``workspace_retention_days``; take whichever
+  // trip has landed rather than assuming a number the server never sent.
+  const retentionDays =
+    trashQuery.data?.retentionDays ??
+    convTrashQuery.data?.retentionDays ??
+    null;
+  const trashCount = trash.length + deletedConversations.length;
 
   const counts = useMemo(() => {
     let ungrouped = 0;
@@ -132,11 +144,19 @@ export function useConversationList(selected: string, folderIds: Set<string>) {
     staleOnly,
   ]);
 
-  // 最近删除 lists projects, not conversations — same search box, own list.
+  // 最近删除 holds deleted projects and deleted chats — same search box, own lists
+  // (neither is a `Conversation`, so they can't ride the recency grouping above).
   const trashList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return q ? trash.filter((f) => f.name.toLowerCase().includes(q)) : trash;
   }, [trash, query]);
+
+  const deletedConversationList = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return q
+      ? deletedConversations.filter((c) => c.title.toLowerCase().includes(q))
+      : deletedConversations;
+  }, [deletedConversations, query]);
 
   return {
     conversations,
@@ -149,8 +169,9 @@ export function useConversationList(selected: string, folderIds: Set<string>) {
     setStaleOnly,
     isArchivedView,
     isTrashView,
-    trash,
+    trashCount,
     trashList,
+    deletedConversationList,
     retentionDays,
   };
 }

@@ -20,7 +20,11 @@ vi.mock("@/lib/redirectLocalWorkspaceAsk", () => ({
   redirectLocalWorkspaceAskAction: vi.fn(),
 }));
 vi.mock("@/lib/toast", () => ({ notifyError: vi.fn() }));
-vi.mock("@/services/api", () => ({ api: { post: vi.fn() } }));
+// 真 ApiError（只换掉 api.post）：失败链路要证明的正是「原始错误对象没被拆」。
+vi.mock("@/services/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/services/api")>();
+  return { ...actual, api: { post: vi.fn() } };
+});
 vi.mock("@/services/conversations", () => ({
   provisionalConversationTitle: (s: string) => s.slice(0, 8),
   requestAutoTitle: vi.fn(),
@@ -42,6 +46,7 @@ vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../settleAttachments", () => ({ settleAttachments: vi.fn() }));
 
 import { notifyError } from "@/lib/toast";
+import { ApiError } from "@/services/api";
 import { sendTurn } from "@/services/turns";
 import { useComposerDraftStore } from "@/stores/composer";
 import { useConversationStore } from "@/stores/conversation";
@@ -176,9 +181,17 @@ describe("useComposerSend 附件收尾", () => {
   });
 
   it("附件最终失败：撤掉假气泡、还回草稿、给中文提示、不发回合", async () => {
+    // 后端拒绝：原始 ApiError 必须整个交给 toast，拆成 message 就只剩通用兜底了。
+    const denied = new ApiError(
+      403,
+      JSON.stringify({
+        error: { code: "WORKSPACE_READONLY", message: "工作区当前只读" },
+      }),
+    );
     settle.mockResolvedValue({
       ok: false,
-      reason: "上传附件到云端工作区失败",
+      reason: denied.message,
+      cause: denied,
       staleIds: [],
     });
     const { result } = renderHook(() => useSendHarness());
@@ -189,10 +202,7 @@ describe("useComposerSend 附件收尾", () => {
 
     expect(messages()).toHaveLength(0);
     expect(turn).not.toHaveBeenCalled();
-    expect(toastError).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "上传附件到云端工作区失败" }),
-      "附件驻留失败",
-    );
+    expect(toastError).toHaveBeenCalledWith(denied, "附件驻留失败");
 
     const draft = useComposerDraftStore.getState().drafts[CONV];
     expect(draft?.value).toBe("看看这张图");
@@ -216,6 +226,11 @@ describe("useComposerSend 附件收尾", () => {
     const draft = useComposerDraftStore.getState().drafts[CONV];
     expect(draft?.value).toBe("看看这张图");
     expect(draft?.attachments ?? []).toHaveLength(0);
+    // 纯客户端原因（没有后端错误对象）原样交出去，别再包一层。
+    expect(toastError).toHaveBeenCalledWith(
+      "附件暂存已失效，请重新附加",
+      "附件驻留失败",
+    );
   });
 
   it("等待附件期间连点发送不会发出第二个回合", async () => {

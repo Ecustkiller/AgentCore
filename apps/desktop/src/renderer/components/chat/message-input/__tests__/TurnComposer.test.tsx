@@ -154,6 +154,10 @@ vi.mock("@/components/chat/message-input/useVoiceInput", () => ({
     stop: vi.fn(),
   }),
 }));
+const dropMock = vi.hoisted(() => ({
+  handlePaste: vi.fn(),
+  handleDrop: vi.fn(),
+}));
 vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
   useComposerDrop: () => ({
     dragOver: false,
@@ -163,8 +167,8 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
     attachFiles: vi.fn(),
     handleDragOver: vi.fn(),
     handleDragLeave: vi.fn(),
-    handleDrop: vi.fn(),
-    handlePaste: vi.fn(),
+    handleDrop: dropMock.handleDrop,
+    handlePaste: dropMock.handlePaste,
   }),
 }));
 
@@ -173,11 +177,13 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
 const genMock = vi.hoisted(() => ({ value: false }));
 const handleSendMock = vi.hoisted(() => vi.fn());
 const sendingMock = vi.hoisted(() => ({ value: false }));
+const creatingMock = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/components/chat/message-input/useComposerSend", () => ({
   useComposerSend: () => ({
     handleSend: handleSendMock,
     isSending: sendingMock.value,
+    isCreatingConversation: creatingMock.value,
   }),
 }));
 vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
@@ -227,7 +233,10 @@ function renderComposer(variant?: "card" | "bar") {
 beforeEach(async () => {
   genMock.value = false;
   sendingMock.value = false;
+  creatingMock.value = false;
   handleSendMock.mockClear();
+  dropMock.handlePaste.mockClear();
+  dropMock.handleDrop.mockClear();
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
@@ -337,6 +346,25 @@ describe("TurnComposer variants", () => {
     expect(handleSendMock).toHaveBeenCalledWith();
   });
 
+  it("生成中：回形针可点、粘贴与拖入照旧进附件收集", () => {
+    // 插话 / 排队本就带附件走（useComposerSend 的 mid-flight 分支会 settleAttachments），
+    // 禁用回形针既不一致、又零反馈：用户只会以为附件坏了。
+    genMock.value = true;
+    const { container } = renderComposer();
+
+    const attach = screen.getByLabelText("附加文件") as HTMLButtonElement;
+    expect(attach.disabled).toBe(false);
+
+    const textarea = container.querySelector("textarea");
+    const root = container.querySelector("[data-composer-variant]");
+    if (!textarea || !root) throw new Error("composer textarea / root missing");
+
+    fireEvent.paste(textarea);
+    expect(dropMock.handlePaste).toHaveBeenCalled();
+    fireEvent.drop(root);
+    expect(dropMock.handleDrop).toHaveBeenCalled();
+  });
+
   it("generating + draft: canvas card also shows 排队发送 + 插队 + 停止", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
@@ -402,6 +430,21 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("建会话中：输入框已清空，仍给出「正在创建对话」的进行中态", () => {
+    creatingMock.value = true;
+    renderComposer();
+
+    // 草稿首发时输入框先清空再发 POST——这条提示就是那段等待期间的唯一反馈，
+    // 没有它用户会以为没发出去而再按一次（线上重复建会话的直接诱因）。
+    expect(screen.getByTestId("composer-creating-notice")).toBeTruthy();
+    expect(screen.getByText("正在创建对话…")).toBeTruthy();
+  });
+
+  it("未在建会话时不显示建会话中提示", () => {
+    renderComposer();
+    expect(screen.queryByTestId("composer-creating-notice")).toBeNull();
   });
 
   it("发送中：按钮进入 in-flight 态并挡住连点", async () => {

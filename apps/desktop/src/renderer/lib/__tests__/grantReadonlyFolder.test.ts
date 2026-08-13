@@ -45,6 +45,81 @@ describe("formatGrantReadonlyFolderAnswer", () => {
   });
 });
 
+describe("pickAndGrantReadonlyFolder 别名以回执为准", () => {
+  beforeEach(async () => {
+    const { api } = await import("@/services/api");
+    vi.mocked(api.post).mockReset();
+    window.fsApi = {
+      grantSessionReadonlyRoot: vi.fn(),
+      adoptSessionRootAlias: vi.fn(async () => true),
+    } as unknown as typeof window.fsApi;
+  });
+
+  it("登记不猜别名，回执里的那个写到本机根上", async () => {
+    const { api } = await import("@/services/api");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "报告", mode: "readonly" },
+    });
+    vi.mocked(api.post).mockResolvedValue({
+      grant: { alias: "ext_mfrggzdf", namespace: "external/ext_mfrggzdf" },
+    });
+
+    const result = await pickAndGrantReadonlyFolder("conv-1", {
+      wellKnown: "documents",
+      targetName: "报告",
+    });
+
+    // 别名是服务端 mint 的命名空间，桌面没有第二套算法去提议它
+    expect(api.post).toHaveBeenCalledWith(
+      "/v1/conversations/conv-1/workspace/external-grants",
+      { root_id: "r1", label: "报告" },
+    );
+    expect(window.fsApi.adoptSessionRootAlias).toHaveBeenCalledWith(
+      "conv-1",
+      "r1",
+      "ext_mfrggzdf",
+    );
+    expect(result.ok && result.alias).toBe("ext_mfrggzdf");
+  });
+
+  it("登记失败不写回（本机授权已撤回）", async () => {
+    const { api } = await import("@/services/api");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "报告", mode: "readonly" },
+    });
+    vi.mocked(api.post).mockRejectedValue(new Error("boom"));
+
+    const result = await pickAndGrantReadonlyFolder("conv-1", {
+      path: "C:\\报告",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(window.fsApi.adoptSessionRootAlias).not.toHaveBeenCalled();
+  });
+
+  it("别名写不下去 → 撤回授权并回失败（没有别名就没有可用挂载）", async () => {
+    const { api } = await import("@/services/api");
+    const { revokeExternalGrant } = await import("@/lib/revokeExternalGrant");
+    vi.mocked(window.fsApi.grantSessionReadonlyRoot).mockResolvedValue({
+      ok: true,
+      root: { id: "r1", name: "报告", mode: "readonly" },
+    });
+    vi.mocked(api.post).mockResolvedValue({
+      grant: { alias: "ext_mfrggzdf", namespace: "external/ext_mfrggzdf" },
+    });
+    vi.mocked(window.fsApi.adoptSessionRootAlias).mockResolvedValue(false);
+
+    const result = await pickAndGrantReadonlyFolder("conv-1", {
+      path: "C:\\报告",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(revokeExternalGrant).toHaveBeenCalledWith("conv-1", "r1");
+  });
+});
+
 describe("pickAndGrantReadonlyFolder resolve failures", () => {
   beforeEach(() => {
     window.fsApi = {

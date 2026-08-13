@@ -291,6 +291,10 @@ def resolve_verify_budget_seconds(
 
 
 def _make_output_callback(context: ToolContext):
+    # Only backends that run the sandbox in-process stream: subprocess / gVisor read
+    # ``ExecutionRequest.on_output``. The desktop channel cannot carry a callback —
+    # ``workspace/local.py::_channel_execute`` drops it and hands back the whole output
+    # once the command has exited.
     on_progress = context.on_progress
     if not on_progress:
         return None
@@ -882,7 +886,7 @@ class TestRunTool:
             name="test_run",
             description=(
                 "有界项目验证：跑工作区声明的检查（受控装包 / 测试 / typecheck / build / "
-                "显式 verify 命令），可流式输出。适合外环验绿与慢 build、"
+                "显式 verify 命令）。适合外环验绿与慢 build、"
                 "全量 tsc、项目测试、npm/pnpm/yarn 或 uv/pip/poetry 装包——"
                 "【不要】用 code_execute 跑这些。云端装包用 check=install（或 "
                 "check=command + npm install / uv sync），需受限出网；无网时诚实降级，勿空转。"
@@ -1157,19 +1161,24 @@ class TestRunTool:
                 )
             duration_ms = int((time.monotonic() - start) * 1000)
             duration_s = duration_ms / 1000.0
-            from agentcore.runtime.loop_controller.types import (
-                EXEC_ENV_TIMEOUT_FAMILY,
-                EXEC_ENV_TIMEOUT_RETIRE_STEER,
-            )
             from agentcore.tools.sandbox.exec_env import (
-                EXEC_ENV_PROBE_FAIL_CODE,
+                exec_env_probe_failure_code,
+                exec_env_probe_failure_language,
                 is_exec_env_probe_failure,
+                probe_failure_retire_steer,
+                probe_failure_retire_tools,
             )
 
             if is_exec_env_probe_failure(exec_result.stderr) or is_exec_env_probe_failure(
                 exec_result.stdout
             ):
                 msg = (exec_result.stderr or exec_result.stdout or "").strip()
+                # Classified probe reason when provable, else generic.
+                probe_code = exec_env_probe_failure_code(msg)
+                # Every check runs as a python script (see ``_python_argv_runner``),
+                # so a dead python retires this tool — but it no longer drags
+                # ``code_execute`` down with it: other languages were not probed.
+                probe_language = exec_env_probe_failure_language(msg)
                 return ToolResult(
                     tool_call_id="",
                     success=False,
@@ -1178,11 +1187,15 @@ class TestRunTool:
                     duration_ms=duration_ms,
                     metadata={
                         "check": check,
-                        "code": EXEC_ENV_PROBE_FAIL_CODE,
+                        "code": probe_code,
                         "exec_env_timeout": True,
                         "error_class": "permanent",
-                        "retire_tools": sorted(EXEC_ENV_TIMEOUT_FAMILY),
-                        "retire_message": EXEC_ENV_TIMEOUT_RETIRE_STEER,
+                        "retire_tools": list(
+                            probe_failure_retire_tools(probe_language)
+                        ),
+                        "retire_message": probe_failure_retire_steer(
+                            probe_code, language=probe_language
+                        ),
                     },
                     display={
                         "check": check,

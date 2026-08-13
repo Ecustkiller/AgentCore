@@ -393,8 +393,8 @@ async def test_run_background_llm_platform_auth_falls_back_to_byok(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_run_background_llm_no_byok_after_platform_auth_returns_none(monkeypatch):
-    from agentcore.billing.gate import run_background_llm
+async def test_run_background_llm_no_byok_after_platform_auth_skips(monkeypatch):
+    from agentcore.billing.gate import BackgroundLlmSkip, BackgroundSkipReason, run_background_llm
     from agentcore.core.errors import LLMAuthError
     from agentcore.llm.credentials import LLMCredentials
 
@@ -426,12 +426,12 @@ async def test_run_background_llm_no_byok_after_platform_auth_returns_none(monke
     )
 
     result = await run_background_llm("u1", purpose="memory", runner=_runner)
-    assert result is None
+    assert result == BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
 
 
 @pytest.mark.asyncio
 async def test_run_background_llm_byok_auth_does_not_retry_platform(monkeypatch):
-    from agentcore.billing.gate import run_background_llm
+    from agentcore.billing.gate import BackgroundLlmSkip, BackgroundSkipReason, run_background_llm
     from agentcore.core.errors import LLMAuthError
     from agentcore.llm.credentials import LLMCredentials
 
@@ -467,7 +467,7 @@ async def test_run_background_llm_byok_auth_does_not_retry_platform(monkeypatch)
     )
 
     result = await run_background_llm("u1", purpose="title", runner=_runner)
-    assert result is None
+    assert result == BackgroundLlmSkip(reason=BackgroundSkipReason.AUTH_REJECTED)
     assert calls == ["user"]
     fallback.assert_not_awaited()
 

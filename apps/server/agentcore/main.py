@@ -50,7 +50,7 @@ from agentcore.api.routes import (
 from agentcore.auth.retention import refresh_token_retention_loop
 from agentcore.config import settings
 from agentcore.conversation.compaction import shutdown_compaction
-from agentcore.core.errors import AgentCoreError
+from agentcore.core.errors import AgentCoreError, wire_moments
 from agentcore.core.logging import get_logger, setup_logging
 from agentcore.db.migration_check import check_migrations
 from agentcore.memory.consolidation import consolidation_loop, shutdown_scheduler
@@ -103,41 +103,46 @@ def _configured_api_worker_count() -> int:
 
 
 def _validate_single_process_assumptions() -> None:
-    """Fail-loud when process-local assumptions would silently break.
+    """Refuse multi-worker boot — two registries are process-local by design.
 
-    Mid-term G5 guardrail (成本配额 · 账本 DB outbox / 限流):
-    - Cost ledger uses shared Postgres ``cost_ledger_outbox`` (every worker may
-      self-drain with ``FOR UPDATE SKIP LOCKED``).
-    - Multi-worker API is allowed only when ``RATE_LIMIT_BACKEND=redis``.
-    - ``RATE_LIMIT_BACKEND=memory`` + multi-worker is still refused (process-local
-      limiters under-throttle).
+    - **设备履约中枢** (``fulfill/hub.py``): a desktop's fulfill SSE lands on worker
+      A while its turn runs on worker B, which then finds no fulfiller at all —
+      local workspace / Host / MCP / 白板 tools break, and local-workspace turns are
+      hard-refused by the presence gate as「本机桌面未连接」(not a soft degrade).
+    - **对话事件流** (``runtime/turn/runs.py`` · ``runtime/events/conversation_hub.py``):
+      attach / 跟播 landing on a worker that is not running the turn yields a bare
+      204, or a ``follow=true`` stream that only ever heartbeats. This one is
+      **silent** — the client cannot tell it apart from an idle conversation.
 
-    This does **not** claim full multi-host readiness: approval gates, IM, steer,
-    and journal settlement may still assume a single process.
+    ``RATE_LIMIT_BACKEND=redis`` only shares the limiters and the cost ledger already
+    drains a shared Postgres outbox, so neither is the blocker: redis used to wave
+    multi-worker straight through, which is exactly how 跟播 could break with no
+    signal anywhere. No env var unlocks this — cross-process fan-out is the
+    prerequisite, and 部署样例 already forbids multi-worker for the fulfill reason.
 
-    DEBUG keeps local iteration runnable: multi-worker + memory is a loud warning
-    only. Non-DEBUG refuses boot for memory + multi-worker.
+    Single-worker is not a readiness claim either: approval gates, IM, steer and
+    journal settlement equally assume one process.
+
+    DEBUG keeps local iteration runnable: loud warning only.
     """
     workers = _configured_api_worker_count()
     if workers <= 1:
         return
 
     backend = settings.rate_limit_backend
-    if backend == "redis":
-        # Shared ledger outbox + shared rate limits → multi-worker API OK.
-        return
-
     detail = (
         f"configured API workers={workers} (AGENTCORE_API_WORKERS / "
-        f"WEB_CONCURRENCY / UVICORN_WORKERS) but RATE_LIMIT_BACKEND="
-        f"{backend!r} is process-local (set RATE_LIMIT_BACKEND=redis before "
-        f"scaling). Cost ledger outbox is already shared Postgres; rate-limit "
-        f"memory alone still blocks multi-worker."
+        f"WEB_CONCURRENCY / UVICORN_WORKERS) but this build has no cross-process "
+        f"event bus: the device fulfillment hub and the conversation event stream "
+        f"(attach / follow) are process-local singletons, so a client's stream and "
+        f"its turn can land on different workers — local-workspace / Host / MCP "
+        f"tools hard-refuse, and follow streams silently degrade to 204 / "
+        f"heartbeat-only. RATE_LIMIT_BACKEND={backend!r} does not unlock this (it "
+        f"only shares limiters). Keep workers=1 until cross-process fan-out lands."
     )
-    event = "security.rate_limit_memory_multi_worker"
     if settings.debug:
         get_logger(__name__).warning(
-            event,
+            "deploy.multi_worker_refused",
             workers=workers,
             rate_limit_backend=backend,
             detail=detail,
@@ -230,6 +235,21 @@ def _validate_production_security() -> None:
             "COOKIE_SAMESITE=none requires COOKIE_SECURE=true (browsers drop a "
             "SameSite=None cookie without Secure). Set COOKIE_SECURE=true."
         )
+    # CSRF is the *only* thing standing between a cross-site page and the ambient
+    # access cookie for browser/desktop sessions (SameSite=None is required for the
+    # desktop app:// origin, so the cookie rides cross-site requests by design), and
+    # turning it off is invisible at runtime — the server looks healthy and every
+    # request succeeds. Loud, not fatal: refusing the boot only ever fired mid-deploy
+    # on a self-hosted install, where a server that will not start is the worse
+    # outcome and the operator is right there reading this line.
+    if not settings.csrf_enabled:
+        logger.warning(
+            "security.csrf_disabled",
+            detail="CSRF_ENABLED=false leaves cookie-session clients (admin console "
+            "/ desktop) with no CSRF protection: any cross-site page could drive "
+            "authenticated state changes using the ambient access cookie. Set "
+            "CSRF_ENABLED=true (bearer-token mobile clients are unaffected).",
+        )
     # The code-execution tool class (code_execute AND test_run — a test suite runs
     # arbitrary project code through the SAME sandbox chain) on a cloud/server worker
     # runs untrusted model/user code. With GVISOR_ENABLED the runsc sandbox provides a
@@ -260,7 +280,8 @@ def _validate_production_security() -> None:
 async def lifespan(app: FastAPI):
     setup_logging()
     _validate_production_security()
-    # Cloud sandbox availability: one-shot probe when config would enable execution.
+    # Cloud sandbox availability: first probe when config would enable execution
+    # (the verdict then TTL-refreshes in the background — runsc can rot after boot).
     # Failure must not block boot — folds into ``code_execution_enabled_for`` so
     # code_execute/test_run stay withheld and workspace_context says 未装配.
     from agentcore.tools.sandbox.browser.netns import probe_browser_netns_at_startup
@@ -276,9 +297,10 @@ async def lifespan(app: FastAPI):
     from agentcore.tools.builtin.git_ops.binary_health import probe_git_binary_at_startup
 
     await probe_git_binary_at_startup()
-    # Schema-drift notice: warn loudly (never block) if the live DB is behind the
-    # migration head, so an unapplied migration surfaces at boot instead of as a
-    # mid-session UndefinedColumnError on a core endpoint.
+    # Schema-drift notice: warn loudly (never block) when the live DB is behind the
+    # migration head — or at head yet missing schema the ORM maps — so a missing
+    # migration surfaces at boot instead of as a mid-session UndefinedColumnError
+    # on a core endpoint.
     await check_migrations()
 
     # Background retention sweep (决策⑦): physically purge soft-deleted workspaces
@@ -384,6 +406,10 @@ async def lifespan(app: FastAPI):
         host=settings.host,
         port=settings.port,
         turn_lease_enabled=settings.turn_lease_enabled,
+        # Same provenance pair as GET /version: semver answers「线上跑的哪个版本」,
+        # git_sha pins the exact build when two deploys share a version.
+        version=system.app_version(),
+        git_sha=settings.git_sha,
     )
 
     try:
@@ -505,9 +531,16 @@ async def agentcore_error_handler(request, exc: AgentCoreError):
     if retry_after is not None and retry_after > 0:
         headers = {"Retry-After": str(math.ceil(retry_after))}
 
+    # Absolute moments ride flat on ``error`` here; the SSE / inference-leaf envelope
+    # carries them inside ``error.context`` instead (that slot also holds upstream
+    # previews and counters, which have no business in a plain REST body). A strict
+    # whitelist either way — the quota gate's copy no longer names a UTC clock time,
+    # so this is the only way a client can put one in the reader's own zone.
     return JSONResponse(
         status_code=exc.status_code,
-        content={"error": {"code": exc.code, "message": exc.message}},
+        content={
+            "error": {"code": exc.code, "message": exc.message, **wire_moments(exc)}
+        },
         headers=headers,
     )
 

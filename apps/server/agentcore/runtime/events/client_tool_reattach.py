@@ -2,13 +2,17 @@
 
 ``*_op_required`` / notify / board_read stay EPHEMERAL (not journaled). Delivery
 goes through the device-level fulfill hub (:func:`push_client_tool_required`),
-not the turn display EventSink. On fulfiller connect / reconnect / roots update,
+not the turn display EventSink. On fulfiller connect / reconnect / root binding,
 :func:`rehang_pending_client_tools` re-pushes still-open registry entries so an
-in-flight op is not lost when the desktop briefly drops. Done / cancelled /
-discarded entries are absent from ``list_pending`` and are not re-sent.
-Process restart does not promise reattach. Both re-hang and cancel run outside
-the turn's context, so the payload carries the origin device (:func:`client_tool_payload`)
-and they route by that copy — never by whichever device happens to be online.
+in-flight op is not lost when the desktop briefly drops. That re-push only has
+something to re-push while the entry is still open, which is why a dispatch that
+lands in a reconnect blind window holds the op for a bounded grace
+(``fulfill/grace.py``) instead of settling it — see
+:func:`push_client_tool_required`. Done / cancelled / discarded entries are
+absent from ``list_pending`` and are not re-sent. Process restart does not
+promise reattach. Both re-hang and cancel run outside the turn's context, so the
+payload carries the origin device (:func:`client_tool_payload`) and they route by
+that copy — never by whichever device happens to be online.
 
 The reverse direction is :func:`cancel_pending_client_tools`: an explicit user
 stop drops the awaiter, so the device must be told to abort the op it is still
@@ -18,9 +22,11 @@ long after the turn is gone).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from agentcore.core.logging import get_logger
+from agentcore.fulfill import grace
 from agentcore.fulfill.origin import current_origin_device
 from agentcore.runtime.events.board import board_op_required, board_read_required
 from agentcore.runtime.events.desktop import (
@@ -177,10 +183,12 @@ def push_client_tool_required(
     error_detail: str,
     origin_offline_detail: str | None = None,
     root_not_held_detail: str | None = None,
+    deadline_seconds: float | None = None,
 ) -> bool:
-    """Deliver via the fulfill hub; when nobody can run it, settle the op now.
+    """Deliver via the fulfill hub; when nobody can run it, settle the op.
 
-    Returns ``True`` when a fulfiller received the frame. ``False`` means the
+    Returns ``True`` while the op is still in flight — a fulfiller took the
+    frame, or the reconnect grace below is holding it. ``False`` means the
     registry Future was settled with a typed failure envelope (caller awaits it).
 
     ``origin_offline_detail`` is the copy for a pinned channel whose origin
@@ -190,33 +198,126 @@ def push_client_tool_required(
     online desktop no longer declares: the machine is there, the folder grant is
     not, and only the user can put it back. Callers that leave either unset fall
     back to ``error_detail``.
-    """
-    from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
 
-    status = deliver_client_tool(
-        user_id,
-        conversation_id,
-        channel,
-        root_id,
-        event,
-        origin_device_id=current_origin_device(),
-    )
-    if status is DeliverResult.DELIVERED:
-        return True
-    detail = error_detail
-    if status is DeliverResult.ORIGIN_OFFLINE and origin_offline_detail:
-        detail = origin_offline_detail
-    elif status is DeliverResult.ROOT_NOT_HELD and root_not_held_detail:
-        detail = root_not_held_detail
-    registry.resolve(
-        request_id,
-        {
-            "ok": False,
-            "error": {"kind": error_kind, "detail": detail},
-        },
+    **Reconnect grace.** "Nobody online" is also what a desktop's SSE reconnect
+    looks like from here for a second or two, and settling then is what turned a
+    blind window into a hard tool failure. So a delivery miss against a device
+    the hub saw a moment ago (``hub.seen_recently``) parks the request instead of
+    resolving it: the reconnect's :func:`rehang_pending_client_tools` re-pushes
+    it, and only if the device is still absent when the grace expires does the
+    same typed failure land.
+
+    :attr:`DeliverResult.ORIGIN_OFFLINE` waits on the same terms as
+    :attr:`DeliverResult.NO_FULFILLER`, and for the same reason — it *is* the
+    no-fulfiller miss, seen by a user who owns a second machine. Whether the
+    account happens to have another install online says nothing about how long
+    the pinned one takes to come back, so failing that user instantly while the
+    single-device one waits was an asymmetry with nothing behind it.
+    :attr:`DeliverResult.ROOT_NOT_HELD` still fails on the spot: the device is
+    right there and answering — the folder authorization is gone, and only the
+    user can put it back. A client away longer than the presence window keeps
+    today's fail-fast exactly. ``deadline_seconds`` is the caller's own deadline;
+    the grace is clamped under it so no op waits past what its channel promised.
+    """
+    origin_device_id = current_origin_device()
+
+    def attempt(*, grace_seconds: float) -> bool:
+        from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
+
+        status = deliver_client_tool(
+            user_id,
+            conversation_id,
+            channel,
+            root_id,
+            event,
+            origin_device_id=origin_device_id,
+        )
+        if status is DeliverResult.DELIVERED:
+            grace.release(request_id)
+            return True
+        waitable = status in (DeliverResult.NO_FULFILLER, DeliverResult.ORIGIN_OFFLINE)
+        if waitable and _hold_for_reconnect(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            channel=channel,
+            root_id=root_id,
+            origin_device_id=origin_device_id,
+            request_id=request_id,
+            seconds=grace_seconds,
+            on_expire=on_grace_expired,
+            status=status,
+        ):
+            return True
+        detail = error_detail
+        if status is DeliverResult.ORIGIN_OFFLINE and origin_offline_detail:
+            detail = origin_offline_detail
+        elif status is DeliverResult.ROOT_NOT_HELD and root_not_held_detail:
+            detail = root_not_held_detail
+        registry.resolve(
+            request_id,
+            {
+                "ok": False,
+                "error": {"kind": error_kind, "detail": detail},
+            },
+            conversation_id=conversation_id,
+        )
+        return False
+
+    def on_grace_expired() -> None:
+        pending = registry.get(request_id)
+        if pending is None or pending.future.done():
+            # Awaiter already left (turn cancelled, channel timed out): pushing
+            # the frame now would run an op nobody is waiting for.
+            return
+        logger.info(
+            "fulfill.grace_expired",
+            user=user_id,
+            conversation_id=conversation_id,
+            channel=channel,
+            request_id=request_id,
+        )
+        attempt(grace_seconds=0.0)
+
+    return attempt(grace_seconds=grace.window_for(deadline_seconds))
+
+
+def _hold_for_reconnect(
+    *,
+    user_id: str,
+    conversation_id: str,
+    channel: str,
+    root_id: str | None,
+    origin_device_id: str | None,
+    request_id: str,
+    seconds: float,
+    on_expire: Callable[[], None],
+    status: str,
+) -> bool:
+    """Park the op iff its device was here a moment ago. Returns whether it is held."""
+    if seconds <= 0:
+        return False
+    # Same lookup delivery just used, so the miss and the presence answer can
+    # never come from two different hubs.
+    from agentcore.fulfill.dispatch import default_fulfiller_hub
+
+    # Unknown origin (re-hang, older clients) falls back to the user's devices —
+    # the coarsest signal that still separates "reconnecting" from "not there".
+    if not default_fulfiller_hub().seen_recently(user_id, device_id=origin_device_id):
+        return False
+    if not grace.hold(request_id, seconds=seconds, on_expire=on_expire):
+        return False
+    logger.info(
+        "fulfill.reconnect_grace",
+        user=user_id,
         conversation_id=conversation_id,
+        channel=channel,
+        root_id=root_id,
+        origin_device=origin_device_id,
+        request_id=request_id,
+        grace_seconds=round(seconds, 3),
+        miss=str(status),
     )
-    return False
+    return True
 
 
 class _PendingRoute(NamedTuple):
@@ -278,6 +379,9 @@ def cancel_pending_client_tools(conversation_id: str) -> int:
         route = _pending_client_tool_route(req)
         if route is None:
             continue
+        # Nothing left to wait for: the turn is going away, so a still-parked op
+        # must not be woken by its grace timer.
+        grace.release(req.id)
         status = deliver_client_tool(
             route.user_id,
             conversation_id,
@@ -318,17 +422,21 @@ def pending_client_tool_events(conversation_id: str) -> list[SSEEvent]:
 def rehang_pending_client_tools(user_id: str) -> int:
     """Re-deliver this user's open CLIENT_TOOL frames to a live fulfiller.
 
-    Called when a fulfiller connects / reconnects or updates roots. Does **not**
+    Called when a fulfiller connects / reconnects or a receipt binds it a new
+    root (:mod:`agentcore.fulfill.declare`). Does **not**
     settle on ``NO_FULFILLER`` — the Future stays open until a capable device
     appears, the channel times out, or the op is discarded. A pinned op re-hangs
     only onto the device that originally asked for it: another install coming
-    online is not an invitation to run someone else's shell command. Returns how
-    many frames were successfully enqueued.
+    online is not an invitation to run someone else's shell command. Ops parked
+    by the reconnect grace are exactly what this call comes back for, so a
+    delivered one drops its expiry timer here. Returns how many frames were
+    successfully enqueued.
     """
     from agentcore.fulfill.dispatch import DeliverResult, deliver_client_tool
     from agentcore.runtime.interaction import default_interaction_registry
 
     delivered = 0
+    ungraced = 0
     for req in default_interaction_registry().list_pending():
         route = _pending_client_tool_route(req)
         if route is None or route.user_id != user_id:
@@ -346,11 +454,14 @@ def rehang_pending_client_tools(user_id: str) -> int:
         )
         if status is DeliverResult.DELIVERED:
             delivered += 1
+            if grace.release(req.id):
+                ungraced += 1
     if delivered:
         logger.info(
             "client_tool.rehang",
             user=user_id,
             delivered=delivered,
+            from_grace=ungraced,
         )
     return delivered
 

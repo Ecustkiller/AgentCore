@@ -48,9 +48,12 @@ export function ensureStreamingAssistant(conversationId: string): void {
   store.createAssistantMessage(conversationId);
 }
 
-type PendingChunk =
-  | { kind: "content"; text: string }
-  | { kind: "reasoning"; text: string };
+type PendingChunk = {
+  kind: "content" | "reasoning";
+  text: string;
+  /** attach 增量重放的替换帧：`text` 是末尾未闭合块的全文，写出时换块而非追加。 */
+  replace?: boolean;
+};
 
 /**
  * rAF 合批 CEO 气泡的流式正文 + 思考（content_delta / reasoning_delta，流式渲染性能）。
@@ -85,6 +88,7 @@ function enqueueChunk(
   conversationId: string,
   kind: PendingChunk["kind"],
   delta: string,
+  replace = false,
 ): void {
   if (!delta) return;
   let q = pendingChunks.get(conversationId);
@@ -93,8 +97,10 @@ function enqueueChunk(
     pendingChunks.set(conversationId, q);
   }
   const last = q[q.length - 1];
-  if (last?.kind === kind) last.text += delta;
-  else q.push({ kind, text: delta });
+  // 替换帧自己起一块——并进前一块会把「换掉末尾未闭合块」变成「接在它后面」。反向合并
+  // 是安全的：先换成 A 再追加 B，等价于换成 A+B，所以替换块后面的追加照常并入。
+  if (last?.kind === kind && !replace) last.text += delta;
+  else q.push({ kind, text: delta, replace });
   scheduleFlush(conversationId);
 }
 
@@ -108,10 +114,11 @@ export function flushPendingContent(conversationId: string): void {
   if (blocksStreamOpen(getTurnPhase(conversationId))) return;
   const store = useConversationStore.getState();
   for (const chunk of q) {
+    const opts = { replace: chunk.replace };
     if (chunk.kind === "content") {
-      store.appendToLastMessage(chunk.text, conversationId);
+      store.appendToLastMessage(chunk.text, conversationId, opts);
     } else {
-      store.appendReasoningToLastMessage(chunk.text, conversationId);
+      store.appendReasoningToLastMessage(chunk.text, conversationId, opts);
     }
   }
 }
@@ -146,15 +153,20 @@ function scheduleFlush(conversationId: string): void {
   pendingFrame.set(conversationId, frame);
 }
 
-/** 把一段正文 delta 入队，并确保已排定一次 frame flush。 */
-export function queueContentDelta(conversationId: string, delta: string): void {
-  enqueueChunk(conversationId, "content", delta);
+/** 把一段正文 delta 入队，并确保已排定一次 frame flush。`replace` 见 {@link PendingChunk}。 */
+export function queueContentDelta(
+  conversationId: string,
+  delta: string,
+  replace?: boolean,
+): void {
+  enqueueChunk(conversationId, "content", delta, replace);
 }
 
 /** 把一段思考(reasoning) delta 入队，并确保已排定一次 frame flush（与正文共用 rAF）。 */
 export function queueReasoningDelta(
   conversationId: string,
   delta: string,
+  replace?: boolean,
 ): void {
-  enqueueChunk(conversationId, "reasoning", delta);
+  enqueueChunk(conversationId, "reasoning", delta, replace);
 }

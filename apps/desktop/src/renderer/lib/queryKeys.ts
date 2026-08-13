@@ -11,6 +11,9 @@ export const conversationKeys = {
   /** Archived conversations (`GET /v1/conversations?archived=true`) — the
    * on-demand「已归档」view, separate from the live grouped cache. */
   archived: ["conversations", "archived"] as const,
+  /** 最近删除（`GET /v1/conversations/trash`）— 已删对话 + 保留天数。Shares the
+   * 「最近删除」view with {@link folderKeys.trash}; two trips, one pane. */
+  trash: ["conversations", "trash"] as const,
   /** 项目协作时间线（`GET /v1/folders/{id}/collaboration-timeline`）。 */
   collaborationTimeline: (folderId: string) =>
     ["collaboration-timeline", folderId] as const,

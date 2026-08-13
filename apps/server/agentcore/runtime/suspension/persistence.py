@@ -10,6 +10,11 @@ claimed frame (sidecar ``rollback_claim`` parity) so the user can retry. Uses
 ``async_session_factory`` directly (not an injected request session), matching the
 cost-ledger / session-roster persistence posture.
 
+The claim's winner also writes down what it settled (``paused_turn_outcomes``, in the
+same transaction as the delete), so everyone who lost that race reads the winner's
+decision instead of inferring one — see :func:`claim_paused_turn` and
+``runtime/suspension/consumed.py``.
+
 The paused turn's journal-so-far rides the ``turn_journal`` table (唯一事实源, §8.3),
 NOT the frame. Facts are normally appended on emit during the turn; at pause time
 :func:`save_paused_turn` also snapshots the suspending face's ``journal_entries`` (the
@@ -23,6 +28,7 @@ claim-then-hydrate failure restores the frame and raises (route 5xx, retryable).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from agentcore.attention import (
@@ -35,6 +41,7 @@ from agentcore.core.log_context import get_log_value
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
+from agentcore.fulfill.user_signal import push_paused_card_settled
 from agentcore.push import PushNotification, notify_user
 from agentcore.runtime.journal.writer import current_journal_writer
 from agentcore.runtime.suspension import (
@@ -227,18 +234,35 @@ async def _signal_frame_resolved(
     conversation_id: str,
     frame: Any,
     message_id: str,
+    decision: str = "",
 ) -> None:
-    """Clear the attention badge for a frame that is no longer pending.
+    """This card is down — clear the badge, and drop it on the user's other installs.
+
+    Two audiences, two channels. ``ai_attention`` is the account-level badge:
+    which conversation still wants them, no content (设计 §2.2). The desktop
+    channel carries the card itself — an install holding this cold card in a
+    conversation it is not watching has a 继续 button that can now only 404, and
+    nothing on its display streams will ever say so.
 
     Reads the kind / checkpoint straight off the stored frame so it works on the
-    delete path too, where no :class:`TurnSuspension` was rebuilt. A frame that
-    cannot be read is not worth failing over — the badge self-corrects on the
-    client's next REST re-pull.
+    live-resolve delete path too, where no :class:`TurnSuspension` was rebuilt
+    (and where ``decision`` is not ours to state — the conversation stream
+    carries that). A frame that cannot be read is not worth failing over.
     """
     data = frame if isinstance(frame, dict) else {}
-    kind = attention_kind_of(str(data.get("kind") or ""))
+    card_kind = str(data.get("kind") or "")
+    kind = attention_kind_of(card_kind)
     if kind is None or not user_id:
         return
+    push_paused_card_settled(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        checkpoint_id=str(data.get("checkpoint_id") or ""),
+        kind=card_kind,
+        decision=decision,
+        decided_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+    )
     await signal_attention_resolved(
         user_id=user_id,
         conversation_id=conversation_id,
@@ -298,16 +322,42 @@ async def load_paused_turn(
         return None
 
 
+async def paused_turn_exists(message_id: str, *, conversation_id: str) -> bool:
+    """Is the frame still on disk? Raises on a DB fault instead of guessing.
+
+    The claim-miss path needs to know whether the frame was *consumed* (someone else
+    continued the turn ⇒ idempotent success) or whether the claim merely failed. It
+    cannot ask :func:`load_paused_turn`, which swallows read errors into ``None``: that
+    would turn a broken database into「已被处理」and let this request's own prewritten
+    settlement pose as somebody else's decision.
+    """
+    async with async_session_factory() as db:
+        row = await PausedTurnRepository(db).get(message_id)
+    return row is not None and row.conversation_id == conversation_id
+
+
 async def claim_paused_turn(
-    message_id: str, *, conversation_id: str | None = None
+    message_id: str,
+    *,
+    conversation_id: str | None = None,
+    decision: str,
+    settled_by: str = "",
 ) -> TurnSuspension | None:
     """Atomically read-and-delete a paused turn for resume; ``None`` if already
     claimed / absent.
 
     The atomic claim (DELETE ... RETURNING) means two racing ``/resume`` calls can't
-    both continue the same turn — the loser gets ``None`` (→ 404 at the route). Pass
-    ``conversation_id`` (the one the route verified the caller owns) so a frame is only
-    claimed within that conversation (IDOR-safe).
+    both continue the same turn — the loser gets ``None``. Pass ``conversation_id``
+    (the one the route verified the caller owns) so a frame is only claimed within that
+    conversation (IDOR-safe).
+
+    Winning is what「结了这张卡」means, so the winner states its conclusion here:
+    ``decision`` (what it is about to apply) and ``settled_by`` (结算方 — the origin
+    device) land in the same transaction as the delete, keyed to the frame's own
+    ``checkpoint_id``. That row is what every loser reads; without it a loser could
+    only look at the journal's last ``*_resolved``, which on this path is usually the
+    settlement it prewrote seconds earlier — telling the user their own decision took
+    effect while somebody else's actually ran.
 
     Claim competition / missing row → ``None``. After a successful claim, frame parse
     or journal load failure restores the row and **raises** (route 5xx, frame kept for
@@ -327,7 +377,12 @@ async def claim_paused_turn(
     claimed: dict[str, Any] | None = None
     try:
         async with async_session_factory() as db:
-            row = await PausedTurnRepository(db).claim(message_id, conversation_id=conversation_id)
+            row = await PausedTurnRepository(db).claim(
+                message_id,
+                conversation_id=conversation_id,
+                decision=decision,
+                settled_by=settled_by,
+            )
             if row is None:
                 return None
             # Materialize before the session closes (expire_on_commit).
@@ -376,14 +431,30 @@ async def claim_paused_turn(
         paused=False,
     )
     # Exactly one caller wins the claim, so exactly one「已处理」reaches the user's
-    # other devices — whichever端 actually answered the card.
+    # other devices — whichever端 actually answered the card, carrying the decision
+    # it just applied.
     await _signal_frame_resolved(
         user_id=claimed["user_id"],
         conversation_id=claimed["conversation_id"],
         frame=claimed["frame"],
         message_id=claimed["message_id"],
+        decision=decision,
     )
     return suspension
+
+
+async def clear_message_pause_latch(*, message_id: str, conversation_id: str) -> None:
+    """Drop ``usage.paused`` on a turn whose frame is gone for good (TTL sweep).
+
+    Claim clears the latch as part of continuing; a swept frame has no continuation to
+    do it, and the latch alone is enough for a reopened client to paint a decision card
+    that can now only fail. Best-effort, same as every other latch write.
+    """
+    await _set_message_pause_latch(
+        message_id=message_id,
+        conversation_id=conversation_id,
+        paused=False,
+    )
 
 
 async def _set_message_pause_latch(

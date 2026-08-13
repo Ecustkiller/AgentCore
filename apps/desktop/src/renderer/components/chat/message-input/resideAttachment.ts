@@ -35,7 +35,18 @@ export type ResideResult =
       /** 浏览器草稿：无会话时持 File，发送时再 PUT。 */
       fileBlob?: File;
     }
-  | { ok: false; reason: string };
+  | ResideFailure;
+
+/**
+ * 驻留失败。`reason` 是给 chip / 菜单直接显示的字符串；`cause` 是抛出的原始错误
+ * （后端 `ApiError` 等），只有它带着 code / serverMessage，`describeError` 靠它
+ * 才能给出真实文案与补救动作——拆成字符串就再也拼不回来了。
+ */
+export interface ResideFailure {
+  ok: false;
+  reason: string;
+  cause?: unknown;
+}
 
 /** Align with main-process ``safeName`` (basename + strip leading dots). */
 export function safeBrowserFileName(name: string): string {
@@ -176,6 +187,7 @@ async function putFileToCloudWorkspace(
     return {
       ok: false,
       reason: e instanceof Error ? e.message : "上传附件到云端工作区失败",
+      cause: e,
     };
   }
   return { ok: true, path: workspacePath, workspacePath, ...meta };
@@ -275,7 +287,7 @@ export type ResidentAttachment =
       text: string;
       truncated: boolean;
     }
-  | { ok: false; reason: string };
+  | ResideFailure;
 
 /**
  * 兜底驻留：把还没落地的附件写入本地工作区或上传到云端工作区。
@@ -387,6 +399,7 @@ export async function ensureAttachmentResident(
     return {
       ok: false,
       reason: e instanceof Error ? e.message : "上传附件到云端工作区失败",
+      cause: e,
     };
   }
   return {

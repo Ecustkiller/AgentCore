@@ -1,4 +1,3 @@
-import { assertNever } from "@/lib/assertNever";
 import { logEvent } from "@/lib/log";
 import { isClientToolRequiredType } from "@/services/clientToolFrames";
 import { traceSSEEvent } from "@/services/sseTrace";
@@ -85,9 +84,15 @@ export function dispatchSSEEvent(event: SSEEvent, ctx: DispatchContext): void {
   for (const handler of HANDLERS) {
     if (handler(event, ctx)) return;
   }
-  // Runtime exhaustiveness tripwire — compile-time coverage for fold lives in
-  // conformanceFold's discriminated switch; both must be updated for new SSE types.
-  assertNever(event as never);
+  // 未知事件类型 = 后端比本客户端新，这是升级期的常态而非异常。编译期穷尽由
+  // conformanceFold 的判别联合 switch 负责（那里才有类型收窄）；在这里抛只会让
+  // 旧客户端的 catch-up 重放整段中断、连不上，所以忽略并记一条丢点。
+  logEvent("warn", "sse.event_dropped", {
+    conversation_id: ctx.conversationId,
+    event_type: event.type,
+    turn_phase: turnPhase,
+    reason: "unhandled_event_type",
+  });
 }
 
 export type { DispatchContext } from "./types";

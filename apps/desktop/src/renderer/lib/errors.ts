@@ -1,3 +1,7 @@
+import {
+  type RecoveryMomentFields,
+  withRecoveryMoment,
+} from "@/lib/recoveryMoment";
 import { ApiError, NetworkError } from "@/services/api";
 import {
   KEY_CONFIG_ERROR_CODES,
@@ -39,6 +43,9 @@ export class StreamError extends Error {
   /** 本回合在产生任何可见输出 / 副作用之前就失败了——调用方可安全地改走另一条链路重跑整轮
    * 而不重复输出 / 副作用。当前用途：sidecar 启动期失败（引擎没跑起来）自动降级回云端。 */
   recoverable?: boolean;
+  /** 上游额度恢复 / 平台配额重置的绝对时刻（ISO8601 UTC，原样保留）——由渲染层按用户
+   * 本机时区成文（{@link withRecoveryMoment}），服务端句子里已不含时刻。 */
+  recoveryMoment?: RecoveryMomentFields;
 
   constructor(
     public kind: StreamErrorKind,
@@ -48,6 +55,7 @@ export class StreamError extends Error {
       serverMessage?: string;
       retryAfter?: number;
       recoverable?: boolean;
+      recoveryMoment?: RecoveryMomentFields;
     },
   ) {
     super(`stream ${kind}${status ? ` ${status}` : ""}`);
@@ -56,7 +64,55 @@ export class StreamError extends Error {
     this.serverMessage = extra?.serverMessage;
     this.retryAfter = extra?.retryAfter;
     this.recoverable = extra?.recoverable;
+    this.recoveryMoment = extra?.recoveryMoment;
   }
+}
+
+/**
+ * Build a {@link StreamError} from a non-OK response. A refused turn (e.g. 429
+ * for quota / rate limit, 403 for CSRF) arrives as a plain JSON
+ * `{error:{code,message}}` body with an optional `Retry-After` header — not an
+ * event stream — so pull those out for precise UI phrasing. Falls back to
+ * status-only when the body isn't the expected shape.
+ *
+ * Every SSE-over-POST channel (chat turn, mid-flight send, workspace handoff)
+ * must go through this: a channel that throws on the status alone phrases the
+ * *same* backend refusal as a bare「操作失败（403）」while its sibling shows the
+ * real reason.
+ */
+export async function streamErrorFromResponse(
+  response: Response,
+): Promise<StreamError> {
+  let code: string | undefined;
+  let serverMessage: string | undefined;
+  let recoveryMoment: RecoveryMomentFields | undefined;
+  try {
+    const body = (await response.json()) as {
+      error?: { code?: string; message?: string } & RecoveryMomentFields;
+      detail?: { code?: string; message?: string } | string;
+    };
+    code = body.error?.code;
+    serverMessage = body.error?.message;
+    if (body.error) {
+      recoveryMoment = {
+        recovery_at: body.error.recovery_at,
+        reset_at: body.error.reset_at,
+      };
+    }
+    if (!code && typeof body.detail === "object" && body.detail) {
+      code = body.detail.code;
+      serverMessage = body.detail.message ?? serverMessage;
+    }
+  } catch {
+    /* non-JSON body — keep status-only phrasing */
+  }
+  const header = Number(response.headers.get("Retry-After"));
+  return new StreamError("http", response.status, {
+    code,
+    serverMessage,
+    retryAfter: Number.isFinite(header) && header > 0 ? header : undefined,
+    recoveryMoment,
+  });
 }
 
 /** Short diagnosis labels for degraded empty-response finishes (mirrors backend). */
@@ -107,6 +163,34 @@ export const LLM_RATE_LIMIT_MESSAGE =
 /** Product copy when the desktop client is below the server force-update floor. */
 export const CLIENT_TOO_OLD_MESSAGE = "桌面端版本过旧，请更新后再试";
 
+/**
+ * Product copy for a rejected security token (backend `CSRF_FAILED`, HTTP 403).
+ *
+ * The backend ships an English developer sentence for this one ("CSRF token
+ * missing or invalid. Re-login and retry."), so the usual verbatim-passthrough
+ * would put untranslated ops copy on a red banner — and it overstates the fix.
+ * The 403 itself hands back a usable token (middleware/csrf.py), which the api
+ * layer has already absorbed by the time this renders, so replaying the same
+ * request is all it takes. Say exactly that: no re-login, no page reload.
+ */
+export const CSRF_FAILED_MESSAGE = "安全校验未通过，请重试。";
+
+/**
+ * Codes whose backend `message` is not user-ready, mapped to the zh sentence that
+ * replaces it. Kept separate from {@link PRODUCT_COPY_BY_CODE} (a fallback for
+ * when the server said nothing): these override even a present server message,
+ * so every surface — toast, banner, inline form message — reads the same.
+ */
+const COPY_OVERRIDE_BY_CODE: Record<string, string> = {
+  CSRF_FAILED: CSRF_FAILED_MESSAGE,
+};
+
+/** zh copy that must replace the backend message, or null to keep it verbatim. */
+export function productCopyOverride(code: string | undefined): string | null {
+  if (!code) return null;
+  return COPY_OVERRIDE_BY_CODE[code] ?? null;
+}
+
 /** Assistant bubble error text; in dev, append upstream body preview when present. */
 export function formatAssistantErrorMessage(error: {
   message: string;
@@ -120,6 +204,8 @@ export function formatAssistantErrorMessage(error: {
     (!message || /rate limited/i.test(message) || !message.includes("上游限流"))
       ? LLM_RATE_LIMIT_MESSAGE
       : message;
+  // 后端句子里已不含时刻，只在 context 上给绝对瞬间——这里按本机时区补一句。
+  text = withRecoveryMoment(text, context);
   if (import.meta.env.DEV && context?.upstream_body_preview) {
     text = `${text} — ${context.upstream_body_preview}`;
   }
@@ -135,12 +221,20 @@ const SETTINGS_ERROR_CODES: readonly string[] = [
   "LLM_INSUFFICIENT_BALANCE",
 ];
 
-/** Connectivity / transport-ish codes — bubble offers「重试」, not settings. */
+/**
+ * Connectivity / transport-ish codes — bubble offers「重试」, not settings, and a
+ * repeat inside one chat may escalate into the Base URL / API Key hint.
+ *
+ * A 429 (``LLM_RATE_LIMIT``) is deliberately absent: the upstream answered, it
+ * just refused for now (per-minute cool-down, or the day's allowance spent). The
+ * Base URL and Key are provably fine — the same credentials reached the vendor to
+ * earn that 429 — so escalating sends the user to "fix" a correct config. The card
+ * already says when the allowance comes back.
+ */
 const CONNECTIVITY_ERROR_CODES: readonly string[] = [
   "LLM_TIMEOUT",
   "LLM_ERROR",
   "LLM_UPSTREAM_ERROR",
-  "LLM_RATE_LIMIT",
 ];
 
 /**
@@ -159,10 +253,31 @@ const OUR_SERVICE_ERROR_CODES: readonly string[] = [
 export const OUR_SERVICE_UNAVAILABLE_MESSAGE =
   "AgentCore 服务暂时不可用，请稍后重试";
 
-/** Session-scoped counter for connectivity failures (resets on full page reload). */
+/**
+ * Connectivity failure counts for the conversation currently on screen.
+ *
+ * "Session" is the chat, not the renderer process. An Electron window lives for
+ * days without a reload, so counting for the process lifetime let a brand-new
+ * chat escalate on its *first* failure because of an unrelated timeout hours
+ * earlier — the copy says「多次连接失败」, so it has to mean multiple failures the
+ * user actually just saw. Moving to another conversation drops the counts, which
+ * also bounds the counted-id set.
+ */
+let _connectivityScope: string | null = null;
 const _sessionConnectivityCounts = new Map<string, number>();
 /** Message ids already counted — format/render must not double-increment. */
 const _countedErrorMessageIds = new Set<string>();
+
+/** Start over when the failing bubbles belong to a different conversation. */
+function enterConnectivityScope(
+  conversationId: string | null | undefined,
+): void {
+  const scope = conversationId ?? null;
+  if (scope === _connectivityScope) return;
+  _connectivityScope = scope;
+  _sessionConnectivityCounts.clear();
+  _countedErrorMessageIds.clear();
+}
 
 export function isConnectivityErrorCode(code: string | undefined): boolean {
   return (
@@ -180,11 +295,13 @@ export function isOurServiceErrorCode(code: string | undefined): boolean {
   );
 }
 
-/** Increment once per message id; return the session count for that code. */
+/** Increment once per message id; return the count for that code in this chat. */
 export function noteSessionConnectivityFailure(
   code: string,
   messageId: string,
+  conversationId?: string | null,
 ): number {
+  enterConnectivityScope(conversationId);
   if (!_countedErrorMessageIds.has(messageId)) {
     _countedErrorMessageIds.add(messageId);
     _sessionConnectivityCounts.set(
@@ -218,8 +335,8 @@ export function isClientSideLlmRejection(opts?: {
 }
 
 /**
- * Escalation copy for the 2nd+ connectivity failure in this session.
- * Side-effect: counts this message id at most once.
+ * Escalation copy for the 2nd+ connectivity failure in this chat.
+ * Side-effect: counts this message id at most once, under `opts.conversationId`.
  * Skips client-side request rejections (e.g. upstream 400 invalid_request).
  */
 export function connectivityEscalationSuffix(
@@ -230,6 +347,8 @@ export function connectivityEscalationSuffix(
     upstreamStatus?: number;
     /** Empty-response diagnosis — never escalate into Base URL / API Key copy. */
     emptyDiagnosis?: string;
+    /** Scopes the counter; a different chat starts counting from zero. */
+    conversationId?: string | null;
   },
 ): string | null {
   // LLM_EMPTY_RESPONSE is not a connectivity code; still guard explicitly so a
@@ -240,13 +359,18 @@ export function connectivityEscalationSuffix(
   if (isOurServiceErrorCode(code)) return null;
   if (!code || !isConnectivityErrorCode(code)) return null;
   if (isClientSideLlmRejection(opts)) return null;
-  const n = noteSessionConnectivityFailure(code, messageId);
+  const n = noteSessionConnectivityFailure(
+    code,
+    messageId,
+    opts?.conversationId,
+  );
   if (n < 2) return null;
   return "\n\n多次连接失败。请到「设置 · 服务商」检查 Base URL / API Key 与网络后重试。";
 }
 
-/** Test helper — clear session connectivity counters. */
+/** Test helper — clear the connectivity counters and their conversation scope. */
 export function resetSessionConnectivityFailures(): void {
+  _connectivityScope = null;
   _sessionConnectivityCounts.clear();
   _countedErrorMessageIds.clear();
 }
@@ -515,6 +639,10 @@ export interface DescribedError {
     base_url?: string;
     retry_after?: number;
     credential_source?: "user" | "platform" | string | null;
+    /** 上游额度恢复的绝对时刻（ISO8601 UTC）；按本机时区成文，缺省即不提时刻。 */
+    recovery_at?: string | null;
+    /** 平台配额闸门的重置时刻（ISO8601 UTC），同上。 */
+    reset_at?: string | null;
   };
 }
 
@@ -578,6 +706,8 @@ interface ErrorFacts {
   serverMessage?: string;
   retryAfter?: number;
   context?: DescribedError["context"];
+  /** 结构化恢复 / 重置时刻，成文交给 {@link withRecoveryMoment}。 */
+  recoveryMoment?: RecoveryMomentFields;
   transport: boolean;
   auth: boolean;
 }
@@ -589,6 +719,7 @@ function factsOf(err: unknown): ErrorFacts {
       code: err.code,
       serverMessage: err.serverMessage,
       retryAfter: err.retryAfter,
+      recoveryMoment: err.recoveryMoment,
       transport: err.kind === "network",
       auth: err.kind === "auth",
     };
@@ -599,6 +730,7 @@ function factsOf(err: unknown): ErrorFacts {
       code: err.code,
       serverMessage: err.serverMessage,
       retryAfter: err.retryAfter,
+      recoveryMoment: err.recoveryMoment,
       transport: false,
       auth: err.status === 401,
     };
@@ -615,9 +747,12 @@ function resolveMessage(f: ErrorFacts): string {
   if (f.code === "CLIENT_TOO_OLD" || f.status === 426) {
     return CLIENT_TOO_OLD_MESSAGE;
   }
+  const override = productCopyOverride(f.code);
+  if (override) return override;
   // A 429 is a deliberate refusal (quota used up, or sending too fast), not an
-  // outage. The backend ships a precise zh message (quota reset time, or a
-  // cool-down), so prefer it; otherwise phrase the wait from Retry-After.
+  // outage. The backend ships the zh sentence minus the moment (which rides
+  // structured, and describeError appends in the user's own timezone); prefer it,
+  // otherwise phrase the wait from Retry-After.
   if (f.status === 429) {
     if (f.serverMessage) return f.serverMessage;
     if (f.retryAfter) return `操作过于频繁，请约 ${f.retryAfter} 秒后再试`;
@@ -712,7 +847,8 @@ export function describeError(err: unknown): DescribedError | null {
     (f.serverMessage != null &&
       /invalid or expired inference token/i.test(f.serverMessage));
   return {
-    message: resolveMessage(f),
+    // 服务端只说「额度恢复前重试仍会失败」，恢复时刻按用户本机时区在这里补上。
+    message: withRecoveryMoment(resolveMessage(f), f.recoveryMoment),
     action: inferenceTokenFailure
       ? null
       : errorActionForCode(f.code, {
@@ -721,7 +857,8 @@ export function describeError(err: unknown): DescribedError | null {
         }),
     // Suppress retry on refusals that an immediate re-send can't fix (quota used /
     // key missing-or-invalid / wallet empty / server key-storage down / free tier
-    // exhausted). Inference JWT expiry is remintable — keep retry. The shared
+    // exhausted). Inference JWT expiry is remintable — keep retry, and so is a CSRF
+    // rejection: the 403 re-armed the client, so the re-send is the fix. The shared
     // contract-types catalog is the single source for the rest.
     retriable: inferenceTokenFailure
       ? true

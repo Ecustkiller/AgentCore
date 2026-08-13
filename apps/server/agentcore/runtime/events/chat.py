@@ -15,8 +15,19 @@ _DISPLAY_LIST_CAP = 50
 
 
 def message_start(
-    message_id: str, *, conversation_id: str, trace_id: str | None = None
+    message_id: str,
+    *,
+    conversation_id: str,
+    trace_id: str | None = None,
+    full_replay: bool = False,
 ) -> SSEEvent:
+    """Open (and stamp) an assistant bubble.
+
+    ``full_replay`` marks this frame as the head of an attach catch-up segment: the
+    client resets the local streaming state it holds for ``message_id`` before folding
+    what follows (see :mod:`agentcore.runtime.events.attach_replay`). Live turns leave
+    it off — the flag is only ever set by the replay builders.
+    """
     payload: dict[str, Any] = {
         "message_id": message_id,
         "conversation_id": conversation_id,
@@ -24,6 +35,8 @@ def message_start(
     tid = trace_id if trace_id is not None else get_log_value("trace_id")
     if tid:
         payload["trace_id"] = tid
+    if full_replay:
+        payload["full_replay"] = True
     return SSEEvent(type=EventType.MESSAGE_START, payload=payload)
 
 
@@ -32,8 +45,18 @@ def turn_warning(message: str) -> SSEEvent:
     return SSEEvent(type=EventType.TURN_WARNING, payload={"message": message})
 
 
-def content_delta(delta: str) -> SSEEvent:
-    return SSEEvent(type=EventType.CONTENT_DELTA, payload={"delta": delta})
+def content_delta(delta: str, *, replace: bool = False) -> SSEEvent:
+    """Grow the CEO bubble's 正文 by ``delta``.
+
+    ``replace`` is set ONLY by the attach replay builders (see
+    :mod:`agentcore.runtime.events.attach_replay`): it says ``delta`` is the whole
+    current text of the channel's last still-open block, not an increment. Live frames
+    never carry it.
+    """
+    payload: dict[str, Any] = {"delta": delta}
+    if replace:
+        payload["replace"] = True
+    return SSEEvent(type=EventType.CONTENT_DELTA, payload=payload)
 
 
 def content_reset(reason: ResetReason) -> SSEEvent:
@@ -42,8 +65,12 @@ def content_reset(reason: ResetReason) -> SSEEvent:
     return SSEEvent(type=EventType.CONTENT_RESET, payload={"reason": reason})
 
 
-def reasoning_delta(delta: str) -> SSEEvent:
-    return SSEEvent(type=EventType.REASONING_DELTA, payload={"delta": delta})
+def reasoning_delta(delta: str, *, replace: bool = False) -> SSEEvent:
+    """Grow the CEO bubble's 思考 by ``delta`` (``replace`` — see :func:`content_delta`)."""
+    payload: dict[str, Any] = {"delta": delta}
+    if replace:
+        payload["replace"] = True
+    return SSEEvent(type=EventType.REASONING_DELTA, payload=payload)
 
 
 def tool_progress(tool_name: str, chars: int) -> SSEEvent:

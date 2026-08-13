@@ -1,9 +1,11 @@
 import { FileDetail } from "@/components/files/FileDetail";
 import { MemoryProfileSplitEditor } from "@/components/files/MemoryProfileSplitEditor";
 import { MemoryUpdatesView } from "@/components/files/MemoryUpdatesView";
+import type { FileSortBy } from "@/components/files/fileTreeTypes";
 import { AgentCoreSection } from "@/components/files/fileWorkbench/AgentCoreSection";
 import { DetailTabs } from "@/components/files/fileWorkbench/DetailTabs";
 import type { EntryOpenTarget } from "@/components/files/fileWorkbench/EntriesSection";
+import { FileSortMenu } from "@/components/files/fileWorkbench/FileSortMenu";
 import {
   type FolderRailHost,
   FolderRailNodes,
@@ -17,15 +19,20 @@ import {
   SharedSpacesRailHeader,
 } from "@/components/files/fileWorkbench/RailHeaders";
 import { WorkspaceSection } from "@/components/files/fileWorkbench/WorkspaceSection";
+import { WorkspaceVersionsPanel } from "@/components/files/fileWorkbench/WorkspaceVersionsPanel";
 import {
   type Tab,
+  WS_TRASH_PATH,
+  WS_VERSIONS_PATH,
   clampRail,
   folderIdOf,
   loadAgentCoreExpanded,
   loadExpandedWs,
+  loadFileSort,
   loadRailWidth,
   saveAgentCoreExpanded,
   saveExpandedWs,
+  saveFileSort,
   saveRailWidth,
   tabKey,
 } from "@/components/files/fileWorkbench/storage";
@@ -33,6 +40,7 @@ import { EmptyHint, InlineError } from "@/components/files/parts";
 import { PendingSharedInvites } from "@/components/files/sharedSpaces/PendingSharedInvites";
 import { SharedSpaceSection } from "@/components/files/sharedSpaces/SharedSpaceSection";
 import { SearchField } from "@/components/ui";
+import { WorkspaceTrashSection } from "@/components/workspace/TrashSection";
 import { getConversations, useConversations } from "@/hooks/useConversations";
 import { getFolders, useFolders } from "@/hooks/useFolders";
 import { useSharedSpaces } from "@/hooks/useSharedSpaces";
@@ -166,6 +174,8 @@ export function FileWorkbench({
   );
   // 按名称/路径实时过滤（会话级瞬态，不持久化——它是搜索而非偏好）。
   const [filter, setFilter] = useState("");
+  // 树内兄弟排序（名称 / 大小 / 修改时间）。与筛选相反，这是偏好，跨会话保留。
+  const [sortBy, setSortBy] = useState<FileSortBy>(() => loadFileSort());
   // 从 /conversations「浏览文件」跳来时高亮的工作区根（1.5s 后消失，呼应对话页的 flash）。
   const [flashWsId, setFlashWsId] = useState<string | null>(null);
   // 最近更新 / 对话卡深链到文件夹条目时，强制展开该文件夹下的 AgentCore（一次性）。
@@ -552,6 +562,7 @@ export function FileWorkbench({
     activeTab,
     flashWsId,
     filterQuery: treeFilterQuery,
+    sortBy,
     offline,
     onCreateSubfolder: (parent, anchorEl) =>
       openCreateFolder(anchorEl ?? null, { id: parent.id, name: parent.name }),
@@ -592,6 +603,13 @@ export function FileWorkbench({
             placeholder="筛选文件夹或文件…"
             aria-label="按名称筛选文件夹或文件"
             className="min-w-0 flex-1"
+          />
+          <FileSortMenu
+            value={sortBy}
+            onChange={(by) => {
+              setSortBy(by);
+              saveFileSort(by);
+            }}
           />
         </div>
 
@@ -721,6 +739,7 @@ export function FileWorkbench({
                         onOpenFile={(path, name) => openFile(wsId, path, name)}
                         flashing={wsId === flashWsId}
                         filterQuery={treeFilterQuery}
+                        sortBy={sortBy}
                       />
                     );
                   })
@@ -748,6 +767,7 @@ export function FileWorkbench({
                       onOpenFile={(path, name) => openFile(ws.wsId, path, name)}
                       flashing={ws.wsId === flashWsId}
                       filterQuery={treeFilterQuery}
+                      sortBy={sortBy}
                     />
                   ))
                 )}
@@ -805,6 +825,15 @@ export function FileWorkbench({
                 // feed view instead of a source-backed editor.
                 const isMemoryUpdates =
                   t.wsId === MEMORY_WS && t.path === MEMORY_UPDATES_PATH;
+                // 版本 / 软删区面板：挂在真实工作区下的合成 tab，不是文件，故不解析文件源。
+                const wsPanel =
+                  t.wsId === MEMORY_WS ||
+                  t.wsId === RULES_WS ||
+                  (t.path !== WS_VERSIONS_PATH && t.path !== WS_TRASH_PATH)
+                    ? null
+                    : t.path;
+                const panelWsName =
+                  railWorkspaceByWsId.get(t.wsId)?.name ?? t.name;
                 const src =
                   t.wsId === MEMORY_WS
                     ? memorySource
@@ -834,6 +863,13 @@ export function FileWorkbench({
                           openMemoryLeafInRail(path, name)
                         }
                       />
+                    ) : wsPanel === WS_VERSIONS_PATH ? (
+                      <WorkspaceVersionsPanel
+                        wsId={t.wsId}
+                        name={panelWsName}
+                      />
+                    ) : wsPanel === WS_TRASH_PATH ? (
+                      <WorkspaceTrashSection wsId={t.wsId} />
                     ) : src ? (
                       projFolderId ? (
                         <MemoryProfileSplitEditor

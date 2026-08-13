@@ -12,6 +12,7 @@ import {
   buildRevisionBadge,
   checkpointBadge,
   escalationKindLabel,
+  failureDetailSentence,
   isDebateAgentNode,
   revisedBadge,
   revisionFaceHint,
@@ -132,7 +133,12 @@ export function buildAgentNodePresentation(
         : liveThinking
           ? { heading: "思考中", text: liveThinking, italic: true }
           : d.status === "failed" && d.error
-            ? { heading: "失败原因", text: d.error }
+            ? {
+                heading: "失败原因",
+                // d.error is engine/infra text (str(exception), 结构闸 paths…) — same
+                // curation as FailureStrip, never the raw string.
+                text: failureDetailSentence(d.failureKind, d.productLanded),
+              }
             : d.outputPreview
               ? { heading: "产出预览", text: d.outputPreview }
               : null;

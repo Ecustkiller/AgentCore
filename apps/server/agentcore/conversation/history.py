@@ -30,6 +30,12 @@ _failure_category_label = failure_category_label
 
 _DETAIL_CLIP = 120
 
+# The whole context a chat gets when it has no rolling summary to lean on — the
+# safety cap in :func:`load_chat_context`, not a tuning knob. Named because it is
+# also the line past which a stalled compaction starts costing real history
+# (conversation/context_gap.py), and the two must not drift apart.
+FALLBACK_CONTEXT_MAX_MESSAGES = 40
+
 
 def _failure_detail(msg: Any) -> str | None:
     """Optional short error_message for the note (category remains primary)."""
@@ -207,7 +213,7 @@ async def load_chat_context(
     session: AsyncSession,
     conversation_id: str,
     *,
-    max_messages: int = 40,
+    max_messages: int = FALLBACK_CONTEXT_MAX_MESSAGES,
 ) -> list[dict]:
     """The CEO chat window: the rolling compaction summary (when present) prefixed to
     the un-folded recent tail; otherwise just the plain recent window.

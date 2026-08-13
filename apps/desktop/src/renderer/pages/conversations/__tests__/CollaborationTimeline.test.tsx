@@ -56,10 +56,13 @@ vi.mock("@/services/collaborationTimeline", async (importOriginal) => {
 });
 
 vi.mock("@/services/workspaces", () => ({
-  wsListFiles: vi.fn(async () => [
-    { path: "AgentCore/文档/research/法律透镜报告.md", isDir: false },
-    { path: "AgentCore/文档/debate/brief.md", isDir: false },
-  ]),
+  wsListFiles: vi.fn(async () => ({
+    files: [
+      { path: "AgentCore/文档/research/法律透镜报告.md", isDir: false },
+      { path: "AgentCore/文档/debate/brief.md", isDir: false },
+    ],
+    truncated: false,
+  })),
 }));
 
 describe("formatActChain / dossierSourceLabel", () => {

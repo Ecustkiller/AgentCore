@@ -11,11 +11,18 @@ role/task 自由文猜「像调研还是像审查」（见双模式工作区 §�
 
 同树旁路（系统噪音，对 AI 与用户文件 UI 都隐藏；**不**注入）::
 
-    AgentCore/{index,trash,baselines}/
+    AgentCore/{index,trash,baselines,versions}/
 
 与可见 ``规则/`` · ``记忆/`` · ``文档/`` 同根；勿与容器路径
-``~/Documents/AgentCore/`` 混淆。禁止把裸名 ``index``/``trash``/``baselines``
-放进全局忽略集（误伤用户项目）——须路径感知（见 ``_paths.is_internal_zone_relpath``）。
+``~/Documents/AgentCore/`` 混淆。禁止把裸名 ``index``/``trash``/``baselines``/
+``versions`` 放进全局忽略集（误伤用户项目）——须路径感知（见
+``_paths.is_internal_zone_relpath``）。
+
+区名集与 ``*_REL`` 在桌面端另有两份手抄（``main/fs/workspaceIgnore.ts`` 与渲染层
+``services/sources/workspaceSource.ts`` 内联副本）。新增区名须三处同改，门禁
+（漏改任一处必红）::
+
+    uv run python scripts/check_workspace_ignore_parity.py
 """
 
 from __future__ import annotations
@@ -40,8 +47,13 @@ REVIEWS_PREFIX = f"{REVIEWS_DIR}/"
 INDEX_ZONE_NAME = "index"
 TRASH_ZONE_NAME = "trash"
 BASELINES_ZONE_NAME = "baselines"
+# User-named local versions (``versions/<version_id>/{meta.json,content.zip}``) —
+# the local twin of cloud labeled snapshots. Internal for the same reason as
+# ``baselines``: the zips are product plumbing, not user files, so grep / index /
+# the next turn baseline must not see them.
+VERSIONS_ZONE_NAME = "versions"
 INTERNAL_ZONE_NAMES: frozenset[str] = frozenset(
-    {INDEX_ZONE_NAME, TRASH_ZONE_NAME, BASELINES_ZONE_NAME}
+    {INDEX_ZONE_NAME, TRASH_ZONE_NAME, BASELINES_ZONE_NAME, VERSIONS_ZONE_NAME}
 )
 # In-tree relative form. Still the layout for local / sidecar roots and shared
 # spaces, and still what the desktop mirror (``fs/workspaceIgnore.ts``) hides.
@@ -50,6 +62,7 @@ INTERNAL_ZONE_NAMES: frozenset[str] = frozenset(
 INDEX_REL = f"{AGENTCORE_ROOT}/{INDEX_ZONE_NAME}"
 TRASH_REL = f"{AGENTCORE_ROOT}/{TRASH_ZONE_NAME}"
 BASELINES_REL = f"{AGENTCORE_ROOT}/{BASELINES_ZONE_NAME}"
+VERSIONS_REL = f"{AGENTCORE_ROOT}/{VERSIONS_ZONE_NAME}"
 
 
 def internal_zone_base(*, root: Path, internal_root: Path | None) -> Path:
@@ -88,9 +101,11 @@ __all__ = [
     "INDEX_ZONE_NAME",
     "TRASH_ZONE_NAME",
     "BASELINES_ZONE_NAME",
+    "VERSIONS_ZONE_NAME",
     "INDEX_REL",
     "TRASH_REL",
     "BASELINES_REL",
+    "VERSIONS_REL",
     "internal_zone_base",
     "internal_zone_path",
 ]

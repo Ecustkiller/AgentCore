@@ -30,7 +30,7 @@ _REPO_DIR = Path(__file__).resolve().parents[2] / "agentcore" / "db" / "reposito
 _CONTRACT: dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]] = {
     "conversations.py": (
         "ConversationRepository",
-        ("get_by_id", "update_title", "soft_delete",
+        ("get_by_id", "get_by_client_request_id", "update_title", "soft_delete",
          "set_pinned", "set_archived"),
         ("get_by_id_unscoped", "update_title_unscoped"),
     ),

@@ -141,6 +141,9 @@ export function allowsSseEvent(phase: TurnPhase, eventType: string): boolean {
     eventType === "turn_queued" ||
     // 冷 resume deferred：wrap_up 可能落在宿主 message_end 之后的 terminal 窗。
     eventType === "resume_deferred" ||
+    // 冷 resume 幂等成功：它是这条连接的首帧，而宿主回合的 message_end 可能刚把
+    // phase 推进 terminal。挡掉等于把卡永远钉在「提交中」。
+    eventType === "resume_settled" ||
     // 异步团队：detached 可落在 message_end 前后；completed 常在 terminal 后同连接到达。
     eventType === "execution_detached" ||
     eventType === "execution_completed"

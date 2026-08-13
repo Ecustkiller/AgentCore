@@ -187,7 +187,9 @@ async def test_claim_paused_turn_restores_frame_on_hydrate_failure() -> None:
         journal_cls.return_value.load = AsyncMock(return_value=[])
 
         with pytest.raises(ValueError, match="bad frame"):
-            await persist_mod.claim_paused_turn("msg-1", conversation_id="conv-1")
+            await persist_mod.claim_paused_turn(
+                "msg-1", conversation_id="conv-1", decision="continue"
+            )
 
     upsert.assert_awaited_once()
     assert upsert.await_args.kwargs["message_id"] == "msg-1"

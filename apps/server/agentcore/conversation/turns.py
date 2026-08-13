@@ -169,7 +169,7 @@ async def stream_chat(
                 content=user_message,
                 attachments=to_stored_metadata(resident_attachments),
             )
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id)
 
         sink.emit(turn_saved(user_message_id=user_msg.id))
 
@@ -316,7 +316,7 @@ async def regenerate_chat(
         )
 
         async with async_session_factory() as session:
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id)
 
         backend = await build_turn_backend(
             user_id=user_id,
@@ -432,7 +432,7 @@ async def resume_chat(
         )
 
         async with async_session_factory() as session:
-            history = await load_chat_context(session, conversation_id, max_messages=40)
+            history = await load_chat_context(session, conversation_id)
             # AI 协作白板 (§六 M2): re-derive the board binding (authoritative in the DB, not
             # carried in the frame) so a board turn paused at a checkpoint regains board_ops
             # on resume — symmetric with the send path's lookup in ``stream_chat``.

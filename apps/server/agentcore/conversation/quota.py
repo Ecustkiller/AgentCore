@@ -31,11 +31,11 @@ trusted/operator account is never gated.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from agentcore.config import settings
-from agentcore.core.errors import QuotaExceededError
+from agentcore.core.errors import QuotaExceededError, utc_moment_iso
 from agentcore.db.repositories import CostEventRepository
 from agentcore.llm.pricing import NANO_PER_CNY, nano_to_yuan
 
@@ -47,6 +47,25 @@ if TYPE_CHECKING:
 # F6): platform额度耗尽 = 等重置 / 联系管理员为主, 「接入自己的 key」为次级出口 (byok
 # 回合不查配额, 是真正的绕过路径). The client maps QUOTA_EXCEEDED → 设置·服务商 CTA.
 _BYOK_EXIT = "或接入自己的 key 继续（设置 · 服务商）"
+
+# What every refusal says instead of naming a clock time. The windows are UTC-bounded
+# and「明日 0 点（UTC）重置」made the reader do the conversion — for a China user that
+# is 08:00 the next morning, not midnight, so the sentence he acted on was wrong by
+# eight hours. The exact instant rides in ``reset_at`` for the client to localise;
+# this stays true on its own for anything that cannot read it.
+_RESET_HINT = "额度重置后可继续"
+
+
+def _next_day_reset(day_start: datetime) -> str:
+    """ISO-8601 UTC instant the day window rolls over at."""
+    return utc_moment_iso(day_start + timedelta(days=1))
+
+
+def _next_month_reset(month_start: datetime) -> str:
+    """ISO-8601 UTC instant the month window rolls over at."""
+    if month_start.month == 12:
+        return utc_moment_iso(month_start.replace(year=month_start.year + 1, month=1))
+    return utc_moment_iso(month_start.replace(month=month_start.month + 1))
 
 
 @dataclass(frozen=True)
@@ -149,10 +168,11 @@ async def enforce_quota(
         if used >= limits.daily_tokens:
             raise QuotaExceededError(
                 f"已达每日 token 上限（{used:,} / {limits.daily_tokens:,}），"
-                f"明日 0 点（UTC）重置；{_BYOK_EXIT}。",
+                f"{_RESET_HINT}；{_BYOK_EXIT}。",
                 dimension="daily_tokens",
                 used=used,
                 limit=limits.daily_tokens,
+                reset_at=_next_day_reset(day_start),
             )
 
     if limits.daily_requests > 0:
@@ -161,10 +181,11 @@ async def enforce_quota(
         if used >= limits.daily_requests:
             raise QuotaExceededError(
                 f"已达每日请求上限（{used} / {limits.daily_requests}），"
-                f"明日 0 点（UTC）重置；{_BYOK_EXIT}。",
+                f"{_RESET_HINT}；{_BYOK_EXIT}。",
                 dimension="daily_requests",
                 used=used,
                 limit=limits.daily_requests,
+                reset_at=_next_day_reset(day_start),
             )
 
     # 日成本 backstop: reuses the day window already fetched — no extra DB read.
@@ -175,10 +196,11 @@ async def enforce_quota(
             cap_cny = nano_to_yuan(limits.daily_cost_nano)
             raise QuotaExceededError(
                 f"已达今日额度上限（约 ¥{spent_cny:.2f} / ¥{cap_cny:.2f}），"
-                f"明日 0 点（UTC）重置；{_BYOK_EXIT}。",
+                f"{_RESET_HINT}；{_BYOK_EXIT}。",
                 dimension="daily_cost",
                 used=used,
                 limit=limits.daily_cost_nano,
+                reset_at=_next_day_reset(day_start),
             )
 
     if limits.monthly_cost_nano > 0:
@@ -188,11 +210,12 @@ async def enforce_quota(
         if used >= limits.monthly_cost_nano:
             spent_cny = nano_to_yuan(used)
             cap_cny = nano_to_yuan(limits.monthly_cost_nano)
-            # F6 主文案: 用完 + 下月 1 日重置 + 联系管理员提额; _BYOK_EXIT = 次级弱化出口.
+            # F6 主文案: 用完 + 等重置 + 联系管理员提额; _BYOK_EXIT = 次级弱化出口.
             raise QuotaExceededError(
                 f"本月额度已用完（约 ¥{spent_cny:.2f} / ¥{cap_cny:.2f}），"
-                f"下月 1 日（UTC）重置；测试需要可联系管理员提额，{_BYOK_EXIT}。",
+                f"{_RESET_HINT}；测试需要可联系管理员提额，{_BYOK_EXIT}。",
                 dimension="monthly_cost",
                 used=used,
                 limit=limits.monthly_cost_nano,
+                reset_at=_next_month_reset(month_start),
             )

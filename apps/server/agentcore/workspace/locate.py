@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from agentcore.config import settings
+from agentcore.fulfill.local_roots import declare_local_root
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.interaction import default_interaction_registry
 from agentcore.runtime.ports import ClientRequestBridge
@@ -379,7 +380,15 @@ def build_local_workspace(
     authorized directory on the user's machine. State (the suspended op Future)
     lives in the registry, so it must be the *shared* default unless a test injects
     its own. ``user_id`` selects which online device receives ``*_required`` frames.
+
+    Building the workspace is also the moment this process commits to running ops
+    against ``binding.root_id``, so the root is declared on the in-process
+    fulfiller here (sidecar only — cloud installs no declarer). A cross-desk desk
+    resolves its root from the target folder, which the turn's own ``localRootId``
+    declaration never covers, and root-scoped frames only reach a session holding
+    the root.
     """
+    declare_local_root(binding.root_id)
     channel = WorkspaceChannel(
         user_id=user_id,
         conversation_id=conversation_id,

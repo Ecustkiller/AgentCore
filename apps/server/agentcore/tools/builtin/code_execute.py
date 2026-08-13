@@ -381,6 +381,9 @@ class CodeExecuteTool:
             not result.success
             and "sandbox network isn't supported" in stderr_l
         )
+        # Probe verdict that only takes out the requested language (see below):
+        # honest failure, but a switch-the-language reject rather than a retire.
+        probe_language_unavailable = False
         meta: dict[str, Any] = {}
         if launcher_unavailable:
             meta["code"] = "launcher_unavailable"
@@ -394,22 +397,38 @@ class CodeExecuteTool:
             )
         else:
             stderr_text = result.stderr or ""
-            from agentcore.runtime.loop_controller.types import (
-                EXEC_ENV_TIMEOUT_FAMILY,
-                EXEC_ENV_TIMEOUT_RETIRE_STEER,
-            )
             from agentcore.tools.sandbox.exec_env import (
-                EXEC_ENV_PROBE_FAIL_CODE,
                 EXEC_TIMEOUT_CODE,
+                exec_env_probe_failure_code,
+                exec_env_probe_failure_language,
                 is_exec_env_probe_failure,
+                probe_failure_retire_steer,
+                probe_failure_retire_tools,
             )
 
             if is_exec_env_probe_failure(stderr_text):
-                meta["code"] = EXEC_ENV_PROBE_FAIL_CODE
+                # Classified reason (missing interpreter / timeout / denied spawn)
+                # when the probe could prove one — else the generic probe-fail code.
+                probe_code = exec_env_probe_failure_code(stderr_text)
+                meta["code"] = probe_code
                 meta["exec_env_timeout"] = True
-                meta["error_class"] = "permanent"
-                meta["retire_tools"] = sorted(EXEC_ENV_TIMEOUT_FAMILY)
-                meta["retire_message"] = EXEC_ENV_TIMEOUT_RETIRE_STEER
+                # The probe covers the language it ran, so the stop covers it too:
+                # a dead python takes test_run with it (every check is a python
+                # script), any other language takes only itself, and a verdict
+                # naming no language (gVisor runtime smoke) still takes the family.
+                probe_language = exec_env_probe_failure_language(stderr_text)
+                retire = probe_failure_retire_tools(probe_language)
+                if retire:
+                    meta["error_class"] = "permanent"
+                    meta["retire_tools"] = list(retire)
+                    meta["retire_message"] = probe_failure_retire_steer(
+                        probe_code, language=probe_language
+                    )
+                else:
+                    # One interpreter is missing while the rest of the toolset is
+                    # untouched — the same self-correctable「换语言」reject as a
+                    # missing launcher, so it must not retire the tool.
+                    probe_language_unavailable = True
             elif (not result.success) and "Timeout: execution exceeded" in stderr_text:
                 meta["code"] = EXEC_TIMEOUT_CODE
                 meta["exec_env_timeout"] = True
@@ -421,7 +440,7 @@ class CodeExecuteTool:
             duration_ms=duration_ms,
             display=display,
             metadata=meta,
-            contract_failure=launcher_unavailable,
+            contract_failure=launcher_unavailable or probe_language_unavailable,
             # 结构化写回自报 (见模块顶部说明): 沙箱 copy-out 的 EXACT 路径，交付物台账据此
             # 记账，永不解析那行「已写回工作区」中文散文（文件名可含「、」、措辞会变）。
             file_products=[file_product(p) for p in (result.written_files or [])],

@@ -1,16 +1,12 @@
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
-import { ApiError, errorMessage } from "@/services/api";
+import { errorMessage } from "@/services/api";
 import { changePassword } from "@/services/auth";
 import { applySession } from "@/services/session";
 import { ShieldCheck } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
-
-function errMsg(e: unknown, fallback: string): string {
-  return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
-}
 
 /** Full-screen gate after an admin-reset temp password login. */
 export function ForcePasswordChangePage() {
@@ -42,7 +38,7 @@ export function ForcePasswordChangePage() {
       await applySession();
       toast.success("密码已设置，可以正常使用管理后台");
     } catch (err) {
-      setError(errMsg(err, errorMessage(err)));
+      setError(errorMessage(err));
       setSubmitting(false);
     }
   };

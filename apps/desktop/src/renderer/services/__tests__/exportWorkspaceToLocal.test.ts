@@ -13,11 +13,12 @@ vi.mock("@/services/api", () => ({
   },
 }));
 
-vi.mock("@/services/workspaceHttp", () => ({
+// 只替掉真会出网/落盘的两个原语，wire→前端形状的纯映射（toSnapshot 等）保持真实，
+// 免得它们每加一个就要来这里补 mock。
+vi.mock("@/services/workspaceHttp", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/workspaceHttp")>()),
   authedFetch: vi.fn(),
   saveBlob: vi.fn(),
-  encodePath: (p: string) => p,
-  decodePreviewResponse: vi.fn(),
 }));
 
 import { hasLocalFiles } from "@/lib/capabilities";

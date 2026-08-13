@@ -77,7 +77,8 @@ const UPSTREAM_503 = "上游模型服务暂时不可用（503），请稍后再�
 const LEGACY_OPERATOR_CONTEXT = {
   upstream_status: 503,
   credential_source: "platform",
-  sub2api_diagnosis: "OAuth token 已过期（到期时间 09:41），需要重新登录 ChatGPT",
+  sub2api_diagnosis:
+    "OAuth token 已过期（到期时间 09:41），需要重新登录 ChatGPT",
   sub2api_account: "eli***@gmail.com",
 } as NonNullable<NonNullable<Message["error"]>["context"]>;
 

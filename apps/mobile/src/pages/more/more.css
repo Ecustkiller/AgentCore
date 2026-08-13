@@ -703,8 +703,8 @@ select.text-input:focus {
   padding: 1px 8px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--primary);
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 12%, transparent);
   border-radius: 999px;
 }
 

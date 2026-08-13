@@ -32,17 +32,110 @@ export interface DownloadedFile {
   contentType: string;
 }
 
+/** Line ending the backend round-trips through an edit (never guessed client-side). */
+export type WorkspaceEol = "lf" | "crlf";
+
+/**
+ * A text file opened for editing: whole text + the mtime CAS baseline.
+ *
+ * The download used for preview is capped and carries no version, so a save must
+ * start from here — `mtimeMs` is what makes the write conditional.
+ */
+export interface WorkspaceEditDoc {
+  text: string;
+  mtimeMs: number;
+  eol: WorkspaceEol;
+}
+
+/** Editor text plus the baseline it was read at (the CAS precondition). */
+export interface WorkspaceWriteInput {
+  content: string;
+  baselineMtimeMs: number;
+  eol: WorkspaceEol;
+}
+
+/**
+ * Outcome of a conditional write.
+ *
+ * `conflict` means the file changed since the baseline (an Agent turn, another
+ * device) and **nothing was written**. `mtimeMs` is then the current cloud
+ * version, so an explicit「仍然覆盖」can re-write with it as the new baseline.
+ */
+export interface WorkspaceWriteOutcome {
+  ok: boolean;
+  mtimeMs: number;
+  conflict: boolean;
+}
+
+type WorkspaceEditDocWire = Schemas["WorkspaceEditDoc"];
+type WorkspaceWriteResultWire = Schemas["WorkspaceWriteResult"];
+
+export const toEditDoc = (d: WorkspaceEditDocWire): WorkspaceEditDoc => ({
+  text: d.text,
+  mtimeMs: d.mtime_ms,
+  eol: d.eol,
+});
+
+export const toWriteOutcome = (
+  r: WorkspaceWriteResultWire,
+): WorkspaceWriteOutcome => ({
+  ok: r.ok,
+  mtimeMs: r.mtime_ms,
+  conflict: r.conflict,
+});
+
+export const editWriteBody = (input: WorkspaceWriteInput): string =>
+  JSON.stringify({
+    content: input.content,
+    baseline_mtime_ms: input.baselineMtimeMs,
+    eol: input.eol,
+  });
+
+/**
+ * The backend's own `{error:{message}}` when it sent one, else `<fallback> (status)`.
+ *
+ * Write refusals are the interesting ones (已存在同名文件 / 路径非法 / 只读成员),
+ * and the server already words them for users — repeating a bare status code
+ * would throw that away.
+ */
+export async function workspaceApiError(
+  res: Response,
+  fallback: string,
+): Promise<Error> {
+  try {
+    const body = (await res.json()) as { error?: { message?: string } };
+    if (body.error?.message) return new Error(body.error.message);
+  } catch {
+    /* non-JSON error body → keep the status fallback */
+  }
+  return new Error(`${fallback} (${res.status})`);
+}
+
+/**
+ * 一次工作区列举的结果：条目 + 是否被服务端条目上限截断。
+ *
+ * `truncated` 必须一路带到界面——被悄悄砍掉的树在用户眼里就是「我的文件没了」。
+ */
+export interface WorkspaceListing {
+  entries: WorkspaceFileEntry[];
+  truncated: boolean;
+}
+
 /** The conversation's whole workspace tree as a flat recursive listing. */
 export async function listWorkspaceFiles(
   conversationId: string,
-): Promise<WorkspaceFileEntry[]> {
+): Promise<WorkspaceListing> {
   const res = await apiFetch(
     `/v1/conversations/${conversationId}/workspace/files?recursive=true`,
   );
   if (!res.ok) throw new Error(`加载文件列表失败 (${res.status})`);
   const data = (await res.json()) as WorkspaceFileListResponse;
-  return data.data;
+  return { entries: data.data, truncated: data.truncated ?? false };
 }
+
+/** Percent-encode each segment, keeping `/` as the path separator. */
+export const encodeWorkspacePath = (path: string): string =>
+  path.split("/").map(encodeURIComponent).join("/");
 
 /** Upload (create/overwrite) a file at `path` from raw bytes. */
 export async function uploadWorkspaceFile(
@@ -50,7 +143,7 @@ export async function uploadWorkspaceFile(
   path: string,
   file: Blob,
 ): Promise<UploadedFile> {
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const encoded = encodeWorkspacePath(path);
   const res = await apiFetch(
     `/v1/conversations/${conversationId}/workspace/files/${encoded}`,
     {
@@ -59,16 +152,7 @@ export async function uploadWorkspaceFile(
       body: file,
     },
   );
-  if (!res.ok) {
-    let message = `上传失败 (${res.status})`;
-    try {
-      const body = (await res.json()) as { error?: { message?: string } };
-      if (body.error?.message) message = body.error.message;
-    } catch {
-      /* non-JSON error body → keep the status fallback */
-    }
-    throw new Error(message);
-  }
+  if (!res.ok) throw await workspaceApiError(res, "上传失败");
   return (await res.json()) as UploadedFile;
 }
 
@@ -77,7 +161,7 @@ export async function downloadWorkspaceFile(
   conversationId: string,
   path: string,
 ): Promise<DownloadedFile> {
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const encoded = encodeWorkspacePath(path);
   const res = await apiFetch(
     `/v1/conversations/${conversationId}/workspace/files/${encoded}`,
   );
@@ -95,6 +179,92 @@ export async function downloadWorkspaceFile(
       blob.type ||
       "application/octet-stream",
   };
+}
+
+// --- Cloud workspace writes (rename/move/delete/mkdir + CAS text edit) ---
+//
+// 手机可写云工作区。本地工作区的字节在用户机器上，服务端会 409 —— 调用方按绑定
+// 模式决定要不要给出这些入口，别在这里分叉。
+//
+// URL 逐条写全、不抽 base 常量：`validate_rest_paths.py` 只认字面量，拼接出来的
+// 后缀它看不见，抽了 base 反而让这些端点漏出 OpenAPI 校验。
+
+/** Move or rename one entry (改名 = 同目录内的移动；后端拒绝覆盖同名). */
+export async function moveWorkspaceEntry(
+  conversationId: string,
+  src: string,
+  dst: string,
+): Promise<void> {
+  const res = await apiFetch(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/move`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ src, dst }),
+    },
+  );
+  if (!res.ok) throw await workspaceApiError(res, "移动失败");
+}
+
+/** Soft-delete one file/directory into `AgentCore/trash`（可在软删区还原）. */
+export async function deleteWorkspaceEntry(
+  conversationId: string,
+  path: string,
+): Promise<void> {
+  const encoded = encodeWorkspacePath(path);
+  const res = await apiFetch(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/files/${encoded}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw await workspaceApiError(res, "删除失败");
+}
+
+/** Create a directory at `path`. */
+export async function createWorkspaceDir(
+  conversationId: string,
+  path: string,
+): Promise<void> {
+  const res = await apiFetch(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/dirs`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    },
+  );
+  if (!res.ok) throw await workspaceApiError(res, "新建文件夹失败");
+}
+
+/** Read a text file for editing: whole text + mtime CAS baseline. */
+export async function readWorkspaceFileForEdit(
+  conversationId: string,
+  path: string,
+): Promise<WorkspaceEditDoc> {
+  const encoded = encodeWorkspacePath(path);
+  const res = await apiFetch(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/edit/${encoded}`,
+  );
+  if (!res.ok) throw await workspaceApiError(res, "打开编辑失败");
+  return toEditDoc((await res.json()) as WorkspaceEditDocWire);
+}
+
+/** Conditionally write editor text back (mtime CAS; `conflict` = 未写入). */
+export async function writeWorkspaceFileText(
+  conversationId: string,
+  path: string,
+  input: WorkspaceWriteInput,
+): Promise<WorkspaceWriteOutcome> {
+  const encoded = encodeWorkspacePath(path);
+  const res = await apiFetch(
+    `/v1/conversations/${encodeURIComponent(conversationId)}/workspace/edit/${encoded}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: editWriteBody(input),
+    },
+  );
+  if (!res.ok) throw await workspaceApiError(res, "保存失败");
+  return toWriteOutcome((await res.json()) as WorkspaceWriteResultWire);
 }
 
 /** Resolved workspace mode for a conversation (local vs cloud). */
@@ -137,7 +307,7 @@ export interface WorkspaceTrashEntry {
 type BackendTrashEntry = Schemas["TrashEntrySummary"];
 type TrashListResponse = Schemas["TrashListResponse"];
 
-const toTrashEntry = (e: BackendTrashEntry): WorkspaceTrashEntry => ({
+export const toTrashEntry = (e: BackendTrashEntry): WorkspaceTrashEntry => ({
   entryId: e.entry_id,
   originalPath: e.original_path,
   name: e.name,

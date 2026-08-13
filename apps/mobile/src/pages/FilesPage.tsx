@@ -1,13 +1,21 @@
 import {
   type DownloadedFile,
-  type WorkspaceFileEntry,
+  type WorkspaceListing,
+  createWorkspaceDir,
+  deleteWorkspaceEntry,
   downloadWorkspaceFile,
   getWorkspaceBinding,
+  listTrash,
   listWorkspaceFiles,
+  moveWorkspaceEntry,
+  readWorkspaceFileForEdit,
+  restoreTrash,
   uploadWorkspaceFile,
+  writeWorkspaceFileText,
 } from "@/api/workspace";
 import { FileBrowser, type FileBrowserSource } from "@/components/FileBrowser";
-import { TrashSection } from "@/components/TrashSection";
+import { TrashSection, type TrashSource } from "@/components/TrashSection";
+import type { FileBrowserOps } from "@/components/fileBrowser/ops";
 import { LOCAL_WORKSPACE_MOBILE_HINT } from "@/lib/fileDownloadError";
 import { toWorkspaceRelPath } from "@/lib/workspacePath";
 // The cloud workspace file browser for ONE conversation (前端技术与架构 §七 · 云端文件浏览).
@@ -15,6 +23,10 @@ import { toWorkspaceRelPath } from "@/lib/workspacePath";
 // Reachable from the chat header (/c/:id/files) — a full-screen, conversation-scoped shortcut
 // (no bottom tab bar). Soft-delete zone (AgentCore/trash list+restore) toggles in-place —
 // same page as the file tree (对齐桌面 TrashSection 语义；非 OS 回收站).
+//
+// Cloud workspaces are writable here (改名 / 移动 / 删除 / 新建文件夹 / 文本编辑). A LOCAL
+// workspace's bytes live on the user's machine and the server refuses writes with 409, so
+// the write ops are simply not handed to the browser in that mode — no dead buttons.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -55,10 +67,31 @@ export function FilesPage() {
   // browser resets to root only when the conversation changes (not on an upload reload).
   const source = useMemo<FileBrowserSource>(
     () => ({
-      list: (): Promise<WorkspaceFileEntry[]> =>
+      list: (): Promise<WorkspaceListing> =>
         listWorkspaceFiles(conversationId ?? ""),
       download: (path: string): Promise<DownloadedFile> =>
         downloadWorkspaceFile(conversationId ?? "", path),
+    }),
+    [conversationId],
+  );
+
+  const cloudOps = useMemo<FileBrowserOps>(
+    () => ({
+      move: (src, dst) => moveWorkspaceEntry(conversationId ?? "", src, dst),
+      remove: (path) => deleteWorkspaceEntry(conversationId ?? "", path),
+      createDir: (path) => createWorkspaceDir(conversationId ?? "", path),
+      readForEdit: (path) =>
+        readWorkspaceFileForEdit(conversationId ?? "", path),
+      writeText: (path, input) =>
+        writeWorkspaceFileText(conversationId ?? "", path, input),
+    }),
+    [conversationId],
+  );
+
+  const trashSource = useMemo<TrashSource>(
+    () => ({
+      list: () => listTrash(conversationId ?? ""),
+      restore: (entryId) => restoreTrash(conversationId ?? "", entryId),
     }),
     [conversationId],
   );
@@ -98,7 +131,7 @@ export function FilesPage() {
           <span className="bar-right" aria-hidden />
         </header>
         <TrashSection
-          conversationId={conversationId}
+          source={trashSource}
           onRestored={() => setReloadKey((k) => k + 1)}
         />
       </div>
@@ -160,6 +193,7 @@ export function FilesPage() {
           localMode ? LOCAL_WORKSPACE_MOBILE_HINT : "此对话还没有工作区文件。"
         }
         onUpload={localMode ? undefined : () => uploadInputRef.current?.click()}
+        ops={localMode ? undefined : cloudOps}
       />
 
       {uploadError && <div className="error bar">{uploadError}</div>}

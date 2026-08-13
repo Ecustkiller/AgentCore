@@ -14,11 +14,18 @@ settles back over ``respond``. Delivery therefore keeps ONE door (the hub) in
 both modes — no EventSink double-delivery (双模式工作区 §7.7 否决「双投递 =
 双真相源」).
 
-Roots mirror the cloud fulfiller's declaration (``POST /v1/fulfill/roots``), fed
-by the ``localRootId`` the desktop already stamps on every turn: the sidecar's own
+Roots mirror the cloud fulfiller's declaration (connect-time query + the bindings
+the API process records when a root is registered, :mod:`agentcore.fulfill.declare`),
+fed by the ``localRootId`` the desktop already stamps on every turn: the sidecar's own
 file ops go straight to ``Path`` (no frame at all) and ``terminal`` ops carry
 ``root_id=""`` → delivered as ``root_id=None``, but a worker desk bound to the
 turn's local root does issue root-scoped ``workspace`` frames.
+
+``localRootId`` alone is only the turn's *own* desk. Cross-desk delegate resolves
+the target folder's binding to a second root, and bare chat brings no root at all,
+so the bridge also installs itself as the process's
+:mod:`~agentcore.fulfill.local_roots` declarer: every local workspace this engine
+builds widens the declared set as it is built.
 """
 
 from __future__ import annotations
@@ -34,6 +41,10 @@ from agentcore.fulfill.hub import (
     FulfillerHub,
     FulfillerSession,
     default_fulfiller_hub,
+)
+from agentcore.fulfill.local_roots import (
+    install_local_root_declarer,
+    uninstall_local_root_declarer,
 )
 from agentcore.sidecar import protocol
 
@@ -99,6 +110,7 @@ class SidecarFulfillBridge:
         )
         self._session = session
         self._drain = asyncio.create_task(self._pump(session))
+        install_local_root_declarer(self)
         logger.info(
             "sidecar.fulfill_bound",
             user_id=uid,
@@ -107,18 +119,20 @@ class SidecarFulfillBridge:
         )
 
     def declare_root(self, root_id: str) -> None:
-        """Add a root this device can serve (cloud parity: ``/v1/fulfill/roots``).
+        """Add a root this device can serve (cloud parity: registration receipts).
 
         Root-scoped ``workspace`` frames only reach a session whose roots contain
         the id; unscoped channels (host / mcp / notify / board / board_read /
-        external_mount / terminal) match regardless.
+        external_mount / terminal) match regardless. Reached both with the turn's
+        own ``localRootId`` and, as each local workspace is built, with a
+        cross-desk target's root (:mod:`agentcore.fulfill.local_roots`).
         """
         rid = (root_id or "").strip()
         if not rid or rid in self._roots:
             return
         self._roots.add(rid)
         if self._session is not None:
-            self._session.update_roots(self._roots)
+            self._session.add_root(rid)
 
     def close(self) -> None:
         """Unregister the session and stop its drain. Idempotent.
@@ -127,6 +141,7 @@ class SidecarFulfillBridge:
         only reaps a drain still parked on a send (rebind / shutdown), so no task
         outlives the loop it was created on.
         """
+        uninstall_local_root_declarer(self)
         session, self._session = self._session, None
         drain, self._drain = self._drain, None
         if session is not None:

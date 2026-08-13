@@ -201,6 +201,23 @@ describe("ModelPicker (mobile profiles)", () => {
     expect(screen.queryByText("跟随账号默认")).toBeNull();
   });
 
+  it("marks system presets apart from user-built combinations", () => {
+    render(
+      <ModelPicker
+        conversationProfileId={null}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    const preset = screen.getByTestId(
+      "profile-row-00000000-0000-4000-8000-000000000011",
+    );
+    expect(preset.textContent).toContain("预置");
+    expect(
+      screen.getByTestId("profile-row-prof-user-1").textContent,
+    ).not.toContain("预置");
+  });
+
   it("highlights the account default when no profile is selected yet", () => {
     render(
       <ModelPicker
