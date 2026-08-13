@@ -36,6 +36,7 @@ export function InspectorPanel({
   onClearRun,
   onClose,
   cnyLabel,
+  className,
 }: {
   message: ReplayMessage;
   selectedRunId: string | null;
@@ -44,6 +45,8 @@ export function InspectorPanel({
   onClose: () => void;
   /** Pre-formatted turn cost for ops strip, e.g. "¥0.12". */
   cnyLabel?: string | null;
+  /** Height and width come from the page's layout row, not from the viewport. */
+  className?: string;
 }) {
   const runs = message.runs;
   const spans = message.spans;
@@ -53,7 +56,12 @@ export function InspectorPanel({
   );
 
   return (
-    <aside className="flex max-h-[calc(100vh-11rem)] flex-col gap-0 overflow-hidden rounded-xl border border-border bg-card">
+    <aside
+      className={cn(
+        "flex flex-col gap-0 overflow-hidden rounded-xl border border-border bg-card",
+        className,
+      )}
+    >
       <div className="flex shrink-0 items-center justify-between gap-2 border-border border-b px-3 py-2">
         <span className="text-xs font-medium text-foreground">队员</span>
         <button

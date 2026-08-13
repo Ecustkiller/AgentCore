@@ -1,7 +1,13 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Spinner } from "@/components/ui/Spinner";
-import { cn, fmtCompact, fmtCny, fmtInt, nanoToYuan } from "@/lib/utils";
+import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
+import {
+  ErrorState,
+  Refreshing,
+  StaleDataNotice,
+  TableSkeleton,
+} from "@/components/ui/States";
+import { cn, fmtCompact, fmtCny, fmtInt, fmtTime, nanoToYuan } from "@/lib/utils";
 import {
   clientGitSha,
   clientVersion,
@@ -13,6 +19,7 @@ import {
   fetchSystemStatus,
 } from "@/services/adminSystem";
 import {
+  buildShasMatch,
   fetchReleaseDrift,
   type ReleaseDriftSnapshot,
   versionsMatch,
@@ -22,6 +29,18 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 
 function orUnknown(s: string): string {
   return !s || s === "unknown" ? "未知" : s;
+}
+
+/**
+ * 构建时间 → 全站统一的 MM-DD HH:mm，本机时区。
+ *
+ * 这一页是部署快照，没有按 UTC 日切的统计窗口同屏（那种时间列才用 `fmtTimeUtc`），
+ * 运维问的是「这套后端是我这边几点起来的」。无法解析的值由 `fmtTime` 原样返回，
+ * 宁可露出脏数据也不冒充一个时间。
+ */
+function fmtBuiltAt(raw: string): string {
+  if (!raw || raw === "unknown") return "未知";
+  return fmtTime(raw);
 }
 
 function quotaLimit(value: string): ReactNode {
@@ -56,183 +75,169 @@ export function SystemPage() {
   }, [load]);
 
   return (
-    <div className="mx-auto max-w-[1200px] px-6 py-8">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">系统状态</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            只读部署快照 · 计费模式、全局配额、数据库健康、版本
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void load()}
-          disabled={loading}
-          aria-label="刷新"
-        >
-          <RefreshCw size={14} className={cn(loading && "animate-spin")} />
-        </Button>
-      </div>
-
-      {loading && (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card py-16 text-muted-foreground text-sm">
-          <Spinner />
-          加载中…
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-16 text-sm">
-          <span className="text-destructive">{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            重试
+    <Page>
+      <PageHeader
+        title="系统状态"
+        description="只读部署快照 · 计费模式、全局配额、数据库健康、版本"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void load()}
+            disabled={loading}
+            aria-label="刷新"
+          >
+            <RefreshCw size={14} className={cn(loading && "animate-spin")} />
           </Button>
+        }
+      />
+
+      {!data && loading && (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }, (_, i) => (
+            <TableSkeleton key={`card-${i}`} rows={4} columns={2} />
+          ))}
         </div>
       )}
 
-      {!loading && !error && data && (
-        <>
-          {data.admins <= 1 && data.users_total <= 2 && (
-            <div className="mb-5 rounded-xl border border-warning/30 bg-warning/10 px-5 py-4 text-sm">
-              <p className="font-medium text-foreground">首次部署引导</p>
-              <p className="mt-1 text-muted-foreground">
-                全新环境请在服务器上运行{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  uv run python scripts/create_admin.py &lt;username&gt;
-                </code>{" "}
-                （在 <code className="font-mono text-xs">apps/server</code>{" "}
-                目录）创建首个管理员；普通用户可直接注册（紧急关闸见环境变量{" "}
-                <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">
-                  REGISTRATION_OPEN
-                </code>
-                ）。
-              </p>
-            </div>
+      {!data && !loading && error && (
+        <ErrorState message={error} onRetry={() => void load()} />
+      )}
+
+      {data && (
+        <div className="flex flex-col gap-5">
+          {error && (
+            <StaleDataNotice message={error} onRetry={() => void load()} />
           )}
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          <Card title="计费模式">
-            <Badge tone="primary">
-              {data.billing_mode === "byok" ? "BYOK · 自带 Key" : "平台付费"}
-            </Badge>
-            <p className="mt-3 text-muted-foreground text-xs">
-              {data.billing_mode === "byok"
-                ? "对话跑在用户自带的 DeepSeek Key 上，配额防线休眠。"
-                : "平台全局 Key + 配额防线生效。"}
-            </p>
-          </Card>
 
-          <Card title="数据库">
-            <Badge tone={data.database_ok ? "success" : "destructive"}>
-              {data.database_ok ? "正常" : "不可达"}
-            </Badge>
-            <p className="mt-3 text-muted-foreground text-xs">
-              实时探测（SELECT 1），与 /readyz 同源。
-            </p>
-          </Card>
+          <Refreshing
+            active={loading}
+            className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+          >
+            <StatusCard title="计费模式">
+              <Badge tone="primary">
+                {data.billing_mode === "byok" ? "BYOK · 自带 Key" : "平台付费"}
+              </Badge>
+              <p className="mt-3 text-muted-foreground text-xs">
+                {data.billing_mode === "byok"
+                  ? "对话跑在用户自带的 DeepSeek Key 上，配额防线休眠。"
+                  : "平台全局 Key + 配额防线生效。"}
+              </p>
+            </StatusCard>
 
-          <Card title="版本">
-            <Row label="控制台版本">{clientVersion()}</Row>
-            <Row label="控制台构建">{formatGitSha(clientGitSha())}</Row>
-            <Row label="API 版本">{orUnknown(data.version)}</Row>
-            <Row label="API 构建">{orUnknown(data.git_sha).slice(0, 12)}</Row>
-            <Row label="API 构建时间">{orUnknown(data.built_at)}</Row>
-          </Card>
+            <StatusCard title="数据库">
+              <Badge tone={data.database_ok ? "success" : "destructive"}>
+                {data.database_ok ? "正常" : "不可达"}
+              </Badge>
+              <p className="mt-3 text-muted-foreground text-xs">
+                实时探测（SELECT 1），与 /readyz 同源。
+              </p>
+            </StatusCard>
 
-          {drift && (
-            <Card title="发布漂移">
-              <Row label="CDN 最新">
-                {drift.desktopCdnVersion ?? "—"}
-              </Row>
-              <Row label="下载页展示">
-                {drift.websiteDownloadVersion ?? "—"}
-              </Row>
-              <Row label="CDN ↔ 下载页">
+            <StatusCard title="版本">
+              <Row label="控制台版本">{clientVersion()}</Row>
+              <Row label="控制台构建">{formatGitSha(clientGitSha())}</Row>
+              <Row label="API 版本">{orUnknown(data.version)}</Row>
+              <Row label="API 构建">{orUnknown(data.git_sha).slice(0, 12)}</Row>
+              <Row label="API 构建时间">{fmtBuiltAt(data.built_at)}</Row>
+              <Row label="控制台 ↔ API">
                 <DriftBadge
-                  ok={versionsMatch(
-                    drift.desktopCdnVersion,
-                    drift.websiteDownloadVersion,
-                  )}
-                  okLabel="一致"
-                  warnLabel="不一致"
-                  unknownLabel="未知"
-                />
-              </Row>
-              <Row label="控制台 ↔ API SHA">
-                <DriftBadge
-                  ok={
-                    data.git_sha && clientGitSha() !== "unknown"
-                      ? data.git_sha.startsWith(clientGitSha()) ||
-                        clientGitSha().startsWith(data.git_sha.slice(0, 7))
-                      : null
-                  }
+                  ok={buildShasMatch(clientGitSha(), data.git_sha)}
                   okLabel="同部署"
                   warnLabel="异轨"
                   unknownLabel="未知"
                 />
               </Row>
-              {drift.errors.length > 0 && (
-                <p className="mt-3 text-destructive text-xs">{drift.errors.join(" · ")}</p>
-              )}
               <p className="mt-3 text-muted-foreground text-xs">
-                CDN 来自 downloads.*/desktop/latest.json；下载页来自官网 runtime
-                API。API 与 Web 客户端独立部署，SHA 不同属预期。
+                任一侧没有构建 SHA（本地开发 / 自建部署未注入）时判定为「未知」，不是异轨。
+                构建时间为本机时区，格式 MM-DD HH:mm。
               </p>
-            </Card>
-          )}
+            </StatusCard>
 
-          <Card title="全局配额默认值">
-            <Row label="日 token">
-              {quotaLimit(
-                data.quota.daily_tokens === 0
-                  ? "0"
-                  : fmtCompact(data.quota.daily_tokens),
-              )}
-            </Row>
-            <Row label="月成本">
-              {quotaLimit(
-                data.quota.monthly_cost_nano === 0
-                  ? "0"
-                  : fmtCny(nanoToYuan(data.quota.monthly_cost_nano)),
-              )}
-            </Row>
-            <Row label="日成本">
-              {quotaLimit(
-                data.quota.daily_cost_nano === 0
-                  ? "0"
-                  : fmtCny(nanoToYuan(data.quota.daily_cost_nano)),
-              )}
-            </Row>
-            <Row label="日请求">
-              {quotaLimit(
-                data.quota.daily_requests === 0
-                  ? "0"
-                  : fmtInt(data.quota.daily_requests),
-              )}
-            </Row>
-            <p className="mt-3 text-muted-foreground text-xs">
-              0 = 不限 · 每用户可在「用户管理」覆盖。
-            </p>
-          </Card>
+            {drift && (
+              <StatusCard title="发布漂移">
+                <Row label="CDN 最新">{drift.desktopCdnVersion ?? "—"}</Row>
+                <Row label="下载页展示">
+                  {drift.websiteDownloadVersion ?? "—"}
+                </Row>
+                <Row label="CDN ↔ 下载页">
+                  <DriftBadge
+                    ok={versionsMatch(
+                      drift.desktopCdnVersion,
+                      drift.websiteDownloadVersion,
+                    )}
+                    okLabel="一致"
+                    warnLabel="不一致"
+                    unknownLabel="未知"
+                  />
+                </Row>
+                {drift.unreachable.length > 0 && (
+                  <p className="mt-3 text-muted-foreground text-xs">
+                    探针未读到：{drift.unreachable.join(" · ")}
+                  </p>
+                )}
+                <p className="mt-3 text-muted-foreground text-xs">
+                  品牌发布通道的可选探针（CDN latest.json ↔
+                  官网下载页），直接从你的浏览器拉取。读不到只说明这两个外部依赖或本机网络不通，与本平台健康无关。
+                </p>
+              </StatusCard>
+            )}
 
-          <Card title="账号">
-            <Row label="总数">{fmtInt(data.users_total)}</Row>
-            <Row label="活跃">{fmtInt(data.users_active)}</Row>
-            <Row label="管理员">{fmtInt(data.admins)}</Row>
-          </Card>
+            <StatusCard title="全局配额默认值">
+              <Row label="日 token">
+                {quotaLimit(
+                  data.quota.daily_tokens === 0
+                    ? "0"
+                    : fmtCompact(data.quota.daily_tokens),
+                )}
+              </Row>
+              <Row label="月成本">
+                {quotaLimit(
+                  data.quota.monthly_cost_nano === 0
+                    ? "0"
+                    : fmtCny(nanoToYuan(data.quota.monthly_cost_nano)),
+                )}
+              </Row>
+              <Row label="日成本">
+                {quotaLimit(
+                  data.quota.daily_cost_nano === 0
+                    ? "0"
+                    : fmtCny(nanoToYuan(data.quota.daily_cost_nano)),
+                )}
+              </Row>
+              <Row label="日请求">
+                {quotaLimit(
+                  data.quota.daily_requests === 0
+                    ? "0"
+                    : fmtInt(data.quota.daily_requests),
+                )}
+              </Row>
+              {/* 上限是部署期配置，口径恒为人民币（`fmtCny`）；随接口下发币种的花销一律
+                  走 `fmtMoney`，否则 BYOK 的估算会被标成 ¥。 */}
+              <p className="mt-3 text-muted-foreground text-xs">
+                0 = 不限 · 每用户可在「用户管理」覆盖。成本上限恒按人民币（¥）配置；BYOK
+                的估算金额自带币种、平台不做汇率换算，两者不可直接比较。
+              </p>
+            </StatusCard>
+
+            <StatusCard title="账号">
+              <Row label="总数">{fmtInt(data.users_total)}</Row>
+              <Row label="活跃">{fmtInt(data.users_active)}</Row>
+              <Row label="管理员">{fmtInt(data.admins)}</Row>
+            </StatusCard>
+          </Refreshing>
         </div>
-        </>
       )}
-    </div>
+    </Page>
   );
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function StatusCard({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <h2 className="mb-3 text-sm font-medium text-muted-foreground">{title}</h2>
-      {children}
-    </div>
+    <Card className="flex flex-col">
+      <SectionHeader title={title} />
+      <div className="p-5">{children}</div>
+    </Card>
   );
 }
 

@@ -5,19 +5,25 @@ export type AdminAuditLogLine = components["schemas"]["AdminAuditLogLine"];
 export type AdminAuditLogListResponse =
   components["schemas"]["AdminAuditLogListResponse"];
 
-export async function listAuditLogs(params: {
-  page?: number;
-  pageSize?: number;
-  action?: string;
-  actorId?: string;
-}): Promise<AdminAuditLogListResponse> {
+export async function listAuditLogs(
+  params: {
+    page?: number;
+    pageSize?: number;
+    action?: string;
+    actorId?: string;
+  },
+  signal?: AbortSignal,
+): Promise<AdminAuditLogListResponse> {
   const q = new URLSearchParams();
   if (params.page) q.set("page", String(params.page));
   if (params.pageSize) q.set("page_size", String(params.pageSize));
   if (params.action) q.set("action", params.action);
   if (params.actorId) q.set("actor_id", params.actorId);
   const suffix = q.size ? `?${q}` : "";
-  return api.get<AdminAuditLogListResponse>(`/v1/admin/audit-logs${suffix}`);
+  return api.get<AdminAuditLogListResponse>(
+    `/v1/admin/audit-logs${suffix}`,
+    signal ? { signal } : undefined,
+  );
 }
 
 /** Human-readable labels for audit action codes. */

@@ -34,11 +34,11 @@ export function ToolLine({
             : "cursor-default text-muted-foreground",
         )}
       >
-        <Wrench size={14} className="mt-0.5 shrink-0 opacity-70" />
+        <Wrench size={14} className="mt-0.5 shrink-0" />
         <span className="min-w-0 flex-1 truncate">
-          <span className="font-medium text-foreground/80">{name}</span>
+          <span className="font-medium text-foreground">{name}</span>
           {runLabel && (
-            <span className="ml-1.5 text-muted-foreground/80">· {runLabel}</span>
+            <span className="ml-1.5 text-muted-foreground">· {runLabel}</span>
           )}
         </span>
         <span className="ml-1 inline-flex shrink-0 items-center gap-1">
@@ -82,7 +82,7 @@ export function ToolLine({
 export function LlmProcessRow({ span }: { span: ReplaySpan }) {
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm text-muted-foreground">
-      <span className="font-medium text-foreground/70">模型调用</span>
+      <span className="font-medium text-foreground">模型调用</span>
       {span.round_idx != null && (
         <span className="tabular-nums">第 {span.round_idx + 1} 轮</span>
       )}

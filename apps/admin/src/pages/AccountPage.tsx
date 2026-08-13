@@ -1,35 +1,58 @@
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
+import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
 import { Spinner } from "@/components/ui/Spinner";
 import { ApiError } from "@/services/api";
 import { changePassword, updateProfile } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, type ReactNode, useState } from "react";
 import { toast } from "sonner";
 
 function errMsg(e: unknown, fallback: string): string {
   return e instanceof ApiError ? (e.serverMessage ?? fallback) : fallback;
 }
 
-function Section({
+/** One settings block: heading + a real `<form>`, so Enter submits it. */
+function FormSection({
   title,
   description,
+  onSubmit,
   children,
 }: {
   title: string;
   description?: string;
-  children: React.ReactNode;
+  onSubmit: () => void;
+  children: ReactNode;
+}) {
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    onSubmit();
+  };
+  return (
+    <Card>
+      <SectionHeader title={title} description={description} />
+      <form
+        onSubmit={handleSubmit}
+        className="flex max-w-md flex-col gap-3 p-5"
+      >
+        {children}
+      </form>
+    </Card>
+  );
+}
+
+function LabeledField({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
 }) {
   return (
-    <section>
-      <h2 className="text-base font-semibold text-foreground">{title}</h2>
-      {description && (
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      )}
-      <div className="mt-3 rounded-xl border border-border bg-card p-4">
-        {children}
-      </div>
-    </section>
+    <label className="block">
+      <span className="mb-1 block text-muted-foreground text-xs">{label}</span>
+      {children}
+    </label>
   );
 }
 
@@ -68,56 +91,60 @@ function ProfileSection() {
   };
 
   return (
-    <Section
+    <FormSection
       title="个人资料"
       description="显示名会展示在侧栏；邮箱用于后续找回密码（可选）。"
+      onSubmit={() => {
+        if (canSave) void save();
+      }}
     >
-      <div className="flex max-w-md flex-col gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            用户名
-          </span>
-          <Input value={user?.username ?? ""} disabled className="opacity-60" />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            显示名
-          </span>
-          <Input
-            value={displayName}
-            maxLength={200}
-            placeholder="你的显示名"
-            onChange={(e) => setDisplayName(e.target.value)}
-            disabled={saving}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            邮箱（可选）
-          </span>
-          <Input
-            type="email"
-            value={email}
-            maxLength={255}
-            placeholder="you@example.com"
-            autoComplete="email"
-            onChange={(e) => setEmail(e.target.value)}
-            disabled={saving}
-          />
-        </label>
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <div className="flex justify-end">
-          <Button size="sm" disabled={!canSave} onClick={() => void save()}>
-            {saving && <Spinner />}
-            保存
-          </Button>
-        </div>
+      <LabeledField label="用户名">
+        <Input
+          value={user?.username ?? ""}
+          readOnly
+          autoComplete="username"
+          title="用户名不可修改"
+          className="opacity-60"
+        />
+      </LabeledField>
+      <LabeledField label="显示名">
+        <Input
+          value={displayName}
+          maxLength={200}
+          placeholder="你的显示名"
+          autoComplete="nickname"
+          onChange={(e) => setDisplayName(e.target.value)}
+          disabled={saving}
+        />
+      </LabeledField>
+      <LabeledField label="邮箱（可选）">
+        <Input
+          type="email"
+          value={email}
+          maxLength={255}
+          placeholder="you@example.com"
+          autoComplete="email"
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={saving}
+        />
+      </LabeledField>
+      {error && (
+        <p role="alert" className="text-destructive text-xs">
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <Button type="submit" size="sm" disabled={!canSave}>
+          {saving && <Spinner />}
+          保存
+        </Button>
       </div>
-    </Section>
+    </FormSection>
   );
 }
 
 function PasswordSection() {
+  const username = useAuthStore((s) => s.user?.username) ?? "";
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -154,74 +181,80 @@ function PasswordSection() {
   };
 
   return (
-    <Section
+    <FormSection
       title="修改密码"
       description="修改后，除当前设备外的所有登录都会失效。"
+      onSubmit={() => {
+        if (canSave) void save();
+      }}
     >
-      <div className="flex max-w-md flex-col gap-3">
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            当前密码
-          </span>
-          <Input
-            type="password"
-            value={current}
-            autoComplete="current-password"
-            onChange={(e) => setCurrent(e.target.value)}
-            disabled={saving}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            新密码（至少 8 位）
-          </span>
-          <Input
-            type="password"
-            value={next}
-            autoComplete="new-password"
-            onChange={(e) => setNext(e.target.value)}
-            disabled={saving}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1 block text-xs text-muted-foreground">
-            确认新密码
-          </span>
-          <Input
-            type="password"
-            value={confirm}
-            autoComplete="new-password"
-            onChange={(e) => setConfirm(e.target.value)}
-            disabled={saving}
-          />
-        </label>
-        {(localError || error) && (
-          <p className="text-xs text-destructive">{localError ?? error}</p>
-        )}
-        <div className="flex justify-end">
-          <Button size="sm" disabled={!canSave} onClick={() => void save()}>
-            {saving && <Spinner />}
-            更新密码
-          </Button>
-        </div>
+      {/*
+        Password managers only offer to save a new password when the form also
+        carries the account it belongs to; without this the change-password form
+        is anonymous and the saved credential silently goes stale.
+      */}
+      <input
+        type="text"
+        name="username"
+        value={username}
+        readOnly
+        tabIndex={-1}
+        aria-hidden
+        autoComplete="username"
+        className="sr-only"
+      />
+      <LabeledField label="当前密码">
+        <Input
+          type="password"
+          value={current}
+          autoComplete="current-password"
+          onChange={(e) => setCurrent(e.target.value)}
+          disabled={saving}
+        />
+      </LabeledField>
+      <LabeledField label="新密码（至少 8 位）">
+        <Input
+          type="password"
+          value={next}
+          minLength={8}
+          autoComplete="new-password"
+          onChange={(e) => setNext(e.target.value)}
+          disabled={saving}
+        />
+      </LabeledField>
+      <LabeledField label="确认新密码">
+        <Input
+          type="password"
+          value={confirm}
+          minLength={8}
+          autoComplete="new-password"
+          onChange={(e) => setConfirm(e.target.value)}
+          disabled={saving}
+        />
+      </LabeledField>
+      {(localError || error) && (
+        <p role="alert" className="text-destructive text-xs">
+          {localError ?? error}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <Button type="submit" size="sm" disabled={!canSave}>
+          {saving && <Spinner />}
+          更新密码
+        </Button>
       </div>
-    </Section>
+    </FormSection>
   );
 }
 
 export function AccountPage() {
   return (
-    <div className="px-6 py-8">
-      <div className="mx-auto max-w-4xl">
-        <h1 className="text-xl font-semibold text-foreground">账户设置</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          管理你的个人资料与登录密码。
-        </p>
-        <div className="mt-8 space-y-8">
-          <ProfileSection />
-          <PasswordSection />
-        </div>
+    <Page>
+      <PageHeader title="账户设置" description="管理你的个人资料与登录密码。" />
+      <div className="flex max-w-3xl flex-col gap-6">
+        <ProfileSection />
+        <PasswordSection />
       </div>
-    </div>
+    </Page>
   );
 }

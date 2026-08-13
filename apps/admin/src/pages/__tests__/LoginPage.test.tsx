@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
 import { LoginPage } from "@/pages/LoginPage";
+import { loginMfa } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/auth", () => ({
@@ -45,5 +52,70 @@ describe("LoginPage MFA", () => {
     fireEvent.change(input, { target: { value: "123456789" } });
     expect(input.value).toBe("123456");
     expect(submit.disabled).toBe(false);
+  });
+
+  it("accepts a 16-hex recovery code and sends it as recovery_code, not code", async () => {
+    vi.mocked(loginMfa).mockResolvedValue({
+      kind: "success",
+      user: {
+        id: "u1",
+        username: "root",
+        displayName: "Root",
+        email: null,
+        role: "admin",
+        passwordMustChange: false,
+      },
+    });
+    render(<LoginPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: /恢复码登录/ }));
+    const input = screen.getByPlaceholderText("恢复码（16 位）") as HTMLInputElement;
+    const submit = screen.getByRole("button", { name: "验证并登录" }) as HTMLButtonElement;
+
+    // Written-down codes carry dashes/uppercase; both normalize away before submit.
+    fireEvent.change(input, { target: { value: "A1B2-C3D4-E5F6-A7B8" } });
+    expect(input.value).toBe("a1b2c3d4e5f6a7b8");
+    expect(submit.disabled).toBe(false);
+
+    fireEvent.click(submit);
+    await waitFor(() =>
+      expect(loginMfa).toHaveBeenCalledWith("pending-token", {
+        recoveryCode: "a1b2c3d4e5f6a7b8",
+      }),
+    );
+    expect(useAuthStore.getState().status).toBe("authenticated");
+  });
+
+  it("keeps submit disabled until a recovery code is complete", () => {
+    render(<LoginPage />);
+    fireEvent.click(screen.getByRole("button", { name: /恢复码登录/ }));
+
+    const input = screen.getByPlaceholderText("恢复码（16 位）") as HTMLInputElement;
+    const submit = screen.getByRole("button", { name: "验证并登录" }) as HTMLButtonElement;
+
+    fireEvent.change(input, { target: { value: "a1b2c3d4" } });
+    expect(submit.disabled).toBe(true);
+
+    // Non-hex characters are rejected outright rather than padding the length.
+    fireEvent.change(input, { target: { value: "zzzz-zzzz-zzzz-zzzz" } });
+    expect(input.value).toBe("");
+    expect(submit.disabled).toBe(true);
+  });
+
+  it("clears the entered code when switching factor, so it is never sent to the wrong field", () => {
+    render(<LoginPage />);
+
+    fireEvent.change(screen.getByPlaceholderText("验证码（6 位）"), {
+      target: { value: "123456" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /恢复码登录/ }));
+    expect(
+      (screen.getByPlaceholderText("恢复码（16 位）") as HTMLInputElement).value,
+    ).toBe("");
+
+    fireEvent.click(screen.getByRole("button", { name: /改用验证器/ }));
+    expect(
+      (screen.getByPlaceholderText("验证码（6 位）") as HTMLInputElement).value,
+    ).toBe("");
   });
 });

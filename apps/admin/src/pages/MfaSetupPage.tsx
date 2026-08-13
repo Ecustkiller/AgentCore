@@ -1,8 +1,8 @@
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
-import { ApiError, errorMessage } from "@/services/api";
-import { mfaConfirm, mfaSetup } from "@/services/auth";
+import { ApiError, clearCsrfToken, errorMessage } from "@/services/api";
+import { logout, mfaConfirm, mfaSetup } from "@/services/auth";
 import { useAuthStore } from "@/stores/auth";
 import { Check, Copy, ShieldCheck } from "lucide-react";
 import { type FormEvent, useEffect, useState } from "react";
@@ -16,7 +16,7 @@ type Phase = "setup" | "recovery";
 
 /** Full-screen MFA enrollment wizard for admin accounts. */
 export function MfaSetupPage() {
-  const setMfaSetupRequired = useAuthStore((s) => s.setMfaSetupRequired);
+  const setUnauthenticated = useAuthStore((s) => s.setUnauthenticated);
 
   const [phase, setPhase] = useState<Phase>("setup");
   const [secret, setSecret] = useState<string | null>(null);
@@ -27,9 +27,12 @@ export function MfaSetupPage() {
   const [error, setError] = useState<string | null>(null);
   const [copiedSecret, setCopiedSecret] = useState(false);
   const [copiedCodes, setCopiedCodes] = useState(false);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError(null);
     void (async () => {
       try {
         const payload = await mfaSetup();
@@ -43,7 +46,7 @@ export function MfaSetupPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadNonce]);
 
   const handleCopySecret = async () => {
     if (!secret) return;
@@ -83,9 +86,17 @@ export function MfaSetupPage() {
     }
   };
 
+  const handleSignOut = () => {
+    void logout().finally(() => setUnauthenticated());
+  };
+
+  // `/mfa/confirm` deliberately revokes every session and clears the auth cookies
+  // (a password-only session must not inherit admin rights it never proved), so the
+  // only honest next step is a fresh login — not "进入管理后台".
   const handleFinish = () => {
-    setMfaSetupRequired(false);
-    toast.success("双因素认证已启用");
+    clearCsrfToken();
+    setUnauthenticated();
+    toast.success("双因素认证已启用，请用新的验证码重新登录");
   };
 
   if (loading) {
@@ -107,7 +118,7 @@ export function MfaSetupPage() {
             <div>
               <h1 className="text-xl font-semibold text-foreground">保存恢复码</h1>
               <p className="mt-1 text-sm text-muted-foreground">
-                请妥善保存以下恢复码。若丢失身份验证器，可用恢复码登录。每个恢复码仅可使用一次。
+                请妥善保存以下恢复码。若丢失身份验证器，可在登录页改用恢复码登录。每个恢复码仅可使用一次。
               </p>
             </div>
           </div>
@@ -115,6 +126,11 @@ export function MfaSetupPage() {
           <div className="rounded-lg border border-warning/40 bg-warning/5 p-4 text-sm text-warning">
             恢复码只会显示这一次，关闭后无法再次查看。请复制或抄写后存放在安全位置。
           </div>
+
+          <p className="mt-4 text-sm text-muted-foreground">
+            启用双因素认证会登出全部设备（含当前这台）。保存好恢复码后，请用密码 +
+            验证器中的新验证码重新登录。
+          </p>
 
           <ul className="mt-4 grid grid-cols-2 gap-2 rounded-lg border border-border bg-card p-4 font-mono text-sm">
             {recoveryCodes.map((rc) => (
@@ -130,7 +146,7 @@ export function MfaSetupPage() {
               {copiedCodes ? "已复制" : "复制全部恢复码"}
             </Button>
             <Button onClick={handleFinish} className="w-full">
-              我已保存，进入管理后台
+              我已保存，重新登录
             </Button>
           </div>
         </div>
@@ -148,13 +164,28 @@ export function MfaSetupPage() {
           <div>
             <h1 className="text-xl font-semibold text-foreground">设置双因素认证</h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              使用身份验证器应用（如 Google Authenticator、Microsoft Authenticator）扫描或手动输入密钥
+              在身份验证器应用（如 Google Authenticator、Microsoft
+              Authenticator）中手动添加下面的密钥
             </p>
           </div>
         </div>
 
         {error && !secret ? (
-          <p className="text-center text-sm text-destructive">{error}</p>
+          <div className="flex flex-col items-center gap-3 text-center">
+            <p className="text-sm text-destructive">{error}</p>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setReloadNonce((n) => n + 1)}
+              >
+                重试
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleSignOut}>
+                退出登录
+              </Button>
+            </div>
+          </div>
         ) : (
           <>
             <div className="rounded-lg border border-border bg-card p-4">

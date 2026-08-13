@@ -5,14 +5,21 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Spinner } from "@/components/ui/Spinner";
 import {
+  TableFrame,
+  TableRow,
+  THead,
+  Td,
+  Th,
+} from "@/components/ui/Table";
+import {
   cn,
   COST_ESTIMATE_HINT,
-  fmtCny,
   fmtCompact,
-  fmtEstimatedCny,
+  fmtEstimatedMoney,
   fmtInt,
+  fmtMoney,
   fmtMs,
-  fmtNanoCny,
+  fmtNanoMoney,
   fmtTime,
 } from "@/lib/utils";
 import { errorMessage } from "@/services/api";
@@ -75,6 +82,15 @@ export function UserDetail({
 
   const user = data?.user;
   const byok = data?.billing_mode === "byok";
+  // 行级金额（趋势 / 按模型）不带 currency——同一账本窗口内币种唯一（记账走 curated
+  // 人民币价卡，BYOK 估算走社区价目快照的美元），且后端无汇率换算，故符号统一取自
+  // 窗口 breakdown，绝不按 billing_mode 猜。与 AnalyticsPage 同口径。
+  const billedCurrency = data?.month.cost.currency;
+  const estimatedCurrency =
+    data?.month.estimated_cost?.currency ??
+    data?.today.estimated_cost?.currency ??
+    null;
+  const estimateFmtCurrency = estimatedCurrency ?? billedCurrency;
 
   return (
     <div className="mx-auto max-w-[1200px] px-6 py-8">
@@ -174,8 +190,9 @@ export function UserDetail({
 
           {byok && (
             <div className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-muted-foreground text-xs">
-              BYOK 模式：记账成本恒为 0；「估算」列为按社区价目的 ≈¥，
-              非上游账单。
+              BYOK 模式：记账成本恒为 0；「估算」列按社区价目计价
+              {estimatedCurrency ? `（${estimatedCurrency}）` : ""}
+              ，非上游账单，且平台不做汇率换算。
             </div>
           )}
 
@@ -188,7 +205,10 @@ export function UserDetail({
             <h2 className="mb-4 text-base font-semibold text-foreground">
               近 7 日成本趋势
             </h2>
-            <CostTrendBars data={data.recent_daily_cost} />
+            <CostTrendBars
+              data={data.recent_daily_cost}
+              currency={billedCurrency}
+            />
           </section>
 
           <section className="overflow-hidden rounded-xl border border-border bg-card">
@@ -206,48 +226,65 @@ export function UserDetail({
                 近 30 日暂无模型调用记录
               </p>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                    <th className="px-5 py-2.5 font-medium">模型</th>
-                    <th className="px-5 py-2.5 text-right font-medium">调用次数</th>
-                    <th className="px-5 py-2.5 text-right font-medium">Tokens</th>
-                    <th className="px-5 py-2.5 text-right font-medium">成本</th>
-                    <th className="px-5 py-2.5 text-right font-medium">估算</th>
-                  </tr>
-                </thead>
+              <TableFrame minWidth={760} className="rounded-none border-0">
+                <THead>
+                  <Th className="whitespace-nowrap">模型</Th>
+                  <Th align="right" className="whitespace-nowrap">
+                    调用次数
+                  </Th>
+                  <Th align="right" className="whitespace-nowrap">
+                    Tokens
+                  </Th>
+                  <Th align="right" className="whitespace-nowrap">
+                    成本{billedCurrency ? `（${billedCurrency}）` : ""}
+                  </Th>
+                  <Th align="right" className="whitespace-nowrap">
+                    估算{estimatedCurrency ? `（${estimatedCurrency}）` : ""}
+                  </Th>
+                </THead>
                 <tbody>
                   {data.recent_by_model.map((row: ModelCostLine) => (
-                    <tr
-                      key={row.model}
-                      className="border-border border-b last:border-0"
-                    >
-                      <td className="px-5 py-3 font-medium text-foreground">
+                    <TableRow key={row.model}>
+                      <Td className="font-medium text-foreground">
                         {row.model || "（未标注）"}
-                      </td>
-                      <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                      </Td>
+                      <Td
+                        align="right"
+                        className="text-muted-foreground tabular-nums"
+                      >
                         {fmtInt(row.calls)}
-                      </td>
-                      <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                      </Td>
+                      <Td
+                        align="right"
+                        className="text-muted-foreground tabular-nums"
+                      >
                         {fmtCompact(row.tokens_total)}
-                      </td>
-                      <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
-                        {fmtNanoCny(row.cost_total)}
-                      </td>
-                      <td
-                        className="px-5 py-3 text-right text-muted-foreground tabular-nums"
+                      </Td>
+                      <Td
+                        align="right"
+                        className="font-medium text-foreground tabular-nums"
+                      >
+                        {fmtNanoMoney(row.cost_total, billedCurrency)}
+                      </Td>
+                      <Td
+                        align="right"
+                        className="text-muted-foreground tabular-nums"
                         title={
                           row.cost_estimated_total > 0
                             ? COST_ESTIMATE_HINT
                             : undefined
                         }
                       >
-                        {fmtNanoCny(row.cost_estimated_total, true)}
-                      </td>
-                    </tr>
+                        {fmtNanoMoney(
+                          row.cost_estimated_total,
+                          estimateFmtCurrency,
+                          true,
+                        )}
+                      </Td>
+                    </TableRow>
                   ))}
                 </tbody>
-              </table>
+              </TableFrame>
             )}
           </section>
 
@@ -304,8 +341,8 @@ function WindowCard({
         title={byok && est ? COST_ESTIMATE_HINT : undefined}
       >
         {byok
-          ? fmtEstimatedCny(est?.cny_total ?? 0)
-          : fmtCny(window.cost.cny_total)}
+          ? fmtEstimatedMoney(est?.cny_total ?? 0, est?.currency)
+          : fmtMoney(window.cost.cny_total, window.cost.currency)}
       </div>
       <div className="mt-4 flex items-center gap-6 text-sm">
         <Stat
@@ -344,43 +381,38 @@ function SessionsTable({ rows }: { rows: SessionSummary[] }) {
           暂无活跃登录会话
         </div>
       ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-5 py-2.5 font-medium">IP</th>
-              <th className="px-5 py-2.5 font-medium">User-Agent</th>
-              <th className="px-5 py-2.5 font-medium">平台</th>
-              <th className="px-5 py-2.5 font-medium">最近使用</th>
-              <th className="px-5 py-2.5 font-medium">创建时间</th>
-            </tr>
-          </thead>
+        <TableFrame minWidth={820} className="rounded-none border-0">
+          <THead>
+            <Th className="whitespace-nowrap">IP</Th>
+            <Th className="whitespace-nowrap">User-Agent</Th>
+            <Th className="whitespace-nowrap">平台</Th>
+            <Th className="whitespace-nowrap">最近使用</Th>
+            <Th className="whitespace-nowrap">创建时间</Th>
+          </THead>
           <tbody>
             {rows.map((s) => (
-              <tr
-                key={s.id}
-                className="border-border border-b align-top last:border-0"
-              >
-                <td className="whitespace-nowrap px-5 py-3 text-foreground tabular-nums">
+              <TableRow key={s.id} className="align-top">
+                <Td className="whitespace-nowrap text-foreground tabular-nums">
                   {s.ip || "—"}
-                </td>
-                <td className="max-w-md px-5 py-3 text-muted-foreground">
+                </Td>
+                <Td className="max-w-md text-muted-foreground">
                   <span className="line-clamp-2 break-all" title={s.user_agent ?? undefined}>
                     {s.user_agent || "—"}
                   </span>
-                </td>
-                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground">
+                </Td>
+                <Td className="whitespace-nowrap text-muted-foreground">
                   {s.platform || "—"}
-                </td>
-                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
+                </Td>
+                <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
                   {fmtTime(s.last_used_at)}
-                </td>
-                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
+                </Td>
+                <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
                   {fmtTime(s.created_at)}
-                </td>
-              </tr>
+                </Td>
+              </TableRow>
             ))}
           </tbody>
-        </table>
+        </TableFrame>
       )}
     </section>
   );
@@ -417,36 +449,36 @@ function ConversationsTable({
           查看全部
         </Button>
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-5 py-2.5 font-medium">标题</th>
-            <th className="px-5 py-2.5 text-right font-medium">消息数</th>
-            <th className="px-5 py-2.5 font-medium">更新时间</th>
-          </tr>
-        </thead>
+      <TableFrame minWidth={560} className="rounded-none border-0">
+        <THead>
+          <Th className="whitespace-nowrap">标题</Th>
+          <Th align="right" className="whitespace-nowrap">
+            消息数
+          </Th>
+          <Th className="whitespace-nowrap">更新时间</Th>
+        </THead>
         <tbody>
           {rows.map((c) => (
-            <tr
+            <TableRow
               key={c.id}
-              onClick={() => onOpen(c.id)}
-              className="cursor-pointer border-border border-b last:border-0 hover:bg-accent/40"
+              label={`打开会话复盘 ${c.title || "未命名会话"}`}
+              onActivate={() => onOpen(c.id)}
             >
-              <td className="px-5 py-3 text-foreground">
+              <Td className="text-foreground">
                 {c.title || (
                   <span className="text-muted-foreground italic">未命名会话</span>
                 )}
-              </td>
-              <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+              </Td>
+              <Td align="right" className="text-muted-foreground tabular-nums">
                 {fmtInt(c.messages)}
-              </td>
-              <td className="px-5 py-3 text-muted-foreground tabular-nums">
+              </Td>
+              <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
                 {fmtTime(c.updated_at)}
-              </td>
-            </tr>
+              </Td>
+            </TableRow>
           ))}
         </tbody>
-      </table>
+      </TableFrame>
       {rows.length === 0 && (
         <div className="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground text-sm">
           <MessageSquare size={22} className="text-muted-foreground/60" />
@@ -490,49 +522,55 @@ function RecentTurnsTable({
           查看全部
         </Button>
       </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-5 py-2.5 font-medium">时间</th>
-            <th className="px-5 py-2.5 font-medium">状态</th>
-            <th className="px-5 py-2.5 font-medium">结束原因</th>
-            <th className="px-5 py-2.5 text-right font-medium">轮数</th>
-            <th className="px-5 py-2.5 text-right font-medium">耗时</th>
-          </tr>
-        </thead>
+      <TableFrame minWidth={720} className="rounded-none border-0">
+        <THead>
+          <Th className="whitespace-nowrap">时间</Th>
+          <Th className="whitespace-nowrap">状态</Th>
+          <Th className="whitespace-nowrap">结束原因</Th>
+          <Th align="right" className="whitespace-nowrap">
+            轮数
+          </Th>
+          <Th align="right" className="whitespace-nowrap">
+            耗时
+          </Th>
+        </THead>
         <tbody>
           {rows.map((t) => {
             const isError = t.status === "error";
             return (
-              <tr
+              <TableRow
                 key={t.turn_id}
-                onClick={() => onOpen(t.conversation_id)}
-                className="cursor-pointer border-border border-b align-top last:border-0 hover:bg-accent/40"
+                className="align-top"
+                label={`打开会话复盘 ${t.conversation_id}`}
+                onActivate={() => onOpen(t.conversation_id)}
               >
-                <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
+                <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
                   {fmtTime(t.created_at)}
-                </td>
-                <td className="px-5 py-3">
+                </Td>
+                <Td>
                   <Badge tone={isError ? "destructive" : "success"}>
                     {isError ? "失败" : "成功"}
                   </Badge>
-                </td>
-                <td className="max-w-xs px-5 py-3 text-muted-foreground">
+                </Td>
+                <Td className="max-w-xs text-muted-foreground">
                   <span className="line-clamp-2 break-words">
                     {isError ? (t.error ?? t.finish_reason ?? "error") : (t.finish_reason ?? "—")}
                   </span>
-                </td>
-                <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
+                </Td>
+                <Td align="right" className="text-muted-foreground tabular-nums">
                   {fmtInt(t.rounds)}
-                </td>
-                <td className="whitespace-nowrap px-5 py-3 text-right text-muted-foreground tabular-nums">
+                </Td>
+                <Td
+                  align="right"
+                  className="whitespace-nowrap text-muted-foreground tabular-nums"
+                >
                   {fmtMs(t.duration_ms)}
-                </td>
-              </tr>
+                </Td>
+              </TableRow>
             );
           })}
         </tbody>
-      </table>
+      </TableFrame>
       {rows.length === 0 && (
         <div className="py-10 text-center text-muted-foreground text-sm">
           该用户暂无回合活动

@@ -57,14 +57,25 @@ export async function login(
   );
 }
 
+/**
+ * Second login factor. The backend branches on which field is present (an authenticator
+ * code, or one single-use recovery code), so the caller must pick exactly one —
+ * sending both, or neither, is a 422.
+ */
+export type MfaChallenge = { code: string } | { recoveryCode: string };
+
 export async function loginMfa(
   pendingToken: string,
-  code: string,
+  challenge: MfaChallenge,
 ): Promise<LoginOutcome> {
+  const field =
+    "code" in challenge
+      ? { code: challenge.code }
+      : { recovery_code: challenge.recoveryCode };
   return parseLoginResponse(
     await api.post<LoginResponse>("/v1/auth/login/mfa", {
       pending_token: pendingToken,
-      code,
+      ...field,
     }),
   );
 }

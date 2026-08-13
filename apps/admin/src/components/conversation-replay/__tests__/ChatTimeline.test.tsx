@@ -220,6 +220,49 @@ describe("ChatTimeline chat layout", () => {
     fireEvent.click(screen.getByText("研究员"));
     expect(onSelectRun).toHaveBeenCalledWith("r-worker");
   });
+
+  it("气泡不再吞掉内部控件的键盘事件（折叠区块可键盘展开）", () => {
+    const onSelect = vi.fn();
+    const messages: ReplayMessage[] = [
+      msg({
+        id: "a1",
+        role: "assistant",
+        content: "结论",
+        spans: [
+          span({
+            kind: "tool",
+            name: "web_search",
+            args_preview: "q=foo",
+            result_preview: "3 hits",
+          }),
+        ],
+      }),
+    ];
+
+    render(
+      <ChatTimeline
+        messages={messages}
+        selectedId="a1"
+        selectedRunId={null}
+        onSelect={onSelect}
+        onSelectRun={vi.fn()}
+        isAnchored={() => false}
+      />,
+    );
+
+    // 回车落在「过程」折叠按钮上：气泡若照旧 preventDefault，浏览器就不会派发 click，
+    // 折叠区块便只剩鼠标能开。
+    const toggle = screen.getByText("1 次工具");
+    fireEvent.keyDown(toggle, { key: "Enter" });
+    fireEvent.keyDown(toggle, { key: " " });
+    expect(onSelect).not.toHaveBeenCalled();
+
+    // 落在气泡自身上的回车仍然选中该回合。
+    const bubble = toggle.closest('[role="button"]');
+    expect(bubble).toBeTruthy();
+    fireEvent.keyDown(bubble as HTMLElement, { key: "Enter" });
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("InspectorPanel worker dock", () => {

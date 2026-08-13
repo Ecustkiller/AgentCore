@@ -14,7 +14,24 @@ import {
 import { cn, fmtCny, fmtMs, fmtTime, nanoToYuan } from "@/lib/utils";
 import type { ReplayMessage } from "@/services/adminObservability";
 import { Users } from "lucide-react";
-import { useEffect, useRef } from "react";
+import { type KeyboardEvent, useEffect, useRef } from "react";
+
+/**
+ * Bubble containers are click-to-select, and they used to swallow every Enter/Space
+ * that bubbled up from the controls inside them — `preventDefault` on the ancestor
+ * cancels the button's own activation, so 展开全文 / 过程 / 工具 could be opened with a
+ * mouse and no other way. Selecting the turn is only what *this* element was asked to
+ * do; anything aimed at a nested control is left alone.
+ */
+function activateOnSelfKey(
+  e: KeyboardEvent<HTMLDivElement>,
+  onSelect: () => void,
+): void {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  if (e.target !== e.currentTarget) return;
+  e.preventDefault();
+  onSelect();
+}
 
 export function ChatTimeline({
   messages,
@@ -23,6 +40,7 @@ export function ChatTimeline({
   onSelect,
   onSelectRun,
   isAnchored,
+  className,
 }: {
   messages: ReplayMessage[];
   selectedId: string | null;
@@ -30,6 +48,8 @@ export function ChatTimeline({
   onSelect: (id: string) => void;
   onSelectRun: (runId: string) => void;
   isAnchored: (m: ReplayMessage) => boolean;
+  /** Sizing comes from the page's layout row — this pane just scrolls inside it. */
+  className?: string;
 }) {
   const refs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -43,10 +63,18 @@ export function ChatTimeline({
   }, [selectedId]);
 
   return (
-    <div className="flex max-h-[calc(100vh-11rem)] flex-col gap-4 overflow-y-auto pr-0.5">
+    <div
+      className={cn(
+        "flex flex-col gap-4 overflow-y-auto pr-0.5",
+        className,
+      )}
+    >
       {messages.map((m) => (
         <div
           key={m.id}
+          // Bubbles keep their own height: a flex column that is allowed to scroll
+          // will otherwise squeeze every message to fit the pane it lives in.
+          className="shrink-0"
           ref={(node) => {
             if (node) refs.current.set(m.id, node);
             else refs.current.delete(m.id);
@@ -101,13 +129,11 @@ function UserBubble({
     <div
       role="button"
       tabIndex={0}
+      // Which turn is open is otherwise carried by a ring alone — nothing a screen
+      // reader or a shared-link test can see.
+      aria-current={selected ? "true" : undefined}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+      onKeyDown={(e) => activateOnSelfKey(e, onSelect)}
       className={cn(
         "flex justify-end outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl",
         selected && "ring-1 ring-primary/30",
@@ -155,13 +181,9 @@ function SystemHarvestBubble({
     <div
       role="button"
       tabIndex={0}
+      aria-current={selected ? "true" : undefined}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+      onKeyDown={(e) => activateOnSelfKey(e, onSelect)}
       className={cn(
         "flex justify-start outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-xl",
         selected && "ring-1 ring-primary/30",
@@ -228,13 +250,9 @@ function AssistantBubble({
     <div
       role="button"
       tabIndex={0}
+      aria-current={selected ? "true" : undefined}
       onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
+      onKeyDown={(e) => activateOnSelfKey(e, onSelect)}
       className={cn(
         "max-w-[min(100%,48rem)] rounded-xl px-1 py-1 outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
         selected && "ring-1 ring-primary/25",

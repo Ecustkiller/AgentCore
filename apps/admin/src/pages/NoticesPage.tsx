@@ -1,7 +1,18 @@
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
+import { Dialog } from "@/components/ui/Dialog";
 import { Input } from "@/components/ui/Input";
+import { Card, Page, PageHeader } from "@/components/ui/Page";
+import { Pagination } from "@/components/ui/Pagination";
+import { Select, type SelectOption } from "@/components/ui/Select";
 import { Spinner } from "@/components/ui/Spinner";
+import {
+  EmptyState,
+  ErrorState,
+  Refreshing,
+  TableSkeleton,
+} from "@/components/ui/States";
+import { TableFrame, TableRow, THead, Td, Th } from "@/components/ui/Table";
 import { cn, fmtTime } from "@/lib/utils";
 import { errorMessage } from "@/services/api";
 import {
@@ -14,6 +25,8 @@ import {
   type NoticeTemplate,
 } from "@/lib/noticeTemplates";
 import { useAdminListPage } from "@/hooks/useAdminListPage";
+import { useFirstLoad } from "@/hooks/useFirstLoad";
+import { oneOf, useUrlFilters } from "@/hooks/useUrlFilters";
 import {
   type CreateNoticeRequest,
   type Notice,
@@ -28,22 +41,12 @@ import {
   publishNotice,
   updateNotice,
 } from "@/services/adminNotices";
-import {
-  Archive,
-  ChevronLeft,
-  ChevronRight,
-  Copy,
-  Megaphone,
-  Pencil,
-  Plus,
-  RefreshCw,
-  Send,
-  X,
-} from "lucide-react";
+import { Archive, Copy, Megaphone, Pencil, Plus, RefreshCw, Send } from "lucide-react";
 import {
   type FormEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -79,6 +82,25 @@ const DISMISS: Record<NoticeDismissPolicy, string> = {
 const PAGE_SIZE = 50;
 
 type StatusFilter = NoticeStatus | "all";
+
+const STATUS_FILTER_VALUES = [
+  "all",
+  "draft",
+  "published",
+  "archived",
+] as const satisfies readonly StatusFilter[];
+
+const STATUS_FILTERS: SelectOption[] = STATUS_FILTER_VALUES.map((value) => ({
+  value,
+  label: value === "all" ? "全部状态" : STATUS[value].label,
+}));
+
+/**
+ * `status` is the API's own query field; 全部 is the default and stays out of the URL.
+ * One list feeds both the dropdown and the codec, so a link can never carry a status
+ * the page has no option for.
+ */
+const NOTICE_FILTERS = { status: oneOf(STATUS_FILTER_VALUES, "all") };
 
 type FormState = {
   title: string;
@@ -188,17 +210,94 @@ function asStatus(raw: string): NoticeStatus {
   return "draft";
 }
 
+function noticeSurface(n: Notice): NoticeSurface {
+  return (n.surface as NoticeSurface) || "both";
+}
+
+function noticeDismiss(n: Notice): NoticeDismissPolicy {
+  return (n.dismiss_policy as NoticeDismissPolicy) || "once";
+}
+
+/**
+ * 正文的一行纯文本梗概，给列表的第二行用。
+ *
+ * 正文是 Markdown，只有客户端会渲染它；列表里直接放原文读到的是源码——「## 本次更新
+ * - 桌面端 **0.9.14** 修复了…」。这里只剥语法，不渲染：一行预览不值一个 Markdown
+ * 依赖，剥不干净最多多留一个符号，不会显示成别的内容。块级结构折成「·」分段，因为
+ * 换行在这一行里本来就看不见。
+ *
+ * 下划线强调不剥：公告里 `snake_case` 的字段名远比 `_斜体_` 常见，剥了会吃掉标识符。
+ */
+function plainPreview(body: string): string {
+  const inlined = body
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1");
+  const blocks: string[] = [];
+  for (const raw of inlined.split(/\r?\n/)) {
+    const line = raw
+      .replace(/^\s{0,3}(?:#{1,6}|>|[-*+]|\d+[.)])\s+/, "")
+      .replace(/^\s*(?:[-*_]\s*){3,}$/, "")
+      .trim();
+    if (line) blocks.push(line);
+  }
+  return blocks
+    .join(" · ")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1");
+}
+
+/**
+ * Everything that has to hold before a draft can be saved, in the order an operator
+ * would notice it. Only 标题 / 正文 / 摘要 were checked before, so a notice could be
+ * saved with a CTA button that had no link (dead button in the client), a cover path
+ * the client can't resolve, or an end time before its start (never displays at all) —
+ * all of which only surface once the thing is in front of users.
+ */
+function formError(form: FormState): string | null {
+  if (!form.title.trim()) return "请填写标题";
+  if (!form.body.trim()) return "请填写正文";
+  if (form.card_template === "article" && !form.summary.trim()) {
+    return "图文模板须填写摘要";
+  }
+  if (form.surface === "modal" && form.dismiss_policy === "never") {
+    return "弹窗展示面仅支持「可关闭」策略";
+  }
+  const cover = form.cover_url.trim();
+  if (cover && !/^https?:\/\//i.test(cover)) {
+    return "封面 URL 需以 http:// 或 https:// 开头";
+  }
+  const ctaLabel = form.cta_label.trim();
+  const ctaUrl = form.cta_url.trim();
+  if (ctaLabel && !ctaUrl) return "填了 CTA 文案就要填链接，否则按钮点了没反应";
+  if (ctaUrl && !ctaLabel) return "填了 CTA 链接就要填文案，否则按钮没有标题";
+  if (ctaUrl && !/^(https?:\/\/|\/)/i.test(ctaUrl)) {
+    return "CTA 链接需以 http(s):// 开头，或用「/」开头的应用内路径（如 /more/about）";
+  }
+  const start = fromLocalInput(form.start_at);
+  const end = fromLocalInput(form.end_at);
+  if (start && end && new Date(end) <= new Date(start)) {
+    return "结束时间要晚于开始时间，否则公告永远不会展示";
+  }
+  return null;
+}
+
+type PendingAction = { kind: "publish" | "archive"; notice: Notice };
+
 export function NoticesPage() {
   const [notices, setNotices] = useState<Notice[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useAdminListPage();
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const { values, set, reset } = useUrlFilters(NOTICE_FILTERS);
+  const statusFilter = values.status;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<Notice | "new" | null>(null);
   /** 新建时的表单种子（模板 / 复制草稿）；编辑已有公告时忽略 */
   const [formSeed, setFormSeed] = useState<FormState | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pending, setPending] = useState<PendingAction | null>(null);
 
   const openNew = (seed: FormState | null = null) => {
     setFormSeed(seed);
@@ -263,8 +362,6 @@ export function NoticesPage() {
     };
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-
   const upsertLocal = (updated: Notice) => {
     setNotices((prev) => {
       const idx = prev.findIndex((n) => n.id === updated.id);
@@ -275,37 +372,26 @@ export function NoticesPage() {
     });
   };
 
-  const handlePublish = async (notice: Notice) => {
+  const runPending = async (act: PendingAction) => {
     if (busyId) return;
+    const { kind, notice } = act;
     setBusyId(notice.id);
     try {
-      const updated = await publishNotice(notice.id);
+      const updated =
+        kind === "publish"
+          ? await publishNotice(notice.id)
+          : await archiveNotice(notice.id);
       upsertLocal(updated);
-      toast.success("公告已发布");
-      if (statusFilter !== "all" && statusFilter !== "published") {
-        void load();
-      }
+      toast.success(kind === "publish" ? "公告已发布" : "公告已归档");
+      const landsOutsideFilter =
+        statusFilter !== "all" &&
+        statusFilter !== (kind === "publish" ? "published" : "archived");
+      if (landsOutsideFilter) void load();
     } catch (err) {
       toast.error(errorMessage(err));
     } finally {
       setBusyId(null);
-    }
-  };
-
-  const handleArchive = async (notice: Notice) => {
-    if (busyId) return;
-    setBusyId(notice.id);
-    try {
-      const updated = await archiveNotice(notice.id);
-      upsertLocal(updated);
-      toast.success("公告已归档");
-      if (statusFilter !== "all" && statusFilter !== "archived") {
-        void load();
-      }
-    } catch (err) {
-      toast.error(errorMessage(err));
-    } finally {
-      setBusyId(null);
+      setPending(null);
     }
   };
 
@@ -320,203 +406,198 @@ export function NoticesPage() {
     }
   };
 
+  const filtered = statusFilter !== "all";
+  const firstLoad = loading && notices.length === 0 && !error;
+  const freezeFilters = useFirstLoad(loading);
+  const outOfRange = notices.length === 0 && total > 0 && page > 1;
+
   return (
-    <div className="mx-auto max-w-[1200px] px-6 py-8">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">公告</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            产品全局 Notice · 发布后写入桌面横幅/弹窗与/或 IM「AgentCore 官方」· 共{" "}
-            {total} 条
-            {statusFilter === "all"
-              ? ""
-              : `（筛选：${STATUS[statusFilter].label}）`}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" onClick={() => openNew()}>
-            <Plus size={14} />
-            新建公告
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void load()}
-            disabled={loading}
-            aria-label="刷新"
-          >
-            <RefreshCw size={14} className={cn(loading && "animate-spin")} />
-          </Button>
-        </div>
-      </div>
-
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <select
-          value={statusFilter}
-          onChange={(e) => {
-            setStatusFilter(e.target.value as StatusFilter);
-            setPage(1);
-          }}
-          aria-label="按状态筛选"
-          className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="all">全部状态</option>
-          <option value="draft">草稿</option>
-          <option value="published">已发布</option>
-          <option value="archived">已归档</option>
-        </select>
-      </div>
-
-      <div className="overflow-hidden rounded-xl border border-border bg-card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-5 py-2.5 font-medium">标题</th>
-              <th className="px-5 py-2.5 font-medium">状态</th>
-              <th className="px-5 py-2.5 font-medium">级别</th>
-              <th className="px-5 py-2.5 font-medium">展示面</th>
-              <th className="px-5 py-2.5 font-medium">关闭策略</th>
-              <th className="px-5 py-2.5 font-medium">更新时间</th>
-              <th className="px-5 py-2.5 text-right font-medium">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {notices.map((n) => {
-              const status = asStatus(n.status);
-              const s = STATUS[status];
-              const sev = SEVERITY[(n.severity as NoticeSeverity) || "normal"] ??
-                SEVERITY.normal;
-              const surface =
-                SURFACE[(n.surface as NoticeSurface) || "both"] ?? n.surface;
-              const dismiss =
-                DISMISS[(n.dismiss_policy as NoticeDismissPolicy) || "once"] ??
-                n.dismiss_policy;
-              const rowBusy = busyId === n.id;
-              const editable = status !== "archived";
-              return (
-                <tr
-                  key={n.id}
-                  className="border-border border-b last:border-0 hover:bg-accent/40"
-                >
-                  <td className="px-5 py-3">
-                    <div className="font-medium text-foreground">{n.title}</div>
-                    <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-                      {n.body}
-                    </div>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Badge tone={s.tone}>{s.label}</Badge>
-                  </td>
-                  <td className="px-5 py-3">
-                    <Badge tone={sev.tone}>{sev.label}</Badge>
-                  </td>
-                  <td className="px-5 py-3 text-muted-foreground">{surface}</td>
-                  <td className="px-5 py-3 text-muted-foreground">{dismiss}</td>
-                  <td className="px-5 py-3 text-muted-foreground tabular-nums">
-                    {fmtTime(n.updated_at)}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {editable && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={rowBusy}
-                          onClick={() => openEdit(n)}
-                        >
-                          <Pencil size={14} />
-                          编辑
-                        </Button>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={rowBusy}
-                        onClick={() => copyAsDraft(n)}
-                        title="复制字段为新草稿"
-                      >
-                        <Copy size={14} />
-                        复制
-                      </Button>
-                      {status === "draft" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          disabled={rowBusy}
-                          onClick={() => void handlePublish(n)}
-                        >
-                          {rowBusy ? <Spinner /> : <Send size={14} />}
-                          发布
-                        </Button>
-                      )}
-                      {status !== "archived" && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive"
-                          disabled={rowBusy}
-                          onClick={() => void handleArchive(n)}
-                        >
-                          {rowBusy ? <Spinner /> : <Archive size={14} />}
-                          归档
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-
-        {loading && (
-          <div className="flex items-center justify-center gap-2 py-10 text-muted-foreground text-sm">
-            <Spinner />
-            加载中…
-          </div>
-        )}
-        {!loading && error && (
-          <div className="flex flex-col items-center gap-3 py-10 text-sm">
-            <span className="text-destructive">{error}</span>
-            <Button variant="outline" size="sm" onClick={() => void load()}>
-              重试
+    <Page>
+      <PageHeader
+        title="公告"
+        description="产品全局 Notice · 发布后写入桌面横幅/弹窗与/或 IM「AgentCore 官方」"
+        note="发布与归档立即对用户生效；已投递的 IM 消息不会被撤回"
+        actions={
+          <>
+            <Button size="sm" onClick={() => openNew()}>
+              <Plus size={14} />
+              新建公告
             </Button>
-          </div>
-        )}
-        {!loading && !error && notices.length === 0 && (
-          <div className="flex flex-col items-center gap-3 py-12 text-center text-muted-foreground text-sm">
-            <Megaphone size={24} className="text-muted-foreground/60" />
-            {statusFilter === "all"
-              ? "还没有公告，点击「新建公告」创建第一条"
-              : `没有「${STATUS[statusFilter].label}」状态的公告`}
-          </div>
-        )}
-      </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void load()}
+              disabled={loading}
+              aria-label="刷新"
+            >
+              <RefreshCw size={14} className={cn(loading && "animate-spin")} />
+            </Button>
+          </>
+        }
+        filters={
+          <Select
+            aria-label="按状态筛选"
+            value={statusFilter}
+            disabled={freezeFilters}
+            onChange={(e) => set({ status: e.target.value as StatusFilter })}
+            options={STATUS_FILTERS}
+          />
+        }
+      />
 
-      {!loading && !error && totalPages > 1 && (
-        <div className="mt-4 flex items-center justify-center gap-3">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => setPage(Math.max(1, page - 1))}
-            aria-label="上一页"
-          >
-            <ChevronLeft size={14} />
-          </Button>
-          <span className="text-muted-foreground text-sm tabular-nums">
-            {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= totalPages}
-            onClick={() => setPage(page + 1)}
-            aria-label="下一页"
-          >
-            <ChevronRight size={14} />
-          </Button>
-        </div>
+      {firstLoad ? (
+        <TableSkeleton columns={7} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : (
+        <Refreshing active={loading}>
+          {notices.length === 0 ? (
+            <Card>
+              {outOfRange ? (
+                // 共 N 条 next to “还没有公告” reads as data loss; it's just a stale
+                // `?page=` from a bookmark or a back step.
+                <EmptyState
+                  icon={Megaphone}
+                  title="这一页没有公告"
+                  description={`当前共 ${total} 条，第 ${page} 页已超出范围。`}
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                      回到第一页
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={Megaphone}
+                  title={
+                    filtered
+                      ? `没有「${STATUS[statusFilter].label}」状态的公告`
+                      : "还没有公告"
+                  }
+                  description={
+                    filtered
+                      ? "换个状态再看，或清除筛选查看全部公告。"
+                      : "新建后先存为草稿，确认文案与展示面再发布。"
+                  }
+                  action={
+                    filtered ? (
+                      <Button variant="outline" size="sm" onClick={reset}>
+                        清除筛选
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={() => openNew()}>
+                        <Plus size={14} />
+                        新建公告
+                      </Button>
+                    )
+                  }
+                />
+              )}
+            </Card>
+          ) : (
+            <TableFrame minWidth={1040}>
+              <THead>
+                <Th>标题</Th>
+                <Th>状态</Th>
+                <Th>级别</Th>
+                <Th>展示面</Th>
+                <Th>关闭策略</Th>
+                <Th>更新时间</Th>
+                <Th align="right">操作</Th>
+              </THead>
+              <tbody>
+                {notices.map((n) => {
+                  const status = asStatus(n.status);
+                  const s = STATUS[status];
+                  const sev =
+                    SEVERITY[(n.severity as NoticeSeverity) || "normal"] ??
+                    SEVERITY.normal;
+                  const surface = SURFACE[noticeSurface(n)] ?? n.surface;
+                  const dismiss = DISMISS[noticeDismiss(n)] ?? n.dismiss_policy;
+                  const rowBusy = busyId === n.id;
+                  const anyBusy = busyId !== null;
+                  const editable = status !== "archived";
+                  return (
+                    <TableRow key={n.id}>
+                      <Td>
+                        <div className="font-medium text-foreground">{n.title}</div>
+                        <div className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
+                          {plainPreview(n.body)}
+                        </div>
+                      </Td>
+                      <Td>
+                        <Badge tone={s.tone}>{s.label}</Badge>
+                      </Td>
+                      <Td>
+                        <Badge tone={sev.tone}>{sev.label}</Badge>
+                      </Td>
+                      <Td className="text-muted-foreground">{surface}</Td>
+                      <Td className="text-muted-foreground">{dismiss}</Td>
+                      <Td className="whitespace-nowrap tabular-nums text-muted-foreground">
+                        {fmtTime(n.updated_at)}
+                      </Td>
+                      <Td align="right">
+                        <div className="flex items-center justify-end gap-1">
+                          {editable && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={anyBusy}
+                              onClick={() => openEdit(n)}
+                            >
+                              <Pencil size={14} />
+                              编辑
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            disabled={anyBusy}
+                            onClick={() => copyAsDraft(n)}
+                            title="复制字段为新草稿"
+                          >
+                            <Copy size={14} />
+                            复制
+                          </Button>
+                          {status === "draft" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              disabled={anyBusy}
+                              onClick={() => setPending({ kind: "publish", notice: n })}
+                            >
+                              {rowBusy ? <Spinner /> : <Send size={14} />}
+                              发布
+                            </Button>
+                          )}
+                          {status !== "archived" && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive"
+                              disabled={anyBusy}
+                              onClick={() => setPending({ kind: "archive", notice: n })}
+                            >
+                              {rowBusy ? <Spinner /> : <Archive size={14} />}
+                              归档
+                            </Button>
+                          )}
+                        </div>
+                      </Td>
+                    </TableRow>
+                  );
+                })}
+              </tbody>
+            </TableFrame>
+          )}
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+            disabled={loading}
+          />
+        </Refreshing>
       )}
 
       {editing && (
@@ -527,7 +608,74 @@ export function NoticesPage() {
           onSaved={onSaved}
         />
       )}
-    </div>
+
+      {pending && (
+        <ConfirmActionDialog
+          action={pending}
+          busy={busyId === pending.notice.id}
+          onClose={() => setPending(null)}
+          onConfirm={() => void runPending(pending)}
+        />
+      )}
+    </Page>
+  );
+}
+
+/**
+ * 发布 / 归档 both reach every user immediately and neither is undoable from this
+ * console (归档 also locks editing — the API rejects writes to archived notices), so
+ * they no longer fire straight off a single ghost-button click.
+ */
+function ConfirmActionDialog({
+  action,
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  action: PendingAction;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+}) {
+  const { kind, notice } = action;
+  const publishing = kind === "publish";
+  const hint = surfacePublishHint(noticeSurface(notice), noticeDismiss(notice));
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      busy={busy}
+      title={publishing ? "发布公告" : "归档公告"}
+      description={notice.title}
+      footer={
+        <>
+          <Button variant="outline" size="sm" onClick={onClose} disabled={busy}>
+            取消
+          </Button>
+          <Button
+            variant={publishing ? "primary" : "destructive"}
+            size="sm"
+            onClick={onConfirm}
+            disabled={busy}
+          >
+            {busy ? <Spinner /> : publishing ? <Send size={14} /> : <Archive size={14} />}
+            {publishing ? "确认发布" : "确认归档"}
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        {publishing
+          ? "发布后立即对所有用户生效。已投递到 IM「AgentCore 官方」的消息无法撤回；后续归档只能停止横幅 / 弹窗展示。"
+          : "归档后从横幅 / 弹窗撤下，并且不能再编辑（服务端会拒绝对已归档公告的修改）。已投递的 IM 消息不受影响。"}
+      </p>
+      {publishing && hint && (
+        <p className="mt-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          {hint}
+        </p>
+      )}
+    </Dialog>
   );
 }
 
@@ -543,6 +691,7 @@ function NoticeFormDialog({
   onSaved: (saved: Notice, isNew: boolean) => void;
 }) {
   const isNew = notice === null;
+  const formId = useId();
   const [form, setForm] = useState<FormState>(() => {
     if (notice) return noticeToForm(notice);
     if (seed) return seed;
@@ -580,31 +729,16 @@ function NoticeFormDialog({
   };
 
   const publishHint = useMemo(
-    () =>
-      surfacePublishHint(
-        form.surface as NoticeTemplate["surface"],
-        form.dismiss_policy as NoticeTemplate["dismiss_policy"],
-      ),
+    () => surfacePublishHint(form.surface, form.dismiss_policy),
     [form.surface, form.dismiss_policy],
   );
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (saving) return;
-    if (!form.title.trim()) {
-      toast.error("请填写标题");
-      return;
-    }
-    if (!form.body.trim()) {
-      toast.error("请填写正文");
-      return;
-    }
-    if (form.card_template === "article" && !form.summary.trim()) {
-      toast.error("图文模板须填写摘要");
-      return;
-    }
-    if (invalidModalNever) {
-      toast.error("弹窗展示面仅支持「可关闭」策略");
+    const problem = formError(form);
+    if (problem) {
+      toast.error(problem);
       return;
     }
     setSaving(true);
@@ -613,10 +747,7 @@ function NoticeFormDialog({
         const created = await createNotice(buildCreateBody(form));
         onSaved(created, true);
       } else {
-        const updated = await updateNotice(
-          notice.id,
-          buildUpdateBody(form),
-        );
+        const updated = await updateNotice(notice.id, buildUpdateBody(form));
         onSaved(updated, false);
       }
     } catch (err) {
@@ -625,337 +756,293 @@ function NoticeFormDialog({
     }
   };
 
-  const selectClass =
-    "h-9 w-full rounded-lg border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
+  const fieldClass =
+    "w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-overlay px-6"
-      onMouseDown={onClose}
-    >
-      <div
-        className="flex max-h-[90vh] w-full max-w-xl flex-col rounded-xl border border-border bg-card p-5 shadow-lg"
-        onMouseDown={(e) => e.stopPropagation()}
-      >
-        <div className="mb-4 flex shrink-0 items-start justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              {isNew ? "新建公告" : "编辑公告"}
-            </h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {isNew
-                ? "可先套用模板，用快捷填写生成正文后再微调；创建后为草稿"
-                : "已归档不可改；已发布内容修改后立即对用户生效（不回填历史 IM）"}
-            </p>
-          </div>
-          <button
+    <Dialog
+      open
+      onClose={onClose}
+      busy={saving}
+      size="lg"
+      title={isNew ? "新建公告" : "编辑公告"}
+      description={
+        isNew
+          ? "可先套用模板，用快捷填写生成正文后再微调；创建后为草稿"
+          : "已归档不可改；已发布内容修改后立即对用户生效（不回填历史 IM）"
+      }
+      footer={
+        <>
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
             onClick={onClose}
-            aria-label="关闭"
-            className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+            disabled={saving}
           >
-            <X size={16} />
-          </button>
-        </div>
-
-        <form
-          onSubmit={handleSubmit}
-          className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
-        >
-          {isNew && (
-            <div className="flex flex-col gap-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                套用模板
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {NOTICE_TEMPLATES.map((t) => {
-                  const selected = activeTemplateId === t.id;
-                  return (
-                    <button
-                      key={t.id}
-                      type="button"
-                      title={t.description}
-                      onClick={() => applyTemplate(t)}
+            取消
+          </Button>
+          <Button type="submit" form={formId} size="sm" disabled={saving}>
+            {saving && <Spinner />}
+            {isNew ? "创建草稿" : "保存"}
+          </Button>
+        </>
+      }
+    >
+      <form
+        id={formId}
+        onSubmit={(e) => void handleSubmit(e)}
+        className="flex flex-col gap-4"
+      >
+        {isNew && (
+          <div className="flex flex-col gap-2">
+            <span className="text-xs font-medium text-muted-foreground">套用模板</span>
+            <div className="flex flex-wrap gap-1.5">
+              {NOTICE_TEMPLATES.map((t) => {
+                const selected = activeTemplateId === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    title={t.description}
+                    onClick={() => applyTemplate(t)}
+                    className={cn(
+                      "rounded-lg border px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+                      selected
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    )}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+            {activeTemplate?.endHint && (
+              <p className="text-xs text-warning">{activeTemplate.endHint}</p>
+            )}
+            {activeTemplate && activeTemplate.slots.length > 0 && (
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    快捷填写（填完点生成，可再手改标题/正文）
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={applySlotsToCopy}
+                  >
+                    生成正文
+                  </Button>
+                </div>
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                  {activeTemplate.slots.map((slot) => (
+                    <label
+                      key={slot.key}
                       className={cn(
-                        "rounded-lg border px-2.5 py-1 text-xs transition-colors",
-                        selected
-                          ? "border-primary bg-primary/10 text-foreground"
-                          : "border-border bg-card text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                        "flex flex-col gap-1",
+                        slot.multiline && "sm:col-span-2",
                       )}
                     >
-                      {t.label}
-                    </button>
-                  );
-                })}
-              </div>
-              {activeTemplate?.endHint && (
-                <p className="text-xs text-warning">{activeTemplate.endHint}</p>
-              )}
-              {activeTemplate && activeTemplate.slots.length > 0 && (
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <span className="text-xs font-medium text-muted-foreground">
-                      快捷填写（填完点生成，可再手改标题/正文）
-                    </span>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={applySlotsToCopy}
-                    >
-                      生成正文
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                    {activeTemplate.slots.map((slot) => (
-                      <label
-                        key={slot.key}
-                        className={cn(
-                          "flex flex-col gap-1",
-                          slot.multiline && "sm:col-span-2",
-                        )}
-                      >
-                        <span className="text-[11px] font-medium text-muted-foreground">
-                          {slot.label}
-                        </span>
-                        {slot.multiline ? (
-                          <textarea
-                            value={slotValues[slot.key] ?? ""}
-                            onChange={(e) =>
-                              setSlotValues((prev) => ({
-                                ...prev,
-                                [slot.key]: e.target.value,
-                              }))
-                            }
-                            placeholder={slot.placeholder}
-                            rows={2}
-                            className="w-full rounded-lg border border-input bg-card px-2.5 py-1.5 text-sm text-foreground outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-                          />
-                        ) : (
-                          <Input
-                            value={slotValues[slot.key] ?? ""}
-                            onChange={(e) =>
-                              setSlotValues((prev) => ({
-                                ...prev,
-                                [slot.key]: e.target.value,
-                              }))
-                            }
-                            placeholder={slot.placeholder}
-                          />
-                        )}
-                      </label>
-                    ))}
-                  </div>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {slot.label}
+                      </span>
+                      {slot.multiline ? (
+                        <textarea
+                          value={slotValues[slot.key] ?? ""}
+                          onChange={(e) =>
+                            setSlotValues((prev) => ({
+                              ...prev,
+                              [slot.key]: e.target.value,
+                            }))
+                          }
+                          placeholder={slot.placeholder}
+                          rows={2}
+                          className={fieldClass}
+                        />
+                      ) : (
+                        <Input
+                          value={slotValues[slot.key] ?? ""}
+                          onChange={(e) =>
+                            setSlotValues((prev) => ({
+                              ...prev,
+                              [slot.key]: e.target.value,
+                            }))
+                          }
+                          placeholder={slot.placeholder}
+                        />
+                      )}
+                    </label>
+                  ))}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
+        )}
 
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">标题</span>
+          <Input
+            value={form.title}
+            onChange={(e) => set("title")(e.target.value)}
+            placeholder="简短标题"
+            autoFocus
+          />
+        </label>
+
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">正文</span>
+          <textarea
+            value={form.body}
+            onChange={(e) => set("body")(e.target.value)}
+            placeholder="公告正文"
+            rows={7}
+            className={fieldClass}
+          />
+        </label>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">官方号模板</span>
+            <Select
+              aria-label="官方号模板"
+              value={form.card_template}
+              onChange={(e) =>
+                set("card_template")(e.target.value as NoticeCardTemplate)
+              }
+              options={[
+                { value: "service", label: "服务通知（默认）" },
+                { value: "article", label: "图文（须摘要）" },
+              ]}
+              className="w-full"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5 sm:col-span-2">
             <span className="text-xs font-medium text-muted-foreground">
-              标题
+              摘要{form.card_template === "article" ? "（图文必填）" : "（可选）"}
             </span>
             <Input
-              value={form.title}
-              onChange={(e) => set("title")(e.target.value)}
-              placeholder="简短标题"
-              autoFocus
-              required
+              value={form.summary}
+              onChange={(e) => set("summary")(e.target.value)}
+              placeholder={
+                form.card_template === "article"
+                  ? "卡面摘要，两句内"
+                  : "服务卡可空，卡面用正文"
+              }
             />
           </label>
+        </div>
 
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-medium text-muted-foreground">
+            封面 URL（可选）
+          </span>
+          <Input
+            value={form.cover_url}
+            onChange={(e) => set("cover_url")(e.target.value)}
+            placeholder="https://… · 无图勿填占位"
+          />
+        </label>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              正文
-            </span>
-            <textarea
-              value={form.body}
-              onChange={(e) => set("body")(e.target.value)}
-              placeholder="公告正文"
-              required
-              rows={7}
-              className="w-full rounded-lg border border-input bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+            <span className="text-xs font-medium text-muted-foreground">级别</span>
+            <Select
+              aria-label="级别"
+              value={form.severity}
+              onChange={(e) => set("severity")(e.target.value as NoticeSeverity)}
+              options={[
+                { value: "normal", label: "普通" },
+                { value: "high", label: "重要" },
+                { value: "critical", label: "紧急" },
+              ]}
+              className="w-full"
             />
           </label>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                官方号模板
-              </span>
-              <select
-                value={form.card_template}
-                onChange={(e) =>
-                  set("card_template")(e.target.value as NoticeCardTemplate)
-                }
-                className={selectClass}
-              >
-                <option value="service">服务通知（默认）</option>
-                <option value="article">图文（须摘要）</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1.5 sm:col-span-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                摘要
-                {form.card_template === "article" ? "（图文必填）" : "（可选）"}
-              </span>
-              <Input
-                value={form.summary}
-                onChange={(e) => set("summary")(e.target.value)}
-                placeholder={
-                  form.card_template === "article"
-                    ? "卡面摘要，两句内"
-                    : "服务卡可空，卡面用正文"
-                }
-                required={form.card_template === "article"}
-              />
-            </label>
-          </div>
-
           <label className="flex flex-col gap-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              封面 URL（可选）
-            </span>
+            <span className="text-xs font-medium text-muted-foreground">展示面</span>
+            <Select
+              aria-label="展示面"
+              value={form.surface}
+              onChange={(e) => set("surface")(e.target.value as NoticeSurface)}
+              options={[
+                { value: "both", label: "横幅 + IM 官方号" },
+                { value: "modal", label: "弹窗 + IM 官方号" },
+                { value: "banner", label: "仅横幅" },
+                { value: "inbox", label: "仅 IM 官方号" },
+              ]}
+              className="w-full"
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">关闭策略</span>
+            <Select
+              aria-label="关闭策略"
+              value={form.dismiss_policy}
+              onChange={(e) =>
+                set("dismiss_policy")(e.target.value as NoticeDismissPolicy)
+              }
+              options={[
+                { value: "once", label: "可关闭（不回潮）" },
+                { value: "never", label: "横幅可关、官方号常驻" },
+              ]}
+              className="w-full"
+            />
+          </label>
+        </div>
+
+        {publishHint && (
+          <p
+            className={cn(
+              "rounded-lg border px-3 py-2 text-xs",
+              invalidModalNever
+                ? "border-destructive/40 bg-destructive/10 text-destructive"
+                : "border-border bg-muted/40 text-muted-foreground",
+            )}
+          >
+            {publishHint}
+          </p>
+        )}
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">CTA 文案</span>
             <Input
-              value={form.cover_url}
-              onChange={(e) => set("cover_url")(e.target.value)}
-              placeholder="https://… · 无图勿填占位"
+              value={form.cta_label}
+              onChange={(e) => set("cta_label")(e.target.value)}
+              placeholder="可选，如「了解更多」"
             />
           </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">CTA 链接</span>
+            <Input
+              value={form.cta_url}
+              onChange={(e) => set("cta_url")(e.target.value)}
+              placeholder="https://… 或应用内 /more/about"
+            />
+          </label>
+        </div>
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                级别
-              </span>
-              <select
-                value={form.severity}
-                onChange={(e) =>
-                  set("severity")(e.target.value as NoticeSeverity)
-                }
-                className={selectClass}
-              >
-                <option value="normal">普通</option>
-                <option value="high">重要</option>
-                <option value="critical">紧急</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                展示面
-              </span>
-              <select
-                value={form.surface}
-                onChange={(e) =>
-                  set("surface")(e.target.value as NoticeSurface)
-                }
-                className={selectClass}
-              >
-                <option value="both">横幅 + IM 官方号</option>
-                <option value="modal">弹窗 + IM 官方号</option>
-                <option value="banner">仅横幅</option>
-                <option value="inbox">仅 IM 官方号</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                关闭策略
-              </span>
-              <select
-                value={form.dismiss_policy}
-                onChange={(e) =>
-                  set("dismiss_policy")(
-                    e.target.value as NoticeDismissPolicy,
-                  )
-                }
-                className={selectClass}
-              >
-                <option value="once">可关闭（不回潮）</option>
-                <option value="never">横幅可关、官方号常驻</option>
-              </select>
-            </label>
-          </div>
-
-          {publishHint && (
-            <p
-              className={cn(
-                "rounded-lg border px-3 py-2 text-xs",
-                invalidModalNever
-                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                  : "border-border bg-muted/40 text-muted-foreground",
-              )}
-            >
-              {publishHint}
-            </p>
-          )}
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                CTA 文案
-              </span>
-              <Input
-                value={form.cta_label}
-                onChange={(e) => set("cta_label")(e.target.value)}
-                placeholder="可选，如「了解更多」"
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                CTA 链接
-              </span>
-              <Input
-                value={form.cta_url}
-                onChange={(e) => set("cta_url")(e.target.value)}
-                placeholder="可选，https://…"
-              />
-            </label>
-          </div>
-
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                开始时间
-              </span>
-              <Input
-                type="datetime-local"
-                value={form.start_at}
-                onChange={(e) => set("start_at")(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">
-                结束时间
-              </span>
-              <Input
-                type="datetime-local"
-                value={form.end_at}
-                onChange={(e) => set("end_at")(e.target.value)}
-              />
-            </label>
-          </div>
-
-          <div className="mt-1 flex shrink-0 justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={onClose}
-              disabled={saving}
-            >
-              取消
-            </Button>
-            <Button
-              type="submit"
-              size="sm"
-              disabled={saving || invalidModalNever}
-            >
-              {saving && <Spinner />}
-              {isNew ? "创建草稿" : "保存"}
-            </Button>
-          </div>
-        </form>
-      </div>
-    </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">开始时间</span>
+            <Input
+              type="datetime-local"
+              value={form.start_at}
+              onChange={(e) => set("start_at")(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-muted-foreground">结束时间</span>
+            <Input
+              type="datetime-local"
+              value={form.end_at}
+              onChange={(e) => set("end_at")(e.target.value)}
+            />
+          </label>
+        </div>
+      </form>
+    </Dialog>
   );
 }

@@ -2,8 +2,8 @@ import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
 import { Spinner } from "@/components/ui/Spinner";
 import { ApiError, errorMessage } from "@/services/api";
-import { changePassword, fetchMe } from "@/services/auth";
-import { useAuthStore } from "@/stores/auth";
+import { changePassword } from "@/services/auth";
+import { applySession } from "@/services/session";
 import { ShieldCheck } from "lucide-react";
 import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
@@ -14,7 +14,6 @@ function errMsg(e: unknown, fallback: string): string {
 
 /** Full-screen gate after an admin-reset temp password login. */
 export function ForcePasswordChangePage() {
-  const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -37,8 +36,10 @@ export function ForcePasswordChangePage() {
     setError(null);
     try {
       await changePassword(current, next);
-      const user = await fetchMe();
-      setAuthenticated(user);
+      // Re-derive the whole session rather than just marking it authenticated:
+      // an account can be behind *both* gates (temp password + MFA enrollment),
+      // and the store's default would drop the MFA one on the way through.
+      await applySession();
       toast.success("密码已设置，可以正常使用管理后台");
     } catch (err) {
       setError(errMsg(err, errorMessage(err)));

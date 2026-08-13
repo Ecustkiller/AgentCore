@@ -13,6 +13,12 @@ import { type FormEvent, useState } from "react";
 import { toast } from "sonner";
 
 type Step = "credentials" | "mfa";
+/** Second factor: the authenticator's rotating code, or one single-use recovery code. */
+type MfaMode = "totp" | "recovery";
+
+const TOTP_LENGTH = 6;
+/** `secrets.token_hex(8)` on the backend — 16 hex chars, dashes are cosmetic. */
+const RECOVERY_LENGTH = 16;
 
 export function LoginPage() {
   const setAuthenticated = useAuthStore((s) => s.setAuthenticated);
@@ -26,7 +32,11 @@ export function LoginPage() {
   /** Default off — session persistence is opt-in via「保持登录」. */
   const [persistSession, setPersistSession] = useState(false);
   const [totpCode, setTotpCode] = useState("");
+  const [mfaMode, setMfaMode] = useState<MfaMode>("totp");
   const [submitting, setSubmitting] = useState(false);
+
+  const mfaLength = mfaMode === "totp" ? TOTP_LENGTH : RECOVERY_LENGTH;
+  const mfaReady = totpCode.length === mfaLength;
 
   const handleCredentials = async (e: FormEvent) => {
     e.preventDefault();
@@ -60,10 +70,14 @@ export function LoginPage() {
   const handleMfa = async (e: FormEvent) => {
     e.preventDefault();
     const token = pendingMfaToken;
-    if (!token || !totpCode || submitting) return;
+    if (!token || !mfaReady || submitting) return;
     setSubmitting(true);
     try {
-      const outcome = await loginMfa(token, totpCode.trim());
+      const entered = totpCode.trim();
+      const outcome = await loginMfa(
+        token,
+        mfaMode === "totp" ? { code: entered } : { recoveryCode: entered },
+      );
       if (outcome.kind !== "success") {
         toast.error("验证失败，请重试");
         setSubmitting(false);
@@ -82,7 +96,13 @@ export function LoginPage() {
     setPendingMfaToken(null);
     setStep("credentials");
     setTotpCode("");
+    setMfaMode("totp");
     setSubmitting(false);
+  };
+
+  const switchMfaMode = () => {
+    setMfaMode((m) => (m === "totp" ? "recovery" : "totp"));
+    setTotpCode("");
   };
 
   return (
@@ -97,9 +117,11 @@ export function LoginPage() {
               AgentCore 管理后台
             </h1>
             <p className="mt-1 text-sm text-muted-foreground">
-              {step === "mfa"
-                ? "输入身份验证器中的 6 位验证码"
-                : "仅限平台管理员登录"}
+              {step !== "mfa"
+                ? "仅限平台管理员登录"
+                : mfaMode === "totp"
+                  ? "输入身份验证器中的 6 位验证码"
+                  : "输入绑定时保存的恢复码，每个仅可使用一次"}
             </p>
           </div>
         </div>
@@ -145,23 +167,60 @@ export function LoginPage() {
           </form>
         ) : (
           <form onSubmit={(e) => void handleMfa(e)} className="flex flex-col gap-3">
-            <Input
-              type="text"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              placeholder="验证码（6 位）"
-              value={totpCode}
-              onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-              disabled={submitting}
-              autoFocus
-            />
+            {mfaMode === "totp" ? (
+              <Input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="验证码（6 位）"
+                aria-label="身份验证器验证码"
+                value={totpCode}
+                onChange={(e) =>
+                  setTotpCode(e.target.value.replace(/\D/g, "").slice(0, TOTP_LENGTH))
+                }
+                disabled={submitting}
+                autoFocus
+              />
+            ) : (
+              <Input
+                type="text"
+                inputMode="text"
+                autoComplete="one-time-code"
+                placeholder="恢复码（16 位）"
+                aria-label="恢复码"
+                className="font-mono"
+                value={totpCode}
+                onChange={(e) =>
+                  // Dashes/spaces are how people write these down; the backend
+                  // normalizes the same way before matching.
+                  setTotpCode(
+                    e.target.value
+                      .replace(/[^0-9a-fA-F]/g, "")
+                      .toLowerCase()
+                      .slice(0, RECOVERY_LENGTH),
+                  )
+                }
+                disabled={submitting}
+                autoFocus
+              />
+            )}
             <Button
               type="submit"
-              disabled={submitting || totpCode.length !== 6}
+              disabled={submitting || !mfaReady}
               className="mt-1 w-full"
             >
               {submitting && <Spinner />}
               {submitting ? "验证中…" : "验证并登录"}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={switchMfaMode}
+              disabled={submitting}
+              className="w-full"
+            >
+              {mfaMode === "totp" ? "无法使用验证器？用恢复码登录" : "改用验证器验证码"}
             </Button>
             <Button
               type="button"

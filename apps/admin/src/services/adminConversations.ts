@@ -29,6 +29,7 @@ export interface ListConversationsParams {
 
 export async function listConversations(
   params: ListConversationsParams,
+  signal?: AbortSignal,
 ): Promise<AdminConversationListResponse> {
   const search = new URLSearchParams({
     page: String(params.page),
@@ -48,6 +49,7 @@ export async function listConversations(
   if (params.until) search.set("until", params.until);
   return api.get<AdminConversationListResponse>(
     `/v1/admin/conversations?${search.toString()}`,
+    signal ? { signal } : undefined,
   );
 }
 
@@ -66,6 +68,7 @@ export interface ListTurnsParams {
 
 export async function listTurns(
   params: ListTurnsParams,
+  signal?: AbortSignal,
 ): Promise<AdminTurnListResponse> {
   const search = new URLSearchParams({
     page: String(params.page),
@@ -84,5 +87,6 @@ export async function listTurns(
   }
   return api.get<AdminTurnListResponse>(
     `/v1/admin/conversations/turns?${search.toString()}`,
+    signal ? { signal } : undefined,
   );
 }

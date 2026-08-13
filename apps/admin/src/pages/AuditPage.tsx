@@ -1,22 +1,35 @@
+import { CopyableId } from "@/components/CopyableId";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
-import { Spinner } from "@/components/ui/Spinner";
-import { cn } from "@/lib/utils";
+import { Dialog } from "@/components/ui/Dialog";
+import { Card, Page, PageHeader } from "@/components/ui/Page";
+import { Pagination } from "@/components/ui/Pagination";
+import { Select, type SelectOption } from "@/components/ui/Select";
+import {
+  EmptyState,
+  ErrorState,
+  Refreshing,
+  TableSkeleton,
+} from "@/components/ui/States";
+import { TableFrame, TableRow, THead, Td, Th } from "@/components/ui/Table";
+import { useAdminListPage } from "@/hooks/useAdminListPage";
+import { useFirstLoad } from "@/hooks/useFirstLoad";
+import { oneOf, str, useUrlFilters } from "@/hooks/useUrlFilters";
+import { cn, fmtTime } from "@/lib/utils";
 import {
   AUDIT_ACTION_LABELS,
   type AdminAuditLogLine,
   listAuditLogs,
 } from "@/services/adminAudit";
-import { listUsers, type AdminUserListItem } from "@/services/adminUsers";
-import { useAdminListPage } from "@/hooks/useAdminListPage";
+import { type AdminUserListItem, listUsers } from "@/services/adminUsers";
 import { errorMessage } from "@/services/api";
-import { ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { Eye, History, RefreshCw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 const PAGE_SIZE = 50;
 
-const ACTION_FILTERS: { value: string; label: string }[] = [
+const ACTION_FILTERS: SelectOption[] = [
   { value: "", label: "全部操作" },
   { value: "user.update", label: "修改用户" },
   { value: "user.reset_password", label: "重置密码" },
@@ -26,14 +39,51 @@ const ACTION_FILTERS: { value: string; label: string }[] = [
   { value: "conversation.replay", label: "回放对话" },
 ];
 
-function fmtTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
+/**
+ * Param names are the API's own query fields (`action`, `actor_id`). The action codec
+ * reads the dropdown itself, so a hand-edited `?action=` can never carry a value the
+ * page cannot also offer as a way back out.
+ */
+const AUDIT_FILTERS = {
+  action: oneOf(
+    ACTION_FILTERS.map((o) => o.value),
+    "",
+  ),
+  actor_id: str(),
+};
+
+type DetailEntry = [string, unknown];
+
+function detailEntries(detail: AdminAuditLogLine["detail"]): DetailEntry[] {
+  return detail ? Object.entries(detail) : [];
 }
 
-function fmtDetail(detail: AdminAuditLogLine["detail"]): string {
-  if (!detail || Object.keys(detail).length === 0) return "—";
-  return JSON.stringify(detail);
+function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function previewValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return `[${value.length}]`;
+  if (typeof value === "object") return "{…}";
+  return clip(String(value), 24);
+}
+
+/**
+ * One line of gist for the 详情 column.
+ *
+ * The column used to hold the whole `JSON.stringify(detail)` behind `truncate` +
+ * `title`, so anything past ~40 characters was readable only as a hover tooltip —
+ * unreachable by keyboard and impossible to copy. Now the cell shows the first
+ * couple of fields and the full document opens in a dialog.
+ */
+function detailPreview(entries: DetailEntry[]): string {
+  const head = entries
+    .slice(0, 2)
+    .map(([key, value]) => `${key}=${previewValue(value)}`)
+    .join(" · ");
+  const rest = entries.length - 2;
+  return rest > 0 ? `${head} +${rest}` : head;
 }
 
 function AuditTarget({ row }: { row: AdminAuditLogLine }) {
@@ -83,11 +133,24 @@ export function AuditPage() {
   const [rows, setRows] = useState<AdminAuditLogLine[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useAdminListPage();
-  const [action, setAction] = useState("");
-  const [actorId, setActorId] = useState("");
+  const { values, set, reset } = useUrlFilters(AUDIT_FILTERS);
+  const { action, actor_id: actorId } = values;
+  /**
+   * Name of an actor picked from a row, who may not be in the admin roster. Kept
+   * alongside the id it describes: `actor_id` can now change without going through
+   * that button (a Back step, a pasted link), and a bare name would then label the
+   * wrong operator.
+   */
+  const [actorHint, setActorHint] = useState<{ id: string; name: string } | null>(
+    null,
+  );
   const [operators, setOperators] = useState<AdminUserListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [detailRow, setDetailRow] = useState<AdminAuditLogLine | null>(null);
+  // 操作者 / 操作类型 flips and page changes can overlap; only the latest response wins.
+  const loadGenRef = useRef(0);
+  const loadAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     void listUsers({ page: 1, pageSize: 100, role: "admin" })
@@ -98,71 +161,77 @@ export function AuditPage() {
   }, []);
 
   const load = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const ac = new AbortController();
+    loadAbortRef.current = ac;
+    const gen = ++loadGenRef.current;
     setLoading(true);
     setError(null);
     try {
-      const res = await listAuditLogs({
-        page,
-        pageSize: PAGE_SIZE,
-        action: action || undefined,
-        actorId: actorId || undefined,
-      });
+      const res = await listAuditLogs(
+        {
+          page,
+          pageSize: PAGE_SIZE,
+          action: action || undefined,
+          actorId: actorId || undefined,
+        },
+        ac.signal,
+      );
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setRows(res.data);
       setTotal(res.total);
     } catch (err) {
+      if (ac.signal.aborted || gen !== loadGenRef.current) return;
       setError(errorMessage(err));
     } finally {
-      setLoading(false);
+      if (!ac.signal.aborted && gen === loadGenRef.current) {
+        setLoading(false);
+      }
     }
   }, [page, action, actorId]);
 
   useEffect(() => {
     void load();
+    return () => {
+      loadAbortRef.current?.abort();
+    };
   }, [load]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const actorOptions = useMemo<SelectOption[]>(() => {
+    const options: SelectOption[] = [{ value: "", label: "全部操作者" }];
+    for (const op of operators) {
+      options.push({ value: op.id, label: op.display_name || op.username });
+    }
+    // An actor picked from a row — or restored from a shared link — may have been
+    // demoted since; without this the select would render blank while the filter is
+    // very much active.
+    if (actorId && !operators.some((op) => op.id === actorId)) {
+      options.push({
+        value: actorId,
+        label:
+          actorHint?.id === actorId ? actorHint.name : `${actorId.slice(0, 8)}…`,
+      });
+    }
+    return options;
+  }, [operators, actorId, actorHint]);
+
+  const filtered = Boolean(action || actorId);
+  const firstLoad = loading && rows.length === 0 && !error;
+  const freezeFilters = useFirstLoad(loading);
+  const outOfRange = rows.length === 0 && total > 0 && page > 1;
+
+  const filterByActor = (row: AdminAuditLogLine) => {
+    setActorHint({ id: row.actor_id, name: row.actor_username });
+    set({ actor_id: row.actor_id });
+  };
 
   return (
-    <div className="mx-auto max-w-[1200px] px-6 py-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">操作审计</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            管理员特权操作记录 · 共 {total} 条
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <select
-            value={actorId}
-            onChange={(e) => {
-              setActorId(e.target.value);
-              setPage(1);
-            }}
-            aria-label="按操作者筛选"
-            className="h-9 max-w-[180px] rounded-lg border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="">全部操作者</option>
-            {operators.map((op) => (
-              <option key={op.id} value={op.id}>
-                {op.display_name || op.username}
-              </option>
-            ))}
-          </select>
-          <select
-            value={action}
-            onChange={(e) => {
-              setAction(e.target.value);
-              setPage(1);
-            }}
-            aria-label="按操作类型筛选"
-            className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {ACTION_FILTERS.map((f) => (
-              <option key={f.value || "all"} value={f.value}>
-                {f.label}
-              </option>
-            ))}
-          </select>
+    <Page>
+      <PageHeader
+        title="操作审计"
+        description="管理员特权操作记录"
+        note="时间为本机时区，格式 MM-DD HH:mm"
+        actions={
           <Button
             variant="outline"
             size="sm"
@@ -172,116 +241,172 @@ export function AuditPage() {
           >
             <RefreshCw size={14} className={cn(loading && "animate-spin")} />
           </Button>
-        </div>
-      </div>
+        }
+        filters={
+          <>
+            <Select
+              aria-label="按操作者筛选"
+              value={actorId}
+              disabled={freezeFilters}
+              onChange={(e) => set({ actor_id: e.target.value })}
+              options={actorOptions}
+              className="max-w-[220px]"
+            />
+            <Select
+              aria-label="按操作类型筛选"
+              value={action}
+              disabled={freezeFilters}
+              onChange={(e) => set({ action: e.target.value })}
+              options={ACTION_FILTERS}
+            />
+            {filtered && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={reset}
+                disabled={freezeFilters}
+              >
+                清除筛选
+              </Button>
+            )}
+          </>
+        }
+      />
 
-      {loading && (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card py-16 text-muted-foreground text-sm">
-          <Spinner />
-          加载中…
-        </div>
-      )}
-
-      {!loading && error && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-16 text-sm">
-          <span className="text-destructive">{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            重试
-          </Button>
-        </div>
-      )}
-
-      {!loading && !error && (
-        <>
-          <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead>
-                <tr className="border-border border-b text-muted-foreground">
-                  <th className="px-4 py-3 font-medium">时间</th>
-                  <th className="px-4 py-3 font-medium">操作者</th>
-                  <th className="px-4 py-3 font-medium">操作</th>
-                  <th className="px-4 py-3 font-medium">目标</th>
-                  <th className="px-4 py-3 font-medium">详情</th>
-                </tr>
-              </thead>
+      {firstLoad ? (
+        <TableSkeleton columns={5} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={() => void load()} />
+      ) : (
+        <Refreshing active={loading}>
+          {rows.length === 0 ? (
+            <Card>
+              {outOfRange ? (
+                // 共 N 条 next to “暂无记录” reads as data loss; it's just a stale
+                // `?page=` from a bookmark or a back step.
+                <EmptyState
+                  icon={History}
+                  title="这一页没有审计记录"
+                  description={`当前共 ${total} 条，第 ${page} 页已超出范围。`}
+                  action={
+                    <Button variant="outline" size="sm" onClick={() => setPage(1)}>
+                      回到第一页
+                    </Button>
+                  }
+                />
+              ) : (
+                <EmptyState
+                  icon={History}
+                  title={filtered ? "没有符合筛选的审计记录" : "暂无审计记录"}
+                  description={
+                    filtered
+                      ? "换个操作者或操作类型再看，或清除筛选查看全部。"
+                      : "管理员执行特权操作（改用户、重置密码、回放对话等）后会记在这里。"
+                  }
+                  action={
+                    filtered ? (
+                      <Button variant="outline" size="sm" onClick={reset}>
+                        清除筛选
+                      </Button>
+                    ) : undefined
+                  }
+                />
+              )}
+            </Card>
+          ) : (
+            <TableFrame minWidth={880}>
+              <THead>
+                <Th>时间</Th>
+                <Th>操作者</Th>
+                <Th>操作</Th>
+                <Th>目标</Th>
+                <Th>详情</Th>
+              </THead>
               <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={5}
-                      className="px-4 py-12 text-center text-muted-foreground"
-                    >
-                      暂无审计记录
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => (
-                    <tr
-                      key={row.id}
-                      className="border-border border-b last:border-b-0"
-                    >
-                      <td className="px-4 py-3 whitespace-nowrap tabular-nums text-muted-foreground">
+                {rows.map((row) => {
+                  const entries = detailEntries(row.detail);
+                  return (
+                    <TableRow key={row.id}>
+                      <Td className="whitespace-nowrap tabular-nums text-muted-foreground">
                         {fmtTime(row.created_at)}
-                      </td>
-                      <td className="px-4 py-3">
+                      </Td>
+                      <Td>
                         <button
                           type="button"
-                          className="text-foreground underline-offset-2 hover:text-primary hover:underline"
-                          onClick={() => {
-                            setActorId(row.actor_id);
-                            setPage(1);
-                          }}
+                          className="rounded text-foreground underline-offset-2 outline-none hover:text-primary hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+                          onClick={() => filterByActor(row)}
                           title="按此操作者筛选"
                         >
                           {row.actor_username}
                         </button>
-                      </td>
-                      <td className="px-4 py-3">
+                      </Td>
+                      <Td>
                         <Badge tone="neutral">
                           {AUDIT_ACTION_LABELS[row.action] ?? row.action}
                         </Badge>
-                      </td>
-                      <td className="px-4 py-3">
+                      </Td>
+                      <Td>
                         <AuditTarget row={row} />
-                      </td>
-                      <td
-                        className="max-w-[280px] truncate px-4 py-3 font-mono text-xs text-muted-foreground"
-                        title={fmtDetail(row.detail)}
-                      >
-                        {fmtDetail(row.detail)}
-                      </td>
-                    </tr>
-                  ))
-                )}
+                      </Td>
+                      <Td>
+                        {entries.length === 0 ? (
+                          <span className="text-muted-foreground">—</span>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="-ml-3 max-w-[320px] font-mono text-xs font-normal text-muted-foreground"
+                            onClick={() => setDetailRow(row)}
+                            aria-label={`查看详情：${row.actor_username} ${
+                              AUDIT_ACTION_LABELS[row.action] ?? row.action
+                            }`}
+                          >
+                            <Eye size={12} className="shrink-0" />
+                            <span className="truncate">{detailPreview(entries)}</span>
+                          </Button>
+                        )}
+                      </Td>
+                    </TableRow>
+                  );
+                })}
               </tbody>
-            </table>
-          </div>
+            </TableFrame>
+          )}
+          <Pagination
+            page={page}
+            pageSize={PAGE_SIZE}
+            total={total}
+            onPageChange={setPage}
+            disabled={loading}
+          />
+        </Refreshing>
+      )}
 
-          {totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage(Math.max(1, page - 1))}
-              >
-                <ChevronLeft size={14} />
-              </Button>
-              <span className="text-muted-foreground text-sm tabular-nums">
-                {page} / {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage(page + 1)}
-              >
-                <ChevronRight size={14} />
-              </Button>
+      {detailRow && (
+        <Dialog
+          open
+          onClose={() => setDetailRow(null)}
+          title="审计详情"
+          description={`${AUDIT_ACTION_LABELS[detailRow.action] ?? detailRow.action} · ${detailRow.actor_username} · ${fmtTime(detailRow.created_at)}`}
+          size="lg"
+          footer={
+            <Button variant="outline" size="sm" onClick={() => setDetailRow(null)}>
+              关闭
+            </Button>
+          }
+        >
+          {detailRow.target_id && (
+            <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+              <span className="text-muted-foreground">目标</span>
+              <span className="text-foreground">{detailRow.target_type}</span>
+              <CopyableId value={detailRow.target_id} label="target_id" />
             </div>
           )}
-        </>
+          <pre className="max-h-[50vh] overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/40 p-3 font-mono text-xs text-foreground">
+            {JSON.stringify(detailRow.detail, null, 2)}
+          </pre>
+        </Dialog>
       )}
-    </div>
+    </Page>
   );
 }

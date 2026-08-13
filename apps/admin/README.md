@@ -40,4 +40,22 @@ pnpm gen:types
 | `pnpm dev` | 开发服务器（5174）|
 | `pnpm build` | 类型检查 + 生产构建 |
 | `pnpm typecheck` | 仅 `tsc --noEmit` |
+| `pnpm test` | vitest（jsdom 渲染测试）|
 | （仓库根）`pnpm gen:types` | 重生成契约类型（含 admin 透传源） |
+
+## 界面约定
+
+控制台是**亮色单主题**：`src/styles/globals.css` 只有 `:root` 一套 OKLCH token，色相与
+`packages/design-tokens` 同源，但不镜像它的暗色半（运营控制台只在桌面浏览器打开，不值得
+维护第二套配色）。写样式时只用语义 token，别写 hex、调色板类名或 `dark:` 变体。
+
+版式与四态走 `src/components/ui/` 的骨架层，别在页面里重造：
+
+| 组件 | 用途 |
+|---|---|
+| `Page` / `PageHeader` / `SectionHeader` / `Card` | 容器宽度、页头（筛选独立成行）、区块 |
+| `TableFrame` / `THead` / `Th` / `Td` / `TableRow` | 表格；`TableRow` 的 `onActivate` 让整行可点且键盘可达 |
+| `Pagination` | 分页，总数常显 |
+| `Dialog` | 模态（Esc / focus trap / 滚动锁 / aria 齐全）|
+| `Select` | 原生 select 封装，`aria-label` 必填 |
+| `EmptyState` / `ErrorState` / `TableSkeleton` / `Refreshing` / `StaleDataNotice` | 空 / 错 / 首次加载 / 刷新（保留旧数据不塌陷）/ 刷新失败但旧数据仍在 |

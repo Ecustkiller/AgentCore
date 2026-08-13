@@ -8,67 +8,20 @@ import { ConversationsPage } from "@/pages/ConversationsPage";
 import { ForcePasswordChangePage } from "@/pages/ForcePasswordChangePage";
 import { LoginPage } from "@/pages/LoginPage";
 import { MfaSetupPage } from "@/pages/MfaSetupPage";
+import { NotFoundPage } from "@/pages/NotFoundPage";
 import { OverviewPage } from "@/pages/OverviewPage";
 import { ReplayPage } from "@/pages/ReplayPage";
 import { BetaGroupPage } from "@/pages/BetaGroupPage";
 import { NoticesPage } from "@/pages/NoticesPage";
 import { SystemPage } from "@/pages/SystemPage";
 import { UsersPage } from "@/pages/UsersPage";
-import {
-  ApiError,
-  NetworkError,
-  setUnauthorizedHandler,
-  tryRefresh,
-} from "@/services/api";
-import { fetchMe, logout, mfaStatus } from "@/services/auth";
+import { setUnauthorizedHandler } from "@/services/api";
+import { logout } from "@/services/auth";
+import { bootstrap } from "@/services/session";
 import { useAuthStore } from "@/stores/auth";
 import { ShieldAlert } from "lucide-react";
 import { useEffect } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-
-async function applySession(): Promise<void> {
-  const { setAuthenticated, setForbidden } = useAuthStore.getState();
-  const user = await fetchMe();
-  if (user.role !== "admin") {
-    setForbidden(user);
-    return;
-  }
-  const { enrolled, required } = await mfaStatus();
-  setAuthenticated(user, { mfaSetupRequired: required && !enrolled });
-}
-
-async function bootstrap(): Promise<void> {
-  const { setUnauthenticated, setUnavailable, setLoading } =
-    useAuthStore.getState();
-  setLoading();
-  try {
-    await applySession();
-    return;
-  } catch (err) {
-    if (err instanceof NetworkError) {
-      setUnavailable();
-      return;
-    }
-    // Access cookie absent/expired. `/v1/auth/me` is an auth path so the HTTP
-    // client will not auto-refresh; try a silent refresh (desktop parity) before
-    // concluding the user is logged out.
-    if (!(err instanceof ApiError) || err.status !== 401) {
-      setUnauthenticated();
-      return;
-    }
-  }
-
-  try {
-    if (!(await tryRefresh())) {
-      setUnauthenticated();
-      return;
-    }
-    await applySession();
-  } catch (err) {
-    if (err instanceof NetworkError) setUnavailable();
-    else setUnauthenticated();
-  }
-}
 
 export function App() {
   const status = useAuthStore((s) => s.status);
@@ -153,6 +106,7 @@ export function App() {
           <Route path="beta-group" element={<BetaGroupPage />} />
           <Route path="system" element={<SystemPage />} />
           <Route path="account" element={<AccountPage />} />
+          <Route path="*" element={<NotFoundPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

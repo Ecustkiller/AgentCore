@@ -2,8 +2,8 @@ import { CopyableId } from "@/components/CopyableId";
 import { ChatTimeline } from "@/components/conversation-replay/ChatTimeline";
 import { InspectorPanel } from "@/components/conversation-replay/InspectorPanel";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
-import { Spinner } from "@/components/ui/Spinner";
+import { Page, PageHeader } from "@/components/ui/Page";
+import { ErrorState, TableSkeleton } from "@/components/ui/States";
 import { cn, fmtCny, fmtInt, fmtTime, nanoToYuan } from "@/lib/utils";
 import {
   type AdminConversationReplay,
@@ -12,8 +12,62 @@ import {
 } from "@/services/adminObservability";
 import { errorMessage } from "@/services/api";
 import { ArrowLeft, Users } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import {
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
+
+/**
+ * The turn being read is part of the address — `?turn=<message id>` — so an operator
+ * can paste a link to one specific turn into a ticket and the next person lands on
+ * that turn, reload included, instead of on the top of a forty-turn conversation.
+ *
+ * Not `useUrlFilters`, though the conventions it encodes still hold here: the default
+ * (no anchor) stays out of the URL, an unresolvable id degrades to 未选中 rather than
+ * throwing, and writes replace so that clicking through a dozen turns does not bury
+ * the roster the operator came from under a dozen history entries. What that hook
+ * cannot do is validate against data it has never seen — a turn id only means
+ * something once this conversation has loaded — or carry router state across the
+ * write, and `setSearchParams` navigates: a navigation without state drops the 来源页
+ * that ReplayPage reads for 返回.
+ */
+const TURN_PARAM = "turn";
+
+/** Worker dock width bounds, in px. Wide enough for prose, never past half a laptop. */
+const DOCK_MIN = 320;
+const DOCK_MAX = 720;
+const DOCK_DEFAULT = 480;
+const DOCK_STEP = 24;
+const DOCK_STORAGE_KEY = "admin:replay:dock-width";
+
+function clampDock(px: number): number {
+  return Math.min(DOCK_MAX, Math.max(DOCK_MIN, Math.round(px)));
+}
+
+function readDockWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(DOCK_STORAGE_KEY);
+    const parsed = raw == null ? Number.NaN : Number(raw);
+    return Number.isFinite(parsed) ? clampDock(parsed) : DOCK_DEFAULT;
+  } catch {
+    return DOCK_DEFAULT;
+  }
+}
+
+function persistDockWidth(px: number): void {
+  try {
+    window.localStorage.setItem(DOCK_STORAGE_KEY, String(px));
+  } catch {
+    // Private-mode / quota — the dock still resizes for this visit.
+  }
+}
 
 export function ConversationReplay({
   conversationId,
@@ -24,18 +78,38 @@ export function ConversationReplay({
   onBack: () => void;
   backLabel?: string;
 }) {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const anchorTrace = searchParams.get("trace") ?? undefined;
-  const anchorTurn = searchParams.get("turn") ?? undefined;
+  const anchorTurn = searchParams.get(TURN_PARAM) ?? undefined;
 
   const [data, setData] = useState<AdminConversationReplay | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   /** Right dock only opens when a worker/node is selected — no standalone 检视入口. */
   const [dockOpen, setDockOpen] = useState(false);
-  const didAnchor = useRef(false);
+  const [dockWidth, setDockWidth] = useState(readDockWidth);
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // RR hands back a fresh setter whenever the search string changes; holding both the
+  // setter and the state to forward in refs keeps the writer identity stable.
+  const setSearchParamsRef = useRef(setSearchParams);
+  setSearchParamsRef.current = setSearchParams;
+  const navStateRef = useRef(location.state);
+  navStateRef.current = location.state;
+
+  const writeTurnAnchor = useCallback((id: string) => {
+    setSearchParamsRef.current(
+      (prev) => {
+        // Sibling params (a `trace` the operator arrived on) are somebody else's state.
+        const next = new URLSearchParams(prev);
+        next.set(TURN_PARAM, id);
+        return next;
+      },
+      { replace: true, state: navStateRef.current },
+    );
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -63,39 +137,39 @@ export function ConversationReplay({
     [assistantTurns],
   );
 
-  // Resolve URL anchor once data lands; scroll to turn only (do not open dock).
-  useEffect(() => {
-    if (!data || didAnchor.current) return;
-    didAnchor.current = true;
+  /**
+   * Selection is read back off the URL instead of being mirrored in state, so a pasted
+   * link, a reload and 后退 cannot disagree about which turn is open. An anchor that no
+   * longer resolves — hand-edited id, a turn from another conversation, history since
+   * trimmed — leaves the page 未选中, which is the same place an anchor-less visit
+   * starts from, rather than blank or thrown.
+   */
+  const selected = useMemo(() => {
+    const messages = data?.messages ?? [];
     const byTurn = anchorTurn
-      ? data.messages.find((m) => m.id === anchorTurn)
+      ? messages.find((m) => m.id === anchorTurn)
       : undefined;
+    if (byTurn) return byTurn;
+    // 对话's 跳转 hands over a trace_id rather than a message id.
     const byTrace = anchorTrace
-      ? data.messages.find((m) => m.trace_id === anchorTrace)
+      ? messages.find((m) => m.trace_id === anchorTrace)
       : undefined;
-    const hit = byTurn ?? byTrace;
-    if (hit) {
-      setSelectedId(hit.id);
-      return;
-    }
-    const first = assistantTurns[0];
-    if (first) setSelectedId(first.id);
-  }, [data, anchorTrace, anchorTurn, assistantTurns]);
+    return byTrace ?? null;
+  }, [data, anchorTrace, anchorTurn]);
 
-  const selected =
-    (data?.messages ?? []).find((m) => m.id === selectedId) ??
-    assistantTurns[0] ??
-    null;
+  const selectedId = selected?.id ?? null;
 
-  const selectTurn = useCallback((id: string) => {
-    setSelectedId((prev) => {
-      if (prev !== id) {
+  const selectTurn = useCallback(
+    (id: string) => {
+      // The open worker belongs to the turn being left behind.
+      if (id !== selectedId) {
         setSelectedRunId(null);
         setDockOpen(false);
       }
-      return id;
-    });
-  }, []);
+      writeTurnAnchor(id);
+    },
+    [selectedId, writeTurnAnchor],
+  );
 
   /** Click graph node → open worker dock. */
   const selectRun = useCallback((runId: string) => {
@@ -112,51 +186,97 @@ export function ConversationReplay({
     setDockOpen(false);
   }, []);
 
+  const startResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    dragRef.current = { startX: e.clientX, startWidth: dockWidth };
+  };
+
+  const moveResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    // The dock is pinned right, so dragging the handle left makes it wider.
+    setDockWidth(clampDock(drag.startWidth - (e.clientX - drag.startX)));
+  };
+
+  const endResize = (e: ReactPointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture?.(e.pointerId);
+    persistDockWidth(dockWidth);
+  };
+
+  /**
+   * A splitter that only answers to a mouse is a splitter half the operators can't
+   * use, so the handle is a focusable `separator` driven by the arrow keys.
+   */
+  const keyResize = (e: KeyboardEvent<HTMLDivElement>) => {
+    const next =
+      e.key === "ArrowLeft"
+        ? clampDock(dockWidth + DOCK_STEP)
+        : e.key === "ArrowRight"
+          ? clampDock(dockWidth - DOCK_STEP)
+          : e.key === "Home"
+            ? DOCK_MAX
+            : e.key === "End"
+              ? DOCK_MIN
+              : null;
+    if (next == null) return;
+    e.preventDefault();
+    setDockWidth(next);
+    persistDockWidth(next);
+  };
+
+  const resetDockWidth = () => {
+    setDockWidth(DOCK_DEFAULT);
+    persistDockWidth(DOCK_DEFAULT);
+  };
+
+  /**
+   * Where a trace jump landed, kept lit after the operator has moved on to another
+   * turn. The turn anchor needs no such marker: it *is* the selection now.
+   */
   const isAnchored = (m: ReplayMessage) =>
-    (anchorTurn != null && m.id === anchorTurn) ||
-    (anchorTrace != null && m.trace_id === anchorTrace);
+    anchorTrace != null && m.trace_id === anchorTrace;
 
   const dockCny =
     selected && selected.cost_total > 0 && data
       ? fmtCny(nanoToYuan(selected.cost_total))
       : null;
 
+  /**
+   * The turn the dock is showing, and the single condition behind both the dock and
+   * the timeline's narrow-screen hiding. Editing the anchor out of the address bar
+   * while the dock is open would otherwise hide the timeline with nothing in its
+   * place — a blank page for a URL that is merely stale.
+   */
+  const dockMessage = dockOpen ? selected : null;
+
   return (
-    <div className="mx-auto max-w-[1400px] px-4 py-5 sm:px-6 sm:py-6">
+    <Page className="flex h-full min-h-0 flex-col">
       <button
         type="button"
         onClick={onBack}
-        className="mb-3 inline-flex items-center gap-1.5 text-muted-foreground text-sm outline-none transition-colors hover:text-foreground focus-visible:text-foreground"
+        className="mb-3 inline-flex shrink-0 items-center gap-1.5 self-start rounded text-muted-foreground text-sm outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
       >
         <ArrowLeft size={16} />
         {backLabel}
       </button>
 
-      {loading && (
-        <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card py-16 text-muted-foreground text-sm">
-          <Spinner />
-          加载中…
-        </div>
-      )}
+      {loading && <TableSkeleton rows={6} columns={1} />}
 
       {!loading && error && (
-        <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-16 text-sm">
-          <span className="text-destructive">{error}</span>
-          <Button variant="outline" size="sm" onClick={() => void load()}>
-            重试
-          </Button>
-        </div>
+        <ErrorState message={error} onRetry={() => void load()} />
       )}
 
       {!loading && !error && data && (
-        <div className="flex flex-col gap-3">
-          <header className="rounded-xl border border-border bg-card px-4 py-3 sm:px-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
-                <h1 className="truncate text-lg font-semibold text-foreground">
-                  {data.conversation.title || "未命名会话"}
-                </h1>
-                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
+        <>
+          {/* Fixed block: the panes below take whatever height is left over. */}
+          <div className="shrink-0">
+            <PageHeader
+              title={data.conversation.title || "未命名会话"}
+              description={
+                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                   <span>
                     {data.conversation.display_name ||
                       data.conversation.username ||
@@ -186,103 +306,113 @@ export function ConversationReplay({
                         }
                       >
                         {data.conversation.model_profile_name}
+                        {/* Mono + smaller carries "secondary" on its own; the
+                            opacity that used to sit on this id dimmed the header's
+                            already-muted text to 2.8:1. */}
                         {data.conversation.model_profile_id && (
-                          <span className="ml-1 font-mono opacity-70">
+                          <span className="ml-1 font-mono text-xs">
                             {data.conversation.model_profile_id.slice(0, 8)}
                           </span>
                         )}
                       </span>
                     </>
                   )}
-                </div>
-              </div>
-              <div className="flex flex-wrap items-center gap-1.5 text-xs">
-                <KpiChip label="回合" value={fmtInt(data.turns)} />
-                <KpiChip
-                  label="错误"
-                  value={fmtInt(data.errors)}
-                  tone={data.errors > 0 ? "destructive" : undefined}
-                />
-                <KpiChip
-                  label="成本"
-                  value={fmtCny(
-                    nanoToYuan(data.cost_total),
-                  )}
-                />
-                {multiAgentTurns > 0 && (
+                </span>
+              }
+              actions={
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <KpiChip label="回合" value={fmtInt(data.turns)} />
                   <KpiChip
-                    label="多 Agent"
-                    value={`${multiAgentTurns} 回合`}
-                    tone="primary"
+                    label="错误"
+                    value={fmtInt(data.errors)}
+                    tone={data.errors > 0 ? "destructive" : undefined}
                   />
-                )}
-              </div>
-            </div>
-
-            <TurnPills
-              className="mt-3"
-              turns={assistantTurns}
-              selectedId={selected?.id ?? null}
-              onSelect={selectTurn}
-              anchorTrace={anchorTrace}
-              anchorTurn={anchorTurn}
+                  <KpiChip
+                    label="成本"
+                    value={fmtCny(nanoToYuan(data.cost_total))}
+                  />
+                  {multiAgentTurns > 0 && (
+                    <KpiChip
+                      label="多 Agent"
+                      value={`${multiAgentTurns} 回合`}
+                      tone="primary"
+                    />
+                  )}
+                </div>
+              }
+              filters={
+                <TurnPills
+                  turns={assistantTurns}
+                  selectedId={selectedId}
+                  onSelect={selectTurn}
+                  anchorTrace={anchorTrace}
+                />
+              }
             />
-          </header>
-
-          {/* Narrow: timeline, or worker dock when a node is selected */}
-          <div className="flex flex-col gap-3 lg:hidden">
-            {dockOpen && selected ? (
-              <InspectorPanel
-                message={selected}
-                selectedRunId={selectedRunId}
-                onSelectRun={selectRun}
-                onClearRun={clearRun}
-                onClose={closeDock}
-                cnyLabel={dockCny}
-              />
-            ) : (
-              <ChatTimeline
-                messages={data.messages}
-                selectedId={selected?.id ?? null}
-                selectedRunId={selectedRunId}
-                onSelect={selectTurn}
-                onSelectRun={selectRun}
-                isAnchored={isAnchored}
-              />
-            )}
           </div>
 
-          {/* Wide: chat main + contextual worker dock */}
-          <div
-            className={cn(
-              "hidden lg:grid lg:gap-4",
-              dockOpen
-                ? "lg:grid-cols-[minmax(0,1fr)_480px]"
-                : "lg:grid-cols-1",
-            )}
-          >
+          {/*
+            One timeline and one dock, laid out by the shell's height rather than by a
+            `calc(100vh - …)` guess: the row fills whatever the scroll container gives
+            it and each pane scrolls on its own. Narrow screens stack, and an open dock
+            takes the whole width by hiding the timeline — hiding, not unmounting, so
+            the reading position survives a trip into a worker and back.
+          */}
+          <div className="flex min-h-0 flex-1 flex-col gap-3 lg:flex-row lg:gap-0">
             <ChatTimeline
+              className={cn("min-w-0 flex-1", dockMessage && "hidden lg:flex")}
               messages={data.messages}
-              selectedId={selected?.id ?? null}
+              selectedId={selectedId}
               selectedRunId={selectedRunId}
               onSelect={selectTurn}
               onSelectRun={selectRun}
               isAnchored={isAnchored}
             />
-            {dockOpen && selected && (
-              <InspectorPanel
-                message={selected}
-                selectedRunId={selectedRunId}
-                onSelectRun={selectRun}
-                onClearRun={clearRun}
-                onClose={closeDock}
-                cnyLabel={dockCny}
-              />
+
+            {dockMessage && (
+              <>
+                <div
+                  role="separator"
+                  aria-orientation="vertical"
+                  aria-label="调整队员面板宽度"
+                  aria-valuenow={dockWidth}
+                  aria-valuemin={DOCK_MIN}
+                  aria-valuemax={DOCK_MAX}
+                  tabIndex={0}
+                  onPointerDown={startResize}
+                  onPointerMove={moveResize}
+                  onPointerUp={endResize}
+                  onPointerCancel={endResize}
+                  onKeyDown={keyResize}
+                  onDoubleClick={resetDockWidth}
+                  title="拖拽调整宽度（双击复位）"
+                  className="group hidden w-3 shrink-0 cursor-col-resize touch-none items-center justify-center outline-none lg:flex"
+                >
+                  <span
+                    aria-hidden
+                    className="h-10 w-px rounded-full bg-border transition-colors group-hover:bg-primary group-focus-visible:bg-primary"
+                  />
+                </div>
+                <div
+                  className="flex min-h-0 w-full flex-1 flex-col lg:w-[var(--dock-w)] lg:flex-none"
+                  style={{ "--dock-w": `${dockWidth}px` } as CSSProperties}
+                >
+                  <InspectorPanel
+                    className="min-h-0 flex-1"
+                    message={dockMessage}
+                    selectedRunId={selectedRunId}
+                    onSelectRun={selectRun}
+                    onClearRun={clearRun}
+                    onClose={closeDock}
+                    cnyLabel={dockCny}
+                  />
+                </div>
+              </>
             )}
           </div>
-        </div>
+        </>
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -309,48 +439,45 @@ function KpiChip({
   );
 }
 
+/**
+ * Turn index. Scrolls sideways instead of wrapping: a 40-turn conversation used to
+ * push the timeline off the bottom of the window before it had rendered a line.
+ */
 function TurnPills({
   turns,
   selectedId,
   onSelect,
   anchorTrace,
-  anchorTurn,
-  className,
 }: {
   turns: ReplayMessage[];
   selectedId: string | null;
   onSelect: (id: string) => void;
   anchorTrace?: string;
-  anchorTurn?: string;
-  className?: string;
 }) {
   if (turns.length === 0) {
-    return (
-      <p className={cn("text-muted-foreground text-xs", className)}>
-        暂无助手回合
-      </p>
-    );
+    return <p className="text-muted-foreground text-xs">暂无助手回合</p>;
   }
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
-      <span className="mr-1 text-muted-foreground text-xs font-medium">
+    <div className="flex w-full min-w-0 items-center gap-1.5 overflow-x-auto pb-1">
+      <span className="shrink-0 text-muted-foreground text-xs font-medium">
         回合
       </span>
       {turns.map((m, i) => {
         const isError = m.metrics?.status === "error";
         const multi = m.runs.length > 0 || m.metrics?.delegated;
-        const anchored =
-          (anchorTurn != null && m.id === anchorTurn) ||
-          (anchorTrace != null && m.trace_id === anchorTrace);
+        const anchored = anchorTrace != null && m.trace_id === anchorTrace;
         const active = selectedId === m.id;
         return (
           <button
             key={m.id}
             type="button"
+            // Selection is a ring and a tint otherwise — invisible to a screen reader,
+            // and the only handle a test has on "this link opened that turn".
+            aria-current={active ? "true" : undefined}
             onClick={() => onSelect(m.id)}
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              "inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1 text-left text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
               active
                 ? "border-primary/40 bg-primary/10 text-foreground"
                 : "border-border bg-card text-muted-foreground hover:bg-muted/50 hover:text-foreground",
@@ -358,9 +485,9 @@ function TurnPills({
             )}
           >
             <span className="font-medium tabular-nums">#{i + 1}</span>
-            <span className="tabular-nums opacity-70">
-              {fmtTime(m.created_at)}
-            </span>
+            {/* The pill already separates 回合号 from time by weight — dimming the
+                timestamp on top of that read at 2.7:1. */}
+            <span className="tabular-nums">{fmtTime(m.created_at)}</span>
             {(isError || multi) && (
               <span className="flex items-center gap-1">
                 {isError && <Badge tone="destructive">错</Badge>}

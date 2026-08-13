@@ -6,6 +6,10 @@
          scripts/vite-csp.mjs — strict `script-src 'self'` in prod (no 'unsafe-eval'/'unsafe-inline'),
          relaxed to object-src/base-uri only in dev so HMR works. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- The console is light-only (see src/styles/globals.css). Declaring it here as
+         well as in CSS keeps the browser from painting dark form controls and
+         scrollbars for a split second before the stylesheet lands. -->
+    <meta name="color-scheme" content="light" />
     <title>AgentCore 管理后台</title>
   </head>
   <body>

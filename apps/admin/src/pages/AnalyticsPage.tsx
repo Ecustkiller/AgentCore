@@ -4,18 +4,33 @@ import { CopyableId } from "@/components/CopyableId";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/Input";
-import { Spinner } from "@/components/ui/Spinner";
+import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
+import {
+  EmptyState,
+  ErrorState,
+  Refreshing,
+  StaleDataNotice,
+  TableSkeleton,
+} from "@/components/ui/States";
+import {
+  TableFrame,
+  TableMessageRow,
+  TableRow,
+  THead,
+  Td,
+  Th,
+} from "@/components/ui/Table";
 import {
   cn,
   COST_ESTIMATE_HINT,
-  fmtCny,
   fmtCompact,
-  fmtEstimatedCny,
+  fmtEstimatedMoney,
   fmtInt,
+  fmtMoney,
   fmtMs,
-  fmtNanoCny,
-  fmtTime,
-  nanoToYuan,
+  fmtNanoMoney,
+  fmtTimeUtc,
+  UTC_WINDOW_HINT,
 } from "@/lib/utils";
 import {
   type AdminObservabilitySummary,
@@ -30,7 +45,7 @@ import {
   fetchUsageSummary,
 } from "@/services/adminUsage";
 import { errorMessage } from "@/services/api";
-import { Info, RefreshCw } from "lucide-react";
+import { CheckCircle2, Coins, Info, RefreshCw } from "lucide-react";
 import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 
@@ -67,6 +82,10 @@ export function AnalyticsPage() {
     navigate(`/replay/${conversationId}`, { state: { from: location.pathname } });
   };
 
+  const openUser = (userId: string) => {
+    navigate(`/users/${userId}`, { state: { from: location.pathname } });
+  };
+
   const submitReplay = (e: FormEvent) => {
     e.preventDefault();
     const id = idInput.trim();
@@ -82,30 +101,12 @@ export function AnalyticsPage() {
       : "跨用户聚合 · 回合健康（错误率 / P95 延迟 / 委派率 / 协作质量）、近 7 日趋势、近期错误";
 
   return (
-    <div className="mx-auto max-w-[1200px] px-6 py-8">
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold text-foreground">分析</h1>
-          <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <SegmentToggle value={segment} onChange={setSegment} />
-          <form onSubmit={submitReplay} className="flex items-center gap-2">
-            <Input
-              value={idInput}
-              onChange={(e) => setIdInput(e.target.value)}
-              placeholder="会话 ID 复盘…"
-              className="w-48"
-            />
-            <Button
-              type="submit"
-              variant="outline"
-              size="sm"
-              disabled={!idInput.trim()}
-            >
-              复盘
-            </Button>
-          </form>
+    <Page>
+      <PageHeader
+        title="分析"
+        description={subtitle}
+        note={UTC_WINDOW_HINT}
+        actions={
           <Button
             variant="outline"
             size="sm"
@@ -115,11 +116,37 @@ export function AnalyticsPage() {
           >
             <RefreshCw size={14} className={cn(activeLoading && "animate-spin")} />
           </Button>
-        </div>
-      </div>
+        }
+        filters={
+          <>
+            <SegmentToggle value={segment} onChange={setSegment} />
+            <form onSubmit={submitReplay} className="flex items-center gap-2">
+              <Input
+                value={idInput}
+                onChange={(e) => setIdInput(e.target.value)}
+                placeholder="会话 ID 复盘…"
+                aria-label="按会话 ID 复盘"
+                className="w-48"
+              />
+              <Button
+                type="submit"
+                variant="outline"
+                size="sm"
+                disabled={!idInput.trim()}
+              >
+                复盘
+              </Button>
+            </form>
+          </>
+        }
+      />
 
       {segment === "cost" ? (
-        <CostPanel reloadKey={reloadKey} onLoadingChange={setCostLoading} />
+        <CostPanel
+          reloadKey={reloadKey}
+          onLoadingChange={setCostLoading}
+          onOpenUser={openUser}
+        />
       ) : (
         <HealthPanel
           reloadKey={reloadKey}
@@ -127,7 +154,7 @@ export function AnalyticsPage() {
           onOpenReplay={openReplay}
         />
       )}
-    </div>
+    </Page>
   );
 }
 
@@ -164,29 +191,16 @@ function SegmentToggle({
   );
 }
 
-function PanelState({
-  loading,
-  error,
-  onRetry,
-}: {
-  loading: boolean;
-  error: string | null;
-  onRetry: () => void;
-}) {
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center gap-2 rounded-xl border border-border bg-card py-16 text-muted-foreground text-sm">
-        <Spinner />
-        加载中…
-      </div>
-    );
-  }
+/** First paint of either lens: two window cards, a trend block and a table. */
+function PanelSkeleton() {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-xl border border-border bg-card py-16 text-sm">
-      <span className="text-destructive">{error}</span>
-      <Button variant="outline" size="sm" onClick={onRetry}>
-        重试
-      </Button>
+    <div className="flex flex-col gap-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <TableSkeleton rows={4} columns={2} />
+        <TableSkeleton rows={4} columns={2} />
+      </div>
+      <TableSkeleton rows={5} columns={7} />
+      <TableSkeleton rows={6} columns={4} />
     </div>
   );
 }
@@ -194,9 +208,11 @@ function PanelState({
 function CostPanel({
   reloadKey,
   onLoadingChange,
+  onOpenUser,
 }: {
   reloadKey: number;
   onLoadingChange: (loading: boolean) => void;
+  onOpenUser: (userId: string) => void;
 }) {
   const [data, setData] = useState<AdminUsageSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -220,148 +236,174 @@ function CostPanel({
     void load();
   }, [load, reloadKey]);
 
-  if (loading || error || !data) {
-    return <PanelState loading={loading} error={error} onRetry={() => void load()} />;
+  if (!data) {
+    return loading ? (
+      <PanelSkeleton />
+    ) : (
+      <ErrorState message={error ?? "加载失败"} onRetry={() => void load()} />
+    );
   }
 
   const byok = data.billing_mode === "byok";
+  // 行级金额（趋势 / 按模型 / 按用户）不带 currency——同一账本窗口内币种唯一（记账走
+  // curated 人民币价卡，BYOK 估算走社区价目快照的美元），且后端明确无汇率换算，所以
+  // 符号统一取自窗口 breakdown，绝不按 billing_mode 猜。
+  const billedCurrency = data.month.cost.currency;
+  const estimatedCurrency =
+    data.month.estimated_cost?.currency ??
+    data.today.estimated_cost?.currency ??
+    null;
+  const estimateFmtCurrency = estimatedCurrency ?? billedCurrency;
 
   return (
     <div className="flex flex-col gap-5">
-      {byok && (
-        <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
-          <Info size={16} className="mt-0.5 shrink-0 text-primary" />
-          <span>
-            当前为 <strong className="text-foreground">BYOK（自带 Key）</strong>
-            模式：记账成本恒为 0；下方「估算」列为按社区价目的 ≈¥，
-            非上游账单。
-          </span>
-        </div>
-      )}
+      {error && <StaleDataNotice message={error} onRetry={() => void load()} />}
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <CostWindowCard label="今日" window={data.today} byok={byok} />
-        <CostWindowCard label="本月" window={data.month} byok={byok} />
-      </div>
-
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-4 text-base font-semibold text-foreground">
-          近 7 日成本趋势
-        </h2>
-        <CostTrendBars data={data.recent_daily_cost} />
-      </section>
-
-      <section className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="border-border border-b px-5 py-3.5">
-          <h2 className="text-base font-semibold text-foreground">
-            本月各模型用量
-          </h2>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            全站按 call 明细聚合（cost_calls · 成本降序）
-            {byok ? ` · ${COST_ESTIMATE_HINT}` : ""}
-          </p>
-        </div>
-        {data.month_by_model.length === 0 ? (
-          <p className="px-5 py-8 text-center text-muted-foreground text-sm">
-            本月暂无模型调用记录
-          </p>
-        ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-                <th className="px-5 py-2.5 font-medium">模型</th>
-                <th className="px-5 py-2.5 text-right font-medium">调用次数</th>
-                <th className="px-5 py-2.5 text-right font-medium">Tokens</th>
-                <th className="px-5 py-2.5 text-right font-medium">本月成本</th>
-                <th className="px-5 py-2.5 text-right font-medium">估算</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.month_by_model.map((row: ModelCostLine) => (
-                <tr
-                  key={row.model}
-                  className="border-border border-b last:border-0 hover:bg-accent/40"
-                >
-                  <td className="px-5 py-3 font-medium text-foreground">
-                    {row.model || "（未标注）"}
-                  </td>
-                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
-                    {fmtInt(row.calls)}
-                  </td>
-                  <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
-                    {fmtCompact(row.tokens_total)}
-                  </td>
-                  <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
-                    {fmtNanoCny(row.cost_total)}
-                  </td>
-                  <td
-                    className="px-5 py-3 text-right text-muted-foreground tabular-nums"
-                    title={
-                      row.cost_estimated_total > 0
-                        ? COST_ESTIMATE_HINT
-                        : undefined
-                    }
-                  >
-                    {fmtNanoCny(row.cost_estimated_total, true)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </section>
-
-      <section className="overflow-hidden rounded-xl border border-border bg-card">
-        <div className="border-border border-b px-5 py-3.5">
-          <h2 className="text-base font-semibold text-foreground">
-            本月 Top 花销用户
-          </h2>
-          <p className="mt-0.5 text-muted-foreground text-xs">
-            按本月成本降序，仅列有花销的账号
-          </p>
-        </div>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-              <th className="px-5 py-2.5 font-medium">#</th>
-              <th className="px-5 py-2.5 font-medium">用户</th>
-              <th className="px-5 py-2.5 text-right font-medium">本月成本</th>
-              <th className="px-5 py-2.5 text-right font-medium">回合数</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.month_by_user.map((row, i) => (
-              <tr
-                key={row.user_id}
-                className="border-border border-b last:border-0 hover:bg-accent/40"
-              >
-                <td className="px-5 py-3 text-muted-foreground tabular-nums">
-                  {i + 1}
-                </td>
-                <td className="px-5 py-3">
-                  <div className="font-medium text-foreground">
-                    {row.display_name || row.username}
-                  </div>
-                  <div className="text-muted-foreground text-xs">
-                    @{row.username}
-                  </div>
-                </td>
-                <td className="px-5 py-3 text-right font-medium text-foreground tabular-nums">
-                  {fmtCny(nanoToYuan(row.cost_total))}
-                </td>
-                <td className="px-5 py-3 text-right text-muted-foreground tabular-nums">
-                  {fmtInt(row.turns)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {data.month_by_user.length === 0 && (
-          <div className="py-10 text-center text-muted-foreground text-sm">
-            本月暂无花销记录
+      <Refreshing active={loading} className="flex flex-col gap-5">
+        {byok && (
+          <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
+            <Info size={16} className="mt-0.5 shrink-0 text-primary" />
+            <span>
+              当前为 <strong className="text-foreground">BYOK（自带 Key）</strong>
+              模式：记账成本恒为 0；下方「估算」按社区价目计价
+              {estimatedCurrency ? `（${estimatedCurrency}）` : ""}
+              ，非上游账单，且平台不做汇率换算。
+            </span>
           </div>
         )}
-      </section>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <CostWindowCard label="今日" window={data.today} byok={byok} />
+          <CostWindowCard label="本月" window={data.month} byok={byok} />
+        </div>
+
+        <Card>
+          <SectionHeader
+            title="近 7 日成本趋势"
+            description={`每日记账成本（UTC 日切 · ${billedCurrency}）`}
+          />
+          <div className="p-5">
+            <CostTrendBars
+              data={data.recent_daily_cost}
+              currency={billedCurrency}
+            />
+          </div>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <SectionHeader
+            title="本月各模型用量"
+            description={`全站按 call 明细聚合（cost_calls · 成本降序）${
+              byok ? ` · ${COST_ESTIMATE_HINT}` : ""
+            }`}
+          />
+          <TableFrame minWidth={760} className="rounded-none border-0">
+            <THead>
+              <Th>模型</Th>
+              <Th align="right">调用次数</Th>
+              <Th align="right">Tokens</Th>
+              <Th align="right">本月成本（{billedCurrency}）</Th>
+              <Th align="right">
+                估算{estimatedCurrency ? `（${estimatedCurrency}）` : ""}
+              </Th>
+            </THead>
+            <tbody>
+              {data.month_by_model.map((row: ModelCostLine) => (
+                <TableRow key={row.model}>
+                  <Td className="font-medium text-foreground">
+                    {row.model || "（未标注）"}
+                  </Td>
+                  <Td align="right" className="text-muted-foreground tabular-nums">
+                    {fmtInt(row.calls)}
+                  </Td>
+                  <Td align="right" className="text-muted-foreground tabular-nums">
+                    {fmtCompact(row.tokens_total)}
+                  </Td>
+                  <Td
+                    align="right"
+                    className="font-medium text-foreground tabular-nums"
+                  >
+                    {fmtNanoMoney(row.cost_total, billedCurrency)}
+                  </Td>
+                  <Td
+                    align="right"
+                    className="text-muted-foreground tabular-nums"
+                    title={
+                      row.cost_estimated_total > 0 ? COST_ESTIMATE_HINT : undefined
+                    }
+                  >
+                    {fmtNanoMoney(
+                      row.cost_estimated_total,
+                      estimateFmtCurrency,
+                      true,
+                    )}
+                  </Td>
+                </TableRow>
+              ))}
+              {data.month_by_model.length === 0 && (
+                <TableMessageRow colSpan={5}>
+                  <EmptyState
+                    icon={Coins}
+                    title="本月暂无模型调用记录"
+                    description="有 LLM 调用落账后，按模型的用量与成本会出现在这里。"
+                    className="py-0"
+                  />
+                </TableMessageRow>
+              )}
+            </tbody>
+          </TableFrame>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <SectionHeader
+            title="本月 Top 花销用户"
+            description="按本月成本降序，仅列有花销的账号 · 点击行进入用户详情"
+          />
+          <TableFrame minWidth={640} className="rounded-none border-0">
+            <THead>
+              <Th>#</Th>
+              <Th>用户</Th>
+              <Th align="right">本月成本（{billedCurrency}）</Th>
+              <Th align="right">回合数</Th>
+            </THead>
+            <tbody>
+              {data.month_by_user.map((row, i) => (
+                <TableRow
+                  key={row.user_id}
+                  onActivate={() => onOpenUser(row.user_id)}
+                  label={`打开用户详情 ${row.display_name || row.username}`}
+                >
+                  <Td className="text-muted-foreground tabular-nums">{i + 1}</Td>
+                  <Td>
+                    <div className="font-medium text-foreground">
+                      {row.display_name || row.username}
+                    </div>
+                    <div className="text-muted-foreground text-xs">
+                      @{row.username}
+                    </div>
+                  </Td>
+                  <Td align="right" className="font-medium text-foreground tabular-nums">
+                    {fmtNanoMoney(row.cost_total, billedCurrency)}
+                  </Td>
+                  <Td align="right" className="text-muted-foreground tabular-nums">
+                    {fmtInt(row.turns)}
+                  </Td>
+                </TableRow>
+              ))}
+              {data.month_by_user.length === 0 && (
+                <TableMessageRow colSpan={4}>
+                  <EmptyState
+                    icon={Coins}
+                    title="本月暂无花销记录"
+                    description="有账号产生花销后，本月的 Top 花销榜会出现在这里。"
+                    className="py-0"
+                  />
+                </TableMessageRow>
+              )}
+            </tbody>
+          </TableFrame>
+        </Card>
+      </Refreshing>
     </div>
   );
 }
@@ -376,18 +418,19 @@ function CostWindowCard({
   byok: boolean;
 }) {
   const est = window.estimated_cost;
+  // `cny_total` 是后端沿用的旧字段名，实为该 breakdown 自己 `currency` 的主单位。
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="text-muted-foreground text-sm">
-        {byok ? `${label}估算` : `${label}总成本`}
+    <Card padded>
+      <div className="text-muted-foreground text-sm" title={UTC_WINDOW_HINT}>
+        {byok ? `${label}估算` : `${label}总成本`}（UTC）
       </div>
       <div
         className="mt-1 text-2xl font-semibold text-foreground tabular-nums"
         title={byok && est ? COST_ESTIMATE_HINT : undefined}
       >
         {byok
-          ? fmtEstimatedCny(est?.cny_total ?? 0)
-          : fmtCny(window.cost.cny_total)}
+          ? fmtEstimatedMoney(est?.cny_total ?? 0, est?.currency)
+          : fmtMoney(window.cost.cny_total, window.cost.currency)}
       </div>
       <div className="mt-4 flex items-center gap-6 text-sm">
         <Stat
@@ -396,7 +439,7 @@ function CostWindowCard({
         />
         <Stat label="请求" value={fmtInt(window.requests)} />
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -431,27 +474,38 @@ function HealthPanel({
     void load();
   }, [load, reloadKey]);
 
-  if (loading || error || !data) {
-    return <PanelState loading={loading} error={error} onRetry={() => void load()} />;
+  if (!data) {
+    return loading ? (
+      <PanelSkeleton />
+    ) : (
+      <ErrorState message={error ?? "加载失败"} onRetry={() => void load()} />
+    );
   }
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <HealthCard label="今日" window={data.today} />
-        <HealthCard label="近 7 日" window={data.week} />
-      </div>
+      {error && <StaleDataNotice message={error} onRetry={() => void load()} />}
 
-      <section className="rounded-xl border border-border bg-card p-5">
-        <h2 className="mb-4 text-base font-semibold text-foreground">
-          近 7 日回合趋势
-        </h2>
-        <TurnTrendBars data={data.recent_daily} />
-      </section>
+      <Refreshing active={loading} className="flex flex-col gap-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <HealthCard label="今日" window={data.today} />
+          <HealthCard label="近 7 日" window={data.week} />
+        </div>
 
-      <AuditSummaryWidget reloadKey={reloadKey} />
+        <Card>
+          <SectionHeader
+            title="近 7 日回合趋势"
+            description="每日回合数与其中的错误（UTC 日切）"
+          />
+          <div className="p-5">
+            <TurnTrendBars data={data.recent_daily} />
+          </div>
+        </Card>
 
-      <ErrorsTable rows={data.recent_errors} onOpen={onOpenReplay} />
+        <AuditSummaryWidget reloadKey={reloadKey} />
+
+        <ErrorsTable rows={data.recent_errors} onOpen={onOpenReplay} />
+      </Refreshing>
     </div>
   );
 }
@@ -474,9 +528,11 @@ function HealthCard({
   // delegated — survival rate is share-of-delegated, the rest are window sums over members.
   const hasDelegated = window.delegated_turns > 0;
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
+    <Card padded>
       <div className="flex items-baseline justify-between">
-        <div className="text-muted-foreground text-sm">{label}回合数</div>
+        <div className="text-muted-foreground text-sm" title={UTC_WINDOW_HINT}>
+          {label}回合数（UTC）
+        </div>
         <Badge tone={errTone}>
           错误 {fmtInt(window.errors)} · {fmtPct(window.error_rate)}
         </Badge>
@@ -516,7 +572,7 @@ function HealthCard({
           />
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -528,43 +584,43 @@ function ErrorsTable({
   onOpen: (conversationId: string) => void;
 }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="border-border border-b px-5 py-3.5">
-        <h2 className="text-base font-semibold text-foreground">近期错误</h2>
-        <p className="mt-0.5 text-muted-foreground text-xs">
-          最近失败的回合（newest-first）· 点击行进入会话复盘
-        </p>
-      </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-border border-b bg-muted/40 text-left text-xs text-muted-foreground">
-            <th className="px-5 py-2.5 font-medium">时间</th>
-            <th className="px-5 py-2.5 font-medium">结束原因</th>
-            <th className="px-5 py-2.5 font-medium">错误</th>
-            <th className="px-5 py-2.5 text-right font-medium">耗时</th>
-            <th className="px-5 py-2.5 font-medium">trace</th>
-          </tr>
-        </thead>
+    <Card className="overflow-hidden">
+      <SectionHeader
+        title="近期错误"
+        description="最近失败的回合（newest-first）· 点击行进入会话复盘"
+      />
+      <TableFrame minWidth={860} className="rounded-none border-0">
+        <THead>
+          <Th title={UTC_WINDOW_HINT}>时间（UTC）</Th>
+          <Th>结束原因</Th>
+          <Th>错误</Th>
+          <Th align="right">耗时</Th>
+          <Th>trace</Th>
+        </THead>
         <tbody>
           {rows.map((row) => (
-            <tr
+            <TableRow
               key={row.turn_id}
-              onClick={() => onOpen(row.conversation_id)}
-              className="cursor-pointer border-border border-b align-top last:border-0 hover:bg-accent/40"
+              onActivate={() => onOpen(row.conversation_id)}
+              label={`打开会话复盘 ${row.conversation_id}`}
+              className="align-top"
             >
-              <td className="whitespace-nowrap px-5 py-3 text-muted-foreground tabular-nums">
-                {fmtTime(row.created_at)}
-              </td>
-              <td className="px-5 py-3">
+              <Td className="whitespace-nowrap text-muted-foreground tabular-nums">
+                {fmtTimeUtc(row.created_at)}
+              </Td>
+              <Td>
                 <Badge tone="destructive">{row.finish_reason ?? "error"}</Badge>
-              </td>
-              <td className="max-w-md px-5 py-3 text-foreground">
+              </Td>
+              <Td className="max-w-md text-foreground">
                 <span className="line-clamp-2 break-words">{row.error ?? "—"}</span>
-              </td>
-              <td className="whitespace-nowrap px-5 py-3 text-right text-muted-foreground tabular-nums">
+              </Td>
+              <Td
+                align="right"
+                className="whitespace-nowrap text-muted-foreground tabular-nums"
+              >
                 {fmtMs(row.duration_ms)}
-              </td>
-              <td className="px-5 py-3">
+              </Td>
+              <Td>
                 {row.trace_id ? (
                   <CopyableId
                     value={row.trace_id}
@@ -575,17 +631,22 @@ function ErrorsTable({
                 ) : (
                   <span className="text-muted-foreground">—</span>
                 )}
-              </td>
-            </tr>
+              </Td>
+            </TableRow>
           ))}
+          {rows.length === 0 && (
+            <TableMessageRow colSpan={5}>
+              <EmptyState
+                icon={CheckCircle2}
+                title="近期暂无错误回合"
+                description="失败的回合会出现在这里，可直接点进会话复盘。"
+                className="py-0"
+              />
+            </TableMessageRow>
+          )}
         </tbody>
-      </table>
-      {rows.length === 0 && (
-        <div className="py-10 text-center text-muted-foreground text-sm">
-          近期暂无错误回合
-        </div>
-      )}
-    </section>
+      </TableFrame>
+    </Card>
   );
 }
 

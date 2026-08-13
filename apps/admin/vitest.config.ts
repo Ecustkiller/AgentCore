@@ -9,6 +9,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    setupFiles: ["./src/test-setup.ts"],
   },
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },

@@ -32,7 +32,7 @@ vi.mock("@/services/adminObservability", () => ({
 // AuditSummaryWidget fires an unmocked fetch whose rejection lands after teardown
 // (window is gone) — pin it to a never-resolving promise to kill the unhandled error.
 vi.mock("@/services/adminAgentAudit", () => ({
-  fetchAuditSummary: vi.fn(() => new Promise(() => {})),
+  fetchAgentAuditSummary: vi.fn(() => new Promise(() => {})),
 }));
 // Trend charts are not under test — stub them to keep the test on the page's own layout.
 vi.mock("@/components/charts", () => ({
@@ -139,12 +139,19 @@ function ReplayProbe() {
   return <div>复盘页 {id}</div>;
 }
 
+/** Same idea for the Top-spender drill-in into 用户详情. */
+function UserProbe() {
+  const { userId } = useParams<{ userId: string }>();
+  return <div>用户页 {userId}</div>;
+}
+
 function renderAnalytics(initial = "/analytics/cost") {
   return render(
     <MemoryRouter initialEntries={[initial]}>
       <Routes>
         <Route path="/analytics/:segment" element={<AnalyticsPage />} />
         <Route path="/replay/:id" element={<ReplayProbe />} />
+        <Route path="/users/:userId" element={<UserProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -154,8 +161,9 @@ describe("AnalyticsPage", () => {
   it("renders the 成本 lens: window totals + top spenders + trend", async () => {
     vi.mocked(fetchUsageSummary).mockResolvedValue(usageSummary());
     renderAnalytics("/analytics/cost");
-    expect(await screen.findByText("今日总成本")).toBeTruthy();
-    expect(screen.getByText("本月总成本")).toBeTruthy();
+    // Window labels carry a（UTC）suffix — the backend cuts these windows on UTC days.
+    expect(await screen.findByText(/今日总成本/)).toBeTruthy();
+    expect(screen.getByText(/本月总成本/)).toBeTruthy();
     expect(screen.getByText("¥12.50")).toBeTruthy(); // today cny_total = 12.5
     expect(screen.getByText("Alice")).toBeTruthy(); // top spender row
     expect(screen.getByTestId("cost-trend")).toBeTruthy();
@@ -176,10 +184,10 @@ describe("AnalyticsPage", () => {
       obsSummary({ today: healthWindow({ turns: 20, errors: 1, error_rate: 0.05 }) }),
     );
     renderAnalytics("/analytics/cost");
-    await screen.findByText("今日总成本"); // cost lens loaded first
+    await screen.findByText(/今日总成本/); // cost lens loaded first
     expect(fetchObservabilitySummary).not.toHaveBeenCalled(); // only the active lens fetches
     fireEvent.click(screen.getByRole("button", { name: "健康" }));
-    expect(await screen.findByText("今日回合数")).toBeTruthy();
+    expect(await screen.findByText(/今日回合数/)).toBeTruthy();
     expect(screen.getByTestId("turn-trend")).toBeTruthy();
     expect(fetchObservabilitySummary).toHaveBeenCalledTimes(1);
   });
@@ -198,11 +206,30 @@ describe("AnalyticsPage", () => {
   it("opens 复盘 from the 会话 ID form", async () => {
     vi.mocked(fetchUsageSummary).mockResolvedValue(usageSummary());
     renderAnalytics("/analytics/cost");
-    await screen.findByText("今日总成本");
+    await screen.findByText(/今日总成本/);
     fireEvent.change(screen.getByPlaceholderText("会话 ID 复盘…"), {
       target: { value: "conv-42" },
     });
     fireEvent.click(screen.getByRole("button", { name: "复盘" }));
     expect(await screen.findByText(/复盘页 conv-42/)).toBeTruthy();
+  });
+
+  it("opens 用户详情 from a Top-spender row without a mouse", async () => {
+    vi.mocked(fetchUsageSummary).mockResolvedValue(usageSummary());
+    renderAnalytics("/analytics/cost");
+    // 这些行一直是「看着能点、键盘够不着」——名字来自 TableRow 的 label。
+    const row = await screen.findByRole("row", { name: /打开用户详情 Alice/ });
+    fireEvent.keyDown(row, { key: "Enter" });
+    expect(await screen.findByText(/用户页 u1/)).toBeTruthy();
+  });
+
+  it("offers a retry when a lens fails to load", async () => {
+    vi.mocked(fetchUsageSummary).mockRejectedValueOnce(new Error("down"));
+    renderAnalytics("/analytics/cost");
+    expect(await screen.findByText("发生未知错误")).toBeTruthy();
+
+    vi.mocked(fetchUsageSummary).mockResolvedValue(usageSummary());
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(await screen.findByText(/今日总成本/)).toBeTruthy();
   });
 });
