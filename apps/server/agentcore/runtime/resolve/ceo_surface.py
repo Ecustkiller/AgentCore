@@ -6,7 +6,7 @@ Injection aligns with the coordination tools' execution gate
 (coordination starts or supervised wave yield) registers the gated tools in
 place — one-time prefix-cache miss is acceptable.
 
-Also owns COST-004 tools-surface observation (JSON chars / approx tokens) and
+Also owns COST-004 tools-surface observation (exact JSON chars + a token band) and
 the coordination-period hint shown in CEO event briefs.
 """
 
@@ -52,7 +52,33 @@ COORDINATION_PERIOD_HINT = (
     "勿同质 wait。全部完成后做最终合成（正文），然后退出协调。"
 )
 
-_CHARS_PER_TOKEN = 4
+# A tool schema is Chinese prose (every ``description``) wrapped in ASCII JSON, and the two
+# halves tokenize an order of magnitude apart: a Han character costs about one token on
+# cl100k-family vocabularies and ~1.5 chars/token on the CJK-dense ones (DeepSeek / Qwen),
+# while the scaffolding (keys, enum literals, punctuation) runs 3–4.5 chars/token. One blended
+# divisor cannot be honest about both: the assembled CEO surface is 22.5k chars / 30% CJK,
+# which the old flat ``chars // 4`` called 5.6k tokens against a 7.8k–11.9k band. So report the
+# BAND, per char class, next to the exact char split — recomputable for a known tokenizer, and
+# never a single number that reads as measured.
+_CJK_TOKENS_PER_CHAR = (0.65, 1.0)
+_OTHER_TOKENS_PER_CHAR = (1 / 4.5, 1 / 3.0)
+
+
+def _is_cjk(char: str) -> bool:
+    """True for the char classes that tokenize roughly one-per-character."""
+    code = ord(char)
+    return (
+        0x3000 <= code <= 0x9FFF  # CJK punctuation · kana · ext-A · unified ideographs
+        or 0xF900 <= code <= 0xFAFF  # compatibility ideographs
+        or 0xFF00 <= code <= 0xFFEF  # fullwidth / halfwidth forms
+    )
+
+
+def _token_band(*, cjk_chars: int, other_chars: int) -> tuple[int, int]:
+    """Lower / upper token estimate for a char split — never a single measured-looking value."""
+    low = cjk_chars * _CJK_TOKENS_PER_CHAR[0] + other_chars * _OTHER_TOKENS_PER_CHAR[0]
+    high = cjk_chars * _CJK_TOKENS_PER_CHAR[1] + other_chars * _OTHER_TOKENS_PER_CHAR[1]
+    return round(low), round(high)
 
 
 def coordination_surface_active(*, execution_id: str | None = None) -> bool:
@@ -224,7 +250,11 @@ def observe_tools_offered(
     scope: str,
     tool_defs: list[dict] | None = None,
 ) -> None:
-    """COST-004: log tools-surface JSON size (observe-only; no SSE / API fields)."""
+    """COST-004: log tools-surface JSON size (observe-only; no SSE / API fields).
+
+    ``total_chars`` / ``cjk_chars`` / ``per_tool`` are exact; the token cost is a band
+    (:func:`_token_band`) because no tokenizer for the serving model is available here.
+    """
     defs = tool_defs
     if defs is None:
         defs = tools.get_openai_definitions() if tools.count > 0 else []
@@ -234,24 +264,30 @@ def observe_tools_offered(
             scope=scope,
             tool_count=0,
             total_chars=0,
-            approx_tokens=0,
+            cjk_chars=0,
+            approx_tokens_low=0,
+            approx_tokens_high=0,
             per_tool={},
         )
         return
     per_tool: dict[str, int] = {}
     total = 0
+    cjk = 0
     for d in defs:
         name = (d.get("function") or {}).get("name") or d.get("name") or "?"
         raw = json.dumps(d, ensure_ascii=False)
-        n = len(raw)
-        per_tool[str(name)] = n
-        total += n
+        per_tool[str(name)] = len(raw)
+        total += len(raw)
+        cjk += sum(1 for char in raw if _is_cjk(char))
+    low, high = _token_band(cjk_chars=cjk, other_chars=total - cjk)
     logger.info(
         "cost.tools_offered",
         scope=scope,
         tool_count=len(defs),
         total_chars=total,
-        approx_tokens=total // _CHARS_PER_TOKEN,
+        cjk_chars=cjk,
+        approx_tokens_low=low,
+        approx_tokens_high=high,
         per_tool=per_tool,
     )
 

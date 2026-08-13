@@ -255,11 +255,8 @@ GIT_TOOL_PARAMETERS: dict[str, Any] = {
                 "remote",
                 "create_pr",
             ],
-            "description": (
-                "子命令。写入与 stash push/pop、tag create、remote add 须审批；"
-                "list/只读免批。无仓只读→no_repo；写硬错（init_baseline 除外）。"
-                "CEO 拒写须 delegate（init_baseline 例外）。"
-            ),
+            # 审批 / 无仓 / CEO 写入策略只在工具描述里写一遍，勿在此复述。
+            "description": "子命令；审批 / 无仓 / CEO 写入策略见工具说明。",
         },
         "paths": {
             "type": "array",

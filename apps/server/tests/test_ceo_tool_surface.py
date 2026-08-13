@@ -461,3 +461,58 @@ def test_debate_and_review_listed_in_idle_directory():
     idle_names = set(_assemble().names)
     directory = render_skill_directory(build_system_skill_registry(), idle_names)
     assert "debate_and_review" in directory
+
+
+# --- COST-004 tools 面 token 口径 --------------------------------------------
+
+
+def _tools_offered_line(monkeypatch, defs: list[dict]) -> dict:
+    """The single ``cost.tools_offered`` line ``observe_tools_offered`` emits for ``defs``."""
+    from agentcore.runtime.resolve import ceo_surface
+
+    captured: list[dict] = []
+
+    class _Spy:
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
+    monkeypatch.setattr(ceo_surface, "logger", _Spy())
+    ceo_surface.observe_tools_offered(ToolRegistry(), scope="unit", tool_defs=defs)
+    return captured[0]
+
+
+def test_a_chinese_schema_no_longer_reads_as_a_quarter_of_its_chars(monkeypatch):
+    """中文正文约 1 汉字 = 1 token；旧的 ``chars // 4`` 把整个工具面算低了三四倍。"""
+    prose = "把任务派给队员并给出验收标准。" * 50
+    line = _tools_offered_line(
+        monkeypatch, [{"function": {"name": "delegate", "description": prose}}]
+    )
+    assert line["cjk_chars"] == len(prose)  # 汉字 + 中文句号都算 CJK
+    assert line["approx_tokens_low"] > line["total_chars"] // 4  # 旧口径
+    # 「1 汉字 1 token」这一最坏情形必须落在带内，否则带本身仍在低估。
+    assert line["approx_tokens_low"] <= len(prose) <= line["approx_tokens_high"]
+    assert "approx_tokens" not in line  # 不留已知偏低的单值
+
+
+def test_an_ascii_schema_band_brackets_the_classic_four_chars_per_token(monkeypatch):
+    line = _tools_offered_line(
+        monkeypatch,
+        [{"function": {"name": "file_read", "description": "Read a file and return its text."}}],
+    )
+    assert line["cjk_chars"] == 0
+    assert line["approx_tokens_low"] <= line["total_chars"] // 4 <= line["approx_tokens_high"]
+
+
+def test_an_empty_tool_surface_keeps_the_same_fields(monkeypatch):
+    line = _tools_offered_line(monkeypatch, [])
+    assert line["tool_count"] == 0
+    assert line["total_chars"] == 0 and line["cjk_chars"] == 0
+    assert line["approx_tokens_low"] == 0 and line["approx_tokens_high"] == 0
+
+
+def test_the_real_ceo_surface_is_chinese_enough_to_have_been_underreported(monkeypatch):
+    """真实装配面：schema 正文几乎全中文，正是旧口径系统性偏低的来源。"""
+    line = _tools_offered_line(monkeypatch, _assemble().get_openai_definitions())
+    assert line["cjk_chars"] > 0
+    assert line["approx_tokens_low"] > line["total_chars"] // 4
+    assert line["per_tool"] and sum(line["per_tool"].values()) == line["total_chars"]

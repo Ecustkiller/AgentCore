@@ -279,17 +279,15 @@ class TerminalTool:
         return ToolSchema(
             name="terminal",
             description=(
+                # 四个子命令各自做什么只写在 subcommand 参数里；这里只留路由与纪律。
                 "在用户本机启动/管理长时后台进程（dev server、watch、长脚本等）。"
                 "【凡永不退出的命令必须用本工具，禁止改走 code_execute / host_shell】"
                 "典型：npm run dev / vite / next dev / uvicorn --reload。"
-                "CEO 可对「只启服 / 重启 / 看是否活着」直接使用本工具；"
-                "改代码、装依赖、修报错仍须 delegate。"
-                "start：spawn 并返回 process_id + 首段输出；宣称「已就绪」前应用 "
-                "wait_for（如 Local:|ready in）等到 ready 信号，勿仅凭首段输出下结论；"
-                "read：读尾部输出或按正则等待；stop：终止；list：列本对话进程"
-                "（可能含用户交互终端「用户终端 #N」，可读不可停）。"
                 "会自行退出的短命令中，装包 / build / test 请用 test_run（worker）；"
                 "其它极短 CLI 可用 code_execute（worker）。"
+                "CEO 可对「只启服 / 重启 / 看是否活着」直接使用本工具；"
+                "改代码、装依赖、修报错仍须 delegate。"
+                "宣称「已就绪」前须用 wait_for 等到 ready 信号，勿仅凭首段输出下结论。"
                 "仅本地模式可用，进程跨回合存活。"
             ),
             parameters=TERMINAL_TOOL_PARAMETERS,

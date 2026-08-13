@@ -147,17 +147,20 @@ def test_directory_lists_only_available_skills_with_names_and_summaries():
         assert skill.summary in out
 
 
-def test_directory_preamble_carves_out_product_help_consult():
-    """产品用法从「纯对话无需 consult」划出，与 platform_knowledge 必查对齐。"""
+def test_product_help_consult_carved_out_and_owned_by_core():
+    """产品用法从「纯对话无需 consult」划出；强度串只在常驻核落一次，目录只负责列条目。"""
+    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT
     from agentcore.runtime.skills import (
         CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
         CONSULT_PRODUCT_HELP_BY_SCENE,
     )
 
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
-    assert CONSULT_PRODUCT_HELP_BY_SCENE in out
-    assert CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE in out
-    assert "必查 `product_help`" in out
+    assert CONSULT_PRODUCT_HELP_BY_SCENE not in out
+    assert CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE not in out
+    assert _CEO_CORE_HINT.count(CONSULT_PRODUCT_HELP_BY_SCENE) == 1
+    assert _CEO_CORE_HINT.count(CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE) == 1
+    assert "必查 `product_help`" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_map" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_faq" in CONSULT_PRODUCT_HELP_BY_SCENE
     # 定案 A：Cursor / .mdc / 改成 AgentCore 规则 → 必查 product_help*
@@ -176,16 +179,22 @@ def test_directory_preamble_carves_out_product_help_consult():
     assert "- product_bug_triage：" in out
 
 
-def test_directory_preamble_recommends_build_app_not_hard_forbid_none():
-    """按需目录对齐编排器：推荐具名 build_app，不硬拒 none/手写；边界未钉≠绿场 SPA。"""
+def test_greenfield_recommends_build_app_not_hard_forbid_none():
+    """绿场准入对齐编排器：推荐具名 build_app，不硬拒 none/手写；边界未钉≠首派五波脚手架。
+
+    去重定案：这条路由的权威位置是常驻核（`_CEO_CORE_HINT`），按需目录只留 `- build_app：`
+    条目行 + skill 自身摘要，不再第三遍复述判据。
+    """
+    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT
+
     out = render_skill_directory(build_system_skill_registry(), _FULL_TOOLS)
-    assert "推荐" in out and "build_app" in out
-    assert "不硬拒" in out or "手写/none 不硬拒" in out
-    assert "必须 build_app" not in out
-    assert "禁 none 手糊" not in out
-    assert "边界未钉" in out or "轻切片" in out or "少节点" in out
-    assert "轻切片" in out or "少节点" in out or "嵌套" in out
-    assert "五波" in out or "脚手架" in out
+    hint = _CEO_CORE_HINT
+    assert "不硬拒" in hint
+    assert "必须 build_app" not in hint
+    assert "禁 none 手糊" not in hint
+    assert "边界未钉" in hint
+    assert "五波脚手架" in hint
+    assert "先聊聊/先做一版" in hint
     assert "- build_app：" in out
     skill = build_system_skill_registry().get("build_app")
     assert skill is not None
@@ -272,7 +281,11 @@ async def test_consult_build_website_hit():
     assert "none" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- build_website：" in directory
-    assert "playbook_args.topic" in directory
+    # 「topic 必填」由常驻核持有，目录不再复述（去重定案）
+    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT
+
+    assert "**必填** `playbook_args.topic`" in _CEO_CORE_HINT
+    assert "playbook_args.topic" not in directory
     assert "- build_toolshed：" not in directory
     assert "style=\"toolshed\"" in result.output or "style=toolshed" in result.output
 

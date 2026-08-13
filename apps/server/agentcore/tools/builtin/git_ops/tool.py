@@ -171,14 +171,16 @@ class GitTool:
         return ToolSchema(
             name="git",
             description=(
+                # 审批 / 无仓 / CEO 写入这三条策略只在这里写一遍——
+                # subcommand 与各参数说明只描述自己的取值语义。
                 "工作区根结构化 Git（仅根 `.git`；探路优先 file_list/grep）。"
                 "只读免批；写入与 stash push/pop、tag create、remote add 须审批；"
                 "CEO 拒写须 delegate（例外 init_baseline 仍须授权）。"
                 "无仓：只读→success+no_repo（勿当干净仓）；写硬错；"
                 "init_baseline=无仓则 init+首提交，脏仓→dirty_skip。"
-                "status 默认无未跟踪；pull=--ff-only；冲突诚实失败；"
+                "pull=--ff-only；冲突诚实失败；"
                 "push/create_pr 恒确认（create_pr 仅 GitHub API）；"
-                "force/保护分支/reset|clean/stash drop|clear/删 tag/remote remove 硬拒。"
+                "force/保护分支/reset|clean 硬拒，其余禁项见 action。"
             ),
             parameters=GIT_TOOL_PARAMETERS,
             category=ToolCategory.FILESYSTEM,

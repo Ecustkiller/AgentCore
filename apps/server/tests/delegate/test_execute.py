@@ -795,9 +795,11 @@ async def test_playbook_xor_and_hoist_conflict_skip_circuit_breaker():
 def test_schema_cues_xor_and_top_level_completion_criteria():
     t = tool(Provider([]))
     assert "二选一" in t.schema.description
-    assert "勿再填已删的 completion_criteria" in t.schema.description
     props = t.schema.parameters["properties"]
     assert "completion_criteria" not in props
+    # S3 字段已删 ⇒ 描述里也不留负面清单（体积棘轮见
+    # tests/test_tool_schema_size_ratchet.py）；误传仍由 execute 静默忽略 + 打点。
+    assert "completion_criteria" not in t.schema.description
 
 
 def test_strict_description_separates_rework_from_disposition():

@@ -1,11 +1,16 @@
-"""Tests for ``<workspace_context>`` environment-facts injection."""
+"""Tests for ``<workspace_context>`` environment-facts injection.
+
+去重定案（一条纪律只留一个权威位置）：本块**只陈述本回合事实**——位置、能力行、挂载、
+产物出口路径、某能力装没装配。「该怎么做 / 禁止什么」的 HOW 归 ``_CEO_CORE_HINT``（CEO 侧）
+或共享基座（全员侧）。因此这里的用例成对写：事实留在 ``out``，HOW 断言指向核。
+"""
 
 from agentcore.runtime.context.workspace_context import (
     build_workspace_context,
     desktop_client_can_bind,
     resolve_channel_profile,
 )
-from agentcore.runtime.resolve.prompt import assemble_system_prompt
+from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, assemble_system_prompt
 from agentcore.tools.builtin import build_ceo_tool_registry
 
 
@@ -114,60 +119,64 @@ def test_cloud_scratch_facts():
     assert "合法非默认" in out or "非默认" in out
     assert "本机传统" in out
     assert "改导" not in out  # skill/context 不得写 Ask 改导导入
-    # 跨文件夹指挥事实面（与 skills 第二教学面互补）
-    assert "跨文件夹指挥" in out
-    assert "list_folders" in out and "resolve_folder" in out
-    assert "target_folder_id" in out
-    assert "create_folder" in out
-    # 嵌套：resolve 按路径，歧义候选带完整路径。
-    assert "按路径解析" in out and "完整路径" in out
-    assert "自动建云文件夹" in out
-    assert "禁猜最近" in out or "猜最近" in out
-    assert "禁默写 scratch" in out or ("scratch" in out and "写盘" in out)
-    assert "多" in out and "并行" in out
-    assert "可能降级" not in out
-    assert "协作图不改" in out
-    # 一句短指针（HOW 在 skill）；先建仅显式新建/多线
-    assert "先建齐再同次派" in out
-    assert "拒后禁塌缩" in out
-    # 跨文件夹读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
-    assert "list_folder_dir" in out and "read_folder_file" in out
-    assert "认桌" in out or "抽样" in out
+    # 跨文件夹：事实层只留「默认坐哪张桌」，整条 HOW 归 ceo_core（去重定案）
     assert "出生桌" in out
-    assert "写仍派工换桌" not in out
-    assert "delegate" in out and "target_folder_id" in out
-    assert "读写通吃" in out or "只读摸底" in out
-    assert "云端读不到本地" in out and "禁止" in out
-    # 空壳先问 + 开发双仓 ≠ open/bind/挂载冒充
-    assert "空" in out and "ask_user" in out
-    assert "file_list" in out
-    assert "开发双仓" in out or "external_mount_readonly" in out
+    assert "跨文件夹指挥" not in out
+    assert "target_folder_id" not in out
+    assert "list_folders" not in out and "resolve_folder" not in out
+    assert "可能降级" not in out
+    hint = _CEO_CORE_HINT
+    assert "【跨文件夹 / 空壳 kickoff】" in hint
+    assert "list_folders" in hint and "resolve_folder" in hint
+    assert "target_folder_id" in hint
+    assert "create_folder" in hint
+    # 嵌套：resolve 按路径，歧义候选带完整路径。
+    assert "按路径解析" in hint and "完整路径" in hint
+    assert "自动建云文件夹" in hint
+    assert "禁猜最近" in hint
+    assert "默写 scratch" in hint
+    assert "协作图不因换桌改变" in hint
+    assert "先建齐再同次派" in hint
+    assert "拒后禁塌缩" in hint
+    # 跨文件夹读写通吃派工换桌；CEO 只读跨桌仅认桌（禁「云端读不到本地」当唯一路径）
+    assert "list_folder_dir" in hint and "read_folder_file" in hint
+    assert "认桌" in hint
+    assert "云端读不到本地" in hint
+    assert "delegate" in hint
+    # 空壳先问 + 开发双仓 ≠ open/bind/挂载冒充（同属 HOW）
+    assert "ask_user" in hint
+    assert "file_list" in hint
+    assert "开发双仓" in hint
+    # 区外授权：事实层留通道与工具名，判据与闭环归核
     assert "external_mount_readonly" in out
     assert "grant_organize_folder" in out
     assert "与工作区绑定正交" in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "云端无法直接授权本机区外路径" not in out
-    # 只读静默：禁新发 grant_readonly 卡；无选择器兜底叙事。
-    assert "禁止" in out and "grant_readonly_folder" in out
     assert "选择器兜底" not in out
-    assert "立即" in out and "勿用纯文本" in out
-    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型
-    assert "口头同意" in out
-    assert "等待确认" in out
-    assert "2～3" in out or "2-3" in out
-    assert "失败分型" in out
-    assert "没找着" in out
-    # 授权后发现：禁首轮文本题要文件名；须提示 well_known
-    assert "授权后发现" in out or "well_known" in out
-    assert "well_known" in out
-    assert "文件名" in out
+    assert "口头同意闭环" not in out
+    assert "失败分型" not in out
+    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型：核里各一份
+    assert hint.count("【口头同意闭环】") == 1
+    assert "等待确认" in hint
+    assert "2～3" in hint
+    assert hint.count("【失败分型】") == 1
+    assert "没找着" in hint
+    assert "为只读新发 `grant_readonly_folder`" in hint
+    # 授权后发现：禁首轮文本题要文件名；须提示 well_known —— 都归核
+    assert hint.count("【授权后发现】") == 1
+    assert "well_known" in hint
+    assert "首轮文本题要文件名/绝对路径" in hint
+    assert "well_known" not in out
     assert "在哪工作" in out
     assert "仅新建会话" in out
     assert "ask_user" in out  # 本机整理仍走卡
     assert "勿引导用户去设置改模式" in out
-    # 定案 A：优化项目 ≠ 默认催开项目；附件收窄范围时先干活。
-    assert "≠默认开项目卡" in out or "收窄本轮" in out
-    assert "开工前置" in out
+    # 定案 A：优化项目 ≠ 默认催开项目；附件收窄范围时先干活（后半句归核）。
+    assert "≠默认开文件夹卡" in out
+    assert "开工前置" not in out
+    assert "【本轮材料收窄】" in hint
+    assert "不得把开文件夹/绑本地当开工前置" in hint
     assert "不可改绑" not in out
     assert "严禁引导" not in out
     assert "本机草稿" not in out or "勿推销本机草稿" in out
@@ -177,8 +186,8 @@ def test_cloud_scratch_facts():
     assert "terminal=未装配" in out
     assert "browser=未装配" in out
     assert "local_open=未装配" in out
-    assert "执行指引" in out
-    assert "禁止" in out and "导入到云" in out
+    assert "执行事实" in out
+    assert "导入到云" in out
     assert "沙箱不可用" in out or "已是云端会话" in out
     assert "host=已装配" in out
     # 产物出口纠偏：文件在云端、「完整预览」进右坞浏览器；禁止本机「双击打开」
@@ -186,18 +195,25 @@ def test_cloud_scratch_facts():
     assert "不在用户本机" in out
     assert "完整预览" in out
     assert "右坞「浏览器」" in out or "右坞" in out
-    assert "双击打开" in out
-    assert "浏览器指引" in out
+    # 「禁给本机路径 / 禁说双击打开」是收口 HOW，归核的【交付指引】
+    assert "双击打开" not in out
+    assert "【交付指引】" in hint
+    assert "双击打开" in hint and "禁止给本机磁盘路径" in hint
+    assert "浏览器事实" in out
     assert "browser=未装配" in out
-    assert "勿假装" in out or "勿调用 browser_*" in out
-    assert "host_info" in out or "host_audio" in out or "本机 Host 指引" in out
-    assert "三分日志" in out
-    assert "host_os_log_summary" in out
+    assert "host_info" in out or "host_audio" in out or "本机 Host 事实" in out
+    # 三分日志只写一遍（核），事实层不再逐 host 分支复述
+    assert "三分日志" not in out
+    assert hint.count("【三分日志·勿混称】") == 1
+    assert "host_os_log_summary" in hint
     # 案 20260803-image-gen-byok-egress-boundary A：云沙箱无任意 HTTPS 出口事实行
     assert "出站网络" in out
     assert "--network=none" in out
-    assert "代调" in out and "生图" in out
-    assert "API Key" in out or "密钥" in out or "明文" in out
+    assert "无原生生图工具" in out
+    # 「禁代调出图」归核；「Key 不落明文」归共享基座，事实层都不写
+    assert "代调" not in out
+    assert "API Key" not in out and "明文" not in out
+    assert "代调" in hint and "生图" in hint
     # 旧「云端临时空间」短标签已换成诚实草稿口径
     assert "工作区身份：云端临时空间" not in out
     # 约定文档布局（始终可见）：四行出口 + 边界
@@ -207,7 +223,9 @@ def test_cloud_scratch_facts():
     assert "约定文档出口·审查：`AgentCore/文档/reviews/`" in out
     assert "讨论/调研/审查类交付写此树" in out
     assert "用户工程源码仍写业务路径" in out
-    assert "完整前缀" in out and "裸 reviews" in out
+    # 「报路径须完整前缀、禁缩短成裸 reviews/」是 HOW，核的【产物路径】持有
+    assert "完整前缀" not in out
+    assert "**完整**路径" in hint and "裸 `reviews/…`" in hint
     # FakeBackend has no root → probe unknown; still soft-tips init_baseline (P3).
     assert "init_baseline" in out
     assert "不挡派工" in out or "不挡" in out
@@ -274,23 +292,25 @@ def test_browser_capability_override():
     )
     assert "browser=已装配" in out
     assert "local_open=未装配" in out
-    assert "ask_user(browser_login=true)" in out
-    assert "escalate(browser_login=true)" not in out
-    assert "接管登录" in out
-    assert "browser_navigate" in out
-    assert "禁止为此" in out or "勿为此" in out or "你自己" in out
-    assert "禁止只用 read_url" in out or "假装已打开" in out
-    assert "browser_open" in out  # 明示禁编造
-    # 意图梯度：navigate 成功即可；验收/截图才 snapshot；跑起来≠必须 navigate
-    assert "navigate 成功" in out or "即可收工" in out
-    assert "验收" in out and "截图" in out
-    assert "≠必须 navigate" in out or "跑起来" in out
-    # CEO 可直持 navigate；其余 browser_* 仍 worker
-    assert "CEO 可直持" in out or "navigate 由 CEO" in out
+    # 事实层：谁能直持、宿主是哪种、能不能开相对路径
+    assert "CEO 可直持" in out
     assert "仅 worker" in out
-    # 乙：沙箱已装配时仍标明相对路径不可测 / 完整预览
     assert "相对" in out or "完整预览" in out
     assert "http(s)" in out or "公网" in out
+    # HOW 归核（登录接管 / 禁编造工具名 / 禁 read_url 冒充 / 意图梯度），事实层不复述
+    assert "ask_user(browser_login=true)" not in out
+    assert "browser_open" not in out
+    hint = _CEO_CORE_HINT
+    assert "ask_user(browser_login=true)" in hint
+    assert "escalate(browser_login=true)" not in hint
+    assert "接管" in hint
+    assert "browser_navigate" in hint
+    assert "**你自己**" in hint
+    assert "只用 `read_url` / `web_search` 交差冒充已开页" in hint
+    assert "无 browser_open，禁编造未列出的工具名" in hint
+    assert "navigate 成功或短操作完成即可" in hint
+    assert "验收" in hint and "截图" in hint
+    assert "「跑起来 / 打开看一下」≠本条" in hint
 
 
 def test_local_browser_guide_mentions_workspace_relative_path():
@@ -306,8 +326,9 @@ def test_local_browser_guide_mentions_workspace_relative_path():
     assert "site/index.html" in out or "相对" in out
     assert "完整预览" in out or "workspace://" in out
     assert "file://" in out  # 明示不支持
-    assert "console" in out
-    assert "browser_console" in out
+    assert "console" in out  # 能力清单里的 browser_* 之一
+    # 「异常先取 JS 错误」是 HOW，归核
+    assert "browser_console" in _CEO_CORE_HINT
 
 
 def test_bridge_session_sandbox_browser_guide_no_relative_html(monkeypatch):
@@ -341,27 +362,29 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
         terminal_enabled=False,
         browser_enabled=False,
     )
-    assert "浏览器指引" in out
+    assert "浏览器事实" in out
     assert "gVisor" in out or "沙箱" in out or "netns" in out
     # 本机传统可教非默认；云协作仍推荐
     assert "本机传统" in out or "合法非默认" in out or "非默认" in out
     assert "bind_local_folder" in out or "open_local_project" in out or "open/bind" in out
     # 禁误导：未装配时勿暗示「本机未装就可随手启用云端沙箱」旧句
     assert "或启用云端沙箱浏览器" not in out
-    assert "ask_user(browser_login=true)" in out
-    assert "escalate(browser_login=true)" not in out
-    assert "已登录，继续" in out
-    assert "Cookie" in out  # 明确否决扫 Cookie 冒充路径
-    assert "用浏览器打开" in out
-    assert "非右坞浏览器" in out
-    assert "静默" in out or "假装" in out
-    # 缺能力 → 同轮可开工排序；人手为一等路径（禁「仅补救/非主路径」）
-    assert "同轮可开工" in out
-    assert "手脑" in out
-    assert "一等" in out or "非补救" in out
-    assert "禁多轮复读" in out or "多轮复读" in out
-    assert "补救，但不是" not in out
-    assert "不是接管流程" not in out
+    # 缺能力怎么办只写一遍：核的【能力未装配·统一姿势】管所有能力，事实层不逐条复述
+    assert "同轮可开工" not in out
+    hint = _CEO_CORE_HINT
+    assert hint.count("**【能力未装配·统一姿势】**") == 1
+    assert "ask_user(browser_login=true)" in hint
+    assert "escalate(browser_login=true)" not in hint
+    assert "已登录，继续" in hint
+    assert "Cookie" in hint  # 明确否决扫 Cookie 冒充路径
+    assert "用浏览器打开" in hint
+    assert "非右坞浏览器" in hint
+    assert "同轮可开工" in hint
+    assert "手脑" in hint
+    assert "一等" in hint or "非补救" in hint
+    assert "多轮复读" in hint
+    assert "补救，但不是" not in hint
+    assert "不是接管流程" not in hint
 
 
 def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
@@ -376,13 +399,14 @@ def test_local_browser_unassembled_guide_splits_reason_no_sandbox_teaser():
     assert "browser=未装配" in out
     assert "无本机 Bridge" in out
     assert "或启用云端沙箱浏览器" not in out
-    assert "禁止假成功" in out or "不可装配" in out
-    assert "同轮可开工" in out
-    assert "手脑" in out
+    assert "不可装配" in out
+    # 「装配启用条件」是事实，留在这里；「未装配怎么开工」归核，见上一用例
+    assert "装配启用需桌面 Local Chromium Bridge 健康" in out
+    assert "同轮可开工" not in out
 
 
-def test_host_mcp_unassembled_same_round_workable():
-    """host/mcp 未装配亦同轮可开工排序，禁只硬否。"""
+def test_host_mcp_unassembled_states_facts_and_defers_posture_to_core():
+    """host/mcp 未装配：事实层只写装没装配与为什么；同轮可开工姿势归核，一处即可。"""
     out = build_workspace_context(
         _FakeBackend("server"),
         desktop_online=False,
@@ -392,11 +416,15 @@ def test_host_mcp_unassembled_same_round_workable():
     )
     assert "host=未装配" in out
     assert "mcp=未装配" in out
-    assert "同轮可开工" in out
-    assert "手脑" in out
-    assert "禁多轮复读" in out or "多轮复读" in out
-    assert "勿假装" in out or "勿调用 host_*" in out
-    assert "勿调用 mcp_*" in out
+    assert "无桌面回填通道" in out
+    assert "同轮可开工" not in out
+    hint = _CEO_CORE_HINT
+    assert "browser / host / mcp / terminal" in hint  # 统一姿势覆盖各能力
+    assert "同轮可开工" in hint
+    assert "手脑" in hint
+    assert "多轮复读" in hint
+    assert "已接 MCP" in hint  # 未装配禁称已用
+    assert "把该能力的动作写进给队员的任务" in hint  # 未装配禁派空跑
 
 
 def test_sidecar_local_without_channel():
@@ -421,8 +449,8 @@ def test_mobile_session_omits_bind_nudge():
     assert "Web / 移动端" not in out
     assert "Web / 手机" not in out
     assert "当前为 Web" not in out
-    assert "勿将通道缺失说成用户在用 Web/手机" in out
-    assert "区外目录授权仅桌面端可用" in out
+    assert "通道缺失≠用户在用 Web/手机" in out
+    assert "授权仅桌面端可用" in out
     assert "https://fashitianxia.xyz/download" in out
     assert "官方桌面客户端" in out
     assert "勿发 grant_* / bind_local_folder / open_local_project" in out
@@ -466,7 +494,9 @@ def test_channel_offline_self_claim_desktop_recheck_honesty():
     assert "导入到云" in out or "连接 Git" in out or "Composer" in out
     assert "Folders" in out
     assert "设置→Folders" in out or "侧栏授权页" in out
-    assert "授权在哪里" in out
+    # 「用户问授权在哪里」的触发语删了；被问时要复述的固定步骤与真源入口仍在同一行
+    assert "复述固定步骤" in out
+    assert "只指真源入口名" in out
     # 不得在离线分支广告可履约发卡
     assert "立即发卡" not in out
     assert "action=open_local_project" not in out
@@ -482,9 +512,9 @@ def test_no_mounts_forbids_claiming_grant_confirmed():
     )
     assert "本对话尚无会话级区外目录授权" in out
     assert "本对话已授权区外目录：" not in out
-    assert "禁止说「授权已确认」" in out or (
-        "禁止说" in out and "授权已确认" in out
-    )
+    assert "禁止声称授权已确认" in out
+    # 铁律只在 mounts 行落一次（离线 grant 行不再抄一遍）
+    assert out.count("授权已确认") == 1
 
 
 def test_cloud_desktop_online_allows_external_grant_without_bind():
@@ -498,11 +528,14 @@ def test_cloud_desktop_online_allows_external_grant_without_bind():
     assert "执行位置：云端沙箱" in out
     assert "external_mount_readonly" in out
     assert "与工作区绑定正交" in out
-    assert "看桌面" in out or "本机某目录" in out
-    assert "手填绝对路径" in out or "探主机家目录" in out
+    assert "本机某目录" in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "选择器兜底" not in out
-    assert "禁止" in out and "grant_readonly_folder" in out
+    # 怎么定位目录（禁手填绝对路径 / 禁探家目录 / 只读禁再发卡）归核
+    hint = _CEO_CORE_HINT
+    assert "手填绝对路径" in hint and "探主机家目录" in hint
+    assert "为只读新发 `grant_readonly_folder`" in hint
+    assert "grant_readonly_folder" not in out
 
 
 def test_assemble_system_prompt_includes_workspace_facts():

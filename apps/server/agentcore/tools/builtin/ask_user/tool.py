@@ -144,12 +144,12 @@ class AskUserTool:
                     "grant_organize_folder",
                 ],
                 "description": (
-                    "可选。open/register/bind_local_* = 本机传统入口"
+                    "可选。open/register/bind_local_*=本机传统入口"
                     "（合法非默认；云协作仍推荐；≠离线；勿当默认主推）；"
                     "grant_organize_folder=区外整理授权（口头同意须立刻发卡；"
-                    "歧义可同一题 2～3 个 organize choice）；"
-                    "grant_readonly_folder=旧帧保留（【禁止】新发；只读用 "
-                    "external_mount_readonly）。"
+                    "歧义可同一题 2～3 个）；"
+                    "grant_readonly_folder=旧帧保留，【禁止】新发"
+                    "（只读用 external_mount_readonly）。"
                 ),
             }
             option_properties["well_known"] = {
@@ -172,16 +172,14 @@ class AskUserTool:
                     "歧义候选宜各不同）。"
                 ),
             }
-            questions_desc += (
-                " 桌面 options.action 见 enum；grant_* 可带 well_known/target_name/path；"
-                "整理歧义可 2～3 个 grant_organize_folder choice。"
-            )
+            # 桌面动作的取值语义只写在 options.action / well_known 等参数里；
+            # 这里只留「有这批动作可用」的短触发，questions 不再第三次复述。
             tool_desc += (
-                " 桌面可标 grant_organize_folder（口头同意须立刻发卡；"
-                "歧义可 2～3 个 organize choice，各不同 well_known/target_name/path）；"
-                "open/register/bind_local_* = 本机传统（合法非默认，云仍推荐，≠离线）；"
-                "只读→external_mount_readonly（【禁止】新发 grant_readonly_folder）；"
-                "grant_* 可加 well_known/target_name/path。"
+                " 桌面 options 可带 action（见 enum）+ well_known/target_name/path："
+                "grant_organize_folder=区外整理授权（口头同意须立刻发卡；"
+                "歧义可 2～3 个，各带不同 well_known/target_name/path）；"
+                "open/register/bind_local_*=本机传统（合法非默认，云仍推荐，≠离线）；"
+                "只读→external_mount_readonly，【禁止】新发 grant_readonly_folder。"
             )
 
         return ToolSchema(
@@ -266,8 +264,7 @@ class AskUserTool:
                             "可选，默认 false。true=请求用户在右坞浏览器完成登录（密码由用户"
                             "亲手输入，AI 永不经手）。强制升格 blocking=true；挂起后用户点"
                             "「已登录，继续」再续跑。典型触发：browser_type 对 password 框硬拒"
-                            "（metadata.code=password_blocked）。CEO 无 escalate——登录请用本字段，"
-                            "勿调 escalate。"
+                            "（metadata.code=password_blocked）。"
                         ),
                     },
                     "card": {
@@ -282,7 +279,6 @@ class AskUserTool:
                             "daily_review=每日复盘提案多选（multiple=true，options 须带 "
                             "review_kind+body；确认后由服务端落盘）。"
                             "要问多个【不同】问题就别用 card（用普通 ask_user，questions 最多 5）。"
-                            "详见 ask_user_* skill。"
                         ),
                     },
                 },

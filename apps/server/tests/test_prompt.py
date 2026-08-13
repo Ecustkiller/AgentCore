@@ -303,7 +303,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "静默自拟" in hint
     assert "按确认默认" in hint
     assert "default" in hint
-    assert "不得 continue 派工" in hint or "无 default" in hint
+    assert "continue 后立刻派工" in hint or "不得 continue 派工" in hint
     # 案 ask-empty-continue-default-dispatch：决策/澄清短问同样须 default；禁空续另拟叠先问你
     assert "决策/澄清短问" in hint
     assert "先问你" in hint
@@ -468,8 +468,12 @@ def test_core_teaches_split_criterion_over_count():
     assert "可跑闭环" in skill or "核心运行时" in skill
     assert "根委派切片诚实" in skill or "嵌套扇出" in skill
 
-def test_catalog_preamble_matches_core_consult_intensity():
-    """核与按需目录 preamble 共用同一句按场面强度。"""
+def test_consult_intensity_lives_only_in_the_core():
+    """三条「按场面 consult」强度串只注入常驻核一次；按需目录不再复述（去重定案）。
+
+    前身断言的是「核与前言共用同一句」——那让同一条路由在装配串里落两次。现在前言只说
+    「有哪些条目、怎么拉」，强度串的唯一权威位置是 ``_CEO_CORE_HINT``。
+    """
     from agentcore.runtime.skills import (
         CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
         CONSULT_PRODUCT_HELP_BY_SCENE,
@@ -481,12 +485,34 @@ def test_catalog_preamble_matches_core_consult_intensity():
         build_system_skill_registry(),
         {"delegate", "consult", "ask_user", "debate"},
     )
-    assert CONSULT_TEAM_ORCH_BY_SCENE in _CEO_CORE_HINT
-    assert CONSULT_TEAM_ORCH_BY_SCENE in directory
-    assert CONSULT_PRODUCT_HELP_BY_SCENE in directory
-    assert CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE in directory
+    for by_scene in (
+        CONSULT_TEAM_ORCH_BY_SCENE,
+        CONSULT_PRODUCT_HELP_BY_SCENE,
+        CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
+    ):
+        assert _CEO_CORE_HINT.count(by_scene) == 1
+        assert by_scene not in directory
     assert "先 consult `team_orchestration_advanced` 再决定团队形态" not in directory
     assert "纯对话式回答自己答即可，无需 consult" not in directory
+
+
+def test_directory_preamble_only_says_what_and_how_to_pull():
+    """前言不得再复述交付档 / intensity / playbook / 绿场 / 薄旁路等常驻路由。"""
+    from agentcore.runtime.resolve.prompt.compose import _on_demand_preamble
+
+    preamble = "\n".join(_on_demand_preamble(with_summaries=True))
+    assert "consult(name)" in preamble and "按需条目" in preamble
+    for restated in (
+        "intensity",
+        "playbook",
+        "build_website",
+        "build_app",
+        "薄旁路",
+        "桌上档",
+        "五波",
+    ):
+        assert restated not in preamble
+    assert "以常驻正文为准" in preamble  # 只指路，不另立一套
 
 
 def test_core_teaches_delegate_graph_and_coordinate_invariants():
@@ -884,20 +910,28 @@ def test_shared_base_and_core_teach_windows_bat_crlf_ascii():
 
 
 def test_core_teaches_image_gen_egress_and_key_boundary():
-    """案 20260803-image-gen-byok-egress-boundary A+B：无 egress 禁代调出图；Key 不落盘。"""
+    """案 20260803-image-gen-byok-egress-boundary A+B：无 egress 禁代调出图；Key 不落盘。
+
+    出图边界是 CEO 侧路由，留在核里；凭据本身怎么处理归共享基座 ``<credential_hygiene>``
+    （去重定案：原先散在核 + 云/本机两条 egress 行，共三份；收成一份后队员也才读得到）。
+    """
     hint = _CEO_CORE_HINT
     assert "生图" in hint
     assert "代调" in hint or "出图" in hint
-    assert "API Key" in hint or "明文" in hint
     assert "本机脚本" in hint or "只帮写" in hint
+    assert "credential_hygiene" in hint  # 核只留一句引用
+    shared = assemble_system_prompt()
+    assert "<credential_hygiene>" in shared
+    assert "API Key" in shared and "明文" in shared
+    assert "环境变量占位" in shared
     # 案 47ae：跨会话进度摘要禁回显密码/token（扩既有 Key 族，非新硬闸）
-    assert "跨会话凭据脱敏" in hint
-    assert "密码" in hint and "原会话" in hint
+    assert "跨窗续作" in shared and "handoff" in shared
+    assert "密码" in shared and "原会话" in shared
+    # 凭据禁令不得在核里第二次落地
+    assert "API Key" not in hint and "明文" not in hint
     orch = _TEAM_ORCHESTRATION_ADVANCED
     assert "生图" in orch
     assert "出站网络" in orch or "egress" in orch.lower() or "HTTPS" in orch
-    assert "明文" in orch or "env" in orch
-    assert "跨会话凭据脱敏" in orch
 
 
 def test_core_teaches_cloud_web_install_verify_honesty():
@@ -1128,18 +1162,23 @@ def test_citation_hint_teaches_multi_source_anchoring():
     assert "#r1#r2" in hint
 
 
-def test_citation_hint_teaches_claim_evidence_and_summary_inheritance():
-    # CEO citing 段：挂号纪律 + 汇总继承；主张须证在共享基座；核心不第三遍重复。
+def test_citation_hint_teaches_only_summary_inheritance():
+    """CEO citing 段只留【汇总继承】；挂号门槛与主张须证都在共享基座，且各只落一次。
+
+    去重定案前「搜到 ≠ 可挂 #rN」在 tool_use / delivery_baseline / claim_evidence / citing
+    四处各写一遍。现在权威位置是 ``<delivery_baseline>``，其余最多留一句引用。
+    """
     hint = CHAT_CITATION_HINT
-    assert "挂号纪律" in hint
-    assert "搜到" in hint and "可挂" in hint
-    assert "read_url" in hint
     assert "汇总继承" in hint
     assert "重新编号" in hint
+    assert "delivery_baseline" in hint  # 只留引用
+    assert "挂号纪律" not in hint
     assert "主张须证" not in hint  # 不归 citing 段
     from agentcore.runtime.resolve.prompt import _DEFAULT_SYSTEM_PROMPT
 
     assert "主张须证" in _DEFAULT_SYSTEM_PROMPT
+    assert _DEFAULT_SYSTEM_PROMPT.count("搜到 ≠ 可挂来源号") == 1
+    assert "read_url 深读（或已 selected）" in _DEFAULT_SYSTEM_PROMPT
     assert "综述若继承队员" not in _CEO_CORE_HINT  # 核心删第三遍
 
 
@@ -1238,7 +1277,9 @@ def test_ceo_core_cross_product_rule_paradigm_routing_hook():
     assert "多轮 list / 通读 `.mdc`" in paradigm
     assert "AgentCore/规则/" in paradigm
     assert "只解释不动文件" in paradigm
-    assert "default" in paradigm
+    # 预填 default 不在本窄钩里第 N 遍重申：紧随其后的总则一句管住核内所有短问
+    assert "default" not in paradigm
+    assert "凡写「短问 / `ask_user`」处一律适用" in hint
     assert "skills/*.json" in paradigm
     assert "平台规则" in paradigm
     assert "delegate" in paradigm

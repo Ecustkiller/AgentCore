@@ -33,11 +33,6 @@ from agentcore.runtime.resolve.prompt.cold_start import (
 )
 from agentcore.runtime.resolve.prompt.memory_rules import _format_rules
 from agentcore.runtime.resolve.prompt.visualization import _CEO_VISUALIZATION_HINT
-from agentcore.runtime.skills.product_help import (
-    CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE,
-    CONSULT_PRODUCT_HELP_BY_SCENE,
-)
-from agentcore.runtime.skills.team_orchestration import CONSULT_TEAM_ORCH_BY_SCENE
 
 
 def assemble_system_prompt(
@@ -92,23 +87,20 @@ def assemble_system_prompt(
 
 
 def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
-    """Shared intro lines for ``<按需目录>`` (CEO gets summaries; worker names-only)."""
+    """Shared intro lines for ``<按需目录>`` (CEO gets summaries; worker names-only).
+
+    The preamble states ONLY what the directory is and how to pull from it. Routing
+    ("which scene must consult what", 交付档 / intensity / playbook / 绿场准入) belongs to
+    the resident core — restating it here made the same rule land three times in one
+    assembled prompt (核 + 前言 + 条目摘要). 每条纪律只留一个权威位置.
+    """
     detail = "name＋一行摘要" if with_summaries else "name"
     return [
         "<按需目录>",
         f"下列按需条目（仅列{detail}、全文未常驻）可用 `consult(name)` 拉取："
         "系统能力指引、按需用户规则、记忆主题笔记。常驻内容已在 ``<rules>``，无需查阅。"
-        f"（{CONSULT_PRODUCT_HELP_BY_SCENE}；"
-        f"{CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE}；"
-        "提问卡直接 ask_user、不必先查；"
-        f"组队进阶：{CONSULT_TEAM_ORCH_BY_SCENE}；"
-        "糊建站 /「做个网站」先 ask_user（形态+桌上档），确认后再 consult `build_website`；"
-        "规格已齐的落地页/作品集可直接 delegate(playbook=build_website, "
-        "playbook_args.topic=简述, intensity=solo|standard)，不必先查；"
-        "控制台 / 后台 / 工具台 dense 用 build_website + style=toolshed（同 consult `build_website`）；"
-        "绿场【推荐】build_app（手写/none 不硬拒）：MVP→lean；模块流水线→full+显式 modules；"
-        "边界未钉 → 首派轻切片/少节点或单 lead 嵌套再拆，再 replan，禁首派五波脚手架；"
-        "做软件禁止单前端单 HTML 薄旁路（局部可手写多角色或选用 build_feature））：",
+        "何时该拉哪条，按条目自身说明判断；"
+        "「必查 / 不必先查」的路由口径以常驻正文为准，本目录不另立一套：",
     ]
 
 

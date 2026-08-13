@@ -71,7 +71,6 @@ DELEGATE_DESCRIPTION = (
     "continue_from_run_id（续派，不限条数）/ replaces_run_id（补缺口），不是冷派整团。"
     "playbook 与 tasks 二选一：禁止二者同时有内容（反例：既填 code_audit 又传 tasks）。"
     "建站快捷套餐必填 playbook_args.topic；绿场必填 app。"
-    "勿再填已删的 completion_criteria / requires_files / name / must_contain / min_length / objective / playbook_none_reason。"
     "HOW→consult(team_orchestration_advanced)。"
 )
 
@@ -129,10 +128,10 @@ DELEGATE_PARAMETERS = {
                     },
                     "continue_from_run_id": {
                         "type": "string",
+                        # 「动同一支团队的正式入口 / 不限条数 / 勿冷派整团」在工具描述里已写，
+                        # 这里只留本字段自己的填法。
                         "description": (
                             "同人续派（调查后确认修 / 改稿 / 收口后接着干）；填已完成 run_id。"
-                            "这是动同一支团队的正式入口，条数不限；"
-                            "批次已收口也走这里，勿冷派整团。"
                         ),
                     },
                     "checkpoint_after": {"type": "boolean"},
