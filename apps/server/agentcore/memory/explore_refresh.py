@@ -94,7 +94,7 @@ async def build_workspace_explore_snapshot(
         return ""
     lines: list[str] = ["# Top-level"]
     try:
-        entries = await backend.list(".", "*")
+        entries = (await backend.list(".", "*")).entries
     except Exception:  # noqa: BLE001
         entries = []
     names: list[str] = []

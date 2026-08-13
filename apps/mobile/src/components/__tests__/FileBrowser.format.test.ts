@@ -20,16 +20,10 @@ describe("formatFileMtime", () => {
   });
 
   it("labels calendar yesterday as 昨天", () => {
-    // Local calendar day before `now` — construct via Date parts so TZ is stable.
+    // 「昨天」要求同时满足 ≥24h 与本地日历差一天。取本地昨天的 00:00：间隔恒为
+    // 24h + now 的当日时刻，两个条件在任何 TZ 下都成立（CI 跑 UTC，作者跑 UTC+8）。
     const d = new Date(now);
-    const y = new Date(
-      d.getFullYear(),
-      d.getMonth(),
-      d.getDate() - 1,
-      15,
-      0,
-      0,
-    );
+    const y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
     expect(formatFileMtime(y.getTime(), now)).toBe("昨天");
   });
 });

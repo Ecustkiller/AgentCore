@@ -346,7 +346,7 @@ async def compute_workspace_explore_fingerprint(
         return None
     top_names: list[str] = []
     try:
-        entries = await backend.list(".", "*")
+        entries = (await backend.list(".", "*")).entries
     except Exception:  # noqa: BLE001 - fingerprint must never break a turn
         entries = []
     for entry in entries:

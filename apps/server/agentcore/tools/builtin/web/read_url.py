@@ -176,7 +176,7 @@ def _failure_face(e: BaseException) -> tuple[str, str]:
         # Connect-time SSRF block (DNS rebinding): same reason ⇒ same code as pre-flight.
         return (
             f"。出网受限或地址不可达{_STOP_READ_HINT}",
-            _BLOCK_CODES.get(getattr(e, "block", None), _CODE_PRIVATE_IP),
+            _BLOCK_CODES.get(e.block, _CODE_PRIVATE_IP) if e.block else _CODE_PRIVATE_IP,
         )
     if isinstance(e, BlockedRedirectError):
         return (

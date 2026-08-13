@@ -153,16 +153,16 @@ class LocalBridgeSession:
             raw = await asyncio.to_thread(self._post_command, payload, self._timeout)
         except BrowserSessionError as exc:
             msg = str(exc)
-            code = "host_unavailable" if "host_unavailable" in msg else None
-            if code:
-                return BrowserCommandResult(ok=False, error=msg, data={"code": code})
+            host_code = "host_unavailable" if "host_unavailable" in msg else None
+            if host_code:
+                return BrowserCommandResult(ok=False, error=msg, data={"code": host_code})
             raise BrowserDriverCrashedError(msg) from exc
 
         if not raw.get("ok"):
-            err, code = parse_bridge_error(raw, http_status=422)
+            err, err_code = parse_bridge_error(raw, http_status=422)
             data: dict[str, Any] = {}
-            if code:
-                data["code"] = code
+            if err_code:
+                data["code"] = err_code
             return BrowserCommandResult(ok=False, error=err, data=data)
 
         data = dict(raw.get("data") or {})
