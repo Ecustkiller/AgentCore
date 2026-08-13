@@ -3,7 +3,7 @@
  *
  * 与 `terminal-service.ts`（外置终端）并列，不混装。应用退出一律终止（MVP）。
  */
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
   PROCESS_CHANNELS,
@@ -17,6 +17,11 @@ import { BrowserWindow, app, ipcMain } from "electron";
 import { resolveCwdInside } from "./fs/pathGuard";
 import type { StoredRoot } from "./fs/roots";
 import { requireStringFields } from "./ipc-validate";
+import {
+  killProcessTree,
+  killProcessTreeSync,
+  treeSpawnOptions,
+} from "./proc-tree";
 import { ptyService, stripAnsi } from "./pty-service";
 
 /** `wait_for` 匹配前剥 ANSI，避免 Vite 等把 `Local:` 拆成 `Local\x1b[22m:` 假阴性。 */
@@ -90,26 +95,9 @@ function broadcast(event: ProcessEventPush): void {
   }
 }
 
-function killTree(pid: number): void {
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], {
-      windowsHide: true,
-      stdio: "ignore",
-    });
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGKILL");
-  } catch {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already dead */
-    }
-  }
-}
-
 function spawnShell(command: string, cwd: string): ChildProcess {
+  // treeSpawnOptions：POSIX 新进程组，便于杀树（Windows 走 taskkill /T 无需标志）；
+  // 仍由本服务持有引用，应用退出会主动杀。
   if (process.platform === "win32") {
     return spawn(
       process.env.ComSpec || "cmd.exe",
@@ -119,15 +107,15 @@ function spawnShell(command: string, cwd: string): ChildProcess {
         env: process.env,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
+        ...treeSpawnOptions(),
       },
     );
   }
-  // detached → 新进程组，便于杀树；仍由本服务持有引用，应用退出会主动杀。
   return spawn("/bin/sh", ["-c", command], {
     cwd,
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
+    ...treeSpawnOptions(),
   });
 }
 
@@ -383,21 +371,7 @@ class ProcessService {
   stop(processId: string): ProcessOpValue | null {
     const rec = this.byId.get(processId);
     if (!rec) return null;
-    if (rec.status === "running" && rec.child?.pid) {
-      killTree(rec.child.pid);
-      // close handler 会落账；若进程已僵死则本地收口
-      if (rec.status === "running") {
-        rec.status = "exited";
-        rec.exit_code = rec.exit_code ?? -1;
-        rec.child = null;
-        broadcast({
-          type: "exited",
-          process_id: rec.process_id,
-          conversation_id: rec.conversation_id,
-          exit_code: rec.exit_code,
-        });
-      }
-    }
+    this.terminate(rec, "async");
     return toOpValue(rec);
   }
 
@@ -412,11 +386,44 @@ class ProcessService {
     }
   }
 
+  /**
+   * 应用退出：**同步**杀树。`before-quit` 之后事件循环未必再转，异步 kill 可能在
+   * taskkill 起来之前就随进程一起没了，把 dev server 之流留在用户机器上。
+   */
   killAll(): void {
-    for (const id of [...this.byId.keys()]) {
-      this.stop(id);
+    for (const rec of this.byId.values()) {
+      this.terminate(rec, "sync");
     }
     this.byId.clear();
+  }
+
+  /**
+   * 杀掉该记录的**整棵进程树**并落账。
+   *
+   * `npm run dev` 这类命令真正占端口的是 shell 的孙进程，只杀 shell 会留下孤儿。
+   * 活路径用异步 kill——Windows 的 `taskkill` 不该把 Electron 主进程卡住；同步变体
+   * 只给退出钩子（见 {@link killAll}）。
+   */
+  private terminate(rec: ProcessRecord, mode: "async" | "sync"): void {
+    const child = rec.child;
+    if (rec.status !== "running" || !child?.pid) return;
+    if (mode === "sync") {
+      killProcessTreeSync(child);
+    } else {
+      void killProcessTree(child);
+    }
+    // close handler 会落账；若进程已僵死则本地收口
+    if (rec.status === "running") {
+      rec.status = "exited";
+      rec.exit_code = rec.exit_code ?? -1;
+      rec.child = null;
+      broadcast({
+        type: "exited",
+        process_id: rec.process_id,
+        conversation_id: rec.conversation_id,
+        exit_code: rec.exit_code,
+      });
+    }
   }
 
   /** 等 regex 命中当前 buffer、进程退出、或超时。 */

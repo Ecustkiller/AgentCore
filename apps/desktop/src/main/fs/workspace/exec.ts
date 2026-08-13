@@ -3,6 +3,7 @@ import { promises as fs, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
+import { killProcessTree, treeSpawnOptions } from "../../proc-tree";
 import { EXEC_CAPTURE_CAP, EXEC_LANGS, EXEC_TIMEOUT_CAP_S } from "../constants";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
@@ -14,6 +15,7 @@ import {
   whichCommand,
 } from "./execCodec";
 import { opErr, opOk } from "./result";
+import { withWrittenFiles, writtenScanCutoffMs } from "./writtenScan";
 
 /** ExecutionResult 形状的成功信封（success 可为 false——执行「跑完了但非 0 退出」）。 */
 function execResult(value: {
@@ -127,13 +129,28 @@ export function pickRegistryEnv(raw: unknown): Record<string, string> {
 }
 
 /**
+ * 杀树后等 pipe 关闭的上限。
+ *
+ * 孤儿攥着 stdout 时 `close` 可能永不触发，撞上限也照常回话。远小于引擎给本地执行
+ * 的 30s slack（`EXEC_TIMEOUT_CAP_S` = 灾难顶 + slack），所以回包不会迟到；同时
+ * 保证「杀失败」退化成晚 2s 回话，而不是把 op 挂死在 20 分钟灾难顶之后。
+ */
+const KILL_GRACE_MS = 2_000;
+
+/**
  * 在 `cwd` 下跑一个脚本文件，捕获 stdout/stderr，超时则强杀。
  *
  * 镜像服务端 SubprocessSandbox：墙钟灾难顶 / 静默活性超时 → stdout 清空、stderr
  * 写超时说明、exit -1；进程起不来（如 PATH 无 python）→ 失败结果而非抛错，保证
  * 通道总收到信封。永不 reject。
+ *
+ * 超时收的是**整棵进程树**：AI 写的脚本会派生 npm / dev server / 无头浏览器，只杀
+ * 解释器会把它们留成孤儿——跑在用户自己机器上占端口占 CPU，还攥着 stdout 让 `close`
+ * 永不触发，把 op 拖到超时之后（`test_run` 灾难顶 20 分钟）。
+ *
+ * 导出仅为测试能用可控的进程树驱动超时路径；产品路径只经 {@link opExecute}。
  */
-function runSubprocess(
+export function runSubprocess(
   cmd: string[],
   scriptFile: string,
   cwd: string,
@@ -147,14 +164,17 @@ function runSubprocess(
     const [bin, ...preArgs] = cmd;
     const child = spawn(bin, [...preArgs, scriptFile], {
       cwd,
+      // stdin 是要写入的 pipe（`args.stdin`），不能像 git_run 那样 ignore。
       stdio: ["pipe", "pipe", "pipe"],
       env: envExtra ? { ...process.env, ...envExtra } : undefined,
+      ...treeSpawnOptions(),
     });
     let stdout = "";
     let stderr = "";
     let timedOut: "disaster" | "idle" | false = false;
     let settled = false;
     let lastOutputMs = Date.now();
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
 
     const noteOutput = () => {
       lastOutputMs = Date.now();
@@ -170,10 +190,42 @@ function runSubprocess(
     });
     // 进程未读 stdin 即退出会让写入抛 EPIPE——吞掉，不让它变成未捕获错误。
     child.stdin.on("error", () => {});
+    // 杀树会把读到一半的管道扯断，那不是执行失败，别让它变成未捕获错误。
+    child.stdout.on("error", () => {});
+    child.stderr.on("error", () => {});
+
+    const finish = (r: WorkspaceOpResult) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(disasterTimer);
+      if (idleTimer) clearInterval(idleTimer);
+      if (graceTimer) clearTimeout(graceTimer);
+      resolve(r);
+    };
+
+    /** 两种超时各自的信封（stdout 清空 = 与服务端 SubprocessSandbox 同契约）。 */
+    const timeoutResult = (kind: "disaster" | "idle"): WorkspaceOpResult =>
+      execResult({
+        success: false,
+        stdout: "",
+        stderr:
+          kind === "idle"
+            ? `Timeout: no output for ${idleTimeoutSeconds}s (execution stalled)`
+            : `Timeout: forced stop after ${timeoutSeconds}s (forced stop)`,
+        exit_code: -1,
+        duration_ms: Date.now() - startedMs,
+      });
+
+    /** 收整棵树，然后等 `close`；树没死透就撞 {@link KILL_GRACE_MS} 照常回话。 */
+    const killAndAnswer = (kind: "disaster" | "idle") => {
+      timedOut = kind;
+      void killProcessTree(child);
+      graceTimer = setTimeout(() => finish(timeoutResult(kind)), KILL_GRACE_MS);
+    };
 
     const disasterTimer = setTimeout(() => {
-      timedOut = "disaster";
-      child.kill("SIGKILL");
+      if (settled || timedOut) return;
+      killAndAnswer("disaster");
     }, timeoutSeconds * 1000);
 
     let idleTimer: ReturnType<typeof setInterval> | undefined;
@@ -185,21 +237,17 @@ function runSubprocess(
       idleTimer = setInterval(() => {
         if (settled || timedOut) return;
         if (Date.now() - lastOutputMs >= idleLimitMs) {
-          timedOut = "idle";
-          child.kill("SIGKILL");
+          killAndAnswer("idle");
         }
       }, 200);
     }
 
-    const finish = (r: WorkspaceOpResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(disasterTimer);
-      if (idleTimer) clearInterval(idleTimer);
-      resolve(r);
-    };
-
     child.on("error", (err) => {
+      // 杀树自身触发的 error 不能改写超时信封。
+      if (timedOut) {
+        finish(timeoutResult(timedOut));
+        return;
+      }
       finish(
         execResult({
           success: false,
@@ -211,29 +259,8 @@ function runSubprocess(
       );
     });
     child.on("close", (code) => {
-      const duration_ms = Date.now() - startedMs;
-      if (timedOut === "idle") {
-        finish(
-          execResult({
-            success: false,
-            stdout: "",
-            stderr: `Timeout: no output for ${idleTimeoutSeconds}s (execution stalled)`,
-            exit_code: -1,
-            duration_ms,
-          }),
-        );
-        return;
-      }
-      if (timedOut === "disaster") {
-        finish(
-          execResult({
-            success: false,
-            stdout: "",
-            stderr: `Timeout: forced stop after ${timeoutSeconds}s (forced stop)`,
-            exit_code: -1,
-            duration_ms,
-          }),
-        );
+      if (timedOut) {
+        finish(timeoutResult(timedOut));
         return;
       }
       finish(
@@ -242,7 +269,7 @@ function runSubprocess(
           stdout,
           stderr,
           exit_code: code ?? 0,
-          duration_ms,
+          duration_ms: Date.now() - startedMs,
         }),
       );
     });
@@ -329,7 +356,9 @@ export async function opExecute(
     if (language === "python") {
       Object.assign(envExtra, buildWorkspacePythonpathEnv(cwdAbs));
     }
-    return await runSubprocess(
+    // 产物写回：截止值必须在子进程能碰盘之前取。
+    const cutoffMs = writtenScanCutoffMs();
+    const ran = await runSubprocess(
       resolved.cmd,
       scriptFile,
       cwdAbs,
@@ -339,6 +368,11 @@ export async function opExecute(
       Object.keys(envExtra).length > 0 ? envExtra : undefined,
       idleTimeoutSeconds,
     );
+    return await withWrittenFiles(ran, {
+      rootAbs: root.absPath,
+      cwdAbs,
+      cutoffMs,
+    });
   } catch (e) {
     return opErr("WorkspaceIOError", toReason(e));
   } finally {

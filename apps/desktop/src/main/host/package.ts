@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import type { HostOpResult } from "@shared/host-contract";
+import { killProcessTree, treeSpawnOptions } from "../proc-tree";
 import { err, ok } from "./result";
 
 /** Keep in lockstep with server host_package_install timeout clamp. */
@@ -125,6 +126,7 @@ export async function hostPackageInstall(
       cwd,
       windowsHide: true,
       env: process.env,
+      ...treeSpawnOptions(),
     });
     let stdout = "";
     let stderr = "";
@@ -144,11 +146,10 @@ export async function hostPackageInstall(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
+      // 收整棵树：包管理器真正干活的是孙进程（winget → 安装器、apt → dpkg、
+      // brew → curl/git），只杀前端会留下孤儿——它继续攥着包数据库锁，下一次
+      // 安装照样失败（与 `.git/index.lock` 同一种病）。同样不等 kill、立刻回话。
+      void killProcessTree(child);
       finish({
         timed_out: true,
         exit_code: null,
@@ -165,6 +166,9 @@ export async function hostPackageInstall(
     child.stderr?.on("data", (chunk: Buffer | string) => {
       stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     });
+    // 杀树会把读到一半的管道扯断，那不是执行失败，别让它变成未捕获错误。
+    child.stdout?.on("error", () => {});
+    child.stderr?.on("error", () => {});
     child.on("error", (e) => {
       if (settled) return;
       settled = true;

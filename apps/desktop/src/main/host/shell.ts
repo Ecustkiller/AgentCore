@@ -8,6 +8,7 @@ import {
   snapshotVisibleMainWindows,
 } from "../host-shell-obs";
 import { logDesktop } from "../log-service";
+import { killProcessTree, treeSpawnOptions } from "../proc-tree";
 import { err, ok } from "./result";
 
 /** P3 host_shell timeout clamp (seconds). */
@@ -174,6 +175,7 @@ export async function hostShell(
       cwd,
       windowsHide: true,
       env: childEnv,
+      ...treeSpawnOptions(),
     });
     let stdout = "";
     let stderr = "";
@@ -205,11 +207,10 @@ export async function hostShell(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        /* ignore */
-      }
+      // 收**整棵树**：跑的是任意主机命令，`npm install` / dev server 派生的孙进程
+      // 只杀 shell 就会留在用户机器上继续占端口占 CPU。不等 kill 完成、不等 close
+      // ——超时立刻回话是本路径原有的好性质，杀树在后台自己走完。
+      void killProcessTree(child);
       finishOk({
         timed_out: true,
         exit_code: null,
@@ -226,6 +227,9 @@ export async function hostShell(
     child.stderr?.on("data", (chunk: Buffer | string) => {
       stderr += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     });
+    // 杀树会把读到一半的管道扯断，那不是执行失败，别让它变成未捕获错误。
+    child.stdout?.on("error", () => {});
+    child.stderr?.on("error", () => {});
     child.on("error", (e) => {
       if (settled) return;
       settled = true;

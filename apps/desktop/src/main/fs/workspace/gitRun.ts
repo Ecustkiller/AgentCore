@@ -6,23 +6,30 @@
  * bound root — same baseline as file_* / exists(".git"); empty cwd = root is the
  * project (open-folder). Aligns with server spawn policy: root-only ``.git`` (no
  * climb), ``GIT_CEILING_DIRECTORIES``, refuse reset/clean / force-like push tokens /
- * git-dir boundary overrides. Returns ``{stdout, stderr, exit_code}`` (success
+ * git-dir boundary overrides, and a timeout that kills the whole process tree
+ * (server ``_reap_git_process``). Returns ``{stdout, stderr, exit_code}`` (success
  * envelope even when exit_code ≠ 0 — tool layer interprets). Policy hard-errors
  * become ``ok:false`` envelopes.
  */
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
+import { killProcessTree, treeSpawnOptions } from "../../proc-tree";
 import { realInside, resolveLexical, toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
 import { opErr, opOk } from "./result";
 
-const execFileAsync = promisify(execFile);
-
 const DEFAULT_TIMEOUT_MS = 20_000;
 const MAX_TIMEOUT_MS = 120_000;
+/** Per-stream capture cap (byte-for-byte the previous ``execFile`` maxBuffer). */
+const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
+/**
+ * After the tree kill, how long to wait for the pipes to close before answering.
+ * Well inside the server's ``_GIT_KILL_SLACK`` (5s) so the channel reply is never
+ * late, and bounded so a kill that failed cannot hang the op.
+ */
+const KILL_GRACE_MS = 2_000;
 const FORCE_TOKENS = new Set(["-f", "--force", "--force-with-lease"]);
 const FORBIDDEN_SUBS = new Set(["reset", "clean"]);
 
@@ -121,59 +128,126 @@ export async function resolveGitRunCwd(
   return { ok: false, detail: after.reason };
 }
 
-async function runGit(
-  cwd: string,
+type CaptureSink = { chunks: Buffer[]; bytes: number };
+
+function sinkText(sink: CaptureSink): string {
+  return Buffer.concat(sink.chunks).toString("utf8");
+}
+
+/**
+ * Spawn ``bin argv`` under ``cwd`` and capture its output.
+ *
+ * Timeout kills the **whole process tree**, not just the direct child: git hands
+ * the network leg to ``git-remote-https`` / credential helpers, and an orphaned
+ * grandchild keeps ``.git/index.lock`` so every later call times out on the same
+ * lock. The stdout received before the kill is still returned — the tool layer
+ * gets whatever git managed to produce, with a timeout ``stderr`` and non-zero code.
+ *
+ * ``bin`` is a parameter only so tests can drive the timeout path with a
+ * controllable process tree; the op always passes ``"git"``. Never rejects.
+ */
+export function runGitCapture(
+  bin: string,
   argv: string[],
+  cwd: string,
   timeoutMs: number,
 ): Promise<{ stdout: string; stderr: string; code: number }> {
-  const ceiling = cwd;
-  try {
-    const { stdout, stderr } = await execFileAsync("git", argv, {
+  return new Promise((resolve) => {
+    const child = spawn(bin, argv, {
       cwd,
-      timeout: timeoutMs,
       windowsHide: true,
-      maxBuffer: 4 * 1024 * 1024,
-      encoding: "utf8",
+      // stdin closed: git never prompts (GIT_TERMINAL_PROMPT=0), and a command that
+      // does read stdin should see EOF rather than block until the timeout.
+      stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
         GIT_TERMINAL_PROMPT: "0",
         GIT_OPTIONAL_LOCKS: "0",
-        GIT_CEILING_DIRECTORIES: ceiling,
+        GIT_CEILING_DIRECTORIES: cwd,
       },
+      ...treeSpawnOptions(),
     });
-    return {
-      stdout: String(stdout ?? ""),
-      stderr: String(stderr ?? ""),
-      code: 0,
+
+    const stdout: CaptureSink = { chunks: [], bytes: 0 };
+    const stderr: CaptureSink = { chunks: [], bytes: 0 };
+    let timedOut = false;
+    let overflow = false;
+    let spawnError: Error | null = null;
+    let exitCode = 0;
+    let settled = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (graceTimer) clearTimeout(graceTimer);
+      const out = sinkText(stdout);
+      if (timedOut) {
+        resolve({
+          stdout: out,
+          stderr: `git 操作超时（${argv.join(" ")}）`,
+          code: 1,
+        });
+        return;
+      }
+      const err = sinkText(stderr);
+      if (overflow) {
+        resolve({
+          stdout: out,
+          stderr:
+            err ||
+            `git 输出超过 ${MAX_OUTPUT_BYTES / (1024 * 1024)}MB 上限（${argv.join(" ")}）`,
+          code: 1,
+        });
+        return;
+      }
+      if (spawnError) {
+        resolve({ stdout: out, stderr: err || spawnError.message, code: 1 });
+        return;
+      }
+      resolve({ stdout: out, stderr: err, code: exitCode });
     };
-  } catch (e: unknown) {
-    const err = e as {
-      stdout?: string;
-      stderr?: string;
-      code?: number | string;
-      killed?: boolean;
-      signal?: string;
-      message?: string;
+
+    const push = (sink: CaptureSink, chunk: Buffer): void => {
+      const room = MAX_OUTPUT_BYTES - sink.bytes;
+      if (chunk.length <= room) {
+        sink.chunks.push(chunk);
+        sink.bytes += chunk.length;
+        return;
+      }
+      if (room > 0) {
+        sink.chunks.push(chunk.subarray(0, room));
+        sink.bytes += room;
+      }
+      if (!overflow) {
+        overflow = true;
+        void killProcessTree(child);
+      }
     };
-    if (err.killed || err.signal === "SIGTERM") {
-      return {
-        stdout: String(err.stdout ?? ""),
-        stderr: `git 操作超时（${argv.join(" ")}）`,
-        code: 1,
-      };
-    }
-    const code =
-      typeof err.code === "number"
-        ? err.code
-        : typeof err.code === "string" && /^\d+$/.test(err.code)
-          ? Number(err.code)
-          : 1;
-    return {
-      stdout: String(err.stdout ?? ""),
-      stderr: String(err.stderr ?? err.message ?? toReason(e)),
-      code,
-    };
-  }
+
+    const timer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      void killProcessTree(child);
+      // Answer on ``close`` if the tree dies promptly, on the grace timer if not.
+      graceTimer = setTimeout(finish, KILL_GRACE_MS);
+    }, timeoutMs);
+
+    child.stdout?.on("data", (chunk: Buffer) => push(stdout, chunk));
+    child.stderr?.on("data", (chunk: Buffer) => push(stderr, chunk));
+    // A killed tree can tear the pipes down mid-read; that is not an op failure.
+    child.stdout?.on("error", () => {});
+    child.stderr?.on("error", () => {});
+    child.on("error", (e: Error) => {
+      spawnError = e;
+      finish();
+    });
+    child.on("close", (code, signal) => {
+      exitCode = code ?? (signal ? 1 : 0);
+      finish();
+    });
+  });
 }
 
 export async function opGitRun(
@@ -197,12 +271,12 @@ export async function opGitRun(
   try {
     await fs.access(join(cwd, ".git"));
   } catch {
-    // Still run rev-parse-like probes so server ensure_repo can distinguish
-    // missing vs corrupt — but ceiling keeps discovery inside cwd.
+    // Still run the command so the server can attribute the real git failure
+    // (missing vs corrupt) — but ceiling keeps discovery inside cwd.
   }
 
   try {
-    const result = await runGit(cwd, argv, timeoutMs);
+    const result = await runGitCapture("git", argv, cwd, timeoutMs);
     return opOk({
       stdout: result.stdout,
       stderr: result.stderr,
