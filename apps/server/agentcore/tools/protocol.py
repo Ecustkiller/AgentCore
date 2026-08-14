@@ -76,11 +76,13 @@ def fork_explore_write_scope(
     write_scope: str,
 ) -> TurnExploreGate:
     """Snapshot explore-pending; give this worker its own write_scope."""
-    scope: WriteScope = (
-        write_scope
-        if write_scope in ("none", "explore_memory", "project")
-        else "project"
-    )
+    scope: WriteScope = "project"
+    if write_scope == "none":
+        scope = "none"
+    elif write_scope == "explore_memory":
+        scope = "explore_memory"
+    elif write_scope == "project":
+        scope = "project"
     return TurnExploreGate(
         pending=bool(context.cold_start_explore_pending),
         write_scope=scope,
