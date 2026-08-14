@@ -241,7 +241,7 @@ async function main() {
   let n = 1;
   printStep(n++, "【公告·预告】人定约时后立刻发（工作流 A · 与门禁并行）", [
     track === "full"
-      ? `pnpm release:notice -- --phase preview --kind release --at HH:MM --highlights "亮点1；亮点2；亮点3"`
+      ? `pnpm release:notice -- --phase preview --kind release --at HH:MM --highlights "亮点1；亮点2；亮点3；亮点4；亮点5"`
       : `pnpm release:notice -- --phase preview --kind hotfix --at HH:MM --summary "一句话变更"`,
     "勿等 gate 全绿才预告；门禁不过 → 改约时或 Admin 归档预告",
     "dry-run 可先: 同上命令加 --dry-run",

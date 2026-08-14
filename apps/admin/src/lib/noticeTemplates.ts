@@ -120,6 +120,8 @@ export const NOTICE_TEMPLATES: readonly NoticeTemplate[] = [
 1. …
 2. …
 3. …
+4. …
+5. …
 
 完成后按上面方式升级即可继续使用。`,
     severity: "high",
@@ -133,7 +135,7 @@ export const NOTICE_TEMPLATES: readonly NoticeTemplate[] = [
       { key: "time", label: "上线时间", placeholder: "如 14:30" },
       {
         key: "highlights",
-        label: "亮点（每行一条，≤3）",
+        label: "亮点（每行一条，≤5）",
         placeholder: "每行一条用户能感知的变化",
         multiline: true,
       },
@@ -145,11 +147,11 @@ export const NOTICE_TEMPLATES: readonly NoticeTemplate[] = [
         .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean)
-        .slice(0, 3);
+        .slice(0, 5);
       const highlights =
         lines.length > 0
           ? lines.map((line, i) => `${i + 1}. ${line}`).join("\n")
-          : "1. …\n2. …\n3. …";
+          : "1. …\n2. …\n3. …\n4. …\n5. …";
       const versionLine = version ? `（桌面 ${version}）` : "";
       return {
         title: `约 ${time} 发版 · 请按需规划好时间 · 提前停止使用 AI 功能`,
