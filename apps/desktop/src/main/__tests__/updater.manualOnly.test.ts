@@ -160,7 +160,11 @@ async function loadUpdater() {
 }
 
 describe("updater installer download (GitHub → Downloads)", () => {
+  const originalPlatform = process.platform;
+
   beforeEach(() => {
+    // Artifact names are Win/Mac only; GitHub CI runs Linux.
+    Object.defineProperty(process, "platform", { value: "win32" });
     h.isPackaged = true;
     h.capable = true;
     h.downloadUpdate.mockClear();
@@ -181,6 +185,7 @@ describe("updater installer download (GitHub → Downloads)", () => {
   });
 
   afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
     vi.resetModules();
   });
 
