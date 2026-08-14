@@ -31,7 +31,6 @@ from agentcore.runtime.resolve.prompt import (
     compose_worker_base_prompt,
     derive_ceo_addon,
 )
-
 from agentcore.runtime.skills import _TEAM_ORCHESTRATION_ADVANCED, build_system_skill_registry
 
 _LOCAL_CEO_CORE = assemble_ceo_core({"terminal", "host_shell", "browser_navigate"})

@@ -3,12 +3,12 @@
  * 不经过 electron-updater / 不经过浏览器下载栏。
  */
 import { createWriteStream } from "node:fs";
-import { unlink } from "node:fs/promises";
 import type { WriteStream } from "node:fs";
+import { unlink } from "node:fs/promises";
 import { net } from "electron";
 import {
-  parseLatestDesktopJson,
   type LatestDesktopJson,
+  parseLatestDesktopJson,
 } from "./installer-feed";
 
 /** 拒绝 GitHub/CDN 返回的 HTML 错误页冒充安装包。 */

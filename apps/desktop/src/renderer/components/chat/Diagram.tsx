@@ -543,10 +543,10 @@ function MermaidInlineSvg({ svg }: { svg: string }) {
 
   return (
     <div ref={hostRef} className="w-full">
-      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid strict mode sanitizes the SVG via DOMPurify. */}
       <div
         className="mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
         style={widthPx ? { width: widthPx } : undefined}
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid strict mode sanitizes the SVG via DOMPurify.
         dangerouslySetInnerHTML={{ __html: svg }}
       />
     </div>
@@ -617,9 +617,9 @@ function MermaidDiagram({ code }: { code: string }) {
       source={code}
       renderZoom={() => (
         // Native pixel size — the lightbox contain-fits this to the viewport.
-        // biome-ignore lint/security/noDangerouslySetInnerHtml: same sanitized SVG as inline.
         <div
           className="[&>svg]:block"
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: same sanitized SVG as inline.
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       )}

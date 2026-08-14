@@ -27,17 +27,23 @@ function readMermaidNativeWidth(svg: string): number {
     const doc = new DOMParser().parseFromString(svg, "image/svg+xml");
     const el = doc.documentElement;
     if (!el || el.tagName.toLowerCase() !== "svg") return 0;
-    const maxW = /max-width:\s*([\d.]+)px/i.exec(el.getAttribute("style") ?? "");
+    const maxW = /max-width:\s*([\d.]+)px/i.exec(
+      el.getAttribute("style") ?? "",
+    );
     if (maxW) {
-      const n = parseFloat(maxW[1]);
+      const n = Number.parseFloat(maxW[1]);
       if (Number.isFinite(n) && n > 0) return n;
     }
     const attr = el.getAttribute("width");
     if (attr && !attr.includes("%")) {
-      const n = parseFloat(attr);
+      const n = Number.parseFloat(attr);
       if (Number.isFinite(n) && n > 0) return n;
     }
-    const vb = el.getAttribute("viewBox")?.trim().split(/[\s,]+/).map(Number);
+    const vb = el
+      .getAttribute("viewBox")
+      ?.trim()
+      .split(/[\s,]+/)
+      .map(Number);
     if (vb && vb.length === 4 && vb[2] > 0) return vb[2];
   } catch {
     /* ignore */
@@ -69,10 +75,10 @@ function MermaidInline({ svg }: { svg: string }) {
   return (
     <div className="mermaid-wrap">
       <div ref={hostRef} className="mermaid-inline-host">
-        {/* biome-ignore lint/security/noDangerouslySetInnerHtml: trusted, sanitized mermaid SVG */}
         <div
           className="mermaid-inline"
           style={widthPx ? { width: widthPx } : undefined}
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted, sanitized mermaid SVG
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>

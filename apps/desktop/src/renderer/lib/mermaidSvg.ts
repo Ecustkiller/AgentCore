@@ -10,20 +10,23 @@ function parsePxLen(raw: string | null): number {
   if (!raw) return 0;
   const t = raw.trim();
   if (!t || t.endsWith("%")) return 0;
-  const n = parseFloat(t);
+  const n = Number.parseFloat(t);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function styleMaxWidthPx(style: string): number {
   const m = /max-width:\s*([\d.]+)px/i.exec(style);
   if (!m) return 0;
-  const n = parseFloat(m[1]);
+  const n = Number.parseFloat(m[1]);
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
 function parseViewBoxSize(vb: string | null): { w: number; h: number } | null {
   if (!vb) return null;
-  const p = vb.trim().split(/[\s,]+/).map(Number);
+  const p = vb
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
   if (p.length !== 4 || !(p[2] > 0) || !(p[3] > 0)) return null;
   return { w: p[2], h: p[3] };
 }

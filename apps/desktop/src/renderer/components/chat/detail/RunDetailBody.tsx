@@ -173,9 +173,7 @@ export function RunDetailBody({
   // captain 除外（手机早有这道护栏）：主管这一路就是这条对话本身，「只停这位队员」对它
   // 无意义，引擎的计划里也没有它——出了按钮就是许一个必然落空的愿。要停就停整轮。
   const intervene =
-    conversationId != null &&
-    !isCaptainRun &&
-    isLiveRunStatus(run.status) ? (
+    conversationId != null && !isCaptainRun && isLiveRunStatus(run.status) ? (
       <RunInterveneControls
         conversationId={conversationId}
         executionId={execution.id}

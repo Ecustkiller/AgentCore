@@ -149,9 +149,9 @@ describe("shouldPinChangesTab (P0c)", () => {
   });
 
   it("pins when restorable without requiring the tab to be active", () => {
-    expect(
-      shouldPinChangesTab({ ...pinBase, hasRestorableEntry: true }),
-    ).toBe(true);
+    expect(shouldPinChangesTab({ ...pinBase, hasRestorableEntry: true })).toBe(
+      true,
+    );
   });
 
   it("pins on deep-link focus", () => {
@@ -161,9 +161,9 @@ describe("shouldPinChangesTab (P0c)", () => {
   });
 
   it("pins while the tab is floating", () => {
-    expect(
-      shouldPinChangesTab({ ...pinBase, isChangesFloating: true }),
-    ).toBe(true);
+    expect(shouldPinChangesTab({ ...pinBase, isChangesFloating: true })).toBe(
+      true,
+    );
   });
 
   it("pins when showChanges already made it the active dock tab", () => {

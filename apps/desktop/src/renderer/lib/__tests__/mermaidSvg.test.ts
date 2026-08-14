@@ -36,8 +36,10 @@ describe("normalizeMermaidSvg", () => {
     const input =
       '<svg id="acmmd-1" class="flowchart"><style>#acmmd-1 .error-icon{fill:#552222;}</style><g></g></svg>';
     const out = normalizeMermaidSvg(input);
-    const svg = new DOMParser().parseFromString(out, "image/svg+xml")
-      .documentElement;
+    const svg = new DOMParser().parseFromString(
+      out,
+      "image/svg+xml",
+    ).documentElement;
     expect(svg.getAttribute("class")).toBe("flowchart");
     expect(out).toContain("error-icon");
   });

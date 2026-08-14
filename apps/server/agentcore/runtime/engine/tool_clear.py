@@ -126,11 +126,13 @@ def cleared_placeholder(
     head = f"{tool_name}({hint})" if hint else tool_name
     if already_executed:
         return (
-            f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）已从上下文窗口移除以节省 token；"
+            f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）"
+            "已从上下文窗口移除以节省 token；"
             "该调用已发生，勿仅为回看而重跑（长驻新日志用 terminal read）。]"
         )
     return (
-        f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）已从上下文窗口移除以节省 token；"
+        f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）"
+        "已从上下文窗口移除以节省 token；"
         "如仍需要可重新调用该工具获取。]"
     )
 

@@ -19,7 +19,6 @@ import { useBrowserSessionsStore } from "../browserSessions";
 import { useCommandPanelStore } from "../commandPanel";
 import { useConversationStore } from "../conversation";
 import { type ExecutionPlan, useExecutionStore } from "../execution";
-import { nextDockActiveAfterFloat } from "../sidePanel/float";
 import {
   CHANGES_TAB_ID,
   COMMAND_TAB_ID,
@@ -42,6 +41,7 @@ import {
   terminalDismissKey,
   useSidePanelStore,
 } from "../sidePanel";
+import { nextDockActiveAfterFloat } from "../sidePanel/float";
 
 const listMock = vi.mocked(listBrowserSessions);
 

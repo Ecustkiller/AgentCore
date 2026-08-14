@@ -72,7 +72,9 @@ describe("MermaidDiagram · 合法图不得误报渲染失败", () => {
     await waitFor(() =>
       expect(container.querySelector("svg.flowchart")).not.toBeNull(),
     );
-    const svg = container.querySelector("svg.flowchart")!;
+    const svg = container.querySelector("svg.flowchart");
+    expect(svg).not.toBeNull();
+    if (!svg) throw new Error("expected flowchart svg");
     expect(svg.getAttribute("width")).toBe("320");
     expect(svg.getAttribute("style") ?? "").not.toMatch(/max-width/i);
     expect(svg.parentElement?.className).toContain("mx-auto");

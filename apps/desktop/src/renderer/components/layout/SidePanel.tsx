@@ -159,8 +159,9 @@ export function SidePanel() {
   const changesFocusMessageId = useSidePanelStore(
     (s) => s.changesFocusMessageId,
   );
-  const hasRestorableEntry =
-    useConversationHasRestorableEntry(currentConversationId);
+  const hasRestorableEntry = useConversationHasRestorableEntry(
+    currentConversationId,
+  );
   const prevConversationIdRef = useRef<string | null | undefined>(undefined);
   const spawnSession = useUserTerminalStore((s) => s.spawnSession);
 

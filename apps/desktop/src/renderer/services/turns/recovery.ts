@@ -23,8 +23,7 @@ function isPausedFinish(message: {
   runs?: { finishReason?: string } | null;
 }): boolean {
   return (
-    message.finishReason === "paused" ||
-    message.runs?.finishReason === "paused"
+    message.finishReason === "paused" || message.runs?.finishReason === "paused"
   );
 }
 

@@ -4,7 +4,14 @@ import {
   type UpdaterPhase,
   type UpdaterStatus,
 } from "@shared/updater-contract";
-import { net, shell, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
+import {
+  net,
+  type BrowserWindow,
+  app,
+  ipcMain,
+  powerMonitor,
+  shell,
+} from "electron";
 import { type UpdateInfo, autoUpdater } from "electron-updater";
 import {
   downloadHttpToFile,

@@ -34,7 +34,7 @@ def test_production_keep_recent_default() -> None:
     """Investigation stacking tax vs independent exec window."""
     assert settings.engine_tool_clear_keep_recent == 2
     assert settings.engine_tool_clear_exec_keep_recent == 1
-    assert EXEC_OUTPUT_CLEAR_TOOLS == frozenset({"host_shell", "terminal"})
+    assert frozenset({"host_shell", "terminal"}) == EXEC_OUTPUT_CLEAR_TOOLS
 
 
 def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read") -> list[LLMMessage]:

@@ -74,10 +74,7 @@ function latestFilenameForPlatform(
  * 清单文件名只取 basename。含 `..`、仍含路径分隔符、空、或对不上该平台约定
  * 安装包名时回落 `installerFilename`。
  */
-function safeInstallerFilename(
-  raw: string | null,
-  expected: string,
-): string {
+function safeInstallerFilename(raw: string | null, expected: string): string {
   if (!raw) return expected;
   if (raw.includes("..")) return expected;
   const base = installerBasename(raw).trim();

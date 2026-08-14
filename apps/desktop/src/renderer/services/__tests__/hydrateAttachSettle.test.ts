@@ -52,7 +52,10 @@ vi.mock("@/lib/log", () => ({
   logEvent: vi.fn(),
 }));
 
-import { runHydrateAttachSettle, scheduleHydrateAttachSettle } from "../turns/hydrateAttachSettle";
+import {
+  runHydrateAttachSettle,
+  scheduleHydrateAttachSettle,
+} from "../turns/hydrateAttachSettle";
 
 const CID = "conv-hydrate-attach";
 

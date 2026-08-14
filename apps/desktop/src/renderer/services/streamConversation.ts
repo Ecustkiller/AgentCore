@@ -256,9 +256,8 @@ export function foldAttachSegment(
   unstable_batchedUpdates(() => {
     // 没有锚点（消息窗里还没有那条用户提问）时 reset 落空 → 仍清尾泡执行槽兜底。
     if (fullReplay) {
-      const replayMessageId = (
-        head?.payload as MessageStartPayload | undefined
-      )?.message_id;
+      const replayMessageId = (head?.payload as MessageStartPayload | undefined)
+        ?.message_id;
       resetPartialTurnForReplay(conversationId, replayMessageId);
       const last = getRuntime(conversationId).messages.at(-1);
       if (last?.role === "assistant") {
