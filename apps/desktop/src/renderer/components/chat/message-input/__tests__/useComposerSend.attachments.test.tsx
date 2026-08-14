@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/hooks/useConversations", () => ({
   patchConversationCache: vi.fn(),
   upsertConversationFront: vi.fn(),
+  applyDeletedConversationLocally: vi.fn(),
 }));
 vi.mock("@/lib/composerPendingHint", () => ({
   confirmSendDespitePendingIfNeeded: () => true,
@@ -28,6 +29,7 @@ vi.mock("@/services/api", async (importOriginal) => {
 vi.mock("@/services/conversations", () => ({
   provisionalConversationTitle: (s: string) => s.slice(0, 8),
   requestAutoTitle: vi.fn(),
+  deleteConversation: vi.fn(),
 }));
 vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
 vi.mock("@/services/models", () => ({ getLastUsedProfileId: () => null }));

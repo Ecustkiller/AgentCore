@@ -11,6 +11,7 @@ import {
   debateRoundActiveBeat,
   debateRoundPhaseLabel,
   debateRoundSettledMark,
+  hasActiveRunningWorkers,
   isCaptainKind,
   isDebateParticipantRun,
   pickDebateCrossExamActivateId,
@@ -47,6 +48,21 @@ describe("captain sink helpers", () => {
     expect(worker).toBeDefined();
     expect(isCaptainKind(cap)).toBe(true);
     expect(isCaptainKind(worker)).toBe(false);
+  });
+
+  it("hasActiveRunningWorkers ignores captain", () => {
+    expect(
+      hasActiveRunningWorkers([
+        { kind: "captain", status: "running" },
+        { kind: "agent", status: "pending" },
+      ]),
+    ).toBe(false);
+    expect(
+      hasActiveRunningWorkers([
+        { kind: "captain", status: "running" },
+        { kind: "agent", status: "running" },
+      ]),
+    ).toBe(true);
   });
 });
 

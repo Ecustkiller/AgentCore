@@ -55,7 +55,7 @@ export function UploadReportDialog({
                     className="flex items-baseline gap-2 text-xs"
                   >
                     <span className="min-w-0 flex-1 break-all">{f.path}</span>
-                    <span className="shrink-0 text-destructive/80">
+                    <span className="shrink-0 text-muted-foreground">
                       {f.reason}
                     </span>
                   </li>

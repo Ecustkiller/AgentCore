@@ -1,4 +1,8 @@
 // @vitest-environment jsdom
+/**
+ * 状态条只留细工具栏：合成草稿 / 等待解说 / 成员摘要不寄居条上。
+ * 成员细节走协作图节点；n/m 仍在工具栏。
+ */
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
 import {
@@ -101,8 +105,8 @@ beforeEach(() => {
   useExecutionStore.setState({ byId: {} });
 });
 
-describe("StatusStrip · team_synthesis_preview draft", () => {
-  it("renders CEO synthesis draft body from preview.text", () => {
+describe("StatusStrip · 不挂合成草稿行", () => {
+  it("preview 事件不把草稿/小结画进工具栏", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setTeamSynthesisPreview(
       {
@@ -119,195 +123,26 @@ describe("StatusStrip · team_synthesis_preview draft", () => {
 
     renderStrip(projectExecution(plan, [], "running"));
 
-    expect(screen.getByTestId("team-synthesis-preview")).toBeTruthy();
-    expect(screen.getByText("进展中")).toBeTruthy();
-    expect(screen.getByText("合成草稿更新 · 已完成 1/2")).toBeTruthy();
-    expect(screen.getByTestId("team-synthesis-draft").textContent).toContain(
-      "两边方向一致：优先方案 A",
-    );
+    expect(screen.queryByTestId("team-synthesis-preview")).toBeNull();
+    expect(screen.queryByText("进展中")).toBeNull();
+    expect(screen.queryByText("合成草稿更新 · 已完成 1/2")).toBeNull();
+    expect(screen.queryByText(/两边方向一致/)).toBeNull();
+    expect(screen.queryByText("并行调研")).toBeNull();
+    expect(screen.getByText("0/2")).toBeTruthy();
   });
 
-  it("里程碑草稿：系统进度（run 摘要）为主、CEO 小结为辅", () => {
+  it("汇总空窗：工人全完成仍 running 时只报 n/m，无解说标题", () => {
     useExecutionStore.getState().startExecution(plan, MID);
-    // CEO 里程碑 update_synthesis：workers=[]、text=自由文草稿。
-    useExecutionStore.getState().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 1,
-        total: 2,
-        headline: "合成草稿更新 · 已完成 1/2",
-        text: "方向已对齐：研究支持方案 A，进入撰写。",
-        workers: [],
-        in_progress: true,
-      },
-      MID,
-    );
-    // 系统进度权威来源：r1 已完成（有 outputSummary），r2 仍在跑 → 非合成空窗。
-    const oneDone: RunFrame[] = [
-      {
-        t: 1,
-        kind: "run_started",
-        runId: "r1",
-        agentId: "w1",
-        parentRunId: null,
-        runKind: "agent",
-        continuesRunId: null,
-      },
-      {
-        t: 2,
-        kind: "run_started",
-        runId: "r2",
-        agentId: "w2",
-        parentRunId: null,
-        runKind: "agent",
-        continuesRunId: null,
-      },
-      {
-        t: 3,
-        kind: "run_completed",
-        runId: "r1",
-        agentId: "w1",
-        outputSummary: "调研完成",
-        durationMs: 100,
-      },
-    ];
-
-    renderStrip(projectExecution(plan, oneDone, "running"));
-
-    // 系统自动进度为主：确定性 run 摘要出现（非 CEO 逐条手写）。
-    expect(screen.getByText(/研究员：调研完成/)).toBeTruthy();
-    // CEO 里程碑总结为辅：带「CEO 小结」标签的辅助块。
-    expect(screen.getByTestId("team-synthesis-ceo-note")).toBeTruthy();
-    expect(screen.getByText("CEO 小结")).toBeTruthy();
-    expect(screen.getByTestId("team-synthesis-draft").textContent).toContain(
-      "方向已对齐",
-    );
-  });
-
-  it("renders worker blurbs when present (no separate draft block)", () => {
-    useExecutionStore.getState().startExecution(plan, MID);
-    useExecutionStore.getState().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 1,
-        total: 2,
-        headline: "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-        text: "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：调研结论",
-        workers: [
-          {
-            run_id: "r1",
-            role: "研究员",
-            status: "completed",
-            summary: "调研结论",
-          },
-          {
-            run_id: "r2",
-            role: "撰写员",
-            status: "pending",
-            summary: "",
-          },
-        ],
-        in_progress: true,
-      },
-      MID,
-    );
-
-    renderStrip(projectExecution(plan, [], "running"));
-
-    expect(screen.getByText(/研究员：调研结论/)).toBeTruthy();
-    expect(screen.queryByTestId("team-synthesis-draft")).toBeNull();
-  });
-
-  it("汇总空窗：工人全完成仍 running 时显示确定性进度 + 活性指示", () => {
-    useExecutionStore.getState().startExecution(plan, MID);
-    // 空窗期常见：最后一条 preview 仍停在 1/2，无新事件。
-    useExecutionStore.getState().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 1,
-        total: 2,
-        headline: "已完成 1/2：✅ 研究员 ⏳ 撰写员",
-        text: "已完成 1/2：✅ 研究员 ⏳ 撰写员\n· 研究员：调研结论",
-        workers: [
-          {
-            run_id: "r1",
-            role: "研究员",
-            status: "completed",
-            summary: "调研结论",
-          },
-          {
-            run_id: "r2",
-            role: "撰写员",
-            status: "pending",
-            summary: "",
-          },
-        ],
-        in_progress: true,
-      },
-      MID,
-    );
-
     const execution = projectExecution(plan, bothWorkersDone, "running");
     expect(execution.progress).toEqual({ completed: 2, total: 2 });
 
     renderStrip(execution);
 
     expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
-    expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
-      "2/2 已完成，正在生成汇总",
-    );
-    expect(
-      screen.getByTestId("team-synthesis-preview").dataset.synthesizing,
-    ).toBe("true");
-    expect(screen.getByText("生成汇总")).toBeTruthy();
-    expect(screen.getByTestId("team-synthesis-headline").textContent).toBe(
-      "2/2 已完成，正在生成汇总",
-    );
-    expect(screen.getByTestId("team-synthesis-pulse")).toBeTruthy();
-    // 空窗用 execution 完成态补全 blurbs（不依赖过期 preview 的 1/2 workers）。
-    expect(screen.getByText(/研究员：调研完成/)).toBeTruthy();
-    expect(screen.getByText(/撰写员：撰写完成/)).toBeTruthy();
-    // 系统进度文禁止挂成「CEO 小结」（空窗误挂会闪 + 与上方列表重复）。
-    expect(screen.queryByTestId("team-synthesis-ceo-note")).toBeNull();
-  });
-
-  it("汇总空窗：仅 workers=[] 的真实草稿才挂 CEO 小结", () => {
-    useExecutionStore.getState().startExecution(plan, MID);
-    useExecutionStore.getState().setTeamSynthesisPreview(
-      {
-        execution_id: "exec-1",
-        completed: 2,
-        total: 2,
-        headline: "合成草稿更新 · 已完成 2/2",
-        text: "五路结论已齐，下面按风险优先级出终稿。",
-        workers: [],
-        in_progress: true,
-      },
-      MID,
-    );
-
-    renderStrip(projectExecution(plan, bothWorkersDone, "running"));
-
-    expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
-    expect(screen.getByTestId("team-synthesis-ceo-note")).toBeTruthy();
-    expect(screen.getByTestId("team-synthesis-draft").textContent).toContain(
-      "五路结论已齐",
-    );
-  });
-
-  it("汇总空窗：无 preview 事件时仍显示确定性进度（不注入 CEO 气泡）", () => {
-    useExecutionStore.getState().startExecution(plan, MID);
-    const execution = projectExecution(plan, bothWorkersDone, "running");
-
-    renderStrip(execution);
-
-    expect(screen.getByTestId("status-strip-synthesizing")).toBeTruthy();
-    expect(screen.getByTestId("status-strip-running-title").textContent).toBe(
-      "2/2 已完成，正在生成汇总",
-    );
-    expect(
-      screen.getByTestId("team-synthesis-preview").dataset.synthesizing,
-    ).toBe("true");
-    expect(screen.queryByTestId("team-synthesis-draft")).toBeNull();
+    expect(screen.getByText("2/2")).toBeTruthy();
+    expect(screen.queryByTestId("status-strip-running-title")).toBeNull();
+    expect(screen.queryByText("2/2 已完成，正在生成汇总")).toBeNull();
+    expect(screen.queryByTestId("team-synthesis-preview")).toBeNull();
+    expect(screen.queryByText("生成汇总")).toBeNull();
   });
 });

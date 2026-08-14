@@ -107,7 +107,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "画布视图",
-              desc: "按对话切换的第二视图：聚焦回合展开完整协作图，其余回合塌成摘要。",
+              desc: "按对话切换的第二视图：聚焦回合展开完整协作图，其余回合塌成摘要。下一步指令在聊天里下达。",
             },
             {
               title: "指挥台",
@@ -469,50 +469,45 @@ export const collaborationChapter: ManualChapterContent = {
     },
     {
       id: MANUAL_SECTION_IDS.collaboration.workflow,
-      title: "存为工作流",
+      title: "工作流",
       icon: "Workflow",
       blocks: [
         {
           type: "lead",
-          text: "某一轮协作跑得满意，可以把「谁做什么、先后怎么排」存下来——下次同类的活直接照这张图跑，不用再从头交代一遍。",
+          text: "把「谁做什么、先后怎么排」画成一张可复用的图——下次同类的活直接照这张图跑，不用再从头交代一遍。",
         },
         {
           type: "paragraph",
-          text: "主路径：从满意的那一轮存起",
+          text: "主路径：去工具箱设计",
           emphasis: true,
         },
         {
           type: "steps",
           items: [
             {
-              title: "先正常跑一轮",
-              desc: "像平时那样说目标，让团队干完。多队员的回合结束后，回合状态条上会出现「存为工作流」；一个人就答完的回合没有分工可存，不出这个入口。",
-            },
-            {
-              title: "存下来",
-              desc: "起个名字保存，系统按这轮的分工与先后顺序生成一张工作流。",
-            },
-            {
-              title: "之后微调、跑一次、或交给定时",
+              title: "打开工具箱 · 工作流",
               desc: [
                 "到 ",
                 {
                   text: "工具箱 · 工作流",
                   link: { kind: "go", to: APP_PATHS.toolbox.workflows.root },
                 },
-                " 在画布上改；点「跑一次」选个工作区就能直起；也可以让自动化里的任务绑着它按时跑。",
+                "。需要固定拆法时在这里新建或套官方模板，再在画布上设计。",
               ],
+            },
+            {
+              title: "新建空白图",
+              desc: "点「新建工作流」从空白画布起步，自己排队员、关卡和先后。",
+            },
+            {
+              title: "在画布上设计，再跑一次或交给定时",
+              desc: "画好后点「跑一次」选个工作区就能直起；也可以让自动化里的任务绑着它按时跑。",
             },
           ],
         },
         {
-          type: "callout",
-          variant: "warning",
-          text: "快照只带走「谁做什么、先后依赖、交付要求」。这一轮的模型选择、辩论站位等运行细节不进快照，复跑效果可能与原轮不同——它是可复用的拆法，不是录像回放。",
-        },
-        {
           type: "paragraph",
-          text: "画布是事后微调的地方，不用从零画",
+          text: "画布上能摆什么",
           emphasis: true,
         },
         {
@@ -532,7 +527,7 @@ export const collaborationChapter: ManualChapterContent = {
             },
             {
               title: "开跑按图执行",
-              desc: "跑的时候结构锁定，不临场加人改序；要改结构就回画布改一版。权限仍按你选的自主度，不因为存过图就自动放宽。",
+              desc: "跑的时候结构锁定，不临场加人改序，也不再由 CEO 即兴组队；要改结构就回画布改一版。权限仍按你选的自主度，不因为有图就自动放宽。",
             },
           ],
         },
@@ -661,15 +656,15 @@ export const collaborationChapter: ManualChapterContent = {
               text: "收件箱",
               link: { kind: "go", to: APP_PATHS.toolbox.automations.inbox },
             },
-            "。想让它每次都按同一套拆法跑，先 ",
+            "。想让它每次都按同一套拆法跑，先去 ",
             {
-              text: "存为工作流",
+              text: "工作流",
               link: {
                 kind: "jump",
                 to: MANUAL_SECTION_IDS.collaboration.workflow,
               },
             },
-            " 再绑上。",
+            " 在工具箱里设计好再绑上。",
           ],
         },
       ],

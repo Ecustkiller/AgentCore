@@ -3,49 +3,24 @@ import { ChevronRight } from "lucide-react";
 
 /**
  * Composer「＋」更多选项 sheet — 会话当前配置收纳处（对齐桌面 bar Plus 清单过滤）。
- * 仅列出手机有能力的项：模型组合、本会话权限、附件。
+ * 仅列出手机有能力的项：本会话权限、@ 引用。模型组合已挂在 composer 行内 chip。
  */
 export function ComposerMoreSheet({
-  modelLabel,
-  modelPreset,
   permissionLabel,
   disabled,
   onClose,
-  onOpenModel,
   onOpenPermission,
-  onAttach,
+  onOpenMention,
 }: {
-  modelLabel: string;
-  /** 系统预置组合（区别于用户自建）。 */
-  modelPreset?: boolean;
   permissionLabel: string;
   disabled?: boolean;
   onClose: () => void;
-  onOpenModel: () => void;
   onOpenPermission: () => void;
-  onAttach: () => void;
+  onOpenMention: () => void;
 }) {
   return (
     <Modal className="sheet" onClose={onClose} label="更多选项">
       <div className="sheet-title">更多</div>
-
-      <button
-        type="button"
-        className="more-row"
-        disabled={disabled}
-        data-testid="composer-more-model"
-        aria-label={`模型组合：${modelLabel}${modelPreset ? "（系统预置）" : ""}`}
-        onClick={onOpenModel}
-      >
-        <div className="more-row-main">
-          <span className="more-row-title">模型组合</span>
-          <span className="more-row-sub more-row-sub-badged muted">
-            <span className="more-row-sub-text">{modelLabel}</span>
-            {modelPreset && <span className="model-preset-badge">预置</span>}
-          </span>
-        </div>
-        <ChevronRight size={16} className="muted" aria-hidden />
-      </button>
 
       <button
         type="button"
@@ -66,13 +41,13 @@ export function ComposerMoreSheet({
         type="button"
         className="more-row"
         disabled={disabled}
-        data-testid="composer-more-attach"
-        aria-label="附件"
-        onClick={onAttach}
+        data-testid="composer-more-mention"
+        aria-label="@ 引用"
+        onClick={onOpenMention}
       >
         <div className="more-row-main">
-          <span className="more-row-title">附件</span>
-          <span className="more-row-sub muted">添加文件到本条消息</span>
+          <span className="more-row-title">@ 引用</span>
+          <span className="more-row-sub muted">附件、团队、对话、文件</span>
         </div>
         <ChevronRight size={16} className="muted" aria-hidden />
       </button>

@@ -72,13 +72,9 @@ export function SteeringPanel({
               你{s.targetName ? ` · 定向 ${s.targetName}` : ""}
               {s.kind === "conclude" ? " · 够了收" : ""}
               {s.focus ? ` · 角度「${s.focus}」` : ""}
-              {s.accepted ? (
-                " · 已发送·下一轮生效"
-              ) : (
-                <span className="text-destructive">
-                  {" · 未生效·辩论已停止接收掌舵"}
-                </span>
-              )}
+              {s.accepted
+                ? " · 已发送·下一轮生效"
+                : " · 未生效·辩论已停止接收掌舵"}
             </p>
             {s.ask ? <p className="text-foreground">{s.ask}</p> : null}
           </div>

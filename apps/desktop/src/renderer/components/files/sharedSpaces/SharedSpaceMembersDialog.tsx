@@ -337,7 +337,7 @@ export function SharedSpaceMembersDialog({
               className="rounded-lg border border-border px-2"
             />
             {searchError && (
-              <p className="text-xs text-destructive">{searchError}</p>
+              <p className="text-xs text-muted-foreground">{searchError}</p>
             )}
             {searching && (
               <p className="text-xs text-muted-foreground">查找中…</p>

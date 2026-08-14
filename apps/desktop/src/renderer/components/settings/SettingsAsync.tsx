@@ -78,7 +78,7 @@ export function SettingsAsync({
     </div>
   ) : error ? (
     <>
-      <p className={cn("text-destructive", text)}>{error}</p>
+      <p className={cn("text-muted-foreground", text)}>{error}</p>
       {onRetry && (
         <Button variant="neutral" size="md" onClick={onRetry}>
           {retryLabel}

@@ -1,6 +1,7 @@
 /**
  * Minimal Android soft-keyboard inset bridge via visualViewport → CSS variable.
- * Mount from TabLayout only. No @capacitor/keyboard dependency.
+ * Mount from TabLayout (tab roots) or a bare detail screen that owns the
+ * keyboard inset (IM thread). No @capacitor/keyboard dependency.
  * When visualViewport is missing or adjustResize already shrunk the view, inset stays 0.
  */
 import { type RefObject, useEffect } from "react";

@@ -111,7 +111,7 @@ export function ForceUpdateGate() {
         ) : null}
 
         {status.phase === "error" ? (
-          <p className="text-sm text-destructive">{status.message}</p>
+          <p className="text-sm text-muted-foreground">{status.message}</p>
         ) : null}
 
         <Button

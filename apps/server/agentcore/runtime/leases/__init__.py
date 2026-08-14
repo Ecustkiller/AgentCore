@@ -14,6 +14,7 @@ from agentcore.runtime.leases.service import (
     heartbeat_turn_lease,
     lease_heartbeat_loop,
     lease_owner_id,
+    list_fresh_conversation_ids_for_user,
     orphan_turn_lease,
     release_turn_lease,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "heartbeat_turn_lease",
     "lease_heartbeat_loop",
     "lease_owner_id",
+    "list_fresh_conversation_ids_for_user",
     "orphan_turn_lease",
     "release_turn_lease",
     "run_turn_lease_sweep",

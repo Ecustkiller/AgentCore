@@ -28,6 +28,11 @@ from agentcore.workspace.stage_dirs import REVIEWS_PREFIX
 
 
 def _ctx(workspace: Path, *, agent_id: str = "a") -> ToolContext:
+    # These tests are not empty-desk cases. A visible user file keeps project-shell
+    # strip from rewriting nested paths the assertions pin.
+    keep = workspace / "README.md"
+    if not keep.exists():
+        keep.write_text("desk\n", encoding="utf-8")
     return ToolContext.create(
         execution_id="e",
         run_id="s",
@@ -478,7 +483,7 @@ async def test_file_read_reread_refresh_after_citation_rework(tmp_path: Path):
 
 
 async def test_file_read_ranged_does_not_count_or_ceiling(tmp_path: Path):
-    """offset/limit success reads neither bump counts nor hit the same-path ceiling."""
+    """offset>1 or limit<行顶 point windows neither bump counts nor hit the ceiling."""
     from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
 
     lines = "\n".join(f"L{i}" for i in range(1, 21))
@@ -507,26 +512,184 @@ async def test_file_read_ranged_does_not_count_or_ceiling(tmp_path: Path):
 
 
 async def test_file_read_long_file_window_footer_and_output_limit(tmp_path: Path):
-    """超默认行数：编号窗 + 「共 N 行」页脚；无「中间省略」；output_limit 覆盖全文。"""
-    from agentcore.tools.builtin.file_ops import _DEFAULT_READ_LINES
+    """超行顶：编号窗 + 「共 N 行」+ 行顶页脚；无「中间省略」；output_limit 覆盖全文。"""
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_LINE_CAP
 
-    total = _DEFAULT_READ_LINES + 50
+    total = FILE_READ_SAFETY_LINE_CAP + 50
     body = "\n".join(f"line-{i}" for i in range(1, total + 1)) + "\n"
     (tmp_path / "long.md").write_text(body, encoding="utf-8")
     result = await FileReadTool().execute({"path": "long.md"}, _ctx(tmp_path))
     assert result.success is True
     out = result.output or ""
     assert f"共 {total} 行" in out
-    assert f"第 1–{_DEFAULT_READ_LINES} 行" in out
-    assert f"line-{_DEFAULT_READ_LINES}" in out
+    assert f"第 1–{FILE_READ_SAFETY_LINE_CAP} 行" in out
+    assert "已达行顶" in out
+    assert f"全文 {total} 行" not in out
+    assert f"line-{FILE_READ_SAFETY_LINE_CAP}" in out
     assert f"line-{total}" not in out  # beyond window
     assert "中间省略" not in out
     assert "已保留首尾" not in out
     assert "系统视图截断" not in out
     assert result.output_limit is not None
     assert result.output_limit >= len(out)
-    # Numbered first line
     assert "     1|line-1" in out
+
+
+async def test_file_read_800_lines_returns_full_text(tmp_path: Path):
+    """800 行一次全文；未截断页脚「全文 N 行」。"""
+    total = 800
+    body = "\n".join(f"line-{i}" for i in range(1, total + 1)) + "\n"
+    (tmp_path / "mid.md").write_text(body, encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    result = await FileReadTool().execute({"path": "mid.md"}, ctx)
+    assert result.success is True
+    out = result.output or ""
+    assert f"全文 {total} 行" in out
+    assert "已达行顶" not in out
+    assert "已达字符顶" not in out
+    assert "     1|line-1" in out
+    assert f"line-{total}" in out
+    assert ctx.file_read_counts.get("mid.md") == 1
+    assert result.output_limit is not None
+    assert result.output_limit >= len(out)
+
+
+async def test_file_read_char_cap_truncates_complete_lines(tmp_path: Path):
+    """超 8 万字符：先到先停、完整行；页脚标明字符顶。"""
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_CHAR_CAP
+
+    line = "x" * 1000
+    total = 90
+    (tmp_path / "wide.md").write_text("\n".join([line] * total) + "\n", encoding="utf-8")
+    result = await FileReadTool().execute({"path": "wide.md"}, _ctx(tmp_path))
+    assert result.success is True
+    out = result.output or ""
+    assert "已达字符顶" in out
+    assert f"共 {total} 行" in out
+    assert "中间省略" not in out
+    assert "已保留首尾" not in out
+    # 1001*n - 1 > cap → n > 79.92, so 79 complete lines.
+    expected_end = 0
+    chars = 0
+    for n in range(1, total + 1):
+        extra = len(line) if n == 1 else 1 + len(line)
+        if chars + extra > FILE_READ_SAFETY_CHAR_CAP:
+            break
+        chars += extra
+        expected_end = n
+    assert expected_end == 79
+    assert f"第 1–{expected_end} 行" in out
+    assert f"{expected_end:>6}|{line}" in out
+    assert f"{expected_end + 1:>6}|{line}" not in out
+    for raw in out.splitlines():
+        if "|" in raw and raw.rsplit("|", 1)[-1].startswith("x"):
+            assert raw.rsplit("|", 1)[-1] == line
+    assert result.output_limit is not None
+    assert result.output_limit >= len(out)
+
+
+async def test_file_read_oversized_single_line_kept_whole(tmp_path: Path):
+    """单行超字符顶：整行留下并标字符顶，禁止半行静默切。"""
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_CHAR_CAP
+
+    line = "y" * (FILE_READ_SAFETY_CHAR_CAP + 50)
+    (tmp_path / "one.md").write_text(line + "\n", encoding="utf-8")
+    result = await FileReadTool().execute({"path": "one.md"}, _ctx(tmp_path))
+    assert result.success is True
+    out = result.output or ""
+    assert f"     1|{line}" in out
+    assert "已达字符顶" in out
+    assert "中间省略" not in out
+    assert result.output_limit is not None
+    assert result.output_limit >= len(out)
+
+
+async def test_file_read_from_line1_fill_cap_counts_toward_ceiling(tmp_path: Path):
+    """从第 1 行要满安全顶（双省 / 只传 offset=1 / 只传 limit=顶）计次。"""
+    from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_LINE_CAP
+
+    (tmp_path / "cap.md").write_text("body\n", encoding="utf-8")
+    ctx = _ctx(tmp_path)
+    tool = FileReadTool()
+    for _ in range(FILE_READ_SAME_PATH_MAX):
+        assert (await tool.execute({"path": "cap.md"}, ctx)).success is True
+    assert (await tool.execute({"path": "cap.md"}, ctx)).success is False
+    assert (await tool.execute({"path": "cap.md", "offset": 1}, ctx)).success is False
+    assert (
+        await tool.execute({"path": "cap.md", "limit": FILE_READ_SAFETY_LINE_CAP}, ctx)
+    ).success is False
+    assert (
+        await tool.execute(
+            {"path": "cap.md", "offset": 1, "limit": FILE_READ_SAFETY_LINE_CAP},
+            ctx,
+        )
+    ).success is False
+    ok = await tool.execute({"path": "cap.md", "offset": 1, "limit": 1}, ctx)
+    assert ok.success is True
+    assert "body" in (ok.output or "")
+    assert ctx.file_read_counts.get("cap.md") == FILE_READ_SAME_PATH_MAX
+
+
+async def test_file_read_oversized_message_does_not_teach_offset_limit(tmp_path: Path):
+    from agentcore.workspace.limits import WORKSPACE_READ_MAX_BYTES
+
+    (tmp_path / "huge.txt").write_bytes(b"a" * (WORKSPACE_READ_MAX_BYTES + 1))
+    result = await FileReadTool().execute({"path": "huge.txt"}, _ctx(tmp_path))
+    assert result.success is False
+    err = (result.error or "").lower()
+    assert "offset" not in err
+    assert "limit" not in err
+    assert "mib" in err
+
+
+async def test_file_read_office_default_uses_same_full_window(tmp_path: Path):
+    from unittest.mock import patch
+
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_LINE_CAP
+
+    body = "\n".join(f"line-{i} word extra" for i in range(1, 801))
+    (tmp_path / "notes.docx").write_bytes(b"PK")
+    ctx = _ctx(tmp_path)
+    with patch(
+        "agentcore.workspace.attachment_parse._convert_with_markitdown",
+        return_value=body,
+    ):
+        result = await FileReadTool().execute({"path": "notes.docx"}, ctx)
+    assert result.success is True
+    out = result.output or ""
+    assert "全文 800 行" in out
+    assert "line-800" in out
+    assert ctx.file_read_counts.get("notes.docx") == 1
+
+    over = "\n".join(
+        f"line-{i} word extra" for i in range(1, FILE_READ_SAFETY_LINE_CAP + 51)
+    )
+    (tmp_path / "big.docx").write_bytes(b"PK")
+    with patch(
+        "agentcore.workspace.attachment_parse._convert_with_markitdown",
+        return_value=over,
+    ):
+        truncated = await FileReadTool().execute({"path": "big.docx"}, ctx)
+    tout = truncated.output or ""
+    assert truncated.success is True
+    assert f"第 1–{FILE_READ_SAFETY_LINE_CAP} 行" in tout
+    assert "已达行顶" in tout
+    assert f"line-{FILE_READ_SAFETY_LINE_CAP + 50}" not in tout
+
+
+def test_file_read_schema_teaches_default_full_read():
+    from agentcore.tools.builtin.file_ops import FILE_READ_SAFETY_LINE_CAP
+
+    schema = FileReadTool().schema
+    limit = schema.parameters["properties"]["limit"]
+    assert limit["maximum"] == FILE_READ_SAFETY_LINE_CAP
+    assert "省略则尽量整读" in limit["description"]
+    assert "超安全顶截断" in limit["description"]
+    desc = schema.description
+    assert "默认整读" in desc
+    assert "grep" in desc or "code_search" in desc
+    assert "开窗" in desc
 
 
 async def test_write_hard_rejects_substantial_prose_with_omission(tmp_path: Path):

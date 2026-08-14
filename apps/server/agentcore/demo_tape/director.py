@@ -223,7 +223,9 @@ async def _auto_resume_durable_pause(
             llm_supports_tools=llm_supports_tools,
         )
     )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user_id
+    )
     logger.info(
         "demo_tape.director_auto_resume",
         conversation_id=conversation_id,
@@ -327,7 +329,9 @@ async def _rewind_and_burst(
             llm_supports_tools=llm_supports_tools,
         )
     )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user_id
+    )
     logger.info(
         "demo_tape.director_rewind",
         conversation_id=conversation_id,

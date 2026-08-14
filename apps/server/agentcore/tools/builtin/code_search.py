@@ -78,7 +78,8 @@ class CodeSearchTool:
             description=(
                 "按【概念 / 意图】搜索工作区代码（BM25 符号块）。适合「审批怎么做」"
                 "「User 模型在哪」这类自然语言或关键词定位；返回匹配的函数/类/方法"
-                "及路径。命中后用 file_read（带 offset/limit）精读，禁止整目录通读。"
+                "及路径。命中后单文件默认 file_read 整读；仅页脚已截断或已有行号时开窗，"
+                "禁止整目录通读。"
                 "精确符号名、字符串或正则请用 grep——两工具并存，勿互相替代。"
                 "查当前索引快照：ready 命中可信；building=尚无快照（首次构建）请改用"
                 "grep、勿空等；stale 时建议配合 grep 核对。"
@@ -179,7 +180,8 @@ def _render(result: CodeSearchResult, *, query: str, path_prefix: str) -> str:
         lines.append(f"{header}\n  {preview}\n  score={score:.2f}")
 
     summary = (
-        f"（共 {len(result.chunks)} 条结果；用 file_read path offset/limit 查看全文）"
+        f"（共 {len(result.chunks)} 条结果；单文件默认 file_read 整读；"
+        "仅页脚已截断或已有行号时开窗）"
     )
     body = "\n\n".join(lines) + f"\n\n{summary}"
     body += _status_footer(status)

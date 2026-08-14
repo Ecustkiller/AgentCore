@@ -13,6 +13,7 @@ import {
   isConnectivityErrorCode,
   isEmptyResponseUserSurface,
   isOurServiceErrorCode,
+  isUnstartedSendRefusal,
   resetSessionConnectivityFailures,
   resolveAssistantFailureFace,
   syntheticErrorForEmptyFailure,
@@ -652,5 +653,53 @@ describe("operator relay diagnosis never reaches the user", () => {
         error: { message: UPSTREAM_503 },
       }),
     ).toBe(UPSTREAM_503);
+  });
+});
+
+describe("isUnstartedSendRefusal", () => {
+  it("matches preflight key / quota / rate-limit / platform billing", () => {
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" }),
+      ),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 429, { code: "QUOTA_EXCEEDED" }),
+      ),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 429, { code: "RATE_LIMITED" }),
+      ),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 503, {
+          code: "PLATFORM_BILLING_UNAVAILABLE",
+        }),
+      ),
+    ).toBe(true);
+    expect(isUnstartedSendRefusal(new StreamError("http", 402))).toBe(true);
+    expect(isUnstartedSendRefusal(new StreamError("http", 429))).toBe(true);
+  });
+
+  it("does not match mid-turn / transport codes", () => {
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 401, { code: "LLM_KEY_INVALID" }),
+      ),
+    ).toBe(false);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 502, { code: "LLM_TIMEOUT" }),
+      ),
+    ).toBe(false);
+    expect(isUnstartedSendRefusal(new StreamError("network"))).toBe(false);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamError("http", 503, { code: "INTERNAL_ERROR" }),
+      ),
+    ).toBe(false);
   });
 });

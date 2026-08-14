@@ -20,6 +20,7 @@ Docker 用法（推荐在生产镜像上验证，不在 Windows 宿主机）：
    # 用刚构建的 api 镜像（已含 runsc + 文档库）
    docker run --rm -it --security-opt seccomp=unconfined \\
      --security-opt apparmor=unconfined \\
+     --cap-add NET_ADMIN --cap-add SYS_ADMIN --user 0 \\
      -v "$PWD:/src:ro" -w /src \\
      agentcore-api:latest \\
      python apps/server/scripts/verify_gvisor_sandbox.py --live
@@ -42,11 +43,11 @@ def _resolve_roots() -> tuple[Path, Path]:
     script = Path(__file__).resolve()
     server_candidate = script.parents[1]
     if (server_candidate / "agentcore").is_dir():
-        repo = (
-            server_candidate.parent
-            if (server_candidate.parent / "deploy").is_dir()
-            else server_candidate
-        )
+        repo = server_candidate
+        for candidate in (server_candidate.parent, server_candidate.parent.parent):
+            if (candidate / "deploy").is_dir():
+                repo = candidate
+                break
         return repo, server_candidate
     return script.parents[3], script.parents[3] / "apps" / "server"
 
@@ -88,6 +89,7 @@ def check_repo_assets() -> list[str]:
         SERVER_ROOT / "agentcore" / "tools" / "sandbox" / "staging.py",
         SERVER_ROOT / "agentcore" / "tools" / "sandbox" / "limits.py",
         REPO_ROOT / "deploy" / "docker-compose.sandbox.yml",
+        REPO_ROOT / "deploy" / "api-sandbox-entrypoint.sh",
         REPO_ROOT / "deploy" / "config" / "production.env.example",
     ]
     for path in required:
@@ -104,6 +106,21 @@ def check_repo_assets() -> list[str]:
         else:
             errors.append(f"Dockerfile missing {needle}")
             _fail(f"Dockerfile missing {needle}")
+
+    sandbox_yml = (REPO_ROOT / "deploy" / "docker-compose.sandbox.yml").read_text(
+        encoding="utf-8"
+    )
+    for needle in (
+        "NET_ADMIN",
+        "SYS_ADMIN",
+        "api-sandbox-entrypoint.sh",
+        'user: "0:0"',
+    ):
+        if needle in sandbox_yml:
+            _ok(f"docker-compose.sandbox.yml has {needle}")
+        else:
+            errors.append(f"docker-compose.sandbox.yml missing {needle}")
+            _fail(f"docker-compose.sandbox.yml missing {needle}")
 
     env_ex = (REPO_ROOT / "deploy" / "config" / "production.env.example").read_text(
         encoding="utf-8"
@@ -305,6 +322,34 @@ async def check_live_runsc() -> list[str]:
     return errors
 
 
+async def check_live_netns() -> list[str]:
+    """``ip netns add`` smoke — same gate as cloud browser_* / package_install."""
+    sys.path.insert(0, str(SERVER_ROOT))
+    from agentcore.config import settings  # noqa: WPS433
+    from agentcore.tools.sandbox.browser.netns import (  # noqa: WPS433
+        browser_netns_health,
+        probe_browser_netns_at_startup,
+        reset_browser_netns_health_for_tests,
+    )
+
+    errors: list[str] = []
+    if not settings.gvisor_enabled:
+        print("  SKIP netns probe (gvisor_enabled=false)")
+        return errors
+    reset_browser_netns_health_for_tests()
+    await probe_browser_netns_at_startup()
+    if browser_netns_health() is True:
+        _ok("browser netns probe (ip netns add/del)")
+        return errors
+    errors.append("browser netns probe unhealthy")
+    _fail(
+        "ip netns add failed — stack docker-compose.sandbox.yml "
+        "(cap_add NET_ADMIN/SYS_ADMIN + api-sandbox-entrypoint.sh); "
+        "do not fall back to DesktopBridge"
+    )
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
     parser.add_argument(
@@ -331,8 +376,11 @@ def main() -> int:
     if args.live:
         print("-- live runsc --")
         errors.extend(asyncio.run(check_live_runsc()))
+        print("-- live netns --")
+        errors.extend(asyncio.run(check_live_netns()))
     else:
         print("-- live runsc -- (skipped; pass --live on Linux/Docker)")
+        print("-- live netns -- (skipped; pass --live on Linux/Docker)")
 
     if errors:
         print(f"\nFAILED ({len(errors)} issue(s))")

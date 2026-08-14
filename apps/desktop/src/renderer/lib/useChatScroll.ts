@@ -24,7 +24,12 @@ import {
  *   stays in view — but only when the window actually reaches the tail
  *   (`hasMoreAfter === false`). Upward wheel/touch detaches immediately so the
  *   stream cannot yank the viewport back; hysteresis governs position-based
- *   re-attach. In a historical window sticking is disabled.
+ *   re-attach. In a historical window sticking is disabled. Async layout growth
+ *   (images / Markdown / process timelines) is followed via ResizeObserver on
+ *   `contentRef` and the viewport, batched on rAF — same path as
+ *   {@link useStickToBottom}. Follow writes `scrollTop` directly so CSS
+ *   `scroll-behavior` cannot animate and lose the pin. Observation re-binds
+ *   when the transcript wrapper appears (empty → first message).
  * - **Load older on scroll-up**: near the top, fetch the previous page and
  *   prepend it; the inflated top is anchored so the viewport stays on the same
  *   line instead of jumping.
@@ -66,9 +71,11 @@ interface ChatScrollOptions {
 export function useChatScroll(opts: ChatScrollOptions) {
   const { messages, resetKey, contentKey, loadingOlder } = opts;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
   const touchYRef = useRef<number | null>(null);
   const [atBottom, setAtBottom] = useState(true);
+  const hasTranscript = messages.length > 0;
 
   // Latest props for the scroll listener, so it subscribes once yet always reads
   // current flags/callbacks (avoids re-binding the listener on every toggle).
@@ -90,10 +97,11 @@ export function useChatScroll(opts: ChatScrollOptions) {
     setAtBottom(stuck);
   }, []);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior) => {
+  /** Instant pin — bypasses CSS `scroll-behavior`. */
+  const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior });
+    el.scrollTop = el.scrollHeight;
   }, []);
 
   const jumpToBottom = useCallback(() => {
@@ -105,7 +113,7 @@ export function useChatScroll(opts: ChatScrollOptions) {
       return;
     }
     applyStick(true);
-    scrollToBottom("auto");
+    scrollToBottom();
   }, [applyStick, scrollToBottom]);
 
   // User-driven scroll + upward gesture: toggle stick, page at either edge.
@@ -217,7 +225,7 @@ export function useChatScroll(opts: ChatScrollOptions) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: contentKey is an intentional re-run key; helpers are stable.
   useLayoutEffect(() => {
     if (stickRef.current && !liveRef.current.hasMoreAfter) {
-      scrollToBottom("auto");
+      scrollToBottom();
     } else {
       // Detached or historical window: keep 回到底部 visible until jump / re-attach.
       setAtBottom(false);
@@ -229,8 +237,41 @@ export function useChatScroll(opts: ChatScrollOptions) {
   useLayoutEffect(() => {
     applyStick(true);
     anchorRef.current = null;
-    scrollToBottom("auto");
+    scrollToBottom();
   }, [resetKey, applyStick, scrollToBottom]);
 
-  return { scrollRef, atBottom, jumpToBottom };
+  // Content / viewport layout growth (async images, Markdown, process timelines):
+  // follow only while stuck at the live head. rAF batches RO deliveries and
+  // avoids "ResizeObserver loop" when we mutate scrollTop in the same turn.
+  // Re-bind when the transcript wrapper appears (empty → first message); a
+  // first-mount-only observe would miss ChatView's conditional content node.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: hasTranscript re-binds when the wrapper mounts
+  useEffect(() => {
+    const content = contentRef.current;
+    const viewport = scrollRef.current;
+    if (!content) return;
+
+    let raf = 0;
+    const followFromLayout = () => {
+      raf = 0;
+      if (stickRef.current && !liveRef.current.hasMoreAfter) {
+        scrollToBottom();
+      } else {
+        setAtBottom(false);
+      }
+    };
+
+    const ro = new ResizeObserver(() => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(followFromLayout);
+    });
+    ro.observe(content);
+    if (viewport) ro.observe(viewport);
+    return () => {
+      if (raf) cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, [scrollToBottom, hasTranscript]);
+
+  return { scrollRef, contentRef, atBottom, jumpToBottom };
 }

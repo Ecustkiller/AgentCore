@@ -16,6 +16,7 @@ import {
 // as a view/edit/delete list. GLOBAL scope only — per-project memory stays a desktop task
 // (减法 boundary). Each section self-loads (mobile has no global store), and edits are
 // CAS-guarded: a stale baseline reloads the live copy rather than clobbering it.
+import { ChevronLeft } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
@@ -47,13 +48,14 @@ export function MemoryPage() {
       <header className="bar">
         <button
           type="button"
-          className="link"
+          className="link icon-btn"
+          aria-label="返回"
           onClick={() => navigate("/files")}
         >
-          ← 文件
+          <ChevronLeft size={20} />
         </button>
-        <span>全局设定</span>
-        <span style={{ width: 44 }} />
+        <span className="bar-title">全局设定</span>
+        <span className="bar-right" aria-hidden />
       </header>
 
       <div className="settings-body">

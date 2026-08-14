@@ -407,10 +407,9 @@ class FolderRepository:
 
         The member-archive UPDATE is deliberately narrow:
 
-        * ``updated_at`` self-assigns so the ORM ``onupdate`` does not fire. Letting it
-          fire would stamp every member chat with the delete timestamp and permanently
-          destroy the「最近活动」ordering the sidebar and
-          :meth:`list_by_user_recently_active` read — unrecoverable after the fact.
+        * ``updated_at`` self-assigns. Conversation recency is turn-stamped only
+          (``touch_activity``); restamping members here would still destroy the
+          sidebar「最近活动」order — unrecoverable after the fact.
         * Already-soft-deleted chats and hidden ``handoff``/``standing`` infrastructure
           rows are excluded, matching every user-facing read path.
         * Only rows that are still un-archived get ``archived_by_folder_delete``, so

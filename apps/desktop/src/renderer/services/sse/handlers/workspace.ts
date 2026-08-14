@@ -1,3 +1,4 @@
+import { notifyConversationWorkspaceTree } from "@/components/files/notifyConversationWorkspaceTree";
 import { notifyWarning } from "@/lib/toast";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import type {
@@ -21,6 +22,9 @@ export function handleWorkspaceEvent(
       const payload = event.payload as WorkspaceSnapshotDonePayload;
       const conversationId = payload.conversation_id || ctx.conversationId;
       useAutoSnapshotStore.getState().clearFailed(conversationId);
+      if (ctx.replay !== true) {
+        notifyConversationWorkspaceTree(conversationId);
+      }
       return true;
     }
     case "workspace_snapshot_failed": {

@@ -1,5 +1,6 @@
 import { PageContainer } from "@/components/layout/PageContainer";
 import { Button, Card, SectionLabel } from "@/components/ui";
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { describeError } from "@/lib/errors";
 import { cn } from "@/lib/utils";
 import { createSimulationRun } from "@/services/simulation/api";
@@ -176,7 +177,7 @@ export function TownLauncherPage() {
                 {creating ? "创建中…" : "新建小镇"}
               </Button>
               {actionError ? (
-                <p className="text-sm text-destructive" role="alert">
+                <p className="text-sm text-muted-foreground" role="alert">
                   {actionError}
                 </p>
               ) : null}
@@ -222,7 +223,7 @@ export function TownLauncherPage() {
           {/* Launch failure detail */}
           {launchHint ? (
             <div
-              className="rounded-xl border border-destructive/40 bg-card p-4"
+              className={cn("rounded-xl border p-4", noticeChipNeutral)}
               role="alert"
             >
               <p className="text-sm text-foreground whitespace-pre-wrap">

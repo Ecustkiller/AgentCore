@@ -509,7 +509,7 @@ export function EntriesSection({
             <button
               type="button"
               onClick={() => void quota.refetch()}
-              className="text-left text-xs text-destructive/80 hover:underline"
+              className="text-left text-xs text-muted-foreground hover:underline"
             >
               用量加载失败，点此重试
             </button>
@@ -557,7 +557,7 @@ export function EntriesSection({
             type="button"
             onClick={() => void entries.refetch()}
             style={{ paddingLeft: leafPad }}
-            className="flex h-7 w-full items-center gap-1 text-left text-xs text-destructive/80 hover:underline"
+            className="flex h-7 w-full items-center gap-1 text-left text-xs text-muted-foreground hover:underline"
           >
             加载失败，点此重试
           </button>
@@ -638,23 +638,21 @@ function AlwaysQuotaMeter({
 
   return (
     <div
-      className="min-w-0 rounded-lg bg-destructive/5 px-1.5 py-1.5"
+      className="min-w-0 rounded-lg bg-primary/5 px-1.5 py-1.5"
       title={title}
     >
       {/* Wraps rather than truncates: this is the state where 还剩/超出多少字 must
           survive, and the block is already the one allowed to take room. */}
-      <div className="text-sm font-medium leading-snug text-destructive">
+      <div className="text-sm font-medium leading-snug text-primary">
         {headline}
       </div>
-      <div className="mt-1.5 text-xs leading-snug text-destructive">
-        {caption}
-      </div>
+      <div className="mt-1.5 text-xs leading-snug text-primary">{caption}</div>
       <AlwaysQuotaBar quota={quota} variant={variant} />
     </div>
   );
 }
 
-/** 快满 / 已超 fill — calm scopes render no bar, so every tone here is destructive. */
+/** 快满 / 已超 fill — calm scopes render no bar, so every tone here is primary. */
 function AlwaysQuotaBar({
   quota,
   variant,
@@ -684,19 +682,19 @@ function AlwaysQuotaBar({
       {variant === "folder" ? (
         <>
           <div
-            className="h-full bg-destructive/45 transition-[width]"
+            className="h-full bg-primary/45 transition-[width]"
             style={{ width: `${globalPct}%` }}
             title="全局"
           />
           <div
-            className="h-full bg-destructive transition-[width]"
+            className="h-full bg-primary transition-[width]"
             style={{ width: `${projectPct}%` }}
             title="本文件夹"
           />
         </>
       ) : (
         <div
-          className="h-full rounded-full bg-destructive transition-[width]"
+          className="h-full rounded-full bg-primary transition-[width]"
           style={{ width: `${usedPct}%` }}
         />
       )}

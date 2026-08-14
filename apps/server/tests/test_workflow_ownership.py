@@ -18,12 +18,19 @@ from agentcore.api.routes.workflows import create_workflow, update_workflow
 from agentcore.api.schemas.workflows import (
     CreateWorkflowRequest,
     UpdateWorkflowRequest,
+    WorkflowSourceModel,
 )
 from agentcore.workflows.definition import validate_workflow_definition
 from agentcore.workflows.source import turn_source
 
 _USER = SimpleNamespace(user_id="u1")
 _SOURCE = turn_source(conversation_id="conv-1", message_id="msg-1")
+
+
+def test_workflow_source_kind_turn_is_historical_not_current_write():
+    doc = WorkflowSourceModel.__doc__ or ""
+    assert "历史行" in doc
+    assert "不是现行写入" in doc
 
 
 def _canvas() -> dict:

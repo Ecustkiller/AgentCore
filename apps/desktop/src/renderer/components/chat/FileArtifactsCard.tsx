@@ -1,7 +1,11 @@
-import { FileAuditTrail } from "@/components/audit/FileAuditTrail";
 import { AutoFolderNoticeLine } from "@/components/chat/AutoFolderNoticeCard";
+import {
+  type ArtifactListMeta,
+  useArtifactListMeta,
+} from "@/components/chat/useArtifactListMeta";
 import { FileTypeIcon } from "@/components/files/FileTypeIcon";
-import { Button, IconButton } from "@/components/ui";
+import { FileRowMeta } from "@/components/files/parts";
+import { Button } from "@/components/ui";
 import {
   type StatusTone,
   statusAccentText,
@@ -9,14 +13,12 @@ import {
 } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { useConversationFileSource } from "@/hooks/useConversationFileSource";
-import { useFileAudit } from "@/hooks/useFileAudit";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import {
   type FileArtifact,
   type FileOp,
   hasChangePreviews,
   splitExportedSources,
-  splitPromotedProducts,
 } from "@/lib/fileArtifacts";
 import { isHtmlPath } from "@/lib/fileSource";
 import { openWorkspaceHtmlInBrowser } from "@/lib/openWorkspaceHtmlInBrowser";
@@ -26,14 +28,12 @@ import { usePersistentDisclosure } from "@/stores/disclosure";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import {
   ArrowRight,
-  Check,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Diff,
   FilePlus,
   FolderOpen,
-  History,
   type LucideIcon,
   Pencil,
   Trash2,
@@ -56,9 +56,13 @@ import type { ReactNode } from "react";
  * （{@link splitExportedSources} 只认工具自报的 `derivedFrom`）：用户要的是那份 Word，
  * 并列两份会让人点开 .md 以为被糊弄。中间稿仍在卡里可展开——降级不是藏起来。
  *
- * 清单按「成品 / 过程材料」分组（{@link splitPromotedProducts}），与文件页「AI 工作间」
- * 同一套心智：归位过的是给用户的东西，其余是 AI 干活留下的材料。零归位（多幕协作中间幕）
- * 不渲染成品组——空组占位会把合法状态演成异常。
+ * 通过项平铺，不按归位分成「成品 / 过程材料」：零归位在直接写项目树时是常态，
+ * 空「成品」组会把用户要打开的文件标成「平时不必打开」。位置看路径；`AgentCore/`
+ * 在文件树里已是「AI 工作间」。通过行不打「已验收」/绿勾（常态零信息，且像用户拍板）；
+ * 未通过单独垫底，只在拒收行出徽章 + 事由。
+ *
+ * 行尾修改时间来自当前工作区 list（与文件树同一套 `mtimeMs`），
+ * 按路径命中才显示；对不上或缺 mtime 不占位，不编造。
  */
 
 const OP_META: Record<
@@ -105,11 +109,9 @@ function rowVisual(artifact: FileArtifact): {
 } {
   if (artifact.acceptance === "accepted") {
     return {
-      icon: (
-        <Check size={14} className={`shrink-0 ${statusAccentText.success}`} />
-      ),
-      tone: "success",
-      badge: "已验收",
+      icon: <FileTypeIcon name={artifact.name} size={14} />,
+      tone: "muted",
+      badge: null,
       preview: true,
     };
   }
@@ -152,29 +154,19 @@ function rowVisual(artifact: FileArtifact): {
 
 function FileRow({
   artifact,
-  conversationId,
-  turnKey,
   onOpen,
   opensFullPreview = false,
+  listMeta,
 }: {
   artifact: FileArtifact;
-  conversationId: string | null;
-  turnKey?: string;
   onOpen: () => void;
   /** 该行点击直达应用内「完整预览」（HTML + 会话具备能力）——仅影响提示文案。 */
   opensFullPreview?: boolean;
+  /** 工作区 list 命中的大小 / 时间；对不上或缺字段则不占位。 */
+  listMeta?: ArtifactListMeta;
 }) {
-  const [auditOpen, setAuditOpen] = usePersistentDisclosure(
-    turnKey ? `${turnKey}:file-audit:${artifact.path}` : null,
-    false,
-  );
   const visual = rowVisual(artifact);
   const isDelete = artifact.op === "delete";
-  const auditState = useFileAudit(
-    conversationId,
-    artifact.path,
-    auditOpen && !isDelete,
-  );
   const dir = artifact.path.slice(
     0,
     artifact.path.length - artifact.name.length,
@@ -208,6 +200,15 @@ function FileRow({
           {visual.badge}
         </span>
       )}
+      <FileRowMeta
+        node={{
+          path: artifact.path,
+          name: artifact.name,
+          isDir: false,
+          sizeBytes: listMeta?.sizeBytes,
+          mtimeMs: listMeta?.mtimeMs,
+        }}
+      />
     </>
   );
 
@@ -219,71 +220,27 @@ function FileRow({
   }
   return (
     <li>
-      <div className="flex items-center">
-        <Button
-          variant="ghost"
-          onClick={onOpen}
-          title={
-            opensFullPreview
-              ? `打开完整预览 ${artifact.path}`
-              : stageLabel
-                ? `在文件页查看约定文档 ${artifact.path}`
-                : `在工作区预览 ${artifact.path}`
-          }
-          className="h-auto min-w-0 flex-1 justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"
-        >
-          <span className="flex w-full items-center gap-2 text-left">
-            {body}
-            <ChevronRight
-              size={14}
-              className="shrink-0 text-muted-foreground/50"
-            />
-          </span>
-        </Button>
-        {conversationId && (
-          <SimpleTooltip label="查看写入归因">
-            <IconButton
-              className="mr-2 shrink-0"
-              aria-label="查看写入归因"
-              aria-expanded={auditOpen}
-              onClick={() => setAuditOpen((v) => !v)}
-            >
-              <History size={14} />
-            </IconButton>
-          </SimpleTooltip>
-        )}
-      </div>
-      {auditOpen && conversationId && (
-        <div className="border-t border-border bg-muted/30 px-3 py-2">
-          <FileAuditTrail state={auditState} compact />
-        </div>
-      )}
-    </li>
-  );
-}
-
-/**
- * 分组小标题。只在该组有行时渲染；过程材料组用次要样式（与文件页「AI 工作间」行同款
- * `text-muted-foreground`），成品组保持正文色——用户要的东西不该退到背景里。
- */
-function GroupHeader({
-  label,
-  hint,
-  secondary = false,
-}: {
-  label: string;
-  hint: string;
-  secondary?: boolean;
-}) {
-  return (
-    <div className="flex items-baseline gap-1.5 border-t border-border px-3 pt-2 pb-1 text-xs">
-      <span
-        className={`shrink-0 font-medium ${secondary ? "text-muted-foreground" : "text-foreground"}`}
+      <Button
+        variant="ghost"
+        onClick={onOpen}
+        title={
+          opensFullPreview
+            ? `打开完整预览 ${artifact.path}`
+            : stageLabel
+              ? `在文件页查看约定文档 ${artifact.path}`
+              : `在工作区预览 ${artifact.path}`
+        }
+        className="h-auto w-full min-w-0 justify-start gap-2 rounded-none px-3 py-2 hover:bg-accent"
       >
-        {label}
-      </span>
-      <span className="min-w-0 truncate text-muted-foreground/70">{hint}</span>
-    </div>
+        <span className="flex w-full items-center gap-2 text-left">
+          {body}
+          <ChevronRight
+            size={14}
+            className="shrink-0 text-muted-foreground/50"
+          />
+        </span>
+      </Button>
+    </li>
   );
 }
 
@@ -295,7 +252,7 @@ export function FileArtifactsCard({
 }: {
   artifacts: FileArtifact[];
   conversationId?: string | null;
-  /** 回合作用域（= messageId）：给了才把整卡/审计行开合持久化。 */
+  /** 回合作用域（= messageId）：给了才把整卡/中间稿开合持久化。 */
   turnKey?: string;
   /** 裸聊自动建桌的落点告知——文件落在这里，所以并进本卡头部而非另起一卡。 */
   autoFolder?: AutoFolderNotice;
@@ -313,17 +270,22 @@ export function FileArtifactsCard({
   const showFile = useSidePanelStore((s) => s.showFile);
   const showChanges = useSidePanelStore((s) => s.showChanges);
   // 与对话侧栏同一套能力判定：hook 只对云端会话源且 hasInAppPreview 时挂 openInAppPreview。
-  const canFullPreview =
-    !!useConversationFileSource(conversationId)?.openInAppPreview;
+  const fileSource = useConversationFileSource(conversationId);
+  const canFullPreview = !!fileSource?.openInAppPreview;
   // 与侧栏同源落地 desk；产物可带独立 workspaceId 覆盖。
   const sessionWsId = useConversationWorkspace(conversationId)?.wsId;
+  const lookupListMeta = useArtifactListMeta(
+    fileSource,
+    artifacts,
+    sessionWsId,
+  );
 
   if (artifacts.length === 0) return null;
 
   // 主推件 / 中间稿分区（只认自报 derivedFrom，与后端 fold_exported_sources 同口径）。
   const { primary, intermediate } = splitExportedSources(artifacts);
-  // 主推件再按位置态分组（只认 promoted，不由路径推断产物地位）。
-  const { products, materials, rejected } = splitPromotedProducts(primary);
+  const accepted = primary.filter((a) => a.acceptance !== "rejected");
+  const rejected = primary.filter((a) => a.acceptance === "rejected");
   const canReview =
     hasChangePreviews(artifacts) || (!!conversationId && !!turnKey);
 
@@ -345,10 +307,9 @@ export function FileArtifactsCard({
     <FileRow
       key={`${a.acceptance ?? a.op ?? "file"}:${a.path}`}
       artifact={a}
-      conversationId={conversationId}
-      turnKey={turnKey}
       onOpen={() => openArtifact(a)}
       opensFullPreview={canFullPreview && isHtmlPath(a.path)}
+      listMeta={lookupListMeta(a)}
     />
   );
 
@@ -400,23 +361,8 @@ export function FileArtifactsCard({
       {expanded && (
         <>
           {/* 无行间横线（统一两卡列表语言）：单行可点行有 hover 底色 + 图标锚点，保持现有密度。 */}
-          {products.length > 0 && (
-            <>
-              <GroupHeader label="成品" hint="已归位到你的工作区" />
-              <ul>{products.map(fileRow)}</ul>
-            </>
-          )}
-          {materials.length > 0 && (
-            <>
-              <GroupHeader
-                label="过程材料"
-                hint="AI 干活留下的，平时不必打开"
-                secondary
-              />
-              <ul>{materials.map(fileRow)}</ul>
-            </>
-          )}
-          {/* 未通过：两组都不进，末尾单列（行本身维持原样：X + 未通过徽章 + 事由）。 */}
+          {accepted.length > 0 && <ul>{accepted.map(fileRow)}</ul>}
+          {/* 未通过：不混进通过列表，末尾单列（X + 未通过徽章 + 事由）。 */}
           {rejected.length > 0 && (
             <ul className="border-t border-border">{rejected.map(fileRow)}</ul>
           )}

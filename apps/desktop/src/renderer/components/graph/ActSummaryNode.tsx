@@ -5,8 +5,6 @@ import type {
   ActKind,
   ExecutionStatus,
 } from "@/stores/execution";
-import { useExecutionScope } from "@/stores/execution";
-import { useRecoveryDismissedStore } from "@/stores/recoveryDismissed";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import {
   AlertTriangle,
@@ -39,8 +37,6 @@ export interface ActSummaryData {
   durationMs?: number | null;
   /** 图上指挥扫视: unanswered boss decisions folded on this act (待你拍板 chip). */
   pendingDecisions?: number;
-  /** Recoverable terminal trouble in this act (待救火 chip when no decision pends). */
-  recoverable?: boolean;
   /** Edge anchor orientation, driven by the active graph layout. */
   handleDirection: "vertical" | "horizontal";
   /** 1-based act number for the「幕 N」eyebrow. */
@@ -92,10 +88,6 @@ export function ActSummaryNode({ data }: NodeProps) {
   const documentMode = useGraphDocumentMode();
   const live = useActSummaryLive(shell.actId);
   const actions = useGraphActions();
-  const messageId = useExecutionScope();
-  const hintDismissed = useRecoveryDismissedStore((s) =>
-    messageId ? s.dismissed.has(messageId) : false,
-  );
 
   const status =
     (documentMode ? live?.status : shell.status) ??
@@ -108,10 +100,6 @@ export function ActSummaryNode({ data }: NodeProps) {
   const durationMs = documentMode ? live?.durationMs : shell.durationMs;
   const pendingDecisions =
     (documentMode ? live?.pendingDecisions : shell.pendingDecisions) ?? 0;
-  const actRecoverable =
-    (documentMode ? live?.recoverable : shell.recoverable) ?? false;
-  // 幕卡「待救火」follows the same session dismiss latch as turn chips.
-  const recoverable = actRecoverable && !hintDismissed;
   const onActivate = documentMode
     ? () => actions.focusAct(shell.actId)
     : shell.onActivate;
@@ -171,18 +159,11 @@ export function ActSummaryNode({ data }: NodeProps) {
               {title}
             </p>
           </div>
-          {pendingDecisions > 0 ? (
+          {pendingDecisions > 0 && (
             <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               <AlertTriangle size={11} />
               待你拍板{pendingDecisions > 1 ? ` ${pendingDecisions}` : ""}
             </span>
-          ) : (
-            recoverable && (
-              <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-                <AlertTriangle size={11} />
-                待救火
-              </span>
-            )
           )}
         </div>
 

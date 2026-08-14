@@ -1382,6 +1382,44 @@ async def test_provider_stream_surfaces_forwarded_empty_diagnosis():
     assert diag[0].empty_raw_preview == "<empty>"
 
 
+async def test_forward_stream_binds_log_context_during_upstream(monkeypatch):
+    """StreamingResponse outlives the handler log_context; re-bind for the upstream read."""
+
+    async def _fake_spend(**_kw):
+        pass
+
+    monkeypatch.setattr(inference.proxy, "_record_proxy_spend", _fake_spend)
+
+    seen: dict[str, str] = {}
+
+    class _ContextProbeProvider:
+        async def stream(self, _request):
+            from agentcore.core.log_context import get_log_value
+
+            seen["conversation_id"] = get_log_value("conversation_id")
+            seen["trace_id"] = get_log_value("trace_id")
+            seen["persona"] = get_log_value("persona")
+            yield LLMChunk(delta_content="ok", finish_reason="stop")
+
+        async def close(self):
+            pass
+
+    resp = await inference._forward_stream(
+        _ContextProbeProvider(),
+        _request(stream=True),
+        user_id="u1",
+        conversation_id="c1",
+        trace_id="ab" * 16,
+        attribution={"persona": "CEO", "role": "captain"},
+    )
+    async for _chunk in resp.body_iterator:
+        pass
+
+    assert seen["conversation_id"] == "c1"
+    assert seen["trace_id"] == "ab" * 16
+    assert seen["persona"] == "CEO"
+
+
 # --- stream-control relay fidelity (断线可救跨代理跳) --------------------------
 #
 # The provider's committed-aware stream emits two control signals: stream_reset (a

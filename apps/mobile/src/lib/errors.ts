@@ -7,7 +7,12 @@ import {
   type RecoveryMomentContext,
   withLocalRecoveryMoment,
 } from "@/lib/recoveryMoment";
-import { KEY_CONFIG_ERROR_CODES } from "@agentcore/contract-types";
+import {
+  KEY_CONFIG_ERROR_CODES,
+  isUnstartedSendRefusal as matchUnstartedSendRefusal,
+} from "@agentcore/contract-types";
+
+export { isZeroOutputSendRefusalCode } from "@agentcore/contract-types";
 
 /** One-click remedy that routes the user to fix the cause (not a retry). */
 export interface ErrorAction {
@@ -50,6 +55,11 @@ export class StreamHttpError extends Error {
  * 唯一用途：决定这次拒绝要不要把卡放回可点。帧不在就不该放回——放回只会请用户一点再点、
  * 次次 404。对齐桌面 `services/turns/regenerate.ts` · `isPausedFrameGone`。
  */
+/** Preflight 402/429/平台凭据缺失：发送当没发生。须再配「用户消息未落库」。 */
+export function isUnstartedSendRefusal(err: StreamHttpError): boolean {
+  return matchUnstartedSendRefusal({ code: err.code, status: err.status });
+}
+
 export function isPausedFrameGone(err: unknown): err is StreamHttpError {
   if (!(err instanceof StreamHttpError)) return false;
   return err.status === 404 || err.status === 410;

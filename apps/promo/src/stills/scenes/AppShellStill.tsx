@@ -10,8 +10,8 @@ import { BRAND_SHELL_RECENT } from "../../videos/brand-30s/shellRecent";
  * 领衔 promo still: the full desktop shell (TitleBar + Sidebar) with the product's
  * 对话级画布 (Canvas view) running inside the main area — the one image that says both
  * "this is a real product" and "a real team is alive in it", shown through the actual
- * Canvas UX (turn spine + a focused turn expanded into its live worker DAG + the 常驻
- * 命令栏). Reuses the real chrome pieces: PromoShell + PromoCanvas (which embeds the
+ * Canvas UX (turn spine + a focused turn expanded into its live worker DAG).
+ * Reuses the real chrome pieces: PromoShell + PromoCanvas (which embeds the
  * real GraphStage butterfly), frozen at a settled mid-run frame.
  */
 

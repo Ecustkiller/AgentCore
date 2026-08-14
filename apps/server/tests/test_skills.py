@@ -224,6 +224,10 @@ def test_product_help_consult_carved_out_and_owned_by_core():
     assert "必查 `product_help`" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_map" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "product_help_faq" in CONSULT_PRODUCT_HELP_BY_SCENE
+    # 巡检 A：官网 / 你的网站 / 下载 → 必查 product_help（禁猜同名他品 / 厂商官网）
+    assert "官网" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert "你的网站" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert "下载" in CONSULT_PRODUCT_HELP_BY_SCENE
     # 定案 A：Cursor / .mdc / 改成 AgentCore 规则 → 必查 product_help*
     assert "Cursor" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert ".mdc" in CONSULT_PRODUCT_HELP_BY_SCENE
@@ -342,10 +346,8 @@ async def test_consult_build_website_hit():
     assert "none" in result.output
     directory = render_skill_directory(reg, _NO_LIVE_USER)
     assert "- build_website：" in directory
-    # 「topic 必填」由常驻核持有，目录不再复述（去重定案）
-    from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT
-
-    assert "**必填** `playbook_args.topic`" in _CEO_CORE_HINT
+    # 「topic 必填」由 build_website 正文持有，目录不再复述（去重定案）
+    assert "**必填** `playbook_args.topic`" in result.output
     assert "playbook_args.topic" not in directory
     assert "- build_toolshed：" not in directory
     assert "style=\"toolshed\"" in result.output or "style=toolshed" in result.output
@@ -487,6 +489,9 @@ def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
     assert "成文后梯度" in body
     assert "轻→标准→重" in body
     assert "档 1" in body and "档 2" in body and "档 3" in body
+    # 核下沉独有句：A/档2 不成篇硬门；开局禁连搜（探路轮跟 settings）
+    assert "成篇硬门" in body
+    assert "开局自己连搜" in body or "连搜多轮" in body
     assert "research_report" in body
     assert "满编" in body
     assert "套 `research_report` 满编" in body
@@ -534,6 +539,11 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
 
     assert "短答" in help_body
     assert "禁内部名" in help_body
+    # 巡检 A：官网真空白 → skill 钉死域名，禁厂商/同名他品
+    assert "https://fashitianxia.xyz" in help_body
+    assert "https://fashitianxia.xyz/download" in help_body
+    assert "https://app.fashitianxia.xyz" in help_body
+    assert "同名他品" in help_body or "模型厂商" in help_body
     assert "ask_user" in help_body  # teach: don't say these to users
     assert "功能总览" in help_body and "≤3" in help_body
     assert "product_help_map" in help_body and "product_help_faq" in help_body
@@ -557,6 +567,8 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
 
     assert "【FAQ 精华】" in faq_body
     assert "为什么没组团" in faq_body
+    assert "https://fashitianxia.xyz" in faq_body
+    assert "官网" in faq_body and "下载" in faq_body
     assert "?s=faq" in faq_body
     assert "playbook=" not in faq_body
     assert "怎么打开 .md" in faq_body or ".md" in faq_body and "阅读预览" in faq_body
@@ -591,9 +603,11 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     help_skill = build_system_skill_registry().get("product_help")
     assert help_skill is not None
     assert "Cursor" in help_skill.summary and "改成 AgentCore 规则" in help_skill.summary
+    assert "官网" in help_skill.summary
     faq_skill = build_system_skill_registry().get("product_help_faq")
     assert faq_skill is not None
     assert "Cursor" in faq_skill.summary
+    assert "官网" in faq_skill.summary
 
     assert "Markdown 语法" in help_body or ".md 怎么打开" in help_body
     # 与 product_bug_triage 分轨：用法短答不承载诊断仪式
@@ -692,6 +706,18 @@ def test_team_orchestration_skill_teaches_cross_folder_parallel():
     assert "先建齐再派" in skill.summary  # 显式多线先建齐再派
     assert "自动建云文件夹" in skill.summary or "勿催 create" in skill.summary
     assert "拒后禁塌缩" in skill.summary
+
+
+def test_team_orchestration_skill_teaches_empty_desk_no_project_shell():
+    body = _body("team_orchestration_advanced")
+    assert "【空桌勿套工程壳】" in body
+    assert "本文件夹根即工作区根" in body
+    assert "工程壳" in body
+    assert "空桌" in body
+    assert "site/" in body and "app/" in body
+    assert "要不要再套一层" in body
+    assert "create_folder" in body
+    assert "mkdir" in body
 
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
@@ -1340,6 +1366,13 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "FILL" in body or "str_replace" in body
     assert "continue_writing" in body  # 禁复活 CTA
     assert "replaces_run_id" in body  # 仅冷接手对照
+    # 多源合并核独有句下沉：骨架禁审校清理连环、禁 CEO 自写、极低 max_rounds
+    assert "多源合并" in body and "成篇优先" in body
+    assert "CEO 自写" in body
+    assert "审校" in body and "清理" in body
+    assert "max_rounds" in body
+    assert "流水线已在执行" in body or "合并进行中" in body
+    assert "SECTION:" in body or "骨架" in body
     # MD→PDF：主交付 .md；要分享时 md_to_pdf；禁 HTML/reportlab 主路径
     assert "md_to_pdf" in body
     assert "HTML" in body

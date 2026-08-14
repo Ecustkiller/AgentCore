@@ -1,9 +1,11 @@
 /**
  * Live cold ResumeCard paint selector (mobile).
  *
- * Authority = cold Interaction pending (stamp-bound); recovery `paused[]` is
- * the reopen shell for entries not yet covered by IX. Desktop semantic parity
- * without importing desktop code.
+ * Authority = cold Interaction pending/submitting (stamp-bound); recovery
+ * `paused[]` is the reopen shell for entries not yet covered by IX. A terminal
+ * IX (`resolved` / `orphaned`) suppresses that shell — follow `*_resolved`
+ * must not leave a clickable card. Desktop semantic parity without importing
+ * desktop code.
  */
 import type { PausedTurnSummary } from "@/api/turn";
 import {
@@ -267,7 +269,10 @@ export function selectVisibleColdResumes(args: {
 
   for (const p of paused) {
     if (covered.has(p.checkpoint_id)) continue;
-    if (byId.get(p.checkpoint_id)?.status === "orphaned") continue;
+    const ixStatus = byId.get(p.checkpoint_id)?.status;
+    // Terminal IX: card is done (this device or another). Do not keep a
+    // clickable recovery shell — desktop `removePausedTurn` on `*_resolved`.
+    if (ixStatus === "orphaned" || ixStatus === "resolved") continue;
     out.push(p);
   }
 

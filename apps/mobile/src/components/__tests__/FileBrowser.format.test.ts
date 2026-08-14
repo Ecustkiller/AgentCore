@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatFileMtime, formatFileSize } from "../FileBrowser";
+import { fileSubtitle, formatFileMtime, formatFileSize } from "../FileBrowser";
 
 describe("formatFileSize", () => {
   it("formats B / KB / MB", () => {
@@ -25,5 +25,18 @@ describe("formatFileMtime", () => {
     const d = new Date(now);
     const y = new Date(d.getFullYear(), d.getMonth(), d.getDate() - 1);
     expect(formatFileMtime(y.getTime(), now)).toBe("昨天");
+  });
+});
+
+describe("fileSubtitle", () => {
+  it("shows only mtime even when sizeBytes is present", () => {
+    expect(
+      fileSubtitle({ mtimeMs: Date.now() - 1000, sizeBytes: 12_000 }),
+    ).toBe("刚刚");
+  });
+
+  it("returns null when mtime is missing (no size placeholder)", () => {
+    expect(fileSubtitle({})).toBeNull();
+    expect(fileSubtitle({ sizeBytes: 12_000 })).toBeNull();
   });
 });

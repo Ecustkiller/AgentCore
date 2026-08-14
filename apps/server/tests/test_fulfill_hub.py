@@ -35,7 +35,9 @@ from agentcore.fulfill.hub import (
     default_fulfiller_hub,
     origin_pinned,
 )
+from agentcore.fulfill.user_signal import FRAME_QUEUE_ACCOUNT_SNAPSHOT
 from agentcore.runtime.events.types import EventType, SSEEvent
+from agentcore.runtime.turn.queue import TurnQueue, new_queued_turn
 
 
 def test_default_fulfiller_hub_is_singleton():
@@ -536,18 +538,11 @@ async def test_observer_alongside_a_desktop_leaves_delivery_untouched():
 async def test_observer_connect_skips_rehang_but_still_gets_snapshot(monkeypatch):
     """Web tab: zero caps. Account state yes; do not re-push pending local ops."""
     rehangs: list[str] = []
-    snapshot = {
-        "type": "turn_queue_snapshot",
-        "payload": {"conversation_id": "c1", "items": []},
-    }
     monkeypatch.setattr(
         "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
         lambda user_id: rehangs.append(user_id) or 0,
     )
-    monkeypatch.setattr(
-        "agentcore.api.routes.fulfill.turn_queue.snapshot_frames",
-        lambda user_id: [snapshot] if user_id == "u1" else [],
-    )
+    monkeypatch.setattr("agentcore.api.routes.fulfill.turn_queue", TurnQueue())
 
     hub = FulfillerHub()
     observer = hub.register("u1", "web-1", caps=[], roots=[], platform="web")
@@ -555,24 +550,20 @@ async def test_observer_connect_skips_rehang_but_still_gets_snapshot(monkeypatch
     _seed_registered_session(observer, hub)
 
     assert rehangs == []
-    assert await observer.get() == snapshot
+    assert await observer.get() == {
+        "type": FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+        "payload": {"queues": []},
+    }
 
 
 async def test_capable_connect_rehangs_pending_ops(monkeypatch):
     """Desktop reconnect: rehang so in-flight CLIENT_TOOL is not dropped."""
     rehangs: list[str] = []
-    snapshot = {
-        "type": "turn_queue_snapshot",
-        "payload": {"conversation_id": "c1", "items": []},
-    }
     monkeypatch.setattr(
         "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
         lambda user_id: rehangs.append(user_id) or 0,
     )
-    monkeypatch.setattr(
-        "agentcore.api.routes.fulfill.turn_queue.snapshot_frames",
-        lambda user_id: [snapshot] if user_id == "u1" else [],
-    )
+    monkeypatch.setattr("agentcore.api.routes.fulfill.turn_queue", TurnQueue())
 
     hub = FulfillerHub()
     desktop = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
@@ -580,7 +571,51 @@ async def test_capable_connect_rehangs_pending_ops(monkeypatch):
     _seed_registered_session(desktop, hub)
 
     assert rehangs == ["u1"]
-    assert await desktop.get() == snapshot
+    assert await desktop.get() == {
+        "type": FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+        "payload": {"queues": []},
+    }
+
+
+async def test_connect_seed_one_account_queue_frame_even_when_empty(monkeypatch):
+    """Empty table still lands — client replace, not silence, not per-conv frames."""
+    monkeypatch.setattr(
+        "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
+        lambda user_id: 0,
+    )
+    monkeypatch.setattr("agentcore.api.routes.fulfill.turn_queue", TurnQueue())
+    hub = FulfillerHub()
+    session = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+    _seed_registered_session(session, hub, running_conversation_ids=[])
+    frame = await session.get()
+    assert frame == {
+        "type": FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+        "payload": {"queues": []},
+    }
+    assert frame["type"] != "turn_queue_snapshot"
+
+
+async def test_connect_seed_packs_all_queues_in_one_account_frame(monkeypatch):
+    """Two conversations → one account snapshot, not two incremental frames."""
+    q = TurnQueue()
+    q.enqueue("c1", new_queued_turn(content="a", user_id="u1"))
+    q.enqueue("c2", new_queued_turn(content="b", user_id="u1"))
+    monkeypatch.setattr(
+        "agentcore.runtime.events.client_tool_reattach.rehang_pending_client_tools",
+        lambda user_id: 0,
+    )
+    monkeypatch.setattr("agentcore.api.routes.fulfill.turn_queue", q)
+    hub = FulfillerHub()
+    session = hub.register("u1", "d1", caps=["workspace"], roots=["r1"])
+    _seed_registered_session(session, hub, running_conversation_ids=[])
+    frame = await session.get()
+    assert frame["type"] == FRAME_QUEUE_ACCOUNT_SNAPSHOT
+    assert {row["conversation_id"] for row in frame["payload"]["queues"]} == {
+        "c1",
+        "c2",
+    }
+    activity = await session.get()
+    assert activity["type"] == "ai_turn_activity_snapshot"
 
 
 def test_presence_window_outlasts_the_grace_it_authorizes():

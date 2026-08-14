@@ -2,7 +2,18 @@
 // components/chat/FileArtifactsCard.tsx 语义）。主清单只认路径验收态（delivery_status.artifacts）；
 // 历史缺 delivery 时由 ChatPage 旁路 process/events。挂在答复正文下方；点任一可预览行 →
 // 跳到该对话的文件页并直接打开预览。「查看改动」在卡内展开（无右坞）。
+// 行尾修改时间：按路径向已有工作区 list 取 mtime_ms（对不上或缺字段就空着；sizeBytes 不画在行上）。
+import {
+  type AutoFolderNotice,
+  AutoFolderNoticeLine,
+} from "@/components/AutoFolderNoticeCard";
+import { formatFileMtime } from "@/components/FileBrowser";
 import { TurnFileChangesReview } from "@/components/TurnFileChangesReview";
+import {
+  artifactListingLookupKey,
+  listingDesksFor,
+  loadFileListingMeta,
+} from "@/lib/artifactListingMeta";
 import {
   type FileArtifact,
   type FileOp,
@@ -11,7 +22,6 @@ import {
 import { stageFileLabel } from "@/lib/stageDirs";
 import {
   ArrowRight,
-  Check,
   ChevronDown,
   ChevronRight,
   ChevronUp,
@@ -22,7 +32,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 const OP_META: Record<
@@ -35,6 +45,13 @@ const OP_META: Record<
   move: { label: "移动", Icon: ArrowRight, cls: "art-move", preview: true },
 };
 
+function artifactMetaLabel(
+  meta: { sizeBytes?: number; mtimeMs?: number } | undefined,
+): string | null {
+  if (typeof meta?.mtimeMs === "number") return formatFileMtime(meta.mtimeMs);
+  return null;
+}
+
 function rowVisual(artifact: FileArtifact): {
   Icon: LucideIcon;
   cls: string;
@@ -44,9 +61,9 @@ function rowVisual(artifact: FileArtifact): {
 } {
   if (artifact.acceptance === "accepted") {
     return {
-      Icon: Check,
-      cls: "art-accepted",
-      badge: "已验收",
+      Icon: FilePlus,
+      cls: "art-neutral",
+      badge: null,
       preview: true,
     };
   }
@@ -82,9 +99,11 @@ function rowVisual(artifact: FileArtifact): {
 function ArtifactBody({
   artifact,
   visual,
+  metaLabel,
 }: {
   artifact: FileArtifact;
   visual: ReturnType<typeof rowVisual>;
+  metaLabel?: string | null;
 }) {
   const dir = artifact.path.slice(
     0,
@@ -108,8 +127,69 @@ function ArtifactBody({
           {visual.badge}
         </span>
       )}
+      {metaLabel ? <span className="artifact-meta">{metaLabel}</span> : null}
     </>
   );
+}
+
+function useArtifactListingMeta(
+  artifacts: FileArtifact[],
+  conversationId: string | null,
+): ReadonlyMap<string, { sizeBytes?: number; mtimeMs?: number }> {
+  const [byKey, setByKey] = useState<
+    Map<string, { sizeBytes?: number; mtimeMs?: number }>
+  >(() => new Map());
+  const artifactsRef = useRef(artifacts);
+  artifactsRef.current = artifacts;
+  const deskSig = listingDesksFor(artifacts, conversationId)
+    .map((d) => `${d.kind}:${d.id}`)
+    .join("|");
+  const pathSig = artifacts
+    .map((a) => `${a.workspaceId ?? ""}:${a.path}`)
+    .join("|");
+
+  // deskSig/pathSig are the real inputs; array identity from ChatPage is unstable.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: signature deps
+  useEffect(() => {
+    const current = artifactsRef.current;
+    const desks = listingDesksFor(current, conversationId);
+    if (desks.length === 0) {
+      setByKey((prev) => (prev.size === 0 ? prev : new Map()));
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(
+      desks.map(async (desk) => ({
+        desk,
+        map: await loadFileListingMeta(desk),
+      })),
+    ).then((loaded) => {
+      if (cancelled) return;
+      const next = new Map<string, { sizeBytes?: number; mtimeMs?: number }>();
+      for (const a of current) {
+        const lookup = artifactListingLookupKey(a, conversationId);
+        if (!lookup) continue;
+        const desk = a.workspaceId
+          ? loaded.find(
+              (x) => x.desk.kind === "ws" && x.desk.id === a.workspaceId,
+            )
+          : loaded.find(
+              (x) => x.desk.kind === "conv" && x.desk.id === conversationId,
+            );
+        const meta = desk?.map.get(a.path);
+        if (meta) next.set(lookup, meta);
+      }
+      setByKey((prev) => {
+        if (next.size === 0 && prev.size === 0) return prev;
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationId, deskSig, pathSig]);
+
+  return byKey;
 }
 
 export function FileArtifactsCard({
@@ -117,6 +197,7 @@ export function FileArtifactsCard({
   conversationId,
   messageId = null,
   reviewArtifacts,
+  autoFolder = null,
 }: {
   artifacts: FileArtifact[];
   conversationId: string | null;
@@ -124,8 +205,11 @@ export function FileArtifactsCard({
   messageId?: string | null;
   /** A1 工具参数预览源（process/events）；缺省回落 artifacts。 */
   reviewArtifacts?: FileArtifact[];
+  /** 裸聊写盘自动建文件夹：有文件时挂卡头一行；没文件时本卡不渲染（由独立告知卡接手）。 */
+  autoFolder?: AutoFolderNotice | null;
 }) {
   const navigate = useNavigate();
+  const listingMeta = useArtifactListingMeta(artifacts, conversationId);
   // 文件不多（≤4）默认展开一目了然；多了先收起，避免长清单淹没答复。
   const [expanded, setExpanded] = useState(artifacts.length <= 4);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -143,7 +227,6 @@ export function FileArtifactsCard({
       navigate(`/files/${encodeURIComponent(a.workspaceId)}`, {
         state: {
           openPath: a.path,
-          name: a.name,
           fromConversationId: conversationId,
         },
       });
@@ -182,19 +265,28 @@ export function FileArtifactsCard({
           </button>
         )}
       </div>
+      {autoFolder && <AutoFolderNoticeLine notice={autoFolder} />}
       {expanded && (
         <ul className="artifacts-list">
           {artifacts.map((a) => {
             const visual = rowVisual(a);
             const isDelete = a.op === "delete";
             const canOpen = visual.preview && !isDelete && !!conversationId;
+            const lookup = artifactListingLookupKey(a, conversationId);
+            const metaLabel = lookup
+              ? artifactMetaLabel(listingMeta.get(lookup))
+              : null;
             if (!canOpen) {
               return (
                 <li
                   key={`${a.acceptance ?? a.op ?? "file"}:${a.path}`}
                   className="artifact-row artifact-static"
                 >
-                  <ArtifactBody artifact={a} visual={visual} />
+                  <ArtifactBody
+                    artifact={a}
+                    visual={visual}
+                    metaLabel={metaLabel}
+                  />
                 </li>
               );
             }
@@ -210,7 +302,11 @@ export function FileArtifactsCard({
                       : `在工作区查看 ${a.path}`
                   }
                 >
-                  <ArtifactBody artifact={a} visual={visual} />
+                  <ArtifactBody
+                    artifact={a}
+                    visual={visual}
+                    metaLabel={metaLabel}
+                  />
                   <ChevronRight size={14} className="artifact-go" aria-hidden />
                 </button>
               </li>

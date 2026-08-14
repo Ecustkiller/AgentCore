@@ -50,7 +50,9 @@ describe("SteeringPanel receipt", () => {
 
   it("says 未生效 when the engine has stopped accepting steers", async () => {
     clickConclude(false);
-    await screen.findByText(/未生效·辩论已停止接收掌舵/);
+    const receipt = await screen.findByText(/未生效·辩论已停止接收掌舵/);
     expect(screen.queryByText(/已发送/)).toBeNull();
+    expect(receipt.className).toContain("text-muted-foreground");
+    expect(receipt.className).not.toContain("destructive");
   });
 });

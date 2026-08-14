@@ -417,6 +417,23 @@ class PausedTurnRepository:
         )
         return result.scalars().all()
 
+    async def list_pending_for_user(self, user_id: str) -> Sequence[PausedTurnRow]:
+        """This user's paused turns on live conversations (oldest first).
+
+        Soft-deleted (``deleted_at`` set) and already-gone conversations are
+        excluded — an attention snapshot must not relight a chat the user deleted.
+        """
+        result = await self._session.execute(
+            select(PausedTurnRow)
+            .join(Conversation, Conversation.id == PausedTurnRow.conversation_id)
+            .where(
+                PausedTurnRow.user_id == user_id,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(PausedTurnRow.created_at.asc())
+        )
+        return result.scalars().all()
+
     async def exists_for_conversation(self, conversation_id: str) -> bool:
         """Whether the conversation holds ANY durably-paused turn (open-turn probe)."""
         result = await self._session.execute(

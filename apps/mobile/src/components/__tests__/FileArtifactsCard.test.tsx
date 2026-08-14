@@ -1,10 +1,16 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { resetArtifactListingMetaInflight } from "@/lib/artifactListingMeta";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FileArtifactsCard } from "../FileArtifactsCard";
 
 const navigate = vi.fn();
+const { listWorkspaceFiles, listWorkspaceFilesByWs } = vi.hoisted(() => ({
+  listWorkspaceFiles: vi.fn(),
+  listWorkspaceFilesByWs: vi.fn(),
+}));
+
 vi.mock("react-router-dom", async () => {
   const actual =
     await vi.importActual<typeof import("react-router-dom")>(
@@ -29,12 +35,31 @@ vi.mock("@/api/turnFilesDiff", () => ({
   }),
 }));
 
+vi.mock("@/api/workspace", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/api/workspace")>("@/api/workspace");
+  return { ...actual, listWorkspaceFiles };
+});
+
+vi.mock("@/api/workspaces", async () => {
+  const actual =
+    await vi.importActual<typeof import("@/api/workspaces")>(
+      "@/api/workspaces",
+    );
+  return { ...actual, listWorkspaceFilesByWs };
+});
+
 beforeEach(() => {
   navigate.mockClear();
+  resetArtifactListingMetaInflight();
+  listWorkspaceFiles.mockReset();
+  listWorkspaceFilesByWs.mockReset();
+  listWorkspaceFiles.mockResolvedValue({ entries: [], truncated: false });
+  listWorkspaceFilesByWs.mockResolvedValue({ entries: [], truncated: false });
 });
 
 describe("FileArtifactsCard acceptance labels", () => {
-  it("shows 已验收/未通过 and never 写入/编辑 on acceptance rows", () => {
+  it("通过行不打已验收，未通过仍标，且不显示写入/编辑", () => {
     render(
       <MemoryRouter>
         <FileArtifactsCard
@@ -57,10 +82,28 @@ describe("FileArtifactsCard acceptance labels", () => {
         />
       </MemoryRouter>,
     );
-    expect(screen.getByText("已验收")).toBeTruthy();
+    expect(screen.queryByText("已验收")).toBeNull();
     expect(screen.getByText("未通过")).toBeTruthy();
     expect(screen.queryByText("写入")).toBeNull();
     expect(screen.queryByText("编辑")).toBeNull();
+  });
+
+  it("全员通过时无已验收徽章", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          messageId="m1"
+          artifacts={[
+            { path: "a.md", name: "a.md", acceptance: "accepted" },
+            { path: "b.md", name: "b.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText("已验收")).toBeNull();
+    expect(screen.getByText("a.md")).toBeTruthy();
+    expect(screen.getByText("b.md")).toBeTruthy();
   });
 
   it("write/edit tool rows omit op badges", () => {
@@ -208,10 +251,144 @@ describe("FileArtifactsCard open routing", () => {
       {
         state: {
           openPath: "version-a-clean.html",
-          name: "version-a-clean.html",
           fromConversationId: "c1",
         },
       },
     );
+  });
+
+  it("keeps the auto-folder landing line visible even when the file list is collapsed", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          autoFolder={{ folderId: "f1", name: "季度复盘" }}
+          artifacts={[
+            { path: "a.md", name: "a.md", acceptance: "accepted" },
+            { path: "b.md", name: "b.md", acceptance: "accepted" },
+            { path: "c.md", name: "c.md", acceptance: "accepted" },
+            { path: "d.md", name: "d.md", acceptance: "accepted" },
+            { path: "e.md", name: "e.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("文件已存到新建的文件夹")).toBeTruthy();
+    expect(screen.getByText("季度复盘")).toBeTruthy();
+  });
+});
+
+describe("FileArtifactsCard list size/mtime", () => {
+  it("shows mtime only on a row when the conversation list hits the path", async () => {
+    listWorkspaceFiles.mockResolvedValue({
+      entries: [
+        {
+          path: "notes.md",
+          is_dir: false,
+          size_bytes: 12000,
+          mtime_ms: Date.now() - 1000,
+        },
+      ],
+      truncated: false,
+    });
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[
+            { path: "notes.md", name: "notes.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("刚刚")).toBeTruthy();
+    expect(screen.queryByText("12 KB")).toBeNull();
+    expect(screen.queryByText("12 KB · 刚刚")).toBeNull();
+    expect(listWorkspaceFiles).toHaveBeenCalledWith("c1");
+    expect(listWorkspaceFilesByWs).not.toHaveBeenCalled();
+  });
+
+  it("looks up workspaceId artifacts on the existing workspace list", async () => {
+    listWorkspaceFilesByWs.mockResolvedValue({
+      entries: [
+        {
+          path: "version-a-clean.html",
+          is_dir: false,
+          size_bytes: 2048,
+          mtime_ms: Date.now() - 1000,
+        },
+      ],
+      truncated: false,
+    });
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[
+            {
+              path: "version-a-clean.html",
+              name: "version-a-clean.html",
+              acceptance: "accepted",
+              workspaceId: "folder:proj-1",
+            },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("刚刚")).toBeTruthy();
+    expect(screen.queryByText("2.0 KB")).toBeNull();
+    expect(listWorkspaceFilesByWs).toHaveBeenCalledWith("folder:proj-1");
+    expect(listWorkspaceFiles).not.toHaveBeenCalled();
+  });
+
+  it("leaves the row blank when the path misses or mtime is null", async () => {
+    listWorkspaceFiles.mockResolvedValue({
+      entries: [
+        {
+          path: "other.md",
+          is_dir: false,
+          size_bytes: 12000,
+          mtime_ms: Date.now() - 1000,
+        },
+        {
+          path: "notes.md",
+          is_dir: false,
+          size_bytes: 12000,
+          mtime_ms: null,
+        },
+      ],
+      truncated: false,
+    });
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId="c1"
+          artifacts={[
+            { path: "notes.md", name: "notes.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(listWorkspaceFiles).toHaveBeenCalledWith("c1"));
+    expect(screen.getByText("notes.md")).toBeTruthy();
+    expect(screen.queryByText("刚刚")).toBeNull();
+    expect(screen.queryByText("12 KB · 刚刚")).toBeNull();
+    expect(screen.queryByText("12 KB")).toBeNull();
+  });
+
+  it("does not fetch when there is no conversation or workspace desk", () => {
+    render(
+      <MemoryRouter>
+        <FileArtifactsCard
+          conversationId={null}
+          artifacts={[
+            { path: "notes.md", name: "notes.md", acceptance: "accepted" },
+          ]}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("notes.md")).toBeTruthy();
+    expect(listWorkspaceFiles).not.toHaveBeenCalled();
+    expect(listWorkspaceFilesByWs).not.toHaveBeenCalled();
   });
 });

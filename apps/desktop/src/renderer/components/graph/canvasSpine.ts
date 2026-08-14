@@ -147,7 +147,6 @@ export function buildTurnSpine({
         messageId: t.id,
         taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         onMaximize: () => maximizeTurn(t.id),
         onCollapse: () => onCollapseTurn(t.id),
         teamNotes: notes,
@@ -192,7 +191,6 @@ export function buildTurnSpine({
         messageId: t.id,
         taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         onMaximize: () => maximizeTurn(t.id),
         onCollapse: () => onCollapseTurn(t.id),
         teamNotes: notes,
@@ -222,7 +220,6 @@ export function buildTurnSpine({
         completed: exec?.progress.completed ?? 0,
         total: exec?.progress.total ?? 0,
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         noteCount,
       };
       outNodes.push({
@@ -290,14 +287,12 @@ export function patchSpineNodes(
         ...prev,
         taskSummary: t.exec?.taskSummary || t.prompt || "团队回合",
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         teamNotes: nextNotes,
         status: t.exec?.status,
       };
       if (
         prev.taskSummary === next.taskSummary &&
         prev.pendingDecisions === next.pendingDecisions &&
-        prev.recoverable === next.recoverable &&
         prev.status === next.status &&
         prev.teamNotes === nextNotes
       ) {
@@ -317,7 +312,6 @@ export function patchSpineNodes(
         completed: exec?.progress.completed ?? 0,
         total: exec?.progress.total ?? 0,
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         noteCount: exec?.teamNotes.length ?? 0,
       };
       const prev = n.data as TurnSummaryData;
@@ -327,7 +321,6 @@ export function patchSpineNodes(
         prev.completed === next.completed &&
         prev.total === next.total &&
         prev.pendingDecisions === next.pendingDecisions &&
-        prev.recoverable === next.recoverable &&
         prev.agentCount === next.agentCount &&
         prev.noteCount === next.noteCount
       ) {

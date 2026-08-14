@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import sys
 
 from agentcore.core.logging import get_logger
@@ -88,6 +89,12 @@ def is_netns_capability_error(exc: BaseException) -> bool:
     return False
 
 
+def chmod_netns_inode(name: str, *, run_dir: str = NETNS_RUN_DIR) -> None:
+    """``ip netns add`` creates the inode as mode 0; non-root runsc must open it."""
+    with contextlib.suppress(OSError):
+        os.chmod(f"{run_dir}/{name}", 0o644)
+
+
 async def _ip(*args: str, check: bool = True) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
         "ip", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
@@ -118,6 +125,7 @@ async def probe_browser_netns_at_startup() -> None:
         # Best-effort clear of a stale probe remnant, then add + del.
         await _ip("netns", "del", _PROBE_NETNS_NAME, check=False)
         await _ip("netns", "add", _PROBE_NETNS_NAME)
+        chmod_netns_inode(_PROBE_NETNS_NAME)
         await _ip("netns", "del", _PROBE_NETNS_NAME, check=False)
         ok = True
     except Exception as exc:  # noqa: BLE001 — probe must never break startup
@@ -136,7 +144,7 @@ async def probe_browser_netns_at_startup() -> None:
         "browser.netns_health_failed",
         reason=reason,
         detail=detail or None,
-        hint="云端 browser_* 将不装配，直到主机 netns 能力可用（不回退 Local）",
+        hint="云端 browser_* 将不装配，直到容器 netns 能力可用（不回退 Local）",
     )
 
 
@@ -160,6 +168,7 @@ class SessionNetns:
         """Create the netns + veth, address both ends, default-route the sandbox."""
         await self.teardown()  # clear any stale remnant from a crashed prior run
         await _ip("netns", "add", self.name)
+        chmod_netns_inode(self.name)
         await _ip("link", "add", self.veth_host, "type", "veth", "peer", "name", self.veth_sbx)
         await _ip("link", "set", self.veth_sbx, "netns", self.name)
         await _ip("addr", "add", f"{self.host_ip}/{self.cidr}", "dev", self.veth_host)

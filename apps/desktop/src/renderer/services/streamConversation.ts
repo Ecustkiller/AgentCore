@@ -72,8 +72,32 @@ async function fetchWithConnectTimeout(
   }
 }
 
-/** Latest journal seq seen on this conversation's SSE (for Last-Event-ID). */
+/** Latest journal seq **folded/dispatched** on this conversation (for Last-Event-ID). */
 const lastEventIds = new Map<string, string>();
+/** Parsed ``id:`` stamped onto the event object; committed only after fold/dispatch. */
+const pendingEventIds = new WeakMap<SSEEvent, string>();
+
+function stampParsedEventId(event: SSEEvent, sseId: string | null): void {
+  if (sseId) pendingEventIds.set(event, sseId);
+}
+
+/** Advance the resume cursor after this event has been folded or dispatched. */
+export function commitFoldedEventId(
+  conversationId: string,
+  event: SSEEvent,
+): void {
+  const id = pendingEventIds.get(event);
+  if (id) lastEventIds.set(conversationId, id);
+}
+
+/** Dispatch then commit the stamped journal seq (live tail / catch-up fold). */
+export function dispatchFoldedSseEvent(
+  event: SSEEvent,
+  ctx: Parameters<typeof dispatchSSEEvent>[1],
+): void {
+  dispatchSSEEvent(event, ctx);
+  commitFoldedEventId(ctx.conversationId, event);
+}
 
 /**
  * Force the active SSE pump for ``conversationId`` to die as a transport drop
@@ -115,8 +139,9 @@ export function clearLastEventId(conversationId: string): void {
  * never a total-duration cap — a long turn that keeps streaming (or just
  * heart-beating) is never cut off.
  *
- * Tracks the latest SSE ``id:`` (journal seq) per conversation for ``Last-Event-ID``
- * resume (流式回复持久化 P3).
+ * Tracks the latest **folded** SSE ``id:`` (journal seq) per conversation for
+ * ``Last-Event-ID`` resume. Parse-time ids stay pending until fold/dispatch;
+ * yielding or dropping an unfolded buffer does not advance or clear the cursor.
  *
  * ``onComment`` receives SSE comment payloads (text after ``:``), used by attach
  * catch-up (``attach-caught-up``) — heartbeats (``ping``) are ignored by callers.
@@ -135,7 +160,7 @@ export async function pumpSseBody(
   const deliver =
     onEvent ??
     ((event: SSEEvent) =>
-      dispatchSSEEvent(event, { conversationId, source: "server" }));
+      dispatchFoldedSseEvent(event, { conversationId, source: "server" }));
 
   const decoder = new TextDecoder();
   let buffer = "";
@@ -204,16 +229,13 @@ export async function pumpSseBody(
         }
         if (line.startsWith("id:")) {
           const id = line.slice(3).trim();
-          if (id) {
-            frameId = id;
-            lastEventIds.set(conversationId, id);
-          }
+          if (id) frameId = id;
           continue;
         }
         if (!line.startsWith("data: ")) continue;
         try {
           const event = JSON.parse(line.slice(6)) as SSEEvent;
-          if (frameId) lastEventIds.set(conversationId, frameId);
+          stampParsedEventId(event, frameId);
           deliver(event);
         } catch {
           /* malformed event — skip */
@@ -256,6 +278,7 @@ export function foldAttachSegment(
   unstable_batchedUpdates(() => {
     // 没有锚点（消息窗里还没有那条用户提问）时 reset 落空 → 仍清尾泡执行槽兜底。
     if (fullReplay) {
+      clearLastEventId(conversationId);
       const replayMessageId = (head?.payload as MessageStartPayload | undefined)
         ?.message_id;
       resetPartialTurnForReplay(conversationId, replayMessageId);
@@ -269,7 +292,7 @@ export function foldAttachSegment(
       }
     }
     for (const event of segment) {
-      dispatchSSEEvent(event, {
+      dispatchFoldedSseEvent(event, {
         conversationId,
         source: "server",
         replay: true,
@@ -365,7 +388,7 @@ export async function attachConversation(
           catchUp.push(event);
           return;
         }
-        dispatchSSEEvent(event, { conversationId, source: "server" });
+        dispatchFoldedSseEvent(event, { conversationId, source: "server" });
       },
       (comment) => {
         if (!catchingUp) return;

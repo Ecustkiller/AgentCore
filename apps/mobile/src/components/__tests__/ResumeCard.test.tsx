@@ -576,7 +576,7 @@ describe("ResumeCard · team_preview", () => {
     expect(amendments).toBeUndefined();
   });
 
-  it("全员同桌时只显示一行工作区汇总", () => {
+  it("全员同桌也不画工作区", () => {
     render(
       <ResumeCard
         paused={teamPreview({
@@ -604,12 +604,12 @@ describe("ResumeCard · team_preview", () => {
         onResume={vi.fn()}
       />,
     );
-    expect(screen.getAllByText("工作区 · 本会话工作区")).toHaveLength(1);
-    expect(screen.getByTestId("team-workspace-summary")).toBeTruthy();
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
+    expect(screen.queryByTestId("team-workspace-summary")).toBeNull();
     expect(screen.queryByTestId("team-worker-desk-r1")).toBeNull();
   });
 
-  it("队员工作区不一致时逐人显示", () => {
+  it("队员工作区不一致也不画工作区", () => {
     render(
       <ResumeCard
         paused={teamPreview({
@@ -639,13 +639,10 @@ describe("ResumeCard · team_preview", () => {
         onResume={vi.fn()}
       />,
     );
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
     expect(screen.queryByTestId("team-workspace-summary")).toBeNull();
-    expect(screen.getByTestId("team-worker-desk-r1").textContent).toBe(
-      "工作区 · 云端甲",
-    );
-    expect(screen.getByTestId("team-worker-desk-r2").textContent).toBe(
-      "工作区 · 云端乙",
-    );
+    expect(screen.queryByTestId("team-worker-desk-r1")).toBeNull();
+    expect(screen.queryByTestId("team-worker-desk-r2")).toBeNull();
   });
 
   it("旧帧无工作区字段时不画工作区", () => {

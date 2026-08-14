@@ -17,7 +17,7 @@ import {
 } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GraphTeamPreview, TeamPreviewCard } from "../TeamPreviewCard";
+import { TeamPreviewCard } from "../TeamPreviewCard";
 
 vi.mock("@/stores/disclosure", () => ({
   usePersistentDisclosure: (_key: string | null, initial: boolean) => {
@@ -122,7 +122,7 @@ describe("TeamPreviewCard", () => {
     renderCard(<TeamPreviewCard preview={makePreview()} />);
 
     const toggle = screen.getByRole("button", {
-      name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
+      name: /已授权开工 · 首波已放行 · 2 人/,
     });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByText("研究员")).toBeNull();
@@ -134,14 +134,14 @@ describe("TeamPreviewCard", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
+        name: /已授权开工 · 首波已放行 · 2 人/,
       }),
     );
 
     expect(
       screen
         .getByRole("button", {
-          name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
+          name: /已授权开工 · 首波已放行 · 2 人/,
         })
         .getAttribute("aria-expanded"),
     ).toBe("true");
@@ -162,7 +162,7 @@ describe("TeamPreviewCard", () => {
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: /已授权开工 · 嘱咐已注入队员 · 预计 2 人开工/,
+        name: /已授权开工 · 嘱咐已注入队员 · 2 人/,
       }),
     );
     expect(screen.getByText("先做公开竞品，不做内部访谈")).toBeTruthy();
@@ -184,13 +184,24 @@ describe("TeamPreviewCard", () => {
   });
 
   it.each([
-    ["adjust", "已调整 · 备注已注入队员并开做 · 预计 2 人开工"],
+    ["adjust", "已调整 · 备注已注入队员并开做 · 2 人"],
     ["stop", "已取消 · 团队未启动 · 预计 2 人开工"],
-    ["timeout", "未及时回应，已自动开做 · 预计 2 人开工"],
+    ["timeout", "未及时回应，团队未启动 · 预计 2 人开工"],
     ["orphaned", "已失效（回合已结束或服务已重启） · 预计 2 人开工"],
   ] as const)("resolved decision=%s 保留既有 label 文案", (decision, label) => {
     renderCard(<TeamPreviewCard preview={makePreview({ decision })} />);
     expect(screen.getByRole("button", { name: label })).toBeTruthy();
+  });
+
+  it("debate resolved timeout 显示辩论未开赛文案", () => {
+    renderCard(
+      <TeamPreviewCard preview={makeDebatePreview({ decision: "timeout" })} />,
+    );
+    expect(
+      screen.getByRole("button", {
+        name: /未及时回应，辩论未开赛 · 预计 2 方开赛/,
+      }),
+    ).toBeTruthy();
   });
 
   it("debate resolved research_first 显示已选先调研文案", () => {
@@ -220,7 +231,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 已排除 1 岗 · 已收紧写盘 · 预计 2 人开工/,
+        name: /已授权开工 · 首波已放行 · 已排除 1 岗 · 已收紧写盘 · 2 人/,
       }),
     ).toBeTruthy();
   });
@@ -236,7 +247,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 嘱咐已注入队员 · 预计 2 人开工/,
+        name: /已授权开工 · 嘱咐已注入队员 · 2 人/,
       }),
     ).toBeTruthy();
   });
@@ -262,7 +273,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已授权开赛 · 嘱咐已注入 · 预计 2 方开赛/,
+        name: /已授权开赛 · 嘱咐已注入 · 2 方/,
       }),
     ).toBeTruthy();
   });
@@ -288,7 +299,7 @@ describe("TeamPreviewCard", () => {
     );
     expect(
       screen.getByRole("button", {
-        name: /已调整辩题 · 开赛 · 预计 2 方开赛/,
+        name: /已调整辩题 · 开赛 · 2 方/,
       }),
     ).toBeTruthy();
   });
@@ -318,17 +329,13 @@ describe("TeamPreviewCard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("debate resolved 但协作图未出现时独立卡仍兜底显示", () => {
+  it("debate resolved continue + 编制已在 → 独立卡隐藏（图接管，不必等开跑）", () => {
     useExecutionStore.getState().startExecution(debatePlan, MID);
-    // No run_started → all pending → teamHasStartedRuns false
-    renderCard(
+    const { container } = renderCard(
       <TeamPreviewCard preview={makeDebatePreview()} messageId={MID} />,
     );
-    expect(
-      screen.getByRole("button", {
-        name: /已授权开赛 · 辩论已放行 · 预计 2 方开赛/,
-      }),
-    ).toBeTruthy();
+    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("debate resolved + 协作图已出现时独立卡隐藏", () => {
@@ -373,123 +380,27 @@ describe("TeamPreviewCard", () => {
     expect(screen.queryByRole("button")).toBeNull();
   });
 
-  it("delegate resolved 但协作图未出现时独立卡仍兜底显示", () => {
+  it("delegate resolved continue + 编制已在 → 独立卡隐藏（图接管，不必等开跑）", () => {
     useExecutionStore.getState().startExecution(debatePlan, MID);
-    renderCard(<TeamPreviewCard preview={makePreview()} messageId={MID} />);
+    const { container } = renderCard(
+      <TeamPreviewCard preview={makePreview()} messageId={MID} />,
+    );
+    expect(container.textContent).toBe("");
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("delegate resolved stop + 从未开跑 → 独立卡仍兜底", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({ decision: "stop" })}
+        messageId={MID}
+      />,
+    );
     expect(
       screen.getByRole("button", {
-        name: /已授权开工 · 首波已放行 · 预计 2 人开工/,
+        name: /已取消 · 团队未启动 · 预计 2 人开工/,
       }),
     ).toBeTruthy();
-  });
-});
-
-describe("GraphTeamPreview", () => {
-  it("debate：ghost 触发器默认关闭，点开 Popover 显示辩题/轮次/双方/嘱咐", () => {
-    renderCard(
-      <GraphTeamPreview
-        preview={makeDebatePreview({ note: "最关心成本谁买单" })}
-      />,
-    );
-    const trigger = screen.getByTestId("graph-team-preview");
-    expect(trigger.textContent).toMatch(/预计 2 方开赛/);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
-
-    fireEvent.click(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("该不该上四天工作制？")).toBeTruthy();
-    expect(screen.getByText(/认真辩透 · 上限 5 轮/)).toBeTruthy();
-    expect(screen.getByText("正方")).toBeTruthy();
-    expect(screen.getByText("应推广")).toBeTruthy();
-    expect(screen.getByText("反方")).toBeTruthy();
-    expect(screen.getByText("暂缓")).toBeTruthy();
-    expect(screen.getByText("最关心成本谁买单")).toBeTruthy();
-  });
-
-  it("debate 开赛卡有模型字段时展示三方署名", () => {
-    renderCard(
-      <GraphTeamPreview
-        preview={makeDebatePreview({
-          sides: [
-            {
-              key: "pro",
-              name: "正方",
-              stance: "应推广",
-              model: "doubao/seed-2.0",
-              origin: "platform",
-            },
-            {
-              key: "con",
-              name: "反方",
-              stance: "暂缓",
-              model: "deepseek/deepseek-v4-flash",
-              origin: "platform",
-            },
-          ],
-          moderatorModel: "deepseek/deepseek-v4-pro",
-          moderatorOrigin: "platform",
-        })}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("graph-team-preview"));
-    const line = screen.getByTestId("debate-roster-line");
-    expect(line.textContent).toBe("正方 豆包 · 反方 DeepSeek · 裁判 DeepSeek");
-  });
-
-  it("debate 开赛卡无模型字段时不展示跨模型署名（同模型场零噪声）", () => {
-    renderCard(<GraphTeamPreview preview={makeDebatePreview()} />);
-    fireEvent.click(screen.getByTestId("graph-team-preview"));
-    expect(screen.queryByTestId("debate-roster-line")).toBeNull();
-    expect(screen.queryByText(/正方 豆包/)).toBeNull();
-    expect(screen.getByText("正方")).toBeTruthy();
-    expect(screen.getByText("反方")).toBeTruthy();
-  });
-
-  it("debate 开赛卡展示消歧候选列表", () => {
-    renderCard(
-      <GraphTeamPreview
-        preview={makeDebatePreview({
-          modelCandidates: [
-            {
-              model: "deepseek-chat",
-              origin: "byok",
-              provider_id: "ds",
-              label: "DeepSeek Chat",
-              side_key: "con",
-            },
-            {
-              model: "deepseek-coder",
-              origin: "byok",
-              provider_id: "ds2",
-              label: "DeepSeek Coder",
-            },
-          ],
-        })}
-      />,
-    );
-    fireEvent.click(screen.getByTestId("graph-team-preview"));
-    const box = screen.getByTestId("debate-model-candidates");
-    expect(box.textContent).toMatch(/消歧失败/);
-    expect(box.textContent).toMatch(/DeepSeek Chat/);
-    expect(box.textContent).toMatch(/byok\/deepseek-chat/);
-  });
-
-  it("delegate：ghost 触发器默认关闭，点开 Popover 显示队员分工/嘱咐", () => {
-    renderCard(
-      <GraphTeamPreview preview={makePreview({ note: "先出竞品对照表" })} />,
-    );
-    const trigger = screen.getByTestId("graph-team-preview");
-    expect(trigger.textContent).toMatch(/预计 2 人开工/);
-    expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByText("研究员")).toBeNull();
-
-    fireEvent.click(trigger);
-    expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByText("研究员")).toBeTruthy();
-    expect(screen.getByText("调研竞品定价策略与公开资料")).toBeTruthy();
-    expect(screen.getByText("撰写员")).toBeTruthy();
-    expect(screen.getByText("基于调研写定价建议")).toBeTruthy();
-    expect(screen.getByText("先出竞品对照表")).toBeTruthy();
   });
 });

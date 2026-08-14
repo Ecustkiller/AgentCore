@@ -2,8 +2,9 @@
  * Shared Tailwind class presets for semantic tones (color-tokens.mdc).
  * Full literal strings so Tailwind v4 keeps them in the build.
  *
- * 极简中性配色：行动/需要你 = primary(蓝)，失败/危险 = destructive(红)，
- * 纯分类/被动 = muted(灰)。不再保留已退役的 warning 语义槽位。
+ * 极简中性配色（color-tokens 三层）：A 用户面 = 需要你 primary / 可恢复中断
+ * {@link noticeChipNeutral} / 危险 destructive；B 执行态 failed = 红点；
+ * C 分类可用 warning，StatusTone 不恢复 warning 槽。
  */
 
 /** Brand shells for decision & checkpoint cards. */
@@ -152,6 +153,12 @@ export const statusChip: Record<StatusTone, string> = {
   destructive: "border-destructive/30 bg-destructive/10 text-destructive",
   muted: "border-border bg-muted text-muted-foreground",
 };
+
+/**
+ * Neutral send-notice chrome: gray wash, readable body (not muted-foreground).
+ * Distinct from {@link statusChip.muted} pills, which gray the text too.
+ */
+export const noticeChipNeutral = "border-border bg-muted/40 text-foreground";
 
 /**
  * Interactive ask_user checkpoint shell.

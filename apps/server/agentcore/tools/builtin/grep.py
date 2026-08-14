@@ -61,8 +61,9 @@ class GrepTool:
             description=(
                 "用正则精确搜索工作区文件【内容】（ripgrep / Rust regex）。"
                 "适合确切符号名、字符串或模式（如 `ApprovalGate`、`TODO`）；"
-                "返回 `path:line: text`，命中后再用 file_read（offset/limit）精读，"
-                "禁止整目录通读。概念/意图定位请用 code_search——两工具并存。"
+                "返回 `path:line: text`，命中后单文件默认 file_read 整读；"
+                "仅页脚已截断或已有行号时开窗，禁止整目录通读。"
+                "概念/意图定位请用 code_search——两工具并存。"
                 "按【文件名】找文件用 `file_list`。跳过二进制与噪音目录；"
                 "用 `path`/`glob` 收窄可更快更准。"
             ),

@@ -36,3 +36,57 @@ export function isKnownErrorCode(code: string | undefined): code is ErrorCode {
     code !== undefined && (ERROR_CODES as readonly string[]).includes(code)
   );
 }
+
+/**
+ * Preflight refusals: the turn never started (SSE 未开、用户消息未落库).
+ * Clients roll back the optimistic send and restore the composer draft.
+ * Mid-turn failures that reuse a code here after persist are **not** this class —
+ * callers must also require "turn never persisted".
+ */
+export const UNSTARTED_SEND_REFUSAL_CODES: readonly ErrorCode[] = [
+  "LLM_KEY_REQUIRED",
+  "QUOTA_EXCEEDED",
+  "RATE_LIMITED",
+  "PLATFORM_BILLING_UNAVAILABLE",
+];
+
+export function isUnstartedSendRefusalCode(
+  code: string | undefined,
+): boolean {
+  return (
+    code !== undefined &&
+    (UNSTARTED_SEND_REFUSAL_CODES as readonly string[]).includes(code)
+  );
+}
+
+/** Coded allowlist, or a bare 402 / 429 (product preflight only uses those
+ * statuses for key / quota / rate-limit). Bare 503 is **not** included — that
+ * can be a generic outage. Pair with a not-persisted check at the call site. */
+export function isUnstartedSendRefusal(opts: {
+  code?: string;
+  status?: number;
+}): boolean {
+  if (isUnstartedSendRefusalCode(opts.code)) return true;
+  return opts.status === 402 || opts.status === 429;
+}
+
+/**
+ * First-upstream capability / rate failures that may be treated as
+ * 「发送当没发生」**only when** the assistant is empty, tokens are 0, and no
+ * tools ran. Do **not** fold these into {@link UNSTARTED_SEND_REFUSAL_CODES} —
+ * the same codes mid-turn (after content or tools) must stay a failed turn.
+ */
+export const ZERO_OUTPUT_SEND_REFUSAL_CODES: readonly ErrorCode[] = [
+  "LLM_RATE_LIMIT",
+  "LLM_KEY_INVALID",
+  "LLM_INSUFFICIENT_BALANCE",
+];
+
+export function isZeroOutputSendRefusalCode(
+  code: string | undefined,
+): boolean {
+  return (
+    code !== undefined &&
+    (ZERO_OUTPUT_SEND_REFUSAL_CODES as readonly string[]).includes(code)
+  );
+}

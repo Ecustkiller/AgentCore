@@ -11,6 +11,10 @@ down — and two transports:
   ≤120-char headline; the card body is re-pulled over REST. Sending the payload
   here would make an account-wide notify channel carry conversation content
   (设计 §2.2「只送信号不送内容」).
+- **fulfill** (``GET /v1/fulfill``): the same incremental ``ai_attention`` plus a
+  connect-time ``ai_attention_snapshot`` replace. Realtime may still carry the
+  incremental during the transition; clients replace only from the fulfill
+  snapshot.
 - **native push**: the last resort, only for ``required``, only when no mobile
   firehose is live. Push vibrates a pocket, so it is gated on「AI 已停住在等人」and
   never on progress or turn completion (设计 §8.1).
@@ -230,16 +234,25 @@ async def signal_attention_required(
     pushed = False
     outcome = PUSH_NOT_REQUESTED
     try:
-        await _publish(
-            user_id,
-            _attention_event(
-                state="required",
-                conversation_id=conversation_id,
-                turn_id=turn_id,
-                interaction_id=interaction_id,
-                kind=kind,
-                title=title,
-            ),
+        event = _attention_event(
+            state="required",
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            title=title,
+        )
+        await _publish(user_id, event)
+        from agentcore.fulfill.user_signal import push_attention
+
+        push_attention(
+            user_id=user_id,
+            state="required",
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            interaction_id=interaction_id,
+            kind=kind.value,
+            title=title,
         )
         if push:
             if _mobile_firehose_online(user_id):
@@ -293,16 +306,26 @@ async def signal_attention_resolved(
     if not user_id:
         return
     try:
-        await _publish(
-            user_id,
-            _attention_event(
-                state="resolved",
-                conversation_id=conversation_id,
-                turn_id=turn_id,
-                interaction_id=interaction_id,
-                kind=kind,
-                title=title or _KIND_HEADLINE[kind],
-            ),
+        resolved_title = title or _KIND_HEADLINE[kind]
+        event = _attention_event(
+            state="resolved",
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            interaction_id=interaction_id,
+            kind=kind,
+            title=resolved_title,
+        )
+        await _publish(user_id, event)
+        from agentcore.fulfill.user_signal import push_attention
+
+        push_attention(
+            user_id=user_id,
+            state="resolved",
+            conversation_id=conversation_id,
+            turn_id=turn_id,
+            interaction_id=interaction_id,
+            kind=kind.value,
+            title=resolved_title,
         )
     except Exception as e:  # noqa: BLE001 — a signal must never break the turn
         logger.warning(

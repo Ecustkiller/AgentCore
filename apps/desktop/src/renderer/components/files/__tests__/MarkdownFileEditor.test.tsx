@@ -247,6 +247,11 @@ describe("MarkdownFileEditor host", () => {
     });
 
     expect(screen.getByText(/保存会覆盖磁盘版本/)).toBeTruthy();
+    const conflictBar = screen.getByText(/保存会覆盖磁盘版本/).closest("div");
+    expect(conflictBar?.className).toContain("primary");
+    expect(conflictBar?.className).not.toContain("destructive");
+    expect(screen.getByText("重新加载").className).not.toContain("destructive");
+    expect(screen.getByText("仍然覆盖").className).toContain("destructive");
 
     await act(async () => {
       fireEvent.click(screen.getByText("仍然覆盖"));
@@ -257,6 +262,37 @@ describe("MarkdownFileEditor host", () => {
       "a.md",
       expect.objectContaining({ baseline: { mtimeMs: 999 } }),
     );
+  });
+
+  it("save denial uses noticeChipNeutral, not destructive", async () => {
+    const source = makeSource({
+      writeText: vi.fn(async () => ({
+        ok: false as const,
+        reason: "denied" as const,
+      })),
+    });
+    await renderEditing(source);
+    editorValue = "edited";
+    act(() => lastEditorProps.onChange?.("edited"));
+    await act(async () => {
+      fireEvent.click(screen.getByText("保存"));
+    });
+    const saveBar = screen.getByText("没有写入权限，无法保存").closest("div");
+    expect(saveBar?.className).toContain("bg-muted/40");
+    expect(saveBar?.className).not.toContain("destructive");
+  });
+
+  it("load failure 无法打开 is muted, not destructive", async () => {
+    const source = makeSource({
+      readForEdit: vi.fn(async () => {
+        throw new Error("disk missing");
+      }),
+    });
+    await renderLoaded(source);
+    const title = screen.getByText("无法打开");
+    expect(title.className).toContain("text-muted-foreground");
+    expect(title.className).not.toContain("destructive");
+    expect(screen.getByText("disk missing")).toBeTruthy();
   });
 
   it("AI 改写 without a selection shows a hint instead of opening the bar", async () => {

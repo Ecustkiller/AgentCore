@@ -356,11 +356,12 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
     );
   });
 
-  it("empty recovery pending clears when not live (resolved/orphan)", async () => {
+  it("empty recovery pending clears confirmed server-origin hot cards", async () => {
     useInteractionStore.getState().upsertRequired({
       kind: "approval",
       conversationId: CID,
       messageId: "m1",
+      origin: "server",
       payload: {
         approval_id: "a-done",
         tool_name: "file_write",
@@ -369,7 +370,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
     });
 
     apiGet.mockResolvedValue({
-      live_running: false,
+      live_running: true,
       paused: [],
       pending_interactions: [],
     });
@@ -385,6 +386,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       kind: "approval",
       conversationId: CID,
       messageId: "m1",
+      origin: "sidecar",
       payload: {
         approval_id: "a-sidecar",
         tool_name: "host_shell",
@@ -491,6 +493,7 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
       kind: "approval",
       conversationId: CID,
       messageId: "m1",
+      origin: "sidecar",
       payload: {
         approval_id: "a-stale",
         tool_name: "host_shell",
@@ -581,6 +584,60 @@ describe("loadRecovery cold start (no React Query / no resolveSidecarRoot)", () 
     expect(r.cloudKnown).toBe(false);
     // 本机侧答了「没有挂起」，但这张壳的帧在云上——那一路没问到，不许清。
     expect(usePausedTurnStore.getState().pending).toHaveLength(1);
+  });
+
+  it("GET 在飞时新热卡不被空 pending 误清", async () => {
+    let settleGet!: (res: unknown) => void;
+    apiGet.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settleGet = resolve;
+        }),
+    );
+    vi.stubGlobal("window", { __WEB__: true });
+
+    const loading = loadRecovery(CID);
+    await Promise.resolve();
+    useInteractionStore.getState().upsertRequired({
+      kind: "approval",
+      conversationId: CID,
+      messageId: "m-inflight",
+      origin: "server",
+      payload: {
+        approval_id: "a-inflight",
+        tool_name: "host_shell",
+        arguments: {},
+      },
+    });
+    settleGet({ live_running: false, paused: [], pending_interactions: [] });
+
+    await loading;
+    expect(useInteractionStore.getState().get("a-inflight")?.status).toBe(
+      "pending",
+    );
+  });
+
+  it("切回假冷卡打终态且不物理删", async () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-gone",
+      origin: "server",
+      payload: { checkpoint_id: "cp-gone", question: "继续？" },
+    });
+
+    apiGet.mockResolvedValue({
+      live_running: false,
+      paused: [],
+      pending_interactions: [],
+    });
+    vi.stubGlobal("window", { __WEB__: true });
+
+    await loadRecovery(CID);
+    const gone = useInteractionStore.getState().get("cp-gone");
+    expect(gone).toBeDefined();
+    expect(gone?.status).toBe("resolved");
+    expect(gone?.resumeSettled).toBeDefined();
   });
 
   it("其它会话的壳不受本会话快照影响", async () => {

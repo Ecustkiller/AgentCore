@@ -23,8 +23,6 @@ export interface TurnRailItem {
   running: boolean;
   /** 待你拍板 count on this turn — drives the primary tone (outranks run state). */
   pendingDecisions: number;
-  /** 待救火 — drives the destructive tone (outranks run state, under 待你拍板). */
-  recoverable: boolean;
   /** Task summary / prompt, for the tick's hover title + a11y label. */
   label: string;
 }
@@ -34,21 +32,19 @@ export interface TurnRailItem {
  * lose track of (kept conservative to honor「简单回合保持干净」). */
 const RAIL_MIN_TURNS = 5;
 
-/** Tick tone + size. Attention (待你拍板 → 待救火) outranks run state, mirroring the
- * folded summary node's chip priority so the rail never disagrees with the spine. */
+/** Tick tone + size. 待你拍板 outranks run state; otherwise running → primary,
+ * completed → success, failed → destructive. */
 function dotClass(t: TurnRailItem, focused: boolean): string {
   const tone =
     t.pendingDecisions > 0
       ? "bg-primary"
-      : t.recoverable
-        ? "bg-destructive"
-        : t.running
-          ? "bg-primary"
-          : t.status === "completed"
-            ? "bg-success"
-            : t.status === "failed"
-              ? "bg-destructive"
-              : "bg-muted-foreground/50";
+      : t.running
+        ? "bg-primary"
+        : t.status === "completed"
+          ? "bg-success"
+          : t.status === "failed"
+            ? "bg-destructive"
+            : "bg-muted-foreground/50";
   // Focused tick reads larger + ringed; team ticks sit a touch bigger than the quieter
   // simple-turn ticks so real teamwork stands out on the index.
   const size = focused

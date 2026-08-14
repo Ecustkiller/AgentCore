@@ -5,6 +5,7 @@ import {
   dedupeFoldersByLocalBinding,
   localFolderBindingKey,
 } from "@/services/folders";
+import { useRequiredConversationIds } from "@/stores/aiAttention";
 import type { Conversation } from "@/stores/conversation";
 import { useMemo } from "react";
 
@@ -40,6 +41,9 @@ function byRecency(a: Conversation, b: Conversation): number {
  * mid-deletion) are skipped; the delete flow unbinds them to 裸聊 so they
  * resurface in「快速对话」.
  *
+ * required 不另开「等你」栏：所在组挤进 ≤6（顶掉最不活跃且非 required 的组）。
+ * 组内回塞 / 折组覆盖在 {@link WorkspaceGroups}；归档 / 置顶 required 不为此挤组。
+ *
  * Map each folder id → the canonical (first / oldest) id for its local binding
  * lives in {@link canonicalFolderIds}: cloud folders map to themselves so
  * sidebar groups don't duplicate the same local path when historical duplicate
@@ -65,9 +69,41 @@ function canonicalFolderIds(folders: FolderMeta[]): Map<string, string> {
   return canonical;
 }
 
+function groupHasUnpinnedRequired(
+  group: WorkspaceGroup,
+  requiredIds: ReadonlySet<string>,
+): boolean {
+  return group.convs.some(
+    (c) => !c.pinned && !c.archived && requiredIds.has(c.id),
+  );
+}
+
+/** Recency-capped rail groups; overflow required groups squeeze in, still ≤6. */
+export function pickVisibleWorkspaceGroups(
+  groups: WorkspaceGroup[],
+  requiredIds: ReadonlySet<string>,
+): WorkspaceGroup[] {
+  if (groups.length <= MAX_WORKSPACE_GROUPS) return groups;
+  const top = groups.slice(0, MAX_WORKSPACE_GROUPS);
+  const required = groups.filter((g) =>
+    groupHasUnpinnedRequired(g, requiredIds),
+  );
+  if (required.length === 0) return top;
+  const topIds = new Set(top.map((g) => g.folder.id));
+  if (required.every((g) => topIds.has(g.folder.id))) return top;
+  const takeRequired = required.slice(0, MAX_WORKSPACE_GROUPS);
+  const taken = new Set(takeRequired.map((g) => g.folder.id));
+  const others = groups
+    .filter((g) => !taken.has(g.folder.id))
+    .slice(0, MAX_WORKSPACE_GROUPS - takeRequired.length);
+  const keep = new Set([...takeRequired, ...others].map((g) => g.folder.id));
+  return groups.filter((g) => keep.has(g.folder.id));
+}
+
 export function buildWorkspaceGroups(
   conversations: Conversation[],
   folders: FolderMeta[],
+  requiredIds: ReadonlySet<string> = new Set(),
 ): WorkspaceGroup[] {
   const displayFolders = dedupeFoldersByLocalBinding(folders);
   const canonical = canonicalFolderIds(folders);
@@ -92,7 +128,7 @@ export function buildWorkspaceGroups(
     result.push({ folder, convs, latest });
   }
   result.sort((a, b) => b.latest - a.latest);
-  return result.slice(0, MAX_WORKSPACE_GROUPS);
+  return pickVisibleWorkspaceGroups(result, requiredIds);
 }
 
 /**
@@ -103,8 +139,9 @@ export function buildWorkspaceGroups(
 export function useWorkspaceGroups(): WorkspaceGroup[] {
   const conversations = useConversations();
   const folders = useFolders();
+  const requiredIds = useRequiredConversationIds();
   return useMemo(
-    () => buildWorkspaceGroups(conversations, folders),
-    [conversations, folders],
+    () => buildWorkspaceGroups(conversations, folders, requiredIds),
+    [conversations, folders, requiredIds],
   );
 }

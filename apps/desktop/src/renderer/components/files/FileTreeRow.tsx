@@ -302,7 +302,7 @@ export function FileTreeRow(props: FileTreeRowProps) {
           )}
           {status === "error" && (
             <li
-              className="py-1 text-xs text-destructive/80"
+              className="py-1 text-xs text-muted-foreground"
               style={{ paddingLeft: (depth + 1) * 14 + 8 + indentBase }}
             >
               加载失败

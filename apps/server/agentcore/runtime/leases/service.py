@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.db.base import async_session_factory
@@ -19,6 +23,40 @@ _OWNER_ID: str = new_id()
 def lease_owner_id() -> str:
     """This process's lease owner id (stable for the process lifetime)."""
     return _OWNER_ID
+
+
+async def list_fresh_conversation_ids_for_user(
+    user_id: str,
+    *,
+    session: AsyncSession | None = None,
+    after: datetime | None = None,
+) -> list[str]:
+    """Distinct conversation ids this user still holds a fresh lease on.
+
+    ``after`` defaults to now minus ``turn_lease_ttl_seconds``. Pass the request
+    session when the caller already has one (fulfill connect seed).
+    """
+    if not user_id:
+        return []
+    cutoff = after or (
+        datetime.now(UTC) - timedelta(seconds=settings.turn_lease_ttl_seconds)
+    )
+
+    async def _load(db: AsyncSession) -> list[str]:
+        rows = await TurnLeaseRepository(db).list_fresh_for_user(user_id, after=cutoff)
+        seen: set[str] = set()
+        ids: list[str] = []
+        for row in rows:
+            cid = row.conversation_id
+            if cid and cid not in seen:
+                seen.add(cid)
+                ids.append(cid)
+        return ids
+
+    if session is not None:
+        return await _load(session)
+    async with async_session_factory() as db:
+        return await _load(db)
 
 
 async def acquire_turn_lease(

@@ -91,6 +91,11 @@ describe("AutonomySettings", () => {
     await waitFor(() =>
       expect(screen.getByText("设置失败 (500)")).toBeTruthy(),
     );
+    const line = screen.getByText("设置失败 (500)").closest(".error");
+    expect(line?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["error"]),
+    );
+    expect(line?.className).not.toMatch(/\b(bar|inline-actions|needs-you)\b/);
 
     const selected = screen.getByRole("radio", {
       name: /少打断/,

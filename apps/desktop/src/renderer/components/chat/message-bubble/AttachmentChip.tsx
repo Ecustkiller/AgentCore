@@ -82,7 +82,7 @@ export function AttachmentChip({
         variant="ghost"
         onClick={onDownload}
         className={`${base} h-auto transition-colors hover:bg-accent/70 ${
-          state === "error" ? "text-destructive" : ""
+          state === "error" ? "text-muted-foreground" : ""
         }`}
       >
         {icon}

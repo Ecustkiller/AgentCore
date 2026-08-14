@@ -1,17 +1,14 @@
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu";
 import { useBackgroundTasksSync } from "@/stores/backgroundTasks";
 import { useCommandPanelStore } from "@/stores/commandPanel";
-import {
-  useActiveGenerating,
-  useConversationStore,
-} from "@/stores/conversation";
+import { useConversationStore } from "@/stores/conversation";
 import { ExecutionScopeContext, useActiveExecField } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
+import { useUIStore } from "@/stores/ui";
 import { Background, Panel, ReactFlow, ReactFlowProvider } from "@xyflow/react";
 import type { EdgeTypes } from "@xyflow/react";
 import { ArrowUp, Loader2, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CanvasCommandBar } from "./CanvasCommandBar";
 import { CanvasPlaybackControls } from "./CanvasPlaybackControls";
 import { CanvasTurnRail } from "./CanvasTurnRail";
 import { CanvasZoomControls } from "./CanvasZoomControls";
@@ -72,8 +69,6 @@ const canvasEdgeTypes = {
 } as EdgeTypes;
 
 function ConversationCanvasInner() {
-  const generating = useActiveGenerating();
-
   const { focusedTurn, setFocusedTurn } = useCanvasFocusState();
 
   const { turns, effectiveFocus, railItems } = useCanvasTurns({
@@ -120,6 +115,7 @@ function ConversationCanvasInner() {
   const onRailSelect = makeOnRailSelect(rfRef);
 
   const conversationId = useConversationStore((s) => s.currentConversationId);
+  const setConversationView = useUIStore((s) => s.setConversationView);
 
   useBackgroundTasksSync(conversationId);
   useEffect(() => {
@@ -130,11 +126,6 @@ function ConversationCanvasInner() {
   useEffect(() => {
     useCommandPanelStore.getState().setFocused(effectiveFocus);
   }, [effectiveFocus]);
-
-  const [dispatched, setDispatched] = useState(false);
-  useEffect(() => {
-    if (!generating) setDispatched(false);
-  }, [generating]);
 
   useEffect(() => () => useSidePanelStore.getState().closeContentTabs(), []);
 
@@ -454,8 +445,21 @@ function ConversationCanvasInner() {
                   className="mx-auto mb-3 text-muted-foreground"
                 />
                 <p className="text-sm text-muted-foreground">
-                  还没有回合。用底部指令入口下达一个需要多 Agent 协作的任务，CEO
-                  组好队后这里就会展开画布。
+                  还没有回合。
+                  {conversationId ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setConversationView(conversationId, "chat")
+                      }
+                      className="text-foreground underline-offset-2 hover:underline"
+                    >
+                      回聊天说
+                    </button>
+                  ) : (
+                    "回聊天说"
+                  )}
+                  ，CEO 组好队后这里就会展开画布。
                 </p>
               </div>
             </div>
@@ -464,12 +468,6 @@ function ConversationCanvasInner() {
             items={railItems}
             focusedId={effectiveFocus}
             onSelect={onRailSelect}
-          />
-          <CanvasCommandBar
-            onDispatch={() => setDispatched(true)}
-            waiting={dispatched && generating}
-            allowBackground
-            emptyConversation={turns.length === 0}
           />
         </div>
       </div>

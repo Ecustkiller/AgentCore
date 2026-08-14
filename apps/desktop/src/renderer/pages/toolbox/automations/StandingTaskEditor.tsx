@@ -439,13 +439,13 @@ export function StandingTaskEditorDrawer({
 
         <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           {foldersError ? (
-            <p className="text-xs text-destructive">
+            <p className="text-xs text-muted-foreground">
               读不到工作区列表（{foldersError}
               ），暂时无法确认可用的云工作区。请关闭抽屉重试。
             </p>
           ) : (
             noCloud && (
-              <p className="text-xs text-destructive">
+              <p className="text-xs text-primary">
                 没有可用的云工作区。请先在「文件」页的「我的文件」里新建一个，任务不能绑定本机工作区。
               </p>
             )
@@ -661,7 +661,7 @@ export function StandingTaskEditorDrawer({
                   )}
                 </div>
                 {!form.includeGlobal && form.scopeFolderIds.length === 0 && (
-                  <p className="text-xs text-destructive">
+                  <p className="text-xs text-muted-foreground">
                     请至少勾选「全局裸聊」或一个云工作区。
                   </p>
                 )}
@@ -822,7 +822,7 @@ export function StandingTaskEditorDrawer({
             />
           </div>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-muted-foreground">{error}</p>}
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border px-5 py-4">

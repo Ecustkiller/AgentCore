@@ -1,4 +1,5 @@
 import {
+  applyDeletedConversationLocally,
   patchConversationCache,
   upsertConversationFront,
 } from "@/hooks/useConversations";
@@ -7,12 +8,17 @@ import {
   resolveDefaultDelivery,
 } from "@/lib/composerDelivery";
 import { confirmSendDespitePendingIfNeeded } from "@/lib/composerPendingHint";
-import { pinDraftRequestId, resolveDraftRequestId } from "@/lib/draftRequestId";
+import {
+  forgetDraftRequestId,
+  pinDraftRequestId,
+  resolveDraftRequestId,
+} from "@/lib/draftRequestId";
 import { isReadOnlyOffline } from "@/lib/offlineMode";
 import { redirectLocalWorkspaceAskAction } from "@/lib/redirectLocalWorkspaceAsk";
 import { notifyError } from "@/lib/toast";
 import { api } from "@/services/api";
 import {
+  deleteConversation,
   provisionalConversationTitle,
   requestAutoTitle,
 } from "@/services/conversations";
@@ -38,11 +44,22 @@ import {
   releaseComposerSendLatch,
   useComposerSendPhase,
 } from "@/stores/composerSend";
-import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  clearComposerSendError,
+  setComposerSendError,
+} from "@/stores/composerSendError";
+import {
+  getActiveRuntime,
+  getRuntime,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useFoldersStore } from "@/stores/folders";
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { forgetAttachmentUpload } from "./attachmentUploads";
+import {
+  forgetAttachmentUpload,
+  peekAttachmentRecoverBlob,
+} from "./attachmentUploads";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -71,6 +88,81 @@ export function scheduleLocalAutoTitle(
   });
 }
 
+function composerSendErrorFromRuntime(conversationId: string) {
+  const rt = getRuntime(conversationId);
+  return rt.error ? { message: rt.error, action: rt.errorAction } : null;
+}
+
+/**
+ * 发送当没发生：已删会话的 ``workspacePath`` 不能拿来跳过再驻留；
+ * ``stagingId`` 往往已被 consume，改用还握着的 File。
+ */
+function attachmentsForUnstartedRetry(
+  pending: readonly PendingAttachment[],
+): PendingAttachment[] {
+  return pending.map((a) => ({
+    ...a,
+    workspacePath: undefined,
+    fileBlob: a.fileBlob ?? peekAttachmentRecoverBlob(a.id),
+  }));
+}
+
+/**
+ * 开跑前拒绝：首发空会话拆回 `/` 草稿；跟发只还当前 cid。
+ * 仅 `createdNew && 回滚后 messages.length===0` 才拆；删失败则留在 cid。
+ */
+async function restoreAfterUnstartedRefusal({
+  conversationId,
+  createdNew,
+  createdFolderId,
+  draft,
+  navigate,
+}: {
+  conversationId: string;
+  createdNew: boolean;
+  createdFolderId: string | null;
+  draft: {
+    value: string;
+    attachments: PendingAttachment[];
+    agentMentions: PendingAgentMention[];
+  };
+  navigate: (to: string) => void;
+}): Promise<void> {
+  const sendError = composerSendErrorFromRuntime(conversationId);
+  const shouldTeardown =
+    createdNew && getRuntime(conversationId).messages.length === 0;
+
+  if (shouldTeardown) {
+    try {
+      await deleteConversation(conversationId);
+    } catch {
+      restoreComposerDraft(conversationId, draft);
+      if (sendError) setComposerSendError(conversationId, sendError);
+      return;
+    }
+    applyDeletedConversationLocally(conversationId);
+    const draftKey = draftKeyFor(null);
+    forgetDraftRequestId(draftKey);
+    restoreComposerDraft(null, {
+      ...draft,
+      attachments: attachmentsForUnstartedRetry(draft.attachments),
+    });
+    if (sendError) setComposerSendError(draftKey, sendError);
+    if (createdFolderId) {
+      useFoldersStore.getState().setDraftWorkspaceIntent({
+        kind: "folder",
+        folderId: createdFolderId,
+      });
+    }
+    useConversationStore.getState().switchConversation(null);
+    navigate("/");
+    return;
+  }
+
+  restoreComposerDraft(conversationId, draft);
+  if (sendError) setComposerSendError(conversationId, sendError);
+}
+
 export function useComposerSend({
   value,
   setValue,
@@ -82,7 +174,6 @@ export function useComposerSend({
   backgroundMode,
   isLocal,
   closeMenu,
-  onDispatch,
 }: {
   value: string;
   setValue: Dispatch<SetStateAction<string>>;
@@ -94,9 +185,6 @@ export function useComposerSend({
   backgroundMode: boolean;
   isLocal: boolean;
   closeMenu: () => void;
-  /** Fires when a FOREGROUND turn is dispatched (not for legacy handoff jobs) — the
-   * canvas host uses it to start auto-following the new round. */
-  onDispatch?: () => void;
 }) {
   const addMessage = useConversationStore((s) => s.addMessage);
   const navigate = useNavigate();
@@ -167,6 +255,7 @@ export function useComposerSend({
       // execution.userInterjections（user_interjection SSE · DURABLE）。
       if (isGenerating && activeConvId) {
         if (!acquireComposerSendLatch(draftKey, "sending")) return;
+        clearComposerSendError(draftKey);
         try {
           const pending = attachments;
           const settled = await settleAttachments(
@@ -204,6 +293,7 @@ export function useComposerSend({
       if (isGenerating) return;
 
       if (backgroundMode && isLocal && activeConvId) {
+        clearComposerSendError(draftKey);
         dispatchBackgroundTask(activeConvId, trimmed);
         // 后台任务只带正文；随草稿一起丢掉的附件也要注销，别让在途上传攥着 File。
         for (const a of attachments) forgetAttachmentUpload(a.id);
@@ -214,6 +304,7 @@ export function useComposerSend({
       // 草稿首发先闩「建会话中」：这段等待里输入框已经清空，进行中态见发送键 in-flight。
       const initialPhase = activeConvId ? "sending" : "creating";
       if (!acquireComposerSendLatch(draftKey, initialPhase)) return;
+      clearComposerSendError(draftKey);
       // 门闩键随 promote 迁移（`__draft__` → 新会话 id），故不是常量。
       let latchKey = draftKey;
       // 只放一次：回合上路后就提前放闸（见下），此后 finally 不能再放——那时闸可能
@@ -231,6 +322,7 @@ export function useComposerSend({
 
         let conversationId = store.currentConversationId;
         let createdNew = false;
+        let createdFolderId: string | null = null;
         if (!conversationId) {
           const intent = useFoldersStore.getState().draftWorkspaceIntent;
           const targetFolderId =
@@ -293,6 +385,7 @@ export function useComposerSend({
             useComposerDraftStore.getState().armDockFlip();
             useConversationStore.getState().switchConversation(conv.id);
             createdNew = true;
+            createdFolderId = targetFolderId;
             useFoldersStore.getState().resetDraftWorkspaceIntent();
             // 门闩跟着 draftKey 迁移，别在翻转的那一帧漏出一个可点的发送键。
             latchKey = draftKeyFor(conv.id);
@@ -356,10 +449,6 @@ export function useComposerSend({
           navigate(`/conversations/${conversationId}`);
         }
 
-        // Same React batch as the optimistic bubble above, so a canvas follow effect
-        // armed here sees the new turn land.
-        onDispatch?.();
-
         const settled = await settleAttachments(
           conversationId,
           pending,
@@ -382,7 +471,6 @@ export function useComposerSend({
           notifyError(settled.cause ?? settled.reason, "附件驻留失败");
           return;
         }
-        for (const a of pending) forgetAttachmentUpload(a.id);
 
         if (pending.length > 0) {
           // 驻留落地后才知道真实 ``attachments/…`` 路径：补正乐观气泡（下载链接靠它）。
@@ -407,14 +495,32 @@ export function useComposerSend({
         // 否则整轮生成期间「排队 / 插队」都会被误锁。
         releaseLatch();
 
-        await sendTurn({
-          conversationId,
-          content: trimmed,
-          attachments: settled.outgoing,
-          agentMentions: outgoingMentions,
-          optimisticUserId: userMsgId,
-          delivery: "steer",
-        });
+        try {
+          const sent = await sendTurn({
+            conversationId,
+            content: trimmed,
+            attachments: settled.outgoing,
+            agentMentions: outgoingMentions,
+            optimisticUserId: userMsgId,
+            delivery: "steer",
+          });
+          if (sent?.unstartedRefusal && conversationId) {
+            // 先还芯片（要读 recover blob），再忘掉登记。
+            await restoreAfterUnstartedRefusal({
+              conversationId,
+              createdNew,
+              createdFolderId,
+              draft: {
+                value: trimmed,
+                attachments: pending,
+                agentMentions,
+              },
+              navigate,
+            });
+          }
+        } finally {
+          for (const a of pending) forgetAttachmentUpload(a.id);
+        }
       } finally {
         releaseLatch();
       }
@@ -432,7 +538,6 @@ export function useComposerSend({
       setValue,
       setAttachments,
       setAgentMentions,
-      onDispatch,
       toOutgoingMentions,
       clearComposer,
       dropStaleAttachments,

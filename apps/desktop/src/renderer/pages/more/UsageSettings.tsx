@@ -89,7 +89,7 @@ export function UsageSettings() {
 }
 
 /**
- * Refresh failed but stale data exists: a soft amber banner above the dashboard
+ * Refresh failed but stale data exists: a muted banner above the dashboard
  * with an inline retry. 用量是附属呈现——刷新失败不清空已有数字 (P1)，只提示可能过期。
  */
 function RefreshErrorBanner({
@@ -100,8 +100,8 @@ function RefreshErrorBanner({
   onRetry: () => void;
 }) {
   return (
-    <Card className="mt-6 flex items-center justify-between gap-3 border-destructive/40 bg-destructive/10 px-4 py-2.5">
-      <p className="text-xs text-destructive">{message}</p>
+    <Card className="mt-6 flex items-center justify-between gap-3 border-border bg-muted/40 px-4 py-2.5">
+      <p className="text-xs text-muted-foreground">{message}</p>
       <Button variant="neutral" onClick={onRetry}>
         重试
       </Button>
@@ -169,7 +169,7 @@ function Dashboard({
             caption={moneyCaption}
           />
           {monthNear && (
-            <p className="-mt-3 text-xs text-destructive">
+            <p className="-mt-3 text-xs text-primary">
               接近本月额度，用完可联系管理员提额，或接入自己的 key 继续。
             </p>
           )}
@@ -256,7 +256,7 @@ function resetTexts(): { dailyResetText: string; monthlyResetText: string } {
   };
 }
 
-/** A semantic quota bar: % filled, amber past 80%, no bar when unlimited (§7.3D). */
+/** A semantic quota bar: % filled, primary past 80% (needs you, not danger), no bar when unlimited (§7.3D). */
 function QuotaMeter({
   label,
   used,
@@ -276,14 +276,14 @@ function QuotaMeter({
     <div>
       <div className="flex items-center justify-between text-sm">
         <span className="text-foreground">{label}</span>
-        <span className={near ? "text-destructive" : "text-muted-foreground"}>
+        <span className={near ? "text-primary" : "text-muted-foreground"}>
           {unlimited ? "不限" : `${pct}%`}
         </span>
       </div>
       <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-muted">
         {!unlimited && (
           <div
-            className={`h-full rounded-full ${near ? "bg-destructive" : "bg-primary"}`}
+            className="h-full rounded-full bg-primary"
             style={{ width: `${pct}%` }}
           />
         )}

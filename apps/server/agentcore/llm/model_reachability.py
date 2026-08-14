@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from agentcore.core.errors import LLMAuthError, LLMError, LLMInsufficientBalanceError
+from agentcore.llm.errors import is_auth_rejection
 
 Reachability = Literal["ok", "error", "unknown"]
 ListKind = Literal["ok", "hard_error", "soft_error"]
@@ -99,5 +100,38 @@ async def check_model_reachable(
     try:
         await provider.probe(model=model_s)  # type: ignore[attr-defined]
     except LLMError as e:
-        return "error", str(e)
+        rewritten = _connectivity_probe_auth_copy(
+            e, model=model_s, list_outcome=outcome
+        )
+        return "error", rewritten if rewritten is not None else str(e)
     return "ok", None
+
+
+def _connectivity_probe_auth_copy(
+    exc: LLMError, *, model: str, list_outcome: ModelListOutcome
+) -> str | None:
+    """Replace probe 401/auth-403 copy using ``upstream_status``, never product text.
+
+    A successful non-empty ``GET /models`` already proved the Key; a later probe
+    401/403 then names the connectivity-test model. Soft / empty lists did not
+    prove the Key — mention both Key and model. Balance, 404, 5xx, and non-auth
+    403 keep the original sentence.
+    """
+    if isinstance(exc, LLMInsufficientBalanceError):
+        return None
+    status = exc.details.get("upstream_status")
+    if status not in (401, 403):
+        return None
+    preview = exc.details.get("upstream_body_preview")
+    body: bytes | str | None = preview if isinstance(preview, bytes | str) else None
+    if not is_auth_rejection(status, body):
+        return None
+    if list_outcome.kind == "ok" and list_outcome.model_ids:
+        return (
+            f"连接测试用模型「{model}」不被上游接受（不存在或无权）。"
+            "当前 API Key 已能列出模型，请改该字段；日常聊天看模型组合。"
+        )
+    return (
+        f"请核对 API Key 与连接测试用模型「{model}」。"
+        "未能区分是密钥无效还是该模型不被上游接受。"
+    )

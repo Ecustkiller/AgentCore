@@ -275,7 +275,7 @@ export function ModelPicker({ disabled }: { disabled?: boolean }) {
           <div className="min-h-0 flex-1 overflow-y-auto p-1">
             {isError ? (
               <div className="px-2.5 py-3 text-xs">
-                <p className="text-destructive">加载模型组合失败</p>
+                <p className="text-muted-foreground">加载模型组合失败</p>
                 <button
                   type="button"
                   onClick={() => void refetch()}

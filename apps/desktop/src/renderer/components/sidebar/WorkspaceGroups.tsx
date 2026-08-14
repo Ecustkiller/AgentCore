@@ -2,6 +2,8 @@ import { SurfaceRowButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
 import { deriveGroupWorkspaceIsLocal } from "@/lib/conversationWorkspaceMode";
+import { isGroupExpanded, pickGroupVisible } from "@/lib/sidebarRailVisibility";
+import { useRequiredConversationIds } from "@/stores/aiAttention";
 import { useConversationStore } from "@/stores/conversation";
 import { useSidebarStore } from "@/stores/sidebar";
 import { MoreHorizontal } from "lucide-react";
@@ -9,9 +11,6 @@ import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
 import { WorkspaceGroupHeader } from "./WorkspaceGroupHeader";
-
-/** Conversations shown inside an expanded group before its「更多」overflow row. */
-const MAX_PER_GROUP = 5;
 
 /**
  * The sidebar's **folder** zone (前端UX §一 方案C): collapsible per-folder groups
@@ -27,9 +26,9 @@ const MAX_PER_GROUP = 5;
  * told apart by its ancestor breadcrumb, not by indentation.
  *
  * Expand state persists per folder (`useSidebarStore.expandedSections`, keyed by
- * folderId): an explicit user toggle always wins; with no stored choice a group
- * defaults collapsed, except the one holding the **unpinned** active conversation
- * (pinned actives already sit in the 置顶区). Each group reuses
+ * folderId): an explicit user toggle is stored; required 期间计算覆盖 persist
+ * （盖过再折叠，不写回）。无 stored 时默认折叠，除非组里有未置顶的当前对话
+ * （置顶当前对话已在置顶区）。Each group reuses
  * {@link ConversationItem} so rows keep the same status dot / rename / move /
  * archive behavior. Group headers expose folder actions via
  * {@link WorkspaceGroupHeader} (header receives full folder members incl. pinned).
@@ -41,6 +40,7 @@ export function WorkspaceGroups() {
   const currentId = useConversationStore((s) => s.currentConversationId);
   const expandedSections = useSidebarStore((s) => s.expandedSections);
   const setSection = useSidebarStore((s) => s.setSection);
+  const requiredIds = useRequiredConversationIds();
   const navigate = useNavigate();
 
   const activeFolderId = useMemo(() => {
@@ -57,10 +57,15 @@ export function WorkspaceGroups() {
       <div className="space-y-0.5 px-2 pb-1 pt-2">
         {groups.map(({ folder, convs }) => {
           const stored = expandedSections[folder.id];
-          const expanded =
-            stored !== undefined ? stored : folder.id === activeFolderId;
           const visible = convs.filter((c) => !c.pinned);
-          const overflow = visible.length - MAX_PER_GROUP;
+          const hasRequired = visible.some((c) => requiredIds.has(c.id));
+          const expanded = isGroupExpanded({
+            stored,
+            isActiveFolder: folder.id === activeFolderId,
+            hasRequired,
+          });
+          const shown = pickGroupVisible(visible, requiredIds);
+          const overflow = visible.length - shown.length;
           const groupIsLocal = deriveGroupWorkspaceIsLocal(folder);
           return (
             <div key={folder.id}>
@@ -74,7 +79,7 @@ export function WorkspaceGroups() {
                 // Same icon column as group header / 裸聊 / top nav — no nested
                 // indent (status dots & cloud icons must share that axis).
                 <div className="space-y-0.5">
-                  {visible.slice(0, MAX_PER_GROUP).map((c) => (
+                  {shown.map((c) => (
                     <ConversationItem
                       key={c.id}
                       conversation={c}

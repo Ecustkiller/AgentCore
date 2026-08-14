@@ -11,10 +11,6 @@ import {
 import { FINISH_REASON_META } from "@/components/ui/finish-reason-chip";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { copyText } from "@/lib/clipboard";
-import {
-  COLLAB_SUMMARY_TOOLTIP,
-  formatCollabSummary,
-} from "@/lib/collabSummary";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
 import {
@@ -46,7 +42,7 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MessageTime, RegenerateMessageAction } from "./MessageActions";
 import { useCopyAction } from "./useCopyAction";
@@ -394,11 +390,6 @@ export function AssistantMessageFooter({
       exportError,
     ),
   );
-  const collabSummary = useMemo(
-    () => formatCollabSummary(message.collab),
-    [message.collab],
-  );
-
   return (
     <div className="mt-1 flex items-center justify-between gap-2">
       <div className="flex min-w-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
@@ -445,13 +436,6 @@ export function AssistantMessageFooter({
         />
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        {collabSummary && (
-          <SimpleTooltip label={COLLAB_SUMMARY_TOOLTIP}>
-            <span className="text-xs text-muted-foreground/70">
-              {collabSummary}
-            </span>
-          </SimpleTooltip>
-        )}
         <MessageUsageSummary
           rounds={message.rounds}
           costText={costText}

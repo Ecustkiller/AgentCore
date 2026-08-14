@@ -7,6 +7,7 @@ import {
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
+import { kickoffReleasedFromPreviews } from "@/components/chat/debatePreviewPlacement";
 import {
   type TimelineNode,
   groupToolRuns,
@@ -240,6 +241,7 @@ export function ProcessTimeline({
     { settledDefault: false },
   );
   const processSummary = formatProcessSummary(reasoningCount, toolCount);
+  const kickoffReleased = kickoffReleasedFromPreviews(teamPreviews);
 
   // 协作图应在 CEO 回复下方: when prose only exists as fallbackContent (no content
   // step), slot it before the first team/graph_append marker — never after the
@@ -274,6 +276,7 @@ export function ProcessTimeline({
           messageId={messageId}
           executionId={node.execution_id}
           journal={journal}
+          kickoffReleased={kickoffReleased}
         />
       ) : null;
     }

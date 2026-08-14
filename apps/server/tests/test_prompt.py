@@ -308,6 +308,7 @@ def test_core_teaches_split_criterion_over_count():
     assert "自然缝" in hint
     assert "不是你能不能写" in hint  # 判据=结构，「我自己写更快」不构成自己答理由
     assert "拿不准先少派" in hint
+    assert "少派 ≠ 猜一人扛里程碑" in hint or "少派≠猜一人扛里程碑" in hint
     assert "可分解" in hint and "质量面" in hint
     assert "机械单步" in hint and "单人落盘" in hint
     assert "收口仍由你写" in hint
@@ -401,13 +402,24 @@ def test_core_teaches_split_criterion_over_count():
     assert "假两段" in hint
     assert "同一 task" in hint  # 禁同 task 文案冒充两段
     assert "规格已齐" in hint
-    assert "playbook_args.topic" in hint
     assert "立刻派 ≠ 立刻全量" in hint or "立刻全量" in hint
     assert "编排自主" in hint
     assert "摸底波" in hint
     assert "根委派切片诚实" in hint or "路径 A" in hint or "路径 B" in hint
     assert "嵌套扇出" in hint or "单 lead" in hint
     assert "凡大活必嵌套" in hint
+    # 不知轻重：禁猜一人扛整座；任务写「先组队」≠已拆编制；规格已齐 ≠ 一人做完 M0
+    assert "不知轻重" in hint
+    assert "一人能扛整座成果" in hint
+    assert "缝不清" in hint and "真两波" in hint
+    assert "按块派" in hint and "不必先称重量" in hint
+    assert "目标·约束·验收" in hint
+    assert "整个里程碑" in hint
+    assert "你可以组队" in hint and "先组队" in hint
+    assert "不算已拆编制" in hint
+    assert "规格已齐 ≠ 一人扛整座里程碑" in hint or "规格已齐≠一人扛整座里程碑" in hint
+    assert "一人做完 M0" in hint
+    assert "临时交成果组长" in hint
     assert "并行写盘" in hint
     assert "私有" in hint  # 私有 path / 笔记
     assert "MVP" in hint or "契约" in hint
@@ -423,13 +435,12 @@ def test_core_teaches_split_criterion_over_count():
     assert "禁止" in hint and ("intensity=full" in hint or "满编" in hint)
     assert "做个网站" in hint
     assert "展示页" in hint or "业务应用" in hint
-    # 混合分流：边界未钉 ≠ 绿场 SPA 满档 build_app；五阶段仅进入后
+    # 混合分流：边界未钉 ≠ 绿场 SPA 满档 build_app；五阶段 HOW 在 build_app
     assert "build_app" in hint
     assert "不硬拒" in hint
     assert "边界未钉" in hint or "轻切片" in hint or "少节点" in hint
     assert "轻切片" in hint or "1～2" in hint
     assert "五波" in hint or "脚手架" in hint
-    assert "五阶段" in hint
     assert "问还是派·中性" in hint or "不偏" in hint
     # P3 路由探针硬错对治：贴码写回强制派、点名实体扇出。
     assert "写回" in hint and "必须" in hint and "delegate" in hint
@@ -456,6 +467,11 @@ def test_core_teaches_split_criterion_over_count():
     assert "改了文件" in hint and "症状消失" in hint
     assert "修复完成" in hint and "已修复" in hint
     assert "请看一眼还乱不乱" in hint
+    # 20260815 A+B：未代测禁「现象已消除」；附件失败禁否认有图
+    assert "未代测" in hint and "现象已消除" in hint and "已全部落地" in hint
+    assert "附件·勿否认" in hint
+    assert "没看到照片" in hint and "图已收到" in hint
+    assert "read_image" in hint and "空口说读不了" in hint
     # 午后巡 e670：标完成前先报真实断点
     assert "收尾·先报断点" in hint
     assert "都实现了" in hint or "收尾完成" in hint
@@ -464,11 +480,13 @@ def test_core_teaches_split_criterion_over_count():
     assert "打开产品会看见什么" in hint
     assert "提示词包" in hint and "系统已就绪" in hint
     assert "界面没改" in hint
-    # 案 merge-pipeline-skeleton-busy-claim A′：多源合并→单写手成篇；骨架禁审校清理连环。
+    # 案 merge-pipeline-skeleton-busy-claim A′：核留标题+consult 钩；独有禁令在 long_form_writing
     assert "多源合并" in hint and "成篇优先" in hint
-    assert "CEO 自写" in hint  # 禁表出现在提示里
-    assert "审校" in hint and "清理" in hint
-    assert "流水线已在执行" in hint or "合并进行中" in hint
+    assert "long_form_writing" in hint
+    lf = build_system_skill_registry().get("long_form_writing").body
+    assert "CEO 自写" in lf
+    assert "审校" in lf and "清理" in lf
+    assert "流水线已在执行" in lf or "合并进行中" in lf
     # 案 cloud-web-install-deny-claim-verified A：云端不能装包时禁「自检全过/跑绿」。
     assert "绿场 Web" in hint or "云端装包" in hint
     assert "自检全过" in hint or "跑绿" in hint
@@ -811,6 +829,17 @@ def test_core_teaches_delivery_honesty_when_no_execution():
     assert "form=files" in skill
 
 
+def test_core_teaches_empty_desk_no_project_shell():
+    hint = _CEO_CORE_HINT
+    assert "【空桌落盘】" in hint
+    assert "本文件夹根即工作区根" in hint
+    assert "工程壳" in hint
+    assert "空桌" in hint
+    assert "site/" in hint and "app/" in hint
+    assert "要不要再套一层" in hint
+    assert "create_folder" in hint
+
+
 def test_core_teaches_delivery_path_by_workspace_type():
     # 收口信任级：产物出口按执行位置分道。
     hint = _CEO_CORE_HINT
@@ -1003,14 +1032,10 @@ def test_core_teaches_cloud_web_install_verify_honesty():
     assert "跑绿" in hint
     assert "单测已绿" in hint
     assert "export_to_local" in hint
-    # 案 88625：记分板 N/N OK 须对齐成功 test_run（提示轻补，不扩姿势 A）
+    # 案 88625：核留一句钩（非 consult 修码回合仍要）；HOW 在 build_app
     assert "外环验绿对账" in hint
     assert "test_run" in hint
     assert "N/N OK" in hint or "passed" in hint
-    # 巡检定案 B：末次同命令退出码；不扩姿势 A / 新 kind
-    assert "最后一次同命令" in hint
-    assert "中途绿" in hint and "报红" in hint
-    assert "分项分开写" in hint
     # 与生图 / Office / 软Ⅱ′分轴提示仍在邻近段落
     assert "分轴" in hint or "零写盘" in hint
 
@@ -1301,6 +1326,8 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     # 常驻产品面地图短：品类 + 高频入口 + 两分路由 + 规则载体对照短钩，勿膨胀整本手册
     assert len(block.strip().splitlines()) <= 30
     assert "【品类】" in block
+    assert "https://fashitianxia.xyz" in block
+    assert "我的官网" in block
     assert "【产品面地图·高频入口】" in block
     assert "【两分路由】" in block
     assert "机制" in block and "架构" in block and "记忆" in block and "能力边界" in block

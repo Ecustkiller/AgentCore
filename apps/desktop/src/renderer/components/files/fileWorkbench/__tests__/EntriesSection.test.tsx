@@ -75,7 +75,7 @@ const entryDetail = (over: Partial<DocumentDetail> = {}): DocumentDetail => ({
 
 function renderScope(scope: "global" | "folder" = "global") {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    defaultOptions: { queries: { retry: false, retryDelay: 0, gcTime: 0 } },
   });
   const onOpen = vi.fn();
   const onDeleted = vi.fn();
@@ -633,12 +633,67 @@ describe("EntriesSection (project)", () => {
     expect(onOpenUpdates).not.toHaveBeenCalled();
     expect(listScopeEntries).toHaveBeenCalledWith("F1");
     expect(getAlwaysQuota).toHaveBeenCalledWith("F1");
-    expect(
-      screen.getByText(/常驻（含全局） · 快满了，还剩约 2 千字/),
-    ).toBeTruthy();
+    const headline = screen.getByText(/常驻（含全局） · 快满了，还剩约 2 千字/);
+    expect(headline.className).toContain("text-primary");
+    expect(headline.className).not.toContain("destructive");
+    expect(headline.parentElement?.className).toContain("bg-primary/5");
+    expect(headline.parentElement?.className).not.toContain("destructive");
     // Consequence copy earns its line back once the pool is 快满 — that is the
     // whole point of collapsing the calm state.
-    expect(screen.getByText("AI 快记不下新东西了，去整理")).toBeTruthy();
+    const caption = screen.getByText("AI 快记不下新东西了，去整理");
+    expect(caption.className).toContain("text-primary");
+    expect(caption.className).not.toContain("destructive");
+    const fills = headline.parentElement?.querySelectorAll(
+      "[class*='bg-primary']",
+    );
+    expect(fills?.length).toBeGreaterThan(0);
+    for (const fill of fills ?? []) {
+      expect(fill.className).not.toContain("destructive");
+    }
     expect(screen.getByText("约 2 千字")).toBeTruthy();
+  });
+
+  it("已满 meter uses primary wash, not destructive", async () => {
+    vi.mocked(getAlwaysQuota).mockResolvedValue({
+      usedChars: 14000,
+      maxChars: 12000,
+      percent: 116.7,
+      globalChars: 4200,
+      projectChars: 9800,
+    });
+    renderScope("folder");
+    const headline = await screen.findByText(
+      /常驻（含全局） · 已满，超出约 2 千字/,
+    );
+    expect(headline.className).toContain("text-primary");
+    expect(headline.className).not.toContain("destructive");
+    expect(headline.parentElement?.className).toContain("bg-primary/5");
+    expect(headline.parentElement?.className).not.toContain("destructive");
+    const caption = screen.getByText("AI 暂时记不下新东西，去整理");
+    expect(caption.className).toContain("text-primary");
+    expect(caption.className).not.toContain("destructive");
+    const fills = headline.parentElement?.querySelectorAll(
+      "[class*='bg-primary']",
+    );
+    expect(fills?.length).toBeGreaterThan(0);
+    for (const fill of fills ?? []) {
+      expect(fill.className).not.toContain("destructive");
+    }
+  });
+
+  it("用量加载失败 is muted, not destructive", async () => {
+    vi.mocked(getAlwaysQuota).mockRejectedValue(new Error("quota down"));
+    renderScope("global");
+    const btn = await screen.findByText("用量加载失败，点此重试");
+    expect(btn.className).toContain("text-muted-foreground");
+    expect(btn.className).not.toContain("destructive");
+  });
+
+  it("条目列表加载失败 is muted, not destructive", async () => {
+    vi.mocked(listScopeEntries).mockRejectedValue(new Error("list down"));
+    renderScope("global");
+    const btn = await screen.findByText("加载失败，点此重试");
+    expect(btn.className).toContain("text-muted-foreground");
+    expect(btn.className).not.toContain("destructive");
   });
 });

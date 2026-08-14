@@ -5,10 +5,12 @@ import {
   type MemoryUpdate,
   type MessageDetail,
   createConversation,
+  deleteConversation,
   getConversation,
   getMessages,
   setConversationModelProfile,
 } from "@/api/conversations";
+import { getFolder } from "@/api/folders";
 import { sendMidFlightMessage } from "@/api/midFlight";
 import {
   getLastModelProfileId,
@@ -45,13 +47,23 @@ import {
   AssistantContent,
   SupportDiagnosticCopyButton,
 } from "@/components/AssistantView";
+import {
+  type AutoFolderNotice,
+  AutoFolderNoticeCard,
+  autoFolderFromSources,
+} from "@/components/AutoFolderNoticeCard";
 import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
 import { CollapsibleUserText } from "@/components/CollapsibleUserText";
+import { ComposerMentionSheet } from "@/components/ComposerMentionSheet";
 import { ComposerModelBar } from "@/components/ComposerModelBar";
 import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
+import {
+  type DraftFolder,
+  DraftFolderChip,
+} from "@/components/DraftFolderChip";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { ModelPicker } from "@/components/ModelPicker";
@@ -71,11 +83,13 @@ import {
   hasSendableDraft,
   prepareAttachment,
 } from "@/lib/attachments";
+import { readDraftFolderState } from "@/lib/cloudFolder";
 import {
   applyColdInteractionWireEvent,
   bindEmptyColdMessageId,
   clearColdInteractions,
   getColdInteraction,
+  idFromColdRequiredPayload,
   isColdResumeKind,
   kindFromColdRequiredEvent,
   kindFromColdResolvedEvent,
@@ -95,6 +109,11 @@ import {
   resolveColdBindHostId,
   selectVisibleColdResumes,
 } from "@/lib/coldResume";
+import {
+  type PendingAgentMention,
+  attachmentDraftKey,
+  toOutgoingAgentMentions,
+} from "@/lib/composerMention";
 import { composerTrailingSlots } from "@/lib/composerTrailing";
 import {
   type ErrorAction,
@@ -104,6 +123,7 @@ import {
   emptyChatCopy,
   errorActionForCode,
   isPausedFrameGone,
+  isUnstartedSendRefusal,
   resolveEmptyFailureNotice,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
@@ -163,8 +183,10 @@ import {
   type SupportDiagnosticIds,
   extractSupportIdsFromEvents,
 } from "@/lib/supportDiagnostics";
+import { useComposerMention } from "@/lib/useComposerMention";
 import { useStickScroll } from "@/lib/useStickScroll";
 import { useVoiceInput } from "@/lib/useVoiceInput";
+import { inspectZeroOutputSendRollback } from "@/lib/zeroOutputSendRollback";
 import {
   type EscalationSlotEsc,
   extractAsks,
@@ -177,7 +199,6 @@ import {
   extractRunToolCalls,
   extractStageCardTraces,
   extractToolPhases,
-  extractTurnCollab,
   extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
@@ -218,7 +239,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 // One-shot handoff from a draft send (at `/`) to the freshly-created conversation's first
 // stream (at `/c/:id`). 直接对话: the 对话 tab opens a draft (no server conversation); the
@@ -230,7 +251,27 @@ let pendingFirstSend: {
   id: string;
   text: string;
   attachments: MessageAttachment[];
+  agentMentions: PendingAgentMention[];
+  folder: DraftFolder | null;
 } | null = null;
+
+// Class A/B 回滚后拆空会话回到 `/`：ChatPage 在 /c/:id → / 会整页重挂，useState
+// error / 还回的草稿都会丢。与 pendingFirstSend 同款模块变量跨重挂；消费后清空。
+// 错误只走错误条，禁止写进 textarea。startDraft 成功后幂等键已置 null——拆后不要钉回。
+// folder 对齐桌面 restoreAfterUnstartedRefusal：拆回草稿后 chip / 下次 create 仍带同一 folder_id。
+let pendingEmptyRollback: {
+  error: ChatError;
+  text: string;
+  attachments: MessageAttachment[];
+  agentMentions: PendingAgentMention[];
+  folder: DraftFolder | null;
+} | null = null;
+
+/** 测例隔离：清掉 / ↔ /c/:id 交棒，避免用例互相钉死草稿或错误条。 */
+export function __resetChatPageHandoffForTests(): void {
+  pendingFirstSend = null;
+  pendingEmptyRollback = null;
+}
 
 // A turn streamed this session. `userText === null` for a turn whose user bubble already
 // lives in the persisted history (a reattach on reopen / a durable resume) — only its
@@ -417,6 +458,14 @@ interface ChatError {
   text: string;
   reconnect?: boolean;
   action?: ErrorAction;
+}
+
+/** User-facing tone: config remedy (去配置) → needs-you / accent; else recoverable gray. */
+function errorSurfaceClass(
+  kind: "bar" | "inline-actions",
+  needsYou: boolean,
+): string {
+  return needsYou ? `error ${kind} needs-you` : `error ${kind}`;
 }
 
 /** The user's 停止 (abort button), never surfaced as an error. */
@@ -744,11 +793,6 @@ function AssistantBubble({
     () => extractEvidenceLedger(turn.events),
     [turn.events],
   );
-  // 回合协作计数（收尾才有）：完成态团队条的「互相把关」一行；旁路读原始事件。
-  const turnCollab = useMemo(
-    () => extractTurnCollab(turn.events),
-    [turn.events],
-  );
   const graphAppendActKinds = useMemo(
     () => extractGraphAppendActKinds(turn.events),
     [turn.events],
@@ -780,7 +824,6 @@ function AssistantBubble({
         workerToolPhases,
         evidenceLedger: debateEvidenceLedger,
         elapsedMs: turnElapsedMs(turn.events),
-        collab: turnCollab,
       }
     : undefined;
   const empty =
@@ -893,7 +936,7 @@ function AssistantBubble({
           />
         ) : null}
         {failureNotice && (
-          <div className="error inline-actions">
+          <div className={errorSurfaceClass("inline-actions", !!errorAction)}>
             <span>{failureNotice}</span>
             <div className="error-card-actions">
               <SupportDiagnosticCopyButton ids={supportIds} />
@@ -919,7 +962,11 @@ function AssistantBubble({
           reviewArtifacts={reviewArtifacts}
           conversationId={conversationId}
           messageId={messageId}
+          autoFolder={p.autoFolder}
         />
+        {artifacts.length === 0 && p.autoFolder ? (
+          <AutoFolderNoticeCard notice={p.autoFolder} />
+        ) : null}
         {/* The team view carries its own progress header; the one-line meta is the
             single-agent fallback. */}
         {!isMulti && meta && <div className="meta">{meta}</div>}
@@ -960,6 +1007,7 @@ function HistoryAssistant({
     userInterjections,
     foldedProcess,
     chrome,
+    autoFolder: foldedAutoFolder,
   } = useMemo(() => {
     const events = m.runs?.events;
     const warning =
@@ -991,6 +1039,7 @@ function HistoryAssistant({
         userInterjections: [] as ProjectedTurn["userInterjections"],
         foldedProcess: [] as ProjectedTurn["process"],
         chrome: emptyChrome,
+        autoFolder: null as AutoFolderNotice | null,
       };
     const p = fold(events);
     const team =
@@ -1008,9 +1057,6 @@ function HistoryAssistant({
             // 辩论场级 `#eN`（勿写入 Message.evidence_ledger 语义）
             evidenceLedger: extractEvidenceLedger(events),
             elapsedMs: turnElapsedMs(events),
-            // 重载路径只能读 REST 列：message_end 是 DERIVED，journal 回放的收口帧只带
-            // finish_reason，`collab` 落在 messages.usage 里（与桌面 m.collab 同源）。
-            collab: m.collab ?? null,
           }
         : undefined;
     return {
@@ -1026,8 +1072,9 @@ function HistoryAssistant({
       userInterjections: p.userInterjections,
       foldedProcess: p.process,
       chrome: extractTurnChrome(events),
+      autoFolder: p.autoFolder,
     };
-  }, [m.runs, m.collab, conversationId]);
+  }, [m.runs, conversationId]);
   // REST process 权威；旧 journal 未落 user_interjection marker 时用 fold 回放补位。
   const restProcess = m.runs?.process ?? undefined;
   const process = (() => {
@@ -1051,6 +1098,10 @@ function HistoryAssistant({
         events: m.runs?.events,
       }),
     [deliveryStatus, process, m.runs?.events],
+  );
+  const autoFolder = autoFolderFromSources(
+    foldedAutoFolder,
+    m.runs?.auto_folder,
   );
   // 非阻塞提问卡内容：仅多 Agent 历史持久化 runs.events（单聊为空 → 无卡，与桌面一致）。
   const asks = useMemo(() => extractAsks(m.runs?.events ?? []), [m.runs]);
@@ -1191,7 +1242,7 @@ function HistoryAssistant({
           />
         )}
         {failureNotice && (
-          <div className="error inline-actions">
+          <div className={errorSurfaceClass("inline-actions", !!errorAction)}>
             <span>{failureNotice}</span>
             <div className="error-card-actions">
               <SupportDiagnosticCopyButton ids={supportIds} />
@@ -1217,7 +1268,11 @@ function HistoryAssistant({
           reviewArtifacts={reviewArtifacts}
           conversationId={conversationId}
           messageId={m.id}
+          autoFolder={autoFolder}
         />
+        {artifacts.length === 0 && autoFolder ? (
+          <AutoFolderNoticeCard notice={autoFolder} />
+        ) : null}
         {interrupted && showRetry && !failureNotice && (
           <button type="button" className="retry-btn" onClick={onRetry}>
             重试
@@ -1230,22 +1285,34 @@ function HistoryAssistant({
 
 export function ChatPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { id: conversationId } = useParams<{ id: string }>();
   // 历史对话抽屉 (☰): the chat is the landing surface now; history slides in over it.
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [history, setHistory] = useState<MessageDetail[] | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(() =>
+    conversationId ? "" : (pendingEmptyRollback?.text ?? ""),
+  );
   const [sending, setSending] = useState(false);
   // 创建会话在途时手里捧着的那份草稿：按下发送就收走输入框并把它摆成气泡（不等 POST 回来），
   // 失败时整份还回输入框。
   const [draftPending, setDraftPending] = useState<{
     text: string;
     attachments: MessageAttachment[];
+    agentMentions: PendingAgentMention[];
   } | null>(null);
+  /** 草稿选中的已有云文件夹；null = 快速对话。抽屉「在此新开」经 location.state 预填。 */
+  const [draftFolder, setDraftFolder] = useState<DraftFolder | null>(() =>
+    conversationId ? null : (pendingEmptyRollback?.folder ?? null),
+  );
+  /** 已开对话所属文件夹名；null = 裸聊 / 尚未解析 → 顶栏「本对话文件」。 */
+  const [workspaceLabel, setWorkspaceLabel] = useState<string | null>(null);
   /** 诚实停止过渡：stopping 时 UI 不先于后端进终态；与 sending 合成 busy。 */
   const [stopPhase, setStopPhase] = useState<StopUiPhase>("idle");
-  const [error, setError] = useState<ChatError | null>(null);
+  const [error, setError] = useState<ChatError | null>(() =>
+    conversationId ? null : (pendingEmptyRollback?.error ?? null),
+  );
   /** 对账发现本地幽灵项（服务端重启丢队）时的一次轻提示。 */
   const [queueDroppedHint, setQueueDroppedHint] = useState<string | null>(null);
   /** 本会话权限四轴（草稿本地；已有会话跟 conversation.permission_axes）。 */
@@ -1262,11 +1329,30 @@ export function ChatPage() {
   const { data: modelProfiles } = useModelProfiles();
   // Files staged for the next send (composer 附件): text inline and/or binary resident.
   // Oversized / upload failures surface `attachError` and aren't staged.
-  const [attachments, setAttachments] = useState<MessageAttachment[]>([]);
+  const [attachments, setAttachments] = useState<MessageAttachment[]>(() =>
+    conversationId ? [] : (pendingEmptyRollback?.attachments ?? []),
+  );
+  const [agentMentions, setAgentMentions] = useState<PendingAgentMention[]>(
+    () => (conversationId ? [] : (pendingEmptyRollback?.agentMentions ?? [])),
+  );
   const [attachError, setAttachError] = useState<string | null>(null);
   const attachInputRef = useRef<HTMLInputElement>(null);
   // The composer textarea — focused after ask / debate handoff fill so the user can edit/send.
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const mention = useComposerMention({
+    conversationId: conversationId ?? null,
+    input,
+    setInput,
+    attachments,
+    setAttachments,
+    agentMentions,
+    setAgentMentions,
+    history: history ?? [],
+    turns,
+    textareaRef: composerInputRef,
+    onPickAttach: () => attachInputRef.current?.click(),
+    onError: setAttachError,
+  });
   // Turns that paused at a checkpoint then lost their stream (durable resume frames),
   // recovery shell on reopen (结构化挂起 2b). Live paint authority = cold Interaction store.
   const [paused, setPaused] = useState<PausedTurnSummary[]>([]);
@@ -1347,6 +1433,9 @@ export function ChatPage() {
   /** 当前会话 id 的同步读（跨 await 判身份；state 闭包会陈旧）。 */
   const conversationIdRef = useRef<string | undefined>(conversationId);
   conversationIdRef.current = conversationId;
+  /** 历史窗同步读：pendingFirstSend 的 send 闭包里 history 还是 null。 */
+  const historyRef = useRef(history);
+  historyRef.current = history;
   /** 对话级订阅（`follow`）的连接槽——与本端自发流互斥，见 {@link claimLocalStream}。 */
   const followRef = useRef<AbortController | null>(null);
   /** 该订阅正在跟播的回合；`message_id` 变 = 另一端起了新回合，另开气泡。 */
@@ -1572,6 +1661,8 @@ export function ChatPage() {
             markColdResolved({ kind: entry.kind, id: entry.id });
           }
         }
+        // 跟播 / 本端：settlement 已锁，recovery 壳不能再画可点卡。
+        setPaused((prev) => prev.filter((x) => x.message_id !== p.message_id));
         // 本端自己发起的那张仍走「放行已记下…」（上面已收口的不再是 pending，自动跳过）。
         markColdDeferred({
           messageId: p.message_id,
@@ -1718,6 +1809,18 @@ export function ChatPage() {
           conversationId,
           hostId,
         );
+        const resolvedKind = kindFromColdResolvedEvent(event.type);
+        if (resolvedKind) {
+          const checkpointId = idFromColdRequiredPayload(
+            resolvedKind,
+            (event.payload ?? {}) as Record<string, unknown>,
+          );
+          if (checkpointId) {
+            setPaused((prev) =>
+              prev.filter((x) => x.checkpoint_id !== checkpointId),
+            );
+          }
+        }
       }
     }
     // 挂起即收口 (②): a live stream can END at a durable checkpoint — message_end carries
@@ -1767,6 +1870,13 @@ export function ChatPage() {
     })();
   }
 
+  // 抽屉「在此新开」经 location.state 预填草稿文件夹。空 state 不要冲掉回滚还回的 folder。
+  useEffect(() => {
+    if (conversationId) return;
+    const fromNav = readDraftFolderState(location.state);
+    if (fromNav) setDraftFolder(fromNav);
+  }, [conversationId, location.state]);
+
   // Load the persisted transcript for the conversation in the URL — this is what makes a
   // refresh keep the conversation (刷新不丢): the id rides the route, the history is the
   // server's. Turns sent this session stream live below it (via the fold). If the latest
@@ -1779,12 +1889,29 @@ export function ChatPage() {
     harvestRefreshRef.current.cancel();
     if (!conversationId) {
       // Draft (直接对话): no server conversation yet — ready to type, nothing to load.
+      let draftCancelled = false;
+      const handed = pendingEmptyRollback;
       setHistory([]);
       setTurns([]);
-      setError(null);
+      if (handed) {
+        setError(handed.error);
+        setInput(handed.text);
+        setAttachments(handed.attachments);
+        setAgentMentions(handed.agentMentions);
+        setDraftFolder(handed.folder);
+      } else {
+        setError(null);
+      }
+      queueMicrotask(() => {
+        if (draftCancelled) return;
+        if (handed && pendingEmptyRollback === handed) {
+          pendingEmptyRollback = null;
+        }
+      });
       setQueueDroppedHint(null);
       setSending(false);
       // 全新的草稿面：栓、在途草稿、幂等键一起归零（上一份草稿已经落成会话或被丢弃）。
+      // 拆空会话回来时也不要钉回旧键——startDraft 成功时已经置 null。
       creatingConversationRef.current = false;
       draftRequestIdRef.current = null;
       setDraftPending(null);
@@ -1803,6 +1930,7 @@ export function ChatPage() {
       // passed as POST model_profile_id on first send (startDraft · 定案 B).
       setCurrentProfileId(getLastModelProfileId());
       setActiveTurn(null);
+      setWorkspaceLabel(null);
       // Seed draft axes from account default recipe (best-effort).
       void getAutonomy()
         .then((d) => {
@@ -1811,10 +1939,13 @@ export function ChatPage() {
         .catch(() => {
           setPermissionAxes(DEFAULT_PERMISSION_AXES);
         });
-      return;
+      return () => {
+        draftCancelled = true;
+      };
     }
     setHistory(null);
     setTurns([]);
+    pendingEmptyRollback = null;
     setError(null);
     setQueueDroppedHint(null);
     setSending(false);
@@ -1839,12 +1970,23 @@ export function ChatPage() {
     setPermissionSheetOpen(false);
     setCurrentProfileId(null);
     setActiveTurn(null);
+    setWorkspaceLabel(null);
     let cancelled = false;
     void getConversation(conversationId)
-      .then((c) => {
+      .then(async (c) => {
         if (cancelled) return;
         setPermissionAxes(normalizeAxes(c.permission_axes));
         setCurrentProfileId(c.model_profile_id ?? null);
+        if (!c.folder_id) {
+          setWorkspaceLabel(null);
+          return;
+        }
+        try {
+          const folder = await getFolder(c.folder_id);
+          if (!cancelled) setWorkspaceLabel(folder.name);
+        } catch {
+          if (!cancelled) setWorkspaceLabel(null);
+        }
       })
       .catch(() => {
         /* best-effort */
@@ -1883,6 +2025,7 @@ export function ChatPage() {
       .then(async ({ messages, hasMoreBefore: more, memoryUpdates }) => {
         if (cancelled) return;
         setHistory(messages);
+        historyRef.current = messages;
         setHasMoreBefore(more);
         // 「记忆已更新」卡 (③ §1.6): only the latest window carries them — anchor them back into
         // the thread. A (re)open/refresh loads them; after message_end we also poll (no
@@ -1895,7 +2038,12 @@ export function ChatPage() {
           pendingFirstSend = null;
           // 定面完成：这一发自己就是本端自发流，订阅等它跑完再归位。
           setFollowReady(true);
-          void send({ text: p.text, attachments: p.attachments });
+          void send({
+            text: p.text,
+            attachments: p.attachments,
+            agentMentions: p.agentMentions,
+            folder: p.folder,
+          });
           return;
         }
         const last = messages[messages.length - 1];
@@ -2389,8 +2537,8 @@ export function ChatPage() {
     if (refused.length > 0) setAttachError(refused.join("；"));
   }
 
-  function removeAttachment(name: string) {
-    setAttachments((prev) => prev.filter((a) => a.name !== name));
+  function removeAttachment(key: string) {
+    setAttachments((prev) => prev.filter((a) => attachmentDraftKey(a) !== key));
   }
 
   // Ask / debate handoff → fill the composer (don't auto-send: let the user edit first).
@@ -2435,25 +2583,39 @@ export function ChatPage() {
     if (creatingConversationRef.current) return;
     creatingConversationRef.current = true;
     const outgoing = attachments;
+    const outgoingMentions = agentMentions;
     if (!draftRequestIdRef.current) {
       draftRequestIdRef.current = crypto.randomUUID();
     }
     const clientRequestId = draftRequestIdRef.current;
+    pendingEmptyRollback = null;
     setError(null);
     setSending(true);
     // 先收草稿、先摆气泡：手机上创建 + 首发要走两趟网，等 POST 回来才有反应会让人以为没发出去。
     setInput("");
     setAttachments([]);
+    setAgentMentions([]);
     setAttachError(null);
-    setDraftPending({ text, attachments: outgoing });
+    setDraftPending({
+      text,
+      attachments: outgoing,
+      agentMentions: outgoingMentions,
+    });
     try {
       // 定案 B: snapshot chosen / last-used profile at create (omit → server writes then-default).
       const id = await createConversation(undefined, {
+        ...(draftFolder ? { folder_id: draftFolder.id } : {}),
         ...(permissionDraftTouched ? { permission_axes: permissionAxes } : {}),
         ...(currentProfileId ? { model_profile_id: currentProfileId } : {}),
         client_request_id: clientRequestId,
       });
-      pendingFirstSend = { id, text, attachments: outgoing };
+      pendingFirstSend = {
+        id,
+        text,
+        attachments: outgoing,
+        agentMentions: outgoingMentions,
+        folder: draftFolder,
+      };
       // 这份草稿到此为止：下一份草稿换新键。
       draftRequestIdRef.current = null;
       navigate(`/c/${id}`, { replace: true });
@@ -2461,6 +2623,7 @@ export function ChatPage() {
       // 整份还给用户（键留着：重发的还是同一份草稿，服务端同键不会再建一条）。
       setInput(raw);
       setAttachments(outgoing);
+      setAgentMentions(outgoingMentions);
       setDraftPending(null);
       setError({ text: e instanceof Error ? e.message : "创建会话失败" });
       setSending(false);
@@ -2499,11 +2662,15 @@ export function ChatPage() {
     override?: {
       text: string;
       attachments: MessageAttachment[];
+      agentMentions?: PendingAgentMention[];
+      folder?: DraftFolder | null;
     },
     deliveryOverride?: MessageDelivery,
   ) {
     const text = (override?.text ?? input).trim();
     const outgoing = override?.attachments ?? attachments;
+    const outgoingMentions = override?.agentMentions ?? agentMentions;
+    const createdFolder = override?.folder ?? null;
     if (!hasSendableDraft(text, outgoing) || !conversationId) return;
     if (stopPhaseRef.current === "stopping") return;
     // Interactive mid-flight while a turn is already streaming (本端自发或跟播另一端的都算).
@@ -2527,6 +2694,7 @@ export function ChatPage() {
     if (!override) {
       setInput("");
       setAttachments([]);
+      setAgentMentions([]);
     }
     setAttachError(null);
     setError(null);
@@ -2551,25 +2719,103 @@ export function ChatPage() {
 
     const ac = new AbortController();
     claimLocalStream(ac);
+    const collected: SSEEvent[] = [];
+    const restoreComposer = () => {
+      setTurns((t) => removeLiveTurn(t, turnId));
+      setInput(text);
+      setAttachments(outgoing);
+      setAgentMentions(outgoingMentions);
+    };
+    const maybeDismantleEmptyConversation = (err: ChatError) => {
+      // 闭包里的 turns 还没有本发刚 push 的那条：回滚后 leftover = 回滚前的其它 live turn。
+      const leftoverLiveTurns = turns.filter((t) => t.id !== turnId);
+      const hist = historyRef.current;
+      // null = 历史还没拉回来，不能当「空会话」拆（否则会误删已有对话）。
+      if (
+        hist === null ||
+        leftoverLiveTurns.length > 0 ||
+        hist.length > 0 ||
+        !conversationId
+      ) {
+        return;
+      }
+      const cid = conversationId;
+      void (async () => {
+        try {
+          await deleteConversation(cid);
+        } catch {
+          return; // 删失败留在 /c/:id；错误条已在本页
+        }
+        pendingEmptyRollback = {
+          error: err,
+          text,
+          attachments: outgoing,
+          agentMentions: outgoingMentions,
+          folder: createdFolder,
+        };
+        navigate("/", {
+          replace: true,
+          ...(createdFolder
+            ? {
+                state: {
+                  draftFolderId: createdFolder.id,
+                  draftFolderName: createdFolder.name,
+                },
+              }
+            : {}),
+        });
+      })();
+    };
     try {
       await streamMessage(
         conversationId,
         text,
-        (event) => appendEventToTurn(turnId, event),
+        (event) => {
+          collected.push(event);
+          appendEventToTurn(turnId, event);
+        },
         ac.signal,
         wireAttachments.length > 0 ? wireAttachments : undefined,
         "steer",
+        outgoingMentions.length > 0
+          ? toOutgoingAgentMentions(outgoingMentions)
+          : undefined,
       );
+      // SSE error 后 stream 常 resolve 不 throw：本发已落库 + 空失败 + Class B 码也要回滚。
+      const zero = inspectZeroOutputSendRollback(collected);
+      if (zero.rollback) {
+        const err: ChatError | null = zero.errorMessage
+          ? {
+              text: zero.errorMessage,
+              action:
+                errorActionForCode(zero.errorCode, {
+                  credentialSource: zero.credentialSource,
+                  message: zero.errorMessage,
+                }) ?? undefined,
+            }
+          : null;
+        if (err) setError(err);
+        restoreComposer();
+        if (err) maybeDismantleEmptyConversation(err);
+      }
     } catch (e) {
       if (isAbort(e)) return; // conversation switch — partial stays, server salvages
       // Pre-stream refusal (402 LLM_KEY_REQUIRED etc.) — surface banner +「去配置」, do not
       // treat as a dropped live run (nothing started).
       if (e instanceof StreamHttpError) {
         const d = describeStreamHttpError(e);
-        setError({
+        const err: ChatError = {
           text: d.message,
           action: d.action ?? undefined,
-        });
+        };
+        setError(err);
+        if (isUnstartedSendRefusal(e)) {
+          restoreComposer();
+          maybeDismantleEmptyConversation(err);
+        } else if (inspectZeroOutputSendRollback(collected).rollback) {
+          restoreComposer();
+          maybeDismantleEmptyConversation(err);
+        }
         return;
       }
       // 诚实停止等待中断流：不自动重连，保持 stopping 等引擎终态。
@@ -2593,6 +2839,7 @@ export function ChatPage() {
   async function sendWhileBusy(text: string, delivery: MessageDelivery) {
     if (!conversationId) return;
     const outgoing = attachments;
+    const outgoingMentions = agentMentions;
     let wireAttachments: Array<Omit<MessageAttachment, "fileBlob">> = [];
     if (outgoing.length > 0) {
       const finalized = await finalizeAttachmentsForSend(
@@ -2621,6 +2868,7 @@ export function ChatPage() {
       composerCleared = true;
       setInput("");
       setAttachments([]);
+      setAgentMentions([]);
     };
 
     try {
@@ -2681,6 +2929,9 @@ export function ChatPage() {
         wireAttachments.length > 0 ? wireAttachments : undefined,
         ac.signal,
         delivery,
+        outgoingMentions.length > 0
+          ? toOutgoingAgentMentions(outgoingMentions)
+          : undefined,
       );
       if (result.kind === "blocked") {
         setError({ text: result.message ?? "请先处理待确认事项" });
@@ -2789,6 +3040,9 @@ export function ChatPage() {
           text: d.message,
           action: d.action ?? undefined,
         });
+        if (isUnstartedSendRefusal(e)) {
+          setTurns((t) => removeLiveTurn(t, turnId));
+        }
         return;
       }
       setError({ text: e instanceof Error ? e.message : "重试失败" });
@@ -3085,7 +3339,16 @@ export function ChatPage() {
             <button
               type="button"
               className="link icon-btn"
-              aria-label="文件"
+              aria-label={
+                workspaceLabel
+                  ? `打开「${workspaceLabel}」的文件`
+                  : "本对话文件"
+              }
+              title={
+                workspaceLabel
+                  ? `打开「${workspaceLabel}」的文件`
+                  : "本对话文件"
+              }
               onClick={() => navigate(`/c/${conversationId}/files`)}
             >
               <Folder size={20} />
@@ -3095,7 +3358,7 @@ export function ChatPage() {
             type="button"
             className="link icon-btn"
             aria-label="新对话"
-            onClick={() => navigate("/")}
+            onClick={() => navigate("/", { state: {} })}
           >
             <SquarePen size={20} />
           </button>
@@ -3179,11 +3442,25 @@ export function ChatPage() {
                   <CollapsibleUserText contentKey={draftPending.text}>
                     {draftPending.text}
                   </CollapsibleUserText>
-                  <AttachmentChips items={draftPending.attachments} />
+                  <AttachmentChips
+                    items={[
+                      ...draftPending.agentMentions.map((a) => ({
+                        name: `@${a.role}`,
+                      })),
+                      ...draftPending.attachments,
+                    ]}
+                  />
                 </div>
               ) : (
                 <div className="bubble user">
-                  <AttachmentChips items={draftPending.attachments} />
+                  <AttachmentChips
+                    items={[
+                      ...draftPending.agentMentions.map((a) => ({
+                        name: `@${a.role}`,
+                      })),
+                      ...draftPending.attachments,
+                    ]}
+                  />
                 </div>
               )}
             </div>
@@ -3285,7 +3562,7 @@ export function ChatPage() {
         ))}
 
       {error && (
-        <div className="error bar">
+        <div className={errorSurfaceClass("bar", !!error.action)}>
           <span>{error.text}</span>
           <div className="error-bar-actions">
             {conversationId && (
@@ -3324,17 +3601,39 @@ export function ChatPage() {
         </div>
       )}
 
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || agentMentions.length > 0) && (
         <div className="attach-tray">
+          {agentMentions.map((a) => (
+            <span key={a.id} className="attach-chip">
+              <span aria-hidden>@</span>
+              <span className="attach-chip-name">{a.role}</span>
+              <button
+                type="button"
+                className="attach-chip-x"
+                onClick={() =>
+                  setAgentMentions((prev) => prev.filter((x) => x.id !== a.id))
+                }
+                aria-label="移除角色点名"
+              >
+                ×
+              </button>
+            </span>
+          ))}
           {attachments.map((a) => (
-            <span key={a.name} className="attach-chip">
-              <span aria-hidden>📎</span>
+            <span key={attachmentDraftKey(a)} className="attach-chip">
+              <span aria-hidden>
+                {a.kind === "conversation"
+                  ? "对话"
+                  : a.kind === "dir"
+                    ? "文件夹"
+                    : "📎"}
+              </span>
               <span className="attach-chip-name">{a.name}</span>
               {a.truncated && <span className="attach-chip-trunc">已截断</span>}
               <button
                 type="button"
                 className="attach-chip-x"
-                onClick={() => removeAttachment(a.name)}
+                onClick={() => removeAttachment(attachmentDraftKey(a))}
                 aria-label="移除附件"
               >
                 ×
@@ -3407,12 +3706,23 @@ export function ChatPage() {
         </div>
       )}
 
-      <ComposerModelBar
-        label={modelLabel}
-        preset={modelIsPreset}
-        disabled={history === null || busy}
-        onOpen={() => setPickerOpen(true)}
-      />
+      {!conversationId && !creatingConversation && (
+        <DraftFolderChip
+          value={draftFolder}
+          onChange={(next) => {
+            setDraftFolder(next);
+            navigate(".", {
+              replace: true,
+              state: next
+                ? {
+                    draftFolderId: next.id,
+                    draftFolderName: next.name,
+                  }
+                : {},
+            });
+          }}
+        />
+      )}
 
       <div className="composer">
         <input
@@ -3433,6 +3743,12 @@ export function ChatPage() {
         >
           ＋
         </button>
+        <ComposerModelBar
+          label={modelLabel}
+          preset={modelIsPreset}
+          disabled={history === null || busy}
+          onOpen={() => setPickerOpen(true)}
+        />
         <textarea
           ref={composerInputRef}
           className="composer-input"
@@ -3440,7 +3756,11 @@ export function ChatPage() {
           placeholder={history === null ? "加载中…" : "说点什么…"}
           value={input}
           disabled={composerLocked}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            setInput(next);
+            mention.syncMention(next, e.target.selectionStart ?? next.length);
+          }}
           onKeyDown={(e) => {
             if (e.key !== "Enter" || e.shiftKey) return;
             // IME 组合态（中文选词等）：Enter 确认候选，勿当发送。
@@ -3513,23 +3833,38 @@ export function ChatPage() {
 
       {moreOpen && (
         <ComposerMoreSheet
-          modelLabel={modelLabel}
-          modelPreset={modelIsPreset}
           permissionLabel={permissionLabel}
           disabled={history === null || busy}
           onClose={() => setMoreOpen(false)}
-          onOpenModel={() => {
-            setMoreOpen(false);
-            setPickerOpen(true);
-          }}
           onOpenPermission={() => {
             setMoreOpen(false);
             setPermissionSheetOpen(true);
           }}
-          onAttach={() => {
+          onOpenMention={() => {
             setMoreOpen(false);
-            attachInputRef.current?.click();
+            mention.openBrowse();
           }}
+        />
+      )}
+
+      {mention.open && (
+        <ComposerMentionSheet
+          query={mention.query}
+          showCategoryLevel={mention.showCategoryLevel}
+          categories={mention.categories}
+          items={mention.items}
+          emptyHint={mention.emptyHint}
+          focusedLabel={mention.focusedLabel}
+          canGoBack={mention.canGoBack}
+          loading={mention.loading}
+          error={mention.error}
+          disabled={history === null || busy}
+          onQueryChange={mention.setQuery}
+          onDrill={mention.drill}
+          onBack={mention.back}
+          onSelect={mention.selectItem}
+          onPickAttach={mention.pickAttach}
+          onClose={mention.close}
         />
       )}
 

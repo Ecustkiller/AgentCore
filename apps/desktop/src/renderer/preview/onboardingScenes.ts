@@ -31,8 +31,8 @@ export const ONBOARDING_PREVIEW_SCENES: readonly OnboardingPreviewScene[] = [
   },
   {
     id: "composer-generating-card",
-    title: "生成中 · 画布栏排队",
-    intent: "回合执行中：画布命令栏插队/排队/停止并存（card）",
+    title: "生成中 · 居中输入排队",
+    intent: "回合执行中：聊天居中输入插队/排队/停止并存（card）",
     kind: "composer-generating-card",
   },
 ];

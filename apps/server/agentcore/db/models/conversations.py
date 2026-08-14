@@ -159,8 +159,11 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )
+    # 最近活动 = 回合。Only ``touch_activity`` (message create / upsert_assistant)
+    # restamps this. Rename / pin / compact / memory / soft-delete must not —
+    # there is deliberately no ORM ``onupdate``.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=text("now()"), onupdate=datetime.now
+        DateTime(timezone=True), server_default=text("now()")
     )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

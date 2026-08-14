@@ -1,4 +1,6 @@
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
+import { queryClient } from "@/lib/queryClient";
+import { workspaceKeys } from "@/lib/queryKeys";
 import type { WorkspaceInfo } from "@/services/workspaces";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { useConversationStore } from "@/stores/conversation";
@@ -6,6 +8,7 @@ import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
 import type { Message } from "@/stores/conversation/types";
 import { useExecutionStore } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
+import type { ProcessStep } from "@/types/events";
 // @vitest-environment jsdom
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -118,6 +121,35 @@ describe("ConversationChangesPanel P0c entry", () => {
       screen.getByText("本对话尚无 AI 文件改动，也没有可恢复的回合基线。"),
     ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "留版本" })).toBeNull();
+  });
+
+  it("does not invalidate workspace list when the first artifacts appear", () => {
+    const spy = vi.spyOn(queryClient, "invalidateQueries");
+    const write: ProcessStep = {
+      kind: "tool",
+      id: "t-write",
+      tool_name: "file_write",
+      arguments: { path: "a.ts", content: "x" },
+      result: null,
+      status: "success",
+    };
+    setMessages([
+      {
+        ...assistant("a-write", "2026-08-10T10:00:00Z"),
+        process: [write],
+      },
+    ]);
+
+    render(<ConversationChangesPanel />);
+
+    expect(screen.getByTestId("review-a-write")).toBeTruthy();
+    expect(screen.getByTestId("review-a-write").textContent).toContain(
+      "artifacts:1",
+    );
+    expect(spy).not.toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: workspaceKeys.list }),
+    );
+    spy.mockRestore();
   });
 });
 

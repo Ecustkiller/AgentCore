@@ -328,6 +328,12 @@ async function request<T>(
         ? await fetchWithTimeout(url, fetchInit, timeoutMs)
         : await fetch(url, fetchInit);
   } catch (cause) {
+    if (cause instanceof DOMException && cause.name === "AbortError") {
+      throw cause;
+    }
+    if (options.signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     // fetch only rejects on transport failure (the server never answered), so
     // surface a typed NetworkError the bootstrap can treat as an outage.
     if (!isAuthPath(path)) onServiceUnavailable?.();
@@ -485,7 +491,8 @@ async function requestWithStatus<T>(
 }
 
 export const api = {
-  get: <T>(path: string) => request<T>(path),
+  get: <T>(path: string, init?: Pick<RequestInit, "signal">) =>
+    request<T>(path, init ?? {}),
 
   post: <T>(path: string, body?: unknown, timeoutMs?: number) =>
     request<T>(

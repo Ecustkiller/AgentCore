@@ -9,6 +9,8 @@ import httpx
 import pytest
 
 from agentcore.core.errors import (
+    RETRY_AFTER_FROM_BACKOFF,
+    RETRY_AFTER_FROM_HEADER,
     LLMError,
     LLMInvalidResponseError,
     LLMRateLimitError,
@@ -504,6 +506,55 @@ def test_retry_wait_honors_small_retry_after_and_ignores_absurd():
     assert _rate_limit_should_retry(None) is True
     assert _rate_limit_should_retry(_MAX_RETRY_AFTER) is True
     assert _rate_limit_should_retry(3600.0) is False
+    # Provenance omitted: old ceiling-only gate, even for a turn-scale scenario.
+    assert (
+        _rate_limit_should_retry(5.0, scenario="chat", attempt=0) is True
+    )
+    assert (
+        _rate_limit_should_retry(
+            2.0,
+            scenario="chat",
+            cooldown_source=RETRY_AFTER_FROM_BACKOFF,
+            attempt=0,
+        )
+        is False
+    )
+    assert (
+        _rate_limit_should_retry(
+            2.0,
+            scenario="agent",
+            cooldown_source=RETRY_AFTER_FROM_HEADER,
+            attempt=0,
+        )
+        is True
+    )
+    assert (
+        _rate_limit_should_retry(
+            2.0,
+            scenario="chat",
+            cooldown_source=RETRY_AFTER_FROM_HEADER,
+            attempt=1,
+        )
+        is False
+    )
+    assert (
+        _rate_limit_should_retry(
+            5.0,
+            scenario="chat",
+            cooldown_source=RETRY_AFTER_FROM_HEADER,
+            attempt=0,
+        )
+        is False
+    )
+    assert (
+        _rate_limit_should_retry(
+            2.0,
+            scenario="title",
+            cooldown_source=RETRY_AFTER_FROM_BACKOFF,
+            attempt=0,
+        )
+        is True
+    )
 
 
 async def test_complete_rate_limit_absurd_retry_after_fails_immediately(monkeypatch):
@@ -565,6 +616,91 @@ async def test_complete_rate_limit_honors_short_retry_after_chain(monkeypatch):
         assert calls["n"] == 4
         assert sleeps == [2.0, 4.0, 8.0]
         assert _RATE_LIMIT_MAX_RETRIES > _MAX_RETRIES
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("scenario", ["chat", "agent"])
+async def test_turn_scale_headerless_429_fails_immediately(scenario, monkeypatch):
+    """Interactive 429 with no Retry-After: one call, no 2→4→8→16 empty wait."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, content=b'{"error":"rate_limited"}')
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMRateLimitError):
+            await provider.complete(_req(scenario))
+        assert calls["n"] == 1
+        assert sleeps == []
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("scenario", ["chat", "agent"])
+async def test_turn_scale_short_retry_after_waits_at_most_once(scenario, monkeypatch):
+    """Attested Retry-After ≤ 2s: sit it out once, then give up on the next 429."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(
+            429,
+            headers={"retry-after": "2"},
+            content=b'{"error":"rate_limited"}',
+        )
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMRateLimitError):
+            await provider.complete(_req(scenario))
+        assert calls["n"] == 2
+        assert sleeps == [2.0]
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("scenario", ["chat", "agent"])
+async def test_turn_scale_short_retry_after_recovers_after_one_wait(scenario, monkeypatch):
+    """A single short header is waited; the next attempt may succeed."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                429,
+                headers={"retry-after": "2"},
+                content=b'{"error":"rate_limited"}',
+            )
+        return httpx.Response(200, json=_ok_body())
+
+    provider = await _mock_provider(handler)
+    try:
+        result = await provider.complete(_req(scenario))
+        assert result.content == "ok"
+        assert calls["n"] == 2
+        assert sleeps == [2.0]
     finally:
         await provider.close()
 
@@ -650,5 +786,118 @@ async def test_stream_retries_after_reasoning_only_disconnect(monkeypatch):
         ]
         assert [c.delta_content for c in chunks if c.delta_content] == ["final answer"]
         assert not any(c.aborted for c in chunks)
+    finally:
+        await provider.close()
+
+
+def _sse_finish(reason: str) -> str:
+    payload = {"choices": [{"delta": {}, "finish_reason": reason}]}
+    return f"data: {json.dumps(payload)}\n"
+
+
+def _stream_response(line_iter):
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.headers = {}
+    mock_response.aread = AsyncMock(return_value=b"")
+    mock_response.aiter_lines = line_iter
+    mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+    mock_response.__aexit__ = AsyncMock(return_value=False)
+    return mock_response
+
+
+async def test_stream_retries_after_reasoning_only_clean_eof(monkeypatch):
+    """Reasoning then clean SSE end (no finish_reason) is incomplete, not silent_empty."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    provider = OpenAICompatibleProvider(
+        name="test", api_key="k", base_url="http://example.invalid/v1"
+    )
+
+    async def first_lines():
+        yield _sse_reasoning("必须")
+        yield _sse_reasoning("先写")
+        yield "data: [DONE]\n"
+
+    async def second_lines():
+        yield _sse_reasoning("fresh")
+        yield _sse_line("final answer")
+        yield _sse_finish("stop")
+        yield "data: [DONE]\n"
+
+    responses = [_stream_response(first_lines), _stream_response(second_lines)]
+
+    def stream_side_effect(*_a, **_kw):
+        calls["n"] += 1
+        return responses[calls["n"] - 1]
+
+    provider._client.stream = MagicMock(side_effect=stream_side_effect)
+    try:
+        chunks = [c async for c in provider.stream(_req())]
+        assert calls["n"] == 2
+        assert sleeps == [_INITIAL_BACKOFF]
+        assert any(c.stream_reset for c in chunks)
+        assert [c.delta_content for c in chunks if c.delta_content] == ["final answer"]
+        assert not any(c.empty_diagnosis for c in chunks)
+        assert not any(c.aborted for c in chunks)
+    finally:
+        await provider.close()
+
+
+async def test_stream_does_not_retry_reasoning_only_with_stop():
+    """finish_reason=stop after thinking-only is a real silent empty — do not retry."""
+    provider = OpenAICompatibleProvider(
+        name="test", api_key="k", base_url="http://example.invalid/v1"
+    )
+
+    async def lines():
+        yield _sse_reasoning("think")
+        yield _sse_finish("stop")
+        yield "data: [DONE]\n"
+
+    provider._client.stream = MagicMock(return_value=_stream_response(lines))
+    try:
+        chunks = [c async for c in provider.stream(_req())]
+        provider._client.stream.assert_called_once()
+        assert [c.empty_diagnosis for c in chunks if c.empty_diagnosis] == ["silent_empty"]
+        assert not any(c.stream_reset for c in chunks)
+    finally:
+        await provider.close()
+
+
+async def test_stream_reasoning_only_incomplete_exhausts_to_empty(monkeypatch):
+    """Retries stay pre-commit; exhausted incomplete thinking still surfaces silent_empty."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(sec: float) -> None:
+        sleeps.append(sec)
+
+    monkeypatch.setattr("agentcore.llm.provider.openai_compatible.asyncio.sleep", fake_sleep)
+
+    provider = OpenAICompatibleProvider(
+        name="test", api_key="k", base_url="http://example.invalid/v1"
+    )
+
+    async def incomplete_lines():
+        yield _sse_reasoning("碎片")
+        yield "data: [DONE]\n"
+
+    def stream_side_effect(*_a, **_kw):
+        calls["n"] += 1
+        return _stream_response(incomplete_lines)
+
+    provider._client.stream = MagicMock(side_effect=stream_side_effect)
+    try:
+        chunks = [c async for c in provider.stream(_req())]
+        assert calls["n"] == _MAX_RETRIES
+        assert len(sleeps) == _MAX_RETRIES - 1
+        assert [c.empty_diagnosis for c in chunks if c.empty_diagnosis] == ["silent_empty"]
     finally:
         await provider.close()

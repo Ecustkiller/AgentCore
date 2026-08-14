@@ -133,14 +133,17 @@ describe("noticeTemplates", () => {
     const built = buildFromSlots(release, {
       version: "0.4.2",
       time: "10:00",
-      highlights: "消息编辑\n撤回优化\n多余行应被截断\n不会出现",
+      highlights:
+        "消息编辑\n撤回优化\n空桌少一层文件夹\n附件可重试\n多余行应被截断\n不会出现",
     });
     expect(built.title).toBe(
       "约 10:00 发版 · 请按需规划好时间 · 提前停止使用 AI 功能",
     );
     expect(built.body).toContain("1. 消息编辑");
     expect(built.body).toContain("2. 撤回优化");
-    expect(built.body).toContain("3. 多余行应被截断");
+    expect(built.body).toContain("3. 空桌少一层文件夹");
+    expect(built.body).toContain("4. 附件可重试");
+    expect(built.body).toContain("5. 多余行应被截断");
     expect(built.body).not.toContain("不会出现");
   });
 

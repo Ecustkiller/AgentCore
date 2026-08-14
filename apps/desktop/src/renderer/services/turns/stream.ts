@@ -7,6 +7,7 @@ import { hasLocalEngine } from "@/lib/capabilities";
 import {
   StreamError,
   describeStreamError,
+  isUnstartedSendRefusal,
   streamErrorAction,
 } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
@@ -24,6 +25,7 @@ import {
 } from "@/services/streamConversation";
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
 import { traceTurnEnd, traceTurnMilestone } from "@/services/turnTrace";
+import { restoreComposerDraft } from "@/stores/composer";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
   beginTurnPreflight,
@@ -41,6 +43,7 @@ import {
 import { rejoinLiveTurn, settleOrphanEmptyAssistants } from "./recovery";
 import { runRegenerate } from "./regenerate";
 import { claimPrimaryStream, releasePrimaryStream } from "./streamOwnership";
+import { inspectZeroOutputSendRollback } from "./zeroOutputSendRollback";
 
 export interface SendTurnSpec {
   conversationId: string;
@@ -114,7 +117,41 @@ function logStreamPath(
  * 发送即有流：POST 恒返回 SSE；in-flight 时先到 ``turn_queued``（dispatch 呈现
  * 「已排队」），drain 后同连接续流——不再有 202 JSON / 另行 attach 守望。
  */
-export async function sendTurn(spec: SendTurnSpec): Promise<void> {
+export type SendTurnResult = { unstartedRefusal: boolean };
+
+function rollbackUnstartedOptimisticTurn(
+  conversationId: string,
+  userId: string,
+): void {
+  const store = useConversationStore.getState();
+  store.truncateAfter(userId, conversationId);
+  store.removeMessage(userId, conversationId);
+  store.setGenerating(false, conversationId);
+  store.setTurnPhase("idle", conversationId);
+  store.setWaitingForWorkspaceLock(false, conversationId);
+}
+
+function surfaceTurnBanner(conversationId: string, err: unknown): void {
+  const msg = describeStreamError(err);
+  if (msg) {
+    useConversationStore
+      .getState()
+      .setError(msg, null, conversationId, streamErrorAction(err));
+  }
+}
+
+function streamErrorFromZeroOutput(code: string, message: string): StreamError {
+  return new StreamError("http", undefined, {
+    code,
+    serverMessage: message || undefined,
+  });
+}
+
+function thrownErrorCode(err: unknown): string | undefined {
+  return err instanceof StreamError ? err.code : undefined;
+}
+
+export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
   const {
     conversationId,
     content,
@@ -155,7 +192,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
       .find((m) => m.role === "user");
     if (lastUser) {
       await runRegenerate(lastUser.id);
-      return;
+      return { unstartedRefusal: false };
     }
   }
 
@@ -290,12 +327,27 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
         signal: ac.signal,
       });
     }
+    const zero = inspectZeroOutputSendRollback(
+      conversationId,
+      optimisticUserId,
+    );
+    if (zero) {
+      // SSE error 后 stream 常 resolve：本发已落库 + 空失败 + Class B 码也要回滚。
+      rollbackUnstartedOptimisticTurn(conversationId, zero.userId);
+      surfaceTurnBanner(
+        conversationId,
+        streamErrorFromZeroOutput(zero.error.code, zero.error.message),
+      );
+      traceTurnEnd(conversationId, "error");
+      return { unstartedRefusal: true };
+    }
     traceTurnEnd(conversationId, "ok");
+    return { unstartedRefusal: false };
   } catch (err) {
     if (isAbort(err)) {
       finalizeHonestStopAbort(conversationId);
       traceTurnEnd(conversationId, "abort");
-      return;
+      return { unstartedRefusal: false };
     }
     // A mid-stream drop no longer means the turn died (1a: it runs detached) —
     // rejoin it live (1b) rather than resending, which would duplicate the turn.
@@ -305,10 +357,8 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     // necessarily mid-run — never auto-rerouted, to avoid repeating side effects.)
     if (isTransportDrop(err) && (await rejoinLiveTurn(conversationId))) {
       traceTurnEnd(conversationId, "ok");
-      return;
+      return { unstartedRefusal: false };
     }
-    finalizeGeneratingIfNeeded(conversationId);
-    const s = useConversationStore.getState();
     // A failed turn never delivers `approval_resolved`; drop this conversation's
     // paused prompt (other conversations keep theirs).
     clearInteractionPrompts(conversationId);
@@ -320,11 +370,25 @@ export async function sendTurn(spec: SendTurnSpec): Promise<void> {
     if (notPersisted && origIndex >= 0 && origUpdatedAt !== null) {
       restoreConversationCache(conversationId, origIndex, origUpdatedAt);
     }
-    const msg = describeStreamError(err);
-    if (msg) {
-      s.setError(msg, null, conversationId, streamErrorAction(err));
+    const unstartedRefusal = notPersisted && isUnstartedSendRefusal(err);
+    const zero = unstartedRefusal
+      ? null
+      : inspectZeroOutputSendRollback(
+          conversationId,
+          optimisticUserId,
+          thrownErrorCode(err),
+        );
+    if (unstartedRefusal) {
+      // 发送当没发生：撤乐观用户泡 + 空助手泡，phase 回 idle（failed 会挡下一发）。
+      rollbackUnstartedOptimisticTurn(conversationId, optimisticUserId);
+    } else if (zero) {
+      rollbackUnstartedOptimisticTurn(conversationId, zero.userId);
+    } else {
+      finalizeGeneratingIfNeeded(conversationId);
     }
+    surfaceTurnBanner(conversationId, err);
     traceTurnEnd(conversationId, "error");
+    return { unstartedRefusal: unstartedRefusal || zero != null };
   } finally {
     // 仅清自己的 abort——midFlight 排队续流可能已接手同一会话的 abort 槽。
     if (getRuntime(conversationId).abort === ac) {
@@ -353,10 +417,17 @@ export async function continueTurn(conversationId: string): Promise<void> {
     },
     conversationId,
   );
-  await sendTurn({
+  const result = await sendTurn({
     conversationId,
     content: "继续",
     attachments: [],
     optimisticUserId: userMsgId,
   });
+  if (result.unstartedRefusal) {
+    restoreComposerDraft(conversationId, {
+      value: "继续",
+      attachments: [],
+      agentMentions: [],
+    });
+  }
 }

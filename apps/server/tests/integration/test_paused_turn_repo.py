@@ -21,7 +21,12 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from agentcore.config import settings
-from agentcore.db.models import PAUSED_TURN_EXPIRED, PAUSED_TURN_SETTLED, PausedTurnRow
+from agentcore.db.models import (
+    PAUSED_TURN_EXPIRED,
+    PAUSED_TURN_SETTLED,
+    Conversation,
+    PausedTurnRow,
+)
 from agentcore.db.repositories import PausedTurnRepository, TurnJournalRepository
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.facts import LlmCallFact, RoundBoundaryFact, TurnStartedFact
@@ -342,6 +347,67 @@ async def test_list_pending_oldest_first(session_factory):
     async with session_factory() as s:
         rows = await PausedTurnRepository(s).list_pending(cid)
     assert [r.message_id for r in rows] == [m1, m2]  # created order (oldest first)
+
+
+async def test_list_pending_for_user_oldest_first(session_factory):
+    u1, u2 = str(uuid4()), str(uuid4())
+    c1, c2 = str(uuid4()), str(uuid4())
+    m1, m2, m3 = str(uuid4()), str(uuid4()), str(uuid4())
+    async with session_factory() as s:
+        s.add(Conversation(id=c1, user_id=u1, title="c1"))
+        s.add(Conversation(id=c2, user_id=u1, title="c2"))
+        await s.commit()
+        repo = PausedTurnRepository(s)
+        await repo.upsert(message_id=m1, conversation_id=c1, user_id=u1, frame={"n": 1})
+        await repo.upsert(message_id=m2, conversation_id=c2, user_id=u1, frame={"n": 2})
+        await repo.upsert(message_id=m3, conversation_id=c1, user_id=u2, frame={"n": 3})
+
+    async with session_factory() as s:
+        rows = await PausedTurnRepository(s).list_pending_for_user(u1)
+    assert [r.message_id for r in rows] == [m1, m2]
+
+
+async def test_list_pending_for_user_skips_soft_deleted_and_missing(session_factory):
+    """已软删 / 已不存在的会话不进 attention snapshot 权威表。"""
+    from agentcore.attention.snapshot import merge_attention_entries
+    from agentcore.fulfill.user_signal import attention_snapshot_frame
+
+    u1 = str(uuid4())
+    c_live, c_del, c_gone = str(uuid4()), str(uuid4()), str(uuid4())
+    m_live, m_del, m_gone = str(uuid4()), str(uuid4()), str(uuid4())
+    async with session_factory() as s:
+        s.add(Conversation(id=c_live, user_id=u1, title="live"))
+        s.add(
+            Conversation(
+                id=c_del, user_id=u1, title="deleted", deleted_at=datetime.now(UTC)
+            )
+        )
+        await s.commit()
+        repo = PausedTurnRepository(s)
+        await repo.upsert(
+            message_id=m_live,
+            conversation_id=c_live,
+            user_id=u1,
+            frame={"kind": "ask_user", "checkpoint_id": "ck-live", "question": "活着？"},
+        )
+        await repo.upsert(
+            message_id=m_del,
+            conversation_id=c_del,
+            user_id=u1,
+            frame={"kind": "ask_user", "checkpoint_id": "ck-del", "question": "已删？"},
+        )
+        await repo.upsert(
+            message_id=m_gone,
+            conversation_id=c_gone,
+            user_id=u1,
+            frame={"kind": "ask_user", "checkpoint_id": "ck-gone", "question": "没了？"},
+        )
+
+    async with session_factory() as s:
+        rows = await PausedTurnRepository(s).list_pending_for_user(u1)
+    assert [r.conversation_id for r in rows] == [c_live]
+    snap = attention_snapshot_frame(merge_attention_entries(rows, user_id=u1))
+    assert [e["conversation_id"] for e in snap["payload"]["entries"]] == [c_live]
 
 
 async def test_delete_removes_frame(session_factory):

@@ -14,6 +14,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FinishReasonChip } from "@/components/ui/finish-reason-chip";
+import {
+  noticeChipNeutral,
+  statusAccentText,
+  statusChip,
+} from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { copyText } from "@/lib/clipboard";
@@ -40,6 +45,7 @@ import {
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
 import { notifySuccess } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { runRegenerate } from "@/services/turns";
 import {
   type AutoFolderNotice,
@@ -177,7 +183,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     : null;
   // Empty interrupted = layer-1 composer recoverability only (no bubble retry).
   // User-stop: no chat-timeline「已停止」face (P1); team StatusStrip still labels cancelled.
-  // 定案 A：红错误卡不挂「重新生成」（整轮推翻易乱；失败救火改再说/改发）。底栏 footer 仍保留。
+  // 定案 A：错误卡不挂「重新生成」（整轮推翻易乱；失败救火改再说/改发）。底栏 footer 仍保留。
   const isUserStopped = displayError?.code === "TURN_CANCELLED";
   const emptyDiagnosis = message.error?.context?.empty_diagnosis;
   const hideFinishReasonChip = isEmptyResponseUserSurface({
@@ -436,9 +442,21 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           journal={message.runs}
         />
       )}
+      {/* Tone: 去配置 action → primary；限流 / 无 action → noticeChipNeutral（非危险红）。 */}
       {displayError && !isUserStopped && (
-        <div className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive">
-          <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+        <div
+          className={cn(
+            "mt-2 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm",
+            errorAction ? statusChip.primary : noticeChipNeutral,
+          )}
+        >
+          <AlertTriangle
+            size={15}
+            className={cn(
+              "mt-0.5 shrink-0",
+              errorAction ? statusAccentText.primary : "text-muted-foreground",
+            )}
+          />
           <p className="min-w-0 flex-1 whitespace-pre-wrap break-words">
             {formatAssistantErrorMessage(displayError)}
             {connectivityEscalationSuffix(displayError.code, message.id, {
@@ -451,7 +469,11 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           {supportDiagnosticText && (
             <Button
               variant="ghost"
-              className="shrink-0 text-destructive hover:bg-destructive/15"
+              className={
+                errorAction
+                  ? "shrink-0 text-primary/70 hover:bg-transparent hover:text-primary"
+                  : "shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+              }
               icon={<Copy size={13} />}
               onClick={copySupportDiagnostics}
             >
@@ -460,7 +482,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           )}
           {errorAction && (
             <Button
-              variant="destructive"
+              variant="primary"
               className="shrink-0"
               icon={<KeyRound size={13} />}
               onClick={() => navigate(errorAction.href)}

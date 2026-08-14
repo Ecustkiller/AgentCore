@@ -149,7 +149,9 @@ export function UpdateAvailableDialog() {
               ) : null}
 
               {force && status.phase === "error" ? (
-                <p className="text-sm text-destructive">{status.message}</p>
+                <p className="text-sm text-muted-foreground">
+                  {status.message}
+                </p>
               ) : null}
             </div>
           </DialogDescription>

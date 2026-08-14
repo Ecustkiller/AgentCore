@@ -99,6 +99,21 @@ describe("ensureAttachmentResident / toWireAttachment", () => {
     });
   });
 
+  it("keeps conversation_id on the wire and strips draft-only id", () => {
+    const wire = toWireAttachment({
+      id: "draft-1",
+      name: "上周复盘",
+      path: "对话",
+      text: "用户: 问",
+      truncated: false,
+      kind: "conversation",
+      conversation_id: "c2",
+    });
+    expect(wire.kind).toBe("conversation");
+    expect(wire.conversation_id).toBe("c2");
+    expect("id" in wire && (wire as { id?: string }).id).toBeFalsy();
+  });
+
   it("PUTs draft binary blob and strips fileBlob on the wire shape", async () => {
     const file = pngFile();
     const staged = await prepareAttachment(file, null);

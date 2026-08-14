@@ -297,6 +297,70 @@ describe("coldResume · live Interaction authority", () => {
     });
     expect(visible).toEqual([]);
   });
+
+  it("resolved IX suppresses recovery shell (follow settlement)", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-follow-ask",
+      payload: { checkpoint_id: "cp-follow-ask", question: "怎么推进？" },
+    });
+    markColdResolved({ kind: "ask_user", id: "cp-follow-ask" });
+
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-follow-tp",
+      payload: tpPayload("cp-follow-tp"),
+    });
+    markColdResolved({ kind: "team_preview", id: "cp-follow-tp" });
+
+    const askShell: PausedTurnSummary = {
+      message_id: "m-follow-ask",
+      checkpoint_id: "cp-follow-ask",
+      kind: "ask_user",
+      user_message: "",
+      user_message_id: "",
+      question: "怎么推进？",
+      context: "",
+      form: "",
+      headline: "",
+      motion: "",
+      primitive: "delegate",
+      max_rounds: 0,
+      thorough: true,
+      browser_login: false,
+      steps: [],
+      pending: [],
+    };
+    const tpShell: PausedTurnSummary = {
+      ...askShell,
+      message_id: "m-follow-tp",
+      checkpoint_id: "cp-follow-tp",
+      kind: "team_preview",
+      question: "",
+      headline: "预计 1 人开工",
+    };
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [askShell, tpShell],
+      hosts: [
+        {
+          role: "assistant",
+          id: "m-follow-ask",
+          serverMessageId: "m-follow-ask",
+        },
+        {
+          role: "assistant",
+          id: "m-follow-tp",
+          serverMessageId: "m-follow-tp",
+        },
+      ],
+    });
+    expect(visible).toEqual([]);
+  });
 });
 
 describe("coldResume · resolveColdBindHostId (投影键不断档)", () => {

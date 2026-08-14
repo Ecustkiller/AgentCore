@@ -246,11 +246,13 @@ def maybe_inject_delivery_idle(
     role: str,
     keep_notes: bool = False,
 ) -> Literal["none", "nudge", "narrow"]:
-    """Files read-idle: soft nudge; repair posts may arm tool-narrow (not FINALIZE).
+    """Inject read-idle steer when the controller bars are armed.
 
-    Report posts (``delivery_idle_report``) nudge only — never pending narrow.
-    Orthogonal to token/timeout wind_down and to the retired zero-write DEGRADED
-    escalate. Narrow allowlist apply is consumed by the react loop via
+    Factory only arms recon-idle (conclude/handoff; no write pressure, no narrow).
+    Files-expected delivery_idle is retired at :func:`create_loop_controller`;
+    this helper still honors an explicitly constructed controller (nudge/narrow
+    /report copy). Orthogonal to token/timeout wind_down.
+    Narrow allowlist apply is consumed by the react loop via
     :meth:`LoopController.take_delivery_idle_narrow_apply`.
     ``keep_notes``: collaboration/wall — narrow prompt mentions note tools stay.
 
@@ -610,10 +612,17 @@ def create_loop_controller(
     thrash; see :meth:`LoopController.apply_seed`); omit on a fresh turn.
 
     Zero-write / prose_idle mid-loop warn→FINALIZE is **retired** (always off).
-    Soft delivery_idle opens for ``files_expected`` and not ``form_prose``.
-    Repair posts: nudge → tool narrow (may reuse wind_down allowlist).
-    Report posts (``report_delivery``): nudge only (``narrow_rounds=0``) — never
-    strip search. Non-landing workers get recon-idle **nudge only** (no narrow).
+    Files-expected delivery_idle (nudge / narrow / report) is **retired**: factory
+    never arms it when ``files_expected=True`` (including ``report_delivery=True``),
+    and ignores leftover ``engine_delivery_idle_*`` settings so env cannot revive it.
+    Absolute investigation-round finalize (``engine_convergence_finalize_rounds``)
+    is **retired**: factory always passes ``convergence_finalize_rounds=0`` and
+    ignores the setting even if env > 0. Same-target spin
+    (``engine_convergence_spin_rounds``) stays. Explicit ``LoopController``
+    construction may still pass ``finalize_rounds``.
+    ``report_delivery`` stays for call-site compatibility and does not drive idle.
+    Non-landing workers (not ``form_prose``) still get recon-idle **nudge only**
+    (conclude/handoff; no write pressure, no tool strip).
     Orthogonal to token/timeout wind_down and never stamps DEGRADED / FAILED for
     read-idle.
     Delivery pressure otherwise stays on round/token hard ceilings + convergence
@@ -627,7 +636,7 @@ def create_loop_controller(
     ``code_execute`` ladders reach nudge→finalize sooner — still the same
     LoopController paths, not a parallel fuse.
     """
-    _ = (short_write_posture, max_rounds)
+    _ = (short_write_posture, max_rounds, report_delivery)
     tool_failure_warn = settings.engine_tool_failure_warn
     tool_failure_disable = settings.engine_tool_failure_disable
     unproductive_threshold = settings.engine_unproductive_threshold
@@ -636,20 +645,14 @@ def create_loop_controller(
         tool_failure_disable = min(int(tool_failure_disable), 2)
         unproductive_threshold = min(int(unproductive_threshold), 2)
 
-    # Soft read-idle ladder (nudge → optional tool narrow).
+    # Soft read-idle: factory never arms files-expected delivery_idle
+    # (nudge/narrow/report), even if leftover settings are still >0.
+    # Non-landing workers (not form_prose) still get recon-idle nudge only.
     delivery_idle_nudge = 0
     delivery_idle_narrow = 0
     delivery_idle_recon = False
     delivery_idle_report = False
-    if files_expected and not form_prose:
-        delivery_idle_nudge = int(settings.engine_delivery_idle_nudge_rounds or 0)
-        if report_delivery:
-            # Report posts: nudge催写报告; never narrow away grep/code_search.
-            delivery_idle_narrow = 0
-            delivery_idle_report = delivery_idle_nudge > 0
-        else:
-            delivery_idle_narrow = int(settings.engine_delivery_idle_narrow_rounds or 0)
-    elif not form_prose:
+    if not files_expected and not form_prose:
         delivery_idle_nudge = int(settings.engine_recon_idle_nudge_rounds or 0)
         delivery_idle_narrow = 0
         delivery_idle_recon = delivery_idle_nudge > 0
@@ -659,7 +662,8 @@ def create_loop_controller(
         tool_failure_warn=tool_failure_warn,
         tool_failure_disable=tool_failure_disable,
         unproductive_threshold=unproductive_threshold,
-        convergence_finalize_rounds=settings.engine_convergence_finalize_rounds,
+        # Retired: ignore settings.engine_convergence_finalize_rounds even if env > 0.
+        convergence_finalize_rounds=0,
         convergence_spin_rounds=settings.engine_convergence_spin_rounds,
         form_prose=form_prose,
         delivery_idle_nudge_rounds=delivery_idle_nudge,

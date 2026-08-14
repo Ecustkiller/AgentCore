@@ -12,6 +12,7 @@ import {
   messagePlanReviews,
   useInteractionStore,
 } from "../interactions";
+import { beginPausedSnapshot } from "../pausedTurns";
 
 const store = () => useInteractionStore.getState();
 
@@ -204,66 +205,143 @@ describe("InteractionStore", () => {
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
+      origin: "server",
       payload: { approval_id: "old", tool_name: "x", arguments: {} },
     });
-    store().hydratePending("c1", [
-      {
-        kind: "delegation_authorization",
-        id: "d1",
-        messageId: "m9",
-        payload: {
-          authorization_id: "d1",
-          execution_id: "ex1",
-          workers: [],
-          tools: ["file_write"],
+    store().hydratePending(
+      "c1",
+      [
+        {
+          kind: "delegation_authorization",
+          id: "d1",
+          messageId: "m9",
+          origin: "server",
+          payload: {
+            authorization_id: "d1",
+            execution_id: "ex1",
+            workers: [],
+            tools: ["file_write"],
+          },
         },
-      },
-    ]);
+      ],
+      { confirmed: ["server"] },
+    );
     expect(store().get("old")).toBeUndefined();
     expect(store().get("d1")?.status).toBe("pending");
     expect(store().get("d1")?.kind).toBe("delegation_authorization");
   });
 
-  it("empty hydratePending keeps live pending (early empty recovery race)", () => {
+  it("empty hydratePending does not dispose sidecar / missing origin", () => {
     store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
-      payload: { approval_id: "a1", tool_name: "host_shell", arguments: {} },
+      origin: "sidecar",
+      payload: {
+        approval_id: "a-side",
+        tool_name: "host_shell",
+        arguments: {},
+      },
     });
-    store().hydratePending("c1", [], { liveRunning: true });
-    expect(store().get("a1")?.status).toBe("pending");
-    expect(store().listPending("c1")).toHaveLength(1);
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: {
+        approval_id: "a-none",
+        tool_name: "host_shell",
+        arguments: {},
+      },
+    });
+    store().hydratePending("c1", [], { confirmed: ["server"] });
+    expect(store().get("a-side")?.status).toBe("pending");
+    expect(store().get("a-none")?.status).toBe("pending");
   });
 
-  it("empty hydratePending clears when turn is not live (resolved/orphan)", () => {
+  it("empty hydratePending drops confirmed server-origin hot cards", () => {
     store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
+      origin: "server",
       payload: { approval_id: "a1", tool_name: "file_write", arguments: {} },
     });
-    store().hydratePending("c1", [], { liveRunning: false });
+    store().hydratePending("c1", [], { confirmed: ["server"] });
     expect(store().get("a1")).toBeUndefined();
     expect(store().listPending("c1")).toHaveLength(0);
   });
 
-  it("empty hydratePending without liveRunning flag clears (terminal default)", () => {
+  it("empty hydratePending keeps cards that surfaced after since", () => {
+    const since = beginPausedSnapshot();
     store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
+      origin: "server",
+      payload: { approval_id: "a-live", tool_name: "x", arguments: {} },
+    });
+    store().hydratePending("c1", [], { since, confirmed: ["server"] });
+    expect(store().get("a-live")?.status).toBe("pending");
+  });
+
+  it("local sidecar-origin hot empty only when sidecar asked and idle", () => {
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "sidecar",
+      payload: { approval_id: "a-side", tool_name: "x", arguments: {} },
+    });
+    store().hydratePending("c1", [], {
+      confirmed: ["sidecar", "server"],
+      sidecarLive: true,
+    });
+    expect(store().get("a-side")?.status).toBe("pending");
+    store().hydratePending("c1", [], {
+      confirmed: ["sidecar", "server"],
+      sidecarLive: false,
+    });
+    expect(store().get("a-side")).toBeUndefined();
+  });
+
+  it("empty hydratePending never Map.delete cold kinds", () => {
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
+      payload: { checkpoint_id: "cp1", question: "继续吗？" },
+    });
+    store().upsertRequired({
+      kind: "team_preview",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
+      payload: {
+        checkpoint_id: "tp1",
+        primitive: "delegate",
+        workers: [],
+      },
+    });
+    store().upsertRequired({
+      kind: "approval",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
       payload: { approval_id: "a1", tool_name: "x", arguments: {} },
     });
-    store().hydratePending("c1", []);
+    store().hydratePending("c1", [], { confirmed: ["server"] });
+    expect(store().get("cp1")?.status).toBe("pending");
+    expect(store().get("tp1")?.status).toBe("pending");
     expect(store().get("a1")).toBeUndefined();
   });
 
-  it("non-empty hydratePending replaces even while live", () => {
+  it("non-empty hydratePending replaces confirmed server-origin even while sidecar live", () => {
     store().upsertRequired({
       kind: "approval",
       conversationId: "c1",
       messageId: "m1",
+      origin: "server",
       payload: { approval_id: "old", tool_name: "x", arguments: {} },
     });
     store().hydratePending(
@@ -273,13 +351,91 @@ describe("InteractionStore", () => {
           kind: "approval",
           id: "new",
           messageId: "m1",
+          origin: "server",
           payload: { approval_id: "new", tool_name: "y", arguments: {} },
         },
       ],
-      { liveRunning: true },
+      { confirmed: ["server"], sidecarLive: true },
     );
     expect(store().get("old")).toBeUndefined();
     expect(store().get("new")?.status).toBe("pending");
+  });
+
+  it("settleUnseenCold marks terminal in place (no Map.delete)", () => {
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
+      payload: { checkpoint_id: "cp-gone", question: "q" },
+    });
+    store().upsertRequired({
+      kind: "plan_review",
+      conversationId: "c1",
+      messageId: "m2",
+      origin: "sidecar",
+      payload: {
+        checkpoint_id: "pr-gone",
+        steps: [],
+        pending: [],
+      },
+    });
+    store().settleUnseenCold("c1", new Set(), {
+      confirmed: ["server", "sidecar"],
+    });
+    expect(store().get("cp-gone")?.status).toBe("resolved");
+    expect(store().get("cp-gone")?.resumeSettled).toEqual({
+      decision: "",
+      decidedAt: "",
+      turnStatus: "unknown",
+    });
+    expect(store().get("pr-gone")?.status).toBe("orphaned");
+  });
+
+  it("settleUnseenCold is per-card (not gated on whole paused=[])", () => {
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
+      payload: { checkpoint_id: "cp-keep", question: "还在" },
+    });
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m2",
+      origin: "server",
+      payload: { checkpoint_id: "cp-gone", question: "没了" },
+    });
+    store().settleUnseenCold("c1", new Set(["cp-keep"]), {
+      confirmed: ["server"],
+    });
+    expect(store().get("cp-keep")?.status).toBe("pending");
+    expect(store().get("cp-gone")?.status).toBe("resolved");
+  });
+
+  it("settleUnseenCold keeps cards after since or unconfirmed origin", () => {
+    const since = beginPausedSnapshot();
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m1",
+      origin: "server",
+      payload: { checkpoint_id: "cp-new", question: "抢跑" },
+    });
+    store().upsertRequired({
+      kind: "ask_user",
+      conversationId: "c1",
+      messageId: "m2",
+      origin: "sidecar",
+      payload: { checkpoint_id: "cp-side", question: "本机" },
+    });
+    store().settleUnseenCold("c1", new Set(), {
+      since,
+      confirmed: ["server"],
+    });
+    expect(store().get("cp-new")?.status).toBe("pending");
+    expect(store().get("cp-side")?.status).toBe("pending");
   });
 
   it("applyInteractionWireEvent handles orphaned + required + resolved", () => {

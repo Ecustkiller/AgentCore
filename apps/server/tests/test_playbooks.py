@@ -531,11 +531,16 @@ def test_build_app_lean_three_nodes_default():
     assert "自检全过" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
     assert "单测已绿" in by_id["smoke"]["task"] or "跑绿" in by_id["smoke"]["task"]
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    assert scaffold_arts
+    assert all(a.startswith("app/") for a in scaffold_arts)
+    assert "vue3/" not in " ".join(scaffold_arts)
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
     assert len(stub_arts) == 1  # 默认仅总览页 stub
     impl_arts = by_id["implement"]["deliverable"]["artifacts"]
     assert stub_arts[0] in impl_arts
+    assert all(a.startswith("app/") for a in impl_arts)
     assert any(a.endswith("tokens.css") for a in impl_arts)
+    assert by_id["smoke"]["deliverable"]["artifacts"] == ["app/QA.md"]
     assert "总览页" in by_id["implement"]["task"]
 
 
@@ -586,6 +591,9 @@ def test_build_app_full_five_waves_default_modules():
     assert set(by_id["integrate"]["depends_on"]) == {"module_0"}
     assert by_id["smoke"]["depends_on"] == ["integrate"]
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    assert scaffold_arts
+    assert all(a.startswith("app/") for a in scaffold_arts)
+    assert "vue3/" not in " ".join(scaffold_arts)
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
     assert len(stub_arts) == 1
     assert by_id["module_0"]["deliverable"]["artifacts"][0] in scaffold_arts
@@ -639,6 +647,9 @@ def test_build_app_modules_fold_over_cap():
     notes = collect_playbook_notes(tasks)
     assert notes and "扇出折叠" in notes[0]
     scaffold_arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    assert scaffold_arts
+    assert all(a.startswith("app/") for a in scaffold_arts)
+    assert not any(a.startswith("大盘/") for a in scaffold_arts)
     stub_arts = [a for a in scaffold_arts if "/src/views/" in a and a.endswith(".vue")]
     assert len(stub_arts) == len(mods)
 
@@ -656,6 +667,26 @@ def test_build_app_requires_app():
     tasks, errors = expand_playbook("build_app", {})
     assert tasks == []
     assert errors and "app" in errors[0]
+
+
+def test_build_app_default_root_is_app_not_name_slug():
+    """无显式 root 时工程根固定 app/，不从应用名派生 slug。"""
+    assert "默认从 app 简述派生" not in PLAYBOOKS["build_app"].slots
+    assert "默认固定 app/" in PLAYBOOKS["build_app"].slots
+    tasks, errors = expand_playbook(
+        "build_app", {"app": "Ops board", "modules": ["overview", "list"]}
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    arts = by_id["scaffold"]["deliverable"]["artifacts"]
+    assert arts
+    assert all(a.startswith("app/") for a in arts)
+    joined = " ".join(arts)
+    assert "ops-board/" not in joined
+    assert "ops_board/" not in joined
+    impl_arts = by_id["implement"]["deliverable"]["artifacts"]
+    assert all(a.startswith("app/") for a in impl_arts)
+    assert by_id["smoke"]["deliverable"]["artifacts"] == ["app/QA.md"]
 
 
 # ── repair_code ───────────────────────────────────────────────────────────────

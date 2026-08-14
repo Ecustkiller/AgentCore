@@ -487,10 +487,12 @@ class DebateTool:
         note: str,
         arguments: dict[str, Any],
     ) -> ToolResult:
-        """Settle a debate kickoff: STOP / RESEARCH_FIRST → cancel; CONTINUE/ADJUST → run moderator.
+        """Settle a debate kickoff: STOP / TIMEOUT / RESEARCH_FIRST → no execute;
+        CONTINUE/ADJUST → run moderator.
 
         CONTINUE/ADJUST + note → 开赛嘱咐（首轮全场插话），不覆写 motion / 不改 sides。
         ADJUST 枚举保留供历史挂起帧 / API；语义与 CONTINUE+note 同构。
+        TIMEOUT → 未开赛，回灌 CEO 自行收尾（对齐 ask timeout；不套用取消「宜先问」）。
         RESEARCH_FIRST → 不开赛，固定回灌文案令 CEO 挂 multi_lens_research（与 STOP 同构）。
         """
 
@@ -503,6 +505,18 @@ class DebateTool:
                 tool_call_id="",
                 success=True,
                 output=format_kickoff_cancel_result(primitive="debate", note=note),
+                effect=ToolEffect.CONTINUE,
+            )
+
+        if decision is CheckpointDecision.TIMEOUT:
+            from agentcore.runtime.kickoff.cancel_guidance import (
+                format_kickoff_timeout_result,
+            )
+
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=format_kickoff_timeout_result(primitive="debate", note=note),
                 effect=ToolEffect.CONTINUE,
             )
 

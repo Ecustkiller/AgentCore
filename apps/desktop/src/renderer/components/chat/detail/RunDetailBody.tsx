@@ -12,7 +12,6 @@ import { useTurnAudit } from "@/hooks/useTurnAudit";
 import { filterInjectInEdges } from "@/lib/causalInject";
 import type { AgentAuditEvent } from "@/services/audit";
 import { permissionAxesShortLabel } from "@/services/permissionAxes";
-import { useComposerDraftStore } from "@/stores/composer";
 import { activeRuntime, useConversationStore } from "@/stores/conversation";
 import {
   type RunNode,
@@ -22,7 +21,7 @@ import {
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath, useUIStore } from "@/stores/ui";
 import { isLiveRunStatus } from "@agentcore/protocol-fold-kit";
-import { Pencil, Shield, Square } from "lucide-react";
+import { Shield, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { WorkerContextSection } from "./WorkerContextSection";
 import {
@@ -47,7 +46,6 @@ import {
   RevisionChainSection,
   revisionComparePair,
 } from "./sections/RunRevisionChain";
-import { StoppedTurnFileChangesSection } from "./sections/StoppedTurnFileChanges";
 import { Section, StatusBadge } from "./sections/shared";
 
 export { SchedulingDiag, CollabDiag } from "./sections/RunDiagnostics";
@@ -137,24 +135,10 @@ export function RunDetailBody({
   if (!execution || !run || !agent) return null;
 
   const output = agent.outputChunks.join("");
-  // 「记下改法」按人写进输入框，队员 / captain 在跑时都有。整轮停只给 captain：队员栏
-  // 再夹一枚方块停止，会和「停止这位队员」看起来像同一件事。整轮硬停的主入口是输入框。
+  // 整轮停只给 captain：队员栏再夹一枚方块停止，会和「停止这位队员」看起来像同一件事。
+  // 整轮硬停的主入口是输入框。「跑完再说」走输入框排队，不在右坞再放填草稿入口。
   const isCaptainRun = run.kind === "captain";
   const working = agent.status === "working";
-  const noteAction = working ? (
-    <Button
-      variant="ghost"
-      className="h-7 text-primary hover:bg-primary/10"
-      icon={<Pencil size={13} />}
-      onClick={() => {
-        useComposerDraftStore
-          .getState()
-          .fill(`【协作中调整】关于「${agent.role}」：`, "append");
-      }}
-    >
-      记下改法（跑完后发送）
-    </Button>
-  ) : null;
   const stopTurnAction =
     working && isCaptainRun ? (
       <Button
@@ -182,14 +166,10 @@ export function RunDetailBody({
         role={agent.role}
         redirectCapable={runCaps.runRedirect}
         output={output}
-        trailing={noteAction}
       />
-    ) : isCaptainRun && (noteAction || stopTurnAction) ? (
-      <div className="flex flex-wrap items-center gap-2">
-        {noteAction}
-        {stopTurnAction}
-      </div>
-    ) : null;
+    ) : (
+      stopTurnAction
+    );
   const thinkingLive = isThinkingLivePlaceholder(agent);
 
   const isModerator = isDebateModeratorRun(execution, run.id);
@@ -373,15 +353,6 @@ export function RunDetailBody({
             runId={runId}
           />
         )}
-
-      {/* 硬停后工作区改动：无 delivery harvest 时仍须露出基线 diff 入口（零 LLM）。 */}
-      {conversationId != null && execution.status === "cancelled" && (
-        <StoppedTurnFileChangesSection
-          execution={execution}
-          conversationId={conversationId}
-          messageId={messageId}
-        />
-      )}
 
       {showTimeline && (
         <div className="mb-4">

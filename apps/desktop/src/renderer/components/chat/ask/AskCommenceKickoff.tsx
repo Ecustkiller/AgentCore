@@ -243,7 +243,9 @@ export function AskCommenceKickoffBody({
             onFolderUnavailable={(msg) => setBindError(msg)}
           />
         ))}
-        {bindError && <p className="text-xs text-destructive">{bindError}</p>}
+        {bindError && (
+          <p className="text-xs text-muted-foreground">{bindError}</p>
+        )}
 
         {/* 恰好一题时「其他…」已覆盖自定义；多题才保留跨题附言，且默认折叠。 */}
         {content.questions.length !== 1 && (

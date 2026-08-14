@@ -214,7 +214,16 @@ async def test_captain_identity_carries_when_to_split_guidance():
     assert "再向下委派一层子团队" in sys
     assert "不要为委派而委派" in sys
     assert "consult(team_orchestration_advanced)" in sys
-    assert "活太大" in sys and "可独立完成" in sys
+    assert "先招人再整合" in sys
+    assert "未钉成单切片" in sys
+    assert "不是先深读再招" in sys
+    assert "薄切片" in sys and "整座仓" in sys
+    assert "escalate（范围）" in sys
+    assert "禁止默默扩编" in sys
+    assert "有 delegate 就可以招" in sys
+    assert "先组队" in sys
+    assert "本来就小" in sys
+    assert "不授权一个人扛里程碑" in sys
     assert "你的子成员仍可再向下委派一层" in sys
     # Path-B encyclopedia moved to consult — identity itself must not carry it
     # (full system prompt still has 豁免 in shared <work_authority>).
@@ -307,6 +316,7 @@ async def test_handoff_prompt_splits_by_topology():
     # 巡检定案 B：交付各一句防回灌（leaf / upstream / 各 form 同源）
     assert "交接勿回灌" in leaf and "交接勿回灌" in upstream
     assert "修复完成" in leaf and "已修复" in leaf
+    assert "现象已消除" in leaf and "已全部落地" in leaf
     assert "系统已就绪" in leaf and "界面没改" in leaf
     assert "最后一次同命令" in leaf and "分项分开写" in leaf
     assert "有工具活动或较长交付" in leaf

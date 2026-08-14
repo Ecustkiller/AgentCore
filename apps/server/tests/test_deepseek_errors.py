@@ -106,6 +106,81 @@ async def test_probe_401_with_credits_body_is_balance():
         with pytest.raises(LLMInsufficientBalanceError) as ei:
             await provider.probe(model=DEEPSEEK_V4_FLASH)
         assert "余额不足" in ei.value.message
+        assert not isinstance(ei.value, LLMAuthError)
+        assert ei.value.details.get("upstream_status") == 401
+        assert "Insufficient balance" in (ei.value.details.get("upstream_body_preview") or "")
+    finally:
+        await provider.close()
+
+
+_AUTH_BODY = (
+    b'{"error":{"message":"invalid api key","type":"authentication_error",'
+    b'"code":"invalid_api_key"}}'
+)
+
+
+@pytest.mark.parametrize("code", [401, 403])
+async def test_probe_auth_attaches_upstream_status_not_llm_auth_error(code):
+    """Connectivity probe must not upgrade 401/403 to LLMAuthError (Key 废)."""
+    provider = await _mock_provider(lambda request: httpx.Response(code, content=_AUTH_BODY))
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.details.get("upstream_status") == code
+        assert "invalid api key" in (ei.value.details.get("upstream_body_preview") or "")
+    finally:
+        await provider.close()
+
+
+async def test_probe_403_model_not_allowed_is_client_error_not_key():
+    body = b'{"error":{"message":"model not allowed","code":"model_not_allowed"}}'
+    provider = await _mock_provider(lambda request: httpx.Response(403, content=body))
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert not isinstance(ei.value, LLMAuthError)
+        assert "API Key 无效" not in ei.value.message
+        assert ei.value.details.get("upstream_status") == 403
+        assert "model not allowed" in (ei.value.details.get("upstream_body_preview") or "")
+    finally:
+        await provider.close()
+
+
+async def test_probe_401_logs_client_error_without_key():
+    from structlog.testing import capture_logs
+
+    secret = "sk-secret-key-xyz"
+    provider = OpenAICompatibleProvider(
+        name="test", api_key=secret, base_url="http://example.invalid/v1"
+    )
+    await provider._client.aclose()
+    provider._client = httpx.AsyncClient(
+        base_url="http://example.invalid/v1",
+        transport=httpx.MockTransport(lambda request: httpx.Response(401)),
+    )
+    try:
+        with capture_logs() as caps, pytest.raises(LLMError):
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        ev = next(c for c in caps if c.get("event") == "llm.client_error")
+        assert ev["status_code"] == 401
+        assert ev["provider"] == "test"
+        assert "api_key" not in ev
+        dumped = " ".join(str(v) for v in ev.values())
+        assert secret not in dumped
+    finally:
+        await provider.close()
+
+
+async def test_list_models_401_is_llm_auth_error():
+    """GET /models 401 is a real Key failure — unlike probe, this stays LLMAuthError."""
+    provider = await _mock_provider(lambda request: httpx.Response(401, content=_AUTH_BODY))
+    try:
+        with pytest.raises(LLMAuthError) as ei:
+            await provider.list_models()
+        assert ei.value.details.get("upstream_status") == 401
+        assert "API Key" in ei.value.message
     finally:
         await provider.close()
 

@@ -224,7 +224,7 @@ export function RunWorkflowDialog({
 
             {foldersState.status === "error" && (
               <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                <p className="min-w-0 flex-1 text-xs text-destructive">
+                <p className="min-w-0 flex-1 text-xs text-muted-foreground">
                   {foldersState.message}
                 </p>
                 <Button
@@ -304,7 +304,7 @@ export function RunWorkflowDialog({
             />
           </label>
 
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-muted-foreground">{error}</p>}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">

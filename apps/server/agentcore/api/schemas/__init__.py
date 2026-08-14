@@ -312,7 +312,6 @@ from .workflows import (
     PlaybookTemplateSummary,
     RunWorkflowRequest,
     RunWorkflowResponse,
-    SaveTurnAsWorkflowRequest,
     UpdateWorkflowRequest,
     WorkflowDefinitionModel,
     WorkflowSourceModel,
@@ -593,7 +592,6 @@ __all__ = [
     "RunWorkflowResponse",
     "PlaybookTemplateSummary",
     "FromPlaybookRequest",
-    "SaveTurnAsWorkflowRequest",
     # devices
     "DeviceRegistration",
     "DeviceSummary",

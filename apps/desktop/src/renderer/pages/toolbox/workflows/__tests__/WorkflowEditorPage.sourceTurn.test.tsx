@@ -23,11 +23,13 @@ vi.mock("../WorkflowCanvas", () => ({
   WorkflowCanvas: () => <div data-testid="canvas" />,
 }));
 
-import { getWorkflow } from "@/services/workflows";
+import { ApiError } from "@/services/api";
+import { getWorkflow, patchWorkflow } from "@/services/workflows";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { WorkflowEditorPage } from "../WorkflowEditorPage";
 
 const load = vi.mocked(getWorkflow);
+const save = vi.mocked(patchWorkflow);
 
 function workflow(source: UserWorkflow["source"]): UserWorkflow {
   return {
@@ -64,6 +66,7 @@ function renderPage() {
 
 beforeEach(() => {
   load.mockReset();
+  save.mockReset();
 });
 
 afterEach(() => {
@@ -90,5 +93,50 @@ describe("工作流详情页 · 回到原对话", () => {
 
     expect(await screen.findByTestId("canvas")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "回到原对话" })).toBeNull();
+  });
+});
+
+describe("工作流详情页 · 可恢复失败", () => {
+  it("加载失败走 muted 行内文案", async () => {
+    load.mockRejectedValue(
+      new ApiError(
+        500,
+        JSON.stringify({ error: { message: "工作流服务开小差" } }),
+      ),
+    );
+    renderPage();
+
+    const err = await screen.findByText("工作流服务开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
+  });
+
+  it("保存失败走 muted 行内文案", async () => {
+    load.mockResolvedValue(workflow(null));
+    save.mockRejectedValue(
+      new ApiError(500, JSON.stringify({ error: { message: "保存开小差" } })),
+    );
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "保存" }));
+
+    const err = await screen.findByText("保存开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
+  });
+
+  it("定义校验 warning 琥珀句保持 warning", async () => {
+    load.mockResolvedValue({
+      ...workflow(null),
+      definition: {
+        nodes: [{ id: "s1", kind: "agent_step", role: "", task: "调研" }],
+        edges: [],
+      },
+    });
+    renderPage();
+
+    const issue = await screen.findByText("队员步骤须填写角色");
+    expect(issue.closest("ul")?.className).toContain("text-warning");
+    expect(issue.closest("ul")?.className).not.toContain("destructive");
   });
 });

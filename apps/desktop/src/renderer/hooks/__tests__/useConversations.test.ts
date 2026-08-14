@@ -57,6 +57,13 @@ describe("conversation list cache helpers", () => {
       upsertConversationFront(mk("b"));
       expect(getConversations().map((c) => c.id)).toEqual(["b", "a"]);
     });
+
+    it("does not blank a cached lastMessagePreview when the incoming row omitted it", () => {
+      seed([{ ...mk("a"), lastMessagePreview: "上次助手句" }]);
+      upsertConversationFront({ ...mk("a"), title: "改名后" });
+      expect(getConversations()[0].title).toBe("改名后");
+      expect(getConversations()[0].lastMessagePreview).toBe("上次助手句");
+    });
   });
 
   describe("removeConversationFromCache", () => {

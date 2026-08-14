@@ -1,15 +1,17 @@
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import type { FileSource } from "@/lib/fileSource";
+import type { FileNode, FileSource } from "@/lib/fileSource";
 import { conversationKeys, workspaceKeys } from "@/lib/queryKeys";
 import type { FolderMeta } from "@/services/folders";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 // @vitest-environment jsdom
 import {
   type RenderResult,
+  act,
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { type ReactElement, useState } from "react";
 import { MemoryRouter } from "react-router-dom";
@@ -56,10 +58,6 @@ vi.mock("@/stores/sidePanel", () => ({
   ) => sel({ showFile, showChanges }),
 }));
 
-vi.mock("@/hooks/useFileAudit", () => ({
-  useFileAudit: () => ({ status: "idle" as const }),
-}));
-
 // 能力判定与对话侧栏同一套：卡直接问 useConversationFileSource 挂没挂 openInAppPreview。
 vi.mock("@/hooks/useConversationFileSource", () => ({
   useConversationFileSource: vi.fn(() => null),
@@ -79,6 +77,23 @@ const sourceWithPreview = {
   openInAppPreview,
 } as unknown as FileSource;
 
+function sourceWithList(
+  entriesByDir: Record<string, FileNode[]>,
+): FileSource & { listDir: ReturnType<typeof vi.fn> } {
+  const listDir = vi.fn(async (dir: string) => entriesByDir[dir] ?? []);
+  return {
+    id: "workspace:test",
+    label: "工作区",
+    caps: { watch: false, transfer: false, edit: false, snapshots: false },
+    listDir,
+    read: async () => ({ kind: "text" as const, text: "", truncated: false }),
+    createFile: async () => {},
+    mkdir: async () => {},
+    move: async () => {},
+    delete: async () => {},
+  };
+}
+
 const sessionWs: WorkspaceInfo = {
   wsId: "folder:proj",
   name: "项目",
@@ -95,7 +110,7 @@ describe("FileArtifactsCard acceptance labels", () => {
     vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
-  it("shows 已验收/未通过 and never 写入/编辑 on acceptance rows", () => {
+  it("通过行不打已验收，未通过仍标，且不显示写入/编辑", () => {
     renderCard(
       <FileArtifactsCard
         conversationId="c1"
@@ -115,10 +130,25 @@ describe("FileArtifactsCard acceptance labels", () => {
         ]}
       />,
     );
-    expect(screen.getByText("已验收")).toBeTruthy();
+    expect(screen.queryByText("已验收")).toBeNull();
     expect(screen.getByText("未通过")).toBeTruthy();
     expect(screen.queryByText("写入")).toBeNull();
     expect(screen.queryByText("编辑")).toBeNull();
+  });
+
+  it("全员通过时无已验收徽章", () => {
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[
+          { path: "a.md", name: "a.md", acceptance: "accepted" },
+          { path: "b.md", name: "b.md", acceptance: "accepted" },
+        ]}
+      />,
+    );
+    expect(screen.queryByText("已验收")).toBeNull();
+    expect(screen.getByText("a.md")).toBeTruthy();
+    expect(screen.getByText("b.md")).toBeTruthy();
   });
 
   it("write/edit tool rows omit op badges", () => {
@@ -137,6 +167,18 @@ describe("FileArtifactsCard acceptance labels", () => {
     );
     expect(screen.queryByText("写入")).toBeNull();
     expect(screen.queryByText("编辑")).toBeNull();
+  });
+
+  it("卡上无写入归因入口", () => {
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        turnKey="msg-1"
+        artifacts={[{ path: "ok.md", name: "ok.md", acceptance: "accepted" }]}
+      />,
+    );
+    expect(screen.queryByLabelText("查看写入归因")).toBeNull();
+    expect(screen.queryByText("查看写入归因")).toBeNull();
   });
 });
 
@@ -376,7 +418,7 @@ describe("FileArtifactsCard — A1 查看改动", () => {
   });
 });
 
-describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
+describe("FileArtifactsCard — 清单不按归位分组", () => {
   // 工作稿是约定目录（`stageDirs`），落在它下面的行走「在文件页查看」入口而非工作区预览。
   const WORKROOM = "AgentCore/文档/工作稿";
   const product = {
@@ -397,18 +439,13 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
     vi.mocked(useConversationWorkspace).mockReturnValue(null);
   });
 
-  it("有成品：成品组在前显示归位后的路径，其余已验收退到过程材料组", () => {
+  it("已验收平铺同一列表，无成品/过程材料标题；归位件只显示新路径", () => {
     renderCard(
       <FileArtifactsCard conversationId="c1" artifacts={[material, product]} />,
     );
 
-    const productHeader = screen.getByText("成品");
-    const materialHeader = screen.getByText("过程材料");
-    // 成品在前、过程材料在后（与文件页「AI 工作间」排同级最后同一心智）。
-    expect(
-      productHeader.compareDocumentPosition(materialHeader) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(screen.queryByText("成品")).toBeNull();
+    expect(screen.queryByText("过程材料")).toBeNull();
 
     // 归位是移动：只显示新路径，AI 工作间里的旧路径已失效。
     const productRow = screen.getByTitle("在工作区预览 起诉状.docx");
@@ -422,31 +459,13 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
       undefined,
     );
 
-    // 两组各自成列，过程材料不混进成品。
     const materialRow = screen.getByTitle(
       `在文件页查看约定文档 ${WORKROOM}/取证清单.md`,
     );
-    expect(productRow.closest("ul")).not.toBe(materialRow.closest("ul"));
+    expect(productRow.closest("ul")).toBe(materialRow.closest("ul"));
   });
 
-  it("零归位：不渲染成品组，其余照常——中间幕是合法状态，不加提示语", () => {
-    renderCard(
-      <FileArtifactsCard
-        conversationId="c1"
-        artifacts={[material, { ...product, promotedFrom: undefined }]}
-      />,
-    );
-
-    expect(screen.queryByText("成品")).toBeNull();
-    expect(screen.getByText("过程材料")).toBeTruthy();
-    expect(screen.getByTitle("在工作区预览 起诉状.docx")).toBeTruthy();
-    expect(
-      screen.getByTitle(`在文件页查看约定文档 ${WORKROOM}/取证清单.md`),
-    ).toBeTruthy();
-    expect(screen.queryByText(/未归位|尚未|无成品|本轮没有/)).toBeNull();
-  });
-
-  it("未通过维持现状：不进成品组，也不混进过程材料组", () => {
+  it("未通过单独一列，不混进已验收列表", () => {
     renderCard(
       <FileArtifactsCard
         conversationId="c1"
@@ -467,10 +486,11 @@ describe("FileArtifactsCard — 成品 / 过程材料分组", () => {
     const rejectedList = screen
       .getByTitle("在工作区预览 报告.md")
       .closest("ul");
-    expect(rejectedList).not.toBe(
-      screen.getByTitle("在工作区预览 起诉状.docx").closest("ul"),
-    );
-    expect(rejectedList).not.toBe(
+    const acceptedList = screen
+      .getByTitle("在工作区预览 起诉状.docx")
+      .closest("ul");
+    expect(rejectedList).not.toBe(acceptedList);
+    expect(acceptedList).toBe(
       screen
         .getByTitle(`在文件页查看约定文档 ${WORKROOM}/取证清单.md`)
         .closest("ul"),
@@ -539,5 +559,148 @@ describe("FileArtifactsCard — 裸聊落点告知并进卡头", () => {
       />,
     );
     expect(screen.queryByTestId("auto-folder-notice")).toBeNull();
+  });
+});
+
+describe("FileArtifactsCard — 工作区 list 修改时间", () => {
+  const HOUR = 3_600_000;
+  const NOW = new Date("2026-08-14T12:00:00").getTime();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(useConversationFileSource).mockReturnValue(null);
+    vi.mocked(useConversationWorkspace).mockReturnValue(null);
+  });
+
+  it("list 命中的行只显示修改时间（与文件树同一套文案）", async () => {
+    vi.setSystemTime(NOW);
+    const src = sourceWithList({
+      "": [
+        {
+          path: "notes.md",
+          name: "notes.md",
+          isDir: false,
+          sizeBytes: 2048,
+          mtimeMs: NOW - HOUR,
+        },
+      ],
+    });
+    vi.mocked(useConversationFileSource).mockReturnValue(src);
+
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[{ path: "notes.md", name: "notes.md", op: "write" }]}
+      />,
+    );
+
+    expect(await screen.findByText("11:00")).toBeTruthy();
+    expect(screen.queryByText(/KB/)).toBeNull();
+    expect(screen.queryByText(/\d+ B\b/)).toBeNull();
+    expect(src.listDir).toHaveBeenCalledWith("");
+    vi.useRealTimers();
+  });
+
+  it("嵌套路径问父目录 list，不新造接口", async () => {
+    vi.setSystemTime(NOW);
+    const src = sourceWithList({
+      src: [
+        {
+          path: "src/main.ts",
+          name: "main.ts",
+          isDir: false,
+          sizeBytes: 10,
+          mtimeMs: NOW - HOUR,
+        },
+      ],
+    });
+    vi.mocked(useConversationFileSource).mockReturnValue(src);
+
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[{ path: "src/main.ts", name: "main.ts", op: "write" }]}
+      />,
+    );
+
+    expect(await screen.findByText("11:00")).toBeTruthy();
+    expect(screen.queryByText(/10 B/)).toBeNull();
+    expect(src.listDir).toHaveBeenCalledWith("src");
+    expect(src.listDir).not.toHaveBeenCalledWith("");
+    vi.useRealTimers();
+  });
+
+  it("对不上或缺字段就不占位，不拿 0 B / 未知冒充", async () => {
+    const src = sourceWithList({
+      "": [
+        {
+          path: "other.md",
+          name: "other.md",
+          isDir: false,
+          sizeBytes: 99,
+          mtimeMs: NOW,
+        },
+        {
+          path: "empty.md",
+          name: "empty.md",
+          isDir: false,
+          sizeBytes: null,
+          mtimeMs: null,
+        },
+      ],
+    });
+    vi.mocked(useConversationFileSource).mockReturnValue(src);
+
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[
+          { path: "missing.md", name: "missing.md", op: "write" },
+          { path: "empty.md", name: "empty.md", op: "write" },
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(src.listDir).toHaveBeenCalled());
+    expect(screen.queryByText(/0 B/)).toBeNull();
+    expect(screen.queryByText(/未知/)).toBeNull();
+    expect(screen.queryByText(/99 B/)).toBeNull();
+  });
+
+  it("别的落地桌不套用会话 list 的数字", async () => {
+    const src = sourceWithList({
+      "": [
+        {
+          path: "notes.md",
+          name: "notes.md",
+          isDir: false,
+          sizeBytes: 2048,
+          mtimeMs: NOW,
+        },
+      ],
+    });
+    vi.mocked(useConversationFileSource).mockReturnValue(src);
+    vi.mocked(useConversationWorkspace).mockReturnValue(sessionWs);
+
+    renderCard(
+      <FileArtifactsCard
+        conversationId="c1"
+        artifacts={[
+          {
+            path: "notes.md",
+            name: "notes.md",
+            op: "write",
+            workspaceId: "folder:other",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTitle("在工作区预览 notes.md")).toBeTruthy();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(src.listDir).not.toHaveBeenCalled();
+    expect(screen.queryByText(/2.0 KB/)).toBeNull();
   });
 });

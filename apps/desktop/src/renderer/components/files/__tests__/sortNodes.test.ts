@@ -33,6 +33,15 @@ describe("sortNodes", () => {
     ]);
   });
 
+  it("按修改时间降序，缺 mtime 沉底后再按名", () => {
+    const older = { ...file("older.md"), mtimeMs: 1 };
+    const newer = { ...file("newer.md"), mtimeMs: 9 };
+    const missing = { ...file("zzz.md"), mtimeMs: null };
+    expect(
+      sortNodes([older, missing, newer], "mtime").map((n) => n.path),
+    ).toEqual(["newer.md", "older.md", "zzz.md"]);
+  });
+
   it("嵌套的同名目录仍按普通目录排", () => {
     const map = bucketTree([
       dir("src"),

@@ -1,4 +1,4 @@
-"""开工卡取消：CEO tool result 软引导（不硬闸）。"""
+"""开工卡取消 / 超时：CEO tool result 软引导（不硬闸）。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import pytest
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.kickoff.cancel_guidance import (
     KICKOFF_CANCEL_GUIDANCE,
+    KICKOFF_TIMEOUT_GUIDANCE,
     format_kickoff_cancel_result,
+    format_kickoff_timeout_result,
 )
 from agentcore.runtime.runs.plan import RunPlan
 from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
@@ -27,6 +29,23 @@ def test_format_kickoff_cancel_result_delegate_and_debate():
     assert "换个角度" in with_note
     assert KICKOFF_CANCEL_GUIDANCE in with_note
     assert "用户留言：" in with_note
+
+
+def test_format_kickoff_timeout_result_delegate_and_debate():
+    d = format_kickoff_timeout_result(primitive="delegate")
+    assert "用户未在时限内回应" in d
+    assert "团队未启动" in d
+    assert "自行收尾" in d
+    assert "禁止未获确认就重派同一套" in d
+    assert KICKOFF_TIMEOUT_GUIDANCE in d
+    assert "宜先问" not in d
+
+    b = format_kickoff_timeout_result(primitive="debate")
+    assert "用户未在时限内回应" in b
+    assert "辩论未开赛" in b
+    assert "自行收尾" in b
+    assert KICKOFF_TIMEOUT_GUIDANCE in b
+    assert "宜先问" not in b
 
 
 @pytest.mark.asyncio
@@ -92,3 +111,33 @@ async def test_resume_plan_stop_kickoff_vs_plan_review():
     assert "人太多" in kickoff_stop.output
     assert "团队未启动" in kickoff_stop.output
     assert "团队执行结果" not in kickoff_stop.output
+
+
+@pytest.mark.asyncio
+async def test_resume_plan_timeout_kickoff_no_grant_no_drive():
+    """team_preview TIMEOUT：不 grant、不跑 worker，回灌未启动/自行收尾。"""
+    from tests.delegate.conftest import Provider, gate, resume_plan, tool
+
+    plan = resume_plan()
+    provider = Provider(["SHOULD_NOT_RUN"])
+    approval = gate()
+    t = tool(provider)
+    t._approval_gate = approval
+
+    kickoff_timeout = await t.resume_plan(
+        plan,
+        {},
+        decision=CheckpointDecision.TIMEOUT,
+        note="",
+        checkpoint_run_ids=set(),
+        execution_id="e-kickoff-timeout",
+        apply_kickoff_grant=True,
+    )
+    assert "未在时限内回应" in kickoff_timeout.output
+    assert "未启动" in kickoff_timeout.output
+    assert "自行收尾" in kickoff_timeout.output
+    assert "禁止未获确认就重派同一套" in kickoff_timeout.output
+    assert "宜先问" not in kickoff_timeout.output
+    assert "团队执行结果" not in kickoff_timeout.output
+    assert provider.calls == 0
+    assert not approval.has_delegation_grant("e-kickoff-timeout")

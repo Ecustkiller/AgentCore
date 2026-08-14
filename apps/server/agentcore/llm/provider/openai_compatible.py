@@ -55,6 +55,7 @@ from agentcore.llm.provider.protocol import (
     MAX_RETRIES,
     RATE_LIMIT_MAX_RETRIES,
     TURN_CONNECT_MAX_RETRIES,
+    TURN_SCALE_SCENARIOS,
     LLMChunk,
     LLMRequest,
     LLMResponse,
@@ -207,8 +208,37 @@ def _retry_wait(
     return retry_after if retry_after > 0 else backoff
 
 
+def _interactive_rate_limit_fail_fast(
+    *,
+    scenario: str | None,
+    cooldown_source: str | None,
+    retry_after: float | None,
+    attempt: int | None,
+) -> bool:
+    """Turn-scale 429s do not sit out an unattested or long cooldown.
+
+    Header-less production 429s used to burn 2→4→8→16 of empty sleep before the
+    30s ceiling refused them. Interactive turns now fail immediately unless
+    upstream attested a short ``Retry-After`` (≤ one initial backoff), and even
+    then wait at most once. ``cooldown_source is None`` keeps the old
+    ceiling-only gate for callers that have not stamped provenance.
+    """
+    if cooldown_source is None or scenario not in TURN_SCALE_SCENARIOS:
+        return False
+    if cooldown_source != RETRY_AFTER_FROM_HEADER:
+        return True
+    if retry_after is None or retry_after > _INITIAL_BACKOFF:
+        return True
+    return attempt is not None and attempt > 0
+
+
 def _rate_limit_should_retry(
-    retry_after: float | None, *, ceiling: float | None = None
+    retry_after: float | None,
+    *,
+    ceiling: float | None = None,
+    scenario: str | None = None,
+    cooldown_source: str | None = None,
+    attempt: int | None = None,
 ) -> bool:
     """Whether a 429 is worth sitting out on the budget this call has left.
 
@@ -218,7 +248,19 @@ def _rate_limit_should_retry(
     the caller's remaining wall clock, or the interactive ``MAX_RETRY_AFTER`` when
     there is no deadline — and anything past it fails immediately so the UI can
     surface rate-limit instead of spinning.
+
+    Turn-scale scenarios (chat / agent) additionally refuse unattested cooldowns
+    and headers longer than one initial backoff. Omitting ``cooldown_source``
+    keeps the ceiling-only behaviour so ``_rate_limit_should_retry(5.0)`` stays
+    True. Title / compaction keep the 2→4→8→16 chain.
     """
+    if _interactive_rate_limit_fail_fast(
+        scenario=scenario,
+        cooldown_source=cooldown_source,
+        retry_after=retry_after,
+        attempt=attempt,
+    ):
+        return False
     limit = _MAX_RETRY_AFTER if ceiling is None else ceiling
     return not (retry_after is not None and retry_after > limit)
 
@@ -246,9 +288,28 @@ def _error_cooldown(error: Exception) -> tuple[float | None, str | None]:
     return None, None
 
 
-def _no_retry_reason(source: str | None) -> str:
-    """Why we stopped: upstream's cooldown outran the budget, or our own next backoff
-    did. The second case used to log as the first, which reads as upstream's fault."""
+def _no_retry_reason(
+    source: str | None,
+    *,
+    retry_after: float | None = None,
+    ceiling: float | None = None,
+    scenario: str | None = None,
+    attempt: int | None = None,
+) -> str:
+    """Why we stopped: upstream's cooldown outran the budget, our own next backoff
+    did, or an interactive turn refused to sit out an unattested / long cooldown.
+    The second case used to log as the first, which reads as upstream's fault.
+    Day-scale headers still log as ``retry_after_too_large`` (the 30s ceiling
+    already refuses them); ``interactive_fail_fast`` is only the new give-up."""
+    limit = _MAX_RETRY_AFTER if ceiling is None else ceiling
+    ceiling_blocks = retry_after is not None and retry_after > limit
+    if not ceiling_blocks and _interactive_rate_limit_fail_fast(
+        scenario=scenario,
+        cooldown_source=source,
+        retry_after=retry_after,
+        attempt=attempt,
+    ):
+        return "interactive_fail_fast"
     return (
         "backoff_exceeds_budget"
         if source == RETRY_AFTER_FROM_BACKOFF
@@ -409,9 +470,12 @@ class OpenAICompatibleProvider:
         ``committed`` flips on the first content or tool_call delta. Reasoning,
         role-only, usage-only, and keepalive chunks do not commit. Pre-commit
         transport/upstream failures transparently retry the whole request;
-        post-commit disconnect yields ``aborted`` instead of raising so the
-        engine can keep the partial. A transparent retry yields ``stream_reset``
-        so consumers drop ephemeral reasoning before the next attempt.
+        a clean EOF after reasoning-only (no ``finish_reason``, no content /
+        tools) is the same class — some gateways close the SSE mid-think
+        without raising. Post-commit disconnect yields ``aborted`` instead of
+        raising so the engine can keep the partial. A transparent retry yields
+        ``stream_reset`` so consumers drop ephemeral reasoning before the next
+        attempt.
         """
         # Sidecar→localhost inference SSE can stall at 0 chunks while the proxy
         # still finishes upstream (proxy_spend_enqueued then llm.stream_stalled).
@@ -585,6 +649,24 @@ class OpenAICompatibleProvider:
                         return
                     raw_body_preview = body_preview("\n".join(last_lines))
                     format_mismatch = json_parse_failures > 0 and parsed_chunks == 0
+                    # Clean EOF after thinking tokens, no protocol finish — not
+                    # silent_empty. Same pre-commit retry as a raised disconnect.
+                    if (
+                        yielded_ephemeral
+                        and last_finish_reason is None
+                        and not format_mismatch
+                        and self._can_retry_attempt(attempt)
+                    ):
+                        yield LLMChunk(stream_reset=True)
+                        yielded_ephemeral = False
+                        backoff = await self._sleep_before_retry(
+                            attempt=attempt,
+                            backoff=backoff,
+                            stream=True,
+                            reason="reasoning_only_incomplete",
+                            partial_sse_lines=lines_seen,
+                        )
+                        continue
                     diagnosis = diagnose_empty_response(
                         raw_body=raw_body_preview,
                         finish_reason=last_finish_reason,
@@ -654,7 +736,11 @@ class OpenAICompatibleProvider:
                     raise
                 retry_after, cooldown_source = _error_cooldown(e)
                 if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after, ceiling=ceiling
+                    retry_after,
+                    ceiling=ceiling,
+                    scenario=request.scenario,
+                    cooldown_source=cooldown_source,
+                    attempt=attempt,
                 ):
                     logger.info(
                         "llm.rate_limit_no_retry",
@@ -664,7 +750,13 @@ class OpenAICompatibleProvider:
                         **_cooldown_fields(retry_after, cooldown_source),
                         ceiling_sec=ceiling,
                         stream=True,
-                        reason=_no_retry_reason(cooldown_source),
+                        reason=_no_retry_reason(
+                            cooldown_source,
+                            retry_after=retry_after,
+                            ceiling=ceiling,
+                            scenario=request.scenario,
+                            attempt=attempt,
+                        ),
                     )
                     raise
                 if yielded_ephemeral:
@@ -880,19 +972,33 @@ class OpenAICompatibleProvider:
                 raise envelope_error
         if status_code == 429:
             cooldown = _parse_retry_after(headers.get("retry-after"), backoff)
-            if not _rate_limit_should_retry(cooldown.seconds, ceiling=retry_ceiling):
-                # The refusal now rides on the error itself, so the retry loop
-                # short-circuits before its own guard could log this. ``ceiling_sec``
-                # is why we refused: a header inside it is waited out instead.
-                logger.info(
-                    "llm.rate_limit_no_retry",
-                    provider=self._name,
-                    scenario=scenario,
-                    attempt=attempt + 1,
-                    **_cooldown_fields(cooldown.seconds, cooldown.source),
-                    ceiling_sec=_MAX_RETRY_AFTER if retry_ceiling is None else retry_ceiling,
-                    reason=_no_retry_reason(cooldown.source),
-                )
+            if not _rate_limit_should_retry(
+                cooldown.seconds,
+                ceiling=retry_ceiling,
+                scenario=scenario,
+                cooldown_source=cooldown.source,
+                attempt=attempt,
+            ):
+                # Ceiling refusals come back non-retryable and skip the loop's
+                # own guard. Interactive fail-fast stays retryable, so the loop
+                # emits this line.
+                limit = _MAX_RETRY_AFTER if retry_ceiling is None else retry_ceiling
+                if cooldown.seconds is not None and cooldown.seconds > limit:
+                    logger.info(
+                        "llm.rate_limit_no_retry",
+                        provider=self._name,
+                        scenario=scenario,
+                        attempt=attempt + 1,
+                        **_cooldown_fields(cooldown.seconds, cooldown.source),
+                        ceiling_sec=limit,
+                        reason=_no_retry_reason(
+                            cooldown.source,
+                            retry_after=cooldown.seconds,
+                            ceiling=retry_ceiling,
+                            scenario=scenario,
+                            attempt=attempt,
+                        ),
+                    )
             raise upstream_rate_limit_error(
                 cooldown.seconds,
                 credential_source=self._credential_source,
@@ -1176,7 +1282,11 @@ class OpenAICompatibleProvider:
                     raise
                 retry_after, cooldown_source = _error_cooldown(e)
                 if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after, ceiling=ceiling
+                    retry_after,
+                    ceiling=ceiling,
+                    scenario=scenario,
+                    cooldown_source=cooldown_source,
+                    attempt=attempt,
                 ):
                     logger.info(
                         "llm.rate_limit_no_retry",
@@ -1186,7 +1296,13 @@ class OpenAICompatibleProvider:
                         **_cooldown_fields(retry_after, cooldown_source),
                         ceiling_sec=ceiling,
                         stream=False,
-                        reason=_no_retry_reason(cooldown_source),
+                        reason=_no_retry_reason(
+                            cooldown_source,
+                            retry_after=retry_after,
+                            ceiling=ceiling,
+                            scenario=scenario,
+                            attempt=attempt,
+                        ),
                     )
                     raise
                 wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
@@ -1264,13 +1380,30 @@ class OpenAICompatibleProvider:
             self._require_chat_completions_body(response.content)
             return
         if code in (401, 403):
+            preview = body_preview(response.content)
+            logger.warning(
+                "llm.client_error",
+                provider=self._name,
+                status_code=code,
+                body_preview=preview,
+            )
             if is_balance_exhausted(response.content):
                 raise LLMInsufficientBalanceError(
                     provider_name=self._name,
                     display_name=self._display_name,
+                    upstream_status=code,
+                    upstream_body_preview=preview,
                 )
-            raise LLMError(
-                f"{self._display_name} API Key 无效或无权限（鉴权失败），请检查后重试"
+            if is_auth_rejection(code, response.content):
+                raise LLMError(
+                    f"{self._display_name} API Key 无效或无权限（鉴权失败），请检查后重试",
+                    upstream_status=code,
+                    upstream_body_preview=preview,
+                )
+            raise upstream_client_error(
+                client_error_message(self._display_name, code, response.content),
+                status=code,
+                body=response.content,
             )
         if code == 402:
             raise LLMInsufficientBalanceError(

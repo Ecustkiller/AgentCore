@@ -113,7 +113,7 @@ describe("searchIndex", () => {
     const entries = buildContentSearchEntries();
 
     const workflow = entries.find((e) => e.id === "collaboration-workflow");
-    expect(workflow?.label).toBe("存为工作流");
+    expect(workflow?.label).toBe("工作流");
     expect(workflow?.to).toBe("/toolbox/manual/collaboration?s=workflow");
     expect(workflow?.haystack).toContain("官方模板");
     expect(workflow?.haystack).toContain("等人关卡");

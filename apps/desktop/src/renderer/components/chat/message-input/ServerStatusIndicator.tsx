@@ -21,7 +21,7 @@ export function ComposerConnectionNotice() {
   return (
     <div
       aria-live="polite"
-      className="flex items-center gap-1.5 px-4 pt-2 text-xs text-destructive"
+      className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
     >
       <Loader2 size={12} className="shrink-0 animate-spin" />
       与服务器断开连接。可浏览已缓存的对话与本机文件（只读）；不能发送或跑

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiError } from "@/services/api";
 import type { StandingTaskRun } from "@/services/standingTasks";
 import {
   cleanup,
@@ -97,5 +98,28 @@ describe("InboxPanel 筛选条", () => {
     expect(
       screen.getByRole("button", { name: "全部" }).getAttribute("aria-pressed"),
     ).toBe("false");
+  });
+
+  it("shows a recoverable list failure as muted inline text", async () => {
+    runs.mockRejectedValueOnce(
+      new ApiError(503, JSON.stringify({ error: { message: "收件箱开小差" } })),
+    );
+    renderPanel();
+
+    const err = await screen.findByText("收件箱开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
+  });
+
+  it("keeps failed-run body and 待拍板 amber (execution / needs-you)", async () => {
+    runs.mockResolvedValue([
+      run({ id: "run-fail", status: "failed", error: "模型超时" }),
+      run({ id: "run-hold", status: "awaiting_user", summary: "等你拍板" }),
+    ]);
+    renderPanel();
+
+    const body = await screen.findByText("模型超时");
+    expect(body.className).toContain("text-destructive");
+    expect(screen.getByText("待拍板").className).toContain("text-warning");
   });
 });

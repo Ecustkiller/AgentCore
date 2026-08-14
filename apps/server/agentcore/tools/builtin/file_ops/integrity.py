@@ -293,33 +293,52 @@ def _norm_rel_path(path: str) -> str:
     return (path or "").strip().replace("\\", "/")
 
 
-def _prepare_write_relpath(path: str) -> tuple[str, str]:
-    """Sanitize a write path; return ``(actual, rename_note)``.
+async def _prepare_write_relpath(
+    path: str,
+    context: ToolContext,
+    *,
+    register: bool = True,
+    register_bare: bool = False,
+) -> tuple[str, str]:
+    """Rewrite empty-desk shell, then sanitize; return ``(actual, rename_note)``.
 
-    ``rename_note`` is a one-line tip when the cleaned path differs from the
-    request (empty string when unchanged). Callers append it to success receipts.
-    ``/workspace/…`` strip alone does not count as a rename (same as backend
-    normalize); only dangerous-char / dossier-flatten changes do.
+    Shell strip lives here (workspace + turn slot) — not in diskless
+    ``sanitize_write_relpath``. ``rename_note`` is a one-line tip when the
+    cleaned path differs from the request. ``/workspace/…`` strip alone does
+    not count as a rename; dangerous-char / dossier-flatten / shell-strip do.
+    ``register=False`` (delete) applies an existing slug only.
+    ``register_bare=True`` (mkdir) stamps a single-segment shell.
     """
     from agentcore.workspace._paths import (
         normalize_workspace_path,
         sanitize_write_relpath,
     )
+    from agentcore.workspace.project_shell import rewrite_project_shell_relpath
 
     requested = (path or "").strip()
     if not requested:
         return "", ""
-    actual = sanitize_write_relpath(requested)
-    baseline = normalize_workspace_path(requested, root_label="workspace")
-    if _norm_rel_path(actual) == _norm_rel_path(baseline):
-        return actual, ""
-    return (
-        actual,
-        f"注意：请求路径已清理，实际写入 `{actual}`。"
-        "约定文档区（`AgentCore/文档/` 下 research/reviews/debate）前缀之后"
-        "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
-        "（规范化后常等同）。",
+    rewritten, shell_note = await rewrite_project_shell_relpath(
+        requested, context, register=register, register_bare=register_bare
     )
+    # ``.`` is a valid workspace-root dest (archive_extract). Empty is a
+    # shell-stripped bare mkdir / invalid file path — callers treat them apart.
+    if rewritten == ".":
+        return ".", shell_note
+    if not rewritten:
+        return "", shell_note
+    actual = sanitize_write_relpath(rewritten)
+    baseline = normalize_workspace_path(rewritten, root_label="workspace")
+    sanitize_note = ""
+    if _norm_rel_path(actual) != _norm_rel_path(baseline):
+        sanitize_note = (
+            f"注意：请求路径已清理，实际写入 `{actual}`。"
+            "约定文档区（`AgentCore/文档/` 下 research/reviews/debate）前缀之后"
+            "嵌套 `/` 会压成 `_`（单文件名）；勿再 file_move/copy「改回」斜杠路径"
+            "（规范化后常等同）。"
+        )
+    note = " ".join(part for part in (shell_note, sanitize_note) if part)
+    return actual, note
 
 
 def write_scope_rejection(context: ToolContext, path: str) -> str | None:

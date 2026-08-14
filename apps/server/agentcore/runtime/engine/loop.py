@@ -297,7 +297,8 @@ async def react_loop(
     wind_down_breach_count = 0
     wind_down_breach_pending_nudge = False
     wind_down_breach_nudge_text = ""
-    # 交文件久读无写收窄（与 token/timeout wind_down 解耦；可先于预算窗生效）。
+    # delivery_idle 工具收窄（factory 对交文件已关；显式构造仍可能走此路径）。
+    # 与 token/timeout wind_down 解耦。
     delivery_idle_narrow_active = False
     # 检索预算临界（剩 ≤2）一次性 reflection，缓解同轮 fan-out 超订。
     retrieval_critical_warned = False
@@ -519,14 +520,14 @@ async def react_loop(
         emit_run_phase(sink, run_id, agent_id, "winding_down")
 
     def _apply_delivery_idle_narrow() -> None:
-        """Narrow to write/诊断/handoff/必要读 after delivery-idle ladder — repair only.
+        """Narrow to write/诊断/handoff/必要读 after delivery-idle ladder.
 
-        Repair ``files_expected`` may reuse :func:`narrow_tools_for_wind_down`.
-        Report-delivery posts never arm this path (``narrow_rounds=0``); do **not**
-        call this for report idle. Does **not** emit ``engine.wind_down_enter`` /
-        winding_down phase (budget wind_down stays independent). If budget
-        wind_down already active, surface is already narrowed — no-op on allowlist.
-        Collaboration keeps note tools on the narrowed surface.
+        Factory never arms files-expected delivery_idle; this path remains for
+        explicit LoopController construction (recon does not set narrow).
+        May reuse :func:`narrow_tools_for_wind_down`. Does **not** emit
+        ``engine.wind_down_enter`` / winding_down phase (budget wind_down stays
+        independent). If budget wind_down already active, surface is already
+        narrowed — no-op on allowlist. Collaboration keeps note tools.
         """
         nonlocal delivery_idle_narrow_active, live_allowed, tool_defs
         if delivery_idle_narrow_active or role != "worker":
@@ -1213,8 +1214,8 @@ async def react_loop(
                         total_usage = tool_round.total_usage
                         if tool_round.tool_defs_changed:
                             tool_defs = tool_round.tool_defs
-                        # Delivery-idle tool narrow (repair files_expected久读无写):
-                        # may reuse wind_down whitelist; report posts never arm this.
+                        # Delivery-idle tool narrow（factory 交文件空转已关；
+                        # 显式构造仍可能 latch；可复用 wind_down 白名单）。
                         if (
                             role == "worker"
                             and controller is not None
@@ -1289,7 +1290,8 @@ async def react_loop(
             finish_guard_reworks = applied.finish_guard_reworks
             if applied.tool_defs_changed:
                 tool_defs = applied.tool_defs
-            # Finalize-path govern may also latch delivery-idle narrow.
+            # Finalize-path govern may also latch delivery-idle narrow
+            # (explicit construction only; factory 交文件空转已关).
             if (
                 role == "worker"
                 and controller is not None

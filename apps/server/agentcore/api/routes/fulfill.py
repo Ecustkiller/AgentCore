@@ -32,6 +32,7 @@ from agentcore.api.dependencies import AuthUser, get_db
 from agentcore.api.sse import release_request_db_before_sse
 from agentcore.core.errors import ValidationError
 from agentcore.core.logging import get_logger
+from agentcore.db.repositories import PausedTurnRepository
 from agentcore.db.repositories.external_grants import ExternalGrantRepository
 from agentcore.fulfill.hub import (
     FULFILL_CHANNELS,
@@ -39,7 +40,13 @@ from agentcore.fulfill.hub import (
     FulfillerSession,
     default_fulfiller_hub,
 )
+from agentcore.fulfill.user_signal import (
+    attention_snapshot_frame,
+    turn_activity_snapshot_frame,
+)
+from agentcore.runtime.leases import list_fresh_conversation_ids_for_user
 from agentcore.runtime.turn.queue import turn_queue
+from agentcore.runtime.turn.runs import turn_runs
 
 logger = get_logger(__name__)
 
@@ -85,6 +92,51 @@ async def _bound_grant_roots(
     return roots
 
 
+async def _running_conversation_ids_for_seed(
+    session: AsyncSession, user_id: str
+) -> list[str] | None:
+    """Fresh ``turn_leases`` for this user, unioned with this process's live runs.
+
+    Leases are the durable truth (restart empties the registry). The registry
+    covers the brief window after ``register`` and before the lease row exists.
+    ``None`` means the lease query failed — do not send a replace snapshot
+    (an empty ``running: []`` would extinguish every live light). A successful
+    empty list is the real「none running」and *is* sent.
+    """
+    try:
+        ids = await list_fresh_conversation_ids_for_user(user_id, session=session)
+    except Exception:  # noqa: BLE001 — connect must still open
+        logger.exception("fulfill.turn_activity_seed_failed", user=user_id)
+        return None
+    seen = set(ids)
+    for run in turn_runs.live_runs():
+        if run.user_id == user_id and run.conversation_id not in seen:
+            seen.add(run.conversation_id)
+            ids.append(run.conversation_id)
+    return ids
+
+
+async def _attention_entries_for_seed(
+    session: AsyncSession, user_id: str
+) -> list[dict] | None:
+    """paused_turns for this user, unioned with this process's registry hot cards.
+
+    One user-scoped query — not an N-conversation recovery scan. Registry covers
+    in-process cards that have not been persisted yet. ``None`` means the query
+    failed — do not send a replace snapshot (an empty ``entries: []`` would
+    extinguish every waiting light). A successful empty list is the real
+    「none waiting」and *is* sent.
+    """
+    from agentcore.attention.snapshot import merge_attention_entries
+
+    try:
+        rows = await PausedTurnRepository(session).list_pending_for_user(user_id)
+    except Exception:  # noqa: BLE001 — connect must still open
+        logger.exception("fulfill.attention_seed_failed", user=user_id)
+        return None
+    return merge_attention_entries(rows, user_id=user_id)
+
+
 def _format_event(event: dict) -> str:
     """Serialize a hub event dict as one ``text/event-stream`` frame."""
     event_type = str(event.get("type", "message"))
@@ -92,7 +144,13 @@ def _format_event(event: dict) -> str:
     return f"event: {event_type}\ndata: {data}\n\n"
 
 
-def _seed_registered_session(session: FulfillerSession, hub: FulfillerHub) -> None:
+def _seed_registered_session(
+    session: FulfillerSession,
+    hub: FulfillerHub,
+    *,
+    running_conversation_ids: list[str] | None = None,
+    attention_entries: list[dict] | None = None,
+) -> None:
     """Replay in-flight ops onto a capable fulfiller; always seed account state.
 
     A reconnect must re-push CLIENT_TOOL frames the previous session already
@@ -102,13 +160,48 @@ def _seed_registered_session(session: FulfillerSession, hub: FulfillerHub) -> No
     ``workspace_op`` / ``host_op`` onto the live desktop and run the side
     effect twice. Do not paper over that with request_id dedup on the
     desktop (a reconnect that dropped the first frame would swallow it).
+
+    Queue seed is one ``turn_queue_account_snapshot`` (empty ``queues`` included)
+    so the client can replace its cloud table — never a loop of per-conversation
+    ``turn_queue_snapshot``. ``running_conversation_ids`` is the account's
+    live-turn set (fresh ``turn_leases``, plus this process's registry for the
+    register-before-lease window). ``None`` skips that replace (query failed;
+    connection still opens). A successful empty list is still delivered so the
+    client can replace. ``attention_entries`` is the account's waiting-card
+    set (``paused_turns`` by user plus this process's registry hot cards).
+    Same ``None`` vs ``[]`` split: empty ``entries: []`` extinguishes stale
+    lights; a failed read must not.
     """
     from agentcore.runtime.events.client_tool_reattach import rehang_pending_client_tools
 
     if session.can_fulfil:
         rehang_pending_client_tools(session.user_id)
-    for frame in turn_queue.snapshot_frames(session.user_id):
-        hub.deliver(session, frame)
+    account_queue = turn_queue.account_snapshot_frame(session.user_id)
+    hub.deliver(session, account_queue)
+    logger.info(
+        "fulfill.queue_account_snapshot_pushed",
+        user=session.user_id,
+        device=session.device_id,
+        queues=len(account_queue["payload"]["queues"]),
+    )
+    if running_conversation_ids is not None:
+        running = list(running_conversation_ids)
+        hub.deliver(session, turn_activity_snapshot_frame(running))
+        logger.info(
+            "fulfill.turn_activity_snapshot_pushed",
+            user=session.user_id,
+            device=session.device_id,
+            running=len(running),
+        )
+    if attention_entries is not None:
+        entries = list(attention_entries)
+        hub.deliver(session, attention_snapshot_frame(entries))
+        logger.info(
+            "fulfill.attention_snapshot_pushed",
+            user=session.user_id,
+            device=session.device_id,
+            entries=len(entries),
+        )
 
 
 async def _fulfill_stream(
@@ -161,6 +254,8 @@ async def fulfill_stream(
     cap_set = _parse_caps(caps)
     root_list = _parse_csv(roots)
     root_list.extend(await _bound_grant_roots(session, user.user_id, device_id))
+    running_ids = await _running_conversation_ids_for_seed(session, user.user_id)
+    attention_entries = await _attention_entries_for_seed(session, user.user_id)
     await release_request_db_before_sse(session)
 
     hub = default_fulfiller_hub()
@@ -171,7 +266,12 @@ async def fulfill_stream(
         roots=root_list,
         platform=x_client_platform,
     )
-    _seed_registered_session(fulfiller, hub)
+    _seed_registered_session(
+        fulfiller,
+        hub,
+        running_conversation_ids=running_ids,
+        attention_entries=attention_entries,
+    )
 
     return StreamingResponse(
         _fulfill_stream(fulfiller, hub),

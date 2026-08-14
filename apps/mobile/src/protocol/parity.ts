@@ -187,7 +187,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   team_note_posted: { verdict: "ported", surface: "TeamView · 团队便签" },
   team_synthesis_preview: {
     verdict: "ported",
-    surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
+    surface:
+      "TeamView · 协调进展预览（桌面状态条已收成工具栏，不再挂合成草稿行）",
   },
   delivery_status: {
     verdict: "ported",
@@ -306,8 +307,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   message_end: {
     verdict: "ported",
-    surface:
-      "ChatPage · 收尾 + 回合总账 + TeamView · 互相把关一行 (collab 计数，extractTurnCollab)",
+    surface: "ChatPage · 收尾 + 回合总账",
   },
 
   // —— 纯管线 / 派生（非用户面）——
@@ -386,9 +386,9 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
     reason: "同上 · 把云端改动合并回本地磁盘，手机无本地",
   },
   auto_folder_created: {
-    verdict: "simplified",
-    reason:
-      "裸聊写盘自动建文件夹告知（§5.4）：fold 已收进 autoFolder，手机暂无落点提示卡与改名入口",
+    verdict: "ported",
+    surface:
+      "AutoFolderNoticeCard / FileArtifactsCard · 落点告知 + 改名 + 跳转我的文件",
   },
   workspace_snapshot_done: {
     verdict: "simplified",
@@ -510,11 +510,6 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface:
       "TurnFileChangesReview（产物卡内展开；仅云 files/diff + restoreSnapshot，无 Local sidecar）",
   },
-  StoppedTurnFileChanges: {
-    verdict: "simplified",
-    reason:
-      "停止回合后的文件变更芯片/详情仅桌面 StatusStrip + RunDetail；手机本波不做停止态文件回顾入口",
-  },
   StageCard: { verdict: "ported", surface: "StageCard" },
   StageCardDock: {
     verdict: "ported",
@@ -555,17 +550,17 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     reason: "进展预览有；无桌面状态条「打开辩论室」进赛事页 CTA",
   },
   TeamSynthesisPreviewLine: {
-    verdict: "ported",
-    surface: "TeamView · 协调进展预览（fold 对齐 StatusStrip）",
+    verdict: "simplified",
+    surface: "TeamView · 协调进展预览",
+    reason: "桌面状态条只留细工具栏，不再挂合成草稿行；手机列表仍有进展预览",
   },
   TurnWarningBanner: {
     verdict: "ported",
     surface: "ChatPage · 预检警告条",
   },
   AutoFolderNoticeCard: {
-    verdict: "simplified",
-    reason:
-      "裸聊写盘落点告知（§5.4）：手机 fold 已收 autoFolder，但暂无提示条与当场改名入口",
+    verdict: "ported",
+    surface: "AutoFolderNoticeCard · 独立卡 / FileArtifactsCard 卡头一行",
   },
   ParallelTimeline: {
     verdict: "ported",
@@ -659,19 +654,17 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   },
 
   // —— 有意精简 ——
-  SaveAsWorkflowButton: {
-    verdict: "simplified",
-    reason:
-      "多队员完成态「存为工作流」（固化本轮拆法 → user_workflows）；手机整组工作流面有意不接（toolbox/workflows/*），存下来无处微调 / 跑一次 / 设为定时",
-  },
   InlineTeamGraph: {
     verdict: "simplified",
     reason:
       "有意竖排 TeamView，非待做画布（不接 React Flow）；点队员卡下钻 RunDetail（对齐桌面抽屉，小屏合理）",
   },
   MentionMenu: {
-    verdict: "simplified",
-    reason: "手机 composer 不带 @ 提及菜单 (niche)",
+    verdict: "ported",
+    surface:
+      "ComposerMentionSheet · ＋/@ 分类 sheet（附件/团队/对话/文件夹/文件）",
+    reason:
+      "各端新建；附件走系统选文件，文件/文件夹只列云端索引；选中进草稿 attachments.kind=conversation / agent_mentions",
   },
   RetryBanner: {
     verdict: "ported",
@@ -771,7 +764,8 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   ConversationPage: { verdict: "ported", surface: "ChatPage（对话）" },
   "conversations/ConversationsPage": {
     verdict: "ported",
-    surface: "ChatPage · 会话列表（抽屉）",
+    surface:
+      "ChatPage · 会话列表（抽屉按文件夹分组；云组头进我的文件、＋ 在此新开）",
   },
   MorePage: { verdict: "ported", surface: "MorePage（设置中心）" },
   OnboardingPreviewPage: {
@@ -782,7 +776,7 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   FilesPage: {
     verdict: "ported",
     surface:
-      "FilesPage（会话别名寻址）/ WorkspacesPage → WorkspaceFilesPage（工作区 id 寻址）；云工作区已从只读升级为可写：上传 / 改名 / 移动 / 删除 / 新建文件夹 / 文本文件 CAS 编辑（冲突「载入最新版 · 仍然覆盖」二选一）+ TrashSection 软删区还原。本机工作区仍只读——字节在用户电脑上、服务端一律 409，故列表直接过滤且整个不注入写契约（而非摆一排必然失败的禁用按钮），配「请在桌面端打开」提示",
+      "FilesPage（会话别名寻址）/ WorkspacesPage「我的文件」（文件夹 / 对话产物 / 共享空间）→ WorkspaceFilesPage；云工作区可写。本机仍只读并过滤。工作区新建/删除仍归桌面；草稿可点选已有云文件夹",
   },
   MessagesPage: { verdict: "ported", surface: "MessagesPage（IM）+ im/*" },
   ServiceUnavailablePage: {

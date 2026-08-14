@@ -14,8 +14,9 @@
  *   ``beginLocalConversationStream``。
  * - **空闲不是「生成中」**。真空闲时本模块一个 store 都不写：不开气泡、不置
  *   ``isGenerating``、不占 abort 槽，也不因掉线弹横幅（后台观察者，静默退避重连）。
- * - **切会话不硬卸正在跟播的泵**（对齐 ``hydrateAttachSettle`` 的既有设计）：切走时
- *   若正跟着一个回合，等它收口的下一个心跳再关，否则气泡会冻在流式态。
+ * - **切走立刻停**。对话级订阅只服务当前揭开的窗口：切到别的会话 / 草稿 / 离页立刻
+ *   ``stop``，不 abort 本端 POST / sidecar 泵。follow-only 撑着的 ``isGenerating``
+ *   随之落下（所有权只认 ``hasLocalConversationStream``）。
  *
  * 两个正交的决定，各有各的依据：
  *
@@ -29,9 +30,9 @@ import { clientHeaders } from "@/lib/clientBuildInfo";
 import { logEvent } from "@/lib/log";
 import { BASE_URL, captureCsrf, tryRefresh } from "@/services/api";
 import { loadLatestWindow } from "@/services/messages";
-import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import {
   ATTACH_CAUGHT_UP_COMMENT,
+  dispatchFoldedSseEvent,
   foldAttachSegment,
   peekLastEventId,
   pumpSseBody,
@@ -50,12 +51,8 @@ type FollowSlot = {
   conversationId: string;
   /** 终止：不再重连，循环退出。 */
   stopped: boolean;
-  /** 已请求关闭但正在跟播 → 等回合收口的下一个心跳再真关。 */
-  closeWhenIdle: boolean;
   /** 本端自有连接占用中 → 让位；闲下来由订阅回调唤醒。 */
   suspended: boolean;
-  /** 这次连接是退避重连 → 连上确认空闲后补一次窗口对账（见 ``reconcileAfterReconnect``）。 */
-  needsReconcile: boolean;
   attempts: number;
   ac: AbortController | null;
   unsubBusy: () => void;
@@ -104,6 +101,13 @@ function waitUntilResumable(slot: FollowSlot): Promise<void> {
   });
 }
 
+function stopFollowOwnedGenerating(conversationId: string): void {
+  if (hasLocalConversationStream(conversationId)) return;
+  if (getRuntime(conversationId).isGenerating) {
+    useConversationStore.getState().setGenerating(false, conversationId);
+  }
+}
+
 function stopSlot(slot: FollowSlot, reason: string): void {
   if (slot.stopped) return;
   slot.stopped = true;
@@ -114,27 +118,11 @@ function stopSlot(slot: FollowSlot, reason: string): void {
   if (slots.get(slot.conversationId) === slot) {
     slots.delete(slot.conversationId);
   }
+  stopFollowOwnedGenerating(slot.conversationId);
   logEvent("info", "conversation.follow_closed", {
     conversation_id: slot.conversationId,
     reason,
   });
-}
-
-/** 切走 / 切到本机引擎会话：正在跟播就先记账，等回合收口再关。 */
-function requestStopSlot(slot: FollowSlot): void {
-  if (slot.stopped) return;
-  if (getRuntime(slot.conversationId).isGenerating) {
-    slot.closeWhenIdle = true;
-    return;
-  }
-  stopSlot(slot, "switched_away");
-}
-
-/** 心跳时兑现待关：此刻没有帧在流动，收口后关掉不会冻住气泡。 */
-function honorDeferredClose(slot: FollowSlot): void {
-  if (!slot.closeWhenIdle || slot.stopped) return;
-  if (getRuntime(slot.conversationId).isGenerating) return;
-  stopSlot(slot, "deferred_switch_away");
 }
 
 /** 段首 ``message_start`` 的 payload（``undefined`` = 这一段没有段首：只带
@@ -183,11 +171,8 @@ async function foldCatchUpSegment(
   const conversationId = slot.conversationId;
   const start = segmentStart(segment);
   if (needsWindowBackfill(conversationId, start?.message_id)) {
-    // 别处开的回合：先把消息窗拉齐，用户那条提问只在 REST 里。挂着的过期
-    // 「生成中」先落下，否则整窗写入被 loadLatestWindow 的门禁挡掉。
-    if (getRuntime(conversationId).isGenerating) {
-      useConversationStore.getState().setGenerating(false, conversationId);
-    }
+    // 别处开的回合：先把消息窗拉齐，用户那条提问只在 REST 里。
+    // 不传页级 AbortSignal：补窗属于这条订阅，切走停的是订阅本身。
     try {
       await loadLatestWindow(conversationId, { softRefresh: true });
     } catch {
@@ -198,29 +183,6 @@ async function foldCatchUpSegment(
   }
   // 清不清由段首说了算——与回合级 attach 同一份判断，两条路不得各自解读。
   foldAttachSegment(conversationId, segment);
-}
-
-/**
- * 退避重连后补一次窗口对账。
- *
- * 服务端只重放**仍在跑**的 run：断线期间另一端整跑完的那个回合已经收口，重连后
- * 一帧都不会补发，本端屏幕上就一直缺着它，直到用户切走再切回。IM firehose 早就
- * 每次 (re)connect 都 ``catchUp``（``services/realtime.ts``），这条流对齐它。
- *
- * 只在**确认服务端此刻没东西可重放**时才拉（``openGate`` 的空段分支）——有 catch-up
- * 段时 ``foldCatchUpSegment`` 自己会拉窗口或 clear-then-fold，这里再拉会打架。
- */
-async function reconcileAfterReconnect(slot: FollowSlot): Promise<void> {
-  if (!slot.needsReconcile) return;
-  slot.needsReconcile = false;
-  if (slot.stopped || slot.suspended) return;
-  // 本端还挂着「生成中」：自有连接 / recovery 正在管这个回合，别用整窗写入去插一脚。
-  if (getRuntime(slot.conversationId).isGenerating) return;
-  try {
-    await loadLatestWindow(slot.conversationId, { softRefresh: true });
-  } catch {
-    /* best-effort：对账没拉到就等下一次重连 / 用户切换 */
-  }
 }
 
 type ConnectionOutcome = "ok" | "retry" | "stop";
@@ -261,8 +223,6 @@ async function pumpFollowBody(
   let releasing = false;
   /** 在飞的折（拉窗口是异步的）——断流后要等它落地再让外层重连，否则两条连接会交叉折。 */
   let releasePending: Promise<void> | null = null;
-  /** 在飞的重连对账（同上，整窗写入也不能跨到下一条连接去）。 */
-  let reconcilePending: Promise<void> | null = null;
 
   const releaseBuffer = (): void => {
     if (releasing) return;
@@ -277,8 +237,9 @@ async function pumpFollowBody(
         // 不能再当 catch-up 段走一次 clear-then-fold（那会把刚折进去的抹掉）。
         while (buffer.length > 0 && !slot.stopped && !slot.suspended) {
           const next = buffer.shift();
-          if (next)
-            dispatchSSEEvent(next, { conversationId, source: "server" });
+          if (next) {
+            dispatchFoldedSseEvent(next, { conversationId, source: "server" });
+          }
         }
       } finally {
         buffer.length = 0;
@@ -292,7 +253,6 @@ async function pumpFollowBody(
     if (!buffering || releasing) return;
     if (buffer.length === 0) {
       buffering = false; // 没有 catch-up 段可折（空闲连接 / 已折过）
-      reconcilePending = reconcileAfterReconnect(slot);
       return;
     }
     releaseBuffer();
@@ -315,16 +275,13 @@ async function pumpFollowBody(
           openGate();
           return;
         }
-        dispatchSSEEvent(event, { conversationId, source: "server" });
+        dispatchFoldedSseEvent(event, { conversationId, source: "server" });
       },
       (comment) => {
         if (slot.stopped) return;
         if (comment === ATTACH_CAUGHT_UP_COMMENT) {
           openGate();
-          return;
         }
-        // ``: ping`` —— 空闲心跳；此刻没有帧在流动，正好兑现待关。
-        honorDeferredClose(slot);
       },
     );
     // 断流时仍压着未折的段（老服务端无边界注释 / 中途掉线）：折掉再走重连。
@@ -334,7 +291,6 @@ async function pumpFollowBody(
   } finally {
     // 折是异步的（要先拉消息窗）。不等它落地就回到外层重连，两条连接会交叉折同一回合。
     await releasePending;
-    await reconcilePending;
   }
 }
 
@@ -392,14 +348,7 @@ async function runFollowLoop(slot: FollowSlot): Promise<void> {
       stopSlot(slot, "server_refused");
       return;
     }
-    // 切走后连接自己断了 → 正好收工，不再重连。
-    if (slot.closeWhenIdle && !getRuntime(slot.conversationId).isGenerating) {
-      stopSlot(slot, "deferred_switch_away");
-      return;
-    }
     if (slot.suspended) continue; // 让位导致的断流：立刻回到等待，不退避
-    // 真断线（非让位、非首连）：退避期间另一端可能整跑完一个回合，连上后要对账。
-    slot.needsReconcile = true;
     const delay = Math.min(
       RECONNECT_BASE_MS * 2 ** slot.attempts,
       RECONNECT_MAX_MS,
@@ -413,9 +362,7 @@ function startSlot(conversationId: string): void {
   const slot: FollowSlot = {
     conversationId,
     stopped: false,
-    closeWhenIdle: false,
     suspended: hasLocalConversationStream(conversationId),
-    needsReconcile: false, // 首连不对账：hydrateAttachSettle 刚拉过窗口
     attempts: 0,
     ac: null,
     unsubBusy: () => {},
@@ -431,8 +378,7 @@ function startSlot(conversationId: string): void {
 /**
  * 把对话级订阅移到 ``conversationId``（``null`` = 全关）。幂等：同一会话重复调用不重开流。
  *
- * 同时只留一条订阅——每访问一个会话就多挂一条空闲 SSE 会吃光连接池。切走的那条若正在
- * 跟播则延后到回合收口再关。
+ * 同时只留一条订阅——每访问一个会话就多挂一条空闲 SSE 会吃光连接池。切走立刻停。
  *
  * 只管当前会话的回合跟播。跨会话的账号态（队列、被别处结掉的挂起卡）走设备长连接
  * （``accountStateIngress``），不由这条订阅的开合去猜。
@@ -440,14 +386,12 @@ function startSlot(conversationId: string): void {
 export function syncConversationFollow(conversationId: string | null): void {
   if (typeof window !== "undefined" && window.__WEB_PREVIEW__) return;
   for (const slot of [...slots.values()]) {
-    if (slot.conversationId !== conversationId) requestStopSlot(slot);
+    if (slot.conversationId !== conversationId) {
+      stopSlot(slot, "switched_away");
+    }
   }
   if (!conversationId) return;
-  const existing = slots.get(conversationId);
-  if (existing) {
-    existing.closeWhenIdle = false; // 切回来 → 撤销待关
-    return;
-  }
+  if (slots.get(conversationId)) return;
   startSlot(conversationId);
 }
 

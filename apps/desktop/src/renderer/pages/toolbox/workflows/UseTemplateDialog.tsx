@@ -185,7 +185,7 @@ export function UseTemplateDialog({
               还需填写：{missing.map((s) => s.label).join("、")}
             </p>
           )}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-muted-foreground">{error}</p>}
         </div>
 
         <div className="mt-5 flex justify-end gap-2">

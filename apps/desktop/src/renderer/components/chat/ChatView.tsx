@@ -29,7 +29,6 @@ import { ConversationOutline } from "./ConversationOutline";
 import { FindBar } from "./FindBar";
 import { MessageInput } from "./MessageInput";
 import { MessageList } from "./MessageList";
-import { RetryBanner } from "./RetryBanner";
 import { StageCardDock } from "./StageCardDock";
 
 export function ChatView() {
@@ -109,7 +108,7 @@ export function ChatView() {
     ? `${last.id}-${last.content.length}-${last.reasoning?.length ?? 0}`
     : "";
 
-  const { scrollRef, atBottom, jumpToBottom } = useChatScroll({
+  const { scrollRef, contentRef, atBottom, jumpToBottom } = useChatScroll({
     messages,
     resetKey: conversationId,
     contentKey,
@@ -132,7 +131,10 @@ export function ChatView() {
         <ConversationOutline />
         <div ref={scrollRef} className="h-full overflow-y-auto">
           {hasMessages && (
-            <div className="mx-auto w-full max-w-3xl space-y-4 px-6 pb-4 pt-10">
+            <div
+              ref={contentRef}
+              className="mx-auto w-full max-w-3xl space-y-4 px-6 pb-4 pt-10"
+            >
               {/* Headerless chat view: the top padding keeps the first message
                   clear of the floating side-panel toggle (top-right of the pane,
                   set in ConversationPage). */}
@@ -204,7 +206,6 @@ export function ChatView() {
               <ConversationDecisionPrompts
                 omitApproval={fuseApprovalComposer}
               />
-              <RetryBanner />
               <StageCardDock />
             </>
           )}

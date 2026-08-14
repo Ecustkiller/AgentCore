@@ -214,6 +214,7 @@ export interface ConversationState {
     conversationId?: string | null,
   ) => void;
   setGenerating: (v: boolean, conversationId?: string | null) => void;
+  /** 真正换 id 时清掉即将显示切片的残留 messageFocus；pendingFocus 不动。 */
   switchConversation: (id: string | null) => void;
   /**
    * Explicit idle-slice drop (tests / diagnostics). Production terminal SSE

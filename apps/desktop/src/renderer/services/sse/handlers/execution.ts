@@ -1,3 +1,7 @@
+import {
+  TREE_WRITE_TOOLS,
+  notifyConversationWorkspaceTree,
+} from "@/components/files/notifyConversationWorkspaceTree";
 import { EXECUTION_RECORD_TOOLS } from "@/lib/executionRecords";
 import type { BrowserHostKind } from "@/services/browserSessions";
 import { useBrowserSessionsStore } from "@/stores/browserSessions";
@@ -243,7 +247,7 @@ export function handleExecutionEvent(
       return true;
     }
     // 执行转后台：附着回合已收口，团队继续跑。EPHEMERAL live stamp → StatusStrip
-    // 静态「团队后台运行中」；conformanceFold 保持 no-op。
+    // 静态「后台」徽标；conformanceFold 保持 no-op。
     // Soft refresh：拉最新 message.runs，配合 hydrate 终态优先，愈合 live 丢的
     // worker `run_completed`（样本：detach 后图仍 Thinking、journal 已绿）。
     case "execution_detached": {
@@ -261,7 +265,7 @@ export function handleExecutionEvent(
     }
     // 后台执行终态：清后台 chrome、按 payload.status 落 execution 终态（缺省 completed），
     // 再刷新对话以拉入 harvest 终稿。禁止无条件 setStatus("completed")——cancel/fail
-    // 须忠实跟契约，否则顶栏会绿勾「团队完成」而图上仍 running。
+    // 须忠实跟契约，否则顶栏会绿勾而图上仍 running。
     case "execution_completed": {
       const mid = execMessageId(
         conversationId,
@@ -295,6 +299,9 @@ export function handleExecutionEvent(
         useExecutionStore
           .getState()
           .setDeliveryStatus(event.payload as DeliveryStatusPayload, mid);
+      }
+      if (ctx.replay !== true) {
+        notifyConversationWorkspaceTree(conversationId);
       }
       return true;
     }
@@ -435,6 +442,13 @@ export function handleExecutionEvent(
       useConversationStore
         .getState()
         .endProcessTool(endPayload, conversationId);
+      if (
+        ctx.replay !== true &&
+        endPayload.status === "success" &&
+        TREE_WRITE_TOOLS.has(endPayload.tool_name)
+      ) {
+        notifyConversationWorkspaceTree(conversationId);
+      }
       return true;
     }
     // 工具执行阶段进度 (联网搜索前端展示优化): a running tool reported a coarse EXECUTION phase

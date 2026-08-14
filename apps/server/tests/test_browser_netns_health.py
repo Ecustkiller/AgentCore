@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import pytest
@@ -10,6 +11,7 @@ from agentcore.config import settings
 from agentcore.tools.sandbox.browser.netns import (
     NetnsError,
     browser_netns_health,
+    chmod_netns_inode,
     probe_browser_netns_at_startup,
     set_browser_netns_health_for_tests,
 )
@@ -78,6 +80,19 @@ async def test_probe_failure_caches_unhealthy_without_raising(
     monkeypatch.setattr("agentcore.tools.sandbox.browser.netns._ip", _fail)
     await probe_browser_netns_at_startup()
     assert browser_netns_health() is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX inode modes")
+def test_chmod_netns_inode_sets_mode(tmp_path):
+    inode = tmp_path / "acbrw0"
+    inode.write_bytes(b"")
+    inode.chmod(0o000)
+    chmod_netns_inode("acbrw0", run_dir=str(tmp_path))
+    assert inode.stat().st_mode & 0o777 == 0o644
+
+
+def test_chmod_netns_inode_missing_path_is_silent(tmp_path):
+    chmod_netns_inode("missing", run_dir=str(tmp_path))
 
 
 def test_set_for_tests_roundtrip():

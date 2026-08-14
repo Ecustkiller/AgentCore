@@ -7,12 +7,11 @@ import {
 
 /**
  * The chat view's composer: the unified {@link TurnComposer} in its chat chrome
- * (bottom padding, default placeholder). The canvas 命令栏
- * ({@link import("../graph/CanvasCommandBar").CanvasCommandBar}) is the SAME core in
- * canvas chrome — one composer, two skins, single draft per conversation.
+ * (bottom padding, default placeholder). One composer, single draft per conversation;
+ * canvas is look-only — say stays here.
  *
  * `variant` is chosen by ChatView: `bar` for the session bottom dock（＋收纳配置）,
- * `card` for the centered new-chat composer. Canvas keeps its own full card.
+ * `card` for the centered new-chat composer.
  *
  * Workspace / Git / compose actions live inside TurnComposer. When fused under
  * ApprovalPrompt, ChatView stacks ApprovalPrompt above this input so the

@@ -174,6 +174,20 @@ class ConversationRepository:
         await self._session.commit()
         return conv, True
 
+    async def touch_activity(self, conversation_id: str, *, commit: bool = False) -> None:
+        """Stamp ``updated_at`` to UTC now — the only writer of「最近活动」.
+
+        Message ``create`` / ``upsert_assistant`` call this in the same unit-of-work
+        (``commit=False``) so a user turn or assistant placeholder can bump the
+        sidebar without an ORM ``onupdate`` firing on rename / pin / compact.
+        """
+        await self._session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(updated_at=datetime.now(UTC))
+        )
+        await commit_or_flush(self._session, commit=commit)
+
     async def set_permission_axes(
         self,
         conversation_id: str,
@@ -667,10 +681,10 @@ class ConversationRepository:
         * ``deleted_at`` is UTC-aware. The column is ``TIMESTAMPTZ`` and asyncpg binds
           a naive datetime as UTC, so a naive local ``now()`` would shift the stamp by
           the box's offset — and「删除于」/「还剩几天」are rendered straight off it.
-        * ``updated_at`` self-assigns to suppress the ORM ``onupdate``. Restamping here
-          would overwrite the chat's real last-activity time with the moment it was
-          deleted, so a restore would land it in「今天」instead of the recency group it
-          actually belongs to — and the original is unrecoverable once overwritten.
+        * ``updated_at`` self-assigns. The column has no ORM ``onupdate`` (only
+          ``touch_activity`` restamps it), but restamping here would still overwrite
+          the chat's real last-turn time with the delete moment — a restore would
+          land it in「今天」instead of the recency group it belongs to.
         """
         conv = await self.get_by_id(conversation_id, user_id=user_id)
         if not conv:
@@ -796,8 +810,7 @@ class ConversationRepository:
             )
             # Plain Core UPDATE: ``rowcount`` is the whole decision, so the ORM's
             # RETURNING-based session sync stays out of it. ``updated_at`` self-assigns
-            # for the same reason it does in ``soft_delete`` — restoring a chat is not
-            # activity on it.
+            # — restoring a chat is not a turn and must not call ``touch_activity``.
             .values(deleted_at=None, updated_at=Conversation.updated_at)
             .execution_options(synchronize_session=False)
         )

@@ -53,8 +53,6 @@ import {
   pruneFolderTree,
 } from "@/lib/folderTree";
 import { useReadOnlyOffline } from "@/lib/offlineMode";
-import { queryClient } from "@/lib/queryClient";
-import { workspaceKeys } from "@/lib/queryKeys";
 import { cn } from "@/lib/utils";
 import { bareConversationScratchSubpath } from "@/services/bareScratchPath";
 import { dedupeFoldersByLocalBinding } from "@/services/folders";
@@ -199,14 +197,11 @@ export function FileWorkbench({
   );
   const openCreateFolder = useFoldersStore((s) => s.openCreateFolder);
 
-  // AI 写入后服务端列表可能仍 stale（30s）——进中枢即拉新，避免「改动」有、左侧无。
-  useEffect(() => {
-    void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
-  }, []);
-
   /** Folder + bare scratch only — `shared:` rows come from {@link useSharedSpaces}.
    * If the active bare chat already produced files but `/v1/workspaces` has not
-   * listed `conv:<id>` yet, synthesize a rail row so the tree is reachable. */
+   * listed `conv:<id>` yet, synthesize a rail row so the tree is reachable.
+   * Do not invalidate `workspaceKeys.list` on open / first artifact — that
+   * rebuilds FileSource and spins the whole tree. */
   const personalWorkspaces = useMemo(() => {
     const base = workspaces.filter((w) => !w.wsId.startsWith("shared:"));
     if (!currentConversationId) return base;

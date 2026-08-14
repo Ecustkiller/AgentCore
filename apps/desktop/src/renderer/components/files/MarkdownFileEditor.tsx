@@ -21,6 +21,7 @@ import {
 import type { SelectionContext } from "@/components/markdown/aiRewrite";
 import { SourceToolbar } from "@/components/markdown/sourceToolbar";
 import { Button, IconButton } from "@/components/ui";
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type {
   EditEncoding,
@@ -581,11 +582,11 @@ export function MarkdownFileEditor({
       )}
 
       {conflict && (
-        <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-foreground">
-          <AlertTriangle size={14} className="shrink-0 text-destructive" />
+        <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-foreground">
+          <AlertTriangle size={14} className="shrink-0 text-primary" />
           <span>磁盘上的文件已被改动，保存会覆盖磁盘版本。</span>
           <Button
-            variant="danger"
+            variant="ghost"
             onClick={load}
             className="h-auto px-0 py-0 underline-offset-2 hover:underline"
           >
@@ -602,15 +603,17 @@ export function MarkdownFileEditor({
       )}
 
       {saveError && !conflict && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-          <AlertTriangle size={14} className="shrink-0" />
+        <div
+          className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${noticeChipNeutral}`}
+        >
+          <AlertTriangle size={14} className="shrink-0 text-muted-foreground" />
           <span>{saveError}</span>
         </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-hidden">
         {loadError ? (
-          <CenterMsg title="无法打开" detail={loadError} error />
+          <CenterMsg title="无法打开" detail={loadError} />
         ) : content === null ? (
           <CenterMsg title="加载中…" />
         ) : mode === "edit" ? (
@@ -661,25 +664,10 @@ export function MarkdownFileEditor({
   );
 }
 
-function CenterMsg({
-  title,
-  detail,
-  error,
-}: {
-  title: string;
-  detail?: string;
-  error?: boolean;
-}) {
+function CenterMsg({ title, detail }: { title: string; detail?: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center gap-1 px-4 text-center">
-      <span
-        className={cn(
-          "text-sm",
-          error ? "text-destructive" : "text-muted-foreground",
-        )}
-      >
-        {title}
-      </span>
+      <span className="text-sm text-muted-foreground">{title}</span>
       {detail && (
         <span className="text-xs text-muted-foreground">{detail}</span>
       )}

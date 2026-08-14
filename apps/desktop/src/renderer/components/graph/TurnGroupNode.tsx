@@ -18,7 +18,6 @@ export interface TurnGroupData {
   messageId: string;
   taskSummary: string;
   pendingDecisions: number;
-  recoverable: boolean;
   onMaximize: () => void;
   /** Fold this turn back to TurnSummaryNode (LRU window). */
   onCollapse?: () => void;
@@ -63,12 +62,6 @@ export function TurnGroupNode({ data }: NodeProps) {
               <AlertTriangle size={12} />
               待你拍板
               {d.pendingDecisions > 1 ? ` ${d.pendingDecisions}` : ""}
-            </span>
-          )}
-          {d.recoverable && d.pendingDecisions === 0 && (
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-              <AlertTriangle size={12} />
-              待救火
             </span>
           )}
           {d.onCollapse && (

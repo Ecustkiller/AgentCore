@@ -20,7 +20,10 @@ import {
   persistOpenedCache,
 } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
+import { clearLastEventId } from "@/services/streamConversation";
 import { scheduleHydrateAttachSettle } from "@/services/turns";
+import { syncConversationFollow } from "@/services/turns/conversationFollow";
+import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import {
   type MemoryUpdate,
@@ -62,9 +65,10 @@ function adoptMessageWindow(
   const s = useConversationStore.getState();
   if (s.currentConversationId !== id) return false;
   const rt = getRuntime(id);
-  if (rt.isGenerating || rt.messages.length > 0) return false;
+  if (hasLocalConversationStream(id) || rt.messages.length > 0) return false;
   s.setMessageWindow(messages, flags, id);
   s.setMemoryUpdates(memoryUpdates, id);
+  clearLastEventId(id);
   if (shouldSetGeneratingOnHydrate(messages)) {
     s.setGenerating(true, id);
   }
@@ -80,9 +84,10 @@ function reconcileMessageWindow(
 ): boolean {
   const s = useConversationStore.getState();
   if (s.currentConversationId !== id) return false;
-  if (getRuntime(id).isGenerating) return false;
+  if (hasLocalConversationStream(id)) return false;
   s.setMessageWindow(messages, flags, id);
   s.setMemoryUpdates(memoryUpdates, id);
+  clearLastEventId(id);
   if (shouldSetGeneratingOnHydrate(messages)) {
     s.setGenerating(true, id);
   }
@@ -109,6 +114,7 @@ export function ConversationPage() {
     // 设置的落库目标（见 startNewConversation），清掉会破坏「全部对话」按项目新建。
     if (!id) {
       if (store.currentConversationId !== null) store.switchConversation(null);
+      syncConversationFollow(null);
       setHydratePhase("ready");
       return;
     }
@@ -124,7 +130,8 @@ export function ConversationPage() {
     const recoveryLoaded = loadRecovery(id);
 
     const warm =
-      getRuntime(id).messages.length > 0 || getRuntime(id).isGenerating;
+      getRuntime(id).messages.length > 0 || hasLocalConversationStream(id);
+    if (!warm) clearLastEventId(id);
     const warmRt = getRuntime(id);
     logEvent("info", "conversation.slice_diag", {
       action: "open_decide",
@@ -135,12 +142,21 @@ export function ConversationPage() {
       has_more_after: warmRt.hasMoreAfter,
       has_more_before: warmRt.hasMoreBefore,
     });
-    setHydratePhase(warm ? "ready" : "loading");
 
     let cancelled = false;
+    const pageAc = new AbortController();
+    const reveal = (): void => {
+      if (cancelled) return;
+      if (useConversationStore.getState().currentConversationId !== id) return;
+      syncConversationFollow(id);
+      setHydratePhase("ready");
+    };
+    if (warm) reveal();
+    else setHydratePhase("loading");
+
     void (async () => {
       // Kick network early; online SWR may reveal from local cache first.
-      const winPromise = fetchMessageWindow(id);
+      const winPromise = fetchMessageWindow(id, {}, pageAc.signal);
 
       if (!warm) {
         const cached = await loadCachedConversation(id);
@@ -163,7 +179,7 @@ export function ConversationPage() {
             conversation_id: id,
             branch: "online_swr_cache",
           });
-          setHydratePhase("ready");
+          reveal();
         }
       }
 
@@ -175,7 +191,7 @@ export function ConversationPage() {
           useConversationStore.getState().currentConversationId === id
         ) {
           // Cold: adopt empty or SWR-reconcile cache.
-          // Warm: generating / destination keep slice; idle no-destination → latest snap.
+          // Warm: local stream / destination keep slice; idle no-destination → latest snap.
           if (!warm) {
             const wrote = reconcileMessageWindow(
               id,
@@ -202,13 +218,15 @@ export function ConversationPage() {
           } else {
             const rt = getRuntime(id);
             const action = decideWarmOpenAction({
-              isGenerating: rt.isGenerating,
+              hasLocalStream: hasLocalConversationStream(id),
               hasDestination: hasOpenDestination(id),
             });
             if (action === "snap_latest") {
               // Explicit snap (composer「跳到最新」同权) — crosses richer/hasMoreAfter.
               // persistOpenedCache runs inside loadLatestWindow on success (no double-write).
-              const wrote = await loadLatestWindow(id);
+              const wrote = await loadLatestWindow(id, {
+                signal: pageAc.signal,
+              });
               logEvent("info", "conversation.slice_diag", {
                 action: "warm_snap_latest",
                 conversation_id: id,
@@ -236,39 +254,40 @@ export function ConversationPage() {
         }
         // Reveal as soon as the window is in the store. Recovery/attach stay
         // eager in the background — they must not cover already-adopted text.
-        if (
-          !cancelled &&
-          useConversationStore.getState().currentConversationId === id
-        ) {
-          setHydratePhase("ready");
-        }
+        reveal();
         scheduleHydrateAttachSettle(id, recoveryLoaded);
       } catch {
+        if (cancelled) {
+          scheduleHydrateAttachSettle(id, recoveryLoaded);
+          return;
+        }
         // N4-A: network / outage → fall back to local-store snapshot for this id.
         // Online SWR may already have revealed from cache — stay ready.
-        if (getRuntime(id).messages.length > 0 || getRuntime(id).isGenerating) {
+        if (
+          getRuntime(id).messages.length > 0 ||
+          hasLocalConversationStream(id) ||
+          getRuntime(id).isGenerating
+        ) {
           scheduleHydrateAttachSettle(id, recoveryLoaded);
-          if (!cancelled) setHydratePhase("ready");
+          reveal();
         } else {
           const cached = await loadCachedConversation(id);
           if (cached) {
-            if (!cancelled) {
-              adoptMessageWindow(
-                id,
-                cached.messages as Message[],
-                {
-                  hasMoreBefore: cached.hasMoreBefore,
-                  hasMoreAfter: cached.hasMoreAfter,
-                },
-                cached.memoryUpdates as MemoryUpdate[],
-              );
-              logEvent("info", "conversation.hydrate", {
-                conversation_id: id,
-                branch: "offline_cache",
-              });
-            }
+            adoptMessageWindow(
+              id,
+              cached.messages as Message[],
+              {
+                hasMoreBefore: cached.hasMoreBefore,
+                hasMoreAfter: cached.hasMoreAfter,
+              },
+              cached.memoryUpdates as MemoryUpdate[],
+            );
+            logEvent("info", "conversation.hydrate", {
+              conversation_id: id,
+              branch: "offline_cache",
+            });
             scheduleHydrateAttachSettle(id, recoveryLoaded);
-            if (!cancelled) setHydratePhase("ready");
+            reveal();
           } else if (!warm) {
             scheduleHydrateAttachSettle(id, recoveryLoaded);
             // No cache + cold slice: explicit error (never silent blank like a draft).
@@ -285,18 +304,20 @@ export function ConversationPage() {
       const pending = jumpStore.pendingFocus;
       if (pending && pending.conversationId === id) {
         jumpStore.clearPendingFocus();
-        void jumpToMessage(id, pending.messageId);
+        void jumpToMessage(id, pending.messageId, pageAc.signal);
       } else {
         // 消息永久链接 (对话基础功能补齐): a #/conversations/:id?msg=<messageId> anchor
         // (from「复制消息链接」or the web build) lands on the exact turn. Read the hash
         // query imperatively so the load effect stays keyed on [id] alone — re-parsing
         // via useSearchParams would fold URL churn into the deps and re-fetch the window.
         const target = readMsgAnchor();
-        if (target) void jumpToMessage(id, target);
+        if (target) void jumpToMessage(id, target, pageAc.signal);
       }
     })();
     return () => {
       cancelled = true;
+      pageAc.abort();
+      syncConversationFollow(null);
     };
   }, [id, hydrateRetry]);
 

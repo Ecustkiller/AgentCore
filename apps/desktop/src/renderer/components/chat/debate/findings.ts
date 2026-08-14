@@ -30,9 +30,9 @@ export const FINDING_STATUS = {
   open: { label: "待回应", pill: statusPillInline.primary },
   answered: { label: "已回应", pill: statusPillInline.muted },
   closed: { label: "已关闭", pill: statusPillInline.success },
-  escalated: { label: "升级", pill: statusPillInline.destructive },
+  escalated: { label: "升级", pill: statusPillInline.primary },
   deadlocked: { label: "僵持", pill: statusPillInline.muted },
-  unanswered: { label: "未回应", pill: statusPillInline.destructive },
+  unanswered: { label: "未回应", pill: statusPillInline.primary },
 } as const;
 
 export type FindingStatus = keyof typeof FINDING_STATUS;

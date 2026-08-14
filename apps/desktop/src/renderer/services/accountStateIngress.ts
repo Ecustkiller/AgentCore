@@ -1,9 +1,27 @@
+import { getConversations } from "@/hooks/useConversations";
 import { parseResumeSettledPayload } from "@/lib/resumeSettled";
 import { type FulfillFrame, onFulfillFrame } from "@/services/fulfillStream";
+import {
+  AI_ATTENTION_SNAPSHOT_TYPE,
+  AI_ATTENTION_TYPE,
+  type AiAttentionEvent,
+  applyAiAttention,
+  applyAiAttentionSnapshot,
+} from "@/stores/aiAttention";
+import {
+  AI_TURN_ACTIVITY_SNAPSHOT_TYPE,
+  AI_TURN_ACTIVITY_TYPE,
+  applyAiTurnActivity,
+  applyAiTurnActivitySnapshot,
+  ignoresCloudTurnActivity,
+} from "@/stores/aiTurnActivity";
+import { useConversationStore } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import {
   type QueuedTurnEntry,
+  TURN_QUEUE_ACCOUNT_SNAPSHOT_TYPE,
+  TURN_QUEUE_SNAPSHOT_TYPE,
   useQueuedTurnsStore,
 } from "@/stores/queuedTurns";
 
@@ -12,32 +30,41 @@ import {
  *
  * 对话级订阅同时只留一条（每访问一个会话就多挂一条空闲 SSE 会吃光连接池），所以
  * 「另一个会话里发生的事」在本端没有任何显示流可走：队列是账号的，挂起卡也是账号的，
- * 它们在哪个对话里变化与用户此刻在看哪个对话无关。设备长连接正是按账号开、每台在线
- * 桌面一条的那条通道，这些状态就走它。
+ * 哪些云对话还在跑、哪些对话停着等你也是账号的，它们在哪个对话里变化与用户此刻在看哪个对话无关。设备
+ * 长连接正是按账号开、每台在线桌面一条的那条通道，这些状态就走它。
  *
  * 帧带的是**事实全量**（整条队列、结算后的卡面），不是「变了」信号——本端不再回头拉
- * 任何东西。此前那三个对账模块（切会话 / 订阅重连时猜「可能漏了」再 GET）就此没有
- * 存在的理由。
+ * 任何东西。连接播种 `turn_queue_account_snapshot` 整表替换云队（空表也 replace；
+ * sidecar / 本地容器 key 保留）；增量仍是 `turn_queue_snapshot`。此前那三个对账
+ * 模块（切会话 / 订阅重连时猜「可能漏了」再 GET）就此没有存在的理由。
  *
  * 只订云通道：sidecar 的履约推送是本机引擎在回合内发的 op 帧，不带账号态。
  */
 
 let unsubscribe: (() => void) | null = null;
 
-function applyQueueSnapshot(payload: unknown): void {
-  if (!payload || typeof payload !== "object") return;
-  const p = payload as { conversation_id?: unknown; items?: unknown };
-  const conversationId =
-    typeof p.conversation_id === "string" ? p.conversation_id : "";
-  if (!conversationId || !Array.isArray(p.items)) return;
+function keepsLocalQueue(conversationId: string): boolean {
+  const via =
+    useConversationStore.getState().byId[conversationId]?.executionVia ?? null;
+  const localContainerRootId =
+    getConversations().find((c) => c.id === conversationId)
+      ?.localContainerRootId ?? null;
+  return ignoresCloudTurnActivity(via, localContainerRootId);
+}
 
-  const store = useQueuedTurnsStore.getState();
+function mapQueueItems(
+  conversationId: string,
+  items: unknown[],
+): QueuedTurnEntry[] {
   const prevById = new Map(
-    store.list(conversationId).map((e) => [e.queueId, e]),
+    useQueuedTurnsStore
+      .getState()
+      .list(conversationId)
+      .map((e) => [e.queueId, e]),
   );
-  const depth = p.items.length;
+  const depth = items.length;
   const next: QueuedTurnEntry[] = [];
-  for (const raw of p.items) {
+  for (const raw of items) {
     if (!raw || typeof raw !== "object") continue;
     const item = raw as Record<string, unknown>;
     const queueId = typeof item.queue_id === "string" ? item.queue_id : "";
@@ -60,7 +87,40 @@ function applyQueueSnapshot(payload: unknown): void {
       degradedFrom: prev?.degradedFrom,
     });
   }
-  store.replaceConversation(conversationId, next);
+  return next;
+}
+
+function applyQueueSnapshot(payload: unknown): void {
+  if (!payload || typeof payload !== "object") return;
+  const p = payload as { conversation_id?: unknown; items?: unknown };
+  const conversationId =
+    typeof p.conversation_id === "string" ? p.conversation_id : "";
+  // 增量只动这一条。缺字段 / 非数组丢帧；空 items 清该会话。禁止整表清空。
+  if (!conversationId || !Array.isArray(p.items)) return;
+  useQueuedTurnsStore
+    .getState()
+    .replaceConversation(
+      conversationId,
+      mapQueueItems(conversationId, p.items),
+    );
+}
+
+function applyQueueAccountSnapshot(payload: unknown): void {
+  if (!payload || typeof payload !== "object") return;
+  const queues = (payload as { queues?: unknown }).queues;
+  // 缺 queues / 非数组丢帧，不清现有表。空数组 = 只清云队。
+  if (!Array.isArray(queues)) return;
+
+  const cloud: Record<string, QueuedTurnEntry[]> = {};
+  for (const raw of queues) {
+    if (!raw || typeof raw !== "object") continue;
+    const q = raw as { conversation_id?: unknown; items?: unknown };
+    const conversationId =
+      typeof q.conversation_id === "string" ? q.conversation_id : "";
+    if (!conversationId || !Array.isArray(q.items)) continue;
+    cloud[conversationId] = mapQueueItems(conversationId, q.items);
+  }
+  useQueuedTurnsStore.getState().replaceAll(cloud, keepsLocalQueue);
 }
 
 function applyPausedCardSettled(payload: unknown): void {
@@ -81,13 +141,48 @@ function applyPausedCardSettled(payload: unknown): void {
 }
 
 function onFrame(frame: FulfillFrame): void {
-  if (frame.type === "turn_queue_snapshot") {
+  if (frame.type === TURN_QUEUE_ACCOUNT_SNAPSHOT_TYPE) {
+    applyQueueAccountSnapshot(frame.payload);
+    return;
+  }
+  if (frame.type === TURN_QUEUE_SNAPSHOT_TYPE) {
     applyQueueSnapshot(frame.payload);
     return;
   }
   if (frame.type === "paused_card_settled") {
     applyPausedCardSettled(frame.payload);
+    return;
   }
+  if (frame.type === AI_TURN_ACTIVITY_SNAPSHOT_TYPE) {
+    applyAiTurnActivitySnapshot(frame.payload);
+    return;
+  }
+  if (frame.type === AI_TURN_ACTIVITY_TYPE) {
+    applyAiTurnActivity(frame.payload);
+    return;
+  }
+  if (frame.type === AI_ATTENTION_SNAPSHOT_TYPE) {
+    applyAiAttentionSnapshot(frame.payload);
+    return;
+  }
+  if (frame.type === AI_ATTENTION_TYPE) {
+    applyFulfillAttention(frame.payload);
+  }
+}
+
+function applyFulfillAttention(payload: unknown): void {
+  if (!payload || typeof payload !== "object") return;
+  const p = payload as Record<string, unknown>;
+  if (p.state !== "required" && p.state !== "resolved") return;
+  applyAiAttention({
+    type: "ai_attention",
+    state: p.state,
+    conversation_id: p.conversation_id,
+    turn_id: p.turn_id,
+    interaction_id: p.interaction_id,
+    kind: p.kind,
+    title: p.title,
+  } as AiAttentionEvent);
 }
 
 /** Subscribe once for the renderer lifetime (idempotent). Call from `main.tsx`. */

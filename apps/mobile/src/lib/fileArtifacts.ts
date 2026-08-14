@@ -46,7 +46,7 @@ export interface FileArtifact {
   fromPath?: string;
   /** A1：只读「查看改动」用的参数侧预览。 */
   change?: FileChangePreview;
-  /** 路径验收态（有则主清单显示已验收/未通过，不显示写入/编辑）。 */
+  /** 路径验收态（有则主清单按态分行；通过行不打徽章，未通过标「未通过」，不显示写入/编辑）。 */
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;

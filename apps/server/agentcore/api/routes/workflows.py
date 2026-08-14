@@ -26,14 +26,17 @@ from agentcore.api.schemas.workflows import (
 )
 from agentcore.core.errors import NotFoundError, ValidationError
 from agentcore.db.repositories import FolderRepository, UserWorkflowRepository
-from agentcore.workflows.from_turn import append_description_note
 from agentcore.workflows.playbook_templates import (
     PlaybookTemplateError,
     instantiate_from_playbook,
     list_playbook_templates,
 )
 from agentcore.workflows.runner import dispatch_workflow_run
-from agentcore.workflows.slot_extract import slots_note, suggest_slots_for_definition
+from agentcore.workflows.slot_extract import (
+    append_description_note,
+    slots_note,
+    suggest_slots_for_definition,
+)
 from agentcore.workflows.slots import slots_from_definition
 from agentcore.workflows.source import is_turn_sourced
 

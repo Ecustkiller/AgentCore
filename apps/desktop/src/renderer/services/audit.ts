@@ -45,21 +45,3 @@ export async function fetchConversationAudit(
     throw e;
   }
 }
-
-/**
- * 按工作区相对路径反查写入链（owner-scoped）。
- * 后端未就绪时 404 → `null`（调用方展示空态，勿当硬错误）。
- */
-export async function fetchFileAudit(
-  conversationId: string,
-  path: string,
-): Promise<AgentAuditListResponse | null> {
-  try {
-    return await api.get<AgentAuditListResponse>(
-      `/v1/conversations/${encodeURIComponent(conversationId)}/audit/file?path=${encodeURIComponent(path)}`,
-    );
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return null;
-    throw e;
-  }
-}

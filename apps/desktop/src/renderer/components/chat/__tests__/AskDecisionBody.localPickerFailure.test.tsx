@@ -118,6 +118,8 @@ describe("AskDecisionBody local picker failure card", () => {
     const card = screen.getByTestId("local-picker-failure-card");
     expect(card.getAttribute("data-failure-kind")).toBe("dialog_failed");
     expect(card.textContent).toContain("未弹出文件夹选择器");
+    expect(card.className).toContain("bg-muted/40");
+    expect(card.className).not.toContain("destructive");
   });
 
   it("shows structured card for unauthorized", async () => {

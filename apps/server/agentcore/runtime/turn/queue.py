@@ -20,13 +20,15 @@ the queue; durable recovery of queued content is out of scope for this slice.
 every enqueue also signals ``turn_queued`` to端 following the conversation (see
 :func:`broadcast_turn_queued`), a「变了」ping for whoever is watching this turn.
 
-The *content* goes somewhere else: every mutation pushes the whole queue to the
-user's online devices over their fulfill channel
-(:func:`~agentcore.fulfill.user_signal.push_queue_snapshot`). A queue belongs to
-the account, and its holder is usually looking at another conversation — or at
-another machine — so the display stream cannot be where it is learned. That push
-is why there is no client-side queue reconciliation any more: the snapshot lands
-on its own, positions already renumbered. The queue itself stays in-process.
+The *content* goes somewhere else: every mutation pushes that conversation's
+queue to the user's online devices over their fulfill channel
+(:func:`~agentcore.fulfill.user_signal.push_queue_snapshot`). Connect seed is
+one account-level :func:`~agentcore.fulfill.user_signal.queue_account_snapshot_frame`
+(empty table included). A queue belongs to the account, and its holder is
+usually looking at another conversation — or at another machine — so the
+display stream cannot be where it is learned. That push is why there is no
+client-side queue reconciliation any more: the snapshot lands on its own,
+positions already renumbered. The queue itself stays in-process.
 """
 
 from __future__ import annotations
@@ -163,24 +165,29 @@ class TurnQueue:
             items=self._items_of(conversation_id),
         )
 
-    def snapshot_frames(self, user_id: str) -> list[dict[str, Any]]:
-        """Every non-empty queue this user owns, as connect-time fulfill frames.
+    def account_snapshot_frame(self, user_id: str) -> dict[str, Any]:
+        """One connect-time fulfill frame for every non-empty queue this user owns.
 
+        Always a single ``turn_queue_account_snapshot`` — including ``queues: []``.
         A device that was offline while the queue changed has no other way to
-        learn it — the pushes it missed are gone, and this is the same frame it
-        would have received. Ownership is per item, so one process serving many
-        accounts never hands one user's queue to another's device.
+        learn it; the client replaces its cloud table from this frame. Ownership
+        is per item, so one process serving many accounts never hands one user's
+        queue to another's device. Incremental mutations still push per-
+        conversation ``turn_queue_snapshot``.
         """
-        from agentcore.fulfill.user_signal import queue_snapshot_frame
+        from agentcore.fulfill.user_signal import queue_account_snapshot_frame
 
-        frames: list[dict[str, Any]] = []
+        queues: list[dict[str, Any]] = []
         for conversation_id, q in self._queues.items():
             if not q or q[0].user_id != user_id:
                 continue
-            frames.append(
-                queue_snapshot_frame(conversation_id, self._items_of(conversation_id))
+            queues.append(
+                {
+                    "conversation_id": conversation_id,
+                    "items": self._items_of(conversation_id),
+                }
             )
-        return frames
+        return queue_account_snapshot_frame(queues)
 
     def _items_of(self, conversation_id: str) -> list[dict[str, Any]]:
         """Pending entries as wire dicts, FIFO, 1-based ``position`` recomputed."""
@@ -417,7 +424,12 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
                 agent_mentions=item.agent_mentions,
             )
         )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id,
+        task=task,
+        sink=sink,
+        user_id=item.user_id,
+    )
 
 
 def new_queued_turn(

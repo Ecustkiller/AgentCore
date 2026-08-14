@@ -3,7 +3,7 @@
  * 发版/热修产品公告（两段式）——套模板后调用 publish:notice。
  *
  *   pnpm release:notice -- --phase preview --kind release --at 20:00 \
- *     --highlights "亮点1；亮点2；亮点3"
+ *     --highlights "亮点1；亮点2；亮点3；亮点4；亮点5"
  *   pnpm release:notice -- --phase done --kind release --versions "api 0.3.39 / 桌面 0.6.39"
  *   pnpm release:notice -- --phase preview --kind hotfix --at 14:30 --summary "修复登录超时"
  *   pnpm release:notice -- --dry-run --phase done --kind hotfix
@@ -43,7 +43,7 @@ function printHelp() {
 
 Options:
   --at HH:MM              预告约时（preview 必填，北京时间）
-  --highlights "a；b；c"   全端发版亮点（≤3 条，可用；或换行分隔）
+  --highlights "a；b；c"   全端发版亮点（≤5 条，可用；或换行分隔）
   --summary "…"           热修一句话摘要
   --versions "api x / 桌面 y / 手机 z"  收口正文版本行（可选）
   --end-hours N|none      传给 publish:notice（preview 默认 4；done 默认 2）
@@ -61,13 +61,13 @@ function splitHighlights(raw) {
     .split(/[；;\n]+/)
     .map((s) => s.trim())
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 5);
 }
 
 function buildReleasePreview({ at, highlights }) {
   const lines = splitHighlights(highlights);
   if (!lines.length) {
-    throw new Error("release preview 需要 --highlights（≤3 条用户可感知变化）");
+    throw new Error("release preview 需要 --highlights（≤5 条用户可感知变化）");
   }
   const title = `约 ${at} 发版 · 请按需规划好时间 · 提前停止使用 AI 功能`;
   const body = `新版本将于今天约 ${at} 起陆续上线。

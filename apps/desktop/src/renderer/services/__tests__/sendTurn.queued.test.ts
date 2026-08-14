@@ -49,6 +49,7 @@ vi.mock("@/services/turns/recovery", () => ({
   settleOrphanEmptyAssistants: vi.fn(),
 }));
 
+import { StreamError } from "@/lib/errors";
 import { notifyInfo } from "@/lib/toast";
 import { streamConversation } from "@/services/streamConversation";
 import { rejoinLiveTurn } from "@/services/turns/recovery";
@@ -115,5 +116,136 @@ describe("sendTurn — 发送即有流（无 202 / 无守望）", () => {
       (m) => m.role === "assistant",
     );
     expect(assistants.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("开跑前 402：撤乐观用户泡与空助手泡，phase 回 idle", async () => {
+    streamMock.mockRejectedValue(
+      new StreamError("http", 402, { code: "LLM_KEY_REQUIRED" }),
+    );
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    const rt = getRuntime(CID);
+    expect(rt.messages.some((m) => m.id === "opt-u2")).toBe(false);
+    expect(rt.messages.some((m) => m.role === "assistant")).toBe(false);
+    expect(rt.isGenerating).toBe(false);
+    expect(rt.turnPhase).toBe("idle");
+    expect(rt.error).toBeTruthy();
+  });
+
+  it("开跑前 429 额度：同样回滚，不留伪回合", async () => {
+    streamMock.mockRejectedValue(
+      new StreamError("http", 429, { code: "QUOTA_EXCEEDED" }),
+    );
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    expect(getRuntime(CID).messages).toHaveLength(0);
+  });
+
+  it("传输失败未落库：不回滚（不是 A 类）", async () => {
+    streamMock.mockRejectedValue(new StreamError("network"));
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    expect(getRuntime(CID).messages.some((m) => m.id === "opt-u2")).toBe(true);
+    expect(getRuntime(CID).messages.some((m) => m.role === "assistant")).toBe(
+      true,
+    );
+  });
+});
+
+function persistEmptyAssistantFailure(opts?: {
+  content?: string;
+  withTool?: boolean;
+  code?: string;
+}): void {
+  const store = useConversationStore.getState();
+  store.reconcileLastTurn("u-server", CID);
+  if (opts?.content) {
+    store.appendToLastMessage(opts.content, CID);
+  }
+  if (opts?.withTool) {
+    store.addProcessTool(
+      {
+        tool_call_id: "t1",
+        tool_name: "web_search",
+        arguments: {},
+      },
+      CID,
+    );
+  }
+  store.attachErrorToLastMessage(
+    {
+      code: opts?.code ?? "LLM_RATE_LIMIT",
+      message: "上游限流，本回合无法继续。",
+    },
+    CID,
+  );
+  store.finalizeLastMessage(CID);
+  store.setTurnPhase("failed", CID);
+}
+
+describe("sendTurn — Class B 零产出回滚（流 resolve）", () => {
+  it("流 resolve + 空助手 LLM_RATE_LIMIT → 回滚 idle", async () => {
+    streamMock.mockImplementation(async () => {
+      persistEmptyAssistantFailure();
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    const rt = getRuntime(CID);
+    expect(rt.messages).toHaveLength(0);
+    expect(rt.isGenerating).toBe(false);
+    expect(rt.turnPhase).toBe("idle");
+    expect(rt.error).toBeTruthy();
+  });
+
+  it("有正文不滚", async () => {
+    streamMock.mockImplementation(async () => {
+      persistEmptyAssistantFailure({ content: "半句" });
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    const rt = getRuntime(CID);
+    expect(rt.messages.some((m) => m.role === "user")).toBe(true);
+    expect(rt.messages.some((m) => m.role === "assistant")).toBe(true);
+    expect(rt.turnPhase).toBe("failed");
+  });
+
+  it("有工具不滚", async () => {
+    streamMock.mockImplementation(async () => {
+      persistEmptyAssistantFailure({ withTool: true });
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(false);
+    expect(getRuntime(CID).messages.some((m) => m.role === "user")).toBe(true);
+    expect(getRuntime(CID).turnPhase).toBe("failed");
+  });
+
+  it("catch 已 persist + 空助手 LLM_RATE_LIMIT → 同样回滚 idle", async () => {
+    streamMock.mockImplementation(async () => {
+      persistEmptyAssistantFailure();
+      throw new StreamError("http", 429, {
+        code: "LLM_RATE_LIMIT",
+        serverMessage: "上游限流，本回合无法继续。",
+      });
+    });
+
+    const result = await sendTurn(spec());
+
+    expect(result.unstartedRefusal).toBe(true);
+    const rt = getRuntime(CID);
+    expect(rt.messages).toHaveLength(0);
+    expect(rt.turnPhase).toBe("idle");
+    expect(rt.error).toBeTruthy();
   });
 });

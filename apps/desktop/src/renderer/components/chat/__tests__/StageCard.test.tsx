@@ -164,7 +164,9 @@ describe("StageCard", () => {
     await waitFor(() => {
       expect(finalizeLastMessage).toHaveBeenCalledWith("c1");
     });
-    expect(screen.getByText("命题检定未通过")).toBeTruthy();
+    const submitFail = screen.getByText("命题检定未通过");
+    expect(submitFail.className).toContain("text-muted-foreground");
+    expect(submitFail.className).not.toContain("destructive");
     expect(screen.getByText("按此开辩")).toBeTruthy();
     expect(markResolved).not.toHaveBeenCalled();
   });

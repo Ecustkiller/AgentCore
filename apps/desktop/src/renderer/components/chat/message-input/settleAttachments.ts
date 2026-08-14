@@ -8,12 +8,18 @@
 import { logEvent } from "@/lib/log";
 import { ApiError, NetworkError } from "@/services/api";
 import type { OutgoingAttachment } from "@/services/streamConversation";
-import { awaitAttachmentUpload } from "./attachmentUploads";
+import {
+  attachmentResidedIn,
+  awaitAttachmentUpload,
+  peekAttachmentRecoverBlob,
+  rememberAttachmentRecover,
+} from "./attachmentUploads";
 import type { PendingAttachment } from "./composerAttachments";
 import {
   OVERSIZE_REASON,
   type ResideFailure,
   type ResideResult,
+  type ResidentAttachmentInput,
   ensureAttachmentResident,
 } from "./resideAttachment";
 
@@ -97,6 +103,36 @@ function passthrough(a: PendingAttachment): OutgoingAttachment {
   };
 }
 
+/** 换了会话就不能信芯片上的旧路径；暂存被吃掉时改用还握着的字节。 */
+function residencyInput(
+  conversationId: string,
+  a: PendingAttachment,
+): ResidentAttachmentInput {
+  const residedIn = attachmentResidedIn(a.id);
+  const fileBlob = a.fileBlob ?? peekAttachmentRecoverBlob(a.id);
+  const workspacePath =
+    a.workspacePath && residedIn !== undefined && residedIn !== conversationId
+      ? undefined
+      : a.workspacePath;
+  return {
+    name: a.name,
+    stagingId: a.stagingId,
+    workspacePath,
+    binary: a.binary,
+    text: a.text,
+    truncated: a.truncated,
+    fileBlob,
+  };
+}
+
+function rememberSettled(
+  conversationId: string,
+  a: PendingAttachment,
+  blob: File | undefined,
+): void {
+  rememberAttachmentRecover(a.id, blob, conversationId);
+}
+
 async function settleOne(
   conversationId: string,
   a: PendingAttachment,
@@ -109,7 +145,11 @@ async function settleOne(
   );
   // 没登记（历史草稿 / 换了会话）或附加时就失败了 → 发送时再试一次。
   if (!res || !res.ok) {
-    const resided = await ensureAttachmentResident(conversationId, a);
+    const input = residencyInput(conversationId, a);
+    const resided = await ensureAttachmentResident(conversationId, input);
+    if (resided.ok) {
+      rememberSettled(conversationId, a, input.fileBlob ?? resided.fileBlob);
+    }
     res = resided.ok
       ? {
           ok: true,
@@ -119,8 +159,11 @@ async function settleOne(
           truncated: resided.truncated,
           binary: resided.binary,
           workspacePath: resided.workspacePath || undefined,
+          fileBlob: input.fileBlob ?? resided.fileBlob,
         }
       : resided;
+  } else {
+    rememberSettled(conversationId, a, a.fileBlob ?? res.fileBlob);
   }
   if (!res.ok) return res;
 

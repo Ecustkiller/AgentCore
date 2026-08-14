@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
-/** 同对话 FIFO 排队项（live · 设备通道快照为权威；进程内，重启丢）。 */
+/** 同对话 FIFO 排队项（live · 设备通道快照为权威；进程内，重启丢）。
+ * 连接播种 `turn_queue_account_snapshot` 整表替换云队；增量 `turn_queue_snapshot`。 */
 export interface QueuedTurnEntry {
   queueId: string;
   conversationId: string;
@@ -20,14 +21,25 @@ export interface QueuedTurnEntry {
   interjectionId?: string;
 }
 
+export const TURN_QUEUE_SNAPSHOT_TYPE = "turn_queue_snapshot";
+export const TURN_QUEUE_ACCOUNT_SNAPSHOT_TYPE = "turn_queue_account_snapshot";
+
 interface QueuedTurnsState {
   byConversation: Record<string, QueuedTurnEntry[]>;
   upsert: (entry: QueuedTurnEntry) => void;
   remove: (conversationId: string, queueId: string) => QueuedTurnEntry | null;
-  /** 快照权威替换（空数组 = 清会话条）。 */
+  /** 增量快照权威替换（空数组 = 清这一条会话；禁止整表清空）。 */
   replaceConversation: (
     conversationId: string,
     entries: QueuedTurnEntry[],
+  ) => void;
+  /**
+   * 账号级整表替换云队。`keepKey` 为真的本机 key（sidecar / 本地容器）原样保留。
+   * 空表 = 只清云队。
+   */
+  replaceAll: (
+    cloudByConversation: Record<string, QueuedTurnEntry[]>,
+    keepKey: (conversationId: string) => boolean,
   ) => void;
   clearConversation: (conversationId: string) => void;
   list: (conversationId: string | null | undefined) => QueuedTurnEntry[];
@@ -77,6 +89,19 @@ export const useQueuedTurnsStore = create<QueuedTurnsState>((set, get) => ({
         );
       }
       return { byConversation };
+    }),
+
+  replaceAll: (cloudByConversation, keepKey) =>
+    set((state) => {
+      const next: Record<string, QueuedTurnEntry[]> = {};
+      for (const [id, entries] of Object.entries(state.byConversation)) {
+        if (keepKey(id)) next[id] = entries;
+      }
+      for (const [id, entries] of Object.entries(cloudByConversation)) {
+        if (keepKey(id) || entries.length === 0) continue;
+        next[id] = [...entries].sort((a, b) => a.position - b.position);
+      }
+      return { byConversation: next };
     }),
 
   clearConversation: (conversationId) =>

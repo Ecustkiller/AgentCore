@@ -109,9 +109,17 @@
   padding: 0 5px;
   font-size: 11px;
   font-weight: 600;
-  color: #fff;
+  color: var(--bg);
   background: var(--accent);
   border-radius: 999px;
+}
+
+/* Bare thread screen (outside TabLayout) owns keyboard inset + home-indicator. */
+.screen.im-thread {
+  padding-bottom: calc(
+    var(--safe-area-inset-bottom, env(safe-area-inset-bottom)) +
+    var(--keyboard-inset-bottom, 0px)
+  );
 }
 
 /* --- Thread --- */
@@ -559,46 +567,6 @@
 .im-result-handle {
   font-size: 12px;
   color: var(--muted);
-}
-
-/* Composer attachment tray (pending uploads before send — Batch E). */
-.im-tray {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 16px 0;
-}
-
-.im-tray-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  max-width: 200px;
-  padding: 4px 8px;
-  font-size: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.im-tray-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.im-tray-x {
-  flex-shrink: 0;
-  min-height: auto;
-  padding: 0 2px;
-  color: var(--muted);
-  background: transparent;
-  border: none;
-  font-size: 14px;
-}
-
-.im-tray-item.uploading {
-  opacity: 0.6;
 }
 
 /* The 附件 (+) button in the composer. */

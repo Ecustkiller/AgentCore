@@ -17,7 +17,6 @@ import {
   type ConversationRecovery,
   shouldHydrateLocalRecovery,
 } from "@/services/resume";
-import { clearAiAttentionForConversation } from "@/stores/aiAttention";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { syncConversationFollow } from "./conversationFollow";
 import { projectPausedRuns } from "./projectPausedRuns";
@@ -28,6 +27,7 @@ import {
   settleOrphanEmptyAssistants,
 } from "./recovery";
 import { attachSidecarTurn } from "./sidecarAttach";
+import { hasLocalConversationStream } from "./streamOwnership";
 
 /** Kick attach/settle when recovery lands. Does not delay overlay reveal. */
 export function scheduleHydrateAttachSettle(
@@ -58,27 +58,19 @@ export async function runHydrateAttachSettle(
     paused_count: recovery.pausedCount,
     branch: useLocal ? "local" : "cloud",
   });
-  // 对话级订阅（云对话多端同权 B2 · 验收 4）：云会话常驻一条 ``follow=true`` 订阅，
-  // 空闲只收心跳，另一端开跑的新回合在同一条流上自动重放 + 跟播。本机引擎在跑 / 有本机
-  // 未同步回合时不订（那些回合服务端没有 run）；纯云的冷挂起会话要订——另一端放行后的
-  // 续跑就是一个新 run。放在 abort 早退之前：订阅自带本端连接闸，忙时自己让位。
-  //
-  // 只跟当前打开的会话：观察泵是会话切片自己的（切走不卸），但订阅全局只留一条，
-  // 快速 A→B 时 A 迟到的 hydrate 不能把订阅从 B 抢回去。
+  // 对话级订阅由揭窗立刻 sync(id)；hydrate 只在本机 sidecar / unsynced 时卸订
+  // （那些回合服务端没有 run）。迟到的 hydrate 不抢订：已切走则不动全局那一条。
   if (
     useConversationStore.getState().currentConversationId === conversationId
   ) {
-    const followCloud = !recovery.sidecarLive && recovery.unsynced.length === 0;
-    syncConversationFollow(followCloud ? conversationId : null);
-    // 进了这个对话 → 页内快照（recovery / InteractionStore）接管权威，跨对话的「等你」
-    // 提醒交棒。这也是断线期间漏收 `ai_attention` resolved 的唯一兜底：没有跨对话挂起
-    // 快照接口，不清就会永远亮着一盏假灯。
-    clearAiAttentionForConversation(conversationId);
+    if (recovery.sidecarLive || recovery.unsynced.length > 0) {
+      syncConversationFollow(null);
+    }
+    // 打开对话不再清 `ai_attention`：权威是 fulfill 快照 / 增量。当前页 banner
+    // 自己过滤；侧栏灯必须留下，否则帽外 required 一进对话就灭。
   }
-  // Live pump already claimed (session abort set) — attach* is idempotent via
-  // isGenerating; settle must not rejoin over it either. Cold hydrate sets
-  // isGenerating from isStreaming overlay but leaves abort null until attach.
-  if (getRuntime(conversationId).abort) {
+  // 本端连接闸已占用 — attach* 不得再开一条。Cold overlay 的 isGenerating 不是所有权。
+  if (hasLocalConversationStream(conversationId)) {
     return useLocal ? "local" : "cloud";
   }
   if (useLocal) {

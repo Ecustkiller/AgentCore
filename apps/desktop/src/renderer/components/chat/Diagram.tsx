@@ -212,12 +212,12 @@ function CodeFallback({
     <div className="code-block">
       <div className="code-block-header">
         <span className="code-block-lang">{lang}</span>
-        <span className="text-xs text-destructive">渲染失败</span>
+        <span className="text-xs text-muted-foreground">渲染失败</span>
       </div>
       <pre>
         <code>{code}</code>
       </pre>
-      <div className="border-t border-border px-3 py-1.5 text-xs text-destructive">
+      <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
         {error}
       </div>
     </div>

@@ -28,7 +28,9 @@ export interface MessageAttachment {
   /** The file's text content (UTF-8, capped at {@link TEXT_PREVIEW_CAP}); empty when binary. */
   text: string;
   truncated: boolean;
-  kind: "file" | "dir";
+  kind: "file" | "dir" | "conversation";
+  /** 仅 kind=conversation：被引用对话的 id（桌面已有 wire 字段）。 */
+  conversation_id?: string;
   /** Binary / image resident: no UTF-8 body inline. */
   binary?: boolean;
   /** Relative path already written under the conversation workspace (`attachments/…`). */
@@ -38,6 +40,8 @@ export interface MessageAttachment {
    * Never serialized onto the wire.
    */
   fileBlob?: File;
+  /** Draft-only chip key; never serialized onto the wire. */
+  id?: string;
 }
 
 /** Outcome of reading / staging one picked file: a ready attachment, or a reason it was refused. */
@@ -65,7 +69,7 @@ function isImageFile(file: File): boolean {
 export function toWireAttachment(
   a: MessageAttachment,
 ): Omit<MessageAttachment, "fileBlob"> {
-  const out: Omit<MessageAttachment, "fileBlob"> = {
+  const out: Omit<MessageAttachment, "fileBlob" | "id"> = {
     name: a.name,
     path: a.path,
     text: a.binary ? "" : a.text,
@@ -74,6 +78,9 @@ export function toWireAttachment(
   };
   if (a.binary) out.binary = true;
   if (a.workspace_path) out.workspace_path = a.workspace_path;
+  if (a.kind === "conversation" && a.conversation_id) {
+    out.conversation_id = a.conversation_id;
+  }
   return out;
 }
 
@@ -189,10 +196,10 @@ export async function finalizeAttachmentsForSend(
   conversationId: string,
   attachments: MessageAttachment[],
 ): Promise<
-  | { ok: true; attachments: Omit<MessageAttachment, "fileBlob">[] }
+  | { ok: true; attachments: Omit<MessageAttachment, "fileBlob" | "id">[] }
   | { ok: false; reason: string }
 > {
-  const out: Omit<MessageAttachment, "fileBlob">[] = [];
+  const out: Omit<MessageAttachment, "fileBlob" | "id">[] = [];
   for (const att of attachments) {
     const res = await ensureAttachmentResident(conversationId, att);
     if (!res.ok) return res;

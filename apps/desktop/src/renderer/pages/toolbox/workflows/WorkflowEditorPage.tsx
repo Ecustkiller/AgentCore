@@ -135,7 +135,9 @@ export function WorkflowEditorPage() {
         >
           工作流
         </Button>
-        <p className="text-sm text-destructive">{error ?? "工作流不存在"}</p>
+        <p className="text-sm text-muted-foreground">
+          {error ?? "工作流不存在"}
+        </p>
       </PageContainer>
     );
   }
@@ -247,7 +249,7 @@ export function WorkflowEditorPage() {
           ))}
         </ul>
       )}
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      {error && <p className="mt-2 text-xs text-muted-foreground">{error}</p>}
       <p className="mt-2 text-xs text-muted-foreground">v{workflow.version}</p>
 
       {/* 传已保存的那份：开跑跑的是服务端的 definition，画布上未保存的改动不算。 */}

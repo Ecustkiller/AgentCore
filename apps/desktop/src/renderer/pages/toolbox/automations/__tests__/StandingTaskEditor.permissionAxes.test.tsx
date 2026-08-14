@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { ApiError } from "@/services/api";
 import type { FolderMeta } from "@/services/folders";
 import type { PermissionAxes } from "@/services/permissionAxes";
 import { RECIPE_AXES } from "@/services/permissionAxes";
@@ -34,6 +35,7 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import {
   StandingTaskEditorDrawer,
+  emptyStandingTaskForm,
   formFromStandingTask,
 } from "../StandingTaskEditor";
 
@@ -190,7 +192,59 @@ describe("StandingTaskEditorDrawer folder loading", () => {
   it("says the workspace list failed instead of claiming there is no cloud workspace", () => {
     renderEditor(makeTask(), "工作区列表加载失败");
 
-    expect(screen.getByText(/读不到工作区列表/)).toBeTruthy();
+    const note = screen.getByText(/读不到工作区列表/);
+    expect(note.className).toContain("text-muted-foreground");
+    expect(note.className).not.toContain("destructive");
     expect(screen.queryByText(/没有可用的云工作区/)).toBeNull();
+  });
+
+  it("keeps the empty-cloud-workspace prompt primary (needs you)", async () => {
+    render(
+      <MemoryRouter>
+        <StandingTaskEditorDrawer
+          open
+          mode="create"
+          initial={emptyStandingTaskForm([])}
+          taskId={null}
+          cloudFolders={[]}
+          foldersError={null}
+          onClose={() => {}}
+          onSaved={async () => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    const note = await screen.findByText(/没有可用的云工作区/);
+    expect(note.className).toContain("text-primary");
+    expect(note.className).not.toContain("destructive");
+  });
+
+  it("shows scope validation as muted (form check, not needs-you)", () => {
+    renderEditor(
+      makeTask({
+        templateConfig: {
+          includeGlobal: false,
+          folderIds: [],
+          lookbackHours: 24,
+        },
+      }),
+    );
+
+    const note = screen.getByText(/请至少勾选/);
+    expect(note.className).toContain("text-muted-foreground");
+    expect(note.className).not.toContain("destructive");
+    expect(note.className).not.toContain("text-primary");
+  });
+
+  it("shows a recoverable save failure as muted inline text", async () => {
+    patch.mockRejectedValueOnce(
+      new ApiError(500, JSON.stringify({ error: { message: "保存开小差" } })),
+    );
+    renderEditor(makeTask());
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    const err = await screen.findByText("保存开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
   });
 });

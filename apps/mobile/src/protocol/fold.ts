@@ -1556,10 +1556,10 @@ export function extractPrevExecutionIds(
 }
 
 /**
- * 回合协作计数（`message_end.collab`）→ 完成态团队条的「互相把关」一行。
+ * 回合协作计数（`message_end.collab`）：内部口径，用户面不展示。
  *
  * Transport-only sibling of {@link fold}：{@link ProjectedTurn} 是 conformance 裁判态，
- * 加字段要动后端 oracle + 重出 golden，而这只是条呈现旁路（桌面同样挂在 `message.collab`
+ * 加字段要动后端 oracle + 重出 golden，而这只是旁路（桌面同样挂在 `message.collab`
  * 上，不进投影）。**只覆盖 live 流**——`message_end` 是 DERIVED、不进 journal，回放的收口
  * 帧只带 finish_reason；历史读 REST `MessageDetail.collab`（messages.usage 列）。
  */

@@ -270,7 +270,7 @@ export function WhiteboardCanvasPage() {
       </header>
 
       {conflict ? (
-        <div className="flex shrink-0 items-center gap-3 border-b border-border bg-destructive/10 px-3 py-2">
+        <div className="flex shrink-0 items-center gap-3 border-b border-primary/30 bg-primary/10 px-3 py-2">
           <span className="text-xs text-foreground">
             此白板已在别处更新，为避免覆盖已暂停自动保存。
           </span>

@@ -11,12 +11,13 @@ import { Loader2 } from "lucide-react";
  * CEO 协调模式：多 worker 团队进展卡片（transport-only，不走 content_delta / CEO 气泡）。
  *
  * 产品语义（2026-07 拍板）：以【系统自动进度】为主、CEO 里程碑总结为辅——
- * - 协调等待（``coordination_wait``）：一行等待摘要归状态条标题行、成员级细节归协作图节点，
- *   本行在等待期不渲染（避免与标题 / 图重复）。
+ * - 协调等待（``coordination_wait``）：成员级细节归协作图节点，本行在等待期不渲染。
  * - 进展主体用确定性 run 完成态派生的每员摘要（权威来源），非 CEO 逐条手写。
  * - CEO 的 ``update_synthesis`` 里程碑草稿降为「CEO 小结」辅助块，挂在系统进度之下。
  * - 汇总空窗（工人全完成、终稿/方案卡未到）即使无新 preview 事件，也渲染确定性
  *   「N/N 已完成，正在生成汇总」+ 活性指示。
+ *
+ * 桌面协作图状态条已收成细工具栏，不再挂本行；组件保留给其它宿主 / 测试。
  */
 export function TeamSynthesisPreviewLine({
   execution,

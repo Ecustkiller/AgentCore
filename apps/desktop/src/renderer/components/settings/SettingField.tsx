@@ -84,7 +84,7 @@ export function SettingField({
         </p>
       )}
       {error && (
-        <p className="mt-1 text-xs text-destructive" role="alert">
+        <p className="mt-1 text-xs text-muted-foreground" role="alert">
           {error}
         </p>
       )}
@@ -95,7 +95,7 @@ export function SettingField({
 export type SettingsFormMessageTone = "error" | "success";
 
 const formMessageToneClass: Record<SettingsFormMessageTone, string> = {
-  error: "text-destructive",
+  error: "text-muted-foreground",
   success: "text-success",
 };
 

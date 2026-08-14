@@ -98,16 +98,16 @@ export interface ExecutionRuntime {
    * splice-derived process so reopen matches live interleaving. null while live. */
   runProcesses: Record<string, ProcessStep[]> | null;
   /** CEO 协调模式 Phase 1：`team_synthesis_preview` 最新快照（同 key 保最新）。P2 起
-   * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。驱动 StatusStrip
-   * 「团队进展」预览行。 */
+   * DURABLE：重载由 hydrateFromJournal 取 journal 中最后一条重建。状态条已收成工具栏，
+   * 不再挂合成草稿行。 */
   teamSynthesisPreview: TeamSynthesisPreviewPayload | null;
   /** CEO 协调等待（`coordination_wait`）：captain 空等团队事件。EPHEMERAL——仅 live
-   * stream；waiting=false / 回合结束清除。驱动 StatusStrip「等待团队成员完成」。 */
+   * stream；waiting=false / 回合结束清除。状态条只报 n/m。 */
   coordinationWait: CoordinationWaitPayload | null;
   /** Client-only: wall-clock ms when the current wait segment began (heartbeats keep it). */
   coordinationWaitStartedAt: number | null;
   /** 执行转后台（`execution_detached`）：附着回合已收口、团队继续跑。EPHEMERAL——仅 live；
-   * 驱动 StatusStrip 静态「团队后台运行中 · n/m」。`execution_completed` / 终态清除。 */
+   * 驱动 StatusStrip 静态「后台」徽标 + n/m。`execution_completed` / 终态清除。 */
   executionDetached: ExecutionDetachedPayload | null;
   /** 交付状态（`delivery_status`，同 execution_id 保最新）：delegate 批次收尾的结构化交付
    * 对账（已交付/缺口/待用户操作）。DURABLE：重载由 hydrateFromJournal 取最后一条重建，

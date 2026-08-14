@@ -153,7 +153,7 @@ export function UserProfileDialog({
 
         <div className="space-y-3 px-5 py-4">
           {error && (
-            <p className="text-sm text-destructive" role="alert">
+            <p className="text-sm text-muted-foreground" role="alert">
               {error}
             </p>
           )}

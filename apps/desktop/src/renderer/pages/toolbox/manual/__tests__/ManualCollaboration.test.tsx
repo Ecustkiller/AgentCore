@@ -52,13 +52,14 @@ describe("ManualCollaboration", () => {
     expect(screen.getByText(/设为新会话默认/)).toBeTruthy();
     expect(screen.getByText("中途插手")).toBeTruthy();
     expect(screen.getByText("记忆与偏好")).toBeTruthy();
+    expect(sectionText("progress")).toMatch(/下一步指令在聊天里下达/);
     expect(screen.queryByText("设置 · 权限配方")).toBeNull();
     expect(screen.queryByText(/ask_user/)).toBeNull();
     expect(screen.queryByText(/plan_review/)).toBeNull();
     expect(screen.queryByText(/run_redirect/)).toBeNull();
   });
 
-  it("renders workflow section: save-a-turn main path, canvas as touch-up, honest snapshot limit", () => {
+  it("renders workflow section: toolbox design main path, canvas primitives, official templates", () => {
     render(
       <MemoryRouter initialEntries={["/toolbox/manual/collaboration"]}>
         <ManualCollaboration />
@@ -66,17 +67,20 @@ describe("ManualCollaboration", () => {
     );
 
     const text = sectionText("workflow");
-    expect(text).toMatch(/主路径：从满意的那一轮存起/);
-    expect(text).toMatch(/回合状态条上会出现「存为工作流」/);
-    expect(text).toMatch(/画布是事后微调的地方，不用从零画/);
+    expect(text).toMatch(/主路径：去工具箱设计/);
+    expect(text).toMatch(/新建工作流/);
+    expect(text).toMatch(/画布上能摆什么/);
     expect(text).toMatch(/队员步骤/);
     expect(text).toMatch(/等人关卡/);
-    // 诚实边界：快照不带模型选择 / 辩论站位
-    expect(text).toMatch(/复跑效果可能与原轮不同/);
+    expect(text).toMatch(/结构锁定/);
+    expect(text).toMatch(/不再由 CEO 即兴组队/);
     expect(text).toMatch(/复制一份成你自己的工作流/);
     // 「模板」只用于工作流页的官方模板
     expect(text).toMatch(/官方模板/);
     expect(text).not.toMatch(/系统模板/);
+    expect(text).not.toMatch(/存为工作流/);
+    expect(text).not.toMatch(/从满意的那一轮存起/);
+    expect(text).not.toMatch(/回合状态条/);
   });
 
   it("renders automation section: triggers, inbox, system tasks, workflow binding", () => {
@@ -94,6 +98,8 @@ describe("ManualCollaboration", () => {
     expect(text).toMatch(/立即触发/);
     expect(text).toMatch(/云工作区/);
     expect(text).toMatch(/绑一张工作流（可选）/);
+    expect(text).toMatch(/在工具箱里设计好再绑上/);
+    expect(text).not.toMatch(/存为工作流/);
     expect(text).toMatch(/重新触发/);
     // 内部词 / 退役词不得外泄；自动化页的预制件不叫「模板」
     expect(text).not.toMatch(/站立任务/);

@@ -1152,7 +1152,7 @@ async def test_test_run_maps_sandbox_error_to_failed_result(monkeypatch: pytest.
 
 
 async def test_parallel_same_path_file_read_coalesces_once(tmp_path: Path):
-    """Same-round parallel file_read on one path → one underlying read, fan-out results."""
+    """Same-round parallel file_read on one path+window → one underlying read, fan-out."""
     from agentcore.tools.builtin.file_ops import FileReadTool
 
     (tmp_path / "doc.md").write_text("# Hello\nshared body\n", encoding="utf-8")
@@ -1235,6 +1235,48 @@ async def test_parallel_distinct_path_file_reads_not_coalesced(tmp_path: Path):
     by_id = {m.tool_call_id: m.content or "" for m in messages}
     assert "AAA" in by_id["r1"]
     assert "BBB" in by_id["r2"]
+
+
+async def test_parallel_same_path_different_window_file_reads_not_coalesced(
+    tmp_path: Path,
+):
+    """Same path, different offset/limit → each window executes (no first-window fan-out)."""
+    from agentcore.tools.builtin.file_ops import FileReadTool
+
+    (tmp_path / "doc.md").write_text("L1\nL2\nL3\nL4\n", encoding="utf-8")
+    backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
+    reads = {"n": 0}
+    orig_read_lines = backend.read_lines
+
+    async def _counting_read_lines(path: str, *args: Any, **kwargs: Any):
+        reads["n"] += 1
+        return await orig_read_lines(path, *args, **kwargs)
+
+    backend.read_lines = _counting_read_lines  # type: ignore[method-assign]
+
+    reg = ToolRegistry()
+    reg.register(FileReadTool())
+    ctx = _ctx(backend)
+    messages, _terminal, attempts = await execute_tools(
+        [
+            _call("r1", "file_read", '{"path": "doc.md", "offset": 1, "limit": 1}'),
+            _call("r2", "file_read", '{"path": "doc.md", "offset": 3, "limit": 1}'),
+        ],
+        reg,
+        ctx,
+        EventSink(),
+        approval_gate=None,
+        run_id="r1",
+    )
+    assert all(a.success for a in attempts)
+    assert reads["n"] == 2
+    by_id = {m.tool_call_id: m.content or "" for m in messages}
+    assert "L1" in by_id["r1"]
+    assert "L3" in by_id["r2"]
+    assert "L1" not in by_id["r2"]
+    assert "L3" not in by_id["r1"]
+    assert "第 1–1 行" in by_id["r1"]
+    assert "第 3–3 行" in by_id["r2"]
 
 
 async def test_ceo_str_replace_miss_still_audience_deny():

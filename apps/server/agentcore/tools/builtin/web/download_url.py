@@ -186,7 +186,7 @@ class DownloadUrlTool:
         if (parsed.scheme or "").lower() not in ("http", "https"):
             return _fail("仅支持 http/https URL", start)
 
-        rel_path, rename_note = _prepare_write_relpath(path_raw)
+        rel_path, rename_note = await _prepare_write_relpath(path_raw, context)
         if not rel_path or rel_path in (".",):
             return _fail("path 无效：请提供工作区相对文件路径（含文件名）", start)
         if rel_path.endswith("/"):

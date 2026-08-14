@@ -99,7 +99,7 @@ export function PauseCard({
   }
 
   return (
-    <div className="pause">
+    <div className="pause pause--budget">
       <ApprovalBody
         pending={pending}
         busy={busy}
@@ -155,9 +155,11 @@ function ApprovalBody({
   const showTurnGrants = !forceOneShot;
   return (
     <>
-      <div className="pause-title">Agent 请求执行 · {label}</div>
-      {headline && <div className="pause-arg">{headline}</div>}
-      {hintLine ? <div className="pause-hint">{hintLine}</div> : null}
+      <div className="pause-scroll">
+        <div className="pause-title">Agent 请求执行 · {label}</div>
+        {headline && <div className="pause-arg">{headline}</div>}
+        {hintLine ? <div className="pause-hint">{hintLine}</div> : null}
+      </div>
       <div className="pause-actions">
         <Btn tone="primary" disabled={busy} onClick={() => onDecide("approve")}>
           允许一次

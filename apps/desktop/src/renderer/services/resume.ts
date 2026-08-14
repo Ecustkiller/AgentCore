@@ -59,23 +59,14 @@ export function shouldHydrateLocalRecovery(r: ConversationRecovery): boolean {
   return r.sidecarLive || r.unsynced.length > 0 || r.pausedCount > 0;
 }
 
-/** Local turn still looks open (recovery `live_running` can lag the message window). */
-function localTurnActive(conversationId: string): boolean {
-  const rt = getRuntime(conversationId);
-  if (rt.isGenerating) return true;
-  const last = [...rt.messages].reverse().find((m) => m.role === "assistant");
-  if (!last) return false;
-  return (
-    last.isStreaming === true ||
-    last.status === "running" ||
-    last.finishReason === "paused"
-  );
-}
-
 function hydratePendingInteractions(
   conversationId: string,
   items: PendingInteractionSummary[],
-  liveRunning: boolean,
+  opts: {
+    since: number;
+    confirmed: readonly ResumeOrigin[];
+    sidecarLive?: boolean;
+  },
   origin: ResumeOrigin = "server",
 ): void {
   useInteractionStore.getState().hydratePending(
@@ -87,10 +78,20 @@ function hydratePendingInteractions(
       payload: i.payload ?? {},
       origin,
     })),
-    {
-      liveRunning: liveRunning || localTurnActive(conversationId),
-    },
+    opts,
   );
+}
+
+function checkpointIdsFromPaused(
+  paused: Array<{ checkpoint_id?: string }>,
+): Set<string> {
+  const ids = new Set<string>();
+  for (const p of paused) {
+    if (typeof p.checkpoint_id === "string" && p.checkpoint_id) {
+      ids.add(p.checkpoint_id);
+    }
+  }
+  return ids;
 }
 
 function asPendingInteractions(
@@ -164,11 +165,17 @@ export async function loadRecovery(
         })),
         { since, confirmed: ["server"] },
       );
-      hydratePendingInteractions(
-        conversationId,
-        cloud.pending,
-        cloud.cloudLive,
-      );
+      hydratePendingInteractions(conversationId, cloud.pending, {
+        since,
+        confirmed: ["server"],
+      });
+      useInteractionStore
+        .getState()
+        .settleUnseenCold(
+          conversationId,
+          checkpointIdsFromPaused(cloud.paused),
+          { since, confirmed: ["server"] },
+        );
       if (cloud.paused.length > 0) {
         finalizeGeneratingForPausedConversation(conversationId);
       }
@@ -229,24 +236,29 @@ export async function loadRecovery(
 
   await Promise.all([localP, cloudP]);
 
-  // Apply after both facts land so live = cloud ∨ sidecar (early empty must
-  // not wipe while either engine still has a live turn).
-  if (cloudPending !== null) {
-    hydratePendingInteractions(
-      conversationId,
-      cloudPending,
-      cloudLive || sidecarLive,
-    );
-  }
-
   const merged = mergePausedWithOrigin(sidecarPaused, cloudPaused);
   // 只有真被问到的那一路才有权清自己来源的壳：一路挂了 ≠ 它那边的帧没了。
   const confirmed: ResumeOrigin[] = [];
   if (sidecarKnown) confirmed.push("sidecar");
   if (cloudKnown) confirmed.push("server");
+  // Cloud failure must not call hydratePending (unknown ≠ idle).
+  if (cloudPending !== null) {
+    hydratePendingInteractions(conversationId, cloudPending, {
+      since,
+      confirmed,
+      sidecarLive,
+    });
+  }
   usePausedTurnStore
     .getState()
     .setForConversation(conversationId, merged, { since, confirmed });
+  useInteractionStore
+    .getState()
+    .settleUnseenCold(
+      conversationId,
+      checkpointIdsFromPaused(merged.map((e) => e.summary)),
+      { since, confirmed },
+    );
   if (merged.length > 0) {
     finalizeGeneratingForPausedConversation(conversationId);
   }
@@ -529,7 +541,7 @@ export function selectVisibleColdResumes(args: {
     }
     if (!entry.id || !entry.payload) continue;
     const full = entry as InteractionEntry;
-    if (full.status === "orphaned") continue;
+    if (full.status === "orphaned" || full.status === "resolved") continue;
     const resumeKey = resolveColdResumeKeyFromMessages(
       messages,
       full.messageId,
@@ -552,7 +564,8 @@ export function selectVisibleColdResumes(args: {
 
   for (const p of pausedForConv) {
     if (covered.has(p.checkpointId)) continue;
-    if (byId.get(p.checkpointId)?.status === "orphaned") continue;
+    const ixStatus = byId.get(p.checkpointId)?.status;
+    if (ixStatus === "orphaned" || ixStatus === "resolved") continue;
     out.push(p);
   }
 

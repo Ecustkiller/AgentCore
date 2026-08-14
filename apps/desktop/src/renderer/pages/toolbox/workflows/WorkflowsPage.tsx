@@ -156,7 +156,7 @@ export function WorkflowsPage() {
           <OfficialTemplateGuide templates={templates ?? []} />
           {templatesHint && (
             <div className="flex flex-wrap items-center gap-3">
-              <p className="min-w-0 flex-1 text-xs text-destructive">
+              <p className="min-w-0 flex-1 text-xs text-muted-foreground">
                 {templatesHint}
               </p>
               <Button
@@ -212,7 +212,7 @@ export function WorkflowsPage() {
         <div className="space-y-3">
           {listError ? (
             <Card className="flex flex-wrap items-center gap-3 p-4">
-              <p className="min-w-0 flex-1 text-sm text-destructive">
+              <p className="min-w-0 flex-1 text-sm text-muted-foreground">
                 {listError}
               </p>
               <Button

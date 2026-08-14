@@ -6,6 +6,7 @@
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -14,20 +15,35 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { listConversations } = vi.hoisted(() => ({
+const { listConversations, listConversationsGrouped } = vi.hoisted(() => ({
   listConversations: vi.fn(),
+  listConversationsGrouped: vi.fn(),
 }));
+
+const navigate = vi.fn();
 
 vi.mock("@/api/client", () => ({ getTokens: () => ({ access: "token" }) }));
 vi.mock("@/api/conversations", () => ({
   listConversations,
+  listConversationsGrouped,
   deleteConversation: vi.fn(),
   renameConversation: vi.fn(),
   setConversationArchived: vi.fn(),
 }));
 vi.mock("@/api/search", () => ({ search: vi.fn() }));
+vi.mock("react-router-dom", async () => {
+  const actual =
+    await vi.importActual<typeof import("react-router-dom")>(
+      "react-router-dom",
+    );
+  return { ...actual, useNavigate: () => navigate };
+});
 
-import type { ConversationSummary } from "@/api/conversations";
+import type {
+  ConversationSummary,
+  FolderGroup,
+  GroupedConversations,
+} from "@/api/conversations";
 import {
   type AiAttentionEvent,
   __resetAiAttentionForTests,
@@ -64,12 +80,32 @@ function attention(over: Partial<AiAttentionEvent> = {}): AiAttentionEvent {
   };
 }
 
-async function mountDrawer() {
-  render(
+function folderGroup(over: Partial<FolderGroup> = {}): FolderGroup {
+  return {
+    id: "f-cloud",
+    name: "设计",
+    mode: "cloud",
+    conversations: [conv({ id: "c-in-cloud", title: "海报" })],
+    ...over,
+  };
+}
+
+function grouped(
+  over: Partial<GroupedConversations> = {},
+): GroupedConversations {
+  return { folders: [], ungrouped: [], ...over };
+}
+
+function renderDrawer(onClose: () => void = () => {}) {
+  return render(
     <MemoryRouter>
-      <ConversationDrawer open onClose={() => {}} onOpen={() => {}} />
+      <ConversationDrawer open onClose={onClose} onOpen={() => {}} />
     </MemoryRouter>,
   );
+}
+
+async function mountDrawer() {
+  renderDrawer();
   await screen.findByText("部署上线");
 }
 
@@ -81,11 +117,15 @@ function lit(title: string): boolean {
 }
 
 beforeEach(() => {
+  navigate.mockReset();
   listConversations.mockReset();
-  listConversations.mockResolvedValue([
-    conv(),
-    conv({ id: "conv-2", title: "周报汇总" }),
-  ]);
+  listConversationsGrouped.mockReset();
+  listConversations.mockResolvedValue([]);
+  listConversationsGrouped.mockResolvedValue(
+    grouped({
+      ungrouped: [conv(), conv({ id: "conv-2", title: "周报汇总" })],
+    }),
+  );
   __resetAiAttentionForTests();
 });
 
@@ -160,5 +200,111 @@ describe("ConversationDrawer · 行级「等你」灯", () => {
     });
 
     expect(lit("部署上线")).toBe(false);
+  });
+});
+
+describe("ConversationDrawer · 文件夹分组", () => {
+  it("云组头进文件", async () => {
+    listConversationsGrouped.mockResolvedValue(
+      grouped({ folders: [folderGroup()] }),
+    );
+    renderDrawer();
+    await screen.findByText("设计");
+
+    fireEvent.click(screen.getByText("设计"));
+    expect(navigate).toHaveBeenCalledWith(
+      `/files/${encodeURIComponent("folder:f-cloud")}`,
+      { state: { name: "设计" } },
+    );
+    expect(listConversations).not.toHaveBeenCalled();
+  });
+
+  it("＋ 带 draftFolder state 去 / 并关抽屉", async () => {
+    const onClose = vi.fn();
+    listConversationsGrouped.mockResolvedValue(
+      grouped({ folders: [folderGroup()] }),
+    );
+    renderDrawer(onClose);
+    await screen.findByText("设计");
+
+    fireEvent.click(screen.getByLabelText("在此新开"));
+    expect(navigate).toHaveBeenCalledWith("/", {
+      state: { draftFolderId: "f-cloud", draftFolderName: "设计" },
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("本机组没有 ＋ / 不进文件", async () => {
+    listConversationsGrouped.mockResolvedValue(
+      grouped({
+        folders: [
+          folderGroup({
+            id: "f-local",
+            name: "本机仓",
+            mode: "local",
+            conversations: [conv({ id: "c-local", title: "本机聊" })],
+          }),
+        ],
+      }),
+    );
+    renderDrawer();
+    await screen.findByText("本机仓");
+
+    expect(screen.queryByLabelText("在此新开")).toBeNull();
+    expect(screen.getByText("请在桌面端打开")).toBeTruthy();
+    fireEvent.click(screen.getByText("本机仓"));
+    expect(
+      navigate.mock.calls.some((c) => String(c[0]).startsWith("/files")),
+    ).toBe(false);
+  });
+
+  it("空组不出现", async () => {
+    listConversationsGrouped.mockResolvedValue(
+      grouped({
+        folders: [
+          folderGroup({
+            id: "f-empty",
+            name: "空文件夹",
+            conversations: [],
+          }),
+          folderGroup({
+            id: "f-full",
+            name: "有对话的组",
+            conversations: [conv({ id: "c-full", title: "组内" })],
+          }),
+        ],
+      }),
+    );
+    renderDrawer();
+    await screen.findByText("有对话的组");
+    expect(screen.queryByText("空文件夹")).toBeNull();
+  });
+
+  it("裸聊在组后，不造未分组标题", async () => {
+    listConversationsGrouped.mockResolvedValue(
+      grouped({
+        folders: [folderGroup({ conversations: [conv({ title: "组内聊" })] })],
+        ungrouped: [conv({ id: "bare", title: "裸聊一条" })],
+      }),
+    );
+    renderDrawer();
+    const groupedTitle = await screen.findByText("设计");
+    const bare = screen.getByText("裸聊一条");
+    expect(
+      groupedTitle.compareDocumentPosition(bare) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByText("未分组")).toBeNull();
+  });
+
+  it("已归档仍走扁平 listConversations(true)", async () => {
+    listConversations.mockResolvedValue([
+      conv({ id: "arch-1", title: "旧归档", archived: true }),
+    ]);
+    await mountDrawer();
+    fireEvent.click(screen.getByText("已归档"));
+    await screen.findByText("旧归档");
+    expect(listConversations).toHaveBeenCalledWith(true);
+    expect(screen.queryByText("未分组")).toBeNull();
   });
 });

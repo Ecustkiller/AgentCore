@@ -39,7 +39,7 @@ describe("SettingsAsync", () => {
       </SettingsAsync>,
     );
     expect(screen.getByText("加载失败，请重试").className).toContain(
-      "text-destructive",
+      "text-muted-foreground",
     );
     expect(screen.queryByText("暂无内容")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "重试" }));

@@ -3,18 +3,13 @@ import {
   ResolvedDecisionRecord,
   teamCorrectionSuffix,
   teamPreviewLead,
+  teamPreviewSettledLead,
   teamResolvedOutcome,
 } from "@/components/chat/decision";
 import {
   DebatePreviewBody,
   WorkerPreviewRows,
 } from "@/components/chat/teamPreview";
-import { Button } from "@/components/ui";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
 
@@ -25,22 +20,26 @@ import { useMessageExecution } from "@/stores/execution";
  *
  * Branches on ``primitive``: delegate = 队员分工表; debate = 辩题 / 立场 / 轮次预算.
  *
- * Resolved + team already started: content hosts in {@link GraphTeamPreview}
- * on the inline StatusStrip (see {@link shouldHostPreviewInGraph}); this card
- * returns null so the timeline does not keep a spare card slot.
+ * Resolved continue/adjust + 编制已在 store：图立刻接管，本卡返回 null
+ * （see {@link shouldHostPreviewInGraph}）— 图已出现则不画废卡.
+ * 同泡仍有 pending 开工卡时 leftover go 不藏（与出图同一套闸）.
+ * 取消 / 超时 / 尚未铺节点时仍留一行结论文.
  *
  * Resolved copy / icons come from the shared decision meta ({@link TEAM_PRIMITIVE_META}).
  */
 export function TeamPreviewCard({
   preview,
   messageId,
+  bubblePreviews,
 }: {
   preview: TeamPreviewDisplay;
-  /** Assistant message id — used to gate resolved embed into the graph. */
+  /** Assistant message id — used to hide the spare timeline card once the graph takes over. */
   messageId?: string;
+  /** Same-bubble team_preview cards — pending sibling blocks leftover-go hide. */
+  bubblePreviews?: readonly Pick<TeamPreviewDisplay, "status" | "decision">[];
 }) {
   const execution = useMessageExecution(messageId ?? null);
-  if (shouldHostPreviewInGraph(preview, execution?.runs)) {
+  if (shouldHostPreviewInGraph(preview, execution?.runs, bubblePreviews)) {
     return null;
   }
   if (preview.status === "resolved") {
@@ -54,60 +53,19 @@ function isDebate(preview: TeamPreviewDisplay): boolean {
 }
 
 function summarySuffix(preview: TeamPreviewDisplay): string {
-  return teamPreviewLead({
+  const args = {
     primitive: preview.primitive,
     headline: preview.headline,
     workerCount: preview.workers.length,
     sideCount: preview.sides.length,
-  });
-}
-
-function graphPreviewSummary(preview: TeamPreviewDisplay): string {
-  return teamPreviewLead({
-    primitive: preview.primitive,
-    headline: preview.headline,
-    workerCount: preview.workers.length,
-    sideCount: preview.sides.length,
-  });
-}
-
-/**
- * Secondary ghost control for StatusStrip — Popover hosts 辩题 / 分工 details
- * (DebatePreviewBody / WorkerPreviewRows + optional note). No DecisionCard shell; does not
- * navigate to the debate room. Mounted only on the inline StatusStrip path.
- */
-export function GraphTeamPreview({
-  preview,
-}: {
-  preview: TeamPreviewDisplay;
-}) {
-  const summary = graphPreviewSummary(preview);
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          className="ml-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-          data-testid="graph-team-preview"
-        >
-          {summary}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-80 p-3 [&>*:first-child]:mt-0">
-        {isDebate(preview) ? (
-          <DebatePreviewBody debate={preview} />
-        ) : (
-          <WorkerPreviewRows workers={preview.workers} />
-        )}
-        {preview.note && (
-          <p className="mt-1.5 whitespace-pre-wrap rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs text-foreground">
-            {preview.note}
-          </p>
-        )}
-      </PopoverContent>
-    </Popover>
-  );
+  };
+  if (
+    preview.status === "resolved" &&
+    (preview.decision === "continue" || preview.decision === "adjust")
+  ) {
+    return teamPreviewSettledLead(args);
+  }
+  return teamPreviewLead(args);
 }
 
 function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
@@ -121,7 +79,10 @@ function ResolvedTeamPreview({ preview }: { preview: TeamPreviewDisplay }) {
     excluded_run_ids: preview.excluded_run_ids,
     write_capability_overrides: preview.write_capability_overrides,
   });
-  const summary = `${meta.label}${correction} · ${summarySuffix(preview)}`;
+  const suffix = summarySuffix(preview);
+  const summary = suffix
+    ? `${meta.label}${correction} · ${suffix}`
+    : `${meta.label}${correction}`;
 
   return (
     <ResolvedDecisionRecord

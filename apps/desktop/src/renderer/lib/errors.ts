@@ -6,6 +6,7 @@ import { ApiError, NetworkError } from "@/services/api";
 import {
   KEY_CONFIG_ERROR_CODES,
   NON_RETRIABLE_ERROR_CODES,
+  isUnstartedSendRefusal as matchUnstartedSendRefusal,
 } from "@agentcore/contract-types";
 
 /**
@@ -285,6 +286,12 @@ export function isConnectivityErrorCode(code: string | undefined): boolean {
     (CONNECTIVITY_ERROR_CODES as readonly string[]).includes(code) &&
     !(OUR_SERVICE_ERROR_CODES as readonly string[]).includes(code)
   );
+}
+
+/** Preflight 402/429/平台凭据缺失：发送当没发生。须再配「用户消息未落库」。 */
+export function isUnstartedSendRefusal(err: unknown): boolean {
+  const f = factsOf(err);
+  return matchUnstartedSendRefusal({ code: f.code, status: f.status });
 }
 
 /** True when the failure is our cloud (not vendor Base URL / API Key). */

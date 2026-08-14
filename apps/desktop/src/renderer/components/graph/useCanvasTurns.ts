@@ -1,7 +1,7 @@
 /** Turn spine: hydrate journal, fold messages → turns (LOD nodes built in useCanvasFlow). */
 
+import { teamGraphVisible } from "@/components/chat/debatePreviewPlacement";
 import { visibleMessageText } from "@/lib/errors";
-import { isUndismissedRecoverable } from "@/lib/turnRecoverable";
 import {
   assistantProjectionId,
   useActiveMessages,
@@ -12,11 +12,15 @@ import {
   projectRuntime,
   useExecutionStore,
 } from "@/stores/execution";
-import { useRecoveryDismissedStore } from "@/stores/recoveryDismissed";
-import { useEffect, useMemo } from "react";
+import { teamPreviewsExact, useInteractionStore } from "@/stores/interactions";
+import { useEffect, useMemo, useRef } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { countPendingDecisions } from "./CanvasDecisionPanel";
 import type { TurnRailItem } from "./CanvasTurnRail";
+import {
+  type TeamJournalSlot,
+  teamJournalsIfIdentityChanged,
+} from "./journalHydrate";
 
 export const TURN_NODE_WIDTH = 320;
 export const TEAM_NODE_HEIGHT = 132;
@@ -35,7 +39,6 @@ export interface TurnItem {
   answerMessageId: string;
   running: boolean;
   pendingDecisions: number;
-  recoverable: boolean;
 }
 
 /** Spine height for a turn — prefers rendered RF style/measured height. */
@@ -86,19 +89,25 @@ export function useCanvasTurns({
   const teamRuntimes = useExecutionStore(
     useShallow((s) => teamTurnIds.map((id) => s.byId[id])),
   );
-  // Subscribe to the Set so dismiss flips recompute rail / fold chips same frame.
-  const dismissed = useRecoveryDismissedStore((s) => s.dismissed);
+  const interactionById = useInteractionStore((s) => s.byId);
+
+  // Journal identity (m.runs / events.length), not every messages tick — live
+  // streaming must not re-fold every team journal. hydrateFromJournal still
+  // applies journalIsNewerThan (catch up after half-court; never roll live back).
+  const journalSlotsRef = useRef<TeamJournalSlot[]>([]);
+  const nextJournals = teamJournalsIfIdentityChanged(
+    journalSlotsRef.current,
+    messages,
+  );
+  if (nextJournals) journalSlotsRef.current = nextJournals;
+  const teamJournals = journalSlotsRef.current;
 
   useEffect(() => {
     const store = useExecutionStore.getState();
-    for (const m of messages) {
-      if (m.role !== "assistant" || !m.executionId || !m.runs) continue;
-      const key = assistantProjectionId(m);
-      if (!store.byId[key]?.plan) {
-        store.hydrateFromJournal(key, m.runs);
-      }
+    for (const { key, journal } of teamJournals) {
+      store.hydrateFromJournal(key, journal);
     }
-  }, [messages]);
+  }, [teamJournals]);
 
   const turns = useMemo<TurnItem[]>(() => {
     const out: TurnItem[] = [];
@@ -116,19 +125,26 @@ export function useCanvasTurns({
       if (m.executionId) {
         const rt = teamRuntimes[teamIdx++];
         const exec = rt ? projectRuntime(rt) : null;
+        const showGraph = teamGraphVisible(
+          exec?.runs,
+          teamPreviewsExact(interactionById.values(), conversationId, turnId),
+        );
         out.push({
           id: turnId,
-          kind: "team",
-          exec,
+          kind: showGraph ? "team" : "simple",
+          exec: showGraph ? exec : null,
           prompt: lastUser,
           answer: visibleMessageText(m),
           promptMessageId: lastUserId,
           answerMessageId: m.id,
-          running: exec?.status === "running" || m.isStreaming,
-          pendingDecisions: countPendingDecisions(m, exec, {
-            conversationId,
-          }),
-          recoverable: isUndismissedRecoverable(turnId, exec, dismissed),
+          running: showGraph
+            ? exec?.status === "running" || m.isStreaming
+            : m.isStreaming,
+          pendingDecisions: showGraph
+            ? countPendingDecisions(m, exec, {
+                conversationId,
+              })
+            : 0,
         });
       } else {
         out.push({
@@ -141,12 +157,11 @@ export function useCanvasTurns({
           answerMessageId: m.id,
           running: m.isStreaming,
           pendingDecisions: 0,
-          recoverable: false,
         });
       }
     }
     return out;
-  }, [messages, teamRuntimes, conversationId, dismissed]);
+  }, [messages, teamRuntimes, conversationId, interactionById]);
 
   const latestTeamId = useMemo(() => {
     for (let i = turns.length - 1; i >= 0; i--) {
@@ -177,7 +192,6 @@ export function useCanvasTurns({
         status: t.exec?.status ?? null,
         running: t.running,
         pendingDecisions: t.pendingDecisions,
-        recoverable: t.recoverable,
         label:
           t.exec?.taskSummary ||
           t.prompt ||

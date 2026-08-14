@@ -14,7 +14,7 @@ function siblingRank(node: FileNode): number {
   return node.isDir ? 0 : 1;
 }
 
-/** 降序比较一项可缺失的数值元信息（大 / 新在前；缺失沉底）。 */
+/** 降序比较一项可缺失的数值元信息（新的在前；缺失沉底）。 */
 function compareDescNullable(
   a: number | null | undefined,
   b: number | null | undefined,
@@ -29,7 +29,7 @@ function compareDescNullable(
 
 /**
  * Dirs first, then by the chosen key — the canonical tree ordering (mutates +
- * returns). Name is always the tie-break, so equal sizes / timestamps still land
+ * returns). Name is always the tie-break, so equal timestamps still land
  * in a stable, readable order.
  */
 export function sortNodes(
@@ -41,11 +41,7 @@ export function sortNodes(
     const rankB = siblingRank(b);
     if (rankA !== rankB) return rankA - rankB;
     const keyed =
-      by === "size"
-        ? compareDescNullable(a.sizeBytes, b.sizeBytes)
-        : by === "mtime"
-          ? compareDescNullable(a.mtimeMs, b.mtimeMs)
-          : 0;
+      by === "mtime" ? compareDescNullable(a.mtimeMs, b.mtimeMs) : 0;
     return keyed !== 0 ? keyed : a.name.localeCompare(b.name);
   });
 }
@@ -88,8 +84,14 @@ export interface FileTreeData {
   truncatedOf: (dir: string) => boolean;
   /** Load a directory's children if not already loaded/loading (lazy sources). */
   ensureDir: (dir: string) => void;
-  /** Reload one directory — eager sources reload the whole tree. */
+  /** Reload one directory — eager sources reload the whole tree. Sets loading. */
   reload: (dir: string) => void;
+  /**
+   * 静默补丁：已 ready 的层不标 loading、不清空 children，只替换该层。
+   * 从未加载的层跳过（不替用户展开）。急切源仍拉整树，但不打 loading。
+   * AI / watch / focus 必须走这条，禁止走 {@link reload}（那条会打 chrome.loading）。
+   */
+  reloadSilent: (dir: string) => Promise<void>;
 }
 
 /**
@@ -110,20 +112,26 @@ export function useFileTreeData(
   source: FileSource,
   sortBy: FileSortBy = "name",
 ): FileTreeData {
-  const eager = !!source.listTree;
   const childrenRef = useRef<Map<string, FileNode[]>>(new Map());
   const statusRef = useRef<Map<string, DirStatus>>(new Map());
   const truncatedRef = useRef<Set<string>>(new Set());
   // Read by the loaders so changing the sort never invalidates them (that would
   // re-run the mount effect and refetch the whole tree just to reorder it).
   const sortRef = useRef(sortBy);
+  // 重置只跟 source.id：同一工作区换了新对象（列表 refetch）不得清空树再转圈。
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
+  const sourceId = source.id;
   const [, bump] = useReducer((n: number) => n + 1, 0);
 
-  const loadEager = useCallback(async () => {
-    const listTree = source.listTree;
+  const loadEager = useCallback(async (silent = false) => {
+    const listTree = sourceRef.current.listTree;
     if (!listTree) return;
-    statusRef.current.set("", "loading");
-    bump();
+    const rootReady = statusRef.current.get("") === "ready";
+    if (!silent) {
+      statusRef.current.set("", "loading");
+      bump();
+    }
     try {
       const all = await listTree();
       childrenRef.current = bucketTree(all, sortRef.current);
@@ -131,43 +139,58 @@ export function useFileTreeData(
       for (const dir of childrenRef.current.keys()) status.set(dir, "ready");
       statusRef.current = status;
     } catch {
-      statusRef.current = new Map([["", "error"]]);
+      if (!silent || !rootReady) {
+        statusRef.current = new Map([["", "error"]]);
+      }
     }
     bump();
-  }, [source]);
+  }, []);
 
-  const loadDir = useCallback(
-    async (dir: string) => {
+  const loadDir = useCallback(async (dir: string, silent = false) => {
+    const src = sourceRef.current;
+    const status = statusRef.current.get(dir);
+    // 静默路径不替用户展开：没加载过的层跳过。loading / ready / error 才补丁。
+    if (
+      silent &&
+      status !== "ready" &&
+      status !== "error" &&
+      status !== "loading"
+    ) {
+      return;
+    }
+    if (!silent) {
       statusRef.current.set(dir, "loading");
       bump();
-      try {
-        // Prefer the bounded reader so a capped level can say so; sources that
-        // enumerate in full only implement `listDir` and stay un-truncated.
-        const bounded = source.listDirBounded;
-        const res = bounded
-          ? await bounded(dir)
-          : { entries: await source.listDir(dir), truncated: false };
-        childrenRef.current.set(dir, sortNodes(res.entries, sortRef.current));
-        if (res.truncated) truncatedRef.current.add(dir);
-        else truncatedRef.current.delete(dir);
-        statusRef.current.set(dir, "ready");
-      } catch {
+    }
+    try {
+      // Prefer the bounded reader so a capped level can say so; sources that
+      // enumerate in full only implement `listDir` and stay un-truncated.
+      const bounded = src.listDirBounded;
+      const res = bounded
+        ? await bounded(dir)
+        : { entries: await src.listDir(dir), truncated: false };
+      childrenRef.current.set(dir, sortNodes(res.entries, sortRef.current));
+      if (res.truncated) truncatedRef.current.add(dir);
+      else truncatedRef.current.delete(dir);
+      statusRef.current.set(dir, "ready");
+    } catch {
+      if (!silent || status !== "ready") {
         statusRef.current.set(dir, "error");
       }
-      bump();
-    },
-    [source],
-  );
+    }
+    bump();
+  }, []);
 
-  // Reset + initial load whenever the source identity changes.
+  // Reset + initial load only when the source *id* changes — not the object.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sourceId is an intentional re-run key
   useEffect(() => {
     childrenRef.current = new Map();
     statusRef.current = new Map();
     truncatedRef.current = new Set();
     bump();
-    if (eager) void loadEager();
+    if (sourceRef.current.listTree) void loadEager();
     else void loadDir("");
-  }, [eager, loadEager, loadDir]);
+  }, [sourceId, loadEager, loadDir]);
 
   // Switching the sort key reorders what's already in memory — never a refetch.
   useEffect(() => {
@@ -178,24 +201,32 @@ export function useFileTreeData(
 
   const ensureDir = useCallback(
     (dir: string) => {
-      if (eager) return; // whole tree already in memory
+      if (sourceRef.current.listTree) return; // whole tree already in memory
       if (statusRef.current.has(dir)) return; // loading / ready / error already
       void loadDir(dir);
     },
-    [eager, loadDir],
+    [loadDir],
   );
 
   const reload = useCallback(
     (dir: string) => {
-      if (eager) void loadEager();
+      if (sourceRef.current.listTree) void loadEager();
       else void loadDir(dir);
     },
-    [eager, loadEager, loadDir],
+    [loadEager, loadDir],
+  );
+
+  const reloadSilent = useCallback(
+    (dir: string) => {
+      if (sourceRef.current.listTree) return loadEager(true);
+      return loadDir(dir, true);
+    },
+    [loadEager, loadDir],
   );
 
   // Stable readers (read live refs) + a memoized facade so effects/handlers can
-  // depend on `data` without re-firing every render; identity changes only with
-  // the source. Re-renders are driven by `bump`, so render-time reads stay fresh.
+  // depend on `data` without re-firing every render; identity stays put across
+  // source-object churn (same id). Re-renders are driven by `bump`.
   const childrenOf = useCallback(
     (dir: string) => childrenRef.current.get(dir),
     [],
@@ -207,7 +238,14 @@ export function useFileTreeData(
   );
 
   return useMemo(
-    () => ({ childrenOf, statusOf, truncatedOf, ensureDir, reload }),
-    [childrenOf, statusOf, truncatedOf, ensureDir, reload],
+    () => ({
+      childrenOf,
+      statusOf,
+      truncatedOf,
+      ensureDir,
+      reload,
+      reloadSilent,
+    }),
+    [childrenOf, statusOf, truncatedOf, ensureDir, reload, reloadSilent],
   );
 }

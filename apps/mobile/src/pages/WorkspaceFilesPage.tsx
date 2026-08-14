@@ -18,7 +18,7 @@ import { toWorkspaceRelPath } from "@/lib/workspacePath";
 // Browse ONE cloud workspace's files (手机端布局重构 · 跨工作区文件总览).
 //
 // The drill-down from the 文件 tab (/files → /files/:wsId). Keeps the bottom tab bar (a
-// within-tab push), with a 「← 文件」back to the workspace list. Renders the shared
+// within-tab push), with a 「← 我的文件」back to the workspace list. Renders the shared
 // <FileBrowser> over a first-class workspace source (api/workspaces.ts), the cross-workspace
 // sibling of the per-conversation /c/:id/files. The workspace name rides in router state from
 // the list so the header shows it without a refetch.
@@ -129,7 +129,7 @@ export function WorkspaceFilesPage() {
             className="link"
             onClick={() => setTrashOpen(false)}
           >
-            ← 文件
+            ← 返回
           </button>
           <span className="viewer-name">软删区</span>
           <span className="bar-right" aria-hidden />
@@ -146,7 +146,7 @@ export function WorkspaceFilesPage() {
     <div className="screen">
       <header className="bar">
         <button type="button" className="link" onClick={onBack}>
-          {fromConversationId ? "← 返回" : "← 文件"}
+          {fromConversationId ? "← 返回" : "← 我的文件"}
         </button>
         <span className="viewer-name">{name}</span>
         <div className="bar-right">

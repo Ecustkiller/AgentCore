@@ -193,7 +193,9 @@ describe("AskDecisionBody Continue + grant fulfillment", () => {
     });
     expect(onContinue).not.toHaveBeenCalled();
     expect(onBindResolve).not.toHaveBeenCalled();
-    expect(screen.getByText("找不到该目录")).toBeTruthy();
+    const bindFail = screen.getByText("找不到该目录");
+    expect(bindFail.className).toContain("text-muted-foreground");
+    expect(bindFail.className).not.toContain("destructive");
     // 卡仍在：主 CTA 仍可点
     expect(screen.getByRole("button", { name: /^提交$/ })).toBeTruthy();
   });

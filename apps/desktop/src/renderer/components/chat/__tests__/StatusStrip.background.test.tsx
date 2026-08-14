@@ -94,7 +94,7 @@ beforeEach(() => {
 });
 
 describe("StatusStrip · execution_detached 后台运行", () => {
-  it("静态「团队后台运行中 · n/m」，无转圈", () => {
+  it("静态「后台」徽标 + n/m，无转圈", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setExecutionDetached(
       {
@@ -112,7 +112,8 @@ describe("StatusStrip · execution_detached 后台运行", () => {
     expect(screen.getByTestId("status-strip-background")).toBeTruthy();
     expect(
       screen.getByTestId("status-strip-background-title").textContent,
-    ).toBe("团队后台运行中");
+    ).toBe("后台");
+    expect(screen.queryByText("团队后台运行中")).toBeNull();
     expect(screen.getByText("1/2")).toBeTruthy();
     expect(container.querySelector(".animate-spin")).toBeNull();
   });

@@ -1,4 +1,7 @@
-import { teamHasStartedRuns } from "@/components/chat/InlineTeamGraph";
+import {
+  shouldShowTeamGraph,
+  teamHasStartedRuns,
+} from "@/components/chat/InlineTeamGraph";
 import {
   type ExecutionPlan,
   type RunFrame,
@@ -67,5 +70,53 @@ describe("teamHasStartedRuns · inline graph gate", () => {
   it("授权后续跑（running + 已有 run_started）渲染图", () => {
     const exec = projectExecution(plan, [started("r1", "w1")], "running");
     expect(teamHasStartedRuns(exec.runs)).toBe(true);
+    expect(shouldShowTeamGraph(exec.runs, true)).toBe(true);
+  });
+
+  it("已授权但队员仍 pending → 仍渲染图", () => {
+    const exec = projectExecution(plan, [], "running");
+    expect(teamHasStartedRuns(exec.runs)).toBe(false);
+    expect(shouldShowTeamGraph(exec.runs, true)).toBe(true);
+  });
+
+  it("journal 回放 captain 已开、工人仍 pending、未授权 → 不出图", () => {
+    const withCaptain: ExecutionPlan = {
+      ...plan,
+      id: "exec-gate-captain",
+      agents: [{ id: "ceo", role: "CEO" }, ...plan.agents],
+      runs: [
+        {
+          id: "captain",
+          agentId: "ceo",
+          task: "",
+          dependsOn: [],
+          kind: "captain",
+        },
+        ...plan.runs,
+      ],
+    };
+    const exec = projectExecution(
+      withCaptain,
+      [
+        {
+          t: 1,
+          kind: "run_started",
+          agentId: "ceo",
+          runId: "captain",
+          parentRunId: null,
+          runKind: "captain",
+          continuesRunId: null,
+        },
+      ],
+      "paused",
+    );
+    expect(exec.runs.find((r) => r.id === "captain")?.status).toBe("running");
+    expect(
+      exec.runs
+        .filter((r) => r.kind !== "captain")
+        .every((r) => r.status === "pending"),
+    ).toBe(true);
+    expect(teamHasStartedRuns(exec.runs)).toBe(false);
+    expect(shouldShowTeamGraph(exec.runs, false)).toBe(false);
   });
 });

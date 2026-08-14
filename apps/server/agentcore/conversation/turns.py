@@ -30,6 +30,7 @@ from agentcore.conversation.turn_runner import (
     suspension_callbacks,
 )
 from agentcore.conversation.turn_stats import turn_worker_stats
+from agentcore.conversation.zero_output_rollback import maybe_delete_zero_output_send
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import error_fields_for
 from agentcore.core.log_context import log_context, new_trace_id
@@ -183,7 +184,7 @@ async def stream_chat(
                 sink=sink,
             )
 
-        await run_and_persist(
+        turn_result = await run_and_persist(
             conversation_id=conversation_id,
             user_message=user_message,
             user_id=user_id,
@@ -201,6 +202,12 @@ async def stream_chat(
             llm_supports_tools=llm_supports_tools,
             x_client_platform=x_client_platform,
             agent_mentions=agent_mentions,
+        )
+        await maybe_delete_zero_output_send(
+            conversation_id=conversation_id,
+            user_message_id=user_msg.id,
+            result=turn_result,
+            user_created_this_send=True,
         )
         # Pillar D1: delay sink.close while a detached coordination drive is live
         # (symmetric with sidecar _run_turn). Exception / cancel skip this.

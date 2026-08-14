@@ -447,6 +447,9 @@ async def test_tool_self_reports_what_it_landed(
     case: _Case, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     """真跑一次成功调用：自报必须逐字对上，且本次新落盘的文件一件都不许漏。"""
+    keep = tmp_path / "README.md"
+    if not keep.exists():
+        keep.write_text("desk\n", encoding="utf-8")
     if case.setup is not None:
         case.setup(tmp_path)
     before = _snapshot(tmp_path)

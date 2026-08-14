@@ -157,11 +157,12 @@ vi.mock("@/components/chat/message-input/useVoiceInput", () => ({
 const dropMock = vi.hoisted(() => ({
   handlePaste: vi.fn(),
   handleDrop: vi.fn(),
+  dropError: null as string | null,
 }));
 vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
   useComposerDrop: () => ({
     dragOver: false,
-    dropError: null,
+    dropError: dropMock.dropError,
     clearDropError: vi.fn(),
     attachDroppedFile: vi.fn(),
     attachFiles: vi.fn(),
@@ -177,6 +178,7 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
 const genMock = vi.hoisted(() => ({ value: false }));
 const handleSendMock = vi.hoisted(() => vi.fn());
 const sendingMock = vi.hoisted(() => ({ value: false }));
+const mentionToggleMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/components/chat/message-input/useComposerSend", () => ({
   useComposerSend: () => ({
@@ -197,6 +199,9 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
     sourceCount: 0,
     indexLoadedRef: { current: true },
     searchInputRef: { current: null },
+    showCategoryLevel: false,
+    categories: [],
+    canGoBack: false,
     closeMenu: vi.fn(),
     syncMention: vi.fn(),
     handleMenuNavKey: () => false,
@@ -206,6 +211,10 @@ vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
     setQuery: vi.fn(),
     handleAddRoot: vi.fn(),
     pickLocalFile: vi.fn(),
+    toggleAtMention: mentionToggleMock,
+    clearActiveMention: vi.fn(),
+    drillCategory: vi.fn(),
+    goBack: vi.fn(),
   }),
 }));
 
@@ -214,7 +223,11 @@ vi.mock("@/stores/conversation", async (importOriginal) => {
   return { ...actual, useActiveGenerating: () => genMock.value };
 });
 
-import { useConversationStore } from "@/stores/conversation";
+import {
+  setComposerSendError,
+  useComposerSendErrorStore,
+} from "@/stores/composerSendError";
+import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import { TurnComposer } from "../TurnComposer";
 
@@ -232,12 +245,15 @@ beforeEach(async () => {
   genMock.value = false;
   sendingMock.value = false;
   handleSendMock.mockClear();
+  mentionToggleMock.mockClear();
   dropMock.handlePaste.mockClear();
   dropMock.handleDrop.mockClear();
+  dropMock.dropError = null;
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
   } as never);
+  useComposerSendErrorStore.setState({ byKey: {} });
   useServerHealthStore.setState({
     status: "online",
     reason: null,
@@ -269,7 +285,7 @@ describe("TurnComposer variants", () => {
     expect(screen.getByLabelText("在哪工作")).toBeTruthy();
     expect(screen.getByLabelText(/模型组合：/)).toBeTruthy();
     expect(screen.getByLabelText(/权限：/)).toBeTruthy();
-    expect(screen.getByLabelText("附加文件")).toBeTruthy();
+    expect(screen.getByLabelText("@ 引用")).toBeTruthy();
     expectWorkspaceBeforeModel(container);
   });
 
@@ -282,7 +298,7 @@ describe("TurnComposer variants", () => {
     // 收纳前：工作区 / 模型 / 附件不在常显条上
     expect(screen.queryByLabelText("在哪工作")).toBeNull();
     expect(screen.queryByLabelText(/模型组合：/)).toBeNull();
-    expect(screen.queryByLabelText("附加文件")).toBeNull();
+    expect(screen.queryByLabelText("@ 引用")).toBeNull();
     expect(screen.getByRole("button", { name: "发送" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "更多选项" }));
@@ -291,9 +307,8 @@ describe("TurnComposer variants", () => {
     expect(screen.getByLabelText("在哪工作")).toBeTruthy();
     expect(screen.getByLabelText(/模型组合：/)).toBeTruthy();
     expect(screen.getByLabelText(/权限：/)).toBeTruthy();
-    expect(screen.getByLabelText("附加文件")).toBeTruthy();
-    // 菜单内附件带可见文案（非整栏 icon-only）
-    expect(within(menu).getByText("附加文件")).toBeTruthy();
+    expect(screen.getByLabelText("@ 引用")).toBeTruthy();
+    expect(within(menu).getByText("@ 引用")).toBeTruthy();
     expect(menu.className).not.toMatch(/\bw-72\b/);
     expectWorkspaceBeforeModel(menu);
     expect(within(menu).queryByText("后台云端")).toBeNull();
@@ -311,9 +326,17 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
-    expect(
-      screen.getByText(/可浏览已缓存的对话与本机文件（只读）/),
-    ).toBeTruthy();
+    const offline = screen.getByText(/可浏览已缓存的对话与本机文件（只读）/);
+    expect(offline.className).toContain("text-muted-foreground");
+    expect(offline.className).not.toContain("destructive");
+  });
+
+  it("drop failure row is muted, not destructive", () => {
+    dropMock.dropError = "上传附件到云端工作区失败";
+    renderComposer();
+    const row = screen.getByText("上传附件到云端工作区失败");
+    expect(row.closest("output")?.className).toContain("text-muted-foreground");
+    expect(row.closest("output")?.className).not.toContain("destructive");
   });
 
   it("generating + empty: bar shows only 停止生成 (no mid-flight send)", () => {
@@ -343,14 +366,17 @@ describe("TurnComposer variants", () => {
     expect(handleSendMock).toHaveBeenCalledWith();
   });
 
-  it("生成中：回形针可点、粘贴与拖入照旧进附件收集", () => {
+  it("生成中：@ 可点、粘贴与拖入照旧进附件收集", () => {
     // 插话 / 排队本就带附件走（useComposerSend 的 mid-flight 分支会 settleAttachments），
-    // 禁用回形针既不一致、又零反馈：用户只会以为附件坏了。
+    // 禁用 @ 既不一致、又零反馈：用户只会以为入口坏了。
     genMock.value = true;
+    mentionToggleMock.mockClear();
     const { container } = renderComposer();
 
-    const attach = screen.getByLabelText("附加文件") as HTMLButtonElement;
-    expect(attach.disabled).toBe(false);
+    const mentionBtn = screen.getByLabelText("@ 引用") as HTMLButtonElement;
+    expect(mentionBtn.disabled).toBe(false);
+    fireEvent.click(mentionBtn);
+    expect(mentionToggleMock).toHaveBeenCalled();
 
     const textarea = container.querySelector("textarea");
     const root = container.querySelector("[data-composer-variant]");
@@ -362,7 +388,7 @@ describe("TurnComposer variants", () => {
     expect(dropMock.handleDrop).toHaveBeenCalled();
   });
 
-  it("generating + draft: canvas card also shows 排队发送 + 插队 + 停止", async () => {
+  it("generating + draft: centered card also shows 排队发送 + 插队 + 停止", async () => {
     genMock.value = true;
     const { useComposerDraftStore } = await import("@/stores/composer");
     useComposerDraftStore.getState().setValue("__draft__", "下一句");
@@ -427,6 +453,46 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("empty draft: composer send error is on the card, not in the textarea", () => {
+    const copy = "发送失败：没有可用的模型密钥";
+    setComposerSendError("__draft__", { message: copy, action: null });
+    renderComposer();
+    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+      copy,
+    );
+    const textarea = screen.getByPlaceholderText(
+      /输入消息/,
+    ) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("");
+    expect(textarea.value).not.toContain(copy);
+  });
+
+  it("empty draft: falls back to session error when composer slot is empty", () => {
+    const copy = "重新生成失败，请稍后重试";
+    useConversationStore.getState().setError(copy, null);
+    renderComposer();
+    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+      copy,
+    );
+    const textarea = screen.getByPlaceholderText(
+      /输入消息/,
+    ) as HTMLTextAreaElement;
+    expect(textarea.value).not.toContain(copy);
+  });
+
+  it("closing the send-error notice clears composer and session slots", () => {
+    const copy = "发送失败，请稍后重试";
+    setComposerSendError("__draft__", { message: copy, action: null });
+    useConversationStore.getState().setError(copy, null);
+    renderComposer();
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+    expect(
+      useComposerSendErrorStore.getState().byKey.__draft__,
+    ).toBeUndefined();
+    expect(getActiveRuntime().error).toBeNull();
   });
 
   it("发送中：按钮进入 in-flight 态并挡住连点", async () => {

@@ -61,6 +61,7 @@ class MessageRepository:
         if evidence_ledger is not None:
             msg.evidence_ledger = strip_nul(evidence_ledger)
         self._session.add(msg)
+        await self._touch_activity(conversation_id)
         await self._session.commit()
         await self._session.refresh(msg)
         return msg
@@ -202,6 +203,7 @@ class MessageRepository:
             .values(**values)
             .on_conflict_do_update(index_elements=["id"], set_=update_set)
         )
+        await self._touch_activity(conversation_id)
         await self._session.commit()
         row = await self.get_by_id(mid, conversation_id=conversation_id)
         assert row is not None
@@ -309,6 +311,13 @@ class MessageRepository:
         await self._session.commit()
         return len(copies)
 
+    async def _touch_activity(self, conversation_id: str) -> None:
+        from agentcore.db.repositories.conversations import ConversationRepository
+
+        await ConversationRepository(self._session).touch_activity(
+            conversation_id, commit=False
+        )
+
     async def count_by_conversation(self, conversation_id: str) -> int:
         """Number of messages in a conversation (0 for a brand-new, unsent one).
 
@@ -337,6 +346,69 @@ class MessageRepository:
             .group_by(Message.conversation_id)
         )
         return {row[0]: row[1] for row in result.all()}
+
+    async def previews_for_conversations(
+        self, conversation_ids: Sequence[str]
+    ) -> dict[str, str]:
+        """Last visible assistant sentence per conversation (sidebar list preview).
+
+        One windowed read for the whole list — same batch shape as
+        :meth:`counts_for_conversations`. Walks back past empty / running /
+        chrome-only assistant rows. Empty and stop-chrome bodies are dropped in
+        SQL so the lookback window is not consumed by them (walk-back still
+        holds under truncation). Ids with no qualifying assistant are absent
+        (callers default them to ``None``). Never falls back to a user turn.
+        """
+        if not conversation_ids:
+            return {}
+        from agentcore.core.list_preview import (
+            PREVIEW_CHROME_ONLY,
+            PREVIEW_SQL_LOOKBACK,
+            pick_last_visible_assistant_preview,
+        )
+
+        lookback = PREVIEW_SQL_LOOKBACK
+        stripped = func.btrim(func.coalesce(Message.content, ""))
+        ranked = (
+            select(
+                Message.conversation_id,
+                Message.content,
+                Message.usage,
+                Message.created_at,
+                func.row_number()
+                .over(
+                    partition_by=Message.conversation_id,
+                    order_by=Message.created_at.desc(),
+                )
+                .label("rn"),
+            )
+            .where(
+                Message.conversation_id.in_(conversation_ids),
+                Message.role == "assistant",
+                stripped != "",
+                stripped.notin_(tuple(sorted(PREVIEW_CHROME_ONLY))),
+            )
+            .subquery()
+        )
+        result = await self._session.execute(
+            select(
+                ranked.c.conversation_id,
+                ranked.c.content,
+                ranked.c.usage,
+                ranked.c.created_at,
+            )
+            .where(ranked.c.rn <= lookback)
+            .order_by(ranked.c.conversation_id, ranked.c.created_at.desc())
+        )
+        grouped: dict[str, list[tuple[str | None, object | None]]] = {}
+        for cid, content, usage, _created in result.all():
+            grouped.setdefault(cid, []).append((content, usage))
+        out: dict[str, str] = {}
+        for cid, rows in grouped.items():
+            preview = pick_last_visible_assistant_preview(rows)
+            if preview:
+                out[cid] = preview
+        return out
 
     async def unfolded_counts_for_conversations(
         self, conversation_ids: Sequence[str]
@@ -689,7 +761,9 @@ class MessageRepository:
         await commit_or_flush(self._session, commit=commit)
         return result.rowcount or 0
 
-    async def delete_by_id(self, message_id: str, *, conversation_id: str) -> bool:
+    async def delete_by_id(
+        self, message_id: str, *, conversation_id: str, commit: bool = True
+    ) -> bool:
         """Hard-delete one message (单条消息删除). Returns whether a row was removed.
 
         Scoped to ``conversation_id`` so a guessed id from another conversation
@@ -702,6 +776,9 @@ class MessageRepository:
         recorded outcome (a deleted turn reports「已重新生成或删除」, never its old
         decision), but the append-only ``cost_events`` ledger is intentionally left
         intact (real spend is never rewritten — 不变量 #1). No-op (False) if absent.
+
+        Pass ``commit=False`` when pairing two deletes in one txn. Default
+        ``commit=True`` keeps standalone delete atomicity for other callers.
         """
         await delete_journal_for_message(self._session, conversation_id, message_id)
         await delete_audit_for_message(self._session, conversation_id, message_id)
@@ -736,5 +813,5 @@ class MessageRepository:
                 Message.conversation_id == conversation_id,
             )
         )
-        await self._session.commit()
+        await commit_or_flush(self._session, commit=commit)
         return (result.rowcount or 0) > 0

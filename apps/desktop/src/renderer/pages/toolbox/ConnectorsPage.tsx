@@ -153,7 +153,7 @@ export function ConnectorsPage() {
       </p>
 
       {error ? (
-        <p className="mt-4 text-sm text-destructive" role="alert">
+        <p className="mt-4 text-sm text-muted-foreground" role="alert">
           {error}
         </p>
       ) : null}

@@ -76,7 +76,7 @@ vi.mock("@/components/chat/debate/CollapsibleSpeech", () => ({
   CollapsibleSpeech: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-// 产出卡的旁路依赖（右坞 / 归因 / 预览能力）不是本文件的议题。
+// 产出卡的旁路依赖（右坞 / 预览能力）不是本文件的议题。
 vi.mock("@/stores/disclosure", () => ({
   usePersistentDisclosure: (_key: string | null, initial: boolean) =>
     useState(initial),
@@ -85,9 +85,6 @@ vi.mock("@/stores/sidePanel", () => ({
   useSidePanelStore: (
     sel: (s: { showFile: () => void; showChanges: () => void }) => unknown,
   ) => sel({ showFile: vi.fn(), showChanges: vi.fn() }),
-}));
-vi.mock("@/hooks/useFileAudit", () => ({
-  useFileAudit: () => ({ status: "idle" as const }),
 }));
 vi.mock("@/hooks/useConversationFileSource", () => ({
   useConversationFileSource: () => null,

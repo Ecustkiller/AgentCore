@@ -49,7 +49,11 @@ export function createSessionSliceActions(
       void detachLocalBrowserHost();
       set((state) => {
         const byId = { ...state.byId };
-        if (!byId[nextKey]) byId[nextKey] = { ...EMPTY_RUNTIME };
+        const incoming = byId[nextKey];
+        // 无目的地打开必须落最新：清 LRU 残留 focus，勿动 pendingFocus。
+        byId[nextKey] = incoming
+          ? { ...incoming, messageFocus: null }
+          : { ...EMPTY_RUNTIME };
         const pruned = pruneConversationSlices(
           byId,
           state.sliceLruOrder ?? [],

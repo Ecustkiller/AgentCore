@@ -181,7 +181,7 @@ describe("AssistantMessage footer gate", () => {
 });
 
 describe("AssistantMessage empty-response single surface", () => {
-  it("LLM_EMPTY_RESPONSE：只红卡，不叠 FinishReasonChip / 连通升级句", () => {
+  it("LLM_EMPTY_RESPONSE：只错误卡，不叠 FinishReasonChip / 连通升级句", () => {
     renderBubble(
       settledMessage({
         id: "empty-1",
@@ -198,12 +198,12 @@ describe("AssistantMessage empty-response single surface", () => {
     expect(screen.queryByText("空响应收尾")).toBeNull();
     expect(screen.queryByText(/降级完成/)).toBeNull();
     expect(screen.queryByText(/模型返回空内容/)).toBeTruthy();
-    // Chip would show diagnosis alone; red card already has it — no separate chip row.
+    // Chip would show diagnosis alone; error card already has it — no separate chip row.
     expect(screen.queryByText("Base URL")).toBeNull();
     expect(screen.queryByText(/设置 · 服务商/)).toBeNull();
   });
 
-  it("legacy oauth_expired diagnosis：红卡唯一面，无 Sub2API / 降级完成", () => {
+  it("legacy oauth_expired diagnosis：错误卡唯一面，无 Sub2API / 降级完成", () => {
     renderBubble(
       settledMessage({
         id: "empty-oauth",
@@ -266,7 +266,7 @@ describe("AssistantMessage empty-response single surface", () => {
     expect(screen.getByText(/上游账户余额不足/)).toBeTruthy();
   });
 
-  it("有正文 + finishReason=error + 无 message.error：红条不静默，无灰标调用失败", () => {
+  it("有正文 + finishReason=error + 无 message.error：错误卡不静默，无灰标调用失败", () => {
     renderBubble(
       settledMessage({
         id: "hard-body-1",
@@ -285,11 +285,11 @@ describe("AssistantMessage empty-response single surface", () => {
     );
     expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
     expect(screen.getByText("部分已生成正文")).toBeTruthy();
-    // Chip must not stack on the red bar.
+    // Chip must not stack on the error card.
     expect(screen.queryByText("调用失败")).toBeNull();
   });
 
-  it("空正文硬失败：只红卡，不叠灰标调用失败", () => {
+  it("空正文硬失败：只错误卡，不叠灰标调用失败", () => {
     renderBubble(
       settledMessage({
         id: "hard-empty-1",
@@ -304,5 +304,51 @@ describe("AssistantMessage empty-response single surface", () => {
     );
     expect(screen.getByText(/平台模型暂时不可用/)).toBeTruthy();
     expect(screen.queryByText("调用失败")).toBeNull();
+  });
+});
+
+describe("AssistantMessage error card chrome", () => {
+  it("限流 / 无 action：错误卡灰底，复制排查包不走红", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: {
+          code: "LLM_RATE_LIMIT",
+          message: "上游限流，暂时无法继续本回合。请稍后再试。",
+        },
+      }),
+    );
+    const errCard = screen
+      .getByText("上游限流，暂时无法继续本回合。请稍后再试。")
+      .closest("div");
+    expect(errCard?.className).toContain("bg-muted/40");
+    expect(errCard?.className).not.toContain("bg-primary/10");
+    const copyBtn = screen.getByRole("button", { name: "复制排查包" });
+    expect(copyBtn.className).toContain("text-muted-foreground");
+    expect(copyBtn.className).not.toContain("destructive");
+    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+  });
+
+  it("有去配置：错误卡蓝底，动作钮 primary，复制排查包跟蓝档", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: {
+          code: "LLM_KEY_REQUIRED",
+          message: "请先在「设置 · 服务商」中填入你的 API Key，再发起对话。",
+        },
+      }),
+    );
+    const errCard = screen
+      .getByText("请先在「设置 · 服务商」中填入你的 API Key，再发起对话。")
+      .closest("div");
+    expect(errCard?.className).toContain("bg-primary/10");
+    expect(errCard?.className).not.toContain("bg-muted/40");
+    const actionBtn = screen.getByRole("button", { name: "去设置" });
+    expect(actionBtn.className).toContain("bg-primary");
+    expect(actionBtn.className).not.toContain("bg-destructive");
+    const copyBtn = screen.getByRole("button", { name: "复制排查包" });
+    expect(copyBtn.className).toContain("text-primary/70");
+    expect(copyBtn.className).not.toContain("destructive");
   });
 });

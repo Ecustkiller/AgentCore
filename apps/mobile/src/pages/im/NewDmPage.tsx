@@ -13,6 +13,7 @@ import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
 // Search is server-visibility-filtered (任意搜人 护栏: a user who isn't discoverable, or
 // who only accepts contacts, won't appear / can't be DMed — the backend enforces it and
 // ships a precise zh refusal we surface). Tapping a result opens (or reuses) the DM.
+import { ChevronLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/im/im.css";
@@ -79,11 +80,16 @@ export function NewDmPage() {
   return (
     <div className="screen">
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/im")}>
-          ← 返回
+        <button
+          type="button"
+          className="link icon-btn"
+          aria-label="返回"
+          onClick={() => navigate("/im")}
+        >
+          <ChevronLeft size={20} />
         </button>
-        <span>找人</span>
-        <span style={{ width: 44 }} />
+        <span className="bar-title">找人</span>
+        <span className="bar-right" aria-hidden />
       </header>
 
       <div className="search">
@@ -138,33 +144,35 @@ export function NewDmPage() {
               </button>
             ))}
           </>
-        ) : (
-          blocks.length > 0 && (
-            <>
-              <div className="im-section-title">黑名单</div>
-              {blocks.map((b) => (
-                <div key={b.id} className="im-search-result">
-                  <ImAvatar
-                    name={b.display_name || b.username}
-                    url={userAvatarPath(b.id)}
-                  />
-                  <span className="im-result-text">
-                    <span className="im-name">
-                      {b.display_name || b.username}
-                    </span>
-                    <span className="im-result-handle">@{b.username}</span>
+        ) : blocks.length > 0 ? (
+          <>
+            <div className="im-section-title">黑名单</div>
+            {blocks.map((b) => (
+              <div key={b.id} className="im-search-result">
+                <ImAvatar
+                  name={b.display_name || b.username}
+                  url={userAvatarPath(b.id)}
+                />
+                <span className="im-result-text">
+                  <span className="im-name">
+                    {b.display_name || b.username}
                   </span>
-                  <button
-                    type="button"
-                    className="link"
-                    onClick={() => void unblock(b.id)}
-                  >
-                    取消拉黑
-                  </button>
-                </div>
-              ))}
-            </>
-          )
+                  <span className="im-result-handle">@{b.username}</span>
+                </span>
+                <button
+                  type="button"
+                  className="link"
+                  onClick={() => void unblock(b.id)}
+                >
+                  取消拉黑
+                </button>
+              </div>
+            ))}
+          </>
+        ) : (
+          <p className="muted hint">
+            输入用户名或显示名精确搜索，即可发起对话。
+          </p>
         )}
       </div>
     </div>

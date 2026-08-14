@@ -60,7 +60,7 @@ export function RouteError() {
 
   return (
     <div className="flex h-screen w-screen flex-col items-center justify-center gap-4 bg-background px-6 text-center">
-      <div className="flex size-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+      <div className="flex size-12 items-center justify-center rounded-full bg-muted/40 text-muted-foreground">
         <AlertTriangle size={24} />
       </div>
       <div className="space-y-1">

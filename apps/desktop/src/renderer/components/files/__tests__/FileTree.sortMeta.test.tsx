@@ -49,8 +49,8 @@ function rowNames(): string[] {
     .filter(Boolean);
 }
 
-describe("文件树的大小 / 修改时间", () => {
-  it("文件行显示大小与修改时间；源没给元信息就不占位（不拿 0 B 冒充）", async () => {
+describe("文件树的修改时间", () => {
+  it("文件行只显示修改时间；源没给元信息就不占位（不拿 0 B 冒充）", async () => {
     vi.setSystemTime(NOW);
     const src = source([
       file("报告.md", 2048, NOW - HOUR),
@@ -63,13 +63,15 @@ describe("文件树的大小 / 修改时间", () => {
     );
 
     expect(await screen.findByText("报告.md")).toBeTruthy();
-    expect(screen.getByText("2.0 KB · 11:00")).toBeTruthy();
+    expect(screen.getByText("11:00")).toBeTruthy();
+    expect(screen.queryByText(/KB/)).toBeNull();
+    expect(screen.queryByText(/\d+ B\b/)).toBeNull();
     // 缺元信息的那行只有文件名，没有任何「0 B」「未知」占位。
     expect(screen.queryByText(/0 B/)).toBeNull();
     vi.useRealTimers();
   });
 
-  it("按大小 / 时间排序只重排已加载的层，不重新拉取；缺元信息的沉底", async () => {
+  it("按时间排序只重排已加载的层，不重新拉取；缺元信息的沉底", async () => {
     const src = source([
       file("小.md", 10, NOW - 3 * HOUR),
       file("大.md", 5000, NOW - 2 * HOUR),
@@ -86,14 +88,6 @@ describe("文件树的大小 / 修改时间", () => {
     const byName = rowNames();
     expect(byName).toEqual([...byName].sort((a, b) => a.localeCompare(b)));
     expect(src.calls()).toBe(1);
-
-    rerender(
-      <TooltipProvider>
-        <FileTree source={src} onOpenFile={() => {}} sortBy="size" />
-      </TooltipProvider>,
-    );
-    await waitFor(() => expect(rowNames()[0]).toBe("大.md"));
-    expect(rowNames()).toEqual(["大.md", "最新.md", "小.md", "无信息.md"]);
 
     rerender(
       <TooltipProvider>
@@ -114,7 +108,7 @@ describe("文件树的大小 / 修改时间", () => {
     ]);
     render(
       <TooltipProvider>
-        <FileTree source={src} onOpenFile={() => {}} sortBy="size" />
+        <FileTree source={src} onOpenFile={() => {}} sortBy="mtime" />
       </TooltipProvider>,
     );
 

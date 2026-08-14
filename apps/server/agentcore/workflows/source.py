@@ -4,8 +4,8 @@
 
 - **会丢**。``definition`` 是画布内容，客户端整份提交、整份覆盖是它的正常用法。任何一端
   按「自己知道的字段」重建这份 JSON，别人加的字段就没了——``deliverable`` 的非 form 字段、
-  画布 ``slots``、这里的 ``source`` 先后被抹掉过。``source`` 一丢，从一轮协作固化出来的
-  工作流就认不出自己是固化来源（按需抽槽不再触发），同一轮重复保存的幂等也跟着失效。
+  画布 ``slots``、这里的 ``source`` 先后被抹掉过。``source`` 一丢，历史固化来的工作流就认
+  不出自己是固化来源（按需抽槽不再触发）。
 - **能伪造**。客户端能写 definition，就能自己塞一个 ``source``，让手画的工作流冒充固化
   来源去骗抽槽——那条路会拿用户的任务描述去调模型改写。
 
@@ -14,7 +14,8 @@
 根本不收这个参数）。definition 里剩下的 nodes / edges / slots 归用户，服务端只校验不重建
 ——见 :mod:`agentcore.workflows.definition` 的所有权约定。
 
-``kind`` 是扩展点：今天只有 ``"turn"``（从一轮协作固化）；官方模板复制、手画的都是无来源。
+``kind`` 是扩展点：今天只有 ``"turn"``（历史：从一轮协作固化）。
+新工作流不再走这条写入路径；官方模板复制、手画的都是无来源。抽槽仍只认这一类。
 """
 
 from __future__ import annotations
@@ -22,12 +23,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-# 从一轮已跑完的协作固化而来（``POST /conversations/{id}/messages/{id}/save-as-workflow`` 写）。
+# 历史行：曾经从一轮协作固化而来。新工作流不再写入；抽槽仍认。
 TURN_SOURCE_KIND = "turn"
 
 
 def turn_source(*, conversation_id: str, message_id: str) -> dict[str, str]:
-    """固化来源标记；同时也是「同一轮重复保存」的幂等键（走 ``source`` 列上的索引）。"""
+    """固化来源标记（历史 ``kind=turn`` 行；抽槽只认这一类）。"""
     return {
         "kind": TURN_SOURCE_KIND,
         "conversation_id": conversation_id,

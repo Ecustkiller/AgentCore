@@ -98,12 +98,7 @@ def _format_available_dep_nodes(
 
 
 def recoverable_raw_id(run_id: str) -> str | None:
-    """Return the short raw suffix of a minted ``del_*`` / ``add_*`` run_id, else None.
-
-    Public because the mint shape has a second reader outside the builder: fixing a
-    finished turn into a user workflow reverses the same prefix to recover the CEO's
-    declared ``tasks[].id`` (``agentcore.workflows.from_turn``).
-    """
+    """Return the short raw suffix of a minted ``del_*`` / ``add_*`` run_id, else None."""
     m = _MINT_PREFIX_RE.match(run_id or "")
     return m.group(1) if m else None
 

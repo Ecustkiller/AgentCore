@@ -6,6 +6,7 @@ export {
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPreviewLead,
+  teamPreviewSettledLead,
   teamResolvedOutcome,
 } from "./meta";
 export type {

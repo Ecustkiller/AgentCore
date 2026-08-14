@@ -1,3 +1,4 @@
+import { notifyFileTreeChanged } from "@/components/files/fileTreeBus";
 import { handleWorkspaceEvent } from "@/services/sse/handlers/workspace";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,10 +14,14 @@ vi.mock("@/services/workspaceOps", () => ({ performWorkspaceOp }));
 vi.mock("@/stores/conversation/turnPhaseActions", () => ({
   getTurnPhase: () => "completed",
 }));
+vi.mock("@/components/files/fileTreeBus", () => ({
+  notifyFileTreeChanged: vi.fn(),
+}));
 
 describe("handleWorkspaceEvent auto-snapshot", () => {
   beforeEach(() => {
     notifyWarning.mockReset();
+    vi.mocked(notifyFileTreeChanged).mockClear();
     useAutoSnapshotStore.setState({ failedByConversation: {} });
   });
 
@@ -41,7 +46,7 @@ describe("handleWorkspaceEvent auto-snapshot", () => {
     expect(opts?.description).not.toMatch(/手动留版本/);
   });
 
-  it("clears failure on done", () => {
+  it("clears failure on done and notifies the conversation file tree", () => {
     useAutoSnapshotStore.getState().markFailed("c1");
     const handled = handleWorkspaceEvent(
       {
@@ -59,5 +64,24 @@ describe("handleWorkspaceEvent auto-snapshot", () => {
       useAutoSnapshotStore.getState().failedByConversation.c1,
     ).toBeUndefined();
     expect(notifyWarning).not.toHaveBeenCalled();
+    expect(notifyFileTreeChanged).toHaveBeenCalledWith({
+      sourceId: "workspace:c1",
+      dir: "",
+    });
+  });
+
+  it("does not notify the tree on replay", () => {
+    handleWorkspaceEvent(
+      {
+        type: "workspace_snapshot_done",
+        payload: {
+          conversation_id: "c1",
+          snapshot_id: "s1",
+          size_bytes: 12,
+        },
+      } as never,
+      { conversationId: "c1", source: "live", replay: true } as never,
+    );
+    expect(notifyFileTreeChanged).not.toHaveBeenCalled();
   });
 });

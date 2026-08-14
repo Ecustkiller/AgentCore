@@ -1,6 +1,10 @@
 import type { ResumeDeferredBusyReason } from "@/lib/resumeDeferred";
 import type { ResumeSettledTurnStatus } from "@/lib/resumeSettled";
-import type { ResumeOrigin } from "@/stores/pausedTurns";
+import {
+  type ResumeOrigin,
+  beginPausedSnapshot,
+  nextObservationSeq,
+} from "@/stores/pausedTurns";
 import type {
   InteractionKind,
   InteractionStatus,
@@ -99,11 +103,15 @@ interface InteractionState {
   /** Sidecar / process death: flip hot pending cards to orphaned 灰态. */
   orphanConversation: (conversationId: string, hotOnly?: boolean) => void;
   /**
-   * Replace this conversation's pending set from recovery hydrate.
-   * Empty snapshots are authoritative only when the turn is not live: an early
-   * empty `/recovery` must not wipe journal/SSE pending that is still valid
-   * while the turn is running (or locally still active). Non-empty snapshots
-   * always replace. Resolved/orphan empties with `liveRunning: false` clear.
+   * Replace this conversation's recovery-authoritative **hot** pending set
+   * (approval / delegation_authorization / escalation / stage_card).
+   * Learns `setForConversation`: a snapshot may dispose only cards it
+   * could have seen (`surfacedSeq <= since`) whose origin it actually
+   * asked (`confirmed`). Cloud empty pending never disposes
+   * `origin=sidecar` / missing origin. Local sidecar-origin hot cards
+   * count as empty only when sidecar was asked and `!sidecarLive`.
+   * Cold kinds are never written from `pending_interactions` and never
+   * `Map.delete`'d here — see {@link settleUnseenCold}.
    */
   hydratePending: (
     conversationId: string,
@@ -114,7 +122,25 @@ interface InteractionState {
       payload: Record<string, unknown>;
       origin?: ResumeOrigin;
     }>,
-    opts?: { liveRunning?: boolean },
+    opts?: {
+      since?: number;
+      confirmed?: readonly ResumeOrigin[];
+      sidecarLive?: boolean;
+    },
+  ) => void;
+  /**
+   * Cold pending the paused snapshot could have seen but didn't:
+   * mark terminal in place (no `Map.delete`). Per-card — not gated on
+   * the whole `paused=[]`. `origin=server` → {@link markResumeSettled}
+   * (他端已决); `origin=sidecar` → {@link markOrphaned} (帧消失).
+   */
+  settleUnseenCold: (
+    conversationId: string,
+    visibleIds: ReadonlySet<string>,
+    opts?: {
+      since?: number;
+      confirmed?: readonly ResumeOrigin[];
+    },
   ) => void;
   /**
    * Re-key entry.messageId after message_start stamps the server id
@@ -138,6 +164,36 @@ function mapCopy(
   src: Map<string, InteractionEntry>,
 ): Map<string, InteractionEntry> {
   return new Map(src);
+}
+
+const ALL_ORIGINS: readonly ResumeOrigin[] = ["sidecar", "server"];
+
+/**
+ * 快照只处置它看得见、且来源已确认的卡。无 origin 与未问到的来源一律留下。
+ * sidecar 热卡还要本机已问到且 `!sidecarLive` 才算「空」。
+ */
+function snapshotCanDisposeHot(
+  entry: { origin?: ResumeOrigin; surfacedSeq?: number },
+  opts: {
+    since: number;
+    confirmed: readonly ResumeOrigin[];
+    sidecarLive: boolean;
+  },
+): boolean {
+  if ((entry.surfacedSeq ?? 0) > opts.since) return false;
+  if (!entry.origin) return false;
+  if (!opts.confirmed.includes(entry.origin)) return false;
+  if (entry.origin === "sidecar") return !opts.sidecarLive;
+  return true;
+}
+
+function snapshotCanSettleCold(
+  entry: { origin?: ResumeOrigin; surfacedSeq?: number },
+  opts: { since: number; confirmed: readonly ResumeOrigin[] },
+): boolean {
+  if ((entry.surfacedSeq ?? 0) > opts.since) return false;
+  if (!entry.origin) return false;
+  return opts.confirmed.includes(entry.origin);
 }
 
 export const useInteractionStore = create<InteractionState>((set, get) => ({
@@ -199,6 +255,7 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
         conversationId,
         messageId: messageId || "",
         payload,
+        surfacedSeq: nextObservationSeq(),
         ...(origin ? { origin } : {}),
       });
       return { byId: next };
@@ -402,31 +459,29 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
   },
 
   hydratePending: (conversationId, entries, opts) => {
+    const since = opts?.since ?? beginPausedSnapshot();
+    const confirmed = opts?.confirmed ?? ALL_ORIGINS;
+    const sidecarLive = opts?.sidecarLive ?? false;
+    const incoming = new Map<string, (typeof entries)[number]>();
+    for (const e of entries) {
+      if (isColdResumeKind(e.kind)) continue;
+      incoming.set(e.id, e);
+    }
     set((state) => {
-      if (entries.length === 0 && opts?.liveRunning) {
-        // Early empty recovery while the turn is still live — keep journal/SSE
-        // pending (aligns with e2e mock guard against wipe-on-race).
-        for (const entry of state.byId.values()) {
-          if (
-            entry.conversationId === conversationId &&
-            (entry.status === "pending" || entry.status === "submitting")
-          ) {
-            return {};
-          }
-        }
-      }
       const next = mapCopy(state.byId);
-      // Drop prior pending/submitting for this conversation (recovery is authoritative
-      // for the live pending set); keep resolved/orphaned history.
       for (const [id, entry] of state.byId) {
-        if (
-          entry.conversationId === conversationId &&
-          (entry.status === "pending" || entry.status === "submitting")
-        ) {
-          next.delete(id);
+        if (entry.conversationId !== conversationId) continue;
+        if (entry.status !== "pending" && entry.status !== "submitting") {
+          continue;
         }
+        if (isColdResumeKind(entry.kind)) continue;
+        if (incoming.has(id)) continue;
+        if (!snapshotCanDisposeHot(entry, { since, confirmed, sidecarLive })) {
+          continue;
+        }
+        next.delete(id);
       }
-      for (const e of entries) {
+      for (const e of incoming.values()) {
         next.set(e.id, {
           id: e.id,
           kind: e.kind,
@@ -434,11 +489,49 @@ export const useInteractionStore = create<InteractionState>((set, get) => ({
           conversationId,
           messageId: e.messageId,
           payload: e.payload,
+          surfacedSeq: nextObservationSeq(),
           ...(e.origin ? { origin: e.origin } : {}),
         });
       }
       return { byId: next };
     });
+  },
+
+  settleUnseenCold: (conversationId, visibleIds, opts) => {
+    const since = opts?.since ?? beginPausedSnapshot();
+    const confirmed = opts?.confirmed ?? ALL_ORIGINS;
+    const toOrphan: InteractionEntry[] = [];
+    const toSettle: InteractionEntry[] = [];
+    for (const entry of get().byId.values()) {
+      if (entry.conversationId !== conversationId) continue;
+      if (!isColdResumeKind(entry.kind)) continue;
+      if (entry.status !== "pending" && entry.status !== "submitting") {
+        continue;
+      }
+      if (visibleIds.has(entry.id)) continue;
+      if (!snapshotCanSettleCold(entry, { since, confirmed })) continue;
+      if (entry.origin === "sidecar") toOrphan.push(entry);
+      else toSettle.push(entry);
+    }
+    for (const entry of toOrphan) {
+      get().markOrphaned(entry.id, {
+        kind: entry.kind,
+        conversationId: entry.conversationId,
+        messageId: entry.messageId,
+      });
+    }
+    for (const entry of toSettle) {
+      if (!isColdResumeKind(entry.kind)) continue;
+      get().markResumeSettled({
+        id: entry.id,
+        kind: entry.kind,
+        conversationId: entry.conversationId,
+        messageId: entry.messageId,
+        decision: "",
+        decidedAt: "",
+        turnStatus: "unknown",
+      });
+    }
   },
 
   rekeyMessageId: (fromMessageId, toMessageId) => {

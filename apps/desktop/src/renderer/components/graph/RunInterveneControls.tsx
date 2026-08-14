@@ -38,8 +38,6 @@ export interface RunInterveneControlsProps {
   redirectCapable: boolean;
   /** 该队员已产出的正文——用于给改方向草稿挑开头，缺省即用角色名模板。 */
   output?: string;
-  /** 同排跟在两枚按人动作之后的宿主自有按钮（右坞队员详情的「记下改法」）。整轮停不进队员栏。 */
-  trailing?: ReactNode;
   className?: string;
 }
 
@@ -63,7 +61,6 @@ export function RunInterveneControls({
   role,
   redirectCapable,
   output = "",
-  trailing,
   className,
 }: RunInterveneControlsProps) {
   const stopCovered = useRunStopPendingStore((s) =>
@@ -142,7 +139,6 @@ export function RunInterveneControls({
             }
           }}
         />
-        {trailing}
       </div>
 
       {composerOpen && (

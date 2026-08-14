@@ -17,7 +17,7 @@ from agentcore.tools.builtin.folder_fs import (
     ListFolderDirTool,
     ReadFolderFileTool,
 )
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.registration import (
     AUDIENCE_CEO,
     CeoWire,
@@ -107,6 +107,14 @@ def test_read_folder_file_schema_and_registration():
     assert "target_folder_id" not in props
     assert set(tool.schema.parameters["required"]) == {"folder_id", "path"}
     assert "子文件夹" in tool.schema.description
+    assert "轻量认桌" in tool.schema.description
+    assert "抽样" in tool.schema.description
+    assert "读到文件末尾" not in tool.schema.description
+    limit_schema = props["limit"]
+    assert limit_schema["maximum"] == 500
+    assert "500" in limit_schema["description"]
+    assert "抽样" in limit_schema["description"]
+    assert "读到文件末尾" not in limit_schema["description"]
     reg = tool_registration(ReadFolderFileTool)
     assert reg.surface is ToolSurface.CEO_ORCHESTRATION
     assert reg.audience == (AUDIENCE_CEO,)
@@ -188,6 +196,133 @@ async def test_list_and_read_registered_local_folder(tmp_path: Path):
     assert (tmp_path / "birth" / "birth_only.txt").read_text(encoding="utf-8") == "birth"
     # Cross-folder did not invent files on birth desk.
     assert not (tmp_path / "birth" / "readme.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_read_folder_file_omitted_limit_stays_sample_window(tmp_path: Path):
+    """Omit limit → inject 500 before FileReadTool; do not inherit worker 2000-line cap."""
+    target_backend = _target_backend(tmp_path)
+    total = 800
+    (tmp_path / "target" / "long.txt").write_text(
+        "".join(f"line-{i}\n" for i in range(1, total + 1)),
+        encoding="utf-8",
+    )
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=_birth_backend(tmp_path),
+        user_id="u1",
+        conversation_id="conv-birth",
+        desktop_channel=SimpleNamespace(user_id="u1"),
+    )
+    with (
+        patch(
+            "agentcore.tools.builtin.folder_fs.load_target_folder_binding",
+            new=AsyncMock(return_value=_local_binding()),
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.build_target_backend",
+            return_value=target_backend,
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.workspace_channel_for_tools",
+            return_value=None,
+        ),
+        patch("agentcore.tools.builtin.file_ops.read._DEFAULT_READ_LINES", 2000),
+    ):
+        read = await ReadFolderFileTool().execute(
+            {"folder_id": "folder_local", "path": "long.txt"},
+            ctx,
+        )
+    assert read.success is True
+    assert "第 1–500 行" in read.output
+    assert f"共 {total} 行" in read.output
+    assert "line-500" in read.output
+    assert "line-501" not in read.output
+
+
+@pytest.mark.asyncio
+async def test_read_folder_file_omitted_limit_injects_before_file_read(tmp_path: Path):
+    """Delegated FileReadTool args must include limit=500 when the model omits it."""
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=_birth_backend(tmp_path),
+        user_id="u1",
+        conversation_id="conv-birth",
+        desktop_channel=SimpleNamespace(user_id="u1"),
+    )
+    with (
+        patch(
+            "agentcore.tools.builtin.folder_fs.load_target_folder_binding",
+            new=AsyncMock(return_value=_local_binding()),
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.build_target_backend",
+            return_value=_target_backend(tmp_path),
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.workspace_channel_for_tools",
+            return_value=None,
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.FileReadTool.execute",
+            new=AsyncMock(
+                return_value=ToolResult(tool_call_id="", success=True, output="ok")
+            ),
+        ) as execute_mock,
+    ):
+        result = await ReadFolderFileTool().execute(
+            {"folder_id": "folder_local", "path": "readme.md"},
+            ctx,
+        )
+    assert result.success is True
+    forwarded = execute_mock.await_args.args[0]
+    assert forwarded["limit"] == 500
+    assert forwarded["path"] == "readme.md"
+    assert "folder_id" not in forwarded
+
+
+@pytest.mark.asyncio
+async def test_read_folder_file_explicit_limit_respected(tmp_path: Path):
+    target_backend = _target_backend(tmp_path)
+    (tmp_path / "target" / "long.txt").write_text(
+        "".join(f"line-{i}\n" for i in range(1, 80)),
+        encoding="utf-8",
+    )
+    ctx = ToolContext.create(
+        execution_id="e",
+        run_id="r",
+        agent_id="ceo",
+        backend=_birth_backend(tmp_path),
+        user_id="u1",
+        conversation_id="conv-birth",
+        desktop_channel=SimpleNamespace(user_id="u1"),
+    )
+    with (
+        patch(
+            "agentcore.tools.builtin.folder_fs.load_target_folder_binding",
+            new=AsyncMock(return_value=_local_binding()),
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.build_target_backend",
+            return_value=target_backend,
+        ),
+        patch(
+            "agentcore.tools.builtin.folder_fs.workspace_channel_for_tools",
+            return_value=None,
+        ),
+    ):
+        read = await ReadFolderFileTool().execute(
+            {"folder_id": "folder_local", "path": "long.txt", "limit": 20},
+            ctx,
+        )
+    assert read.success is True
+    assert "第 1–20 行" in read.output
+    assert "line-20" in read.output
+    assert "line-21" not in read.output
 
 
 @pytest.mark.asyncio

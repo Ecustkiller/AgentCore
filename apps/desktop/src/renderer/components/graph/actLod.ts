@@ -110,7 +110,6 @@ export function actCardDataFromScene(act: SceneAct, index: number) {
     total: act.total,
     durationMs: act.durationMs,
     pendingDecisions: act.pendingDecisions,
-    recoverable: act.recoverable,
     index,
   };
 }

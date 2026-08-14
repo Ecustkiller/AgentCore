@@ -1,23 +1,26 @@
 /**
- * 「哪个对话在等你」——账号级 firehose 信号 `ai_attention`（云对话多端同权 B2 · L1）。
+ * 「哪个对话在等你」——账号级信号 `ai_attention` / `ai_attention_snapshot`。
  *
- * 回合停在阻塞卡上时后端往 `/v1/realtime` 发 `required`，任一端放行（或超时 / 孤儿 /
- * Stop）后发 `resolved`。这条信号**只带对话与一行标题、不带卡的正文**——正文永远由该
- * 对话自己的流 / REST 重取（设计 §2.2「只送信号不送内容」）。
+ * 回合停在阻塞卡上时后端发 `required`，任一端放行（或超时 / 孤儿 / Stop）后发
+ * `resolved`。只带对话与一行标题、不带卡的正文——正文永远由该对话自己的流 / REST
+ * 重取（设计 §2.2「只送信号不送内容」）。
  *
- * 本存储只回答一个问题：**哪些对话正停着等人**。用途是让用户人不在那个对话页时也看得见
- * ——侧栏「等你」灯（{@link useConversationAwaitingAttention}）与跨对话提醒都读它。对话页
- * 内真正的可操作面仍是 ApprovalPrompt / ResumePrompt，权威是 InteractionStore 与 recovery
- * 快照，本存储不参与。
+ * 权威是 fulfill 播种：`ai_attention_snapshot` 整表 replace（空表也 replace，用来
+ * 灭断线期间的假灯）。增量 `ai_attention` 走 fulfill，过渡期也可从 realtime 入站；
+ * replace 只认 fulfill 快照。打开对话不再清灯——当前页的 banner / 提醒自己过滤。
  *
- * 没有跨对话的挂起快照接口，所以断线期间漏掉的 `resolved` 补不回来——由「打开该对话即清」
- * 兜底（{@link clearAiAttentionForConversation}）：进了那个对话，页内快照就是权威。
+ * 本存储只回答：**哪些对话正停着等人**。侧栏「等你」灯与跨对话提醒都读它。对话页
+ * 内真正的可操作面仍是 ApprovalPrompt / ResumePrompt。
  */
+import { useMemo } from "react";
 import { create } from "zustand";
 
-/** `/v1/realtime` 的 `ai_attention` 帧（账号级扁平事件，不是回合流的 envelope）。 */
+export const AI_ATTENTION_SNAPSHOT_TYPE = "ai_attention_snapshot";
+export const AI_ATTENTION_TYPE = "ai_attention";
+
+/** realtime 扁平帧，或 fulfill 增量 payload（字段相同，fulfill 多包一层 payload）。 */
 export interface AiAttentionEvent {
-  type: "ai_attention";
+  type?: "ai_attention";
   state: "required" | "resolved";
   conversation_id: string;
   turn_id: string;
@@ -37,9 +40,10 @@ export interface AiAttentionEntry {
 }
 
 interface AiAttentionState {
-  /** 按到达先后排列——提醒不跳序。 */
+  /** 按到达先后排列——提醒不跳序。快照 replace 用服务端给的顺序。 */
   entries: AiAttentionEntry[];
   apply: (event: AiAttentionEvent) => void;
+  replace: (entries: AiAttentionEntry[]) => void;
   clearConversation: (conversationId: string) => void;
   clear: () => void;
 }
@@ -48,18 +52,57 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function entryFromFields(raw: {
+  interaction_id?: unknown;
+  conversation_id?: unknown;
+  turn_id?: unknown;
+  kind?: unknown;
+  title?: unknown;
+}): AiAttentionEntry | null {
+  const interactionId = text(raw.interaction_id);
+  const conversationId = text(raw.conversation_id);
+  if (!interactionId || !conversationId) return null;
+  return {
+    interactionId,
+    conversationId,
+    turnId: text(raw.turn_id),
+    kind: text(raw.kind),
+    title: text(raw.title),
+  };
+}
+
+function sameEntries(
+  a: readonly AiAttentionEntry[],
+  b: readonly AiAttentionEntry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.interactionId !== y.interactionId ||
+      x.conversationId !== y.conversationId ||
+      x.turnId !== y.turnId ||
+      x.kind !== y.kind ||
+      x.title !== y.title
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const useAiAttentionStore = create<AiAttentionState>((set) => ({
   entries: [],
 
   apply: (event) => {
-    const interactionId = text(event.interaction_id);
-    const conversationId = text(event.conversation_id);
-    if (!interactionId || !conversationId) return; // 字段缺失的帧直接丢弃
+    const entry = entryFromFields(event);
+    if (!entry) return;
 
     if (event.state === "resolved") {
       set((state) => {
         const next = state.entries.filter(
-          (e) => e.interactionId !== interactionId,
+          (e) => e.interactionId !== entry.interactionId,
         );
         return next.length === state.entries.length ? state : { entries: next };
       });
@@ -67,24 +110,19 @@ export const useAiAttentionStore = create<AiAttentionState>((set) => ({
     }
     if (event.state !== "required") return;
 
-    const entry: AiAttentionEntry = {
-      interactionId,
-      conversationId,
-      turnId: text(event.turn_id),
-      kind: text(event.kind),
-      title: text(event.title),
-    };
     set((state) => {
       const index = state.entries.findIndex(
-        (e) => e.interactionId === interactionId,
+        (e) => e.interactionId === entry.interactionId,
       );
       if (index < 0) return { entries: [...state.entries, entry] };
-      // 同一 interaction 重发（多端 / 重连补发）：更新文案但留在原位。
       const next = state.entries.slice();
       next[index] = entry;
       return { entries: next };
     });
   },
+
+  replace: (entries) =>
+    set((state) => (sameEntries(state.entries, entries) ? state : { entries })),
 
   clearConversation: (conversationId) =>
     set((state) => {
@@ -99,15 +137,32 @@ export const useAiAttentionStore = create<AiAttentionState>((set) => ({
     set((state) => (state.entries.length === 0 ? state : { entries: [] })),
 }));
 
-/** 应用一帧 `ai_attention`（realtime firehose 的唯一入口）。 */
+/** 应用一帧增量 `ai_attention`（fulfill payload 或 realtime 扁平事件）。 */
 export function applyAiAttention(event: AiAttentionEvent): void {
   useAiAttentionStore.getState().apply(event);
 }
 
 /**
- * 打开某对话即清它的提醒——该页自己会呈现真正的卡片（灯改由 InteractionStore /
- * pausedTurns 点亮），也兜住断线期间漏收的 `resolved`。
+ * fulfill 播种：整份 `{ entries }` replace。缺字段 / 非数组的帧丢掉，不清现有表。
+ * 空数组 = 灭断线假灯。
  */
+export function applyAiAttentionSnapshot(payload: unknown): void {
+  if (!payload || typeof payload !== "object") return;
+  const raw = (payload as { entries?: unknown }).entries;
+  if (!Array.isArray(raw)) return;
+  const entries: AiAttentionEntry[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const entry = entryFromFields(item as Record<string, unknown>);
+    if (!entry || seen.has(entry.interactionId)) continue;
+    seen.add(entry.interactionId);
+    entries.push(entry);
+  }
+  useAiAttentionStore.getState().replace(entries);
+}
+
+/** 仍导出：登出 / 测试用。打开对话不再走这条。 */
 export function clearAiAttentionForConversation(conversationId: string): void {
   useAiAttentionStore.getState().clearConversation(conversationId);
 }
@@ -126,7 +181,26 @@ export function useConversationAwaitingAttention(
   );
 }
 
+/** 当前 required 对话 id 集合（侧栏回塞 / 折组覆盖）。 */
+export function useRequiredConversationIds(): ReadonlySet<string> {
+  const entries = useAiAttentionStore((s) => s.entries);
+  return useMemo(() => {
+    const ids = new Set<string>();
+    for (const e of entries) ids.add(e.conversationId);
+    return ids;
+  }, [entries]);
+}
+
 /** 快照读（非 React 调用方：跨对话提醒的去重与对账）。 */
 export function aiAttentionEntries(): readonly AiAttentionEntry[] {
   return useAiAttentionStore.getState().entries;
+}
+
+/** Banner / 提醒：可按当前页过滤，不必清 store。 */
+export function aiAttentionEntriesExcept(
+  conversationId: string | null,
+): readonly AiAttentionEntry[] {
+  const entries = useAiAttentionStore.getState().entries;
+  if (!conversationId) return entries;
+  return entries.filter((e) => e.conversationId !== conversationId);
 }

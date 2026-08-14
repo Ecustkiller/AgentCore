@@ -14,7 +14,7 @@ export function GraphLayoutError({
       role="alert"
     >
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">
-        <div className="flex size-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+        <div className="flex size-10 items-center justify-center rounded-full bg-muted/40 text-muted-foreground">
           <AlertTriangle size={20} />
         </div>
         <div className="space-y-1">
@@ -23,7 +23,7 @@ export function GraphLayoutError({
             {LAYOUT_FAILURE_USER_MESSAGE}
           </p>
           {detail && detail !== LAYOUT_FAILURE_USER_MESSAGE && (
-            <p className="mt-1 break-words text-xs text-destructive/80">
+            <p className="mt-1 break-words text-xs text-muted-foreground">
               {detail}
             </p>
           )}

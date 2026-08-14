@@ -77,9 +77,18 @@ function writeConversations(
   );
 }
 
-/** Prepend a conversation (or move an existing one to the front, deduped). */
+/** Prepend a conversation (or move an existing one to the front, deduped).
+ * A null `lastMessagePreview` from create/patch means「未计算」, not「算过是空」—
+ * keep the cached sentence so write responses do not blank the sidebar. */
 export function upsertConversationFront(conv: Conversation): void {
-  writeConversations((list) => [conv, ...list.filter((c) => c.id !== conv.id)]);
+  writeConversations((list) => {
+    const prev = list.find((c) => c.id === conv.id);
+    const next =
+      conv.lastMessagePreview == null && prev?.lastMessagePreview
+        ? { ...conv, lastMessagePreview: prev.lastMessagePreview }
+        : conv;
+    return [next, ...list.filter((c) => c.id !== conv.id)];
+  });
 }
 
 /** Drop a conversation from the cached list. */
@@ -210,6 +219,26 @@ export function useRenameConversation() {
   });
 }
 
+/** Soft-delete 成功后的本地收敛：列表 / UI blob / scratch / runtime。 */
+export function applyDeletedConversationLocally(id: string): void {
+  removeConversationFromCache(id);
+  // Purge this conversation's persisted UI prefs (disclosure / drafts /
+  // views / canvas-turn / graph-fold) so blob maps don't leak keys for gone
+  // conversations (守「表恒收敛不膨胀」).
+  clearConversationUiState(id);
+  // Drop the files-hub rail section + refetch so open tabs close via
+  // FileWorkbench's「workspace gone → close tabs」effect.
+  removeConversationScratch(id);
+  // In-memory runtime buckets (pausedTurns / interactions /
+  // backgroundTasks / processes / terminals / toolOutput).
+  purgeConversationRuntimeState(id);
+  void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
+  void queryClient.invalidateQueries({ queryKey: conversationKeys.trash });
+  void queryClient.invalidateQueries({
+    queryKey: conversationKeys.archived,
+  });
+}
+
 /** Soft-delete a conversation server-side, then drop it from the cache (delete
  * first so a failed delete leaves the row in place). The chat is recoverable from
  *「最近删除」for the retention window, so that list is refreshed too. */
@@ -217,22 +246,7 @@ export function useDeleteConversation() {
   return useMutation({
     mutationFn: (id: string) => apiDeleteConversation(id),
     onSuccess: (_data, id) => {
-      removeConversationFromCache(id);
-      // Purge this conversation's persisted UI prefs (disclosure / drafts /
-      // views / canvas-turn / graph-fold) so blob maps don't leak keys for gone
-      // conversations (守「表恒收敛不膨胀」).
-      clearConversationUiState(id);
-      // Drop the files-hub rail section + refetch so open tabs close via
-      // FileWorkbench's「workspace gone → close tabs」effect.
-      removeConversationScratch(id);
-      // In-memory runtime buckets (pausedTurns / interactions /
-      // backgroundTasks / processes / terminals / toolOutput).
-      purgeConversationRuntimeState(id);
-      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
-      void queryClient.invalidateQueries({ queryKey: conversationKeys.trash });
-      void queryClient.invalidateQueries({
-        queryKey: conversationKeys.archived,
-      });
+      applyDeletedConversationLocally(id);
     },
   });
 }
@@ -330,12 +344,22 @@ export function useUnarchiveConversation() {
   return useMutation({
     mutationFn: (id: string) => apiSetArchived(id, false),
     onMutate: (id) => {
+      const archived = queryClient.getQueryData<Conversation[]>(
+        conversationKeys.archived,
+      );
+      const preview =
+        archived?.find((c) => c.id === id)?.lastMessagePreview ?? null;
       queryClient.setQueryData<Conversation[]>(
         conversationKeys.archived,
         (old) => (old ? old.filter((c) => c.id !== id) : old),
       );
+      return { preview };
     },
-    onSuccess: (conv) => upsertConversationFront(conv),
+    onSuccess: (conv, _id, ctx) =>
+      upsertConversationFront({
+        ...conv,
+        lastMessagePreview: conv.lastMessagePreview ?? ctx?.preview ?? null,
+      }),
     onError: () => {
       void queryClient.invalidateQueries({
         queryKey: conversationKeys.archived,

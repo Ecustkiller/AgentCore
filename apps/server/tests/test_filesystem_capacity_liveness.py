@@ -173,7 +173,7 @@ async def test_file_read_channel_dead_stamps_family_retire(tmp_path: Path):
     [
         (FileListTool(), {"directory": "."}, "list"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
-        (MkdirTool(), {"path": "d"}, "mkdir"),
+        (MkdirTool(), {"path": "nested/d"}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
 )
@@ -212,7 +212,7 @@ async def test_filesystem_tools_single_timeout_no_family_retire(
     [
         (FileListTool(), {"directory": "."}, "list"),
         (FileWriteTool(), {"path": "a.txt", "content": "x"}, "write"),
-        (MkdirTool(), {"path": "d"}, "mkdir"),
+        (MkdirTool(), {"path": "nested/d"}, "mkdir"),
         (GrepTool(), {"pattern": "x"}, "grep"),
     ],
 )

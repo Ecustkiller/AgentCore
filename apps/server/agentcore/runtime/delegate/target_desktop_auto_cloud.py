@@ -11,9 +11,9 @@ from agentcore.runtime.delegate.target_desktop_gate import gate_bare_chat_requir
 logger = get_logger(__name__)
 
 _DEFAULT_AUTO_CLOUD_DESK_NAME = "云文件夹"
-# 标题模型被要求「最多约 16 个字（或等长短语）」——按显示宽度量（CJK 计 2）正好是
-# 这个上限：约 16 个汉字 / 32 个西文字符。再长的就是一句话，不是名字。
-_NAME_SHAPE_MAX_WIDTH = 32
+# 只收「像文件夹名」的短标题：显示宽度 ≤16（CJK 计 2 → 约 8 个汉字 / 16 个西文字符）。
+# 再宽就是一句话或英文长标题，不当目录段。
+_NAME_SHAPE_MAX_WIDTH = 16
 # ``fallback_title`` 与 ``_sanitize_title``（memory.conversation_title）截断时在末尾
 # 留省略号。留着标记的标题是半句话，当侧栏标签还行，当目录名不成立。
 _TRUNCATION_MARKERS = ("…", "...")
@@ -43,8 +43,8 @@ def auto_cloud_desk_name(*, conversation_title: str | None) -> str:
     """裸聊自动建桌的文件夹名——只有「形状像个名字」的会话标题才被采用。
 
     这个名字会成为云端磁盘上的真实目录段，所以判断标准是「当文件夹名是否成立」，
-    而不是标题上限：够短、且不带截断标记（半句话）。不满足一律退通用名，用户可在
-    对话里当场改名。
+    而不是标题上限：显示宽度 ≤16、且不带截断标记（半句话）。不满足一律退通用名，
+    用户可在对话里当场改名。
 
     用户原话**不作为**命名来源：那串话常含身份证号 / 电话 / 住址，而且没有任何形
     状保证。标题是否由 LLM 生成无从追溯（追溯要加 DB 列、跨三层改），这里只做形状

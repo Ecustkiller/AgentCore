@@ -147,7 +147,7 @@ PLAYBOOKS: dict[str, Playbook] = {
             "modules(可选,功能模块名数组;"
             "lean=覆盖清单不扇出;full=各派一名实现,默认仅总览页,超过 3 个折叠到末槽) / "
             "stack(可选,技术栈,默认 Vue3+Vite+TS) / "
-            "root(可选,项目目录名,默认从 app 简述派生)"
+            "root(可选,工程目录名,默认固定 app/；禁止从 app 简述派生 slug)"
         ),
         build=build_app,
     ),

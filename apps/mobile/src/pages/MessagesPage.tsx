@@ -8,6 +8,7 @@ import { ImAvatar, userAvatarPath } from "@/pages/im/ImAvatar";
 // messages.py is REST-only, so the list POLLS (every 10s + on regaining visibility) for
 // new chats / unread counts. Rows drill into a thread (/im/c/:id); the chat summary is
 // passed via router state so the thread shows its title without a refetch.
+import { SquarePen } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/im/im.css";
@@ -36,10 +37,11 @@ export function MessagesPage() {
         <span>消息</span>
         <button
           type="button"
-          className="link"
+          className="link icon-btn"
+          aria-label="发起"
           onClick={() => navigate("/im/new")}
         >
-          发起
+          <SquarePen size={20} />
         </button>
       </header>
 
@@ -47,7 +49,7 @@ export function MessagesPage() {
         {chats === null && !error && <p className="muted hint">加载中…</p>}
         {error && <p className="error hint">{error}</p>}
         {chats !== null && chats.length === 0 && !error && (
-          <p className="muted hint">还没有会话。点右上角「发起」找人聊天。</p>
+          <p className="muted hint">还没有会话。点右上角发起新聊天。</p>
         )}
         {chats?.map((chat) => (
           <ChatRow

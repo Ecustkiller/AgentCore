@@ -44,7 +44,12 @@ export function MorePage() {
       </header>
 
       <div className="list" style={{ padding: 0 }}>
-        <div className="more-ident">
+        <button
+          type="button"
+          className="more-ident"
+          onClick={() => navigate("/more/account")}
+          aria-label="账户设置"
+        >
           <Avatar user={user} size={52} />
           <div className="more-ident-text">
             <span className="more-name">
@@ -54,7 +59,10 @@ export function MorePage() {
               <span className="more-sub">@{user.username}</span>
             )}
           </div>
-        </div>
+          <span className="more-row-chevron" aria-hidden>
+            ›
+          </span>
+        </button>
 
         <div className="more-group">
           <NavRow label="模型配置" onClick={() => navigate("/more/model")} />

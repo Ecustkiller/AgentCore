@@ -5,18 +5,6 @@ import type { FileSource } from "@/lib/fileSource";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 只桩掉会拉真实服务/store 的邻居；视图本体（源码渲染 + 横幅递进 + 图标门控）用真的。
-vi.mock("@/stores/conversation", () => ({
-  useConversationStore: (
-    sel: (s: { currentConversationId: string | null }) => unknown,
-  ) => sel({ currentConversationId: "c1" }),
-}));
-vi.mock("@/hooks/useFileAudit", () => ({
-  useFileAudit: () => ({ status: "idle" as const }),
-}));
-vi.mock("@/components/audit/FileAuditTrail", () => ({
-  FileAuditSection: () => <div data-testid="file-audit" />,
-}));
 // md 预览复用聊天 Markdown 渲染器；桩成可断言的叶子，避免在 jsdom 里拉整条 remark 管线。
 vi.mock("@/components/chat/Markdown", () => ({
   Markdown: ({ content }: { content: string }) => (
@@ -87,11 +75,11 @@ describe("FilePreviewView — HTML 源码视图（静态快照已取消）", () 
     expect(screen.queryByRole("button", { name: "预览效果" })).toBeNull();
   });
 
-  it("编辑与审计回归：HTML 可编辑（铅笔入口）、FileAuditSection 出现", async () => {
+  it("编辑回归：HTML 可编辑（铅笔入口），不再渲染写入归因", async () => {
     renderView(makeSource());
     await screen.findByText(/这是网页文件的源码/);
     expect(screen.getByRole("button", { name: "编辑" })).toBeTruthy();
-    expect(screen.getByTestId("file-audit")).toBeTruthy();
+    expect(screen.queryByText(/写入归因/)).toBeNull();
   });
 
   it("横幅 CTA 最高档：有 openInAppPreview →「打开完整预览」，点击路由到位", async () => {
@@ -269,6 +257,11 @@ describe("FilePreviewView — 非 md 文本编辑走 CAS（不静默覆盖）", 
     });
 
     expect(screen.getByText(/保存会覆盖磁盘版本/)).toBeTruthy();
+    const conflictBar = screen.getByText(/保存会覆盖磁盘版本/).closest("div");
+    expect(conflictBar?.className).toContain("primary");
+    expect(conflictBar?.className).not.toContain("destructive");
+    expect(screen.getByText("重新加载").className).not.toContain("destructive");
+    expect(screen.getByText("仍然覆盖").className).toContain("destructive");
     // 冲突不是终点：仍在编辑态、草稿还在，用户才有得选。
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
       "我的改动",
@@ -348,7 +341,9 @@ describe("FilePreviewView — 非 md 文本编辑走 CAS（不静默覆盖）", 
       fireEvent.click(screen.getByText("保存"));
     });
 
-    expect(screen.getByText("没有写入权限，无法保存")).toBeTruthy();
+    const saveBar = screen.getByText("没有写入权限，无法保存").closest("div");
+    expect(saveBar?.className).toContain("bg-muted/40");
+    expect(saveBar?.className).not.toContain("destructive");
     expect(screen.getByRole("textbox")).toBeTruthy();
   });
 

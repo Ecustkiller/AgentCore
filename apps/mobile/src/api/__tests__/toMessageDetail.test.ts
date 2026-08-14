@@ -110,6 +110,23 @@ describe("toMessageDetail runs.error (cold-load failure)", () => {
     );
     expect(m.runs?.error).toBeNull();
   });
+
+  it("lifts runs.auto_folder so the landing notice survives a reload", () => {
+    const m = toMessageDetail(
+      baseRow({
+        runs: {
+          events: [],
+          finish_reason: "end_turn",
+          process: null,
+          auto_folder: { folder_id: "f1", name: "季度复盘" },
+        },
+      }),
+    );
+    expect(m.runs?.auto_folder).toEqual({
+      folder_id: "f1",
+      name: "季度复盘",
+    });
+  });
 });
 
 describe("cold-load empty failure → export", () => {

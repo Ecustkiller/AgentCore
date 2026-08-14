@@ -170,10 +170,14 @@ export async function streamMessage(
   signal?: AbortSignal,
   attachments?: MessageAttachment[],
   delivery: "steer" | "queue" = "steer",
+  agentMentions?: { agent_id: string; role: string }[],
 ): Promise<void> {
   const path = `/v1/conversations/${conversationId}/messages`;
   const payload: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
+  if (agentMentions && agentMentions.length > 0) {
+    payload.agent_mentions = agentMentions;
+  }
   const response = await sseFetch(() =>
     fetch(apiUrl(path), {
       method: "POST",

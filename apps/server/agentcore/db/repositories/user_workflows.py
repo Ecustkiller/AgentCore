@@ -52,10 +52,10 @@ class UserWorkflowRepository:
     async def find_by_turn_source(
         self, *, user_id: str, conversation_id: str, message_id: str
     ) -> UserWorkflow | None:
-        """同一轮已固化过的工作流（幂等短路），没有则 ``None``。
+        """同一轮已固化过的工作流，没有则 ``None``。
 
-        走 ``ix_user_workflows_turn_source``。一轮存多个变体是要留的余地（保存后改名 /
-        另存），所以这里不是唯一索引；命中多条时取最近改过的那条。
+        走 ``ix_user_workflows_turn_source``。历史 ``kind=turn`` 行仍认（抽槽只认固化来源）；
+        不是唯一索引，命中多条时取最近改过的那条。
         """
         result = await self._session.execute(
             select(UserWorkflow)

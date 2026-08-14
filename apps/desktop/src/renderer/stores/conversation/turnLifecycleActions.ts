@@ -1,3 +1,4 @@
+import { hasActiveRunningWorkers } from "@/components/graph/helpers";
 import { discardAllPendingChunks } from "@/services/sse/contentBuffer";
 import { flushPendingFrames } from "@/services/sse/execFrameBuffer";
 import { stopConversation } from "@/services/stopTurn";
@@ -34,7 +35,7 @@ type TurnLifecycleActions = Pick<
   | "clearError"
 >;
 
-/** Align with StatusStrip canStop: running, or paused with an in-flight run. */
+/** Align with StatusStrip: running, or paused with an in-flight worker (not captain). */
 function canStopCurrentExecution(messages: Message[]): boolean {
   const mid = lastAssistantProjectionId(messages);
   if (!mid) return false;
@@ -51,7 +52,7 @@ function canStopCurrentExecution(messages: Message[]): boolean {
     ert.crossExamEnabled,
     ert.debateOpening,
   );
-  return exec.runs.some((r) => r.status === "running");
+  return hasActiveRunningWorkers(exec.runs);
 }
 
 /** Turn lifecycle / phase / error / stopGeneration. */

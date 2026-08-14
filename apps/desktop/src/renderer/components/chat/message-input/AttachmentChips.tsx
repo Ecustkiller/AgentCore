@@ -60,7 +60,7 @@ export function AttachmentChips({
             className={cn(
               "inline-flex max-w-[220px] items-center gap-1.5 rounded-lg px-2 py-1 text-xs",
               failed
-                ? "bg-destructive/10 text-destructive"
+                ? "bg-muted/40 text-muted-foreground"
                 : "bg-accent text-accent-foreground",
             )}
           >
@@ -79,12 +79,7 @@ export function AttachmentChips({
             ) : (
               <FileTypeIcon name={a.name} path={a.path} size={12} />
             )}
-            <span
-              className={cn(
-                "shrink-0",
-                failed ? "text-destructive" : "text-muted-foreground",
-              )}
-            >
+            <span className="shrink-0 text-muted-foreground">
               {uploading ? "上传中" : failed ? "上传失败" : KIND_LABEL[a.kind]}
             </span>
             <SimpleTooltip

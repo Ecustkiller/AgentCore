@@ -20,23 +20,23 @@ class EngineSettings(BaseModel):
     # 都有整轮花在不存在的路径上；补上被幻觉路径吃掉的余量。抬得更高会放大 CEO
     # 单干塌缩面（成规模审计恰恰该早派）。
     engine_team_gate_investigation_rounds: int = 7
-    # Absolute investigation-round ceiling (safety net). Progress-aware spinning detection
-    # normally triggers earlier; this is the hard backstop. Must be ≤ worker agent
-    # max_rounds (56) or the cap never fires before the loop exits.
-    engine_convergence_finalize_rounds: int = 48
+    # 调查满 N 轮强制收工已退役：create_loop_controller 永远把
+    # convergence_finalize_rounds 设为 0，即便本项 >0 也忽略，防止
+    # 环境变量把误设计救活。读很多轮不同内容不是空转。
+    # 同一目标连读仍走 engine_convergence_spin_rounds → FINALIZE。
+    # 计数器与 LoopController 显式传入 finalize_rounds 仍可用；默认 0。
+    engine_convergence_finalize_rounds: int = 0
     # Consecutive investigation-only rounds re-reading the same targets before finalize.
     engine_convergence_spin_rounds: int = 3
-    # 交文件队员久读无写（与 token/timeout wind_down 解耦；不做 FINALIZE/FAILED）：
-    # 修码 files_expected：连续纯调查轮 nudge → soft「先改或交接」；达 narrow →
-    # 复用 wind_down 白名单收窄工具（卸检索）。报告岗（结构化谓词）仅 nudge 催写报告，
-    # narrow_rounds=0，永不卸检索。仅 files_expected 且非 prose 开启。≤0 关闭对应阶。
-    # 默认 8/10：交文件多留摸仓轮次再催；修码 narrow 仍晚于 nudge，梯子不反序。
-    # 与 recon 默认 8 对齐首催时机；仍远低于绝对收敛顶（48）。
-    engine_delivery_idle_nudge_rounds: int = 8
-    engine_delivery_idle_narrow_rounds: int = 10
+    # 交文件空转（久读无写催写 / 收检索）已退役：create_loop_controller 对
+    # files_expected 永不打开 nudge/narrow/report，即便本项 >0 也忽略，防止
+    # 环境变量把误设计救活。计数器与 LoopController 显式构造仍可用；默认 0。
+    # 与 token/timeout wind_down 无关（那是额度将尽，不是「没写过文件」）。
+    engine_delivery_idle_nudge_rounds: int = 0
+    engine_delivery_idle_narrow_rounds: int = 0
     # 非交文件（调查/诊断）队员：久读无结论只 soft nudge，不收窄工具、不 FINALIZE。
     # 与 delivery_idle 共用纯调查轮计数器；文案催 handoff/escalate/收敛，不催写盘。
-    # ≤0 关闭。默认 8：在绝对顶（48）之前给一次刹车。
+    # ≤0 关闭。默认 8：给一次刹车（不依赖已退役的调查轮绝对顶）。
     engine_recon_idle_nudge_rounds: int = 8
     engine_finish_guard_max_reworks: int = 2
     # C2 概览契约：本回合已发 delivery_status 时，CEO 终稿超过此字数 → finish_guard 回炉压缩。
@@ -61,8 +61,8 @@ class EngineSettings(BaseModel):
 
     # 当轮调查结果（NEVER + FILESYSTEM/SEARCH/RESEARCH）投影窗：只留最近 N 条
     # ≥min_chars 的全文。journal / UI 仍全文。旧结果 → 稳定指针；file_read 另附
-    # ≤1200 字结构摘要 + 再读授额。2 打堆叠税（工人长调查把多份 500 行窗整段
-    # 带进下一轮 LLM）；不拧单次默认 500 行窗、不把 file_read 塞回通用 4k 头尾裁
+    # ≤1200 字结构摘要 + 再读授额。2 打堆叠税（工人长调查把多份读窗整段
+    # 带进下一轮 LLM）；不拧单次安全顶、不把 file_read 塞回通用 4k 头尾裁
     # （那伤单次读手感）。host_shell / terminal 走独立 exec 窗，不进本集合。
     engine_tool_clear_keep_recent: int = 2
     engine_tool_clear_min_chars: int = 2000

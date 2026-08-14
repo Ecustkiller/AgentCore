@@ -6,6 +6,8 @@
  * 关流即作废（不把上一个账号的提醒留给下一个）。
  */
 import {
+  applyAiAttention,
+  applyAiAttentionSnapshot,
   clearAiAttentionForConversation,
   useAiAttentionStore,
 } from "@/stores/aiAttention";
@@ -199,7 +201,39 @@ describe("firehose ai_attention", () => {
   });
 });
 
-describe("打开对话即清（漏收 resolved 的唯一兜底）", () => {
+describe("ai_attention_snapshot replace", () => {
+  it("空表 replace 灭假灯；缺字段帧不清表", () => {
+    useAiAttentionStore.setState({
+      entries: [
+        {
+          interactionId: "stale",
+          conversationId: CID,
+          turnId: "t",
+          kind: "approval",
+          title: "假灯",
+        },
+      ],
+    });
+    applyAiAttentionSnapshot({ entries: [] });
+    expect(entries()).toEqual([]);
+
+    applyAiAttention({
+      type: "ai_attention",
+      state: "required",
+      conversation_id: CID,
+      turn_id: "t",
+      interaction_id: "keep",
+      kind: "approval",
+      title: "真灯",
+    });
+    applyAiAttentionSnapshot(null);
+    applyAiAttentionSnapshot({});
+    applyAiAttentionSnapshot({ entries: "nope" });
+    expect(entries()).toHaveLength(1);
+  });
+});
+
+describe("clearConversation 仍可用（打开对话不再走这条）", () => {
   it("只清该会话，别的会话的提醒留着", () => {
     useAiAttentionStore.setState({
       entries: [

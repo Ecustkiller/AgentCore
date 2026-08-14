@@ -32,6 +32,14 @@ export function pinDraftRequestId(key: string, requestId: string): void {
   requestIds.set(key, requestId);
 }
 
+/**
+ * 首发「发送当没发生」拆掉空会话后必须作废该键。
+ * ``get_by_client_request_id`` 不过滤 ``deleted_at``，复用旧键会领回已软删的行。
+ */
+export function forgetDraftRequestId(key: string): void {
+  requestIds.delete(key);
+}
+
 // 草稿清空即作废：composer store 在草稿空掉时会删除该键（见 `write`），所以「发送成功
 // 清空」「用户手动抹掉」「按会话清 UI 状态」三条路径共用这一处轮换。
 useComposerDraftStore.subscribe((state, prev) => {

@@ -5,6 +5,7 @@
  * cold empty-slice adopt path must keep calling the same branches.
  */
 import type { ConversationRecovery } from "@/services/resume";
+import { useAiAttentionStore } from "@/stores/aiAttention";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +57,10 @@ import {
   runHydrateAttachSettle,
   scheduleHydrateAttachSettle,
 } from "../turns/hydrateAttachSettle";
+import {
+  beginLocalConversationStream,
+  resetStreamOwnershipForTests,
+} from "../turns/streamOwnership";
 
 const CID = "conv-hydrate-attach";
 
@@ -95,6 +100,8 @@ function seedMessages(
 
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });
+  useAiAttentionStore.setState({ entries: [] });
+  resetStreamOwnershipForTests();
   attachOnOpen.mockClear();
   settleCloudRunningAssistant.mockClear();
   settleOrphanEmptyAssistants.mockClear();
@@ -240,7 +247,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(attachOnOpen).not.toHaveBeenCalled();
   });
 
-  it("云会话挂上对话级订阅；本机引擎在跑则不订（服务端没有 run）", async () => {
+  it("云会话不在 hydrate 里订 follow（揭窗才订）；本机引擎在跑则卸订", async () => {
     seedMessages({ role: "assistant", status: "complete" });
 
     await runHydrateAttachSettle(CID, {
@@ -250,7 +257,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
       pausedCount: 0,
       unsynced: [],
     });
-    expect(syncConversationFollow).toHaveBeenCalledWith(CID);
+    expect(syncConversationFollow).not.toHaveBeenCalled();
 
     syncConversationFollow.mockClear();
     await runHydrateAttachSettle(CID, {
@@ -263,7 +270,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(syncConversationFollow).toHaveBeenCalledWith(null);
   });
 
-  it("纯云冷挂起仍订阅：另一端放行后的续跑是一个新 run", async () => {
+  it("纯云冷挂起也不在 hydrate 里订：揭窗即订，hydrate 只卸 sidecar/unsynced", async () => {
     seedMessages({ role: "assistant", status: "complete", id: "a-paused" });
 
     await runHydrateAttachSettle(CID, {
@@ -274,7 +281,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
       unsynced: [],
     });
 
-    expect(syncConversationFollow).toHaveBeenCalledWith(CID);
+    expect(syncConversationFollow).not.toHaveBeenCalled();
   });
 
   it("迟到的 hydrate 不抢订阅：用户已切走就不动全局那一条", async () => {
@@ -292,10 +299,9 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(syncConversationFollow).not.toHaveBeenCalled();
   });
 
-  it("skips settle/attach when session abort already pumping", async () => {
+  it("skips settle/attach when local stream already pumping", async () => {
     seedMessages({ role: "assistant", status: "running" });
-    useConversationStore.getState().setGenerating(true, CID);
-    useConversationStore.getState().setAbort(new AbortController(), CID);
+    const release = beginLocalConversationStream(CID);
 
     await runHydrateAttachSettle(CID, {
       sidecarLive: false,
@@ -309,6 +315,7 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     expect(attachOnOpen).not.toHaveBeenCalled();
     expect(attachSidecarTurn).not.toHaveBeenCalled();
     expect(projectPausedRuns).not.toHaveBeenCalled();
+    release();
   });
 
   it("cold overlay isGenerating without abort still settles", async () => {
@@ -327,6 +334,32 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     });
 
     expect(settleCloudRunningAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("打开对话不清 ai_attention 灯", async () => {
+    useAiAttentionStore.setState({
+      entries: [
+        {
+          interactionId: "appr-1",
+          conversationId: CID,
+          turnId: "t1",
+          kind: "approval",
+          title: "需要授权：终端",
+        },
+      ],
+    });
+    seedMessages({ role: "assistant", status: "complete" });
+
+    await runHydrateAttachSettle(CID, {
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+
+    expect(useAiAttentionStore.getState().entries).toHaveLength(1);
+    expect(useAiAttentionStore.getState().entries[0].conversationId).toBe(CID);
   });
 
   it("scheduleHydrateAttachSettle returns before recovery lands", async () => {

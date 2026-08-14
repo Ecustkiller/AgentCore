@@ -198,6 +198,7 @@ describe("ensureAttachmentResident", () => {
       binary: true,
       text: "",
       truncated: false,
+      fileBlob: expect.any(File),
     });
     expect(consume).toHaveBeenCalledWith("stg-3");
     expect(upload).toHaveBeenCalledWith(
@@ -269,6 +270,7 @@ describe("ensureAttachmentResident", () => {
       binary: true,
       text: "",
       truncated: false,
+      fileBlob: blob,
     });
     expect(upload).toHaveBeenCalledWith("c1", "attachments/pack.docx", blob);
   });
@@ -535,6 +537,7 @@ describe("ensureAttachmentResident 兼顾暂存与内存 File", () => {
       binary: true,
       text: "",
       truncated: false,
+      fileBlob: blob,
     });
     expect(consume).not.toHaveBeenCalled();
     expect(upload).toHaveBeenCalledWith("c1", "attachments/shot.png", blob);
@@ -573,6 +576,91 @@ describe("ensureAttachmentResident 兼顾暂存与内存 File", () => {
 
     expect(res.ok).toBe(true);
     expect(finalize).toHaveBeenCalledWith("stg-1", {
+      rootId: "root-1",
+      subpath: undefined,
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it("旧 workspacePath + fileBlob：仍 PUT 进当前会话，不拿已删路径跳过", async () => {
+    getBinding.mockResolvedValue({
+      mode: "cloud",
+      scope: "conversation",
+      rootId: null,
+      source: "container",
+    });
+    resolveTarget.mockResolvedValue(null);
+    upload.mockResolvedValue(undefined as never);
+    const blob = new File([new Uint8Array([1, 2])], "shot.png", {
+      type: "image/png",
+    });
+
+    const res = await ensureAttachmentResident("new-conv", {
+      name: "shot.png",
+      workspacePath: "attachments/shot.png",
+      binary: true,
+      text: "",
+      truncated: false,
+      fileBlob: blob,
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.workspacePath).toBe("attachments/shot.png");
+    expect(upload).toHaveBeenCalledWith(
+      "new-conv",
+      "attachments/shot.png",
+      blob,
+    );
+  });
+
+  it("已消耗 stagingId + fileBlob：本机 finalize 失效则再暂存进当前工作区", async () => {
+    getBinding.mockResolvedValue({
+      mode: "local",
+      scope: "folder",
+      rootId: "root-1",
+      source: "explicit",
+    });
+    resolveTarget.mockResolvedValue({ rootId: "root-1", subpath: "" });
+    const finalize = vi.fn().mockResolvedValue({
+      ok: false,
+      reason: "附件暂存已失效，请重新附加",
+    });
+    const stageDroppedFile = vi.fn().mockResolvedValue({
+      ok: true,
+      data: {
+        name: "shot.png",
+        workspacePath: "attachments/shot.png",
+        binary: true,
+        text: "",
+        truncated: false,
+      },
+    });
+    (window as unknown as { fsApi: Record<string, unknown> }).fsApi = {
+      finalizeStagedAttachment: finalize,
+      stageDroppedFile,
+    };
+    const blob = new File([new Uint8Array([1])], "shot.png", {
+      type: "image/png",
+    });
+
+    const res = await ensureAttachmentResident("new-conv", {
+      name: "shot.png",
+      stagingId: "stg-consumed",
+      binary: true,
+      text: "",
+      truncated: false,
+      fileBlob: blob,
+    });
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.workspacePath).toBe("attachments/shot.png");
+    expect(finalize).toHaveBeenCalledWith("stg-consumed", {
+      rootId: "root-1",
+      subpath: undefined,
+    });
+    expect(stageDroppedFile).toHaveBeenCalledWith(blob, {
       rootId: "root-1",
       subpath: undefined,
     });

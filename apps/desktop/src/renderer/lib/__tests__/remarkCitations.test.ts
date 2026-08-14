@@ -64,6 +64,29 @@ describe("splitCitationText", () => {
     ]);
   });
 
+  it("drops hyphen/comma glue between adjacent cites so they stay two chips", () => {
+    expect(splitCitationText("见 [1]-[2]", 2)).toEqual([
+      { type: "text", value: "见 " },
+      cite(1),
+      cite(2),
+    ]);
+    expect(splitCitationText("[1]、[2]、[3]", 3)).toEqual([
+      cite(1),
+      cite(2),
+      cite(3),
+    ]);
+    expect(splitCitationText("[1] - [2]", 2)).toEqual([cite(1), cite(2)]);
+  });
+
+  it("keeps words between cites (与 / and)", () => {
+    expect(splitCitationText("见 [1] 与 [2]", 2)).toEqual([
+      { type: "text", value: "见 " },
+      cite(1),
+      { type: "text", value: " 与 " },
+      cite(2),
+    ]);
+  });
+
   it("rewrites consecutive #rN markers without spaces", () => {
     const known = new Set(["#r5", "#r3", "#r11"]);
     const ledgerCite = (id: string): MdNode => ({

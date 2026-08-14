@@ -15,12 +15,12 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 10px 12px;
+  padding: 6px 12px;
 }
 
 .team-strip-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -28,7 +28,6 @@
   flex-shrink: 0;
   width: 8px;
   height: 8px;
-  margin-top: 5px;
   border-radius: 999px;
   background: var(--border);
 }
@@ -83,14 +82,6 @@
 }
 
 .team-strip-meta {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-
-/* 队友互相把关：收益轻信号，比 meta 再淡一档，不与「用时 / ¥」抢那一行 */
-.team-strip-collab {
   font-size: 12px;
   line-height: 1.4;
   color: var(--muted);

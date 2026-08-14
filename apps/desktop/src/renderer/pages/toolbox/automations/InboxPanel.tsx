@@ -186,7 +186,7 @@ export function InboxPanel() {
             className="animate-spin text-muted-foreground/50"
           />
         ) : listError ? (
-          <p className="text-sm text-destructive">{listError}</p>
+          <p className="text-sm text-muted-foreground">{listError}</p>
         ) : visible.length === 0 ? (
           <Card className="px-4 py-6 text-center">
             <p className="text-sm text-muted-foreground">

@@ -70,8 +70,8 @@ class WorkflowDefinitionModel(BaseModel):
 class WorkflowSourceModel(BaseModel):
     """这条工作流是从哪儿来的——服务端权威，客户端只读。
 
-    ``kind`` 今天只有 ``"turn"``（从一轮协作固化），带原对话 / 消息定位。手画的、官方模板
-    复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
+    ``kind`` 今天只有 ``"turn"``（历史行：曾经从一轮协作固化，不是现行写入），带原对话 /
+    消息定位。手画的、官方模板复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
     :mod:`agentcore.workflows.source`。
     """
 
@@ -122,12 +122,6 @@ class WorkflowSummary(BaseModel):
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
-
-
-class SaveTurnAsWorkflowRequest(BaseModel):
-    """固化一轮已跑完的协作；省略 ``name`` 时服务端按队员角色生成。"""
-
-    name: str | None = Field(None, min_length=1, max_length=200)
 
 
 class RunWorkflowRequest(BaseModel):

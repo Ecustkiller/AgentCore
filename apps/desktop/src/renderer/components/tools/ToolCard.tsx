@@ -69,7 +69,7 @@ export function ToolCard({
   const Icon = CATEGORY_META[tool.category]?.icon ?? Wrench;
   const colorVar = catalogCategoryColorVar(tool.category);
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-card p-4">
+    <div className="flex h-full min-w-0 flex-col rounded-xl border border-border bg-card p-4">
       <Button
         variant="ghost"
         onClick={() => setOpen((v) => !v)}
@@ -94,30 +94,36 @@ export function ToolCard({
           </span>
         </div>
       </Button>
-      <p className="mt-2 text-muted-foreground text-xs">{tool.description}</p>
-      {capabilityHint && (
-        <p className="mt-2 text-xs text-muted-foreground/80">
-          {capabilityHint}
-        </p>
-      )}
-      <Button
-        variant="ghost"
-        onClick={() => setOpen((v) => !v)}
-        className="mt-2 h-auto self-start gap-1 px-0 py-0 text-muted-foreground hover:text-foreground"
-        icon={
-          <ChevronRight
-            size={12}
-            className={`transition-transform ${open ? "rotate-90" : ""}`}
-          />
-        }
+      <p
+        className={`mt-2 text-muted-foreground text-xs ${open ? "" : "line-clamp-2"}`}
       >
-        调用参数
-      </Button>
-      {open && (
-        <div className="mt-2 border-border/60 border-t pt-2">
-          <ToolParams parameters={tool.parameters} />
-        </div>
-      )}
+        {tool.description}
+      </p>
+      <div className="mt-auto pt-2">
+        <Button
+          variant="ghost"
+          onClick={() => setOpen((v) => !v)}
+          className="h-auto self-start gap-1 px-0 py-0 text-muted-foreground hover:text-foreground"
+          icon={
+            <ChevronRight
+              size={12}
+              className={`transition-transform ${open ? "rotate-90" : ""}`}
+            />
+          }
+        >
+          调用参数
+        </Button>
+        {open && (
+          <div className="mt-2 border-border/60 border-t pt-2">
+            {capabilityHint && (
+              <p className="mb-2 text-xs text-muted-foreground/80">
+                {capabilityHint}
+              </p>
+            )}
+            <ToolParams parameters={tool.parameters} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
