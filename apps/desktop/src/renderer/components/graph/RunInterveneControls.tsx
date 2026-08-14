@@ -1,19 +1,14 @@
 /**
- * 「只停这个人 / 只改这个人的方向」—— 两个按人干预动作的唯一实现，协作图节点上的
- * 干预条与右坞 run 详情共用同一份判定、文案与提交路径。
+ * 「只停这个人 / 只改这个人的方向」—— 两个按人干预动作的唯一实现，桌面右坞 run
+ * 详情挂载。图节点不挂这两枚按钮（点节点即开本详情）。
  *
- * 不可用时**变灰并说明原因**，绝不隐藏（判定与文案由 `protocol-fold-kit/runIntervene`
- * 与手机端共用一份）。用户在图上按人看每个队员在干什么，能操作的却只有「停止整轮」
- * ——入口一次次扑空正是这么来的。
+ * 调用方用 `isLiveRunStatus` **终局整条不挂载**（不留空 wrapper）。仍挂载时
+ * （running / pending），不可用动作变灰并说明原因——排队改方向就是这一类，不要
+ * 藏成「按钮不见了」。判定与文案由 `protocol-fold-kit/runIntervene` 给出，不在
+ * 本文件另写 status 表。
  */
 
 import { Button, Textarea } from "@/components/ui";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { detectReviewConcern } from "@/lib/reviewConcern";
 import { cn } from "@/lib/utils";
@@ -37,20 +32,13 @@ export interface RunInterveneControlsProps {
   executionId: string;
   runId: string;
   runStatus: RunStatus;
-  /** 队员角色名——进改方向草稿与弹窗标题。 */
+  /** 队员角色名——进改方向草稿开头。 */
   role: string;
   /** 本幕是否开放改方向（辩论幕恒 false → 该按钮整体不渲染）。 */
   redirectCapable: boolean;
   /** 该队员已产出的正文——用于给改方向草稿挑开头，缺省即用角色名模板。 */
   output?: string;
-  /**
-   * `node` = 协作图节点上的干预条（紧凑两枚按钮 + 弹窗写改法）；
-   * `panel` = 右坞 run 详情（完整文案 + 就地展开文本框）。
-   */
-  variant?: "node" | "panel";
-  /** 改方向草稿打开/关闭——节点干预条据此在鼠标移开后仍保持可见。 */
-  onComposerOpenChange?: (open: boolean) => void;
-  /** 同排跟在两枚按人动作之后的宿主自有按钮（右坞的「记下改法」/「停止整轮」）。 */
+  /** 同排跟在两枚按人动作之后的宿主自有按钮（右坞队员详情的「记下改法」）。整轮停不进队员栏。 */
   trailing?: ReactNode;
   className?: string;
 }
@@ -75,12 +63,9 @@ export function RunInterveneControls({
   role,
   redirectCapable,
   output = "",
-  variant = "panel",
-  onComposerOpenChange,
   trailing,
   className,
 }: RunInterveneControlsProps) {
-  const compact = variant === "node";
   const stopCovered = useRunStopPendingStore((s) =>
     s.isRunCovered(executionId, runId),
   );
@@ -102,12 +87,10 @@ export function RunInterveneControls({
   const openComposer = () => {
     setDraft(seedRedirectDraft(role, output));
     setComposerOpen(true);
-    onComposerOpenChange?.(true);
   };
 
   const closeComposer = () => {
     setComposerOpen(false);
-    onComposerOpenChange?.(false);
   };
 
   const stopLabel = stopBusy ? STOP_BUSY_LABEL : STOP_LABEL;
@@ -125,17 +108,6 @@ export function RunInterveneControls({
     ? (redirectGate.reason ?? stopGate.reason)
     : stopGate.reason;
 
-  const composer = (
-    <RunRedirectComposer
-      conversationId={conversationId}
-      executionId={executionId}
-      runId={runId}
-      draft={draft}
-      onDraftChange={setDraft}
-      onDone={closeComposer}
-    />
-  );
-
   return (
     <div className={cn("flex flex-col gap-2", className)}>
       <div className="flex flex-wrap items-center gap-2">
@@ -143,10 +115,8 @@ export function RunInterveneControls({
           <GatedButton
             gate={redirectGate}
             label={REDIRECT_LABEL}
-            text={compact ? "改方向" : REDIRECT_LABEL}
             tip={redirectTip}
-            icon={<RotateCcw size={compact ? 12 : 13} />}
-            compact={compact}
+            icon={<RotateCcw size={13} />}
             tone="primary"
             onClick={openComposer}
           />
@@ -154,10 +124,8 @@ export function RunInterveneControls({
         <GatedButton
           gate={stopGate}
           label={stopLabel}
-          text={compact && !stopBusy ? "停止" : stopLabel}
           tip={stopTip}
-          icon={<Square size={compact ? 12 : 13} />}
-          compact={compact}
+          icon={<Square size={13} />}
           tone="destructive"
           busy={stopBusy}
           onClick={async () => {
@@ -177,30 +145,21 @@ export function RunInterveneControls({
         {trailing}
       </div>
 
-      {/* 右坞：改法就地展开（保持原姿态）；图上：弹窗写，避免被画布裁切/被邻节点盖住。 */}
-      {composerOpen &&
-        (compact ? (
-          <Dialog
-            open
-            onOpenChange={(open) => {
-              if (!open) closeComposer();
-            }}
-          >
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>{`改「${role}」的方向`}</DialogTitle>
-              </DialogHeader>
-              <div className="px-5 pb-5">{composer}</div>
-            </DialogContent>
-          </Dialog>
-        ) : (
-          <div className="space-y-2 border-t border-primary/15 pt-2">
-            {composer}
-          </div>
-        ))}
+      {composerOpen && (
+        <div className="space-y-2 border-t border-primary/15 pt-2">
+          <RunRedirectComposer
+            conversationId={conversationId}
+            executionId={executionId}
+            runId={runId}
+            draft={draft}
+            onDraftChange={setDraft}
+            onDone={closeComposer}
+          />
+        </div>
+      )}
 
       {/* 右坞有空间就把原因直接写出来，不必等用户去 hover 才知道为什么点不动。 */}
-      {!compact && panelReason && (
+      {panelReason && (
         <p className="text-xs leading-snug text-muted-foreground">
           {panelReason}
         </p>
@@ -217,20 +176,16 @@ export function RunInterveneControls({
 function GatedButton({
   gate,
   label,
-  text,
   tip,
   icon,
-  compact,
   tone,
   busy = false,
   onClick,
 }: {
   gate: InterveneGate;
   label: string;
-  text: string;
   tip: ReactNode;
   icon: ReactNode;
-  compact: boolean;
   tone: "primary" | "destructive";
   busy?: boolean;
   onClick: () => void | Promise<void>;
@@ -246,7 +201,7 @@ function GatedButton({
         type="button"
         variant="ghost"
         className={cn(
-          compact ? "h-6 gap-1 px-1.5" : "h-7",
+          "h-7",
           unavailable
             ? "cursor-not-allowed text-muted-foreground/60 hover:bg-transparent hover:text-muted-foreground/60"
             : toneClass,
@@ -263,13 +218,13 @@ function GatedButton({
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {text}
+        {label}
       </Button>
     </SimpleTooltip>
   );
 }
 
-/** 写改法 + 提交（两个宿主共用；提交语义与提示文案只此一份）。 */
+/** 写改法 + 提交（提交语义与提示文案只此一份）。 */
 function RunRedirectComposer({
   conversationId,
   executionId,

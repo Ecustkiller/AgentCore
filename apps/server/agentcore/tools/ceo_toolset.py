@@ -22,6 +22,7 @@ from agentcore.runtime.sessions import (
 from agentcore.runtime.skills import (
     SkillRegistry,
 )
+from agentcore.runtime.skills.registry import AUDIENCE_CEO, AUDIENCE_WORKER
 from agentcore.runtime.suspension import (
     SuspensionDeleter,
     SuspensionSaver,
@@ -64,11 +65,13 @@ async def _wire_consult_if_entries(
     folder_id: str | None,
     memory_enabled: bool,
     user_id: str,
+    skill_audience: str,
 ) -> bool:
     """Register unified ``consult`` when the merged catalog is non-empty.
 
     Returns whether the tool was wired (for prompt directory↔tool gate).
     Prompt listing and fetch share the same :class:`MergedConsultSource` instance.
+    ``skill_audience`` is the reader role (``ceo`` / ``worker``) — not a task guess.
     """
     from agentcore.runtime.resolve.prepare import default_memory_store
 
@@ -80,6 +83,7 @@ async def _wire_consult_if_entries(
         memory_store=default_memory_store(),
         folder_id=folder_id,
         memory_enabled=memory_enabled,
+        skill_audience=skill_audience,
     )
     entries = await source.list_directory(user_id)
     if not entries:
@@ -250,6 +254,7 @@ async def wire_ceo_consult(
         folder_id=folder_id,
         memory_enabled=memory_enabled,
         user_id=user_id,
+        skill_audience=AUDIENCE_CEO,
     )
 
 
@@ -268,6 +273,7 @@ async def wire_worker_consult(
         folder_id=folder_id,
         memory_enabled=memory_enabled,
         user_id=user_id,
+        skill_audience=AUDIENCE_WORKER,
     )
 
 

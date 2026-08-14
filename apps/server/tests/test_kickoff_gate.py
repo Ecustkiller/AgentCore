@@ -285,23 +285,23 @@ def test_delegate_trigger_rules_unchanged():
         RunSpec(run_id="r2", task="b", role="撰写", depends_on=["r1"]),
     )
     solo = _plan(RunSpec(run_id="r1", task="alone", role="写手"))
-    assert should_preview_delegate_plan(multi, finalize=False) is True
-    assert should_preview_delegate_plan(solo, finalize=True) is False
+    assert should_preview_delegate_plan(multi) is True
+    assert should_preview_delegate_plan(solo) is False
     assert (
         delegate_should_kickoff(
-            multi, finalize=False, local_gate=False, axes=_KICKOFF_RULES
+            multi, local_gate=False, axes=_KICKOFF_RULES
         )
         is True
     )
     assert (
         delegate_should_kickoff(
-            multi, finalize=False, local_gate=False, axes=recipe_to_axes(AutonomyPolicy.MANAGED)
+            multi, local_gate=False, axes=recipe_to_axes(AutonomyPolicy.MANAGED)
         )
         is False
     )
     assert (
         delegate_should_kickoff(
-            solo, finalize=True, local_gate=True, axes=_KICKOFF_RULES
+            solo, local_gate=True, axes=_KICKOFF_RULES
         )
         is True
     )  # capability half only
@@ -313,7 +313,7 @@ def test_checkpoint_after_yields_plan_preview_half():
         RunSpec(run_id="r1", task="提纲", role="写作", checkpoint_after=True),
         RunSpec(run_id="r2", task="全文", role="写作", depends_on=["r1"]),
     )
-    assert should_preview_delegate_plan(with_cp, finalize=False) is False
+    assert should_preview_delegate_plan(with_cp) is False
     # Capability auth still drives kickoff when local gate is on.
     assert (
         should_kickoff(
@@ -325,27 +325,26 @@ def test_checkpoint_after_yields_plan_preview_half():
     )
     assert (
         delegate_should_kickoff(
-            with_cp, finalize=False, local_gate=True, axes=_KICKOFF_RULES
+            with_cp, local_gate=True, axes=_KICKOFF_RULES
         )
         is True
     )
     # No local gate + checkpoint batch → no kickoff card at all.
     assert (
         delegate_should_kickoff(
-            with_cp, finalize=False, local_gate=False, axes=_KICKOFF_RULES
+            with_cp, local_gate=False, axes=_KICKOFF_RULES
         )
         is False
     )
     # Solo with leftover stance/round tags must NOT hang plan-preview
     # (CEO schema no longer advertises those fields; runtime tags are not kickoff marks).
     tagged_solo = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="应推广"))
-    assert should_preview_delegate_plan(tagged_solo, finalize=False) is False
-    assert should_preview_delegate_plan(tagged_solo, finalize=True) is False
+    assert should_preview_delegate_plan(tagged_solo) is False
     # checkpoint_after still yields plan half regardless of leftover tags.
     tagged_cp = _plan(
         RunSpec(run_id="r1", task="辩", role="正方", stance="应推广", checkpoint_after=True)
     )
-    assert should_preview_delegate_plan(tagged_cp, finalize=False) is False
+    assert should_preview_delegate_plan(tagged_cp) is False
 
 
 def test_debate_kickoff_summary_shape():

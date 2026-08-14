@@ -182,7 +182,7 @@ function StripControls({
       {canStop && (
         <StripIconButton
           icon={<Square size={15} />}
-          title={stopping ? "停止中…" : "停止任务"}
+          title={stopping ? "停止中…" : "停止整轮"}
           onClick={() => useConversationStore.getState().stopGeneration()}
         />
       )}

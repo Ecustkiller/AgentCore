@@ -159,7 +159,7 @@ export function MemoryUpdateCard({ updates }: { updates: MemoryUpdate[] }) {
               className="mem-update-link"
               onClick={() => navigate("/memory#updates")}
             >
-              在「AI 记忆」中查看
+              在「全局设定」中查看
               <ChevronRight size={14} aria-hidden />
             </button>
           </div>

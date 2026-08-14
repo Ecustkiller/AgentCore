@@ -97,7 +97,7 @@ describe("ForceUpdateGate", () => {
     expect(check).toHaveBeenCalled();
   });
 
-  it("shows 立即更新 and downloads when a version is available", () => {
+  it("shows 下载安装包 and downloads when a version is available", () => {
     const download = vi.fn(() => Promise.resolve());
     const openUpdateDialog = vi.fn();
     useUpdatesStore.setState({
@@ -110,12 +110,12 @@ describe("ForceUpdateGate", () => {
       },
     });
     render(<ForceUpdateGate />);
-    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
     expect(openUpdateDialog).toHaveBeenCalled();
     expect(download).toHaveBeenCalled();
   });
 
-  it("autoInstallCapable:false swaps primary CTA to download page and skips download", () => {
+  it("autoInstallCapable:false still downloads the installer in-app", () => {
     const download = vi.fn(() => Promise.resolve());
     const openUpdateDialog = vi.fn();
     useUpdatesStore.setState({
@@ -128,19 +128,16 @@ describe("ForceUpdateGate", () => {
       },
     });
     render(<ForceUpdateGate />);
-    expect(screen.getByText(/此版本需手动下载安装/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
-    const primary = screen.getByRole("link", { name: "前往下载页" });
-    expect(primary.getAttribute("href")).toBe(downloadPageUrl);
-    expect(download).not.toHaveBeenCalled();
-    expect(openUpdateDialog).not.toHaveBeenCalled();
-    // Secondary escape remains available.
+    expect(screen.queryByText(/此版本需手动下载安装/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
+    expect(download).toHaveBeenCalled();
+    expect(openUpdateDialog).toHaveBeenCalled();
     expect(
       screen.getByRole("link", { name: "前往下载页手动安装" }),
     ).toBeTruthy();
   });
 
-  it("shows 重启安装 when downloaded", () => {
+  it("shows 打开安装包 when downloaded", () => {
     const install = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({
       install,
@@ -151,7 +148,7 @@ describe("ForceUpdateGate", () => {
       },
     });
     render(<ForceUpdateGate />);
-    fireEvent.click(screen.getByRole("button", { name: "重启安装" }));
+    fireEvent.click(screen.getByRole("button", { name: "打开安装包" }));
     expect(install).toHaveBeenCalled();
   });
 });

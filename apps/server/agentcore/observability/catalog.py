@@ -1069,7 +1069,18 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='evals.documents_purge_failed'),
     EventSpec(name='evals.documents_purge_skipped'),
     EventSpec(name='evals.run_case_failed'),
-    EventSpec(name='event_sink.backpressure_drop'),
+    EventSpec(
+        name='event_sink.backpressure_drop',
+        description='SSE 慢消费者弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数',
+        fields={
+            'conversation_id': FieldType('str'),
+            'dropped_delta': FieldType('int'),
+            'dropped_total': FieldType('int'),
+            'label': FieldType('str'),
+            'message_id': FieldType('str'),
+            'type': FieldType('str'),
+        },
+    ),
     EventSpec(
         name='event_sink.close',
         description='EventSink 真 close（开→关仅一条）；was_detached 区分先前仅断线 vs 仍附着收口',
@@ -1110,7 +1121,16 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='file_write.prose_omission_rejected'),
     EventSpec(name='file_write.scope_rejected'),
     EventSpec(name='file_write.severe_shrink_rejected'),
-    EventSpec(name='firehose.backpressure_drop'),
+    EventSpec(
+        name='firehose.backpressure_drop',
+        description='IM firehose 慢连接弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数',
+        fields={
+            'dropped_delta': FieldType('int'),
+            'dropped_total': FieldType('int'),
+            'type': FieldType('str'),
+            'user': FieldType('str'),
+        },
+    ),
     EventSpec(name='firehose.subscribe'),
     EventSpec(name='firehose.unsubscribe'),
     EventSpec(name='folder.tombstone_move_failed'),

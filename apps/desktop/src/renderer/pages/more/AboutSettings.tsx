@@ -41,24 +41,22 @@ function updateStatusText(status: UpdaterStatus): string {
     case "not-available":
       return "已是最新版本。";
     case "available":
-      return !status.autoInstallCapable
-        ? `发现新版本 ${status.version}，此版本需手动下载安装。`
-        : `发现新版本 ${status.version}，确认后开始后台下载。`;
+      return `发现新版本 ${status.version}，确认后下载安装包。`;
     case "downloading":
-      return `正在后台下载 ${status.version}…（${formatDownloadProgress({
+      return `正在下载安装包 ${status.version}…（${formatDownloadProgress({
         percent: status.percent,
         transferred: status.transferred,
         total: status.total,
         bytesPerSecond: status.bytesPerSecond,
       })}）`;
     case "downloaded":
-      return `新版本 ${status.version} 已下载，重启后生效。`;
+      return `安装包 ${status.version} 已下载，打开后按向导完成安装。`;
     case "error":
       return `更新失败：${status.message}`;
   }
 }
 
-/** 软件更新: mirror the main-process updater status + 检查 / 查看 / 重启安装. */
+/** 软件更新: mirror the main-process updater status + 检查 / 查看 / 打开安装包. */
 function UpdateSection() {
   const status = useUpdatesStore((s) => s.status);
   const check = useUpdatesStore((s) => s.check);
@@ -66,9 +64,7 @@ function UpdateSection() {
   const openUpdateDialog = useUpdatesStore((s) => s.openUpdateDialog);
 
   const busy = status.phase === "checking" || status.phase === "downloading";
-  const manualOnly = !status.autoInstallCapable;
-  const showManualDownloadLink =
-    manualOnly && (status.phase === "available" || status.phase === "error");
+  const showDownloadPageLink = status.phase === "error";
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
   return (
@@ -97,10 +93,10 @@ function UpdateSection() {
         <div className="flex flex-wrap items-center gap-2">
           {status.phase === "downloaded" ? (
             <Button size="md" onClick={() => void install()}>
-              重启安装
+              打开安装包
             </Button>
           ) : null}
-          {showManualDownloadLink ? (
+          {showDownloadPageLink ? (
             <a
               href={downloadPageUrl}
               target="_blank"
@@ -111,11 +107,7 @@ function UpdateSection() {
             </a>
           ) : null}
           {status.phase === "available" ? (
-            <Button
-              size="md"
-              variant={manualOnly ? "neutral" : "primary"}
-              onClick={() => openUpdateDialog()}
-            >
+            <Button size="md" onClick={() => openUpdateDialog()}>
               查看更新
             </Button>
           ) : null}

@@ -20,7 +20,7 @@ import {
   persistOpenedCache,
 } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
-import { runHydrateAttachSettle } from "@/services/turns";
+import { scheduleHydrateAttachSettle } from "@/services/turns";
 import { useBookmarkStore } from "@/stores/bookmarks";
 import {
   type MemoryUpdate,
@@ -117,11 +117,10 @@ export function ConversationPage() {
     // Load this conversation's recovery snapshot on reopen (recovery 统一, 对称 §8.2):
     // ONE owner-gated read that both (a) surfaces any turn paused at a plan_review /
     // ask_user checkpoint then disconnected (结构化挂起 2b) as a resume card above the
-    // composer, and (b) reports whether a detached run is still live to 续看. Best-effort
-    // + independent of the history load, so it never blocks rendering the conversation.
-    // Kept as a promise (not fire-and-forget) so the reattach decision below can gate on
-    // its result — see the attach block. `loadRecovery` never rejects (it swallows its own
-    // errors), so the handle is safe to leave unawaited on the paths that skip the gate.
+    // composer, and (b) reports whether a detached run is still live to 续看. Eager but
+    // non-blocking: overlay reveals after the message window (or cache), then
+    // `scheduleHydrateAttachSettle` runs when this promise lands. `loadRecovery` never
+    // rejects, so the handle is safe to leave unawaited on the paths that skip the gate.
     const recoveryLoaded = loadRecovery(id);
 
     const warm =
@@ -235,21 +234,20 @@ export function ConversationPage() {
             }
           }
         }
-        // P0: recovery then attach in background (slice-owned — still kick after navigate-away).
-        const recovery = await recoveryLoaded;
-        void runHydrateAttachSettle(id, recovery);
-        if (cancelled) return;
-        if (useConversationStore.getState().currentConversationId !== id) {
-          return;
+        // Reveal as soon as the window is in the store. Recovery/attach stay
+        // eager in the background — they must not cover already-adopted text.
+        if (
+          !cancelled &&
+          useConversationStore.getState().currentConversationId === id
+        ) {
+          setHydratePhase("ready");
         }
-        setHydratePhase("ready");
+        scheduleHydrateAttachSettle(id, recoveryLoaded);
       } catch {
         // N4-A: network / outage → fall back to local-store snapshot for this id.
         // Online SWR may already have revealed from cache — stay ready.
         if (getRuntime(id).messages.length > 0 || getRuntime(id).isGenerating) {
-          const recovery = await recoveryLoaded;
-          // Slice-owned observation pump — kick even if this page effect cancelled.
-          void runHydrateAttachSettle(id, recovery);
+          scheduleHydrateAttachSettle(id, recoveryLoaded);
           if (!cancelled) setHydratePhase("ready");
         } else {
           const cached = await loadCachedConversation(id);
@@ -269,13 +267,10 @@ export function ConversationPage() {
                 branch: "offline_cache",
               });
             }
-            const recovery = await recoveryLoaded;
-            void runHydrateAttachSettle(id, recovery);
+            scheduleHydrateAttachSettle(id, recoveryLoaded);
             if (!cancelled) setHydratePhase("ready");
           } else if (!warm) {
-            // Still try recovery attach (list running indicator) even when UI errors.
-            const recovery = await recoveryLoaded;
-            void runHydrateAttachSettle(id, recovery);
+            scheduleHydrateAttachSettle(id, recoveryLoaded);
             // No cache + cold slice: explicit error (never silent blank like a draft).
             if (!cancelled) setHydratePhase("error");
             return;

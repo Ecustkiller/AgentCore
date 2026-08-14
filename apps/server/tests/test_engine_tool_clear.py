@@ -14,7 +14,12 @@ from agentcore.config import settings
 from agentcore.core.types import ToolApproval, ToolCategory
 from agentcore.llm.provider.protocol import LLMChunk, LLMMessage, ToolCall, ToolCallFunction
 from agentcore.runtime.engine import react_loop
-from agentcore.runtime.engine.tool_clear import cleared_placeholder, project_cleared_window
+from agentcore.runtime.engine.round import build_request_window
+from agentcore.runtime.engine.tool_clear import (
+    EXEC_OUTPUT_CLEAR_TOOLS,
+    cleared_placeholder,
+    project_cleared_window,
+)
 from agentcore.runtime.events import EventSink
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
@@ -23,6 +28,13 @@ from agentcore.workspace.server import ServerWorkspace
 from tests.llm_helpers import make_profile_params
 
 CLEARABLE = frozenset({"file_read", "grep", "web_search"})
+
+
+def test_production_keep_recent_default() -> None:
+    """Investigation stacking tax vs independent exec window."""
+    assert settings.engine_tool_clear_keep_recent == 2
+    assert settings.engine_tool_clear_exec_keep_recent == 1
+    assert EXEC_OUTPUT_CLEAR_TOOLS == frozenset({"host_shell", "terminal"})
 
 
 def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read") -> list[LLMMessage]:
@@ -35,6 +47,24 @@ def _read_pair(call_id: str, path: str, result: str, *, tool: str = "file_read")
                 ToolCall(
                     id=call_id,
                     function=ToolCallFunction(name=tool, arguments=json.dumps({"path": path})),
+                )
+            ],
+        ),
+        LLMMessage(role="tool", content=result, tool_call_id=call_id),
+    ]
+
+
+def _exec_pair(
+    call_id: str, tool: str, arguments: dict, result: str
+) -> list[LLMMessage]:
+    return [
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id=call_id,
+                    function=ToolCallFunction(name=tool, arguments=json.dumps(arguments)),
                 )
             ],
         ),
@@ -132,8 +162,37 @@ def test_idempotent():
 def test_placeholder_names_the_call():
     ph = cleared_placeholder("file_read", json.dumps({"path": "src/foo.py"}), 8421)
     assert "file_read" in ph and "src/foo.py" in ph and "8421" in ph
+    assert "可重新调用该工具获取" in ph
     # deterministic
     assert ph == cleared_placeholder("file_read", json.dumps({"path": "src/foo.py"}), 8421)
+
+
+def test_exec_placeholder_forbids_rerun():
+    ph = cleared_placeholder(
+        "host_shell",
+        json.dumps({"command": "Get-ChildItem"}),
+        4000,
+        already_executed=True,
+    )
+    assert "host_shell" in ph and "Get-ChildItem" in ph
+    assert "勿仅为回看而重跑" in ph
+    assert "可重新调用该工具获取" not in ph
+    assert ph == cleared_placeholder(
+        "host_shell",
+        json.dumps({"command": "Get-ChildItem"}),
+        4000,
+        already_executed=True,
+    )
+
+
+def test_exec_placeholder_truncates_long_command():
+    long = "echo " + ("x" * 200)
+    ph = cleared_placeholder(
+        "host_shell", json.dumps({"command": long}), 111, already_executed=True
+    )
+    assert long not in ph
+    assert "…" in ph
+    assert "111" in ph
 
 
 def test_empty_clearable_is_noop():
@@ -419,3 +478,76 @@ def test_canonical_messages_untouched_by_projection():
     )
     assert out is not msgs
     assert [m.content for m in msgs if m.role == "tool"] == originals
+
+
+# ── exec output family (host_shell / terminal) ──────────────────────────────
+
+
+def test_exec_keeps_one_clears_old():
+    msgs = [LLMMessage(role="user", content="go")]
+    for i in range(4):
+        msgs += _exec_pair(
+            f"h{i}", "host_shell", {"command": f"echo {i}"}, "X" * 200
+        )
+    out = project_cleared_window(
+        msgs,
+        clearable_tools=EXEC_OUTPUT_CLEAR_TOOLS,
+        keep_recent=1,
+        min_chars=100,
+        already_executed=True,
+    )
+    assert _cleared_ids(out) == ["h0", "h1", "h2"]
+    kept = [m for m in out if m.role == "tool" and not (m.content or "").startswith("[已清理")]
+    assert [m.tool_call_id for m in kept] == ["h3"]
+    stub = next(m for m in out if m.tool_call_id == "h0")
+    assert "勿仅为回看而重跑" in (stub.content or "")
+    assert "可重新调用该工具获取" not in (stub.content or "")
+
+
+def test_exec_and_investigation_windows_independent(monkeypatch):
+    monkeypatch.setattr(settings, "engine_tool_clear_keep_recent", 2)
+    monkeypatch.setattr(settings, "engine_tool_clear_exec_keep_recent", 1)
+    monkeypatch.setattr(settings, "engine_tool_clear_min_chars", 100)
+    msgs: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    for i in range(3):
+        msgs += _read_pair(f"r{i}", f"src/f{i}.py", "R" * 200)
+        msgs += _exec_pair(f"s{i}", "terminal", {"subcommand": "read", "process_id": f"p{i}"}, "S" * 200)
+    out = build_request_window(msgs, investigation_tools=CLEARABLE, round_idx=0)
+    assert set(_cleared_ids(out)) == {"r0", "s0", "s1"}
+    stub = next(m for m in out if m.tool_call_id == "s0")
+    assert "p0" in (stub.content or "")
+    assert "勿仅为回看而重跑" in (stub.content or "")
+    read_stub = next(m for m in out if m.tool_call_id == "r0")
+    assert "可重新调用该工具获取" in (read_stub.content or "")
+
+
+def test_build_request_window_leaves_code_execute(monkeypatch):
+    monkeypatch.setattr(settings, "engine_tool_clear_min_chars", 100)
+    msgs = _window(4, tool="code_execute")
+    out = build_request_window(msgs, investigation_tools=CLEARABLE, round_idx=0)
+    assert _cleared_ids(out) == []
+
+
+async def test_loop_clears_old_exec_in_request_window(monkeypatch):
+    monkeypatch.setattr(settings, "engine_tool_clear_exec_keep_recent", 1)
+    monkeypatch.setattr(settings, "engine_tool_clear_min_chars", 100)
+    provider = _CapturingProvider([[LLMChunk(delta_content="完成。")]])
+    registry = ToolRegistry()
+    registry.register(_FakeReadTool())
+    messages: list[LLMMessage] = [LLMMessage(role="user", content="go")]
+    for i in range(4):
+        messages += _exec_pair(f"h{i}", "host_shell", {"command": f"dir {i}"}, "Y" * 200)
+    await react_loop(
+        messages=messages,
+        llm=provider,
+        tools=registry,
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=make_profile_params(max_rounds=4),
+        turn_model="m",
+        approval_gate=None,
+    )
+    window = provider.windows[0]
+    assert _cleared_ids(window) == ["h0", "h1", "h2"]
+    stub = next(m for m in window if m.tool_call_id == "h0")
+    assert "勿仅为回看而重跑" in (stub.content or "")

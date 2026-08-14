@@ -37,7 +37,6 @@ def test_drive_signature_unchanged():
     assert {
         "execution_id",
         "seed_completed",
-        "finalize",
         "seed_notes",
         "complexity_hint",
         "coordination",
@@ -86,7 +85,6 @@ async def test_team_preview_skips_when_seeded():
     result = await team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=False,
         complexity_hint="standard",
         seed_completed={"a": object()},  # type: ignore[dict-item]
         call_idx=0,
@@ -108,7 +106,6 @@ async def test_team_preview_skips_light_handwritten():
     result = await team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=False,
         complexity_hint="light",
         seed_completed=None,
         call_idx=0,
@@ -148,7 +145,6 @@ async def test_team_preview_light_with_capability_auth_does_not_skip(monkeypatch
     result = await team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=True,
         complexity_hint="light",
         seed_completed=None,
         call_idx=0,

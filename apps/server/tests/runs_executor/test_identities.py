@@ -41,16 +41,57 @@ class _StubDelegate:
         return ToolResult(tool_call_id="", success=True, output="")
 
 
+class _StubReplan:
+    """Companion replan on the LeadSubteam bundle — opening offer must omit it."""
+
+    @property
+    def schema(self) -> ToolSchema:
+        return ToolSchema(
+            name="replan",
+            description="stub",
+            parameters={"type": "object", "properties": {}},
+            category=ToolCategory.ORCHESTRATION,
+            approval=ToolApproval.NEVER,
+        )
+
+    async def execute(self, arguments, context) -> ToolResult:  # noqa: ANN001
+        return ToolResult(tool_call_id="", success=True, output="")
+
+
 async def _noop_dispose() -> None:
     return None
 
 
 def _stub_subteam() -> LeadSubteam:
-    """The factory's return shape (受监督子计划 B): a lead's delegate + replan bundle. These
-    identity / depth-cap tests only care that a bundle is minted (not its contents), so one
-    stub delegate with a no-op dispose stands in for the real make_lead_subteam output."""
+    """The factory's return shape (受监督子计划 B): a lead's delegate + replan bundle.
+    Opening registry registers delegate only; these identity / depth-cap tests
+    still only care that a bundle is minted."""
     stub = _StubDelegate()
-    return LeadSubteam(tools=(stub,), tool_names=(stub.schema.name,), dispose=_noop_dispose)
+    replan = _StubReplan()
+    return LeadSubteam(
+        tools=(stub, replan),
+        tool_names=(stub.schema.name, replan.schema.name),
+        dispose=_noop_dispose,
+    )
+
+
+class _RecordToolsProvider(_ContentProvider):
+    """Records OpenAI tool names offered on each LLM request."""
+
+    def __init__(self, contents: list[str]) -> None:
+        super().__init__(contents)
+        self.tool_names: list[list[str]] = []
+
+    async def stream(self, request):  # noqa: ANN001
+        names: list[str] = []
+        for item in request.tools or []:
+            if isinstance(item, dict):
+                fn = item.get("function") or {}
+                if isinstance(fn, dict) and fn.get("name"):
+                    names.append(str(fn["name"]))
+        self.tool_names.append(names)
+        async for chunk in super().stream(request):
+            yield chunk
 
 
 def _spec(run_id: str, *, depth: int):
@@ -126,6 +167,19 @@ async def test_captain_worker_gets_captain_identity_and_delegate_tool():
     assert "你的子成员不能再向下委派" not in provider.system_messages[0]
 
 
+async def test_captain_worker_opening_omits_replan():
+    """开场只挂 delegate；bundle 里的 companion replan 要等子计划存在才 offer。"""
+    provider = _RecordToolsProvider(["X"])
+    plan = RunPlan()
+    plan.add(_spec("d1", depth=1))
+    executor = _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())
+    await executor(plan.by_id("d1"), {})
+    assert provider.tool_names, "expected at least one LLM request"
+    opening = provider.tool_names[0]
+    assert "delegate" in opening
+    assert "replan" not in opening
+
+
 async def test_default_worker_is_captain_within_depth_cap():
     provider = _ContentProvider(["X"])
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
@@ -159,19 +213,20 @@ async def test_captain_identity_carries_when_to_split_guidance():
     sys = provider.system_messages[0]
     assert "再向下委派一层子团队" in sys
     assert "不要为委派而委派" in sys
-    # Path-B priority nudge: 成果级 + 本轮无结构钉 → 优先先嵌套；无 3+ 子系统启发式。
-    assert "优先】先调用 delegate" in sys or "优先先嵌套" in sys
-    assert "3+" not in sys and "独立子系统" not in sys
-    assert "未嵌套禁写" in sys  # 明示禁止该误读
-    assert "凡大活" in sys and "嵌套" in sys
-    assert "≥2 角并行" in sys or "冷启动" in sys  # 勿与并行摸底打架
-    assert "嵌套扇出·写盘" in sys or "共写同一目标文件" in sys
-    assert "豁免" in sys and "单文件" in sys and "已钉死薄壳" in sys
-    assert "强耦合同 run 切片" in sys
-    assert "小修" in sys and "finalize" in sys
-    assert "整里程碑 M0" in sys and "不在】豁免" in sys
-    assert "深入实现" in sys
-    assert "4 个 sub-worker" in sys
+    assert "consult(team_orchestration_advanced)" in sys
+    assert "活太大" in sys and "可独立完成" in sys
+    assert "你的子成员仍可再向下委派一层" in sys
+    # Path-B encyclopedia moved to consult — identity itself must not carry it
+    # (full system prompt still has 豁免 in shared <work_authority>).
+    from agentcore.runtime.runs.executor.identities import build_worker_identity
+
+    identity = build_worker_identity(has_dependents=False, captain=True)
+    assert "优先先嵌套" not in identity
+    assert "未嵌套禁写" not in identity
+    assert "凡大活" not in identity
+    assert "共写同一目标文件" not in identity
+    assert "豁免" not in identity
+    assert "4 个 sub-worker" not in identity
 
 
 async def test_depth_three_subworker_keeps_leaf_identity():
@@ -240,10 +295,20 @@ async def test_handoff_prompt_splits_by_topology():
     )
     assert "summary 不算正文" in prose_up
     assert "加长 summary 也不能代替正文" in prose_up
+    assert "交接勿回灌" in prose_up
+    files_leaf = build_worker_identity(
+        has_dependents=False, captain=False, form="files"
+    )
+    assert "交接勿回灌" in files_leaf
 
     assert "不必为交而交" in leaf
     assert "接力契约 + 增量交代" in leaf
     assert "必须调用 handoff" not in leaf
+    # 巡检定案 B：交付各一句防回灌（leaf / upstream / 各 form 同源）
+    assert "交接勿回灌" in leaf and "交接勿回灌" in upstream
+    assert "修复完成" in leaf and "已修复" in leaf
+    assert "系统已就绪" in leaf and "界面没改" in leaf
+    assert "最后一次同命令" in leaf and "分项分开写" in leaf
     assert "有工具活动或较长交付" in leaf
     assert "汇报不完整" in leaf
     assert "权威文档冲突" in leaf
@@ -309,93 +374,43 @@ def test_worker_identity_states_no_execution_capability():
 
 
 def test_worker_identity_teaches_escalate_blocking_choice():
-    """Worker 按题自选 blocking：identity 须写清该停 / 能报，且不再写「escalate 不会打断你」。"""
+    """Worker 按题自选：有把握报一声继续；猜错作废就停。不再钉 blocking= 字面。"""
     from agentcore.runtime.runs.executor.identities import build_worker_identity
 
     body = build_worker_identity(has_dependents=False)
-    assert "blocking=false" in body
-    assert "blocking=true" in body
-    assert "该停时别装非阻塞" in body
+    assert "报一声" in body and "继续" in body
+    assert "猜错" in body and "作废" in body and "停" in body
+    assert "blocking=false" not in body
+    assert "blocking=true" not in body
     assert "escalate 不会打断你" not in body
 
 
-def test_worker_identity_direct_to_user_switches_register():
-    """单人直出：正文原样给用户 ⇒ identity 换口径（对用户说话、禁内部动作旁白）。
-
-    ``direct_to_user=True`` 对应 ``RunPlan.solo_direct_answer()``（finalize 批 + 单节点，
-    即 ``drive_finalize`` 走 ``direct_result`` 的那条路）；默认关，其余拓扑字节不变。
-    """
-    from agentcore.runtime.runs.executor.identities import build_worker_identity
-
-    direct = build_worker_identity(has_dependents=False, direct_to_user=True)
-    assert "正文直达用户" in direct
-    assert "原样】作为本回合的最终答复" in direct
-    assert "现在提交交接简报" in direct  # 事故原话：内部动作旁白点名禁掉
-    assert "向您汇报" in direct  # 对主管汇报的口吻点名禁掉
-
-    plain = build_worker_identity(has_dependents=False)
-    assert "正文直达用户" not in plain
-    # 默认参数与显式 False 字节一致（不惊扰其余场景）。
-    assert plain == build_worker_identity(has_dependents=False, direct_to_user=False)
-    # 交付形态 / 拓扑各分支同样只在开关打开时长出这一段。
-    assert "正文直达用户" not in build_worker_identity(
-        has_dependents=True, form="prose"
-    )
-    assert "正文直达用户" in build_worker_identity(
-        has_dependents=False, form="files", captain=True, direct_to_user=True
-    )
-
-
-async def test_executor_wires_solo_finalize_direct_answer_into_identity():
-    """结构化信号穿到执行器：finalize 批 + 单节点 ⇒ worker system prompt 带直出段。"""
-    plan, _ = build_run_plan([{"role": "工程师", "task": "改一行"}], id_prefix="t")
-    plan.finalize = True
-    assert plan.solo_direct_answer() is True
-    provider = _ContentProvider(["OUT"])
-    await _nesting_executor(plan, provider, lambda rid, d: _stub_subteam())(
-        plan.nodes[0], {}
-    )
-    assert "正文直达用户" in provider.system_messages[0]
-
-
-async def test_executor_omits_direct_answer_for_multi_node_or_plain_batch():
-    """多节点 / 非 finalize：两侧都不该长出直出段（提示词一字不变）。"""
-    multi, _ = build_run_plan(
-        [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="m"
-    )
-    multi.finalize = True
-    assert multi.solo_direct_answer() is False
-    multi_provider = _ContentProvider(["A", "B"])
-    await _nesting_executor(multi, multi_provider, lambda rid, d: _stub_subteam())(
-        multi.nodes[0], {}
-    )
-    assert "正文直达用户" not in multi_provider.system_messages[0]
-
+async def test_executor_never_wires_direct_to_user_register():
+    """单人 / 多节点 / 嵌套 lead：身份提示词都不长直出段。"""
     solo, _ = build_run_plan([{"role": "工程师", "task": "改一行"}], id_prefix="s")
-    assert solo.solo_direct_answer() is False  # finalize 缺省 = 不直出
     solo_provider = _ContentProvider(["OUT"])
     await _nesting_executor(solo, solo_provider, lambda rid, d: _stub_subteam())(
         solo.nodes[0], {}
     )
     assert "正文直达用户" not in solo_provider.system_messages[0]
 
+    multi, _ = build_run_plan(
+        [{"role": "A", "task": "做A"}, {"role": "B", "task": "做B"}], id_prefix="m"
+    )
+    multi_provider = _ContentProvider(["A", "B"])
+    await _nesting_executor(multi, multi_provider, lambda rid, d: _stub_subteam())(
+        multi.nodes[0], {}
+    )
+    assert "正文直达用户" not in multi_provider.system_messages[0]
 
-async def test_nested_lead_finalize_batch_is_not_direct_to_user():
-    """嵌套 lead 的收口批同样命中 direct_result，但那份正文只是 lead 的终稿。
-
-    往上仍可能被主管合成，对子队员说「直达用户」是假的——宁可漏报也不误报。
-    CEO 直派是 depth=1（见 ``build_run_plan``），子队员更深。
-    """
     nested, _ = build_run_plan(
         [{"role": "子队员", "task": "改一行"}], id_prefix="n", depth=2
     )
-    nested.finalize = True
-    assert nested.solo_direct_answer() is False
-    provider = _ContentProvider(["OUT"])
-    await _nesting_executor(nested, provider, lambda rid, d: _stub_subteam())(
+    nested_provider = _ContentProvider(["OUT"])
+    await _nesting_executor(nested, nested_provider, lambda rid, d: _stub_subteam())(
         nested.nodes[0], {}
     )
-    assert "正文直达用户" not in provider.system_messages[0]
+    assert "正文直达用户" not in nested_provider.system_messages[0]
 
 
 async def test_executor_passes_registry_capability_into_identity():

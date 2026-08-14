@@ -35,13 +35,12 @@ should_preview = should_preview_delegate_plan
 def should_kickoff(
     plan: RunPlan,
     *,
-    finalize: bool,
     local_gate: bool,
     axes: PermissionAxes,
 ) -> bool:
     """Delegate-shaped wrapper: plan_preview from :func:`should_preview_delegate_plan`."""
     return _should_kickoff_core(
-        plan_preview=should_preview_delegate_plan(plan, finalize=finalize),
+        plan_preview=should_preview_delegate_plan(plan),
         local_gate=local_gate,
         axes=axes,
     )

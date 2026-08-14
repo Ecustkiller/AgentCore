@@ -35,6 +35,7 @@ from typing import Any
 from uuid import uuid4
 
 from agentcore.core.logging import get_logger
+from agentcore.observability.drop_heartbeat import DropLogHeartbeat, DropPulse
 
 logger = get_logger(__name__)
 
@@ -66,6 +67,7 @@ class Subscription:
         self.user_id = user_id
         self.device_id = (device_id or "").strip() or f"anon-{uuid4().hex}"
         self.platform = (platform or "").strip().lower() or None
+        self._drop_log = DropLogHeartbeat()
         self._queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(
             maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
         )
@@ -87,8 +89,23 @@ class Subscription:
                 self._queue.put_nowait(event)
             return False
 
+    def _log_backpressure_drop(self, pulse: DropPulse) -> None:
+        logger.warning(
+            "firehose.backpressure_drop",
+            user=self.user_id,
+            type=pulse.event_type,
+            dropped_delta=pulse.dropped_delta,
+            dropped_total=pulse.dropped_total,
+        )
+
+    def _flush_backpressure_drop(self) -> None:
+        pulse = self._drop_log.flush()
+        if pulse is not None:
+            self._log_backpressure_drop(pulse)
+
     def close(self) -> None:
         """Signal end-of-stream to the consumer (drains backlog, then sentinel)."""
+        self._flush_backpressure_drop()
         while True:
             try:
                 self._queue.get_nowait()
@@ -152,6 +169,7 @@ class ChatHub:
 
     def unsubscribe(self, sub: Subscription) -> None:
         """Remove a connection (on disconnect); drop the user entry when empty."""
+        sub._flush_backpressure_drop()
         key = (sub.user_id, sub.device_id)
         # Guard against a reconnect's teardown evicting its own replacement.
         if self._by_device.get(key) is sub:
@@ -204,11 +222,12 @@ class ChatHub:
         for user_id in set(user_ids):
             for sub in tuple(self._subscribers.get(user_id, ())):
                 if not sub._offer(event):
-                    logger.warning(
-                        "firehose.backpressure_drop",
-                        user=user_id,
-                        type=event.get("type"),
+                    event_type = event.get("type")
+                    pulse = sub._drop_log.note(
+                        event_type if isinstance(event_type, str) else None
                     )
+                    if pulse is not None:
+                        sub._log_backpressure_drop(pulse)
 
 
 class HubChatEventPublisher:

@@ -10,6 +10,9 @@
  * 两种段各钉一遍，且两个入口都走真实 SSE 泵（缓冲到 ``: attach-caught-up`` → 一次性折）：
  * `attachConversation` 自己的判断，以及掉线重连真正的调用方 `rejoinLiveTurn`——它从前抢在
  * attach 之前无条件 clear-then-fold，正是前半段消失的成因。
+ *
+ * ``full_replay`` 原位清空正文/过程/执行槽、保留气泡 id（打开/刷新时换泡会把已画 Markdown
+ * 卸掉，正文看起来像又加载一次）。增量段一个字都不许清。
  */
 import { flushPendingContent } from "@/services/sse/contentBuffer";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
@@ -143,7 +146,7 @@ describe("attachConversation · 段首决定清不清", () => {
     expect(useExecutionStore.getState().byId[TURN_ID]?.plan).toBeTruthy();
   });
 
-  it("整段重放（段首带 full_replay）：先清本回合本地态，再整段重折", async () => {
+  it("整段重放（段首带 full_replay）：原位重置再整段重折，气泡不换、正文不叠", async () => {
     foldFirstHalf();
     const before = tailAssistant();
 
@@ -151,9 +154,9 @@ describe("attachConversation · 段首决定清不清", () => {
     await expect(attachConversation(CID)).resolves.toBe("attached");
 
     const after = tailAssistant();
-    // 段里带的就是这一轮的全部：旧气泡整条换掉，正文不得叠成两份。
+    // 段里带的就是这一轮的全部：正文不得叠成两份；气泡 id 保持，避免换泡重挂 Markdown。
     expect(after?.content).toBe("整段重放的全文。");
-    expect(after?.id).not.toBe(before?.id);
+    expect(after?.id).toBe(before?.id);
     expect(getRuntime(CID).messages).toHaveLength(2);
     expect(useExecutionStore.getState().byId[TURN_ID]?.plan).toBeFalsy();
   });
@@ -173,13 +176,15 @@ describe("rejoinLiveTurn · 掉线重连不抢着清屏", () => {
     expect(useExecutionStore.getState().byId[TURN_ID]?.plan).toBeTruthy();
   });
 
-  it("整段重放：clear-then-fold 照旧生效，正文不叠两份", async () => {
+  it("整段重放：原位重置后正文不叠两份", async () => {
     foldFirstHalf();
+    const before = tailAssistant();
 
     stubAttachSegment(true, "整段重放的全文。");
     await expect(rejoinLiveTurn(CID)).resolves.toBe(true);
 
     expect(tailAssistant()?.content).toBe("整段重放的全文。");
+    expect(tailAssistant()?.id).toBe(before?.id);
     expect(getRuntime(CID).messages).toHaveLength(2);
   });
 });

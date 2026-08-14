@@ -328,7 +328,7 @@ const updaterApi: UpdaterApi = {
     ipcRenderer.invoke(UPDATER_CHANNELS.configure, apiBaseUrl),
   check: () => ipcRenderer.invoke(UPDATER_CHANNELS.check),
   download: () => ipcRenderer.invoke(UPDATER_CHANNELS.download),
-  quitAndInstall: () => ipcRenderer.invoke(UPDATER_CHANNELS.quitAndInstall),
+  openInstaller: () => ipcRenderer.invoke(UPDATER_CHANNELS.openInstaller),
   getStatus: () => ipcRenderer.invoke(UPDATER_CHANNELS.getStatus),
   onStatus: (cb) => {
     const listener = (_e: unknown, payload: UpdaterStatus) => cb(payload);

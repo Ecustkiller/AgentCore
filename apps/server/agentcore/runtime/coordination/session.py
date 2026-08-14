@@ -257,16 +257,15 @@ def should_enter_coordination(
     *,
     coordinate: bool,
     worker_count: int,
-    finalize: bool,
     depth: int,
     has_checkpoint: bool = False,
     checkpoint_enabled: bool = False,
 ) -> bool:
-    """Gate: ≥1 worker + root CEO + not finalize; opt out with ``coordinate=False``.
+    """Gate: ≥1 worker + root CEO; opt out with ``coordinate=False``.
 
     Callers default ``coordinate`` to True when the LLM omits the arg; only an
-    explicit false falls back to classic blocking. Nested lead / finalize still
-    never enter. Solo (1 worker) enters so mid-flight interjections and
+    explicit false falls back to classic blocking. Nested lead still never
+    enters. Solo (1 worker) enters so mid-flight interjections and
     ``cancel_worker`` stay reachable while the worker runs.
 
     Adjacent ≥2 gates (kickoff plan-preview, team_synthesis_preview, cold-start
@@ -279,7 +278,7 @@ def should_enter_coordination(
 
     **Invariant B**: CEO arbitration (``resolve_escalation`` / ``awaiting=ceo``)
     is available iff a coordination session is active. Classic blocking escalate
-    (no live session — e.g. ``coordinate=false`` / finalize / nested lead)
+    (no live session — e.g. ``coordinate=false`` / nested lead / ``checkpoint_after``)
     therefore hangs on the **user**, never the CEO — otherwise worker↔CEO deadlock
     (CEO blocked inside ``delegate``, worker waiting for ``resolve_escalation``).
     Solo-in-coordination has a free CEO, so Invariant B holds the same way as
@@ -288,8 +287,6 @@ def should_enter_coordination(
     if coordinate is False:
         return False
     if depth != 0:
-        return False
-    if finalize:
         return False
     if has_checkpoint and checkpoint_enabled:
         return False

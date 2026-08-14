@@ -1058,9 +1058,9 @@ async def test_write_then_append_segmented_path(tmp_path: Path):
     assert merged == skeleton + section + closing
 
 
-def test_write_schema_teaches_artifact_first():
+def test_write_schema_teaches_hard_rejects():
+    """硬拒留在按钮上；Artifact-first HOW 在 identity / consult(long_form_landing)。"""
     write_desc = FileWriteTool().schema.description
-    assert "Artifact-first" in write_desc
     assert "主路径" in write_desc and "完整正文" in write_desc
     assert "短骨架" in write_desc or "骨架" in write_desc
     assert "可选" in write_desc or "按节" in write_desc or "分段" in write_desc
@@ -1068,7 +1068,6 @@ def test_write_schema_teaches_artifact_first():
     assert "成篇省略硬拒" in write_desc or "省略标记" in write_desc
     assert "硬拒绝" in write_desc
     assert "中间省略" in write_desc
-    assert "manifest" in write_desc
     assert "优先" in write_desc and "str_replace" in write_desc
     assert "整文件覆盖亦允许" in write_desc or "整盖" in write_desc
     assert "禁止整篇一次" not in write_desc and "仍建议分段" not in write_desc
@@ -1078,6 +1077,10 @@ def test_write_schema_teaches_artifact_first():
     assert "写盘参数" in write_desc or "重发" in write_desc
     assert "真文" in write_desc
     assert "file_read" in write_desc and "str_replace" in write_desc
+    # HOW / 回执百科不在按钮上（身份段 + consult 已有）。
+    assert "Artifact-first" not in write_desc
+    assert "次数上限" not in write_desc
+    assert "NoMatch" not in write_desc
     content_desc = FileWriteTool().schema.parameters["properties"]["content"]["description"]
     assert "一次写完" in content_desc or "完整正文" in content_desc
     assert "骨架" in content_desc
@@ -1090,6 +1093,8 @@ def test_write_schema_teaches_artifact_first():
     assert "成篇" in append_desc or "禁止" in append_desc
     assert "str_replace" in append_desc
     assert "不硬拒" in append_desc
+    assert "次数上限" not in append_desc
+    assert "Artifact-first" not in append_desc
 
     replace_desc = StrReplaceTool().schema.description
     assert "优先" in replace_desc
@@ -1101,6 +1106,8 @@ def test_write_schema_teaches_artifact_first():
     assert "清参后改稿" in replace_desc
     assert "真文" in replace_desc
     assert "file_read" in replace_desc
+    assert "Artifact-first" not in replace_desc
+    assert "manifest" not in replace_desc
     new_desc = StrReplaceTool().schema.parameters["properties"]["new_string"]["description"]
     assert "不硬拒" in new_desc
     assert "_landed_summary" not in new_desc

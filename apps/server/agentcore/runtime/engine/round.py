@@ -37,7 +37,7 @@ from .directive import Continue, LoopDirective, Return, Rework
 from .outcome import RoundOutcome
 from .segments import tool_calls_to_dicts
 from .stream import stream_llm_round
-from .tool_clear import project_cleared_window
+from .tool_clear import EXEC_OUTPUT_CLEAR_TOOLS, project_cleared_window
 from .write_args_clear import project_cleared_write_args
 
 logger = get_logger(__name__)
@@ -88,6 +88,32 @@ def build_request_window(
                 round=round_idx,
             )
             window = cleared
+    exec_cleared = project_cleared_window(
+        window,
+        clearable_tools=EXEC_OUTPUT_CLEAR_TOOLS,
+        keep_recent=settings.engine_tool_clear_exec_keep_recent,
+        min_chars=settings.engine_tool_clear_min_chars,
+        summary_max_chars=0,
+        already_executed=True,
+    )
+    if exec_cleared is not window:
+        chars_saved = sum(
+            len(old.content or "") - len(new.content or "")
+            for old, new in zip(window, exec_cleared, strict=True)
+            if old.content != new.content
+        )
+        n_cleared = sum(
+            1
+            for old, new in zip(window, exec_cleared, strict=True)
+            if old.content != new.content
+        )
+        logger.info(
+            "engine.tool_clear_exec",
+            cleared=n_cleared,
+            chars_saved=chars_saved,
+            round=round_idx,
+        )
+        window = exec_cleared
     # Handoff 缓存崩塌：落盘后的 file_write 等大 body 仍在 assistant tool_calls.args，
     # 后续轮（含 handoff）整段 cache_miss。投影侧坍缩正文，canonical messages 不动。
     write_cleared = project_cleared_write_args(window, min_chars=500)

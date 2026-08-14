@@ -11,6 +11,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+WriteScope = Literal["none", "explore_memory", "project"]
+
 from agentcore.core.text import truncate_head_tail
 from agentcore.core.types import ToolApproval, ToolCategory, ToolEffect
 from agentcore.tools.file_products import FileProduct
@@ -49,6 +51,39 @@ def fork_workspace_slot(
     return WorkspaceSlot(
         backend=backend,
         material_paths=frozenset() if material_paths is None else material_paths,
+    )
+
+
+@dataclass
+class TurnExploreGate:
+    """CEO-turn explore pending + write_scope, shared across ``replace()`` copies.
+
+    Engine injects per-call ``on_phase`` via ``dataclasses.replace``, which copies
+    bool / str fields by value. This object is copied by reference (same as
+    :class:`WorkspaceSlot`), so ``update_folder_profile`` close-out is visible to
+    ``delegate`` on the pipeline base context.
+
+    Worker forks that need a different write_scope must pass a fresh gate
+    (:func:`fork_explore_write_scope`) so siblings do not share write permission.
+    """
+
+    pending: bool = False
+    write_scope: WriteScope = "project"
+
+
+def fork_explore_write_scope(
+    context: ToolContext,
+    write_scope: str,
+) -> TurnExploreGate:
+    """Snapshot explore-pending; give this worker its own write_scope."""
+    scope: WriteScope = (
+        write_scope
+        if write_scope in ("none", "explore_memory", "project")
+        else "project"
+    )
+    return TurnExploreGate(
+        pending=bool(context.cold_start_explore_pending),
+        write_scope=scope,
     )
 
 
@@ -451,18 +486,14 @@ class ToolContext:
     )
     # path → 首次落盘该 path 的 ``agent_id``（共享可变 dict，与 kinds 同生命周期）。
     landed_artifact_authors: dict[str, str] = field(default_factory=dict)
-    # 冷启动探索幕未完成（硬挡：rebind / 点名 refresh / empty+工程点名；尚未成功
-    # ``update_folder_profile``）。assemble 注入 ``<cold_start_explore>`` 时置 True；
-    # 画像写入成功后清 False。Delegate 读此旗标：抑制 form/artifacts→files_written
-    # 推断，并要求探路队 ≥2 worker（form 与写盘闸正交，见 ``write_scope``）。
-    # 与 deep_research_auto_debate_count 同模式——CEO base ToolContext 上就地翻转。
-    cold_start_explore_pending: bool = False
-    # Worker 写盘范围契约（与 deliverable.form 正交）。默认 ``project``=可写工作区；
-    # 硬挡 explore-pending 时 assemble/resume 将 base 设为 ``explore_memory``（worker
-    # 经 ``dataclasses.replace`` 继承）——仅允许 ``AgentCore/`` 下约定记忆与探索笔记；
-    # ``none``=拒一切写。闸在写工具入口。厚约定文档已是 documents 条目，worker 无写
-    # 条目的工具，故本闸不再需要一条路径禁令。
-    write_scope: Literal["none", "explore_memory", "project"] = "project"
+    # 冷启动探索幕未完成 + 写盘范围。放在共享盒里：引擎 ``replace(on_phase=…)``
+    # 拷的是引用，``update_folder_profile`` 翻转后 ``delegate`` 在 pipeline base
+    # 上立刻看见。bool 字段会被 replace 按值拷走，写在副本上正本仍 pending。
+    # Worker 要不同 write_scope 时必须 :func:`fork_explore_write_scope` 换新盒，
+    # 禁止 ``replace(..., write_scope=)``（那不再是字段）。
+    _explore_gate: TurnExploreGate = field(
+        default_factory=TurnExploreGate, repr=False, compare=False
+    )
     # Sidecar/desktop-injected Folder local bind for explore workspace_key
     # (RPC ``localRootId`` / ``localSubpath``, same camelCase shape as ``folderId``).
     # ``folder_binding_injected`` True ⇒ assemble must not open PG for key resolve
@@ -489,6 +520,19 @@ class ToolContext:
         **fields: Any,
     ) -> ToolContext:
         """Build a context owning a fresh :class:`WorkspaceSlot`."""
+        write_scope = fields.pop("write_scope", None)
+        pending = fields.pop("cold_start_explore_pending", None)
+        if "_explore_gate" not in fields:
+            gate = TurnExploreGate()
+            if pending is not None:
+                gate.pending = bool(pending)
+            if write_scope is not None:
+                gate.write_scope = (
+                    write_scope
+                    if write_scope in ("none", "explore_memory", "project")
+                    else "project"
+                )
+            fields["_explore_gate"] = gate
         return cls(
             _workspace=WorkspaceSlot(
                 backend=backend,
@@ -512,6 +556,22 @@ class ToolContext:
     @material_paths.setter
     def material_paths(self, value: frozenset[str]) -> None:
         self._workspace.material_paths = value
+
+    @property
+    def cold_start_explore_pending(self) -> bool:
+        return self._explore_gate.pending
+
+    @cold_start_explore_pending.setter
+    def cold_start_explore_pending(self, value: bool) -> None:
+        self._explore_gate.pending = bool(value)
+
+    @property
+    def write_scope(self) -> WriteScope:
+        return self._explore_gate.write_scope
+
+    @write_scope.setter
+    def write_scope(self, value: WriteScope) -> None:
+        self._explore_gate.write_scope = value
 
 
 @dataclass

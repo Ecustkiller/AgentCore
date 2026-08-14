@@ -266,7 +266,6 @@ async def _settle_resume(
                     plan,
                     execution_id=snap.execution_id,
                     seed_completed=seed,
-                    finalize=False,
                     seed_notes=None,
                     complexity_hint="standard",
                     # Prefer the in-process mode from the live tool; missing (process

@@ -338,7 +338,6 @@ def resolve_delegate_prelude(
         tasks_raw,
         depth=depth,
         playbook=playbook if isinstance(playbook, str) else None,
-        finalize=bool(arguments.get("finalize")),
     )
     if root_slice_warn:
         logger.info(

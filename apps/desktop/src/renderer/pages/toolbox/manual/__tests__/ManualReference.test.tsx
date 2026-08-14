@@ -97,7 +97,7 @@ describe("ManualReference", () => {
 
   it("renders settings rows including memory", () => {
     renderReference();
-    expect(screen.getByText("AI 记忆")).toBeTruthy();
+    expect(screen.getByText("全局设定")).toBeTruthy();
     expect(screen.queryByText("设置 · 自主度")).toBeNull();
   });
 

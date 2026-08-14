@@ -33,17 +33,23 @@ _SOURCE_PRIORITY: tuple[str, ...] = ("skill", "rule", "memory")
 
 @dataclass
 class SkillConsultSource:
-    """System skills filtered by the caller's live tool names (same gate as旧能力目录)."""
+    """System skills filtered by the caller's live tool names and reader role.
+
+    ``audience`` is ``\"ceo\"`` / ``\"worker\"`` in production so listing and fetch
+    cannot advertise a CEO-only manual to a worker. ``None`` keeps the tools-only
+    filter (unit tests that exercise CEO hits without a wire path).
+    """
 
     registry: SkillRegistry
     tool_names: Collection[str]
+    audience: str | None = None
 
     async def list_directory(self, user_id: str) -> Sequence[ConsultDirectoryEntry]:
         del user_id  # skills are code-defined, not per-user
         names = set(self.tool_names)
         return [
             ConsultDirectoryEntry(name=s.name, summary=s.summary)
-            for s in self.registry.available(names)
+            for s in self.registry.available(names, audience=self.audience)
         ]
 
     async def fetch_by_name(self, user_id: str, name: str) -> str | None:
@@ -52,7 +58,7 @@ class SkillConsultSource:
         if not key:
             return None
         names = set(self.tool_names)
-        for skill in self.registry.available(names):
+        for skill in self.registry.available(names, audience=self.audience):
             if skill.name == key:
                 return skill.body
         return None
@@ -210,10 +216,15 @@ def build_merged_consult_source(
     folder_id: str | None,
     memory_enabled: bool = True,
     include_rules: bool = True,
+    skill_audience: str | None = None,
 ) -> MergedConsultSource:
     """Assemble the turn's unified consult source (CEO or worker)."""
     skill = (
-        SkillConsultSource(registry=skill_registry, tool_names=tool_names)
+        SkillConsultSource(
+            registry=skill_registry,
+            tool_names=tool_names,
+            audience=skill_audience,
+        )
         if skill_registry is not None
         else None
     )

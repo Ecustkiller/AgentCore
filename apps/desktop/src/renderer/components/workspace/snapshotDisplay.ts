@@ -1,6 +1,6 @@
 /**
  * Cloud snapshot presentation helpers (axis-3: auto backup / kept version / system),
- * consumed by the 「改动」 tab timeline (`changesTimeline.ts`).
+ * consumed by the files-page version list (`changesTimeline.ts`).
  *
  * System labels are written by product paths (turn baseline, handoff, export /
  * merge) — they share the same storage as user pins but should not read as
@@ -36,11 +36,11 @@ export function classifySnapshotLabel(label: string | null): SnapshotKind {
 }
 
 /**
- * Labels withheld from the timeline. Two reasons, one outcome: `turn-baseline:`
- * is the same object the 「改动」 tab already lists per turn with file-level diff,
- * and the export / preview / merge labels are transport byproducts nobody asked
- * to keep. `handoff:` stays visible — 「本机交接」 is a milestone with no
- * equivalent elsewhere.
+ * Labels withheld from the files-page version list. Two reasons, one outcome:
+ * `turn-baseline:` is the same object the 「改动」 tab already lists per turn with
+ * file-level diff, and the export / preview / merge labels are transport
+ * byproducts nobody asked to keep. `handoff:` stays visible — 「本机交接」 is a
+ * milestone with no equivalent elsewhere.
  */
 function isHiddenSnapshotLabel(label: string | null): boolean {
   if (!label) return false;

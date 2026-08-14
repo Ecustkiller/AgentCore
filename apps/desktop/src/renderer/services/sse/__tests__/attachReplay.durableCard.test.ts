@@ -77,7 +77,7 @@ function pendingCards() {
 
 /**
  * 重开会话后的 attach 起点：上一回合完整、本回合只有用户行 —— 在飞助手泡由
- * `clearAfterUserForReplay` 清掉（clear-then-fold），等回放段重建。
+ * `resetPartialTurnForReplay` 原位清空（保留气泡 id），等回放段重建。
  */
 beforeEach(() => {
   useConversationStore.setState({ currentConversationId: null, byId: {} });

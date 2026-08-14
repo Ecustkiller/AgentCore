@@ -116,8 +116,8 @@ interface MemoryUpdateFeedItemWire {
 
 /**
  * The signed-in user's recent memory updates across ALL conversations, newest-first
- * (记忆更新对话内可见 §1.6 — the write side's cross-conversation home). Powers the「AI 记忆」
- * editor's「最近更新」view; `limit` caps how many recent passes to pull.
+ * (记忆更新对话内可见 §1.6 — the write side's cross-conversation home). Powers the files-page
+ * 「最近更新」view; `limit` caps how many recent passes to pull.
  */
 export function listMemoryUpdates(
   limit = 50,
@@ -155,7 +155,7 @@ export function listMemoryUpdates(
 
 /** folder_ids that have project-scoped memory — retained for API callers / diagnostics;
  * the file rail no longer aggregates them under a top-level「项目记忆」folder (each
- * project mounts its own「记忆」child instead). */
+ * folder mounts its own「本文件夹设定」child instead). */
 export function listMemoryProjects(): Promise<string[]> {
   return api
     .get<{ folders: string[] }>("/v1/users/me/memory/projects")

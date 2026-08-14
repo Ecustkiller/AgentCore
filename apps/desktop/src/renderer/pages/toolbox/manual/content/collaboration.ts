@@ -437,8 +437,8 @@ export const collaborationChapter: ManualChapterContent = {
               desc: "直接说「忘掉上次说的……」或「改成……」即可。",
             },
             {
-              title: "文件页 · AI 记忆",
-              desc: "打开文件页的「AI 记忆」，可查看、编辑或清理长期记忆。",
+              title: "文件页 · 全局设定",
+              desc: "打开文件页顶部的「全局设定」，可查看、编辑或清理。",
             },
           ],
         },
@@ -451,7 +451,7 @@ export const collaborationChapter: ManualChapterContent = {
               text: "文件",
               link: { kind: "go", to: APP_PATHS.files },
             },
-            " → AI 记忆。记忆来自你的对话偏好；与数据留存、导出等关系见 ",
+            " → 全局设定。记忆来自你的对话偏好；与数据留存、导出等关系见 ",
             {
               text: "数据与隐私",
               link: {

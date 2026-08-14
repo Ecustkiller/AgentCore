@@ -17,7 +17,9 @@ class LeadSubteam:
     objects + the ``dispose`` closure here):
 
     - ``tools`` — the lead's own ``delegate`` PLUS the companion ``replan`` bound to
-      THAT delegate instance, both registered onto the lead's per-worker tool set.
+      THAT delegate instance. The bundle mints both (dispose / 波边界 binding); the
+      opening registry registers ``delegate`` only. ``replan`` is offered after a
+      nested sub-plan exists (``_supervised``), via ``promote_coordination_surface_if_needed``.
       Wiring ``replan`` for a lead (not just the root CEO) is the 去特例 fix: a lead
       supervises its own sub-plan's 波边界 (bind_after_deps / 子队员 escalate scope)
       exactly like the CEO — without it a yielding sub-plan would be a dead-end.
@@ -47,87 +49,57 @@ DelegateFactory = Callable[[str, int], LeadSubteam]
 # wave's width being parked on the user. Tunable; start conservative.
 ESCALATION_CONCURRENCY_CAP = 3
 
+# Shared one-liners for every form block (HOW encyclopedia lives in tools / consult).
+_WORKER_STRUCTURE_OWNERSHIP = (
+    "专业结构由你定：task 里的骨架 / 关注点只是起点线索，不是填字模板或答题边界。"
+)
+_WORKER_NO_PREAMBLE = (
+    "直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。"
+)
+# Compressed landing (files + omit). Artifact-first / 中间省略 is not identity copy;
+# the files handoff field guide may still mention 短骨架.
+_WORKER_LANDING_DISCIPLINE = """\
+写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
+回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
+【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
+str_replace（局部修订）或同轮 handoff，勿为空转自检。成篇 md【禁止】用 write_section \
+或 `<!-- SECTION: -->`（二者仅用于建站 site HTML）。超长成篇细则 consult(long_form_landing)。"""
+
 # Legacy two-way form policy (form omitted): worker judges prose vs files itself.
 # Kept as the default so omitting form preserves prior behaviour.
-_WORKER_DELIVERABLE_FORM = """\
+_WORKER_DELIVERABLE_FORM = f"""\
 分清你的交付【形态】，用对的方式交付：
 - 交付物是【可独立阅读的文字】（分析、审查意见、设计 / 调研说明、解释、问答）时，直接\
 作为你的文字产出写出来，自包含、完整准确。
 - 交付物是【文件 / 产物】（可运行代码 / 网页 / 应用、脚本、配置、数据文件、多文件工程，\
 或任何用户要打开 / 运行 / 编辑 / 保存的东西，或任务要求「产出文件」）时，你【必须】调用 \
-file_write 把它真正写进工作区，而不是把整份内容粘在回复正文里；此时正文只简短交代：改了\
-哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。只贴在聊天里的代码不算交付。
+file_write 把它真正写进工作区，聊天粘贴不算交付。正文只简短交代路径、怎么运行、关键取舍。
 
-写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
-回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
-【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
-str_replace（局部修订）或同轮 handoff，勿为空转自检。
+{_WORKER_LANDING_DISCIPLINE}
 
-【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长成篇 MD：可一次写完完整正文，\
-或先短骨架（大纲 / 章节标题 / FILL 占位）再用 str_replace 或 file_append 按章填空——【禁止】用 \
-`<!-- SECTION: -->` 或 write_section 填成篇 md（二者仅用于建站 site HTML）。本 run 已成篇 \
-prose 禁止再同文件 append。长文成篇：一次写完或按章填空——一章写完再下一章；预算不够时停在完整\
-章边界，并在 handoff 标明已完成章节与【待续】章节（从哪一章续写），勿章中截断。修订已有成品时\
-按审校 / 续派意见逐条用 str_replace 局部改；骨架路径上扩写可用 file_append；整文件 file_write \
-覆盖允许，但须完整正文、勿惰性省略中段（正文写「……（中间省略，已保留首尾）……」会残缺交付）。\
-仍**禁止**整篇 file_delete 后重写长文。
+{_WORKER_NO_PREAMBLE}
 
-直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。你的文字\
-产出会直接展示给用户、也回流给主 Agent 整合，故要完整、准确、可独立阅读；任务附带产出\
-要求就逐条满足。
-
-这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
-除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
-增删、优化，而不是照它填字。task 里若带了关注点 / 重点清单，同样只当起点线索——不是答题边界；\
-领到范围内的全面审查与自主发现是你的职责，别把自己限成对清单逐条扩写。硬指标（篇幅 / 格式 / \
-范围 / 受众 / 必含要点 / 验收项）仍须逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最\
-核心的专业产出。"""
+{_WORKER_STRUCTURE_OWNERSHIP}"""
 
 # form=prose: text body only — no file_write landing guidance at all.
-_WORKER_DELIVERABLE_FORM_PROSE = """\
+_WORKER_DELIVERABLE_FORM_PROSE = f"""\
 你的交付形态是【纯文字】（form=prose）：把完整内容直接作为正文交付，自包含、准确、可独立阅读。\
-不要落盘、不要调用写文件工具；成品就是你的文字产出本身（回答 / 分析 / 汇报 / 创意文字等）。
+不要落盘、不要调用写文件工具；成品就是你的文字产出本身（回答 / 分析 / 汇报 / 创意文字等）。\
+{_WORKER_NO_PREAMBLE}
 
-直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。你的文字\
-产出会直接展示给用户、也回流给主 Agent 整合；任务附带产出要求就逐条满足。
+{_WORKER_STRUCTURE_OWNERSHIP}"""
 
-这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
-除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
-增删、优化，而不是照它填字。task 里若带了关注点 / 重点清单，同样只当起点线索——不是答题边界；\
-领到范围内的全面审查与自主发现是你的职责，别把自己限成对清单逐条扩写。硬指标（篇幅 / 格式 / \
-范围 / 受众 / 必含要点 / 验收项）仍须逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最\
-核心的专业产出。"""
-
-# form=files: heavy landing guidance (must not weaken the 46k-HTML-in-chat defence).
-_WORKER_DELIVERABLE_FORM_FILES = """\
+# form=files: must-land defence (must not weaken the 46k-HTML-in-chat gate).
+_WORKER_DELIVERABLE_FORM_FILES = f"""\
 你的交付形态是【落盘文件】（form=files）：你【必须】调用 file_write 把产物真正写进工作区，\
-而不是把整份内容粘在回复正文里。可运行代码 / 网页 / 应用、脚本、配置、数据文件、多文件工程，\
-或任何用户要打开 / 运行 / 编辑 / 保存的东西，都以工作区文件为准——只贴在聊天里的代码不算交付。
+而不是把整份内容粘在回复正文里。只贴在聊天里的代码不算交付。正文只简短交代：改了哪些文件\
+（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。
 
-正文只简短交代：改了哪些文件（给路径）、怎么运行、关键取舍，不要再整份粘贴文件内容。
+{_WORKER_LANDING_DISCIPLINE}
 
-写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
-回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
-【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
-str_replace（局部修订）或同轮 handoff，勿为空转自检。
+{_WORKER_NO_PREAMBLE}
 
-【落盘与修订·Artifact-first】中等单篇一次 file_write 写完；超长成篇 MD：可一次写完完整正文，\
-或先短骨架（大纲 / 章节标题 / FILL 占位）再用 str_replace 或 file_append 按章填空——【禁止】用 \
-`<!-- SECTION: -->` 或 write_section 填成篇 md（二者仅用于建站 site HTML）。本 run 已成篇 \
-prose 禁止再同文件 append。长文成篇：一次写完或按章填空——一章写完再下一章；预算不够时停在完整\
-章边界，并在 handoff 标明已完成章节与【待续】章节（从哪一章续写），勿章中截断。修订已有成品时\
-按审校 / 续派意见逐条用 str_replace 局部改；骨架路径上扩写可用 file_append；整文件 file_write \
-覆盖允许，但须完整正文、勿惰性省略中段（正文写「……（中间省略，已保留首尾）……」会残缺交付）。\
-仍**禁止**整篇 file_delete 后重写长文。
-
-直接以产出本身开头，别写「我来为你生成…」「我是一个 agent」之类开场白或元叙述。
-
-这份交付物的【专业结构】由你这位专家定夺：task 或预期产出里若带了章节 / 模块 / 布局骨架，\
-除非【原始用户请求】中用户亲口指定要照此结构，否则只当起点建议——按你的专业判断去重组、\
-增删、优化，而不是照它填字。task 里若带了关注点 / 重点清单，同样只当起点线索——不是答题边界；\
-领到范围内的全面审查与自主发现是你的职责，别把自己限成对清单逐条扩写。硬指标（篇幅 / 格式 / \
-范围 / 受众 / 必含要点 / 验收项）仍须逐条满足；但「这份交付物怎么搭骨架、怎么展开」正是你最\
-核心的专业产出。"""
+{_WORKER_STRUCTURE_OWNERSHIP}"""
 
 # Shared handoff field checklist (appended after the topology-specific opener).
 _HANDOFF_FIELD_GUIDE = """\
@@ -164,6 +136,13 @@ str_replace 填空），\
 escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交接简报里的建议是「我已做完、\
 提示个后续方向」。
 调用 handoff 即代表你这次的活已完成；别把简报重复写进交付正文，也别在还没产出交付时就调它。"""
+
+# 巡检定案 B：worker 交付各一句，防 CEO 综收把「已修复 / 已就绪 / 中途绿」回灌成用户症状已消。
+# 不扩姿势 A 词表、不加闸。
+_WORKER_DELIVERY_HONESTY = """\
+【交接勿回灌】正文与 handoff：用户报了可见症状时勿写「修复完成 / 已修复」——写改了什么、请对照看一眼；\
+勿把提示词包 / 脚本 / 说明书说成「系统已就绪」——没改用户打开的文件就写界面没改；\
+说测试通过以最后一次同命令退出码为准，中途绿最后红报红的，分项分开写。"""
 
 
 def _handoff_field_guide(form: DeliverableForm | None) -> str:
@@ -240,43 +219,13 @@ def _deliverable_policy(
         if has_dependents
         else _handoff_policy_leaf(form)
     )
-    return f"{_form_block(form)}\n\n{handoff}"
+    return f"{_form_block(form)}\n\n{handoff}\n\n{_WORKER_DELIVERY_HONESTY}"
 
-# Shared by every delegated worker (leaf + captain): how to use the team note wall
-# (§2.2 通·便签墙 + §2.4 变·worker 的「拉」). Workers run in parallel silos; without this they
-# each guess in isolation and only reconcile at the CEO. Four moves, stated explicitly so the
-# wall stays a 玻璃箱 broadcast (NOT a chat / question channel — the doc's main risk): PUSH a
-# decision / heads-up / claim (post_note — claim 我领了 is the proactive, visible counterpart of
-# WriteCoordinator's hard file guard: announce a piece you're taking so siblings don't dup it),
-# PULL the whole wall on demand (read_notes), 改写/作废 a stale note you posted (amend_note,
-# §2.2 便签会过期), and — when what you need isn't there at all — flag the dependency gap
-# (escalate kind=dep). Benefit-gated broadcast: only post when a still-running sibling would
-# change course; completion belongs in handoff, not on the wall.
+# Shared by every delegated worker (leaf + captain): when to post on the team note
+# wall. HOW (kinds / amend / 并行审查) lives in consult(team_orchestration_advanced).
+# Solo setup strips this constant by exact replace — keep the replacement mechanism.
 _WORKER_TEAM_NOTE_POLICY = """\
-你和若干队友正在【并行】干这一批活。贴便签前先问：这条会让某个【还在跑的】队友改变做法吗？\
-不会就别贴。值得贴时用 post_note 贴一条【一行、具体】的便签广播给并行队友：\
-kind=decision 是「我定了」（接口 / 字段名 / 格式 / 命名等别人要对齐的决定），\
-kind=heads_up 是「提个醒」（坑 / 发现），\
-kind=claim 是「我领了」——【开工前占坑】（你正要动手的一块活 / 文件，如『登录页我来写』，\
-免得俩人干同一件事或抢同一个文件）。完工信息是 handoff 的职责，【不要】贴完工宣告。\
-贴完就【立刻继续做你的活】——\
-它是顺手广播、不等任何回复，既不是聊天也不是提问（要上级拍板仍用 escalate）。\
-队友新贴的便签每轮开始前会自动推给你：据此对齐接口、避免和队友重复或冲突，但你【不必回应】。\
-read_notes 只用于找推送里没有的旧约定——它只是读、不打断你也不等回复。\
-若你早先贴的某条决定后来【变了 / 不作数了】（如字段从 password 改成 pwd），\
-用 amend_note 把它更正掉，免得队友照过时的便签做错：\
-ref 填那条便签的编号（post_note 成功时返回的 N 编号），\
-给 text 写新内容＝改写、省略 text＝作废——别让旧便签一直挂着误导队友。\
-若你要的东西【墙上根本没有】（没人产出过、计划也没安排），那是依赖缺口：别硬猜瞎编一个凑数、\
-真卡在再猜也是错的缺口上就主动用 escalate kind=dep 写清你卡在缺什么（强过闷头产出一堆作废的东西），\
-主管 / lead 会在波边界补上；期间你照常按假设把能做的做完，【绝不要空等队友】。\
-拿捏分寸：只有【会让还在跑的队友改做法】的决定 / 坑 / 开工占坑才值得贴——别自己定了却闷不吭声，\
-也别把完工宣告或无关碎话贴上墙（这里不是聊天区）。
-
-【并行审查 / 质检专则】若你的角色是审查、质检、红队、语言/体验/可读性等【审别人的产出】，且你与别的\
-审查官【同一波并行】：一旦发现整体方向偏差、致命问题、或打分≤7/10且主因是方向/定位（而非标点级细节），\
-必须【先】用 post_note（kind=heads_up）贴一行警示（如「方向偏书面，建议叫停重写」），【再】写你的详细\
-审查——让并行队友先看到重大信号，别各自闷头修标点。方向没问题、只有局部建议时，不必为每条小事贴便签。"""
+会改变还在跑的队友才 post_note 一行；完工别贴。细则 consult(team_orchestration_advanced)。"""
 
 # 环境能力自述（能写 ≠ 能跑）: appended ONLY when the turn's worker registry carries no
 # execution class (cloud location=server without sandbox — see
@@ -303,10 +252,7 @@ _WORKER_TOOL_SAFETY_POLICY = """\
 写文件、删除、移动、执行代码等会改动环境的工具，可能需要用户确认后才执行；你放手\
 调用即可，由确认机制处理同意，不必在正文里反复征求许可。对不可逆或破坏性的操作\
 （删除、整体覆盖、危险命令）要格外谨慎——尤其在本地模式下，它们作用于用户自己的机器。\
-【第三方 Key】【禁止】把用户粘贴的 API Key 写入工作区明文（含 env）；脚本用环境变量占位，\
-用户本机自备。handoff / 进度摘要【禁止】复述密码、token、私钥、hostkey、完整 Key 原文——\
-改写为「已识别凭据，请到原会话或密钥处查看」。云端无任意 HTTPS 出口时【禁止】用 code_execute \
-代调外网生图 API 交差。
+云端无任意 HTTPS 出口时【禁止】用 code_execute 代调外网生图 API 交差。
 </tool_safety>"""
 
 # Shared problem-handling tiers for leaf + captain workers. Both identities embed
@@ -321,25 +267,7 @@ _WORKER_PROBLEM_HANDLING = """\
 无法合理假设、权威文档冲突——用户点名为准或已写入 task 的设计稿与代码/其它权威稿不一致）：\
 立即用 escalate 上报，不要自行决定方向（含勿静默改权威稿）。
 默认原则：信息不足时做出最合理的假设、简短说明，然后照常交付——不要为小事停下。\
-escalate 的 blocking 按题自选（默认 false）：已有合理默认、报一声即可 → blocking=false\
-（上报后按假设继续、主管收尾纠偏）；猜错产物基本作废 / 用户明确要不确定就问 / 只有上级能定的\
-关键岔路 → blocking=true（原地挂起，须写 assumption）。能自行合理假设的小事别升级；blocking \
-省着用，但该停时别装非阻塞。\
-升级时若这个岔路是干净的【二选一 / 多选一】（候选明确、只差有人拍板），就在 escalate 里附上\
-结构化 questions（把候选写进 options），让拍板者一键选定、不必读你的散文再手敲；没有明确候选的\
-开放问题则照常用一句话问、不必硬凑选项。"""
-
-# 单人直出（``RunPlan.solo_direct_answer``）: a finalize batch with a single node hands this
-# worker's ``state.content`` to the user verbatim (``ceo_format.direct_result``) — no CEO
-# synthesis pass rewrites, retells or summarises it. Without saying so the worker keeps the
-# default「向主管交活」register and its internal-action narration (「现在提交交接简报」) lands
-# in what the user reads as the turn's answer. Off for every other topology (byte-identical).
-_WORKER_DIRECT_TO_USER = """\
-【正文直达用户】你是这次委派的唯一队员，你写的交付正文会【原样】作为本回合的最终答复呈现给\
-用户——不会再有主管改写、转述或替你总结。所以正文直接对用户说话（里面的「你」＝用户本人）、\
-开门见山给结果：【禁止】内部动作旁白与流程播报（如「现在提交交接简报」「接下来我将调用某某工具」\
-「已完成本次任务并提交」）——交接简报走的是用户看不见的结构化通道，写进正文只是一句突兀的自述；\
-【禁止】用对主管汇报的口吻（如「向您汇报」「以上是我的交付，请审阅」）。"""
+有把握就报一声继续做；猜错会作废、或只有上级能定的关键岔路，就停下来等。"""
 
 # Shared path-finding nudge (leaf + captain): avoid reading vague workspace roots.
 # Inserted in build_worker_identity — not inside captain nesting preamble (P3 surface).
@@ -357,11 +285,10 @@ _WORKER_LEAF_INTRO = f"""\
 你不能再向下委派。{_WORKER_PROBLEM_HANDLING}"""
 
 # Captain intro for any worker within the depth cap (delegation is on by default —
-# there is no per-node opt-in flag). Path-B briefs (成果级目标·约束·验收, no structure
-# pins this round) get a priority nudge to delegate-then-integrate — not a hard
-# workflow, and never「凡大活必嵌套 / 未嵌套禁写」. Nesting honesty branches on
-# ``depth`` vs ``MAX_DELEGATION_DEPTH``: children of a near-cap captain are leaves;
-# shallower captains' children may still nest. Workers at the cap get the leaf intro.
+# there is no per-node opt-in flag). HOW (怎么拆 / 何时不该拆 / replan 续跑) lives in
+# consult(team_orchestration_advanced). Nesting honesty branches on ``depth`` vs
+# ``MAX_DELEGATION_DEPTH``: children of a near-cap captain are leaves; shallower
+# captains' children may still nest. Workers at the cap get the leaf intro.
 
 
 def _worker_captain_intro(*, depth: int) -> str:
@@ -378,28 +305,10 @@ def _worker_captain_intro(*, depth: int) -> str:
         )
     return f"""\
 你是团队中的一名专家 worker，除了自己干活，你还可以再向下委派一层子团队来分担。你负责一个划定\
-好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。
-
-【路径 B · 优先先嵌套】根只给了成果级目标·约束·验收、且本轮无结构钉（边界仍需再拆）时——\
-【优先】先调用 delegate 嵌套扇出、再整合子产出（优先级 nudge，非硬流程；写文件工具仍可用，\
-不是「未嵌套禁写」）。能少则少、有独立缝才并行；不要为委派而委派。禁止把「凡大活」一律嵌套。\
-本条不推翻冷启动 / 成规模摸底「≥2 角并行」——那些是根侧扇出纪律，不是「凡大活必嵌套」。
-
-【豁免 · 可自干】下列情形不必先嵌套，自己做完即可：单文件；已钉死薄壳；强耦合同 run 切片；\
-小修 / 已钉切片 / finalize 机械单步。整里程碑 M0、空仓多模块骨架【不在】豁免内——仍优先先嵌套。
-
-【嵌套扇出·写盘】子员无 depends_on 并行时，勿让两人共写同一目标文件——各写私有产出，或串行 /\
-指定整合者（与根侧并行同路径纪律同旨）。
-
-【何时不该拆】已深入实现到一半时——先完成手头工作再拆新的，别突然把进行中的活甩给子队。\
-仅接缝清晰、可独立验证时才 delegate。
-
-【拆分粒度】每个 sub-worker 应是一个可独立完成、可独立验证的单元；单次最多带 4 个 sub-worker。
-
-{nest_honesty}你带的子队若声明了 bind_after_deps（依赖完成后再定稿）的步骤、或子队员用 \
-escalate kind=scope 报告了职责偏离，控制权会在波边界交回你（子队输出『计划已让出』）——\
-这时用 replan 据上游产出把待定稿步骤定稿 / 操舵尚未运行的步骤，续跑【同一张】子计划；确认\
-无需改动可直接续跑、确无需继续则 replan(stop=true) 收口。{_WORKER_PROBLEM_HANDLING}"""
+好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。活太大、能拆成可独立完成的\
+几件时可再招人。怎么拆、何时不该拆、控制权交回后怎么续跑 → \
+consult(team_orchestration_advanced)。不要为委派而委派。
+{nest_honesty}{_WORKER_PROBLEM_HANDLING}"""
 
 
 def build_worker_identity(
@@ -410,7 +319,6 @@ def build_worker_identity(
     form: DeliverableForm | None = None,
     artifacts: Sequence[str] | None = None,
     can_execute: bool = True,
-    direct_to_user: bool = False,
 ) -> str:
     """Assemble a worker's identity preamble (topology-split handoff + leaf/captain).
 
@@ -424,21 +332,16 @@ def build_worker_identity(
     ``can_execute`` mirrors whether the execution class (code_execute / test_run) is in
     this turn's worker registry — False layers the 能写≠能跑 self-description in so the
     prompt never over-claims capability the toolset withheld (能力闸门与交付诚实性).
-    ``direct_to_user`` is the plan's 单人直出 signal (``RunPlan.solo_direct_answer``):
-    True adds the 正文直达用户 register so the body reads as the answer the user gets,
-    not as a report filed with a supervisor.
     """
     effective_form = resolve_identity_form(form, artifacts=artifacts)
     intro = _worker_captain_intro(depth=depth) if captain else _WORKER_LEAF_INTRO
     no_exec = "" if can_execute else f"\n\n{_WORKER_NO_EXECUTION_POLICY}"
-    direct = f"\n\n{_WORKER_DIRECT_TO_USER}" if direct_to_user else ""
     return (
         f"{intro}\n\n"
         f"{_WORKER_PATH_FIND_NUDGE}\n\n"
         f"{_WORKER_TEAM_NOTE_POLICY}\n\n"
         f"{_deliverable_policy(has_dependents=has_dependents, form=effective_form)}"
-        f"{no_exec}"
-        f"{direct}\n\n"
+        f"{no_exec}\n\n"
         f"{_WORKER_TOOL_SAFETY_POLICY}"
     )
 

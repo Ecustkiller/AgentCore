@@ -52,7 +52,11 @@ from agentcore.runtime.runs.notewall import NOTE_NUDGE_TEXT, format_notes_for_in
 from agentcore.runtime.runs.retrieval_budget import RETRIEVAL_TOOL_NAMES
 from agentcore.runtime.runs.types import ContextBlock, RunPhase, RunSpec, RunState
 from agentcore.runtime.runs.website_visual_critic import MAX_VISUAL_REWORK
-from agentcore.tools.protocol import RetrievalBudgetState, ToolContext
+from agentcore.tools.protocol import (
+    RetrievalBudgetState,
+    ToolContext,
+    fork_explore_write_scope,
+)
 from agentcore.tools.registry import ToolRegistry
 
 
@@ -143,7 +147,7 @@ async def prepare_agent_node(
         ownership_desk_id=(
             str(spec.target_folder_id or env.session_folder_id or "").strip() or None
         ),
-        write_scope=worker_write_scope,  # type: ignore[arg-type]
+        _explore_gate=fork_explore_write_scope(base_ctx, worker_write_scope),
         # 升级实时可见: give this worker's escalate tool a live channel back to the
         # run's SSE stream. The executor owns event shape (引擎纯化) — escalate just
         # hands it the (question, assumption, blocking) triple. run_id/agent_id are
@@ -218,10 +222,11 @@ async def prepare_agent_node(
         and spec.depth < MAX_DELEGATION_DEPTH
     )
     if is_captain:
-        # The lead gets BOTH its own delegate AND the companion replan bound to
-        # that delegate instance, so it supervises its sub-plan's 波边界
-        # (bind_after_deps / 子队员 escalate scope) exactly like the CEO
-        # (受监督子计划 B 去特例). Its turn-end dispose runs in the finally below.
+        # Bundle still mints delegate + companion replan (dispose / 波边界 binding,
+        # 受监督子计划 B 去特例). Opening offer is delegate only — same idea as
+        # CEO idle vs coordination. replan lands after nested delegate sets
+        # _supervised, via promote_coordination_surface_if_needed. Turn-end
+        # dispose still runs in the finally below.
         lead_subteam = env.delegate_factory(spec.run_id, spec.depth)
         # §4.2b·3：子派默认继承父目标桌（再点名才换）。
         child_delegate = lead_subteam.tools[0]
@@ -231,9 +236,10 @@ async def prepare_agent_node(
         # 父审计员再嵌套：手写 tasks 继承 code_audit 收工纪律（不重跑整本 playbook）。
         if deliverable is not None and getattr(deliverable, "code_audit_gate", False):
             child_delegate._inherit_code_audit_discipline = True  # type: ignore[attr-defined]
-        worker_tools = _registry_with(worker_tools, *lead_subteam.tools)
-        # allowed_tools stays None — "offer all" already includes lead_subteam
-        # tools now living in worker_tools.
+        opening = tuple(t for t in lead_subteam.tools if t.schema.name != "replan")
+        worker_tools = _registry_with(worker_tools, *opening)
+        # allowed_tools stays None — "offer all" already includes the opening
+        # lead_subteam tools now living in worker_tools.
     # Topology-split handoff wording + deliverable.form: DAG is known at identity
     # build — upstream nodes get imperative「必须 handoff」; leaves get conditional
     # 「有增量才写」. form=prose/files selects the landing block (omit = legacy).
@@ -249,10 +255,6 @@ async def prepare_agent_node(
         # execution class absent (cloud without sandbox) ⇒ the identity says so,
         # instead of the generic wording implying the worker can run code.
         can_execute=worker_tools.get_optional("code_execute") is not None,
-        # 单人直出: a finalize batch of one hands this body to the user verbatim
-        # (drive_finalize → direct_result), so the register switches from
-        # 「向主管交活」to speaking to the user.
-        direct_to_user=env.plan.solo_direct_answer(),
     )
     if not env.collaboration:
         identity = identity.replace(_WORKER_TEAM_NOTE_POLICY, "").replace("\n\n\n", "\n\n")

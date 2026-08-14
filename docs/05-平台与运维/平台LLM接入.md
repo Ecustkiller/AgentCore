@@ -66,6 +66,7 @@ skip_if:
 | 项 | 约束 |
 |---|---|
 | 模型名 | `deepseek-v4-pro` / `deepseek-v4-flash`；旧名 `deepseek-chat` / `deepseek-reasoner` 已停用 |
+| 上下文 | 官方 **1M**（input+output 合计）；max output 384K。目录 `context_length` 与近顶压缩跟这条，不跟过期的 128K 记忆 |
 | base_url | `https://api.deepseek.com`（兼容 `/v1`） |
 | 思考开关 | `extra_body.thinking.type=enabled/disabled`，默认 enabled；AgentCore 只用此开关 |
 | 温度坑 | **思考模式下** `temperature`/`top_p`/penalty **静默忽略** |
@@ -106,6 +107,7 @@ BYOK 厂商预设 id=`opencode_zen`；canonical `https://opencode.ai/zen/v1`。�
 | 协议 | 主路仍 OpenAI `chat/completions`（Flash / GLM 等兼容行）；目录有 ≠ 一定能跑（Claude / GPT 等可能需其它协议） |
 | BYOK | 用户自备 Zen key；估算价卡按现有 BYOK 两层解析；**不**进平台配额 |
 | 平台代付 | ✅ 可经 `PLATFORM_*` 指向同一 Zen 端点；**现网定案**：只上架 `deepseek-v4-flash-free`（见 §五·附） |
+| 上下文 | 付费 `deepseek-v4-flash` **1M**；免费档 `deepseek-v4-flash-free` **200K**（Zen 网关 cap，非模型原生）。近顶压缩按 **SKU id** 取窗，不按 origin 分叉 |
 | 未做 | `zen/` 前缀路由；为本网关单独开 Anthropic/Responses 分叉 |
 | 隐私 | free 档限时且可能用于改进模型——产品公告须诚实；勿当永久免费算力承诺 |
 
@@ -133,6 +135,7 @@ BYOK 厂商预设 id=`opencode_zen`；canonical `https://opencode.ai/zen/v1`。�
 | 后台档 | 同钉 `deepseek-v4-flash-free`（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
 | 额度 | 月 ¥10 · 日 ¥10 · 日请求 500（`quota_*` 不变） |
 | 价卡 | curated 名义价 **同** 付费 Flash（¥0.02 / ¥1 / ¥2）——上游免费，产品仍按名义价扣额度 |
+| 上下文窗 | `deepseek-v4-flash-free` **200K**（Zen 免费档网关；原生 Flash 是 1M）。目录展示与近顶压缩（窗 × 80% ≈ 160K）跟 SKU，禁止把 free 行写成 1M |
 | Vision | 本阶段不配 `VISION_*`（白板读图仅用户 BYOK 填 vision 槽时可用） |
 | 公告 | 恢复时归档 `quota_jiurelay`；发模板 **`quota_platform_restored`** → [产品公告文案模板 §4.2](/docs/05-平台与运维/产品公告文案模板.md) |
 

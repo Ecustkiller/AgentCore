@@ -167,7 +167,7 @@ describe("StatusStrip · user stop cancelled", () => {
     expect(screen.queryByRole("button", { name: "重试失败项" })).toBeNull();
     expect(screen.queryByRole("button", { name: "继续" })).toBeNull();
     expect(container.querySelector(".animate-spin")).toBeNull();
-    expect(screen.queryByLabelText("停止任务")).toBeNull();
+    expect(screen.queryByLabelText("停止整轮")).toBeNull();
     await waitFor(() => {
       expect(
         screen.queryByTestId("status-strip-stopped-file-changes"),

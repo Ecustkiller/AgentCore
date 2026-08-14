@@ -11,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcore.llm.provider.protocol import LLMMessage
-from agentcore.runtime.delegate.ceo_format import direct_result
 from agentcore.runtime.runs.file_acceptance import (
     REASON_CITATIONS_UNVERIFIED,
     build_file_acceptance,
@@ -21,7 +20,7 @@ from agentcore.runtime.runs.serialize import (
     file_products_from_transcript,
     files_touched_from_transcript,
 )
-from agentcore.runtime.runs.types import RunPhase, RunState
+from agentcore.runtime.runs.types import RunPhase
 from agentcore.tools.builtin.file_ops import FileWriteTool
 from agentcore.tools.builtin.md_to_docx import MdToDocxTool
 from agentcore.tools.builtin.md_to_pdf import MdToPdfTool
@@ -29,7 +28,6 @@ from agentcore.tools.file_products import with_file_products_marker
 from agentcore.tools.protocol import ToolContext, ToolResult
 from agentcore.tools.sandbox import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
-from tests.delegate.conftest import Provider, tool
 
 
 def _ctx(workspace: Path) -> ToolContext:
@@ -113,18 +111,9 @@ async def test_word_request_user_facing_location_points_at_docx(tmp_path: Path):
         },
     ]
 
-    state = RunState(
-        phase=RunPhase.COMPLETED,
-        content="Word 文档已生成。",
-        files_touched=touched,
-        file_acceptance=acceptance,
-    )
-    final = direct_result(tool(Provider([])), state).final_text or ""
-    location = next(line for line in final.splitlines() if line.startswith("文件位置："))
-    assert location == "文件位置：`抚养费起诉状-昝雯.docx`（可在工作区文件页打开）"
-    assert md not in location
-    # 折叠 ≠ 抹掉：源 md 仍如实交代，只是降级为中间稿。
-    assert f"（中间稿：`{md}`，已导出为上述文件，一般无需打开）" in final
+    files, intermediates = fold_exported_sources(acceptance)
+    assert files == ["抚养费起诉状-昝雯.docx"]
+    assert intermediates == [md]
 
 
 def test_fold_keeps_every_export_and_demotes_only_self_reported_sources():

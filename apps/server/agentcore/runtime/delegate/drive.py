@@ -138,7 +138,6 @@ async def drive(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None = None,
     complexity_hint: str = "standard",
     coordination: str = "none",
@@ -148,8 +147,8 @@ async def drive(
 ) -> ToolResult:
     """Run ``plan`` through the WaveScheduler and fold workers' products into a CEO ToolResult.
 
-    When ``coordinate`` is true (default) and the gate passes (≥1 worker, root CEO,
-    not finalize), starts a background scheduler and returns immediately. Pass
+    When ``coordinate`` is true (default) and the gate passes (≥1 worker, root CEO),
+    starts a background scheduler and returns immediately. Pass
     ``coordinate=False`` for classic blocking. Pass ``session`` only from the
     background task (:func:`drive_coordinated`).
 
@@ -219,7 +218,6 @@ async def drive(
                     plan,
                     results,
                     execution_id=execution_id,
-                    finalize=finalize,
                     seed_completed=seed_completed,
                     session=session,
                     call_idx=call_idx,
@@ -252,7 +250,6 @@ async def drive(
                     plan,
                     results,
                     execution_id=execution_id,
-                    finalize=finalize,
                     seed_completed=seed_completed,
                     session=session,
                     call_idx=call_idx,
@@ -274,7 +271,6 @@ async def drive(
                     plan,
                     execution_id=execution_id,
                     seed_completed=seed_completed,
-                    finalize=finalize,
                     seed_notes=seed_notes,
                     complexity_hint=complexity_hint,
                     coordination=coordination,
@@ -311,7 +307,6 @@ async def _drive_body(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     coordination: str,
@@ -337,7 +332,6 @@ async def _drive_body(
             existing_coord is not None
             and existing_coord.active
             and tool._depth == 0
-            and not finalize
         )
         if (
             merging_into_active
@@ -439,7 +433,6 @@ async def _drive_body(
         preview_early = await team_preview_before_workers(
             tool,
             plan,
-            finalize=finalize,
             complexity_hint=complexity_hint,
             seed_completed=seed_completed,
             call_idx=call_idx,
@@ -537,7 +530,7 @@ async def _drive_body(
                 has_deps=False,
             )
 
-    # CEO 协调模式：默认非阻塞臂（solo / finalize / depth>0 / 显式 false 由 gate 拦下）。
+    # CEO 协调模式：默认非阻塞臂（depth>0 / 显式 false / checkpoint_after 由 gate 拦下）。
     # 已有活跃协调会话时必须走 try_start（内部 merge），即使本批 coordinate=false。
     if session is None and (coordinate or merging_into_active):
         from agentcore.runtime.coordination.host import try_start_coordination
@@ -547,7 +540,6 @@ async def _drive_body(
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
             coordination=coordination,
@@ -680,7 +672,6 @@ async def _drive_body(
         plan,
         results,
         execution_id=execution_id,
-        finalize=finalize,
         seed_completed=seed_completed,
         session=session,
         call_idx=call_idx,
@@ -695,7 +686,6 @@ async def drive_coordinated(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None = None,
     complexity_hint: str = "standard",
     coordination: str = "none",
@@ -708,7 +698,6 @@ async def drive_coordinated(
         plan,
         execution_id=execution_id,
         seed_completed=seed_completed,
-        finalize=finalize,
         seed_notes=seed_notes,
         complexity_hint=complexity_hint,
         coordination=coordination,

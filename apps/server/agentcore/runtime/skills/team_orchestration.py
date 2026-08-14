@@ -16,10 +16,11 @@ _IR = str(settings.engine_team_gate_investigation_rounds)
 # playbook 降级为形状词汇教学示例（协作优先重设计阶段 2）：listing 仍嵌进 skill，口径改为对照学形状。
 _PLAYBOOK_LISTING = available_playbooks()
 
-# Shared with ``prompt._CEO_CORE_HINT`` — same intensity, no「可选 vs 必先查」对打.
+# Shared with ``prompt._CEO_CORE_HINT``. Intensity must match the core's
+# 「规格已齐 → 立刻派，勿先查」：建站已齐则直接派，禁止本常量写成「建站必查」。
 CONSULT_TEAM_ORCH_BY_SCENE = (
-    "按场面：建站/工具台套 playbook、或拿不准怎么拆 → 必查 `team_orchestration_advanced`；"
-    "常见对比 / 单人落盘 / 提问卡 → 直接做不必查；单人事清楚可 finalize → 可不查"
+    "按场面：拿不准怎么拆 / 跨文件夹 / 绿场切片 / 成文档 / Office → 必查 `team_orchestration_advanced`；"
+    "规格已齐建站、常见对比、单人落盘、提问卡 → 直接派不必查，收口仍回 CEO"
 )
 
 _TEAM_ORCHESTRATION_ADVANCED = """\
@@ -41,7 +42,7 @@ _TEAM_ORCHESTRATION_ADVANCED = """\
 **多屏 UI / 单文件大原型** → 默认 MVP 或同上真两段 / wave1=`form=files`；\
 **禁止**首 grant「完整可玩 N 屏」（桌上档 / `playbook_args` 等结构槽已点「一次做完」除外；禁扫长文）；\
 **规格已齐 ≠ 全量**。\
-单页 / 落地页仍可一人整页（`build_website`）；勿误伤 light+finalize 小活 / 短文落盘。
+单页 / 落地页仍可一人整页（`build_website`）；勿误伤 light 小活 / 短文落盘。
 
 **【根委派切片诚实】**方向已定、本轮边界未钉 → 立刻派但须结构表达切片：默认根多节点手写 tasks / deliverable 钉边界（固定流水线可快捷具名 playbook），\
 **或**单 lead 嵌套扇出（路径 B）；禁无边界整锅。
@@ -241,10 +242,10 @@ score（0–10））——`artifacts` 对账路径存在，`output_format=json` 
 （注意：`result_handling` 只管【上游→下游】注入，不影响回到你手里的内容——后者由 task 措辞\
 决定，见下「广度调查」。）
 - 嵌套委派（lead 下放）——每个 worker **默认**就能再带一层子队（深度上限内自动开、无需声明）；\
-硬顶 `depth≤3`（合法链 CEO→depth1→depth2→depth3 叶子；depth&lt;3 获 `delegate`+`replan`）。\
+硬顶 `depth≤3`（合法链 CEO→depth1→depth2→depth3 叶子；depth&lt;3 获 `delegate`，`replan` 在已有子计划后挂上）。\
 与根侧多节点 DAG **等价合法**（根委派切片诚实路径 B）：根可只派单 lead 交成果级目标·约束·验收；\
 lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `delegate` 补编制再整合（nudge，非硬流程）。\
-豁免可自干：单文件 / 已钉薄壳 / 小修·finalize；整里程碑 M0 不在豁免。\
+豁免可自干：单文件 / 已钉薄壳 / 小修；整里程碑 M0 不在豁免。\
 **禁止**「凡大活必嵌套」；能少则少、勿为委派而委派；拆得清可扁平。\
 （与冷启动 / 成规模摸底「≥2 角并行」并列不打架——后者是根侧扇出纪律。）\
 拆活先想【粒度】，同一摊与本层平铺【二选一】、勿双开：\
@@ -268,9 +269,6 @@ lead 接到成果级且本轮无结构钉成单切片时，**优先**先再 `del
 ③ **交 lead 嵌套（路径 B）**：某一区够大、够自成一摊 → 根只派该区 lead；lead 接到成果级且无结构钉时\
 **优先**先嵌套补编制（同嵌套委派条）；与①②勿双开同职责。仍禁「凡大活必嵌套」；拆得清可扁平、\
 豁免面可自干；禁为编排而编排。
-- 轻量直出：当只派【一个】worker、且这次委派就是整件事的最终交付时，设 `finalize=true`：\
-该 worker 成功后其产出直接作为你的回复呈现，省掉一轮收尾。只留给机械单步；只要可能要据结果\
-继续委派、或一次派了多个 worker，就别设。
 - 协调模式（默认开）：派【≥1 个】worker 时默认进入协调（含单 worker）——`delegate` 立即返回『团队已启动』，\
 团队后台跑，你边看边调（`cancel_worker` 中途终止 / `resolve_escalation` 仲裁阻塞升级 / \
 `update_synthesis` 仅在有语义增量——新中间结论、产出冲突、方向修正——时更新合成草稿；\
@@ -296,10 +294,10 @@ tasks[] 上点名上一批队员的 run_id：让原作者接着干填 `continue_
 （系统写 `prev_execution_id`），不再是把新人塞进上一回合的旧图；纯新任务不传。\
 向用户汇报用「新开一队、接续上一张图」口径，别说成同图追加。\
 同回合再调 `delegate` 并入当前活跃图见上。\
-**`resolve_escalation` 只在协调模式下可用**；无协调 session 时（`finalize` / 嵌套 lead / \
+**`resolve_escalation` 只在协调模式下可用**；无协调 session 时（嵌套 lead / \
 `coordinate=false` / 把关闸开阻塞）升级直达用户，你无法（也不应尝试）用本工具裁决。\
 只需经典阻塞等待（等全队完成再返回）时传 `coordinate=false` 显式退出。\
-同步阻塞只出现在：`finalize`、嵌套 lead、显式 `coordinate=false`、\
+同步阻塞只出现在：显式 `coordinate=false`、嵌套 lead、\
 含 `checkpoint_after` 把关节点且闸开（走阻塞等待，好让把关卡到点弹给用户）——这是预期，\
 别为进协调而去掉把关点。
 - 交付形态（`deliverable.form`，优先用）：产出给用户【看】（回答 / 分析 / 汇报 / 创意文字 / \

@@ -3,6 +3,6 @@
  * `@/components/chat/ResumePrompt` / `./ResumePrompt`.
  *
  * Implementation lives under `./resume/` aligned with hot cards
- * (`PlanReviewCard` / `TeamPreviewCard` / `CheckpointCard` + `ask/`).
+ * (`TeamPreviewCard` / `CheckpointCard` + `ask/`；plan_review 只在拍板卡).
  */
 export { ResumePrompt } from "./resume/ResumePrompt";

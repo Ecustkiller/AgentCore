@@ -5,7 +5,6 @@ import {
   askResolvedOutcome,
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
-  teamPendingMarkerLabel,
   teamPreviewLead,
   teamResolvedOutcome,
 } from "../meta";
@@ -75,18 +74,13 @@ describe("decision meta", () => {
     ).toBe(" · 已排除 2 岗 · 已收紧写盘");
   });
 
-  it("pending marker + resume captions share one table", () => {
-    expect(teamPendingMarkerLabel("delegate", "预计 2 人开工")).toBe(
-      "等你确认 · 确认后才会开工（预计 2 人开工）",
-    );
-    expect(TEAM_PRIMITIVE_META.debate.activeCaption).toBe(
-      "等你确认 · 确认后才会开赛",
-    );
+  it("ask resume captions share one table", () => {
     expect(ASK_INTENT_META.kickoff.activeCaption).toBe("需要你拍板");
     expect(ASK_INTENT_META.kickoff.cta).toBe("提交");
     expect(ASK_INTENT_META.decision.activeCaption).toBe(
       ASK_INTENT_META.kickoff.activeCaption,
     );
+    expect(TEAM_PRIMITIVE_META.debate.resumeCta).toBe("授权开赛");
   });
 
   it("teamPreviewLead prefers wire headline; falls back to headcount", () => {

@@ -1,22 +1,14 @@
 import { TurnFileChangesReview } from "@/components/chat/TurnFileChangesReview";
 import { EmptyHint } from "@/components/files/parts";
-import { Button } from "@/components/ui";
-import { ChangesVersionEntry } from "@/components/workspace/ChangesVersionEntry";
 import { GitChangesSection } from "@/components/workspace/GitChangesSection";
-import { KeepVersionAction } from "@/components/workspace/KeepVersionAction";
 import { useWorkspaceModeState } from "@/components/workspace/WorkspaceModeControl";
-import {
-  type TurnTimelineEntry,
-  type VersionSource,
-  mergeChangesTimeline,
-} from "@/components/workspace/changesTimeline";
-import { useChangesVersions } from "@/components/workspace/useChangesVersions";
 import { useGitRepoStatus } from "@/hooks/useGitRepoStatus";
 import { useLocalTurnBaselineIds } from "@/hooks/useLocalTurnBaselineIds";
 import { useConversationWorkspace } from "@/hooks/useWorkspaces";
 import { hasLocalFiles } from "@/lib/capabilities";
 import { shouldIncludeChangesTurn } from "@/lib/conversationFileChanges";
 import {
+  type FileArtifact,
   fileArtifactsFromExecution,
   fileArtifactsFromProcess,
   mergeArtifacts,
@@ -37,25 +29,18 @@ import { Diff } from "lucide-react";
 import { useEffect, useMemo, useRef } from "react";
 
 /**
- * 右坞常驻「改动」tab 体 —— 双轨：Git SCM（U2/U3）∥ zip 时间轴。
- * tab 一直在（空态由本面板自己如实说明），深链只决定聚焦哪个回合。
+ * 右坞「改动」tab 体 —— 只审本对话 AI 文件改动：回合 diff + 回合基线回滚，
+ * 本机有仓时并排 Git SCM（U2/U3）。用户留存版本不在这里。
  *
- * zip 轨是**一条**倒序时间轴：回合改动、用户留存版本、交接存档穿插在一起——
- * 「改动」与「版本」本就是同一个功能，用户要的是「什么时候变成什么样、怎么回去」。
- * 云端工作区的版本走快照 API、本机工作区的走盘上版本区，在轨上是同一种条目
- * （见 `changesTimeline.ts`）。自动备份与回合基线不单列（回合条目已代表那个时间点）。
+ * tab 出现条件由外层决定；深链只决定聚焦哪个回合。
  */
 
-/** 版本轨没拉到时的诚实兜底：别让「暂无改动」冒充「确实没有版本」。 */
-function VersionsUnavailableNotice({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span>版本没能加载出来，这里只有本对话的回合改动。</span>
-      <Button variant="ghost" onClick={onRetry}>
-        重试
-      </Button>
-    </div>
-  );
+interface TurnEntry {
+  id: string;
+  messageId: string;
+  label: string;
+  artifacts: FileArtifact[];
+  at: string;
 }
 
 /**
@@ -71,7 +56,7 @@ function AutoBackupFailedNotice({
   if (!failed) return null;
   return (
     <div className="shrink-0 border-b border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-      最近一次自动备份失败。回合已正常完成；可手动留版本，或等下次改文件回合重试。
+      最近一次自动备份失败。回合已正常完成，下次改文件的回合会再试。
     </div>
   );
 }
@@ -101,31 +86,8 @@ export function ConversationChangesPanel() {
   );
   const showGitTrack = gitTrackHasWork(gitStatus);
 
-  // 版本住在哪由工作区决定：云端走快照 API，本机走盘上版本区（与回合基线同一个内部区）。
-  const isLocalWorkspace =
-    convWs?.location === "local" || !!wsState?.effective.isLocal;
-  const localVersionRootId =
-    convWs?.location === "local" ? convWs.rootId : null;
-  const versionSource = useMemo<VersionSource | null>(() => {
-    if (!conversationId) return null;
-    if (!isLocalWorkspace) return { origin: "cloud", conversationId };
-    // 够不到盘（web 运行时 / 根还没解析出来）就没有版本轨，别拿云端快照冒充本机版本。
-    if (!hasLocalFiles() || !localVersionRootId) return null;
-    return {
-      origin: "local",
-      target: { rootId: localVersionRootId, subpath: workspaceSubpath },
-    };
-  }, [conversationId, isLocalWorkspace, localVersionRootId, workspaceSubpath]);
-  const {
-    entries: versions,
-    failed: versionsFailed,
-    reload: reloadVersions,
-  } = useChangesVersions(versionSource);
-  // 项目工作区（folder:*）下各会话共用一份版本历史（云端按存储键、本机按盘上目录），要标注共享。
-  const versionsShared = (convWs?.wsId ?? "").startsWith("folder:");
-
-  const turns = useMemo((): TurnTimelineEntry[] => {
-    const out: TurnTimelineEntry[] = [];
+  const turns = useMemo((): TurnEntry[] => {
+    const out: TurnEntry[] = [];
     let turnIndex = 0;
     for (const msg of messages) {
       if (msg.role !== "assistant") continue;
@@ -148,7 +110,6 @@ export function ConversationChangesPanel() {
         continue;
       }
       out.push({
-        kind: "turn",
         id: messageId,
         messageId,
         label: `回合 ${turnIndex}`,
@@ -159,7 +120,6 @@ export function ConversationChangesPanel() {
     // 聚焦回合尚未出现在 messages（极端时序）时仍给一个入口。
     if (focusMessageId && !out.some((t) => t.messageId === focusMessageId)) {
       out.push({
-        kind: "turn",
         id: focusMessageId,
         messageId: focusMessageId,
         label: "本回合",
@@ -170,10 +130,8 @@ export function ConversationChangesPanel() {
     return out;
   }, [messages, byId, focusMessageId, baselineMessageIds]);
 
-  const timeline = useMemo(
-    () => mergeChangesTimeline(turns, versions),
-    [turns, versions],
-  );
+  // 倒序：最近回合在上（原先 zip 时间轴也是倒序，只是不再穿插版本）。
+  const timeline = useMemo(() => [...turns].reverse(), [turns]);
 
   const focusRef = useRef<HTMLElement | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: timeline is an intentional re-run key after list lands
@@ -209,21 +167,9 @@ export function ConversationChangesPanel() {
           <div className="space-y-1">
             <p className="text-sm text-muted-foreground">暂无改动</p>
             <p className="text-xs text-muted-foreground">
-              {versionSource
-                ? "可为当前工作区留一个版本，之后随时回到这里。"
-                : "本对话尚无 AI 文件改动，也没有可恢复的回合基线。"}
+              本对话尚无 AI 文件改动，也没有可恢复的回合基线。
             </p>
           </div>
-          {versionSource ? (
-            <KeepVersionAction
-              emphasis
-              source={versionSource}
-              onCreated={() => void reloadVersions()}
-            />
-          ) : null}
-          {versionsFailed ? (
-            <VersionsUnavailableNotice onRetry={() => void reloadVersions()} />
-          ) : null}
         </div>
       </div>
     );
@@ -245,35 +191,11 @@ export function ConversationChangesPanel() {
         <div className="space-y-3" data-testid="changes-timeline">
           {showGitTrack ? (
             <p className="px-0.5 text-xs text-muted-foreground">
-              改动与版本（zip 轨 · 与 Git 正交）
+              本对话改动（与 Git 正交）
             </p>
           ) : null}
 
-          {versionSource ? (
-            <div className="flex justify-end">
-              <KeepVersionAction
-                source={versionSource}
-                onCreated={() => void reloadVersions()}
-              />
-            </div>
-          ) : null}
-
-          {versionsFailed ? (
-            <VersionsUnavailableNotice onRetry={() => void reloadVersions()} />
-          ) : null}
-
           {timeline.map((entry) => {
-            if (entry.kind !== "turn") {
-              return versionSource ? (
-                <ChangesVersionEntry
-                  key={entry.id}
-                  source={versionSource}
-                  entry={entry}
-                  shared={versionsShared}
-                  onChanged={() => void reloadVersions()}
-                />
-              ) : null;
-            }
             const focused = entry.messageId === focusMessageId;
             return (
               <section

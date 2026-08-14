@@ -12,14 +12,22 @@ from agentcore.runtime.skills.deep_multi_lens_research import (
     _MULTI_LENS_COURTROOM_TRIGGERS_JOINED,
 )
 from agentcore.runtime.skills.delegate_checkpoint import _DELEGATE_CHECKPOINT
-from agentcore.runtime.skills.long_form_writing import _LONG_FORM_WRITING
+from agentcore.runtime.skills.long_form_writing import (
+    _LONG_FORM_LANDING,
+    _LONG_FORM_WRITING,
+)
 from agentcore.runtime.skills.product_help import (
     _PRODUCT_BUG_TRIAGE,
     _PRODUCT_HELP,
     _PRODUCT_HELP_FAQ,
     _PRODUCT_HELP_MAP,
 )
-from agentcore.runtime.skills.registry import SkillRegistry, SystemSkill
+from agentcore.runtime.skills.registry import (
+    AUDIENCE_CEO_ONLY,
+    AUDIENCE_WORKER_ONLY,
+    SkillRegistry,
+    SystemSkill,
+)
 from agentcore.runtime.skills.revising_a_product import _REVISING_A_PRODUCT
 from agentcore.runtime.skills.team_orchestration import (
     _TEAM_ORCHESTRATION_ADVANCED,
@@ -58,6 +66,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "入口点名再查 product_help_map，FAQ 再查 product_help_faq"
         ),
         body=_PRODUCT_HELP,
+        audience=AUDIENCE_CEO_ONLY,
     ),
     SystemSkill(
         name="product_help_map",
@@ -66,6 +75,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "→ 入口地图短答；桌面可附手册深链，手机只短答勿承诺深链"
         ),
         body=_PRODUCT_HELP_MAP,
+        audience=AUDIENCE_CEO_ONLY,
     ),
     SystemSkill(
         name="product_help_faq",
@@ -75,6 +85,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "→ 自含短答；桌面可附对应手册节"
         ),
         body=_PRODUCT_HELP_FAQ,
+        audience=AUDIENCE_CEO_ONLY,
     ),
     SystemSkill(
         name="product_bug_triage",
@@ -83,6 +94,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "→ 四类结论 + 复现要点；FAQ 自助仍走 product_help*；禁 L4/跨用户/假装读服务端日志"
         ),
         body=_PRODUCT_BUG_TRIAGE,
+        audience=AUDIENCE_CEO_ONLY,
     ),
     SystemSkill(
         name="build_website",
@@ -118,6 +130,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
             "调查批确认修默认乙（换 title≠换职能；禁再套 repair_code 冷开）"
         ),
         body=_REVISING_A_PRODUCT,
+        audience=AUDIENCE_CEO_ONLY,
     ),
     SystemSkill(
         name="ask_user_kickoff",
@@ -154,13 +167,9 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="verify_and_fix",
         summary="完成代码改动后验证并修复测试失败（test_run → 读上下文 → 修代码 → 重试）",
         body=_VERIFY_AND_FIX,
-        # Gated on ``delegate``, not ``test_run``: this skill guides the DELEGATED dev
-        # loop (a worker runs test_run + str_replace), and test_run is now a worker-only
-        # code-execution tool (GRANTABLE), so it never appears in the CEO's tool set.
-        # Since consult is CEO-only, gating on the worker-only test_run would make
-        # the skill un-advertisable (dead). ``delegate`` is the CEO's real precondition —
-        # it can act on this guidance by delegating — mirroring long_form_writing.
-        requires_tools=("delegate",),
+        # Consult is CEO+worker. Body is the worker loop; CEO still consults to brief.
+        # Do not gate on ``delegate`` (would hide it from workers) or ``test_run``
+        # (CEO has no test_run → skill would vanish from the supervisor catalog).
     ),
     SystemSkill(
         name="long_form_writing",
@@ -171,6 +180,16 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         ),
         body=_LONG_FORM_WRITING,
         requires_tools=("delegate",),
+        audience=AUDIENCE_CEO_ONLY,
+    ),
+    SystemSkill(
+        name="long_form_landing",
+        summary=(
+            "超长单文档落盘：主路径一次完整 file_write；可选骨架填空；成篇后 str_replace；"
+            "MD 禁 write_section；manifest 即验真，勿回读自产物"
+        ),
+        body=_LONG_FORM_LANDING,
+        audience=AUDIENCE_WORKER_ONLY,
     ),
     SystemSkill(
         name="deep_multi_lens_research",

@@ -159,7 +159,7 @@ describe("syncConversationFollow (对话级订阅)", () => {
     close();
   });
 
-  it("气泡还在但 isGenerating 已被 recovery 收尾：段首标记照样 clear-then-fold", async () => {
+  it("气泡还在但 isGenerating 已被 recovery 收尾：段首标记照样原位重置", async () => {
     const { response, push, close } = sseStream();
     vi.stubGlobal(
       "fetch",
@@ -199,11 +199,11 @@ describe("syncConversationFollow (对话级订阅)", () => {
 
     // 本地已有这一轮的上下文（提问 + 气泡都在）→ 不必回补消息窗。
     expect(loadLatestWindow).not.toHaveBeenCalled();
-    // 半截正文的那条气泡已被清掉，整段重放折进全新气泡，不会叠成两份。
+    // 半截正文原位清空，气泡 id 保持，不会叠成两份、也不会换泡重挂 Markdown。
     const msgs = getRuntime(CID).messages;
     expect(msgs.map((m) => m.id)).toHaveLength(2);
     expect(msgs[0].id).toBe("u0");
-    expect(msgs[1].id).not.toBe("a0");
+    expect(msgs[1].id).toBe("a0");
     expect(msgs[1].content).toBe("");
     expect(dispatched).toEqual([
       "message_start",
@@ -261,7 +261,7 @@ describe("syncConversationFollow (对话级订阅)", () => {
     const ids = getRuntime(CID).messages.map((m) => m.id);
     expect(ids[0]).toBe("u0");
     expect(ids).toHaveLength(2);
-    expect(ids).not.toContain("a0");
+    expect(ids).toContain("a0");
     expect(ids).not.toContain("a1");
     expect(dispatched).toEqual(["message_start", "content_delta"]);
     close();

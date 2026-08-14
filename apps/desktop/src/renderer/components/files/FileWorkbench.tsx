@@ -370,7 +370,7 @@ export function FileWorkbench({
   // 对话页「记忆已更新」卡片深链跳来：打开目标记忆叶子的 tab（记忆更新对话内可见 §1.6）。每个
   // focusKey（导航键）只应用一次。记忆源与工作区列表无关，故无需等 workspaces 就绪即可打开；
   // 文件夹画像叶子的双栏编辑器会在列表到位后自行解析文件夹名。内联开 tab 逻辑（与 openFile
-  // 同义）避免依赖在其后定义的 openFile。文件夹叶子额外展开对应文件夹 +「记忆」节点；主题叶再展「主题」。
+  // 同义）避免依赖在其后定义的 openFile。文件夹叶子额外展开对应文件夹 +「本文件夹设定」节点；主题叶再展「主题」。
   useEffect(() => {
     if (!openMemoryLeaf || !focusKey) return;
     if (appliedMemoryLeafRef.current === focusKey) return;

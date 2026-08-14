@@ -10,16 +10,10 @@ vi.mock("@/lib/clientBuildInfo", () => ({
 }));
 
 import { hasAutoUpdater } from "@/lib/capabilities";
-import {
-  clientReleaseChannel,
-  desktopDownloadUrlForChannel,
-} from "@/lib/releaseChannel";
 import { useUpdatesStore } from "@/stores/updates";
 import { UpdateAvailableDialog } from "../UpdateAvailableDialog";
 
 const hasAutoUpdaterMock = vi.mocked(hasAutoUpdater);
-
-const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
 beforeEach(() => {
   hasAutoUpdaterMock.mockReturnValue(true);
@@ -56,7 +50,7 @@ describe("UpdateAvailableDialog", () => {
     expect(screen.getByText("发现新版本 0.7.0")).toBeTruthy();
     expect(screen.getByText(/当前版本 0\.6\.1/)).toBeTruthy();
     expect(screen.getByText("重要修复")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "立即更新" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下载安装包" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "稍后提醒" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "跳过此版本" })).toBeTruthy();
   });
@@ -74,15 +68,15 @@ describe("UpdateAvailableDialog", () => {
     expect(screen.getByText("修复与体验改进")).toBeTruthy();
   });
 
-  it("calls download on 立即更新", () => {
+  it("calls download on 下载安装包", () => {
     const download = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({ download });
     render(<UpdateAvailableDialog />);
-    fireEvent.click(screen.getByRole("button", { name: "立即更新" }));
+    fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
     expect(download).toHaveBeenCalled();
   });
 
-  it("autoInstallCapable:false replaces download CTA with channel download-page link", () => {
+  it("autoInstallCapable:false still offers in-app installer download", () => {
     const download = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({
       download,
@@ -94,13 +88,9 @@ describe("UpdateAvailableDialog", () => {
       },
     });
     render(<UpdateAvailableDialog />);
-    expect(screen.getByText(/此版本需手动下载安装/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
-    const link = screen.getByRole("link", { name: "前往下载页" });
-    expect(link.getAttribute("href")).toBe(downloadPageUrl);
-    expect(link.getAttribute("target")).toBe("_blank");
-    expect(download).not.toHaveBeenCalled();
-    // Soft dismiss actions remain.
+    expect(screen.queryByText(/此版本需手动下载安装/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "下载安装包" }));
+    expect(download).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "稍后提醒" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "跳过此版本" })).toBeTruthy();
   });
@@ -122,7 +112,7 @@ describe("UpdateAvailableDialog", () => {
     render(<UpdateAvailableDialog />);
     expect(screen.queryByText(/下载进度/)).toBeNull();
     expect(screen.queryByRole("button", { name: "后台下载" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "立即更新" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "下载安装包" })).toBeNull();
   });
 
   it("force gate still shows download progress in dialog", () => {
@@ -155,7 +145,7 @@ describe("UpdateAvailableDialog", () => {
   it("hides skip / later under force-update hard gate", () => {
     useUpdatesStore.setState({ outdatedMinVersion: "0.6.5" });
     render(<UpdateAvailableDialog />);
-    expect(screen.getByRole("button", { name: "立即更新" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下载安装包" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "稍后提醒" })).toBeNull();
     expect(screen.queryByRole("button", { name: "跳过此版本" })).toBeNull();
     expect(screen.queryByRole("button", { name: "关闭" })).toBeNull();

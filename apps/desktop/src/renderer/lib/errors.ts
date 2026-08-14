@@ -433,7 +433,7 @@ type StructuredErr =
  * Default ON: empty content + any structured error source, or empty + failure
  * finishReason. Short silent exemption list:
  * - user-initiated stop (cancelled / TURN_CANCELLED) — chat timeline omits face
- * - paused / ask when a dedicated interaction card already owns the UI
+ * - paused (always silent, card or not) — structured error still surfaces
  *
  * Copy tiers: structured message → code product sentence → generic fallback.
  */
@@ -506,13 +506,7 @@ export function resolveAssistantFailureFace(input: {
       message: PRODUCT_COPY_BY_CODE.LLM_EMPTY_RESPONSE,
     };
   }
-  if (fr === "paused") {
-    if (input.hasDedicatedPauseOrAskUi) return null;
-    return {
-      code: "TURN_INCOMPLETE",
-      message: GENERIC_EMPTY_FAILURE_MESSAGE,
-    };
-  }
+  if (fr === "paused") return null;
   return null;
 }
 

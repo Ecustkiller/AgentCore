@@ -1,10 +1,16 @@
-"""回合内工具结果清理 (clear_tool_uses): collapse OLD re-fetchable tool results.
+"""回合内工具结果清理 (clear_tool_uses): collapse OLD tool results in the LLM view.
 
-Within one ReAct run a long worker re-reads many files / pages; every round re-sends
-all of those tool results to the model, paying their tokens again and burying the
-recent signal under stale reads (context rot). This module collapses the OLD,
-read-only, re-fetchable results into a compact, stable pointer so the model still
-knows the call happened (and can re-issue it) without carrying the full body.
+Within one ReAct run a long worker re-reads many files / pages and may also pile
+``host_shell`` / ``terminal`` stdout; every round re-sends those bodies. This module
+collapses OLD results into a compact, stable pointer so the model still knows the
+call happened without carrying the full body.
+
+Two families, **independent** keep-windows (do not share ``keep_recent``; do not
+put exec tools into ``investigation_tools`` — that set also drives idle-governance):
+
+- Investigation (read-only, re-fetchable): pointer invites a fresh call.
+- Exec output (``host_shell`` / ``terminal``): pointer forbids re-run-to-recover.
+  ``code_execute`` / ``test_run`` stay verbatim.
 
 Design — a PURE projection applied at request-assembly time only (``build_request``),
 NOT a mutation of the canonical window:
@@ -21,12 +27,10 @@ NOT a mutation of the canonical window:
   region therefore remains cache-hittable; only the moving boundary near the tail
   (which re-caches every round anyway) misses.
 
-What is cleared = read-only re-fetchable tool results (the run's ``investigation_tools``
-— NEVER-approval FILESYSTEM / SEARCH / RESEARCH) that have fallen out of the most
-recent ``keep_recent`` window AND are at least ``min_chars`` long. Never cleared:
-side-effecting / non-re-fetchable results (``code_execute`` / ``file_write`` / …),
-interaction results, injected user steers (nudge / reflection / circuit breaker),
-assistant / system messages.
+Investigation clear = the run's ``investigation_tools`` (NEVER + FILESYSTEM /
+SEARCH / RESEARCH) past ``keep_recent`` and ≥ ``min_chars``. Exec clear =
+``EXEC_OUTPUT_CLEAR_TOOLS`` on a separate pass. Never cleared: ``code_execute`` /
+``test_run`` / ``file_write`` / interaction cards / steers / assistant / system.
 
 R1 (file_read): cleared ``file_read`` results may append a deterministic structural
 digest (no LLM). When a path has zero verbatim bodies left in the projected window,
@@ -43,9 +47,21 @@ from dataclasses import replace
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.tools.protocol import ToolContext
 
-# Argument keys, in priority order, that identify WHICH read-only call was cleared, so
-# the pointer names the specific file / query / url and the model can re-issue it.
-_HINT_KEYS = ("path", "file_path", "query", "url", "pattern")
+# Argument keys, in priority order, that identify WHICH call was cleared.
+_HINT_KEYS = (
+    "path",
+    "file_path",
+    "query",
+    "url",
+    "pattern",
+    "process_id",
+    "command",
+    "subcommand",
+)
+_HINT_COMMAND_MAX = 80
+
+# Independent of ``investigation_tools`` (governance / 空转). Name allowlist only.
+EXEC_OUTPUT_CLEAR_TOOLS = frozenset({"host_shell", "terminal"})
 
 _CLEARED_PREFIX = "[已清理"
 
@@ -70,7 +86,10 @@ def _key_arg(arguments: str) -> str:
     for key in _HINT_KEYS:
         value = data.get(key)
         if isinstance(value, str) and value:
-            return f"{key}={value!r}"
+            shown = value
+            if key == "command" and len(shown) > _HINT_COMMAND_MAX:
+                shown = shown[: _HINT_COMMAND_MAX - 1] + "…"
+            return f"{key}={shown!r}"
     return ""
 
 
@@ -88,14 +107,28 @@ def _path_from_arguments(arguments: str) -> str:
     return raw.strip().replace("\\", "/")
 
 
-def cleared_placeholder(tool_name: str, arguments: str, original_len: int) -> str:
+def cleared_placeholder(
+    tool_name: str,
+    arguments: str,
+    original_len: int,
+    *,
+    already_executed: bool = False,
+) -> str:
     """The stable pointer that replaces a cleared tool result's content.
 
     Deterministic in its inputs (no time / counters), so the same cleared result
     yields byte-identical bytes on every round — the prefix-cache invariant.
+
+    ``already_executed``: exec-family stdout (host_shell / terminal). The command
+    already ran; the pointer must not invite a re-issue just to recover text.
     """
     hint = _key_arg(arguments)
     head = f"{tool_name}({hint})" if hint else tool_name
+    if already_executed:
+        return (
+            f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）已从上下文窗口移除以节省 token；"
+            "该调用已发生，勿仅为回看而重跑（长驻新日志用 terminal read）。]"
+        )
     return (
         f"{_CLEARED_PREFIX}: {head} 的输出（{original_len} 字符）已从上下文窗口移除以节省 token；"
         "如仍需要可重新调用该工具获取。]"
@@ -136,15 +169,23 @@ def cleared_tool_content(
     *,
     min_chars: int,
     summary_max_chars: int,
+    already_executed: bool = False,
 ) -> str:
     """Pointer (+ optional ``file_read`` digest) replacing a cleared tool body.
 
     Hard invariant: ``len(result) < min_chars`` so the stub is never re-cleared
-    (idempotent projection / prefix-cache).
+    (idempotent projection / prefix-cache). Exec-family stubs never append a digest.
     """
     body = original_content or ""
-    pointer = cleared_placeholder(tool_name, arguments, len(body))
-    if tool_name != "file_read" or summary_max_chars <= 0 or min_chars <= 0:
+    pointer = cleared_placeholder(
+        tool_name, arguments, len(body), already_executed=already_executed
+    )
+    if (
+        already_executed
+        or tool_name != "file_read"
+        or summary_max_chars <= 0
+        or min_chars <= 0
+    ):
         return pointer
     room = min_chars - len(pointer) - 1  # newline between pointer and digest
     if room <= 0:
@@ -167,8 +208,11 @@ def project_cleared_window(
     keep_recent: int,
     min_chars: int,
     summary_max_chars: int = 0,
+    already_executed: bool = False,
 ) -> list[LLMMessage]:
-    """Return ``messages`` with old re-fetchable tool results collapsed to pointers.
+    """Return ``messages`` with old clearable tool results collapsed to pointers.
+
+    ``already_executed`` selects the exec-family pointer (no re-fetch invite).
 
     Returns the SAME list object unchanged when nothing qualifies (a short turn with
     few reads never triggers clearing), so callers can cheaply detect a no-op with
@@ -228,6 +272,7 @@ def project_cleared_window(
                         message.content or "",
                         min_chars=min_chars,
                         summary_max_chars=summary_max_chars,
+                        already_executed=already_executed,
                     ),
                     tool_call_id=message.tool_call_id,
                 )

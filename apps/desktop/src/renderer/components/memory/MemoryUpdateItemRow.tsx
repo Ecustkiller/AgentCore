@@ -15,7 +15,7 @@ import { useState } from "react";
 
 /**
  * One applied memory change (新增/更新/移除 + 目标叶子 + 正文), shared by the in-conversation
- * 「记忆已更新」card ({@link MemoryUpdateCard}) and the「AI 记忆」editor's跨对话「最近更新」feed
+ * 「记忆已更新」card ({@link MemoryUpdateCard}) and the files-page「最近更新」feed
  * ({@link MemoryUpdatesView}) — one source of truth for how a change reads, so the two
  * surfaces never drift (Agent记忆与知识系统 §1.6).
  *
@@ -366,7 +366,7 @@ export function MemoryUpdateItemRow({
         <button
           type="button"
           onClick={() => onOpenLeaf(item.target, item.projectId)}
-          title={`在「AI 记忆」中打开${item.file}`}
+          title={`在设定中打开${item.file}`}
           className="group flex w-full items-start gap-2 text-left"
         >
           <span className={`shrink-0 ${statusPillInline[meta.tone]}`}>

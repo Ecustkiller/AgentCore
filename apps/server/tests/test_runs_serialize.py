@@ -524,19 +524,14 @@ def test_plan_json_round_trips_late_bound_placeholder_node():
     assert b.depends_on == ["a"]
 
 
-def test_plan_json_round_trips_finalize_batch_marker():
-    # 单人直出：resume 折回同一张图时 worker 的身份口径不能变，所以收口批标记随快照走。
-    # 缺省批不写这个键（旧快照 / 既有 golden 字节不变）。
-    solo = RunPlan(nodes=[RunSpec(run_id="a", task="改一行", role="工程师")], finalize=True)
-    raw = plan_to_json(solo)
-    assert raw["finalize"] is True
-    restored = plan_from_json(raw)
-    assert restored.finalize is True
-    assert restored.solo_direct_answer() is True
-
+def test_plan_json_ignores_legacy_finalize_key():
+    """旧快照若含 finalize 键：反序列化忽略，写出也不再带该键。"""
     plain = RunPlan(nodes=[RunSpec(run_id="a", task="改一行", role="工程师")])
-    assert "finalize" not in plan_to_json(plain)
-    assert plan_from_json(plan_to_json(plain)).solo_direct_answer() is False
+    raw = plan_to_json(plain)
+    assert "finalize" not in raw
+    restored = plan_from_json({**raw, "finalize": True})
+    assert "finalize" not in plan_to_json(restored)
+    assert not hasattr(restored, "finalize") or getattr(restored, "finalize", None) is None
 
 
 def test_spec_from_json_tolerates_unknown_and_missing_keys():

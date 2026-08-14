@@ -14,7 +14,7 @@ import {
 } from "@/services/messages";
 import { loadCachedConversation } from "@/services/offlineCache";
 import { loadRecovery } from "@/services/resume";
-import { runHydrateAttachSettle } from "@/services/turns";
+import { scheduleHydrateAttachSettle } from "@/services/turns";
 import {
   type MemoryUpdate,
   type Message,
@@ -155,20 +155,15 @@ export function TurnDetailPage() {
             }
           }
         }
-        // Recovery then attach in background (slice-owned — still kick after navigate-away).
-        const recovery = await recoveryLoaded;
-        void runHydrateAttachSettle(conversationId, recovery);
-        if (cancelled) return;
-        setHydratePhase("ready");
+        if (!cancelled) setHydratePhase("ready");
+        scheduleHydrateAttachSettle(conversationId, recoveryLoaded);
       } catch {
         // Align with ConversationPage: offline cache, else explicit error (no silent blank).
         if (
           getRuntime(conversationId).messages.length > 0 ||
           getRuntime(conversationId).isGenerating
         ) {
-          const recovery = await recoveryLoaded;
-          // Slice-owned observation pump — kick even if this page effect cancelled.
-          void runHydrateAttachSettle(conversationId, recovery);
+          scheduleHydrateAttachSettle(conversationId, recoveryLoaded);
           if (!cancelled) setHydratePhase("ready");
         } else {
           const cached = await loadCachedConversation(conversationId);
@@ -193,13 +188,10 @@ export function TurnDetailPage() {
                 }
               }
             }
-            const recovery = await recoveryLoaded;
-            void runHydrateAttachSettle(conversationId, recovery);
+            scheduleHydrateAttachSettle(conversationId, recoveryLoaded);
             if (!cancelled) setHydratePhase("ready");
           } else if (!warm) {
-            // Still try recovery attach (list running indicator) even when UI errors.
-            const recovery = await recoveryLoaded;
-            void runHydrateAttachSettle(conversationId, recovery);
+            scheduleHydrateAttachSettle(conversationId, recoveryLoaded);
             if (!cancelled) setHydratePhase("error");
           }
         }

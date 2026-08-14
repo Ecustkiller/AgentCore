@@ -187,8 +187,8 @@ def _apply_cutoff_reasons(
 
 def _registry_with(base: ToolRegistry, *extra: Tool) -> ToolRegistry:
     """A per-worker registry = the shared team tools + the worker's own extra tools
-    (its nested ``delegate`` and the companion ``replan`` that supervises that
-    delegate's sub-plan). Returns a fresh registry; the shared ``base`` is never
+    (opening: nested ``delegate``; companion ``replan`` is promoted later once a
+    sub-plan exists). Returns a fresh registry; the shared ``base`` is never
     mutated (it backs every worker in the team and must stay delegate-free for leaf
     workers)."""
     registry = ToolRegistry()

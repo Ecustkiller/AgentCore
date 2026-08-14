@@ -87,10 +87,12 @@ async def test_run_git_spawns_with_optional_locks_disabled(
 
     repo = _init_repo(tmp_path / "repo")
     captured: list[dict[str, str]] = []
+    captured_stdin: list[object] = []
     real_exec = asyncio.create_subprocess_exec
 
     async def _capture(*args: Any, **kwargs: Any):
         captured.append(dict(kwargs.get("env") or {}))
+        captured_stdin.append(kwargs.get("stdin"))
         return await real_exec(*args, **kwargs)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", _capture)
@@ -99,6 +101,9 @@ async def test_run_git_spawns_with_optional_locks_disabled(
     assert captured
     assert captured[0]["GIT_OPTIONAL_LOCKS"] == "0"
     assert captured[0]["GIT_TERMINAL_PROMPT"] == "0"
+    # Sidecar stdin is the JSON-RPC pipe; inheriting it stalls git until timeout.
+    assert captured_stdin
+    assert captured_stdin[0] is asyncio.subprocess.DEVNULL
 
 
 def _run_git(cwd: Path, *args: str) -> None:

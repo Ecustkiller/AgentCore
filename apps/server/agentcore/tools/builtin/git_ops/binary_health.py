@@ -80,6 +80,7 @@ async def probe_git_binary_at_startup() -> None:
         proc = await asyncio.create_subprocess_exec(
             "git",
             "--version",
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )

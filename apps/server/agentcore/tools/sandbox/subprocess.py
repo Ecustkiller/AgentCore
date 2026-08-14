@@ -316,7 +316,11 @@ def _execute_blocking(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            stdin=subprocess.PIPE if stdin_bytes is not None else None,
+            # Sidecar stdin is the JSON-RPC pipe. Inherit it and a child that
+            # never reads stdin can still stall until the probe/run timeout
+            # (same reason desktop ``git_run`` uses stdio ignore, and desktop
+            # ``execute`` always allocates a fresh pipe instead of inheriting).
+            stdin=subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL,
             cwd=cwd,
             env=env,
             **_new_group_kwargs(),

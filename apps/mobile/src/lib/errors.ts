@@ -142,7 +142,8 @@ export function emptyChatCopy(): {
 /**
  * Visible notice for an empty assistant bubble that finished abnormally.
  * Default ON for failure finishes (error / unproductive / degraded / interrupted);
- * cancelled stays silent (user stop). Matches desktop resolveAssistantFailureFace.
+ * cancelled / paused stay silent (user stop / checkpoint pause). Matches desktop
+ * resolveAssistantFailureFace for hard-failure faces; paused is not a failure.
  */
 export function emptyFailureNotice(
   finishReason: string | null | undefined,
@@ -152,7 +153,6 @@ export function emptyFailureNotice(
     return "工具连续无有效进展或参数无效，请重试。";
   if (finishReason === "degraded") return "模型返回空内容，请重试。";
   if (finishReason === "interrupted") return "已中断。直接发送下一条即可重试。";
-  if (finishReason === "paused") return "本轮未能完成，请重试。";
   return null;
 }
 
@@ -173,7 +173,7 @@ export function emptyFailureVisibleNotice(
 /**
  * ChatPage live/history gate for the hard-failure red card (对齐桌面 displayError).
  * - Prefer structured `errorMessage` even when content is non-empty (半成品 + 挂掉).
- * - Empty body → {@link emptyFailureNotice} (`error` / `unproductive`).
+ * - Empty body → {@link emptyFailureNotice} (`error` / `unproductive`); `paused` is silent.
  * - Body + `finishReason=error` + no payload → synthesize (砍顶栏灰标后禁止静默).
  * - `skip` (streaming / live mid-turn) → null.
  */

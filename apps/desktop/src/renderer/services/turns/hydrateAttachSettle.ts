@@ -2,7 +2,9 @@
  * Open-time attach/settle after message-window fetch (P4 unified hydrate).
  *
  * Decoupled from message-window adopt and from hydrate UI ready: ConversationPage
- * reveals after adopt (+ recovery await); this runs in the background (void).
+ * reveals after adopt (message window / cache); recovery+attach stay eager in the
+ * background via {@link scheduleHydrateAttachSettle} and must not cover already-adopted
+ * text. `loadRecovery` never rejects.
  * Warm reopen keeps the in-memory slice (adopt skips overwrite) but still runs
  * recovery-driven attach/settle so a detached live / ghost running assistant is
  * not left stuck in a fake generating state.
@@ -26,6 +28,16 @@ import {
   settleOrphanEmptyAssistants,
 } from "./recovery";
 import { attachSidecarTurn } from "./sidecarAttach";
+
+/** Kick attach/settle when recovery lands. Does not delay overlay reveal. */
+export function scheduleHydrateAttachSettle(
+  conversationId: string,
+  recoveryLoaded: Promise<ConversationRecovery>,
+): void {
+  void recoveryLoaded.then((recovery) => {
+    void runHydrateAttachSettle(conversationId, recovery);
+  });
+}
 
 /**
  * Branch on recovery facts and rejoin / settle / project unsynced.

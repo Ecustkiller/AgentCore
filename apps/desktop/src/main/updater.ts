@@ -1,51 +1,54 @@
+import { join } from "node:path";
 import {
   UPDATER_CHANNELS,
   type UpdaterPhase,
   type UpdaterStatus,
 } from "@shared/updater-contract";
-import { net, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
+import { net, shell, type BrowserWindow, app, ipcMain, powerMonitor } from "electron";
 import { type UpdateInfo, autoUpdater } from "electron-updater";
+import {
+  downloadHttpToFile,
+  fetchLatestDesktopJson,
+} from "./installer-download";
+import {
+  desktopLatestJsonUrl,
+  releaseChannelFromDefine,
+  resolveInstallerArtifact,
+} from "./installer-feed";
 import { logDesktop } from "./log-service";
 import { isMacAutoUpdateInstallCapable } from "./mac-auto-update-capable";
+
+declare const __DESKTOP_RELEASE_CHANNEL__: string | undefined;
 
 // 检查频率（发布与门禁.md §7.6）：启动 + 每 4h + 系统唤醒。
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 /** download-progress 落盘节流，避免刷盘。 */
 const PROGRESS_LOG_MIN_MS = 1000;
-/** UI 速度用近期窗口，避免 electron-updater 全程平均被续传冲高。 */
+/** UI 速度用近期窗口，避免全程平均被续传冲高。 */
 const SPEED_SAMPLE_MIN_MS = 1500;
 /** 单样本速度上限：挡住续传首包把已有字节算进瞬时速率的离谱尖峰。 */
 const SPEED_CAP_BPS = 50 * 1024 * 1024;
 
-/** 主进程拒绝自动下载时推给 renderer 的文案（未签名 mac 等）。 */
-const MANUAL_INSTALL_REQUIRED_MESSAGE =
-  "当前安装包无法自动更新，请前往下载页手动安装";
-
 type CheckTrigger = "startup" | "interval" | "resume" | "manual";
 
 let mainWindow: BrowserWindow | null = null;
-/** 与 phase 正交的本机自动安装能力；每次 push 都附带。默认 true，探测后校正。 */
+/** 与 phase 正交的本机 Squirrel 安装能力；每次 push 都附带。不再拦截安装包下载。 */
 let autoInstallCapable = true;
 let status: UpdaterStatus = { phase: "idle", autoInstallCapable: true };
-// 下载中的目标版本：download-progress 事件不带版本，从 update-available 暂存补上。
 let pendingVersion = "";
 let pendingSizeBytes: number | null = null;
+/** 已下载安装包的本机路径；不下发 renderer。 */
+let pendingInstallerPath: string | null = null;
 let intervalTimer: ReturnType<typeof setInterval> | null = null;
-// 云 API 基址，由 renderer 经 `configure` 传入（它是 API 地址单一源）；null = 尚未配置。
 let apiBaseUrl: string | null = null;
-// 检查调度只起一次——在收到 API 基址后启动，确保首检也过远程熔断闸。
 let scheduleStarted = false;
-// 防重复点「立即更新」并发起多次 downloadUpdate。
 let downloadInFlight = false;
-/** 最近一次 runCheck 起点（ms），供 phase / error 算 sinceCheckMs。 */
 let checkStartedAt = 0;
 let lastCheckTrigger: CheckTrigger | null = null;
 let lastProgressLogAt = 0;
 let downloadStartedAt = 0;
-/** 近期速度窗口锚点（ms / transferred）。 */
 let speedSampleAt = 0;
 let speedSampleTransferred = 0;
-/** 最近一次算稳的窗口速率（B/s），推给 UI。 */
 let displayBytesPerSecond = 0;
 
 function resetSpeedTracker(): void {
@@ -54,10 +57,6 @@ function resetSpeedTracker(): void {
   displayBytesPerSecond = 0;
 }
 
-/**
- * 用 transferred 增量估近期速率；窗口未满时沿用上一稳值。
- * 续传/回退时重置，避免把缓存字节算成「几十 MB/s」。
- */
 function recentBytesPerSecond(now: number, transferred: number): number {
   if (speedSampleAt === 0) {
     speedSampleAt = now;
@@ -84,7 +83,6 @@ function recentBytesPerSecond(now: number, transferred: number): number {
   return displayBytesPerSecond;
 }
 
-/** 推送 phase；始终附带当前 `autoInstallCapable`（能力与 phase 正交）。 */
 function pushStatus(next: UpdaterPhase): void {
   const full: UpdaterStatus = { ...next, autoInstallCapable };
   status = full;
@@ -93,7 +91,6 @@ function pushStatus(next: UpdaterPhase): void {
   }
 }
 
-/** 剥掉能力字段，便于在能力值变化后按当前 phase 再推一次。 */
 function currentPhase(): UpdaterPhase {
   const { autoInstallCapable: _capable, ...phase } = status;
   return phase;
@@ -109,6 +106,14 @@ function logUpdater(
   fields?: Record<string, unknown>,
 ): void {
   logDesktop({ level, event, fields });
+}
+
+function desktopChannel(): "stable" | "beta" {
+  return releaseChannelFromDefine(
+    typeof __DESKTOP_RELEASE_CHANNEL__ !== "undefined"
+      ? __DESKTOP_RELEASE_CHANNEL__
+      : undefined,
+  );
 }
 
 /** Normalize electron-updater releaseNotes (string | note list) to plain text. */
@@ -131,7 +136,6 @@ function normalizeReleaseNotes(info: UpdateInfo): string | null {
   return null;
 }
 
-/** Sum package file sizes from UpdateInfo when present. */
 function packageSizeBytes(info: UpdateInfo): number | null {
   const files = info.files;
   if (!Array.isArray(files) || files.length === 0) return null;
@@ -148,10 +152,8 @@ function packageSizeBytes(info: UpdateInfo): number | null {
 }
 
 /**
- * 远程熔断查询（发布与门禁.md §7.6, 部署与运维.md §7.9）：检查前查后端策略
- * `GET /updates/policy`，`enabled:false` 即暂停下载（坏版本急停闸）。**fail-open**——
- * 未配置基址 / 非 200 / 网络错一律视为放行（已发布的安全网络要保活，与特性开关的
- * fail-safe 刻意相反）。完整灰度 / 双通道仍依赖 §7.9 特性开关，未在此消费。
+ * 远程熔断查询（发布与门禁.md §7.6）：检查前查后端策略
+ * `GET /updates/policy`，`enabled:false` 即暂停检查（坏版本急停闸）。**fail-open**。
  */
 async function updatesEnabled(): Promise<boolean> {
   if (!apiBaseUrl) {
@@ -199,7 +201,24 @@ async function updatesEnabled(): Promise<boolean> {
   }
 }
 
+function isDownloadInFlight(): boolean {
+  return downloadInFlight || status.phase === "downloading";
+}
+
+/** 已落到本机的安装包：检查事件不得冲掉路径。 */
+function hasPendingInstaller(): boolean {
+  return pendingInstallerPath != null && pendingInstallerPath.length > 0;
+}
+
 async function runCheck(trigger: CheckTrigger): Promise<void> {
+  if (isDownloadInFlight()) {
+    logUpdater("info", "updater.check_end", {
+      trigger,
+      result: "skipped_downloading",
+      phase: status.phase,
+    });
+    return;
+  }
   lastCheckTrigger = trigger;
   checkStartedAt = Date.now();
   logUpdater("info", "updater.check_begin", { trigger });
@@ -220,7 +239,6 @@ async function runCheck(trigger: CheckTrigger): Promise<void> {
       phase: status.phase,
     });
   } catch (err) {
-    // 网络等失败也会经 'error' 事件推状态；这里吞掉 reject 防未处理的 promise 异常。
     logUpdater("warn", "updater.check_end", {
       trigger,
       result: "rejected",
@@ -230,29 +248,66 @@ async function runCheck(trigger: CheckTrigger): Promise<void> {
   }
 }
 
+function pushDownloadProgress(transferred: number, total: number): void {
+  const now = Date.now();
+  const safeTotal = Math.max(0, Math.round(total || pendingSizeBytes || 0));
+  const safeTransferred = Math.max(0, Math.round(transferred));
+  const percent =
+    safeTotal > 0
+      ? Math.min(100, Math.round((safeTransferred / safeTotal) * 100))
+      : 0;
+  const bytesPerSecond = recentBytesPerSecond(now, safeTransferred);
+  pushStatus({
+    phase: "downloading",
+    version: pendingVersion,
+    percent,
+    bytesPerSecond,
+    transferred: safeTransferred,
+    total: safeTotal,
+  });
+  if (
+    lastProgressLogAt === 0 ||
+    now - lastProgressLogAt >= PROGRESS_LOG_MIN_MS ||
+    percent >= 100
+  ) {
+    lastProgressLogAt = now;
+    logUpdater("info", "updater.download_progress", {
+      version: pendingVersion || undefined,
+      percent,
+      bytesPerSecond,
+      transferred: safeTransferred,
+      total: safeTotal,
+      sinceDownloadMs: downloadStartedAt > 0 ? now - downloadStartedAt : null,
+    });
+  }
+}
+
+async function resolvePendingInstaller(): Promise<{
+  url: string;
+  filename: string;
+}> {
+  const version = pendingVersion.trim();
+  if (!version) {
+    throw new Error("当前无法开始下载，请重新检查更新");
+  }
+  const latest = await fetchLatestDesktopJson(
+    desktopLatestJsonUrl(desktopChannel()),
+  );
+  const artifact = resolveInstallerArtifact(version, process.platform, latest);
+  if (!artifact) {
+    throw new Error("当前平台请前往下载页获取安装包");
+  }
+  return artifact;
+}
+
 async function runDownload(): Promise<void> {
   if (downloadInFlight) return;
-  // 能力字段已在每次 push 附带；此处只读缓存，禁止二次跑 codesign 探测。
-  if (!autoInstallCapable) {
-    logUpdater("info", "updater.download_skipped", {
-      reason: "manual_only",
-      version: pendingVersion || undefined,
-      phaseBefore: status.phase,
-    });
-    // 拒绝执行必须产生状态跃迁——静默 return 会让硬闸「重试下载」变成死按钮。
-    pushStatus({
-      phase: "error",
-      message: MANUAL_INSTALL_REQUIRED_MESSAGE,
-    });
-    return;
-  }
   if (status.phase !== "available" && status.phase !== "error") {
     logUpdater("info", "updater.download_skipped", {
       reason: "wrong_phase",
       phase: status.phase,
       version: pendingVersion || undefined,
     });
-    // 已在下载/待安装时不打断；其余拒绝同样推 error，避免 renderer 空等。
     if (status.phase !== "downloading" && status.phase !== "downloaded") {
       pushStatus({
         phase: "error",
@@ -264,8 +319,8 @@ async function runDownload(): Promise<void> {
   downloadInFlight = true;
   downloadStartedAt = Date.now();
   lastProgressLogAt = 0;
+  pendingInstallerPath = null;
   resetSpeedTracker();
-  // 立刻进入 downloading，避免首包 progress 前 UI /「关于」仍停在 available。
   pushStatus({
     phase: "downloading",
     version: pendingVersion,
@@ -274,32 +329,68 @@ async function runDownload(): Promise<void> {
     transferred: 0,
     total: pendingSizeBytes ?? 0,
   });
-  logUpdater("info", "updater.download_begin", {
-    version: pendingVersion || undefined,
-    sizeBytes: pendingSizeBytes ?? undefined,
-  });
   try {
-    await autoUpdater.downloadUpdate();
+    const artifact = await resolvePendingInstaller();
+    const destPath = join(app.getPath("downloads"), artifact.filename);
+    logUpdater("info", "updater.download_begin", {
+      version: pendingVersion || undefined,
+      sizeBytes: pendingSizeBytes ?? undefined,
+      filename: artifact.filename,
+      source: "github",
+    });
+    await downloadHttpToFile({
+      url: artifact.url,
+      destPath,
+      onProgress: ({ transferred, total }) => {
+        pushDownloadProgress(transferred, total);
+      },
+    });
+    pendingInstallerPath = destPath;
+    pushStatus({ phase: "downloaded", version: pendingVersion });
     logUpdater("info", "updater.download_end", {
       result: "resolved",
       durationMs: Date.now() - downloadStartedAt,
       version: pendingVersion || undefined,
-      phase: status.phase,
+      filename: artifact.filename,
+      phase: "downloaded",
     });
   } catch (err) {
-    // 失败经 'error' 事件推状态。
+    pendingInstallerPath = null;
+    const message = err instanceof Error ? err.message : String(err);
+    pushStatus({ phase: "error", message });
     logUpdater("warn", "updater.download_end", {
       result: "rejected",
       durationMs: Date.now() - downloadStartedAt,
       version: pendingVersion || undefined,
-      message: err instanceof Error ? err.message : String(err),
+      message,
     });
   } finally {
     downloadInFlight = false;
   }
 }
 
-/** 启动检查调度（仅一次）：立即首检 + 每 4h + 系统唤醒（§7.6）。 */
+async function runOpenInstaller(): Promise<void> {
+  if (!pendingInstallerPath) {
+    logUpdater("warn", "updater.open_installer", { result: "no_file" });
+    pushStatus({
+      phase: "error",
+      message: "请先下载安装包",
+    });
+    return;
+  }
+  logUpdater("info", "updater.open_installer", {
+    version: pendingVersion || undefined,
+  });
+  const err = await shell.openPath(pendingInstallerPath);
+  if (err) {
+    logUpdater("error", "updater.open_installer", { result: "failed", err });
+    pushStatus({
+      phase: "error",
+      message: `无法打开安装包：${err}`,
+    });
+  }
+}
+
 function startSchedule(): void {
   if (scheduleStarted) return;
   scheduleStarted = true;
@@ -313,10 +404,7 @@ function startSchedule(): void {
 }
 
 /**
- * 初始化自动更新。**始终**注册 IPC 句柄（renderer 不会命中缺通道）；仅打包态接入
- * electron-updater 与检查调度，dev / 未打包态状态恒为 `unsupported`。
- *
- * 只应调用一次（IPC 句柄全局唯一）——在 `app.whenReady` 里随首个窗口创建后调用。
+ * 初始化自动更新。**始终**注册 IPC 句柄；仅打包态接入检查调度与安装包下载。
  */
 export function initUpdater(window: BrowserWindow): void {
   mainWindow = window;
@@ -329,27 +417,22 @@ export function initUpdater(window: BrowserWindow): void {
     ipcMain.handle(UPDATER_CHANNELS.configure, () => {});
     ipcMain.handle(UPDATER_CHANNELS.check, () => {});
     ipcMain.handle(UPDATER_CHANNELS.download, () => {});
-    ipcMain.handle(UPDATER_CHANNELS.quitAndInstall, () => {});
+    ipcMain.handle(UPDATER_CHANNELS.openInstaller, () => {});
     return;
   }
 
-  // 预热 mac 签名探测缓存（仅 darwin 打包态真正跑 codesign），校正能力字段并推一次。
   void isMacAutoUpdateInstallCapable().then((capable) => {
     if (autoInstallCapable === capable) return;
     autoInstallCapable = capable;
     pushStatus(currentPhase());
   });
 
-  // 发现即说明、用户同意后再下载；安装仍须显式 quitAndInstall（§7.6）。
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = false;
-  // 临时默认：关闭 blockmap 差分，改拉全量安装包（~190MB）。
-  // 动机：downloads 经 Tunnel 时差分小 Range / multipart 易卡到数分钟～十余分钟
-  //（本机日志 8.5MB 差分 ≈509s）；全量单连接更稳。分发改国内 OSS/CDN（§7.6b 方案 B）
-  // 并验收 Range 后应改回 false。→ 发布与门禁.md §7.6 客户端更新 UX。
   autoUpdater.disableDifferentialDownload = true;
 
   autoUpdater.on("checking-for-update", () => {
+    if (isDownloadInFlight() || hasPendingInstaller()) return;
     pushStatus({ phase: "checking" });
     logUpdater("info", "updater.phase", {
       phase: "checking",
@@ -358,11 +441,15 @@ export function initUpdater(window: BrowserWindow): void {
     });
   });
   autoUpdater.on("update-available", (info) => {
+    if (isDownloadInFlight()) return;
+    if (hasPendingInstaller() && info.version === pendingVersion) return;
     void (async () => {
+      autoInstallCapable = await isMacAutoUpdateInstallCapable();
+      if (isDownloadInFlight()) return;
+      if (hasPendingInstaller() && info.version === pendingVersion) return;
       pendingVersion = info.version;
       pendingSizeBytes = packageSizeBytes(info);
-      // 与 init 预热共用探测缓存；结果写入模块级能力字段后随 push 正交附带。
-      autoInstallCapable = await isMacAutoUpdateInstallCapable();
+      pendingInstallerPath = null;
       pushStatus({
         phase: "available",
         version: info.version,
@@ -380,6 +467,7 @@ export function initUpdater(window: BrowserWindow): void {
     })();
   });
   autoUpdater.on("update-not-available", () => {
+    if (isDownloadInFlight() || hasPendingInstaller()) return;
     pushStatus({ phase: "not-available" });
     logUpdater("info", "updater.phase", {
       phase: "not-available",
@@ -387,52 +475,8 @@ export function initUpdater(window: BrowserWindow): void {
       sinceCheckMs: sinceCheckMs(),
     });
   });
-  autoUpdater.on("download-progress", (progress) => {
-    const now = Date.now();
-    const percent = Math.round(progress.percent);
-    const transferred = Math.max(0, Math.round(progress.transferred || 0));
-    const total = Math.max(0, Math.round(progress.total || 0));
-    // UI / 日志用近期窗口速率；reportedAvg 仅诊断（续传会虚高）。
-    const reportedAvgBps = Math.max(
-      0,
-      Math.round(progress.bytesPerSecond || 0),
-    );
-    const bytesPerSecond = recentBytesPerSecond(now, transferred);
-    pushStatus({
-      phase: "downloading",
-      version: pendingVersion,
-      percent,
-      bytesPerSecond,
-      transferred,
-      total,
-    });
-    if (
-      lastProgressLogAt === 0 ||
-      now - lastProgressLogAt >= PROGRESS_LOG_MIN_MS ||
-      percent >= 100
-    ) {
-      lastProgressLogAt = now;
-      logUpdater("info", "updater.download_progress", {
-        version: pendingVersion || undefined,
-        percent,
-        bytesPerSecond,
-        reportedAvgBps,
-        transferred,
-        total,
-        sinceDownloadMs: downloadStartedAt > 0 ? now - downloadStartedAt : null,
-      });
-    }
-  });
-  autoUpdater.on("update-downloaded", (info) => {
-    pushStatus({ phase: "downloaded", version: info.version });
-    logUpdater("info", "updater.phase", {
-      phase: "downloaded",
-      version: info.version,
-      sinceDownloadMs:
-        downloadStartedAt > 0 ? Date.now() - downloadStartedAt : null,
-    });
-  });
   autoUpdater.on("error", (err) => {
+    if (isDownloadInFlight() || hasPendingInstaller()) return;
     const message = err?.message ?? "更新检查失败";
     const phaseBefore = status.phase;
     pushStatus({ phase: "error", message });
@@ -446,27 +490,19 @@ export function initUpdater(window: BrowserWindow): void {
     });
   });
 
-  // renderer 传入 API 基址后才启动调度——确保首次检查也先过远程熔断闸（fail-open）。
   ipcMain.handle(UPDATER_CHANNELS.configure, (_e, baseUrl: unknown) => {
-    // IPC-004（第五轮 IPC 权限面审计）：边界结构校验——非 string 基址直接忽略（renderer 是
-    // API 地址单一源，畸形仅可能来自被攻破的 renderer）。不抛：configure 契约为 Promise<void>。
     if (typeof baseUrl !== "string") return;
     apiBaseUrl = baseUrl;
     logUpdater("info", "updater.configure", {
       hasBaseUrl: baseUrl.length > 0,
-      disableDifferentialDownload: autoUpdater.disableDifferentialDownload,
+      installerSource: "github",
+      channel: desktopChannel(),
     });
     startSchedule();
   });
   ipcMain.handle(UPDATER_CHANNELS.check, () => runCheck("manual"));
   ipcMain.handle(UPDATER_CHANNELS.download, () => runDownload());
-  ipcMain.handle(UPDATER_CHANNELS.quitAndInstall, () => {
-    logUpdater("info", "updater.quit_and_install", {
-      version: pendingVersion || undefined,
-    });
-    // isSilent=false：显示安装进度；isForceRunAfter=true：装毕重启应用。
-    autoUpdater.quitAndInstall(false, true);
-  });
+  ipcMain.handle(UPDATER_CHANNELS.openInstaller, () => runOpenInstaller());
 
   app.on("before-quit", () => {
     if (intervalTimer) {

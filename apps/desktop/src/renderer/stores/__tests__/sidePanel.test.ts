@@ -19,6 +19,7 @@ import { useBrowserSessionsStore } from "../browserSessions";
 import { useCommandPanelStore } from "../commandPanel";
 import { useConversationStore } from "../conversation";
 import { type ExecutionPlan, useExecutionStore } from "../execution";
+import { nextDockActiveAfterFloat } from "../sidePanel/float";
 import {
   CHANGES_TAB_ID,
   COMMAND_TAB_ID,
@@ -896,6 +897,15 @@ describe("Local browser detach on dock / browser tab close", () => {
 });
 
 describe("应用内浮窗（§十 · Move / float·dock / 上限 8）", () => {
+  it("nextDockActiveAfterFloat prefers 工作区 when it is still docked", () => {
+    expect(
+      nextDockActiveAfterFloat(
+        { activeTabId: tabId("run-1"), tabs: [], floats: [] },
+        tabId("run-1"),
+      ),
+    ).toBe(WORKSPACE_TAB_ID);
+  });
+
   it("floatTab Moves a run out of the dock and focuses the float", () => {
     panel().openTab(runDetail("run-1"));
     expect(panel().floatTab(tabId("run-1"))).toBe(true);
@@ -907,8 +917,8 @@ describe("应用内浮窗（§十 · Move / float·dock / 上限 8）", () => {
       tabId: tabId("run-1"),
     });
     expect(sidePanelFocusTabId(panel())).toBe(tabId("run-1"));
-    // Dock active leaves the floated tab (Move, not a second copy).
-    expect(panel().activeTabId).toBe(CHANGES_TAB_ID);
+    // Dock active leaves the floated tab (Move). 工作区仍停靠 → 回工作区，不优先改动。
+    expect(panel().activeTabId).toBe(WORKSPACE_TAB_ID);
   });
 
   it("dockTab pins a float back and activates it in the dock", () => {

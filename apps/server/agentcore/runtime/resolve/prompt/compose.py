@@ -3,6 +3,7 @@
 import time
 from collections.abc import Sequence
 
+from agentcore.config import settings
 from agentcore.runtime.context import ContextAssembler, SectionOrder
 from agentcore.runtime.context.consultable import ConsultDirectoryEntry
 from agentcore.runtime.context.folder_catalog import (
@@ -23,6 +24,7 @@ from agentcore.runtime.resolve.prompt.base import (
 from agentcore.runtime.resolve.prompt.ceo_core import (
     _CEO_CORE_HINT,
     _PROMOTE_PRODUCT_TOOL_HINT,
+    capability_how_suffix,
 )
 from agentcore.runtime.resolve.prompt.citation import CHAT_CITATION_HINT
 from agentcore.runtime.resolve.prompt.cold_start import (
@@ -87,7 +89,7 @@ def assemble_system_prompt(
 
 
 def _on_demand_preamble(*, with_summaries: bool) -> list[str]:
-    """Shared intro lines for ``<按需目录>`` (CEO gets summaries; worker names-only).
+    """Shared intro lines for ``<按需目录>`` (CEO and worker both get name＋摘要).
 
     The preamble states ONLY what the directory is and how to pull from it. Routing
     ("which scene must consult what", 交付档 / intensity / playbook / 绿场准入) belongs to
@@ -109,11 +111,12 @@ def render_on_demand_directory(
     *,
     with_summaries: bool = True,
 ) -> str:
-    """Render the unified ``<按需目录>`` block (CEO: name＋摘要；worker: names only).
+    """Render the unified ``<按需目录>`` block (name＋摘要；production always on).
 
     Returns "" when empty so the caller appends nothing (directory↔tool: only when
     ``consult`` is wired this turn). Entries must come from the same
     :class:`~agentcore.runtime.context.consult_sources.MergedConsultSource` the tool holds.
+    ``with_summaries=False`` remains a test/compat switch — workers no longer use it.
     """
     if not entries:
         return ""
@@ -141,8 +144,9 @@ def compose_worker_base_prompt(
 ) -> str:
     """Build the delegated worker's system prompt from the shared base.
 
-    Layers the worker simplified ``<按需目录>`` (names only) when ``on_demand_entries``
-    is non-empty, then the per-turn attachment block last (缓存友好).
+    Layers the same ``<按需目录>`` (name＋摘要) the CEO sees when ``on_demand_entries``
+    is non-empty, then the per-turn attachment block last (缓存友好). Summaries are
+    the existing ``description`` / skill ``summary`` strings — this does not rewrite them.
     """
     del memory_enabled  # gate is has_entries at wire time; entries already filtered
     if on_demand_entries:
@@ -158,12 +162,13 @@ def compose_worker_base_prompt(
         ]
     else:
         entries = ()
-    on_demand_block = render_on_demand_directory(entries, with_summaries=False)
+    on_demand_block = render_on_demand_directory(entries, with_summaries=True)
     return (
         ContextAssembler()
         .add("shared_base", shared_base, SectionOrder.BASE)
         .add("on_demand_directory", on_demand_block, SectionOrder.SKILL_DIRECTORY)
         .add("attachment_context", attachment_context, SectionOrder.ATTACHMENT)
+        .observe(scope="worker_base", soft_cap=settings.prompt_budget_char_soft_cap)
         .render()
     )
 
@@ -189,6 +194,9 @@ def compose_ceo_chat_prompt(
     citation + visualization. ``on_demand_entries`` must match the tool's merged source.
     """
     ceo_core = resolve(FRAGMENT_CEO_CORE, _CEO_CORE_HINT)
+    how_suffix = capability_how_suffix(ceo_tool_names)
+    if how_suffix:
+        ceo_core = f"{ceo_core.rstrip()}\n{how_suffix}\n"
     if "update_folder_profile" in ceo_tool_names:
         ceo_core = f"{ceo_core.rstrip()}\n{_FOLDER_PROFILE_TOOL_HINT.strip()}\n"
     if "promote_product" in ceo_tool_names:

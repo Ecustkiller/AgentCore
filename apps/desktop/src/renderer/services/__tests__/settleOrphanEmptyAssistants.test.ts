@@ -151,4 +151,31 @@ describe("settleOrphanEmptyAssistants", () => {
     expect(rt?.status).toBe("cancelled");
     expect(rt?.frames.length).toBe(1);
   });
+
+  it("leaves paused+running empty bubble alone (cold-load latch)", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "a-paused",
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: false,
+        status: "running",
+        finishReason: "paused",
+      },
+      CID,
+    );
+
+    settleOrphanEmptyAssistants(CID);
+
+    const a = useConversationStore
+      .getState()
+      .byId[CID].messages.find((m) => m.id === "a-paused");
+    expect(a?.status).toBe("running");
+    expect(a?.finishReason).toBe("paused");
+    expect(a?.isStreaming).toBe(false);
+  });
 });

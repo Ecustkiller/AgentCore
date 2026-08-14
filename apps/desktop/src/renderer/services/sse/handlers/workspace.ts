@@ -1,6 +1,5 @@
 import { notifyWarning } from "@/lib/toast";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
-import { useSidePanelStore } from "@/stores/sidePanel";
 import type {
   SSEEvent,
   WorkspaceSnapshotDonePayload,
@@ -29,13 +28,7 @@ export function handleWorkspaceEvent(
       const conversationId = payload.conversation_id || ctx.conversationId;
       useAutoSnapshotStore.getState().markFailed(conversationId);
       notifyWarning("本回合自动备份失败", {
-        description: "回合已完成；重要节点请手动留版本。",
-        action: {
-          label: "查看改动",
-          onClick: () => {
-            useSidePanelStore.getState().showChanges();
-          },
-        },
+        description: "回合已完成；下次改文件的回合会再试。",
       });
       return true;
     }

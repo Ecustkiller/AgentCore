@@ -47,7 +47,6 @@ def should_defer_run_plan_emit_to_merge(
     tool: DelegateTool,
     *,
     execution_id: str,
-    finalize: bool,
 ) -> bool:
     """True when an active coordination session will emit the commit ``run_plan``.
 
@@ -55,7 +54,7 @@ def should_defer_run_plan_emit_to_merge(
     emits the grown plan after admission. Emitting earlier would leave a durable
     skeleton even when admission later rejects.
     """
-    if finalize or int(getattr(tool, "_depth", 0) or 0) != 0:
+    if int(getattr(tool, "_depth", 0) or 0) != 0:
         return False
     existing = active_coordination(execution_id)
     return existing is not None and existing.active
@@ -88,7 +87,6 @@ def admit_before_run_plan_emit(
     plan: RunPlan,
     *,
     execution_id: str,
-    finalize: bool = False,
     call_idx: int | None = None,
     host_plan: RunPlan | None = None,
     seed_completed: dict[str, Any] | None = None,
@@ -120,7 +118,6 @@ def admit_before_run_plan_emit(
         existing is not None
         and existing.active
         and int(getattr(tool, "_depth", 0) or 0) == 0
-        and not finalize
     )
 
     if merging and existing is not None:
@@ -221,7 +218,6 @@ def admit_before_run_plan_emit(
     if (
         host_plan is not None
         and int(getattr(tool, "_depth", 0) or 0) == 0
-        and not finalize
     ):
         from agentcore.runtime.coordination.isomorphic import (
             is_isomorphic_redelegation,
@@ -413,8 +409,8 @@ def _coordination_start_echo(
         "老板中途插话：【先】用可见正文响应该句（哪怕极短「收到，仍按原计划」），"
         "再谈团队；相关则图内处置，无关则 queue_user_message 转对话级排队；"
         "全部完成后做最终合成并收口（协调态进度旁白不是终稿）。"
-        "用户要立等结果的快任务请用 finalize 阻塞收口；"
-        "finalize / 嵌套 lead / 显式 coordinate=false 仍走阻塞等待。"
+        "用户要立等结果请设 coordinate=false 走阻塞等待；"
+        "嵌套 lead / 显式 coordinate=false / 波间 checkpoint_after 仍走阻塞等待。"
     )
 
 
@@ -504,7 +500,6 @@ def _merge_into_active_coordination(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
@@ -718,7 +713,6 @@ def _merge_into_active_coordination(
                 added_plan,
                 execution_id=execution_id,
                 seed_completed=seed_completed,
-                finalize=finalize,
                 seed_notes=seed_notes,
                 complexity_hint=complexity_hint,
                 coordination=coordination,
@@ -775,7 +769,6 @@ def try_start_coordination(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
@@ -798,7 +791,7 @@ def try_start_coordination(
     # dual-drive; opt-out is only meaningful for the *first* arm.
     if session is None:
         existing = active_coordination(execution_id)
-        if existing is not None and existing.active and tool._depth == 0 and not finalize:
+        if existing is not None and existing.active and tool._depth == 0:
             existing.event_sink = getattr(tool, "_sink", None) or existing.event_sink
             return _merge_into_active_coordination(
                 tool,
@@ -806,7 +799,6 @@ def try_start_coordination(
                 existing,
                 execution_id=execution_id,
                 seed_completed=seed_completed,
-                finalize=finalize,
                 seed_notes=seed_notes,
                 complexity_hint=complexity_hint,
                 call_idx=call_idx,
@@ -818,7 +810,6 @@ def try_start_coordination(
     if session is None and not should_enter_coordination(
         coordinate=coordinate,
         worker_count=len(plan.nodes),
-        finalize=finalize,
         depth=tool._depth,
         has_checkpoint=has_checkpoint,
         checkpoint_enabled=checkpoint_enabled,
@@ -944,7 +935,6 @@ def try_start_coordination(
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
             coordination=coordination,
@@ -996,7 +986,6 @@ async def _background_drive(
     *,
     execution_id: str,
     seed_completed: dict[str, RunState] | None,
-    finalize: bool,
     seed_notes: list[dict[str, str]] | None,
     complexity_hint: str,
     call_idx: int,
@@ -1020,7 +1009,6 @@ async def _background_drive(
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=finalize,
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
             coordination=coordination,

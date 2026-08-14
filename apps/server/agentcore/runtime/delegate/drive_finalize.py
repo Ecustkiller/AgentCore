@@ -13,7 +13,7 @@ from agentcore.runtime.delegate.accumulate import (
     collect_ledger,
     register_sessions,
 )
-from agentcore.runtime.delegate.ceo_format import direct_result, format_for_ceo
+from agentcore.runtime.delegate.ceo_format import format_for_ceo
 from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
 from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
 from agentcore.runtime.delegate.nesting import absorb_children
@@ -112,7 +112,6 @@ def handle_pending_boundary(
     results: dict[str, RunState],
     *,
     execution_id: str,
-    finalize: bool,
     session: Any,
     call_idx: int,
 ) -> ToolResult | None:
@@ -140,7 +139,6 @@ def handle_pending_boundary(
         plan=plan,
         completed=dict(results),
         execution_id=execution_id,
-        finalize=finalize,
         reason=reason,
         boundary_run_ids=[n.run_id for n in nodes],
     )
@@ -182,7 +180,6 @@ def handle_partial_failure(
     results: dict[str, RunState],
     *,
     execution_id: str,
-    finalize: bool,
     seed_completed: dict[str, RunState] | None,
     session: Any,
     call_idx: int,
@@ -209,7 +206,6 @@ def handle_partial_failure(
         plan=plan,
         completed=dict(results),
         execution_id=execution_id,
-        finalize=finalize,
         reason=BoundaryReason.SCOPE,
         boundary_run_ids=[n.run_id for n in failed_nodes],
     )
@@ -265,7 +261,6 @@ async def finalize_successful_drive(
     results: dict[str, RunState],
     *,
     execution_id: str,
-    finalize: bool,
     session: Any,
     call_idx: int,
 ) -> ToolResult:
@@ -275,7 +270,6 @@ async def finalize_successful_drive(
     """
     from agentcore.runtime.costing import usage_metadata
     from agentcore.runtime.delegate.completion import collect_completion_soft_notes
-    from agentcore.runtime.runs import RunPhase
 
     # §十一 来源卡接入 (方案①, 远期规划.md §4.5): snapshot the turn-accumulated sources
     # BEFORE folding this call's workers in, so the slice below is exactly THIS delegate call's
@@ -318,7 +312,7 @@ async def finalize_successful_drive(
         results, backend=backend, file_map=file_map or None
     )
 
-    # 交付状态（诚实对账）：正常收尾（含 finalize 单人直出）——有落盘文件或缺口才发，
+    # 交付状态（诚实对账）：正常收尾——有落盘文件或缺口才发，
     # 纯 prose 成功批次保持无声。Soft overlay notes → state=notes（不 blocking）。
     maybe_emit_delivery_status(
         tool._sink,
@@ -329,19 +323,6 @@ async def finalize_successful_drive(
         criteria_gaps=soft_notes or None,
         promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
-
-    if finalize and len(plan.nodes) == 1:
-        only = results.get(plan.nodes[0].run_id)
-        if only and only.phase is RunPhase.COMPLETED and only.content.strip():
-            if session is not None:
-                post_session_all_completed(
-                    session,
-                    output=only.content,
-                    completed=1,
-                    total=1,
-                    output_limit=2000,
-                )
-            return direct_result(tool, only)
 
     output = format_for_ceo(tool, plan, results, call_idx=call_idx)
     if session is not None:
@@ -362,7 +343,6 @@ async def finalize_drive(
     results: dict[str, RunState],
     *,
     execution_id: str,
-    finalize: bool,
     seed_completed: dict[str, RunState] | None,
     session: Any,
     call_idx: int,
@@ -400,7 +380,6 @@ async def finalize_drive(
         plan,
         results,
         execution_id=execution_id,
-        finalize=finalize,
         session=session,
         call_idx=call_idx,
     )
@@ -411,7 +390,6 @@ async def finalize_drive(
         plan,
         results,
         execution_id=execution_id,
-        finalize=finalize,
         seed_completed=seed_completed,
         session=session,
         call_idx=call_idx,
@@ -423,7 +401,6 @@ async def finalize_drive(
         plan,
         results,
         execution_id=execution_id,
-        finalize=finalize,
         session=session,
         call_idx=call_idx,
     )

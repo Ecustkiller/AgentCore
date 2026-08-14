@@ -10,7 +10,7 @@ import {
   writeMemoryFile,
   writeMemoryTopic,
 } from "@/api/memory";
-// AI 记忆 (/memory) — the mobile 查看 + 改 + 删 lens on long-term memory (Agent记忆与知识系统
+// 全局设定 (/memory) — the mobile 查看 + 改 + 删 lens on long-term memory (Agent记忆与知识系统
 // §一). Reached from the 文件 tab: cross-conversation「最近更新」feed, the two always-
 // injected GLOBAL core leaves (偏好 / 画像) as editable text, and the on-demand 主题 notes
 // as a view/edit/delete list. GLOBAL scope only — per-project memory stays a desktop task
@@ -52,7 +52,7 @@ export function MemoryPage() {
         >
           ← 文件
         </button>
-        <span>AI 记忆</span>
+        <span>全局设定</span>
         <span style={{ width: 44 }} />
       </header>
 

@@ -35,21 +35,18 @@ def test_should_preview_multi_worker():
         RunSpec(run_id="r1", task="a", role="调研"),
         RunSpec(run_id="r2", task="b", role="撰写", depends_on=["r1"]),
     )
-    assert should_preview(plan, finalize=False) is True
-    assert should_preview(plan, finalize=True) is True
+    assert should_preview(plan) is True
 
 
-def test_should_preview_skips_solo_finalize():
+def test_should_preview_skips_solo():
     plan = _plan(RunSpec(run_id="r1", task="alone", role="写手"))
-    assert should_preview(plan, finalize=True) is False
-    assert should_preview(plan, finalize=False) is False
+    assert should_preview(plan) is False
 
 
 def test_should_preview_skips_solo_even_with_runtime_tags():
     """stance/round on RunSpec are runtime display tags — not kickoff hang marks."""
     plan = _plan(RunSpec(run_id="r1", task="辩", role="正方", stance="pro", round=1))
-    assert should_preview(plan, finalize=True) is False
-    assert should_preview(plan, finalize=False) is False
+    assert should_preview(plan) is False
 
 
 async def test_confirmed_ask_still_suspends_team_preview():

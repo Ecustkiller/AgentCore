@@ -236,8 +236,8 @@ async def prepare_fresh_turn(
 
     material_paths = collect_turn_material_paths(attachments)
     backend.ai_list_materials = material_paths
-    # Workers hold no CEO hints; their base is the shared base + optional simplified
-    # ``<按需目录>`` + the same attachment block at the end.
+    # Workers hold no CEO hints; their base is the shared base + the same
+    # ``<按需目录>`` (name＋摘要) + the same attachment block at the end.
     from agentcore.runtime.capability_packs import enabled_packs
 
     skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())

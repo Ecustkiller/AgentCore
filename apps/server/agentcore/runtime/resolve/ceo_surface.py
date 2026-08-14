@@ -6,8 +6,9 @@ Injection aligns with the coordination tools' execution gate
 (coordination starts or supervised wave yield) registers the gated tools in
 place — one-time prefix-cache miss is acceptable.
 
-Also owns COST-004 tools-surface observation (exact JSON chars + a token band) and
-the coordination-period hint shown in CEO event briefs.
+Also owns COST-004 tools-surface observation (exact JSON chars + a token band)
+for ``ceo_turn`` and ``worker_run``, and the coordination-period hint shown in
+CEO event briefs.
 """
 
 from __future__ import annotations
@@ -96,8 +97,10 @@ def _owns_coordination(delegate: Any) -> bool:
     ``depth >= 1`` worker carries its own nested ``delegate`` handle AND shares the
     parent's ``execution_id`` — so an identity-blind promote hands ``wait`` /
     ``cancel_worker`` to plain members, which are then offered for real because
-    workers run unrestricted (``allowed_tools=None``). Nested leads get their
-    ``delegate`` + ``replan`` pre-wired by ``spawn_lead_subteam`` instead.
+    workers run unrestricted (``allowed_tools=None``). Nested leads keep
+    ``delegate`` from round 1; ``replan`` is promoted here once ``_supervised``
+    is set (same idle→coordination idea as the CEO). The LeadSubteam bundle
+    still mints both (dispose / 波边界 binding).
     """
     depth = getattr(delegate, "_depth", 0)
     return depth == 0 if isinstance(depth, int) else False
@@ -252,8 +255,10 @@ def observe_tools_offered(
 ) -> None:
     """COST-004: log tools-surface JSON size (observe-only; no SSE / API fields).
 
-    ``total_chars`` / ``cjk_chars`` / ``per_tool`` are exact; the token cost is a band
-    (:func:`_token_band`) because no tokenizer for the serving model is available here.
+    ``scope``: ``ceo_turn`` (pipeline assemble) or ``worker_run`` (engine opening
+    offer). ``total_chars`` / ``cjk_chars`` / ``per_tool`` are exact; the token
+    cost is a band (:func:`_token_band`) because no tokenizer for the serving
+    model is available here.
     """
     defs = tool_defs
     if defs is None:

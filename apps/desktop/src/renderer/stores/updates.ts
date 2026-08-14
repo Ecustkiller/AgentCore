@@ -11,9 +11,10 @@ import { create } from "zustand";
 
 /**
  * 自动更新状态的前端落点（发布与门禁.md §7.6）。主进程权威持有状态机；发现新版本后
- * **不**自动下载——本 store 弹说明窗，用户同意后再 `download()`。软更新：同意后立刻关窗
- * + 短 toast，后台静默下载；进度在「设置 · 关于」；就绪 sticky toast。强制更新硬闸仍全屏
- * 跟进度。订阅在应用外壳启动（`startUpdates`）。
+ * **不**自动下载——本 store 弹说明窗，用户同意后再 `download()`（GitHub 安装包落到
+ * 「下载」文件夹）。软更新：同意后立刻关窗 + 短 toast，后台下载；进度在「设置 · 关于」；
+ * 就绪 sticky toast「打开安装包」。强制更新硬闸仍全屏跟进度。订阅在应用外壳启动
+ *（`startUpdates`）。
  *
  * 硬闸（`outdatedMinVersion`）在启动时拉 `GET /updates/policy`，本地低于
  * `min_desktop_version` 时由 AppShell 全屏硬遮罩挡住；不可关闭，只能走更新流程。
@@ -119,15 +120,15 @@ interface UpdatesState {
    */
   check: () => Promise<void>;
   /**
-   * 开始下载当前可用更新。软更新：立刻关说明窗 + toast「正在后台下载」；硬闸下不关窗、
-   * 不 toast（由 ForceUpdateGate / 说明窗跟进度）。
+   * 开始下载当前可用版本的安装包。软更新：立刻关说明窗 + toast「正在下载安装包」；
+   * 硬闸下不关窗、不 toast（由 ForceUpdateGate / 说明窗跟进度）。
    */
   download: () => Promise<void>;
   /** Snooze auto-prompt for current available version for 24h. No-op under hard gate. */
   remindLater: () => void;
   /** Persist skip for current available version (survives restart). No-op under hard gate. */
   skipVersion: () => void;
-  /** 安装已下载的更新：退出 → 安装 → 重启。 */
+  /** 打开已下载的安装包（系统默认程序）。 */
   install: () => Promise<void>;
 }
 
@@ -160,8 +161,6 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
     if (!api) return;
     const force = isForceUpdateActive();
     const { status } = useUpdatesStore.getState();
-    // 能力字段与 phase 正交：未签名等不可自动安装时一律不调 download。
-    if (!status.autoInstallCapable) return;
     if (!force) {
       useUpdatesStore.setState({ dialogOpen: false });
       if (status.phase === "available") {
@@ -169,11 +168,11 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
           status.sizeBytes != null && status.sizeBytes > 0
             ? `（约 ${formatBytes(status.sizeBytes)}）`
             : "";
-        notifyInfo(`正在后台下载 ${status.version}${sizeHint}`, {
+        notifyInfo(`正在下载安装包 ${status.version}${sizeHint}`, {
           description: "进度可在「设置 · 关于」查看",
         });
       } else if (status.phase === "error") {
-        notifyInfo("正在后台重试下载…", {
+        notifyInfo("正在重试下载安装包…", {
           description: "进度可在「设置 · 关于」查看",
         });
       }
@@ -216,7 +215,7 @@ export const useUpdatesStore = create<UpdatesState>(() => ({
   install: async () => {
     const api = getUpdaterApi();
     if (!api) return;
-    await api.quitAndInstall();
+    await api.openInstaller();
   },
 }));
 
@@ -252,7 +251,7 @@ async function pollOutdatedPolicy(): Promise<void> {
 /**
  * 在应用外壳挂载时启动：同步初始状态 + 订阅推送写入 store。发现可用版本时按
  * skip/snooze 决定是否弹说明窗（硬闸激活时忽略 skip/snooze）；软更新下载失败 toast；
- * 下载完毕 sticky「重启安装」（§7.6）。返回取消订阅函数。
+ * 下载完毕 sticky「打开安装包」（§7.6）。返回取消订阅函数。
  *
  * 非 Electron / preload 未注入 `window.updaterApi`（如纯浏览器打开 Vite 端口）时 no-op，
  * 状态置 `unsupported`，与契约「dev 态不生效」一致。
@@ -296,14 +295,14 @@ export function startUpdates(): () => void {
 
     if (status.phase === "downloaded" && status.version !== notifiedVersion) {
       notifiedVersion = status.version;
-      notifyInfo(`新版本 ${status.version} 已就绪`, {
-        description: "将在重启后安装",
+      notifyInfo(`安装包 ${status.version} 已下载`, {
+        description: "打开后按向导完成安装",
         duration: Number.POSITIVE_INFINITY,
         action: {
-          label: "重启安装",
+          label: "打开安装包",
           onClick: () => {
             const installApi = getUpdaterApi();
-            if (installApi) void installApi.quitAndInstall();
+            if (installApi) void installApi.openInstaller();
           },
         },
       });

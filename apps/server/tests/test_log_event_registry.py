@@ -39,9 +39,17 @@ def test_catalog_covers_key_runtime_events():
         "http.unhandled_error",
         "approval.sandbox_auto_pass",
         "firehose.backpressure_drop",
+        "event_sink.backpressure_drop",
     ):
         assert required in names, required
     assert len(names) >= 100
+
+
+def test_backpressure_drop_fields_registered():
+    for name in ("event_sink.backpressure_drop", "firehose.backpressure_drop"):
+        fields = get_registry().requires(name).fields
+        assert "dropped_delta" in fields
+        assert "dropped_total" in fields
 
 
 def test_catalog_registers_failure_and_build_provenance_fields():

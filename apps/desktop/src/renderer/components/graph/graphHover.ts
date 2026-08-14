@@ -106,13 +106,6 @@ export function useGraphHoverState({
   return { hoveredNodeId, setHoveredNodeId, hoverState };
 }
 
-/** True when the pointer is on this RF node (per-node hover affordances). */
-export function useGraphNodeHovered(): boolean {
-  const nodeId = useNodeId();
-  const { hoveredNodeId } = useContext(GraphHoverContext);
-  return nodeId != null && hoveredNodeId === nodeId;
-}
-
 /** True when this RF node should paint at dim opacity (face/overlay only). */
 export function useGraphNodeDimmed(): boolean {
   const nodeId = useNodeId();

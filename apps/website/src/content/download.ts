@@ -28,8 +28,8 @@ export const PLATFORM_COPY: Record<
     label: "Windows",
     subtitle: { zh: "Windows 10 及以上", en: "Windows 10 and later" },
     meta: {
-      zh: "安装版。安装后可在设置 → 关于 检查更新，新版本会自动推送。",
-      en: "Installer build. Check for updates in Settings → About; new versions are pushed automatically.",
+      zh: "安装版。之后可在设置 → 关于 检查更新，把新安装包下载到本机再打开。",
+      en: "Installer build. Later, check for updates in Settings → About and open the downloaded installer.",
     },
   },
   mac: {
@@ -111,10 +111,10 @@ export const REQUIREMENTS = {
 };
 
 export const AUTO_UPDATE = {
-  eyebrow: { zh: "自动更新", en: "Auto update" },
+  eyebrow: { zh: "检查更新", en: "Check for updates" },
   body: {
-    zh: "已安装用户无需重复下载——应用会在后台检查更新，就绪后提示重启安装。macOS 内测包更新后若无法启动，请再次右键 →「打开」。",
-    en: "Installed users need not download again — the app checks in the background and prompts to restart when ready. If a macOS beta build won't launch after updating, right-click → Open once more.",
+    zh: "已安装用户可在设置 → 关于检查更新。有新版本时应用会把安装包下载到本机「下载」文件夹，打开后按向导覆盖安装。macOS 内测包未签名，打开 dmg / 替换后再启动须右键 →「打开」。",
+    en: "Installed users can check for updates in Settings → About. New versions download the installer to your Downloads folder; open it and follow the wizard. Unsigned macOS builds still need right-click → Open after replacing the app.",
   },
 };
 
@@ -133,8 +133,8 @@ export const INSTALL_STEPS: Partial<Record<PlatformId, T[]>> = {
     },
     { zh: "首次启动注册账号并登录。", en: "Register and sign in on first launch." },
     {
-      zh: "在设置 → 关于 可检查更新；已安装用户会自动收到新版本。",
-      en: "Check for updates in Settings → About; installed users get new versions automatically.",
+      zh: "在设置 → 关于 可检查更新；有新版本时下载安装包并打开即可覆盖安装。",
+      en: "Check for updates in Settings → About; download the installer and open it to upgrade.",
     },
   ],
   mac: [

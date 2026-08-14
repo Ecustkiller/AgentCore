@@ -14,7 +14,10 @@ export {
   settleCloudRunningAssistant,
   settleOrphanEmptyAssistants,
 } from "./turns/recovery";
-export { runHydrateAttachSettle } from "./turns/hydrateAttachSettle";
+export {
+  runHydrateAttachSettle,
+  scheduleHydrateAttachSettle,
+} from "./turns/hydrateAttachSettle";
 export {
   syncConversationFollow,
   stopAllConversationFollows,

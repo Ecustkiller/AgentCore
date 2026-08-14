@@ -525,7 +525,6 @@ async def test_drive_mlr_preauth_skips_team_preview(monkeypatch):
     result = await _team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=True,
         complexity_hint="standard",
         seed_completed=None,
         call_idx=0,
@@ -537,7 +536,6 @@ async def test_drive_mlr_preauth_skips_team_preview(monkeypatch):
     result2 = await _team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=True,
         complexity_hint="standard",
         seed_completed=None,
         call_idx=1,
@@ -703,7 +701,6 @@ async def test_mlr_stop_clears_keep_flag(monkeypatch):
     await _team_preview_before_workers(
         _Tool(),
         plan,
-        finalize=True,
         complexity_hint="standard",
         seed_completed=None,
         call_idx=0,

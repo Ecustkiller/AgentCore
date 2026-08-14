@@ -1362,3 +1362,100 @@ async def test_safety_net_is_flavor_agnostic_finalizes_a_delegation_capable_run(
     assert content == "done"
     assert provider.calls == 7  # same salvage path, regardless of delegate
     assert len(_finalizes(messages)) == 1
+
+
+async def test_worker_react_loop_emits_tools_offered_once(monkeypatch):
+    """COST-004: worker 开口发 cost.tools_offered scope=worker_run；captain 不重复。"""
+    from agentcore.runtime.resolve import ceo_surface
+
+    captured: list[str] = []
+    real = ceo_surface.observe_tools_offered
+
+    def _spy(tools, *, scope, tool_defs=None):
+        captured.append(scope)
+        return real(tools, scope=scope, tool_defs=tool_defs)
+
+    monkeypatch.setattr(ceo_surface, "observe_tools_offered", _spy)
+    messages = [LLMMessage(role="user", content="go")]
+    profile = make_profile_params(max_rounds=2)
+    await react_loop(
+        messages=messages,
+        llm=_ScriptedProvider([[_content_chunk("ok")]]),
+        tools=_registry(_StubTool()),
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+        turn_model="m",
+        role="worker",
+        approval_gate=None,
+    )
+    assert captured.count("worker_run") == 1
+
+    captured.clear()
+    await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=_ScriptedProvider([[_content_chunk("ok")]]),
+        tools=_registry(_StubTool()),
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+        turn_model="m",
+        role="captain",
+        approval_gate=None,
+    )
+    assert "worker_run" not in captured
+
+
+def _openai_tool_names(request) -> list[str]:  # noqa: ANN001
+    names: list[str] = []
+    for item in request.tools or []:
+        if isinstance(item, dict):
+            fn = item.get("function") or {}
+            if isinstance(fn, dict) and fn.get("name"):
+                names.append(str(fn["name"]))
+    return names
+
+
+@pytest.mark.parametrize("supervised,expect_replan", [(False, False), (True, True)])
+async def test_worker_nested_lead_replan_follows_supervised(
+    supervised: bool, expect_replan: bool
+):
+    """嵌套 lead：无子计划时开口无 replan；续跑已有 _supervised 时首轮 LLM 已挂上。"""
+
+    class _Rec(_ScriptedProvider):
+        def __init__(self) -> None:
+            super().__init__([[_content_chunk("ok")]])
+            self.names: list[list[str]] = []
+
+        async def stream(self, request):  # noqa: ANN001
+            self.names.append(_openai_tool_names(request))
+            async for chunk in super().stream(request):
+                yield chunk
+
+    delegate = _StubTool(name="delegate", category=ToolCategory.ORCHESTRATION)
+    delegate._supervised = object() if supervised else None
+    delegate._depth = 1
+    delegate._sink = None
+    reg = ToolRegistry()
+    reg.register(delegate)
+    provider = _Rec()
+    profile = make_profile_params(max_rounds=2)
+    await react_loop(
+        messages=[LLMMessage(role="user", content="go")],
+        llm=provider,
+        tools=reg,
+        sink=EventSink(),
+        tool_context=_context(),
+        profile=profile,
+        turn_model="m",
+        role="worker",
+        approval_gate=None,
+    )
+    assert provider.names, "expected at least one LLM request"
+    opening = provider.names[0]
+    assert "delegate" in opening
+    if expect_replan:
+        assert "replan" in opening
+        assert "wait" not in opening
+    else:
+        assert "replan" not in opening

@@ -2,20 +2,14 @@ import { handleWorkspaceEvent } from "@/services/sse/handlers/workspace";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { notifyWarning, showChanges, performWorkspaceOp } = vi.hoisted(() => ({
+const { notifyWarning, performWorkspaceOp } = vi.hoisted(() => ({
   notifyWarning: vi.fn(),
-  showChanges: vi.fn(),
   performWorkspaceOp: vi.fn(),
 }));
 
 vi.mock("@/lib/toast", () => ({ notifyWarning }));
 vi.mock("@/lib/log", () => ({ logEvent: vi.fn() }));
 vi.mock("@/services/workspaceOps", () => ({ performWorkspaceOp }));
-vi.mock("@/stores/sidePanel", () => ({
-  useSidePanelStore: {
-    getState: () => ({ showChanges }),
-  },
-}));
 vi.mock("@/stores/conversation/turnPhaseActions", () => ({
   getTurnPhase: () => "completed",
 }));
@@ -23,11 +17,10 @@ vi.mock("@/stores/conversation/turnPhaseActions", () => ({
 describe("handleWorkspaceEvent auto-snapshot", () => {
   beforeEach(() => {
     notifyWarning.mockReset();
-    showChanges.mockReset();
     useAutoSnapshotStore.setState({ failedByConversation: {} });
   });
 
-  it("marks failure, toasts, and opens the 改动 tab on action", () => {
+  it("marks failure and toasts without version or changes-tab guidance", () => {
     const handled = handleWorkspaceEvent(
       {
         type: "workspace_snapshot_failed",
@@ -40,13 +33,12 @@ describe("handleWorkspaceEvent auto-snapshot", () => {
     expect(notifyWarning).toHaveBeenCalledWith(
       "本回合自动备份失败",
       expect.objectContaining({
-        description: "回合已完成；重要节点请手动留版本。",
+        description: "回合已完成；下次改文件的回合会再试。",
       }),
     );
-    const action = notifyWarning.mock.calls[0]?.[1]?.action;
-    expect(action?.label).toBe("查看改动");
-    action?.onClick();
-    expect(showChanges).toHaveBeenCalled();
+    const opts = notifyWarning.mock.calls[0]?.[1];
+    expect(opts?.action).toBeUndefined();
+    expect(opts?.description).not.toMatch(/手动留版本/);
   });
 
   it("clears failure on done", () => {

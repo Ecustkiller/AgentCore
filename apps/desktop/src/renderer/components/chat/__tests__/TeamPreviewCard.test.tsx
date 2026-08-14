@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 开工卡被动记录：默认一行结论收起，点开才看队员明细；
- * resolved / pending 摘要文案与各 decision label 对齐。
+ * resolved 摘要文案与各 decision label 对齐；pending 不占时间线。
  */
 
 import { conversationKeys } from "@/lib/queryKeys";
@@ -168,8 +168,8 @@ describe("TeamPreviewCard", () => {
     expect(screen.getByText("先做公开竞品，不做内部访谈")).toBeTruthy();
   });
 
-  it("wire headline 优先于本地人数回退", () => {
-    renderCard(
+  it("pending 不占时间线（对齐 ask_user；可操作面只在拍板卡）", () => {
+    const { container } = renderCard(
       <TeamPreviewCard
         preview={makePreview({
           status: "pending",
@@ -178,27 +178,8 @@ describe("TeamPreviewCard", () => {
         })}
       />,
     );
-    const marker = screen.getByTestId("pending-decision-marker");
-    expect(marker.textContent).toContain(
-      "等你确认 · 确认后才会开工（MVP主流程 · 预计 2 人）",
-    );
-  });
-
-  it("pending 降级为单行拍板标记，无明细、无任何按钮（方案 C）", () => {
-    renderCard(
-      <TeamPreviewCard
-        preview={makePreview({ status: "pending", decision: null })}
-      />,
-    );
-
-    const marker = screen.getByTestId("pending-decision-marker");
-    expect(marker.textContent).toContain(
-      "等你确认 · 确认后才会开工（预计 2 人开工）",
-    );
-    expect(marker.textContent).toContain("入口在下方拍板卡");
-    // 单行标记：完整分工表归 ResumePrompt 拍板中心，这里零展开、零操作。
+    expect(container.textContent).toBe("");
     expect(screen.queryByText("研究员")).toBeNull();
-    expect(screen.queryByText("调研竞品定价策略与公开资料")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
   });
 
@@ -312,8 +293,8 @@ describe("TeamPreviewCard", () => {
     ).toBeTruthy();
   });
 
-  it("debate pending 同样降级为单行拍板标记（辩题立场归拍板中心）", () => {
-    renderCard(
+  it("debate pending 不占时间线（辩题立场只在拍板卡）", () => {
+    const { container } = renderCard(
       <TeamPreviewCard
         preview={makePreview({
           primitive: "debate",
@@ -331,11 +312,7 @@ describe("TeamPreviewCard", () => {
         })}
       />,
     );
-
-    const marker = screen.getByTestId("pending-decision-marker");
-    expect(marker.textContent).toContain(
-      "等你确认 · 确认后才会开赛（预计 2 方开赛）",
-    );
+    expect(container.textContent).toBe("");
     expect(screen.queryByText("该不该上四天工作制？")).toBeNull();
     expect(screen.queryByText("正方")).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();

@@ -5,15 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
-from agentcore.core.types import ToolEffect
 from agentcore.runtime.delegate.plan_events import emit_captain_readback
-from agentcore.runtime.events import content_delta
 from agentcore.runtime.runs.constants import DELEGATE_OUTPUT_LIMIT
-from agentcore.tools.protocol import ToolResult
 
 if TYPE_CHECKING:
     from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.runtime.runs.types import RunState
 
 DelegateTool = Any
 
@@ -114,80 +110,6 @@ def motion_cards_block(products: list[dict[str, Any]], *, auto_adopt: bool = Fal
         "\n### 建议开辩（队员提交的命题卡）\n"
         "以下是队员在完工交接中提交的结构化命题卡（发现【必须对抗交锋】的核心争议时才会出现）。"
         f"{_motion_card_guidance(auto_adopt=auto_adopt)}\n\n" + body
-    )
-
-
-def _user_facing_file_locations(state: RunState) -> str:
-    """User-visible path footer from ``file_acceptance`` only (no ``files_touched``).
-
-    Single-worker ``direct_result`` has no CEO synthesis pass, so accepted paths must
-    be appended here or the turn ends without telling the user where files landed.
-    Wording is end-user facing (where / how to open), not the CEO-facing citation block.
-
-    要 Word 就该指到 ``.docx``：自报了 ``derived_from`` 的导出件会把它的源文件折叠到
-    「中间稿」一行（口径见 ``fold_exported_sources``），主推的只有导出件。
-    """
-    if not state.file_acceptance:
-        return ""
-    from agentcore.runtime.runs.file_acceptance import fold_exported_sources
-
-    files, intermediates = fold_exported_sources(state.file_acceptance)
-    rejected: list[tuple[str, str]] = []
-    for row in state.file_acceptance:
-        if not isinstance(row, dict) or row.get("status") != "rejected":
-            continue
-        path = str(row.get("path") or "").strip()
-        if not path:
-            continue
-        detail = str(row.get("detail") or row.get("reason") or "").strip()
-        rejected.append((path, detail))
-    parts: list[str] = []
-    if files:
-        listed = "、".join(f"`{p}`" for p in files)
-        parts.append(f"文件位置：{listed}（可在工作区文件页打开）")
-    if intermediates:
-        drafts = "、".join(f"`{p}`" for p in intermediates)
-        parts.append(f"（中间稿：{drafts}，已导出为上述文件，一般无需打开）")
-    if rejected:
-        bits = [f"`{p}`" + (f"（{detail}）" if detail else "") for p, detail in rejected[:8]]
-        # Honest residual: completed runs can still carry path-level rejections.
-        parts.append(f"以下文件未通过验收：{'、'.join(bits)}")
-    return "\n".join(parts)
-
-
-def direct_result(tool: DelegateTool, state: RunState) -> ToolResult:
-    """提案2a：把单个成功 worker 的产出直接作为本回合最终答复（HANDOFF 终态）。"""
-    # 完工交接简报: ``state.debrief`` stays structured (handoff tool args) — never mixed into
-    # the deliverable prose. ``next_steps`` is rendered by run-detail 交接简报, not re-serialized
-    # into ``content`` (that hard footer caused duplicate「建议下一步」with the structured card).
-    # Optional motion_card still needs a user-visible cue when there is no CEO synthesis pass.
-    text = state.content
-    file_footer = _user_facing_file_locations(state)
-    if file_footer:
-        text = f"{text}\n\n{file_footer}"
-    debrief = state.debrief if isinstance(state.debrief, dict) else None
-    card = (debrief or {}).get("motion_card") if debrief else None
-    if isinstance(card, dict):
-        from agentcore.runtime.deep_research_auto import tool_may_auto_debate
-
-        if tool_may_auto_debate(tool):
-            footer = (
-                "**建议开辩**（深度研究自治：可直接调 debate 开赛；"
-                "background 据 fact_pointers 与产物汇编客观事实，不得装观点）\n"
-            )
-        else:
-            footer = (
-                "**建议开辩**（系统登记阶段推进卡；【勿口头征求开辩同意】；本回合勿直接开辩）\n"
-            )
-        text = f"{text}\n\n---\n{footer}" + _format_motion_card_block("队员", card)
-    tool._sink.emit(content_delta(text))
-    return ToolResult(
-        tool_call_id="",
-        success=True,
-        output=text,
-        output_limit=DELEGATE_OUTPUT_LIMIT,
-        effect=ToolEffect.HANDOFF,
-        final_text=text,
     )
 
 

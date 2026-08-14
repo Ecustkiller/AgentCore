@@ -76,8 +76,9 @@ export function nextDockActiveAfterFloat(
   if (dockedContent.length > 0) {
     return dockedContent[dockedContent.length - 1]?.id ?? WORKSPACE_TAB_ID;
   }
-  if (!floating.has(CHANGES_TAB_ID)) return CHANGES_TAB_ID;
+  // 工作区仍停靠时回工作区。「改动」是 §十 P0c 条件 tab，不能当 float 后的默认 home。
   if (!floating.has(WORKSPACE_TAB_ID)) return WORKSPACE_TAB_ID;
+  if (!floating.has(CHANGES_TAB_ID)) return CHANGES_TAB_ID;
   // All fixed homes floating and no docked content — keep a stable dock sentinel;
   // UI shows pin-back when workspace itself is floating.
   return WORKSPACE_TAB_ID;

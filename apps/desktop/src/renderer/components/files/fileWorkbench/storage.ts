@@ -31,7 +31,7 @@ export function saveRailWidth(px: number): void {
   uiSet(RAIL_KEY, clampRail(px));
 }
 
-// Generic Set<string> persistence — every rail fold state (工作区段 / 记忆段 /
+// Generic Set<string> persistence — every rail fold state (工作区段 / 设定段 /
 // 主题子夹) is "a set of ids in their non-default state". Tolerates unavailable / corrupt storage.
 function loadStringSet(key: string): Set<string> {
   const parsed = uiGet<unknown>(key);
@@ -55,7 +55,7 @@ export function saveExpandedWs(set: Set<string>): void {
   saveStringSet(WS_EXPANDED_KEY, set);
 }
 
-// 记忆段折叠态：全局段**默认展开**（保住老肌肉记忆），故只持久化「被折叠」的键——空集 =
+// 设定段折叠态：全局段**默认展开**（保住老肌肉记忆），故只持久化「被折叠」的键——空集 =
 // 展开（新用户零配置即得默认）。现仅全局段（键 "global"）使用；项目段默认折叠、走下方
 // MEMORY_PROJECTS_EXPANDED_KEY 的「记展开」语义（旧挂载时代的 folderId 残留条目无害，被忽略）。
 const MEMORY_COLLAPSED_KEY = "files-memory-collapsed";
@@ -79,7 +79,7 @@ export function saveMemoryTopicsExpanded(set: Set<string>): void {
   saveStringSet(MEMORY_TOPICS_EXPANDED_KEY, set);
 }
 
-// 项目「记忆」节点展开态：挂在每个项目下的「记忆」子节点**默认折叠**，故只持久化「被展开」
+// 文件夹「本文件夹设定」节点展开态：挂在每个文件夹下的设定子节点**默认折叠**，故只持久化「被展开」
 // 的 folderId——空集 = 全部折叠。（旧「项目记忆」聚合夹的 "__projects__" 残留键无害、被忽略。）
 const MEMORY_PROJECTS_EXPANDED_KEY = "files-memory-projects-expanded";
 

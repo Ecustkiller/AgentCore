@@ -53,7 +53,11 @@ async def test_dag_delegate_completes_with_both_products():
     assert "FINAL" in result.output
 
 
-async def test_finalize_single_worker_surfaces_directly_as_terminal():
+async def test_single_worker_success_folds_to_ceo_not_handoff():
+    """单 worker 成功：一律 format_for_ceo 回灌，不 HANDOFF、不灌主气泡。
+
+    arguments 残留 finalize 键静默忽略（不报错、不直出）。
+    """
     usage = TokenUsage(
         input_tokens=10,
         output_tokens=5,
@@ -62,32 +66,39 @@ async def test_finalize_single_worker_surfaces_directly_as_terminal():
         cache_miss_tokens=4,
     )
     sink = EventSink()
-    direct = _upstream_body("DIRECT")
     t = tool(Provider(["DIRECT"], usage=usage), sink=sink)
     result = await t.execute(
-        {"tasks": [{"role": "工程师", "task": "建文件"}], "finalize": True}, ctx()
+        {
+            "tasks": [{"role": "工程师", "task": "建文件"}],
+            "finalize": True,
+            "coordinate": False,
+        },
+        ctx(),
     )
     assert result.success is True
-    assert result.is_terminal is True
-    assert result.effect is ToolEffect.HANDOFF
-    assert result.final_text == direct
+    assert result.is_terminal is False
+    assert result.effect is not ToolEffect.HANDOFF
+    assert result.final_text is None
+    assert "DIRECT" in result.output
+    assert "团队执行结果" in result.output
     assert t.usage["input"] == 10
-    assert "input_tokens" not in result.metadata
     sink.close()
     deltas = [e.payload["delta"] async for e in sink if e.type == EventType.CONTENT_DELTA]
-    assert deltas == [direct]
+    assert deltas == []
 
 
-async def test_finalize_ignored_for_multi_worker_batch():
+async def test_leftover_finalize_ignored_for_multi_worker_batch():
     t = tool(Provider(["A", "B"]))
     result = await t.execute(
         {
             "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
             "finalize": True,
+            "coordinate": False,
         },
         ctx(),
     )
     assert result.is_terminal is False
+    assert result.effect is not ToolEffect.HANDOFF
     assert "A" in result.output and "B" in result.output
 
 
@@ -98,41 +109,24 @@ def _system_prompts(provider: Provider) -> list[str]:
     ]
 
 
-async def test_finalize_single_worker_identity_says_body_reaches_user():
-    """单人直出：finalize 入参穿到 RunPlan → worker 身份提示词换成对用户说话的口径。
-
-    直出路径把 worker 正文原样当最终答复，缺了这段交代它会按对主管汇报的口吻写，
-    「现在提交交接简报」这类内部动作旁白就进了用户可见的答复。
-    """
+async def test_leftover_finalize_keeps_plain_worker_identity():
+    """残留 finalize 键不换身份口径：产出仍回主管合成。"""
     provider = Provider(["DIRECT"])
     t = tool(provider)
     result = await t.execute(
-        {"tasks": [{"role": "工程师", "task": "改一行"}], "finalize": True}, ctx()
-    )
-    assert result.effect is ToolEffect.HANDOFF  # 确实走了直出
-    worker_sys = _system_prompts(provider)[0]
-    assert "正文直达用户" in worker_sys
-    assert "现在提交交接简报" in worker_sys
-
-
-async def test_multi_worker_finalize_keeps_plain_worker_identity():
-    """多节点：直出不成立（direct_result 不触发）⇒ 身份提示词一字不变。"""
-    provider = Provider(["A", "B"])
-    t = tool(provider)
-    result = await t.execute(
         {
-            "tasks": [{"role": "A", "task": "a"}, {"role": "B", "task": "b"}],
+            "tasks": [{"role": "工程师", "task": "改一行"}],
             "finalize": True,
+            "coordinate": False,
         },
         ctx(),
     )
-    assert result.is_terminal is False
-    prompts = _system_prompts(provider)
-    assert prompts and all("正文直达用户" not in sys for sys in prompts)
+    assert result.effect is not ToolEffect.HANDOFF
+    assert all("正文直达用户" not in sys for sys in _system_prompts(provider))
 
 
-async def test_single_worker_without_finalize_keeps_plain_worker_identity():
-    """单节点但未声明 finalize：产出仍回主管合成 ⇒ 不换口径。"""
+async def test_single_worker_keeps_plain_worker_identity():
+    """单节点产出仍回主管合成 ⇒ 不换直出口径。"""
     provider = Provider(["OUT"])
     t = tool(provider)
     await t.execute(
@@ -141,8 +135,8 @@ async def test_single_worker_without_finalize_keeps_plain_worker_identity():
     assert all("正文直达用户" not in sys for sys in _system_prompts(provider))
 
 
-async def test_finalize_falls_back_to_synthesis_when_worker_fails():
-    """Worker 硬失败（缺必备章节 + strict）→ finalize 不直出，回退 synthesis。
+async def test_single_worker_failure_still_folds_to_ceo():
+    """Worker 硬失败（缺必备章节 + strict）→ 仍走 format_for_ceo，不直出。
 
     定案乙后 min_length 已 soft；改用仍硬拦的 required_sections。
     """
@@ -157,10 +151,12 @@ async def test_finalize_falls_back_to_synthesis_when_worker_fails():
                 }
             ],
             "finalize": True,
+            "coordinate": False,
         },
         ctx(),
     )
     assert result.is_terminal is False
+    assert result.effect is not ToolEffect.HANDOFF
 
 
 def test_should_auto_light_delegate():
@@ -797,6 +793,7 @@ def test_schema_cues_xor_and_top_level_completion_criteria():
     assert "二选一" in t.schema.description
     props = t.schema.parameters["properties"]
     assert "completion_criteria" not in props
+    assert "finalize" not in props
     # S3 字段已删 ⇒ 描述里也不留负面清单（体积棘轮见
     # tests/test_tool_schema_size_ratchet.py）；误传仍由 execute 静默忽略 + 打点。
     assert "completion_criteria" not in t.schema.description

@@ -16,7 +16,7 @@ import { Brain, History, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 /**
- * 记忆动态 —「AI 记忆」editor's cross-conversation「最近更新」view (记忆更新对话内可见, §1.6,
+ * 记忆动态 — files-page「最近更新」view (记忆更新对话内可见, §1.6,
  * hybrid 方向 B 的家).
  *
  * The in-conversation card ({@link MemoryUpdateCard}) answers「这次对话 AI 记了什么」;

@@ -21,6 +21,7 @@ import {
 } from "@/stores/execution";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath, useUIStore } from "@/stores/ui";
+import { isLiveRunStatus } from "@agentcore/protocol-fold-kit";
 import { Pencil, Shield, Square } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { WorkerContextSection } from "./WorkerContextSection";
@@ -136,41 +137,45 @@ export function RunDetailBody({
   if (!execution || !run || !agent) return null;
 
   const output = agent.outputChunks.join("");
-  // 回合级动作，与「按人」那两枚并排；不属于某一位队员，captain 详情里也照出。
-  const turnActions =
-    agent.status === "working" ? (
-      <>
-        <Button
-          variant="ghost"
-          className="h-7 text-primary hover:bg-primary/10"
-          icon={<Pencil size={13} />}
-          onClick={() => {
-            useComposerDraftStore
-              .getState()
-              .fill(`【协作中调整】关于「${agent.role}」：`, "append");
-          }}
-        >
-          记下改法（跑完后发送）
-        </Button>
-        <Button
-          variant="ghost"
-          className="h-7 text-destructive hover:bg-destructive/10"
-          icon={<Square size={13} />}
-          onClick={() => useConversationStore.getState().stopGeneration()}
-        >
-          停止整轮
-        </Button>
-      </>
+  // 「记下改法」按人写进输入框，队员 / captain 在跑时都有。整轮停只给 captain：队员栏
+  // 再夹一枚方块停止，会和「停止这位队员」看起来像同一件事。整轮硬停的主入口是输入框。
+  const isCaptainRun = run.kind === "captain";
+  const working = agent.status === "working";
+  const noteAction = working ? (
+    <Button
+      variant="ghost"
+      className="h-7 text-primary hover:bg-primary/10"
+      icon={<Pencil size={13} />}
+      onClick={() => {
+        useComposerDraftStore
+          .getState()
+          .fill(`【协作中调整】关于「${agent.role}」：`, "append");
+      }}
+    >
+      记下改法（跑完后发送）
+    </Button>
+  ) : null;
+  const stopTurnAction =
+    working && isCaptainRun ? (
+      <Button
+        variant="ghost"
+        className="h-7 text-destructive hover:bg-destructive/10"
+        icon={<Square size={13} />}
+        onClick={() => useConversationStore.getState().stopGeneration()}
+      >
+        停止整轮
+      </Button>
     ) : null;
-  // 按人干预（只改这个人 / 只停这个人）：队员跑完后这两件事确实做不到，但入口不隐藏
-  // ——`RunInterveneControls` 会变灰并说明原因，而不是让用户以为自己找错了地方。
+  // 按人干预（只改这个人 / 只停这个人）：只在 `isLiveRunStatus` 时挂载（running /
+  // pending）。终局整条不渲染、也不写灰字原因——死按钮没有教学价值。排队仍画：可停；
+  // 改方向继续变灰 +「还没开工」。
   //
   // captain 除外（手机早有这道护栏）：主管这一路就是这条对话本身，「只停这位队员」对它
-  // 无意义，引擎的计划里也没有它——出了按钮就是许一个必然落空的愿。要停就停整轮，那枚
-  // 按钮仍在。
-  const isCaptainRun = run.kind === "captain";
+  // 无意义，引擎的计划里也没有它——出了按钮就是许一个必然落空的愿。要停就停整轮。
   const intervene =
-    conversationId != null && !isCaptainRun ? (
+    conversationId != null &&
+    !isCaptainRun &&
+    isLiveRunStatus(run.status) ? (
       <RunInterveneControls
         conversationId={conversationId}
         executionId={execution.id}
@@ -179,10 +184,13 @@ export function RunDetailBody({
         role={agent.role}
         redirectCapable={runCaps.runRedirect}
         output={output}
-        trailing={turnActions}
+        trailing={noteAction}
       />
-    ) : isCaptainRun && turnActions ? (
-      <div className="flex flex-wrap items-center gap-2">{turnActions}</div>
+    ) : isCaptainRun && (noteAction || stopTurnAction) ? (
+      <div className="flex flex-wrap items-center gap-2">
+        {noteAction}
+        {stopTurnAction}
+      </div>
     ) : null;
   const thinkingLive = isThinkingLivePlaceholder(agent);
 
@@ -262,8 +270,8 @@ export function RunDetailBody({
         </div>
       )}
 
-      {/* 队员不在跑时同样露出按人干预入口——排队中可停，已终局则变灰并说明原因。
-          默默消失会让用户以为自己找错了地方，下次就不再来找。 */}
+      {/* 队员不在跑、但仍 live（排队 pending）时露出按人干预。终局 `intervene` 为
+          null，这里整块不挂，避免空 wrapper。 */}
       {agent.status !== "working" && intervene && (
         <div className="mb-4">{intervene}</div>
       )}

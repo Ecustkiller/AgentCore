@@ -580,6 +580,20 @@ def test_near_context_ceiling_ratio_and_absolute():
     assert compaction.near_context_ceiling(200_000, 0) is True  # non-positive → absolute
 
 
+def test_near_context_ceiling_flash_free_uses_zen_gateway_cap():
+    """Existing ``deepseek-v4-flash-free`` must near-top at 80% of 200K, not 1M/128K."""
+    from agentcore.llm.model_metadata import model_metadata_for
+
+    free = model_metadata_for("deepseek-v4-flash-free").context_length
+    native = model_metadata_for("deepseek-v4-flash").context_length
+    assert free == 200_000
+    assert native == 1_000_000
+    assert compaction.near_context_ceiling(160_000, free) is True
+    assert compaction.near_context_ceiling(159_999, free) is False
+    # Same 160K is far from native 1M; the retired 128K hint would have fired at 102.4K.
+    assert compaction.near_context_ceiling(160_000, native) is False
+
+
 async def test_ensure_before_turn_noop_when_not_near(monkeypatch):
     monkeypatch.setattr(compaction.settings, "compaction_enabled", True, raising=True)
     monkeypatch.setattr(compaction.settings, "compaction_near_context_ratio", 0.8, raising=True)

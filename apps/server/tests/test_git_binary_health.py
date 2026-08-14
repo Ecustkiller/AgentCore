@@ -66,10 +66,17 @@ async def test_unprobed_cache_is_none():
 
 @pytest.mark.asyncio
 async def test_probe_success_caches_available(monkeypatch: pytest.MonkeyPatch):
-    _patch_spawn(monkeypatch, _FakeProc(stdout=b"git version 2.43.0"))
+    seen_stdin: list[object] = []
+
+    async def _spawn(*_args: Any, **kwargs: Any) -> Any:
+        seen_stdin.append(kwargs.get("stdin"))
+        return _FakeProc(stdout=b"git version 2.43.0")
+
+    monkeypatch.setattr(binary_health.asyncio, "create_subprocess_exec", _spawn)
     await probe_git_binary_at_startup()
     assert git_binary_health() is True
     assert git_binary_health_failure() is None
+    assert seen_stdin == [asyncio.subprocess.DEVNULL]
 
 
 @pytest.mark.asyncio

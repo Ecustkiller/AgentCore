@@ -17,8 +17,7 @@ import type { ReactNode } from "react";
  * is false). Fail-open: missing policy leaves this hidden.
  *
  * Always exposes a secondary link to this channel’s download page so users are
- * never permanently locked if in-app update cannot complete
- * (`autoInstallCapable === false` or any other failure path).
+ * never permanently locked if in-app installer download cannot complete.
  */
 export function ForceUpdateGate() {
   const minVersion = useUpdatesStore((s) => s.outdatedMinVersion);
@@ -34,7 +33,6 @@ export function ForceUpdateGate() {
   const checking = status.phase === "checking";
   const downloading = status.phase === "downloading";
   const available = status.phase === "available";
-  const manualOnly = !status.autoInstallCapable;
   const downloaded = status.phase === "downloaded";
   const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
@@ -46,7 +44,7 @@ export function ForceUpdateGate() {
   };
 
   if (downloaded) {
-    ctaLabel = "重启安装";
+    ctaLabel = "打开安装包";
     onCta = () => {
       void install();
     };
@@ -55,11 +53,8 @@ export function ForceUpdateGate() {
     ctaDisabled = true;
     ctaIcon = <Loader2 size={14} className="animate-spin" />;
     onCta = () => {};
-  } else if (manualOnly && (available || status.phase === "error")) {
-    // Primary action is the download-page <a> below; no auto download / retry.
-    onCta = null;
   } else if (available) {
-    ctaLabel = "立即更新";
+    ctaLabel = "下载安装包";
     onCta = () => {
       openUpdateDialog();
       void download();
@@ -69,10 +64,12 @@ export function ForceUpdateGate() {
     ctaDisabled = true;
     ctaIcon = <Loader2 size={14} className="animate-spin" />;
     onCta = () => {};
+  } else if (status.phase === "error") {
+    ctaLabel = "重试下载";
+    onCta = () => {
+      void download();
+    };
   }
-
-  const primaryIsDownloadPage =
-    manualOnly && (available || status.phase === "error");
 
   return (
     <div
@@ -92,7 +89,6 @@ export function ForceUpdateGate() {
         </h1>
         <p id="force-update-desc" className="text-sm text-muted-foreground">
           当前版本 {current} · 最低要求 {minVersion}
-          {manualOnly ? "。此版本需手动下载安装。" : null}
         </p>
 
         {downloading ? (
@@ -118,26 +114,15 @@ export function ForceUpdateGate() {
           <p className="text-sm text-destructive">{status.message}</p>
         ) : null}
 
-        {primaryIsDownloadPage ? (
-          <a
-            href={downloadPageUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            前往下载页
-          </a>
-        ) : (
-          <Button
-            variant="primary"
-            size="md"
-            disabled={ctaDisabled}
-            icon={ctaIcon}
-            onClick={onCta ?? undefined}
-          >
-            {ctaLabel}
-          </Button>
-        )}
+        <Button
+          variant="primary"
+          size="md"
+          disabled={ctaDisabled}
+          icon={ctaIcon}
+          onClick={onCta ?? undefined}
+        >
+          {ctaLabel}
+        </Button>
 
         <p className="text-sm text-muted-foreground">
           若无法完成更新，可

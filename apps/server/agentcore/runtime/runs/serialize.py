@@ -489,8 +489,6 @@ def plan_to_json(plan: RunPlan) -> dict[str, Any]:
         payload["workflow_id"] = plan.workflow_id
     if plan.workflow_version is not None:
         payload["workflow_version"] = int(plan.workflow_version)
-    if plan.finalize:
-        payload["finalize"] = True
     return payload
 
 
@@ -509,8 +507,7 @@ def plan_from_json(data: dict[str, Any]) -> RunPlan:
         plan.workflow_version = wv
     elif isinstance(wv, str) and wv.strip().isdigit():
         plan.workflow_version = int(wv.strip())
-    # 收口批标记随快照走：resume 折回同一张图时 worker 的身份口径不能变。
-    plan.finalize = bool(data.get("finalize"))
+    # 旧快照若含 ``finalize`` 键：忽略，不当直出。
     return plan
 
 

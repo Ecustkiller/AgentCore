@@ -312,7 +312,7 @@ describe("MemoryUpdateCard", () => {
         />
       </MemoryRouter>,
     );
-    fireEvent.click(screen.getByTitle("在「AI 记忆」中打开画像"));
+    fireEvent.click(screen.getByTitle("在设定中打开画像"));
     expect(navigate).toHaveBeenCalledWith("/files", {
       state: {
         openMemoryLeaf: {

@@ -26,7 +26,7 @@ class SupervisedRun:
     """A delegate plan paused at a decision boundary, awaiting the CEO's ``replan`` (受监督
     的波循环).     Holds exactly what :meth:`DelegateTool.replan` needs to finalise / re-steer
     and resume the SAME DAG from where it yielded: the (mutable) plan, the completed-so-far
-    seeds, the turn's execution id, the original ``finalize`` flag, the ``reason`` it
+    seeds, the turn's execution id, the ``reason`` it
     yielded for (``BIND`` = late-bind a placeholder, ``SCOPE`` = the reactive arm: re-steer the
     tail after a 队员 deviation OR replan(add) a producer for a worker卡在缺输入·依赖缺口, §2.4
     — gates ``replan``'s required-field check), and the run_ids that triggered the yield (the
@@ -36,7 +36,6 @@ class SupervisedRun:
     plan: RunPlan
     completed: dict[str, RunState]
     execution_id: str
-    finalize: bool
     reason: BoundaryReason
     boundary_run_ids: list[str]
 

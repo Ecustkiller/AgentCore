@@ -314,7 +314,6 @@ async def test_same_batch_depends_on_plus_continue_from():
         tool,
         plan,
         execution_id="e",
-        finalize=False,
         call_idx=1,
         seed_notes=None,
         complexity_hint="standard",

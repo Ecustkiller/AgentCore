@@ -1,8 +1,8 @@
 /**
  * 按人干预可用性判定 —— 两端共用这一份，说的必须是同一句。
  *
- * 关键不变量：**永远给得出一句原因**。调用方据此渲染「变灰 + 说明」，而不是把入口藏掉；
- * 藏掉会让用户以为自己找错了地方，扑空一次就再也不试。
+ * 调用方终局不画入口（`!isLiveRunStatus`）。本文件钉的是判定本身：live 可点；
+ * 不可用分支（含排队未开工的改方向）永远给得出一句原因，供仍渲染的那一截使用。
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -57,7 +57,7 @@ describe("runRedirectGate", () => {
 
   it("同一个 run 状态，三端问出来必须是同一个答案", () => {
     // 回归闸：曾经这里还收一个 turnLive（气泡还在流吗），团队转后台跑时它与「引擎够得着」
-    // 分离，于是同一个在飞 run 在画布上「可以改方向」、在右坞上「这一轮已经结束了」。
+    // 分离，于是同一个在飞 run 一处「可以改方向」、另一处「这一轮已经结束了」。
     // 现在粗过滤只认 run 自己的状态，本端再没有第二个自变量可分叉。
     expect(runRedirectGate("running")).toEqual(runRedirectGate("running"));
     expect(runStopGate("running").enabled).toBe(
@@ -65,7 +65,7 @@ describe("runRedirectGate", () => {
     );
   });
 
-  it("任何不可用分支都带原因（没有「按钮不见了」这条路）", () => {
+  it("任何不可用分支都带原因（仍渲染的那一截用；终局由调用方整条不画）", () => {
     for (const status of [...SETTLED, "pending", "running", "weird"]) {
       const gate = runRedirectGate(status);
       if (gate.enabled) {

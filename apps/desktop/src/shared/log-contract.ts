@@ -20,10 +20,10 @@
  * 但 `/readyz` 仍健康：`server_health.api_outage_ignored`（不标 offline）。
  * 自动更新可观测（主进程直写）：`updater.configure` / `updater.schedule_start` /
  * `updater.policy` / `updater.check_begin|end` / `updater.phase` /
- * `updater.download_begin|progress|end` / `updater.error` / `updater.quit_and_install`
+ * `updater.download_begin|progress|end` / `updater.error` / `updater.open_installer`
  *（含 `durationMs` / `sinceCheckMs`，用于区分 policy / feed / 下载慢点；
- * `download_progress` 的 `bytesPerSecond`=近期窗口，`reportedAvgBps`=electron-updater
- * 全程平均；`configure` 另记 `disableDifferentialDownload`——临时全量开关是否开启）。
+ * `download_progress` 的 `bytesPerSecond`=近期窗口；`configure` 另记
+ * `installerSource=github`——安装包走 GitHub，不经 electron-updater）。
  * 切对话消息窗诊断（临时）：`conversation.slice_diag`（`action`=
  * `message_end_slice_kept` / `release_drop`（仅显式 API）/ `warm_skip_reconcile`
  *（仅 generating）/ `warm_keep_anchor`（pendingFocus / ?msg=）/ `warm_snap_latest` /

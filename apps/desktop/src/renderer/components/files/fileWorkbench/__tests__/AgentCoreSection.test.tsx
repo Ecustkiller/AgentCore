@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * 条目区标题——显示名与盘上 `AgentCore/`（文件树里的「AI 工作间」）消歧。
+ * 条目区标题——按作用域「全局设定」/「本文件夹设定」，与盘上 `AgentCore/`（「AI 工作间」）消歧。
  */
 
 import { render, screen } from "@testing-library/react";
@@ -30,14 +30,18 @@ function renderSection(scope: "global" | "folder") {
 }
 
 describe("AgentCoreSection 标题", () => {
-  it("全局与文件夹两处作用域都显示「记忆」，不再叫 AgentCore", () => {
+  it("全局显示「全局设定」、文件夹显示「本文件夹设定」，不再叫记忆或 AgentCore", () => {
     const { unmount } = renderSection("global");
-    expect(screen.getByText("记忆")).toBeTruthy();
+    expect(screen.getByText("全局设定")).toBeTruthy();
+    expect(screen.queryByText("本文件夹设定")).toBeNull();
+    expect(screen.queryByText("记忆")).toBeNull();
     expect(screen.queryByText("AgentCore")).toBeNull();
     unmount();
 
     renderSection("folder");
-    expect(screen.getByText("记忆")).toBeTruthy();
+    expect(screen.getByText("本文件夹设定")).toBeTruthy();
+    expect(screen.queryByText("全局设定")).toBeNull();
+    expect(screen.queryByText("记忆")).toBeNull();
     expect(screen.queryByText("AgentCore")).toBeNull();
   });
 });

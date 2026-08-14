@@ -5,7 +5,6 @@ export {
   askResolvedOutcome,
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
-  teamPendingMarkerLabel,
   teamPreviewLead,
   teamResolvedOutcome,
 } from "./meta";

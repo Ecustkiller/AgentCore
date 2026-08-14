@@ -23,14 +23,8 @@ vi.mock("@/services/system", () => ({
   ),
 }));
 
-import {
-  clientReleaseChannel,
-  desktopDownloadUrlForChannel,
-} from "@/lib/releaseChannel";
 import { useUpdatesStore } from "@/stores/updates";
 import { AboutSettings } from "../AboutSettings";
-
-const downloadPageUrl = desktopDownloadUrlForChannel(clientReleaseChannel());
 
 beforeEach(() => {
   useUpdatesStore.setState({
@@ -51,8 +45,8 @@ afterEach(() => {
   });
 });
 
-describe("AboutSettings software update (autoInstallCapable)", () => {
-  it("shows manual-download copy and channel download link", async () => {
+describe("AboutSettings software update", () => {
+  it("shows installer-download copy and 查看更新 when a version is available", async () => {
     useUpdatesStore.setState({
       status: {
         phase: "available",
@@ -67,12 +61,30 @@ describe("AboutSettings software update (autoInstallCapable)", () => {
     );
     await waitFor(() => {
       expect(
-        screen.getByText(/发现新版本 0\.7\.0，此版本需手动下载安装/),
+        screen.getByText(/发现新版本 0\.7\.0，确认后下载安装包/),
       ).toBeTruthy();
     });
-    const link = screen.getByRole("link", { name: "前往下载页" });
-    expect(link.getAttribute("href")).toBe(downloadPageUrl);
-    expect(link.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("link", { name: "前往下载页" })).toBeNull();
     expect(screen.getByRole("button", { name: "查看更新" })).toBeTruthy();
+  });
+
+  it("shows 打开安装包 when downloaded", async () => {
+    const install = vi.fn(() => Promise.resolve());
+    useUpdatesStore.setState({
+      install,
+      status: {
+        phase: "downloaded",
+        version: "0.7.0",
+        autoInstallCapable: true,
+      },
+    });
+    render(
+      <MemoryRouter>
+        <AboutSettings />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "打开安装包" })).toBeTruthy();
+    });
   });
 });

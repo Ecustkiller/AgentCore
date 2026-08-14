@@ -265,3 +265,25 @@ def test_captain_context_blocks_first_turn_omits_history():
     # A fresh conversation (no prior turns) → only system + request, no empty history block.
     blocks = _build_captain_context_blocks("你是 CEO。", [], "第一条消息")
     assert [b.channel for b in blocks] == ["system", "request"]
+
+
+def test_worker_turn_observe_covers_identity(monkeypatch):
+    captured: list[dict] = []
+
+    class _Spy:
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
+    monkeypatch.setattr("agentcore.runtime.context.assembler.logger", _Spy())
+    spec = RunSpec(run_id="x", agent_id="x", role="汇报员", task="t")
+    msgs = _build_messages(_plan(spec), spec, {}, "SYS", "原始请求")
+    system = msgs[0].content or ""
+    assert system.startswith("SYS\n\n")
+    assert "你的角色：汇报员" in system
+    rows = [r for r in captured if r.get("event") == "cost.prompt_assembled"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["scope"] == "worker_turn"
+    assert row["sections"]["worker_base"] == 3
+    assert row["sections"]["identity"] > 0
+    assert row["sections"]["role"] == len("你的角色：汇报员")

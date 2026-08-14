@@ -71,7 +71,22 @@ def test_family_variant_appends_qualifier_not_identical_label():
     assert free.badge == "免费额度"
     assert free.vendor == "DeepSeek"
     assert free.capabilities == base.capabilities
-    assert free.context_length == base.context_length
+    # Free SKU must NOT inherit Flash's native 1M — Zen caps this id at 200K.
+    assert free.context_length == 200_000
+    assert base.context_length == 1_000_000
+
+
+def test_deepseek_v4_windows_follow_sku_not_family():
+    """Native Flash/Pro = 1M; Zen free-tier id keeps the 200K gateway cap.
+
+    Dated paid variants inherit 1M; a ``-free-…`` suffix must keep 200K (longest
+    family key is ``deepseek-v4-flash-free``, not bare ``flash``).
+    """
+    assert model_metadata_for("deepseek-v4-flash").context_length == 1_000_000
+    assert model_metadata_for("deepseek-v4-pro").context_length == 1_000_000
+    assert model_metadata_for("deepseek-v4-flash-free").context_length == 200_000
+    assert model_metadata_for("deepseek-v4-flash-0731").context_length == 1_000_000
+    assert model_metadata_for("deepseek-v4-flash-free-0731").context_length == 200_000
 
 
 def test_curated_display_name_badge_pairs_are_unique():

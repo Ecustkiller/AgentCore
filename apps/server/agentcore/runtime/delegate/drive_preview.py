@@ -21,7 +21,6 @@ async def team_preview_before_workers(
     tool: DelegateTool,
     plan: RunPlan,
     *,
-    finalize: bool,
     complexity_hint: str,
     seed_completed: dict[str, Any] | None,
     call_idx: int,
@@ -52,7 +51,7 @@ async def team_preview_before_workers(
     ):
         return None
     if not should_kickoff(
-        plan, finalize=finalize, local_gate=local_gate, axes=axes
+        plan, local_gate=local_gate, axes=axes
     ):
         # Card skipped: still silent-grant when command=auto, OR when team_kickoff=skip
         # with command=kickoff (跳组团卡但仍开工授执行类；托管或自定义轴).

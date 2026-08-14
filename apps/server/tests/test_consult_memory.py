@@ -134,13 +134,32 @@ def test_compose_ceo_renders_directory_when_consult_wired():
     assert "<按需目录>" not in without
 
 
-def test_compose_worker_simplified_directory():
-    topics = [MemoryTopic(name="部署流程", summary="ignored")]
+def test_compose_worker_directory_includes_summaries():
+    topics = [MemoryTopic(name="部署流程", summary="怎么起")]
     base = assemble_system_prompt()
     out = compose_worker_base_prompt(base, memory_topics=topics)
     assert "<按需目录>" in out
-    assert "部署流程" in out
-    assert "怎么起" not in out  # names only
+    assert "部署流程：怎么起" in out
+    assert "name＋一行摘要" in out
+
+
+def test_compose_worker_base_observe_sections(monkeypatch):
+    captured: list[dict] = []
+
+    class _Spy:
+        def info(self, event: str, **kwargs: object) -> None:
+            captured.append({"event": event, **kwargs})
+
+    monkeypatch.setattr("agentcore.runtime.context.assembler.logger", _Spy())
+    topics = [MemoryTopic(name="部署流程", summary="怎么起")]
+    compose_worker_base_prompt(assemble_system_prompt(), memory_topics=topics)
+    rows = [r for r in captured if r.get("event") == "cost.prompt_assembled"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["scope"] == "worker_base"
+    assert "shared_base" in row["sections"]
+    assert "on_demand_directory" in row["sections"]
+    assert row["sections"]["on_demand_directory"] > 0
 
 
 async def test_wire_worker_consult_when_topics_exist(tmp_path, monkeypatch):
@@ -165,6 +184,15 @@ async def test_wire_worker_consult_when_topics_exist(tmp_path, monkeypatch):
         user_id="u",
     )
     assert "consult" in registry.names
+    consult = registry.get("consult")
+    assert consult is not None
+    names = {e.name for e in await consult.source.list_directory("u")}
+    assert "部署流程" in names
+    assert "team_orchestration_advanced" in names
+    assert "product_help" not in names
+    assert "revising_a_product" not in names
+    assert "long_form_landing" in names
+    assert "long_form_writing" not in names
 
 
 async def test_merged_source_directory_and_fetch_agree(tmp_path):

@@ -19,11 +19,18 @@ export type AgentCoreScope =
   | { kind: "folder"; folderId: string };
 
 /**
- * Entry-base rail title. The base holds exactly one kind of thing — equal md
- * entries — so the name presumes neither who wrote it nor what it holds, and it
- * no longer collides with the on-disk `AgentCore/`（文件树里的「AI 工作间」）.
+ * Entry-base rail titles by mount. The base holds equal md entries (画像 / 偏好 /
+ * 规则 / 主题); the label names the scope, not who wrote it and not AgentCore
+ * (on-disk `AgentCore/` stays「AI 工作间」).
  */
-export const ENTRIES_SECTION_NAME = "记忆";
+export const ENTRIES_SECTION_NAME_GLOBAL = "全局设定";
+export const ENTRIES_SECTION_NAME_FOLDER = "本文件夹设定";
+
+export function entriesSectionName(scope: AgentCoreScope): string {
+  return scope.kind === "global"
+    ? ENTRIES_SECTION_NAME_GLOBAL
+    : ENTRIES_SECTION_NAME_FOLDER;
+}
 
 /**
  * Entry-base rail section — flat entries by scope (目标形态 · 文件页形态).
@@ -138,7 +145,9 @@ export function AgentCoreSection({
         ) : (
           <Folder size={14} className="shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 truncate">{ENTRIES_SECTION_NAME}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {entriesSectionName(scope)}
+        </span>
       </button>
 
       {sectionOpen && (

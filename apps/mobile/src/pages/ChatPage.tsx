@@ -642,6 +642,31 @@ function extractTurnWarning(events: SSEEvent[]): string | null {
 /** Live / journal：``message_start.message_id``（客户端 turn.id 是本地 UUID，不能当云 messageId）。 */
 const extractMessageId = turnMessageId;
 
+/** 空泡失败红卡豁免：该回合已是 paused，或时间线已有 ask / checkpoint / ResumeCard 面。 */
+function dedicatedPauseOrAskUi(opts: {
+  paused?: boolean | null;
+  finishReason?: string | null;
+  projectedStatus?: string | null;
+  askCount: number;
+  process?: readonly { kind: string }[] | null;
+}): boolean {
+  if (
+    opts.paused ||
+    opts.finishReason === "paused" ||
+    opts.projectedStatus === "paused"
+  ) {
+    return true;
+  }
+  if (opts.askCount > 0) return true;
+  return (opts.process ?? []).some(
+    (s) =>
+      s.kind === "ask" ||
+      s.kind === "checkpoint" ||
+      s.kind === "plan_review" ||
+      s.kind === "team_preview",
+  );
+}
+
 function AssistantBubble({
   turn,
   live,
@@ -768,6 +793,12 @@ function AssistantBubble({
     finishReason,
     errorMessage: chrome.errorMessage,
     skip: live,
+    hasDedicatedPauseOrAskUi: dedicatedPauseOrAskUi({
+      finishReason,
+      projectedStatus: p.status,
+      askCount: asks.length,
+      process: p.process,
+    }),
   });
   const errorAction = failureNotice
     ? errorActionForCode(chrome.errorCode, {
@@ -1075,6 +1106,12 @@ function HistoryAssistant({
     finishReason,
     errorMessage,
     skip: streaming,
+    hasDedicatedPauseOrAskUi: dedicatedPauseOrAskUi({
+      paused: m.paused,
+      finishReason,
+      askCount: asks.length,
+      process,
+    }),
   });
   const errorAction = failureNotice
     ? errorActionForCode(errorCode, {
@@ -1891,23 +1928,29 @@ export function ChatPage() {
             expectLiveRunRef.current = true;
             setFollowRunning(true);
           } else if (!recovery.liveRunning && recovery.paused.length === 0) {
-            setHistory((h) => {
-              if (!h || h.length === 0) return h;
-              const next = h.slice();
-              const i = next.length - 1;
-              next[i] = {
-                ...next[i],
-                status: "incomplete",
-                runs: {
-                  events: next[i].runs?.events ?? [],
-                  finish_reason: "interrupted",
-                  process: next[i].runs?.process ?? null,
-                  captain_context: next[i].runs?.captain_context,
-                  turn_warning: next[i].runs?.turn_warning,
-                },
-              };
-              return next;
-            });
+            // pause 闩（usage.paused / finish_reason=paused）是挂起回合，不是死租约。
+            // hold：禁止 stamp incomplete/interrupted，提问卡 / ResumeCard 才是该面。
+            const pauseLatch =
+              Boolean(last.paused) || last.runs?.finish_reason === "paused";
+            if (!pauseLatch) {
+              setHistory((h) => {
+                if (!h || h.length === 0) return h;
+                const next = h.slice();
+                const i = next.length - 1;
+                next[i] = {
+                  ...next[i],
+                  status: "incomplete",
+                  runs: {
+                    events: next[i].runs?.events ?? [],
+                    finish_reason: "interrupted",
+                    process: next[i].runs?.process ?? null,
+                    captain_context: next[i].runs?.captain_context,
+                    turn_warning: next[i].runs?.turn_warning,
+                  },
+                };
+                return next;
+              });
+            }
           }
         }
         // 定面完成 → 挂对话级订阅（无论是否有回合在跑：空闲对话也要停在上面等）。
@@ -3143,7 +3186,6 @@ export function ChatPage() {
                   <AttachmentChips items={draftPending.attachments} />
                 </div>
               )}
-              <p className="muted hint">正在创建会话…</p>
             </div>
           )}
           {/* 锚不到更晚用户消息的记忆卡 (③ §1.6): 最近一轮的固化结果，留在线程尾部。卡自己

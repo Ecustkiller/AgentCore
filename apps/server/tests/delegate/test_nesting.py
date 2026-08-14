@@ -145,11 +145,11 @@ async def test_depth_three_subworker_cannot_delegate_further():
 
 
 def test_make_lead_subteam_wires_delegate_plus_replan_bound_to_child():
-    # 受监督子计划 B 去特例 (docs/03-AI核心/编排器与CEO主Agent.md §2.4): a lead gets BOTH its own
-    # delegate AND a replan bound to THAT child delegate instance (not the root CEO's) — so it
-    # finalises / re-steers its OWN sub-plan at a 波边界 exactly like the CEO. Without the bound
-    # replan a yielding sub-plan would be a dead-end. The child is also registered on the parent
-    # so absorb_children later folds its ledger into the turn totals.
+    # 受监督子计划 B 去特例: a lead's bundle mints BOTH its own delegate AND a
+    # replan bound to THAT child (not the root CEO's). Opening offer is delegate
+    # only; replan is promoted once a sub-plan exists. Without the bound replan
+    # a yielding sub-plan would be a dead-end. The child is also registered on
+    # the parent so absorb_children later folds its ledger into the turn totals.
     parent = tool(Provider([]))
     subteam = make_lead_subteam(parent, "cap1", 1)
 

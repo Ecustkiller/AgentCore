@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * RunDetailBody 按人干预入口：队员那一路任何状态都在（跑完了就变灰 + 说明原因，绝不消失）；
- * 点击走 requestRunStop；请求中禁用。
+ * RunDetailBody 按人干预入口：只在 `isLiveRunStatus`（running / pending）时出现；
+ * 终局整条不渲染、不写灰字原因、不留空 wrapper。点击走 requestRunStop；请求中禁用。
  *
  * 两条诚实边界一并钉在这里：受理与否由服务端回答（引擎够不着时不留「停止请求中…」），
  * 以及 captain 那一路不出按人干预（主管就是这条对话本身，「只停这位队员」对它无意义）。
@@ -199,44 +199,35 @@ describe("RunDetailBody member stop", () => {
     expect(screen.queryByRole("button", { name: "停止整轮" })).toBeNull();
   });
 
-  it("shows stop on the same row as redirect while working", () => {
+  it("shows per-member stop and redirect while working, without 停止整轮", () => {
     seed({ agentStatus: "working", runStatus: "running" });
     wrap(<RunDetailBody messageId="m1" runId="r1" />);
 
     expect(screen.getByRole("button", { name: "停止这位队员" })).toBeTruthy();
     expect(screen.getByText(/正在实时输出/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "停止整轮" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "记下改法（跑完后发送）" }),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "停止整轮" })).toBeNull();
   });
 
-  // 跑完的队员确实停不了也改不了，但入口消失会让用户以为自己找错了地方——扑空一次
-  // 就再也不来，最后只敢用够得着的「停止整轮」。所以变灰 + 说清为什么，不隐藏。
-  it("keeps both entries visible but disabled with a reason once settled", () => {
-    seed({ agentStatus: "completed", runStatus: "completed" });
-    wrap(<RunDetailBody messageId="m1" runId="r1" />);
+  it.each(["completed", "failed", "cancelled", "skipped"] as const)(
+    "does not render per-member intervene once %s (no gray reason, no empty wrapper)",
+    (runStatus) => {
+      seed({
+        agentStatus: runStatus === "completed" ? "completed" : "idle",
+        runStatus,
+      });
+      wrap(<RunDetailBody messageId="m1" runId="r1" />);
 
-    const stop = screen.getByRole("button", {
-      name: /^停止这位队员（/,
-    }) as HTMLButtonElement;
-    expect(stop.getAttribute("aria-disabled")).toBe("true");
-    expect(stop.title).toMatch(/已经跑完/);
-
-    const redirect = screen.getByRole("button", {
-      name: /^立即改此人（/,
-    }) as HTMLButtonElement;
-    expect(redirect.getAttribute("aria-disabled")).toBe("true");
-    expect(redirect.title).toMatch(/已经跑完/);
-
-    // 原因也写在面板上，不必等 hover 才知道为什么点不动。
-    expect(screen.getByText(/这位队员已经跑完/)).toBeTruthy();
-  });
-
-  it("blocks stop clicks once settled (no request goes out)", () => {
-    seed({ agentStatus: "completed", runStatus: "completed" });
-    wrap(<RunDetailBody messageId="m1" runId="r1" />);
-
-    fireEvent.click(screen.getByRole("button", { name: /^停止这位队员（/ }));
-    expect(submitRunStop).not.toHaveBeenCalled();
-  });
+      expect(screen.queryByRole("button", { name: /停止这位队员/ })).toBeNull();
+      expect(screen.queryByRole("button", { name: /立即改此人/ })).toBeNull();
+      expect(
+        screen.queryByText(/已经跑完|已经结束|已经停下|没有执行|还没开工/),
+      ).toBeNull();
+      expect(submitRunStop).not.toHaveBeenCalled();
+    },
+  );
 
   it("explains that a queued member has no in-flight work to redirect", () => {
     seed({ agentStatus: "idle", runStatus: "pending" });
@@ -294,7 +285,7 @@ describe("RunDetailBody member stop", () => {
   });
 
   // captain 不是被派出去的队员——引擎的计划里没有它，「只停这位队员」必然落空。
-  // 但回合级的「停止整轮」仍在，用户要停有地方停（手机早已是这个判据）。
+  // 整轮停只挂在 captain 详情（队员栏不夹），与输入框「停止生成」同一条 stopGeneration。
   it("hides per-member intervene on the captain run, keeps 停止整轮", () => {
     seed({ agentStatus: "working", runStatus: "running", runKind: "captain" });
     wrap(<RunDetailBody messageId="m1" runId="r1" />);
@@ -302,5 +293,8 @@ describe("RunDetailBody member stop", () => {
     expect(screen.queryByRole("button", { name: /停止这位队员/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /立即改此人/ })).toBeNull();
     expect(screen.getByRole("button", { name: "停止整轮" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "记下改法（跑完后发送）" }),
+    ).toBeTruthy();
   });
 });

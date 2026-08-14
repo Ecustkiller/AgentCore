@@ -86,6 +86,45 @@ describe("previewFromOpenedWindow", () => {
   it("keeps listed preview when the window is empty", () => {
     expect(previewFromOpenedWindow([], STALE)).toBe(STALE);
   });
+
+  it("walks back past empty cancelled assistant instead of stop copy", () => {
+    expect(
+      previewFromOpenedWindow(
+        [
+          msg("u1", "user", "你好"),
+          msg("a1", "assistant", "", { finishReason: "cancelled" }),
+        ],
+        STALE,
+      ),
+    ).toBe("你好");
+  });
+
+  it("walks back past empty paused assistant instead of incomplete-failure copy", () => {
+    const preview = previewFromOpenedWindow(
+      [
+        msg("u1", "user", "你好"),
+        msg("a1", "assistant", "", { finishReason: "paused" }),
+      ],
+      STALE,
+    );
+    expect(preview).toBe("你好");
+    expect(preview).not.toBe("本轮未能完成，请重试。");
+    expect(preview).not.toContain("本轮未能完成");
+  });
+
+  it("walks back empty paused when finishReason is only on runs", () => {
+    const preview = previewFromOpenedWindow(
+      [
+        msg("u1", "user", "你好"),
+        msg("a1", "assistant", "", {
+          runs: { events: [], finishReason: "paused" },
+        }),
+      ],
+      STALE,
+    );
+    expect(preview).toBe("你好");
+    expect(preview).not.toContain("本轮未能完成");
+  });
 });
 
 describe("syncConversationListPreview", () => {

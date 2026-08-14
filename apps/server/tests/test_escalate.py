@@ -8,6 +8,7 @@ it was blocked, straight from the line — no DB round-trip. These drive the non
 (no live escalation channel), which still emits the log before returning its CONTINUE ack.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -159,7 +160,7 @@ def test_escalation_required_carries_timeout_only_when_ops_configured_one():
 
 
 def test_escalate_schema_teaches_blocking_choice():
-    """Worker 按题自选 blocking：schema 须写清该停 / 能报，默认仍 false。"""
+    """Worker 按题自选 blocking：身份段用人话，按钮上仍须写清 JSON 字段默认 false。"""
     schema = EscalateTool().schema
     desc = schema.description
     assert "默认 false" in desc
@@ -172,6 +173,14 @@ def test_escalate_schema_teaches_blocking_choice():
     assert "该停时别装非阻塞" in blocking
     # default philosophy unchanged: missing blocking stays non-blocking
     assert schema.parameters["properties"]["blocking"].get("default") in (None, False)
+
+
+def test_escalate_schema_stays_off_engine_internals():
+    """协调模式 / 超时 / 未武装 是引擎行为，不写进按钮。"""
+    schema = EscalateTool().schema
+    blob = schema.description + json.dumps(schema.parameters, ensure_ascii=False)
+    for phrase in ("协调模式", "经典路径", "near-verbatim", "未武装", "并发满"):
+        assert phrase not in blob, phrase
 
 
 @pytest.mark.asyncio

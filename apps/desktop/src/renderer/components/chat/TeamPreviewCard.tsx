@@ -2,7 +2,6 @@ import { shouldHostPreviewInGraph } from "@/components/chat/debatePreviewPlaceme
 import {
   ResolvedDecisionRecord,
   teamCorrectionSuffix,
-  teamPendingMarkerLabel,
   teamPreviewLead,
   teamResolvedOutcome,
 } from "@/components/chat/decision";
@@ -16,20 +15,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { isColdPendingDrawable } from "@/services/resume";
 import type { TeamPreviewDisplay } from "@/stores/conversation";
-import { useConversationStore } from "@/stores/conversation";
 import { useMessageExecution } from "@/stores/execution";
-import { useInteractionStore } from "@/stores/interactions";
-import { PendingDecisionMarker } from "./PendingDecisionMarker";
 
 /**
  * Inline team_preview card — thin preflight before fan-out / moderator start.
- * Actionable surface is the durable ResumePrompt (挂起即收口). 方案 C（一个焦点 +
- * 一个入口）: inline pending is a single-line {@link PendingDecisionMarker} — the
- * full 分工表 / 辩题立场 live on the ResumePrompt 拍板中心; resolved keeps a
- * collapsible settled trace (one-line conclusion; expand for plan details + note).
- * plan_review resolved 不占时间线，结论收进图节点 checkpoint 徽标。
+ * Actionable surface is the durable ResumePrompt (挂起即收口). pending 对齐
+ * ask_user：时间线不画标记，分工表 / 辩题立场只在拍板卡。resolved 留可折叠结论文。
  *
  * Branches on ``primitive``: delegate = 队员分工表; debate = 辩题 / 立场 / 轮次预算.
  *
@@ -48,29 +40,13 @@ export function TeamPreviewCard({
   messageId?: string;
 }) {
   const execution = useMessageExecution(messageId ?? null);
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const entryMessageId = useInteractionStore(
-    (s) => s.byId.get(preview.id)?.messageId,
-  );
   if (shouldHostPreviewInGraph(preview, execution?.runs)) {
     return null;
   }
   if (preview.status === "resolved") {
     return <ResolvedTeamPreview preview={preview} />;
   }
-  // Honesty: do not point at the 拍板卡 when ResumePrompt cannot paint yet.
-  if (
-    conversationId &&
-    entryMessageId !== undefined &&
-    !isColdPendingDrawable(conversationId, entryMessageId)
-  ) {
-    return null;
-  }
-  return (
-    <PendingDecisionMarker
-      label={teamPendingMarkerLabel(preview.primitive, summarySuffix(preview))}
-    />
-  );
+  return null;
 }
 
 function isDebate(preview: TeamPreviewDisplay): boolean {
@@ -78,7 +54,6 @@ function isDebate(preview: TeamPreviewDisplay): boolean {
 }
 
 function summarySuffix(preview: TeamPreviewDisplay): string {
-  // Marker already has activeCaption; suffix is the delivery/headcount lead.
   return teamPreviewLead({
     primitive: preview.primitive,
     headline: preview.headline,

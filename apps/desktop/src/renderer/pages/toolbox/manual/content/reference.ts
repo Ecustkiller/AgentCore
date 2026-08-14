@@ -154,8 +154,8 @@ export const referenceChapter: ManualChapterContent = {
               to: APP_PATHS.more.providers,
             },
             {
-              label: "AI 记忆",
-              desc: "在文件页查看、编辑或清理长期记忆",
+              label: "全局设定",
+              desc: "在文件页查看、编辑画像、偏好与规则",
               to: APP_PATHS.files,
             },
             {
@@ -541,7 +541,7 @@ export const referenceChapter: ManualChapterContent = {
             },
             {
               title: "记忆",
-              desc: "团队记住的偏好来自你的对话；想改写或清掉，直接说即可，或在「文件」页的「AI 记忆」里编辑、清理。",
+              desc: "团队记住的偏好来自你的对话；想改写或清掉，直接说即可，或在「文件」页的「全局设定」里编辑、清理。",
             },
             {
               title: "反馈附带的上下文",

@@ -12,7 +12,6 @@ import {
   StageCardTrace,
 } from "@/components/chat/HotDecisionTrace";
 import { NonBlockingAskCard } from "@/components/chat/NonBlockingAskCard";
-import { PlanReviewCard } from "@/components/chat/PlanReviewCard";
 import { TeamPreviewCard } from "@/components/chat/TeamPreviewCard";
 import type {
   CheckpointDisplay,
@@ -66,10 +65,9 @@ export function renderTimelineInteractionCard(
       const ask = bags.nonBlockingAsks.find((a) => a.id === node.ask_id);
       return ask ? <NonBlockingAskCard key={ask.id} ask={ask} /> : null;
     }
-    case "plan_review": {
-      const pr = bags.planReviews.find((p) => p.id === node.checkpoint_id);
-      return pr ? <PlanReviewCard key={pr.id} review={pr} /> : null;
-    }
+    case "plan_review":
+      // pending / resolved 都不占时间线；可操作面只在 ResumePrompt。
+      return null;
     case "team_preview": {
       const tp = bags.teamPreviews.find((p) => p.id === node.checkpoint_id);
       return tp ? (

@@ -82,7 +82,9 @@ MVP 主流程可点 → `intensity=lean`；模块流水线一次做完 → `inte
 `package_install=未装配`（云端能跑代码 ≠ 能装依赖）时：【禁止】把仅结构自检说成「自检全过 / 跑绿 / 单测已绿」；\
 须写明未装包 / 未外环验绿，并给本机命令或 `export_to_local`（与 Office / 生图 / 零写盘假改分轴）。\
 **【外环验绿对账】**宣称「N/N OK / passed / PASS / 全绿」须本回合有成功的 `test_run` 或 `terminal` \
-验证证据；本轮仅 error → 【禁止】写全绿，应标工具卡未通过或「曾失败→改命令后通过（附依据）」。
+验证证据；本轮仅 error → 【禁止】写全绿，应标工具卡未通过或「曾失败→改命令后通过（附依据）」。\
+说测试通过时以最后一次同命令退出码为准（含 `host_shell` / gradle 等，不限记分板）；\
+中途绿最后红报红的；分项分开写。
 
 组队进阶旋钮见 `consult(team_orchestration_advanced)`。
 </build_app>"""

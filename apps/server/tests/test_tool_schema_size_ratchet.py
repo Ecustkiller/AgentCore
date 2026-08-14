@@ -1,4 +1,4 @@
-"""工具 schema 体积棘轮——CEO 回合工具面只许瘦、不许悄悄回潮。
+"""工具 schema 体积棘轮——CEO / worker 工具面只许瘦、不许悄悄回潮。
 
 ## 为什么有这道棘轮
 
@@ -57,6 +57,15 @@ _TOTAL_CAP = sum(_CAPS.values())
 # 非桌面（web）态 ask_user：桌面独有的 action / well_known 等选项不装配。
 _ASK_USER_WEB_CAP = 2450
 
+# Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
+_WORKER_CAPS: dict[str, int] = {
+    "escalate": 1880,
+    "handoff": 1900,
+    "file_write": 910,
+    "file_append": 510,
+    "str_replace": 840,
+}
+
 
 def _delegate_schema() -> ToolSchema:
     """DelegateTool.schema 的等价体（真工具要一整套协作依赖才构得出来）。"""
@@ -90,6 +99,24 @@ def _measured() -> dict[str, int]:
     return sizes
 
 
+def _measured_worker() -> dict[str, int]:
+    from agentcore.tools.builtin.escalate import EscalateTool
+    from agentcore.tools.builtin.file_ops.mutate import (
+        FileAppendTool,
+        FileWriteTool,
+        StrReplaceTool,
+    )
+    from agentcore.tools.builtin.handoff import HandoffTool
+
+    return {
+        "escalate": measure_openai_tool_chars(EscalateTool().schema),
+        "handoff": measure_openai_tool_chars(HandoffTool().schema),
+        "file_write": measure_openai_tool_chars(FileWriteTool().schema),
+        "file_append": measure_openai_tool_chars(FileAppendTool().schema),
+        "str_replace": measure_openai_tool_chars(StrReplaceTool().schema),
+    }
+
+
 def test_per_tool_schema_chars_within_cap():
     sizes = _measured()
     assert set(sizes) == set(_CAPS), f"棘轮覆盖面漂了：{sorted(set(sizes) ^ set(_CAPS))}"
@@ -120,6 +147,7 @@ def test_deleted_delegate_fields_have_no_negative_list():
         "min_length",
         "objective",
         "playbook_none_reason",
+        "finalize",
     )
     blob = DELEGATE_DESCRIPTION + json.dumps(DELEGATE_PARAMETERS, ensure_ascii=False)
     for field in retired:
@@ -163,3 +191,16 @@ def test_terminal_description_routes_without_restating_subcommands():
     sub_desc = TERMINAL_TOOL_PARAMETERS["properties"]["subcommand"]["description"]
     for sub in ("start", "read", "stop", "list"):
         assert f"{sub}：" in sub_desc
+
+
+def test_worker_tool_schema_chars_within_cap():
+    sizes = _measured_worker()
+    assert set(sizes) == set(_WORKER_CAPS), (
+        f"worker 棘轮覆盖面漂了：{sorted(set(sizes) ^ set(_WORKER_CAPS))}"
+    )
+    over = {
+        name: (chars, _WORKER_CAPS[name])
+        for name, chars in sizes.items()
+        if chars > _WORKER_CAPS[name]
+    }
+    assert not over, f"worker 工具 schema 变胖（实测, 上限）：{over}"

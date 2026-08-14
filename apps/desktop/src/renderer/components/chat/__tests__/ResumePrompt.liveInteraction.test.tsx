@@ -15,7 +15,6 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
-import { TeamPreviewCard } from "../TeamPreviewCard";
 
 vi.mock("@/services/interactionSubmit", () => ({
   submitInteraction: vi.fn().mockResolvedValue("ok"),
@@ -547,7 +546,7 @@ describe("ResumePrompt · ask continue → same-turn team_preview", () => {
     expect(screen.getByText("授权并开工")).toBeTruthy();
   });
 
-  it("unstamped window: no clickable card and no「入口在下方拍板卡」marker", () => {
+  it("unstamped window: no clickable card", () => {
     useConversationStore.setState({ currentConversationId: null, byId: {} });
     useInteractionStore.getState().clear();
     useConversationStore.getState().switchConversation(CID);
@@ -594,36 +593,5 @@ describe("ResumePrompt · ask continue → same-turn team_preview", () => {
     const { container } = renderResume();
     expect(container.querySelector(".mx-4")).toBeNull();
     expect(screen.queryByText("授权并开工")).toBeNull();
-
-    render(
-      <MemoryRouter>
-        <TooltipProvider>
-          <TeamPreviewCard
-            preview={{
-              id: "tp-nostamp-window",
-              primitive: "delegate",
-              workers: [
-                {
-                  run_id: "r1",
-                  role: "研究员",
-                  task: "调研",
-                  depends_on: [],
-                },
-              ],
-              tools: [],
-              motion: "",
-              form: "",
-              sides: [],
-              maxRounds: 0,
-              thorough: true,
-              status: "pending",
-              decision: null,
-              note: "",
-            }}
-          />
-        </TooltipProvider>
-      </MemoryRouter>,
-    );
-    expect(screen.queryByTestId("pending-decision-marker")).toBeNull();
   });
 });

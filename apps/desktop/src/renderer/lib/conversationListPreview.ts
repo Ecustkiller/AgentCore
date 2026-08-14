@@ -7,8 +7,11 @@ const PREVIEW_SLICE = 80;
  * Sidebar / opened-cache preview from the trusted window's last row.
  * When the last row exists but has no visible text, never keep a stale list
  * preview — prefer the same synthetic empty-failure face as the message bubble,
- * except user-stop (`cancelled`): chat timeline no longer shows「已停止」, so
- * walk back for prior visible text (else clear).
+ * except user-stop (`cancelled`) and pause (`paused`): those empty bubbles
+ * walk back for prior visible text (usually the user turn; else clear).
+ * Walk-back is keyed on `finishReason` so paused still skips even if
+ * `resolveAssistantFailureFace` later returns null (otherwise last-row empty
+ * would only clear the preview).
  */
 export function previewFromOpenedWindow(
   messages: Message[],
@@ -20,6 +23,7 @@ export function previewFromOpenedWindow(
     const text = visibleMessageText(row);
     if (text) return text.slice(0, PREVIEW_SLICE);
     const finishReason = row.finishReason ?? row.runs?.finishReason;
+    if (finishReason === "cancelled" || finishReason === "paused") continue;
     const synthetic = resolveAssistantFailureFace({
       content: row.content,
       error: row.error,

@@ -224,7 +224,7 @@ function resolvedCollapsedSummary(checkpoint: CheckpointDisplay): string {
  * answer note. Outcome tone stays on badge/label so a glance still reads the
  * verdict; shell is quiet card chrome (not a success toast).
  * 取消结算（stop / 误用 research_first）不占时间线存根——问句由 AssistantMessage
- * 回落为普通正文，对齐 PlanReviewCard resolved 静默。 */
+ * 回落为普通正文，对齐 plan_review resolved 静默。 */
 function ResolvedCheckpoint({ checkpoint }: { checkpoint: CheckpointDisplay }) {
   const decision = checkpoint.decision ?? "timeout";
   if (isAskSilentResolvedDecision(decision)) {

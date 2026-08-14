@@ -121,20 +121,24 @@ def test_identity_form_prose_has_no_file_write_guidance():
     assert "form=files" in files
     assert "file_write" in files
     assert "必须" in files
-    # 落盘纪律落在 worker 会读到的 identity（不只 CEO skill）。
-    assert "str_replace" in files
-    assert "Artifact-first" in files or "短骨架" in files
-    assert "中间省略" in files or "落盘与修订" in files
+    # 压缩后的落盘纪律（identity，不只 CEO skill）。
     assert "artifact manifest" in files
-    assert "code_execute" in files
-    assert "handoff" in files
     assert "禁止" in files and "file_read" in files
+    assert "write_section" in files or "SECTION" in files
+    assert "Artifact-first" not in files
+    assert "落盘与修订" not in files
+    assert "consult(long_form_landing)" in files
+    assert "consult(long_form_landing)" in omitted
+    assert "consult(long_form_landing)" not in prose
 
-    # omit = legacy two-way
+    # omit = legacy two-way + 同一套压缩落盘纪律
     assert "可独立阅读的文字" in omitted
     assert "file_write" in omitted
-    assert "落盘与修订" in omitted
-    assert "Artifact-first" in omitted or "短骨架" in omitted
+    assert "artifact manifest" in omitted
+    assert "禁止" in omitted and "file_read" in omitted
+    assert "write_section" in omitted or "SECTION" in omitted
+    assert "Artifact-first" not in omitted
+    assert "落盘与修订" not in omitted
 
 def test_artifacts_inject_files_form_identity_block():
     """非空 artifacts 且 form 省略 ⇒ 强制 files 形态提示，非 legacy。"""

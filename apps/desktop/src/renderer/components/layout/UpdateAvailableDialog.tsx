@@ -24,10 +24,9 @@ import { Loader2 } from "lucide-react";
 /**
  * Consent-first update explanation dialog (发布与门禁.md §7.6).
  *
- * Soft update: only the `available` consent surface — 「立即更新」关窗并后台静默下载。
- * `autoInstallCapable === false`：不调 download，主行动改为打开本通道下载页。
- * Force-update hard gate: non-dismissible multi-phase (download progress / install /
- * retry) when the dialog is opened from the gate. Force 态任意 phase 都保留下载页出口。
+ * Soft update: only the `available` consent surface — 「下载安装包」关窗并后台下载
+ * 到系统「下载」文件夹。Force-update hard gate: non-dismissible multi-phase
+ * （进度 / 打开安装包 / 重试）；任意 phase 都保留下载页作为失败出口。
  */
 export function UpdateAvailableDialog() {
   const dialogOpen = useUpdatesStore((s) => s.dialogOpen);
@@ -42,7 +41,6 @@ export function UpdateAvailableDialog() {
   if (!hasAutoUpdater()) return null;
 
   const force = isForceUpdateActive({ outdatedMinVersion });
-  const manualOnly = !status.autoInstallCapable;
 
   const version =
     status.phase === "available" ||
@@ -74,23 +72,12 @@ export function UpdateAvailableDialog() {
   const current = clientVersion();
   const title =
     status.phase === "downloaded"
-      ? `新版本 ${version} 已就绪`
+      ? `安装包 ${version} 已下载`
       : status.phase === "downloading"
         ? `正在下载 ${version}`
         : status.phase === "error"
           ? "更新失败"
           : `发现新版本 ${version ?? ""}`;
-
-  const downloadPageLink = (
-    <a
-      href={downloadPageUrl}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex h-8 items-center justify-center rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-    >
-      前往下载页
-    </a>
-  );
 
   return (
     <Dialog
@@ -127,11 +114,9 @@ export function UpdateAvailableDialog() {
                       ? ` · 安装包约 ${formatBytes(sizeBytes)}`
                       : null}
                   </p>
-                  {manualOnly ? (
-                    <p className="text-sm text-muted-foreground">
-                      此版本需手动下载安装。请前往下载页获取安装包并完成安装。
-                    </p>
-                  ) : null}
+                  <p className="text-sm text-muted-foreground">
+                    将下载安装包到本机「下载」文件夹，打开后按向导完成安装。
+                  </p>
                   <p className="whitespace-pre-wrap text-sm text-foreground">
                     {releaseNotes}
                   </p>
@@ -159,7 +144,7 @@ export function UpdateAvailableDialog() {
 
               {force && status.phase === "downloaded" ? (
                 <p className="text-sm text-muted-foreground">
-                  将在重启后安装。
+                  安装包已保存到本机「下载」文件夹，打开后按向导完成安装。
                 </p>
               ) : null}
 
@@ -190,17 +175,13 @@ export function UpdateAvailableDialog() {
                     </Button>
                   </>
                 )}
-                {manualOnly ? (
-                  downloadPageLink
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="md"
-                    onClick={() => void download()}
-                  >
-                    立即更新
-                  </Button>
-                )}
+                <Button
+                  variant="primary"
+                  size="md"
+                  onClick={() => void download()}
+                >
+                  下载安装包
+                </Button>
               </>
             ) : null}
 
@@ -231,14 +212,12 @@ export function UpdateAvailableDialog() {
                 size="md"
                 onClick={() => void install()}
               >
-                重启安装
+                打开安装包
               </Button>
             ) : null}
 
             {force && status.phase === "error" ? (
-              manualOnly ? (
-                downloadPageLink
-              ) : (
+              <>
                 <Button
                   variant="primary"
                   size="md"
@@ -246,7 +225,15 @@ export function UpdateAvailableDialog() {
                 >
                   重试下载
                 </Button>
-              )
+                <a
+                  href={downloadPageUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex h-8 items-center justify-center rounded-lg px-3 text-xs font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  前往下载页手动安装
+                </a>
+              </>
             ) : null}
           </DialogFooter>
         </DialogContent>

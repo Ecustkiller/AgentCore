@@ -152,13 +152,13 @@ describe("emptyFailureNotice", () => {
 
   it("stays silent for normal / other finishes", () => {
     expect(emptyFailureNotice("end_turn")).toBeNull();
+    expect(emptyFailureNotice("paused")).toBeNull();
     expect(emptyFailureNotice(null)).toBeNull();
     expect(emptyFailureNotice(undefined)).toBeNull();
   });
 
-  it("flips default ON for degraded / paused empty finishes", () => {
+  it("flips default ON for degraded empty finishes", () => {
     expect(emptyFailureNotice("degraded")).toBe("模型返回空内容，请重试。");
-    expect(emptyFailureNotice("paused")).toBe("本轮未能完成，请重试。");
   });
 });
 
@@ -254,6 +254,32 @@ describe("resolveEmptyFailureNotice (ChatPage gate)", () => {
         finishReason: "cancelled",
       }),
     ).toBeNull();
+  });
+
+  it("empty paused stays silent (not a failure face)", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "paused",
+      }),
+    ).toBeNull();
+    expect(
+      resolveEmptyFailureNotice({
+        content: null,
+        finishReason: "paused",
+        hasDedicatedPauseOrAskUi: true,
+      }),
+    ).toBeNull();
+  });
+
+  it("still surfaces structured error on empty paused", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "paused",
+        errorMessage: "配额已用尽",
+      }),
+    ).toBe("配额已用尽");
   });
 });
 

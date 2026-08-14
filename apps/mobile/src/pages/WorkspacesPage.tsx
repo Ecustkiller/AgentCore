@@ -63,8 +63,8 @@ export function WorkspacesPage() {
             <Brain size={16} />
           </span>
           <span className="file-row-main">
-            <span className="file-name">AI 记忆</span>
-            <span className="file-sub">跨对话长期记忆</span>
+            <span className="file-name">全局设定</span>
+            <span className="file-sub">画像、偏好与主题笔记</span>
           </span>
           <span className="file-chevron" aria-hidden>
             <ChevronRight size={18} />

@@ -1,6 +1,9 @@
 import { IconButton } from "@/components/ui";
 import { copyText } from "@/lib/clipboard";
+import { clampScale, fitContainView } from "@/lib/diagramView";
+import { inlineMermaidWidthPx } from "@/lib/inlineMermaidWidth";
 import { normalizeMermaidSource } from "@/lib/mermaidNormalize";
+import { normalizeMermaidSvg, readMermaidSvgWidth } from "@/lib/mermaidSvg";
 import { sanitizeMarkmapTree } from "@/lib/sanitizeMarkmap";
 import { notifyActionError } from "@/lib/toast";
 import { useIsDark } from "@/lib/useIsDark";
@@ -21,6 +24,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -265,18 +269,15 @@ function ToolbarButton({
   );
 }
 
-const MIN_SCALE = 0.2;
-const MAX_SCALE = 8;
-const clampScale = (s: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, s));
-
 /** Fullscreen diagram viewer with wheel-zoom (anchored at the cursor),
  * drag-to-pan and zoom controls — plain scroll is useless for big flowcharts /
- * dense charts / wide mind maps. Content size is read via offsetWidth/Height
- * (layout px, unaffected by the CSS transform), so re-centering math stays
- * simple; a ResizeObserver keeps it centered while async SVGs settle, until the
- * user first interacts. Close via the X button or Esc (mirrors the canvas
- * 放大态) — no click-to-dismiss backdrop, which would need a
- * keyboard equivalent. */
+ * dense charts / wide mind maps. Opens at contain-fit (same idea as the file
+ * preview image lightbox `object-contain`), not native 1:1 — mermaid's SVG is
+ * often a few hundred px and would otherwise sit as a stamp in the viewport.
+ * Content size is offsetWidth/Height (layout px; CSS transform does not affect
+ * them). A ResizeObserver re-fits while async SVGs settle, until the user
+ * first interacts. Close via X or Esc (mirrors the canvas 放大态) — no
+ * click-to-dismiss backdrop, which would need a keyboard equivalent. */
 function DiagramLightbox({
   label,
   children,
@@ -287,6 +288,7 @@ function DiagramLightbox({
   onClose: () => void;
 }) {
   const [view, setView] = useState({ scale: 1, x: 0, y: 0 });
+  const [ready, setReady] = useState(false);
   const viewportRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
@@ -301,11 +303,15 @@ function DiagramLightbox({
     const vp = viewportRef.current;
     const ct = contentRef.current;
     if (!vp || !ct) return;
-    setView({
-      scale: 1,
-      x: (vp.clientWidth - ct.offsetWidth) / 2,
-      y: (vp.clientHeight - ct.offsetHeight) / 2,
-    });
+    const fitted = fitContainView(
+      vp.clientWidth,
+      vp.clientHeight,
+      ct.offsetWidth,
+      ct.offsetHeight,
+    );
+    if (!fitted) return;
+    setView(fitted);
+    setReady(true);
   }, []);
 
   const zoomAt = useCallback((px: number, py: number, factor: number) => {
@@ -317,6 +323,11 @@ function DiagramLightbox({
     });
   }, []);
 
+  const resetView = useCallback(() => {
+    interacted.current = false;
+    center();
+  }, [center]);
+
   const zoomCentered = useCallback(
     (factor: number) => {
       const vp = viewportRef.current;
@@ -325,15 +336,24 @@ function DiagramLightbox({
     [zoomAt],
   );
 
-  // Keep centered while the (possibly async) SVG settles, until first interaction.
+  // Re-fit while the (possibly async) SVG settles and if the viewport resizes,
+  // until first interaction. Hidden until the first successful measure so we
+  // don't flash native-size mermaid in the corner.
   useEffect(() => {
+    const vp = viewportRef.current;
     const ct = contentRef.current;
-    if (!ct) return;
+    if (!vp || !ct) return;
     const ro = new ResizeObserver(() => {
       if (!interacted.current) center();
     });
+    ro.observe(vp);
     ro.observe(ct);
-    return () => ro.disconnect();
+    center();
+    const fallback = window.setTimeout(() => setReady(true), 250);
+    return () => {
+      ro.disconnect();
+      window.clearTimeout(fallback);
+    };
   }, [center]);
 
   useEffect(() => {
@@ -394,7 +414,7 @@ function DiagramLightbox({
           <ToolbarButton label="放大" onClick={() => zoomCentered(1.25)}>
             <ZoomIn size={16} />
           </ToolbarButton>
-          <ToolbarButton label="复位" onClick={center}>
+          <ToolbarButton label="复位" onClick={resetView}>
             <RotateCcw size={16} />
           </ToolbarButton>
           <ToolbarButton label="关闭" onClick={onClose}>
@@ -408,18 +428,18 @@ function DiagramLightbox({
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
-        onDoubleClick={center}
+        onDoubleClick={resetView}
         className="relative min-h-0 flex-1 cursor-grab touch-none select-none overflow-hidden active:cursor-grabbing"
       >
         <div
+          ref={contentRef}
           style={{
-            transform: `translate(${view.x}px, ${view.y}px)`,
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})`,
+            transformOrigin: "0 0",
           }}
-          className="absolute left-0 top-0"
+          className={`absolute left-0 top-0 ${ready ? "" : "opacity-0"}`}
         >
-          <div ref={contentRef} style={{ zoom: view.scale }}>
-            {children}
-          </div>
+          {children}
         </div>
       </div>
     </div>,
@@ -500,6 +520,39 @@ function DiagramCard({
   );
 }
 
+function MermaidInlineSvg({ svg }: { svg: string }) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  const nativeW = readMermaidSvgWidth(svg);
+  const [widthPx, setWidthPx] = useState(() =>
+    nativeW > 0 ? inlineMermaidWidthPx(nativeW, 0) : undefined,
+  );
+
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const apply = () => {
+      const w = inlineMermaidWidthPx(nativeW, host.clientWidth);
+      if (w > 0) setWidthPx(w);
+    };
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(host);
+    return () => ro.disconnect();
+  }, [nativeW]);
+
+  return (
+    <div ref={hostRef} className="w-full">
+      {/* biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid strict mode sanitizes the SVG via DOMPurify. */}
+      <div
+        className="mx-auto [&>svg]:block [&>svg]:h-auto [&>svg]:w-full"
+        style={widthPx ? { width: widthPx } : undefined}
+        dangerouslySetInnerHTML={{ __html: svg }}
+      />
+    </div>
+  );
+}
+
 function MermaidDiagram({ code }: { code: string }) {
   const dark = useIsDark();
   const [svg, setSvg] = useState<string | null>(null);
@@ -540,7 +593,7 @@ function MermaidDiagram({ code }: { code: string }) {
         renderSeq += 1;
         const id = `acmmd-${renderSeq}`;
         const { svg } = await mermaid.render(id, normalized);
-        if (!cancelled) setSvg(svg);
+        if (!cancelled) setSvg(normalizeMermaidSvg(svg));
       } catch (e) {
         // Syntax / render-time failure — keep mermaid's message when present.
         if (!cancelled) {
@@ -557,17 +610,18 @@ function MermaidDiagram({ code }: { code: string }) {
   if (error) return <CodeFallback code={code} lang="mermaid" error={error} />;
   if (svg == null) return <DiagramSkeleton label="mermaid" hint="渲染中…" />;
 
-  const rendered = (
-    // biome-ignore lint/security/noDangerouslySetInnerHtml: mermaid strict mode sanitizes the SVG via DOMPurify.
-    <div className="max-w-full" dangerouslySetInnerHTML={{ __html: svg }} />
-  );
+  const rendered = <MermaidInlineSvg svg={svg} />;
   return (
     <DiagramCard
       label="mermaid"
       source={code}
       renderZoom={() => (
+        // Native pixel size — the lightbox contain-fits this to the viewport.
         // biome-ignore lint/security/noDangerouslySetInnerHtml: same sanitized SVG as inline.
-        <div className="w-full" dangerouslySetInnerHTML={{ __html: svg }} />
+        <div
+          className="[&>svg]:block"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
       )}
     >
       {rendered}

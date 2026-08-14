@@ -211,7 +211,7 @@ export function useComposerSend({
         return;
       }
 
-      // 草稿首发先闩「建会话中」：这段等待里输入框已经清空，界面必须自己说得清在干嘛。
+      // 草稿首发先闩「建会话中」：这段等待里输入框已经清空，进行中态见发送键 in-flight。
       const initialPhase = activeConvId ? "sending" : "creating";
       if (!acquireComposerSendLatch(draftKey, initialPhase)) return;
       // 门闩键随 promote 迁移（`__draft__` → 新会话 id），故不是常量。
@@ -253,7 +253,7 @@ export function useComposerSend({
           const clientRequestId = resolveDraftRequestId(draftKey);
           // 清空输入框排在创建 POST 之前：按下发送到 POST 返回之间界面若毫无变化（文字
           // 还在、没气泡、没跳转），用户就会再按一次——线上重复建会话的 3.7s / 5.6s 两例
-          // 正是这个形状。等待期间的进行中态见 ComposerCreatingNotice；创建失败时下面把
+          // 正是这个形状。等待期间的进行中态见发送键 in-flight；创建失败时下面把
           // 整份草稿（正文 + 附件 + 点名）原样还回。
           clearComposer();
           try {

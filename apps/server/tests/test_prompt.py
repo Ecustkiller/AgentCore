@@ -25,12 +25,16 @@ from agentcore.runtime.resolve.prompt import (
     _CEO_VISUALIZATION_HINT,
     _DEFAULT_SYSTEM_PROMPT,
     CHAT_CITATION_HINT,
+    assemble_ceo_core,
     assemble_system_prompt,
     compose_ceo_chat_prompt,
     compose_worker_base_prompt,
     derive_ceo_addon,
 )
+
 from agentcore.runtime.skills import _TEAM_ORCHESTRATION_ADVANCED, build_system_skill_registry
+
+_LOCAL_CEO_CORE = assemble_ceo_core({"terminal", "host_shell", "browser_navigate"})
 
 
 def test_derive_ceo_addon_splits_shared_prefix_from_full_ceo_prompt():
@@ -259,6 +263,45 @@ def test_core_states_coordinator_tool_boundary():
     assert "禁止" in hint and "文件名" in hint
 
 
+def test_capability_how_gated_on_ceo_tool_names():
+    """本机/Host/浏览器操作 HOW 跟工具表走；未装配只留路由短句（禁派 / 假开页 / 三分日志）。"""
+    spine = _CEO_CORE_HINT
+    assert "wait_for" not in spine
+    assert "ask_user(browser_login=true)" not in spine
+    assert "通识长文当交付" not in spine
+    assert "假开页" in spine
+    assert "三分日志" in spine
+    assert "把启服写进队员任务" in spine
+    assert "禁派空跑" in spine
+
+    term = assemble_ceo_core({"terminal"})
+    assert "wait_for" in term
+    assert "ask_user(browser_login=true)" not in term
+    assert "通识长文当交付" not in term
+
+    host = assemble_ceo_core({"host_shell"})
+    assert "通识长文当交付" in host
+    assert "wait_for" not in host
+
+    browser = assemble_ceo_core({"browser_navigate"})
+    assert "ask_user(browser_login=true)" in browser
+    assert "wait_for" not in browser
+
+    ceo = compose_ceo_chat_prompt(
+        assemble_system_prompt(),
+        ceo_tool_names={"delegate", "consult"},
+    )
+    assert "wait_for" not in ceo
+    assert "ask_user(browser_login=true)" not in ceo
+    local = compose_ceo_chat_prompt(
+        assemble_system_prompt(),
+        ceo_tool_names={"delegate", "terminal", "host_shell", "browser_navigate"},
+    )
+    assert "wait_for" in local
+    assert "通识长文当交付" in local
+    assert "ask_user(browser_login=true)" in local
+
+
 def test_core_teaches_split_criterion_over_count():
     # 路由清晰化：按活的自然缝拆人；第一拍一句定方向；短文落盘单人。
     hint = _CEO_CORE_HINT
@@ -267,7 +310,11 @@ def test_core_teaches_split_criterion_over_count():
     assert "不是你能不能写" in hint  # 判据=结构，「我自己写更快」不构成自己答理由
     assert "拿不准先少派" in hint
     assert "可分解" in hint and "质量面" in hint
-    assert "finalize=true" in hint and "机械单步" in hint
+    assert "机械单步" in hint and "单人落盘" in hint
+    assert "收口仍由你写" in hint
+    assert "单人直出" not in hint
+    assert "轻量直出" not in hint
+    assert "finalize" not in hint
     # 结局分层：挡路才讨论开场 ask；未明示成文宜 A parallel_brief；
     # 明示成文可 research_report，但须成文梯度（档 2 轻成文勿满编；档 3 才满编）
     assert "结局分层" in hint
@@ -290,16 +337,11 @@ def test_core_teaches_split_criterion_over_count():
     assert "学术审校" in hint
     assert "少扇出" in hint or "常 2" in hint
     assert "论文" in hint and ("资料" in hint or "开源" in hint)  # 论文/开源 ≠ 明示成文
-    # 派摸底验收：手写/playbook=none 也要目标·手段·收工；够用即停 + handoff
-    assert "派摸底" in hint or "摸底·验收" in hint or "了解到什么算够" in hint
+    # 派摸底验收：核留短钩（目标·手段·收工 / 够用即停）；检索手册在编排 skill
+    assert "派摸底" in hint or "摸底·验收" in hint
     assert "够用即停" in hint
     assert "handoff" in hint
-    assert "file_list" in hint and ("grep" in hint or "code_search" in hint)
-    assert "每个 app" in hint and "package.json" in hint
-    assert "禁止" in hint and "名单" in hint
-    assert "已知路径" in hint
-    assert "含糊" in hint and "根" in hint
-    assert "无限深挖" in hint or "更全" in hint
+    assert "目标·手段·收工" in hint
     # 三路/多路调研缺主体：硬 ask + 预填 default；continue=确认默认；禁静默自拟
     assert "缺主体" in hint
     assert "静默自拟" in hint
@@ -370,23 +412,14 @@ def test_core_teaches_split_criterion_over_count():
     assert "并行写盘" in hint
     assert "私有" in hint  # 私有 path / 笔记
     assert "MVP" in hint or "契约" in hint
-    assert "多屏" in hint and ("大原型" in hint or "单文件" in hint)
-    assert "完整可玩" in hint
     assert "规格已齐 ≠ 全量" in hint or "规格已齐≠全量" in hint
     assert "结构槽" in hint or "playbook_args" in hint
-    assert "桌面壳" in hint or "多进程" in hint
     assert "playbook=none" in hint
-    assert "可跑闭环" in hint or "核心运行时" in hint
-    # 交付档 → intensity / playbook（结构槽，禁意图分类器）
-    assert "交付档" in hint
+    # 桌面壳 / 多屏 / 完整可玩 / 交付档对照表：HOW 在 skill（本函数后段已钉 skill）
+    # 交付档 → intensity：核留结构槽指针；对照表在 kickoff / build_*
     assert "intensity" in hint
-    assert "solo" in hint and "standard" in hint
     assert "lean" in hint and "full" in hint
-    assert "一页先上" in hint or "一页先上线" in hint
-    assert "品牌站" in hint
-    assert "工具壳" in hint
     assert "模块流水线" in hint
-    assert "只改一处" in hint
     assert "桌上结果" in hint or "桌上档" in hint
     assert "禁止" in hint and ("intensity=full" in hint or "满编" in hint)
     assert "做个网站" in hint
@@ -419,10 +452,19 @@ def test_core_teaches_split_criterion_over_count():
     assert "server" in hint.lower() or "云端" in hint
     assert "上次说错了" in hint or "此前误报" in hint
     assert "验收通过" in hint
+    # 巡检定案 B：可见症状 ≠ 改了文件；长跑先写打开看见什么（阶梯 1，不扩姿势 A）
+    assert "可见症状·勿报已修" in hint
+    assert "改了文件" in hint and "症状消失" in hint
+    assert "修复完成" in hint and "已修复" in hint
+    assert "请看一眼还乱不乱" in hint
     # 午后巡 e670：标完成前先报真实断点
     assert "收尾·先报断点" in hint
     assert "都实现了" in hint or "收尾完成" in hint
     assert "断点" in hint
+    assert "长跑收口·打开看见" in hint
+    assert "打开产品会看见什么" in hint
+    assert "提示词包" in hint and "系统已就绪" in hint
+    assert "界面没改" in hint
     # 案 merge-pipeline-skeleton-busy-claim A′：多源合并→单写手成篇；骨架禁审校清理连环。
     assert "多源合并" in hint and "成篇优先" in hint
     assert "CEO 自写" in hint  # 禁表出现在提示里
@@ -523,6 +565,8 @@ def test_core_teaches_delegate_graph_and_coordinate_invariants():
     hint = _CEO_CORE_HINT
     assert "一回合一张协作图" in hint
     assert "coordinate=false" in hint
+    assert "嵌套 lead" in hint
+    assert "波间把关" in hint and "checkpoint_after" in hint
     skill = _TEAM_ORCHESTRATION_ADVANCED
     assert "不必等" in skill or "同回合再调" in skill
     assert "再带一层子队" in skill
@@ -741,7 +785,6 @@ def test_core_teaches_outline_checkpoint_prefers_structured_path():
     hint = _CEO_CORE_HINT
     assert "主拍板" in hint
     assert "ask_user" in hint
-    assert "checkpoint_after" not in hint
     assert "方案挑选" in hint or "风险确认" in hint or "短澄清" in hint
 
 
@@ -789,14 +832,9 @@ def test_core_teaches_delivery_path_by_workspace_type():
     assert "【右坞浏览器】" in hint
     assert "browser_navigate" in hint
     assert "escalate" in hint
-    assert "已登录，继续" in hint
     assert "用浏览器打开" in hint
-    assert "navigate 成功即可" in hint or "帮我看页面" in hint
     assert "跑起来" in hint or "打开看一下" in hint  # 切断跑起来→必须 navigate
-    assert "你自己" in hint  # CEO 直调 navigate
-    assert "口头假验收" in hint or "已打开即可" in hint
     assert "delegate" in hint  # 验收仍 delegate
-    assert "read_url" in hint
     assert "双击打开" in hint
     assert "系统浏览器" in hint
     assert "禁止给本机磁盘路径" in hint or "禁止给本机" in hint
@@ -805,9 +843,16 @@ def test_core_teaches_delivery_path_by_workspace_type():
     assert "同轮可开工" in _DEFAULT_SYSTEM_PROMPT
     assert "手脑" in _DEFAULT_SYSTEM_PROMPT
     assert "假开页" in hint or "勿假装" in hint or "假开页底线" in hint
-    assert "ask_user(browser_login=true)" in hint
     assert "escalate → 右坞接管" not in hint
     assert "仅可作标明" not in hint  # 旧：未装配只剩 read_url 摘录
+    # 已装配才注入的操作 HOW
+    how = _LOCAL_CEO_CORE
+    assert "已登录，继续" in how
+    assert "navigate 成功即可" in how or "帮我看页面" in how
+    assert "你自己" in how
+    assert "口头假验收" in how or "已打开即可" in how
+    assert "read_url" in how
+    assert "ask_user(browser_login=true)" in how
 
 
 def test_shared_base_teaches_unassembled_capability_honesty():
@@ -840,19 +885,13 @@ def test_core_teaches_presentation_honesty():
     assert "pptx" in hint.lower()
     assert "Office 已落盘可直接使用" in hint or "PPT 已落盘可直接使用" in hint
     assert "静默" in hint or "只交" in hint
-    assert "file_copy" in hint
-    assert "当模板" in hint or "按模板" in hint
-    assert "Presentation()" in hint
     assert "再派" in hint or "ask_user" in hint
-    # 案 1eb5eb99 A：压体积与模板保真解耦（另存 slim / 列删改）
-    assert "压体积" in hint and "模板保真" in hint
-    assert "*_slim.pptx" in hint or "slim.pptx" in hint
-    assert "相对模板" in hint
     assert "图形组织图" in hint
     assert "直接拒" in hint
     assert "文本" in hint and "表格" in hint
     assert "说满" in hint and "空派" in hint
     assert "SmartArt" not in hint and "DrawingML" not in hint
+    # 当模板 / 压体积 / Presentation()：HOW 在编排 skill（核只留短指针）
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
     # 场面 format_options 已退役；仅允许以「禁复活」语境出现，不得当字段教
     assert "复活" in kickoff and "format_options" in kickoff
@@ -924,8 +963,7 @@ def test_shared_base_and_core_teach_windows_bat_crlf_ascii():
     hint = _CEO_CORE_HINT
     assert ".bat" in hint
     assert "CRLF" in hint
-    assert "双击即用" in hint
-    assert "自动转码" in hint
+    # 双击即用 / 自动转码 HOW 在编排 skill（核只留短指针）
     orch = _TEAM_ORCHESTRATION_ADVANCED
     assert ".bat" in orch and "CRLF" in orch
     assert "ASCII" in orch
@@ -970,6 +1008,10 @@ def test_core_teaches_cloud_web_install_verify_honesty():
     assert "外环验绿对账" in hint
     assert "test_run" in hint
     assert "N/N OK" in hint or "passed" in hint
+    # 巡检定案 B：末次同命令退出码；不扩姿势 A / 新 kind
+    assert "最后一次同命令" in hint
+    assert "中途绿" in hint and "报红" in hint
+    assert "分项分开写" in hint
     # 与生图 / Office / 软Ⅱ′分轴提示仍在邻近段落
     assert "分轴" in hint or "零写盘" in hint
 
@@ -1175,7 +1217,8 @@ def test_core_drops_advanced_mechanism_detail():
     # so its DETAIL must not creep back into the always-on core (that would re-inflate
     # the per-turn prompt). These tokens are unique to the moved-out skill bodies.
     hint = _CEO_CORE_HINT
-    for token in ("多轮辩论", "跨轮", "stance", "采纳正方", "checkpoint_after", "target_run_id"):
+    # checkpoint_after 现为同步阻塞不变量点名（非 HOW），允许出现在核心。
+    for token in ("多轮辩论", "跨轮", "stance", "采纳正方", "target_run_id"):
         assert token not in hint, f"advanced detail '{token}' leaked back into the core"
 
 

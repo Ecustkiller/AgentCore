@@ -1,17 +1,14 @@
 import { Button, Input } from "@/components/ui";
 import type { VersionSource } from "@/components/workspace/changesTimeline";
 import { notifyError, notifySuccess } from "@/lib/toast";
-import { createLocalVersion } from "@/services/localWorkspaceVersions";
-import { createSnapshot } from "@/services/workspace";
 import { wsCreateSnapshot } from "@/services/workspaces";
 import { Bookmark, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 /**
  * 「留版本」入口 —— 折叠成一个按钮，展开才占一行输入。
- * 改动 tab 大多数时候在看 diff，常驻输入框是噪音；空态则由它承担唯一入口。
- *
- * 云端写快照 API、本机写盘上版本区，对用户是同一个动作，所以是同一个按钮。
+ * 只挂在「我的文件」云端版本面板；右坞「改动」tab 不再提供本动作。
+ * 本机命名版本无产品入口（盘上 API 仍在，见 localWorkspaceVersions）。
  */
 export function KeepVersionAction({
   source,
@@ -37,13 +34,7 @@ export function KeepVersionAction({
     if (!trimmed || saving) return;
     setSaving(true);
     try {
-      if (source.origin === "local") {
-        await createLocalVersion(source.target, trimmed);
-      } else if (source.origin === "cloudWs") {
-        await wsCreateSnapshot(source.wsId, trimmed);
-      } else {
-        await createSnapshot(source.conversationId, trimmed);
-      }
+      await wsCreateSnapshot(source.wsId, trimmed);
       notifySuccess(`已留版本「${trimmed}」`);
       close();
       onCreated();

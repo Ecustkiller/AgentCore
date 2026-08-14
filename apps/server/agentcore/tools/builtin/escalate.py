@@ -72,98 +72,62 @@ class EscalateTool:
 
     @property
     def schema(self) -> ToolSchema:
+        # Schema layer (工具面瘦身): short trigger + field cues. When-to-stop
+        # lives in identity; engine internals stay off the button.
         return ToolSchema(
             name=ESCALATE_TOOL_NAME,
             description=(
-                "把一个【必须由上级/用户拍板】的待决问题、或一个【职责/范围偏离】上报。你是被"
-                "委派的 worker、够不到用户，这是你唯一的向上通道。仅在遇到【缺了就会让整件事"
-                "走偏的关键信息】【只有上级/用户能定的关键岔路】或【发现真正该做的与初始计划"
-                "不符】时才用——能自行合理假设的小事不要升级。\n"
-                "blocking 怎么选（默认 false，按题自选）："
-                "true【阻塞·求决策】——猜错产物基本作废 / 用户明确要求不确定就问 / "
-                "只有上级能定的关键岔路：原地挂起等裁决再继续"
-                "（须写 assumption；协调模式主管仲裁，经典路径直送用户）；"
-                "false【非阻塞·默认】——已有合理默认、报一声即可、主管收尾纠偏："
-                "上报后立刻按假设继续。"
-                "能自行合理假设的小事别升级；blocking 省着用，但该停时别装非阻塞硬猜。\n"
-                "kind 维度（正交）：默认 normal=普通待决问题；scope=【职责偏离】——你发现真正"
-                "该做的与初始计划/子任务设定不符（如上游产出显示真问题是 X 不是 Y）；dep=【卡在"
-                "缺输入】——你缺一个【还不存在】的输入 / 依赖才能继续（没人产出过、计划也没安排；"
-                "先用 read_notes 翻墙确认队友确实没贴过再上报）。dep 该主动：真卡在这种再猜也是"
-                "错的缺口上时别硬猜瞎编一个，发 dep 让上级在波边界补，强过闷头产出一堆作废的东西。"
-                "scope / dep 主管 / lead 都会在波"
-                "边界据此校准【尚未运行】的下游（scope→操舵已有步骤，dep→replan 追加一个产出它的"
-                "步骤 / 接一条依赖边）；两者都【不停工】——你照常按假设把当前能做的做完。"
-                "克制使用 normal——能自行合理假设的小事别升级；"
-                "唯独 dep（卡在【不存在】的输入、再猜也是错）该喊就喊、别硬猜瞎编。"
-                "browser_login：仅 blocking 有意义；为 true 时强制阻塞语义，挂起后允许用户在"
-                "回合仍 running 时接管浏览器完成登录（AI 永不经手密码）。"
+                "向上通道：把必须由上级/用户拍板的问题，或职责偏离，报上去。"
+                "能自行合理假设的小事不要升级。何时停、何时报一声见身份段。\n"
+                "blocking 默认 false（报一声继续）；猜错产物基本作废 / 用户明确要求"
+                "不确定就问 / 只有上级能定 → true（须 assumption，原地等）。"
+                "该停时别装非阻塞。\n"
+                "kind：normal 待决；scope 职责偏离；dep 缺还不存在的输入"
+                "（先 read_notes，别硬猜）。scope/dep 不停工。\n"
+                "browser_login=true 强制 blocking（用户接管登录，AI 不经手密码）。"
             ),
             parameters={
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": (
-                            "必填。需要上级拍板的具体问题，写清楚、自包含——主管可能会把它"
-                            "near-verbatim 转给用户，所以别依赖只有你才懂的局部上下文。"
-                        ),
+                        "description": "必填。要拍板的问题，写清楚、自包含。",
                     },
                     "assumption": {
                         "type": "string",
                         "description": (
-                            "在拿到答复前你暂时采用的假设（你正/将据此继续）。blocking=true 时"
-                            "【必填】：用户 / 主管显式「按假设继续」、或未武装 / 并发满退化为非阻"
-                            "塞、或运维配置了超时上限且届时未答复时，按它继续；blocking=false 时"
-                            "强烈建议——写明它，主管才能判断你的产物是否需要据真实答案返工。"
+                            "暂定假设。blocking=true 必填；false 时也建议写，"
+                            "便于主管判断要不要返工。"
                         ),
                     },
                     "blocking": {
                         "type": "boolean",
                         "description": (
-                            "可选，默认 false。按题自选：false=【非阻塞】——"
-                            "已有合理默认、报一声即可、主管收尾纠偏：上报后立刻按假设做完。"
-                            "true=【阻塞·求决策】——猜错产物基本作废 / 用户明确要不确定就问 / "
-                            "只有上级能定的关键岔路：原地挂起等裁决"
-                            "（须写 assumption；默认无限期等，用户 / 主管可点「按假设继续」；"
-                            "仅未武装 sink、并发满、或运维显式超时才自动按假设继续）。"
-                            "省着用，该停时别装非阻塞。"
+                            "可选，默认 false。false=报一声继续；true=猜错作废 / "
+                            "不确定就问 / 只有上级能定，原地等（须 assumption）。"
+                            "该停时别装非阻塞。"
                         ),
                     },
                     "browser_login": {
                         "type": "boolean",
                         "description": (
-                            "可选，默认 false。true=请求用户接管云端浏览器完成登录（密码由用户"
-                            "亲手输入，AI 永不经手）。仅 blocking 有意义：为 true 时强制升格为"
-                            "blocking=true（须写明 assumption）。典型触发：browser_type 对 "
-                            "password 框硬拒（metadata.code=password_blocked）之后。"
+                            "可选，默认 false。true=用户接管浏览器登录"
+                            "（AI 不经手密码）；强制 blocking=true，须 assumption。"
                         ),
                     },
                     "kind": {
                         "type": "string",
                         "enum": ["normal", "scope", "dep"],
                         "description": (
-                            "可选，默认 normal。scope=【职责偏离】：你发现真正要做的事与初始计划"
-                            "/你的子任务设定不符（例如上游产出显示真问题是 X 不是 Y），需要主管据此"
-                            "校准【尚未运行】的下游步骤——主管会在波边界读到你的偏离信号并操舵下游。"
-                            "dep=【卡在缺输入】：你缺一个【还不存在】的输入 / 依赖才能继续——没人产"
-                            "出过、计划也没安排（先用 read_notes 翻墙确认队友确实没贴过；若墙上已有"
-                            "就直接读、不必升级）。这一类该【主动】：真卡在再猜也是错的缺口上时，别硬"
-                            "猜瞎编、主动发 dep，强过闷头产出一堆作废的东西。"
-                            "主管 / lead 会在波边界用 replan 追加一个产出它的"
-                            "步骤 / 接一条依赖边。scope / dep 你都仍照常把当前能做的做完、"
-                            "不必阻塞。"
-                            "normal=普通待决问题（默认）。"
+                            "可选，默认 normal。scope=职责偏离；dep=缺还不存在的输入"
+                            "（先 read_notes，别硬猜）。scope/dep 不停工。"
                         ),
                     },
                     "questions": {
                         "type": "array",
                         "description": (
-                            "可选，仅 blocking=true 时有意义：把这个【关键岔路】"
-                            "拆成结构化选项，便于一键拍板、不必读散文再手敲。"
-                            "岔路是干净的 A/B 或多选时强烈建议给（结构同 ask_user 的 "
-                            "questions，最多 5 个）；纯开放问题（无明确候选）则省略，"
-                            "文本作答。"
+                            "仅 blocking=true：干净二选一/多选时给选项（最多 5 题）；"
+                            "开放问题省略。"
                         ),
                         "items": {
                             "type": "object",

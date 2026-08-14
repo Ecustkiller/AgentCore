@@ -8,7 +8,10 @@ derived entry, so the catalog always returns something usable — the goal is
 enhancement, not gatekeeping (never hardcode「可选模型清单」to replace discovery).
 
 Capability tags are a subset of ``{"vision", "tools", "reasoning"}`` — the same
-three flags the frontend renders. Context length is a display hint (tokens).
+three flags the frontend renders. Context length is the gateway window in tokens
+(catalog display **and** compaction near-top = 80% of this number). Prefer the
+SKU the user actually hits, not the model's advertised native max: a ``-free``
+row that a gateway caps at 200K must not inherit a sibling's 1M.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ class ModelMeta:
     display_name: str
     vendor: str
     capabilities: frozenset[str] = field(default_factory=frozenset)
+    # Gateway window (tokens): catalog + compaction near-top. Not "native max".
     context_length: int | None = None
     # Curated display badge for clients to render as-is (e.g. 「免费额度」); never
     # inferred from id suffixes.
@@ -44,27 +48,29 @@ class ModelMeta:
 # Exact rows still win for curated branding (e.g. hy3-preview, glm-5.2-jiu).
 # Uniqueness is ``(display_name, badge)`` across curated rows — ``display_name``
 # alone may repeat when a badge distinguishes the SKU (e.g. Flash +「免费额度」).
-# Context lengths are display hints.
+# Context length = the window this id actually gets (native vs gateway cap).
 _METADATA: dict[str, ModelMeta] = {
     "deepseek-v4-flash": ModelMeta(
         display_name="DeepSeek V4 Flash",
         vendor="DeepSeek",
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
-        context_length=128_000,
+        context_length=1_000_000,
     ),
     # Zen limited-free SKU: brand base name + curated badge (not auto「· free」).
+    # Exact row is load-bearing: family-prefix would otherwise inherit Flash's 1M,
+    # but OpenCode Zen's free tier caps this id at 200K (models.dev / Zen catalog).
     "deepseek-v4-flash-free": ModelMeta(
         display_name="DeepSeek V4 Flash",
         vendor="DeepSeek",
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
-        context_length=128_000,
+        context_length=200_000,
         badge="免费额度",
     ),
     "deepseek-v4-pro": ModelMeta(
         display_name="DeepSeek V4 Pro",
         vendor="DeepSeek",
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
-        context_length=128_000,
+        context_length=1_000_000,
     ),
     "gpt-4o": ModelMeta(
         display_name="GPT-4o",

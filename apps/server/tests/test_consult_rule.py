@@ -114,10 +114,10 @@ def test_compose_ceo_rule_entries_with_consult():
 
 
 def test_compose_worker_rule_entries():
-    rules = [OnDemandUserRule(name="合规附录", summary="ignored")]
+    rules = [OnDemandUserRule(name="合规附录", summary="长条文")]
     out = compose_worker_base_prompt(assemble_system_prompt(), on_demand_rules=rules)
     assert "<按需目录>" in out
-    assert "合规附录" in out
+    assert "合规附录：长条文" in out
 
 
 def test_render_on_demand_with_rule_entry():

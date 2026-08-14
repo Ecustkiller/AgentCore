@@ -481,13 +481,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     reason:
       "ask intent 专用面已对等进 ResumeCard（decision/kickoff compose+其他；proposal/risk 行选；organize/daily 勾选墙）；本机目录 action 手机禁用",
   },
-  PlanReviewCard: { verdict: "ported", surface: "ResumeCard" },
   TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
-  PendingDecisionMarker: {
-    verdict: "internal",
-    reason:
-      "桌面 pending 交互行内单行标记；手机 PauseCard/ResumeCard 自带等价态",
-  },
   ApprovalPrompt: { verdict: "ported", surface: "PauseCard" },
   HotDecisionTrace: {
     verdict: "ported",

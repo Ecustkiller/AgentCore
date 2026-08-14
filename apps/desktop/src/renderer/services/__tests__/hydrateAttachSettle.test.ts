@@ -4,6 +4,7 @@
  * Warm reopen (slice already has messages) must still enter settle/attach;
  * cold empty-slice adopt path must keep calling the same branches.
  */
+import type { ConversationRecovery } from "@/services/resume";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -51,7 +52,7 @@ vi.mock("@/lib/log", () => ({
   logEvent: vi.fn(),
 }));
 
-import { runHydrateAttachSettle } from "../turns/hydrateAttachSettle";
+import { runHydrateAttachSettle, scheduleHydrateAttachSettle } from "../turns/hydrateAttachSettle";
 
 const CID = "conv-hydrate-attach";
 
@@ -323,5 +324,27 @@ describe("runHydrateAttachSettle (warm reopen / cold adopt)", () => {
     });
 
     expect(settleCloudRunningAssistant).toHaveBeenCalledTimes(1);
+  });
+
+  it("scheduleHydrateAttachSettle returns before recovery lands", async () => {
+    seedMessages({ role: "assistant", status: "complete" });
+    let resolveRecovery!: (value: ConversationRecovery) => void;
+    const recoveryLoaded = new Promise<ConversationRecovery>((resolve) => {
+      resolveRecovery = resolve;
+    });
+
+    scheduleHydrateAttachSettle(CID, recoveryLoaded);
+    expect(settleOrphanEmptyAssistants).not.toHaveBeenCalled();
+
+    resolveRecovery({
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+    await vi.waitFor(() => {
+      expect(settleOrphanEmptyAssistants).toHaveBeenCalledWith(CID);
+    });
   });
 });

@@ -215,6 +215,20 @@ def test_nested_lead_still_gets_replan_on_supervised_yield():
     assert "cancel_worker" not in reg.names
 
 
+def test_nested_lead_opening_omits_replan_until_supervised():
+    """开场只有 delegate；子计划让出后才挂 replan（与 CEO 闲聊/协调同构）。"""
+    reg = ToolRegistry()
+    reg.register(_fake_delegate(supervised=False, depth=1))
+    assert promote_coordination_surface_if_needed(reg) is False
+    assert "replan" not in reg.names
+
+    delegate = reg.get("delegate")
+    delegate._supervised = object()
+    assert promote_coordination_surface_if_needed(reg) is True
+    assert "replan" in reg.names
+    assert "wait" not in reg.names
+
+
 def test_resync_binding_follows_hot_graph_merge():
     """回归钉：合入热图后 CEO 必须重新绑到宿主图，否则不等待也拿不到 wait。
 

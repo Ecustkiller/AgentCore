@@ -32,7 +32,7 @@ export function PlanReviewResumeCard({ turn }: { turn: PendingResume }) {
       icon
     );
 
-  // 拍板中心（方案 C）：时间线只留单行标记，等谁 / 等什么 / 产出引用都在这张卡。
+  // 拍板中心：时间线挂起态不画标记，等谁 / 等什么 / 产出引用都在这张卡。
   const reviewedRoles = turn.steps.map((s) => s.role).filter(Boolean);
   const rolesLabel =
     reviewedRoles.length > 0 ? `「${reviewedRoles.join("、")}」` : "这一步";

@@ -234,8 +234,9 @@ export async function pumpSseBody(
  *
  * 服务端在段首 ``message_start`` 上表态，客户端照做，绝不自己猜：
  *
- * - 带 ``full_replay`` = 全量段（本段就是这一回合的全部）→ 先重置本回合已折的一切（正文
- *   气泡 + 执行槽），再整段重折，否则正文折两遍。
+ * - 带 ``full_replay`` = 全量段（本段就是这一回合的全部）→ 原位清空本回合正文 / 过程 /
+ *   执行槽（**保留气泡 id**，避免换泡把已画 Markdown 卸掉），再整段重折，否则正文折两遍。
+ *   一次折仍是为了协作图：已完成 worker 不得再演一遍 running→completed。
  * - 不带（增量段 / 没有段首的段）=「你手里那半场是对的，往后接」→ 一个字都不许清。断线重连
  *   时客户端手上的上半场只在自己内存里，清了就永远回不来了——服务端这一段只带游标之后的事实。
  *   另端刚开的新回合同理（本端从没见过它，清只会抹掉上一回合的团队图）。
@@ -255,7 +256,10 @@ export function foldAttachSegment(
   unstable_batchedUpdates(() => {
     // 没有锚点（消息窗里还没有那条用户提问）时 reset 落空 → 仍清尾泡执行槽兜底。
     if (fullReplay) {
-      resetPartialTurnForReplay(conversationId);
+      const replayMessageId = (
+        head?.payload as MessageStartPayload | undefined
+      )?.message_id;
+      resetPartialTurnForReplay(conversationId, replayMessageId);
       const last = getRuntime(conversationId).messages.at(-1);
       if (last?.role === "assistant") {
         const { clearExecution } = useExecutionStore.getState();

@@ -167,6 +167,7 @@ async def production_crash_delegate_factory(
                 memory_store=memory_store,
                 folder_id=folder_id,
                 memory_enabled=memory_enabled,
+                skill_audience="worker",
             ).list_directory(user_id)
         )
         base_system_prompt = compose_worker_base_prompt(

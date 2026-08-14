@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import agentcore.observability.drop_heartbeat as drop_hb
 import agentcore.runtime.events.sink as sink_mod
-from agentcore.runtime.events.sink import EventSink
+from agentcore.runtime.events.chat import content_delta
+from agentcore.runtime.events.sink import _SUBSCRIBER_QUEUE_MAXSIZE, EventSink
 from tests.conftest import LogSpy
 
 
@@ -72,6 +74,55 @@ def test_close_with_a_peer_still_attached_is_not_detached(monkeypatch):
 
     sink.close(reason="turn_finally")
     assert spy.get("event_sink.close")["was_detached"] is False
+
+
+def test_backpressure_drop_logs_are_o1(monkeypatch):
+    """N shed frames must not write N jsonl lines: first drop + end flush."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+    monkeypatch.setattr(drop_hb, "_now", lambda: 0.0)
+
+    sink = EventSink(conversation_id="c1", message_id="m1")
+    sub = sink.subscribe(label="slow")
+    extra = 200
+    for i in range(_SUBSCRIBER_QUEUE_MAXSIZE + extra):
+        sink.emit(content_delta(str(i)))
+
+    drops = [kw for name, kw in spy.events if name == "event_sink.backpressure_drop"]
+    assert len(drops) == 1
+    assert drops[0]["dropped_delta"] == 1
+    assert drops[0]["dropped_total"] == 1
+    assert drops[0]["label"] == "slow"
+    assert drops[0]["type"] == "content_delta"
+    assert drops[0]["conversation_id"] == "c1"
+    assert drops[0]["message_id"] == "m1"
+
+    sink.unsubscribe(sub, reason="sse_disconnect")
+    drops = [kw for name, kw in spy.events if name == "event_sink.backpressure_drop"]
+    assert len(drops) == 2
+    assert drops[1]["dropped_delta"] == extra - 1
+    assert drops[1]["dropped_total"] == extra
+    assert sum(d["dropped_delta"] for d in drops) == extra
+
+
+def test_close_flushes_remaining_backpressure_drops(monkeypatch):
+    """Sink close (no prior unsubscribe) still flushes the drop remainder."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+    monkeypatch.setattr(drop_hb, "_now", lambda: 0.0)
+
+    sink = EventSink(conversation_id="c2", message_id="m2")
+    sink.subscribe(label="slow")
+    extra = 50
+    for i in range(_SUBSCRIBER_QUEUE_MAXSIZE + extra):
+        sink.emit(content_delta(str(i)))
+
+    spy.events.clear()
+    sink.close(reason="turn_finally")
+    drops = [kw for name, kw in spy.events if name == "event_sink.backpressure_drop"]
+    assert len(drops) == 1
+    assert drops[0]["dropped_delta"] == extra - 1
+    assert drops[0]["dropped_total"] == extra
 
 
 def test_close_without_reason_still_works(monkeypatch):

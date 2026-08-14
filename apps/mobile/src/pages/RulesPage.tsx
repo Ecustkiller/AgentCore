@@ -12,7 +12,7 @@ import {
   writeDocument,
 } from "@/api/documents";
 // 用户规则 (/rules) — mobile lens on user-owned rule documents (Agent记忆与知识系统
-// §5.2 / §5.4). Reached from the 文件 tab beside「AI 记忆」. GLOBAL scope only
+// §5.2 / §5.4). Reached from the 文件 tab beside「全局设定」. GLOBAL scope only
 // (per-project rules stay desktop). List / create / edit / delete + 常驻·按需.
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";

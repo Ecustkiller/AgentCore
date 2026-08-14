@@ -26,7 +26,6 @@ import {
 import { dispatchSSEEvent } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
-import { useExecutionStore } from "@/stores/execution";
 import type { SSEEvent } from "@/types/events";
 import type {
   SidecarAttachResponse,
@@ -36,6 +35,7 @@ import { unstable_batchedUpdates } from "react-dom";
 import { loadRecovery } from "../resume";
 import { projectUnsyncedTurns } from "./projectUnsynced";
 import { markGhostInterrupted } from "./recovery";
+import { resetAssistantsAfterUserInPlace } from "./replayReset";
 import { beginLocalConversationStream } from "./streamOwnership";
 
 /** In-flight attach per conversation — hydrate 两次 coalesce 到同一 Promise。 */
@@ -46,27 +46,26 @@ function isTerminalEvent(type: string): boolean {
 }
 
 /**
- * Clear assistants after ``userMessageId`` and open a fresh streaming placeholder
- * (sidecar-specific; anchor is the attach response id, never `lastUserMessageOf`).
+ * Clear assistants after ``userMessageId`` in place (keep bubble id); mint a
+ * placeholder only when this turn has no assistant yet.
  */
 function clearAfterUserForSidecarReplay(
   conversationId: string,
   userMessageId: string,
+  keepMessageId?: string,
 ): void {
   const rt = getRuntime(conversationId);
   const idx = rt.messages.findIndex((m) => m.id === userMessageId);
   if (idx === -1) return;
-  const exec = useExecutionStore.getState();
-  for (const m of rt.messages.slice(idx + 1)) {
-    if (m.role !== "assistant") continue;
-    exec.clearExecution(m.id);
-    if (m.serverMessageId && m.serverMessageId !== m.id) {
-      exec.clearExecution(m.serverMessageId);
-    }
+  if (
+    !resetAssistantsAfterUserInPlace(
+      conversationId,
+      userMessageId,
+      keepMessageId,
+    )
+  ) {
+    useConversationStore.getState().createAssistantMessage(conversationId);
   }
-  const store = useConversationStore.getState();
-  store.truncateAfter(userMessageId, conversationId);
-  store.createAssistantMessage(conversationId);
 }
 
 function ensureUserRow(
@@ -319,7 +318,11 @@ async function attachSidecarTurnExclusive(
         res.userMessage ?? "",
         res.traceId,
       );
-      clearAfterUserForSidecarReplay(conversationId, userMessageId);
+      clearAfterUserForSidecarReplay(
+        conversationId,
+        userMessageId,
+        res.messageId,
+      );
       anchorUserMessageId = userMessageId;
     }
 

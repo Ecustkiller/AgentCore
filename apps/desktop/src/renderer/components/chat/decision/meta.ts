@@ -166,7 +166,7 @@ export function askResolvedOutcome(
 
 /**
  * ask_user 取消结算（wire `stop`；同档误用的 `research_first`）：桌面时间线不画
- * toneStub——对齐 PlanReviewCard resolved 静默。meta 文案表仍可返回「已取消本回合」。
+ * toneStub——对齐 plan_review resolved 静默。meta 文案表仍可返回「已取消本回合」。
  */
 export function isAskSilentResolvedDecision(
   decision: CheckpointDecision | null | undefined,
@@ -177,8 +177,6 @@ export function isAskSilentResolvedDecision(
 type TeamResolvedRow = { label: string; icon: LucideIcon };
 
 export type TeamPrimitiveMeta = {
-  /** Inline pending marker only（「等你确认 · 确认后才会…」）；拍板卡头不再复用。 */
-  activeCaption: string;
   resumeLead: string;
   resumeCta: string;
   notePlaceholder: string;
@@ -189,7 +187,6 @@ export type TeamPrimitiveMeta = {
 
 export const TEAM_PRIMITIVE_META = {
   delegate: {
-    activeCaption: "等你确认 · 确认后才会开工",
     // 旧 payload 无 headline 时的兜底导语；有人数时前端会优先「预计 N 人开工」。
     resumeLead: "预计开工。等待你确认后才会上场，分工如下：",
     resumeCta: "授权并开工",
@@ -221,7 +218,6 @@ export const TEAM_PRIMITIVE_META = {
     },
   },
   debate: {
-    activeCaption: "等你确认 · 确认后才会开赛",
     resumeLead: "预计开赛。等待你确认后才会开赛，辩题与立场如下：",
     resumeCta: "授权开赛",
     notePlaceholder: "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入",
@@ -306,11 +302,4 @@ export function teamCorrectionSuffix(args: {
       .length ?? 0;
   if (tightened > 0) parts.push("已收紧写盘");
   return parts.length > 0 ? ` · ${parts.join(" · ")}` : "";
-}
-
-export function teamPendingMarkerLabel(
-  primitive: KickoffPrimitive,
-  summarySuffix: string,
-): string {
-  return `${TEAM_PRIMITIVE_META[primitive].activeCaption}（${summarySuffix}）`;
 }

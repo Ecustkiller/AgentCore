@@ -119,7 +119,7 @@ export function notifyWarning(
  * A neutral informational toast with an optional one-click action and duration.
  *
  * Distinct from success/warning: neither "操作成功" nor "降级警告" — a heads-up the
- * user may act on (e.g. "新版本已就绪 → 重启安装"). Brand-primary icon on the neutral
+ * user may act on (e.g. "安装包已下载 → 打开安装包"). Brand-primary icon on the neutral
  * surface (color-tokens). Pass `duration: Infinity` for a sticky notice that stays
  * until dismissed or acted on.
  */

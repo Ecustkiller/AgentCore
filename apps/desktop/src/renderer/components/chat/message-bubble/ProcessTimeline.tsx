@@ -310,25 +310,23 @@ export function ProcessTimeline({
       node.kind === "delegation_authorization" ||
       node.kind === "stage_card"
     ) {
-      return (
-        <div key={nodeKey}>
-          {renderTimelineInteractionCard(
-            node.kind,
-            node,
-            {
-              checkpoints,
-              nonBlockingAsks,
-              planReviews,
-              teamPreviews,
-            },
-            {
-              messageId: messageId ?? "",
-              conversationId,
-              interactive: isStreaming,
-            },
-          )}
-        </div>
+      const card = renderTimelineInteractionCard(
+        node.kind,
+        node,
+        {
+          checkpoints,
+          nonBlockingAsks,
+          planReviews,
+          teamPreviews,
+        },
+        {
+          messageId: messageId ?? "",
+          conversationId,
+          interactive: isStreaming,
+        },
       );
+      if (!card) return null;
+      return <div key={nodeKey}>{card}</div>;
     }
     if (node.kind === "tool-group") {
       return (

@@ -290,8 +290,8 @@ const DEFAULT_SETTINGS_ROWS: { label: string; desc: string; to: string }[] = [
     to: APP_PATHS.more.providers,
   },
   {
-    label: "AI 记忆",
-    desc: "在文件页查看、编辑或清理长期记忆",
+    label: "全局设定",
+    desc: "在文件页查看、编辑画像、偏好与规则",
     to: APP_PATHS.files,
   },
   { label: "用量", desc: "查看花费与额度", to: APP_PATHS.more.usage },

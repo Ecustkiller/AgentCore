@@ -98,6 +98,33 @@ async def test_written_files_empty_when_execution_writes_nothing(tmp_path: Path)
     assert result.written_files == []
 
 
+async def test_execute_closes_stdin_when_script_has_no_input(tmp_path: Path, monkeypatch):
+    """Sidecar stdin is the JSON-RPC pipe; inheriting it stalls ``print('ok')``."""
+    import subprocess as sp
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    seen: list[object] = []
+    real_popen = sp.Popen
+
+    def _capture(*args: object, **kwargs: object):
+        seen.append(kwargs.get("stdin"))
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(sp, "Popen", _capture)
+    result = await SubprocessSandbox().execute(
+        ExecutionRequest(
+            code="print('ok')",
+            language="python",
+            cwd=str(root),
+            timeout_seconds=30,
+        )
+    )
+    assert result.success is True, result.stderr
+    assert seen
+    assert all(value is sp.DEVNULL for value in seen)
+
+
 async def test_written_files_none_without_workspace_cwd():
     """无工作区 cwd（一次性 temp dir）→ 无从报起，保持 ``None`` 而不是假装空。"""
     result = await SubprocessSandbox().execute(

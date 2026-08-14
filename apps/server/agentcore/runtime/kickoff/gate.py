@@ -16,10 +16,10 @@ _AFFIRM_RE = re.compile(
 )
 
 
-def should_preview_delegate_plan(plan: Any, *, finalize: bool) -> bool:
+def should_preview_delegate_plan(plan: Any) -> bool:
     """Whether the *plan half* of a delegate kickoff would show (ignores autonomy).
 
-    Hang when ≥2 workers. Skip single-worker + finalize (zero-friction solo path).
+    Hang when ≥2 workers. Solo (1 worker) stays off — zero-friction kickoff.
     Nested depth / resume / ``team_kickoff`` / full_auto are decided by
     :func:`should_kickoff` and the caller. Confirmed ``ask_user`` does **not**
     skip this half (ask ⊥ team_preview).
@@ -29,11 +29,7 @@ def should_preview_delegate_plan(plan: Any, *, finalize: bool) -> bool:
     """
     if any(bool(getattr(n, "checkpoint_after", False)) for n in plan.nodes):
         return False
-    if len(plan.nodes) >= 2:
-        return True
-    if len(plan.nodes) == 1 and finalize:
-        return False
-    return False
+    return len(plan.nodes) >= 2
 
 
 # Back-compat aliases used by tests / call sites.

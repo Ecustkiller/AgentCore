@@ -151,7 +151,7 @@ const updaterApi: UpdaterApi = {
   configure: async () => {},
   check: async () => {},
   download: async () => {},
-  quitAndInstall: async () => {},
+  openInstaller: async () => {},
   getStatus: async () => ({
     phase: "unsupported",
     autoInstallCapable: false,

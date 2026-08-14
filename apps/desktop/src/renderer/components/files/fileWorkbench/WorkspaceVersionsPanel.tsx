@@ -10,9 +10,8 @@ import { useMemo } from "react";
 /**
  * 文件页的「版本」面板 —— 一个云端工作区的留存版本与交接存档，倒序排列。
  *
- * 与右坞「改动」tab 同一批卡片（{@link ChangesVersionEntry} / {@link KeepVersionAction}）、
- * 同一套恢复口径，只少了回合轨：从「我的文件」进来时手里没有会话，谈不上「回合 N」，
- * 所以这里只排版本，不假装能给出某个回合的逐文件 diff。
+ * 右坞「改动」tab 不再列版本；命名版本只从这里创建 / 恢复 / 下载。
+ * 没有会话就谈不上「回合 N」，所以这里只排版本，不假装能给出某个回合的逐文件 diff。
  */
 export function WorkspaceVersionsPanel({
   wsId,

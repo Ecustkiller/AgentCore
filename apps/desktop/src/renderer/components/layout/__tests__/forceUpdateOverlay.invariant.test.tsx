@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
  * 不可关闭遮罩层不变量：硬闸门禁 / force 态说明窗在任意 phase 下都至少有一个
- * 真正可用的动作；未签名 mac + error 不得出现点了没反应的「重试下载」。
+ * 真正可用的动作；error 态「重试下载」必须真的调用 download。
  */
 import type { UpdaterPhase, UpdaterStatus } from "@shared/updater-contract";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -141,7 +141,7 @@ describe("force-update overlay usable-action invariant", () => {
     }
   });
 
-  it("unsigned mac + hard gate + error: download-page action, no dead 重试下载", () => {
+  it("unsigned mac + hard gate + error: retry download is live, plus download-page hatch", () => {
     const download = vi.fn(() => Promise.resolve());
     useUpdatesStore.setState({
       download,
@@ -154,7 +154,8 @@ describe("force-update overlay usable-action invariant", () => {
     expect(
       screen.getAllByRole("link", { name: /前往下载页/ }).length,
     ).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "重试下载" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "重试下载" }));
+    expect(download).toHaveBeenCalled();
     expect(usableActions(gate).length).toBeGreaterThan(0);
 
     cleanup();
@@ -165,11 +166,8 @@ describe("force-update overlay usable-action invariant", () => {
       status: capable({ phase: "error", message: "network down" }, false),
     });
     render(<UpdateAvailableDialog />);
-    expect(screen.queryByRole("button", { name: "重试下载" })).toBeNull();
-    const primary = screen.getByRole("link", { name: "前往下载页" });
-    expect(primary.getAttribute("href")).toBeTruthy();
-    fireEvent.click(primary);
-    expect(download).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "重试下载" }));
+    expect(download).toHaveBeenCalledTimes(2);
     expect(usableActions(screen.getByRole("dialog")).length).toBeGreaterThan(0);
   });
 });

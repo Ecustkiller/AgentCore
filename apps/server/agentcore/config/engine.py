@@ -59,8 +59,17 @@ class EngineSettings(BaseModel):
     # runs/constants.py::MAX_PARALLEL_DELEGATIONS，值同步为 12）。
     engine_max_parallel_delegations: int = 12
 
-    engine_tool_clear_keep_recent: int = 4
+    # 当轮调查结果（NEVER + FILESYSTEM/SEARCH/RESEARCH）投影窗：只留最近 N 条
+    # ≥min_chars 的全文。journal / UI 仍全文。旧结果 → 稳定指针；file_read 另附
+    # ≤1200 字结构摘要 + 再读授额。2 打堆叠税（工人长调查把多份 500 行窗整段
+    # 带进下一轮 LLM）；不拧单次默认 500 行窗、不把 file_read 塞回通用 4k 头尾裁
+    # （那伤单次读手感）。host_shell / terminal 走独立 exec 窗，不进本集合。
+    engine_tool_clear_keep_recent: int = 2
     engine_tool_clear_min_chars: int = 2000
+    # host_shell / terminal 当轮 stdout 独立投影窗（不进 investigation_tools，
+    # 以免改空转治理）。指针禁止教重跑。1 = 只留最近一条全文。code_execute /
+    # test_run 不在此列（改码对照 / 验证诚实性）。
+    engine_tool_clear_exec_keep_recent: int = 1
     # R1: when clearing a large file_read result, append a deterministic structural
     # digest (chars). 0 = pointer-only rollback (no summary). Must keep
     # pointer+summary strictly below engine_tool_clear_min_chars (idempotency).

@@ -40,7 +40,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AttachmentChips } from "./AttachmentChips";
 import { ComposerCloudBridgeHint } from "./ComposerCloudBridgeHint";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
-import { ComposerCreatingNotice } from "./ComposerCreatingNotice";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
@@ -267,7 +266,7 @@ export function TurnComposer({
     ),
   });
 
-  const { handleSend, isSending, isCreatingConversation } = useComposerSend({
+  const { handleSend, isSending } = useComposerSend({
     value,
     setValue,
     attachments,
@@ -680,9 +679,6 @@ export function TurnComposer({
         onRemove={removeAttachment}
         onRemoveAgent={removeAgentMention}
       />
-
-      {/* 建会话中：草稿首发按下发送就清空输入框，这条顶住创建 POST 那段等待。 */}
-      <ComposerCreatingNotice show={isCreatingConversation} />
 
       {/* 断连提示：仅在心跳判定服务器不可达时出现，主动告知「发送前」状态。 */}
       <ComposerConnectionNotice />

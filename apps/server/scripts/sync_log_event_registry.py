@@ -419,7 +419,12 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
     },
     "approval.sandbox_auto_pass": {"tool": "str"},
     "approval.timeout": {"tool": "str"},
-    "firehose.backpressure_drop": {},
+    "firehose.backpressure_drop": {
+        "user": "str",
+        "type": "str",
+        "dropped_delta": "int",
+        "dropped_total": "int",
+    },
     "auth.login_failed": {
         "reason": "str",
         "user_id": "str",
@@ -513,6 +518,14 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "prefix": "str",
         "error": "str",
         "count": "int",
+    },
+    "event_sink.backpressure_drop": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "label": "str",
+        "type": "str",
+        "dropped_delta": "int",
+        "dropped_total": "int",
     },
     "event_sink.detach": {
         "reason": "str",
@@ -649,6 +662,9 @@ KEY_DESC: dict[str, str] = {
     "cost.prompt_assembled": (
         "系统提示装配观测（段 chars + section_digests + assembly_hash；零行为副作用）"
     ),
+    "cost.tools_offered": (
+        "发给模型的工具 schema JSON 体积（scope=ceo_turn|worker_run；只观测不闸）"
+    ),
     "cost.prefix_cache": (
         "前缀缓存实测（hit_ratio 命中率 + breach/breach_section 击穿归因 + "
         "reusable/forfeited；cache_reported=false 表示上游没报缓存，不等于 0% 命中）"
@@ -707,6 +723,12 @@ KEY_DESC: dict[str, str] = {
     "rate_limit.redis_fail_open": (
         "Redis 限流请求中途失败 → fail-open 放行本请求（可告警；与 construct 期 "
         "security.rate_limit_redis_fallback 对偶）"
+    ),
+    "event_sink.backpressure_drop": (
+        "SSE 慢消费者弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数"
+    ),
+    "firehose.backpressure_drop": (
+        "IM firehose 慢连接弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数"
     ),
     "event_sink.detach": (
         "SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach"

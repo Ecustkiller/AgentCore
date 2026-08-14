@@ -121,32 +121,20 @@ class HandoffTool:
 
     @property
     def schema(self) -> ToolSchema:
+        # Schema layer (工具面瘦身): topology one-liners + field cues. Field
+        # checklist / escalate-vs-next_steps live in identity; maxLength on schema.
         return ToolSchema(
             name=HANDOFF_TOOL_NAME,
             description=(
-                "提交交接简报并收尾。简报 =【接力契约 + 增量交代】（给主管 / 下游队员看的结构化"
-                "交接，不是正文复述）。\n"
-                "· 有下游队员依赖你的产出时：完成后【必须】调用——下游靠简报接力。\n"
-                "· 无下游（叶节点）时：有工具活动或较长交付须调用 handoff 交短摘要，"
-                "否则对账会标成汇报不完整；短答自明、无工具时写完正文即可结束，不必为交而交。\n"
-                "用法：先把【交付】终稿写完（`form=files` 则先 file_write/str_replace 定稿），"
-                "再在【同一轮】调用 handoff；调用即代表本次任务【已完成】，之后勿再改同一产物"
-                "并再次 handoff（除非主管续派 / escalate）。\n"
-                "· `form=files` 且已落盘：本轮正文可很短或空，但 summary【必填】且须含核心结论 +"
-                "完整相对路径；key_points 须具体（勿空话「已完成」）；禁止只交空 summary。\n"
-                "简报只需几句、精炼具体——【短字段、勿塞长文】（超长易 JSON 写坏）："
-                "summary 一句话核心结论（必填，≤约 300 字）；key_points 下游 / 主管"
-                "最该知道的 2-4 条（每条≤约 120 字；具体数字 / 文件路径 / 关键决定，别空泛）；"
-                "assumptions 信息不足时你采用的关键假设（没有就省略；≤约 300 字）；"
-                "next_steps 顺带给主管的后续建议（没有就省略；≤约 300 字——"
-                "它与 escalate 不同：escalate 是『缺了它整件事会走偏、需现在有人拍板』，这里是"
-                "『我已做完、提示个后续方向』）。\n"
-                "· motion_card（可选对象字段）：仅当发现【必须对抗交锋】的核心争议、要建议开辩时"
-                "【必须】填本参数——这是主管呈报 / 系统开辩芯片的【唯一】结构化载体。"
-                "正文 markdown 表、key_points 散文写『命题卡已就位』【一律不算】；无本字段 ="
-                "无建议开辩。字段要短：sides[].stance 一句薄立场；fact_pointers / rationale 必填"
-                "（指针可 []）；勿把长文塞进卡里以免 JSON 写坏。\n"
-                "别把简报重复写进交付正文，也不要在还没产出交付时就调用它。"
+                "提交交接简报并收尾。简报=【接力契约 + 增量交代】（给主管/下游，不是正文复述）。\n"
+                "有下游：完成后【必须】调用。无下游：有工具活动或较长交付须交短摘要；"
+                "短答自明、无工具时写完正文即可，不必为交而交。\n"
+                "先写完交付（files 先落盘），再同一轮调用；调用即完成。"
+                "短字段、勿塞长文（超长易 JSON 写坏）。"
+                "form=files：summary 必填且含路径，勿空交。\n"
+                "motion_card：建议开辩时【必须】填此对象——唯一结构化载体；"
+                "正文表/key_points 写「命题卡已就位」一律不算。\n"
+                "别把简报重复写进正文，也别没产出就调。"
             ),
             parameters={
                 "type": "object",
@@ -186,11 +174,7 @@ class HandoffTool:
                         "type": "object",
                         "description": (
                             "建议开辩时【必填】的结构化命题卡对象（不是字符串、不是正文表格）。"
-                            "仅当核心争议必须对抗交锋、而非继续调研时填写；省略 = 不建议开辩、"
-                            "交接其它字段不受影响。sides[].stance 薄立场"
-                            f"（一句话立场倾向；硬上限 {STANCE_MAX_CHARS} 字作兜底）："
-                            "只写结论倾向，禁换行/分号/论证展开与论点清单。"
-                            "散文提及命题【不能】代替本对象。"
+                            "省略=不开辩。散文提及【不能】代替本对象。"
                         ),
                         "properties": {
                             "motion": {

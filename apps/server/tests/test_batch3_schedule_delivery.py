@@ -304,7 +304,6 @@ async def test_nested_drive_pauses_parent_hard_timeout():
             plan,
             execution_id="exec-nested",
             seed_completed=None,
-            finalize=False,
             coordinate=False,
         )
         assert result.success is True
@@ -377,7 +376,6 @@ async def test_nested_drive_pauses_on_turn_ceiling_seed_finalize():
             plan,
             execution_id="exec-ceiling",
             seed_completed=seed,
-            finalize=True,
             coordinate=False,
         )
         assert result.success is True
@@ -431,7 +429,6 @@ async def test_root_drive_does_not_pause_hard_timeout():
             plan,
             execution_id="exec-root",
             seed_completed=None,
-            finalize=False,
             coordinate=False,
         )
         assert result.success is True

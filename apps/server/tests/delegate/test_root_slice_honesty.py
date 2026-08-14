@@ -18,7 +18,7 @@ def _files_task(**deliverable_extra):
 
 
 def test_warn_single_handwritten_files_no_nail():
-    warn = check_root_slice_honesty([_files_task()], depth=0, playbook=None, finalize=False)
+    warn = check_root_slice_honesty([_files_task()], depth=0, playbook=None)
     assert warn == root_slice_honesty_soft_message()
     assert "嵌套扇出" in warn
     assert "不拒收" in warn
@@ -44,15 +44,6 @@ def test_ok_form_omitted():
     warn = check_root_slice_honesty(
         [{"role": "工程师", "task": "从零实现", "deliverable": {}}],
         depth=0,
-    )
-    assert warn is None
-
-
-def test_ok_finalize():
-    warn = check_root_slice_honesty(
-        [_files_task()],
-        depth=0,
-        finalize=True,
     )
     assert warn is None
 

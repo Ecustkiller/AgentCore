@@ -642,7 +642,6 @@ class DelegateTool:
         # 禁止先 merge 再 sibling 整图——会把已完成同座+同路径误判成同批交叉。
         added_nodes_for_anchor: list = list(plan.nodes)
 
-        finalize_flag = bool(arguments.get("finalize"))
         from agentcore.runtime.coordination.host import (
             admit_before_run_plan_emit,
             should_defer_run_plan_emit_to_merge,
@@ -662,7 +661,6 @@ class DelegateTool:
                 self,
                 plan,
                 execution_id=append_to,
-                finalize=finalize_flag,
                 call_idx=call_idx,
                 host_plan=host_plan_for_append,
                 seed_completed=append_seed,
@@ -708,16 +706,11 @@ class DelegateTool:
                 self,
                 plan,
                 execution_id=execution_id,
-                finalize=finalize_flag,
                 call_idx=call_idx,
             )
             if admitted_reject is not None:
                 return admitted_reject
 
-        # 收口批标记落在【真正被驱动的那张图】上（合入时是宿主图）：执行器据
-        # ``plan.solo_direct_answer()`` 决定 worker 的身份口径——单人直出时它的正文
-        # 会原样当最终答复，不该再用对主管汇报的写法。快照前写，resume 折回时不丢。
-        plan.finalize = finalize_flag
         record_plan_snapshot(plan)
 
         from agentcore.runtime.audit.hooks import on_delegate_plan
@@ -729,7 +722,7 @@ class DelegateTool:
         )
         # 同回合合入活跃协调时由 merge 在准入后发出成长后的 run_plan（提交点）。
         if not should_defer_run_plan_emit_to_merge(
-            self, execution_id=execution_id, finalize=finalize_flag
+            self, execution_id=execution_id
         ):
             self._sink.emit(
                 plan_event(
@@ -803,7 +796,6 @@ class DelegateTool:
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=bool(arguments.get("finalize")),
             seed_notes=seed_notes,
             complexity_hint=complexity_hint,
             coordination=coordination,
@@ -901,7 +893,6 @@ class DelegateTool:
         *,
         execution_id: str,
         seed_completed: dict[str, RunState] | None,
-        finalize: bool,
         seed_notes: list[dict[str, str]] | None = None,
         complexity_hint: str = "standard",
     ) -> ToolResult:
@@ -910,7 +901,6 @@ class DelegateTool:
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=finalize,
             seed_notes=seed_notes or [],
             complexity_hint=complexity_hint,
             coordination=self._coordination,
@@ -1003,15 +993,11 @@ class DelegateTool:
         # 臂后台（coordinate=True）；显式经典由调用方传 coordinate=False。
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
 
-        # 续跑一律不直出（下面 drive 的 finalize=False）：快照折回的收口批标记要跟着回落，
-        # 否则恢复后才起跑的 worker 会以为正文原样呈给用户，实际仍回主管合成。
-        plan.finalize = False
         result = await drive(
             self,
             plan,
             execution_id=execution_id,
             seed_completed=seed_completed,
-            finalize=False,
             # 开工卡恢复补种 CEO 预贴便签（挂起时尚未上墙）；plan_review 恢复不带（已上墙）。
             seed_notes=list(seed_notes or []),
             coordination=self._coordination,
@@ -1144,7 +1130,6 @@ class DelegateTool:
             sup.plan,
             execution_id=sup.execution_id,
             seed_completed=sup.completed,
-            finalize=sup.finalize,
             coordination=self._coordination,
             coordinate=False,
         )

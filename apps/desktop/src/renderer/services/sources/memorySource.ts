@@ -8,8 +8,8 @@ import {
 } from "@/services/memory";
 
 /**
- * A {@link FileSource} over the user's long-term-memory **leaves**, so the「AI 记忆」rail
- * can reuse the same markdown editor host ({@link MarkdownFileEditor}) the file workbench
+ * A {@link FileSource} over the user's long-term-memory **leaves**, so the files-page
+ * 设定 rail can reuse the same markdown editor host ({@link MarkdownFileEditor}) the file workbench
  * uses — full-text edit + preview + AI 改写 + CAS conflict handling, all for free
  * (Agent记忆与知识系统 §1.6).
  *
@@ -98,7 +98,7 @@ export function parseProjectProfilePath(path: string): string | null {
 /**
  * folderId encoded in a project-scoped synthetic memory path (`project/<id>/profile`,
  * `project/<id>/navigation`, or `project/<id>/topics/<slug>`), else null. Used by 最近更新 /
- * 对话卡深链 to expand that project and its「记忆」node in the file rail.
+ * 对话卡深链 to expand that project and its「本文件夹设定」node in the file rail.
  */
 export function parseProjectMemoryFolderId(path: string): string | null {
   const profile = PROJECT_PROFILE_RE.exec(path);
@@ -154,7 +154,7 @@ function saveLeaf(
 export function createMemorySource(): FileSource {
   return {
     id: "memory",
-    label: "AI 记忆",
+    label: "设定",
     caps: { watch: false, transfer: false, edit: true, snapshots: false },
     listDir: (): Promise<FileNode[]> => Promise.resolve([]),
     read: async (path): Promise<FilePreviewResult> => {

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from uuid import uuid4
 
@@ -36,7 +36,7 @@ from agentcore.runtime.resolve.prompt import compose_ceo_chat_prompt
 from agentcore.runtime.skills import build_system_skill_registry
 from agentcore.tools.builtin.remember import RememberTool
 from agentcore.tools.builtin.update_folder_profile import UpdateFolderProfileTool
-from agentcore.tools.protocol import ToolContext
+from agentcore.tools.protocol import ToolContext, fork_explore_write_scope
 from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
@@ -765,6 +765,49 @@ async def test_update_folder_profile_clears_explore_pending(tmp_path):
     assert res.success
     assert context.cold_start_explore_pending is False
     assert context.write_scope == "project"
+
+
+@pytest.mark.asyncio
+async def test_update_folder_profile_clears_pending_across_replace_copy(tmp_path):
+    """引擎 replace(on_phase=…) 后写画像，pipeline base 上的 delegate 必须立刻看见。"""
+    store = FileMemoryStore(tmp_path)
+    uid = str(uuid4())
+    folder = str(uuid4())
+    tool = UpdateFolderProfileTool(
+        folder_id=folder, store=store, workspace_key=f"folder:{folder}"
+    )
+    base = _ctx(user_id=uid)
+    base.cold_start_explore_pending = True
+    base.write_scope = "explore_memory"
+    copy = replace(base, on_phase=lambda _phase: None)
+    res = await tool.execute(
+        {"content": "## 技术栈与工具\n- Python\n"},
+        copy,
+    )
+    assert res.success
+    assert copy.cold_start_explore_pending is False
+    assert copy.write_scope == "project"
+    assert base.cold_start_explore_pending is False
+    assert base.write_scope == "project"
+
+
+def test_fork_explore_write_scope_does_not_share_write_permission():
+    base = _ctx()
+    base.cold_start_explore_pending = True
+    base.write_scope = "explore_memory"
+    worker = replace(
+        base,
+        run_id="w1",
+        _explore_gate=fork_explore_write_scope(base, "none"),
+    )
+    assert worker.write_scope == "none"
+    assert worker.cold_start_explore_pending is True
+    base.write_scope = "project"
+    base.cold_start_explore_pending = False
+    assert worker.write_scope == "none"
+    assert worker.cold_start_explore_pending is True
+    assert base.write_scope == "project"
+    assert base.cold_start_explore_pending is False
 
 
 @pytest.mark.asyncio

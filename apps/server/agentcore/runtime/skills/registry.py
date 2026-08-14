@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# Same tokens as tools.registration.meta — kept local so skills stay free of tools/.
+AUDIENCE_CEO = "ceo"
+AUDIENCE_WORKER = "worker"
+AUDIENCE_CEO_ONLY: tuple[str, ...] = (AUDIENCE_CEO,)
+AUDIENCE_WORKER_ONLY: tuple[str, ...] = (AUDIENCE_WORKER,)
+AUDIENCE_BOTH: tuple[str, ...] = (AUDIENCE_CEO, AUDIENCE_WORKER)
+
 
 @dataclass(frozen=True)
 class SystemSkill:
@@ -15,12 +22,16 @@ class SystemSkill:
     catalog entry: the skill appears only when every named tool is wired this turn
     (e.g. the ``ask_user_*`` skills need the ``ask_user`` tool, which is live-user
     only), so the prompt never advertises a capability the CEO cannot act on.
+    ``audience`` is who may *see* the entry (CEO vs worker). Default both.
+    Directory listing and ``consult`` fetch share this filter — do not advertise
+    a name the same source cannot fetch. Not a task-intent classifier.
     """
 
     name: str
     summary: str
     body: str
     requires_tools: tuple[str, ...] = ()
+    audience: tuple[str, ...] = AUDIENCE_BOTH
 
 
 class SkillRegistry:
@@ -43,10 +54,17 @@ class SkillRegistry:
         """Every registered skill (registration order)."""
         return list(self._skills.values())
 
-    def available(self, tool_names: set[str]) -> list[SystemSkill]:
-        """Skills whose ``requires_tools`` are all wired — the catalog visibility filter."""
+    def available(
+        self, tool_names: set[str], *, audience: str | None = None
+    ) -> list[SystemSkill]:
+        """Skills whose ``requires_tools`` are wired, optionally narrowed by reader.
+
+        ``audience=None`` keeps the tools-only filter (CEO directory tests).
+        Production consult sources pass ``\"ceo\"`` or ``\"worker\"``.
+        """
         return [
             skill
             for skill in self._skills.values()
             if all(tool in tool_names for tool in skill.requires_tools)
+            and (audience is None or audience in skill.audience)
         ]

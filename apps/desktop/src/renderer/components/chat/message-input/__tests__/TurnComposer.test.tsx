@@ -177,13 +177,11 @@ vi.mock("@/components/chat/message-input/useComposerDrop", () => ({
 const genMock = vi.hoisted(() => ({ value: false }));
 const handleSendMock = vi.hoisted(() => vi.fn());
 const sendingMock = vi.hoisted(() => ({ value: false }));
-const creatingMock = vi.hoisted(() => ({ value: false }));
 
 vi.mock("@/components/chat/message-input/useComposerSend", () => ({
   useComposerSend: () => ({
     handleSend: handleSendMock,
     isSending: sendingMock.value,
-    isCreatingConversation: creatingMock.value,
   }),
 }));
 vi.mock("@/components/chat/message-input/useMentionMenu", () => ({
@@ -233,7 +231,6 @@ function renderComposer(variant?: "card" | "bar") {
 beforeEach(async () => {
   genMock.value = false;
   sendingMock.value = false;
-  creatingMock.value = false;
   handleSendMock.mockClear();
   dropMock.handlePaste.mockClear();
   dropMock.handleDrop.mockClear();
@@ -430,21 +427,6 @@ describe("TurnComposer variants", () => {
     renderComposer("bar");
     const send = screen.getByRole("button", { name: "发送" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("建会话中：输入框已清空，仍给出「正在创建对话」的进行中态", () => {
-    creatingMock.value = true;
-    renderComposer();
-
-    // 草稿首发时输入框先清空再发 POST——这条提示就是那段等待期间的唯一反馈，
-    // 没有它用户会以为没发出去而再按一次（线上重复建会话的直接诱因）。
-    expect(screen.getByTestId("composer-creating-notice")).toBeTruthy();
-    expect(screen.getByText("正在创建对话…")).toBeTruthy();
-  });
-
-  it("未在建会话时不显示建会话中提示", () => {
-    renderComposer();
-    expect(screen.queryByTestId("composer-creating-notice")).toBeNull();
   });
 
   it("发送中：按钮进入 in-flight 态并挡住连点", async () => {

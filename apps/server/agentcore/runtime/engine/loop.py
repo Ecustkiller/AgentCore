@@ -364,6 +364,21 @@ async def react_loop(
 
     # Entry: teammates that never hit a dead envelope still inherit session/channel sticky.
     _maybe_retire_workspace_channel_dead()
+    # Nested worker lead may resume with _supervised already set (new react_loop).
+    # Promote before the opening observe / first LLM so replan is on the menu
+    # (CEO wait 套件 still gated on depth==0 + live session inside promote).
+    from agentcore.runtime.resolve.ceo_surface import (
+        ensure_coordination_surface_before_llm,
+    )
+
+    if ensure_coordination_surface_before_llm(tools):
+        tool_defs = _resolve_tool_defs()
+    if role == "worker":
+        from agentcore.runtime.resolve.ceo_surface import observe_tools_offered
+
+        # Opening offer only (wind_down narrowing is a later round). Pass the
+        # resolved defs so allowed/disabled filtering is what the model sees.
+        observe_tools_offered(tools, scope="worker_run", tool_defs=tool_defs or [])
     # 跑/修·打开验证·贴码写回：引擎不再扫用户文硬分叉；选型/验收靠提示词 + 结构字段。
     if role == "captain":
         maybe_inject_availability_status_nudge(
@@ -788,14 +803,15 @@ async def react_loop(
                 from agentcore.runtime.runs.run_phase_emit import emit_run_phase
 
                 emit_run_phase(sink, run_id, agent_id, "thinking")
-            # 协调已活 → 进入本轮 LLM 前装好 wait 等闸内工具（与 mid-turn promote 对齐）。
-            if role == "captain":
-                from agentcore.runtime.resolve.ceo_surface import (
-                    ensure_coordination_surface_before_llm,
-                )
+            # 协调已活 / 嵌套 lead 已有子计划 → 进入本轮 LLM 前装好闸内工具
+            # （CEO wait 套件；nested worker 仅 replan）。不按 role 跳过：
+            # worker 续跑时 _supervised 可能已在，须赶在首轮 LLM 前挂上。
+            from agentcore.runtime.resolve.ceo_surface import (
+                ensure_coordination_surface_before_llm,
+            )
 
-                if ensure_coordination_surface_before_llm(tools):
-                    tool_defs = _resolve_tool_defs()
+            if ensure_coordination_surface_before_llm(tools):
+                tool_defs = _resolve_tool_defs()
             # Sticky channel-dead poll immediately before LLM (session-read posture like
             # timeout wind_down): sibling may have stamped after prior round / on_round_begin.
             _maybe_retire_workspace_channel_dead()

@@ -156,7 +156,6 @@ DELEGATE_PARAMETERS = {
                 "required": ["role", "task"],
             },
         },
-        "finalize": {"type": "boolean"},
         "append_to_execution_id": {
             "type": "string",
             "description": (

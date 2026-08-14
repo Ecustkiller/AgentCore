@@ -105,7 +105,7 @@ const config = {
 
   mac: {
     icon: abs(identity.macIcon),
-    // dmg = 首装下载；zip = electron-updater 拉取（latest-mac.yml）。
+    // dmg = 首装与当前「下载安装包」路径；zip / latest-mac.yml 仍上传供版本检查。
     // 内测未签名：首装需右键打开；且 Squirrel.Mac 拒装未签名更新，主进程 codesign 探测到
     // 无签名身份即降级为引导手动下载（发布与门禁.md §7.6「未签名 mac 不能自动安装」）。
     target: ["dmg", "zip"],

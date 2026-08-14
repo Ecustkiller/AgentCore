@@ -9,6 +9,8 @@ behaviour. No DB, no HTTP — plain async tests (asyncio_mode=auto).
 
 import asyncio
 
+import agentcore.messaging.hub as hub_mod
+import agentcore.observability.drop_heartbeat as drop_hb
 from agentcore.api.routes.realtime import _firehose, _format_event
 from agentcore.messaging.hub import (
     _SUBSCRIBER_QUEUE_MAXSIZE,
@@ -17,6 +19,7 @@ from agentcore.messaging.hub import (
     Subscription,
     default_chat_hub,
 )
+from tests.conftest import LogSpy
 
 
 async def test_publish_delivers_to_subscriber():
@@ -116,6 +119,53 @@ async def test_backpressure_drops_oldest_when_full():
     drained = [await sub.get() for _ in range(_SUBSCRIBER_QUEUE_MAXSIZE)]
     assert drained[0] == {"type": "m", "i": 1}
     assert drained[-1] == {"type": "m", "i": total - 1}
+
+
+async def test_backpressure_drop_logs_are_o1(monkeypatch):
+    """N shed frames must not write N jsonl lines: first drop + end flush."""
+    spy = LogSpy()
+    monkeypatch.setattr(hub_mod, "logger", spy)
+    monkeypatch.setattr(drop_hb, "_now", lambda: 0.0)
+
+    hub = ChatHub()
+    sub = hub.subscribe("u1")
+    extra = 200
+    for i in range(_SUBSCRIBER_QUEUE_MAXSIZE + extra):
+        await hub.publish(["u1"], {"type": "m", "i": i})
+
+    drops = [kw for name, kw in spy.events if name == "firehose.backpressure_drop"]
+    assert len(drops) == 1
+    assert drops[0]["dropped_delta"] == 1
+    assert drops[0]["dropped_total"] == 1
+    assert drops[0]["type"] == "m"
+    assert drops[0]["user"] == "u1"
+
+    hub.unsubscribe(sub)
+    drops = [kw for name, kw in spy.events if name == "firehose.backpressure_drop"]
+    assert len(drops) == 2
+    assert drops[1]["dropped_delta"] == extra - 1
+    assert drops[1]["dropped_total"] == extra
+    assert sum(d["dropped_delta"] for d in drops) == extra
+
+
+async def test_close_flushes_remaining_backpressure_drops(monkeypatch):
+    """Connection close (no prior unsubscribe) still flushes the drop remainder."""
+    spy = LogSpy()
+    monkeypatch.setattr(hub_mod, "logger", spy)
+    monkeypatch.setattr(drop_hb, "_now", lambda: 0.0)
+
+    hub = ChatHub()
+    sub = hub.subscribe("u1")
+    extra = 50
+    for i in range(_SUBSCRIBER_QUEUE_MAXSIZE + extra):
+        await hub.publish(["u1"], {"type": "m", "i": i})
+
+    spy.events.clear()
+    sub.close()
+    drops = [kw for name, kw in spy.events if name == "firehose.backpressure_drop"]
+    assert len(drops) == 1
+    assert drops[0]["dropped_delta"] == extra - 1
+    assert drops[0]["dropped_total"] == extra
 
 
 async def test_subscription_offer_reports_drop():

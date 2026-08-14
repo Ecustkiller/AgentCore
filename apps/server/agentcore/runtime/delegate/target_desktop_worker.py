@@ -42,6 +42,7 @@ async def registry_rewire_consult_tools(
         memory_store=default_memory_store(),
         folder_id=folder_id,
         memory_enabled=memory_enabled,
+        skill_audience="worker",
     )
     if await source.list_directory(user_id):
         registry.register(ConsultTool(source=source))
@@ -92,6 +93,7 @@ async def rebuild_worker_prompt_for_target(
         memory_store=memory_store,
         folder_id=folder_id,
         memory_enabled=memory_enabled,
+        skill_audience="worker",
     )
     entries = list(await source.list_directory(user_id))
     return compose_worker_base_prompt(

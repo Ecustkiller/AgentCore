@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.observability.drop_heartbeat import DropLogHeartbeat, DropPulse
 from agentcore.runtime.events.chat import content_delta
 from agentcore.runtime.events.journal_config import (
     _HISTORY_COALESCE_RUN,
@@ -220,11 +221,12 @@ class SinkSubscription:
     unsubscribe`), which is exactly the 断开连坐 bug the single-queue sink had.
     """
 
-    __slots__ = ("_queue", "dropped", "label")
+    __slots__ = ("_drop_log", "_queue", "dropped", "label")
 
     def __init__(self, *, label: str) -> None:
         self.label = label
         self.dropped = 0
+        self._drop_log = DropLogHeartbeat()
         self._queue: asyncio.Queue[_Frame | None] = asyncio.Queue(
             maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
         )
@@ -512,6 +514,7 @@ class EventSink:
         if not already_detached:
             self._subscribers.remove(sub)
             self._consumer_dropped = True
+        self._flush_backpressure_drop(sub)
         sub._close()
         logger.info(
             "event_sink.detach",
@@ -548,17 +551,29 @@ class EventSink:
             self._spool(event)
             return False
         frame = _Frame(event=event, seq_ready=ready)
+        event_type = event.type.value
         for sub in subs:
             if not sub._offer(frame):
-                logger.warning(
-                    "event_sink.backpressure_drop",
-                    conversation_id=self._conversation_id,
-                    message_id=self._message_id,
-                    label=sub.label,
-                    type=event.type.value,
-                    dropped=sub.dropped,
-                )
+                pulse = sub._drop_log.note(event_type)
+                if pulse is not None:
+                    self._log_backpressure_drop(sub, pulse)
         return True
+
+    def _log_backpressure_drop(self, sub: SinkSubscription, pulse: DropPulse) -> None:
+        logger.warning(
+            "event_sink.backpressure_drop",
+            conversation_id=self._conversation_id,
+            message_id=self._message_id,
+            label=sub.label,
+            type=pulse.event_type,
+            dropped_delta=pulse.dropped_delta,
+            dropped_total=pulse.dropped_total,
+        )
+
+    def _flush_backpressure_drop(self, sub: SinkSubscription) -> None:
+        pulse = sub._drop_log.flush()
+        if pulse is not None:
+            self._log_backpressure_drop(sub, pulse)
 
     def _arm_seq_backfill(
         self, event: SSEEvent, barrier: asyncio.Future[int | None] | None
@@ -1313,6 +1328,7 @@ class EventSink:
                     pass
                 self._checkpointer = None
             for sub in tuple(self._subscribers):
+                self._flush_backpressure_drop(sub)
                 sub._close()
             self._spool_close()
             logger.info(

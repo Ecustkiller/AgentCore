@@ -74,17 +74,27 @@
   overflow-y: hidden;
 }
 
-/* --- Mermaid: centered, responsive; strip the surrounding code <pre> box. --- */
+/* --- Mermaid: magazine figure (grow small charts, cap below full-bleed);
+   strip the surrounding code <pre> box. `!important` beats mermaid's inline
+   max-width:<native>px so the sized wrapper can scale the SVG. --- */
 .md .mermaid-wrap {
-  display: flex;
-  justify-content: center;
+  display: block;
   margin: 10px 0;
-  overflow-x: auto;
 }
 
-.md .mermaid-wrap svg {
-  max-width: 100%;
-  height: auto;
+.md .mermaid-inline-host {
+  width: 100%;
+}
+
+.md .mermaid-inline {
+  margin-inline: auto;
+}
+
+.md .mermaid-inline svg {
+  display: block;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
 }
 
 /* :has lets a mermaid block shed the default <pre> chrome on modern webviews; older

@@ -63,6 +63,7 @@ import {
   type InterveneGate,
   formatCollabSummary,
   interveneAckText,
+  isLiveRunStatus,
   parallelSaving,
   parallelSavingText,
   parallelSavingTooltip,
@@ -1243,7 +1244,10 @@ function RunDetailPanel({
           continuationIndex={continuationIndexOf(runs, run)}
         />
 
-        {run.kind !== "captain" && conversationId && executionId ? (
+        {run.kind !== "captain" &&
+        conversationId &&
+        executionId &&
+        isLiveRunStatus(run.status) ? (
           <RunInterveneBar
             conversationId={conversationId}
             executionId={executionId}
@@ -1408,8 +1412,10 @@ function RunDetailPanel({
  * 手机上这两件事此前**一处都没有**：列表按人显示每个队员在干什么，能操作的却只有整轮
  * 停止。现在提到队员详情最上方，一次点击（点卡）即可达。
  *
- * 不可用时**变灰并把原因写出来**，绝不隐藏——手机没有 hover，原因必须是看得见的一行字
- * （判定与文案与桌面共用 `protocol-fold-kit/runIntervene`，两端说同一句）。
+ * 调用方只在 `isLiveRunStatus`（running / pending）时挂上；终局整条不渲染——点不动也改
+ * 不了，死按钮没有教学价值，也不再写灰字原因。排队未开工仍画：可停；改方向变灰，原因
+ * 写成看得见的一行字（手机没有 hover）。判定与文案与桌面共用
+ * `protocol-fold-kit/runIntervene`，两端说同一句。
  */
 function RunInterveneBar({
   conversationId,

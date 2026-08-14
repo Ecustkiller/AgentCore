@@ -27,37 +27,18 @@ from tests.delegate.conftest import Provider, ctx, tool
 
 
 def test_should_enter_coordination_gate():
-    # Default-on: coordinate=True (or omitted at tool layer) + ≥1 + root + not finalize.
-    assert should_enter_coordination(
-        coordinate=True, worker_count=2, finalize=False, depth=0
-    )
-    assert should_enter_coordination(
-        coordinate=True, worker_count=1, finalize=False, depth=0
-    )
+    # Default-on: coordinate=True (or omitted at tool layer) + ≥1 + root.
+    assert should_enter_coordination(coordinate=True, worker_count=2, depth=0)
+    assert should_enter_coordination(coordinate=True, worker_count=1, depth=0)
     # Explicit opt-out.
-    assert not should_enter_coordination(
-        coordinate=False, worker_count=2, finalize=False, depth=0
-    )
-    assert not should_enter_coordination(
-        coordinate=False, worker_count=1, finalize=False, depth=0
-    )
-    assert not should_enter_coordination(
-        coordinate=True, worker_count=0, finalize=False, depth=0
-    )
-    assert not should_enter_coordination(
-        coordinate=True, worker_count=2, finalize=True, depth=0
-    )
-    assert not should_enter_coordination(
-        coordinate=True, worker_count=1, finalize=True, depth=0
-    )
-    assert not should_enter_coordination(
-        coordinate=True, worker_count=2, finalize=False, depth=1
-    )
+    assert not should_enter_coordination(coordinate=False, worker_count=2, depth=0)
+    assert not should_enter_coordination(coordinate=False, worker_count=1, depth=0)
+    assert not should_enter_coordination(coordinate=True, worker_count=0, depth=0)
+    assert not should_enter_coordination(coordinate=True, worker_count=2, depth=1)
     # B1: checkpoint_after batch + gate open → classic blocking (durable plan_review).
     assert not should_enter_coordination(
         coordinate=True,
         worker_count=2,
-        finalize=False,
         depth=0,
         has_checkpoint=True,
         checkpoint_enabled=True,
@@ -66,7 +47,6 @@ def test_should_enter_coordination_gate():
     assert should_enter_coordination(
         coordinate=True,
         worker_count=2,
-        finalize=False,
         depth=0,
         has_checkpoint=True,
         checkpoint_enabled=False,
@@ -75,7 +55,6 @@ def test_should_enter_coordination_gate():
     assert should_enter_coordination(
         coordinate=True,
         worker_count=2,
-        finalize=False,
         depth=0,
         has_checkpoint=False,
         checkpoint_enabled=True,
@@ -1526,7 +1505,6 @@ async def test_coordination_mid_checkpoint_still_boundary_yields(monkeypatch):
         plan,
         execution_id="e",
         seed_completed=None,
-        finalize=False,
         seed_notes=None,
         complexity_hint="standard",
         call_idx=1,

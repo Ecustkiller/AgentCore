@@ -1458,8 +1458,9 @@ async def test_production_crash_factory_base_prompt_lists_system_skills(monkeypa
     assert tool is not None
     prompt = captured["base_system_prompt"]
     assert "<按需目录>" in prompt
-    # Empty-requires_tools system skill — listed for workers via MergedConsultSource.
-    assert "- product_help" in prompt
+    # Worker catalog: keep team HOW; CEO-only product_help is not listed.
+    assert "- team_orchestration_advanced" in prompt
+    assert "- product_help" not in prompt
 
 
 async def test_orphan_turn_lease_keeps_row_for_sweeper(monkeypatch):

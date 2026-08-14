@@ -37,6 +37,28 @@ from agentcore.workspace.stage_dirs import DRAFTS_DIR
 logger = get_logger(__name__)
 
 
+def _observe_worker_opening(
+    *,
+    worker_base: str,
+    identity: str,
+    role: str | None,
+    supplement: str | None,
+) -> None:
+    """COST-004: log worker opening system sections (observe-only; join stays ``\\n\\n``)."""
+    from agentcore.config import settings
+    from agentcore.runtime.context import ContextAssembler, SectionOrder
+
+    role_text = f"你的角色：{role}" if role else None
+    (
+        ContextAssembler()
+        .add("worker_base", worker_base, SectionOrder.BASE)
+        .add("identity", identity, SectionOrder.WORKER_IDENTITY)
+        .add("role", role_text, SectionOrder.WORKER_ROLE)
+        .add("supplement", supplement, SectionOrder.WORKER_SUPPLEMENT)
+        .observe(scope="worker_turn", soft_cap=settings.prompt_budget_char_soft_cap)
+    )
+
+
 def _format_upstream_absence(
     dep_id: str,
     label: str,
@@ -138,6 +160,12 @@ def _build_messages(
     if spec.system_prompt_supplement:
         sys_parts.append(spec.system_prompt_supplement)
     system_content = "\n\n".join(p for p in sys_parts if p)
+    _observe_worker_opening(
+        worker_base=system_prompt,
+        identity=identity,
+        role=spec.role,
+        supplement=spec.system_prompt_supplement,
+    )
 
     blocks = _build_context_blocks(
         plan,

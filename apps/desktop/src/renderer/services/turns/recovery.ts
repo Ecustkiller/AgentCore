@@ -17,6 +17,17 @@ import {
   lastUserMessageOf,
 } from "./helpers";
 
+/** Cold-load pause latch is ``status=running`` + ``finishReason=paused``. */
+function isPausedFinish(message: {
+  finishReason?: string;
+  runs?: { finishReason?: string } | null;
+}): boolean {
+  return (
+    message.finishReason === "paused" ||
+    message.runs?.finishReason === "paused"
+  );
+}
+
 /**
  * Settle a live execution slot to cancelled so {@link finalizeFold} freezes
  * in-flight nodes. No-op when there is no plan (avoids inventing empty slots).
@@ -114,6 +125,9 @@ export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
  * recoverability (send a new turn / composer hint + synthetic「已中断」face); no
  * message-level retry row.
  *
+ * No-op when the tail is already paused (``finishReason`` / ``runs.finishReason``)
+ * — a successful pause must not be rewritten as interrupted.
+ *
  * Also drops any resume card painted from a stale ``usage.paused`` latch + journal
  * residual (ask_user fact still in journal after the user already continued).
  */
@@ -121,6 +135,8 @@ export function markGhostInterrupted(conversationId: string): void {
   const store = useConversationStore.getState();
   const last = getRuntime(conversationId).messages.at(-1);
   if (!last || last.role !== "assistant" || last.status !== "running") return;
+  // Successful pause (cold-load latch) must not be rewritten as interrupted.
+  if (isPausedFinish(last)) return;
   store.updateMessage(
     last.id,
     {
@@ -153,6 +169,7 @@ export function markGhostInterrupted(conversationId: string): void {
  *
  * Leaves ``cancelled`` / ``error`` / ``unproductive`` alone (those already have
  * product faces). Skips assistants with body or a real error payload.
+ * Skips ``paused`` entirely — even ``status===running`` (cold-load latch).
  */
 export function settleOrphanEmptyAssistants(conversationId: string): void {
   const store = useConversationStore.getState();
@@ -162,6 +179,8 @@ export function settleOrphanEmptyAssistants(conversationId: string): void {
     if ((m.content ?? "").trim()) continue;
     if (m.error?.message?.trim()) continue;
     if (m.runs?.error?.message?.trim()) continue;
+    // Successful pause must not become interrupted, even while still ``running``.
+    if (isPausedFinish(m)) continue;
     const fr = m.finishReason ?? m.runs?.finishReason;
     // Already has a synthesizable terminal finish — keep it.
     if (
@@ -207,7 +226,7 @@ export function settleOrphanEmptyAssistants(conversationId: string): void {
  * - live ∧ paused=0 → rejoin
  * - paused≥1 → hold + clear generating/streaming (card + isGenerating is illegal)
  * - cloudKnown ∧ !live ∧ paused=0 → real dead-lease / TTL degrade → ghost
- *   (also covers stale ``usage.paused`` latch with no ``paused_turns`` frame)
+ *   unless the tail is already paused (cold-load latch) — then hold, never ghost
  * - !cloudKnown → unknown (request failed); never ghost — hold; keep a prior
  *   non-empty non-{@link UNKNOWN_CLOUD_BANNER} error, else set that banner
  *   (plain banner; never resend; not {@link RECONNECT_BANNER})
@@ -242,6 +261,12 @@ export async function settleCloudRunningAssistant(
     return "hold";
   }
   if (!snap.cloudLive && snap.pausedCount === 0) {
+    const last = getRuntime(conversationId).messages.at(-1);
+    if (last?.role === "assistant" && isPausedFinish(last)) {
+      store.clearError(conversationId);
+      finalizeGeneratingForPausedConversation(conversationId, { force: true });
+      return "hold";
+    }
     store.clearError(conversationId);
     markGhostInterrupted(conversationId);
     return "ghost";

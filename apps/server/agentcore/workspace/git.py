@@ -152,6 +152,7 @@ async def _git_clone(repo_url: str, dest: Path, *, depth: int, timeout: int) -> 
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,

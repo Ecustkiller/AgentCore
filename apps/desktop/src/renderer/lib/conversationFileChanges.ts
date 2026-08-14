@@ -13,6 +13,7 @@ import {
 import { assistantProjectionId } from "@/stores/conversation/runtime";
 import type { Message } from "@/stores/conversation/types";
 import { type ExecutionRuntime, projectRuntime } from "@/stores/execution";
+import { CHANGES_TAB_ID } from "@/stores/sidePanel/types";
 
 /** 当前对话 messages 是否已有至少一条成功的 AI 文件改动。 */
 export function conversationHasFileArtifacts(
@@ -61,4 +62,50 @@ export function shouldIncludeChangesTurn(opts: {
     return true;
   }
   return false;
+}
+
+/** 新会话是否「自己撑得起」改动 tab（不含「当前正在看」撑场）。 */
+export function conversationSupportsChangesTab(opts: {
+  conversationId: string | null;
+  hasRestorableEntry: boolean;
+  changesFocusMessageId: string | null;
+  isChangesFloating: boolean;
+}): boolean {
+  if (!opts.conversationId) return false;
+  return (
+    opts.hasRestorableEntry ||
+    opts.changesFocusMessageId != null ||
+    opts.isChangesFloating
+  );
+}
+
+/**
+ * 右坞是否挂「改动」（§十 · P0c）。草稿无会话不出现。
+ * `activeTabId === CHANGES` 也挂：Git chip / 产物卡 `showChanges()` 能先挂再看。
+ */
+export function shouldPinChangesTab(opts: {
+  conversationId: string | null;
+  hasRestorableEntry: boolean;
+  changesFocusMessageId: string | null;
+  isChangesFloating: boolean;
+  activeTabId: string;
+}): boolean {
+  if (!opts.conversationId) return false;
+  if (opts.activeTabId === CHANGES_TAB_ID) return true;
+  return conversationSupportsChangesTab(opts);
+}
+
+/**
+ * 切对话后是否把坞焦点从「改动」弹回工作区。
+ * 只看新会话有无可恢复入口——不含 active 撑场（否则同会话 Git chip 打开的空改动会被弹走）。
+ * 调用方必须只在 `conversationId` 变化时使用。
+ */
+export function shouldBounceChangesTabToWorkspace(opts: {
+  conversationId: string | null;
+  hasRestorableEntry: boolean;
+  activeTabId: string;
+}): boolean {
+  if (opts.activeTabId !== CHANGES_TAB_ID) return false;
+  if (!opts.conversationId) return true;
+  return !opts.hasRestorableEntry;
 }

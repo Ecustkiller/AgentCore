@@ -45,7 +45,7 @@ class SectionOrder(IntEnum):
     SKILL_DIRECTORY = 500
     # The 记忆主题目录 (consult's catalog) sits beside the skill directory:
     # both are "here is a catalog, pull the full text by name" blocks (记忆文件夹化 §六).
-    # CEO gets name+summary; workers get a simplified names-only variant.
+    # CEO and worker both get name+summary (记忆系统 · 读侧无差别).
     MEMORY_TOPICS = 550
     # On-demand user rules (consult) — constraint appendices, NOT memory topics.
     # Same live-tool gate: render only when ``consult`` is wired this turn.
@@ -68,8 +68,15 @@ class SectionOrder(IntEnum):
     ATTACHMENT = 900
     # 已登记来源台账 (#rN): hydrated from the whole conversation's assistant rows, so it
     # grows monotonically with the chat — the most volatile section there is, and the one
-    # a future budget lever would trim first. Last so the sections above keep their bytes.
+    # a future budget lever would trim first. Last on the CEO turn assembler so the
+    # sections above keep their bytes.
     REGISTERED_SOURCES = 950
+    # Worker opening tail (executor ``worker_turn`` observe). Not used on the CEO
+    # turn assembler — numeric values sit after the CEO tail so a mistaken add
+    # cannot reorder CEO sections.
+    WORKER_IDENTITY = 960
+    WORKER_ROLE = 970
+    WORKER_SUPPLEMENT = 980
 
 
 @dataclass(frozen=True)

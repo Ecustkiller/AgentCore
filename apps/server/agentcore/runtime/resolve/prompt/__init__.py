@@ -16,6 +16,7 @@ from agentcore.runtime.resolve.prompt.base import (
 from agentcore.runtime.resolve.prompt.ceo_core import (
     _CEO_CORE_HINT,
     _CEO_CORE_HINT_TEMPLATE,
+    assemble_ceo_core,
 )
 from agentcore.runtime.resolve.prompt.citation import CHAT_CITATION_HINT
 from agentcore.runtime.resolve.prompt.cold_start import (
@@ -60,6 +61,7 @@ __all__ = [
     "_RUNTIME_CONTEXT_TEMPLATE",
     "_explore_act_block",
     "_format_rules",
+    "assemble_ceo_core",
     "assemble_system_prompt",
     "compose_ceo_chat_prompt",
     "compose_worker_base_prompt",

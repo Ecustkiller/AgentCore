@@ -26,7 +26,10 @@ vi.mock("@/services/messages", () => ({
 }));
 
 import { UNKNOWN_CLOUD_BANNER } from "../turns/helpers";
-import { settleCloudRunningAssistant } from "../turns/recovery";
+import {
+  markGhostInterrupted,
+  settleCloudRunningAssistant,
+} from "../turns/recovery";
 
 const CID = "conv-stale-ghost";
 const ASSISTANT_ID = "a-running";
@@ -248,5 +251,82 @@ describe("settleCloudRunningAssistant (stale recovery race)", () => {
     const rt = useConversationStore.getState().byId[CID];
     expect(rt.error).toBe(concrete);
     expect(rt.error).not.toBe(UNKNOWN_CLOUD_BANNER);
+  });
+
+  it("paused latch running assistant with empty recovery → hold, not ghost", async () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: "u1",
+        role: "user",
+        content: "q",
+        createdAt: "2026-01-01T00:00:00Z",
+        executionId: null,
+        isStreaming: false,
+      },
+      CID,
+    );
+    store.addMessage(
+      {
+        id: ASSISTANT_ID,
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: false,
+        status: "running",
+        finishReason: "paused",
+        serverMessageId: ASSISTANT_ID,
+      },
+      CID,
+    );
+    store.setGenerating(true, CID);
+
+    apiGet.mockResolvedValue({
+      live_running: false,
+      paused: [],
+      pending_interactions: [],
+    });
+
+    const outcome = await settleCloudRunningAssistant(CID, {
+      ...emptyRecovery,
+    });
+
+    expect(outcome).toBe("hold");
+    expect(assistant()?.status).toBe("running");
+    expect(assistant()?.finishReason).toBe("paused");
+    expect(assistant()?.finishReason).not.toBe("interrupted");
+    expect(assistant()?.isStreaming).toBe(false);
+    expect(useConversationStore.getState().byId[CID].isGenerating).toBe(false);
+  });
+});
+
+describe("markGhostInterrupted (paused latch)", () => {
+  it("paused running tail is a no-op", () => {
+    const store = useConversationStore.getState();
+    store.switchConversation(CID);
+    store.addMessage(
+      {
+        id: ASSISTANT_ID,
+        role: "assistant",
+        content: "",
+        createdAt: "2026-01-01T00:00:01Z",
+        executionId: null,
+        isStreaming: false,
+        status: "running",
+        finishReason: "paused",
+        serverMessageId: ASSISTANT_ID,
+      },
+      CID,
+    );
+    store.setGenerating(true, CID);
+
+    markGhostInterrupted(CID);
+
+    expect(assistant()?.status).toBe("running");
+    expect(assistant()?.finishReason).toBe("paused");
+    expect(assistant()?.isStreaming).toBe(false);
+    expect(useConversationStore.getState().byId[CID].isGenerating).toBe(true);
   });
 });

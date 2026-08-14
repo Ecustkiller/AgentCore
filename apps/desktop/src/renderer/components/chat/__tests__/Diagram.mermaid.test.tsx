@@ -59,6 +59,24 @@ describe("MermaidDiagram · 合法图不得误报渲染失败", () => {
     // ...and never degrades to the CodeFallback「渲染失败」card.
     expect(screen.queryByText("渲染失败")).toBeNull();
   });
+
+  it("drops mermaid's max-width cap so the card can scale the SVG up", async () => {
+    mermaidApi.render.mockResolvedValueOnce({
+      svg:
+        '<svg class="flowchart" width="100%" height="120" style="max-width: 320px;" viewBox="0 0 320 120">' +
+        "<style>#acmmd-1 .error-icon{fill:#552222;}</style></svg>",
+    });
+    const { container } = render(
+      <DiagramBlock kind="mermaid" code={sampleCode} streaming={false} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector("svg.flowchart")).not.toBeNull(),
+    );
+    const svg = container.querySelector("svg.flowchart")!;
+    expect(svg.getAttribute("width")).toBe("320");
+    expect(svg.getAttribute("style") ?? "").not.toMatch(/max-width/i);
+    expect(svg.parentElement?.className).toContain("mx-auto");
+  });
 });
 
 describe("MermaidDiagram · 模块加载失败分型", () => {

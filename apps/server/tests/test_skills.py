@@ -20,6 +20,7 @@ from agentcore.config import settings
 from agentcore.core.types import ToolCategory
 from agentcore.runtime.context.consult_sources import MergedConsultSource, SkillConsultSource
 from agentcore.runtime.skills import (
+    CONSULT_TEAM_ORCH_BY_SCENE,
     SkillRegistry,
     SystemSkill,
     build_system_skill_registry,
@@ -31,7 +32,8 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 # debate / delegate are wired on every path; ask_user is live-user only.
-# verify_and_fix / long_form_writing / team_orchestration_advanced ride delegate.
+# verify_and_fix / long_form_writing ride consult audience (worker loop vs CEO 派工);
+# long_form_landing is worker-only landing HOW. team_orchestration_advanced is ungated.
 _FULL_TOOLS = {"delegate", "ask_user", "debate"}
 _NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user
 
@@ -81,6 +83,7 @@ def test_registry_registers_the_system_skills():
         "delegate_checkpoint",
         "verify_and_fix",
         "long_form_writing",
+        "long_form_landing",
         "deep_multi_lens_research",
     }
     assert "build_toolshed" not in names
@@ -106,8 +109,8 @@ def test_registry_rejects_duplicate_name():
 def test_available_hides_gated_skills_without_required_tools():
     # The ask_user_* skills (and delegate_checkpoint, which pauses for user review)
     # need the ask_user tool. On the autonomous (no live user) path it is not wired,
-    # so those skills drop out of the catalog. verify_and_fix rides delegate (the
-    # delegated dev loop), so it stays available on the autonomous path.
+    # so those skills drop out of the catalog. verify_and_fix is ungated (worker loop;
+    # CEO still consults to brief) — not tied to delegate.
     reg = build_system_skill_registry()
     available = {s.name for s in reg.available(_NO_LIVE_USER)}
     assert "team_orchestration_advanced" in available
@@ -132,6 +135,64 @@ def test_available_shows_gated_skills_when_tools_wired():
     assert "ask_user_midtask" in available
     assert "delegate_checkpoint" in available
     assert "verify_and_fix" in available
+
+
+def test_available_audience_hides_ceo_only_from_workers():
+    """A：队员目录拿掉主管手册；不按任务猜。requires_tools 轴仍独立。"""
+    reg = build_system_skill_registry()
+    worker = {s.name for s in reg.available(set(), audience="worker")}
+    assert "product_help" not in worker
+    assert "product_help_map" not in worker
+    assert "product_help_faq" not in worker
+    assert "product_bug_triage" not in worker
+    assert "revising_a_product" not in worker
+    assert "team_orchestration_advanced" in worker
+    assert "work_discipline" in worker
+    assert "long_form_landing" in worker
+    assert "verify_and_fix" in worker
+    assert "long_form_writing" not in worker
+    ceo = {s.name for s in reg.available(_FULL_TOOLS, audience="ceo")}
+    assert "product_help" in ceo
+    assert "revising_a_product" in ceo
+    assert "team_orchestration_advanced" in ceo
+    assert "long_form_writing" in ceo
+    assert "verify_and_fix" in ceo
+    assert "long_form_landing" not in ceo
+
+
+async def test_worker_consult_source_hides_ceo_only_listing_and_fetch():
+    """目录和查阅同一份来源：列表没有的名字，按名也拉不到。"""
+    source = SkillConsultSource(
+        registry=build_system_skill_registry(),
+        tool_names=set(),
+        audience="worker",
+    )
+    names = {e.name for e in await source.list_directory("u")}
+    assert "product_help" not in names
+    assert "revising_a_product" not in names
+    assert "team_orchestration_advanced" in names
+    assert "long_form_landing" in names
+    assert "verify_and_fix" in names
+    assert "long_form_writing" not in names
+    assert await source.fetch_by_name("u", "product_help") is None
+    assert await source.fetch_by_name("u", "long_form_writing") is None
+    assert await source.fetch_by_name("u", "team_orchestration_advanced") is not None
+    assert await source.fetch_by_name("u", "long_form_landing") is not None
+
+
+async def test_ceo_consult_source_keeps_product_help():
+    source = SkillConsultSource(
+        registry=build_system_skill_registry(),
+        tool_names=set(_FULL_TOOLS),
+        audience="ceo",
+    )
+    names = {e.name for e in await source.list_directory("u")}
+    assert "product_help" in names
+    assert "long_form_writing" in names
+    assert "long_form_landing" not in names
+    assert await source.fetch_by_name("u", "product_help") is not None
+    assert await source.fetch_by_name("u", "long_form_writing") is not None
+    assert await source.fetch_by_name("u", "long_form_landing") is None
 
 
 # --- directory rendering -----------------------------------------------------
@@ -635,11 +696,17 @@ def test_team_orchestration_skill_teaches_cross_folder_parallel():
 
 def test_team_orchestration_skill_teaches_delegate_knobs():
     # Relocated from the old always-on hint: quality contract, output shaping,
-    # finalize, the DAG-vs-nesting distinction (model tiers were removed).
+    # the DAG-vs-nesting distinction (model tiers were removed).
     body = _body("team_orchestration_advanced")
     assert "deliverable" in body
-    assert "finalize" in body
     assert "coordinate" in body and "coordinate=false" in body
+    assert "轻量直出" not in body
+    assert "单人直出" not in body
+    assert "finalize" not in body
+    assert "收口仍回 CEO" in CONSULT_TEAM_ORCH_BY_SCENE
+    assert "finalize" not in CONSULT_TEAM_ORCH_BY_SCENE
+    assert "规格已齐建站" in CONSULT_TEAM_ORCH_BY_SCENE
+    assert "建站/工具台套 playbook" not in CONSULT_TEAM_ORCH_BY_SCENE
     assert "depends_on" in body and "同一层" in body
     # 依赖流水线 bullet 须教「派前先判生产者→消费者」+ 正反例（何时串行 / 何时并行），
     # 而非只讲 DAG 机械怎么填——修复 CEO 默认全平铺把有先后的流水线拍平的根因。
@@ -783,6 +850,9 @@ def test_build_app_skill_teaches_cloud_install_verify_honesty():
     # 案 88625：记分板对账
     assert "外环验绿对账" in body
     assert "test_run" in body
+    # 巡检定案 B：末次同命令退出码（skill 与核同轴，不扩姿势 A）
+    assert "最后一次同命令" in body
+    assert "分项分开写" in body
 
 
 def test_build_app_skill_teaches_admission_and_agent_diversion():
@@ -1206,10 +1276,9 @@ def test_delegate_checkpoint_skill_teaches_wave_boundary_pause():
 
 def test_verify_and_fix_skill_teaches_test_run_loop():
     skill = build_system_skill_registry().get("verify_and_fix")
-    # Gated on delegate (the delegated dev loop), not test_run — test_run is now a
-    # worker-only execution tool and consult is CEO-only, so gating on it would
-    # make the skill un-advertisable. The body still teaches the test_run → fix loop.
-    assert skill.requires_tools == ("delegate",)
+    # Ungated: consult is CEO+worker; body is the worker loop. Do not gate on
+    # test_run (CEO has none) or delegate (would hide it from workers).
+    assert skill.requires_tools == ()
     body = skill.body
     assert "test_run" in body
     assert "str_replace" in body
@@ -1279,6 +1348,18 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "一次完整" in skill.summary or "主路径" in skill.summary
     assert "分波" in skill.summary or "continue_from" in skill.summary
     assert "write_section" in skill.summary
+
+    landing = build_system_skill_registry().get("long_form_landing")
+    assert landing is not None
+    assert landing.requires_tools == ()
+    assert landing.audience == ("worker",)
+    assert "file_write" in landing.body
+    assert "write_section" in landing.body
+    assert "manifest" in landing.body
+    # Worker book is landing HOW, not 派工百科.
+    assert "continue_from_run_id" not in landing.body
+    assert "parallel_brief" not in landing.body
+    assert "checkpoint_after" not in landing.body
 
 
 def test_deep_multi_lens_research_listed_and_gated_on_delegate():

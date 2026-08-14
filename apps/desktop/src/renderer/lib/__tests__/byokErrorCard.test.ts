@@ -111,15 +111,12 @@ describe("syntheticErrorForEmptyFailure", () => {
     });
   });
 
-  it("flips default ON for degraded / paused empty finishes", () => {
+  it("flips default ON for degraded; paused empty stays silent", () => {
     expect(syntheticErrorForEmptyFailure("degraded")).toEqual({
       code: "LLM_EMPTY_RESPONSE",
       message: "模型返回空内容，请重试。",
     });
-    expect(syntheticErrorForEmptyFailure("paused")).toEqual({
-      code: "TURN_INCOMPLETE",
-      message: "本轮未能完成，请重试。",
-    });
+    expect(syntheticErrorForEmptyFailure("paused")).toBeNull();
   });
 
   it("returns null for non-failure finishes", () => {
@@ -146,7 +143,7 @@ describe("resolveAssistantFailureFace", () => {
     });
   });
 
-  it("exempts paused when dedicated pause/ask UI owns the turn", () => {
+  it("paused is always silent (card or not); structured error still surfaces", () => {
     expect(
       resolveAssistantFailureFace({
         content: "",
@@ -154,16 +151,23 @@ describe("resolveAssistantFailureFace", () => {
         hasDedicatedPauseOrAskUi: true,
       }),
     ).toBeNull();
-  });
-
-  it("still faces paused empty without a dedicated card", () => {
     expect(
       resolveAssistantFailureFace({
         content: "",
         finishReason: "paused",
         hasDedicatedPauseOrAskUi: false,
-      })?.message,
-    ).toBe("本轮未能完成，请重试。");
+      }),
+    ).toBeNull();
+    expect(
+      resolveAssistantFailureFace({
+        content: "",
+        finishReason: "paused",
+        error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
+      }),
+    ).toEqual({
+      code: "LLM_ERROR",
+      message: "模型调用失败，请重试。",
+    });
   });
 });
 

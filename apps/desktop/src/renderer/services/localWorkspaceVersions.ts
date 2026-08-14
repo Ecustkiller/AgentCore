@@ -1,7 +1,7 @@
 /**
  * 本地工作区「命名版本」四件套 —— 云端快照四件套（`services/workspace.ts` 的
- * `listSnapshots` / `createSnapshot` / `restoreSnapshot`）的本机对位实现，让「留版本」
- * 在本地和云端体验一致。
+ * `listSnapshots` / `createSnapshot` / `restoreSnapshot`）的本机对位实现。
+ * 产品不再提供本机创建 / 列表 / 恢复 UI；本模块与 sidecar 仍保留，已留下的 zip 不删。
  *
  * 盘上落在 `AgentCore/versions/<version_id>/{meta.json,content.zip}`（内部区，不会被
  * grep / 索引 / 下个回合基线看见）。分两条 IPC：
@@ -10,7 +10,7 @@
  * - **列举 / 删除** 只是读目录 + 读 json + 删目录，走更轻的 `window.fsApi`。
  *
  * 与回合基线（`localTurnBaselines.ts`）分轨：基线是 best-effort、失败静默；命名版本是
- * **用户显式动作**，任何失败都抛出让 UI 如实报错，绝不假装留成了。
+ * **显式动作**，任何失败都抛出，绝不假装留成了。
  *
  * 保留策略：用户命名版本永不自动清理，只有 {@link deleteLocalVersion} 会删。
  */

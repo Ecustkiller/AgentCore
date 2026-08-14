@@ -106,10 +106,12 @@ async def execute_agent_node(
     # rounds, merged into RunState.escalations alongside transcript-harvested escalate
     # tool calls.
     gate_escalations: list[dict[str, Any]] = []
-    # 受监督子计划 B: a lead's nested-delegation handle (delegate + replan + dispose),
-    # hoisted so the finally can fold a sub-plan the lead yielded-but-never-resumed back
-    # into the ledger before the parent absorbs this child (堵漏账). Stays None for a leaf
-    # worker (no opt-in / at the depth cap / no factory wired).
+    # 受监督子计划 B: a lead's nested-delegation handle (delegate + companion
+    # replan on the bundle + dispose). Opening offer is delegate; replan after
+    # a sub-plan exists. Hoisted so the finally can fold a sub-plan the lead
+    # yielded-but-never-resumed back into the ledger before the parent absorbs
+    # this child (堵漏账). Stays None for a leaf worker (no opt-in / at the
+    # depth cap / no factory wired).
     lead_subteam: LeadSubteam | None = None
     product_landing_artifacts: list[str] | None = None
     tool_ctx: Any | None = None

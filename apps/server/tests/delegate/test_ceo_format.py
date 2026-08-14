@@ -3,7 +3,6 @@
 from structlog.testing import capture_logs
 
 from agentcore.runtime.delegate.ceo_format import (
-    direct_result,
     format_for_ceo,
     worker_products,
 )
@@ -343,73 +342,6 @@ def test_format_for_ceo_no_next_steps_section_when_none():
     # The advisory SECTION (its unique intro) is absent; the closing instruction's conditional
     # mention of 『队员建议的下一步』 may still appear and is fine.
     assert "顺带提的后续方向" not in out
-
-
-def test_direct_result_keeps_deliverable_clean_of_next_steps():
-    # finalize=true (single worker → user): the answer IS the clean deliverable. ``next_steps``
-    # stays on structured debrief (run-detail 交接简报) — do not re-serialize into content.
-    t = tool(Provider([]))
-    state = RunState(
-        phase=RunPhase.COMPLETED,
-        content="最终交付正文。",
-        debrief={"summary": "完成", "next_steps": "可考虑加单测"},
-    )
-    res = direct_result(t, state)
-    assert res.final_text == "最终交付正文。"
-    assert "建议下一步" not in res.final_text
-    assert "可考虑加单测" not in res.final_text
-
-
-def test_direct_result_surfaces_accepted_paths_for_user():
-    """单写手有 accepted 戳 → 用户面终稿含路径（非 CEO「文件产出（已验收）」口吻）。"""
-    t = tool(Provider([]))
-    state = RunState(
-        phase=RunPhase.COMPLETED,
-        content="文件已完整写入（596 行，约 12914 字节）",
-        files_touched=["AgentCore/文档/research/报告.md"],
-        file_acceptance=_accepted("AgentCore/文档/research/报告.md"),
-    )
-    res = direct_result(t, state)
-    assert "`AgentCore/文档/research/报告.md`" in res.final_text
-    assert "文件位置：" in res.final_text
-    assert "可在工作区文件页打开" in res.final_text
-    assert "文件产出（已验收）" not in res.final_text
-    assert res.final_text.startswith("文件已完整写入")
-
-
-def test_direct_result_no_acceptance_without_stamp():
-    """无 file_acceptance 戳 → 不写已验收字样，也不用 files_touched 冒充路径。"""
-    t = tool(Provider([]))
-    state = RunState(
-        phase=RunPhase.COMPLETED,
-        content="写好了。",
-        files_touched=["ghost.md"],
-    )
-    res = direct_result(t, state)
-    assert res.final_text == "写好了。"
-    assert "已验收" not in res.final_text
-    assert "文件位置：" not in res.final_text
-    assert "`ghost.md`" not in res.final_text
-
-
-def test_direct_result_surfaces_rejected_paths_honestly():
-    """COMPLETED 但仍有 path-level rejected → 用户可见未通过验收，不得冒充已写入成功清单。"""
-    t = tool(Provider([]))
-    touched = ["ok.md", "bad.md"]
-    state = RunState(
-        phase=RunPhase.COMPLETED,
-        content="部分落盘。",
-        files_touched=touched,
-        file_acceptance=build_file_acceptance(
-            touched,
-            phase=RunPhase.COMPLETED,
-            path_rejections={"bad.md": ("cite_tier", "引用未核实")},
-        ),
-    )
-    res = direct_result(t, state)
-    assert "文件位置：`ok.md`" in res.final_text
-    assert "以下文件未通过验收：`bad.md`（引用未核实）" in res.final_text
-    assert "文件产出（已验收）" not in res.final_text
 
 
 def test_format_for_ceo_includes_final_synthesis_discipline():

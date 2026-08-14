@@ -64,3 +64,38 @@ _LONG_FORM_WRITING = """\
 勿教用户修引号转义。
 - 本门禁仅约束「一篇成文」交付；调研透镜多报告、代码多文件、建站 site/ 多产物【不】套用。
 </long_form_writing>"""
+
+# Worker-facing landing HOW (no 派工 / continue_from / 多角编排). CEO keeps
+# ``long_form_writing`` for when to delegate; workers consult this name.
+_LONG_FORM_LANDING = """\
+<long_form_landing>
+## 长文落盘（你来写文件）
+
+【主路径】一次 `file_write` 写入**完整正文**（含超长、无省略标记）；成篇后修订**只用** \
+`str_replace`。`file_append` **仅**骨架填空路径（本 run 已成篇 prose 则禁 append）。\
+【可选】防截断 / 超大风险时，可先短骨架再按节 `file_append` / `str_replace` 填空——非硬教条。\
+短笔记 / 小配置 / 小片段仍一次写完。
+
+【主交付·MD → PDF/Word】主交付永远是 `.md`。用户要 PDF / Word / 可分享文件时：顺序 = \
+成篇 `.md` → 调用 `md_to_pdf` 或 `md_to_docx`（对主文件）→ handoff。两者都是确定性导出、\
+与执行沙箱无关，`code_execute=未装配` 也照样能交真 PDF/Word。【禁止】用多份 HTML 顶替 PDF；\
+【禁止】把 code_execute + reportlab / python-docx 当主路径。
+
+写/append 成功回执即 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）\
+——以此验真，禁止为质检再 code_execute / file_read 回读正文；下一步仅 str_replace \
+（局部改）或同轮 handoff；成篇后勿再用 file_append，整文件覆盖须完整正文。用户要 PDF / Word \
+时在 handoff 前对主文件调 `md_to_pdf` / `md_to_docx`。\
+【例外】≠ 为验真空转回读（仍认 artifact manifest）；清参后改稿才可先 `file_read`——\
+写参被收成已落盘短状态后须先读盘上真文，再 `str_replace`（优先）或按真文写，\
+【禁止】把短状态当正文重发。
+
+【禁止】对 Markdown / FILL / 大纲占位调用 `write_section`\
+（那是建站 HTML 的 `<!-- SECTION:sN -->` 分区工具，与成篇 `.md` 无关）。
+
+纪律：
+- 骨架路径追加前确认 path 与主文件一致；每节 content 自行带好段落分隔（如 leading `\\n\\n`）。
+- 单节仍过长时，再拆成多轮 file_append / str_replace，不要硬塞万行单次调用。
+- 连续写失败（含参数不是合法 JSON）→ 完整一次写入若仍失败则改可选骨架分段，勿停用写文件，\
+勿教用户修引号转义。
+- 本门禁仅约束「一篇成文」交付；调研透镜多报告、代码多文件、建站 site/ 多产物【不】套用。
+</long_form_landing>"""

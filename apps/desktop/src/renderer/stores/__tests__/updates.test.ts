@@ -53,7 +53,7 @@ function stubUpdaterApi() {
     onStatus,
     check: vi.fn(() => Promise.resolve()),
     download: vi.fn(() => Promise.resolve()),
-    quitAndInstall: vi.fn(() => Promise.resolve()),
+    openInstaller: vi.fn(() => Promise.resolve()),
     /** Test helper: push a status as the main process would. */
     _emit(status: unknown) {
       for (const cb of listeners) cb(status);
@@ -302,7 +302,7 @@ describe("update consent dialog + prefs", () => {
     expect(api.download).toHaveBeenCalled();
     expect(useUpdatesStore.getState().dialogOpen).toBe(false);
     expect(notifyInfoMock).toHaveBeenCalledWith(
-      "正在后台下载 0.7.0（约 2.0 KB）",
+      "正在下载安装包 0.7.0（约 2.0 KB）",
       expect.objectContaining({
         description: "进度可在「设置 · 关于」查看",
       }),
@@ -326,12 +326,12 @@ describe("update consent dialog + prefs", () => {
     expect(api.download).toHaveBeenCalled();
     expect(useUpdatesStore.getState().dialogOpen).toBe(true);
     expect(notifyInfoMock).not.toHaveBeenCalledWith(
-      expect.stringContaining("正在后台下载"),
+      expect.stringContaining("正在下载安装包"),
       expect.anything(),
     );
   });
 
-  it("download is a no-op when autoInstallCapable is false", async () => {
+  it("download still runs when autoInstallCapable is false", async () => {
     const api = stubUpdaterApi();
     startUpdates();
     useUpdatesStore.setState({
@@ -344,9 +344,8 @@ describe("update consent dialog + prefs", () => {
       },
     });
     await useUpdatesStore.getState().download();
-    expect(api.download).not.toHaveBeenCalled();
-    expect(useUpdatesStore.getState().dialogOpen).toBe(true);
-    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(api.download).toHaveBeenCalled();
+    expect(useUpdatesStore.getState().dialogOpen).toBe(false);
   });
 
   it("toasts on downloaded without auto-install", () => {
@@ -358,7 +357,7 @@ describe("update consent dialog + prefs", () => {
       autoInstallCapable: true,
     });
     expect(notifyInfoMock).toHaveBeenCalled();
-    expect(api.quitAndInstall).not.toHaveBeenCalled();
+    expect(api.openInstaller).not.toHaveBeenCalled();
   });
 
   it("soft-update error toasts without reopening dialog", () => {

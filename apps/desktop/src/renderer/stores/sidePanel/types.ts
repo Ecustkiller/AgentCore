@@ -2,7 +2,8 @@
  * Unified conversation side panel types & constants (前端UX设计.md §十).
  * ONE flat tab strip (方案 B · 图1式):
  *
- *  - 「工作区」(first) + 「改动」(second)：不可销毁、可 detach 为应用内浮窗；
+ *  - 「工作区」(first)：不可销毁、可 detach 为应用内浮窗；
+ *  - 「改动」(second)：§十 P0c 条件固定（有货才审），出现后不可关、可 detach；
  *  - in canvas mode only: fixed, non-closable 「指挥台」(条件固定，不进 `+`；不可 float)；
  *  - closable content tabs (≤12, 固定不计): File 多实例、Terminal / Browser 各一壳
  *   （壳内各自管会话/页签）、run / endpoint / simple-turn 详情。
@@ -65,9 +66,9 @@ export const SIDE_PANEL_MAX_FLOATS = MAX_FLOATS;
 export const WORKSPACE_TAB_ID = "workspace";
 
 /**
- * Reserved id of the fixed 「改动」 tab（常驻第二位、不可销毁、可 detach；
- * 前端UX设计.md §十 · P0c）。改动 / 快照同属一个「回退与留版本」面，
- * 故不再按「本对话有无改动」条件挂载——空态由面板自身表达。
+ * Reserved id of the 「改动」 tab（§十 · P0c 条件固定：本对话有可恢复入口 /
+ * 深链 / 已 float / 当前正在看时挂上；出现后不可关、可 detach）。
+ * 有货才审，空态不常驻。
  */
 export const CHANGES_TAB_ID = "changes";
 
@@ -372,7 +373,7 @@ export interface SidePanelState {
   /** Reveal the panel on the 工作区 home tab (the chat toggle / Ctrl+J). */
   showWorkspace: () => void;
   /**
-   * 揭示面板并激活常驻「改动」tab；可选聚焦某回合。
+   * 揭示面板并激活「改动」tab（条件固定；无货时仍可先挂再看）；可选聚焦某回合。
    */
   showChanges: (messageId?: string | null) => void;
   /** 清除改动深链聚焦（切对话时调用）。 */

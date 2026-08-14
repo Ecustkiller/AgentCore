@@ -163,8 +163,7 @@ describe("graph run-stop entries", () => {
     expect(screen.getByText(/^已完成/)).toBeTruthy();
   });
 
-  // 卡面本身仍是纯展示（状态/活动预览不被按钮挤占）；按人干预挂在卡外的
-  // AgentNodeInterveneBar 上，跟随悬停/选中出现（见 agentNodeInterveneBar.test.tsx）。
+  // 卡面是纯展示：按人干预只在右坞 run 详情，图节点不挂改方向 / 停止。
   it("node face has no stop/redirect action buttons", () => {
     renderNodeFace();
     expect(screen.queryByRole("button", { name: "停止这个" })).toBeNull();

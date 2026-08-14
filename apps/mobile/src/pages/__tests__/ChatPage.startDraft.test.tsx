@@ -142,7 +142,7 @@ describe("ChatPage · 草稿首发并发闸", () => {
 
     expect(composer().value).toBe("");
     expect(screen.getByText("帮我写个周报")).toBeTruthy();
-    expect(screen.getByText("正在创建会话…")).toBeTruthy();
+    expect(screen.getByTestId("draft-pending-turn")).toBeTruthy();
     // 还没有 run 可停：主槽是不可点的「发送中」，不是 Stop。
     expect(screen.getByLabelText("发送中")).toBeTruthy();
     expect(screen.queryByLabelText("停止")).toBeNull();
@@ -166,7 +166,7 @@ describe("ChatPage · 草稿首发并发闸", () => {
 
     // 原样（含首尾空白）还给用户，进行中气泡撤掉，错误如实摆出。
     expect(composer().value).toBe("  周报草稿  ");
-    expect(screen.queryByText("正在创建会话…")).toBeNull();
+    expect(screen.queryByTestId("draft-pending-turn")).toBeNull();
     expect(await screen.findByText("网络炸了")).toBeTruthy();
 
     const second = deferred<string>();

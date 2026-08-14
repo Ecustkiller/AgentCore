@@ -13,6 +13,7 @@ from agentcore.runtime.context.workspace_context import (
 from agentcore.runtime.resolve.prompt import (
     _CEO_CORE_HINT,
     _DEFAULT_SYSTEM_PROMPT,
+    assemble_ceo_core,
     assemble_system_prompt,
 )
 from agentcore.tools.builtin import build_ceo_tool_registry
@@ -305,16 +306,17 @@ def test_browser_capability_override():
     assert "ask_user(browser_login=true)" not in out
     assert "browser_open" not in out
     hint = _CEO_CORE_HINT
-    assert "ask_user(browser_login=true)" in hint
-    assert "escalate(browser_login=true)" not in hint
-    assert "接管" in hint
     assert "browser_navigate" in hint
-    assert "**你自己**" in hint
-    assert "只用 `read_url` / `web_search` 交差冒充已开页" in hint
     assert "无 browser_open，禁编造未列出的工具名" in hint
-    assert "navigate 成功或短操作完成即可" in hint
     assert "验收" in hint and "截图" in hint
-    assert "「跑起来 / 打开看一下」≠本条" in hint
+    how = assemble_ceo_core({"browser_navigate"})
+    assert "ask_user(browser_login=true)" in how
+    assert "escalate(browser_login=true)" not in how
+    assert "接管" in how
+    assert "**你自己**" in how
+    assert "只用 `read_url` / `web_search` 交差冒充已开页" in how
+    assert "navigate 成功或短操作完成即可" in how
+    assert "「跑起来 / 打开看一下」≠本条" in how
 
 
 def test_local_browser_guide_mentions_workspace_relative_path():
@@ -331,8 +333,8 @@ def test_local_browser_guide_mentions_workspace_relative_path():
     assert "完整预览" in out or "workspace://" in out
     assert "file://" in out  # 明示不支持
     assert "console" in out  # 能力清单里的 browser_* 之一
-    # 「异常先取 JS 错误」是 HOW，归核
-    assert "browser_console" in _CEO_CORE_HINT
+    # 「异常先取 JS 错误」是 HOW，随 browser_navigate 装配注入
+    assert "browser_console" in assemble_ceo_core({"browser_navigate"})
 
 
 def test_bridge_session_sandbox_browser_guide_no_relative_html(monkeypatch):
@@ -379,11 +381,14 @@ def test_browser_unassembled_guide_mentions_bind_or_gvisor():
     base = _DEFAULT_SYSTEM_PROMPT
     assert base.count("【能力未装配·统一姿势】") == 1
     assert "【能力未装配·统一姿势】" not in hint
-    assert "ask_user(browser_login=true)" in hint
-    assert "escalate(browser_login=true)" not in hint
-    assert "已登录，继续" in hint
-    assert "Cookie" in hint  # 明确否决扫 Cookie 冒充路径
+    assert "假开页" in hint
     assert "用浏览器打开" in hint
+    assert "ask_user(browser_login=true)" not in hint  # 登录接管随 browser 装配注入
+    how = assemble_ceo_core({"browser_navigate"})
+    assert "ask_user(browser_login=true)" in how
+    assert "escalate(browser_login=true)" not in how
+    assert "已登录，继续" in how
+    assert "Cookie" in how  # 明确否决扫 Cookie 冒充路径
     assert "非右坞浏览器" in base
     assert "同轮可开工" in base
     assert "手脑" in base

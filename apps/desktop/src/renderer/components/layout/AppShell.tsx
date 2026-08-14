@@ -97,7 +97,7 @@ export function AppShell() {
     return startServerHealthMonitor();
   }, []);
 
-  // Auto-update lives at the shell so the consent dialog / "重启安装" toast (and
+  // Auto-update lives at the shell so the consent dialog / "打开安装包" toast (and
   // 关于 page status) stay live regardless of route. Main process schedules checks;
   // download starts only after the user confirms (发布与门禁.md §7.6).
   useEffect(() => startUpdates(), []);

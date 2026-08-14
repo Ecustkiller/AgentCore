@@ -344,6 +344,10 @@ async def _run_git(
         "git",
         *args,
         cwd=cwd,
+        # Sidecar stdin is the JSON-RPC pipe. Inheriting it lets git (or Windows
+        # I/O completion) stall until the tool timeout — desktop ``git_run``
+        # already uses ``stdio: ignore`` for this reason.
+        stdin=asyncio.subprocess.DEVNULL,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,

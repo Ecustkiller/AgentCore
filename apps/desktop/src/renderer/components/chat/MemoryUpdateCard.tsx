@@ -209,7 +209,7 @@ export function MemoryUpdateCard({ update }: { update: MemoryUpdate }) {
                 href="#/files"
                 className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
               >
-                在「AI 记忆」中查看
+                在「全局设定」中查看
                 <ChevronRight size={13} />
               </a>
             </div>

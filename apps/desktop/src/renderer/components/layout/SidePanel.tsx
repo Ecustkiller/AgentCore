@@ -32,6 +32,11 @@ import { BrowserPanel } from "@/components/workspace/BrowserPanel";
 import { ConversationChangesPanel } from "@/components/workspace/ConversationChangesPanel";
 import { WorkspaceMode } from "@/components/workspace/WorkspacePanel";
 import { useFileTabSourceState } from "@/hooks/useConversationFileSource";
+import { useConversationHasRestorableEntry } from "@/hooks/useConversationHasRestorableEntry";
+import {
+  shouldBounceChangesTabToWorkspace,
+  shouldPinChangesTab,
+} from "@/lib/conversationFileChanges";
 import { notifyError } from "@/lib/toast";
 import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import {
@@ -80,6 +85,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -109,8 +115,8 @@ function isDetailTabLive(
 
 /**
  * The conversation's single right-docked surface (前端UX设计.md §十 · 方案 B):
- * `[工作区*] [改动*] | 内容 tabs | [+]`，画布态另出条件「指挥台」。
- * 「改动」与「工作区」同为常驻固定 tab：不可关、可 detach 为浮窗。
+ * `[工作区*] [改动?] | 内容 tabs | [+]`，画布态另出条件「指挥台」。
+ * 「工作区」常驻固定 tab：不可关、可 detach。「改动」按 §十 P0c 条件出现（有货才审）。
  */
 export function SidePanel() {
   const open = useSidePanelStore((s) => s.open);
@@ -150,6 +156,12 @@ export function SidePanel() {
   const currentConversationId = useConversationStore(
     (s) => s.currentConversationId,
   );
+  const changesFocusMessageId = useSidePanelStore(
+    (s) => s.changesFocusMessageId,
+  );
+  const hasRestorableEntry =
+    useConversationHasRestorableEntry(currentConversationId);
+  const prevConversationIdRef = useRef<string | null | undefined>(undefined);
   const spawnSession = useUserTerminalStore((s) => s.spawnSession);
 
   // 流式性能 (白屏卡死修复·Stage 3 收窄订阅): gate this dock on the SET of live tabs, not on
@@ -188,7 +200,14 @@ export function SidePanel() {
       ? null
       : (visibleTabs.find((t) => t.id === activeTabId) ?? null);
   const workspaceInDock = !floatingIds.has(WORKSPACE_TAB_ID);
-  const changesInDock = !floatingIds.has(CHANGES_TAB_ID);
+  const changesPin = shouldPinChangesTab({
+    conversationId: currentConversationId,
+    hasRestorableEntry,
+    changesFocusMessageId,
+    isChangesFloating: floatingIds.has(CHANGES_TAB_ID),
+    activeTabId,
+  });
+  const changesInDock = changesPin && !floatingIds.has(CHANGES_TAB_ID);
   const workspaceActive = workspaceInDock && activeTabId === WORKSPACE_TAB_ID;
   const changesActive = changesInDock && activeTabId === CHANGES_TAB_ID;
   const commandActive = command.show && activeTabId === COMMAND_TAB_ID;
@@ -201,18 +220,38 @@ export function SidePanel() {
   }, [command.show, activeTabId, setActiveTab]);
 
   // 切对话：清深链聚焦 + 清浮窗 + 清对话作用域内容 tab；桌面须先/并关对应真窗。
+  // 新会话撑不起改动且仍停在改动 tab → 回工作区。bounce 只跟切对话走（同会话
+  // Git chip 打开的空改动不能被弹走；初次挂载也不弹，避免 messages 未到就卸）。
+  // hasRestorableEntry 故意不进 deps。
   // biome-ignore lint/correctness/useExhaustiveDependencies: currentConversationId is an intentional re-run key
   useEffect(() => {
+    const prevConversationId = prevConversationIdRef.current;
+    prevConversationIdRef.current = currentConversationId;
     clearChangesFocus();
     const floated = useSidePanelStore.getState().floats.map((f) => f.tabId);
     clearFloats();
     closeOsFloatWindowsForTabs(floated);
     closeConversationScopedTabs();
+    const switched =
+      prevConversationId !== undefined &&
+      prevConversationId !== currentConversationId;
+    if (!switched) return;
+    const stillActive = useSidePanelStore.getState().activeTabId;
+    if (
+      shouldBounceChangesTabToWorkspace({
+        conversationId: currentConversationId,
+        hasRestorableEntry,
+        activeTabId: stillActive,
+      })
+    ) {
+      setActiveTab(WORKSPACE_TAB_ID);
+    }
   }, [
     currentConversationId,
     clearChangesFocus,
     clearFloats,
     closeConversationScopedTabs,
+    setActiveTab,
   ]);
 
   // 终端「有活动」时自动补壳：用户关掉后记 dismiss，活动清零后才允许再次自动浮出。

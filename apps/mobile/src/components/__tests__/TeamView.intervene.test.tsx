@@ -3,8 +3,8 @@
  * 手机端按人干预（只改这个人的方向 / 只停这个人）—— 点开队员就在手边。
  *
  * 之前手机上这两件事一处都没有：列表按人显示每个队员在干什么，能操作的却只有整轮停止。
- * 这里钉住两件事：入口在队员详情里够得着；队员跑完之后**变灰并写出原因**，而不是消失
- * ——消失会让用户以为自己找错了地方，扑空一次就再也不试。
+ * 这里钉住两件事：入口在队员详情里够得着；run 终局时整条不渲染（不再变灰留着）。
+ * 排队 pending 仍画：可停；改方向变灰 +「还没开工」（手机无 hover，原因必须是可见文字）。
  */
 import { TeamView } from "@/components/TeamView";
 import { resetRunStopPending } from "@/lib/runStopPending";
@@ -144,27 +144,22 @@ describe("TeamView 按人干预", () => {
     expect(screen.getByText(/不是「停止整轮」/)).toBeTruthy();
   });
 
-  it("跑完的队员：入口留在原位、变灰并写出原因", () => {
-    openMember({ runStatus: "completed" });
+  it.each(["completed", "failed", "cancelled", "skipped"] as const)(
+    "终局 %s：整条不渲染、不写灰字原因",
+    (status) => {
+      openMember({ runStatus: status });
 
-    const redirect = screen.getByRole("button", { name: /^改这个人的方向（/ });
-    expect(redirect.getAttribute("aria-disabled")).toBe("true");
-    const stop = screen.getByRole("button", { name: /^停止这位队员（/ });
-    expect(stop.getAttribute("aria-disabled")).toBe("true");
-
-    // 手机没有 hover：原因必须是看得见的一行字。
-    expect(screen.getByText(/这位队员已经跑完/)).toBeTruthy();
-  });
-
-  it("跑完之后点也不发请求", () => {
-    openMember({ runStatus: "completed" });
-
-    fireEvent.click(screen.getByRole("button", { name: /^停止这位队员（/ }));
-    fireEvent.click(screen.getByRole("button", { name: /^改这个人的方向（/ }));
-
-    expect(submitRunStop).not.toHaveBeenCalled();
-    expect(submitRunRedirect).not.toHaveBeenCalled();
-  });
+      expect(document.querySelector(".rd-intervene")).toBeNull();
+      expect(screen.queryByRole("button", { name: /停止这位队员/ })).toBeNull();
+      expect(
+        screen.queryByRole("button", { name: /改这个人的方向/ }),
+      ).toBeNull();
+      expect(screen.queryByText(/这位队员已经跑完/)).toBeNull();
+      expect(screen.queryByText(/没跑成/)).toBeNull();
+      expect(screen.queryByText(/已经停下/)).toBeNull();
+      expect(screen.queryByText(/没有执行/)).toBeNull();
+    },
+  );
 
   it("排队中的队员：可以停，但没有在跑的工作可改", () => {
     openMember({ runStatus: "pending" });
