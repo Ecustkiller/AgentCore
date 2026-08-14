@@ -58,15 +58,9 @@ import type {
   TurnStatus,
 } from "@agentcore/protocol-conformance";
 import {
-  COLLAB_SUMMARY_TOOLTIP,
-  type CollabCounts,
   type InterveneGate,
-  formatCollabSummary,
   interveneAckText,
   isLiveRunStatus,
-  parallelSaving,
-  parallelSavingText,
-  parallelSavingTooltip,
   runRedirectGate,
   runStopGate,
 } from "@agentcore/protocol-fold-kit";
@@ -289,95 +283,43 @@ type StripFace = {
   phase: boolean;
 };
 
-function teamStripFace(args: {
-  status: TurnStatus | null | undefined;
-  isDebate: boolean;
-  multiAct: boolean;
-  actCount: number;
-  workers: readonly ProjectedRun[];
-  progress: { completed: number; total: number };
-}): StripFace {
-  const { status, isDebate, multiAct, actCount, workers, progress } = args;
-  const liveRound = maxDebateRound(workers);
+function teamStripFace(status: TurnStatus | null | undefined): StripFace {
   if (status === "failed") {
-    return { title: "任务失败", mark: "err", phase: false };
+    return { title: "失败", mark: "err", phase: false };
   }
   if (status === "cancelled") {
     return { title: "已停止", mark: "muted", phase: false };
   }
   if (status === "paused") {
-    return {
-      title: isDebate
-        ? liveRound > 0
-          ? `辩论已暂停 · 第 ${liveRound} 轮`
-          : "辩论已暂停 · 等待你确认"
-        : "已暂停 · 等待你确认后才会继续",
-      mark: "paused",
-      phase: true,
-    };
+    return { title: "", mark: "paused", phase: true };
   }
   if (status === "running") {
-    if (isDebate) {
-      return {
-        title: liveRound > 0 ? `辩论 · 第 ${liveRound} 轮进行中` : "辩论进行中",
-        mark: "run",
-        phase: true,
-      };
-    }
-    const allWorkersDone =
-      progress.total > 0 &&
-      workers.length > 0 &&
-      workers.every(
-        (r) =>
-          r.status === "completed" ||
-          r.status === "failed" ||
-          r.status === "cancelled" ||
-          r.status === "skipped",
-      );
-    if (allWorkersDone) {
-      return { title: "正在生成汇总", mark: "run", phase: true };
-    }
-    return { title: "协作进行中", mark: "run", phase: true };
+    return { title: "", mark: "run", phase: true };
   }
-  // completed / unknown history
-  if (isDebate) {
-    return {
-      title: liveRound > 0 ? `辩论完成 · ${liveRound} 轮` : "辩论完成",
-      mark: "ok",
-      phase: false,
-    };
-  }
-  if (multiAct) {
-    return { title: `团队完成 · ${actCount} 幕`, mark: "ok", phase: false };
-  }
-  return { title: "团队完成", mark: "ok", phase: false };
+  return { title: "", mark: "ok", phase: false };
 }
 
 /**
- * 完工的一行账：子任务 / 用时 / 并行省下 / ¥。
+ * 完工的一行账：子任务 n/m、用时、花费。
  *
- * 「用时」旁边给出并行省下的那段（`saving`，与桌面同一句、同一个数），否则这条账单只剩
- * 「更慢、更贵」——找一支团队换来的东西一处都没写。只派一个人 / 没省到时 saving 为 null，
- * 什么都不说。
+ * 并行省时已从产品删掉——不计算、不写进条、不写进 title。
  */
 function teamStripMeta(args: {
   workers: readonly ProjectedRun[];
   progress: { completed: number; total: number };
   status: TurnStatus | null | undefined;
   elapsedMs: number;
-  saving: ReturnType<typeof parallelSaving>;
 }): string {
-  const { workers, progress, status, elapsedMs, saving } = args;
+  const { workers, progress, status, elapsedMs } = args;
   const bits: string[] = [];
   // 「N 个 Agent」已删——与图/列表上成员重复；保留子任务 n/m。
   bits.push(`${progress.completed}/${progress.total} 子任务`);
   const failed = workers.filter((r) => r.status === "failed").length;
   if (failed > 0) bits.push(`${failed} 失败`);
-  // 用时 = 回合墙钟跨度（桌面同量）。曾按队员时长求和，并行越多数字越大，把省时显示成了更慢。
+  // 用时 = 回合墙钟跨度。曾按队员时长求和，并行越多数字越大。
   if (elapsedMs > 0 && status !== "running") {
     bits.push(`用时 ${formatDuration(elapsedMs)}`);
   }
-  if (saving) bits.push(parallelSavingText(saving, formatDuration));
   const money = aggregateWorkerCost(workers);
   if (money) {
     if (money.nano > 0) {
@@ -417,7 +359,6 @@ export function TeamView({
   workerToolPhases,
   evidenceLedger = [],
   elapsedMs = 0,
-  collab = null,
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -445,18 +386,15 @@ export function TeamView({
   workerToolPhases?: Map<string, { phase: string; toolName: string }>;
   /** 场级证据台账（`extractEvidenceLedger`）：辩论发言徽章 `#eN` 解析（O7）。 */
   evidenceLedger?: EvidenceLedgerEntry[];
-  /** 回合墙钟跨度（`turnElapsedMs(turn.events)`）：条上「用时」。与桌面同量——绝不用队员时长求和
-   *  顶替，那是工时，并行越多越大，会把省时显示成更慢。缺省 0 = 不显示用时。 */
+  /** 回合墙钟跨度（`turnElapsedMs(turn.events)`）：条上「用时」。绝不用队员时长求和
+   *  顶替，那是工时，并行越多数字越大。缺省 0 = 不显示用时。 */
   elapsedMs?: number;
-  /** 回合协作计数（live `message_end.collab` / 历史 REST `MessageDetail.collab`，旁路不入
-   *  ProjectedTurn）：条上「互相把关」一行；全 0 / 缺省则不渲染。 */
-  collab?: CollabCounts | null;
 }) {
   // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
   // list is the same ProjectedTurn slice whether live or replayed.
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const workers = runs.filter((r) => r.kind !== "captain");
   const ledgerMap = useMemo(
     () => (evidenceLedger.length ? buildLedgerMap(evidenceLedger) : null),
@@ -475,28 +413,13 @@ export function TeamView({
   const pct =
     progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
   const notesDefaultOpen = teamNotesDefaultExpanded(status, teamNotes);
-  const strip = teamStripFace({
-    status,
-    isDebate,
-    multiAct,
-    actCount: acts.length,
-    workers,
-    progress,
-  });
-  // 并行省时只在完工面上说（strip.mark === "ok" ≡ 桌面非 stopped 的 CompletedStrip）：
-  // 进行中还没有终局跨度，失败 / 已停止 / 待确认的半程谈「省下」不合适。
-  const saving =
-    strip.mark === "ok" ? parallelSaving({ elapsedMs, runs: workers }) : null;
+  const strip = teamStripFace(status);
   const stripMeta = teamStripMeta({
     workers,
     progress,
     status,
     elapsedMs,
-    saving,
   });
-  // 队友互相把关（原「纠偏/漂移/唤回/上报」四个负面内部计数）——同一批事实的收益口径，
-  // 与桌面同一句。全 0 时 formatCollabSummary 返回 null，这里就不渲染。
-  const collabSummary = formatCollabSummary(collab);
   const showDebateEntry = isDebate;
   const synthesisBlurbs = workers
     .filter((r) => r.status === "completed" && !!r.outputSummary)
@@ -581,36 +504,20 @@ export function TeamView({
               aria-hidden
             />
             <div className="team-strip-body">
-              <div
-                className={`team-strip-title${strip.phase ? " is-phase" : ""}`}
-              >
-                <span>{strip.title}</span>
-                {multiAct ? (
-                  <span className="team-tag">{acts.length} 幕</span>
-                ) : isDebate ? (
-                  <span className="team-tag">辩论</span>
-                ) : null}
-              </div>
-              {stripMeta ? (
+              {strip.title || multiAct || isDebate ? (
                 <div
-                  className="team-strip-meta"
-                  title={
-                    saving
-                      ? parallelSavingTooltip(saving, formatDuration)
-                      : undefined
-                  }
+                  className={`team-strip-title${strip.phase ? " is-phase" : ""}`}
                 >
-                  {stripMeta}
+                  {strip.title ? <span>{strip.title}</span> : null}
+                  {multiAct ? (
+                    <span className="team-tag">{acts.length} 幕</span>
+                  ) : isDebate ? (
+                    <span className="team-tag">辩论</span>
+                  ) : null}
                 </div>
               ) : null}
-              {collabSummary ? (
-                <div
-                  className="team-strip-collab"
-                  data-testid="team-strip-collab"
-                  title={COLLAB_SUMMARY_TOOLTIP}
-                >
-                  {collabSummary}
-                </div>
+              {stripMeta ? (
+                <div className="team-strip-meta">{stripMeta}</div>
               ) : null}
             </div>
             {!isDebate && (

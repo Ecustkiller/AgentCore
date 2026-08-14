@@ -1,8 +1,11 @@
 import { getTokens } from "@/api/client";
 import {
   type ConversationSummary,
+  type FolderGroup,
+  type GroupedConversations,
   deleteConversation,
   listConversations,
+  listConversationsGrouped,
   renameConversation,
   setConversationArchived,
 } from "@/api/conversations";
@@ -15,7 +18,15 @@ import {
   timeLabel,
 } from "@/components/conversations";
 import { useConversationAwaitingAttention } from "@/lib/aiAttention";
-import { SquarePen } from "lucide-react";
+import { folderWorkspaceId } from "@/lib/cloudFolder";
+import {
+  ChevronDown,
+  ChevronRight,
+  Cloud,
+  Folder,
+  Plus,
+  SquarePen,
+} from "lucide-react";
 // 历史对话抽屉 (手机端对话页重设计 · 抽屉式直聊).
 //
 // The chat page is now「开盖即聊」(a fresh draft on the 对话 tab); the conversation history
@@ -24,11 +35,32 @@ import { SquarePen } from "lucide-react";
 // (ChatGPT/Claude 左抽屉历史). Hosts the same management surface the old list page had —
 // 搜索 / 已归档 / 行内 重命名·归档·删除 — reusing the shared primitives in conversations.tsx.
 //
-// Data is fetched lazily on open (and refetched when the archived view toggles), so a closed
-// drawer costs nothing. Picking a conversation routes to /c/:id and closes; ✎ starts a new
-// draft (routes to /, the draft home) and closes.
+// Live list is folder-grouped (`listConversationsGrouped`); archived stays a flat
+// `listConversations(true)`. Data is fetched lazily on open (and refetched when the
+// archived view toggles), so a closed drawer costs nothing. Picking a conversation
+// routes to /c/:id and closes; ✎ starts a new draft (routes to /, the draft home)
+// and closes. Cloud group「＋」lands on / with draftFolder state.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+function mapGroupedConversations(
+  grouped: GroupedConversations | null,
+  fn: (c: ConversationSummary) => ConversationSummary | null,
+): GroupedConversations | null {
+  if (!grouped) return grouped;
+  const apply = (rows: ConversationSummary[]) =>
+    rows.flatMap((c) => {
+      const next = fn(c);
+      return next ? [next] : [];
+    });
+  return {
+    folders: grouped.folders.map((f) => ({
+      ...f,
+      conversations: apply(f.conversations),
+    })),
+    ungrouped: apply(grouped.ungrouped),
+  };
+}
 
 export function ConversationDrawer({
   open,
@@ -44,6 +76,8 @@ export function ConversationDrawer({
 }) {
   const navigate = useNavigate();
   const [items, setItems] = useState<ConversationSummary[] | null>(null);
+  const [grouped, setGrouped] = useState<GroupedConversations | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [archivedView, setArchivedView] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -74,17 +108,20 @@ export function ConversationDrawer({
   useEffect(() => {
     if (!open) return;
     setItems(null);
+    setGrouped(null);
     setError(null);
-    listConversations(archivedView)
-      .then(setItems)
-      .catch((e) => {
-        if (!getTokens()) {
-          navigate("/login", { replace: true });
-          return;
-        }
-        setError(e instanceof Error ? e.message : "加载会话列表失败");
-        setItems([]);
-      });
+    const req = archivedView
+      ? listConversations(true).then(setItems)
+      : listConversationsGrouped().then(setGrouped);
+    req.catch((e) => {
+      if (!getTokens()) {
+        navigate("/login", { replace: true });
+        return;
+      }
+      setError(e instanceof Error ? e.message : "加载会话列表失败");
+      setItems([]);
+      setGrouped({ folders: [], ungrouped: [] });
+    });
   }, [open, archivedView, navigate]);
 
   // Reset transient surfaces when the drawer closes, so reopening is clean.
@@ -94,6 +131,7 @@ export function ConversationDrawer({
     setMenuFor(null);
     setRenaming(null);
     setDeleting(null);
+    setCollapsed(new Set());
   }, [open]);
 
   // Touch-drag open/close (attached once; reads state via refs). A drag from the left-edge
@@ -204,7 +242,29 @@ export function ConversationDrawer({
   }
 
   function newChat() {
-    navigate("/");
+    navigate("/", { state: {} });
+    onClose();
+  }
+
+  function toggleGroup(id: string) {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function openFolderFiles(folder: FolderGroup) {
+    navigate(`/files/${encodeURIComponent(folderWorkspaceId(folder.id))}`, {
+      state: { name: folder.name },
+    });
+  }
+
+  function newInFolder(folder: FolderGroup) {
+    navigate("/", {
+      state: { draftFolderId: folder.id, draftFolderName: folder.name },
+    });
     onClose();
   }
 
@@ -218,6 +278,11 @@ export function ConversationDrawer({
           xs?.map((x) =>
             x.id === conv.id ? { ...x, title: updated.title } : x,
           ) ?? xs,
+      );
+      setGrouped((g) =>
+        mapGroupedConversations(g, (x) =>
+          x.id === conv.id ? { ...x, title: updated.title } : x,
+        ),
       );
       setRenaming(null);
     } catch (e) {
@@ -233,6 +298,9 @@ export function ConversationDrawer({
     try {
       await setConversationArchived(conv.id, !conv.archived);
       setItems((xs) => xs?.filter((x) => x.id !== conv.id) ?? xs);
+      setGrouped((g) =>
+        mapGroupedConversations(g, (x) => (x.id === conv.id ? null : x)),
+      );
       setMenuFor(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
@@ -247,6 +315,9 @@ export function ConversationDrawer({
     try {
       await deleteConversation(conv.id);
       setItems((xs) => xs?.filter((x) => x.id !== conv.id) ?? xs);
+      setGrouped((g) =>
+        mapGroupedConversations(g, (x) => (x.id === conv.id ? null : x)),
+      );
       setDeleting(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败");
@@ -256,6 +327,14 @@ export function ConversationDrawer({
   }
 
   const searchMode = query.trim().length > 0;
+  const loading = !error && (archivedView ? items === null : grouped === null);
+  const empty = archivedView
+    ? items?.length === 0
+    : Boolean(
+        grouped &&
+          grouped.ungrouped.length === 0 &&
+          grouped.folders.every((f) => f.conversations.length === 0),
+      );
 
   return (
     <div
@@ -339,23 +418,52 @@ export function ConversationDrawer({
           />
         ) : (
           <div className="list">
-            {items === null && !error && <p className="muted hint">加载中…</p>}
-            {items?.length === 0 && (
+            {loading && <p className="muted hint">加载中…</p>}
+            {empty && (
               <p className="muted hint">
                 {archivedView
                   ? "没有已归档的对话。"
                   : "还没有对话，点 ✎ 开始。"}
               </p>
             )}
-            {items?.map((c) => (
-              <ConversationRow
-                key={c.id}
-                conv={c}
-                active={c.id === activeId}
-                onOpen={() => openConversation(c.id)}
-                onMenu={() => setMenuFor(c)}
-              />
-            ))}
+            {archivedView
+              ? items?.map((c) => (
+                  <ConversationRow
+                    key={c.id}
+                    conv={c}
+                    active={c.id === activeId}
+                    onOpen={() => openConversation(c.id)}
+                    onMenu={() => setMenuFor(c)}
+                  />
+                ))
+              : grouped && (
+                  <>
+                    {grouped.folders
+                      .filter((f) => f.conversations.length > 0)
+                      .map((folder) => (
+                        <FolderGroupBlock
+                          key={folder.id}
+                          folder={folder}
+                          expanded={!collapsed.has(folder.id)}
+                          activeId={activeId}
+                          onToggle={() => toggleGroup(folder.id)}
+                          onOpenFiles={() => openFolderFiles(folder)}
+                          onNewInFolder={() => newInFolder(folder)}
+                          onOpenConv={openConversation}
+                          onMenu={setMenuFor}
+                        />
+                      ))}
+                    {grouped.ungrouped.map((c) => (
+                      <ConversationRow
+                        key={c.id}
+                        conv={c}
+                        active={c.id === activeId}
+                        onOpen={() => openConversation(c.id)}
+                        onMenu={() => setMenuFor(c)}
+                      />
+                    ))}
+                  </>
+                )}
           </div>
         )}
 
@@ -399,6 +507,93 @@ export function ConversationDrawer({
           onCancel={() => setDeleting(null)}
           onConfirm={() => void doDelete(deleting)}
         />
+      )}
+    </div>
+  );
+}
+
+function FolderGroupBlock({
+  folder,
+  expanded,
+  activeId,
+  onToggle,
+  onOpenFiles,
+  onNewInFolder,
+  onOpenConv,
+  onMenu,
+}: {
+  folder: FolderGroup;
+  expanded: boolean;
+  activeId?: string;
+  onToggle: () => void;
+  onOpenFiles: () => void;
+  onNewInFolder: () => void;
+  onOpenConv: (id: string | null) => void;
+  onMenu: (c: ConversationSummary) => void;
+}) {
+  const cloud = folder.mode === "cloud";
+  return (
+    <div className="conv-group">
+      <div className="conv-group-head">
+        <button
+          type="button"
+          className="conv-group-new"
+          aria-expanded={expanded}
+          aria-label={expanded ? `收起${folder.name}` : `展开${folder.name}`}
+          onClick={onToggle}
+        >
+          {expanded ? (
+            <ChevronDown size={16} aria-hidden />
+          ) : (
+            <ChevronRight size={16} aria-hidden />
+          )}
+        </button>
+        {cloud ? (
+          <Cloud size={16} aria-hidden />
+        ) : (
+          <Folder size={16} aria-hidden />
+        )}
+        {cloud ? (
+          <button
+            type="button"
+            className="conv-group-head-main"
+            onClick={onOpenFiles}
+          >
+            <span className="conv-group-name">{folder.name}</span>
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="conv-group-head-main"
+            onClick={onToggle}
+          >
+            <span className="conv-group-name">{folder.name}</span>
+            <span className="conv-group-sub">请在桌面端打开</span>
+          </button>
+        )}
+        {cloud && (
+          <button
+            type="button"
+            className="conv-group-new"
+            aria-label="在此新开"
+            onClick={onNewInFolder}
+          >
+            <Plus size={18} aria-hidden />
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="conv-group-body">
+          {folder.conversations.map((c) => (
+            <ConversationRow
+              key={c.id}
+              conv={c}
+              active={c.id === activeId}
+              onOpen={() => onOpenConv(c.id)}
+              onMenu={() => onMenu(c)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );

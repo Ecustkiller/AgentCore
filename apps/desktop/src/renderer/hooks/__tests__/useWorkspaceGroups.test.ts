@@ -81,6 +81,46 @@ describe("buildWorkspaceGroups (方案B 项目分组)", () => {
     ]);
   });
 
+  it("required 所在组挤进 ≤6，不另开栏", () => {
+    const folders = Array.from({ length: MAX_WORKSPACE_GROUPS + 1 }, (_, i) =>
+      folder(`f${i}`),
+    );
+    const conversations = folders.map((f, i) =>
+      conv(`c${i}`, {
+        folderId: f.id,
+        at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+      }),
+    );
+    const groups = buildWorkspaceGroups(
+      conversations,
+      folders,
+      new Set(["c0"]),
+    );
+    expect(groups).toHaveLength(MAX_WORKSPACE_GROUPS);
+    expect(groups.some((g) => g.folder.id === "f0")).toBe(true);
+    expect(groups.some((g) => g.folder.id === "f1")).toBe(false);
+  });
+
+  it("置顶 required 不为此挤进第 7 组（行已在置顶区）", () => {
+    const folders = Array.from({ length: MAX_WORKSPACE_GROUPS + 1 }, (_, i) =>
+      folder(`f${i}`),
+    );
+    const conversations = folders.map((f, i) =>
+      conv(`c${i}`, {
+        folderId: f.id,
+        at: `2026-01-${String(i + 1).padStart(2, "0")}T00:00:00Z`,
+        pinned: i === 0,
+      }),
+    );
+    const groups = buildWorkspaceGroups(
+      conversations,
+      folders,
+      new Set(["c0"]),
+    );
+    expect(groups).toHaveLength(MAX_WORKSPACE_GROUPS);
+    expect(groups.some((g) => g.folder.id === "f0")).toBe(false);
+  });
+
   it("caps the number of groups at MAX_WORKSPACE_GROUPS", () => {
     const folders = Array.from({ length: MAX_WORKSPACE_GROUPS + 3 }, (_, i) =>
       folder(`f${i}`),

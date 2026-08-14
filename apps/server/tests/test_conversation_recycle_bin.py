@@ -3,9 +3,9 @@
 删除本来就是软删——行一直都在，只是从来没有任何东西列出过它们，所以「删了就没了」
 在事实层面成立。这一层给它一条回头路，四条约束钉在这里：
 
-  * **软删不许改写 ``updated_at``**——列带 ``onupdate``，一次 UPDATE 就会把「最近活动」
-    刷成删除时刻；恢复后对话落进「今天」而不是它原本所属的时间分组，且原值一旦被
-    覆盖就再也追不回来。抑制靠自赋值，是编译期性质，所以直接断言编译出的 SQL。
+  * **软删不许改写 ``updated_at``**——「最近活动」只由回合 ``touch_activity`` 推进；
+    一次误写就会把位次刷成删除时刻，恢复后落进「今天」且原值追不回来。自赋值
+    钉住「家政不顶位次」，是编译期性质，所以直接断言编译出的 SQL。
   * **``deleted_at`` 必须带 UTC 时区**——列是 ``TIMESTAMPTZ``，asyncpg 把 naive 值按 UTC
     绑定；naive 的本地 ``now()`` 会按机器时区偏移，而「删除于」「还剩几天」直接渲染它。
   * **回收站不列基础设施行**——``handoff`` / ``standing`` 由机器路径软删，用户不知道
@@ -68,9 +68,8 @@ class _Result:
 class _RecordingSession:
     """Records every statement and replays canned results in order.
 
-    Lets the repository's real SQL be inspected without a database — which is where
-    the ``onupdate`` suppression actually lives (a compile-time property of the SET
-    clause, not a runtime one).
+    Lets the repository's real SQL be inspected without a database — the
+    ``updated_at`` self-assign is a compile-time property of the SET clause.
     """
 
     def __init__(self, results: list[_Result] | None = None) -> None:
@@ -155,15 +154,14 @@ def _soft_delete_session(conv: Any) -> _RecordingSession:
 
 
 async def test_soft_delete_does_not_restamp_updated_at():
-    """自赋值抑制 onupdate：SET 里必须是 updated_at=conversations.updated_at。"""
+    """自赋值保持位次：SET 里必须是 updated_at=conversations.updated_at。"""
     session = _soft_delete_session(_fake_conversation())
 
     assert await ConversationRepository(session).soft_delete(CONV_ID, user_id=USER_ID)
 
     set_clause = _updates(session)[0].split("WHERE")[0]
     assert "updated_at=conversations.updated_at" in set_clause
-    # 若 onupdate 生效，SET 里 updated_at 会是个绑定值（编译期渲染成 <ts:…>），
-    # 也就是把「最近活动」永久改写成了删除时刻。
+    # 若误写成绑定值（编译期渲染成 <ts:…>），就是把「最近活动」改成了删除时刻。
     assert "updated_at=<ts:" not in set_clause
 
 

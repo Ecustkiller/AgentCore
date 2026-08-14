@@ -4960,6 +4960,17 @@
             "title": "Id",
             "type": "string"
           },
+          "last_message_preview": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message Preview"
+          },
           "local_container_root_id": {
             "anyOf": [
               {
@@ -12634,26 +12645,6 @@
         "title": "RunsPayload",
         "type": "object"
       },
-      "SaveTurnAsWorkflowRequest": {
-        "description": "固化一轮已跑完的协作；省略 ``name`` 时服务端按队员角色生成。",
-        "properties": {
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
-          }
-        },
-        "title": "SaveTurnAsWorkflowRequest",
-        "type": "object"
-      },
       "SearchItem": {
         "description": "One hit in a section. Field meaning depends on the section ``type``:\n\n- conversation: ``id`` = conversation id, ``title`` = its title.\n- message: ``id`` = message id, ``conversation_id`` = where to jump,\n  ``title`` = the owning conversation's title (list-row context), ``role`` =\n  user/assistant, ``snippet`` = match window with ``match_start``/``match_end``\n  offsets into the snippet for client-side highlighting.\n- folder: ``id`` = folder id, ``title`` = its name.",
         "properties": {
@@ -16775,7 +16766,7 @@
       },
       "WorkflowSourceModel": {
         "additionalProperties": true,
-        "description": "这条工作流是从哪儿来的——服务端权威，客户端只读。\n\n``kind`` 今天只有 ``\"turn\"``（从一轮协作固化），带原对话 / 消息定位。手画的、官方模板\n复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →\n:mod:`agentcore.workflows.source`。",
+        "description": "这条工作流是从哪儿来的——服务端权威，客户端只读。\n\n``kind`` 今天只有 ``\"turn\"``（历史行：曾经从一轮协作固化，不是现行写入），带原对话 /\n消息定位。手画的、官方模板复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →\n:mod:`agentcore.workflows.source`。",
         "properties": {
           "conversation_id": {
             "anyOf": [
@@ -17329,7 +17320,7 @@
   "info": {
     "description": "Multi-Agent AI Workspace API",
     "title": "AgentCore",
-    "version": "0.6.2"
+    "version": "0.6.3"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -26759,107 +26750,6 @@
           }
         },
         "summary": "Get Run Llm Window",
-        "tags": [
-          "conversations"
-        ]
-      }
-    },
-    "/v1/conversations/{conversation_id}/messages/{message_id}/save-as-workflow": {
-      "post": {
-        "description": "固化这一回合的团队拆法为账户级工作流（owner-scoped，同源幂等）。\n\n幂等只认来源（``user_workflows.source`` 列上的 conversation_id + message_id），不认\n``name``：同一轮再点一次保存返回已有那条，想要「同一轮多个变体」走保存后改名 / 另存，\n而不是靠这个端点的隐藏分支。来源是服务端权威元数据、不在客户端能覆盖的 definition 里\n（:mod:`agentcore.workflows.source`），所以这里能直接走索引查。422 = 这轮压根没有多队\n员协作（无计划快照或有效节点 < 2），或整轮只有辩论（辩论不写计划快照，折不出画布）。",
-        "operationId": "save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "conversation_id",
-            "required": true,
-            "schema": {
-              "title": "Conversation Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "path",
-            "name": "message_id",
-            "required": true,
-            "schema": {
-              "title": "Message Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "authorization",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Authorization"
-            }
-          },
-          {
-            "in": "cookie",
-            "name": "access_token",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Access Token"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/SaveTurnAsWorkflowRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/WorkflowSummary"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Save Turn As Workflow",
         "tags": [
           "conversations"
         ]

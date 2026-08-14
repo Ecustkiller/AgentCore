@@ -33,4 +33,5 @@ export {
   sendTurn,
   continueTurn,
   type SendTurnSpec,
+  type SendTurnResult,
 } from "./turns/stream";

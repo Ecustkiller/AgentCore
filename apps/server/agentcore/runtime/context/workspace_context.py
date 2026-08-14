@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from agentcore.workspace.layout import CONV_SEGMENT, INTERNAL_SEGMENT, TREE_SEGMENT
 from agentcore.workspace.stage_dirs import (
     DEBATE_DIR,
     DRAFTS_DIR,
@@ -186,6 +187,42 @@ def resolve_channel_profile(x_client_platform: str | None) -> ChannelProfile:
     return ChannelProfile(surface="unknown", desktop_online=False, can_bind_folder=False)
 
 
+_FOLDER_INTERNAL_KIND = "folder"
+
+
+def _is_cloud_folder_desk(backend: WorkspaceBackend) -> bool:
+    """True when this server backend is a user Folder (tree), not conv scratch.
+
+    Reads existing backend attrs only — does not rewrite path resolution.
+    ``internal/folder/<id>`` or a visible ``tree/`` root → folder desk.
+    Missing signals (FakeBackend / hermetic tmp roots) stay scratch.
+    """
+    internal = getattr(backend, "_internal_root", None)
+    if internal is not None:
+        try:
+            parts = Path(internal).parts
+        except (TypeError, ValueError):
+            parts = ()
+        if INTERNAL_SEGMENT in parts:
+            idx = parts.index(INTERNAL_SEGMENT)
+            kind = parts[idx + 1] if idx + 1 < len(parts) else ""
+            if kind == _FOLDER_INTERNAL_KIND:
+                return True
+            if kind == CONV_SEGMENT:
+                return False
+    root = getattr(backend, "root", None) or getattr(backend, "_root", None)
+    if root is not None:
+        try:
+            parts = Path(root).parts
+        except (TypeError, ValueError):
+            parts = ()
+        if TREE_SEGMENT in parts:
+            return True
+        if CONV_SEGMENT in parts:
+            return False
+    return False
+
+
 def desktop_client_can_bind(x_client_platform: str | None) -> bool:
     """Thin fail-closed wrapper: folder AskOption actions need a desktop client.
 
@@ -275,17 +312,32 @@ def build_workspace_context(
         )
     else:
         location_line = "执行位置：云端沙箱（服务端）"
+        # 已建云桌（tree / internal/folder）勿写成 scratch「草稿/临时」。
         # 裸聊默认云 scratch：空树 ≠ 本机/已打开仓库。对模型显式纠偏，避免把宿主路径当项目。
-        identity_line = (
-            f"工作区身份：本会话云端草稿/临时文件空间（根标签 `{root_label}`）——"
-            "不是用户本机目录，也不是用户本机已打开的仓库或工程工作区。"
-        )
+        if _is_cloud_folder_desk(backend):
+            identity_line = (
+                f"工作区身份：云端文件夹（根标签 `{root_label}`）——"
+                "不是用户本机目录，也不是用户本机已打开的仓库或工程工作区。"
+            )
+            empty_tree_clause = (
+                "空树只表示本文件夹尚无用户文件，勿当成「本机空工程」"
+                "或宿主机器上的 Git 仓库。"
+            )
+        else:
+            identity_line = (
+                f"工作区身份：本会话云端草稿/临时文件空间（根标签 `{root_label}`）——"
+                "不是用户本机目录，也不是用户本机已打开的仓库或工程工作区。"
+            )
+            empty_tree_clause = (
+                "空树只表示本会话云端草稿尚无文件，勿当成「本机空工程」"
+                "或宿主机器上的 Git 仓库。"
+            )
         # Host 定案 §3.4: 云 reach 与 host= 正交——工作区在云；本机 Host 以能力行为准。
         reach_line = (
             "云端工作区文件在云端沙箱，不是用户本机磁盘；"
             "本机 Host（音响/系统信息/打开设置等）另计，以能力行 host= 为准——"
             "host=已装配时可经桌面回填通道调用 host_*；"
-            "空树只表示本会话云端草稿尚无文件，勿当成「本机空工程」或宿主机器上的 Git 仓库。"
+            + empty_tree_clause
         )
         artifact_line = (
             "产物出口：你写入工作区的文件保存在云端工作区（不在用户本机），"
@@ -605,10 +657,13 @@ def build_workspace_context(
     # delegate / list_folders / resolve_folder / create_folder / folder_fs 的 schema 里，
     # 队员持哪把工具就看哪条 schema）；此处只留一行事实：默认坐哪张桌。
     desk_line = "工作台：默认工作区=本会话出生桌（通用 `file_*` 只绑出生桌）。"
+    # 事实句，不是禁令。空桌勿套工程壳的 HOW 归 ceo_core / 编排 skill。
+    root_scope_line = "工作区根：本文件夹根即工作区根。"
 
     body_lines = [
         location_line,
         identity_line,
+        root_scope_line,
         reach_line,
         artifact_line,
         egress_line,

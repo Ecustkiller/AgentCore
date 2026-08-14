@@ -3,6 +3,11 @@ import {
   parseMentionFilter,
   pickRecentConversations,
 } from "../composerAttachments";
+import {
+  buildMentionCategoryRows,
+  mentionMenuKeyAction,
+  showMentionCategoryLevel,
+} from "../mentionMenuLevel";
 
 describe("parseMentionFilter", () => {
   it("returns null section when no type prefix", () => {
@@ -76,5 +81,159 @@ describe("pickRecentConversations", () => {
   it("filters by title substring", () => {
     const items = pickRecentConversations(list, null, "设计");
     expect(items.map((i) => i.relPath)).toEqual(["c3"]);
+  });
+});
+
+describe("showMentionCategoryLevel", () => {
+  it("shows L1 only when empty and not drilled", () => {
+    expect(
+      showMentionCategoryLevel({
+        sectionFilter: null,
+        activeCategory: null,
+        filterText: "",
+      }),
+    ).toBe(true);
+    expect(
+      showMentionCategoryLevel({
+        sectionFilter: null,
+        activeCategory: null,
+        filterText: "  ",
+      }),
+    ).toBe(true);
+  });
+
+  it("hides L1 when typed, prefixed, or drilled", () => {
+    expect(
+      showMentionCategoryLevel({
+        sectionFilter: null,
+        activeCategory: null,
+        filterText: "readme",
+      }),
+    ).toBe(false);
+    expect(
+      showMentionCategoryLevel({
+        sectionFilter: "conversation",
+        activeCategory: null,
+        filterText: "",
+      }),
+    ).toBe(false);
+    expect(
+      showMentionCategoryLevel({
+        sectionFilter: null,
+        activeCategory: "file",
+        filterText: "",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("buildMentionCategoryRows", () => {
+  it("prepending 附件, disables empty team and keeps other categories drillable", () => {
+    const rows = buildMentionCategoryRows({
+      counts: { team: 0, conversation: 3, folder: 0, file: 12 },
+    });
+    expect(rows.map((r) => r.id)).toEqual([
+      "attach",
+      "team",
+      "conversation",
+      "folder",
+      "file",
+    ]);
+    expect(rows[0]).toMatchObject({
+      id: "attach",
+      label: "附件",
+      hint: "从本机添加",
+      disabled: false,
+    });
+    expect(rows[1]).toMatchObject({
+      disabled: true,
+      hint: "多 Agent 回合后可点名",
+    });
+    expect(rows[2].disabled).toBe(false);
+    expect(rows[3]).toMatchObject({ disabled: false, count: 0 });
+    expect(rows[4].count).toBe(12);
+  });
+
+  it("marks file/folder loading when index is still empty", () => {
+    const rows = buildMentionCategoryRows({
+      counts: { team: 1, conversation: 0, folder: 0, file: 0 },
+      loadingFiles: true,
+    });
+    expect(rows[1].disabled).toBe(false);
+    expect(rows[3].loading).toBe(true);
+    expect(rows[4].loading).toBe(true);
+  });
+});
+
+describe("mentionMenuKeyAction", () => {
+  const l1 = {
+    showCategoryLevel: true,
+    categoryCount: 5,
+    activeIndex: 1,
+    categoryDisabled: true,
+    categoryAttach: false,
+    itemCount: 0,
+    canKeyBack: false,
+  };
+
+  it("navigates and drills on L1; Enter on disabled team is ignored", () => {
+    expect(mentionMenuKeyAction("ArrowDown", l1)).toEqual({
+      type: "move",
+      index: 2,
+    });
+    expect(mentionMenuKeyAction("Enter", l1)).toEqual({ type: "ignore" });
+    expect(mentionMenuKeyAction("Tab", l1)).toEqual({ type: "ignore" });
+    expect(mentionMenuKeyAction("ArrowRight", l1)).toEqual({ type: "consume" });
+    expect(
+      mentionMenuKeyAction("Enter", {
+        ...l1,
+        activeIndex: 2,
+        categoryDisabled: false,
+      }),
+    ).toEqual({ type: "drill" });
+    expect(
+      mentionMenuKeyAction("ArrowRight", {
+        ...l1,
+        activeIndex: 2,
+        categoryDisabled: false,
+      }),
+    ).toEqual({ type: "drill" });
+  });
+
+  it("附件行：Enter 选文件，ArrowRight 不 drill", () => {
+    const attach = {
+      ...l1,
+      activeIndex: 0,
+      categoryDisabled: false,
+      categoryAttach: true,
+    };
+    expect(mentionMenuKeyAction("Enter", attach)).toEqual({ type: "attach" });
+    expect(mentionMenuKeyAction("Tab", attach)).toEqual({ type: "attach" });
+    expect(mentionMenuKeyAction("ArrowRight", attach)).toEqual({
+      type: "consume",
+    });
+  });
+
+  it("goes back on L2 with empty filter; leaves ArrowLeft through when typing", () => {
+    const l2 = {
+      showCategoryLevel: false,
+      categoryCount: 5,
+      activeIndex: 0,
+      categoryDisabled: false,
+      categoryAttach: false,
+      itemCount: 3,
+      canKeyBack: true,
+    };
+    expect(mentionMenuKeyAction("ArrowLeft", l2)).toEqual({ type: "back" });
+    expect(mentionMenuKeyAction("Enter", l2)).toEqual({ type: "select" });
+    expect(
+      mentionMenuKeyAction("ArrowLeft", { ...l2, canKeyBack: false }),
+    ).toEqual({
+      type: "ignore",
+    });
+  });
+
+  it("closes on Escape from either level", () => {
+    expect(mentionMenuKeyAction("Escape", l1)).toEqual({ type: "close" });
   });
 });

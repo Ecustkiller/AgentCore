@@ -105,7 +105,7 @@ describe("ManualReference", () => {
     renderReference();
     expect(screen.getByText("工作流和自动化有什么区别？")).toBeTruthy();
     expect(screen.getByText("电脑关着，定时任务还会跑吗？")).toBeTruthy();
-    expect(screen.getAllByText(/存为工作流/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/去工具箱新建或套官方模板/)).toBeTruthy();
     expect(screen.getAllByText(/自动化 · 收件箱/).length).toBeGreaterThan(0);
   });
 
@@ -122,7 +122,7 @@ describe("ManualReference", () => {
     expect(screen.getAllByText("画布").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("白板").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("自主度").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("工作流")).toBeTruthy();
+    expect(screen.getAllByText("工作流").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("系统任务")).toBeTruthy();
     expect(screen.getAllByText("收件箱").length).toBeGreaterThanOrEqual(1);
   });

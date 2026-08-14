@@ -34,6 +34,8 @@ const SKIP_TYPES = new Set([
 
 const POOL_MARKER = /\[(\d+)\]/g;
 const LEDGER_MARKER = /#r(\d+)\b/g;
+/** Model glue between adjacent cites (`[1]-[2]`, `[1]、[2]`). Keep words like 与/and. */
+const ADJACENT_CITE_SEP = /^[\s]*[-–—−,，、][\s]*$/;
 
 /** One `citemark` element carrying the canonical 1-based pool index. */
 function citeNode(n: number): MdNode {
@@ -116,7 +118,36 @@ export function splitCitationText(
   if (last < value.length) {
     parts.push({ type: "text", value: value.slice(last) });
   }
-  return parts.length ? parts : [{ type: "text", value }];
+  const split = parts.length ? parts : [{ type: "text", value }];
+  return dropAdjacentCiteSeparators(split);
+}
+
+function isCiteMark(node: MdNode): boolean {
+  return node.type === "cite";
+}
+
+/** Drop hyphen/comma glue so `[1]-[2]` renders as two chips, not a fake range. */
+function dropAdjacentCiteSeparators(parts: MdNode[]): MdNode[] {
+  if (parts.length < 3) return parts;
+  const out: MdNode[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const cur = parts[i];
+    const prev = out[out.length - 1];
+    const next = parts[i + 1];
+    if (
+      cur.type === "text" &&
+      cur.value != null &&
+      ADJACENT_CITE_SEP.test(cur.value) &&
+      prev &&
+      isCiteMark(prev) &&
+      next &&
+      isCiteMark(next)
+    ) {
+      continue;
+    }
+    out.push(cur);
+  }
+  return out;
 }
 
 function walk(

@@ -205,9 +205,7 @@ describe("RunDetailBody member stop", () => {
 
     expect(screen.getByRole("button", { name: "停止这位队员" })).toBeTruthy();
     expect(screen.getByText(/正在实时输出/)).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "记下改法（跑完后发送）" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /记下改法/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "停止整轮" })).toBeNull();
   });
 
@@ -293,8 +291,6 @@ describe("RunDetailBody member stop", () => {
     expect(screen.queryByRole("button", { name: /停止这位队员/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /立即改此人/ })).toBeNull();
     expect(screen.getByRole("button", { name: "停止整轮" })).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: "记下改法（跑完后发送）" }),
-    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /记下改法/ })).toBeNull();
   });
 });

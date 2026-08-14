@@ -26,6 +26,34 @@ const MAX_TRACKED = 64;
 
 const inFlight = new Map<string, TrackedUpload>();
 
+/**
+ * 上次成功驻留的目标会话 + 可再 PUT / 再暂存的字节。
+ * in-flight Promise 在发送收口后就会忘，但开跑前拒绝会拆掉刚建的会话——这两份要
+ * 活到芯片还回之后，重试才能驻进新工作区，而不是拿已删会话的路径跳过。
+ */
+const recoverBlobs = new Map<string, File>();
+const residedIn = new Map<string, string>();
+
+/** 记下这次驻留落在哪个会话、以及还能再拷的字节。 */
+export function rememberAttachmentRecover(
+  attachmentId: string,
+  blob: File | undefined,
+  conversationId: string,
+): void {
+  if (blob) recoverBlobs.set(attachmentId, blob);
+  residedIn.set(attachmentId, conversationId);
+}
+
+export function peekAttachmentRecoverBlob(
+  attachmentId: string,
+): File | undefined {
+  return recoverBlobs.get(attachmentId);
+}
+
+export function attachmentResidedIn(attachmentId: string): string | undefined {
+  return residedIn.get(attachmentId);
+}
+
 /** 登记一条在途上传并原样返回它，调用方照常 await 拿结果去更新 chip。 */
 export function trackAttachmentUpload(
   attachmentId: string,
@@ -61,9 +89,11 @@ export async function awaitAttachmentUpload(
   }
 }
 
-/** chip 被移除 / 发送已消费：丢掉登记（同时放掉它引用的 File）。 */
+/** chip 被移除 / 发送已真正上路：丢掉登记（同时放掉它引用的 File）。 */
 export function forgetAttachmentUpload(attachmentId: string): void {
   inFlight.delete(attachmentId);
+  recoverBlobs.delete(attachmentId);
+  residedIn.delete(attachmentId);
 }
 
 /**
@@ -76,18 +106,24 @@ export function startStagedAttachmentUpload(
   att: PendingAttachment,
 ): Promise<ResideResult> {
   const promise = ensureAttachmentResident(conversationId, att).then(
-    (res): ResideResult =>
-      res.ok
-        ? {
-            ok: true,
-            name: res.name,
-            path: res.workspacePath || att.path,
-            text: res.text,
-            truncated: res.truncated,
-            binary: res.binary,
-            workspacePath: res.workspacePath || undefined,
-          }
-        : res,
+    (res): ResideResult => {
+      if (!res.ok) return res;
+      rememberAttachmentRecover(
+        att.id,
+        att.fileBlob ?? res.fileBlob,
+        conversationId,
+      );
+      return {
+        ok: true,
+        name: res.name,
+        path: res.workspacePath || att.path,
+        text: res.text,
+        truncated: res.truncated,
+        binary: res.binary,
+        workspacePath: res.workspacePath || undefined,
+        fileBlob: att.fileBlob ?? res.fileBlob,
+      };
+    },
   );
   return trackAttachmentUpload(att.id, conversationId, promise);
 }
@@ -95,4 +131,6 @@ export function startStagedAttachmentUpload(
 /** @internal vitest */
 export function __clearAttachmentUploadsForTests(): void {
   inFlight.clear();
+  recoverBlobs.clear();
+  residedIn.clear();
 }

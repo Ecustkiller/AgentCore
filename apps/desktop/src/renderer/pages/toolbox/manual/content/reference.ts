@@ -267,9 +267,9 @@ export const referenceChapter: ManualChapterContent = {
                 {
                   type: "text",
                   text: [
-                    "工作流管「活儿怎么拆」——把满意的一轮存成可复用的团队拆法；自动化管「什么时候跑」——给任务配定时或 Webhook，到点由 CEO 自动开一轮。任务绑一张工作流就按图跑，不绑就按目标文案让 CEO 即兴组队。展开见 ",
+                    "工作流管「活儿怎么拆」——去工具箱新建或套官方模板，在画布上设计可复用的团队拆法；自动化管「什么时候跑」——给任务配定时或 Webhook，到点由 CEO 自动开一轮。任务绑一张工作流就按图跑，不绑就按目标文案让 CEO 即兴组队。展开见 ",
                     {
-                      text: "存为工作流",
+                      text: "工作流",
                       link: {
                         kind: "jump",
                         to: MANUAL_SECTION_IDS.collaboration.workflow,
@@ -709,7 +709,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "协作图上同一现场根的「续 ×N」节点链；状态条可显「接续 N 次」。有接续标记才是同人，无标记的同角色再委派仍是冷启动新人。",
+                  text: "协作图上同一现场根的「续 ×N」节点链；各版并排对比走画布「对比」。有接续标记才是同人，无标记的同角色再委派仍是冷启动新人。",
                 },
               ],
             },
@@ -746,7 +746,7 @@ export const referenceChapter: ManualChapterContent = {
               a: [
                 {
                   type: "text",
-                  text: "保存下来的团队拆法——谁做什么、先后怎么排。存的是这一轮的分工，不含模型选择等运行细节；开跑时再选工作区。官方模板只读，「使用」= 复制一份成你自己的。",
+                  text: "在工具箱里设计的团队拆法——谁做什么、先后怎么排。可新建空白图，或从官方模板复制一份再改；开跑时再选工作区。官方模板只读，「使用」= 复制一份成你自己的。",
                 },
               ],
             },

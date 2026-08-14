@@ -34,8 +34,8 @@ import {
   deleteConversationConfirmLabel,
   notifyConversationDeleted,
 } from "@/lib/conversationDeleteCopy";
+import { buildMessagePreview } from "@/lib/conversationListPreview";
 import { shouldShowConversationCloudIcon } from "@/lib/conversationWorkspaceMode";
-import { visibleMessageText } from "@/lib/errors";
 import { notifyError, notifyInfo } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -44,7 +44,12 @@ import {
 } from "@/services/conversations";
 import { useConversationAwaitingAttention } from "@/stores/aiAttention";
 import {
+  conversationSidebarActivityStatus,
+  useConversationCloudRunning,
+} from "@/stores/aiTurnActivity";
+import {
   type Conversation,
+  type Message,
   useConversationGenerating,
   useConversationStore,
 } from "@/stores/conversation";
@@ -73,15 +78,7 @@ import { useNavigate } from "react-router-dom";
 import { ConversationCloudIcon } from "./ConversationWorkspaceModeIcon";
 
 const PREVIEW_DELAY_MS = 500;
-const PREVIEW_MAX_CHARS = 80;
-type PreviewMessage = {
-  role: "user" | "assistant";
-  content: string;
-  error?: { message?: string } | null;
-  runs?: { error?: { message?: string } | null } | null;
-};
-
-const EMPTY_MESSAGES: PreviewMessage[] = [];
+const EMPTY_MESSAGES: Message[] = [];
 
 function timeAgo(date: string | Date): string {
   const ms = Date.now() - new Date(date).getTime();
@@ -92,49 +89,6 @@ function timeAgo(date: string | Date): string {
   if (hr < 24) return `${hr} 小时前`;
   const d = Math.floor(hr / 24);
   return `${d} 天前`;
-}
-
-function truncatePreview(text: string, max = PREVIEW_MAX_CHARS): string {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= max) return normalized;
-  return `${normalized.slice(0, max)}…`;
-}
-
-function buildMessagePreview(
-  lastMessagePreview: string | null,
-  messages: PreviewMessage[],
-): string | null {
-  if (lastMessagePreview?.trim()) {
-    return truncatePreview(lastMessagePreview);
-  }
-  if (messages.length === 0) return null;
-
-  let lastUserText: string | null = null;
-  let lastAssistantText: string | null = null;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    const text = visibleMessageText(msg);
-    if (!text) continue;
-    if (msg.role === "assistant" && !lastAssistantText)
-      lastAssistantText = text;
-    if (msg.role === "user" && !lastUserText) lastUserText = text;
-    if (lastUserText && lastAssistantText) break;
-  }
-
-  const parts: string[] = [];
-  if (lastUserText) {
-    parts.push(`你: ${truncatePreview(lastUserText, 40)}`);
-  }
-  if (lastAssistantText) {
-    parts.push(`AI: ${truncatePreview(lastAssistantText, 40)}`);
-  }
-  if (parts.length > 0) return parts.join(" → ");
-
-  const last = messages[messages.length - 1];
-  const lastText = visibleMessageText(last);
-  if (!lastText) return null;
-  const roleLabel = last.role === "user" ? "你" : "AI";
-  return `${roleLabel}: ${truncatePreview(lastText)}`;
 }
 
 interface Props {
@@ -179,6 +133,10 @@ export function ConversationItem({
   const unarchiveMutation = useUnarchiveConversation();
   const folders = useFolders();
   const isGenerating = useConversationGenerating(conversation.id);
+  const executionVia = useConversationStore(
+    (s) => s.byId[conversation.id]?.executionVia ?? null,
+  );
+  const cloudRunning = useConversationCloudRunning(conversation.id);
   // 「等你」灯（前端UX设计.md §对话列表状态点）：热阻塞交互（审批 / 授权 / 升级拍板，
   // CEO 仲裁除外）+ 任意 kind 的暂停帧（开工确认 / 途中提问 / 计划复核）都算等用户。
   const awaitingInteraction = useInteractionStore((s) =>
@@ -200,12 +158,15 @@ export function ConversationItem({
     currentFolderId ? "folder" : undefined,
   );
 
-  const status: "running" | "awaiting" | null =
-    awaitingInteraction || awaitingResume || awaitingAttention
-      ? "awaiting"
-      : isGenerating
-        ? "running"
-        : null;
+  // 等你灯 > 云 running > 本端 isGenerating。sidecar / 本地容器忽略云 running，
+  // 免得本机引擎对话被账号级集合再点一次灯。
+  const status = conversationSidebarActivityStatus({
+    awaiting: awaitingInteraction || awaitingResume || awaitingAttention,
+    cloudRunning,
+    isGenerating,
+    executionVia,
+    localContainerRootId: conversation.localContainerRootId,
+  });
 
   const suppressPreview = moreOpen || confirmingDelete || contextMenuOpen;
   const messagePreview = useMemo(

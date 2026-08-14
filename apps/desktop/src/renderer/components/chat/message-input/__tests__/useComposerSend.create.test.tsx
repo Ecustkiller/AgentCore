@@ -12,9 +12,17 @@ import { act, renderHook } from "@testing-library/react";
 import { type SetStateAction, useCallback } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { navigate, deleteConversation, applyDeletedConversationLocally } =
+  vi.hoisted(() => ({
+    navigate: vi.fn(),
+    deleteConversation: vi.fn(),
+    applyDeletedConversationLocally: vi.fn(),
+  }));
+
 vi.mock("@/hooks/useConversations", () => ({
   patchConversationCache: vi.fn(),
   upsertConversationFront: vi.fn(),
+  applyDeletedConversationLocally,
 }));
 vi.mock("@/lib/composerPendingHint", () => ({
   confirmSendDespitePendingIfNeeded: () => true,
@@ -28,6 +36,7 @@ vi.mock("@/services/api", () => ({ api: { post: vi.fn() } }));
 vi.mock("@/services/conversations", () => ({
   provisionalConversationTitle: (s: string) => s.slice(0, 8),
   requestAutoTitle: vi.fn(),
+  deleteConversation,
 }));
 vi.mock("@/services/messages", () => ({ loadLatestWindow: vi.fn() }));
 vi.mock("@/services/models", () => ({ getLastUsedProfileId: () => null }));
@@ -47,7 +56,7 @@ vi.mock("@/services/turns", () => ({ sendTurn: vi.fn(async () => undefined) }));
 vi.mock("@/services/turns/midFlight", () => ({
   sendMidFlightMessage: vi.fn(),
 }));
-vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
+vi.mock("react-router-dom", () => ({ useNavigate: () => navigate }));
 vi.mock("../settleAttachments", () => ({
   settleAttachments: vi.fn(async () => ({ ok: true, outgoing: [] })),
 }));
@@ -58,7 +67,17 @@ import { api } from "@/services/api";
 import { sendTurn } from "@/services/turns";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import { __resetComposerSendLatchesForTests } from "@/stores/composerSend";
+import {
+  setComposerSendError,
+  useComposerSendErrorStore,
+} from "@/stores/composerSendError";
 import { useConversationStore } from "@/stores/conversation";
+import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
+import { useFoldersStore } from "@/stores/folders";
+import {
+  __clearAttachmentUploadsForTests,
+  rememberAttachmentRecover,
+} from "../attachmentUploads";
 import type {
   PendingAgentMention,
   PendingAttachment,
@@ -127,11 +146,34 @@ function useSendHarness() {
   return { send };
 }
 
-function seedDraft(): void {
+const REFUSAL_MSG = "账户余额不足";
+const EXISTING = "conv-existing";
+
+function seedDraftOn(key: string): void {
   const store = useComposerDraftStore.getState();
-  store.setValue(DRAFT_KEY, TEXT);
-  store.setAttachments(DRAFT_KEY, [shot]);
-  store.setAgentMentions(DRAFT_KEY, [mention]);
+  store.setValue(key, TEXT);
+  store.setAttachments(key, [shot]);
+  store.setAgentMentions(key, [mention]);
+}
+
+function seedDraft(): void {
+  seedDraftOn(DRAFT_KEY);
+}
+
+function mockUnstartedRefusal(): void {
+  turn.mockImplementation(async (args) => {
+    const conversationId = args.conversationId;
+    const optimisticUserId = args.optimisticUserId;
+    if (optimisticUserId) {
+      useConversationStore
+        .getState()
+        .removeMessage(optimisticUserId, conversationId);
+    }
+    useConversationStore
+      .getState()
+      .setError(REFUSAL_MSG, null, conversationId, null);
+    return { unstartedRefusal: true };
+  });
 }
 
 function draft() {
@@ -149,8 +191,13 @@ beforeEach(() => {
   settle.mockResolvedValue({ ok: true, outgoing: [] });
   turn.mockReset();
   turn.mockResolvedValue(undefined as never);
+  navigate.mockReset();
+  deleteConversation.mockReset();
+  deleteConversation.mockResolvedValue(undefined);
+  applyDeletedConversationLocally.mockReset();
   __resetComposerSendLatchesForTests();
   __resetDraftRequestIdsForTests();
+  __clearAttachmentUploadsForTests();
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
@@ -159,6 +206,10 @@ beforeEach(() => {
     drafts: {},
     fillToken: 0,
     dockFlipToken: 0,
+  });
+  useComposerSendErrorStore.setState({ byKey: {} });
+  useFoldersStore.setState({
+    draftWorkspaceIntent: { kind: "quick_cloud" },
   });
 });
 
@@ -240,6 +291,7 @@ describe("useComposerSend 草稿首发建会话", () => {
         release = r as (conv: { id: string }) => void;
       }),
     );
+    setComposerSendError(DRAFT_KEY, { message: "上次失败", action: null });
     seedDraft();
     const { result } = renderHook(() => useSendHarness());
 
@@ -251,6 +303,9 @@ describe("useComposerSend 草稿首发建会话", () => {
     expect(post).toHaveBeenCalledTimes(1);
     expect(draft()).toBeUndefined();
     expect(result.current.send.isCreatingConversation).toBe(true);
+    expect(
+      useComposerSendErrorStore.getState().byKey[DRAFT_KEY],
+    ).toBeUndefined();
 
     await act(async () => {
       release({ id: NEW_CONV });
@@ -261,6 +316,216 @@ describe("useComposerSend 草稿首发建会话", () => {
     expect(
       useConversationStore.getState().byId[NEW_CONV]?.messages,
     ).toHaveLength(1);
+    expect(useConversationStore.getState().currentConversationId).toBe(
+      NEW_CONV,
+    );
+  });
+
+  it("开跑前拒绝：拆空会话，草稿和错误回到 __draft__，不复用已软删的幂等键", async () => {
+    post.mockResolvedValue({ id: NEW_CONV } as never);
+    mockUnstartedRefusal();
+    seedDraft();
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    expect(draft()?.value).toBe(TEXT);
+    expect(draft()?.attachments).toEqual([shot]);
+    expect(draft()?.agentMentions).toEqual([mention]);
+    expect(
+      useComposerDraftStore.getState().drafts[draftKeyFor(NEW_CONV)],
+    ).toBeUndefined();
+    expect(useComposerSendErrorStore.getState().byKey[DRAFT_KEY]).toEqual({
+      message: REFUSAL_MSG,
+      action: null,
+    });
+    expect(deleteConversation).toHaveBeenCalledWith(NEW_CONV);
+    expect(applyDeletedConversationLocally).toHaveBeenCalledWith(NEW_CONV);
+    expect(navigate).toHaveBeenCalledWith("/");
+    expect(useConversationStore.getState().currentConversationId).toBeNull();
+    expect(turn).toHaveBeenCalledTimes(1);
+
+    const firstId = createdBody(0).client_request_id;
+    post.mockResolvedValue({ id: "conv-2" } as never);
+    turn.mockResolvedValue(undefined as never);
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+    expect(createdBody(1).client_request_id).toBeTruthy();
+    expect(createdBody(1).client_request_id).not.toBe(firstId);
+  });
+
+  it("开跑前拒绝拆会话后重试：旧 workspacePath / 已消耗 staging 也要再驻留进新会话", async () => {
+    const blob = new File([new Uint8Array([1])], "shot.png", {
+      type: "image/png",
+    });
+    const stale: PendingAttachment = {
+      ...shot,
+      workspacePath: "attachments/shot.png",
+      stagingId: "stg-consumed",
+      fileBlob: blob,
+    };
+    post.mockResolvedValue({ id: NEW_CONV } as never);
+    mockUnstartedRefusal();
+    useComposerDraftStore.getState().setValue(DRAFT_KEY, TEXT);
+    useComposerDraftStore.getState().setAttachments(DRAFT_KEY, [stale]);
+    useComposerDraftStore.getState().setAgentMentions(DRAFT_KEY, [mention]);
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    const restored = draft()?.attachments[0];
+    expect(restored?.workspacePath).toBeUndefined();
+    expect(restored?.fileBlob).toBe(blob);
+    expect(restored?.stagingId).toBe("stg-consumed");
+    expect(settle).toHaveBeenCalledWith(NEW_CONV, [stale], "send");
+
+    post.mockResolvedValue({ id: "conv-2" } as never);
+    turn.mockResolvedValue(undefined as never);
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    expect(settle).toHaveBeenCalledTimes(2);
+    expect(settle.mock.calls[1][0]).toBe("conv-2");
+    expect(settle.mock.calls[1][1][0]).toEqual(
+      expect.objectContaining({
+        id: stale.id,
+        workspacePath: undefined,
+        fileBlob: blob,
+        stagingId: "stg-consumed",
+      }),
+    );
+  });
+
+  it("开跑前拒绝：芯片没有 File 时从 recover blob 恢复再发", async () => {
+    const blob = new File([new Uint8Array([9])], "shot.png", {
+      type: "image/png",
+    });
+    const consumed: PendingAttachment = {
+      ...shot,
+      workspacePath: "attachments/shot.png",
+      stagingId: "stg-consumed",
+    };
+    rememberAttachmentRecover(consumed.id, blob, NEW_CONV);
+    post.mockResolvedValue({ id: NEW_CONV } as never);
+    mockUnstartedRefusal();
+    useComposerDraftStore.getState().setValue(DRAFT_KEY, TEXT);
+    useComposerDraftStore.getState().setAttachments(DRAFT_KEY, [consumed]);
+    useComposerDraftStore.getState().setAgentMentions(DRAFT_KEY, [mention]);
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    expect(draft()?.attachments[0]?.workspacePath).toBeUndefined();
+    expect(draft()?.attachments[0]?.fileBlob).toBe(blob);
+
+    post.mockResolvedValue({ id: "conv-2" } as never);
+    turn.mockResolvedValue(undefined as never);
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    expect(settle.mock.calls[1][0]).toBe("conv-2");
+    expect(settle.mock.calls[1][1][0].fileBlob).toBe(blob);
+    expect(settle.mock.calls[1][1][0].workspacePath).toBeUndefined();
+  });
+
+  it("已有会话跟发开跑前拒绝：草稿还回当前会话，不删", async () => {
+    useConversationStore.setState({
+      currentConversationId: EXISTING,
+      byId: {
+        [EXISTING]: {
+          ...EMPTY_RUNTIME,
+          messages: [
+            {
+              id: "old-1",
+              role: "user",
+              content: "上一句",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              executionId: null,
+              isStreaming: false,
+            },
+          ],
+        },
+      },
+    } as never);
+    mockUnstartedRefusal();
+    seedDraftOn(EXISTING);
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    const restored = useComposerDraftStore.getState().drafts[EXISTING];
+    expect(restored?.value).toBe(TEXT);
+    expect(restored?.attachments).toEqual([shot]);
+    expect(restored?.agentMentions).toEqual([mention]);
+    expect(draft()).toBeUndefined();
+    expect(useComposerSendErrorStore.getState().byKey[EXISTING]).toEqual({
+      message: REFUSAL_MSG,
+      action: null,
+    });
+    expect(deleteConversation).not.toHaveBeenCalled();
+    expect(applyDeletedConversationLocally).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().currentConversationId).toBe(
+      EXISTING,
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("开跑前拒绝拆会话：create 带了 folder_id 则恢复 folder 意图", async () => {
+    useFoldersStore.getState().setDraftWorkspaceIntent({
+      kind: "folder",
+      folderId: "fld-1",
+    });
+    post.mockResolvedValue({ id: NEW_CONV } as never);
+    mockUnstartedRefusal();
+    seedDraft();
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    expect(useFoldersStore.getState().draftWorkspaceIntent).toEqual({
+      kind: "folder",
+      folderId: "fld-1",
+    });
+    expect(deleteConversation).toHaveBeenCalledWith(NEW_CONV);
+    expect(navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("开跑前拒绝：删失败则留在新会话，仍还草稿和错误", async () => {
+    post.mockResolvedValue({ id: NEW_CONV } as never);
+    deleteConversation.mockRejectedValue(new Error("网络不可达"));
+    mockUnstartedRefusal();
+    seedDraft();
+    const { result } = renderHook(() => useSendHarness());
+
+    await act(async () => {
+      await result.current.send.handleSend();
+    });
+
+    const restored =
+      useComposerDraftStore.getState().drafts[draftKeyFor(NEW_CONV)];
+    expect(restored?.value).toBe(TEXT);
+    expect(draft()).toBeUndefined();
+    expect(useComposerSendErrorStore.getState().byKey[NEW_CONV]).toEqual({
+      message: REFUSAL_MSG,
+      action: null,
+    });
+    expect(deleteConversation).toHaveBeenCalledWith(NEW_CONV);
+    expect(applyDeletedConversationLocally).not.toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalledWith("/");
     expect(useConversationStore.getState().currentConversationId).toBe(
       NEW_CONV,
     );

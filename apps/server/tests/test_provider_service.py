@@ -13,10 +13,15 @@ from agentcore.config import settings
 from agentcore.core.errors import (
     KeyStorageUnavailableError,
     LLMError,
+    LLMInsufficientBalanceError,
     NotFoundError,
     ValidationError,
 )
 from agentcore.llm.credentials import LLMCredentials
+from agentcore.llm.model_reachability import (
+    ModelListOutcome,
+    check_model_reachable,
+)
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider_service import LlmProviderService
 
@@ -186,6 +191,7 @@ class _FakeProbeProvider:
         supports_tools: bool | None = None,
         model_ids: list[str] | None = None,
         list_models_error: Exception | None = None,
+        probe_error: Exception | None = None,
         probe_tools_raises: bool = False,
         fail_models: set[str] | None = None,
     ) -> None:
@@ -193,6 +199,7 @@ class _FakeProbeProvider:
         self._supports_tools = supports_tools
         self._model_ids = model_ids
         self._list_models_error = list_models_error
+        self._probe_error = probe_error
         self._probe_tools_raises = probe_tools_raises
         self._fail_models = fail_models or set()
         self.probe_model: str | None = None
@@ -212,6 +219,8 @@ class _FakeProbeProvider:
         self.probe_called = True
         self.probe_model = model
         self.probe_models.append(model)
+        if self._probe_error is not None:
+            raise self._probe_error
         if self._fail or model in self._fail_models:
             raise LLMError("bad key" if self._fail else f"model {model} not found")
 
@@ -412,6 +421,142 @@ async def test_test_provider_list_models_auth_error_is_hard_failure(service):
     assert "API Key" in (view.message or "")
     assert "模型组合" not in (view.message or "")
     assert fake.probe_called is False
+
+
+async def test_test_provider_list_ok_probe_401_blames_test_model_not_key(service):
+    """Nickname default_model: /models proved the Key; probe 401 must not say Key 废."""
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="error"),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc",
+        base_url="https://api.deepseek.com",
+        default_model="DeepSeek1",
+    )
+    fake = _FakeProbeProvider(
+        model_ids=[DEEPSEEK_V4_FLASH, "deepseek-chat"],
+        probe_error=LLMError(
+            "DeepSeek API Key 无效或无权限（鉴权失败），请检查后重试",
+            upstream_status=401,
+        ),
+    )
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.list_models_called is True
+    assert fake.probe_called is True
+    assert fake.probe_model == "DeepSeek1"
+    assert view.status == "error"
+    msg = view.message or ""
+    assert "连接测试用模型「DeepSeek1」" in msg
+    assert "不被上游接受" in msg
+    assert "列出模型" in msg
+    assert "模型组合" in msg
+    assert "API Key 无效" not in msg
+
+
+@pytest.mark.parametrize(
+    "fake_kw",
+    [
+        {"list_models_error": LLMError("列出模型失败（HTTP 500）")},
+        {"model_ids": []},
+    ],
+    ids=["soft_error", "empty_list"],
+)
+async def test_test_provider_list_unproven_probe_401_mentions_key_and_model(
+    service, fake_kw
+):
+    service._repo.get = AsyncMock(
+        side_effect=[
+            _row(api_key_enc=b"x"),
+            _row(api_key_enc=b"x", status="error"),
+        ]
+    )
+    creds = LLMCredentials(
+        api_key="sk-abc",
+        base_url="https://api.deepseek.com",
+        default_model="DeepSeek1",
+    )
+    fake = _FakeProbeProvider(
+        probe_error=LLMError(
+            "DeepSeek API Key 无效或无权限（鉴权失败），请检查后重试",
+            upstream_status=401,
+        ),
+        **fake_kw,
+    )
+    with (
+        patch(
+            "agentcore.llm.provider_service.resolve_provider_credentials",
+            AsyncMock(return_value=creds),
+        ),
+        patch("agentcore.llm.provider_service.build_provider", return_value=fake),
+        patch.object(service, "_encryptor", return_value=_enc()),
+    ):
+        view = await service.test_provider("u1", "prov-1")
+    assert fake.probe_called is True
+    assert view.status == "error"
+    msg = view.message or ""
+    assert "API Key" in msg
+    assert "连接测试用模型「DeepSeek1」" in msg
+    assert "API Key 无效" not in msg
+
+
+class _RaiseProbe:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def probe(self, *, model: str) -> None:
+        raise self._exc
+
+
+@pytest.mark.parametrize(
+    ("exc", "keep"),
+    [
+        (
+            LLMInsufficientBalanceError(
+                provider_name="DeepSeek",
+                upstream_status=401,
+            ),
+            "余额",
+        ),
+        (
+            LLMError("指定的模型不可用（404）", upstream_status=404),
+            "404",
+        ),
+        (
+            LLMError("上游模型服务暂时不可用（500），请稍后再试", upstream_status=500),
+            "暂时不可用",
+        ),
+        (
+            LLMError(
+                "test model not allowed",
+                upstream_status=403,
+                upstream_body_preview='{"error":{"code":"model_not_allowed"}}',
+            ),
+            "model not allowed",
+        ),
+    ],
+    ids=["credits", "404", "5xx", "non_auth_403"],
+)
+async def test_check_model_reachable_does_not_rewrite_non_auth_probe(exc, keep):
+    reach, msg = await check_model_reachable(
+        _RaiseProbe(exc),
+        model="DeepSeek1",
+        model_list=ModelListOutcome(kind="ok", model_ids=(DEEPSEEK_V4_FLASH,)),
+    )
+    assert reach == "error"
+    assert keep in (msg or "")
+    assert "不被上游接受" not in (msg or "")
+    assert "请核对 API Key 与连接测试用模型" not in (msg or "")
 
 
 async def test_test_provider_falls_back_to_probe_when_list_models_fails(service):

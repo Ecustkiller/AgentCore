@@ -190,7 +190,7 @@ export const TEAM_PRIMITIVE_META = {
     // 旧 payload 无 headline 时的兜底导语；有人数时前端会优先「预计 N 人开工」。
     resumeLead: "预计开工。等待你确认后才会上场，分工如下：",
     resumeCta: "授权并开工",
-    notePlaceholder: "可选 · 对全体队员的嘱咐（授权开工时注入）",
+    notePlaceholder: "开工时注入全体队员",
     resolved: {
       continue: {
         icon: Check,
@@ -206,7 +206,7 @@ export const TEAM_PRIMITIVE_META = {
         icon: OctagonX,
         label: "已取消 · 团队未启动",
       },
-      timeout: { icon: Clock, label: "未及时回应，已自动开做" },
+      timeout: { icon: Clock, label: "未及时回应，团队未启动" },
       orphaned: {
         icon: Ban,
         label: "已失效（回合已结束或服务已重启）",
@@ -220,7 +220,7 @@ export const TEAM_PRIMITIVE_META = {
   debate: {
     resumeLead: "预计开赛。等待你确认后才会开赛，辩题与立场如下：",
     resumeCta: "授权开赛",
-    notePlaceholder: "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入",
+    notePlaceholder: "开赛时注入各方",
     resolved: {
       continue: {
         icon: Check,
@@ -236,7 +236,7 @@ export const TEAM_PRIMITIVE_META = {
         icon: Scale,
         label: "已选先调研 · 辩论未开赛",
       },
-      timeout: { icon: Clock, label: "未及时回应，已自动开赛" },
+      timeout: { icon: Clock, label: "未及时回应，辩论未开赛" },
       orphaned: {
         icon: Ban,
         label: "已失效（回合已结束或服务已重启）",
@@ -269,6 +269,23 @@ export function teamPreviewLead(args: {
   }
   const n = args.workerCount;
   return n > 0 ? `预计 ${n} 人开工` : TEAM_PRIMITIVE_META.delegate.resumeLead;
+}
+
+/** 已授权后的人数后缀：不再用「预计开工 / 开赛」（那是拍板前的话）. */
+export function teamPreviewSettledLead(args: {
+  primitive: KickoffPrimitive;
+  headline?: string | null;
+  workerCount: number;
+  sideCount: number;
+}): string {
+  const fromWire = (args.headline ?? "").trim();
+  if (fromWire) return fromWire;
+  if (args.primitive === "debate") {
+    const n = args.sideCount;
+    return n > 0 ? `${n} 方` : "";
+  }
+  const n = args.workerCount;
+  return n > 0 ? `${n} 人` : "";
 }
 
 export function teamResolvedOutcome(

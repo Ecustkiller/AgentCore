@@ -233,8 +233,8 @@ export function createLocalRootSource(
       if (!res.ok) throwFs(res.reason, res.code);
     },
     watch(dir, onChange) {
-      // Missing dirs are tolerated (fs.watch throws → main ignores); after first
-      // write materializes the base, a remount/reload re-attaches the watcher.
+      // Missing dirs are tolerated (fs.watch throws → main ignores). FileTree
+      // re-attaches after a silent root patch goes empty→has — do not swap source.
       const watched = inPath(dir);
       void window.fsApi.watch(rootId, watched);
       const off = window.fsApi.onChanged((e) => {

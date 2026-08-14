@@ -408,7 +408,9 @@ class FileWriteTool:
         if not requested_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
 
-        rel_path, rename_note = _prepare_write_relpath(requested_path)
+        rel_path, rename_note = await _prepare_write_relpath(requested_path, context)
+        if not rel_path:
+            return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
 
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="file_write.scope_rejected"
@@ -650,7 +652,7 @@ class FileAppendTool:
         if not requested_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径（如 report.md）", start)
 
-        rel_path, rename_note = _prepare_write_relpath(requested_path)
+        rel_path, rename_note = await _prepare_write_relpath(requested_path, context)
 
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="file_append.scope_rejected"
@@ -866,7 +868,7 @@ class StrReplaceTool:
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
 
-        rel_path, rename_note = _prepare_write_relpath(rel_path)
+        rel_path, rename_note = await _prepare_write_relpath(rel_path, context)
 
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="str_replace.scope_rejected"
@@ -1043,7 +1045,7 @@ class WriteSectionTool:
         if content_arg is None and not from_file:
             return _error("须提供 content 或 from_file（分区 HTML 正文来源）", start)
 
-        rel_path, rename_note = _prepare_write_relpath(requested_path)
+        rel_path, rename_note = await _prepare_write_relpath(requested_path, context)
         if rel_path.lower().endswith(".md"):
             return _error(
                 "write_section 仅用于建站 HTML 的 `<!-- SECTION:sN -->` 标记，"

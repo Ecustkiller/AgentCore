@@ -105,7 +105,7 @@ export function NewChatDialog({ open, onClose, onOpenProfile }: Props) {
 
         <div className="max-h-80 overflow-y-auto">
           {error && (
-            <p className="px-4 py-3 text-sm text-destructive">{error}</p>
+            <p className="px-4 py-3 text-sm text-muted-foreground">{error}</p>
           )}
           {!error && loading && (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">

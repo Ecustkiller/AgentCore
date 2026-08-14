@@ -73,7 +73,7 @@ function FailureList({ failures }: { failures: readonly BatchFailure[] }) {
               {locationLabel(f.path)}
             </span>
           </div>
-          <p className="text-xs text-destructive/80">{f.reason}</p>
+          <p className="text-xs text-muted-foreground">{f.reason}</p>
         </li>
       ))}
     </ul>

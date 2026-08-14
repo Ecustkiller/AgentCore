@@ -7,14 +7,13 @@ import {
 import { cn } from "@/lib/utils";
 import type { ActiveNotice } from "@/services/notices";
 import { useProductNoticesStore } from "@/stores/productNotices";
-import { AlertTriangle, Info, X } from "lucide-react";
+import { Info, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 /** Map notice severity → tone-presets (no hardcoded hex / warning slot). */
 export function noticeSeverityTone(severity: string): StatusTone {
   switch (severity) {
     case "critical":
-      return "destructive";
     case "high":
       return "primary";
     default:
@@ -69,7 +68,6 @@ function NoticeBannerRow({
   navigate: (to: string) => void;
 }) {
   const tone = noticeSeverityTone(notice.severity);
-  const Icon = tone === "destructive" ? AlertTriangle : Info;
 
   return (
     // biome-ignore lint/a11y/useSemanticElements: 内嵌 CTA / 关闭按钮，<output> 语义不符——保留 aria live 容器。
@@ -80,7 +78,7 @@ function NoticeBannerRow({
         statusChip[tone],
       )}
     >
-      <Icon size={15} className={cn("shrink-0", statusAccentText[tone])} />
+      <Info size={15} className={cn("shrink-0", statusAccentText[tone])} />
       <span className="min-w-0 flex-1 text-foreground">{notice.title}</span>
       {notice.cta_label && notice.cta_url ? (
         <Button

@@ -47,7 +47,8 @@ DEFAULT_TIMEOUT_WARN_RATIO = 0.75
 # file_read 不在此基础集：仅交付类（form=files / 非空 artifacts，工具面仍含
 # file_write）经 :func:`wind_down_allowed_tools` 叠加——回读自己产物属于写作，
 # 不是继续调查；web_search / read_url / grep 等检索类不放回。
-# code_diagnostics：修码自检（内环），收尾/delivery_idle 收窄后仍可用。
+# code_diagnostics：修码自检（内环），token/timeout 收尾收窄后仍可用。
+# 交文件 delivery_idle 收窄已退役；本白名单仍可被显式构造的 idle narrow 复用。
 # md_to_docx / md_to_pdf：把已成篇 .md 确定性导出为同目录同名交付件——用户要
 # PDF / Word / 可分享文件时的成文主路径末步（见 research_quality.MD_EXPORT_DISCIPLINE），
 # 属收口落盘而非新战线：不检索、不出网、回执只有一行 manifest。

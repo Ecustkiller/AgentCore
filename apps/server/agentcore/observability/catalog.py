@@ -367,6 +367,30 @@ EVENTS: list[EventSpec] = [
             'via': FieldType('str'),
         },
     ),
+    EventSpec(
+        name='chat.zero_output_send_delete_failed',
+        description=(
+            '本发零产出回滚硬删失败（助手或 user 行未去掉）；客户端仍可能撤泡，重载以库为准'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'message_id': FieldType('str'),
+            'user_message_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='chat.zero_output_send_deleted',
+        description=(
+            '本发新建 user + 空失败助手（LLM_RATE_LIMIT / KEY_INVALID / 余额不足，无正文/工具/token'
+            '）已硬删，发送在库里当没发生；cost_events 留下'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'error_code': FieldType('str'),
+            'message_id': FieldType('str'),
+            'user_message_id': FieldType('str'),
+        },
+    ),
     EventSpec(name='checkpoint.finalized'),
     EventSpec(name='checkpoint.persist_failed'),
     EventSpec(name='checkpoint.persist_unavailable'),
@@ -632,7 +656,10 @@ EVENTS: list[EventSpec] = [
             'total_usd': FieldType('float'),
         },
     ),
-    EventSpec(name='cost.tools_offered'),
+    EventSpec(
+        name='cost.tools_offered',
+        description='发给模型的工具 schema JSON 体积（scope=ceo_turn|worker_run；只观测不闸）',
+    ),
     EventSpec(name='db.migration_check_failed'),
     EventSpec(name='db.migration_upgrade_failed'),
     EventSpec(name='db.migrations_branched'),
@@ -1051,6 +1078,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.token_budget_exhausted'),
     EventSpec(name='engine.tool_circuit_breaker'),
     EventSpec(name='engine.tool_clear'),
+    EventSpec(name='engine.tool_clear_exec'),
     EventSpec(name='engine.turn_steer_inject'),
     EventSpec(name='engine.turn_token_budget_nudge'),
     EventSpec(name='engine.unproductive_stop'),
@@ -1159,6 +1187,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='friend.request_cancelled'),
     EventSpec(name='friend.request_created'),
     EventSpec(name='friend.request_rejected'),
+    EventSpec(name='fulfill.attention_pushed'),
+    EventSpec(name='fulfill.attention_seed_failed'),
+    EventSpec(name='fulfill.attention_snapshot_pushed'),
     EventSpec(name='fulfill.delivered'),
     EventSpec(
         name='fulfill.grace_expired',
@@ -1190,6 +1221,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='fulfill.origin_offline'),
     EventSpec(name='fulfill.paused_card_settled_pushed'),
+    EventSpec(name='fulfill.queue_account_snapshot_pushed'),
     EventSpec(name='fulfill.queue_full_close'),
     EventSpec(name='fulfill.queue_snapshot_pushed'),
     EventSpec(name='fulfill.receipt_device_offline'),
@@ -1211,6 +1243,9 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='fulfill.register'),
     EventSpec(name='fulfill.root_declared'),
+    EventSpec(name='fulfill.turn_activity_pushed'),
+    EventSpec(name='fulfill.turn_activity_seed_failed'),
+    EventSpec(name='fulfill.turn_activity_snapshot_pushed'),
     EventSpec(name='fulfill.unregister'),
     EventSpec(name='git.binary_ok'),
     EventSpec(name='git.binary_unavailable'),
@@ -1304,9 +1339,10 @@ EVENTS: list[EventSpec] = [
         description=(
             '429 冷却超出本次调用能等的上限，放弃重试。cooldown_sec / cooldown_source = 判定所依据'
             '的冷却及其来源：upstream_header（上游声明，reason=retry_after_too_large）/ local_backo'
-            'ff（上游没带头，这个数是我们自己的退避链，reason=backoff_exceeds_budget）；retry_after'
-            '_sec 只记上游声明值，无头时为 null；ceiling_sec = 该上限（后台一次性调用按剩余预算算，'
-            '交互回合为 30s）'
+            'ff（上游没带头，这个数是我们自己的退避链，reason=backoff_exceeds_budget）；交互回合 ch'
+            'at/agent 无头或头>2s 立刻放弃（reason=interactive_fail_fast），不再走 2→4→8→16；retry_'
+            'after_sec 只记上游声明值，无头时为 null；ceiling_sec = 该上限（后台一次性调用按剩余预'
+            '算算，交互回合为 30s）'
         ),
         fields={
             'attempt': FieldType('int'),
@@ -2029,6 +2065,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='turn_queue.enqueued_no_live_sink'),
     EventSpec(name='turn_queue.start_failed'),
     EventSpec(name='turn_queue.starting'),
+    EventSpec(name='turn_run.activity_done_failed'),
+    EventSpec(name='turn_run.activity_running_failed'),
     EventSpec(name='turn_run.conversation_publish_failed'),
     EventSpec(name='turn_run.drain'),
     EventSpec(name='turn_run.overlap'),
@@ -2106,7 +2144,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='workflow.run_conversation_missing'),
     EventSpec(name='workflow.run_failed'),
     EventSpec(name='workflow.run_finished'),
-    EventSpec(name='workflow.saved_from_turn'),
     EventSpec(name='workflow.slot_extract_failed'),
     EventSpec(name='workflow.slot_extract_timeout'),
     EventSpec(name='workflow.slot_roundtrip_mismatch'),

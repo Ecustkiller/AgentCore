@@ -682,7 +682,6 @@ export type ActSummaryLive = Pick<
   | "total"
   | "durationMs"
   | "pendingDecisions"
-  | "recoverable"
 >;
 
 /** Live act-card progress — derived from current Execution via scene IR. */
@@ -706,7 +705,6 @@ export function useActSummaryLive(actId: string): ActSummaryLive | null {
       total: sa.total,
       durationMs: sa.durationMs,
       pendingDecisions: sa.pendingDecisions,
-      recoverable: sa.recoverable,
     };
   }, [liveSig, actId, getExecution]);
 }

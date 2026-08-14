@@ -215,6 +215,8 @@ describe("ModelSettings (profiles + providers)", () => {
     await waitFor(() => expect(screen.getByText("DeepSeek")).toBeTruthy());
     expect(screen.getByText("OpenAI")).toBeTruthy();
     expect(screen.getByText("api.deepseek.com")).toBeTruthy();
+    expect(screen.getByText("测试用模型 deepseek-v4-pro")).toBeTruthy();
+    expect(screen.getByText("测试用模型 gpt-4o")).toBeTruthy();
     expect(screen.queryByText("模型 deepseek-v4-pro")).toBeNull();
     expect(screen.getAllByTestId("provider-card")).toHaveLength(2);
     expect(screen.getByTestId("profiles-section")).toBeTruthy();
@@ -517,6 +519,7 @@ describe("ModelSettings (profiles + providers)", () => {
     render(<ModelSettings />);
 
     await waitFor(() => expect(screen.getByTestId("profile-new")).toBeTruthy());
+    expect(screen.queryByText(/测试用模型/)).toBeNull();
     fireEvent.click(screen.getByTestId("profile-new"));
     await screen.findByTestId("profile-form");
     expect(screen.getByTestId("profile-main-combobox")).toBeTruthy();
@@ -820,5 +823,10 @@ describe("ModelSettings (profiles + providers)", () => {
       ).toBeTruthy(),
     );
     expect(screen.queryByText("加载失败，请重试")).toBeNull();
+    const line = screen
+      .getByText("此账号为管理员账号，请使用管理后台登录")
+      .closest(".error");
+    expect(line?.className).toBe("error");
+    expect(line?.className).not.toMatch(/\b(bar|inline-actions|needs-you)\b/);
   });
 });

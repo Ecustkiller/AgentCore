@@ -710,12 +710,10 @@ async def test_apply_target_desktop_mixed_local_and_cloud():
 
 
 def test_auto_cloud_desk_name_takes_name_shaped_title():
-    """够短、没有截断标记的标题 → 直接当文件夹名（中西文同轨）。"""
+    """显示宽度 ≤16、没有截断标记 → 直接当文件夹名（中西文同轨）。"""
     assert auto_cloud_desk_name(conversation_title="  抚养费起诉状  ") == "抚养费起诉状"
-    assert (
-        auto_cloud_desk_name(conversation_title="Child support complaint")
-        == "Child support complaint"
-    )
+    assert auto_cloud_desk_name(conversation_title="抚养费起诉状草稿") == "抚养费起诉状草稿"
+    assert auto_cloud_desk_name(conversation_title="Q3 report") == "Q3 report"
 
 
 def test_auto_cloud_desk_name_rejects_truncated_title():
@@ -728,11 +726,16 @@ def test_auto_cloud_desk_name_rejects_truncated_title():
 
 
 def test_auto_cloud_desk_name_rejects_sentence_length_title():
-    """没被截断但一看就是一句话（超出名字宽度）→ 通用名。"""
+    """没被截断但超宽（含英文长标题）→ 通用名。"""
     zh = "帮我写一份要求男方支付抚养费的起诉状"
-    en = "Draft a child support complaint for me"
+    en = "Child support complaint"
+    assert auto_cloud_desk_name(conversation_title="抚养费起诉状及证据") == "云文件夹"
     assert auto_cloud_desk_name(conversation_title=zh) == "云文件夹"
     assert auto_cloud_desk_name(conversation_title=en) == "云文件夹"
+    assert (
+        auto_cloud_desk_name(conversation_title="Draft a child support complaint for me")
+        == "云文件夹"
+    )
 
 
 def test_auto_cloud_desk_name_falls_back_without_title():

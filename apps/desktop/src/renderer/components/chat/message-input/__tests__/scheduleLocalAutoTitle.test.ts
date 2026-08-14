@@ -2,10 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/hooks/useConversations", () => ({
   patchConversationCache: vi.fn(),
+  upsertConversationFront: vi.fn(),
+  applyDeletedConversationLocally: vi.fn(),
 }));
 
 vi.mock("@/services/conversations", () => ({
   requestAutoTitle: vi.fn(),
+  deleteConversation: vi.fn(),
 }));
 
 vi.mock("@/services/sidecarRouting", () => ({

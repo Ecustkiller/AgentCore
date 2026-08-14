@@ -6,6 +6,10 @@ import asyncio
 
 import pytest
 
+from agentcore.fulfill.user_signal import (
+    FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+    queue_account_snapshot_frame,
+)
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.turn.queue import QueuedTurn, TurnQueue, new_queued_turn, turn_queue
 from agentcore.runtime.turn.runs import TurnRunRegistry, turn_runs
@@ -360,3 +364,28 @@ def test_list_pending_empty_and_fifo_order_with_interjection():
     assert snap_b[0].content == "other conv"
     assert snap_b[0].interjection_id == "inj-x"
     assert q.list_pending("c-missing") == []
+
+
+def test_account_snapshot_empty_table_is_still_a_frame():
+    q = TurnQueue()
+    assert q.account_snapshot_frame("u1") == {
+        "type": FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+        "payload": {"queues": []},
+    }
+    assert queue_account_snapshot_frame([]) == {
+        "type": FRAME_QUEUE_ACCOUNT_SNAPSHOT,
+        "payload": {"queues": []},
+    }
+
+
+def test_account_snapshot_is_one_frame_for_this_users_queues():
+    q = TurnQueue()
+    q.enqueue("c1", new_queued_turn(content="a", user_id="u1"))
+    q.enqueue("c2", new_queued_turn(content="b", user_id="u1"))
+    q.enqueue("c3", new_queued_turn(content="other", user_id="u2"))
+    frame = q.account_snapshot_frame("u1")
+    assert frame["type"] == FRAME_QUEUE_ACCOUNT_SNAPSHOT
+    queues = frame["payload"]["queues"]
+    assert {row["conversation_id"] for row in queues} == {"c1", "c2"}
+    assert all(isinstance(row["items"], list) and row["items"] for row in queues)
+    assert frame["type"] != "turn_queue_snapshot"

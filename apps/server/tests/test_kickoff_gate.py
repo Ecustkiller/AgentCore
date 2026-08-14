@@ -633,6 +633,16 @@ async def test_debate_resume_stop_continue_adjust():
     assert captured[-1]["arguments"]["motion"] == "原命题"
     assert captured[-1]["arguments"]["_kickoff_ask"] == "改成新命题"
 
+    before_timeout = len(captured)
+    timed_out = await tool.resume_after_kickoff(
+        decision=CheckpointDecision.TIMEOUT, note="", arguments=args
+    )
+    assert len(captured) == before_timeout
+    assert "未在时限内回应" in timed_out.output
+    assert "未开赛" in timed_out.output
+    assert "自行收尾" in timed_out.output
+    assert "宜先问" not in timed_out.output
+
 
 async def test_delegate_full_auto_multi_skips_card():
     """Regression: full_auto + ≥2 workers no longer pauses for plan half."""

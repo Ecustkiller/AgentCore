@@ -11,7 +11,12 @@ vi.mock("@/components/files/FileTreeRowMenu", () => ({
 
 function noop() {}
 
-function renderDir(path: string, name: string, fileCount: number) {
+function renderDir(
+  path: string,
+  name: string,
+  fileCount: number,
+  status: "ready" | "error" = "ready",
+) {
   const children = Array.from({ length: fileCount }, (_, i) => ({
     path: `${path}/f${i}.md`,
     name: `f${i}.md`,
@@ -23,18 +28,20 @@ function renderDir(path: string, name: string, fileCount: number) {
     caps: { watch: false, transfer: false, edit: false, snapshots: false },
   } as unknown as FileSource;
   const data = {
-    childrenOf: (dir: string) => map.get(dir),
-    statusOf: () => "ready" as const,
+    childrenOf: (dir: string) =>
+      status === "error" ? undefined : map.get(dir),
+    statusOf: () => status,
     truncatedOf: () => false,
     ensureDir: noop,
     reload: noop,
+    reloadSilent: async () => {},
   };
   const base = {
     depth: 0,
     indentBase: 0,
     source,
     data,
-    expanded: new Set<string>(),
+    expanded: status === "error" ? new Set([path]) : new Set<string>(),
     activePath: null,
     creating: null,
     renaming: null,
@@ -99,5 +106,14 @@ describe("FileTreeRow 约定根呈现名", () => {
     renderDir("src/AgentCore", "AgentCore", 1);
     expect(screen.getByText("AgentCore")).toBeTruthy();
     expect(screen.queryByText("AI 工作间")).toBeNull();
+  });
+});
+
+describe("FileTreeRow load error tone", () => {
+  it("展开后加载失败 is muted, not destructive", () => {
+    renderDir("docs", "docs", 0, "error");
+    const line = screen.getByText("加载失败");
+    expect(line.className).toContain("text-muted-foreground");
+    expect(line.className).not.toContain("destructive");
   });
 });

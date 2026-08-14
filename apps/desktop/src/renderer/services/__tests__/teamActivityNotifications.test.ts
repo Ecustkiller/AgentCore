@@ -4,6 +4,10 @@ import { queryClient } from "@/lib/queryClient";
 import { notifyInfo } from "@/lib/toast";
 import { startTeamActivityNotifications } from "@/services/teamActivityNotifications";
 import { applyAiAttention, useAiAttentionStore } from "@/stores/aiAttention";
+import {
+  applyAiTurnActivity,
+  useAiTurnActivityStore,
+} from "@/stores/aiTurnActivity";
 import { useConversationStore } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { type PendingResume, usePausedTurnStore } from "@/stores/pausedTurns";
@@ -87,6 +91,7 @@ function setGenerating(id: string, generating: boolean): void {
           loadingOlder: false,
           loadingNewer: false,
           pendingTurnWarning: null,
+          executionVia: null,
         }),
         isGenerating: generating,
       },
@@ -106,6 +111,7 @@ describe("startTeamActivityNotifications", () => {
     usePausedTurnStore.getState().clear();
     useInteractionStore.getState().clear();
     useAiAttentionStore.getState().clear();
+    useAiTurnActivityStore.getState().clear();
     window.location.hash = `#/conversations/${OTHER}`;
     stop = startTeamActivityNotifications();
   });
@@ -115,6 +121,7 @@ describe("startTeamActivityNotifications", () => {
     usePausedTurnStore.getState().clear();
     useInteractionStore.getState().clear();
     useAiAttentionStore.getState().clear();
+    useAiTurnActivityStore.getState().clear();
     useConversationStore.setState({ currentConversationId: null, byId: {} });
   });
 
@@ -136,18 +143,97 @@ describe("startTeamActivityNotifications", () => {
     expect(messages).toContain("「团队辩论」等待你确认后才会继续");
   });
 
-  it("普通收口仍弹已完成", async () => {
+  it("云对话完成认 reason=completed 弹已完成", () => {
     seedTitle(CID, "调研");
-    setGenerating(CID, true);
-    setGenerating(CID, false);
-
-    await Promise.resolve();
-    await Promise.resolve();
-
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
     expect(notifyInfoMock).toHaveBeenCalledWith(
       "「调研」已完成",
       expect.any(Object),
     );
+  });
+
+  it("reason=error 弹执行失败；paused/stopped 不报已完成", () => {
+    seedTitle(CID, "调研");
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "error",
+    });
+    expect(notifyInfoMock).toHaveBeenCalledWith(
+      "「调研」执行失败",
+      expect.any(Object),
+    );
+
+    notifyInfoMock.mockClear();
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "paused",
+    });
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "stopped",
+    });
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("云对话 isGenerating↓ 不再当完成（改认 activity reason）", async () => {
+    seedTitle(CID, "调研");
+    setGenerating(CID, true);
+    setGenerating(CID, false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+  });
+
+  it("sidecar 本端收口仍弹已完成，云 done 不双计", async () => {
+    seedTitle(CID, "本机");
+    setGenerating(CID, true);
+    useConversationStore.setState((s) => ({
+      byId: {
+        ...s.byId,
+        [CID]: { ...s.byId[CID], executionVia: "sidecar" },
+      },
+    }));
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+
+    setGenerating(CID, false);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(notifyInfoMock).toHaveBeenCalledTimes(1);
+    expect(notifyInfoMock).toHaveBeenCalledWith(
+      "「本机」已完成",
+      expect.any(Object),
+    );
+  });
+
+  it("本地容器对话忽略云 done", () => {
+    getConversationsMock.mockReturnValue([
+      {
+        id: CID,
+        title: "本机容器",
+        updatedAt: "2020-01-01T00:00:00.000Z",
+        messageCount: 0,
+        lastMessagePreview: null,
+        localContainerRootId: "root-1",
+      },
+    ]);
+    applyAiTurnActivity({
+      conversation_id: CID,
+      state: "done",
+      reason: "completed",
+    });
+    expect(notifyInfoMock).not.toHaveBeenCalled();
   });
 
   it("挂起 ask_user / plan_review 弹等待你确认后才会继续", () => {

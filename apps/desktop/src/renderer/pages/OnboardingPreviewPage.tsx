@@ -133,7 +133,7 @@ export function OnboardingPreviewPage() {
           >
             <div className="mx-auto flex w-full max-w-3xl flex-col">
               <div className="px-4 pb-2 text-center text-sm text-muted-foreground">
-                回合执行中：画布命令栏同样「插队 / 排队 /
+                回合执行中：聊天居中输入同样「插队 / 排队 /
                 停止」并存；无草稿仅停止
               </div>
               <MessageInput className="px-4 pb-2 pt-4" variant="card" />

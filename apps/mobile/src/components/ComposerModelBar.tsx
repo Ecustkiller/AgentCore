@@ -1,11 +1,8 @@
 import { Bot } from "lucide-react";
 
 /**
- * Composer 上方常驻的「本会话跑在哪个模型组合上」——原先埋在「＋ → 更多」两层里，
- * 用户看不到会话钉死在平台预置组合上，接了自己的 API 仍撞限流才发现。
- *
- * 独立成行而不是塞进 composer：窄屏下主输入区不让宽。点击开的仍是同一个
- * ModelPicker，选择逻辑不变。
+ * Composer 行内模型组合 chip（＋ 与输入之间）。
+ * 窄屏限宽省略，完整名走 aria-label / title；点击仍开同一个 ModelPicker。
  */
 export function ComposerModelBar({
   label,
@@ -19,20 +16,20 @@ export function ComposerModelBar({
   disabled?: boolean;
   onOpen: () => void;
 }) {
+  const fullName = `模型组合：${label}${preset ? "（系统预置）" : ""}`;
   return (
-    <div className="composer-model-bar">
-      <button
-        type="button"
-        className="composer-model-chip"
-        data-testid="composer-model-chip"
-        aria-label={`模型组合：${label}${preset ? "（系统预置）" : ""}`}
-        disabled={disabled}
-        onClick={onOpen}
-      >
-        <Bot size={13} className="composer-model-icon" aria-hidden />
-        <span className="composer-model-name">{label}</span>
-        {preset && <span className="model-preset-badge">预置</span>}
-      </button>
-    </div>
+    <button
+      type="button"
+      className="composer-model-chip"
+      data-testid="composer-model-chip"
+      aria-label={fullName}
+      title={label}
+      disabled={disabled}
+      onClick={onOpen}
+    >
+      <Bot size={13} className="composer-model-icon" aria-hidden />
+      <span className="composer-model-name">{label}</span>
+      {preset && <span className="model-preset-badge">预置</span>}
+    </button>
   );
 }

@@ -40,6 +40,13 @@ import {
   pickRecentConversations,
 } from "./composerAttachments";
 import {
+  MENTION_CATEGORY_LABEL,
+  buildMentionCategoryRows,
+  isMentionSectionId,
+  mentionMenuKeyAction,
+  showMentionCategoryLevel,
+} from "./mentionMenuLevel";
+import {
   pickLocalFileAttachment,
   stageRootFileAttachment,
 } from "./resideAttachment";
@@ -85,6 +92,7 @@ export function useMentionMenu({
   setAgentMentions,
   textareaRef,
   onAttachmentFolderHint,
+  onBrowserFilePick,
 }: {
   conversationId: string | null;
   value: string;
@@ -96,10 +104,15 @@ export function useMentionMenu({
   textareaRef: RefObject<HTMLTextAreaElement | null>;
   /** Draft-only: @ / browse attach from a folder → suggest filing into it (B4). */
   onAttachmentFolderHint?: (hint: AttachmentFolderHint) => void;
+  /** Web：无本机选择器时点「附件」走 hidden file input。 */
+  onBrowserFilePick?: () => void;
 }) {
   const [menuMode, setMenuMode] = useState<MenuMode>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [activeCategory, setActiveCategory] = useState<MentionSectionId | null>(
+    null,
+  );
   const [menuError, setMenuError] = useState<string | null>(null);
   const [fileIndex, setFileIndex] = useState<IndexedEntry[]>([]);
   const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
@@ -110,6 +123,8 @@ export function useMentionMenu({
   const sourcesRef = useRef<Map<string, FileSource>>(new Map());
   const mentionRangeRef = useRef<{ start: number; end: number } | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  /** 手打 @ → 团队；工具栏 @ → 附件。打开后不因索引加载改高亮。 */
+  const highlightPrefRef = useRef<"team" | "attach">("team");
 
   const messages = useConversationStore((s) => {
     if (!conversationId) return EMPTY_MESSAGES;
@@ -126,6 +141,12 @@ export function useMentionMenu({
     () => parseMentionFilter(query),
     [query],
   );
+  const showCategoryLevel = showMentionCategoryLevel({
+    sectionFilter,
+    activeCategory,
+    filterText,
+  });
+  const focusedSection = sectionFilter ?? activeCategory;
 
   // 缓存列表变动时（发送/新建）刷新对话分区；tick 作轻量失效键。
   // biome-ignore lint/correctness/useExhaustiveDependencies: conversationId is an intentional re-run key
@@ -134,21 +155,44 @@ export function useMentionMenu({
     setConvTick((n) => n + 1);
   }, [menuMode, conversationId]);
 
+  const emptyLimit = focusedSection !== null ? 50 : EMPTY_MENTION_INDEX_LIMIT;
+
   const convItems = useMemo(() => {
     void convTick;
-    if (menuMode === "browse" && !filterText.trim() && !sectionFilter) {
-      // browse 空搜不强推对话；有过滤词或类型前缀时再出。
-      if (!query.trim()) return [];
+    if (
+      menuMode === "browse" &&
+      !filterText.trim() &&
+      !focusedSection &&
+      !query.trim()
+    ) {
+      // browse 空搜不强推对话；有过滤词、类型前缀或已钻入时再出。
+      return [];
     }
     return pickRecentConversations(
       getConversations(),
       conversationId,
       filterText,
-      EMPTY_MENTION_INDEX_LIMIT,
+      emptyLimit,
     );
-  }, [convTick, menuMode, filterText, sectionFilter, query, conversationId]);
+  }, [
+    convTick,
+    menuMode,
+    filterText,
+    focusedSection,
+    query,
+    conversationId,
+    emptyLimit,
+  ]);
 
-  const emptyLimit = sectionFilter === null ? EMPTY_MENTION_INDEX_LIMIT : 50;
+  const convCount = useMemo(() => {
+    void convTick;
+    return pickRecentConversations(
+      getConversations(),
+      conversationId,
+      filterText,
+      Number.MAX_SAFE_INTEGER,
+    ).length;
+  }, [convTick, conversationId, filterText]);
 
   const folderItems = useMemo(() => {
     const dirs = filterEntries(dirIndex, filterText, emptyLimit);
@@ -176,13 +220,42 @@ export function useMentionMenu({
     }));
   }, [teamAgents, filterText]);
 
+  const folderCount = useMemo(
+    () =>
+      filterText.trim()
+        ? filterEntries(dirIndex, filterText, Number.MAX_SAFE_INTEGER).length
+        : dirIndex.length,
+    [dirIndex, filterText],
+  );
+  const fileCount = useMemo(
+    () =>
+      filterText.trim()
+        ? filterEntries(fileIndex, filterText, Number.MAX_SAFE_INTEGER).length
+        : fileIndex.length,
+    [fileIndex, filterText],
+  );
+
+  const categories = useMemo(
+    () =>
+      buildMentionCategoryRows({
+        counts: {
+          team: agentItems.length,
+          conversation: convCount,
+          folder: folderCount,
+          file: fileCount,
+        },
+        loadingFiles: indexLoading,
+      }),
+    [agentItems.length, convCount, folderCount, fileCount, indexLoading],
+  );
+
   const sections = useMemo((): MentionMenuSection[] => {
     const show = (id: MentionSectionId) =>
-      sectionFilter === null || sectionFilter === id;
+      focusedSection === null || focusedSection === id;
 
     const out: MentionMenuSection[] = [];
 
-    // browse：不强推团队空态；mention 始终可出团队分区。
+    // browse：不强推团队空态；mention 始终可出团队分区；钻入/前缀时允许空态。
     if (menuMode === "mention" && show("team")) {
       out.push({
         id: "team",
@@ -191,18 +264,29 @@ export function useMentionMenu({
         emptyHint:
           agentItems.length === 0 ? "多 Agent 回合后可点名" : undefined,
       });
-    } else if (menuMode === "browse" && show("team") && agentItems.length > 0) {
-      out.push({ id: "team", label: "团队", items: agentItems });
+    } else if (
+      menuMode === "browse" &&
+      show("team") &&
+      (agentItems.length > 0 || focusedSection === "team")
+    ) {
+      out.push({
+        id: "team",
+        label: "团队",
+        items: agentItems,
+        emptyHint:
+          agentItems.length === 0 ? "多 Agent 回合后可点名" : undefined,
+      });
     }
 
     if (
       show("conversation") &&
-      (convItems.length > 0 || sectionFilter === "conversation")
+      (convItems.length > 0 || focusedSection === "conversation")
     ) {
       out.push({
         id: "conversation",
         label: "对话",
         items: convItems,
+        emptyHint: convItems.length === 0 ? "暂无其他对话" : undefined,
       });
     }
 
@@ -211,6 +295,10 @@ export function useMentionMenu({
         id: "folder",
         label: "文件夹",
         items: folderItems,
+        emptyHint:
+          folderItems.length === 0 && focusedSection === "folder"
+            ? "没有匹配的文件夹"
+            : undefined,
       });
     }
 
@@ -219,18 +307,32 @@ export function useMentionMenu({
         id: "file",
         label: "文件",
         items: fileItems,
+        emptyHint:
+          fileItems.length === 0 && focusedSection === "file"
+            ? "没有匹配的文件"
+            : undefined,
       });
     }
 
     return out;
-  }, [menuMode, sectionFilter, agentItems, convItems, folderItems, fileItems]);
+  }, [menuMode, focusedSection, agentItems, convItems, folderItems, fileItems]);
 
   const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
 
+  // 一级：手打高亮团队、工具栏高亮附件；索引加载完成不抢高亮。
+  // biome-ignore lint/correctness/useExhaustiveDependencies: categories read on level enter only
+  useEffect(() => {
+    if (!showCategoryLevel) return;
+    const want = highlightPrefRef.current;
+    const i = categories.findIndex((c) => c.id === want);
+    setActiveIndex(i >= 0 ? i : 0);
+  }, [query, menuMode, showCategoryLevel]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode/sections are intentional re-run keys
   useEffect(() => {
+    if (showCategoryLevel) return;
     setActiveIndex(0);
-  }, [query, menuMode, flatItems.length]);
+  }, [query, menuMode, flatItems.length, showCategoryLevel]);
 
   const ensureIndex = useCallback(async () => {
     if (indexLoadedRef.current) return;
@@ -262,6 +364,7 @@ export function useMentionMenu({
   const closeMenu = useCallback(() => {
     setMenuMode(null);
     setMenuError(null);
+    setActiveCategory(null);
     mentionRangeRef.current = null;
   }, []);
 
@@ -332,15 +435,61 @@ export function useMentionMenu({
   }, [menuMode, value, setValue, textareaRef]);
 
   const openMention = useCallback(
-    (start: number, end: number, q: string) => {
+    (
+      start: number,
+      end: number,
+      q: string,
+      highlight: "team" | "attach" = "team",
+    ) => {
       mentionRangeRef.current = { start, end };
       setQuery(q);
+      if (menuMode !== "mention") {
+        setActiveCategory(null);
+        highlightPrefRef.current = highlight;
+      } else if (highlight === "attach") {
+        highlightPrefRef.current = highlight;
+      }
       setMenuMode("mention");
       setMenuError(null);
       void ensureIndex();
     },
-    [ensureIndex],
+    [ensureIndex, menuMode],
   );
+
+  const clearActiveMention = useCallback(() => {
+    stripMentionQuery();
+    closeMenu();
+  }, [stripMentionQuery, closeMenu]);
+
+  /** 工具栏 @：插入 `@` 开菜单（高亮附件）；已在 @query 内不插第二个；菜单已开则关。 */
+  const toggleAtMention = useCallback(() => {
+    if (menuMode) {
+      closeMenu();
+      textareaRef.current?.focus();
+      return;
+    }
+    const el = textareaRef.current;
+    const caret = el?.selectionStart ?? value.length;
+    const selEnd = el?.selectionEnd ?? caret;
+    const existing = detectMention(value, caret);
+    if (existing) {
+      openMention(existing.start, caret, existing.query, "attach");
+      el?.focus();
+      return;
+    }
+    const needsSpace = caret > 0 && !/\s/.test(value[caret - 1] ?? "");
+    const insert = `${needsSpace ? " " : ""}@`;
+    const next = value.slice(0, caret) + insert + value.slice(selEnd);
+    const atPos = caret + (needsSpace ? 1 : 0);
+    setValue(next);
+    openMention(atPos, atPos + 1, "", "attach");
+    requestAnimationFrame(() => {
+      const box = textareaRef.current;
+      if (!box) return;
+      box.focus();
+      box.selectionStart = box.selectionEnd = atPos + 1;
+    });
+  }, [menuMode, closeMenu, value, setValue, openMention, textareaRef]);
 
   const openBrowse = useCallback(() => {
     if (menuMode === "browse") {
@@ -349,6 +498,7 @@ export function useMentionMenu({
     }
     mentionRangeRef.current = null;
     setQuery("");
+    setActiveCategory(null);
     setMenuMode("browse");
     setMenuError(null);
     void ensureIndex();
@@ -486,7 +636,7 @@ export function useMentionMenu({
             setMenuError(
               res.kind === "too-large"
                 ? "文件过大，无法作为附件"
-                : "图片或二进制请用回形针 / 拖入附加（将驻留到工作区）",
+                : "图片或二进制请用 @ 附件或拖入附加（将驻留到工作区）",
             );
             return;
           }
@@ -544,14 +694,17 @@ export function useMentionMenu({
     await ensureIndex();
   }, [ensureIndex]);
 
-  /** 回形针 / 菜单：从本机任选文件（含工作区外），主进程驻留。 */
+  /** 一级「附件」/ 菜单：从本机任选文件（含工作区外），主进程驻留。 */
   const pickLocalFile = useCallback(async () => {
+    if (!hasLocalFiles()) {
+      onBrowserFilePick?.();
+      return;
+    }
     setMenuError(null);
     const res = await pickLocalFileAttachment(conversationId);
     if (res === null) return;
     if (!res.ok) {
       setMenuError(res.reason);
-      // 回形针直开选择器时菜单可能未开——仍把错误挂在 menuError，并确保 browse 可见。
       if (!menuMode) {
         setMenuMode("browse");
         mentionRangeRef.current = null;
@@ -560,7 +713,7 @@ export function useMentionMenu({
     }
     const key = `picked:${res.name}:${res.workspacePath ?? res.stagingId ?? res.name}`;
     if (attachments.some((a) => a.key === key)) {
-      closeMenu();
+      clearActiveMention();
       return;
     }
     const attachment: PendingAttachment = {
@@ -577,56 +730,128 @@ export function useMentionMenu({
     };
     setAttachments((prev) => [...prev, attachment]);
     startCloudUpload(attachment);
-    closeMenu();
-    textareaRef.current?.focus();
+    clearActiveMention();
   }, [
     attachments,
-    closeMenu,
+    clearActiveMention,
     conversationId,
     menuMode,
+    onBrowserFilePick,
     setAttachments,
     startCloudUpload,
-    textareaRef,
   ]);
+
+  const setMenuQuery = useCallback(
+    (q: string) => {
+      if (menuMode === "browse" && q.trim()) setActiveCategory(null);
+      setQuery(q);
+    },
+    [menuMode],
+  );
+
+  const drillCategory = useCallback((id: MentionSectionId) => {
+    setActiveCategory(id);
+    setActiveIndex(0);
+    setMenuError(null);
+  }, []);
+
+  const goBack = useCallback(() => {
+    if (activeCategory) {
+      setActiveCategory(null);
+      setActiveIndex(0);
+      return;
+    }
+    if (!sectionFilter) return;
+    if (menuMode === "mention") {
+      const range = mentionRangeRef.current;
+      const next = filterText;
+      if (range) {
+        const updated =
+          value.slice(0, range.start + 1) + next + value.slice(range.end);
+        setValue(updated);
+        mentionRangeRef.current = {
+          start: range.start,
+          end: range.start + 1 + next.length,
+        };
+      }
+      setQuery(next);
+    } else {
+      setQuery(filterText);
+    }
+    setActiveIndex(0);
+  }, [activeCategory, sectionFilter, menuMode, filterText, value, setValue]);
+
+  const canGoBack = focusedSection !== null && !showCategoryLevel;
+  const canKeyBack = canGoBack && !filterText.trim();
+  const focusedSectionLabel = focusedSection
+    ? MENTION_CATEGORY_LABEL[focusedSection]
+    : undefined;
 
   const handleMenuNavKey = useCallback(
     (e: KeyboardEvent): boolean => {
       if (!menuMode) return false;
-      switch (e.key) {
-        case "ArrowDown":
+      const action = mentionMenuKeyAction(e.key, {
+        showCategoryLevel,
+        categoryCount: categories.length,
+        activeIndex,
+        categoryDisabled: Boolean(categories[activeIndex]?.disabled),
+        categoryAttach: categories[activeIndex]?.id === "attach",
+        itemCount: flatItems.length,
+        canKeyBack,
+      });
+      switch (action.type) {
+        case "move":
           e.preventDefault();
-          setActiveIndex((i) =>
-            Math.min(i + 1, Math.max(flatItems.length - 1, 0)),
-          );
+          setActiveIndex(action.index);
           return true;
-        case "ArrowUp":
+        case "attach":
           e.preventDefault();
-          setActiveIndex((i) => Math.max(i - 1, 0));
+          void pickLocalFile();
           return true;
-        case "Enter":
+        case "drill": {
+          const row = categories[activeIndex];
+          if (!row || row.disabled || !isMentionSectionId(row.id)) return true;
+          e.preventDefault();
+          drillCategory(row.id);
+          return true;
+        }
+        case "back":
+          e.preventDefault();
+          goBack();
+          return true;
+        case "select":
           if (flatItems[activeIndex]) {
             e.preventDefault();
             selectItem(flatItems[activeIndex]);
             return true;
           }
           return false;
-        case "Tab":
-          if (flatItems[activeIndex]) {
-            e.preventDefault();
-            selectItem(flatItems[activeIndex]);
-            return true;
-          }
-          return false;
-        case "Escape":
+        case "close":
           e.preventDefault();
           closeMenu();
           textareaRef.current?.focus();
+          return true;
+        case "consume":
+          e.preventDefault();
           return true;
         default:
           return false;
       }
     },
-    [menuMode, flatItems, activeIndex, selectItem, closeMenu, textareaRef],
+    [
+      menuMode,
+      showCategoryLevel,
+      categories,
+      activeIndex,
+      flatItems,
+      canKeyBack,
+      drillCategory,
+      goBack,
+      selectItem,
+      pickLocalFile,
+      closeMenu,
+      textareaRef,
+    ],
   );
 
   return {
@@ -642,12 +867,20 @@ export function useMentionMenu({
     sourceCount,
     indexLoadedRef,
     searchInputRef,
-    setQuery,
+    showCategoryLevel,
+    categories,
+    canGoBack,
+    focusedSectionLabel,
+    setQuery: setMenuQuery,
     setActiveIndex,
     openBrowse,
+    toggleAtMention,
+    clearActiveMention,
     syncMention,
     attachEntry,
     selectItem,
+    drillCategory,
+    goBack,
     closeMenu,
     handleMenuNavKey,
     handleAddRoot,

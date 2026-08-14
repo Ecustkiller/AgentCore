@@ -82,6 +82,12 @@ describe("FileTextEditor · mtime CAS", () => {
     await waitFor(() => {
       expect(screen.getByText(/还没有保存/)).toBeTruthy();
     });
+    expect(
+      screen.getByText(/还没有保存/).closest(".file-editor-conflict"),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "仍然覆盖" }).className,
+    ).toContain("dialog-danger");
     expect(onSaved).not.toHaveBeenCalled();
     expect(screen.queryByText("已保存")).toBeNull();
     expect(
@@ -147,5 +153,12 @@ describe("FileTextEditor · mtime CAS", () => {
     await waitFor(() => {
       expect(screen.getByText("文件不是 UTF-8 文本，无法编辑")).toBeTruthy();
     });
+    const line = screen
+      .getByText("文件不是 UTF-8 文本，无法编辑")
+      .closest(".error");
+    expect(line?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["error"]),
+    );
+    expect(line?.className).not.toMatch(/\b(bar|inline-actions|needs-you)\b/);
   });
 });

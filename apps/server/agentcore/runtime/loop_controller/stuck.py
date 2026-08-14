@@ -130,12 +130,12 @@ class StuckInterventionMixin:
 
     @property
     def delivery_idle_nudge_rounds(self) -> int:
-        """Configured soft nudge threshold for files_expected read-idle (0 = off)."""
+        """Configured soft nudge threshold (0 = off). Factory: recon-idle only."""
         return self._delivery_idle_nudge_rounds
 
     @property
     def delivery_idle_narrow_rounds(self) -> int:
-        """Configured tool-narrow threshold for files_expected read-idle (0 = off)."""
+        """Configured tool-narrow threshold (0 = off). Factory never arms files-expected."""
         return self._delivery_idle_narrow_rounds
 
     @property
@@ -145,7 +145,7 @@ class StuckInterventionMixin:
 
     @property
     def delivery_idle_report(self) -> bool:
-        """True when soft nudge uses report-landing copy (never arms search strip)."""
+        """Compat flag for report-landing copy; factory never sets this."""
         return self._delivery_idle_report
 
     @property
@@ -197,13 +197,13 @@ class StuckInterventionMixin:
         return True
 
     def convergence_action(self) -> Intervention:
-        """Over-investigation finalize: progress-aware spinning + absolute cap.
+        """Over-investigation finalize: same-target spinning; leftover absolute cap.
 
         Spinning = consecutive investigation-only rounds re-reading the same targets
         (same tool+args fingerprints, or a subset of the prior round). Reading new
         files each round does not trip spinning. The absolute ``finalize_rounds``
-        cap is a hard backstop for true runaways. Each path disabled when its
-        threshold <= 0.
+        knob is leftover API (disabled at ``<= 0``); the product factory always
+        passes 0 — many distinct-target reads are not a runaway.
         """
         if (
             self._convergence_spin_rounds > 0
@@ -227,7 +227,8 @@ class StuckInterventionMixin:
         When a hard ceiling (token backstop / max rounds) forces the run to stop —
         as opposed to the model choosing to finish — this routes the finalize: a
         *thrashing* run (sustained all-failing-no-output rounds, over-investigation
-        spinning / absolute-cap, or a validation fingerprint re-hit after path-stop
+        spinning, leftover absolute-cap if constructed, or a validation fingerprint
+        re-hit after path-stop
         steer) should finish DEGRADED and surface an observable signal, while an
         *on-track* run (made real progress, just ran out of budget) should finalize
         normally and deliver.

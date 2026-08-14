@@ -71,7 +71,12 @@ export function renderTimelineInteractionCard(
     case "team_preview": {
       const tp = bags.teamPreviews.find((p) => p.id === node.checkpoint_id);
       return tp ? (
-        <TeamPreviewCard key={tp.id} preview={tp} messageId={ctx?.messageId} />
+        <TeamPreviewCard
+          key={tp.id}
+          preview={tp}
+          messageId={ctx?.messageId}
+          bubblePreviews={bags.teamPreviews}
+        />
       ) : null;
     }
     case "escalation": {

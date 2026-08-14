@@ -2,15 +2,15 @@ import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { GraphAppendAnchor } from "@/components/chat/GraphAppendAnchor";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
-import {
-  shouldHostPreviewInGraph,
-  teamHasStartedRuns,
-} from "@/components/chat/debatePreviewPlacement";
+import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
 import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
 import { GraphView } from "@/components/graph/GraphView";
+import {
+  journalHydrateIdentity,
+  journalHydrateIdentityEqual,
+} from "@/components/graph/journalHydrate";
 import { executionGraphCapabilities } from "@/components/graph/planCapabilities";
 import { ContextualTip } from "@/components/onboarding/ContextualTip";
-import { formatCollabSummary } from "@/lib/collabSummary";
 import {
   EMBED_DEFAULT_COL_WIDTH,
   estimateBbox,
@@ -28,14 +28,16 @@ import {
   useMessageExecution,
 } from "@/stores/execution";
 import { useGraphStore } from "@/stores/graph";
-import { useMessageInteractionCards } from "@/stores/interactions";
 import { useSidePanelStore } from "@/stores/sidePanel";
 import { turnDetailPath } from "@/stores/ui";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 /** Re-export gate used by fixture tests and graph consumers. */
-export { teamHasStartedRuns } from "@/components/chat/debatePreviewPlacement";
+export {
+  shouldShowTeamGraph,
+  teamHasStartedRuns,
+} from "@/components/chat/debatePreviewPlacement";
 
 /**
  * The multi-agent turn's primary surface, embedded in the assistant message
@@ -53,17 +55,30 @@ export function InlineTeamGraph({
   messageId,
   executionId,
   journal,
+  kickoffReleased = false,
 }: {
   messageId: string;
   executionId: string;
   journal?: ExecutionJournal;
+  /** 开工卡已授权 continue/adjust：pending 编制也出图，不必等第一人开跑. */
+  kickoffReleased?: boolean;
 }) {
   const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const hydrateFromJournal = useExecutionStore((s) => s.hydrateFromJournal);
+  const journalIdentity = journalHydrateIdentity(journal);
+  const journalIdentityRef = useRef(journalIdentity);
+  if (
+    !journalHydrateIdentityEqual(journalIdentityRef.current, journalIdentity)
+  ) {
+    journalIdentityRef.current = journalIdentity;
+  }
+  const stableJournalIdentity = journalIdentityRef.current;
   useEffect(() => {
-    if (journal) hydrateFromJournal(messageId, journal);
-  }, [journal, messageId, hydrateFromJournal]);
+    if (stableJournalIdentity) {
+      hydrateFromJournal(messageId, stableJournalIdentity.journal);
+    }
+  }, [stableJournalIdentity, messageId, hydrateFromJournal]);
 
   const execution = useMessageExecution(messageId);
   // 「打开辩论室」/「在画布打开」/「回放」→ 全屏回合详情；辩论回合传 view=debate
@@ -80,29 +95,6 @@ export function InlineTeamGraph({
       );
     },
     [conversationId, messageId, navigate, execution],
-  );
-  // 「改了 N 版」信号 → 深链全屏页的「对比」视图。
-  const openRevisionsInCanvas = useCallback(() => {
-    if (!conversationId) return;
-    navigate(turnDetailPath(conversationId, messageId, "compare"));
-  }, [conversationId, messageId, navigate]);
-  const { teamPreviews } = useMessageInteractionCards(
-    conversationId,
-    messageId,
-  );
-  const resolvedPreview = useMemo(
-    () => teamPreviews.find((p) => p.status === "resolved") ?? null,
-    [teamPreviews],
-  );
-  const message = useConversationStore((s) => {
-    const key = s.currentConversationId ?? "";
-    return s.byId[key]?.messages.find(
-      (m) => m.id === messageId || m.serverMessageId === messageId,
-    );
-  });
-  const collabSummary = useMemo(
-    () => formatCollabSummary(message?.collab),
-    [message?.collab],
   );
   const [measured, setMeasured] = useState<{
     height: number;
@@ -143,13 +135,12 @@ export function InlineTeamGraph({
     !execution ||
     execution.id !== executionId ||
     !caps.showsTeamGraph ||
-    !teamHasStartedRuns(execution.runs)
+    !shouldShowTeamGraph(execution.runs, kickoffReleased)
   ) {
     return null;
   }
 
   const graphHeight = measured?.height ?? fallbackHeight;
-  const hostPreview = shouldHostPreviewInGraph(resolvedPreview, execution.runs);
   // 推进线（认知轨迹）位置随辩论状态分治：进行中留在标题下方，让用户不点开也能瞥当前轮焦点；
   // 收场后标题已给出结论，推进线降权下移到协作图之后，头部只留一条结论行（前端UX设计.md §三）。
   const debateLive =
@@ -162,7 +153,7 @@ export function InlineTeamGraph({
       <ContextualTip tipId="inline_team_graph" placement="top" active>
         <div className="animate-task-card-enter mb-3 overflow-hidden rounded-xl border border-border bg-card">
           {/* 辩论全过程 / 版本对比等「过程产物」不再内联聊天——它们归画布放大态（统一辩论室 /
-              统一「对比」视图），聊天正文只在状态条留信号（辩论 pill /「改了 N 版」chip）+ 入口 CTA
+              统一「对比」视图），聊天正文状态条只留战绩 + 入口 CTA
               （前端UX设计.md §4.1/§4.2/§6.4）。 */}
           {execution.prevExecutionId ? (
             <div className="border-b border-border/60 px-3 py-2">
@@ -179,9 +170,6 @@ export function InlineTeamGraph({
             onToggle={() => setExpanded(!expanded)}
             onMaximize={() => openInCanvas(false)}
             onReplay={() => openInCanvas(true)}
-            onOpenRevisions={openRevisionsInCanvas}
-            collabSummary={collabSummary}
-            teamPreview={hostPreview ? resolvedPreview : null}
           />
           {debateLive && (
             <DebateProgressLine

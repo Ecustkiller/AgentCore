@@ -115,9 +115,13 @@ export async function sendMidFlightMessage(
   attachments?: MessageAttachment[],
   signal?: AbortSignal,
   delivery: MessageDelivery = "steer",
+  agentMentions?: { agent_id: string; role: string }[],
 ): Promise<MidFlightSendResult> {
   const payload: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
+  if (agentMentions && agentMentions.length > 0) {
+    payload.agent_mentions = agentMentions;
+  }
 
   const gate = { mode: "open" as DeliverMode };
   const buffer: SSEEvent[] = [];

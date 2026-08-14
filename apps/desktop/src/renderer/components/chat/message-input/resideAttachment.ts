@@ -286,15 +286,68 @@ export type ResidentAttachment =
       binary: boolean;
       text: string;
       truncated: boolean;
+      /** 还握着的字节：开跑前拒绝拆掉会话后，用它再驻留进新工作区。 */
+      fileBlob?: File;
     }
   | ResideFailure;
 
+function isStagingExpired(reason: string): boolean {
+  return reason.includes("暂存已失效");
+}
+
+function residentOk(
+  workspacePath: string,
+  att: Pick<
+    ResidentAttachmentInput,
+    "name" | "binary" | "text" | "truncated" | "fileBlob"
+  >,
+  over: Partial<Extract<ResidentAttachment, { ok: true }>> = {},
+): Extract<ResidentAttachment, { ok: true }> {
+  const { fileBlob: overBlob, ...restOver } = over;
+  const out: Extract<ResidentAttachment, { ok: true }> = {
+    ok: true,
+    workspacePath,
+    name: att.name,
+    binary: !!att.binary,
+    text: att.text,
+    truncated: att.truncated,
+    ...restOver,
+  };
+  const blob = overBlob ?? att.fileBlob;
+  if (blob) out.fileBlob = blob;
+  return out;
+}
+
+/** 本机 dest 已解析：把 File 再暂存进当前会话 ``attachments/``。 */
+async function restageFileBlobLocal(
+  conversationId: string,
+  file: File,
+  att: ResidentAttachmentInput,
+): Promise<ResidentAttachment> {
+  const staged = await stageDroppedFileAttachment(conversationId, file);
+  if (!staged.ok) return staged;
+  const workspacePath = staged.workspacePath;
+  if (typeof workspacePath !== "string") {
+    return { ok: false, reason: "附件落盘未返回工作区路径" };
+  }
+  return residentOk(workspacePath, att, {
+    name: staged.name,
+    binary: staged.binary,
+    text: staged.text,
+    truncated: staged.truncated,
+    fileBlob: file,
+  });
+}
+
 /**
  * 兜底驻留：把还没落地的附件写入本地工作区或上传到云端工作区。
- * 已有 ``workspacePath`` 的跳过。失败返回 reason。
+ * 已有 ``workspacePath`` **且没有可再拷的字节** 才跳过。失败返回 reason。
  *
  * 正常路径上附件在附加时就已驻留完（{@link residentAttachmentForFile}），这里只兜
  * 三种情形：重启后从草稿恢复的暂存件、附加时上传失败后的发送重试、以及历史纯文本引用。
+ *
+ * 开跑前拒绝会拆掉刚建的会话：芯片上的 ``workspacePath`` 仍指向已删工作区，不能拿来
+ * 跳过；``stagingId`` 往往已被 consume / finalize 吃掉，要从 ``fileBlob`` 或再暂存恢复。
  *
  * 分支顺序有讲究：本机工作区的 finalize 必须排在内存 File 直传之前——桌面草稿两者都
  * 有，若先看 File 就会把本该落进本机项目的附件误传到云端。
@@ -303,15 +356,8 @@ export async function ensureAttachmentResident(
   conversationId: string,
   att: ResidentAttachmentInput,
 ): Promise<ResidentAttachment> {
-  if (att.workspacePath) {
-    return {
-      ok: true,
-      workspacePath: att.workspacePath,
-      name: att.name,
-      binary: !!att.binary,
-      text: att.text,
-      truncated: att.truncated,
-    };
+  if (att.workspacePath && !att.fileBlob && !att.stagingId) {
+    return residentOk(att.workspacePath, att);
   }
 
   if (att.stagingId && window.fsApi?.finalizeStagedAttachment) {
@@ -321,19 +367,22 @@ export async function ensureAttachmentResident(
         att.stagingId,
         dest,
       );
-      if (!res.ok) return { ok: false, reason: res.reason };
-      const workspacePath = res.data.workspacePath;
-      if (typeof workspacePath !== "string") {
-        return { ok: false, reason: "附件落盘未返回工作区路径" };
+      if (res.ok) {
+        const workspacePath = res.data.workspacePath;
+        if (typeof workspacePath !== "string") {
+          return { ok: false, reason: "附件落盘未返回工作区路径" };
+        }
+        return residentOk(workspacePath, att, {
+          name: res.data.name,
+          binary: res.data.binary,
+          text: res.data.text,
+          truncated: res.data.truncated,
+        });
       }
-      return {
-        ok: true,
-        workspacePath,
-        name: res.data.name,
-        binary: res.data.binary,
-        text: res.data.text,
-        truncated: res.data.truncated,
-      };
+      if (!isStagingExpired(res.reason) || !att.fileBlob) {
+        return { ok: false, reason: res.reason };
+      }
+      return restageFileBlobLocal(conversationId, att.fileBlob, att);
     }
   }
 
@@ -357,14 +406,10 @@ export async function ensureAttachmentResident(
       binary: !!att.binary,
     });
     if (!res.ok) return res;
-    return {
-      ok: true,
-      workspacePath: res.workspacePath ?? `attachments/${name}`,
+    return residentOk(res.workspacePath ?? `attachments/${name}`, att, {
       name,
-      binary: !!att.binary,
-      text: att.text,
-      truncated: att.truncated,
-    };
+      fileBlob: att.fileBlob,
+    });
   }
 
   if (!att.stagingId) {
@@ -389,12 +434,12 @@ export async function ensureAttachmentResident(
   const consumed = await window.fsApi.consumeStagedBytes(att.stagingId);
   if (!consumed.ok) return { ok: false, reason: consumed.reason };
   const workspacePath = `attachments/${consumed.data.name}`;
+  const recovered = new File(
+    [new Uint8Array(consumed.data.data)],
+    consumed.data.name,
+  );
   try {
-    await uploadWorkspaceFile(
-      conversationId,
-      workspacePath,
-      new Blob([new Uint8Array(consumed.data.data)]),
-    );
+    await uploadWorkspaceFile(conversationId, workspacePath, recovered);
   } catch (e) {
     return {
       ok: false,
@@ -402,12 +447,9 @@ export async function ensureAttachmentResident(
       cause: e,
     };
   }
-  return {
-    ok: true,
-    workspacePath,
+  return residentOk(workspacePath, att, {
     name: consumed.data.name,
     binary: consumed.data.binary,
-    text: att.text,
-    truncated: att.truncated,
-  };
+    fileBlob: recovered,
+  });
 }

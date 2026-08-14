@@ -1,10 +1,8 @@
 """按需抽槽：让模型把「上一次的具体输入」从任务描述里认出来，换成占位符。
 
-**不在保存路径上**。用户点「存为工作流」时的心智是「这轮不错先存下来」，还没想到「下次换
-个主题」；真正需要槽位的是第二次要用它、看见任务里写死着上一轮主题的那一刻。挂在保存上还
-会带来两个更硬的问题：抽槽失败就**永久**没槽位且用户不知情、没法补；抽出来的东西用户在保
-存那一刻看不见，质量不可见。所以它挂在 ``POST /v1/workflows/{id}/suggest-slots``——前端在
-用户第一次点「跑一次」时调，抽到了写回 definition（以后再跑不用重抽），抽不到就照常直接跑。
+挂在 ``POST /v1/workflows/{id}/suggest-slots``——前端在用户第一次点「跑一次」时调，抽到了
+写回 definition（以后再跑不用重抽），抽不到就照常直接跑。只认历史固化来源（``kind=turn``
+列，不是画布里的 ``definition.source``）；官方模板 / 手画的不抽。
 
 **一次**背景模型调用。调用超时、上游拒付、模型返回垃圾，一律回落成「没有槽位」而不是报错
 ——调用方拿回的 definition 与调用前逐字一致，「跑一次」这条路一步都不受影响。
@@ -51,6 +49,8 @@ _TIMEOUT_SECONDS = 20.0
 _MAX_TASK_CHARS_IN_PROMPT = 1200
 # 太短的片段（「A」「报告」）在别处误伤的概率远大于它的复用价值。
 _MIN_VALUE_CHARS = 2
+# 描述列有 4000 字上限（``user_workflows.description``），抽槽写回追记时不能撑爆。
+_MAX_DESCRIPTION_CHARS = 4000
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
 
@@ -248,6 +248,17 @@ def slots_note(slots: list[dict[str, str]]) -> str:
     """写进工作流说明的那一句（槽位是抽出来的，不是用户自己画的，得说清楚）。"""
     labels = "、".join(s["label"] for s in slots)
     return f"已抽出 {len(slots)} 个可替换槽位（{labels}），默认值就是原轮原值，不改即原样复跑"
+
+
+def append_description_note(description: str, note: str) -> str:
+    """给已成文的说明再追一条（抽槽写回时记下抽出了几个槽位）。"""
+    text = (note or "").strip()
+    if not text:
+        return description
+    combined = f"{description}；{text}" if description else text
+    if len(combined) <= _MAX_DESCRIPTION_CHARS:
+        return combined
+    return combined[: _MAX_DESCRIPTION_CHARS - 1] + "…"
 
 
 async def _ask_model(steps: str, *, user_id: str) -> str:

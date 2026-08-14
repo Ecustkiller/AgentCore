@@ -340,6 +340,38 @@ export async function restoreTrash(
   if (!res.ok) throw new Error(`还原失败 (${res.status})`);
 }
 
+/**
+ * Listing leaf → FileNode size/mtime. Null stays omitted (never `0` / epoch as a stand-in).
+ * Same mapping `buildTree` uses for the listing row itself (`isLeaf`) vs synthetic parents.
+ */
+export function listingLeafMeta(
+  entry: Pick<WorkspaceFileEntry, "size_bytes" | "mtime_ms">,
+  isLeaf: boolean,
+): Pick<FileNode, "sizeBytes" | "mtimeMs"> {
+  return {
+    sizeBytes:
+      isLeaf && entry.size_bytes != null ? entry.size_bytes : undefined,
+    mtimeMs: isLeaf && entry.mtime_ms != null ? entry.mtime_ms : undefined,
+  };
+}
+
+/**
+ * Path → leaf size/mtime from an existing workspace list.
+ * Directories and rows with both fields null are omitted; callers leave the UI blank.
+ */
+export function fileMetaByPath(
+  entries: WorkspaceFileEntry[],
+): Map<string, Pick<FileNode, "sizeBytes" | "mtimeMs">> {
+  const out = new Map<string, Pick<FileNode, "sizeBytes" | "mtimeMs">>();
+  for (const entry of entries) {
+    if (entry.is_dir) continue;
+    const meta = listingLeafMeta(entry, true);
+    if (meta.sizeBytes == null && meta.mtimeMs == null) continue;
+    out.set(entry.path, meta);
+  }
+  return out;
+}
+
 /** Group a flat recursive listing into `dir → sorted children`. */
 export function buildTree(
   entries: WorkspaceFileEntry[],
@@ -364,10 +396,7 @@ export function buildTree(
       const prev = here.get(name);
       // Only the listing leaf carries size/mtime; synthetic intermediate dirs stay bare
       // until a real dir entry for the same path arrives and merges meta.
-      const sizeBytes =
-        isLeaf && entry.size_bytes != null ? entry.size_bytes : undefined;
-      const mtimeMs =
-        isLeaf && entry.mtime_ms != null ? entry.mtime_ms : undefined;
+      const { sizeBytes, mtimeMs } = listingLeafMeta(entry, isLeaf);
       if (!prev) {
         here.set(name, { name, path: full, isDir, sizeBytes, mtimeMs });
       } else {

@@ -286,9 +286,14 @@ class FileBatchTool:
             requested = str(item.get("path", "")).strip()
             if not requested:
                 return "fail", "mkdir · path 不能为空", []
-            path, rename_note = _prepare_write_relpath(requested)
+            path, rename_note = await _prepare_write_relpath(
+                requested, context, register_bare=True
+            )
             if not path:
-                return "fail", "mkdir · path 不能为空", []
+                detail = "mkdir .（工作区根已存在）"
+                if rename_note:
+                    detail = f"{detail}。{rename_note}"
+                return "ok", detail, []
             scope_err = write_scope_rejection(context, path)
             if scope_err is not None:
                 logger.info(
@@ -319,7 +324,9 @@ class FileBatchTool:
             requested = str(item.get("path", "")).strip()
             if not requested:
                 return "fail", "delete · path 不能为空", []
-            path, rename_note = _prepare_write_relpath(requested)
+            path, rename_note = await _prepare_write_relpath(
+                requested, context, register=False
+            )
             if not path:
                 return "fail", "delete · path 不能为空", []
             scope_err = write_scope_rejection(context, path)
@@ -354,7 +361,13 @@ class FileBatchTool:
         requested_dest = str(item.get("destination", "")).strip()
         if not source or not requested_dest:
             return "fail", f"{op} · source 与 destination 均为必填", []
-        destination, rename_note = _prepare_write_relpath(requested_dest)
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+
+        # Dest first: empty-desk first shot may register; source then shares that slug.
+        destination, rename_note = await _prepare_write_relpath(requested_dest, context)
+        source, _src_note = await rewrite_project_shell_relpath(
+            source, context, register=False
+        )
         if not destination:
             return "fail", f"{op} · source 与 destination 均为必填", []
         if source == destination:

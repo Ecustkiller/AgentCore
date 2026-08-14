@@ -5,9 +5,8 @@ import { usePolling } from "@/lib/usePolling";
 // The mobile shell's top-level switcher: 对话 (AI) / 消息 (人际 IM) / 文件 (跨工作区文件总览) /
 // 我的 (账户·设置). Mirrors the desktop sidebar's mental model (apps/desktop … sidebar/Sidebar
 // NAV_ITEMS) compressed to the four destinations that survive the 手机端「减法」and have a
-// built mobile home. Rendered by TabLayout on top-level pages only; full-screen detail pages
-// (聊天 / IM 线程 / 设置子页 / 文件预览) push over it without the bar, so it never fights a
-// page's own bottom composer.
+// built mobile home. Rendered by TabLayout on top-level pages only. AI 对话 `/` 与 `/c/:id`
+// 有意留底栏（开盖即聊）；全屏盖住底栏的是 IM 线程 / 设置子页 / 会话文件 `/c/:id/files`。
 //
 // The 消息 tab carries an aggregate unread badge. Mobile has no global messaging store (each
 // page fetches its own), so the count is polled here (visibility-aware, see usePolling) by

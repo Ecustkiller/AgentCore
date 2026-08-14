@@ -1,7 +1,10 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
 import { loadLatestWindow } from "@/services/messages";
 import { type ConversationRecovery, loadRecovery } from "@/services/resume";
-import { attachConversation } from "@/services/streamConversation";
+import {
+  attachConversation,
+  clearLastEventId,
+} from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
@@ -16,6 +19,7 @@ import {
   isTransportDrop,
   lastUserMessageOf,
 } from "./helpers";
+import { hasLocalConversationStream } from "./streamOwnership";
 
 /** Cold-load pause latch is ``status=running`` + ``finishReason=paused``. */
 function isPausedFinish(message: {
@@ -149,6 +153,7 @@ export function markGhostInterrupted(conversationId: string): void {
     conversationId,
   );
   useConversationStore.getState().setGenerating(false, conversationId);
+  clearLastEventId(conversationId);
   // Freeze the graph in place (cancelled → finalizeFold freezes in-flight nodes).
   // Do not clearExecution — the inline team graph must stay until journal replay.
   finalizeRunningExecutionSlots(last.id, last.serverMessageId);
@@ -288,7 +293,7 @@ export async function settleCloudRunningAssistant(
  */
 export async function attachOnOpen(conversationId: string): Promise<void> {
   const store = useConversationStore.getState();
-  if (getRuntime(conversationId).isGenerating) return; // already streaming locally
+  if (hasLocalConversationStream(conversationId)) return;
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);

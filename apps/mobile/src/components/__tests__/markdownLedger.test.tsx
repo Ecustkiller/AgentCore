@@ -68,6 +68,15 @@ describe("Markdown citationToDisplay", () => {
     expect(chip1.textContent).toBe("2");
   });
 
+  it("renders [1]-[2] as two chips without a visible hyphen", () => {
+    const { container } = render(
+      <Markdown content="见 [1]-[2]" citations={CITATIONS} />,
+    );
+    expect(screen.getByRole("link", { name: "来源 1" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "来源 2" })).toBeTruthy();
+    expect(container.textContent).not.toMatch(/1\s*-\s*2/);
+  });
+
   it("falls back to identity numbering when map is omitted", () => {
     render(<Markdown content="see [1]" citations={CITATIONS} />);
     const chip = screen.getByRole("link", { name: "来源 1" });

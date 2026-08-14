@@ -371,7 +371,9 @@ export function AskQuestionFields({
           message={pickerFailure.message}
         />
       )}
-      {bindError && <p className="text-xs text-destructive">{bindError}</p>}
+      {bindError && (
+        <p className="text-xs text-muted-foreground">{bindError}</p>
+      )}
     </div>
   );
 }

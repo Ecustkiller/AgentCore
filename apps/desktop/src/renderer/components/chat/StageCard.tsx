@@ -181,7 +181,9 @@ export function StageCard({ entry }: { entry: InteractionEntry }) {
           disabled={busy}
         />
       </label>
-      {error ? <p className="mb-2 text-xs text-destructive">{error}</p> : null}
+      {error ? (
+        <p className="mb-2 text-xs text-muted-foreground">{error}</p>
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <Button
           variant="primary"

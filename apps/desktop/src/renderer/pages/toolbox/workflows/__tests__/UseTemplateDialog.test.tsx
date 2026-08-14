@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/workflows", () => ({
   createWorkflowFromPlaybook: vi.fn(),
 }));
 
+import { ApiError } from "@/services/api";
 import type {
   WorkflowTemplate,
   WorkflowTemplateSlot,
 } from "@/services/workflows";
+import { createWorkflowFromPlaybook } from "@/services/workflows";
 import { MemoryRouter } from "react-router-dom";
 import { UseTemplateDialog } from "../UseTemplateDialog";
 
@@ -86,5 +88,20 @@ describe("UseTemplateDialog slots", () => {
     // 可选枚举必须能「不指定」，让后端用模板默认值。
     expect(screen.getByRole("option", { name: /不指定/ })).toBeTruthy();
     expect(screen.getByText("默认营销落地页")).toBeTruthy();
+  });
+
+  it("shows a recoverable copy failure as muted inline text", async () => {
+    vi.mocked(createWorkflowFromPlaybook).mockRejectedValue(
+      new ApiError(500, JSON.stringify({ error: { message: "复制开小差" } })),
+    );
+    renderDialog([slot()]);
+    fireEvent.change(screen.getByLabelText(/主题/), {
+      target: { value: "竞品" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "复制为我的" }));
+
+    const err = await screen.findByText("复制开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
   });
 });

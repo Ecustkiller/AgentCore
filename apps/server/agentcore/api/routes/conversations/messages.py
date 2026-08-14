@@ -581,7 +581,9 @@ async def send_message(
             x_client_platform=x_client_platform,
         )
     )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user.user_id
+    )
 
     return sse_response(sink, detach_on_disconnect=True)
 

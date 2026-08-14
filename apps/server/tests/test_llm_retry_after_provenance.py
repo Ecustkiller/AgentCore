@@ -40,7 +40,7 @@ _OUR_BACKOFF_CHAIN = [2.0, 4.0, 8.0, 16.0]
 _DAY_RESET = 46440.0
 
 
-def _req(scenario: str = "chat") -> LLMRequest:
+def _req(scenario: str = "title") -> LLMRequest:
     return LLMRequest(
         messages=[LLMMessage(role="user", content="hi")],
         model=DEEPSEEK_V4_FLASH,
@@ -186,7 +186,7 @@ async def test_the_retry_line_does_not_borrow_upstreams_authority_either(spy, sl
 
 
 async def test_the_streaming_loop_tells_the_same_story(spy, sleeps):
-    """交互回合走的是流式那条循环——它有自己的一份日志代码，不能只修一半。"""
+    """One-shot stream has its own copy of the retry log — title still sits the chain."""
     calls = {"n": 0}
     sse = 'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
 
@@ -207,6 +207,63 @@ async def test_the_streaming_loop_tells_the_same_story(spy, sleeps):
     assert (row["stream"], row["wait_sec"]) == (True, _OUR_BACKOFF_CHAIN[0])
     assert row["retry_after_sec"] is None
     assert row["cooldown_source"] == RETRY_AFTER_FROM_BACKOFF
+
+
+async def test_chat_headerless_429_fails_fast_without_our_backoff_chain(spy, sleeps):
+    """Interactive turns no longer sit out 2→4→8→16 on a 429 that stated nothing."""
+    calls = {"n": 0}
+    provider = await _mock_provider(_throttled(None, calls))
+    try:
+        with pytest.raises(LLMRateLimitError):
+            await provider.complete(_req("chat"))
+    finally:
+        await provider.close()
+
+    row = spy.get("llm.rate_limit_no_retry")
+    assert (row["attempt"], calls["n"], sleeps) == (1, 1, [])
+    assert row["retry_after_sec"] is None
+    assert row["cooldown_source"] == RETRY_AFTER_FROM_BACKOFF
+    assert row["reason"] == "interactive_fail_fast"
+    assert row["scenario"] == "chat"
+
+
+async def test_chat_short_retry_after_waits_at_most_once(spy, sleeps):
+    """Attested ≤2s header: one sleep, then interactive_fail_fast on the next 429."""
+    calls = {"n": 0}
+    provider = await _mock_provider(_throttled({"retry-after": "2"}, calls))
+    try:
+        with pytest.raises(LLMRateLimitError):
+            await provider.complete(_req("chat"))
+    finally:
+        await provider.close()
+
+    row = spy.get("llm.rate_limit_no_retry")
+    assert sleeps == [2.0]
+    assert calls["n"] == 2
+    assert row["attempt"] == 2
+    assert row["retry_after_sec"] == 2.0
+    assert row["cooldown_source"] == RETRY_AFTER_FROM_HEADER
+    assert row["reason"] == "interactive_fail_fast"
+
+
+async def test_chat_stream_headerless_429_fails_fast_too(spy, sleeps):
+    """The streaming loop is the turn-scale path — same fail-fast, not a second policy."""
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(429, content=b'{"error":"rate_limited"}')
+
+    provider = await _mock_provider(handler)
+    try:
+        with pytest.raises(LLMRateLimitError):
+            _ = [c async for c in provider.stream(_req("chat"))]
+    finally:
+        await provider.close()
+
+    row = spy.get("llm.rate_limit_no_retry")
+    assert (row["stream"], row["attempt"], calls["n"], sleeps) == (True, 1, 1, [])
+    assert row["reason"] == "interactive_fail_fast"
 
 
 # ---- 出处跟着异常走，且只走到日志为止 --------------------------------------------

@@ -275,7 +275,7 @@ function StatusBadge({
   }
   if (status === "error") {
     return (
-      <span className="flex items-center gap-1.5 text-xs text-destructive">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <XCircle size={14} />
         {message ?? "连接失败"}
       </span>
@@ -303,9 +303,12 @@ function ProviderCard({
 }) {
   const host = hostFromBaseUrl(provider.base_url);
   const busy = testing;
-  const metaParts = [host || null, provider.masked_key ?? "已配置"].filter(
-    Boolean,
-  );
+  const testModel = provider.default_model?.trim();
+  const metaParts = [
+    host || null,
+    provider.masked_key ?? "已配置",
+    testModel ? `测试用模型 ${testModel}` : null,
+  ].filter(Boolean);
 
   return (
     <Card className="px-4 py-3">
@@ -349,7 +352,7 @@ function ProviderCard({
         </div>
       </div>
       {actionError && (
-        <p className="mt-2 text-xs text-destructive">{actionError}</p>
+        <p className="mt-2 text-xs text-muted-foreground">{actionError}</p>
       )}
     </Card>
   );

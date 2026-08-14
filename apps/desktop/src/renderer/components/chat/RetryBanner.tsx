@@ -1,5 +1,9 @@
 import { Button, IconButton } from "@/components/ui";
-import { statusAccentText, statusChip } from "@/components/ui/tone-presets";
+import {
+  noticeChipNeutral,
+  statusAccentText,
+  statusChip,
+} from "@/components/ui/tone-presets";
 import { cn } from "@/lib/utils";
 import {
   useActiveError,
@@ -10,16 +14,16 @@ import { AlertTriangle, KeyRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 /**
- * Banner for a failed turn (send / regenerate transport error). Shown just above
- * the input in chat ({@link import("./ChatView")}) and in the canvas 指挥台
- * ({@link import("../graph/CanvasDecisionPanel")}, 前端UX设计.md §6.2) — in canvas
- * mode ChatView is unmounted, so without it a transport failure would be
- * invisible there. Displays the error copy; the optional action routes the user
- * to fix the cause (e.g. "去配置" → model config for a missing BYOK key);
+ * Banner for a failed turn (send / regenerate transport error). Chat surfaces
+ * the same copy on {@link import("./message-input/TurnComposer").TurnComposer}
+ * (empty-state first-send included). This banner stays on the canvas 指挥台
+ * ({@link import("../graph/CanvasDecisionPanel")}, 前端UX设计.md §6.2) — ChatView
+ * is unmounted there. Displays the error copy; the optional action routes the
+ * user to fix the cause (e.g. "去配置" → model config for a missing BYOK key);
  * dismissing only hides the banner.
  *
- * Tone: a failed turn is always red `destructive`; the optional 去配置 button is the
- * blue `primary` action that routes to fix the cause (e.g. a missing BYOK key).
+ * Tone: config remedy (去配置) = blue `primary`; everything else on this banner
+ * is a recoverable interruption → {@link noticeChipNeutral} (not danger red).
  *
  * Conversation-scoped (reads the active conversation's error state) and therefore
  * self-contained wherever it mounts — mirrors {@link import("./ApprovalPrompt").ApprovalPrompt}
@@ -32,16 +36,21 @@ export function RetryBanner() {
   const navigate = useNavigate();
   if (!error) return null;
 
+  const needsYou = Boolean(action);
+
   return (
     <div
       className={cn(
         "mx-4 mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
-        statusChip.destructive,
+        needsYou ? statusChip.primary : noticeChipNeutral,
       )}
     >
       <AlertTriangle
         size={15}
-        className={cn("shrink-0", statusAccentText.destructive)}
+        className={cn(
+          "shrink-0",
+          needsYou ? statusAccentText.primary : "text-muted-foreground",
+        )}
       />
       <span className="min-w-0 flex-1">{error}</span>
       {action && (
@@ -60,7 +69,11 @@ export function RetryBanner() {
       <IconButton
         onClick={() => clearError()}
         aria-label="关闭"
-        className="text-destructive/70 hover:bg-transparent hover:text-destructive"
+        className={
+          needsYou
+            ? "text-primary/70 hover:bg-transparent hover:text-primary"
+            : "text-muted-foreground hover:bg-transparent hover:text-foreground"
+        }
       >
         <X size={14} />
       </IconButton>

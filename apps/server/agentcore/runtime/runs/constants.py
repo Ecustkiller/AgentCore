@@ -114,7 +114,9 @@ DEP_POINTER_MAX_FILES = 20
 # 单文件截断上限；多文件合计另受调用方清单约束。
 CONTEXT_INJECT_CHARS = 2400
 
-# Wave3 B：同一相对路径【整读】成功 file_read 次数上限（offset/limit 分段读不计次、不触顶）。
+# Wave3 B：同一相对路径【整读】成功 file_read 次数上限。
+# 从第 1 行要满安全顶（双省 offset/limit、只传 offset=1、只传 limit=行顶）计次；
+# offset>1 或 limit<行顶的定点窗不计次、不触顶。
 # 仅当投影窗口仍有该 path 正文且无再读授额时硬拒（逼模型吃已有正文）；正文已清理或写成功后可再整读。
 # 同轮并行同 path 多 call 在 execute_tools 扇出去重，只计一次成功读。
 FILE_READ_SAME_PATH_MAX = 5

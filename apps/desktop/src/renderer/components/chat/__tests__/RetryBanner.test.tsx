@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type { ErrorAction } from "@/lib/errors";
 import {
   RECONNECT_BANNER,
   UNKNOWN_CLOUD_BANNER,
@@ -9,10 +10,11 @@ import { RetryBanner } from "../RetryBanner";
 
 const clearError = vi.fn();
 let error: string | null = null;
+let action: ErrorAction | null = null;
 
 vi.mock("@/stores/conversation", () => ({
   useActiveError: () => error,
-  useActiveErrorAction: () => null,
+  useActiveErrorAction: () => action,
   useConversationStore: (
     sel: (s: { clearError: typeof clearError }) => unknown,
   ) => sel({ clearError }),
@@ -26,6 +28,7 @@ afterEach(() => {
   cleanup();
   clearError.mockReset();
   error = null;
+  action = null;
 });
 
 describe("RetryBanner", () => {
@@ -59,5 +62,23 @@ describe("RetryBanner", () => {
     error = null;
     const { container } = render(<RetryBanner />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("uses neutral chrome for a recoverable interruption", () => {
+    error = "上游限流，暂时无法继续本回合。请约 2 秒后再试。";
+    const { container } = render(<RetryBanner />);
+    const banner = container.firstElementChild as HTMLElement;
+    expect(banner.className).toContain("bg-muted/40");
+    expect(banner.className).not.toContain("destructive");
+  });
+
+  it("uses primary chrome when a config action is offered", () => {
+    error = "请先在「设置 · 服务商」中填入你的 API Key，再发起对话。";
+    action = { label: "去设置", href: "/more/providers" };
+    const { container } = render(<RetryBanner />);
+    const banner = container.firstElementChild as HTMLElement;
+    expect(banner.className).toContain("bg-primary/10");
+    expect(banner.className).not.toContain("destructive");
+    expect(screen.getByRole("button", { name: "去设置" })).toBeTruthy();
   });
 });

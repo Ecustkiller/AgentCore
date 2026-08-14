@@ -18,6 +18,7 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/services/streamConversation", () => ({
   attachConversation: vi.fn(async () => "none"),
+  clearLastEventId: vi.fn(),
   // rejoinLiveTurn pulls these; keep inert for the live-refresh path.
 }));
 

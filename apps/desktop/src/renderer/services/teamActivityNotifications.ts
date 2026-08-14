@@ -12,6 +12,10 @@ import {
   type AiAttentionEntry,
   useAiAttentionStore,
 } from "@/stores/aiAttention";
+import {
+  ignoresCloudTurnActivity,
+  useAiTurnActivityStore,
+} from "@/stores/aiTurnActivity";
 import { DRAFT_KEY, useConversationStore } from "@/stores/conversation";
 import {
   type InteractionEntry,
@@ -26,9 +30,10 @@ import { usePausedTurnStore } from "@/stores/pausedTurns";
  * 纯前端感知层——不碰 SSE 契约 / 协议 fold，不新增事件；接线一次于 AppShell（与 realtime /
  * updates 同处），随会话常驻。
  *
- * 挂起收口（finish_reason=paused → isGenerating↓）不是「已完成」：完成通道跳过仍有
- * pausedTurns 的对话；挂起感知统一走 pausedTurns 订阅（team_preview → 等待确认后开工；
- * ask_user / plan_review → 等待确认后继续）。
+ * 云对话完成认 fulfill `ai_turn_activity` 的 `reason`：只对 `completed|error` 报完成/
+ * 失败，`paused|stopped` 不报「已完成」。本机 sidecar / 本地容器忽略云信号，仍走本端
+ * isGenerating↓。挂起收口（pausedTurns 仍在）也不是「已完成」，感知统一走 pausedTurns
+ * 订阅（team_preview → 等待确认后开工；ask_user / plan_review → 等待确认后继续）。
  *
  * 热阻塞卡（approval / escalation / delegation_authorization）走 InteractionStore 订阅，
  * 判定直接复用侧栏「等你」灯的 {@link isAwaitingUserEntry}（含 CEO 仲裁中的升级卡不打扰）
@@ -200,6 +205,15 @@ function liveNotifiableIds(): Set<string> {
   ]);
 }
 
+function ignoresCloudActivity(conversationId: string): boolean {
+  const via =
+    useConversationStore.getState().byId[conversationId]?.executionVia ?? null;
+  const localContainerRootId =
+    getConversations().find((c) => c.id === conversationId)
+      ?.localContainerRootId ?? null;
+  return ignoresCloudTurnActivity(via, localContainerRootId);
+}
+
 function conversationHasPausedTurn(conversationId: string): boolean {
   return usePausedTurnStore
     .getState()
@@ -250,6 +264,9 @@ export function startTeamActivityNotifications(): () => void {
         ? runtimeHasError(nextRt)
         : runtimeHasError(prevRt);
       queueMicrotask(() => {
+        // 云对话完成认 `ai_turn_activity.reason`，本通道只服务 sidecar / 本地容器，
+        // 避免同一收口被云信号与本端 isGenerating↓ 各弹一次。
+        if (!ignoresCloudActivity(id)) return;
         // Durable pause close lands pausedTurns in the same sync turn as
         // finalizeLastMessage; by this microtask the frame is already there.
         // Skip「已完成」— pause perception is the pausedTurns channel only.
@@ -260,6 +277,16 @@ export function startTeamActivityNotifications(): () => void {
         const failed = latest ? runtimeHasError(latest) : failedAtBoundary;
         notifyTurnEnd(id, failed);
       });
+    }
+  });
+
+  const unsubActivity = useAiTurnActivityStore.subscribe((state, prev) => {
+    const done = state.lastDone;
+    if (!done || done.seq === prev.lastDone?.seq) return;
+    if (ignoresCloudActivity(done.conversationId)) return;
+    if (done.reason === "paused" || done.reason === "stopped") return;
+    if (done.reason === "completed" || done.reason === "error") {
+      notifyTurnEnd(done.conversationId, done.reason === "error");
     }
   });
 
@@ -298,6 +325,7 @@ export function startTeamActivityNotifications(): () => void {
 
   return () => {
     unsubConversation();
+    unsubActivity();
     unsubInteractions();
     unsubPaused();
     unsubAttention();

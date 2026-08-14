@@ -44,7 +44,13 @@ from typing import Any, Literal
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
+from agentcore.fulfill.user_signal import (
+    TurnActivityDoneReason,
+    push_turn_activity_done,
+    push_turn_activity_running,
+)
 from agentcore.runtime.events import EventSink
+from agentcore.runtime.events.types import FinishReason
 
 logger = get_logger(__name__)
 
@@ -59,6 +65,8 @@ class TurnRun:
     conversation_id: str
     task: asyncio.Task
     sink: EventSink
+    # Account owner — fulfill activity frames are keyed by user, not conversation.
+    user_id: str = ""
     # Set by :meth:`mark_user_stop` / :meth:`stop` / :meth:`stop_and_drain` /
     # shutdown salvage before ``task.cancel()`` so the CancelledError handler can
     # tell clean cancel (terminal + release) from true hard kill (orphan lease for
@@ -83,6 +91,7 @@ class ResumeDeferredWaiter:
     message_id: str
     busy_reason: ResumeBusyReason
     checkpoint_response: Any
+    user_id: str = ""
     llm_credentials: Any = None
     llm_supports_tools: bool | None = None
     x_client_platform: str | None = None
@@ -195,7 +204,14 @@ class TurnRunRegistry:
         """True while lifespan is salvaging in-flight turns."""
         return _shutting_down
 
-    def register(self, *, conversation_id: str, task: asyncio.Task, sink: EventSink) -> str:
+    def register(
+        self,
+        *,
+        conversation_id: str,
+        task: asyncio.Task,
+        sink: EventSink,
+        user_id: str = "",
+    ) -> str:
         """Track ``task`` as the conversation's active run; returns its ``run_id``.
 
         Installs a done-callback that drops the run from the registry when it ends —
@@ -225,6 +241,7 @@ class TurnRunRegistry:
             conversation_id=conversation_id,
             task=task,
             sink=sink,
+            user_id=user_id,
         )
         task.add_done_callback(lambda _t: self._discard(conversation_id, run_id))
         # 对话级订阅 (云对话多端同权 B2): every turn start funnels through here, so this is
@@ -240,26 +257,34 @@ class TurnRunRegistry:
                 conversation_id=conversation_id,
                 run_id=run_id,
             )
+        _emit_activity_running(user_id, conversation_id)
         return run_id
 
     def _discard(self, conversation_id: str, run_id: str) -> None:
         current = self._runs.get(conversation_id)
-        if current is not None and current.run_id == run_id:
-            del self._runs[conversation_id]
-            # Cold resume deferred owns the next slot ahead of FIFO.
-            waiter = self._resume_deferred.pop(conversation_id, None)
-            if waiter is not None:
-                self._arm_resume_deferred_start(waiter)
-                return
-            try:
-                from .queue import turn_queue
+        if current is None or current.run_id != run_id:
+            return
+        user_id = current.user_id
+        reason = activity_done_reason(current)
+        del self._runs[conversation_id]
+        # Cold resume deferred owns the next slot ahead of FIFO — drain 接棒, no done.
+        waiter = self._resume_deferred.pop(conversation_id, None)
+        if waiter is not None:
+            self._arm_resume_deferred_start(waiter)
+            return
+        try:
+            from .queue import turn_queue
 
+            if turn_queue.depth(conversation_id) > 0:
                 turn_queue.schedule_drain(conversation_id)
-            except Exception:  # noqa: BLE001 — queue drain must not break done-callback
-                logger.exception(
-                    "turn_run.queue_drain_failed",
-                    conversation_id=conversation_id,
-                )
+                return
+        except Exception:  # noqa: BLE001 — queue drain must not break done-callback
+            logger.exception(
+                "turn_run.queue_drain_failed",
+                conversation_id=conversation_id,
+            )
+        # 槽空才 done：queued / cold-resume takeover already returned above.
+        _emit_activity_done(user_id, conversation_id, reason)
 
     def busy_reason_for_resume(
         self, conversation_id: str, message_id: str
@@ -451,7 +476,10 @@ class TurnRunRegistry:
                 )
             )
         self.register(
-            conversation_id=waiter.conversation_id, task=task, sink=sink
+            conversation_id=waiter.conversation_id,
+            task=task,
+            sink=sink,
+            user_id=waiter.user_id,
         )
 
     def get(self, conversation_id: str) -> TurnRun | None:
@@ -604,6 +632,55 @@ class TurnRunRegistry:
         if tasks:
             await asyncio.wait(set(tasks), timeout=timeout)
         return [run for run in live if not run.task.done()]
+
+
+def activity_done_reason(run: TurnRun) -> TurnActivityDoneReason:
+    """Map a finished run to the account-level ``ai_turn_activity`` done reason."""
+    if run.user_stopped:
+        return "stopped"
+    finish = getattr(run.sink, "_stream_finish_reason", None)
+    if finish == FinishReason.PAUSED.value:
+        return "paused"
+    if finish in {FinishReason.ERROR.value, FinishReason.INTERRUPTED.value}:
+        return "error"
+    if finish == FinishReason.CANCELLED.value:
+        return "stopped"
+    task = run.task
+    if task.done() and not task.cancelled():
+        try:
+            if task.exception() is not None:
+                return "error"
+        except (asyncio.CancelledError, asyncio.InvalidStateError):
+            pass
+    return "completed"
+
+
+def _emit_activity_running(user_id: str, conversation_id: str) -> None:
+    if not user_id or not conversation_id:
+        return
+    try:
+        push_turn_activity_running(user_id=user_id, conversation_id=conversation_id)
+    except Exception:  # noqa: BLE001 — activity must never break registration
+        logger.exception(
+            "turn_run.activity_running_failed",
+            conversation_id=conversation_id,
+        )
+
+
+def _emit_activity_done(
+    user_id: str, conversation_id: str, reason: TurnActivityDoneReason
+) -> None:
+    if not user_id or not conversation_id:
+        return
+    try:
+        push_turn_activity_done(
+            user_id=user_id, conversation_id=conversation_id, reason=reason
+        )
+    except Exception:  # noqa: BLE001 — activity must never break the done-callback
+        logger.exception(
+            "turn_run.activity_done_failed",
+            conversation_id=conversation_id,
+        )
 
 
 # Module-level singleton (single-worker posture, as approvals / interaction).

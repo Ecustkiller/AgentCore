@@ -10,16 +10,15 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { ArrowDownUp, Check } from "lucide-react";
 
-const OPTIONS: { value: FileSortBy; label: string }[] = [
+export const FILE_SORT_OPTIONS: { value: FileSortBy; label: string }[] = [
   { value: "name", label: "名称" },
-  { value: "size", label: "大小（大的在前）" },
   { value: "mtime", label: "修改时间（新的在前）" },
 ];
 
 /** Menu label of a sort key — also the trigger tooltip, so the current mode is
  * readable without opening the menu. */
 export function fileSortLabel(by: FileSortBy): string {
-  return OPTIONS.find((o) => o.value === by)?.label ?? "名称";
+  return FILE_SORT_OPTIONS.find((o) => o.value === by)?.label ?? "名称";
 }
 
 /**
@@ -47,7 +46,7 @@ export function FileSortMenu({
       </SimpleTooltip>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>排序方式</DropdownMenuLabel>
-        {OPTIONS.map((o) => (
+        {FILE_SORT_OPTIONS.map((o) => (
           <DropdownMenuItem key={o.value} onSelect={() => onChange(o.value)}>
             <Check
               size={14}

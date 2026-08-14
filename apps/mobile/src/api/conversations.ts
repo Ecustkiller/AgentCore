@@ -41,6 +41,8 @@ export interface RunsPayload {
   turn_warning?: string | null;
   /** 报错回合 terminal error（冷加载 inline 错因；null = 干净回合）. */
   error?: RunError | null;
+  /** 裸聊写盘自动建文件夹告知（§5.4）；冷加载走 lifted 字段，不依赖 journal 里是否还留着事件. */
+  auto_folder?: Schemas["AutoFolderNotice"] | null;
 }
 
 /** A user message's attachment as persisted (composer 附件). The agent-chat send ships the
@@ -79,7 +81,7 @@ export interface MessageDetail {
   usage?: UsageBreakdown | null;
   /** ReAct 轮次（messages.rounds）. */
   rounds?: number | null;
-  /** 回合协作计数（`usage.collab`）：完成态团队条的「互相把关」一行。live 走 message_end；
+  /** 回合协作计数（`usage.collab`）：内部口径，用户面不展示。live 走 message_end；
    *  这里是重载路径——message_end 是 DERIVED（不进 journal），历史只能从这列拿。 */
   collab?: Schemas["TurnCollabMetrics"] | null;
   created_at: string;
@@ -173,15 +175,17 @@ export async function deleteConversation(id: string): Promise<void> {
 }
 
 /** Create a fresh cloud conversation and return its id (skeleton: no folder/mode).
- *  Optional ``permission_axes`` seeds this session (else account default recipe).
- *  Optional ``model_profile_id`` snapshots that combination at create (定案 B);
- *  omit to let the server write the then-current account default.
+ *  Optional ``folder_id`` files the chat into an existing cloud folder at birth
+ *  (归属中途不改挂). Optional ``permission_axes`` seeds this session (else account
+ *  default recipe). Optional ``model_profile_id`` snapshots that combination at
+ *  create (定案 B); omit to let the server write the then-current account default.
  *  Optional ``client_request_id`` is the caller's idempotency key — the server answers a
  *  repeat of the same key with the conversation it already created, so a double-fire
  *  (双击 / 重试) can't leave a duplicate 会话 behind. */
 export async function createConversation(
   title?: string,
   opts?: {
+    folder_id?: string | null;
     permission_axes?: Schemas["PermissionAxesModel"] | null;
     model_profile_id?: string | null;
     client_request_id?: string | null;
@@ -192,6 +196,7 @@ export async function createConversation(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       title: title ?? null,
+      ...(opts?.folder_id ? { folder_id: opts.folder_id } : {}),
       ...(opts?.permission_axes
         ? { permission_axes: opts.permission_axes }
         : {}),
@@ -206,6 +211,17 @@ export async function createConversation(
   if (!res.ok) throw new Error(`创建会话失败 (${res.status})`);
   const data = (await res.json()) as { id: string };
   return data.id;
+}
+
+/** Sidebar-shaped grouping: folders (incl. empty) + ungrouped 裸聊. Live list only
+ *  (archived chats stay on {@link listConversations} with `archived=true`). */
+export type FolderGroup = Schemas["FolderGroup"];
+export type GroupedConversations = Schemas["GroupedConversationsResponse"];
+
+export async function listConversationsGrouped(): Promise<GroupedConversations> {
+  const res = await apiFetch("/v1/conversations/grouped");
+  if (!res.ok) throw new Error(`加载会话列表失败 (${res.status})`);
+  return (await res.json()) as GroupedConversations;
 }
 
 /** One applied memory change in a 记忆已更新 card (Agent记忆与知识系统 §1.6). */
@@ -266,6 +282,7 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
             | null,
           turn_warning: runs.turn_warning ?? null,
           error: runs.error ?? null,
+          auto_folder: runs.auto_folder ?? null,
         }
       : paused
         ? {

@@ -197,10 +197,12 @@ def delivery_idle_nudge_prompt(
     report: bool = False,
     channel_dead: bool = False,
 ) -> str:
-    """Soft steer for read-idle (repair files, report files, or investigation recon).
+    """Soft steer for read-idle.
 
-    ``channel_dead``: workspace write path is sticky-unavailable — never urge
-    ``file_write`` / ``str_replace`` (complements Phase 1 tool retire).
+    Factory only arms the ``recon`` branch (conclude/handoff). Files/report copy
+    remains for explicit LoopController construction; product delivery_idle is
+    retired. ``channel_dead``: workspace write path is sticky-unavailable — never
+    urge ``file_write`` / ``str_replace`` (complements Phase 1 tool retire).
     """
     if recon:
         return (
@@ -231,11 +233,11 @@ def delivery_idle_nudge_prompt(
 def delivery_idle_narrow_prompt(
     *, rounds: int, keep_notes: bool = False, channel_dead: bool = False
 ) -> str | None:
-    """After soft nudge (repair files only): tools narrowed — still not FINALIZE.
+    """After soft nudge: tools narrowed — still not FINALIZE.
 
-    Report-delivery posts never arm this step (``narrow_rounds=0``); do not reuse
-    for report idle. Collaboration (wall) keeps note tools; mention briefly when
-    ``keep_notes``.
+    Factory never arms this for files_expected. Explicit construction may still
+    set ``narrow_rounds``. Collaboration (wall) keeps note tools; mention briefly
+    when ``keep_notes``.
 
     ``channel_dead`` → ``None`` (caller must skip): narrow copy keeps write tools
     and would push落盘 after the channel is already sticky-dead.

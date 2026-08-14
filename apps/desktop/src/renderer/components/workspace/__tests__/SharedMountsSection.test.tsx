@@ -109,6 +109,17 @@ describe("SharedMountsSection", () => {
     );
   });
 
+  it("list load failure is muted, not destructive", () => {
+    useSharedMountsMock.mockReturnValue(
+      mockQuery(undefined, { isError: true }) as never,
+    );
+    render(<SharedMountsSection conversationId="conv-1" />);
+    const line = screen.getByText(/无法加载挂载列表/);
+    expect(line.className).toContain("text-muted-foreground");
+    expect(line.className).not.toContain("destructive");
+    expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+  });
+
   it("picker empty state offers 新建共享空间 (兑现「或创建」)", () => {
     useSharedSpacesMock.mockReturnValue(mockQuery([]) as never);
     render(<SharedMountsSection conversationId="conv-1" />);

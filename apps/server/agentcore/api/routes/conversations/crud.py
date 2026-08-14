@@ -74,6 +74,7 @@ def _summary_with_count(
     conv: Conversation,
     counts: dict[str, int],
     unfolded: dict[str, int] | None = None,
+    previews: dict[str, str] | None = None,
 ) -> ConversationSummary:
     """Build a conversation summary, filling ``message_count`` from a counts map.
 
@@ -81,17 +82,26 @@ def _summary_with_count(
     ``MessageRepository.counts_for_conversations``) and pass the map here so the
     sidebar gets each chat's count without an N+1; absent ids default to 0.
 
+    ``previews`` is the same batch overlay for ``last_message_preview`` (last
+    visible assistant sentence; absent → null, never a user turn).
+
     ``unfolded`` is the same trick for the un-folded backlog (:func:`_unfolded_counts`),
     and only its keys get a ``context_gap`` verdict — a conversation left out was never
     a candidate, which is not the same as one proven intact.
     """
+    preview = None if previews is None else previews.get(conv.id)
     if unfolded is not None and conv.id in unfolded:
         return conversation_summary_from_orm(
             conv,
             message_count=counts.get(conv.id, 0),
             unfolded_messages=unfolded[conv.id],
+            last_message_preview=preview,
         )
-    return conversation_summary_from_orm(conv, message_count=counts.get(conv.id, 0))
+    return conversation_summary_from_orm(
+        conv,
+        message_count=counts.get(conv.id, 0),
+        last_message_preview=preview,
+    )
 
 
 async def _unfolded_counts(msg_repo: MessageRepository, counts: dict[str, int]) -> dict[str, int]:
@@ -241,7 +251,14 @@ async def duplicate_conversation(
         model_profile_id=src_pin,
     )
     count = await msg_repo.copy_all(conversation_id, new_conv.id)
-    return conversation_summary_from_orm(new_conv, message_count=count)
+    # Sidebar inserts this row into an infinite-stale cache — same preview
+    # overlay as list/grouped, or the clone stays blank until a full refetch.
+    previews = await msg_repo.previews_for_conversations([new_conv.id])
+    return conversation_summary_from_orm(
+        new_conv,
+        message_count=count,
+        last_message_preview=previews.get(new_conv.id),
+    )
 
 
 @router.get("", response_model=ConversationListResponse)
@@ -259,10 +276,12 @@ async def list_conversations(
     conversations, total = await repo.list_by_user(
         user.user_id, limit=page_size, offset=offset, archived=archived
     )
-    counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
+    ids = [c.id for c in conversations]
+    counts = await msg_repo.counts_for_conversations(ids)
+    previews = await msg_repo.previews_for_conversations(ids)
     unfolded = await _unfolded_counts(msg_repo, counts)
     return ConversationListResponse(
-        data=[_summary_with_count(c, counts, unfolded) for c in conversations],
+        data=[_summary_with_count(c, counts, unfolded, previews) for c in conversations],
         total=total,
         page=page,
         page_size=page_size,
@@ -283,13 +302,15 @@ async def list_conversations_grouped(
     """
     folders = await folder_repo.list_by_user(user.user_id)
     conversations = await conv_repo.list_all_by_user(user.user_id)
-    counts = await msg_repo.counts_for_conversations([c.id for c in conversations])
+    ids = [c.id for c in conversations]
+    counts = await msg_repo.counts_for_conversations(ids)
+    previews = await msg_repo.previews_for_conversations(ids)
     unfolded = await _unfolded_counts(msg_repo, counts)
 
     buckets: dict[str, list[ConversationSummary]] = {f.id: [] for f in folders}
     ungrouped: list[ConversationSummary] = []
     for conv in conversations:
-        summary = _summary_with_count(conv, counts, unfolded)
+        summary = _summary_with_count(conv, counts, unfolded, previews)
         if conv.folder_id in buckets:
             buckets[conv.folder_id].append(summary)
         else:

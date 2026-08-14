@@ -7,6 +7,7 @@
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as dispatchMod from "../sse/dispatch";
+import { clearLastEventId, peekLastEventId } from "../streamConversation";
 import {
   followedConversationIds,
   stopAllConversationFollows,
@@ -92,6 +93,7 @@ beforeEach(() => {
 afterEach(() => {
   stopAllConversationFollows();
   resetStreamOwnershipForTests();
+  clearLastEventId(CID);
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
@@ -267,7 +269,7 @@ describe("syncConversationFollow (对话级订阅)", () => {
     close();
   });
 
-  it("退避重连后补一次窗口对账：断线期间另一端跑完的回合不会自己冒出来", async () => {
+  it("退避重连不对账：不再用整窗写入去补断线期间已收口的回合", async () => {
     const first = sseStream();
     const second = sseStream();
     let call = 0;
@@ -283,7 +285,6 @@ describe("syncConversationFollow (对话级订阅)", () => {
     await tick();
     first.push(": attach-caught-up\n\n");
     await tick();
-    // 首连不对账：hydrateAttachSettle 刚拉过窗口。
     expect(loadLatestWindow).not.toHaveBeenCalled();
 
     first.close(); // 断线 → 退避重连
@@ -292,8 +293,7 @@ describe("syncConversationFollow (对话级订阅)", () => {
     second.push(": attach-caught-up\n\n");
     await tick();
 
-    // 服务端只重放仍在跑的 run；退避期间已收口的那个回合只能靠对账拉回来。
-    expect(loadLatestWindow).toHaveBeenCalledWith(CID, { softRefresh: true });
+    expect(loadLatestWindow).not.toHaveBeenCalled();
     second.close();
   });
 
@@ -373,8 +373,8 @@ describe("syncConversationFollow (对话级订阅)", () => {
     expect(followedConversationIds()).toEqual([CID]);
   });
 
-  it("正在跟播时切走不硬卸泵：等回合收口的心跳再关", async () => {
-    const { response, push, close } = sseStream();
+  it("切走立刻停：follow-only 的 isGenerating 落下，本端泵不杀", async () => {
+    const { response, close } = sseStream();
     vi.stubGlobal(
       "fetch",
       vi.fn(() => Promise.resolve(response)),
@@ -386,12 +386,80 @@ describe("syncConversationFollow (对话级订阅)", () => {
 
     syncConversationFollow(null);
     await tick();
-    expect(followedConversationIds()).toEqual([CID]); // 仍在跟播 → 延后关
+    expect(followedConversationIds()).toEqual([]);
+    expect(getRuntime(CID).isGenerating).toBe(false);
+    close();
+  });
 
-    useConversationStore.getState().setGenerating(false, CID);
-    push(": ping\n\n");
+  it("切走不 abort 本端连接闸：本地流仍在则 isGenerating 保留", async () => {
+    const { response, close } = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(response)),
+    );
+
+    const release = beginLocalConversationStream(CID);
+    useConversationStore.getState().setGenerating(true, CID);
+    syncConversationFollow(CID);
+    await tick();
+
+    syncConversationFollow(null);
     await tick();
     expect(followedConversationIds()).toEqual([]);
+    expect(getRuntime(CID).isGenerating).toBe(true);
+    release();
     close();
+  });
+
+  it("游标在 fold 后才推进；丢未折段与让位不清游标", async () => {
+    const { response, push, close } = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(response)),
+    );
+
+    const framed = (
+      type: string,
+      payload: Record<string, unknown>,
+      sseId: string,
+    ): string =>
+      `id: ${sseId}\ndata: ${JSON.stringify({ type, timestamp: "t", payload })}\n\n`;
+
+    syncConversationFollow(CID);
+    await tick();
+
+    push(
+      framed("message_start", { message_id: "srv-1", full_replay: true }, "10"),
+    );
+    push(framed("content_delta", { delta: "你" }, "11"));
+    await tick();
+    // 还在 catch-up 缓冲，未折 → 游标不动。
+    expect(peekLastEventId(CID)).toBeUndefined();
+
+    syncConversationFollow(null);
+    await tick();
+    expect(peekLastEventId(CID)).toBeUndefined();
+    close();
+
+    const live = sseStream();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve(live.response)),
+    );
+    syncConversationFollow(CID);
+    await tick();
+    live.push(
+      framed("message_start", { message_id: "srv-2", full_replay: true }, "20"),
+    );
+    live.push(framed("content_delta", { delta: "好" }, "21"));
+    live.push(": attach-caught-up\n\n");
+    await tick();
+    expect(peekLastEventId(CID)).toBe("21");
+
+    beginLocalConversationStream(CID);
+    live.push(framed("content_delta", { delta: "丢" }, "22"));
+    await tick();
+    expect(peekLastEventId(CID)).toBe("21");
+    live.close();
   });
 });

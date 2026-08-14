@@ -73,6 +73,11 @@ if [[ "$_gvisor_off" -eq 0 ]]; then
     echo "ERROR: 云执行默认开但找不到 docker-compose.sandbox.yml（或设 GVISOR_ENABLED=false）"
     exit 1
   fi
+  _sandbox_entrypoint="$(dirname "$_sandbox_yml")/api-sandbox-entrypoint.sh"
+  if [[ ! -f "$_sandbox_entrypoint" ]]; then
+    echo "ERROR: $_sandbox_yml 需要同目录 api-sandbox-entrypoint.sh（或设 GVISOR_ENABLED=false）"
+    exit 1
+  fi
   COMPOSE+=(-f "$_sandbox_yml")
   echo "gVisor sandbox overlay: $_sandbox_yml"
 fi

@@ -25,6 +25,7 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { FileTreeBatchDialogs } from "./FileTreeBatchDialogs";
@@ -39,6 +40,7 @@ import {
   runBatch,
   withSkipped,
 } from "./fileTreeBatch";
+import { subscribeFileTreeChanged } from "./fileTreeBus";
 import { loadExpanded, saveExpanded } from "./fileTreeExpanded";
 import { computeFileTreeFilter } from "./fileTreeFilter";
 import { flattenVisibleRows, topLevelSelection } from "./fileTreeSelection";
@@ -54,6 +56,9 @@ import { useFileTreeDrop } from "./useFileTreeDrop";
 
 export { dedupeName } from "./dedupeName";
 export type { FileTreeChromeState, FileTreeHandle } from "./fileTreeTypes";
+
+/** AI / watch / focus 连写合并窗口。人手点刷新不走这里。 */
+export const FILE_TREE_SILENT_DEBOUNCE_MS = 200;
 
 /**
  * The unified file tree for any {@link FileSource} (文件中枢统一 Step 0) — the one
@@ -188,30 +193,89 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       clearSelection();
     }, [source.id, clearSelection]);
 
+    const sourceRef = useRef(source);
+    sourceRef.current = source;
+    const dataRef = useRef(data);
+    dataRef.current = data;
+    const expandedRef = useRef(effectiveExpanded);
+    expandedRef.current = effectiveExpanded;
+    const silentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [watchEpoch, setWatchEpoch] = useState(0);
+
+    const runSilentRefresh = useCallback(async () => {
+      const tree = dataRef.current;
+      const src = sourceRef.current;
+      const dirs = src.listTree ? [""] : ["", ...expandedRef.current];
+      const wasEmpty = dirs.filter(
+        (dir) => (tree.childrenOf(dir)?.length ?? 0) === 0,
+      );
+      await Promise.all(dirs.map((dir) => tree.reloadSilent(dir)));
+      // 本机空→有：第一笔把目录写出来之后，原先挂在不存在路径上的 watch 是空的，
+      // 必须重挂；不换 source（换对象会冲掉树）。
+      if (
+        src.caps.watch &&
+        wasEmpty.some((dir) => (tree.childrenOf(dir)?.length ?? 0) > 0)
+      ) {
+        setWatchEpoch((n) => n + 1);
+      }
+    }, []);
+
+    const scheduleSilentRefresh = useCallback(() => {
+      if (silentTimerRef.current != null) {
+        clearTimeout(silentTimerRef.current);
+      }
+      silentTimerRef.current = setTimeout(() => {
+        silentTimerRef.current = null;
+        void runSilentRefresh();
+      }, FILE_TREE_SILENT_DEBOUNCE_MS);
+    }, [runSilentRefresh]);
+
+    useEffect(
+      () => () => {
+        if (silentTimerRef.current != null) {
+          clearTimeout(silentTimerRef.current);
+        }
+      },
+      [],
+    );
+
     // Live updates: watch the root + every expanded dir (local FS only).
+    // AI / watch 走 silent，禁止 data.reload（那条会打 chrome.loading）。
+    // biome-ignore lint/correctness/useExhaustiveDependencies: source.id / caps.watch / watchEpoch re-subscribe; body reads sourceRef
     useEffect(() => {
-      const watch = source.watch;
-      if (!watch || !source.caps.watch) return;
+      const watch = sourceRef.current.watch;
+      if (!watch || !sourceRef.current.caps.watch) return;
       const offs = ["", ...effectiveExpanded].map((dir) =>
-        watch(dir, () => data.reload(dir)),
+        watch(dir, () => scheduleSilentRefresh()),
       );
       return () => {
         for (const off of offs) off();
       };
-    }, [source, effectiveExpanded, data]);
+    }, [
+      source.id,
+      source.caps.watch,
+      effectiveExpanded,
+      scheduleSilentRefresh,
+      watchEpoch,
+    ]);
 
-    // Cloud / no-watch sources never push mutations — re-pull when the window
-    // regains focus so AI writes land in the panel without a manual refresh
-    // (fc35aece: stale empty tree while「改动」already saw the files).
+    // Cloud / no-watch sources never push mutations — silent re-pull on focus
+    // (不轮询、不给云源 watch:true)。人手刷新仍走下面的 refresh()。
     useEffect(() => {
       if (source.caps.watch) return;
-      const onFocus = () => {
-        data.reload("");
-        for (const dir of effectiveExpanded) data.reload(dir);
-      };
+      const onFocus = () => scheduleSilentRefresh();
       window.addEventListener("focus", onFocus);
       return () => window.removeEventListener("focus", onFocus);
-    }, [source.caps.watch, data, effectiveExpanded]);
+    }, [source.caps.watch, scheduleSilentRefresh]);
+
+    // fileTreeBus：AI 写盘与跨源搬运都通知「这棵树某层变了」。订阅侧走 silent。
+    useEffect(
+      () =>
+        subscribeFileTreeChanged((change) => {
+          if (change.sourceId === source.id) scheduleSilentRefresh();
+        }),
+      [source.id, scheduleSilentRefresh],
+    );
 
     const toggle = useCallback(
       (dir: string) => {
@@ -599,7 +663,7 @@ export const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(
       <InlineError onRetry={() => data.reload("")} />
     ) : (
       <div
-        className="flex items-center gap-2 py-2 text-xs text-destructive/80"
+        className="flex items-center gap-2 py-2 text-xs text-muted-foreground"
         style={{ paddingLeft: indent + 8 }}
       >
         加载失败

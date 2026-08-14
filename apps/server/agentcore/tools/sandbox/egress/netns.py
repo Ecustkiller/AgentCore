@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 
 from agentcore.core.logging import get_logger
+from agentcore.tools.sandbox.browser.netns import chmod_netns_inode
 
 logger = get_logger(__name__)
 
@@ -53,6 +54,7 @@ class PackageNetns:
     async def setup(self) -> None:
         await self.teardown()
         await _ip("netns", "add", self.name)
+        chmod_netns_inode(self.name)
         await _ip("link", "add", self.veth_host, "type", "veth", "peer", "name", self.veth_sbx)
         await _ip("link", "set", self.veth_sbx, "netns", self.name)
         await _ip("addr", "add", f"{self.host_ip}/{self.cidr}", "dev", self.veth_host)

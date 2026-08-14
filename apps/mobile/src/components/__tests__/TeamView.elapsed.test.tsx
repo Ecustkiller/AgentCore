@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /**
- * 团队条「用时」= 回合墙钟跨度（与桌面同量）。
+ * 团队条「用时」= 回合墙钟跨度。
  *
  * 回归钉：曾按队员时长求和，同一回合桌面「用时 40s」、手机「用时 2m10s」——并行度越高手机
- * 的数字越大，把这个产品「并行省时」的卖点显示成了反面。
+ * 的数字越大。用时只认墙钟，不回潮成队员工时之和。
  */
 import { TeamView } from "@/components/TeamView";
 import type {
@@ -11,7 +11,7 @@ import type {
   ProjectedRun,
 } from "@agentcore/protocol-conformance";
 import { turnElapsedMs } from "@agentcore/protocol-fold-kit";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 afterEach(cleanup);
@@ -157,6 +157,7 @@ describe("TeamView 团队条 · 用时", () => {
         elapsedMs={42_000}
       />,
     );
+    fireEvent.click(screen.getByRole("button", { name: "展开协作列表" }));
     expect(screen.getByText(/39\.0s/)).toBeTruthy();
   });
 });

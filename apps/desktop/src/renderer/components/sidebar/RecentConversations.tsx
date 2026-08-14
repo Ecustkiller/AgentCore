@@ -1,18 +1,17 @@
 import { SurfaceRowButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useWorkspaceGroups } from "@/hooks/useWorkspaceGroups";
+import {
+  BARE_LIMIT_SOLO,
+  BARE_LIMIT_WITH_GROUPS,
+  pickBareVisible,
+} from "@/lib/sidebarRailVisibility";
+import { useRequiredConversationIds } from "@/stores/aiAttention";
 import { type Conversation, useConversationStore } from "@/stores/conversation";
 import { ChevronRight, MessageSquare } from "lucide-react";
 import { useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { ConversationItem } from "./ConversationItem";
-
-/** How many 裸聊 the「快速对话」zone shows before deferring to /conversations.
- * Adaptive: with no folder groups the zone owns more of the rail ({@link BARE_LIMIT_SOLO});
- * once groups sit above it the cap relaxes to {@link BARE_LIMIT_WITH_GROUPS}.
- * Overflow exits via「查看全部对话」. Pinned chats live in {@link PinnedConversations}. */
-const BARE_LIMIT_SOLO = 15;
-const BARE_LIMIT_WITH_GROUPS = 10;
 
 function byRecency(a: Conversation, b: Conversation): number {
   return (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0);
@@ -21,8 +20,9 @@ function byRecency(a: Conversation, b: Conversation): number {
 /**
  * The rail's bare-chat zone (前端UX §一 方案C): **unpinned 裸聊** below the
  * workspace groups. Foldered chats live in their {@link useWorkspaceGroups} group
- * (or the pin zone if pinned). The currently-open bare chat is always kept even
- * when older than the cut-off.
+ * (or the pin zone if pinned). The currently-open bare chat and any required
+ * 「等你」bare chat are re-inserted even when older than the cut-off. Archived
+ * chats are not pulled back.
  *
  * No section title. A hairline separates this zone from whatever sits above
  * (置顶 and/or 文件夹). When every chat is foldered or pinned this zone renders nothing.
@@ -32,19 +32,15 @@ export function RecentConversations() {
   const hasGroups = useWorkspaceGroups().length > 0;
   const hasPinned = conversations.some((c) => c.pinned);
   const currentId = useConversationStore((s) => s.currentConversationId);
+  const requiredIds = useRequiredConversationIds();
 
   const recent = useMemo(() => {
     const limit = hasGroups ? BARE_LIMIT_WITH_GROUPS : BARE_LIMIT_SOLO;
     const bare = conversations
       .filter((c) => !c.folderId && !c.pinned)
       .sort(byRecency);
-    const top = bare.slice(0, limit);
-    if (currentId && !top.some((c) => c.id === currentId)) {
-      const active = bare.find((c) => c.id === currentId);
-      if (active) top.push(active); // keep an out-of-window active bare chat visible
-    }
-    return top;
-  }, [conversations, currentId, hasGroups]);
+    return pickBareVisible(bare, { limit, currentId, requiredIds });
+  }, [conversations, currentId, hasGroups, requiredIds]);
 
   if (conversations.length === 0) {
     return (

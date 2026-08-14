@@ -1,9 +1,7 @@
 /**
- * 协作收益轻信号（气泡脚 + 完成态状态条）。
- *
- * 实现在 `@agentcore/protocol-fold-kit`：这行文案手机端要一字不差地说同一句、同一个数，
- * 与「用时」同理（那次两端各写一份，结果分叉成 40s / 2m10s）。这里只做转出口，让桌面调用方
- * 继续 import `@/lib/collabSummary`。
+ * 协作计数口径转出口（`formatCollabSummary`）。用户面已不渲染「互相把关」
+ * （状态条 / 气泡脚都不挂）；实现与测试仍走 `@agentcore/protocol-fold-kit`，
+ * 避免桌面再写一份句子。
  */
 export {
   COLLAB_SUMMARY_TOOLTIP,

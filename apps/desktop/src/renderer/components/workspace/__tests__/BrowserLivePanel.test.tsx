@@ -360,7 +360,11 @@ describe("BrowserLivePanel · M2 接管流转", () => {
     goLive();
     await clickAsync("接管");
 
-    expect(screen.getByText("当前没有进行中的浏览器会话")).toBeTruthy();
+    const failBar = screen
+      .getByText("当前没有进行中的浏览器会话")
+      .closest("div");
+    expect(failBar?.className).toContain("bg-muted/40");
+    expect(failBar?.className).not.toContain("destructive");
     // Back to idle → the 接管 affordance returns, no 接管中 bar.
     expect(screen.getByText("接管")).toBeTruthy();
     expect(screen.queryByText("归还控制")).toBeNull();

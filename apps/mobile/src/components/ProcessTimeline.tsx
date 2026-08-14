@@ -37,7 +37,6 @@ import type {
   ProjectedTeamNote,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
-import type { CollabCounts } from "@agentcore/protocol-fold-kit";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import "@/components/ProcessTimeline.css";
 
@@ -77,16 +76,62 @@ export function reworkChipLabel(
 }
 
 /**
- * True once the team has actually started work: any run left the never-started
- * states (`pending`, or terminal `skipped` from finalize before a start).
+ * True once a **worker** left the never-started states (`pending`, or terminal
+ * `skipped` from finalize before a start). Captain `run_started` is the CEO
+ * turn itself and must not count (journal hydrate restores a frame live SSE drops).
  * Gates TeamView so team_preview hang / stop-before-start stay graph-less;
- * plan_review mid-wave pause (completed nodes exist) still shows the graph.
+ * plan_review mid-wave pause (completed worker nodes exist) still shows the graph.
  * Aligns desktop `debatePreviewPlacement.teamHasStartedRuns`.
  */
 export function teamHasStartedRuns(
-  runs: readonly { status: string }[],
+  runs: readonly { status: string; kind?: string | null }[],
 ): boolean {
-  return runs.some((r) => r.status !== "pending" && r.status !== "skipped");
+  return runs.some(
+    (r) =>
+      r.kind !== "captain" && r.status !== "pending" && r.status !== "skipped",
+  );
+}
+
+export function isKickoffGoDecision(decision: unknown): boolean {
+  return decision === "continue" || decision === "adjust";
+}
+
+/**
+ * Hang stays graph-less. After authorize (continue/adjust) pending nodes still
+ * show. Aligns desktop `shouldShowTeamGraph`.
+ */
+export function shouldShowTeamGraph(
+  runs: readonly { status: string; kind?: string | null }[] | null | undefined,
+  kickoffReleased = false,
+): boolean {
+  const list = runs ?? [];
+  if (teamHasStartedRuns(list)) return true;
+  return kickoffReleased && list.length > 0;
+}
+
+export function kickoffReleasedFromCold(
+  entries: Iterable<{
+    kind: string;
+    messageId: string;
+    status: string;
+    resolution?: Record<string, unknown>;
+  }>,
+  messageId: string | null | undefined,
+): boolean {
+  if (!messageId) return false;
+  let released = false;
+  let pending = false;
+  for (const e of entries) {
+    if (e.kind !== "team_preview") continue;
+    if (e.messageId !== messageId) continue;
+    if (e.status === "pending") {
+      pending = true;
+      continue;
+    }
+    if (e.status !== "resolved" && e.status !== "submitting") continue;
+    if (isKickoffGoDecision(e.resolution?.decision)) released = true;
+  }
+  return released && !pending;
 }
 
 export interface TeamProjection {
@@ -122,9 +167,6 @@ export interface TeamProjection {
   evidenceLedger?: EvidenceLedgerEntry[];
   /** 回合墙钟跨度（`turnElapsedMs(events)`，与桌面同量）：条上「用时」。缺省 0 = 不显示。 */
   elapsedMs?: number;
-  /** 回合协作计数（live = `message_end.collab`；历史 = REST `MessageDetail.collab`）：条上
-   *  「互相把关」一行。不入 ProjectedTurn（旁路，同桌面 `message.collab`）。 */
-  collab?: CollabCounts | null;
 }
 
 /** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,
@@ -432,6 +474,7 @@ export function ProcessTimeline({
   turnClosed = false,
   onFill,
   onOpenBrowserLive,
+  kickoffReleased = false,
 }: {
   steps: ProcessStep[];
   citations?: Citation[];
@@ -457,6 +500,8 @@ export function ProcessTimeline({
   userInterjections?: readonly InterjectionItem[];
   /** 回合已收口 → received 派生态「未被主 Agent 读取」。 */
   turnClosed?: boolean;
+  /** 开工卡已授权 continue/adjust：pending 编制也出图. */
+  kickoffReleased?: boolean;
   onFill?: (text: string) => void;
   onOpenBrowserLive?: (opts?: { runId?: string }) => void;
 }) {
@@ -524,7 +569,8 @@ export function ProcessTimeline({
       return <Reasoning key={nodeKey} text={node.text} isStreaming={live} />;
     }
     if (node.kind === "team") {
-      if (!team || !teamHasStartedRuns(team.runs)) return null;
+      if (!team || !shouldShowTeamGraph(team.runs, kickoffReleased))
+        return null;
       const hasPrev = Boolean(prevExecutionIds?.get(node.execution_id));
       return (
         <Fragment key={nodeKey}>
@@ -667,7 +713,9 @@ export function ProcessTimeline({
 
   return (
     <div className="timeline">
-      {team && !hasTeamMarker && teamHasStartedRuns(team.runs) ? (
+      {team &&
+      !hasTeamMarker &&
+      shouldShowTeamGraph(team.runs, kickoffReleased) ? (
         <TeamView {...team} />
       ) : null}
       {nodes.map((node, i) => {

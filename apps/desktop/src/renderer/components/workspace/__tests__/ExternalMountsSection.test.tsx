@@ -106,7 +106,9 @@ describe("ExternalMountsSection", () => {
       mockQuery(undefined, { isError: true }) as never,
     );
     render(<ExternalMountsSection conversationId="conv-1" />);
-    expect(screen.getByText(/无法加载区外挂载/)).toBeTruthy();
+    const line = screen.getByText(/无法加载区外挂载/);
+    expect(line.className).toContain("text-muted-foreground");
+    expect(line.className).not.toContain("destructive");
     expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
   });
 });

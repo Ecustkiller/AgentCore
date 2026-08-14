@@ -15,6 +15,7 @@ import { logEvent } from "@/lib/log";
 import { ApiError, NetworkError } from "@/services/api";
 import {
   __clearAttachmentUploadsForTests,
+  rememberAttachmentRecover,
   trackAttachmentUpload,
 } from "../attachmentUploads";
 import type { PendingAttachment } from "../composerAttachments";
@@ -190,7 +191,13 @@ describe("settleAttachments", () => {
 
     await settleAttachments("new-conv", [att]);
 
-    expect(ensure).toHaveBeenCalledWith("new-conv", att);
+    expect(ensure).toHaveBeenCalledWith(
+      "new-conv",
+      expect.objectContaining({
+        name: att.name,
+        fileBlob: att.fileBlob,
+      }),
+    );
   });
 
   it("暂存已失效：报中文原因并点名要摘掉的 chip", async () => {
@@ -223,6 +230,67 @@ describe("settleAttachments", () => {
     if (res.ok) return;
     expect(res.cause).toBe(refused);
     expect(res.reason).toBe("文件超出 26214400 字节的上传上限");
+  });
+
+  it("已删会话的 workspacePath 不能跳过：换会话要再驻留", async () => {
+    const att = fileAttachment({
+      workspacePath: "attachments/a.png",
+      stagingId: "stg-1",
+    });
+    rememberAttachmentRecover(att.id, att.fileBlob, "old-conv");
+    ensure.mockResolvedValue({
+      ok: true,
+      workspacePath: "attachments/a.png",
+      name: "a.png",
+      binary: true,
+      text: "",
+      truncated: false,
+    });
+
+    const res = await settleAttachments("new-conv", [att]);
+
+    expect(res.ok).toBe(true);
+    expect(ensure).toHaveBeenCalledWith(
+      "new-conv",
+      expect.objectContaining({
+        workspacePath: undefined,
+        fileBlob: att.fileBlob,
+      }),
+    );
+  });
+
+  it("已消耗 stagingId：用 recover blob 再驻留，不报暂存已失效", async () => {
+    const blob = new File([new Uint8Array([1])], "a.png", {
+      type: "image/png",
+    });
+    const att = fileAttachment({
+      stagingId: "stg-consumed",
+      fileBlob: undefined,
+    });
+    rememberAttachmentRecover(att.id, blob, "old-conv");
+    ensure.mockResolvedValue({
+      ok: true,
+      workspacePath: "attachments/a.png",
+      name: "a.png",
+      binary: true,
+      text: "",
+      truncated: false,
+    });
+
+    const res = await settleAttachments("new-conv", [att]);
+
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.outgoing[0]).toMatchObject({
+      workspace_path: "attachments/a.png",
+    });
+    expect(ensure).toHaveBeenCalledWith(
+      "new-conv",
+      expect.objectContaining({
+        fileBlob: blob,
+        stagingId: "stg-consumed",
+      }),
+    );
   });
 
   it("对话 / 目录这类纯文本引用原样透传，不碰驻留", async () => {

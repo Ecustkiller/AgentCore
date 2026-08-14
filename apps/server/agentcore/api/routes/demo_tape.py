@@ -201,6 +201,7 @@ async def start_demo_tape(
         conversation_id=prepared.conversation_id,
         task=task,
         sink=sink,
+        user_id=user.user_id,
     )
     await _wait_for_user_message(prepared.conversation_id)
     await _wait_for_paused_or_settled(prepared.conversation_id, task)

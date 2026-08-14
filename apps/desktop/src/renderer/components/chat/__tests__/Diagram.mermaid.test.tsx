@@ -95,6 +95,9 @@ describe("MermaidDiagram · 模块加载失败分型", () => {
     render(<DiagramBlock kind="mermaid" code={sampleCode} streaming={false} />);
 
     await waitFor(() => expect(screen.getByText("渲染失败")).toBeTruthy());
+    const failLabel = screen.getByText("渲染失败");
+    expect(failLabel.className).toContain("text-muted-foreground");
+    expect(failLabel.className).not.toContain("destructive");
     expect(screen.getByText(/图表引擎加载失败/)).toBeTruthy();
     expect(screen.getByText(/刷新页面/)).toBeTruthy();
     expect(

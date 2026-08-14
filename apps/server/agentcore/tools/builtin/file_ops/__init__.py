@@ -55,6 +55,8 @@ from agentcore.tools.builtin.file_ops.mutate import (
 )
 from agentcore.tools.builtin.file_ops.read import (
     _DEFAULT_READ_LINES,
+    FILE_READ_SAFETY_CHAR_CAP,
+    FILE_READ_SAFETY_LINE_CAP,
     FileListTool,
     FileReadTool,
     expand_brace_globs,
@@ -72,6 +74,8 @@ __all__ = [
     "MkdirTool",
     "StrReplaceTool",
     "WriteSectionTool",
+    "FILE_READ_SAFETY_CHAR_CAP",
+    "FILE_READ_SAFETY_LINE_CAP",
     "_DEFAULT_READ_LINES",
     "_mark_landed_files",
     "_outside_workspace_msg",

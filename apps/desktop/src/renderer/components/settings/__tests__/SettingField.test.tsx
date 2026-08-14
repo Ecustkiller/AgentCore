@@ -82,7 +82,7 @@ describe("SettingField", () => {
     );
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toBe("保存失败，请重试");
-    expect(alert.className).toContain("text-destructive");
+    expect(alert.className).toContain("text-muted-foreground");
     expect(screen.getByText("明文加密落库")).toBeTruthy();
   });
 
@@ -104,7 +104,7 @@ describe("SettingsFormMessage", () => {
     render(<SettingsFormMessage>保存失败，请重试</SettingsFormMessage>);
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toBe("保存失败，请重试");
-    expect(alert.className).toContain("text-destructive");
+    expect(alert.className).toContain("text-muted-foreground");
   });
 
   it("announces success politely", () => {

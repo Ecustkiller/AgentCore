@@ -27,7 +27,7 @@ export function ExternalMountsSection({
   if (grantsQuery.isError) {
     return (
       <div className="shrink-0 border-t border-border px-3 py-2">
-        <p className="text-xs text-destructive">
+        <p className="text-xs text-muted-foreground">
           无法加载区外挂载
           <Button
             size="sm"

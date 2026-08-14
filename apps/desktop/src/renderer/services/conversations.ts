@@ -11,7 +11,10 @@ import type { components } from "@/types/api.generated";
 type Schemas = components["schemas"];
 
 /** A conversation row from the list/detail endpoints (server-shaped). */
-type BackendConversation = Schemas["ConversationSummary"];
+type BackendConversation = Schemas["ConversationSummary"] & {
+  /** List preview; field name is fixed even if OpenAPI lags the payload. */
+  last_message_preview?: string | null;
+};
 /** Paginated conversation list (`GET /v1/conversations`). */
 type ConversationListResponse = Schemas["ConversationListResponse"];
 /** Folders + ungrouped conversations in one trip (`/v1/conversations/grouped`). */
@@ -39,7 +42,7 @@ function toConversation(c: BackendConversation): Conversation {
     updatedAt: c.updated_at,
     // The list/grouped endpoints carry message_count (0 for an unsent chat).
     messageCount: c.message_count ?? 0,
-    lastMessagePreview: null,
+    lastMessagePreview: c.last_message_preview?.trim() || null,
     folderId: c.folder_id ?? null,
     localContainerRootId: c.local_container_root_id ?? null,
     pinned: c.pinned ?? false,

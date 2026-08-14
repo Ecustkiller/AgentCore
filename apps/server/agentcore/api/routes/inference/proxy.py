@@ -539,43 +539,57 @@ async def _forward_stream(
     attr = attribution or {}
 
     async def _iter_sse():
-        async for chunk in provider.stream(request):
-            # Relay the provider's stream-control signals inline (mirror of the
-            # empty_diagnosis relay) so the downstream sidecar reconstructs the exact
-            # LLMChunk protocol across the proxy hop: a transparent pre-commit retry
-            # (stream_reset) and a post-commit disconnect salvage (aborted) would
-            # otherwise flatten to an empty delta and be silently lost.
-            if chunk.stream_reset:
-                yield f"data: {json.dumps({'stream_reset': True})}\n\n"
-                continue
-            if chunk.aborted:
-                yield f"data: {json.dumps({'aborted': True})}\n\n"
-                continue
-            data: dict = {"choices": [{"index": 0, "delta": {}, "finish_reason": None}]}
-            delta = data["choices"][0]["delta"]
-            if chunk.delta_content:
-                delta["content"] = chunk.delta_content
-            if chunk.delta_reasoning:
-                delta["reasoning_content"] = chunk.delta_reasoning
-            if chunk.delta_tool_calls:
-                delta["tool_calls"] = _tool_call_deltas_to_wire(chunk.delta_tool_calls)
-            if chunk.finish_reason:
-                data["choices"][0]["finish_reason"] = chunk.finish_reason
-            if chunk.usage:
-                captured["usage"] = chunk.usage
-                captured["model"] = request.model
-                data["usage"] = _usage_to_openai_wire(chunk.usage)
-            if chunk.empty_diagnosis:
-                # Relay the provider's precise empty-response diagnosis (upstream_non_api /
-                # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of
-                # re-deriving a generic SILENT_EMPTY from a bare empty delta (01 F8).
-                diag: dict = {"empty_diagnosis": chunk.empty_diagnosis}
-                if chunk.empty_raw_preview is not None:
-                    diag["empty_raw_preview"] = chunk.empty_raw_preview
-                yield f"data: {json.dumps(diag, ensure_ascii=False)}\n\n"
-                continue
-            yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
-        yield "data: [DONE]\n\n"
+        # StreamingResponse runs after the request handler's log_context exits.
+        # Re-bind for the upstream read so llm.empty_response / llm.call_retried
+        # on this hop keep conversation_id / trace_id / run tree.
+        with log_context(
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            message_id=message_id,
+            run_id=attr.get("run_id"),
+            parent_run_id=attr.get("parent_run_id"),
+            agent_id=attr.get("agent_id"),
+            cost_role=attr.get("role"),
+            persona=attr.get("persona"),
+        ):
+            async for chunk in provider.stream(request):
+                # Relay the provider's stream-control signals inline (mirror of the
+                # empty_diagnosis relay) so the downstream sidecar reconstructs the exact
+                # LLMChunk protocol across the proxy hop: a transparent pre-commit retry
+                # (stream_reset) and a post-commit disconnect salvage (aborted) would
+                # otherwise flatten to an empty delta and be silently lost.
+                if chunk.stream_reset:
+                    yield f"data: {json.dumps({'stream_reset': True})}\n\n"
+                    continue
+                if chunk.aborted:
+                    yield f"data: {json.dumps({'aborted': True})}\n\n"
+                    continue
+                data: dict = {"choices": [{"index": 0, "delta": {}, "finish_reason": None}]}
+                delta = data["choices"][0]["delta"]
+                if chunk.delta_content:
+                    delta["content"] = chunk.delta_content
+                if chunk.delta_reasoning:
+                    delta["reasoning_content"] = chunk.delta_reasoning
+                if chunk.delta_tool_calls:
+                    delta["tool_calls"] = _tool_call_deltas_to_wire(chunk.delta_tool_calls)
+                if chunk.finish_reason:
+                    data["choices"][0]["finish_reason"] = chunk.finish_reason
+                if chunk.usage:
+                    captured["usage"] = chunk.usage
+                    captured["model"] = request.model
+                    data["usage"] = _usage_to_openai_wire(chunk.usage)
+                if chunk.empty_diagnosis:
+                    # Relay the provider's precise empty-response diagnosis (upstream_non_api /
+                    # MODEL_UNKNOWN ...) so the sidecar surfaces the actionable hint instead of
+                    # re-deriving a generic SILENT_EMPTY from a bare empty delta (01 F8).
+                    diag: dict = {"empty_diagnosis": chunk.empty_diagnosis}
+                    if chunk.empty_raw_preview is not None:
+                        diag["empty_raw_preview"] = chunk.empty_raw_preview
+                    yield f"data: {json.dumps(diag, ensure_ascii=False)}\n\n"
+                    continue
+                yield f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
 
     sse_gen = _iter_sse()
     try:

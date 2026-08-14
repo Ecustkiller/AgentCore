@@ -83,7 +83,7 @@ node scripts/check-ui-tokens.mjs --src apps/mobile/src
 
 ## 配色要点（细节权威 = color-tokens）
 
-只用语义 token；禁止硬编码。执行态：pending→muted、running→primary、completed→success、failed→destructive、待拍板→primary。分类色板（agent / artifact / debate-side）≠ 状态。**手机仅浅色**（明确决策）。`accent` ≠ 成功色。tone 预设 → `ui/tone-presets.ts`。
+只用语义 token；禁止硬编码。用户面提示：需要你→primary，可恢复中断→`noticeChipNeutral`（灰），危险操作→destructive。执行态：pending→muted、running→primary、completed→success、failed→destructive（红点；整卡提示走用户面档）。分类色板（agent / artifact / debate-side / git / 风险）≠ 状态。**手机仅浅色**（明确决策）。`accent` ≠ 成功色。三层细则 → `color-tokens.mdc`。tone 预设 → `ui/tone-presets.ts`。
 
 ## 布局规格（细节权威 = desktop-layout）
 

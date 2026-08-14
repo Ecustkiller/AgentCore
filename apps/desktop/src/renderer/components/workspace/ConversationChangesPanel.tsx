@@ -15,8 +15,6 @@ import {
 } from "@/lib/fileArtifacts";
 import { formatMessageTime } from "@/lib/format";
 import { gitTrackHasWork } from "@/lib/gitRepoStatus";
-import { queryClient } from "@/lib/queryClient";
-import { workspaceKeys } from "@/lib/queryKeys";
 import { useAutoSnapshotStore } from "@/stores/autoSnapshot";
 import { useConversationStore } from "@/stores/conversation";
 import {
@@ -31,6 +29,7 @@ import { useEffect, useMemo, useRef } from "react";
 /**
  * 右坞「改动」tab 体 —— 只审本对话 AI 文件改动：回合 diff + 回合基线回滚，
  * 本机有仓时并排 Git SCM（U2/U3）。用户留存版本不在这里。
+ * 只读 process / execution，不为「出现产物」invalidate 工作区列表或换 FileSource。
  *
  * tab 出现条件由外层决定；深链只决定聚焦哪个回合。
  */
@@ -139,13 +138,6 @@ export function ConversationChangesPanel() {
     if (!focusMessageId) return;
     focusRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusMessageId, timeline]);
-
-  // 有 AI 文件改动时刷新工作区轨，避免中枢仍藏着尚未列出的 conv scratch（与列表对齐）。
-  useEffect(() => {
-    if (turns.some((t) => t.artifacts.length > 0)) {
-      void queryClient.invalidateQueries({ queryKey: workspaceKeys.list });
-    }
-  }, [turns]);
 
   if (!conversationId) {
     return (

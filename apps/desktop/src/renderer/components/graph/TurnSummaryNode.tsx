@@ -37,10 +37,6 @@ export interface TurnSummaryData {
    * finalized checkpoint pause is NOT counted here — it shows via the `paused` status ring +
    * the dock's durable resume (see {@link countPendingDecisions}). */
   pendingDecisions: number;
-  /** 图上指挥扫视: this folded turn has recoverable terminal trouble (failed / cancelled
-   * / 部分失败). Drives a destructive「待救火」chip; shown only when no decision pends
-   * (an actionable decision outranks a recoverable failure). */
-  recoverable: boolean;
   /** Turn-level note wall count (`Execution.teamNotes`); 0 → no chip. */
   noteCount: number;
   [key: string]: unknown;
@@ -102,20 +98,12 @@ export function TurnSummaryNode({ data }: NodeProps) {
             {d.taskSummary || "团队回合"}
           </p>
           {/* 图上指挥扫视 (§6.2): mirror the focused node's chips on the FOLDED summary so
-              a long spine flags which turns need the boss. 待你拍板 (actionable) outranks
-              待救火 (terminal) when both apply; the title truncates to make room. */}
-          {d.pendingDecisions > 0 ? (
+              a long spine flags which turns need the boss; the title truncates to make room. */}
+          {d.pendingDecisions > 0 && (
             <span className="flex shrink-0 items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
               <AlertTriangle size={11} />
               待你拍板{d.pendingDecisions > 1 ? ` ${d.pendingDecisions}` : ""}
             </span>
-          ) : (
-            d.recoverable && (
-              <span className="flex shrink-0 items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive">
-                <AlertTriangle size={11} />
-                待救火
-              </span>
-            )
           )}
         </div>
 

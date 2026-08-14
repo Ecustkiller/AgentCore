@@ -78,6 +78,17 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reason": "str",
         "found_role": "str",
     },
+    "chat.zero_output_send_deleted": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "user_message_id": "str",
+        "error_code": "str",
+    },
+    "chat.zero_output_send_delete_failed": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "user_message_id": "str",
+    },
     "chat.prepare_phase": {
         "phase": "str",
         "ms": "int",
@@ -591,8 +602,16 @@ KEY_DESC: dict[str, str] = {
         "429 冷却超出本次调用能等的上限，放弃重试。cooldown_sec / cooldown_source = 判定所依据的"
         "冷却及其来源：upstream_header（上游声明，reason=retry_after_too_large）/ local_backoff"
         "（上游没带头，这个数是我们自己的退避链，reason=backoff_exceeds_budget）；"
-        "retry_after_sec 只记上游声明值，无头时为 null；"
+        "交互回合 chat/agent 无头或头>2s 立刻放弃（reason=interactive_fail_fast），"
+        "不再走 2→4→8→16；retry_after_sec 只记上游声明值，无头时为 null；"
         "ceiling_sec = 该上限（后台一次性调用按剩余预算算，交互回合为 30s）"
+    ),
+    "chat.zero_output_send_deleted": (
+        "本发新建 user + 空失败助手（LLM_RATE_LIMIT / KEY_INVALID / 余额不足，"
+        "无正文/工具/token）已硬删，发送在库里当没发生；cost_events 留下"
+    ),
+    "chat.zero_output_send_delete_failed": (
+        "本发零产出回滚硬删失败（助手或 user 行未去掉）；客户端仍可能撤泡，重载以库为准"
     ),
     "chat.turn_start": "回合起点（preview/chars/history）",
     "chat.turn_complete": "回合收尾（含 Phase-0 延迟：prepare/assemble/ttft_*；model/credential_source）",

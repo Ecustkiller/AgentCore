@@ -106,24 +106,47 @@
 }
 
 /* --- Inline citation chips ([n] / #rN → citemark from remarkCitations).
-   Pill shape aligned with desktop chip (rounded-full + primary wash); no Popover. --- */
+   Muted favicon+number pill; aligned with desktop CitationChip. No Popover. --- */
 .cite-chip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 2px;
   min-width: 1.15em;
-  height: auto;
-  padding: 0 6px;
+  height: 1.15em;
+  padding: 0 4px;
   margin: 0 2px;
   font-size: 0.75rem;
   font-weight: 500;
-  line-height: 1.35;
-  color: var(--accent);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
   text-decoration: none;
   vertical-align: middle;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--panel);
   border-radius: 999px;
+}
+
+.cite-chip-favicon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 0.6em;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--muted);
+}
+
+.cite-chip-favicon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 /* --- Inline evidence badges (辩手举证标记 → evidencemark from remarkEvidence). ---

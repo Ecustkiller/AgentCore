@@ -140,7 +140,7 @@ escalate 是「缺了它整件事会走偏、需要现在有人拍板」，交�
 # 巡检定案 B：worker 交付各一句，防 CEO 综收把「已修复 / 已就绪 / 中途绿」回灌成用户症状已消。
 # 不扩姿势 A 词表、不加闸。
 _WORKER_DELIVERY_HONESTY = """\
-【交接勿回灌】正文与 handoff：用户报了可见症状时勿写「修复完成 / 已修复」——写改了什么、请对照看一眼；\
+【交接勿回灌】正文与 handoff：用户报了可见症状时勿写「修复完成 / 已修复 / 现象已消除 / 已全部落地」——写改了什么、请对照看一眼；\
 勿把提示词包 / 脚本 / 说明书说成「系统已就绪」——没改用户打开的文件就写界面没改；\
 说测试通过以最后一次同命令退出码为准，中途绿最后红报红的，分项分开写。"""
 
@@ -285,7 +285,8 @@ _WORKER_LEAF_INTRO = f"""\
 你不能再向下委派。{_WORKER_PROBLEM_HANDLING}"""
 
 # Captain intro for any worker within the depth cap (delegation is on by default —
-# there is no per-node opt-in flag). HOW (怎么拆 / 何时不该拆 / replan 续跑) lives in
+# there is no per-node opt-in flag). WHEN 短判决（成果级先招 / 薄切片读出整仓 escalate /
+# 有 delegate 即可招）lives here; HOW (怎么拆 / 何时不该拆 / replan 续跑) lives in
 # consult(team_orchestration_advanced). Nesting honesty branches on ``depth`` vs
 # ``MAX_DELEGATION_DEPTH``: children of a near-cap captain are leaves; shallower
 # captains' children may still nest. Workers at the cap get the leaf intro.
@@ -305,9 +306,11 @@ def _worker_captain_intro(*, depth: int) -> str:
         )
     return f"""\
 你是团队中的一名专家 worker，除了自己干活，你还可以再向下委派一层子团队来分担。你负责一个划定\
-好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。活太大、能拆成可独立完成的\
-几件时可再招人。怎么拆、何时不该拆、控制权交回后怎么续跑 → \
-consult(team_orchestration_advanced)。不要为委派而委派。
+好的任务，外加完成它所需的上下文；你够不到用户、不会有人实时答疑。接到整座成果且任务未钉成\
+单切片 → 先招人再整合（不是先深读再招）。接到的已是薄切片、读仓后发现是整座仓 → \
+escalate（范围），禁止默默扩编。有 delegate 就可以招，不看任务里有没有「先组队」。\
+「不要为委派而委派」只约束本来就小的活，不授权一个人扛里程碑。怎么拆、何时不该拆、\
+控制权交回后怎么续跑 → consult(team_orchestration_advanced)。
 {nest_honesty}{_WORKER_PROBLEM_HANDLING}"""
 
 

@@ -5,6 +5,7 @@ import {
   bootstrapRequest,
   captureCsrf,
   clearCsrfToken,
+  setServiceUnavailableHandler,
   setSessionRenewedHandler,
   tryRefresh,
 } from "../api";
@@ -286,5 +287,35 @@ describe("tryRefresh single-flight + three-state", () => {
 
     expect(await tryRefresh()).toBe("transient");
     expect(renewed).not.toHaveBeenCalled();
+  });
+});
+
+describe("api.get signal", () => {
+  afterEach(() => {
+    setServiceUnavailableHandler(null);
+  });
+
+  it("forwards AbortSignal and does not treat abort as an outage", async () => {
+    const outage = vi.fn();
+    setServiceUnavailableHandler(outage);
+    const ac = new AbortController();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: unknown, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () => {
+              reject(new DOMException("Aborted", "AbortError"));
+            });
+          }),
+      ),
+    );
+
+    const pending = api.get("/v1/conversations/c1/messages", {
+      signal: ac.signal,
+    });
+    ac.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(outage).not.toHaveBeenCalled();
   });
 });

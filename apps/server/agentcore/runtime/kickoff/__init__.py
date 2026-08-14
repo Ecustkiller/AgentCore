@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from agentcore.runtime.kickoff.cancel_guidance import (
     KICKOFF_CANCEL_GUIDANCE,
+    KICKOFF_TIMEOUT_GUIDANCE,
     format_kickoff_cancel_result,
+    format_kickoff_timeout_result,
 )
 from agentcore.runtime.kickoff.debate_host import (
     DebateHostAttach,
@@ -82,8 +84,10 @@ __all__ = [
     "format_kickoff_headline",
     "grant_mlr_preauth",
     "format_kickoff_cancel_result",
+    "format_kickoff_timeout_result",
     "intensity_short_label",
     "KICKOFF_CANCEL_GUIDANCE",
+    "KICKOFF_TIMEOUT_GUIDANCE",
     "kickoff_tools",
     "worker_rows",
     "mark_turn_keeps_stage_card",

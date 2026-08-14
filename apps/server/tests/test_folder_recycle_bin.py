@@ -2,10 +2,10 @@
 
 软删曾是单程票，这一层给它一条回头路。四条人定死的约束钉在这里：
 
-  * **软删不许改写成员对话的 ``updated_at``**——``Conversation.updated_at`` 带
-    ``onupdate``，批量 UPDATE 会把每条成员对话刷成删除时刻，侧栏与
-    ``list_by_user_recently_active`` 的「最近活动」排序当场作废且事后追不回。
-    自赋值 ``updated_at=Conversation.updated_at`` 抑制 onupdate——这是编译期性质，
+  * **软删不许改写成员对话的 ``updated_at``**——对话「最近活动」只由回合
+    ``touch_activity`` 推进；批量误写会把每条成员刷成删除时刻，侧栏与
+    ``list_by_user_recently_active`` 排序当场作废且事后追不回。自赋值
+    ``updated_at=Conversation.updated_at`` 钉住位次——这是编译期性质，
     所以直接断言编译出来的 SQL。
   * **只给「删除时尚未归档」的行打标**——``archived`` 是裸 bool，用户自己归档的
     对话与项目连带归档的对话今天逐字节相同；无脑全解档会把前者也拽回侧栏。
@@ -70,9 +70,8 @@ class _Result:
 class _RecordingSession:
     """Records every statement and replays canned results in order.
 
-    Lets the repository's real SQL be inspected without a database — which is where
-    the ``onupdate`` suppression actually lives (a compile-time property of the SET
-    clause, not a runtime one).
+    Lets the repository's real SQL be inspected without a database — the
+    ``updated_at`` self-assign is a compile-time property of the SET clause.
     """
 
     def __init__(self, results: list[_Result] | None = None) -> None:
@@ -170,7 +169,7 @@ def _member_archive_sql(session: _RecordingSession) -> str:
 
 
 async def test_soft_delete_does_not_restamp_member_updated_at():
-    """自赋值抑制 onupdate：SET 里必须是 updated_at=conversations.updated_at。"""
+    """自赋值保持位次：SET 里必须是 updated_at=conversations.updated_at。"""
     session = _soft_delete_session(_fake_folder())
 
     assert await FolderRepository(session).soft_delete(FOLDER_ID, user_id=USER_ID)
@@ -178,8 +177,7 @@ async def test_soft_delete_does_not_restamp_member_updated_at():
     sql = _member_archive_sql(session)
     set_clause = sql.split("WHERE")[0]
     assert "updated_at=conversations.updated_at" in set_clause
-    # 若 onupdate 生效，SET 里 updated_at 会是个绑定值（编译期渲染成 <ts:…>/NULL）
-    # 而不是列自赋值——这正是它把成员对话顶到侧栏最前的样子。
+    # 若误写成绑定值（编译期渲染成 <ts:…>/NULL）而不是列自赋值，就会把成员顶到侧栏最前。
     assert "<ts:" not in set_clause
     assert "updated_at=NULL" not in set_clause
 

@@ -155,10 +155,12 @@ def deliverable_declares_debate_files(deliverable: Any) -> bool:
 
 
 def deliverable_is_report_delivery(deliverable: Any) -> bool:
-    """Structured report-landing post for delivery_idle (never strip search).
+    """Structured report-landing stamp (compat; factory no longer drives idle).
 
     OR of structured stamps / path declarations only — no role-name regex, no bare
     ``files_expected`` / ``form=files`` (those would mis-classify repair/build).
+    Callers may still pass the result as ``report_delivery``; factory ignores it
+    for delivery_idle.
     """
     if deliverable is None:
         return False

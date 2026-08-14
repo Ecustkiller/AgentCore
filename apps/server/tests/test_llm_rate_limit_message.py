@@ -250,7 +250,7 @@ def _req() -> LLMRequest:
     return LLMRequest(
         messages=[LLMMessage(role="user", content="hi")],
         model=DEEPSEEK_V4_FLASH,
-        scenario="chat",
+        scenario="title",
     )
 
 

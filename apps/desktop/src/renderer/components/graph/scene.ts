@@ -82,7 +82,7 @@ export interface SceneUnit {
 
 /** One act in the execution's act sequence, carrying its top-level units.
  *
- * The derived fields (`status` … `recoverable`) are pure functions of the
+ * The derived fields (`status` … `pendingDecisions`) are pure functions of the
  * execution's runs, decided once here so batch R2 (幕级 LOD) can render a 幕摘要卡
  * and auto-focus the active act straight from the IR — the golden pins them, and
  * no host re-derives act status from laid-out nodes. Every field uses only data
@@ -110,8 +110,6 @@ export interface SceneAct {
   durationMs: number | null;
   /** Pending boss decisions in this act (pending escalations + pending checkpoints). */
   pendingDecisions: number;
-  /** Act has recoverable terminal trouble (a failed / cancelled member run). */
-  recoverable: boolean;
 }
 
 export type SceneBandKind = "act" | "wave" | "delegate" | "debateStage";
@@ -629,7 +627,6 @@ interface ActDerived {
   total: number;
   durationMs: number | null;
   pendingDecisions: number;
-  recoverable: boolean;
 }
 
 /** Aggregate an act's runs into card-ready derived state — only real run data. */
@@ -641,7 +638,6 @@ function computeActDerived(members: RunNode[]): ActDerived {
   let durationMs = 0;
   let anyDuration = false;
   let pendingDecisions = 0;
-  let recoverable = false;
   for (const r of members) {
     const role = r.role ?? r.agentId ?? r.id;
     if (!seenRoles.has(role)) {
@@ -658,7 +654,6 @@ function computeActDerived(members: RunNode[]): ActDerived {
       if (e.status === "pending") pendingDecisions++;
     }
     if (r.checkpoint?.status === "pending") pendingDecisions++;
-    if (r.status === "failed" || r.status === "cancelled") recoverable = true;
   }
   const statuses = members.map((r) => r.status);
   let status: ExecutionStatus;
@@ -681,7 +676,6 @@ function computeActDerived(members: RunNode[]): ActDerived {
     total: members.length,
     durationMs: anyDuration ? durationMs : null,
     pendingDecisions,
-    recoverable,
   };
 }
 

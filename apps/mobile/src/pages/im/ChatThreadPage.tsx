@@ -18,6 +18,8 @@ import {
   sendMessage,
   uploadChatFile,
 } from "@/api/messaging";
+import { Modal } from "@/components/Modal";
+import { useKeyboardInsetBridge } from "@/lib/keyboardInsets";
 import { shareOrDownloadFile } from "@/lib/share";
 import { clock } from "@/lib/time";
 import { usePolling } from "@/lib/usePolling";
@@ -30,7 +32,13 @@ import {
   messageMentionsUser,
   splitContentByMentions,
 } from "@/pages/im/chatDisplay";
-import { ArrowDown, Loader2, Send } from "lucide-react";
+import {
+  ArrowDown,
+  ChevronLeft,
+  Loader2,
+  MoreHorizontal,
+  Send,
+} from "lucide-react";
 // 消息线程 (/im/c/:chatId) — one human↔human thread. REST + polling (no SSE): the open
 // thread refetches the most-recent page every 4s and merges by id, so sends from the peer
 // appear within a cycle. IM list pagination is created_at ASC (page 1 = oldest), so the
@@ -38,7 +46,13 @@ import { ArrowDown, Loader2, Send } from "lucide-react";
 //
 // Reply / @：展示服务端 `reply_to` + `mentions`；发送侧仅最小回复入口（无独立 @ 菜单 /
 // presence 绿点 — 文档「不做手机端」）。
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import "@/pages/im/im.css";
 
@@ -94,10 +108,12 @@ export function ChatThreadPage() {
   );
 
   const attachInputRef = useRef<HTMLInputElement>(null);
-  const composerInputRef = useRef<HTMLInputElement>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement>(null);
+  const shellRef = useRef<HTMLDivElement>(null);
   const totalRef = useRef(0);
   const initedRef = useRef(false);
   const lastMarkedRef = useRef<string | null>(null);
+  useKeyboardInsetBridge(shellRef);
 
   const lastMsg = messages.length > 0 ? messages[messages.length - 1] : null;
   const scrollContentKey = lastMsg
@@ -135,6 +151,14 @@ export function ChatThreadPage() {
   useEffect(() => {
     setReplyTarget(null);
   }, [chatId]);
+
+  useLayoutEffect(() => {
+    const el = composerInputRef.current;
+    if (!el) return;
+    el.value = text;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [text]);
 
   // Group/official sender names (dm needs none — the only peer is the title).
   useEffect(() => {
@@ -333,19 +357,27 @@ export function ChatThreadPage() {
   }
 
   return (
-    <div className="screen">
+    <div className="screen im-thread" ref={shellRef}>
       <header className="bar">
-        <button type="button" className="link" onClick={() => navigate("/im")}>
-          ← 消息
-        </button>
-        <span className="viewer-name">{title}</span>
         <button
           type="button"
-          className="link"
-          onClick={() => setSheetOpen(true)}
+          className="link icon-btn"
+          aria-label="返回"
+          onClick={() => navigate("/im")}
         >
-          ⋯
+          <ChevronLeft size={20} />
         </button>
+        <span className="bar-title">{title}</span>
+        <div className="bar-right">
+          <button
+            type="button"
+            className="link icon-btn"
+            aria-label="更多"
+            onClick={() => setSheetOpen(true)}
+          >
+            <MoreHorizontal size={20} />
+          </button>
+        </div>
       </header>
 
       <div className="messages-pane">
@@ -473,15 +505,18 @@ export function ChatThreadPage() {
           >
             ＋
           </button>
-          <input
+          <textarea
             ref={composerInputRef}
+            className="composer-input"
+            rows={1}
             value={text}
             placeholder={replyTarget ? "输入回复…" : "发送消息…"}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
+              if (e.key !== "Enter" || e.shiftKey) return;
               if (e.nativeEvent.isComposing || e.nativeEvent.keyCode === 229)
                 return;
+              e.preventDefault();
               void send();
             }}
           />
@@ -503,37 +538,37 @@ export function ChatThreadPage() {
       )}
 
       {sheetOpen && (
-        // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click-to-dismiss is a pointer convenience; the sheet is also closeable via its buttons/Esc
-        <div className="sheet-backdrop" onClick={() => setSheetOpen(false)}>
-          {/* biome-ignore lint/a11y/useKeyWithClickEvents: inner panel only stops propagation; it is not an actionable control */}
-          <div className="sheet" onClick={(e) => e.stopPropagation()}>
-            <div className="sheet-title">{title}</div>
-            {isDm ? (
-              <button
-                type="button"
-                className="sheet-item sheet-danger"
-                onClick={() => void onBlock()}
-              >
-                拉黑此人
-              </button>
-            ) : !isOfficial ? (
-              <button
-                type="button"
-                className="sheet-item sheet-danger"
-                onClick={() => void onLeave()}
-              >
-                退出会话
-              </button>
-            ) : null}
+        <Modal
+          className="sheet"
+          onClose={() => setSheetOpen(false)}
+          label={title}
+        >
+          <div className="sheet-title">{title}</div>
+          {isDm ? (
             <button
               type="button"
-              className="sheet-item sheet-cancel"
-              onClick={() => setSheetOpen(false)}
+              className="sheet-item sheet-danger"
+              onClick={() => void onBlock()}
             >
-              取消
+              拉黑此人
             </button>
-          </div>
-        </div>
+          ) : !isOfficial ? (
+            <button
+              type="button"
+              className="sheet-item sheet-danger"
+              onClick={() => void onLeave()}
+            >
+              退出会话
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="sheet-item sheet-cancel"
+            onClick={() => setSheetOpen(false)}
+          >
+            取消
+          </button>
+        </Modal>
       )}
     </div>
   );

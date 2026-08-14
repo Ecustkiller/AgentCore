@@ -1,18 +1,20 @@
 import { getTokens } from "@/api/client";
 import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
+import { workspaceKind } from "@/lib/cloudFolder";
 import { Brain, ChevronRight, Cloud, Folder, ScrollText } from "lucide-react";
-// 文件 tab home — the cross-workspace file overview (手机端布局重构 · 跨工作区文件总览).
-//
-// Lists the user's CLOUD workspaces (= folders); tapping one drills into its file tree
-// (/files/:wsId). The mobile counterpart of the desktop 文件 hub, minus the desktop-only
-// halves: LOCAL workspaces live on the user's machine (reached over desktop IPC; the server
-// refuses file ops with 409), so the phone hides them — a 减法 boundary, surfaced as a note
-// when the user has local-only workspaces. A workspace's *contents* are editable on the phone
-// (see WorkspaceFilesPage), but the workspace **lifecycle** — 新建 / 重命名 / 删除 a workspace,
-// 绑定本机文件夹 — stays a desktop task, so this list has no management actions. Re-fetches on
-// each visit (the tab remounts), so files just produced in a chat appear without a refresh.
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
+// 文件 tab home — 用户面「我的文件」。云端工作区按种类分组（文件夹 / 对话产物 /
+// 共享空间）；本机工作区不展示。工作区生命周期（新建 / 重命名 / 删除、绑定本机
+// 文件夹）仍是桌面的活，本列表没有管理动作。每次进入会重拉（tab remount），
+// 对话里刚产出的文件不用手动刷新。
+
+const CLOUD_GROUPS = [
+  { kind: "folder" as const, title: "文件夹" },
+  { kind: "conv" as const, title: "对话产物" },
+  { kind: "shared" as const, title: "共享空间" },
+];
 
 export function WorkspacesPage() {
   const navigate = useNavigate();
@@ -50,7 +52,7 @@ export function WorkspacesPage() {
   return (
     <div className="screen">
       <header className="bar">
-        <span>文件</span>
+        <span>我的文件</span>
       </header>
 
       <div className="list">
@@ -102,29 +104,37 @@ export function WorkspacesPage() {
             </p>
           </div>
         )}
-        {clouds.map((ws) => (
-          <button
-            key={ws.wsId}
-            type="button"
-            className="file-row"
-            onClick={() =>
-              navigate(`/files/${encodeURIComponent(ws.wsId)}`, {
-                state: { name: ws.name },
-              })
-            }
-          >
-            {/* 手机只列云端：云标识并进文件夹图标角标，避免「云端工作区」独占一行 */}
-            <span className="file-icon file-icon-cloud-ws" aria-hidden>
-              <Folder size={16} />
-              <Cloud size={9} className="file-icon-badge" />
-            </span>
-            <span className="file-name">{ws.name}</span>
-            {!ws.hasFiles && <span className="file-tag">空</span>}
-            <span className="file-chevron" aria-hidden>
-              <ChevronRight size={18} />
-            </span>
-          </button>
-        ))}
+        {CLOUD_GROUPS.map(({ kind, title }) => {
+          const group = clouds.filter((w) => workspaceKind(w.wsId) === kind);
+          if (group.length === 0) return null;
+          return (
+            <Fragment key={kind}>
+              <p className="file-section-title">{title}</p>
+              {group.map((ws) => (
+                <button
+                  key={ws.wsId}
+                  type="button"
+                  className="file-row"
+                  onClick={() =>
+                    navigate(`/files/${encodeURIComponent(ws.wsId)}`, {
+                      state: { name: ws.name },
+                    })
+                  }
+                >
+                  <span className="file-icon file-icon-cloud-ws" aria-hidden>
+                    <Folder size={16} />
+                    <Cloud size={9} className="file-icon-badge" />
+                  </span>
+                  <span className="file-name">{ws.name}</span>
+                  {!ws.hasFiles && <span className="file-tag">空</span>}
+                  <span className="file-chevron" aria-hidden>
+                    <ChevronRight size={18} />
+                  </span>
+                </button>
+              ))}
+            </Fragment>
+          );
+        })}
       </div>
     </div>
   );

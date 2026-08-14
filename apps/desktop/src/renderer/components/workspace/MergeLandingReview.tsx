@@ -199,7 +199,7 @@ function MergeLandingReview({
         <span className="text-success">+{counts.added}</span>
         <span className="text-primary">~{counts.modified}</span>
         {conflicts.length > 0 ? (
-          <span className="flex items-center gap-1 text-destructive">
+          <span className="flex items-center gap-1 text-primary">
             <AlertTriangle size={12} />
             {conflicts.length} 个冲突（默认保留本机）
           </span>
@@ -228,7 +228,7 @@ function MergeLandingReview({
             return (
               <li
                 key={row.change.path}
-                className="rounded-lg border border-destructive/40 bg-destructive/5"
+                className="rounded-lg border border-primary/30 bg-primary/10"
               >
                 <div className="flex items-center gap-1.5 px-2 py-1.5">
                   <IconButton
@@ -262,7 +262,7 @@ function MergeLandingReview({
                   />
                 </div>
                 {open && canPreview && (
-                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words border-t border-destructive/30 px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
+                  <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words border-t border-primary/30 px-2.5 py-2 font-mono text-xs leading-relaxed text-foreground">
                     {row.change.content}
                   </pre>
                 )}
@@ -278,7 +278,9 @@ function MergeLandingReview({
           将强制覆盖 {forced} 个有本机改动的文件
         </p>
       )}
-      {applyError && <p className="text-xs text-destructive">{applyError}</p>}
+      {applyError && (
+        <p className="text-xs text-muted-foreground">{applyError}</p>
+      )}
 
       <DialogFooter className="gap-2 sm:justify-between">
         <Button

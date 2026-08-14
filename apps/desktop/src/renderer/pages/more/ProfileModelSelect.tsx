@@ -468,7 +468,7 @@ export function ProfileModelSelect({
       )}
 
       {selectedGroup?.orphan ? (
-        <p className="mt-1 text-xs text-destructive">
+        <p className="mt-1 text-xs text-primary">
           原服务商已移除，请改选其他渠道与模型后再保存。
         </p>
       ) : null}

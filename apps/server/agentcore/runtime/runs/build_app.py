@@ -47,17 +47,28 @@ def _clean_str_list(value: Any, *, cap: int | None = None) -> list[str]:
     return out
 
 
-def _derive_root(app: str, root_slot: str) -> str:
-    """Project directory under workspace: slot ``root`` or short slug from ``app``."""
+_DEFAULT_ROOT = "app"
+
+
+def _derive_root(root_slot: str) -> str:
+    """Workspace project dir: explicit ``root`` slot, else fixed ``app``.
+
+    Do not derive an app-name slug as the project root (same convention as the
+    workspace engineering-shell allowlist).
+    """
     if root_slot:
         return root_slot.strip().strip("/").replace("\\", "/")
-    # Prefer a short ASCII-ish slug; fall back to a stable Chinese-trimmed name.
-    ascii_bits = _SLUG_RE.sub("-", app.lower()).strip("-")
+    return _DEFAULT_ROOT
+
+
+def _page_slug(mod: str, index: int) -> str:
+    """Filename slug for a module page — not the project root."""
+    ascii_bits = _SLUG_RE.sub("-", mod.lower()).strip("-")
     ascii_bits = re.sub(r"-{2,}", "-", ascii_bits)[:32].strip("-")
     if ascii_bits and any(c.isascii() and c.isalnum() for c in ascii_bits):
         return ascii_bits
-    cjk = "".join(_CJK_SLUG_RE.findall(app))[:12]
-    return cjk or "app"
+    cjk = "".join(_CJK_SLUG_RE.findall(mod))[:12]
+    return cjk or f"module-{index}"
 
 
 def _module_id(index: int) -> str:
@@ -65,8 +76,7 @@ def _module_id(index: int) -> str:
 
 
 def _page_path(root: str, mod: str, index: int) -> str:
-    page_slug = _derive_root(mod, "") or f"module-{index}"
-    return f"{root}/src/views/{page_slug}.vue"
+    return f"{root}/src/views/{_page_slug(mod, index)}.vue"
 
 
 def _scaffold_task(
@@ -297,7 +307,7 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     """Expand build_app by ``intensity``: lean (default) or full.
 
     Slots: ``app``(required) / ``intensity``(optional) / ``modules``(optional) /
-    ``stack``(optional) / ``root``(optional).
+    ``stack``(optional) / ``root``(optional; default ``app``, never an app-name slug).
     """
     app = _clean_str(args.get("app"))
     if not app:
@@ -316,7 +326,7 @@ def _build_app(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         modules = list(_DEFAULT_MODULES)
 
     stack = _clean_str(args.get("stack")) or _DEFAULT_STACK
-    root = _derive_root(app, _clean_str(args.get("root")))
+    root = _derive_root(_clean_str(args.get("root")))
 
     if intensity == INTENSITY_LEAN:
         return _build_app_lean(app=app, modules=modules, stack=stack, root=root)

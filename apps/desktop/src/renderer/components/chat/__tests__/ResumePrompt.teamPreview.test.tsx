@@ -79,6 +79,10 @@ vi.mock("@/stores/interactions", () => ({
     sel({ byId: new Map() }),
 }));
 
+function openKickoffNote() {
+  fireEvent.click(screen.getByRole("button", { name: /加一句嘱咐/ }));
+}
+
 function makeTeamPreview(over: Record<string, unknown> = {}) {
   return {
     messageId: "m1",
@@ -136,7 +140,7 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.getByText("MVP主流程 · 预计 1 人")).toBeTruthy();
   });
 
-  it("全员同桌时冷拍板只汇总一行工作区", () => {
+  it("全员同桌时冷拍板分工表不画工作区", () => {
     pendingRef.current = [
       makeTeamPreview({
         workers: [
@@ -158,10 +162,12 @@ describe("ResumePrompt · team_preview delegate", () => {
       }),
     ];
     render(<ResumePrompt />);
-    expect(screen.getAllByText("工作区 · 本会话工作区")).toHaveLength(1);
+    expect(screen.getByText("调研")).toBeTruthy();
+    expect(screen.getByText("撰写")).toBeTruthy();
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
   });
 
-  it("队员坐不同桌时冷拍板逐人显示工作区", () => {
+  it("队员坐不同桌时冷拍板分工表不画工作区", () => {
     pendingRef.current = [
       makeTeamPreview({
         workers: [
@@ -185,8 +191,9 @@ describe("ResumePrompt · team_preview delegate", () => {
       }),
     ];
     render(<ResumePrompt />);
-    expect(screen.getByText("工作区 · 云端甲")).toBeTruthy();
-    expect(screen.getByText("工作区 · 云端乙")).toBeTruthy();
+    expect(screen.getByText("甲")).toBeTruthy();
+    expect(screen.getByText("乙")).toBeTruthy();
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
   });
 
   it("仅两按钮：左取消 + 右授权并开工；无逐次审批 / 调整 / 停止", () => {
@@ -203,11 +210,14 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.getByText("将授权的执行能力")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/开工时注入全体队员/)).toBeNull();
   });
 
   it("主按钮带非空备注发 continue（非 adjust）", () => {
     render(<ResumePrompt />);
-    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
       target: { value: "  先做公开竞品  " },
     });
     fireEvent.click(screen.getByText("授权并开工"));
@@ -288,7 +298,8 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(scroll).toBeTruthy();
 
     expect(screen.getByText("授权并开工")).toBeTruthy();
-    expect(screen.getByPlaceholderText(/对全体队员的嘱咐/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/开工时注入全体队员/)).toBeNull();
   });
 
   it("确认面无纳入/排除开关；continue 不带 excluded_run_ids", () => {
@@ -482,14 +493,16 @@ describe("ResumePrompt · team_preview debate", () => {
     expect(screen.queryByText("停止")).toBeNull();
     expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
-    expect(screen.getByPlaceholderText(/开赛嘱咐/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
+    expect(screen.queryByPlaceholderText(/开赛时注入各方/)).toBeNull();
     // cold Badge 与 hot DebateBody 共用 formatDebateBudgetLabel（含「上限」）
     expect(screen.getByText("认真辩透 · 上限 5 轮")).toBeTruthy();
   });
 
   it("主按钮带嘱咐发 continue；辩论未改模型不附修正字段", () => {
     render(<ResumePrompt />);
-    fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开赛时注入各方/), {
       target: { value: "最关心成本谁买单" },
     });
     fireEvent.click(screen.getByText("授权开赛"));

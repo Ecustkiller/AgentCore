@@ -2411,32 +2411,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/conversations/{conversation_id}/messages/{message_id}/save-as-workflow": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Save Turn As Workflow
-         * @description 固化这一回合的团队拆法为账户级工作流（owner-scoped，同源幂等）。
-         *
-         *     幂等只认来源（``user_workflows.source`` 列上的 conversation_id + message_id），不认
-         *     ``name``：同一轮再点一次保存返回已有那条，想要「同一轮多个变体」走保存后改名 / 另存，
-         *     而不是靠这个端点的隐藏分支。来源是服务端权威元数据、不在客户端能覆盖的 definition 里
-         *     （:mod:`agentcore.workflows.source`），所以这里能直接走索引查。422 = 这轮压根没有多队
-         *     员协作（无计划快照或有效节点 < 2），或整轮只有辩论（辩论不写计划快照，折不出画布）。
-         */
-        post: operations["save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/conversations/{conversation_id}/permission-axes": {
         parameters: {
             query?: never;
@@ -8268,6 +8242,8 @@ export interface components {
             folder_id?: string | null;
             /** Id */
             id: string;
+            /** Last Message Preview */
+            last_message_preview?: string | null;
             /** Local Container Root Id */
             local_container_root_id?: string | null;
             /**
@@ -11712,14 +11688,6 @@ export interface components {
             turn_warning?: string | null;
         };
         /**
-         * SaveTurnAsWorkflowRequest
-         * @description 固化一轮已跑完的协作；省略 ``name`` 时服务端按队员角色生成。
-         */
-        SaveTurnAsWorkflowRequest: {
-            /** Name */
-            name?: string | null;
-        };
-        /**
          * SearchItem
          * @description One hit in a section. Field meaning depends on the section ``type``:
          *
@@ -13477,8 +13445,8 @@ export interface components {
          * WorkflowSourceModel
          * @description 这条工作流是从哪儿来的——服务端权威，客户端只读。
          *
-         *     ``kind`` 今天只有 ``"turn"``（从一轮协作固化），带原对话 / 消息定位。手画的、官方模板
-         *     复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
+         *     ``kind`` 今天只有 ``"turn"``（历史行：曾经从一轮协作固化，不是现行写入），带原对话 /
+         *     消息定位。手画的、官方模板复制的没有来源（``null``）。为什么它不在 ``definition`` 里 →
          *     :mod:`agentcore.workflows.source`。
          */
         WorkflowSourceModel: {
@@ -18013,46 +17981,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RunLlmWindowResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    save_turn_as_workflow_v1_conversations__conversation_id__messages__message_id__save_as_workflow_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                authorization?: string | null;
-            };
-            path: {
-                conversation_id: string;
-                message_id: string;
-            };
-            cookie?: {
-                access_token?: string | null;
-            };
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["SaveTurnAsWorkflowRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["WorkflowSummary"];
                 };
             };
             /** @description Validation Error */

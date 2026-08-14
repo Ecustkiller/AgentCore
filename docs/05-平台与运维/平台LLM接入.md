@@ -20,7 +20,7 @@ skip_if:
 | **多厂商 provider 路由** | model 串带 `厂商/` 前缀 | 豆包 / Moonshot / 智谱 等（§四） |
 | **platform 平台凭据** | `billing_mode=platform` / 显式 platform | `PLATFORM_*` 三项 |
 
-**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认。测连：优先 `GET /models`（合法 JSON）；空列表或不在列表的 default → `POST /chat/completions` **且验 body**（拒 HTML/非 JSON/缺 choices）；成功文案须标明连通≠聊天就绪，并提示自定义 Base URL 通常需含 `/v1`。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
+**BYOK 去向**：每用户多服务商列表（`user_llm_providers`：AES-GCM 密文 key + base_url + `default_model`）；账号/会话选的是**模型组合**（`llm_model_profiles` → `{main, worker?, background?, vision?}` 槽，每槽 `(model, origin, provider_id)`）。服务商上的 `default_model` 仅作连接测试 / 目录种子（UI 在「高级选项 · 连接测试用模型」，Input+datalist 可手填；换厂商预设时保留已填自定义值），**不是**日常聊天默认。测连：优先 `GET /models`（合法 JSON）；空列表或不在列表的 default → `POST /chat/completions` **且验 body**（拒 HTML/非 JSON/缺 choices）。目录已成功列出模型后 probe 仍 401/403（非余额）→ 点名「连接测试用模型」不被上游接受，**禁止**说 Key 无效；目录未证明 Key 时同时请核 Key 与该模型。成功文案须标明连通≠聊天就绪，并提示自定义 Base URL 通常需含 `/v1`。服务商卡片露出测试用模型 id（不是聊天默认）。key **不在 `.env`**。BYOK 且无服务商、又无 platform 回退 → `402 LLM_KEY_REQUIRED`。
 
 ## 二、模型与凭据解析
 

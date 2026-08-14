@@ -137,13 +137,15 @@ class LoopController(
         convergence_finalize_rounds: int = 0,
         convergence_spin_rounds: int = DEFAULT_THRESHOLD,
         form_prose: bool = False,
-        # Soft files-expected ladder (nudge → tool narrow); orthogonal to
-        # token/timeout wind_down. ≤0 disables each step.
+        # Idle bars (nudge → optional tool narrow). Factory never arms
+        # files-expected delivery_idle; recon uses nudge only. Explicit
+        # construction may still set these. Orthogonal to token/timeout
+        # wind_down. ≤0 disables each step.
         delivery_idle_nudge_rounds: int = 0,
         delivery_idle_narrow_rounds: int = 0,
         # True → nudge prompt is recon (conclude/handoff), not write-disk pressure.
         delivery_idle_recon: bool = False,
-        # True → report-landing files post: nudge催写报告, never narrow away search.
+        # Compat: report-landing copy. Factory never sets this.
         delivery_idle_report: bool = False,
         investigation_tools: frozenset[str] = frozenset(),
         product_landing_artifacts: tuple[str, ...] | list[str] | None = None,
@@ -172,8 +174,8 @@ class LoopController(
         # disables the absolute cap; ``spin_rounds <= 0`` disables spinning detection.
         self._convergence_finalize_rounds = max(0, convergence_finalize_rounds)
         self._convergence_spin_rounds = max(0, convergence_spin_rounds)
-        # Delivery-idle thrashing: investigation-only with no landing success.
-        # Soft delivery_idle (nudge/narrow) uses this idle-round counter.
+        # Idle-round counter (factory: recon-idle; explicit delivery_idle
+        # construction still uses the same clock). Soft nudge/narrow read it.
         # Landing *attempt* resets; success latches done.
         self._form_prose = bool(form_prose)
         self._delivery_idle_nudge_rounds = max(0, int(delivery_idle_nudge_rounds))

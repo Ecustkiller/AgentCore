@@ -13,7 +13,9 @@ import * as dispatchMod from "../sse/dispatch";
 import {
   ATTACH_CAUGHT_UP_COMMENT,
   attachConversation,
+  clearLastEventId,
   forceSseTransportDrop,
+  peekLastEventId,
   pumpSseBody,
   streamConversation,
 } from "../streamConversation";
@@ -507,5 +509,39 @@ describe("pumpSseBody comments", () => {
     } catch {
       /* already cancelled */
     }
+  });
+
+  it("does not advance Last-Event-ID until the event is dispatched", async () => {
+    clearLastEventId("c-cursor");
+    const body =
+      'id: 7\ndata: {"type":"content_delta","timestamp":"t","payload":{"delta":"a"}}\n\n';
+    await pumpSseBody(
+      new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+      "c-cursor",
+      () => {
+        expect(peekLastEventId("c-cursor")).toBeUndefined();
+      },
+    );
+    // Custom onEvent did not fold — cursor stays put (丢未折段不清).
+    expect(peekLastEventId("c-cursor")).toBeUndefined();
+  });
+
+  it("default pump commits Last-Event-ID after dispatch", async () => {
+    clearLastEventId("c-commit");
+    vi.spyOn(dispatchMod, "dispatchSSEEvent").mockImplementation(() => {});
+    const body =
+      'id: 9\ndata: {"type":"content_delta","timestamp":"t","payload":{"delta":"a"}}\n\n';
+    await pumpSseBody(
+      new Response(body, {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+      "c-commit",
+    );
+    expect(peekLastEventId("c-commit")).toBe("9");
+    clearLastEventId("c-commit");
   });
 });

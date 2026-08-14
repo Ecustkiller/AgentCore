@@ -38,6 +38,9 @@ class _StubTool:
 
 
 def _ctx(workspace: Path, *, write_scope: str = "project") -> ToolContext:
+    keep = workspace / "README.md"
+    if not keep.exists():
+        keep.write_text("desk\n", encoding="utf-8")
     return ToolContext.create(
         execution_id="e",
         run_id="s",

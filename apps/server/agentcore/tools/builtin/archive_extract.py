@@ -124,7 +124,7 @@ class ArchiveExtractTool:
                 start,
             )
 
-        dest_path, dest_note = _prepare_write_relpath(dest_raw)
+        dest_path, dest_note = await _prepare_write_relpath(dest_raw, context)
         if not dest_path:
             return _fail("dest 无效", start)
         if dest_path in ("..",) or dest_path.startswith("../"):

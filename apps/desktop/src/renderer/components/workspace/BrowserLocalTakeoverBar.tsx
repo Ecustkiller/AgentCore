@@ -4,6 +4,7 @@
  * 语义 = POST …/browser/takeover 打 registry mark（`user_in_control`），用户仍直接操作本机
  * WebContents——不挂帧捕获、不注入 CDP input。有 `sessionId` 才挂本组件（D8 随时可接管）。
  */
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { conversationHasPendingBrowserLogin } from "@/lib/browserActivity";
 import {
   endBrowserTakeover,
@@ -124,8 +125,10 @@ export function BrowserLocalTakeoverBar({
       )}
 
       {takeoverError && (
-        <div className="flex shrink-0 items-center gap-1.5 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-          <MonitorOff size={13} className="shrink-0" />
+        <div
+          className={`flex shrink-0 items-center gap-1.5 border-b px-3 py-1.5 text-xs ${noticeChipNeutral}`}
+        >
+          <MonitorOff size={13} className="shrink-0 text-muted-foreground" />
           {takeoverError}
         </div>
       )}

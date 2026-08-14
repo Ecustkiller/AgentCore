@@ -102,15 +102,16 @@ beforeEach(() => {
 });
 
 describe("StatusStrip · 完成态不挂交付 unmet 仪式", () => {
-  it("无 delivery_status 时保持「团队完成」", () => {
+  it("无 delivery_status 时中性完成勾，无解说标题", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     const exec = projectExecution(plan, doneFrames, "completed");
     renderStrip(exec);
-    expect(screen.getByText("团队完成")).toBeTruthy();
+    expect(screen.queryByText("团队完成")).toBeNull();
+    expect(screen.getByLabelText("完成")).toBeTruthy();
     expect(screen.queryByText("已跑完 · 交付未过关")).toBeNull();
   });
 
-  it("partial 仍用中性「团队完成」，无 unmet 图标/文案", () => {
+  it("partial 仍用中性完成勾，无 unmet 图标/文案", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setDeliveryStatus(
       {
@@ -125,14 +126,15 @@ describe("StatusStrip · 完成态不挂交付 unmet 仪式", () => {
     );
     const exec = projectExecution(plan, doneFrames, "completed");
     const { container } = renderStrip(exec);
-    expect(screen.getByText("团队完成")).toBeTruthy();
+    expect(screen.queryByText("团队完成")).toBeNull();
+    expect(screen.getByLabelText("完成")).toBeTruthy();
     expect(screen.queryByText("已跑完 · 交付未过关")).toBeNull();
     expect(screen.queryByTestId("status-strip-delivery-unmet-icon")).toBeNull();
     expect(container.querySelector(".text-success")).toBeTruthy();
     expect(container.querySelector(".text-warning")).toBeNull();
   });
 
-  it("blocked 仍用中性「团队完成」，无 unmet 警示图标", () => {
+  it("blocked 仍用中性完成勾，无 unmet 警示图标", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setDeliveryStatus(
       {
@@ -147,14 +149,15 @@ describe("StatusStrip · 完成态不挂交付 unmet 仪式", () => {
     );
     const exec = projectExecution(plan, doneFrames, "completed");
     const { container } = renderStrip(exec);
-    expect(screen.getByText("团队完成")).toBeTruthy();
+    expect(screen.queryByText("团队完成")).toBeNull();
+    expect(screen.getByLabelText("完成")).toBeTruthy();
     expect(screen.queryByText("已跑完 · 交付未过关")).toBeNull();
     expect(screen.queryByTestId("status-strip-delivery-unmet-icon")).toBeNull();
     expect(container.querySelector(".text-success")).toBeTruthy();
     expect(container.querySelector(".text-destructive")).toBeNull();
   });
 
-  it("delivered 对账不改「团队完成」", () => {
+  it("delivered 对账不改完成勾", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setDeliveryStatus(
       {
@@ -169,7 +172,8 @@ describe("StatusStrip · 完成态不挂交付 unmet 仪式", () => {
     );
     const exec = projectExecution(plan, doneFrames, "completed");
     renderStrip(exec);
-    expect(screen.getByText("团队完成")).toBeTruthy();
+    expect(screen.queryByText("团队完成")).toBeNull();
+    expect(screen.getByLabelText("完成")).toBeTruthy();
     expect(screen.queryByText("已跑完 · 交付未过关")).toBeNull();
   });
 });

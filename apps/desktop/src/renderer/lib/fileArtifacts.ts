@@ -4,8 +4,8 @@
 // 无该字段 / 空数组 → 空清单（不 silent 降级扫工具列表）。导出件（.docx / .pdf）只存在于
 // 工具自报的产物行里——工具入参只有源 md，故任何按参数合成的清单都会漏掉它。
 //
-// 成品 / 过程材料分组：``delivery_status.promoted``（成品归位）是唯一依据（见
-// {@link splitPromotedProducts}）——归位是 CEO 收口时的显式移动，产物地位**不由路径推断**。
+// ``promotedFrom`` 记录成品归位的旧路径（移动已发生，``path`` 是新位置）。产物卡不按
+// 归位分组——位置看路径；文件树把 ``AgentCore/`` 沉成「AI 工作间」。
 //
 // 中间稿折叠：行里自报的 ``derived_from`` 是唯一依据（见 {@link splitExportedSources}），
 // 不按扩展名 / 工具名猜派生关系；折叠只降级、不删除。
@@ -52,13 +52,13 @@ export interface FileArtifact {
   fromPath?: string;
   /** A1：只读「查看改动」用的参数侧预览。 */
   change?: FileChangePreview;
-  /** 路径验收态（有则主清单显示已验收/未通过，不显示写入/编辑）。 */
+  /** 路径验收态（有则主清单按态分行；通过行不打徽章，未通过标「未通过」，不显示写入/编辑）。 */
   acceptance?: ArtifactAcceptance;
   acceptanceReason?: string;
   acceptanceDetail?: string;
   /**
    * 已归位成品的 AI 工作间旧路径（`path` 已是归位后的新路径，旧路径盘上不再存在）。
-   * 有值 = 进「成品」组；无值 = 过程材料。
+   * 产物卡不据此分组；位置以 `path` 为准。
    */
   promotedFrom?: string;
   /** 产出工具自报的产物类型（`md` / `docx` / `pdf` / `code` / …）；未自报时缺省。 */
@@ -240,34 +240,6 @@ export function fileArtifactsFromDeliveryStatus(
     });
   }
   return dedupe(out);
-}
-
-/**
- * 拆出「成品 / 过程材料 / 未通过」——用户一眼分清哪些是给他的东西。
- *
- * **成品** = 已归位（`promotedFrom`）的产物：CEO 收口时显式移进用户工作区的那几份。这是
- * **这张对账卡累积的**归位表，不限于最后一回合——跨回合再归位时早先的成品仍在成品组里，
- * 用户看的是「哪些东西是我的」，不是「这一幕动了什么」。
- * **过程材料** = 其余已验收产物，仍在 AI 工作间里（与文件页「AI 工作间」同一心智）。
- * **未通过** = rejected，两组都不进，维持原样单列。
- *
- * `products` 为空（零归位）是多幕协作中间幕的**合法状态**：调用方直接不渲染成品组，
- * 不留空组占位、不加提示语——「归位了什么」由收口正文交代，清单不设闸。
- */
-export function splitPromotedProducts(artifacts: FileArtifact[]): {
-  products: FileArtifact[];
-  materials: FileArtifact[];
-  rejected: FileArtifact[];
-} {
-  const products: FileArtifact[] = [];
-  const materials: FileArtifact[] = [];
-  const rejected: FileArtifact[] = [];
-  for (const a of artifacts) {
-    if (a.acceptance === "rejected") rejected.push(a);
-    else if (a.promotedFrom) products.push(a);
-    else materials.push(a);
-  }
-  return { products, materials, rejected };
 }
 
 /**

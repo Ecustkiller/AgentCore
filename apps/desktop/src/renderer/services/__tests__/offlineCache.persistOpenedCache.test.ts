@@ -82,7 +82,28 @@ describe("persistOpenedCache preview", () => {
     expect(payload.conversation.lastMessagePreview).not.toBe(STALE_SUCCESS);
   });
 
-  it("uses prior visible text when empty cancelled finish (no「已停止」preview)", async () => {
+  it("walks back to the previous assistant when empty cancelled (no user / 已停止)", async () => {
+    getConversations.mockReturnValue([listed("c1", STALE_SUCCESS)]);
+    const messages = [
+      msg("a0", "assistant", "先前助手回复"),
+      msg("u1", "user", "你好"),
+      msg("a1", "assistant", "", {
+        finishReason: "cancelled",
+      }),
+    ];
+
+    await persistOpenedCache("c1", messages, [], {
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+    });
+
+    const payload = putOpenedConversation.mock.calls[0][0];
+    expect(payload.conversation.lastMessagePreview).toBe("先前助手回复");
+    expect(payload.conversation.lastMessagePreview).not.toBe("你好");
+    expect(payload.conversation.lastMessagePreview).not.toBe("已停止");
+  });
+
+  it("does not use the user sentence when cancelled has no prior assistant", async () => {
     getConversations.mockReturnValue([listed("c1", STALE_SUCCESS)]);
     const messages = [
       msg("u1", "user", "你好"),
@@ -97,9 +118,9 @@ describe("persistOpenedCache preview", () => {
     });
 
     const payload = putOpenedConversation.mock.calls[0][0];
-    expect(payload.conversation.lastMessagePreview).toBe("你好");
+    expect(payload.conversation.lastMessagePreview).not.toBe("你好");
     expect(payload.conversation.lastMessagePreview).not.toBe("已停止");
-    expect(payload.conversation.lastMessagePreview).not.toBe(STALE_SUCCESS);
+    expect(payload.conversation.lastMessagePreview).toBe(STALE_SUCCESS);
   });
 
   it("reads finishReason from runs when message.finishReason absent", async () => {

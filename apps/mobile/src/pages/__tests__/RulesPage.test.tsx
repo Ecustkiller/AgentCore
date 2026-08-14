@@ -65,6 +65,14 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("RulesPage", () => {
+  it("uses icon-btn back + centered bar-title", async () => {
+    render(<RulesPage />);
+    expect(screen.getByLabelText("返回").className).toMatch(/icon-btn/);
+    expect(document.querySelector(".bar-title")?.textContent).toBe("规则");
+    expect(screen.queryByText("← 文件")).toBeNull();
+    expect(await screen.findByText("还没有全局规则")).toBeTruthy();
+  });
+
   it("empty state shows hint + 新建规则 CTA", async () => {
     render(<RulesPage />);
     expect(await screen.findByText("还没有全局规则")).toBeTruthy();

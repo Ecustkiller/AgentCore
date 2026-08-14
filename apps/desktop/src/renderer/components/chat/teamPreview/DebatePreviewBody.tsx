@@ -4,6 +4,10 @@ import { useState } from "react";
 import { formatDebateBudgetLabel } from "./budget";
 import type { TeamPreviewDebateView, TeamPreviewSideView } from "./types";
 
+const ROW = "rounded-lg border border-border bg-card/60 px-2.5 py-1.5";
+const ROW_HOVER = `${ROW} hover:bg-accent`;
+const CANDIDATE_PANEL = ROW;
+
 type DebatePreviewBodyProps = {
   mode?: "readonly" | "collapsible";
   debate: TeamPreviewDebateView;
@@ -60,10 +64,7 @@ export function DebatePreviewBody({
         <p className="text-xs text-muted-foreground">同模型辩论</p>
       )}
       {debate.modelCandidates && debate.modelCandidates.length > 0 && (
-        <div
-          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-          data-testid="debate-model-candidates"
-        >
+        <div className={CANDIDATE_PANEL} data-testid="debate-model-candidates">
           <p className="text-xs font-medium text-foreground">
             模型消歧失败 · 请从目录候选重选（勿再问「是不是当前主模型」）
           </p>
@@ -88,10 +89,7 @@ export function DebatePreviewBody({
 
         if (!collapsible) {
           return (
-            <div
-              key={s.key}
-              className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-            >
+            <div key={s.key} className={ROW}>
               {meta}
               {s.stance && (
                 <p className="mt-0.5 whitespace-pre-wrap text-xs text-muted-foreground">
@@ -104,10 +102,7 @@ export function DebatePreviewBody({
 
         if (!s.stance) {
           return (
-            <div
-              key={s.key}
-              className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-            >
+            <div key={s.key} className={ROW_HOVER}>
               {meta}
             </div>
           );
@@ -115,10 +110,7 @@ export function DebatePreviewBody({
 
         const open = expanded.has(s.key);
         return (
-          <div
-            key={s.key}
-            className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-          >
+          <div key={s.key} className={ROW_HOVER}>
             <button
               type="button"
               onClick={() => toggle(s.key)}

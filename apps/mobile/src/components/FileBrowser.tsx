@@ -231,15 +231,13 @@ function fileIcon(name: string, isDir: boolean): LucideIcon {
   return File;
 }
 
-function fileSubtitle(node: FileNode): string | null {
-  if (node.isDir) {
-    if (node.mtimeMs != null) return formatFileMtime(node.mtimeMs);
-    return null;
-  }
-  const parts: string[] = [];
-  if (node.sizeBytes != null) parts.push(formatFileSize(node.sizeBytes));
-  if (node.mtimeMs != null) parts.push(formatFileMtime(node.mtimeMs));
-  return parts.length > 0 ? parts.join(" · ") : null;
+/** List-row subtitle: mtime only. Size stays on listing/meta and in the previewer. */
+export function fileSubtitle(node: {
+  mtimeMs?: number;
+  sizeBytes?: number;
+}): string | null {
+  if (node.mtimeMs != null) return formatFileMtime(node.mtimeMs);
+  return null;
 }
 
 type CrumbItem =

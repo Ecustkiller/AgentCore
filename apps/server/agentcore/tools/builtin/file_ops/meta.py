@@ -90,6 +90,14 @@ class FileDeleteTool:
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对文件路径", start)
 
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+
+        rel_path, _shell_note = await rewrite_project_shell_relpath(
+            rel_path, context, register=False
+        )
+        if not rel_path:
+            return _error("path 不能为空：请提供工作区内的相对文件路径", start)
+
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="file_write.scope_rejected"
         )
@@ -212,7 +220,13 @@ class FileMoveTool:
         if not source or not requested_dest:
             return _error("'source' 与 'destination' 均为必填", start)
 
-        destination, rename_note = _prepare_write_relpath(requested_dest)
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+
+        # Dest first: empty-desk first shot may register; source then shares that slug.
+        destination, rename_note = await _prepare_write_relpath(requested_dest, context)
+        source, _src_note = await rewrite_project_shell_relpath(
+            source, context, register=False
+        )
 
         if source == destination:
             # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
@@ -350,7 +364,13 @@ class FileCopyTool:
         if not source or not requested_dest:
             return _error("'source' 与 'destination' 均为必填", start)
 
-        destination, rename_note = _prepare_write_relpath(requested_dest)
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+
+        # Dest first: empty-desk first shot may register; source then shares that slug.
+        destination, rename_note = await _prepare_write_relpath(requested_dest, context)
+        source, _src_note = await rewrite_project_shell_relpath(
+            source, context, register=False
+        )
 
         if source == destination:
             # Idempotent: already at the (sanitized) target — e.g. dossier flatten.
@@ -439,6 +459,20 @@ class MkdirTool:
         if not rel_path:
             return _error("path 不能为空：请提供工作区内的相对目录路径", start)
 
+        rel_path, rename_note = await _prepare_write_relpath(
+            rel_path, context, register_bare=True
+        )
+        if not rel_path or rel_path == ".":
+            output = "工作区根已存在，无需创建目录"
+            if rename_note:
+                output = f"{output}。{rename_note}"
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=output,
+                duration_ms=int((time.monotonic() - start) * 1000),
+            )
+
         scope_denied = _reject_write_scope(
             context, rel_path, start, event="file_write.scope_rejected"
         )
@@ -460,9 +494,12 @@ class MkdirTool:
                 return dead
             return _error(f"创建目录失败：{e}", start, user_face=False)
 
+        output = f"已创建目录 {rel_path}"
+        if rename_note:
+            output = f"{output}。{rename_note}"
         return ToolResult(
             tool_call_id="",
             success=True,
-            output=f"已创建目录 {rel_path}",
+            output=output,
             duration_ms=int((time.monotonic() - start) * 1000),
         )

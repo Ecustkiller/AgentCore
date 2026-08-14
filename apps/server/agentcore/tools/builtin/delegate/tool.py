@@ -489,6 +489,9 @@ class DelegateTool:
                 # 参数/依赖校验打回是零成本可自纠——勿进熔断。
                 contract_failure=True,
             )
+        from agentcore.workspace.project_shell import rewrite_plan_project_shell
+
+        await rewrite_plan_project_shell(plan, self._base_tool_context)
         if getattr(self, "_topology_lock", False):
             plan.topology_lock = True
             wid = getattr(self, "_workflow_id", None)
@@ -941,6 +944,16 @@ class DelegateTool:
                 kickoff_cancelled=apply_kickoff_grant,
                 note=note,
             )
+        if decision is CheckpointDecision.TIMEOUT and apply_kickoff_grant:
+            # team_preview TIMEOUT ≠ CONTINUE：不 grant、不开工，回灌 CEO 自行收尾。
+            # plan_review TIMEOUT（apply_kickoff_grant=False）本轮仍走下方 drive。
+            return await finalize_stopped(
+                self,
+                plan,
+                seed_completed,
+                kickoff_timeout=True,
+                note=note,
+            )
 
         # Steer: ADJUST always; kickoff CONTINUE+note ≡ former adjust (嘱咐注入未跑队员).
         # plan_review CONTINUE+note does not steer (apply_kickoff_grant=False; UI still has 调整).
@@ -964,7 +977,7 @@ class DelegateTool:
             gate_body = compress_ceo_review_for_gate(ceo_review)
             if gate_body:
                 apply_gate_notes(plan, seed_completed, checkpoint_run_ids, gate_body)
-        # Kickoff (开工卡): continue / adjust / timeout → grant.
+        # Kickoff (开工卡): continue / adjust → grant. TIMEOUT already returned above.
         # apply_kickoff_grant is True only when resuming a team_preview suspension.
         if (
             apply_kickoff_grant
@@ -973,7 +986,6 @@ class DelegateTool:
             in (
                 CheckpointDecision.CONTINUE,
                 CheckpointDecision.ADJUST,
-                CheckpointDecision.TIMEOUT,
             )
         ):
             self._approval_gate.grant_delegation(execution_id)

@@ -32,6 +32,10 @@ import {
 import type { Message } from "@/stores/conversation";
 import { useInteractionStore } from "@/stores/interactions";
 import { loadLatestWindow } from "../messages";
+import {
+  beginLocalConversationStream,
+  resetStreamOwnershipForTests,
+} from "../turns/streamOwnership";
 
 const store = () => useConversationStore.getState();
 
@@ -77,6 +81,7 @@ beforeEach(() => {
   logEvent.mockClear();
   apiGet.mockReset();
   persistOpenedCache.mockClear();
+  resetStreamOwnershipForTests();
   useConversationStore.setState({
     currentConversationId: null,
     byId: {},
@@ -192,14 +197,14 @@ describe("loadLatestWindow write gates", () => {
     );
   });
 
-  it("refuses whole-window replace while generating", async () => {
+  it("refuses whole-window replace while a local stream is pumping", async () => {
     store().switchConversation("a");
     store().setMessageWindow(
       [msg("m1", "user", "hi"), msg("m2", "assistant", "partial")],
       { hasMoreBefore: false, hasMoreAfter: false },
       "a",
     );
-    store().setGenerating(true, "a");
+    const release = beginLocalConversationStream("a");
 
     mockWindow([
       msg("m1", "user", "hi"),
@@ -219,6 +224,27 @@ describe("loadLatestWindow write gates", () => {
         conversation_id: "a",
       }),
     );
+    release();
+  });
+
+  it("allows whole-window replace when only follow-held isGenerating", async () => {
+    store().switchConversation("a");
+    store().setMessageWindow(
+      [msg("m1", "user", "hi"), msg("m2", "assistant", "partial")],
+      { hasMoreBefore: false, hasMoreAfter: false },
+      "a",
+    );
+    store().setGenerating(true, "a");
+
+    mockWindow([
+      msg("m1", "user", "hi"),
+      msg("m2", "assistant", "partial"),
+      msg("m3", "user", "next"),
+    ]);
+    await expect(loadLatestWindow("a", { softRefresh: true })).resolves.toBe(
+      true,
+    );
+    expect(getRuntime("a").messages).toHaveLength(3);
   });
 
   it("rejects soft refresh when active + hasMoreAfter (reading history)", async () => {
@@ -319,5 +345,23 @@ describe("loadLatestWindow write gates", () => {
       "conversation.slice_diag",
       expect.objectContaining({ action: "reject_not_resident" }),
     );
+  });
+
+  it("aborts the window GET when the page signal fires", async () => {
+    store().switchConversation("a");
+    const ac = new AbortController();
+    apiGet.mockImplementation(
+      (_path: unknown, init?: { signal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () =>
+            reject(new DOMException("Aborted", "AbortError"));
+          if (init?.signal?.aborted) onAbort();
+          init?.signal?.addEventListener("abort", onAbort);
+        }),
+    );
+    const pending = loadLatestWindow("a", { signal: ac.signal });
+    ac.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(store().byId.a.messages).toEqual([]);
   });
 });

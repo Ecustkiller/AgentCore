@@ -51,7 +51,10 @@ describe("AttachmentChips 上传态", () => {
     ]);
     expect(screen.getByText("上传失败")).toBeTruthy();
     expect(screen.getByText("shot.png")).toBeTruthy();
-    expect(container.querySelector('[data-upload-state="error"]')).toBeTruthy();
+    const failed = container.querySelector('[data-upload-state="error"]');
+    expect(failed).toBeTruthy();
+    expect(failed?.className).toContain("text-muted-foreground");
+    expect(failed?.className).not.toContain("destructive");
   });
 
   it("落地后回到普通 chip", () => {

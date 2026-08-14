@@ -7,8 +7,16 @@
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
   padding: 16px;
+  text-align: left;
+  background: transparent;
+  border: none;
   border-bottom: 1px solid var(--border);
+}
+
+.more-ident:active {
+  background: var(--panel);
 }
 
 .more-avatar {
@@ -34,6 +42,7 @@
 
 .more-ident-text {
   display: flex;
+  flex: 1;
   flex-direction: column;
   min-width: 0;
 }
@@ -336,7 +345,7 @@
 }
 
 .meter-pct.near {
-  color: var(--warning);
+  color: var(--accent);
 }
 
 .meter-track {
@@ -353,7 +362,7 @@
 }
 
 .meter-fill.near {
-  background: var(--warning);
+  background: var(--accent);
 }
 
 .meter-cap {
@@ -490,6 +499,7 @@
 
 .rule-apply-chip {
   flex-shrink: 0;
+  min-height: auto;
   padding: 2px 10px;
   font-size: 12px;
   line-height: 1.4;

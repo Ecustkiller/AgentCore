@@ -3,9 +3,9 @@ import { AlertTriangle, CheckCircle2, Info } from "lucide-react";
 import { toast } from "sonner";
 
 // Token-colored leading icons (the toast surface itself stays neutral popover —
-// see components/ui/Toaster). The icon carries the status color, matching how the
-// app signals state with icons elsewhere (color-tokens).
-const errorIcon = <AlertTriangle size={16} className="text-destructive" />;
+// see components/ui/Toaster). Recoverable interruptions use muted, not danger red
+// (color-tokens 三层 A). Config remedy already uses the blue info icon below.
+const errorIcon = <AlertTriangle size={16} className="text-muted-foreground" />;
 const successIcon = <CheckCircle2 size={16} className="text-success" />;
 const warningIcon = (
   <AlertTriangle size={16} className="text-muted-foreground" />

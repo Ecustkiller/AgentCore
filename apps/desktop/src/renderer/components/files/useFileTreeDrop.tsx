@@ -5,7 +5,7 @@ import type { DropUploadCapture } from "@/lib/folderUpload";
 import { captureDropUpload } from "@/lib/folderUpload";
 import { notifyActionError, notifyError } from "@/lib/toast";
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { UploadReportDialog } from "./UploadReportDialog";
 import { setFileClipboard } from "./fileClipboard";
 import {
@@ -14,7 +14,7 @@ import {
   runBatch,
   withSkipped,
 } from "./fileTreeBatch";
-import { notifyFileTreeChanged, subscribeFileTreeChanged } from "./fileTreeBus";
+import { notifyFileTreeChanged } from "./fileTreeBus";
 import { DRAG_MIME, type DragPayload, parseDragPayload } from "./fileTreeDrag";
 import {
   CROSS_SOURCE_UNSUPPORTED,
@@ -33,8 +33,8 @@ import { useFileUpload } from "./useFileUpload";
  *
  * 跨源：拖拽与粘贴都可能来自**另一棵**树（文件中枢把每个云文件夹渲染成独立源，父子亦然）。
  * 能接上的走 {@link resolveBridgedTransfer} 翻译成一次普通的工作区内 move/copy；接不上的
- * 明说 {@link CROSS_SOURCE_UNSUPPORTED}，不静默吞掉。搬完通知对面那棵树刷新 + 摘掉它选区里
- * 已搬走的行（本树自己 reload，搬走了什么经 `onMoved` 回给调用方）。
+ * 明说 {@link CROSS_SOURCE_UNSUPPORTED}，不静默吞掉。搬完通知对面那棵树（它走 silent
+ * 补丁）+ 摘掉它选区里已搬走的行（本树自己 reload，搬走了什么经 `onMoved` 回给调用方）。
  */
 export function useFileTreeDrop({
   source,
@@ -94,15 +94,6 @@ export function useFileTreeDrop({
     useFileUpload(source, reloadDir);
 
   const canUpload = source.caps.transfer && canMutate;
-
-  // 别的树搬走/搬来的东西也落在本树里时，本树得自己重拉那一层。
-  useEffect(
-    () =>
-      subscribeFileTreeChanged((change) => {
-        if (change.sourceId === source.id) data.reload(change.dir);
-      }),
-    [source.id, data],
-  );
 
   /** 同源移动：保名搬进 `destDir`，挡掉空操作与「搬进自己子树」。 */
   const moveWithin = useCallback(

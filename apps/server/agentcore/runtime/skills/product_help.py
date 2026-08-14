@@ -4,7 +4,7 @@ from __future__ import annotations
 
 # Shared with按需目录 preamble — carve product UX out of「纯对话无需 consult」.
 CONSULT_PRODUCT_HELP_BY_SCENE = (
-    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ"
+    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ / 官网 / 你的网站 / 下载"
     "（为何没组团、费用、Key、断网、.md/文件面板怎么打开、"
     "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 必查 `product_help`；"
     "细节按场面再查 `product_help_map` / `product_help_faq`；"
@@ -20,7 +20,7 @@ CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
 
 _PRODUCT_HELP = """\
 <product_help>
-用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么」时的 HOW。先 consult 本 skill，再按场面短答；\
+用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么 / 官网 / 你的网站 / 下载」时的 HOW。先 consult 本 skill，再按场面短答；\
 入口/UI 点名细节 → `consult(product_help_map)`；FAQ 类 → `consult(product_help_faq)`。
 
 【答法】
@@ -33,7 +33,9 @@ _PRODUCT_HELP = """\
 - FAQ（「为什么没组团 / 费用 / Key…」等）：即使冷启动、本回合尚无协作图，\
 也再查 `product_help_faq`，用其中自含短答；勿当成本回合情境编故事，勿对用户说内部名。
 - 正例：宽问「有什么功能」→ 只用下方总览骨架短答，不拉 map / faq。
+- 正例：用户问「官网 / 你的网站 / 下载」→ 先 consult 本 skill，只用下方【官网 / 下载】域名。
 - 反例：宽问却整表复述入口地图或 FAQ 清单。
+- 反例：把当前模型厂商官网或网上同名他品说成「我的官网 / 本产品官网」。
 - 正例：用户问「设置在哪」→ 查 map 后指路（桌面可附深链）。
 - 正例：冷启动「为什么没组团」→ 查 faq，用 faq 里的产品口径短答（勿临场编「本回合没派工」）。
 - 正例：「.md 怎么打开 / 文件面板」→ 查 map 或 faq，一两句指路阅读预览；\
@@ -52,6 +54,12 @@ _PRODUCT_HELP = """\
 能力柱（≤3）：① 对话里说目标、拍板、收结果 ② 复杂任务看协作图、随时插手 ③ 产物落工作区；\
 手册在工具箱、偏好在设置。
 试一试：直接说你想完成的事即可。
+
+【官网 / 下载】
+本产品官网：https://fashitianxia.xyz
+桌面安装包：https://fashitianxia.xyz/download
+网页版：https://app.fashitianxia.xyz
+域名只许用这三条。【禁止】把当前模型厂商或网上同名他品说成「我的官网」。
 
 【这是什么】（intro·what）
 AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
@@ -97,6 +105,7 @@ _PRODUCT_HELP_MAP = """\
 与 `.md` 阅读预览不是一路
 - 右坞浏览器：打开页 / 直播 / 登录接管（与「完整预览」同壳）
 - 工具箱 → 产品手册：`#/toolbox/manual/intro`（总入口）
+- 官网 / 下载：https://fashitianxia.xyz （安装包 `/download`；网页版 `https://app.fashitianxia.xyz`）
 - 工具箱 → 能力图鉴：工具与提示词清单
 - 设置（模型 / 服务商 / 用量 / 外观 / 快捷键 / 反馈 / 关于）→ `#/toolbox/manual/reference?s=settings`
 - 检查点与审批、辩论室：关键拍板与正反交锋
@@ -125,6 +134,7 @@ AgentCore 用户规则 = `AgentCore/规则/` + `remember`；`skills/*.json` = �
 `#/toolbox/manual/collaboration?s=control`
 - 画布 vs 白板？——画布＝对话里跨回合空间视图；白板＝工具箱独立创作工具。`?s=faq`
 - 费用？——「设置 · 用量」看花费与额度；多队员 / 更强模型 / 深度思考更贵。`?s=faq`
+- 官网 / 下载？——官网 https://fashitianxia.xyz ；安装包 https://fashitianxia.xyz/download ；网页版 https://app.fashitianxia.xyz 。只许用这些域名，勿把模型厂商或同名他品说成本产品。`?s=faq`
 - 用什么模型？——到 https://jiurelay.com/ 免费自行配额度后在「设置 · 服务商」接入；也可自带 Key（BYOK）；组合在「设置 · 模型」。`?s=faq`
 - 数据存哪？——文件在工作区；对话在后端用于续聊与记忆；文件页可看可导出。`?s=faq`
 - 删对话能找回吗？——能，约 30 天内：删完那条提示上点「撤销」，或到「全部对话」页左边\

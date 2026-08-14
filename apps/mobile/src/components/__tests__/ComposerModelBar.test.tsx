@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Composer 上方常驻的模型组合条 — 会话钉在哪个组合上必须零层可见，
- * 系统预置要与用户自建区分得开。
+ * Composer 行内模型组合 chip — 会话钉在哪个组合上必须零层可见，
+ * 系统预置要与用户自建区分得开；窄屏省略时完整名走 aria-label / title。
  */
 import { ComposerModelBar } from "@/components/ComposerModelBar";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -16,6 +16,21 @@ describe("ComposerModelBar", () => {
     );
     expect(screen.getByTestId("composer-model-chip").textContent).toContain(
       "GLM-5.2",
+    );
+  });
+
+  it("exposes the full name on title for truncated chips", () => {
+    render(
+      <ComposerModelBar
+        label="很长的用户自建写作组合名称"
+        preset={false}
+        onOpen={vi.fn()}
+      />,
+    );
+    const chip = screen.getByTestId("composer-model-chip");
+    expect(chip.getAttribute("title")).toBe("很长的用户自建写作组合名称");
+    expect(chip.getAttribute("aria-label")).toBe(
+      "模型组合：很长的用户自建写作组合名称",
     );
   });
 

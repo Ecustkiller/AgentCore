@@ -40,6 +40,12 @@ class WorkspaceSlot:
 
     backend: WorkspaceBackend
     material_paths: frozenset[str] = field(default_factory=frozenset)
+    # Per-desk cache for empty-desk project-shell (not turn-global: a fork sits
+    # on another root). ``None`` = not listed yet. Invalidated on backend rebind.
+    desk_visibly_empty: bool | None = None
+    # Test override for nested-Folder names. ``None`` = load from DB on register
+    # (``ownership_desk_id``). A frozenset skips the query (including empty).
+    child_folder_names: frozenset[str] | None = None
 
 
 def fork_workspace_slot(
@@ -199,6 +205,19 @@ class TurnPromotionLedger:
 
     reconciliation: dict[str, Any] | None = None
     promotions: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass
+class TurnProjectShell:
+    """Empty-desk project-shell strip for one conversation turn.
+
+    Shared by reference across ``replace()`` (CEO ↔ worker) and workspace-slot
+    forks (``fork_workspace_slot`` only replaces ``_workspace``). First unknown
+    top-level segment on a visibly empty desk is ``stripped_slug``; later write /
+    read / mkdir / artifacts / write-claims strip that prefix for the turn.
+    """
+
+    stripped_slug: str | None = None
 
 
 @dataclass
@@ -464,7 +483,8 @@ class ToolContext:
     # body-floor exemption must read ``landed_artifact_kinds`` (prose) instead.
     has_landed_files: bool = False
     # Wave3 B：本 run 内各相对路径成功【整读】``file_read`` 次数（共享可变 dict；
-    # ``dataclasses.replace`` 浅拷贝仍指向同一计数器）。带 offset/limit 的分段读不计入。
+    # ``dataclasses.replace`` 浅拷贝仍指向同一计数器）。从第 1 行要满安全顶计次；
+    # offset>1 或 limit<行顶的定点窗不计入。
     # 超 ``FILE_READ_SAME_PATH_MAX`` 且投影窗内仍有该 path 正文、又无再读授额时拒绝。
     file_read_counts: dict[str, int] = field(default_factory=dict)
     # R1 tool_clear 双态：engine 在每轮 ``execute_tools`` 前对 canonical 再跑
@@ -508,6 +528,8 @@ class ToolContext:
     turn_target_desk: TurnTargetDeskHint = field(default_factory=TurnTargetDeskHint)
     # 成品归位台账（共享可变；``replace`` 浅拷贝同引用）——见 ``TurnPromotionLedger``。
     promotion_ledger: TurnPromotionLedger = field(default_factory=TurnPromotionLedger)
+    # 空桌工程壳剥段（共享可变；``replace`` / workspace fork 同引用）——见 ``TurnProjectShell``。
+    project_shell: TurnProjectShell = field(default_factory=TurnProjectShell)
     # Bare-chat landing write desk (``Conversation.auto_desk_folder_id``). Orthogonal
     # to birth ``folder_id`` / sidebar / memory. When set, CEO file tools + overview
     # sit on this Folder while affiliation stays 裸聊. Never auto-promote.
@@ -550,6 +572,7 @@ class ToolContext:
     @backend.setter
     def backend(self, value: WorkspaceBackend) -> None:
         self._workspace.backend = value
+        self._workspace.desk_visibly_empty = None
 
     @property
     def material_paths(self) -> frozenset[str]:
@@ -586,8 +609,9 @@ class ToolResult:
     model and loops; a terminal effect (``HANDOFF`` / ``INTERACT``) stops the loop
     because the tool already produced the turn's final user-facing answer, carried
     in ``final_text`` (so the model does not generate a second, duplicate reply).
-    ``ask_user`` stop / timeout and team_preview cancel feed ``CONTINUE`` so the
-    CEO sees the拒答 and may short-close; ``delegate`` likewise stays ``CONTINUE``
+    ``ask_user`` stop / timeout and team_preview cancel / timeout feed ``CONTINUE``
+    so the CEO sees the拒答 or unanswered card and may short-close; ``delegate``
+    likewise stays ``CONTINUE``
     (workers' products return to the CEO loop). ``final_text`` (when a terminal
     effect sets it) is persisted but NOT re-emitted and is exempt from ``output``
     truncation (which only guards the model-facing ``output`` string).

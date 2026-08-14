@@ -125,5 +125,6 @@ RESEARCHER_ACADEMIC_SEARCH_DISCIPLINE = (
 # playbook 内联避免循环 import，测试可对 task 文案断言）。
 DIRECTED_SEARCH_TASK_HINT = (
     "【检索纪律】概念/意图先用 code_search，精确符号或字符串用 grep；"
-    "命中后再 file_read（优先 offset/limit）；禁止无目标地整目录逐文件通读。"
+    "命中后单文件默认 file_read 整读；仅页脚已截断或已有行号时开窗；"
+    "禁止无目标地整目录逐文件通读。"
 )

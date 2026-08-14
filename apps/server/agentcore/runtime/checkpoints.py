@@ -51,7 +51,7 @@ class CheckpointDecision(StrEnum):
     ADJUST = "adjust"  # steer with a note, then continue (kickoff: also grants)
     STOP = "stop"  # end this turn gracefully
     RESEARCH_FIRST = "research_first"  # debate kickoff only: 先多视角调研再辩
-    TIMEOUT = "timeout"  # no answer within the deadline (engine-set, never user-set)
+    TIMEOUT = "timeout"  # 运维上限触发；开工卡不 grant / 不开工，回灌 CEO 收尾（对齐 ask）
     ORPHANED = "orphaned"  # 热路失效终态（冷路检查点一般不走 orphan；枚举公共尾部对齐）
 
 

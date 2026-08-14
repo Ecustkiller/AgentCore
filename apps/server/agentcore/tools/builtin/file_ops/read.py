@@ -51,7 +51,12 @@ from .errors import (
 )
 from .path_hints import enrich_missing_path_message
 
-_DEFAULT_READ_LINES = 500
+# Safety cap for one file_read view (disk original text). Distinct from
+# tool_clear ``min_chars`` and worker token ceilings — do not reuse those.
+FILE_READ_SAFETY_LINE_CAP = 2000
+FILE_READ_SAFETY_CHAR_CAP = 80_000
+# Alias: folder_fs tests patch this name; value tracks the line cap.
+_DEFAULT_READ_LINES = FILE_READ_SAFETY_LINE_CAP
 
 # Non-recursive ``file_list`` hit the backend's entry ceiling. The recursive branch
 # already footers its own elision through ``_render_file_tree``; this is the flat
@@ -84,15 +89,137 @@ def _format_line_window(
     start_line: int,
     end_line: int,
     total_lines: int,
+    cap_kind: str | None = None,
 ) -> str:
-    """Honest ranged view: numbered lines + footer ``（第 a–b 行，共 N 行）``.
+    """Numbered lines + honest footer. No transport elision in body text.
 
-    Never silently drops a tail without a footer, and never inserts transport
-    elision (``DEFAULT_ELISION_MARKER``) into filesystem body text.
+    Untruncated full file → ``（全文 N 行）``. Truncated → ``（第 a–b 行，共 N 行）``
+    and, when the safety cap stopped us, mark 行顶 or 字符顶.
     """
     body = _format_numbered_lines(lines, start_line) if lines else ""
-    footer = f"（第 {start_line}–{end_line} 行，共 {total_lines} 行）"
+    full = cap_kind is None and start_line == 1 and end_line == total_lines
+    if full:
+        footer = f"（全文 {total_lines} 行）"
+    else:
+        footer = f"（第 {start_line}–{end_line} 行，共 {total_lines} 行）"
+        if cap_kind == "line":
+            footer = f"（第 {start_line}–{end_line} 行，共 {total_lines} 行；已达行顶）"
+        elif cap_kind == "char":
+            footer = f"（第 {start_line}–{end_line} 行，共 {total_lines} 行；已达字符顶）"
     return body + "\n\n" + footer if body else footer
+
+
+def _as_int(value: object) -> int:
+    """Coerce a tool-arg number. Raises ``TypeError`` / ``ValueError`` like ``int``."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        return int(value)
+    raise TypeError(f"expected int, got {type(value).__name__}")
+
+
+def _effective_offset(offset: object) -> int:
+    return 1 if offset is None else _as_int(offset)
+
+
+def _effective_line_limit(limit: object) -> int:
+    if limit is None:
+        return FILE_READ_SAFETY_LINE_CAP
+    return max(1, min(_as_int(limit), FILE_READ_SAFETY_LINE_CAP))
+
+
+def _is_ceiling_counted_read(offset: object, limit: object) -> bool:
+    """From line 1 filling the safety cap — counts toward the same-path ceiling.
+
+    双省 / 只传 offset=1 / 只传 limit=行顶 (and offset=1+limit≥行顶) count.
+    offset>1 or limit<行顶 windows do not.
+    """
+    if _effective_offset(offset) > 1:
+        return False
+    if limit is None:
+        return True
+    return _as_int(limit) >= FILE_READ_SAFETY_LINE_CAP
+
+
+def _trim_to_char_cap(lines: list[str]) -> tuple[list[str], bool]:
+    """Stop at the char cap on complete lines; keep an oversized first line whole."""
+    selected: list[str] = []
+    chars = 0
+    for line in lines:
+        extra = len(line) if not selected else 1 + len(line)
+        if chars + extra > FILE_READ_SAFETY_CHAR_CAP:
+            if not selected:
+                return [line], True
+            return selected, True
+        selected.append(line)
+        chars += extra
+    return selected, False
+
+
+def _cap_kind_for_window(
+    *,
+    char_hit: bool,
+    selected_len: int,
+    start_line: int,
+    total_lines: int,
+    line_limit: int,
+) -> str | None:
+    if char_hit:
+        return "char"
+    end_line = start_line + selected_len - 1 if selected_len else start_line - 1
+    if (
+        line_limit >= FILE_READ_SAFETY_LINE_CAP
+        and selected_len >= FILE_READ_SAFETY_LINE_CAP
+        and end_line < total_lines
+    ):
+        return "line"
+    return None
+
+
+def _finalize_window(
+    sliced: list[str],
+    *,
+    start_line: int,
+    total_lines: int,
+    line_limit: int,
+) -> tuple[list[str], int, int, str | None]:
+    if not sliced:
+        return [], start_line, start_line - 1, None
+    selected, char_hit = _trim_to_char_cap(sliced)
+    end_line = start_line + len(selected) - 1
+    cap_kind = _cap_kind_for_window(
+        char_hit=char_hit,
+        selected_len=len(selected),
+        start_line=start_line,
+        total_lines=total_lines,
+        line_limit=line_limit,
+    )
+    return selected, start_line, end_line, cap_kind
+
+
+def _select_line_window(
+    all_lines: list[str],
+    *,
+    offset: object,
+    limit: object,
+) -> tuple[list[str], int, int, int, str | None]:
+    """Apply offset/limit + safety caps to in-memory lines (Office extract)."""
+    total = len(all_lines)
+    start = _effective_offset(offset)
+    line_limit = _effective_line_limit(limit)
+    start_idx = max(0, start - 1)
+    if start_idx >= total:
+        return [], start, start - 1, total, None
+    sliced = all_lines[start_idx : start_idx + line_limit]
+    selected, start_line, end_line, cap_kind = _finalize_window(
+        sliced,
+        start_line=start_idx + 1,
+        total_lines=total,
+        line_limit=line_limit,
+    )
+    return selected, start_line, end_line, total, cap_kind
 
 
 def _file_read_ok(output: str, start: float) -> ToolResult:
@@ -104,6 +231,7 @@ def _file_read_ok(output: str, start: float) -> ToolResult:
         duration_ms=int((time.monotonic() - start) * 1000),
         output_limit=max(len(output), ToolResult._MAX_OUTPUT_LEN),
     )
+
 
 class _TreeNode:
     __slots__ = ("children", "is_dir", "name")
@@ -303,9 +431,9 @@ def _note_file_read_success(
     *,
     using_reread: bool,
 ) -> str:
-    """Bump ``file_read_counts`` for a full (non-ranged) read; consume grant; tip.
+    """Bump ``file_read_counts`` for a ceiling-counted read; consume grant; tip.
 
-    Ranged reads (offset/limit) must not call this — they neither count nor tip.
+    Only from-line-1 fill-cap reads call this. Point windows do not count or tip.
     """
     from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
 
@@ -324,7 +452,7 @@ def _note_file_read_success(
         output += (
             f"\n\n[系统提示] 本 run 对 `{path_key}` 的整读 file_read 已达上限 "
             f"（{FILE_READ_SAME_PATH_MAX} 次）；正文仍在对话中时请停止重复整读，"
-            "改用已有正文落盘；可用 offset/limit 精读片段。"
+            "改用已有正文落盘；若页脚已截断或只需片段再开窗。"
         )
     return output
 
@@ -332,28 +460,19 @@ def _note_file_read_success(
 def _format_extracted_read(
     text: str,
     *,
-    offset: int | None,
-    limit: int | None,
+    offset: object,
+    limit: object,
 ) -> str:
-    """Apply file_read offset/limit to extracted (or sidecar) text lines.
-
-    Full and ranged reads share the same honest window: numbered lines + footer.
-    """
-    lines = text.splitlines()
-    total = len(lines)
-    eff_offset = int(offset) if offset is not None else 1
-    eff_limit = int(limit) if limit is not None else _DEFAULT_READ_LINES
-    start_idx = max(0, eff_offset - 1)
-    if start_idx >= total:
-        return f"（第 {eff_offset}–{eff_offset - 1} 行，共 {total} 行）"
-    selected = lines[start_idx : start_idx + eff_limit]
-    start_line = start_idx + 1
-    end_line = start_idx + len(selected)
+    """Apply the same file_read window (offset/limit + safety caps) to extract text."""
+    selected, start_line, end_line, total, cap_kind = _select_line_window(
+        text.splitlines(), offset=offset, limit=limit
+    )
     return _format_line_window(
         selected,
         start_line=start_line,
         end_line=end_line,
         total_lines=total,
+        cap_kind=cap_kind,
     )
 
 class FileReadTool:
@@ -373,14 +492,17 @@ class FileReadTool:
                 "读取工作区内某个文件的内容（相对路径）。"
                 "Office/PDF（docx/pdf/pptx/odt/rtf）自动抽取文本；表格（xlsx/csv 等）请用 "
                 "code_execute。"
-                "宜在 grep / code_search 命中后再读；优先传 offset/limit 精读片段，"
+                "定位请用 grep / code_search；单文件默认整读"
+                "（省略则尽量整读，超安全顶截断）。"
+                "仅当页脚已标明截断或已有行号时再用 offset/limit 开窗。"
                 "禁止无目标地整目录逐文件通读。"
                 "含糊「根」/ `.` / 仅根标签勿当文件整读——先 file_list/grep 钉真实路径。"
-                "回执为编号行 + 页脚「第 a–b 行，共 N 行」（区间视图；"
-                "超默认行数只展示窗口，非磁盘残缺，勿把页脚当正文去 str_replace）。"
-                "同一相对路径本 run 对【整读】有成功次数上限（带 offset/limit 的分段读"
-                "不计入、不触顶）；触顶且正文仍在对话中、又无再读授额时仅拒绝该路径，"
-                "其它文件仍可 file_read。正文已被清理或写成功后可再整读核对。"
+                "回执为编号行；未截断页脚「全文 N 行」，截断为「第 a–b 行，共 N 行」"
+                "并标明行顶或字符顶（视图截断非磁盘残缺，勿把页脚当正文去 str_replace）。"
+                "同一相对路径本 run 对【整读】有成功次数上限（从第 1 行要满安全顶计次；"
+                "offset>1 或 limit<行顶的定点窗不计入、不触顶）；触顶且正文仍在对话中、"
+                "又无再读授额时仅拒绝该路径，其它文件仍可 file_read。"
+                "正文已被清理或写成功后可再整读核对。"
                 "已落盘产物优先以写/append 回执中的 artifact manifest 验真。"
             ),
             parameters={
@@ -400,9 +522,9 @@ class FileReadTool:
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "最多读取行数。省略则读到文件末尾（上限 500 行）。",
+                        "description": "最多读取行数。省略则尽量整读，超安全顶截断。",
                         "minimum": 1,
-                        "maximum": 500,
+                        "maximum": FILE_READ_SAFETY_LINE_CAP,
                     },
                 },
                 "required": ["path"],
@@ -416,17 +538,21 @@ class FileReadTool:
         rel_path = arguments.get("path", "")
         offset = arguments.get("offset")
         limit = arguments.get("limit")
-        use_range = offset is not None or limit is not None
+        counts_ceiling = _is_ceiling_counted_read(offset, limit)
 
-        # Same-path ceiling (full reads only): hard-reject empty spin only when
-        # verbatim body is still in the projected window AND no reread grant.
-        # Ranged (offset/limit) skips the gate and does not bump counts.
+        # Same-path ceiling (from-line-1 fill-cap only): hard-reject empty spin
+        # when verbatim body is still in the projected window AND no reread grant.
+        # Point windows skip the gate and do not bump counts.
         # Cleared body → allow recovery read even with remaining == 0.
         from agentcore.runtime.runs.constants import FILE_READ_SAME_PATH_MAX
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
 
+        rel_path, _shell_note = await rewrite_project_shell_relpath(
+            rel_path, context, register=False
+        )
         path_key = (rel_path or "").strip().replace("\\", "/")
         using_reread = False
-        if path_key and not use_range:
+        if path_key and counts_ceiling:
             prior = int(context.file_read_counts.get(path_key, 0))
             if prior >= FILE_READ_SAME_PATH_MAX:
                 remaining = int(context.file_read_reread_remaining.get(path_key, 0))
@@ -470,11 +596,11 @@ class FileReadTool:
                 context=context,
             )
 
+        # Default fills to EOF or the safety cap (line / char, complete lines).
+        # Never whole-file read + silent head-only chop without footer.
+        eff_offset = _effective_offset(offset)
+        eff_limit = _effective_line_limit(limit)
         try:
-            # Full + ranged share read_lines window (default cap = _DEFAULT_READ_LINES).
-            # Never whole-file read + silent head-only chop without footer.
-            eff_offset = int(offset) if offset is not None else 1
-            eff_limit = int(limit) if limit is not None else _DEFAULT_READ_LINES
             result = await context.backend.read_lines(
                 rel_path, offset=eff_offset, limit=eff_limit
             )
@@ -490,17 +616,23 @@ class FileReadTool:
         except WorkspaceError as e:
             return _map_workspace_read_error(e, path=path_key or rel_path, start=start)
 
-        output = _format_line_window(
+        selected, start_line, end_line, cap_kind = _finalize_window(
             result.lines,
             start_line=result.start_line,
-            end_line=result.end_line,
             total_lines=result.total_lines,
+            line_limit=eff_limit,
         )
-        if path_key and not use_range:
+        output = _format_line_window(
+            selected,
+            start_line=start_line,
+            end_line=end_line,
+            total_lines=result.total_lines,
+            cap_kind=cap_kind,
+        )
+        if path_key and counts_ceiling:
             output = _note_file_read_success(
                 context, path_key, output, using_reread=using_reread
             )
-        # Ranged success: no file_read_counts bump.
         return _file_read_ok(output, start)
 
     async def _read_office_or_pdf(
@@ -508,8 +640,8 @@ class FileReadTool:
         rel_path: str,
         *,
         path_key: str,
-        offset: int | None,
-        limit: int | None,
+        offset: object,
+        limit: object,
         using_reread: bool,
         start: float,
         context: ToolContext,
@@ -582,8 +714,7 @@ class FileReadTool:
 
         assert text is not None
         output = _format_extracted_read(text, offset=offset, limit=limit)
-        use_range = offset is not None or limit is not None
-        if path_key and not use_range:
+        if path_key and _is_ceiling_counted_read(offset, limit):
             output = _note_file_read_success(
                 context, path_key, output, using_reread=using_reread
             )
@@ -665,6 +796,14 @@ class FileListTool:
                 + _external_directory_hint(context.backend),
                 start,
             )
+
+        from agentcore.workspace.project_shell import rewrite_project_shell_relpath
+
+        directory, _shell_note = await rewrite_project_shell_relpath(
+            str(directory or "."), context, register=False
+        )
+        if not directory:
+            directory = "."
 
         prev_reveal = getattr(context.backend, "ai_list_reveal_archives", False)
         if reveal_archives:

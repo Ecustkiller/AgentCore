@@ -111,7 +111,9 @@ describe("StandingTasksPanel", () => {
     );
     renderPanel();
 
-    expect(await screen.findByText(/读不到工作区列表/)).toBeTruthy();
+    const note = await screen.findByText(/读不到工作区列表/);
+    expect(note.parentElement?.className).toContain("bg-muted/40");
+    expect(note.parentElement?.className).not.toContain("destructive");
     expect(screen.getByText(/这不代表你没有云工作区/)).toBeTruthy();
     // The task list itself still loaded.
     expect(screen.getByText("竞品简报")).toBeTruthy();
@@ -122,6 +124,20 @@ describe("StandingTasksPanel", () => {
       expect(screen.queryByText(/读不到工作区列表/)).toBeNull(),
     );
     expect(folders).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows a recoverable task-list failure as muted inline text", async () => {
+    tasks.mockRejectedValueOnce(
+      new ApiError(
+        503,
+        JSON.stringify({ error: { message: "任务列表开小差" } }),
+      ),
+    );
+    renderPanel();
+
+    const err = await screen.findByText("任务列表开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
   });
 
   it("shows 立即触发 rather than the workflow's 跑一次 wording", async () => {

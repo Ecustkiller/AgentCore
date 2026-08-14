@@ -185,8 +185,8 @@ async def run_retention_sweep() -> dict[str, int]:
             # the shared fan-out — no user scope (global sweep). The archive
             # provenance flag goes with it: nothing can restore this project now,
             # so a lingering「因项目删除而归档」mark would name a folder that is gone.
-            # ``updated_at`` self-assigns to suppress the ORM ``onupdate`` — housekeeping
-            # must not restamp every chat and scramble the「已归档」recency order.
+            # ``updated_at`` self-assigns — housekeeping must not call ``touch_activity``
+            # and scramble the「已归档」recency order.
             await session.execute(
                 update(Conversation)
                 .where(Conversation.folder_id == folder.id)

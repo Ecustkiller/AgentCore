@@ -188,7 +188,9 @@ async def regenerate_message(
             llm_supports_tools=preflight.supports_tools,
         )
     )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user.user_id
+    )
 
     return sse_response(sink, detach_on_disconnect=True)
 
@@ -412,6 +414,7 @@ async def resume_message(
             message_id=message_id,
             busy_reason=busy_reason,
             checkpoint_response=checkpoint_response,
+            user_id=user.user_id,
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,
             x_client_platform=x_client_platform,
@@ -473,5 +476,7 @@ async def resume_message(
     )
     # 执行与请求解耦 (C1 · slice 1a): track the resumed run so a disconnect lets it
     # finish + persist and 停止 routes through POST .../stop, same as a fresh send.
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user.user_id
+    )
     return sse_response(sink, detach_on_disconnect=True)

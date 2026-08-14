@@ -74,7 +74,7 @@ def _file_too_large_error(path: str, start: float) -> ToolResult:
     return _error(
         (
             f"`{path}` {FILE_TOO_LARGE_DETAIL}（上限 {max_mib} MiB）。"
-            "请改用 offset/limit 精读、grep 定位后局部读，或请用户提供更小片段 / 先转文本；"
+            "请用 grep 定位，或请用户提供更小片段 / 先转文本；"
             "禁止原样重试整文件读取。"
         ),
         start,

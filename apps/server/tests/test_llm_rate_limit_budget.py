@@ -147,7 +147,7 @@ async def test_a_budget_does_not_buy_back_the_headerless_giveups(clock):
     """
     runs: dict[str, tuple[int, list[float], float | None]] = {}
     for label, scenario, patience in (
-        ("interactive", "chat", None),
+        ("interactive", "title", None),
         ("budgeted", "compaction", _COMPACT_BUDGET),
     ):
         calls = {"n": 0}
@@ -363,10 +363,12 @@ def test_a_patience_on_a_user_facing_scenario_is_ignored_not_obeyed():
 
 
 async def test_stream_path_does_not_take_a_budget_on_the_callers_word(sleeps):
-    """流式回合被塞了 5 秒 patience：仍按 MAX_RETRY_AFTER 等满这 20 秒。
+    """流式回合被塞了 5 秒 patience：仍不按 patience 收窄，短头照等一次。
 
-    这条口子只靠调用方自觉时，一个 20 秒的 429 会当场放弃，而气泡上写着「请约 20 秒
-    后再试」——引擎已经否决了它自己印出来的那句话。
+    这条口子只靠调用方自觉时，一个仍在交互上限内的 429 会当场放弃，而气泡上写着
+    「请约 2 秒后再试」——引擎已经否决了它自己印出来的那句话。交互回合不再坐等
+    长头（>2s），所以这条用不了 20 秒来钉 patience 被忽略；≤2s 的短头仍能证明
+    patience=5 没有把上限收到 0。
     """
     calls = {"n": 0}
     sse = (
@@ -378,7 +380,7 @@ async def test_stream_path_does_not_take_a_budget_on_the_callers_word(sleeps):
         calls["n"] += 1
         if calls["n"] == 1:
             return httpx.Response(
-                429, headers={"retry-after": "20"}, content=b'{"error":"rate_limited"}'
+                429, headers={"retry-after": "2"}, content=b'{"error":"rate_limited"}'
             )
         return httpx.Response(200, text=sse)
 
@@ -387,7 +389,7 @@ async def test_stream_path_does_not_take_a_budget_on_the_callers_word(sleeps):
         chunks = [c async for c in provider.stream(_req("chat", 5.0, stream=True))]
         assert any(c.delta_content == "ok" for c in chunks)
         assert calls["n"] == 2
-        assert sleeps == [20.0]
+        assert sleeps == [2.0]
     finally:
         await provider.close()
 

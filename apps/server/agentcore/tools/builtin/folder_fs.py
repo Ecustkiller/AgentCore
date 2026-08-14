@@ -37,6 +37,9 @@ logger = get_logger(__name__)
 
 LIST_FOLDER_DIR_TOOL_NAME = "list_folder_dir"
 READ_FOLDER_FILE_TOOL_NAME = "read_folder_file"
+# CEO recon window. FileReadTool omit-limit follows the worker full-read default;
+# inject this before delegating so cross-desk sampling cannot inherit that cap.
+_READ_FOLDER_SAMPLE_LINES = 500
 
 _MISSING_FOLDER_ID = "缺少 folder_id（目标文件夹 id；先 list_folders / resolve_folder）。"
 _DENIED_MSG = (
@@ -135,6 +138,21 @@ async def _open_target_folder(
 def _readonly_args(arguments: dict[str, Any]) -> dict[str, Any]:
     """Drop ``folder_id`` before delegating to birth-desk file_* implementations."""
     return {k: v for k, v in arguments.items() if k != "folder_id"}
+
+
+def _readonly_read_args(arguments: dict[str, Any]) -> dict[str, Any]:
+    """Drop ``folder_id`` and pin a sampling ``limit`` before FileReadTool.
+
+    Schema maximum is 500; omitting ``limit`` must still inject 500 — otherwise
+    FileReadTool treats omit as worker full-read (2000-line cap).
+    """
+    args = _readonly_args(arguments)
+    raw = args.get("limit")
+    if raw is None:
+        args["limit"] = _READ_FOLDER_SAMPLE_LINES
+        return args
+    args["limit"] = min(int(raw), _READ_FOLDER_SAMPLE_LINES)
+    return args
 
 
 class ListFolderDirTool:
@@ -258,9 +276,12 @@ class ReadFolderFileTool:
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "最多读取行数。省略则默认窗口 500 行。",
+                        "description": (
+                            f"最多读取行数。省略则默认抽样 {_READ_FOLDER_SAMPLE_LINES} 行"
+                            "（派单前轻量认桌，非整读）。"
+                        ),
                         "minimum": 1,
-                        "maximum": 500,
+                        "maximum": _READ_FOLDER_SAMPLE_LINES,
                     },
                 },
                 "required": ["folder_id", "path"],
@@ -275,4 +296,4 @@ class ReadFolderFileTool:
         if err is not None:
             return err
         assert target_ctx is not None
-        return await FileReadTool().execute(_readonly_args(arguments), target_ctx)
+        return await FileReadTool().execute(_readonly_read_args(arguments), target_ctx)

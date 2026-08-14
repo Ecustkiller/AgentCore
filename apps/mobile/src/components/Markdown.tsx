@@ -1,3 +1,4 @@
+import { BASE_URL } from "@/api/client";
 import { EvidenceBadge } from "@/components/EvidenceBadge";
 import { MermaidDiagram } from "@/components/MermaidDiagram";
 import { remarkCitations } from "@/components/remarkCitations";
@@ -23,6 +24,7 @@ import {
   type ReactNode,
   memo,
   useMemo,
+  useState,
 } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -103,8 +105,33 @@ function resolveLedgerCitation(
 }
 
 /**
- * Inline citation chip: display number linked to the source URL (no Popover —
- * mobile simplifies to tappable external link; numbering follows ``toDisplay``).
+ * Tiny inline favicon. Failed / missing icon falls back to the same site letter
+ * used on SourceCards, so body chips and the source row stay aligned.
+ */
+function ChipFavicon({ site, title }: { site?: string; title?: string }) {
+  const domain = site?.trim();
+  const [failedDomain, setFailedDomain] = useState<string | null>(null);
+  const letter = (domain || title || "?").charAt(0).toUpperCase();
+  const showImg = !!domain && failedDomain !== domain;
+  return (
+    <span className="cite-chip-favicon" aria-hidden>
+      {showImg ? (
+        <img
+          src={`${BASE_URL}/v1/favicon?domain=${encodeURIComponent(domain)}`}
+          alt=""
+          loading="lazy"
+          onError={() => setFailedDomain(domain)}
+        />
+      ) : (
+        letter
+      )}
+    </span>
+  );
+}
+
+/**
+ * Inline citation chip: muted favicon+number pill linked to the source URL
+ * (no Popover — mobile simplifies to tappable external link).
  */
 function CitationChip({
   "data-n": dataN,
@@ -137,6 +164,7 @@ function CitationChip({
         title={citation.title || citation.url}
         aria-label={`来源 ${display}（${dataLedgerId}）`}
       >
+        <ChipFavicon site={citation.site} title={citation.title} />
         {display}
       </a>
     );
@@ -160,6 +188,7 @@ function CitationChip({
       title={citation.title || citation.url}
       aria-label={`来源 ${display}`}
     >
+      <ChipFavicon site={citation.site} title={citation.title} />
       {display}
     </a>
   );

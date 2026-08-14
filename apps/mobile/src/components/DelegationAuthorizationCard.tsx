@@ -98,10 +98,12 @@ function DelegationBody({
     .join(" · ");
 
   return (
-    <div className="pause">
-      <div className="pause-title">团队开工前 · 工具授权</div>
-      {workers && <div className="pause-context">{workers}</div>}
-      {tools && <div className="pause-arg">涉及：{tools}</div>}
+    <div className="pause pause--budget">
+      <div className="pause-scroll">
+        <div className="pause-title">团队开工前 · 工具授权</div>
+        {workers && <div className="pause-context">{workers}</div>}
+        {tools && <div className="pause-arg">涉及：{tools}</div>}
+      </div>
       <div className="pause-actions">
         <button
           type="button"

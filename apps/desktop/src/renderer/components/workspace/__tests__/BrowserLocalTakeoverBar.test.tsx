@@ -99,4 +99,19 @@ describe("BrowserLocalTakeoverBar", () => {
     expect(records).toHaveLength(1);
     expect(records[0]?.endedAt).toBeTruthy();
   });
+
+  it("start failure bar is noticeChipNeutral, not destructive", async () => {
+    const { TakeoverStartError } = await import("@/services/browserTakeover");
+    mockStart.mockRejectedValue(new TakeoverStartError("no_session"));
+    render(
+      <BrowserLocalTakeoverBar
+        conversationId="conv-1"
+        sessionId="sess-local"
+      />,
+    );
+    await clickAsync("接管");
+    const failBar = await screen.findByText("当前没有进行中的浏览器会话");
+    expect(failBar.className).toContain("bg-muted/40");
+    expect(failBar.className).not.toContain("destructive");
+  });
 });

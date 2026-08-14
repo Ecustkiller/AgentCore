@@ -1,5 +1,6 @@
 import { Button, Card } from "@/components/ui";
 import { Switch } from "@/components/ui/Switch";
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { notifyError, notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { APP_PATHS } from "@/pages/toolbox/manual/paths";
@@ -288,8 +289,13 @@ export function StandingTasksPanel() {
       </div>
 
       {foldersError && (
-        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2">
-          <p className="min-w-0 flex-1 text-xs text-destructive">
+        <div
+          className={cn(
+            "mt-4 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2",
+            noticeChipNeutral,
+          )}
+        >
+          <p className="min-w-0 flex-1 text-xs">
             读不到工作区列表（{foldersError}
             ），任务落点与作用域暂时无法选择。这不代表你没有云工作区。
           </p>
@@ -395,7 +401,7 @@ export function StandingTasksPanel() {
             className="animate-spin text-muted-foreground/50"
           />
         ) : listError ? (
-          <p className="text-sm text-destructive">{listError}</p>
+          <p className="text-sm text-muted-foreground">{listError}</p>
         ) : tasks.length === 0 ? (
           <Card className="px-4 py-6 text-center">
             <p className="text-sm text-muted-foreground">

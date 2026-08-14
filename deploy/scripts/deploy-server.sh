@@ -66,7 +66,8 @@ COMPOSE_FILES=(
   -f "$REPO_DIR/deploy/docker-compose.server.yml"
   -f "$REPO_DIR/deploy/docker-compose.app.yml"
 )
-# gVisor 默认开：除非 GVISOR_ENABLED=false，否则叠 sandbox（seccomp/apparmor + mem_limit）。
+# gVisor 默认开：除非 GVISOR_ENABLED=false，否则叠 sandbox
+# （seccomp/apparmor + netns caps + entrypoint 降权 + mem_limit）。
 # 不叠层 → 沙箱起不来，启动期健康探测失败不拒启（fail-safe）：打
 # sandbox.cloud_health_failed warning、执行类整类不装配、能力行如实显示未装配。
 _gvisor_off=0
@@ -76,6 +77,11 @@ fi
 if [[ "$_gvisor_off" -eq 0 ]]; then
   _sandbox_yml="$REPO_DIR/deploy/docker-compose.sandbox.yml"
   if [[ -f "$_sandbox_yml" ]]; then
+    _sandbox_entrypoint="$(dirname "$_sandbox_yml")/api-sandbox-entrypoint.sh"
+    if [[ ! -f "$_sandbox_entrypoint" ]]; then
+      err "云执行默认开但缺少 $_sandbox_entrypoint（或设 GVISOR_ENABLED=false）"
+      exit 1
+    fi
     COMPOSE_FILES+=(-f "$_sandbox_yml")
   else
     err "云执行默认开但缺少 $_sandbox_yml（或设 GVISOR_ENABLED=false）"

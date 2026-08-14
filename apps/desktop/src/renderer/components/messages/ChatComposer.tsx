@@ -1,5 +1,7 @@
 import { IconButton } from "@/components/ui";
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { collectClipboardFiles } from "@/lib/clipboardFiles";
+import { cn } from "@/lib/utils";
 import {
   type ChatMention,
   type MessageReplyTo,
@@ -75,7 +77,8 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024; // mirrors workspace_upload_max_bytes
  *
  * Sending is optimistic in the store (it uploads files first, then appends a
  * local twin and swaps it for the stored message). This owns the draft + staged
- * files and surfaces both local validation errors and the store's send error.
+ * files and surfaces both local validation errors and the store's send error
+ * (always {@link noticeChipNeutral} — IM has no 去配置 action).
  * An optional reply target renders a cancelable quote bar above the input.
  * An optional edit target prefills the textarea and saves via PATCH (no attachments).
  */
@@ -471,8 +474,16 @@ export function ChatComposer({
   return (
     <div className="px-4 pb-4 pt-2">
       {(sendError || localError) && (
-        <div className="mb-2 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          <AlertTriangle size={15} className="shrink-0" />
+        <div
+          role="alert"
+          aria-live="polite"
+          data-testid="im-composer-send-error"
+          className={cn(
+            "mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
+            noticeChipNeutral,
+          )}
+        >
+          <AlertTriangle size={15} className="shrink-0 text-muted-foreground" />
           <span className="min-w-0 flex-1">{sendError ?? localError}</span>
           <IconButton
             onClick={() => {
@@ -480,7 +491,7 @@ export function ChatComposer({
               setLocalError(null);
             }}
             aria-label="关闭"
-            className="text-destructive/70 hover:bg-transparent hover:text-destructive"
+            className="text-muted-foreground hover:bg-transparent hover:text-foreground"
           >
             <X size={14} />
           </IconButton>

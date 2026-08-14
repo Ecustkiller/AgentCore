@@ -149,32 +149,37 @@ export function FilesPage() {
           ← 返回
         </button>
         <span>文件</span>
-        <div className="bar-right">
-          <button
-            type="button"
-            className="link"
-            onClick={() => setTrashOpen(true)}
-            aria-label="软删区"
-            disabled={localMode}
-          >
-            软删区
-          </button>
-          <button
-            type="button"
-            className="link"
-            onClick={() => uploadInputRef.current?.click()}
-            disabled={uploading || localMode}
-          >
-            {uploading ? "上传中…" : "上传"}
-          </button>
-        </div>
-        <input
-          ref={uploadInputRef}
-          type="file"
-          accept="image/*,.pdf,.md,.markdown,.txt,.json,.csv,.html,.css,.js,.ts,.tsx,.py,.zip,text/*"
-          style={{ display: "none" }}
-          onChange={(e) => void onPickUpload(e)}
-        />
+        {localMode ? (
+          <span className="bar-right" aria-hidden />
+        ) : (
+          <div className="bar-right">
+            <button
+              type="button"
+              className="link"
+              onClick={() => setTrashOpen(true)}
+              aria-label="软删区"
+            >
+              软删区
+            </button>
+            <button
+              type="button"
+              className="link"
+              onClick={() => uploadInputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? "上传中…" : "上传"}
+            </button>
+          </div>
+        )}
+        {!localMode && (
+          <input
+            ref={uploadInputRef}
+            type="file"
+            accept="image/*,.pdf,.md,.markdown,.txt,.json,.csv,.html,.css,.js,.ts,.tsx,.py,.zip,text/*"
+            style={{ display: "none" }}
+            onChange={(e) => void onPickUpload(e)}
+          />
+        )}
       </header>
 
       {localMode && (

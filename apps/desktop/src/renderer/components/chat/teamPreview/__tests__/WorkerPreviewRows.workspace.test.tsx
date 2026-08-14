@@ -18,7 +18,7 @@ function worker(
 }
 
 describe("WorkerPreviewRows · workspace", () => {
-  it("shows one summary line when all desks match", () => {
+  it("never paints workspace chrome when all desks match", () => {
     render(
       <WorkerPreviewRows
         workers={[
@@ -35,10 +35,12 @@ describe("WorkerPreviewRows · workspace", () => {
         ]}
       />,
     );
-    expect(screen.getAllByText("工作区 · 本会话工作区")).toHaveLength(1);
+    expect(screen.getByText("调研")).toBeTruthy();
+    expect(screen.getByText("撰写")).toBeTruthy();
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
   });
 
-  it("shows per-worker desks when they differ", () => {
+  it("never paints workspace chrome when desks differ", () => {
     render(
       <WorkerPreviewRows
         workers={[
@@ -57,8 +59,9 @@ describe("WorkerPreviewRows · workspace", () => {
         ]}
       />,
     );
-    expect(screen.getByText("工作区 · 云端甲")).toBeTruthy();
-    expect(screen.getByText("工作区 · 云端乙")).toBeTruthy();
+    expect(screen.getByText("甲")).toBeTruthy();
+    expect(screen.getByText("乙")).toBeTruthy();
+    expect(screen.queryByText(/工作区 ·/)).toBeNull();
   });
 
   it("hides workspace chrome on old frames without names", () => {

@@ -13,11 +13,13 @@ import {
   Reasoning,
   type TeamProjection,
   graphAppendAnchorLabel,
+  kickoffReleasedFromCold,
   prevGraphAnchorLabel,
-  teamHasStartedRuns,
+  shouldShowTeamGraph,
 } from "@/components/ProcessTimeline";
 import { SourceCards, buildCitationDisplayMap } from "@/components/SourceCards";
 import { TeamView } from "@/components/TeamView";
+import { useColdInteractions } from "@/lib/coldInteractions";
 import { copyText } from "@/lib/messageExport";
 import {
   type SupportDiagnosticIds,
@@ -57,8 +59,9 @@ import { useMemo, useRef, useState } from "react";
 
 export {
   graphAppendAnchorLabel,
+  kickoffReleasedFromCold,
   prevGraphAnchorLabel,
-  teamHasStartedRuns,
+  shouldShowTeamGraph,
   type TeamProjection,
 };
 export {
@@ -167,10 +170,12 @@ export function AssistantContent({
   durationMs?: number | null;
   clockIso?: string | null;
 }) {
+  const coldById = useColdInteractions();
+  const kickoffReleased = kickoffReleasedFromCold(coldById.values(), messageId);
   const hasTeam = !!team && team.runs.length > 0;
-  // 开工挂起零开跑不出图：全 pending/skipped 时仍保留 team 投影（交付/升级槽），但不挂 TeamView。
+  // 开工挂起不出图；授权后 pending 编制也出图。
   const showTeamGraph =
-    !!team && team.runs.length > 0 && teamHasStartedRuns(team.runs);
+    !!team && shouldShowTeamGraph(team.runs, kickoffReleased);
   const turnLedger = evidenceLedger;
 
   // Display renumbering: append-only across stream frames so assigned numbers never jump.
@@ -247,6 +252,7 @@ export function AssistantContent({
           prevExecutionIds={prevExecutionIds}
           userInterjections={userInterjections}
           turnClosed={turnClosed}
+          kickoffReleased={kickoffReleased}
           onFill={onFill}
           onOpenBrowserLive={onOpenBrowserLive}
         />

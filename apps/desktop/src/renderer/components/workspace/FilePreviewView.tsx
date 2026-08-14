@@ -1,11 +1,10 @@
-import { FileAuditSection } from "@/components/audit/FileAuditTrail";
 import { Markdown } from "@/components/chat/Markdown";
 import { FilePreviewBody } from "@/components/files/FilePreviewBody";
 import { FileTypeIcon } from "@/components/files/FileTypeIcon";
 import { Centered, InlineError } from "@/components/files/parts";
 import { Button, IconButton } from "@/components/ui";
+import { noticeChipNeutral } from "@/components/ui/tone-presets";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { useFileAudit } from "@/hooks/useFileAudit";
 import {
   type EditEncoding,
   type EditEol,
@@ -18,7 +17,6 @@ import {
 } from "@/lib/fileSource";
 import { notifyActionError, notifyError } from "@/lib/toast";
 import { LocalFsError } from "@/services/sources/localRootSource";
-import { useConversationStore } from "@/stores/conversation";
 import {
   AlertTriangle,
   AppWindow,
@@ -90,8 +88,6 @@ export function FilePreviewView({
   const editing = edit !== null;
   const isHtml = isHtmlPath(name);
   const isMarkdown = isMarkdownPath(name);
-  const conversationId = useConversationStore((s) => s.currentConversationId);
-  const fileAuditState = useFileAudit(conversationId, path, !editing);
 
   const load = useCallback(async () => {
     setResult(null);
@@ -421,11 +417,11 @@ export function FilePreviewView({
 
       {/* 冲突三态与 md 编辑器同一套语汇：说明「会覆盖」+ 两个明确出口，绝不静默落盘。 */}
       {conflictVersion && (
-        <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-foreground">
-          <AlertTriangle size={14} className="shrink-0 text-destructive" />
+        <div className="flex flex-wrap shrink-0 items-center gap-2 border-b border-primary/30 bg-primary/10 px-3 py-1.5 text-xs text-foreground">
+          <AlertTriangle size={14} className="shrink-0 text-primary" />
           <span>磁盘上的文件已被改动，保存会覆盖磁盘版本。</span>
           <Button
-            variant="danger"
+            variant="ghost"
             onClick={reloadFromDisk}
             className="h-auto px-0 py-0 underline-offset-2 hover:underline"
           >
@@ -443,8 +439,10 @@ export function FilePreviewView({
       )}
 
       {saveError && !conflictVersion && (
-        <div className="flex shrink-0 items-center gap-2 border-b border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
-          <AlertTriangle size={14} className="shrink-0" />
+        <div
+          className={`flex shrink-0 items-center gap-2 border-b px-3 py-1.5 text-xs ${noticeChipNeutral}`}
+        >
+          <AlertTriangle size={14} className="shrink-0 text-muted-foreground" />
           <span>{saveError}</span>
         </div>
       )}
@@ -507,7 +505,6 @@ export function FilePreviewView({
                 }
               />
             )}
-            {conversationId && <FileAuditSection state={fileAuditState} />}
           </>
         )}
       </div>

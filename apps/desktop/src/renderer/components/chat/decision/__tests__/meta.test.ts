@@ -6,6 +6,7 @@ import {
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPreviewLead,
+  teamPreviewSettledLead,
   teamResolvedOutcome,
 } from "../meta";
 
@@ -48,6 +49,12 @@ describe("decision meta", () => {
     );
     expect(teamResolvedOutcome("delegate", "research_first", false).label).toBe(
       "已取消 · 团队未启动",
+    );
+    expect(teamResolvedOutcome("delegate", "timeout", false).label).toBe(
+      "未及时回应，团队未启动",
+    );
+    expect(teamResolvedOutcome("debate", "timeout", false).label).toBe(
+      "未及时回应，辩论未开赛",
     );
     expect(teamResolvedOutcome("delegate", "continue", true).label).toBe(
       "已授权开工 · 嘱咐已注入队员",
@@ -100,6 +107,22 @@ describe("decision meta", () => {
         sideCount: 0,
       }),
     ).toBe("预计 2 人开工");
+    expect(
+      teamPreviewSettledLead({
+        primitive: "delegate",
+        headline: "",
+        workerCount: 2,
+        sideCount: 0,
+      }),
+    ).toBe("2 人");
+    expect(
+      teamPreviewSettledLead({
+        primitive: "debate",
+        headline: null,
+        workerCount: 0,
+        sideCount: 2,
+      }),
+    ).toBe("2 方");
     expect(
       teamPreviewLead({
         primitive: "debate",

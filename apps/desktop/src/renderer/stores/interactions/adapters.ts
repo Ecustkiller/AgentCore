@@ -374,6 +374,26 @@ export function messageTeamPreviews(
   );
 }
 
+/**
+ * Exact messageId only. Empty id is not match-all (unlike {@link matchesMessage}),
+ * so a leftover continue from another bubble cannot release this turn's graph.
+ */
+export function teamPreviewsExact(
+  entries: Iterable<InteractionEntry>,
+  conversationId: string | null,
+  messageId: string,
+): TeamPreviewDisplay[] {
+  if (!conversationId || !messageId) return [];
+  const out: TeamPreviewDisplay[] = [];
+  for (const e of entries) {
+    if (e.kind !== "team_preview") continue;
+    if (e.conversationId !== conversationId) continue;
+    if (e.messageId !== messageId) continue;
+    out.push(entryToTeamPreview(e));
+  }
+  return out;
+}
+
 /** Whether a tool is covered by an active grant_delegation for this conversation. */
 export function isToolGranted(
   conversationId: string,

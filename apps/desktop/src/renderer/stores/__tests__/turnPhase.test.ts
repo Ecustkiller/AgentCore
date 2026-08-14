@@ -315,6 +315,81 @@ describe("turn stop lifecycle", () => {
     });
   });
 
+  it("terminal + paused 仅 captain running → 不打 stop API", () => {
+    const kickoffPlan: ExecutionPlan = {
+      id: "exec-kickoff-pause",
+      planType: "multi_agent",
+      taskSummary: "开工确认",
+      agents: [
+        { id: "ceo", role: "CEO" },
+        { id: "w1", role: "研究员" },
+        { id: "w2", role: "撰写员" },
+      ],
+      runs: [
+        {
+          id: "captain",
+          agentId: "ceo",
+          task: "编排",
+          dependsOn: [],
+          kind: "captain",
+        },
+        { id: "r1", agentId: "w1", task: "调研", dependsOn: [] },
+        { id: "r2", agentId: "w2", task: "撰写", dependsOn: [] },
+      ],
+    };
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useExecutionStore.getState().startExecution(kickoffPlan, mid);
+    useExecutionStore.getState().recordFrame(
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "captain",
+        agentId: "ceo",
+        parentRunId: null,
+        runKind: "captain",
+        continuesRunId: null,
+      },
+      mid,
+    );
+    useExecutionStore.getState().setStatus("paused", mid);
+    useConversationStore.getState().setTurnPhase("completed", CID);
+
+    useConversationStore.getState().stopGeneration();
+    expect(apiPost).not.toHaveBeenCalled();
+    expect(getTurnPhase(CID)).toBe("completed");
+  });
+
+  it("terminal + paused 且 worker 仍 running → 打 stop API", async () => {
+    beginTurnPreflight(CID);
+    enterTurnStreaming(CID);
+    const mid = useConversationStore.getState().createAssistantMessage(CID);
+    if (!mid) throw new Error("expected assistant message id");
+    useExecutionStore.getState().startExecution(plan, mid);
+    useExecutionStore.getState().recordFrame(
+      {
+        t: 1,
+        kind: "run_started",
+        runId: "r1",
+        agentId: "w1",
+        parentRunId: null,
+        runKind: "agent",
+        continuesRunId: null,
+      },
+      mid,
+    );
+    useExecutionStore.getState().setStatus("paused", mid);
+    useConversationStore.getState().setTurnPhase("completed", CID);
+
+    useConversationStore.getState().stopGeneration();
+    expect(getTurnPhase(CID)).toBe("completed");
+    await vi.waitFor(() => {
+      expect(apiPost).toHaveBeenCalledWith(`/v1/conversations/${CID}/stop`);
+    });
+  });
+
   it("terminal 且无可停 execution → 不打 stop API", () => {
     beginTurnPreflight(CID);
     enterTurnStreaming(CID);

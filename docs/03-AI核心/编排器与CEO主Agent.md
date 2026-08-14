@@ -67,7 +67,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 
 `delegate` 默认**非终态**：worker 跑完交回 CEO，CEO 写简短概览收尾（否决独立 SYNTHESIS 合稿节点；单 worker 成功亦然）。曾有 `finalize=true` 单人直出（HANDOFF 当回合答复、省合成轮），与「一个 CEO 声音」冲突，已撤。图由 CEO 在 ReAct 循环里增量声明——非外部一次性 JSON 计划。**参数主路**：默认手写顶层 `tasks`；具名 `playbook` = 固化流水线快捷套餐（与 tasks XOR，禁同时有内容；建站等可点名快捷）。
 
-**跨文件夹（✅）**：跨已登记文件夹（只读摸底与写盘通吃）一律 `delegate` 各填 `target_folder_id`（=该队员坐哪张桌；写不写盘由 write_scope/grant 正交）；CEO 的 `list_folder_dir` / `read_folder_file` 仅派前轻量认桌/抽样，非摸底主通道；均不改会话 `folder_id`。点名：`list_folders` / `resolve_folder`（按路径解析，同名多层返歧义候选而非静默猜）；**显式**新建云桌用 `create_folder`（可带 `parent_path` 挂到某层下；仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）；`delete_folder` **只认 id**（跨层同名合法，按名删必然误删）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 建云文件夹并 `turn_target_desk` 继承，**建成即在对话里告知落点**（`auto_folder_created`；告知非审批、不挂起、可当场改名）；首次落 `Conversation.auto_desk_folder_id`（不改出生 `folder_id`），后续回合复用；CEO 文件视野可坐落地桌。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读（非名册目标）可不点名（scratch 禁写）；名册目标与写盘禁默写 scratch。→ [工作区 · §五](/docs/02-架构/双模式工作区.md)。
+**跨文件夹（✅）**：跨已登记文件夹（只读摸底与写盘通吃）一律 `delegate` 各填 `target_folder_id`（=该队员坐哪张桌；写不写盘由 write_scope/grant 正交）；CEO 的 `list_folder_dir` / `read_folder_file` 仅派前轻量认桌/抽样，非摸底主通道；均不改会话 `folder_id`。点名：`list_folders` / `resolve_folder`（按路径解析，同名多层返歧义候选而非静默猜）；**显式**新建云桌用 `create_folder`（可带 `parent_path` 挂到某层下；仅用户点名新建 / 多线显式先建——禁止为过写盘闸而建）；`delete_folder` **只认 id**（跨层同名合法，按名删必然误删）。裸聊写盘缺桌 → 运行时 `ensure_bare_chat_auto_cloud_desk` 建云文件夹并 `turn_target_desk` 继承，**建成即在对话里告知落点**（`auto_folder_created`；告知非审批、不挂起、可当场改名）；首次落 `Conversation.auto_desk_folder_id`（不改出生 `folder_id`），后续回合复用；CEO 文件视野可坐落地桌。**文件夹根即工作区根**：空桌成品落在该文件夹根，禁止再套工程壳（✅ 写入剥壳）。进云另经桌面导入到云 / 连接 Git；本机传统走 `open_local_project` / `register_local_project` / `bind_local_folder`（合法非默认）。裸聊：纯对话/只读（非名册目标）可不点名（scratch 禁写）；名册目标与写盘禁默写 scratch。→ [工作区 · §五 · §5.4](/docs/02-架构/双模式工作区.md)。
 
 | 动作 | 语义 |
 |---|---|
@@ -193,8 +193,8 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 - **目标**：根侧 `depth=0` 单节点手写写工程且无结构钉本轮切片时，软警告进入 **CEO 可见**委派结果尾——把「立刻派 ≠ 立刻全量」落成通用能力（非场景特例）。
 - **命中**（可证明结构）：无具名 playbook ∧ 恰好 1 task ∧ 显式写工程（`form=files`；form 省略不算）∧ 无切片钉。
 - **切片钉白名单**（任一豁免）：非空 `artifacts` / `artifact_dir` / 非空 `required_sections` / 本 task `checkpoint_after`。
-- **路径**：根多节点 / 具名 playbook / deliverable 钉边界（A）与 **单 lead 嵌套扇出**（B）等价合法；软文案须明示嵌套可用。路径 B 与整锅入口同构 → **接受软提示对 B 亦响**（nudge，非拒）。路径 B 责任落 **lead**：接到成果级且无结构钉时 **优先**先嵌套补编制（captain 身份 / skill 优先级 nudge），非强制 CEO 改平铺、亦非「凡大活必嵌套」。
-- **编排自主（✅ 提示/技能，非硬编码 playbook）**：范围大或拆缝不清时，CEO/lead 可自判 **摸底波→专班**（同批 `depends_on` 或再 `delegate`/`replan`）与路径 A/B 并列；通用于审计/摸仓/大改等，**禁止**写成「凡 X 必两拨人 / 必嵌套」。路径 B 下 lead 的「优先先嵌套」与此并列：仍是 nudge，拆得清可扁平、豁免面可自干。真两段结构 OK；同 task 假两段仍禁。→ `skills`「编排自主·摸底波 / 专班 / 嵌套」· CEO `【编排自主】` · captain `_WORKER_CAPTAIN_INTRO`
+- **路径**：根多节点 / 具名 playbook / deliverable 钉边界（A）与 **单 lead 嵌套扇出**（B）等价合法；软文案须明示嵌套可用。路径 B 与整锅入口同构 → **接受软提示对 B 亦响**（nudge，非拒）。路径 B 责任落 **lead**：接到成果级且无结构钉时 **先招人再整合**（captain 常驻短判决 + skill 旋钮；非硬流程、非「未嵌套禁写」），非强制 CEO 改平铺、亦非「凡大活必嵌套」。
+- **编排自主（✅ 提示/技能，非硬编码 playbook）**：范围大或拆缝不清时，CEO/lead 可自判 **摸底波→专班**（同批 `depends_on` 或再 `delegate`/`replan`）与路径 A/B 并列；通用于审计/摸仓/大改等，**禁止**写成「凡 X 必两拨人 / 必嵌套」。CEO **不知轻重时禁止猜「一人能扛整座成果」**——缝不清先短摸底再专班，缝已在文档/目录则按块派（不必先称每块有多重）；任务里写「先组队 / 你可以组队」**不算**已拆编制。交 lead 只写目标·约束·验收，禁止「你去执行整个里程碑」口吻。路径 B 下 lead：成果级无钉 → 先招再整合；**已钉薄切片却读出整仓** → `escalate kind=scope`，不默默扩编。「不要为委派而委派」只约束本来就小的活。真两段结构 OK；同 task 假两段仍禁。不扩软闸、不按读轮次催招。→ `skills`「编排自主·摸底波 / 专班 / 嵌套」· CEO `【立刻派 ≠ 立刻全量】` · captain `_WORKER_CAPTAIN_INTRO`
 - **边界**：仍**不拒收、不改图**；不做硬拒；不扫用户/task 长文；不用 `write_scope`（非 grant 槽）。阶梯沿用 `design_impl` 先例（提示词后直接软提示）。
 - **验收**：单 task + `form=files` + 无钉 → CEO 可见告警；具名 playbook / 有 artifacts 等 → 不告警。→ 见代码: `tools/builtin/delegate/tool.py`（tails）+ `runtime/delegate/root_slice_honesty.py`
 

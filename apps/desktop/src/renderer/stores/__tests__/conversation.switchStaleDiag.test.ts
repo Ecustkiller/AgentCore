@@ -203,7 +203,7 @@ describe("switch-conversation stale window (diag repro)", () => {
     // Idle warm + no destination → ConversationPage calls intentional snap.
     expect(
       decideWarmOpenAction({
-        isGenerating: rtWarm.isGenerating,
+        hasLocalStream: rtWarm.isGenerating,
         hasDestination: false,
       }),
     ).toBe("snap_latest");
@@ -218,18 +218,18 @@ describe("switch-conversation stale window (diag repro)", () => {
     expect(getRuntime("a").hasMoreAfter).toBe(false);
   });
 
-  it("warm open policy: generating / destination keep slice", () => {
+  it("warm open policy: local stream / destination keep slice", () => {
     expect(
-      decideWarmOpenAction({ isGenerating: true, hasDestination: false }),
+      decideWarmOpenAction({ hasLocalStream: true, hasDestination: false }),
     ).toBe("skip_generating");
     expect(
-      decideWarmOpenAction({ isGenerating: true, hasDestination: true }),
+      decideWarmOpenAction({ hasLocalStream: true, hasDestination: true }),
     ).toBe("skip_generating");
     expect(
-      decideWarmOpenAction({ isGenerating: false, hasDestination: true }),
+      decideWarmOpenAction({ hasLocalStream: false, hasDestination: true }),
     ).toBe("keep_anchor");
     expect(
-      decideWarmOpenAction({ isGenerating: false, hasDestination: false }),
+      decideWarmOpenAction({ hasLocalStream: false, hasDestination: false }),
     ).toBe("snap_latest");
   });
 });

@@ -162,8 +162,8 @@ def test_apply_light_round_budgets_is_noop():
     assert plan.nodes[0].max_rounds is None
 
 
-def test_files_delivery_idle_opens_only_for_files_expected():
-    """Soft delivery_idle opens for files_expected; form_prose and prose-only stay off write pressure."""
+def test_factory_closes_files_delivery_idle_keeps_recon():
+    """交文件空转已关：files/report factory 不注入；recon 仍 nudge；prose 全关。"""
     from agentcore.runtime.engine.governance import create_loop_controller
     from agentcore.runtime.runs.worker_budget import (
         LIGHT_REPAIR_MAX_ROUNDS,
@@ -179,22 +179,26 @@ def test_files_delivery_idle_opens_only_for_files_expected():
         files_expected=True,
         short_write_posture=False,
     )
-    assert standard.delivery_idle_nudge_rounds > 0
-    assert standard.delivery_idle_narrow_rounds > 0
+    assert standard.delivery_idle_nudge_rounds == 0
+    assert standard.delivery_idle_narrow_rounds == 0
+    assert standard.delivery_idle_report is False
+    assert standard.delivery_idle_recon is False
     report = create_loop_controller(
         frozenset({"file_read", "grep"}),
         files_expected=True,
         report_delivery=True,
     )
-    assert report.delivery_idle_nudge_rounds > 0
+    assert report.delivery_idle_nudge_rounds == 0
     assert report.delivery_idle_narrow_rounds == 0
-    assert report.delivery_idle_report is True
+    assert report.delivery_idle_report is False
     short_files = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=True,
         short_write_posture=True,
     )
-    assert short_files.delivery_idle_nudge_rounds > 0
+    assert short_files.delivery_idle_nudge_rounds == 0
+    assert short_files.delivery_idle_narrow_rounds == 0
+    assert short_files.delivery_idle_report is False
     prose = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=True,
@@ -203,6 +207,8 @@ def test_files_delivery_idle_opens_only_for_files_expected():
     )
     assert prose.delivery_idle_nudge_rounds == 0
     assert prose.delivery_idle_narrow_rounds == 0
+    assert prose.delivery_idle_recon is False
+    assert prose.delivery_idle_report is False
     no_files = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=False,
@@ -211,12 +217,14 @@ def test_files_delivery_idle_opens_only_for_files_expected():
     assert no_files.delivery_idle_nudge_rounds > 0
     assert no_files.delivery_idle_narrow_rounds == 0
     assert no_files.delivery_idle_recon is True
+    assert no_files.delivery_idle_report is False
     prose_no_files = create_loop_controller(
         frozenset({"file_read"}),
         files_expected=False,
         form_prose=True,
     )
     assert prose_no_files.delivery_idle_nudge_rounds == 0
+    assert prose_no_files.delivery_idle_narrow_rounds == 0
     assert prose_no_files.delivery_idle_recon is False
 
 
@@ -308,9 +316,10 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
         tighten_verify_exec_thrash=True,
         max_rounds=4,
     )
-    # Soft delivery_idle stays off for non-files / form paths at factory.
-    assert tightened.delivery_idle_nudge_rounds > 0  # recon-idle for non-files
+    # Recon-idle still opens for non-files; files delivery_idle is closed at factory.
+    assert tightened.delivery_idle_nudge_rounds > 0
     assert tightened.delivery_idle_narrow_rounds == 0
+    assert tightened.delivery_idle_recon is True
     # disable<=2：两次同工具失败即 disable（默认 3 才 disable）
     tightened.record(
         [ToolAttempt(fingerprint="fp0", tool_name="code_execute", success=False)]
@@ -355,7 +364,7 @@ def test_should_tighten_verify_exec_thrash_for_repair_verify_posture():
 
 
 def test_factory_delivery_idle_not_finalize():
-    """Factory opens soft delivery_idle / recon-idle only — never mid-loop FINALIZE from idle."""
+    """Idle 读不中途 FINALIZE；交文件 factory 不累计 delivery_idle_rounds（tracking 已关）。"""
     from agentcore.runtime.engine.governance import create_loop_controller
     from agentcore.runtime.loop_controller import Intervention, ToolAttempt
 
@@ -367,6 +376,7 @@ def test_factory_delivery_idle_not_finalize():
     )
     assert ctrl.delivery_idle_nudge_rounds > 0
     assert ctrl.delivery_idle_narrow_rounds == 0
+    assert ctrl.delivery_idle_recon is True
     for i in range(12):
         ctrl.record([ToolAttempt(fingerprint=f"r{i}", tool_name="file_read", success=True)])
     assert ctrl.convergence_action() is Intervention.CONTINUE
@@ -377,8 +387,13 @@ def test_factory_delivery_idle_not_finalize():
         short_write_posture=True,
         max_rounds=4,
     )
-    assert files.delivery_idle_nudge_rounds > 0
-    assert files.delivery_idle_narrow_rounds > 0
+    assert files.delivery_idle_nudge_rounds == 0
+    assert files.delivery_idle_narrow_rounds == 0
+    assert files.delivery_idle_report is False
+    for i in range(12):
+        files.record([ToolAttempt(fingerprint=f"f{i}", tool_name="file_read", success=True)])
+    assert files.convergence_action() is Intervention.CONTINUE
+    assert files.delivery_idle_rounds == 0
 
 
 def test_narrow_for_light_repair_strips_investigation():

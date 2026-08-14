@@ -10,6 +10,7 @@ from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agentcore.db.models.conversations import Conversation
 from agentcore.db.models.runs import TurnLeaseRow
 
 # Process-level cancel / shutdown: keep the row so the sweeper can reclaim.
@@ -153,6 +154,28 @@ class TurnLeaseRepository:
             .limit(1)
         )
         return result.scalar_one_or_none() is not None
+
+    async def list_fresh_for_user(
+        self, user_id: str, *, after: datetime
+    ) -> Sequence[TurnLeaseRow]:
+        """This user's fresh leases on live conversations (owner presumed live).
+
+        Account-level「哪些云对话还在跑」seeds from this, not the process-local
+        registry — a restart empties memory while the rows remain. Soft-deleted
+        (``deleted_at`` set) and already-gone conversations are excluded so a
+        reconnect snapshot cannot relight a chat the user deleted.
+        """
+        result = await self._session.execute(
+            select(TurnLeaseRow)
+            .join(Conversation, Conversation.id == TurnLeaseRow.conversation_id)
+            .where(
+                TurnLeaseRow.user_id == user_id,
+                TurnLeaseRow.heartbeat_at >= after,
+                Conversation.deleted_at.is_(None),
+            )
+            .order_by(TurnLeaseRow.heartbeat_at.desc())
+        )
+        return result.scalars().all()
 
     async def list_expired(self, *, before: datetime, limit: int) -> Sequence[TurnLeaseRow]:
         """Leases whose owner is presumed dead (stale heartbeat or cancel orphan mark)."""

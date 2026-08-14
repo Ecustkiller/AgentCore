@@ -1,7 +1,7 @@
 import { Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import type { FileNode } from "@/lib/fileSource";
-import { formatBytes, formatMessageTime } from "@/lib/format";
+import { formatMessageTime } from "@/lib/format";
 import { Loader2 } from "lucide-react";
 
 /**
@@ -78,28 +78,20 @@ export function TruncatedNotice({
   );
 }
 
-/** 文件行右侧的元信息串：`大小 · 修改时间`（缺哪项就省哪项，全缺则返回 null）。 */
-export function fileMetaLabel(node: {
-  isDir: boolean;
-  sizeBytes?: number | null;
-  mtimeMs?: number | null;
-}): string | null {
-  const parts: string[] = [];
-  // 目录不显示字节数（后端只对文件统计），也就不拿 0 冒充「空目录」。
-  if (!node.isDir && typeof node.sizeBytes === "number")
-    parts.push(formatBytes(node.sizeBytes));
-  if (typeof node.mtimeMs === "number") {
-    const at = formatMessageTime(new Date(node.mtimeMs).toISOString());
-    if (at) parts.push(at);
-  }
-  return parts.length ? parts.join(" · ") : null;
+/** 文件行右侧的修改时间（缺 mtime 则返回 null，不占位）。 */
+export function fileMetaLabel(node: { mtimeMs?: number | null }):
+  | string
+  | null {
+  if (typeof node.mtimeMs !== "number") return null;
+  const at = formatMessageTime(new Date(node.mtimeMs).toISOString());
+  return at || null;
 }
 
 /**
- * 文件树行尾的大小 / 修改时间。
+ * 文件树行尾的修改时间。
  *
- * 只在源给出元信息时出现：合成源（记忆叶子等）与列不出 stat 的条目一律不占位，宁可少
- * 一列也不显示「0 B」「未知」这类会被读成事实的占位符。文件名负责截断，这段 `shrink-0`
+ * 只在源给出 mtime 时出现：合成源（记忆叶子等）与列不出 stat 的条目一律不占位，宁可少
+ * 一列也不显示「未知」这类会被读成事实的占位符。文件名负责截断，这段 `shrink-0`
  * 保证窄栏里先挤名字、后挤元信息。
  */
 export function FileRowMeta({ node }: { node: FileNode }) {

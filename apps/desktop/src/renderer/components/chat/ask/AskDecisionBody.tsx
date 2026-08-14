@@ -466,7 +466,7 @@ export function AskDecisionBody({
           </div>
         )}
         {bindError && (
-          <p className="px-2 text-xs text-destructive">{bindError}</p>
+          <p className="px-2 text-xs text-muted-foreground">{bindError}</p>
         )}
 
         <div className="px-2">

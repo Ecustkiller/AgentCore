@@ -104,6 +104,9 @@ class ConversationSummary(BaseModel):
     updated_at: datetime
     created_at: datetime
     message_count: int = 0
+    # List projection: last visible assistant sentence. Null when none qualify.
+    # Never a user turn, empty running placeholder, or stop/interrupt chrome.
+    last_message_preview: str | None = None
     # Project membership; None = 裸聊. When set, effective workspace is the project's.
     folder_id: str | None = None
     # Desktop local-first intent for a 裸聊; moot once foldered.
@@ -141,6 +144,7 @@ def conversation_summary_from_orm(
     *,
     message_count: int | None = None,
     unfolded_messages: int | None = None,
+    last_message_preview: str | None = None,
 ) -> ConversationSummary:
     """Assemble ``ConversationSummary`` with ``context_compacted`` (no summary body).
 
@@ -148,13 +152,19 @@ def conversation_summary_from_orm(
     the ``context_gap`` half: omit it on endpoints that do not count messages and the
     field stays null, which clients read as「未计算」and keep quiet about — a cheaper
     default than making every conversation write pay for a count nobody reads.
+
+    ``last_message_preview`` is the same batch overlay as ``message_count``: list /
+    grouped fills it; create / get / patch leave the default null.
     """
     summary = ConversationSummary.model_validate(conv)
     compacted = bool(
         getattr(conv, "compaction_summary", None)
         and getattr(conv, "compacted_through", None)
     )
-    updates: dict[str, object] = {"context_compacted": compacted}
+    updates: dict[str, object] = {
+        "context_compacted": compacted,
+        "last_message_preview": last_message_preview,
+    }
     if message_count is not None:
         updates["message_count"] = message_count
     if unfolded_messages is not None:

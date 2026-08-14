@@ -594,4 +594,50 @@ describe("ResumePrompt · ask continue → same-turn team_preview", () => {
     expect(container.querySelector(".mx-4")).toBeNull();
     expect(screen.queryByText("授权并开工")).toBeNull();
   });
+
+  it("resolved IX suppresses recovery shell (align mobile coldResume)", () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      payload: { checkpoint_id: "cp-resolved-shell", question: "怎么推进？" },
+    });
+    useInteractionStore.getState().markResolved({
+      kind: "ask_user",
+      id: "cp-resolved-shell",
+    });
+    usePausedTurnStore.getState().addLiveResume({
+      messageId: "m-server-tp",
+      conversationId: CID,
+      checkpointId: "cp-resolved-shell",
+      kind: "ask_user",
+      userMessage: "问",
+      userMessageId: "u1",
+      steps: [],
+      pending: [],
+      workers: [],
+      tools: [],
+      primitive: "delegate",
+      motion: "",
+      form: "",
+      sides: [],
+      maxRounds: 0,
+      thorough: true,
+      question: "怎么推进？",
+      context: "",
+      assumptions: [],
+      questions: [],
+      intent: "decision",
+      origin: "server",
+    });
+
+    expect(
+      selectVisibleColdResumes({
+        conversationId: CID,
+        byId: useInteractionStore.getState().byId,
+        pausedPending: usePausedTurnStore.getState().pending,
+        messages: useConversationStore.getState().byId[CID]?.messages ?? [],
+      }),
+    ).toHaveLength(0);
+  });
 });

@@ -1211,6 +1211,7 @@ function ProviderCard({
   const [testing, setTesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const host = endpointHost(provider.base_url);
+  const testModel = provider.default_model?.trim() ?? "";
 
   async function test() {
     setTesting(true);
@@ -1233,6 +1234,9 @@ function ProviderCard({
       </div>
 
       {host && <p className="provider-host muted">{host}</p>}
+      {testModel ? (
+        <p className="provider-model muted">测试用模型 {testModel}</p>
+      ) : null}
       <span className="masked-key">{provider.masked_key ?? "已配置"}</span>
 
       <div>

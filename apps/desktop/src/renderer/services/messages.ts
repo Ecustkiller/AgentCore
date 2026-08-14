@@ -8,6 +8,8 @@ import { promoteScalarContentIntoProcess } from "@/lib/processTimeline";
 import { api } from "@/services/api";
 import { persistOpenedCache } from "@/services/offlineCache";
 import { surfaceResumeFromAssistant } from "@/services/resume";
+import { clearLastEventId } from "@/services/streamConversation";
+import { hasLocalConversationStream } from "@/services/turns/streamOwnership";
 import {
   type MemoryUpdate,
   type Message,
@@ -418,6 +420,7 @@ export interface MessageWindowQuery {
 export async function fetchMessageWindow(
   conversationId: string,
   query: MessageWindowQuery = {},
+  signal?: AbortSignal,
 ): Promise<MessageWindow> {
   const params = new URLSearchParams();
   if (query.around) params.set("around", query.around);
@@ -427,6 +430,7 @@ export async function fetchMessageWindow(
   const qs = params.toString();
   const res = await api.get<BackendMessageListResponse>(
     `/v1/conversations/${conversationId}/messages${qs ? `?${qs}` : ""}`,
+    signal ? { signal } : undefined,
   );
   const rows = res.data as unknown as BackendMessage[];
   return {
@@ -508,21 +512,23 @@ export async function loadNewerMessages(conversationId: string): Promise<void> {
  */
 export type LoadLatestWindowOpts = {
   softRefresh?: boolean;
+  /** Page-lifecycle abort for the window GET only — never forwarded to follow backfill. */
+  signal?: AbortSignal;
 };
 
 /**
  * Warm open write policy (消息窗写入契约 step 3):
- * - generating → keep live slice (no network window replace)
+ * - local stream pumping → keep live slice (no network window replace)
  * - destination (pendingFocus / ?msg=) → keep current slice for jump/load-around
  * - else (sidebar reopen / A→B→A) → explicit latest snap (not softRefresh)
  */
 export type WarmOpenAction = "skip_generating" | "keep_anchor" | "snap_latest";
 
 export function decideWarmOpenAction(opts: {
-  isGenerating: boolean;
+  hasLocalStream: boolean;
   hasDestination: boolean;
 }): WarmOpenAction {
-  if (opts.isGenerating) return "skip_generating";
+  if (opts.hasLocalStream) return "skip_generating";
   if (opts.hasDestination) return "keep_anchor";
   return "snap_latest";
 }
@@ -569,7 +575,7 @@ export async function loadLatestWindow(
     return reject("reject_not_resident");
   }
   const before = storeBefore.byId[conversationId];
-  if (before?.isGenerating) {
+  if (hasLocalConversationStream(conversationId)) {
     return reject("reject_generating");
   }
   if (
@@ -580,7 +586,7 @@ export async function loadLatestWindow(
     return reject("reject_active_has_more_after");
   }
 
-  const win = await fetchMessageWindow(conversationId);
+  const win = await fetchMessageWindow(conversationId, {}, opts.signal);
   const store = useConversationStore.getState();
   if (
     !isMessageWindowResident(
@@ -592,7 +598,7 @@ export async function loadLatestWindow(
     return reject("reject_not_resident", { after_count: win.messages.length });
   }
   const rt = store.byId[conversationId];
-  if (rt?.isGenerating) {
+  if (hasLocalConversationStream(conversationId)) {
     return reject("reject_generating", { after_count: win.messages.length });
   }
   if (
@@ -639,6 +645,7 @@ export async function loadLatestWindow(
     { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
     conversationId,
   );
+  clearLastEventId(conversationId);
   // Latest window owns the tail cards; replace them (older/around pages return none).
   store.setMemoryUpdates(win.memoryUpdates, conversationId);
   // Trusted write only — reject paths above return without persisting.
@@ -660,6 +667,7 @@ export async function loadLatestWindow(
 export async function jumpToMessage(
   conversationId: string,
   messageId: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   const store = useConversationStore.getState();
   const rt = store.byId[conversationId];
@@ -673,7 +681,11 @@ export async function jumpToMessage(
     return;
   }
   try {
-    const win = await fetchMessageWindow(conversationId, { around: messageId });
+    const win = await fetchMessageWindow(
+      conversationId,
+      { around: messageId },
+      signal,
+    );
     const after = useConversationStore.getState();
     // The user may have navigated away while the window loaded — only swap it in
     // if this conversation is still the one on screen.
@@ -683,6 +695,7 @@ export async function jumpToMessage(
       { hasMoreBefore: win.hasMoreBefore, hasMoreAfter: win.hasMoreAfter },
       conversationId,
     );
+    clearLastEventId(conversationId);
     // The tail cards belong only to the live tail; an around-window has none, so this
     // clears any cards left from the latest view (they'd otherwise float after the
     // historical window). They return on the next latest-window load.

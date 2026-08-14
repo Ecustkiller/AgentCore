@@ -4,7 +4,12 @@ import {
 } from "@/components/chat/ConversationHydrateOverlay";
 import { TurnCompare } from "@/components/chat/compare/TurnCompare";
 import { DebateArena } from "@/components/chat/debate/arena/DebateArena";
+import { teamGraphVisible } from "@/components/chat/debatePreviewPlacement";
 import { GraphView } from "@/components/graph/GraphView";
+import {
+  journalHydrateIdentity,
+  journalHydrateIdentityEqual,
+} from "@/components/graph/journalHydrate";
 import { SidePanel } from "@/components/layout/SidePanel";
 import { SidePanelToggle } from "@/components/layout/SidePanelToggle";
 import { Button } from "@/components/ui";
@@ -30,6 +35,7 @@ import {
   useExecutionStore,
   useMessageExecution,
 } from "@/stores/execution";
+import { teamPreviewsExact, useInteractionStore } from "@/stores/interactions";
 import { dismissFocusedFloat, useSidePanelStore } from "@/stores/sidePanel";
 import type { TurnDetailView } from "@/stores/ui";
 import { ReactFlowProvider } from "@xyflow/react";
@@ -40,7 +46,7 @@ import {
   Network,
   Square,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { isDebateViewPending, resolveTurnDetailView } from "./turnDetailView";
 
@@ -230,28 +236,48 @@ export function TurnDetailPage() {
     setJournalHydrateAttempted(false);
   }, [scopeKey, conversationId]);
 
+  const journal =
+    turnMessage?.role === "assistant" && turnMessage.executionId
+      ? turnMessage.runs
+      : undefined;
+  const journalIdentity = journalHydrateIdentity(journal);
+  const journalIdentityRef = useRef(journalIdentity);
+  if (
+    !journalHydrateIdentityEqual(journalIdentityRef.current, journalIdentity)
+  ) {
+    journalIdentityRef.current = journalIdentity;
+  }
+  const stableJournalIdentity = journalIdentityRef.current;
+  const hasTurnMessage = !!turnMessage;
+
   // Project the scoped turn's journal into execution store (cold deep-link /
-  // refresh) — same gate as useCanvasTurns / InlineTeamGraph.
+  // refresh) — same gate as useCanvasTurns / InlineTeamGraph: journal identity
+  // (m.runs / events.length), not every turnMessage tick. Store applies
+  // journalIsNewerThan (catch up after half-court; never roll live back).
   useEffect(() => {
     if (!scopeKey) return;
-    if (!turnMessage) {
+    if (!hasTurnMessage) {
       if (hydratePhase === "ready") setJournalHydrateAttempted(true);
       return;
     }
-    if (
-      turnMessage.role === "assistant" &&
-      turnMessage.executionId &&
-      turnMessage.runs
-    ) {
-      const store = useExecutionStore.getState();
-      if (!store.byId[scopeKey]?.plan) {
-        store.hydrateFromJournal(scopeKey, turnMessage.runs);
-      }
+    if (stableJournalIdentity) {
+      useExecutionStore
+        .getState()
+        .hydrateFromJournal(scopeKey, stableJournalIdentity.journal);
     }
     setJournalHydrateAttempted(true);
-  }, [turnMessage, scopeKey, hydratePhase]);
+  }, [stableJournalIdentity, scopeKey, hydratePhase, hasTurnMessage]);
 
   const execution = useMessageExecution(scopeKey);
+  const interactionById = useInteractionStore((s) => s.byId);
+  const showTeamGraph = teamGraphVisible(
+    execution?.runs,
+    teamPreviewsExact(
+      interactionById.values(),
+      conversationId ?? null,
+      scopeKey,
+    ),
+  );
   const taskSummary = execution?.taskSummary;
   // Scoped to the turn being viewed — not "conversation is generating somewhere".
   const liveViewedTurn =
@@ -453,9 +479,26 @@ export function TurnDetailPage() {
             <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
               {!debateViewPending && view === "graph" && (
                 <div className="min-h-0 flex-1">
-                  <ReactFlowProvider>
-                    <GraphView interactive fitMode="view" autoplay={autoplay} />
-                  </ReactFlowProvider>
+                  {showTeamGraph ? (
+                    <ReactFlowProvider>
+                      <GraphView
+                        interactive
+                        fitMode="view"
+                        autoplay={autoplay}
+                      />
+                    </ReactFlowProvider>
+                  ) : (
+                    <div className="flex h-full w-full items-center justify-center">
+                      <div className="text-center">
+                        <p className="text-sm text-muted-foreground">
+                          确认开工后再看协作图
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          回到对话点「开做」后，这里会展开团队进度
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
               {!debateViewPending &&

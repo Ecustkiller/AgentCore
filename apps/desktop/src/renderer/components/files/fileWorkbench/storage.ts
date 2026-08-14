@@ -142,7 +142,8 @@ const SORT_KEY = "files-sort-by";
 
 export function loadFileSort(): FileSortBy {
   const raw = uiGet<unknown>(SORT_KEY);
-  return raw === "size" || raw === "mtime" ? raw : "name";
+  // 旧偏好 `"size"` 已从 FileSortBy 拿掉，回落到名称，不能再让 size 进类型。
+  return raw === "mtime" ? raw : "name";
 }
 
 export function saveFileSort(by: FileSortBy): void {

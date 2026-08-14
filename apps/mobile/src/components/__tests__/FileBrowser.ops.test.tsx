@@ -203,3 +203,56 @@ describe("FileBrowser · new folder", () => {
     });
   });
 });
+
+describe("FileBrowser · list row meta", () => {
+  it("shows mtime only, never size, on a file row", async () => {
+    const list = vi.fn().mockResolvedValue({
+      entries: [
+        {
+          path: "note.txt",
+          is_dir: false,
+          size_bytes: 12000,
+          mtime_ms: Date.now() - 1000,
+        },
+      ],
+      truncated: false,
+    });
+    render(
+      <MemoryRouter>
+        <FileBrowser
+          source={{ list, download: vi.fn() }}
+          cwd=""
+          onCwdChange={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("刚刚")).toBeTruthy();
+    expect(screen.queryByText("12 KB")).toBeNull();
+  });
+
+  it("does not occupy the subtitle when mtime is missing", async () => {
+    const list = vi.fn().mockResolvedValue({
+      entries: [
+        {
+          path: "note.txt",
+          is_dir: false,
+          size_bytes: 12000,
+          mtime_ms: null,
+        },
+      ],
+      truncated: false,
+    });
+    render(
+      <MemoryRouter>
+        <FileBrowser
+          source={{ list, download: vi.fn() }}
+          cwd=""
+          onCwdChange={() => {}}
+        />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("note.txt")).toBeTruthy();
+    expect(screen.queryByText("刚刚")).toBeNull();
+    expect(screen.queryByText("12 KB")).toBeNull();
+  });
+});

@@ -25,13 +25,18 @@ import {
   OctagonX,
   Users,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ResumeDeferredNotice } from "./ResumeDeferredNotice";
 import { useColdSubmit } from "./useColdSubmit";
 
-/** Cold-path team_preview resume card (delegate / debate). */
+/**
+ * Cold-path team_preview resume card (delegate / debate).
+ * 壳对齐 AskCardShell：中性单表面，卡内不铺品牌色；彩色只留给主 CTA。
+ */
 export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
+  const [noteOpen, setNoteOpen] = useState(false);
+  const noteRef = useRef<HTMLTextAreaElement>(null);
   const [capsOpen, setCapsOpen] = useState(false);
   const [textOnlyRunIds, setTextOnlyRunIds] = useState<ReadonlySet<string>>(
     () => new Set(),
@@ -50,6 +55,10 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const debateBudget = isDebate
     ? formatDebateBudgetLabel(turn.maxRounds, turn.thorough)
     : null;
+
+  useEffect(() => {
+    if (noteOpen) noteRef.current?.focus();
+  }, [noteOpen]);
 
   const spinnerOr = (
     decision: PlanReviewUserDecision,
@@ -95,14 +104,14 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
 
   return (
     <DecisionCard
-      tone="primary"
+      tone="neutral"
       animate
       className="mx-0 flex max-h-[min(60vh,36rem)] flex-col overflow-hidden p-0"
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
           <div className="flex items-start gap-2">
-            <DecisionCardIcon tone="primary">
+            <DecisionCardIcon tone="neutral">
               <Users size={16} />
             </DecisionCardIcon>
             <div className="min-w-0 flex-1">
@@ -180,19 +189,47 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
           </div>
         </div>
 
-        <div className="shrink-0 space-y-2 border-t border-border bg-card/95 px-3 py-3 backdrop-blur-sm">
+        <div className="shrink-0 space-y-2 border-t border-border px-3 py-3">
           {settlementLocked && deferredBusyReason ? (
             <ResumeDeferredNotice busyReason={deferredBusyReason} />
           ) : null}
           {!settlementLocked ? (
-            <Textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              disabled={busy}
-              rows={2}
-              placeholder={family.notePlaceholder}
-              className="w-full border-border bg-card/70 focus:border-primary/60"
-            />
+            <div>
+              <button
+                type="button"
+                onClick={() => setNoteOpen((v) => !v)}
+                aria-expanded={noteOpen}
+                className="flex w-full items-center gap-1.5 text-left"
+              >
+                <ChevronRight
+                  size={13}
+                  className={`shrink-0 text-muted-foreground transition-transform ${
+                    noteOpen ? "rotate-90" : ""
+                  }`}
+                />
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  加一句嘱咐（可选）
+                </span>
+                {!noteOpen && note.trim() && (
+                  <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
+                    {note.trim()}
+                  </span>
+                )}
+              </button>
+              {noteOpen ? (
+                <div className="mt-1.5 pl-5">
+                  <Textarea
+                    ref={noteRef}
+                    value={note}
+                    onChange={(e) => setNote(e.target.value)}
+                    disabled={busy}
+                    rows={2}
+                    placeholder={family.notePlaceholder}
+                    className="w-full border-border bg-card/70 focus:border-primary/60"
+                  />
+                </div>
+              ) : null}
+            </div>
           ) : null}
           <div className="flex flex-wrap items-center gap-1.5">
             {!settlementLocked ? (

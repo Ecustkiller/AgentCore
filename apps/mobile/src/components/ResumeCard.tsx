@@ -12,10 +12,6 @@ import {
   RISK_SEVERITY_TAG,
   parseRiskLabel,
 } from "@/components/ask/parseRiskLabel";
-import {
-  formatWorkspaceLabel,
-  resolveWorkspacePresentation,
-} from "@/components/teamPreviewWorkspace";
 import type { ColdDeferredBusyReason } from "@/lib/coldInteractions";
 import type { VisibleColdResume } from "@/lib/coldResume";
 import {
@@ -515,7 +511,6 @@ function ResumeCardBody({
         paused.workers as Array<Record<string, unknown>> | undefined,
       )
     : [];
-  const desk = resolveWorkspacePresentation(workers);
   const debateKickoff = useMemo(
     () =>
       isDebateKickoff
@@ -1137,14 +1132,6 @@ function ResumeCardBody({
       )}
       {isDelegateKickoff && workers.length > 0 && (
         <div className="pause-steps" data-testid="team-preview-workers">
-          {desk.mode === "summary" && (
-            <div
-              className="pause-workspace-summary"
-              data-testid="team-workspace-summary"
-            >
-              {formatWorkspaceLabel(desk.name)}
-            </div>
-          )}
           {workers.map((w) => {
             const writeCap = effectiveWriteCap(w);
             const writeLabel = effectiveWriteLabel(w);
@@ -1166,14 +1153,6 @@ function ResumeCardBody({
                       }
                     >
                       {writeLabel}
-                    </span>
-                  )}
-                  {desk.mode === "perWorker" && w.target_folder_name && (
-                    <span
-                      className="pause-worker-desk"
-                      data-testid={`team-worker-desk-${w.run_id}`}
-                    >
-                      {formatWorkspaceLabel(w.target_folder_name)}
                     </span>
                   )}
                   {w.depends_on.length > 0 && (

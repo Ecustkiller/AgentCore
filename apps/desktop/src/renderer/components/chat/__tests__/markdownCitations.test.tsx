@@ -5,7 +5,7 @@ import { SourceCards } from "@/components/chat/SourceCards";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import type { Citation } from "@/types/events";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it } from "vitest";
 
@@ -53,8 +53,46 @@ describe("Markdown citation chips (render seam)", () => {
     expect(chip1.getAttribute("href")).toBe("https://a.example/one");
     expect(chip2.getAttribute("target")).toBe("_blank");
     expect(chip2.getAttribute("rel")).toBe("noreferrer");
-    expect(chip2.textContent).toContain("1");
-    expect(chip1.textContent).toContain("2");
+    expect(chip2.textContent).toBe("1");
+    expect(chip1.textContent).toBe("2");
+    expect(chip2.querySelector("img")?.getAttribute("src")).toContain(
+      "b.example",
+    );
+    expect(chip2.className).toContain("bg-muted");
+    expect(chip2.className).not.toContain("bg-primary");
+  });
+
+  it("falls back to a site letter when the favicon fails to load", () => {
+    const display = buildCitationDisplayMap("see [1]", 1);
+    renderWithTooltip(
+      <Markdown
+        content="see [1]"
+        citations={CITATIONS.slice(0, 1)}
+        citationToDisplay={display.toDisplay}
+      />,
+    );
+    const chip = screen.getByRole("link", { name: "来源 1" });
+    const img = chip.querySelector("img");
+    expect(img).toBeInstanceOf(HTMLImageElement);
+    if (!(img instanceof HTMLImageElement)) return;
+    fireEvent.error(img);
+    expect(chip.querySelector("img")).toBeNull();
+    expect(chip.textContent).toContain("A");
+    expect(chip.textContent).toContain("1");
+  });
+
+  it("renders [1]-[2] as two chips without a visible hyphen", () => {
+    const display = buildCitationDisplayMap("见 [1]-[2]", 2);
+    const { container } = renderWithTooltip(
+      <Markdown
+        content="见 [1]-[2]"
+        citations={CITATIONS.slice(0, 2)}
+        citationToDisplay={display.toDisplay}
+      />,
+    );
+    expect(screen.getByRole("link", { name: "来源 1" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "来源 2" })).toBeTruthy();
+    expect(container.textContent).not.toMatch(/1\s*-\s*2/);
   });
 
   it("leaves out-of-range markers as plain text (no chip link)", () => {

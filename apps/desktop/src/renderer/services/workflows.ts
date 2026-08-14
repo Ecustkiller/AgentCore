@@ -265,28 +265,6 @@ export async function suggestWorkflowSlots(id: string): Promise<UserWorkflow> {
   return toUserWorkflow(res);
 }
 
-/**
- * 把一轮已跑完的多队员协作存成工作流（工作流的主入口，见 StatusStrip 完成态）。
- *
- * definition 由服务端从该回合 journal 派生——前端只交标识与名字：`RunNode` 没有
- * deliverable 字段，客户端拼不出忠实的交付契约。同一轮重复保存幂等返回已有记录；
- * 这轮不是多队员协作时服务端 422。
- */
-export async function saveTurnAsWorkflow(
-  conversationId: string,
-  messageId: string,
-  input?: { name?: string | null },
-): Promise<UserWorkflow> {
-  const body: Record<string, unknown> = {};
-  const name = input?.name?.trim();
-  if (name) body.name = name;
-  const res = await api.post<UserWorkflowWire>(
-    `/v1/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/save-as-workflow`,
-    body,
-  );
-  return toUserWorkflow(res);
-}
-
 /** Lightweight list for standing-task binder (id + name only). */
 export async function listWorkflowOptions(): Promise<
   Array<{ id: string; name: string }>

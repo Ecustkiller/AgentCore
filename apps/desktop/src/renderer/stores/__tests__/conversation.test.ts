@@ -43,6 +43,7 @@ beforeEach(() => {
     currentConversationId: null,
     byId: {},
     sliceLruOrder: [],
+    pendingFocus: null,
   });
   useInteractionStore.getState().clear();
   detachLocalBrowserHost.mockClear();
@@ -93,6 +94,62 @@ describe("conversation store", () => {
       expect(store().currentConversationId).toBeNull();
       expect(rt().messages).toEqual([]);
       expect(rt().isGenerating).toBe(false);
+    });
+
+    const keepAliveMsg = (id: string) => ({
+      id,
+      role: "user" as const,
+      content: id,
+      createdAt: "",
+      executionId: null,
+      isStreaming: false,
+    });
+
+    it("clears leftover messageFocus when returning to A after visiting B", () => {
+      store().switchConversation("a");
+      store().addMessage(keepAliveMsg("m-a"));
+      store().focusMessage("m-a");
+      expect(store().byId.a?.messageFocus?.id).toBe("m-a");
+
+      store().switchConversation("b");
+      store().addMessage(keepAliveMsg("m-b"));
+      store().switchConversation("a");
+
+      expect(store().byId.a?.messageFocus).toBeNull();
+    });
+
+    it("clears leftover messageFocus on an LRU slice when switching into it", () => {
+      store().switchConversation("a");
+      store().addMessage(keepAliveMsg("m-a"));
+      store().switchConversation("b");
+      store().addMessage(keepAliveMsg("m-b"));
+      store().focusMessage("m-b");
+      expect(store().byId.b?.messageFocus?.id).toBe("m-b");
+
+      store().switchConversation("a");
+      expect(store().byId.b?.messageFocus?.id).toBe("m-b");
+
+      store().switchConversation("b");
+      expect(store().byId.b?.messageFocus).toBeNull();
+    });
+
+    it("does not clear messageFocus on same-id early return", () => {
+      store().switchConversation("a");
+      store().addMessage(keepAliveMsg("m-a"));
+      store().focusMessage("m-a");
+      store().switchConversation("a");
+      expect(store().byId.a?.messageFocus?.id).toBe("m-a");
+    });
+
+    it("leaves pendingFocus intact when switching conversations", () => {
+      store().requestMessageFocus("b", "msg-y");
+      store().switchConversation("a");
+      store().addMessage(keepAliveMsg("m-a"));
+      store().switchConversation("b");
+      expect(store().pendingFocus).toEqual({
+        conversationId: "b",
+        messageId: "msg-y",
+      });
     });
   });
 

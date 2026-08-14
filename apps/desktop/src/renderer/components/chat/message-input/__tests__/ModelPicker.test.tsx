@@ -313,4 +313,18 @@ describe("ModelPicker", () => {
     expect(settingsLink.getAttribute("href")).toBe("/more/model");
     expect(screen.getByText("管理组合…")).toBeTruthy();
   });
+
+  it("load failure is muted, not destructive", () => {
+    useProfilesMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      isError: true,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useLlmModelProfiles>);
+    renderPicker();
+    fireEvent.click(screen.getByRole("button", { name: /模型组合：/ }));
+    const fail = screen.getByText("加载模型组合失败");
+    expect(fail.className).toContain("text-muted-foreground");
+    expect(fail.className).not.toContain("destructive");
+  });
 });

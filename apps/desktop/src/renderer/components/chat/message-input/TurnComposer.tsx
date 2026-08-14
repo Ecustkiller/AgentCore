@@ -3,7 +3,6 @@ import { MentionMenu } from "@/components/chat/MentionMenu";
 import { Button, IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
-import { hasLocalFiles } from "@/lib/capabilities";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   COMPOSER_EMPTY_INTERRUPTED_HINT,
@@ -27,10 +26,10 @@ import {
 import { usePausedTurnStore } from "@/stores/pausedTurns";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import {
+  AtSign,
   CloudUpload,
   ListPlus,
   Loader2,
-  Paperclip,
   Send,
   Square,
   X,
@@ -44,6 +43,7 @@ import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
 import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
 import { ComposerPlusMenu, useComposerPlusClose } from "./ComposerPlusMenu";
+import { ComposerSendErrorNotice } from "./ComposerSendErrorNotice";
 import { ComposerWorkspaceChip } from "./ComposerWorkspaceChip";
 import { ModelPicker } from "./ModelPicker";
 import { PermissionAxesBadge } from "./PermissionPresetBadge";
@@ -80,33 +80,31 @@ export type TurnComposerVariant = "card" | "bar";
 
 /**
  * The ONE turn composer (统一 AI 输入框): the full-featured card — auto-growing
- * textarea, @ 文件引用 + 回形针浏览, drag-drop attachments, 停止生成,
- * char count, 回填 channel — shared by BOTH surfaces that give the team an order:
- * the chat view's {@link import("../MessageInput").MessageInput} and the canvas
- * 命令栏 {@link import("../../graph/CanvasCommandBar").CanvasCommandBar}. 下达指令 is
- * the same act in both views, so it is the same component; hosts only pick chrome
- * (placeholder, canvas follow hook, whether legacy handoff arm applies).
+ * textarea, @ 引用（含本机附件）, drag-drop attachments, 停止生成,
+ * char count, 回填 channel — hosted by the chat view's
+ * {@link import("../MessageInput").MessageInput}. Canvas is look-only; 下达指令
+ * stays in chat. Hosts only pick chrome (placeholder, whether legacy handoff arm
+ * applies).
  *
  * `variant="bar"` is the compact single-row chrome used only by the chat bottom dock:
- * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/附件收进＋菜单（遗留 handoff
+ * `[＋]` · textarea · 语音 · 发送；工作区/Git/模型/权限/@ 收进＋菜单（遗留 handoff
  * 武装在 ModeControl，不在「＋」）。
- * default `card` keeps textarea-above-toolbar（居中草稿 + 画布指挥台），左簇摊开。
+ * default `card` keeps textarea-above-toolbar（居中草稿），左簇摊开。
  * 离线态靠 {@link ComposerConnectionNotice} 与发送硬禁，不再用安静连接绿点。
  *
  * Draft state (text + attachments) lives in {@link useComposerDraftStore} keyed by
- * conversation, NOT in component state — switching 聊天 ⇄ 画布 swaps the mounted skin
- * but keeps the half-typed order, and 回填 (ask card / run-detail / debate) lands in the
- * draft even across that swap. The textarea stays typable while a turn is generating
- * (queue up the next order); only sending is gated, with 停止 in the send slot.
+ * conversation, NOT in component state — switching 聊天 ⇄ 画布 unmounts the composer
+ * but keeps the half-typed order, and 回填 (ask card / run-detail / debate) lands in
+ * the draft even if the composer is briefly unmounted. The textarea stays typable
+ * while a turn is generating (queue up the next order); only sending is gated, with
+ * 停止 in the send slot.
  *
  * Draft-conversation-only concerns (workspace picker, attachment→folder hint) are
- * self-gated on `!conversationId`, so they never render on the canvas (which always
- * has a conversation).
+ * self-gated on `!conversationId`.
  */
 export function TurnComposer({
   placeholder = "输入消息，@ 引用文件或点名角色…",
   allowBackground = true,
-  onDispatch,
   variant = "card",
   attachedBelowApproval = false,
 }: {
@@ -116,10 +114,8 @@ export function TurnComposer({
    * No Composer「＋」toggle — arming lives in WorkspaceModeMenu.
    */
   allowBackground?: boolean;
-  /** Called when a foreground turn is dispatched (canvas uses it to auto-follow). */
-  onDispatch?: () => void;
   /**
-   * `card` = textarea above toolbar (default; center draft + canvas).
+   * `card` = textarea above toolbar (default; centered new-chat composer).
    * `bar` = compact dock: ＋菜单收纳左簇，常显仅输入与发送。
    */
   variant?: TurnComposerVariant;
@@ -222,6 +218,11 @@ export function TurnComposer({
     [],
   );
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const onBrowserFilePick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
   const mention = useMentionMenu({
     conversationId,
     value,
@@ -234,27 +235,20 @@ export function TurnComposer({
     onAttachmentFolderHint: conversationId
       ? undefined
       : handleAttachmentFolderHint,
+    onBrowserFilePick,
   });
 
   const drop = useComposerDrop(attachments, setAttachments, conversationId);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const onPaperclipClick = useCallback(() => {
-    if (hasLocalFiles()) {
-      void mention.pickLocalFile();
-    } else {
-      fileInputRef.current?.click();
-    }
-  }, [mention.pickLocalFile]);
 
   const onBrowserFilesSelected = useCallback(
     async (e: ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
       e.target.value = "";
+      if (files.length === 0) return;
       await drop.attachFiles(files);
+      mention.clearActiveMention();
     },
-    [drop.attachFiles],
+    [drop.attachFiles, mention.clearActiveMention],
   );
 
   const voice = useVoiceInput({
@@ -277,7 +271,6 @@ export function TurnComposer({
     backgroundMode: allowBackground && isLocal && handoffArmed,
     isLocal,
     closeMenu: mention.closeMenu,
-    onDispatch,
   });
 
   const adjustHeight = useCallback(() => {
@@ -454,8 +447,8 @@ export function TurnComposer({
     ? charCount >= CHAR_COUNT_NEAR_LIMIT
     : charCount > 0;
 
-  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · 附件
-  // bar：整簇收进 ComposerPlusMenu（权限/附件带文案）；card：底栏摊开（iconOnly）。
+  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · @
+  // bar：整簇收进 ComposerPlusMenu（权限/@ 带文案）；card：底栏摊开（iconOnly）。
   // 否决 Composer 并排「本地引擎/云端过桥」切换器；过桥事后弱提示见 ComposerCloudBridgeHint。
   // 遗留 handoff 武装在 ModeControl，不进「＋」。
   const sessionChrome = (
@@ -468,15 +461,18 @@ export function TurnComposer({
     </>
   );
 
-  // 生成中照常可附加：插话 / 排队本就带附件走，禁用只会让人以为坏了。
-  const attachButton = (
-    <ComposerAttachButton onAttach={onPaperclipClick} iconOnly={!isBar} />
+  // 生成中照常可开 @：插话 / 排队本就带附件走，禁用只会让人以为坏了。
+  const mentionButton = (
+    <ComposerMentionButton
+      onToggle={mention.toggleAtMention}
+      iconOnly={!isBar}
+    />
   );
 
   const leftCluster = (
     <>
       {sessionChrome}
-      {attachButton}
+      {mentionButton}
     </>
   );
 
@@ -628,12 +624,12 @@ export function TurnComposer({
       {drop.dropError && (
         <output
           aria-live="polite"
-          className="flex items-start gap-2 px-3 pt-2 text-xs text-destructive"
+          className="flex items-start gap-2 px-3 pt-2 text-xs text-muted-foreground"
         >
           <span className="min-w-0 flex-1">{drop.dropError}</span>
           <button
             type="button"
-            className="shrink-0 rounded-lg p-0.5 text-destructive/70 hover:bg-destructive/10 hover:text-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="shrink-0 rounded-lg p-0.5 text-muted-foreground hover:bg-transparent hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             aria-label="关闭提示"
             onClick={drop.clearDropError}
           >
@@ -641,6 +637,7 @@ export function TurnComposer({
           </button>
         </output>
       )}
+      <ComposerSendErrorNotice draftKey={draftKey} />
       {menuOpen && (
         <MentionMenu
           sections={mention.sections}
@@ -653,12 +650,19 @@ export function TurnComposer({
           noFileSources={
             mention.indexLoadedRef.current && mention.sourceCount === 0
           }
+          showCategoryLevel={mention.showCategoryLevel}
+          categories={mention.categories}
+          canGoBack={mention.canGoBack}
+          focusedSectionLabel={mention.focusedSectionLabel}
           onQueryChange={mention.setQuery}
           onKeyDown={(e) => {
             mention.handleMenuNavKey(e);
           }}
           onSelect={(item) => mention.selectItem(item)}
           onHover={mention.setActiveIndex}
+          onDrill={mention.drillCategory}
+          onAttach={() => void mention.pickLocalFile()}
+          onBack={mention.goBack}
           onAddRoot={mention.handleAddRoot}
           searchInputRef={mention.searchInputRef}
         />
@@ -712,7 +716,7 @@ export function TurnComposer({
           <div className="flex shrink-0 items-center pb-0.5">
             <ComposerPlusMenu>
               {sessionChrome}
-              {attachButton}
+              {mentionButton}
             </ComposerPlusMenu>
           </div>
           {textareaBlock}
@@ -753,23 +757,23 @@ export function TurnComposer({
   );
 }
 
-/** 附件按钮：bar「＋」菜单内带文案；card 底栏仅图标。点菜单内项时先关菜单再选文件。 */
-function ComposerAttachButton({
-  onAttach,
+/** @ 按钮：bar「＋」菜单内带文案；card 底栏仅图标。点菜单内项时先关＋再插入/开关 mention。 */
+function ComposerMentionButton({
+  onToggle,
   iconOnly = true,
 }: {
-  onAttach: () => void;
+  onToggle: () => void;
   iconOnly?: boolean;
 }) {
   const closePlus = useComposerPlusClose();
   const onClick = () => {
     closePlus?.();
-    onAttach();
+    onToggle();
   };
   if (iconOnly) {
     return (
-      <IconButton size="md" onClick={onClick} aria-label="附加文件">
-        <Paperclip size={16} />
+      <IconButton size="md" onClick={onClick} aria-label="@ 引用">
+        <AtSign size={16} />
       </IconButton>
     );
   }
@@ -777,11 +781,11 @@ function ComposerAttachButton({
     <button
       type="button"
       onClick={onClick}
-      aria-label="附加文件"
+      aria-label="@ 引用"
       className="inline-flex h-8 w-full items-center gap-1.5 rounded-lg px-2 text-xs text-muted-foreground hover:bg-accent/60 hover:text-foreground"
     >
-      <Paperclip size={14} className="shrink-0" aria-hidden />
-      <span>附加文件</span>
+      <AtSign size={14} className="shrink-0" aria-hidden />
+      <span>@ 引用</span>
     </button>
   );
 }

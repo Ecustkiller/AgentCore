@@ -1263,21 +1263,16 @@ async def test_productive_round_resets_unproductive_streak():
     assert finish_override == []
 
 
-# --- over-investigation safety net (收敛治理, 保险丝: engine wiring) ----------------
+# --- investigation-round finalize retired (engine wiring) ----------------
 #
-# The soft nudge was removed (A/B: ignored + net-negative); only a HIGH-bar finalize
-# remains, keyed on investigation *rounds* and flavor-agnostic. These tests pin a LOW bar
-# via monkeypatch so the wiring is exercised without scripting a dozen rounds — the real
-# default is high enough never to fire on normal broad research. Each `_read_then_answer(n)`
-# round does exactly one read, so n reads == n investigation rounds.
+# Factory always passes convergence_finalize_rounds=0 (settings cannot revive it).
+# Different-target reads do not force-finalize; same-target spin still does
+# (covered by the repeated-call tests above). Soft nudge stays gone.
 
 
 def _read_then_answer(reads: int) -> _ScriptedProvider:
-    # `reads` rounds of a read with DISTINCT args (so the repeated-call detector never
-    # trips — isolating the safety net), then a tool-free answer for below-bar runs.
-    # One read per round, so `reads` == investigation rounds. When the net finalizes
-    # mid-run, successful stub reads count as salvage inventory; soft salvage consumes
-    # the trailing answer round if present.
+    # Distinct args so spin / repeated-call never trip. Trailing tool-free answer
+    # is the model's own wrap-up (not salvage).
     rounds: list[list[LLMChunk]] = [
         [_tool_chunk("file_read", '{"p": "%d"}' % i)] for i in range(reads)
     ]
@@ -1320,48 +1315,44 @@ def _convergence_steers(messages: list[LLMMessage]) -> list[LLMMessage]:
     ]
 
 
-async def test_safety_net_dormant_below_the_bar_no_soft_nudge(monkeypatch):
-    # Below the high bar there is NO convergence intervention — the soft nudge is gone.
-    # A run that reads a few times (under the bar) then answers gets zero convergence steers.
-    monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
+async def test_few_different_target_reads_have_no_convergence_steer():
+    # A short different-target read run that answers itself: no soft nudge, no finalize.
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))  # investigation (SEARCH + NEVER approval)
     content, messages = await _run_with_registry(_read_then_answer(3), reg)
 
     assert content == "done"
     assert _finalizes(messages) == []
-    assert _convergence_steers(messages) == []  # no soft nudge, no finalize
+    assert _convergence_steers(messages) == []
 
 
-async def test_safety_net_finalizes_a_true_runaway(monkeypatch):
-    # A run that keeps investigating to the (lowered) bar is force-finalized rather
-    # than spinning to the round cap. Successful stub reads → salvage inventory →
-    # soft salvage consumes the trailing scripted "done".
+async def test_many_different_target_reads_do_not_force_finalize(monkeypatch):
+    # Settings >0 must not revive investigation-round finalize. Many distinct
+    # file_read targets still reach the model's own answer; no 收工 prompt.
     monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
-    provider = _read_then_answer(6)
+    provider = _read_then_answer(12)
     content, messages = await _run_with_registry(provider, reg)
 
     assert content == "done"
-    assert provider.calls == 7  # 6 investigation + soft salvage (eats trailing done)
-    assert len(_finalizes(messages)) == 1  # salvage prompt injected
+    assert provider.calls == 13  # 12 reads + model's own answer; no salvage extra call
+    assert _finalizes(messages) == []
 
 
-async def test_safety_net_is_flavor_agnostic_finalizes_a_delegation_capable_run(monkeypatch):
-    # THE fix the A/B drove: a run that ALSO holds an ORCHESTRATION tool (the old storm
-    # source) gets NO special delegate steer — it is reined in by the SAME flavor-agnostic
-    # finalize backstop. The old leaf-only convergence left such runs uncurbed (17 rounds).
+async def test_many_different_target_reads_do_not_force_finalize_with_delegate(monkeypatch):
+    # Same contract with an ORCHESTRATION tool present — no flavor-specific
+    # round-count finalize either.
     monkeypatch.setattr(settings, "engine_convergence_finalize_rounds", 6)
     reg = ToolRegistry()
     reg.register(_StubTool(name="file_read"))
     reg.register(_StubTool(name="delegate", category=ToolCategory.ORCHESTRATION))
-    provider = _read_then_answer(6)
+    provider = _read_then_answer(12)
     content, messages = await _run_with_registry(provider, reg)
 
     assert content == "done"
-    assert provider.calls == 7  # same salvage path, regardless of delegate
-    assert len(_finalizes(messages)) == 1
+    assert provider.calls == 13
+    assert _finalizes(messages) == []
 
 
 async def test_worker_react_loop_emits_tools_offered_once(monkeypatch):

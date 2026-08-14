@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 // @vitest-environment jsdom
 /**
  * Render tests for mobile 用量 (More → /more/usage), focused on the 今日额度 meter
@@ -16,6 +19,11 @@ import { getUsageSummary } from "@/api/usage";
 import { UsageSettings } from "@/pages/more/UsageSettings";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const moreCss = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "../more.css"),
+  "utf8",
+);
 
 vi.mock("@/api/usage", () => ({ getUsageSummary: vi.fn() }));
 
@@ -85,5 +93,33 @@ describe("UsageSettings 今日额度 meter", () => {
 
     await waitFor(() => expect(screen.getByText("本月额度")).toBeTruthy());
     expect(screen.queryByText("今日额度")).toBeNull();
+  });
+});
+
+describe("UsageSettings near tone", () => {
+  it("marks the month meter near at 80% without warning classes", async () => {
+    mockGet.mockResolvedValue({
+      ...makeSummary({ monthly_cost_nano: 10_000_000_000 }),
+      month: usageWindow(8_000_000_000),
+    });
+    render(<UsageSettings />);
+
+    await waitFor(() => expect(screen.getByText("80%")).toBeTruthy());
+    const pct = screen.getByText("80%");
+    expect(pct.className).toContain("meter-pct");
+    expect(pct.className).toContain("near");
+    expect(pct.className).not.toContain("warning");
+    const fill = document.querySelector(".meter-fill.near");
+    expect(fill).toBeTruthy();
+    expect(fill?.className).not.toContain("warning");
+  });
+
+  it("near meter CSS uses accent, not warning", () => {
+    const pct = moreCss.match(/\.meter-pct\.near\s*\{([^}]*)\}/);
+    const fill = moreCss.match(/\.meter-fill\.near\s*\{([^}]*)\}/);
+    expect(pct?.[1]).toMatch(/var\(--accent\)/);
+    expect(pct?.[1]).not.toMatch(/--warning/);
+    expect(fill?.[1]).toMatch(/var\(--accent\)/);
+    expect(fill?.[1]).not.toMatch(/--warning/);
   });
 });

@@ -60,7 +60,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help",
         summary=(
-            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 产品面 FAQ"
+            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 产品面 FAQ / 官网 / 下载"
             "（为何没组团、费用、Key、.md/文件面板怎么打开、"
             "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 先查本 skill 再短答；"
             "入口点名再查 product_help_map，FAQ 再查 product_help_faq"
@@ -80,7 +80,7 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help_faq",
         summary=(
-            "产品面 FAQ（组团 / 费用 / Key / 断网 / .md·文件面板怎么打开 / "
+            "产品面 FAQ（组团 / 费用 / Key / 官网·下载 / 断网 / .md·文件面板怎么打开 / "
             "Cursor 规则↔AgentCore 用户规则…）"
             "→ 自含短答；桌面可附对应手册节"
         ),
@@ -174,7 +174,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="long_form_writing",
         summary=(
-            "超长单文档成篇：主路径一次完整 file_write；可选骨架填空；成篇后 str_replace；"
+            "超长单文档成篇 / 多源合并：主路径一次完整 file_write；可选骨架填空；成篇后 str_replace；"
+            "骨架禁审校清理连环、禁 CEO 自写、勿极低 max_rounds；"
             "单写手超长跨 delegate 分波；成篇未写完用 continue_from；MD 禁 write_section；"
             "可并行拆章但验收须单主文件+合并责任"
         ),

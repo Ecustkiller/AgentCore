@@ -11,10 +11,12 @@ vi.mock("@/lib/toast", () => ({ notifySuccess: vi.fn() }));
 
 import { ApiError } from "@/services/api";
 import { type FolderMeta, listFolders } from "@/services/folders";
+import { runWorkflow } from "@/services/workflows";
 import { MemoryRouter } from "react-router-dom";
 import { RunWorkflowDialog } from "../RunWorkflowDialog";
 
 const folders = vi.mocked(listFolders);
+const run = vi.mocked(runWorkflow);
 
 function cloudFolder(id: string, name: string): FolderMeta {
   return { id, name, mode: "cloud", localRootId: null, localSubpath: null };
@@ -35,6 +37,7 @@ function renderDialog() {
 
 beforeEach(() => {
   folders.mockReset();
+  run.mockReset();
 });
 
 afterEach(() => {
@@ -51,7 +54,9 @@ describe("RunWorkflowDialog workspace list", () => {
     );
     renderDialog();
 
-    expect(await screen.findByText("工作区服务开小差")).toBeTruthy();
+    const err = await screen.findByText("工作区服务开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
     expect(screen.queryByText(/还没有可用工作区/)).toBeNull();
     expect(
       screen.getByRole("button", { name: "开跑" }).hasAttribute("disabled"),
@@ -70,6 +75,21 @@ describe("RunWorkflowDialog workspace list", () => {
     expect(
       screen.getByRole("button", { name: "开跑" }).hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  it("shows a recoverable run failure as muted inline text", async () => {
+    folders.mockResolvedValue([cloudFolder("f1", "工作")]);
+    run.mockRejectedValue(
+      new ApiError(500, JSON.stringify({ error: { message: "开跑开小差" } })),
+    );
+    renderDialog();
+
+    await screen.findByRole("option", { name: "工作" });
+    fireEvent.click(screen.getByRole("button", { name: "开跑" }));
+
+    const err = await screen.findByText("开跑开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
   });
 
   it("only says the account has none when the request actually returned none", async () => {

@@ -16,8 +16,8 @@ export function faviconUrl(domain: string): string {
 /**
  * A site favicon avatar with a graceful fallback. Loads the icon via the backend
  * proxy ({@link faviconUrl}); on load failure (or when the host is unparseable) it
- * falls back to a neutral letter chip. Used by source cards and the inline `[n]`
- * citation hover so a reader recognizes a source at a glance.
+ * falls back to a neutral letter chip. Used by source cards and inline `[n]`
+ * chips so a reader recognizes a source at a glance.
  */
 export function Favicon({
   site,

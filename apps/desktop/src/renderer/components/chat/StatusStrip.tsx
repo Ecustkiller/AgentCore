@@ -1,18 +1,11 @@
-import { SaveAsWorkflowButton } from "@/components/chat/SaveAsWorkflowButton";
-import { StoppedTurnFileChangesChip } from "@/components/chat/StoppedTurnFileChanges";
-import { GraphTeamPreview } from "@/components/chat/TeamPreviewCard";
-import { TeamSynthesisPreviewLine } from "@/components/chat/TeamSynthesisPreviewLine";
-import { debatePreviewSubtitle } from "@/components/chat/debate/debateEntryCopy";
 import {
   isTeamSynthesizing,
-  teamSynthesisPhaseLabel,
   workerProgress,
 } from "@/components/chat/teamSynthesisPhase";
-import { useCoordinationWaitChrome } from "@/components/chat/useCoordinationWaitChrome";
 import { failureDetailSentence } from "@/components/graph/agentNode/shared";
+import { hasActiveRunningWorkers } from "@/components/graph/helpers";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
-import { COLLAB_SUMMARY_TOOLTIP } from "@/lib/collabSummary";
 import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
 import {
   COST_UNPRICED_LABEL,
@@ -20,11 +13,9 @@ import {
   formatDuration,
 } from "@/lib/format";
 import {
-  type TeamPreviewDisplay,
   isTerminalPhase,
   useActiveError,
   useActiveTurnPhase,
-  useConversationStore,
 } from "@/stores/conversation";
 import {
   type Execution,
@@ -34,17 +25,11 @@ import {
 } from "@/stores/execution";
 import type { ExecutionDetachedPayload } from "@/types/events";
 import {
-  parallelSaving,
-  parallelSavingText,
-  parallelSavingTooltip,
-} from "@agentcore/protocol-fold-kit";
-import {
   AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
-  History,
   Loader2,
   Maximize2,
   MessagesSquare,
@@ -61,32 +46,26 @@ export interface StatusStripProps {
   onToggle: () => void;
   onMaximize: () => void;
   onReplay: () => void;
-  /** 定向唤回「修订 vN」的回合：聊天正文不再内联版本对比大卡，改由状态条「改了 N 版」信号 chip
-   *  深链画布放大态统一「对比」视图（前端UX设计.md §4.2/§6.4）。无修订 / 未提供则不出 chip。 */
-  onOpenRevisions?: () => void;
-  /** 协作质量轻信号（message_end.collab）；有非零才显。 */
-  collabSummary?: string | null;
-  /** Resolved 辩题/分工 preview — secondary Popover in StripControls (inline graph only). */
-  teamPreview?: TeamPreviewDisplay | null;
   /** Incremental kickoff: overlay「新批次待确认」on the running strip. */
   pendingBatchBadge?: boolean;
 }
 
 /** First batch still actively running (incremental kickoff overlay gate).
- * Pending-only (next wave queued, nothing spinning) keeps the static pause strip. */
+ * Pending-only (next wave queued, nothing spinning) keeps the static pause strip.
+ * Captain running is the CEO turn itself — not a worker batch. */
 function hasActiveRunningRuns(execution: Execution): boolean {
-  return execution.runs.some((r) => r.status === "running");
+  return hasActiveRunningWorkers(execution.runs);
 }
 
 /**
- * Lifecycle header row above the collaboration graph (前端UX设计.md §三).
- * Dispatches to running / paused / completed / cancelled / failed variants.
- * ``cancelled`` → CompletedStrip(stopped)「已停止」——忠实跟 execution.status，
- * 勿加「图上仍有 running 就不显示完成」特判（终态不变量由服务端 + payload.status 保证）。
+ * Thin toolbar above the collaboration graph (前端UX设计.md §三 / 协作图 UX §三).
+ * Lifecycle icon + n/m + completed duration/cost + fold / canvas / replay.
+ * No talking titles; Stop lives on the composer, not here.
+ *
+ * ``cancelled`` → CompletedStrip(stopped)「已停止」——忠实跟 execution.status.
  *
  * Incremental kickoff (`paused` while first batch still running): keep the
- * running strip scrolling and overlay a「新批次待确认」badge — do not replace
- * the whole strip with the static pause chrome.
+ * running chrome and overlay a「新批次待确认」badge.
  */
 export function StatusStrip(props: StatusStripProps) {
   switch (props.execution.status) {
@@ -106,8 +85,8 @@ export function StatusStrip(props: StatusStripProps) {
   }
 }
 
-/** running：有 execution_detached → 静态后台条；否则原 RunningStrip（含旧 hold 转圈）。
- * 停止中优先走 RunningStrip，保留「停止中…」诚实过渡，不回退。 */
+/** running：有 execution_detached → 静态后台条；否则 RunningStrip。
+ * 停止中优先走 RunningStrip，保留转圈过渡，不回退成后台。 */
 function RunningOrBackgroundStrip(props: StatusStripProps) {
   const turnPhase = useActiveTurnPhase();
   const detached = useActiveExecField((rt) => rt.executionDetached);
@@ -122,9 +101,23 @@ function RunningOrBackgroundStrip(props: StatusStripProps) {
 
 function DebateTag() {
   return (
-    <Badge tone="primary" pill className="mr-1.5 align-middle font-medium">
+    <Badge tone="primary" pill className="align-middle font-medium">
       辩论
     </Badge>
+  );
+}
+
+function LifeIcon({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="inline-flex shrink-0" role="img" aria-label={label}>
+      {children}
+    </span>
   );
 }
 
@@ -159,33 +152,13 @@ function StripControls({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
 }: StatusStripProps) {
-  const turnPhase = useActiveTurnPhase();
-  const stopping = turnPhase === "stopping";
-  // paused+running keeps the running chrome (badge overlay); stop still available.
-  const canStop =
-    execution.status === "running" ||
-    (execution.status === "paused" && hasActiveRunningRuns(execution));
   const canReplay =
     execution.status === "completed" || execution.status === "cancelled";
   const debate = isDebate(execution);
-  // 「接续 N 次」仅计同人续派 / 热修；辩论 continue_run（陈词/质询/结辩）不是接续计数。
-  const continuationCount = debate
-    ? 0
-    : execution.runs.filter((r) => r.continuesRunId != null).length;
 
   return (
     <>
-      {canStop && (
-        <StripIconButton
-          icon={<Square size={15} />}
-          title={stopping ? "停止中…" : "停止整轮"}
-          onClick={() => useConversationStore.getState().stopGeneration()}
-        />
-      )}
       {canReplay && (
         <StripIconButton
           icon={<Play size={15} />}
@@ -198,30 +171,7 @@ function StripControls({
         title={expanded ? "收起协作图" : "展开协作图"}
         onClick={onToggle}
       />
-      {/* 「改了 N 版」信号：本回合有定向唤回续写时，正文不再内联版本对比大卡，改为一枚 chip →
-          深链画布放大态统一「对比」视图并排比对（前端UX设计.md §4.2/§6.4）。 */}
-      {continuationCount > 0 && onOpenRevisions && (
-        <SimpleTooltip label="查看接续链上各次产出并排对比（在画布）">
-          <Button
-            variant="ghost"
-            className="ml-0.5 shrink-0 text-muted-foreground hover:text-foreground"
-            icon={<History size={13} />}
-            onClick={onOpenRevisions}
-          >
-            接续 {continuationCount} 次
-          </Button>
-        </SimpleTooltip>
-      )}
-      {collabSummary && (
-        <SimpleTooltip label={COLLAB_SUMMARY_TOOLTIP}>
-          <span className="ml-0.5 max-w-[18rem] truncate text-xs text-muted-foreground">
-            {collabSummary}
-          </span>
-        </SimpleTooltip>
-      )}
-      {/* 辩题/分工：次要 ghost，主 CTA 左侧；内容走 Popover，不抢「打开辩论室 / 在画布打开」。 */}
-      {teamPreview && <GraphTeamPreview preview={teamPreview} />}
-      {/* 入口：辩论回合给醒目「打开辩论室」CTA（更可发现、直达群聊主视图），其余给通用「在画布打开」；
+      {/* 入口：辩论回合给醒目「打开辩论室」CTA，其余给通用「在画布打开」；
           二者同去处（放大态 Route A），辩论默认落群聊、回放走同一去处 + 自动播放。 */}
       <Button
         variant="ghost"
@@ -241,114 +191,70 @@ function RunningStrip({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
   pendingBatchBadge,
 }: StatusStripProps) {
   const turnPhase = useActiveTurnPhase();
   const stopping = turnPhase === "stopping";
-  const { completed, total } = execution.progress;
-  const workers = workerProgress(execution);
-  const { wait: coordinationWait, waitLabel } =
-    useCoordinationWaitChrome(execution);
+  const coordinationWait = useActiveExecField((rt) => rt.coordinationWait);
   const synthesizing =
     !isDebate(execution) &&
-    !waitLabel &&
+    !coordinationWait &&
     isTeamSynthesizing(execution, {
       turnTerminal: isTerminalPhase(turnPhase),
     });
-  const runningTitle = stopping
-    ? "停止中…"
-    : isDebate(execution)
-      ? debatePreviewSubtitle(execution)
-      : waitLabel
-        ? waitLabel
-        : synthesizing
-          ? teamSynthesisPhaseLabel(execution)
-          : execution.taskSummary;
-  const waitCompleted = coordinationWait?.completed ?? 0;
-  const waitTotal = coordinationWait?.total ?? 0;
-  const progressLabel = waitLabel
-    ? `${waitCompleted}/${waitTotal}`
+  const workers = workerProgress(execution);
+  const { completed, total } = execution.progress;
+  const progressLabel = coordinationWait
+    ? `${coordinationWait.completed}/${coordinationWait.total}`
     : synthesizing
       ? `${workers.completed}/${workers.total}`
       : `${completed}/${total}`;
-  const highlightPhase = Boolean(waitLabel || synthesizing) && !stopping;
+  const testId = stopping
+    ? "status-strip-stopping"
+    : pendingBatchBadge
+      ? "status-strip-pending-batch"
+      : coordinationWait
+        ? "status-strip-coordination-wait"
+        : synthesizing
+          ? "status-strip-synthesizing"
+          : undefined;
 
   return (
-    <div
-      className="px-4 py-3"
-      data-testid={
-        stopping
-          ? "status-strip-stopping"
-          : pendingBatchBadge
-            ? "status-strip-pending-batch"
-            : waitLabel
-              ? "status-strip-coordination-wait"
-              : synthesizing
-                ? "status-strip-synthesizing"
-                : undefined
-      }
-    >
+    <div className="px-3 py-1.5" data-testid={testId}>
       <div className="flex items-center gap-2">
-        <Loader2 size={15} className="shrink-0 animate-spin text-primary" />
-        <span
-          className={`flex flex-1 items-center truncate text-sm font-medium ${
-            highlightPhase || stopping ? "text-primary" : "text-foreground"
-          }`}
-        >
-          {isDebate(execution) && <DebateTag />}
-          <span className="truncate" data-testid="status-strip-running-title">
-            {runningTitle}
-          </span>
-          {pendingBatchBadge ? (
-            <Badge
-              tone="primary"
-              pill
-              className="ml-2 shrink-0 font-medium"
-              data-testid="status-strip-pending-batch-badge"
-            >
-              新批次待确认
-            </Badge>
-          ) : null}
-          {highlightPhase ? (
-            <span
-              className="ml-2 size-1.5 shrink-0 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
-              aria-hidden
-            />
-          ) : null}
-        </span>
-        {!isDebate(execution) && (
-          <span
-            className={`shrink-0 text-xs ${
-              highlightPhase
-                ? "font-medium text-primary"
-                : "text-muted-foreground"
-            }`}
+        <LifeIcon label={stopping ? "停止中" : "进行中"}>
+          <Loader2 size={14} className="animate-spin text-primary" />
+        </LifeIcon>
+        {isDebate(execution) && <DebateTag />}
+        {pendingBatchBadge ? (
+          <Badge
+            tone="primary"
+            pill
+            className="shrink-0 font-medium"
+            data-testid="status-strip-pending-batch-badge"
           >
-            {progressLabel}
-          </span>
-        )}
+            新批次待确认
+          </Badge>
+        ) : null}
+        <span className="min-w-0 flex-1" />
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {progressLabel}
+        </span>
         <StripControls
           execution={execution}
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
-          onOpenRevisions={onOpenRevisions}
-          collabSummary={collabSummary}
-          teamPreview={teamPreview}
         />
       </div>
-      <TeamSynthesisPreviewLine execution={execution} />
     </div>
   );
 }
 
 /**
  * Mid-turn pause (e.g. plan_review / team_preview gate) while the graph stays visible.
- * Static — no spinner — so「等待你确认」is not painted as「正在协作 / 卡住」。
+ * Static — no spinner — so pause is not painted as「正在协作 / 卡住」。
  */
 function PausedStrip({
   execution,
@@ -356,36 +262,26 @@ function PausedStrip({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
 }: StatusStripProps) {
   const { completed, total } = execution.progress;
 
   return (
-    <div className="px-4 py-3" data-testid="status-strip-paused">
+    <div className="px-3 py-1.5" data-testid="status-strip-paused">
       <div className="flex items-center gap-2">
-        <Pause size={15} className="shrink-0 text-primary" aria-hidden />
-        <span className="flex flex-1 items-center truncate text-sm text-primary">
-          {isDebate(execution) && <DebateTag />}
-          <span className="truncate font-medium">
-            已暂停 · 等待你确认后才会继续
-          </span>
+        <LifeIcon label="已暂停">
+          <Pause size={14} className="text-primary" />
+        </LifeIcon>
+        {isDebate(execution) && <DebateTag />}
+        <span className="min-w-0 flex-1" />
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {completed}/{total}
         </span>
-        {!isDebate(execution) && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {completed}/{total}
-          </span>
-        )}
         <StripControls
           execution={execution}
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
-          onOpenRevisions={onOpenRevisions}
-          collabSummary={collabSummary}
-          teamPreview={teamPreview}
         />
       </div>
     </div>
@@ -394,7 +290,7 @@ function PausedStrip({
 
 /**
  * 异步团队转后台：CEO 回合已收口，团队继续跑。
- * 静态（无转圈）——诚实呈现「后台运行中」，区别于 live RunningStrip。
+ * 静态（无转圈）——诚实呈现后台，区别于 live RunningStrip。
  */
 function BackgroundRunningStrip({
   execution,
@@ -403,40 +299,35 @@ function BackgroundRunningStrip({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
 }: StatusStripProps & { detached: ExecutionDetachedPayload }) {
   const completed = detached.completed;
   const total = detached.total;
 
   return (
-    <div className="px-4 py-3" data-testid="status-strip-background">
+    <div className="px-3 py-1.5" data-testid="status-strip-background">
       <div className="flex items-center gap-2">
-        <Pause size={15} className="shrink-0 text-primary" aria-hidden />
-        <span className="flex flex-1 items-center truncate text-sm font-medium text-foreground">
-          {isDebate(execution) && <DebateTag />}
-          <span
-            className="truncate"
-            data-testid="status-strip-background-title"
-          >
-            团队后台运行中
-          </span>
+        <LifeIcon label="后台运行">
+          <Pause size={14} className="text-primary" />
+        </LifeIcon>
+        {isDebate(execution) && <DebateTag />}
+        <Badge
+          tone="primary"
+          pill
+          className="shrink-0 font-medium"
+          data-testid="status-strip-background-title"
+        >
+          后台
+        </Badge>
+        <span className="min-w-0 flex-1" />
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {completed}/{total}
         </span>
-        {!isDebate(execution) && (
-          <span className="shrink-0 text-xs text-muted-foreground">
-            {completed}/{total}
-          </span>
-        )}
         <StripControls
           execution={execution}
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
-          onOpenRevisions={onOpenRevisions}
-          collabSummary={collabSummary}
-          teamPreview={teamPreview}
         />
       </div>
     </div>
@@ -450,24 +341,14 @@ function CompletedStrip({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
 }: StatusStripProps & { stopped?: boolean }) {
   const frames = useActiveExecField((rt) => rt.frames);
   const { completed, total } = execution.progress;
   const ms = elapsedMs(frames);
   const duration = ms > 0 ? formatDuration(ms) : "";
 
-  // 「用时 40s」单独看不出找一支团队换来了什么。同一批数据里另有一个数：各队员时长之和 =
-  // 这些活一个接一个做要多久。两个数并排，并行省下的那段才看得见。只派一个人 / 没省到时
-  // parallelSaving 返回 null，这里就什么都不说。停止态不挂（半途终止谈「省下」不合适）。
-  const saving = stopped
-    ? null
-    : parallelSaving({ elapsedMs: ms, runs: execution.runs });
-
   // 子任务失败只靠 meta（n/m）+ 图节点色 + 右坞详情；完成/停止态不再挂红条复述。
-  // 交付 unmet（partial/blocked）由气泡轻提示承担，完成态条保持中性「团队完成」。
+  // 交付 unmet（partial/blocked）由气泡轻提示承担，完成态条保持中性勾。
 
   // 费用累计：以协作图上各 run.cost 之和为准（跨回合追加后仍覆盖全图），
   // 不再读「最新助手气泡」——追加回合的 message_end.cost 会盖掉宿主口径。
@@ -485,58 +366,34 @@ function CompletedStrip({
         : "";
 
   return (
-    <div className="px-4 py-3">
+    <div className="px-3 py-1.5">
       <div className="flex items-center gap-2">
         {stopped ? (
-          <Square size={15} className="shrink-0 text-muted-foreground" />
+          <LifeIcon label="已停止">
+            <Square size={14} className="text-muted-foreground" />
+          </LifeIcon>
         ) : (
-          <CheckCircle2 size={15} className="shrink-0 text-success" />
+          <LifeIcon label="完成">
+            <CheckCircle2 size={14} className="text-success" />
+          </LifeIcon>
         )}
-        <span className="flex-1 text-sm text-foreground">
-          {!stopped && isDebate(execution) && <DebateTag />}
-          <span className="font-medium">
-            {stopped
-              ? "已停止"
-              : isDebate(execution)
-                ? debatePreviewSubtitle(execution)
-                : "团队完成"}
-          </span>
-          {/* 完成态 meta（子任务 / 用时 / ¥）辩论与多 Agent 同口径：
-              ¥ 归状态条（前端成本呈现）；标题仍走辩论预告片文案。
-              「N 个 Agent」已删——与图上节点重复。 */}
-          <span className="text-muted-foreground">
-            {` · ${completed}/${total} 子任务${
-              duration ? ` · 用时 ${duration}` : ""
-            }`}
-          </span>
-          {saving && (
-            <SimpleTooltip
-              label={parallelSavingTooltip(saving, formatDuration)}
-            >
-              <span
-                className="text-success"
-                data-testid="status-strip-parallel-saving"
-              >
-                {` · ${parallelSavingText(saving, formatDuration)}`}
-              </span>
-            </SimpleTooltip>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm text-foreground">
+          {stopped ? (
+            <span className="font-medium">已停止</span>
+          ) : (
+            isDebate(execution) && <DebateTag />
           )}
+          <span className="text-muted-foreground">
+            {`${completed}/${total}${duration ? ` · 用时 ${duration}` : ""}`}
+          </span>
           <span className="text-muted-foreground">{costSegment}</span>
         </span>
-        {/* 硬停 + 本回合动过工作区 → 露出改动入口（无改动不渲染；真 diff 在右坞）。 */}
-        {stopped ? <StoppedTurnFileChangesChip execution={execution} /> : null}
-        {/* 工作流主入口：刚跑完一轮满意的多队员协作 = 用户想要工作流的那一刻。
-            单队员 / 纯对话 / 硬停回合自行不渲染（saveAsWorkflowGate）。 */}
-        <SaveAsWorkflowButton execution={execution} />
         <StripControls
           execution={execution}
           expanded={expanded}
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
-          onOpenRevisions={onOpenRevisions}
-          collabSummary={collabSummary}
-          teamPreview={teamPreview}
         />
       </div>
     </div>
@@ -549,15 +406,12 @@ function FailureStrip({
   onToggle,
   onMaximize,
   onReplay,
-  onOpenRevisions,
-  collabSummary,
-  teamPreview,
 }: StatusStripProps) {
   const detached = useActiveExecField((rt) => rt.executionDetached);
   // Same session error RetryBanner / 底栏 already shows (e.g. stream interrupt).
   const sessionError = useActiveError();
   // Long task briefs (e.g. code_audit instructions) must not explode the strip —
-  // default clamp; click to expand (teamPreview WorkerPreviewRows / AskCommenceKickoff).
+  // default clamp; click to expand.
   const [detailOpen, setDetailOpen] = useState(false);
 
   const failedRun = execution.runs.find((s) => s.status === "failed") ?? null;
@@ -592,28 +446,27 @@ function FailureStrip({
         : null;
 
   return (
-    <div className="px-4 py-3" data-testid="status-strip-failed">
+    <div className="px-3 py-1.5" data-testid="status-strip-failed">
       {detached ? (
         <div
-          className="mb-2 flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-xs text-foreground"
+          className="mb-1.5 flex items-center gap-2 text-xs text-foreground"
           data-testid="status-strip-failed-detached"
         >
           <Pause size={13} className="shrink-0 text-primary" aria-hidden />
-          <span className="font-medium">团队后台运行中</span>
-          {!isDebate(execution) && (
-            <span className="text-muted-foreground">
-              {detached.completed}/{detached.total}
-            </span>
-          )}
+          <Badge tone="primary" pill className="font-medium">
+            后台
+          </Badge>
           <span className="text-muted-foreground">
-            · 对话已因错误收口，团队仍在继续
+            {detached.completed}/{detached.total}
           </span>
         </div>
       ) : null}
       <div className="flex items-center gap-2">
-        <AlertTriangle size={15} className="shrink-0 text-destructive" />
+        <LifeIcon label="失败">
+          <AlertTriangle size={14} className="text-destructive" />
+        </LifeIcon>
         <span className="flex-1 text-sm text-foreground">
-          <span className="font-medium">任务失败</span>
+          <span className="font-medium">失败</span>
           {spentSegment && (
             <span className="text-muted-foreground">{spentSegment}</span>
           )}
@@ -624,13 +477,10 @@ function FailureStrip({
           onToggle={onToggle}
           onMaximize={onMaximize}
           onReplay={onReplay}
-          onOpenRevisions={onOpenRevisions}
-          collabSummary={collabSummary}
-          teamPreview={teamPreview}
         />
       </div>
 
-      <div className="mt-2 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+      <div className="mt-1.5 rounded-lg bg-muted/40 px-3 py-2 text-sm">
         {canToggleDetail ? (
           <button
             type="button"

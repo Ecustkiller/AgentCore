@@ -54,6 +54,11 @@ export interface InteractionEntry {
    */
   origin?: ResumeOrigin;
   /**
+   * 这张卡进入本地时的观察序号（与 {@link beginPausedSnapshot} 同一条）。
+   * `/recovery` 只对发起前就浮现、且来源已确认的卡有处置权。
+   */
+  surfacedSeq?: number;
+  /**
    * Cold resume accepted while slot busy (EPHEMERAL `resume_deferred`).
    * Settlement is locked — UI keeps submitting and hides cancel-改口.
    */

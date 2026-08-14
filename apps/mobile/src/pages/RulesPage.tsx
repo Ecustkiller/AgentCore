@@ -14,6 +14,7 @@ import {
 // 用户规则 (/rules) — mobile lens on user-owned rule documents (Agent记忆与知识系统
 // §5.2 / §5.4). Reached from the 文件 tab beside「全局设定」. GLOBAL scope only
 // (per-project rules stay desktop). List / create / edit / delete + 常驻·按需.
+import { ChevronLeft } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
@@ -120,13 +121,14 @@ export function RulesPage() {
       <header className="bar">
         <button
           type="button"
-          className="link"
+          className="link icon-btn"
+          aria-label="返回"
           onClick={() => navigate("/files")}
         >
-          ← 文件
+          <ChevronLeft size={20} />
         </button>
-        <span>规则</span>
-        <span style={{ width: 44 }} />
+        <span className="bar-title">规则</span>
+        <span className="bar-right" aria-hidden />
       </header>
 
       <div className="settings-body">

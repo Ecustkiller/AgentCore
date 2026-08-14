@@ -5,6 +5,8 @@
 或共享基座（全员侧）。因此这里的用例成对写：事实留在 ``out``，HOW 断言指向基座或核。
 """
 
+from pathlib import Path
+
 from agentcore.runtime.context.workspace_context import (
     build_workspace_context,
     desktop_client_can_bind,
@@ -110,6 +112,8 @@ def test_cloud_scratch_facts():
     assert out.startswith("<workspace_context>")
     assert "执行位置：云端沙箱" in out
     assert "云端草稿/临时文件空间" in out
+    assert "本文件夹根即工作区根" in out
+    assert "工程壳" not in out
     assert "不是用户本机目录" in out
     assert "不是用户本机已打开的仓库" in out
     assert "空树" in out
@@ -140,6 +144,9 @@ def test_cloud_scratch_facts():
     assert "自动建云文件夹" in hint
     assert "禁猜最近" in hint
     assert "默写 scratch" in hint
+    assert "【空桌落盘】" in hint
+    assert "工程壳" in hint
+    assert "要不要再套一层" in hint
     assert "协作图不因换桌改变" in hint
     assert "先建齐再同次派" in hint
     assert "拒后禁塌缩" in hint
@@ -238,6 +245,44 @@ def test_cloud_scratch_facts():
     assert "通常无 Git" not in out
 
 
+def test_cloud_folder_desk_identity_is_not_scratch():
+    """已建云桌：身份是云端文件夹，勿再写成 scratch「草稿/临时」。"""
+    backend = _FakeBackend("server", root_label="我的白板")
+    backend._root = Path("/data/workspaces/u/tree/我的白板")
+    backend._internal_root = Path("/data/workspaces/u/internal/folder/fid")
+    out = build_workspace_context(
+        backend,
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "工作区身份：云端文件夹" in out
+    assert "本文件夹根即工作区根" in out
+    assert "本文件夹尚无用户文件" in out
+    assert "云端草稿/临时文件空间" not in out
+    assert "本会话云端草稿尚无文件" not in out
+    assert "工程壳" not in out
+    hint = _CEO_CORE_HINT
+    assert "【空桌落盘】" in hint
+    assert "工程壳" in hint
+
+
+def test_cloud_conv_root_stays_scratch_identity():
+    """盘上 conv/ 根仍是会话草稿，不因有 _root 就改口成云端文件夹。"""
+    backend = _FakeBackend("server", root_label="workspace")
+    backend._root = Path("/data/workspaces/u/conv/cid")
+    backend._internal_root = Path("/data/workspaces/u/internal/conv/cid")
+    out = build_workspace_context(
+        backend,
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "云端草稿/临时文件空间" in out
+    assert "工作区身份：云端文件夹" not in out
+    assert "本文件夹根即工作区根" in out
+
+
 def test_cloud_host_off_capability():
     from agentcore.core.types import HostAxis
 
@@ -273,6 +318,8 @@ def test_local_remote_channel_facts():
     )
     assert "执行位置：用户本机（经桌面通道遥控）" in out
     assert "本地目录（根标签 `MyProject`）" in out
+    assert "本文件夹根即工作区根" in out
+    assert "工程壳" not in out
     assert "code_execute=已装配" in out
     assert "package_install=已装配" in out
     assert "terminal=已装配" in out

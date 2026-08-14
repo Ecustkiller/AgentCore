@@ -143,7 +143,7 @@ export function SharedMountsSection({
       )}
 
       {mountsQuery.isError ? (
-        <p className="px-3 pb-2 text-xs text-destructive">
+        <p className="px-3 pb-2 text-xs text-muted-foreground">
           无法加载挂载列表
           <Button
             size="sm"

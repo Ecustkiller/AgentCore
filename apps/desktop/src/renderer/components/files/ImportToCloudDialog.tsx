@@ -224,7 +224,7 @@ export function ImportToCloudDialog({
             />
           </div>
           {error ? (
-            <p className="text-sm text-destructive" role="alert">
+            <p className="text-sm text-muted-foreground" role="alert">
               {error}
             </p>
           ) : null}

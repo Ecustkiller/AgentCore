@@ -94,7 +94,7 @@ beforeEach(() => {
 });
 
 describe("StatusStrip · coordination_wait", () => {
-  it("compresses wait into a one-line title summary (no inline member panel)", () => {
+  it("wait shows n/m only (no talking title, no inline member panel)", () => {
     useExecutionStore.getState().startExecution(plan, MID);
     useExecutionStore.getState().setCoordinationWait(
       {
@@ -109,14 +109,11 @@ describe("StatusStrip · coordination_wait", () => {
     const execution = projectExecution(plan, oneDoneFrames, "running");
     renderStrip(execution);
 
-    // 标题行：全局等待态 + n/m 进度（不含成员名；成员细节只靠图上 worker 节点）。
+    // 工具栏只报 n/m；成员细节只靠图上 worker 节点。
     expect(screen.getByTestId("status-strip-coordination-wait")).toBeTruthy();
-    expect(
-      screen.getByTestId("status-strip-running-title").textContent,
-    ).toMatch(/等待团队成员完成 \(1\/2\)/);
-    expect(
-      screen.getByTestId("status-strip-running-title").textContent,
-    ).not.toMatch(/撰写员|研究员/);
+    expect(screen.getByText("1/2")).toBeTruthy();
+    expect(screen.queryByText(/等待团队成员完成/)).toBeNull();
+    expect(screen.queryByTestId("status-strip-running-title")).toBeNull();
 
     // 协调等待分支整体移除：不再内联渲染成员状态列表 / 协调等待徽标 / 重复 headline，
     // 成员级细节改由协作图节点承担。

@@ -12,6 +12,8 @@ import {
   errorActionForCode,
   isEmptyResponseUserSurface,
   isPausedFrameGone,
+  isUnstartedSendRefusal,
+  isZeroOutputSendRefusalCode,
   resolveEmptyFailureNotice,
 } from "../errors";
 import { formatLocalMoment } from "../recoveryMoment";
@@ -130,6 +132,54 @@ describe("isPausedFrameGone", () => {
     expect(isPausedFrameGone(new StreamHttpError(500))).toBe(false);
     expect(isPausedFrameGone(new Error("network"))).toBe(false);
     expect(isPausedFrameGone(undefined)).toBe(false);
+  });
+});
+
+describe("isZeroOutputSendRefusalCode", () => {
+  it("matches first-upstream capability / rate codes (Class B)", () => {
+    expect(isZeroOutputSendRefusalCode("LLM_RATE_LIMIT")).toBe(true);
+    expect(isZeroOutputSendRefusalCode("LLM_KEY_INVALID")).toBe(true);
+    expect(isZeroOutputSendRefusalCode("LLM_INSUFFICIENT_BALANCE")).toBe(true);
+  });
+
+  it("does not match Class A unstarted codes or generic failures", () => {
+    expect(isZeroOutputSendRefusalCode("LLM_KEY_REQUIRED")).toBe(false);
+    expect(isZeroOutputSendRefusalCode("QUOTA_EXCEEDED")).toBe(false);
+    expect(isZeroOutputSendRefusalCode("RATE_LIMITED")).toBe(false);
+    expect(isZeroOutputSendRefusalCode("PLATFORM_BILLING_UNAVAILABLE")).toBe(
+      false,
+    );
+    expect(isZeroOutputSendRefusalCode("INTERNAL_ERROR")).toBe(false);
+    expect(isZeroOutputSendRefusalCode(undefined)).toBe(false);
+  });
+});
+
+describe("isUnstartedSendRefusal", () => {
+  it("matches preflight key / quota / rate-limit / platform billing", () => {
+    expect(
+      isUnstartedSendRefusal(new StreamHttpError(402, "LLM_KEY_REQUIRED")),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(new StreamHttpError(429, "QUOTA_EXCEEDED")),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(new StreamHttpError(429, "RATE_LIMITED")),
+    ).toBe(true);
+    expect(
+      isUnstartedSendRefusal(
+        new StreamHttpError(503, "PLATFORM_BILLING_UNAVAILABLE"),
+      ),
+    ).toBe(true);
+    expect(isUnstartedSendRefusal(new StreamHttpError(402))).toBe(true);
+  });
+
+  it("does not match mid-turn key-invalid or generic 503", () => {
+    expect(
+      isUnstartedSendRefusal(new StreamHttpError(401, "LLM_KEY_INVALID")),
+    ).toBe(false);
+    expect(
+      isUnstartedSendRefusal(new StreamHttpError(503, "INTERNAL_ERROR")),
+    ).toBe(false);
   });
 });
 

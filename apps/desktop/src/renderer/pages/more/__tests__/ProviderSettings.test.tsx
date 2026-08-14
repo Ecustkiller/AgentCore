@@ -98,12 +98,31 @@ describe("ProviderSettings", () => {
     expect(screen.getByText("OpenAI")).toBeTruthy();
     expect(screen.getByText(/api\.deepseek\.com/)).toBeTruthy();
     expect(screen.getByText(/••••abcd/)).toBeTruthy();
+    expect(screen.getByText(/测试用模型 deepseek-v4-pro/)).toBeTruthy();
+    expect(screen.getByText(/测试用模型 gpt-4o/)).toBeTruthy();
     expect(screen.queryByText(/默认模型/)).toBeNull();
     expect(screen.getByRole("button", { name: "添加服务商" })).toBeTruthy();
     expect(screen.queryByText("模型组合")).toBeNull();
     expect(
       screen.getByText("测连绿≠可聊天；自定义 Base URL 常需 /v1"),
     ).toBeTruthy();
+  });
+
+  it("omits the test-model line when default_model is empty", () => {
+    mockProviders(
+      providersResponse({
+        providers: [
+          {
+            ...providersResponse().providers[0],
+            default_model: "",
+          },
+        ],
+      }),
+    );
+    renderPage();
+    expect(screen.getByText("DeepSeek")).toBeTruthy();
+    expect(screen.queryByText(/测试用模型/)).toBeNull();
+    expect(screen.queryByText(/默认模型/)).toBeNull();
   });
 
   it("shows a compact platform status line when the deployment offers platform models", () => {

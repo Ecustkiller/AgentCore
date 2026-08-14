@@ -27,10 +27,11 @@ from agentcore.workflows.slot_extract import (
     parameterize_definition,
     suggest_slots_for_definition,
 )
+from agentcore.workflows.source import turn_source
 
 _TOPIC = "Notion 的协作功能定价"
 # 服务端权威的固化来源：落在 ``user_workflows.source`` 列上，不在 definition 里。
-_SOURCE = {"kind": "turn", "conversation_id": "conv-1", "message_id": "msg-1"}
+_SOURCE = turn_source(conversation_id="conv-1", message_id="msg-1")
 
 
 def _plain_definition() -> dict:
@@ -277,7 +278,7 @@ async def test_missing_credentials_degrade_to_no_slots(monkeypatch):
     assert await suggest_slots_for_definition(original, user_id="u1") == (original, [])
 
 
-# --- 保存路由：不调模型，存的就是原轮原文 -------------------------------------------
+# --- 按需抽槽路由：幂等 / 只认固化来源 / 抽不出来照常能跑 ----------------------------
 
 
 class _FakeWorkflowRepo:
@@ -286,18 +287,6 @@ class _FakeWorkflowRepo:
     def __init__(self) -> None:
         self.rows: list[SimpleNamespace] = []
         self.updates = 0
-
-    async def find_by_turn_source(self, *, user_id, conversation_id, message_id):
-        for row in self.rows:
-            source = row.source or {}
-            if row.user_id != user_id or source.get("kind") != "turn":
-                continue
-            if (
-                source.get("conversation_id") == conversation_id
-                and source.get("message_id") == message_id
-            ):
-                return row
-        return None
 
     async def get_by_id(self, workflow_id: str, *, user_id: str | None = None):
         for row in self.rows:
@@ -338,68 +327,17 @@ class _FakeWorkflowRepo:
         return row
 
 
-async def _save(repo: _FakeWorkflowRepo):
-    from agentcore.api.routes.conversations.save_as_workflow import save_turn_as_workflow
-    from agentcore.runtime.runs.plan import RunPlan
-    from agentcore.runtime.runs.serialize import plan_snapshot_fact
-    from agentcore.runtime.runs.types import RunSpec
-
-    def _spec(rid: str, role: str, task: str) -> RunSpec:
-        return RunSpec(
-            run_id=rid,
-            task=task,
-            role=role,
-            agent_id=rid,
-            agent_name=role,
-            depth=1,
-            parent_run_id="captain",
-        )
-
-    # 真实铸造形状：``del_<uuid>_<CEO 声明的 tasks[].id>``（反解后才是画布 id）。
-    minted = "del_2f1c4a90-0b3d-4c21-9a77-1f0e5b6d8c33"
-    plan = RunPlan(
-        nodes=[
-            _spec(f"{minted}_research", "研究员", f"调研{_TOPIC}，产出要点清单"),
-            _spec(f"{minted}_write", "写手", f"根据调研写一篇关于{_TOPIC}的简报"),
-        ]
-    )
-    return await save_turn_as_workflow(
-        _SOURCE["conversation_id"],
-        _SOURCE["message_id"],
-        SimpleNamespace(user_id="u1"),
-        body=None,
-        conv_repo=SimpleNamespace(
-            get_by_id=AsyncMock(return_value=SimpleNamespace(id="conv-1"))
+async def _seed_turn_sourced(repo: _FakeWorkflowRepo, *, user_id: str = "u1"):
+    """历史固化行：``repo.create`` + ``turn_source``，不走已下线的对话固化入口。"""
+    return await repo.create(
+        user_id=user_id,
+        name="简报流",
+        definition=_plain_definition(),
+        source=turn_source(
+            conversation_id=_SOURCE["conversation_id"],
+            message_id=_SOURCE["message_id"],
         ),
-        msg_repo=SimpleNamespace(
-            get_by_id=AsyncMock(
-                return_value=SimpleNamespace(id="msg-1", role="assistant")
-            )
-        ),
-        journal_repo=SimpleNamespace(
-            load_owned=AsyncMock(return_value=[plan_snapshot_fact(plan).entry()])
-        ),
-        workflow_repo=repo,
     )
-
-
-async def test_save_route_never_calls_the_model(monkeypatch):
-    """保存 = 「这轮不错先存下来」，不该为一件用户还没想到的事等一次模型调用。"""
-    asked = AsyncMock(
-        return_value=f'{{"slots":[{{"key":"topic","label":"主题","value":"{_TOPIC}"}}]}}'
-    )
-    monkeypatch.setattr(slot_extract, "_ask_model", asked)
-
-    saved = await _save(_FakeWorkflowRepo())
-    asked.assert_not_awaited()
-    assert "slots" not in saved.definition
-    stored = {n["id"]: n["task"] for n in saved.definition["nodes"]}
-    assert stored["research"] == f"调研{_TOPIC}，产出要点清单"
-    assert saved.source.model_dump() == _SOURCE
-    assert "source" not in saved.definition
-
-
-# --- 按需抽槽路由：幂等 / 只认固化来源 / 抽不出来照常能跑 ----------------------------
 
 
 async def _suggest(repo: _FakeWorkflowRepo, workflow_id: str = "wf-1"):
@@ -419,11 +357,11 @@ def _reply(**values: str) -> str:
     return f'{{"slots":[{items}]}}'
 
 
-async def _saved_then_suggested(monkeypatch, reply: str):
-    """走一遍真实时序：先保存（原文落库），再按需抽槽（写回）。"""
+async def _seeded_then_suggested(monkeypatch, reply: str):
+    """种一条历史固化行，再按需抽槽（写回）。"""
     monkeypatch.setattr(slot_extract, "_ask_model", AsyncMock(return_value=reply))
     repo = _FakeWorkflowRepo()
-    saved = await _save(repo)
+    saved = await _seed_turn_sourced(repo)
     return repo, saved, await _suggest(repo)
 
 
@@ -431,7 +369,7 @@ async def test_suggest_writes_placeholders_back_and_defaults_reproduce_the_turn(
     monkeypatch,
 ):
     """抽到了就落库：以后再跑不用重抽，且不填覆盖值仍逐字复现原轮任务描述。"""
-    repo, saved, out = await _saved_then_suggested(monkeypatch, _reply(topic=_TOPIC))
+    repo, _, out = await _seeded_then_suggested(monkeypatch, _reply(topic=_TOPIC))
 
     assert out.definition["slots"] == [
         {"key": "topic", "label": "主题", "default": _TOPIC}
@@ -444,7 +382,7 @@ async def test_suggest_writes_placeholders_back_and_defaults_reproduce_the_turn(
     assert repo.rows[0].definition["slots"] == out.definition["slots"]
 
     # 不填 = 原样复跑（与写回前逐字相同）；填了 = 每个用到它的步骤一起换。
-    assert _tasks(out.definition) == _tasks(saved.definition)
+    assert _tasks(out.definition) == _tasks(_plain_definition())
     swapped = _tasks(out.definition, slot_values={"topic": "Figma 的团队版"})
     assert swapped["research"]["task"] == "调研Figma 的团队版，产出要点清单"
     assert swapped["write"]["task"] == "根据调研写一篇关于Figma 的团队版的简报"
@@ -452,7 +390,7 @@ async def test_suggest_writes_placeholders_back_and_defaults_reproduce_the_turn(
 
 async def test_suggest_is_idempotent_once_slots_exist(monkeypatch):
     """已经有槽位就直接返回：第二次点「跑一次」不该再烧一次模型调用。"""
-    repo, _saved, first = await _saved_then_suggested(monkeypatch, _reply(topic=_TOPIC))
+    repo, _saved, first = await _seeded_then_suggested(monkeypatch, _reply(topic=_TOPIC))
     writes = repo.updates
 
     asked = AsyncMock(return_value=_reply(product="Notion"))
@@ -513,7 +451,7 @@ async def test_suggest_falls_back_to_the_definition_it_was_called_with(
     """抽不出来 = 「没有槽位」而不是报错：前端照常直接跑，definition 一个字符没动。"""
     monkeypatch.setattr(slot_extract, "_ask_model", outcome)
     repo = _FakeWorkflowRepo()
-    saved = await _save(repo)
+    saved = await _seed_turn_sourced(repo)
     before = dict(saved.definition)
 
     out = await _suggest(repo)
@@ -529,9 +467,7 @@ async def test_suggest_404s_on_someone_elses_workflow(monkeypatch):
     asked = AsyncMock(return_value=_reply(topic=_TOPIC))
     monkeypatch.setattr(slot_extract, "_ask_model", asked)
     repo = _FakeWorkflowRepo()
-    await repo.create(
-        user_id="u2", name="别人的", definition=_plain_definition(), source=dict(_SOURCE)
-    )
+    await _seed_turn_sourced(repo, user_id="u2")
 
     with pytest.raises(NotFoundError):
         await _suggest(repo)

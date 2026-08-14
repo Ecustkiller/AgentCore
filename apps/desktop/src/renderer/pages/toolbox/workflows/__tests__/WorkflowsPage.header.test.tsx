@@ -22,11 +22,13 @@ vi.mock("@/lib/toast", () => ({
   notifySuccess: vi.fn(),
 }));
 
-import { listWorkflows } from "@/services/workflows";
+import { ApiError } from "@/services/api";
+import { listWorkflowTemplates, listWorkflows } from "@/services/workflows";
 import { MemoryRouter } from "react-router-dom";
 import { WorkflowsPage } from "../WorkflowsPage";
 
 const workflows = vi.mocked(listWorkflows);
+const templates = vi.mocked(listWorkflowTemplates);
 
 const WORKFLOW: UserWorkflow = {
   id: "wf-1",
@@ -51,6 +53,8 @@ beforeEach(() => {
   useStandingInboxStore.setState({ badge: 0 });
   workflows.mockReset();
   workflows.mockResolvedValue([WORKFLOW]);
+  templates.mockReset();
+  templates.mockResolvedValue([]);
 });
 
 afterEach(cleanup);
@@ -88,5 +92,32 @@ describe("工作流列表 · 统一页头", () => {
 
     const note = screen.getByText(/可保存的团队拆法/);
     expect(container.querySelector("header")?.contains(note)).toBe(false);
+  });
+});
+
+describe("工作流列表 · 可恢复失败", () => {
+  it("我的工作流加载失败走 muted 行内文案", async () => {
+    workflows.mockRejectedValue(
+      new ApiError(500, JSON.stringify({ error: { message: "列表开小差" } })),
+    );
+    renderPage();
+
+    const err = await screen.findByText("列表开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
+  });
+
+  it("官方模板加载失败走 muted 行内文案", async () => {
+    templates.mockRejectedValue(
+      new ApiError(
+        500,
+        JSON.stringify({ error: { message: "官方模板开小差" } }),
+      ),
+    );
+    renderPage();
+
+    const err = await screen.findByText("官方模板开小差");
+    expect(err.className).toContain("text-muted-foreground");
+    expect(err.className).not.toContain("destructive");
   });
 });

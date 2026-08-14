@@ -568,7 +568,9 @@ async def run_harvest_closing_turn(
         _run(),
         name=f"harvest-close-{execution_id[:8]}",
     )
-    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink)
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user_id
+    )
     # Wait for the closing turn so the harvester can clear the registry afterward
     # if the turn never re-attached (edge failure).
     with contextlib.suppress(asyncio.CancelledError):

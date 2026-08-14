@@ -1,10 +1,6 @@
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useState } from "react";
 import type { TeamPreviewWorkerView } from "./types";
-import {
-  formatWorkspaceLabel,
-  resolveWorkspacePresentation,
-} from "./workspacePresentation";
 
 type ReadonlyProps = {
   mode?: "readonly";
@@ -21,11 +17,15 @@ type InteractiveProps = {
 
 export type WorkerPreviewRowsProps = ReadonlyProps | InteractiveProps;
 
+/** 队员各占一格，边框区分相邻岗（与 DebatePreviewBody 同行样式）。 */
+const ROW = "rounded-lg border border-border bg-card/60 px-2.5 py-1.5";
+const ROW_HOVER = `${ROW} hover:bg-accent`;
+
 /**
  * Worker 分工表 — shared by hot TeamPreviewCard/Graph (readonly) and cold
  * TeamPreviewResumeCard (interactive: 写盘收紧 / 任务折叠).
  * CEO 提案模型只读展示；人改模型 / 排除岗 UI 已撤（后端契约仍保留）。
- * 工作区：全员同桌一行汇总，不一致逐人；旧帧无显示名不画。
+ * 同源分工表不画工作区（建桌告知 / 铬条 / 文件树另处展示）。
  */
 export function WorkerPreviewRows(props: WorkerPreviewRowsProps) {
   if (props.mode === "interactive") {
@@ -34,36 +34,15 @@ export function WorkerPreviewRows(props: WorkerPreviewRowsProps) {
   return <ReadonlyWorkerRows workers={props.workers} />;
 }
 
-function WorkspaceSummary({ name }: { name: string }) {
-  return (
-    <p className="text-xs text-muted-foreground">
-      {formatWorkspaceLabel(name)}
-    </p>
-  );
-}
-
-function WorkspaceChip({ name }: { name: string }) {
-  return (
-    <span className="text-xs text-muted-foreground">
-      {formatWorkspaceLabel(name)}
-    </span>
-  );
-}
-
 function ReadonlyWorkerRows({
   workers,
 }: {
   workers: readonly TeamPreviewWorkerView[];
 }) {
-  const desk = resolveWorkspacePresentation(workers);
   return (
     <div className="mt-2 space-y-1.5">
-      {desk.mode === "summary" && <WorkspaceSummary name={desk.name} />}
       {workers.map((w) => (
-        <div
-          key={w.run_id}
-          className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-        >
+        <div key={w.run_id} className={ROW}>
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="text-xs font-medium text-foreground">{w.role}</p>
             {w.model && (
@@ -79,9 +58,6 @@ function ReadonlyWorkerRows({
               >
                 {w.write_capability_label}
               </span>
-            )}
-            {desk.mode === "perWorker" && w.target_folder_name && (
-              <WorkspaceChip name={w.target_folder_name} />
             )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
@@ -109,7 +85,6 @@ function InteractiveWorkerRows({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const desk = resolveWorkspacePresentation(workers);
 
   const toggle = (runId: string) => {
     setExpanded((prev) => {
@@ -122,7 +97,6 @@ function InteractiveWorkerRows({
 
   return (
     <div className="mt-2 space-y-1.5">
-      {desk.mode === "summary" && <WorkspaceSummary name={desk.name} />}
       {workers.map((w) => {
         const open = expanded.has(w.run_id);
         const effectiveTextOnly =
@@ -185,9 +159,6 @@ function InteractiveWorkerRows({
                   撤销
                 </button>
               )}
-            {desk.mode === "perWorker" && w.target_folder_name && (
-              <WorkspaceChip name={w.target_folder_name} />
-            )}
             {w.depends_on.length > 0 && (
               <span className="text-xs text-muted-foreground">
                 依赖 {w.depends_on.length} 步
@@ -198,20 +169,14 @@ function InteractiveWorkerRows({
 
         if (!w.task) {
           return (
-            <div
-              key={w.run_id}
-              className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-            >
+            <div key={w.run_id} className={ROW_HOVER}>
               <div className="flex items-start gap-1.5">{meta}</div>
             </div>
           );
         }
 
         return (
-          <div
-            key={w.run_id}
-            className="rounded-lg border border-border bg-card/60 px-2.5 py-1.5"
-          >
+          <div key={w.run_id} className={ROW_HOVER}>
             <div className="flex items-start gap-1.5">{meta}</div>
             <button
               type="button"

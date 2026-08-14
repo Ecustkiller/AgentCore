@@ -6,7 +6,6 @@ import {
   mergeArtifacts,
   resolveFileArtifactsForCard,
   splitExportedSources,
-  splitPromotedProducts,
 } from "@/lib/fileArtifacts";
 import type {
   DeliveryArtifact,
@@ -356,39 +355,6 @@ describe("成品归位（delivery_status.promoted）", () => {
       ),
     );
     expect(arts[0].promotedFrom).toBeUndefined();
-  });
-});
-
-describe("splitPromotedProducts（成品 / 过程材料 / 未通过）", () => {
-  const product: FileArtifact = {
-    path: "起诉状.docx",
-    name: "起诉状.docx",
-    acceptance: "accepted",
-    promotedFrom: "AgentCore/文档/工作稿/起诉状.docx",
-  };
-  const material: FileArtifact = {
-    path: "AgentCore/文档/research/取证清单.md",
-    name: "取证清单.md",
-    acceptance: "accepted",
-  };
-  const bad: FileArtifact = {
-    path: "报告.md",
-    name: "报告.md",
-    acceptance: "rejected",
-  };
-
-  it("归位的进成品，其余 accepted 进过程材料，rejected 两组都不进", () => {
-    expect(splitPromotedProducts([material, product, bad])).toEqual({
-      products: [product],
-      materials: [material],
-      rejected: [bad],
-    });
-  });
-
-  it("零归位：成品组为空，其余照常（合法中间幕，不是异常）", () => {
-    const { products, materials } = splitPromotedProducts([material]);
-    expect(products).toEqual([]);
-    expect(materials).toEqual([material]);
   });
 });
 

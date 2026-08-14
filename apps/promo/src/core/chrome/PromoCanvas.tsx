@@ -2,10 +2,8 @@ import { agentColorVar, agentGlyph } from "@/lib/agentIdentity";
 import type { Edge, Node } from "@xyflow/react";
 import {
   AlertTriangle,
-  ArrowUp,
   CheckCircle2,
   ClipboardCheck,
-  Cloud,
   ListChecks,
   Loader2,
   Maximize,
@@ -24,16 +22,17 @@ import { GraphStage } from "../graph/GraphStage";
  * 领衔 promo still — the product's 对话级画布 (Canvas view), re-stated the same way
  * PromoShell re-states the app shell: a pixel-faithful static copy of the real
  * ConversationCanvas markup (slim 画布 header + 视图切换/侧栏 floating chrome + a top→
- * bottom turn spine + the 常驻命令栏 + the right-docked 图上指挥 指挥台), with one TEAM
- * turn focused and expanded IN PLACE into its full worker DAG via the real GraphStage
- * (reused butterfly, running + glow). It answers "this is a real product", "a real
- * team is alive in it", AND "you command that team" — the三连 the chat-only crops miss.
+ * bottom turn spine + the right-docked 图上指挥 指挥台), with one TEAM turn focused
+ * and expanded IN PLACE into its full worker DAG via the real GraphStage (reused
+ * butterfly, running + glow). It answers "this is a real product" and "a real team
+ * is alive in it" — the chat-only crops miss both. Command lives on the 指挥台, not
+ * a mirrored composer: the product canvas reads as a pure board by default.
  *
  * The spine cards mirror SimpleTurnNode / TurnSummaryNode; the focused card mirrors
  * FocusedTurnNode; the right rail mirrors CanvasDecisionPanel (指挥台, 计划复核 + 工作者
- * 上报); the bottom bar mirrors CanvasCommandBar. Bottom-anchored so the focused turn
- * sits low (above the bar, under a spotlight) with earlier turns climbing into the
- * header — the same latest-turn camera the real canvas parks on.
+ * 上报). Bottom-anchored so the focused turn sits low (under a spotlight) with
+ * earlier turns climbing into the header — the same latest-turn camera the real
+ * canvas parks on.
  *
  * Demo task title / graph snapshot / bbox come from the caller (video or still
  * package) — core does not import videos/.
@@ -310,24 +309,6 @@ function ZoomControls() {
   );
 }
 
-function CommandBar() {
-  return (
-    <div className="shrink-0 border-t border-border bg-card px-4 py-3">
-      <div className="mx-auto flex max-w-3xl items-end gap-2">
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground">
-          <Cloud size={18} />
-        </span>
-        <div className="flex min-h-[2.5rem] flex-1 items-center rounded-xl border border-border bg-background px-3 py-2 text-sm text-muted-foreground">
-          向 CEO 下达下一步指令…
-        </div>
-        <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-          <ArrowUp size={18} />
-        </span>
-      </div>
-    </div>
-  );
-}
-
 /** 图上指挥 指挥台 (前端UX设计.md §6.2): the boss's pending decisions docked right.
  * Mirrors CanvasDecisionPanel — a 计划复核 checkpoint (plan_review) + a worker
  * 上报 (成本分析 waiting on the budget cap that paused the budget turn above). */
@@ -474,8 +455,6 @@ export function PromoCanvas({
           </div>
           <ZoomControls />
         </div>
-
-        <CommandBar />
       </div>
 
       <CommandDeck />

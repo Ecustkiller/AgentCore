@@ -32,7 +32,8 @@ const ALL_ORIGINS: readonly ResumeOrigin[] = ["sidecar", "server"];
  */
 let observationSeq = 0;
 
-const nextObservationSeq = (): number => ++observationSeq;
+/** 盖在新浮现的壳 / IX 卡上；与 {@link beginPausedSnapshot} 同一条序号。 */
+export const nextObservationSeq = (): number => ++observationSeq;
 
 /**
  * 取一次快照的观察起点——**发请求之前**调用。此后才进入本地的壳，这次快照都看不见，
