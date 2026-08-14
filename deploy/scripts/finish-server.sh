@@ -54,7 +54,12 @@ elif ! docker pull "$IMAGE" 2>/dev/null; then
   docker tag "${IMAGE_REGISTRY}/api:latest" "$IMAGE"
 fi
 
-COMPOSE=( docker compose -p agentcore -f "$DEPLOY/docker-compose.server.yml" -f "$DEPLOY/docker-compose.app.yml" --env-file "$ENVF" )
+# One-shots (probe / tar / alembic / migrate) must not use the sandbox overlay:
+# that entrypoint is for the long-running api. `compose run` through it can
+# exit with empty stdout, which the workspace probe treats as "cannot prove
+# no data will be lost" and aborts — while the live api is still serving.
+COMPOSE_BASE=( docker compose -p agentcore -f "$DEPLOY/docker-compose.server.yml" -f "$DEPLOY/docker-compose.app.yml" --env-file "$ENVF" )
+COMPOSE=( "${COMPOSE_BASE[@]}" )
 # gVisor 默认开（代码/内测默认 true）：除非 env 显式 GVISOR_ENABLED=false，否则叠 sandbox。
 # 快照目录若缺 sandbox 则回退仓库 deploy/（remote-build-deploy 已 checkout 的 tree）。
 _gvisor_off=0
@@ -80,6 +85,18 @@ if [[ "$_gvisor_off" -eq 0 ]]; then
   if [[ ! -f "$_sandbox_entrypoint" ]]; then
     echo "ERROR: $_sandbox_yml 需要同目录 api-sandbox-entrypoint.sh（或设 GVISOR_ENABLED=false）"
     exit 1
+  fi
+  # Compose 把 overlay 里的 ./ 卷解析到「第一个 -f」所在目录（=$DEPLOY），
+  # 不是 sandbox yml 自己的目录。活栈目录若缺该文件，Docker 会建成同名空目录，
+  # 入口变成目录 → api 空跑秒退（exit 0、无日志）。
+  _ep_dst="$DEPLOY/api-sandbox-entrypoint.sh"
+  if [[ -d "$_ep_dst" ]]; then
+    echo "WARN: $_ep_dst 是目录（Docker 缺文件时的占位）— 删除后写入入口脚本"
+    rm -rf "$_ep_dst"
+  fi
+  if [[ "$_sandbox_entrypoint" != "$_ep_dst" ]]; then
+    cp -f "$_sandbox_entrypoint" "$_ep_dst"
+    echo "sandbox entrypoint -> $_ep_dst"
   fi
   COMPOSE+=(-f "$_sandbox_yml")
   echo "gVisor sandbox overlay: $_sandbox_yml"
@@ -107,7 +124,7 @@ else
   mkdir -p "$BACKUP_DIR"
   # 一次性容器读卷：不依赖 api 容器在不在跑（上次部署失败可能把它停在地上）。
   # --no-deps：备份只用 appdata 卷，不该被 DB/Redis 的状态拖住。
-  ws_probe="$("${COMPOSE[@]}" run --rm --no-deps -T api sh -c \
+  ws_probe="$("${COMPOSE_BASE[@]}" run --rm --no-deps -T api sh -c \
     'if [ -d /data/workspaces ]; then du -sk /data/workspaces | cut -f1; else echo MISSING; fi' \
     | tr -d '\r' | tail -n1 || true)"
   if [[ "$ws_probe" == "MISSING" ]]; then
@@ -137,7 +154,7 @@ else
     fi
     ws_snapshot="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S)-$IMAGE_TAG-workspaces.tar.gz"
     ws_rc=0
-    "${COMPOSE[@]}" run --rm --no-deps -T api tar -czf - -C /data workspaces >"$ws_snapshot.partial" || ws_rc=$?
+    "${COMPOSE_BASE[@]}" run --rm --no-deps -T api tar -czf - -C /data workspaces >"$ws_snapshot.partial" || ws_rc=$?
     # tar 退 1 = 「读的过程中有文件被改」——api 还在服务，热备份下属常态，不是失败；2+ 才是
     # 真出错。归档到底完不完整不看 tar 的脸色，由下面的 gzip -t 说了算。
     if ((ws_rc == 1)); then
@@ -162,10 +179,10 @@ echo "== [6/13] 停 api（关闭旧代码 + 新 schema 窗口）=="
 "${COMPOSE[@]}" stop api 2>/dev/null || true
 
 echo "== [7/13] alembic upgrade head =="
-"${COMPOSE[@]}" run --rm api alembic upgrade head
+"${COMPOSE_BASE[@]}" run --rm api alembic upgrade head
 
 echo "== [8/13] schema gate (live) =="
-"${COMPOSE[@]}" run --rm api python scripts/check_schema_gate.py --live
+"${COMPOSE_BASE[@]}" run --rm api python scripts/check_schema_gate.py --live
 
 # 迁移步的退出码闸。这些脚本用非零同时表达两件事：真出错，以及「我很安全地什么都没做」
 # （tree 的 2 = 目标目录已存在、已跳过待人工确认；docs 的 3 = 一个工作区目录都没扫到的保险）。
@@ -191,14 +208,14 @@ migrate_step() {
 # 依赖 [7] 回填的 folders.rel_path；必须早于 [11]（它读迁移后的 tree/ 落点）。
 echo "== [9/13] workspace tree 迁移（平铺目录 -> tree/<rel_path>）=="
 migrate_step "workspace tree" 2 \
-  "${COMPOSE[@]}" run --rm api python scripts/migrate_workspace_tree.py
+  "${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_workspace_tree.py
 
 echo "== [10/13] memory pipeline migrate/contract (self-lagged) =="
-"${COMPOSE[@]}" run --rm api python scripts/migrate_memory_pipeline.py
+"${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_memory_pipeline.py
 
 echo "== [11/13] project docs 迁移（厚约定文档 -> 记忆条目）=="
 migrate_step "project docs" 3 \
-  "${COMPOSE[@]}" run --rm api python scripts/migrate_project_docs.py
+  "${COMPOSE_BASE[@]}" run --rm api python scripts/migrate_project_docs.py
 
 echo "== [12/13] 起 api =="
 "${COMPOSE[@]}" up -d

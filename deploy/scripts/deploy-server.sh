@@ -62,10 +62,11 @@ HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_INTERVAL="${HEALTH_INTERVAL:-3}"
 TARGET_REF="${1:-latest}"
 
-COMPOSE_FILES=(
+COMPOSE_BASE_FILES=(
   -f "$REPO_DIR/deploy/docker-compose.server.yml"
   -f "$REPO_DIR/deploy/docker-compose.app.yml"
 )
+COMPOSE_FILES=( "${COMPOSE_BASE_FILES[@]}" )
 # gVisor 默认开：除非 GVISOR_ENABLED=false，否则叠 sandbox
 # （seccomp/apparmor + netns caps + entrypoint 降权 + mem_limit）。
 # 不叠层 → 沙箱起不来，启动期健康探测失败不拒启（fail-safe）：打
@@ -89,6 +90,8 @@ if [[ "$_gvisor_off" -eq 0 ]]; then
   fi
 fi
 dc() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
+# One-shots must not use the sandbox entrypoint (empty stdout aborts the workspace probe).
+dc_oneshot() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_BASE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
 
 [[ -f "$ENV_FILE" ]] || { err "env file not found: $ENV_FILE（从 production.env.example 复制并填值）"; exit 1; }
 
@@ -159,7 +162,7 @@ if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_WORKSPACE_SNAPSHOT:-0}" != "1" ]]; then
   mkdir -p "$BACKUP_DIR"
   # 一次性容器读卷：不依赖 api 容器在不在跑（上次部署失败可能把它停在地上）。
   # --no-deps：备份只用 appdata 卷，不该被 DB/Redis 的状态拖住。
-  ws_probe="$(dc run --rm --no-deps -T api sh -c \
+  ws_probe="$(dc_oneshot run --rm --no-deps -T api sh -c \
     'if [ -d /data/workspaces ]; then du -sk /data/workspaces | cut -f1; else echo MISSING; fi' \
     | tr -d '\r' | tail -n1 || true)"
   if [[ "$ws_probe" == "MISSING" ]]; then
@@ -190,7 +193,7 @@ if [[ "$IS_ROLLBACK" -eq 0 && "${SKIP_WORKSPACE_SNAPSHOT:-0}" != "1" ]]; then
     fi
     ws_snapshot="$BACKUP_DIR/pre-deploy-$(date +%Y%m%d-%H%M%S)-$SHORT_SHA-workspaces.tar.gz"
     ws_rc=0
-    dc run --rm --no-deps -T api tar -czf - -C /data workspaces >"$ws_snapshot.partial" || ws_rc=$?
+    dc_oneshot run --rm --no-deps -T api tar -czf - -C /data workspaces >"$ws_snapshot.partial" || ws_rc=$?
     # tar 退 1 = 「读的过程中有文件被改」——api 还在服务，热备份下属常态，不是失败；2+ 才是
     # 真出错。归档到底完不完整不看 tar 的脸色，由下面的 gzip -t 说了算。
     if ((ws_rc == 1)); then
@@ -242,19 +245,19 @@ migrate_step() {
 if [[ "$IS_ROLLBACK" -eq 0 ]]; then
   dc stop api 2>/dev/null || true
   stage "api stopped before migrate"
-  dc run --rm api alembic upgrade head
+  dc_oneshot run --rm api alembic upgrade head
   stage "alembic upgrade head"
-  dc run --rm api python scripts/check_schema_gate.py --live
+  dc_oneshot run --rm api python scripts/check_schema_gate.py --live
   stage "schema gate (live)"
   # 依赖上面回填的 folders.rel_path；必须早于 project docs（它读迁移后的 tree/ 落点）。
   migrate_step "workspace tree relocation" 2 \
-    dc run --rm api python scripts/migrate_workspace_tree.py
+    dc_oneshot run --rm api python scripts/migrate_workspace_tree.py
   stage "workspace tree relocation"
   # Memory migrate + self-lagged contract (sources cleared on the *next* deploy).
-  dc run --rm api python scripts/migrate_memory_pipeline.py
+  dc_oneshot run --rm api python scripts/migrate_memory_pipeline.py
   stage "memory pipeline migrate/contract (lagged)"
   migrate_step "project docs migration" 3 \
-    dc run --rm api python scripts/migrate_project_docs.py
+    dc_oneshot run --rm api python scripts/migrate_project_docs.py
   stage "project docs → memory entries"
 else
   warn "回退：跳过 alembic（如 schema 不一致，从 $BACKUP_DIR 手动恢复对齐）"

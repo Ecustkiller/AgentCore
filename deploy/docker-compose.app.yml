@@ -37,6 +37,9 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
         BUILT_AT: ${BUILT_AT:-unknown}
     restart: unless-stopped
+    # 与 Dockerfile CMD 对齐。sandbox overlay 会换 entrypoint；Compose 此时若
+    # 未显式 command，会把镜像 CMD 清成 null，api 空跑秒退。
+    command: ["python", "-m", "agentcore"]
     logging: *default-logging
     mem_limit: 1024m
     mem_reservation: 256m

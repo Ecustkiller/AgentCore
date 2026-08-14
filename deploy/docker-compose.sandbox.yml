@@ -37,6 +37,8 @@ services:
     volumes:
       - ./api-sandbox-entrypoint.sh:/usr/local/bin/api-sandbox-entrypoint.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/api-sandbox-entrypoint.sh"]
+    # Compose 覆盖 entrypoint 时会丢掉镜像 CMD；不写 command 则容器空跑、秒退、重启循环。
+    command: ["python", "-m", "agentcore"]
     # 沙箱内存记在 api 容器 cgroup 名下：基线 ~1G + 1×浏览器 OCI 2G + 并发 2 ×
     # 单次 512MB 执行 + 余量。覆盖 app compose 的 mem_limit=1024m。
     mem_limit: 4g
