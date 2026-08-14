@@ -100,15 +100,16 @@ async def test_worker_prompt_carries_role_and_task():
 
 
 async def test_worker_identity_states_output_is_user_visible():
-    """The worker's system prompt tells it the product is shown to the user directly
-    (drillable in the UI) and flows back to the CEO — P2, to motivate self-contained,
-    user-ready quality rather than writing only for the CEO."""
+    """Worker identity still tells it prose is self-contained user-facing copy
+    (drillable in the UI) — P2, to motivate user-ready quality rather than
+    writing only for the CEO. The old「直接展示给用户」line moved into the
+    compressed form block as「可独立阅读」/「自包含」."""
     plan, _ = build_run_plan([{"role": "分析师", "task": "拆解需求"}], id_prefix="t")
     provider = _ContentProvider(["X"])
     await WaveScheduler().run(plan, _executor(plan, provider, EventSink()))
     system = provider.system_messages[0]
-    assert "直接展示给用户" in system
     assert "可独立阅读" in system
+    assert "自包含" in system
 
 
 async def test_run_lifecycle_events_emitted():
