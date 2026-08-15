@@ -367,7 +367,8 @@ describe("SidecarManager harvest orphan turn/event", () => {
       "c-attach",
     );
     expect(
-      manager.attach(mockWc() as never, { conversationId: "c-attach" }).attached,
+      manager.attach(mockWc() as never, { conversationId: "c-attach" })
+        .attached,
     ).toBe(false);
   });
 
