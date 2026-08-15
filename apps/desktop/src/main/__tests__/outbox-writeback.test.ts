@@ -46,6 +46,7 @@ import {
   normalizeToolFailureCode,
   outboxDir,
   shouldDeleteOutboxAfterAck,
+  toRecordTurnBody,
   toolFailuresFromJournal,
 } from "../outbox-writeback";
 
@@ -116,7 +117,31 @@ describe("drainOutbox", () => {
     expect(path).toBe("/v1/conversations/c1/local-turns");
     expect(body.user_message_id).toBe("u1");
     expect(body.content).toBe("world");
+    expect(body).not.toHaveProperty("origin");
     expect(status.pending).toEqual([]);
+  });
+
+  it("POSTs harvest provenance on RecordTurnRequest (origin / execution_id / harvest_kind)", async () => {
+    writeReady("u-harvest", {
+      origin: "execution_harvest",
+      execution_id: "exec-h1",
+      harvest_kind: "completed",
+      user_message: "【系统收口】后台团队任务已全部完成。",
+    });
+    h.bearerPostJson.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      body: {
+        user_message_id: "u-harvest",
+        assistant_message_id: "m-h",
+        title: null,
+      },
+    });
+    await drainOutbox();
+    const body = h.bearerPostJson.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(body.origin).toBe("execution_harvest");
+    expect(body.execution_id).toBe("exec-h1");
+    expect(body.harvest_kind).toBe("completed");
   });
 
   it("encodes conversation_id in writeback URL", async () => {
@@ -1063,6 +1088,38 @@ describe("writeback failure classification", () => {
         empty,
       ),
     ).toBe(true);
+  });
+});
+
+describe("toRecordTurnBody", () => {
+  it("forwards harvest origin / execution_id / harvest_kind when present", () => {
+    const body = toRecordTurnBody({
+      user_message_id: "u-h",
+      conversation_id: "c1",
+      user_message: "【系统收口】后台团队任务已全部完成。",
+      content: "综合稿",
+      trace_id: "a".repeat(32),
+      origin: "execution_harvest",
+      execution_id: "exec-h1",
+      harvest_kind: "completed",
+    });
+    expect(body.origin).toBe("execution_harvest");
+    expect(body.execution_id).toBe("exec-h1");
+    expect(body.harvest_kind).toBe("completed");
+    expect(body.user_message_id).toBe("u-h");
+  });
+
+  it("omits provenance on ordinary turns (no free-text guess)", () => {
+    const body = toRecordTurnBody({
+      user_message_id: "u1",
+      conversation_id: "c1",
+      user_message: "hello",
+      content: "world",
+      trace_id: "a".repeat(32),
+    });
+    expect(body).not.toHaveProperty("origin");
+    expect(body).not.toHaveProperty("execution_id");
+    expect(body).not.toHaveProperty("harvest_kind");
   });
 });
 

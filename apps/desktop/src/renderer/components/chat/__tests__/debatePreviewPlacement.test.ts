@@ -1,5 +1,4 @@
 import {
-  isKickoffReleased,
   kickoffReleasedFromPreviews,
   shouldHostPreviewInGraph,
   shouldShowTeamGraph,
@@ -73,22 +72,22 @@ describe("shouldHostPreviewInGraph", () => {
     expect(shouldHostPreviewInGraph(undefined, undefined)).toBe(false);
   });
 
-  it("shares shouldShowTeamGraph with InlineTeamGraph", () => {
+  it("shares teamGraphVisible with InlineTeamGraph (same gate, no dual-write)", () => {
     expect(shouldShowTeamGraph(started)).toBe(true);
     expect(shouldShowTeamGraph(dormant)).toBe(false);
     expect(shouldShowTeamGraph(pendingOnly, true)).toBe(true);
     expect(shouldShowTeamGraph(pendingOnly, false)).toBe(false);
     expect(shouldHostPreviewInGraph(go, pendingOnly)).toBe(
-      shouldShowTeamGraph(pendingOnly, isKickoffReleased(go)),
+      teamGraphVisible(pendingOnly, [go]),
     );
     expect(shouldHostPreviewInGraph(stopped, pendingOnly)).toBe(
-      shouldShowTeamGraph(pendingOnly, isKickoffReleased(stopped)),
+      teamGraphVisible(pendingOnly, [stopped]),
     );
     expect(shouldHostPreviewInGraph(go, pendingOnly, [go, pending])).toBe(
-      shouldShowTeamGraph(
-        pendingOnly,
-        kickoffReleasedFromPreviews([go, pending]),
-      ),
+      teamGraphVisible(pendingOnly, [go, pending]),
+    );
+    expect(shouldHostPreviewInGraph(debateResolved, dormant)).toBe(
+      teamGraphVisible(dormant, [debateResolved]),
     );
   });
 });
@@ -161,6 +160,7 @@ describe("kickoffReleasedFromPreviews", () => {
 describe("teamGraphVisible", () => {
   const go = { status: "resolved" as const, decision: "continue" as const };
   const pending = { status: "pending" as const, decision: null };
+  const stopped = { status: "resolved" as const, decision: "stop" as const };
   const captainRunning = [
     { status: "running" as const, kind: "captain" as const },
     { status: "pending" as const },
@@ -182,5 +182,13 @@ describe("teamGraphVisible", () => {
         [pending],
       ),
     ).toBe(true);
+  });
+
+  it("取消且卡还在 → 不出图", () => {
+    expect(teamGraphVisible(captainRunning, [stopped])).toBe(false);
+  });
+
+  it("回放无卡 + pending 工人 → 出图（避免刷新空窗）", () => {
+    expect(teamGraphVisible(captainRunning, [])).toBe(true);
   });
 });

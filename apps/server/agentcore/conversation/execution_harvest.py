@@ -122,13 +122,26 @@ class HarvestDeferredError(Exception):
         super().__init__(f"harvest deferred: live turn on {conversation_id}")
 
 
+class HarvestNotReadyError(Exception):
+    """Local harvest missing user / root / outbox / sidecar — keep registry, not success."""
+
+    def __init__(self, conversation_id: str, execution_id: str, reason: str) -> None:
+        self.conversation_id = conversation_id
+        self.execution_id = execution_id
+        self.reason = reason
+        super().__init__(f"harvest not ready ({reason}): {conversation_id}")
+
+
 def harvest_closing_kind(session: CoordinationSession) -> HarvestKind:
     """Classify harvest outcome for synthetic user text (success / failure / cancelled)."""
     from agentcore.runtime.coordination.session import CoordinationEventKind
 
     if session.soft_stop:
         return "cancelled"
-    if any(ev.kind is CoordinationEventKind.DRIVE_CANCELLED for ev in session._pending):
+    if any(
+        ev.kind is CoordinationEventKind.DRIVE_CANCELLED
+        for ev in _iter_terminal_events(session)
+    ):
         return "cancelled"
     if session.failed_run_ids:
         return "failure"
@@ -139,15 +152,32 @@ def harvest_closing_kind(session: CoordinationSession) -> HarvestKind:
 
 
 def format_harvest_user_text(session: CoordinationSession) -> str:
-    return _HARVEST_USER_TEXT[harvest_closing_kind(session)]
+    """Synthetic harvest user text; attach draft / 团队成品 when present."""
+    base = _HARVEST_USER_TEXT[harvest_closing_kind(session)]
+    extras: list[str] = []
+    draft = (getattr(session, "draft", None) or "").strip()
+    if draft:
+        extras.append(f"当前合成草稿：\n{draft}")
+    output = _all_completed_terminal_output(session)
+    if output and output != draft:
+        extras.append(f"团队成品：\n{output}")
+    if extras:
+        return base + "\n\n" + "\n\n".join(extras)
+    return base
+
+
+def _iter_terminal_events(session: CoordinationSession) -> list[Any]:
+    pending = list(getattr(session, "_pending", []) or [])
+    stash = list(getattr(session, "_harvest_stash", []) or [])
+    return pending + stash
 
 
 def _all_completed_terminal_output(session: CoordinationSession) -> str:
-    """Pull ``ALL_COMPLETED.output`` (format_for_ceo / partial) from pending events."""
+    """Pull ``ALL_COMPLETED.output`` from pending events and harvest stash."""
     from agentcore.runtime.coordination.session import CoordinationEventKind
 
     chunks: list[str] = []
-    for ev in list(getattr(session, "_pending", []) or []):
+    for ev in _iter_terminal_events(session):
         if getattr(ev, "kind", None) is not CoordinationEventKind.ALL_COMPLETED:
             continue
         out = (getattr(ev, "payload", None) or {}).get("output")
@@ -298,6 +328,366 @@ async def persist_harvest_fallback(
     return content
 
 
+async def _persist_harvest_fallback_local(
+    sidecar: Any,
+    *,
+    conversation_id: str,
+    execution_id: str,
+    user_id: str,
+    session: CoordinationSession,
+    kind: HarvestKind,
+    error_message: str = "",
+    user_message: str,
+    user_message_id: str,
+    message_id: str,
+    trace_id: str,
+) -> None:
+    """No-LLM harvest close via outbox (never MessageRepository / local PG)."""
+    content = build_harvest_fallback_content(
+        session, kind=kind, error_message=error_message
+    )
+    outbox = sidecar._outbox_store
+    if outbox is None:
+        logger.warning(
+            "coordination.harvest_not_ready",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            reason="no_outbox",
+        )
+        raise HarvestNotReadyError(conversation_id, execution_id, "no_outbox")
+    await sidecar._outbox_finalize(
+        outbox,
+        conversation_id=conversation_id,
+        user_message=user_message,
+        user_message_id=user_message_id,
+        trace_id=trace_id,
+        result={
+            "message_id": message_id,
+            "content": content,
+            "journal_entries": [],
+        },
+        origin="execution_harvest",
+        execution_id=execution_id,
+        harvest_kind=kind,
+    )
+    logger.info(
+        "coordination.harvest_fallback_persisted",
+        conversation_id=conversation_id,
+        execution_id=execution_id,
+        harvest_kind=kind,
+        content_chars=len(content),
+        channel_dead=_session_saw_channel_dead(session, content),
+        via="sidecar",
+    )
+    await _notify_harvest_complete(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        execution_id=execution_id,
+        kind=kind,
+    )
+
+
+async def _run_local_harvest_closing_turn(
+    sidecar: Any,
+    *,
+    session: CoordinationSession,
+    conversation_id: str,
+    execution_id: str,
+) -> None:
+    """Sidecar harvest: bind_turn → ``_pump`` → pipeline → OutboxStore.finalize(local).
+
+    Ordinary local harvest always opens a new turn. D5 ``recovered_turn_id``
+    continues the original *cloud* bubble and must not be reused here — this
+    path must not pretend a local pump is that continuation.
+    """
+    import asyncio
+
+    from agentcore.account.credentials import account_credentials_scope
+    from agentcore.core.log_context import log_context, new_trace_id
+    from agentcore.core.types import new_id
+    from agentcore.folders.credentials import folders_credentials_scope
+    from agentcore.runtime.delegate.post_close_gate import (
+        EXECUTION_HARVEST_ORIGIN,
+        bind_user_message_origin,
+        reset_user_message_origin,
+    )
+    from agentcore.sidecar import server as sidecar_server
+    from agentcore.sidecar.server_pkg.turns import _inference_search_creds
+    from agentcore.tools.builtin.web.cloud_fallback import (
+        inference_search_credentials_scope,
+    )
+
+    recovered = (getattr(session, "recovered_turn_id", "") or "").strip()
+    kind = harvest_closing_kind(session)
+    user_text = format_harvest_user_text(session)
+    user_id = str(sidecar._user_id or "").strip()
+    if not user_id:
+        logger.warning(
+            "coordination.harvest_not_ready",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            reason="no_user",
+            via="sidecar",
+        )
+        raise HarvestNotReadyError(conversation_id, execution_id, "no_user")
+    if sidecar._root is None:
+        logger.warning(
+            "coordination.harvest_not_ready",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            reason="no_workspace_root",
+        )
+        raise HarvestNotReadyError(conversation_id, execution_id, "no_workspace_root")
+
+    scope = sidecar.folder_scope_for(conversation_id)
+    folder_id = session.birth_desk_id or (scope.folder_id if scope else None)
+    binding_injected = bool(session.folder_binding_injected) or (
+        scope.binding_injected if scope is not None else False
+    )
+    folder_local_root_id = session.folder_local_root_id
+    if folder_local_root_id is None and scope is not None:
+        folder_local_root_id = scope.local_root_id
+    folder_local_subpath = session.folder_local_subpath or (
+        scope.local_subpath if scope is not None else ""
+    )
+
+    user_message_id = new_id()
+    message_id = new_id()
+    trace_id = new_trace_id()
+    turn_creds = sidecar._creds_for(conversation_id, trace_id, message_id)
+    outbox = sidecar._outbox_store
+    if outbox is None:
+        logger.warning(
+            "coordination.harvest_not_ready",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            reason="no_outbox",
+        )
+        raise HarvestNotReadyError(conversation_id, execution_id, "no_outbox")
+    outbox.bind_turn(
+        conversation_id=conversation_id,
+        user_message_id=user_message_id,
+        user_message=user_text,
+        message_id=message_id,
+        trace_id=trace_id,
+        origin="execution_harvest",
+        execution_id=execution_id,
+        harvest_kind=kind,
+    )
+    await outbox.begin_turn(
+        conversation_id=conversation_id,
+        message_id=message_id,
+        trace_id=trace_id,
+    )
+
+    async def _finalize(result: dict[str, Any]) -> None:
+        if outbox is None:
+            return
+        await sidecar._outbox_finalize(
+            outbox,
+            conversation_id=conversation_id,
+            user_message=user_text,
+            user_message_id=user_message_id,
+            trace_id=trace_id,
+            result=result,
+            origin="execution_harvest",
+            execution_id=execution_id,
+            harvest_kind=kind,
+        )
+
+    if turn_creds is None or getattr(session, "workspace_channel_dead", False):
+        err = "" if turn_creds is not None else "系统收口需要可用的模型凭证。"
+        if getattr(session, "workspace_channel_dead", False):
+            logger.warning(
+                "coordination.harvest_channel_dead_skip_llm",
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                via="sidecar",
+            )
+            err = CHANNEL_DEAD_PREPARE_ABORT
+        else:
+            logger.warning(
+                "coordination.harvest_credentials_unavailable",
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                via="sidecar",
+            )
+        with contextlib.suppress(Exception):
+            await _persist_harvest_fallback_local(
+                sidecar,
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                user_id=user_id,
+                session=session,
+                kind=kind,
+                error_message=err,
+                user_message=user_text,
+                user_message_id=user_message_id,
+                message_id=message_id,
+                trace_id=trace_id,
+            )
+        if outbox is not None:
+            outbox.clear_turn(message_id)
+        logger.info(
+            "coordination.harvest_closing_turn_done",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            harvest_kind=kind,
+            ignored_recovered_turn_id=recovered,
+            via="sidecar",
+        )
+        return
+
+    sink = EventSink()
+    if outbox is not None:
+        sink.bind_content_checkpoint(
+            conversation_id=conversation_id,
+            message_id=message_id,
+        )
+    backend = sidecar._make_backend()
+    saver, deleter = sidecar._suspension_hooks()
+    session_saver, session_loader = sidecar._session_hooks(conversation_id)
+
+    async def _run() -> None:
+        from agentcore.runtime.coordination.session import adopt_active_execution
+
+        adopt_active_execution(
+            conversation_id, event_sink=sink, reopen_harvest=True
+        )
+        origin_token = bind_user_message_origin(EXECUTION_HARVEST_ORIGIN)
+        result: dict[str, Any] | None = None
+        pump = asyncio.create_task(
+            sidecar._pump(message_id, sink, conversation_id=conversation_id)
+        )
+        try:
+            try:
+                with (
+                    log_context(
+                        trace_id=trace_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        message_id=message_id,
+                    ),
+                    inference_search_credentials_scope(
+                        _inference_search_creds(turn_creds)
+                    ),
+                    folders_credentials_scope(sidecar._folders_creds),
+                    account_credentials_scope(sidecar._account_creds),
+                ):
+                    result = await sidecar_server.run_chat_pipeline(
+                        conversation_id=conversation_id,
+                        user_message=user_text,
+                        history=sidecar.history_for(conversation_id),
+                        sink=sink,
+                        user_id=user_id,
+                        backend=backend,
+                        folder_id=folder_id,
+                        folder_binding_injected=binding_injected,
+                        folder_local_root_id=folder_local_root_id,
+                        folder_local_subpath=folder_local_subpath,
+                        approvals_enabled=sidecar._approvals_enabled,
+                        permission_axes=sidecar.permission_axes_for(
+                            conversation_id
+                        ),
+                        llm_credentials=turn_creds,
+                        session_saver=session_saver,
+                        session_loader=session_loader,
+                        suspension_saver=saver,
+                        suspension_deleter=deleter,
+                        message_id=message_id,
+                        x_client_platform="desktop",
+                    )
+            except Exception as e:
+                if not _exc_is_channel_dead(e):
+                    raise
+                session.workspace_channel_dead = True
+                logger.warning(
+                    "coordination.harvest_channel_dead_after_turn",
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    error=str(e),
+                    via="sidecar_exception",
+                )
+                with contextlib.suppress(Exception):
+                    await _persist_harvest_fallback_local(
+                        sidecar,
+                        conversation_id=conversation_id,
+                        execution_id=execution_id,
+                        user_id=user_id,
+                        session=session,
+                        kind=kind,
+                        error_message=str(e) or CHANNEL_DEAD_PREPARE_ABORT,
+                        user_message=user_text,
+                        user_message_id=user_message_id,
+                        message_id=message_id,
+                        trace_id=trace_id,
+                    )
+                return
+            if _result_is_channel_dead_abort(result):
+                session.workspace_channel_dead = True
+                err_text = ""
+                raw_err = result.get("error") if isinstance(result, dict) else None
+                if isinstance(raw_err, dict):
+                    err_text = str(raw_err.get("message") or raw_err.get("detail") or "")
+                elif raw_err is not None:
+                    err_text = str(raw_err)
+                logger.warning(
+                    "coordination.harvest_channel_dead_after_turn",
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                    error=err_text or CHANNEL_DEAD_PREPARE_ABORT,
+                    via="sidecar_salvaged_result",
+                )
+                with contextlib.suppress(Exception):
+                    await _persist_harvest_fallback_local(
+                        sidecar,
+                        conversation_id=conversation_id,
+                        execution_id=execution_id,
+                        user_id=user_id,
+                        session=session,
+                        kind=kind,
+                        error_message=err_text or CHANNEL_DEAD_PREPARE_ABORT,
+                        user_message=user_text,
+                        user_message_id=user_message_id,
+                        message_id=message_id,
+                        trace_id=trace_id,
+                    )
+                return
+            await _finalize(result or {"message_id": message_id, "content": ""})
+            await _notify_harvest_complete(
+                user_id=user_id,
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                kind=kind,
+            )
+        finally:
+            reset_user_message_origin(origin_token)
+            sink.close(reason="sidecar_harvest_finally")
+            with contextlib.suppress(Exception):
+                await pump
+            if outbox is not None:
+                outbox.clear_turn(message_id)
+
+    task = asyncio.create_task(
+        _run(),
+        name=f"harvest-close-{execution_id[:8]}",
+    )
+    sidecar._register_turn(message_id, task, conversation_id=conversation_id)
+    try:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+    finally:
+        sidecar._unregister_turn(message_id)
+    logger.info(
+        "coordination.harvest_closing_turn_done",
+        conversation_id=conversation_id,
+        execution_id=execution_id,
+        harvest_kind=kind,
+        ignored_recovered_turn_id=recovered,
+        via="sidecar",
+    )
+
+
 async def run_harvest_closing_turn(
     *,
     conversation_id: str,
@@ -309,6 +699,10 @@ async def run_harvest_closing_turn(
     reply). A crash-redriven drive (``session.recovered_turn_id``) instead CONTINUES
     the interrupted turn: no synthetic user row, and the synthesis is written back
     onto that assistant message under its own journal.
+
+    Sidecar (``get_active_sidecar()``) never opens local PG: bind_turn → pipeline →
+    ``OutboxStore.finalize(local)``. D5 ``recovered_turn_id`` is cloud-only and is
+    ignored on the local path.
 
     Raises:
         HarvestDeferredError: another turn owns the conversation slot — do **not**
@@ -345,8 +739,37 @@ async def run_harvest_closing_turn(
         )
         raise HarvestDeferredError(conversation_id, execution_id)
 
+    from agentcore.sidecar.server_pkg.core import get_active_sidecar, is_sidecar_process
+
+    sidecar = get_active_sidecar()
+    if sidecar is not None:
+        live = sidecar.live_turn_task(conversation_id)
+        if live is not None and not live.done():
+            logger.info(
+                "coordination.harvest_deferred_live_turn",
+                conversation_id=conversation_id,
+                execution_id=execution_id,
+                via="sidecar",
+            )
+            raise HarvestDeferredError(conversation_id, execution_id)
+        await _run_local_harvest_closing_turn(
+            sidecar,
+            session=session,
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+        )
+        return
+    if is_sidecar_process():
+        logger.warning(
+            "coordination.harvest_not_ready",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            reason="sidecar_unavailable",
+        )
+        raise HarvestNotReadyError(conversation_id, execution_id, "sidecar_unavailable")
+
     kind = harvest_closing_kind(session)
-    user_text = _HARVEST_USER_TEXT[kind]
+    user_text = format_harvest_user_text(session)
     # 崩溃重驱恢复归属原回合 (D5)：这次收口是那条消息的续写，不是新回合。
     recovered_turn_id = (getattr(session, "recovered_turn_id", "") or "").strip()
 
@@ -477,7 +900,9 @@ async def run_harvest_closing_turn(
         )
 
         # Adopt before pipeline so CEO wait binds the live execution_id.
-        adopt_active_execution(conversation_id, event_sink=sink)
+        adopt_active_execution(
+            conversation_id, event_sink=sink, reopen_harvest=True
+        )
         origin_token = bind_user_message_origin(EXECUTION_HARVEST_ORIGIN)
         try:
             try:

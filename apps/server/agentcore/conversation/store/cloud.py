@@ -731,8 +731,14 @@ class CloudStore:
         trace_id: str,
         finish_reason: str | None = None,
         llm_credentials: LLMCredentials | None = None,
+        origin: str | None = None,
+        execution_id: str | None = None,
+        harvest_kind: str | None = None,
     ) -> dict[str, Any]:
         """Local write-back via finalize(mode=local): content + status + journal."""
+        origin = (origin or "").strip() or None
+        execution_id = (execution_id or "").strip() or None
+        harvest_kind = (harvest_kind or "").strip() or None
         finish_value = finish_reason
         is_paused = finish_value == FinishReason.PAUSED.value
         is_incomplete = finish_value == FinishReason.CANCELLED.value
@@ -787,12 +793,20 @@ class CloudStore:
                 )
             else:
                 try:
+                    user_usage: dict[str, Any] = {}
+                    if origin:
+                        user_usage["origin"] = origin
+                    if execution_id:
+                        user_usage["execution_id"] = execution_id
+                    if harvest_kind:
+                        user_usage["harvest_kind"] = harvest_kind
                     async with async_session_factory() as session:
                         user_msg = await MessageRepository(session).create(
                             conversation_id=conversation_id,
                             role="user",
                             content=user_message,
                             message_id=user_message_id,
+                            metadata=user_usage or None,
                         )
                         user_msg_id = user_msg.id
                 except IntegrityError:
@@ -987,7 +1001,8 @@ class CloudStore:
             existing_title = conv.title if conv else None
 
         # Synthetic / empty um has no real user intent — never mint title from it.
-        if synthetic_user:
+        # Harvest user text is real-looking but system-authored; skip title from it.
+        if synthetic_user or origin == "execution_harvest":
             needs_title = False
 
         # Parallel auto-title (desktop REST) may already be minting — skip write-back

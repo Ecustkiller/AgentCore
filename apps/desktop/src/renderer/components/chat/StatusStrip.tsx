@@ -1,9 +1,14 @@
 import {
   isTeamSynthesizing,
   workerProgress,
+  workersAreTerminal,
 } from "@/components/chat/teamSynthesisPhase";
 import { failureDetailSentence } from "@/components/graph/agentNode/shared";
-import { hasActiveRunningWorkers } from "@/components/graph/helpers";
+import {
+  deriveCaptainStatus,
+  hasActiveRunningWorkers,
+  resolveCaptainSinkId,
+} from "@/components/graph/helpers";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
@@ -57,6 +62,15 @@ function hasActiveRunningRuns(execution: Execution): boolean {
   return hasActiveRunningWorkers(execution.runs);
 }
 
+/** 工人未齐或汇聚点非 completed 时不得画「完成」（与 deriveCaptainStatus 一致）. */
+function canPaintTeamCompleted(execution: Execution): boolean {
+  const captainId = resolveCaptainSinkId(execution.runs);
+  if (captainId) {
+    return deriveCaptainStatus(execution, captainId) === "completed";
+  }
+  return workersAreTerminal(execution);
+}
+
 /**
  * Thin toolbar above the collaboration graph (前端UX设计.md §三 / 协作图 UX §三).
  * Lifecycle icon + n/m + completed duration/cost + fold / canvas / replay.
@@ -70,6 +84,9 @@ function hasActiveRunningRuns(execution: Execution): boolean {
 export function StatusStrip(props: StatusStripProps) {
   switch (props.execution.status) {
     case "completed":
+      if (!canPaintTeamCompleted(props.execution)) {
+        return <RunningOrBackgroundStrip {...props} />;
+      }
       return <CompletedStrip {...props} />;
     case "cancelled":
       return <CompletedStrip {...props} stopped />;

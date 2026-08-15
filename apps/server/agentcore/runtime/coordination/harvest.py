@@ -8,7 +8,8 @@ harvester:
 3. Notifies the user (best-effort push).
 
 If a concurrent user turn has already re-attached (``turn_attached=True``), the
-harvester no-ops — that turn's CEO will consume ``ALL_COMPLETED``.
+harvester no-ops — that turn's CEO will consume ``ALL_COMPLETED``. Same-turn
+``wait`` inject alone does **not** skip harvest (inject ≠ user-visible close).
 
 If the conversation slot is busy, the harvester **defers** (keeps the registry)
 and retries — never treats deferral as success then ``_close_detached_session``.
@@ -69,6 +70,7 @@ async def harvest_detached_execution(session: CoordinationSession) -> None:
 
     from agentcore.conversation.execution_harvest import (
         HarvestDeferredError,
+        HarvestNotReadyError,
         run_harvest_closing_turn,
     )
     from agentcore.runtime.coordination.session import _sessions
@@ -102,6 +104,14 @@ async def harvest_detached_execution(session: CoordinationSession) -> None:
             )
             await _wait_slot_or_backoff(conversation_id)
             continue
+        except HarvestNotReadyError as e:
+            logger.error(
+                "coordination.harvest_not_ready",
+                execution_id=session.execution_id,
+                conversation_id=conversation_id,
+                reason=e.reason,
+            )
+            return
         except Exception:  # noqa: BLE001 — retry; do not silently unregister
             logger.exception(
                 "coordination.harvest_closing_turn_failed",
@@ -142,6 +152,15 @@ async def _wait_slot_or_backoff(conversation_id: str) -> None:
         with contextlib.suppress(Exception, asyncio.CancelledError):
             await asyncio.wait_for(asyncio.shield(existing.task), timeout=30.0)
         return
+    from agentcore.sidecar.server_pkg.core import get_active_sidecar
+
+    sidecar = get_active_sidecar()
+    if sidecar is not None:
+        live = sidecar.live_turn_task(conversation_id)
+        if live is not None and not live.done():
+            with contextlib.suppress(Exception, asyncio.CancelledError):
+                await asyncio.wait_for(asyncio.shield(live), timeout=30.0)
+            return
     await asyncio.sleep(_HARVEST_RETRY_DELAY_S)
 
 

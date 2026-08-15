@@ -402,8 +402,9 @@ def _coordination_start_echo(
         "user_interjection / all_completed）。完成进度与各队员完成摘要由系统自动展示给用户；"
         "仅当形成新的中间结论、发现各路产出冲突或需要方向修正时用 update_synthesis 更新合成草稿，"
         "勿为播报进度而更新；无需处置时调 wait（或空响应，系统已豁免）——"
+        "派完若结束本回合：可见正文只留一句短的「人已派出」，禁止「还在等/你不用管」当终稿；"
         "图在转、无新结论时【可静默】，禁止用用户可见正文复述「谁还在跑/仍在检索」"
-        "（协作图才是进度真相）；对用户开口仅三选一：请示用户 / 报告阻塞与选项 / "
+        "（协作图才是进度真相）；此后对用户开口仅三选一：请示用户 / 报告阻塞与选项 / "
         "宣布阶段结论（非纯进度）；勿写「静默等待中」类空旁白（会原样显示且无收尾）；"
         "也勿用 delegate 占位等待（同构再派会被拒绝）；"
         "老板中途插话：【先】用可见正文响应该句（哪怕极短「收到，仍按原计划」），"
@@ -749,6 +750,7 @@ def _merge_into_active_coordination(
             f"图共 {session.total_workers} 名，其中 {completed_k} 名已完成。"
             "仍属同一协作图 / 同一协调会话。\n"
             "队员正在后台报到；完成态由图事件异步呈现，勿宣称全员已就位。"
+            "本回合若结束：可见正文只留一句短的「人已派出」；禁止「还在等/你不用管」当终稿。"
             "取消请求与仲裁态保留；你将继续收到团队事件，全部完成后做最终合成。"
         )
     return annotate_batch_meta(
@@ -911,6 +913,12 @@ def try_start_coordination(
         if session.host_journal_writer is None:
             _bind_session_host_journal(session)
         set_active_coordination(session)
+
+    from agentcore.sidecar.server_pkg.core import get_active_sidecar
+
+    sidecar = get_active_sidecar()
+    if sidecar is not None:
+        sidecar.apply_folder_scope(session)
 
     # C3: first arm declares ownership after admission; resume keeps snapshot ledger.
     if file_ownership_v2_enabled() and fresh_session:

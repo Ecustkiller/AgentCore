@@ -30,6 +30,7 @@ export {
   fillFromCaptainStreamSegments,
   recordHasProcessState,
   shouldDeleteOutboxAfterAck,
+  toRecordTurnBody,
   drainOutbox,
   statusSnapshot,
   listUnsyncedSummaries,

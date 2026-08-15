@@ -51,3 +51,4 @@ Dogfood：出包后仓库根 `python evals/dogfood/fill_from_pack.py --pack <dir
 - **本地空、ID 像线上** → 先 sync / `--export-dir`，勿在空库硬猜
 - **横幅 `turn already running`** → 本机互斥拒（仅 `startTurn`；冷 resume 撞槽改走 deferred），**不进**云端 sync；查安装机 `userData/logs/desktop.jsonl` 事件 `sidecar.turn_already_running` / `resume.deferred`（见分析指南）
 - **ID 已齐**（cid / trace / 已贴排查包）→ 主 Agent **直接**跑 `log_timeline --json` 或 `--pack`
+- 用户面「本机暂时跑不了命令：最短的一句命令 5 秒内都没跑完」→ `exec_env_probe_timeout`（`sandbox.exec_env_probe_failed` / `coordination.exec_env_dead_user_notice`）。是 host `content_delta`，落库正文常没有。jsonl 遇 `cost.ledger_drain_failed` 洪水会把开场事件轮转掉；查 `--export-dir` + 同会话后半夜 `chat.local_turn_tool_failures`。个案 2026-08-14 cid `bceeaa74-46d4-45b0-bfbe-8d7e533bf0e1` / trace `562127ee4d5b46259b05844aa23bcd7d`（user `fa260d12-…`）

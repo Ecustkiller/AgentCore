@@ -72,6 +72,7 @@ def _patch_persistence(
             events.append(("msg", role, kw.get("conversation_id")))
             events.append(("msg_id", role, kw.get("message_id")))
             events.append(("trace", role, kw.get("trace_id")))
+            events.append(("user_usage", role, kw.get("metadata")))
             return SimpleNamespace(id=f"{role}-id")
 
         async def upsert_assistant(self, **kw):
@@ -842,3 +843,59 @@ async def test_record_local_turn_placeholder_still_reuses_paired_user(monkeypatc
     assert not any(e[0] == "msg" for e in events)
     assert ("upsert", "assistant", "c1") in events
     assert result["user_message_id"] == _USER_MSG_ID
+
+
+async def test_record_local_turn_writes_harvest_origin_on_user_usage(monkeypatch):
+    """local-turns stamps synthetic harvest user ``usage.origin`` and skips title mint."""
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title=None)
+
+    result = await record_local_turn(
+        conversation_id="c-harvest",
+        user_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        assistant_content="终稿。",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-harvest",
+        input_tokens=1,
+        output_tokens=2,
+        rounds=1,
+        trace_id=_TRACE,
+        origin="execution_harvest",
+        execution_id="exec-1",
+        harvest_kind="success",
+    )
+
+    usage = next(e for e in events if e[0] == "user_usage" and e[1] == "user")
+    assert usage[2]["origin"] == "execution_harvest"
+    assert usage[2]["execution_id"] == "exec-1"
+    assert usage[2]["harvest_kind"] == "success"
+    assert not any(e[0] == "title_mint" for e in events)
+    assert result["assistant_message_id"] == "assistant-id"
+
+
+async def test_record_local_turn_strips_harvest_origin_for_title_skip(monkeypatch):
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title=None)
+
+    await record_local_turn(
+        conversation_id="c-harvest-ws",
+        user_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        assistant_content="终稿。",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-harvest-ws",
+        input_tokens=1,
+        output_tokens=2,
+        rounds=1,
+        trace_id=_TRACE,
+        origin="  execution_harvest  ",
+        execution_id="  exec-1  ",
+        harvest_kind="  success  ",
+    )
+
+    usage = next(e for e in events if e[0] == "user_usage" and e[1] == "user")
+    assert usage[2]["origin"] == "execution_harvest"
+    assert usage[2]["execution_id"] == "exec-1"
+    assert usage[2]["harvest_kind"] == "success"
+    assert not any(e[0] == "title_mint" for e in events)

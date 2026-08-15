@@ -30,6 +30,22 @@ from agentcore.workspace.server import ServerWorkspace
 
 logger = get_logger(__name__)
 
+_active_sidecar: SidecarServer | None = None
+# True after this process installed a sidecar. Shutdown may clear the pointer
+# while harvest still needs to know "do not fall into local PG".
+_sidecar_process: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class SidecarFolderScope:
+    """startTurn / resume folder bind, readable by harvest without opening local PG."""
+
+    folder_id: str | None
+    binding_injected: bool
+    local_root_id: str | None
+    local_subpath: str
+
+
 ResumeBusyReason = Literal["wrap_up", "live_turn"]
 
 
@@ -64,10 +80,10 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # Account narrow-ticket creds for conversation-log tools; refreshed per turn.
         self._account_creds: AccountCredentials | None = None
         self._approvals_enabled = True
-        # Conversation permission axes. Axes are still client-pushed (desktop sends
-        # ``permissionAxes`` on initialize and refreshes per turn). Turn ``folderId``
-        # prefers RPC params; DB load is only the old-desktop fallback.
+        # Initialize-seeded default. Per-turn refresh writes ``_permission_axes_by_conv``
+        # so harvest reads this conversation, not the process-level last write.
         self._permission_axes: PermissionAxes = DEFAULT_PERMISSION_AXES
+        self._permission_axes_by_conv: dict[str, PermissionAxes] = {}
         # The local durable-pause store (§8.6 paused-turn port, local impl), set from
         # ``initialize``'s ``dataDir``. ``None`` ⇒ no data dir ⇒ pauses stay in-memory.
         self._paused_store: LocalPausedTurnStore | None = None
@@ -77,6 +93,11 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         # Progressive outbox (as-built: 双模式工作区 §10.3): sibling of paused under dataDir.
         # ``None`` ⇒ no data dir ⇒ no local outbox (dev without durable write-back).
         self._outbox_store: OutboxStore | None = None
+        # startTurn / resume folder bind, keyed by conversation_id (harvest reads
+        # this instead of ``resolve_local_binding(db)``).
+        self._folder_scope: dict[str, SidecarFolderScope] = {}
+        # Recent chat history from startTurn / resume, same lifetime as folder_scope.
+        self._turn_history: dict[str, list[Any]] = {}
         # turn_id → running task, so ``cancel`` can reach an in-flight turn. A resume
         # registers under its message_id, so a cancel during resume reaches it too.
         self._turns: dict[str, asyncio.Task[None]] = {}
@@ -110,6 +131,108 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         self._turn_conversations.pop(turn_id, None)
         if cid:
             self._wake_resume_deferred_if_idle(cid)
+
+    def live_turn_task(self, conversation_id: str) -> asyncio.Task[None] | None:
+        """Live ``_turns`` task holding ``conversation_id``, if any."""
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return None
+        for tid, task in self._turns.items():
+            if task.done():
+                continue
+            if self._turn_conversations.get(tid) == cid:
+                return task
+        return None
+
+    def folder_scope_for(self, conversation_id: str) -> SidecarFolderScope | None:
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return None
+        return self._folder_scope.get(cid)
+
+    def apply_folder_scope(self, session: Any) -> None:
+        """Copy stamped folder bind onto a live ``CoordinationSession``."""
+        scope = self.folder_scope_for(getattr(session, "conversation_id", "") or "")
+        if scope is None:
+            return
+        if not getattr(session, "birth_desk_id", None) and scope.folder_id:
+            session.birth_desk_id = scope.folder_id
+        session.folder_binding_injected = scope.binding_injected
+        session.folder_local_root_id = scope.local_root_id
+        session.folder_local_subpath = scope.local_subpath
+
+    def stamp_folder_scope(
+        self,
+        conversation_id: str,
+        *,
+        folder_id: str | None,
+        binding_injected: bool,
+        local_root_id: str | None,
+        local_subpath: str,
+    ) -> SidecarFolderScope | None:
+        """Remember startTurn / resume folder bind for harvest (no local PG).
+
+        Returns the previous scope so resume veto can roll it back.
+        """
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return None
+        previous = self._folder_scope.get(cid)
+        self._folder_scope[cid] = SidecarFolderScope(
+            folder_id=folder_id,
+            binding_injected=binding_injected,
+            local_root_id=local_root_id,
+            local_subpath=local_subpath or "",
+        )
+        from agentcore.runtime.coordination.session import (
+            active_coordination_for_conversation,
+        )
+
+        session = active_coordination_for_conversation(cid)
+        if session is not None:
+            self.apply_folder_scope(session)
+        return previous
+
+    def restore_folder_scope(
+        self, conversation_id: str, previous: SidecarFolderScope | None
+    ) -> None:
+        """Undo :meth:`stamp_folder_scope` (resume veto)."""
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return
+        if previous is None:
+            self._folder_scope.pop(cid, None)
+            return
+        self._folder_scope[cid] = previous
+        from agentcore.runtime.coordination.session import (
+            active_coordination_for_conversation,
+        )
+
+        session = active_coordination_for_conversation(cid)
+        if session is not None:
+            self.apply_folder_scope(session)
+
+    def stamp_turn_history(self, conversation_id: str, history: Any) -> None:
+        """Remember startTurn / resume history for harvest (same lifetime as folder)."""
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return
+        self._turn_history[cid] = list(history) if isinstance(history, list) else []
+
+    def history_for(self, conversation_id: str) -> list[Any]:
+        cid = (conversation_id or "").strip()
+        if not cid:
+            return []
+        return list(self._turn_history.get(cid) or [])
+
+    def permission_axes_for(self, conversation_id: str) -> PermissionAxes:
+        """Per-conversation axes, else the initialize default (never another conv's last)."""
+        cid = (conversation_id or "").strip()
+        if cid:
+            bag = self._permission_axes_by_conv.get(cid)
+            if bag is not None:
+                return bag
+        return self._permission_axes
 
     def busy_reason_for_resume(
         self, conversation_id: str, message_id: str
@@ -218,6 +341,8 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
     async def _dispatch(self, request_id: Any, method: str, params: dict[str, Any]) -> None:
         if method == "initialize":
             await self._on_initialize(request_id, params)
+            if self._initialized:
+                set_active_sidecar(self)
         elif method == "startTurn":
             await self._on_start_turn(request_id, params)
         elif method == "respond":
@@ -255,6 +380,14 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
 
             uninstall_recorder()
             self._close_fulfiller()
+            live = any(not t.done() for t in self._turns.values())
+            if get_active_sidecar() is self and not live:
+                set_active_sidecar(None)
+            elif live:
+                logger.info(
+                    "sidecar.shutdown_kept_active",
+                    live_turns=sum(1 for t in self._turns.values() if not t.done()),
+                )
             self.shutdown_requested.set()
             await self._reply(request_id, {"ok": True})
         else:
@@ -463,3 +596,28 @@ class SidecarServer(HandlerMixin, TurnExecutionMixin):
         """Send a success response, unless the message was a notification (no id)."""
         if request_id is not None:
             await self._send(protocol.make_result(request_id, result))
+
+
+def get_active_sidecar() -> SidecarServer | None:
+    """Process-wide sidecar (harvest / host read folder scope + ``_creds_for``)."""
+    return _active_sidecar
+
+
+def set_active_sidecar(server: SidecarServer | None) -> None:
+    """Install or clear the process-wide sidecar (initialize / shutdown / tests)."""
+    global _active_sidecar, _sidecar_process
+    _active_sidecar = server
+    if server is not None:
+        _sidecar_process = True
+
+
+def is_sidecar_process() -> bool:
+    """True when this process installed a sidecar (pointer may already be cleared)."""
+    return _sidecar_process
+
+
+def reset_active_sidecar_for_tests() -> None:
+    """Drop the process-wide sidecar so later tests do not inherit a live instance."""
+    global _active_sidecar, _sidecar_process
+    _active_sidecar = None
+    _sidecar_process = False

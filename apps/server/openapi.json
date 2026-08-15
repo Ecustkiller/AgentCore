@@ -11377,6 +11377,18 @@
             "title": "Evidence Ledger",
             "type": "array"
           },
+          "execution_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Id"
+          },
           "finish_reason": {
             "anyOf": [
               {
@@ -11388,6 +11400,18 @@
               }
             ],
             "title": "Finish Reason"
+          },
+          "harvest_kind": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Harvest Kind"
           },
           "input_tokens": {
             "default": 0,
@@ -11421,6 +11445,18 @@
               }
             ],
             "title": "Message Id"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin"
           },
           "output_tokens": {
             "default": 0,

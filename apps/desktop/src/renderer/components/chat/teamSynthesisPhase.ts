@@ -4,6 +4,17 @@ import type {
   TeamSynthesisPreviewPayload,
 } from "@/types/events";
 
+/**
+ * Same membership as {@link deriveCaptainStatus}'s WORKER_TERMINAL.
+ * Do not count only `completed` — failed / cancelled / skipped are done too.
+ */
+const WORKER_TERMINAL = new Set<string>([
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+]);
+
 /** Worker runs only (CEO captain sink is not a delegate progress unit). */
 export function workerProgress(execution: Execution): {
   completed: number;
@@ -14,6 +25,13 @@ export function workerProgress(execution: Execution): {
     completed: workers.filter((r) => r.status === "completed").length,
     total: workers.length,
   };
+}
+
+/** True when every non-captain run is in WORKER_TERMINAL (vacant roster = true). */
+export function workersAreTerminal(execution: Execution): boolean {
+  return execution.runs
+    .filter((r) => r.kind !== "captain")
+    .every((r) => WORKER_TERMINAL.has(r.status));
 }
 
 /** Roles still outstanding while CEO is in ``coordination_wait``. */
@@ -101,12 +119,11 @@ export function coordinationWaitCaptainCaption(
 }
 
 /**
- * All workers finished while the turn is still running — CEO synthesis /
- * proposal_pick gap. Matches {@link deriveCaptainStatus}'s "running" sink.
+ * All workers finished while execution is still running — CEO synthesis /
+ * harvest closing gap. Matches {@link deriveCaptainStatus}'s "running" sink.
  *
- * ``turnTerminal``: message_end already closed the chat turn (turnPhase
- * completed/stopped/failed) while execution.status may still be stuck
- * ``running`` — never show the synthesis spinner after the turn is over.
+ * ``turnTerminal`` is ignored: CEO may have ``end_turn``'d while the team
+ * (or harvest) is still live. Hiding the spinner here painted a false「已汇总」.
  *
  * ``paused``: cold ask / plan_review hang — workers may be 2/2, but CEO is
  * waiting on the user (same invariant as deriveCaptainStatus).
@@ -115,11 +132,11 @@ export function isTeamSynthesizing(
   execution: Execution,
   opts?: { turnTerminal?: boolean },
 ): boolean {
-  if (opts?.turnTerminal) return false;
+  void opts?.turnTerminal;
   if (execution.status === "paused") return false;
   if (execution.status !== "running") return false;
-  const { completed, total } = workerProgress(execution);
-  return total > 0 && completed >= total;
+  const { total } = workerProgress(execution);
+  return total > 0 && workersAreTerminal(execution);
 }
 
 /** Deterministic strip / indicator copy for the synthesis empty window. */

@@ -837,5 +837,8 @@ async def record_local_turn_endpoint(
         trace_id=body.trace_id,
         finish_reason=body.finish_reason,
         llm_credentials=credentials,
+        origin=body.origin,
+        execution_id=body.execution_id,
+        harvest_kind=body.harvest_kind,
     )
     return RecordTurnResponse(**result)

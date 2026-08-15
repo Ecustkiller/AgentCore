@@ -14,6 +14,7 @@ Two layers, both zero-LLM (a scripted provider stands in for DeepSeek, mirroring
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 
@@ -270,6 +271,11 @@ def test_sidecar_runs_a_turn_on_the_local_dir(tmp_path, monkeypatch):
     assert "tool_use_start" in types
     assert "content_delta" in types
     assert "message_end" in types
+    for note in sent:
+        if note.get("method") != "turn/event":
+            continue
+        assert note["params"]["conversationId"] == "c1"
+        assert note["params"]["turnId"] == "t1"
 
     tool_start = next(e for e in events if e["type"] == "tool_use_start")
     assert tool_start["payload"]["tool_name"] == "file_list"
@@ -1235,3 +1241,105 @@ def test_start_turn_result_reports_cloud_proxy_model(tmp_path, monkeypatch):
 
     done = _response(sent, 2)
     assert done["result"]["model"] == "deepseek-v4-flash"
+
+
+def test_start_turn_rejects_conversation_slot_busy(tmp_path, monkeypatch):
+    """Same conversation, different turnId: startTurn refuses while a live turn holds the slot."""
+
+    async def _hang(**kwargs: Any) -> dict[str, Any]:
+        await asyncio.Event().wait()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", _hang)
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "inference": _FAKE_INFERENCE,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t-live",
+                        "conversationId": "c1",
+                        "userMessage": "first",
+                    },
+                }
+            )
+        )
+        await asyncio.sleep(0)
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t-second",
+                        "conversationId": "c1",
+                        "userMessage": "second",
+                    },
+                }
+            )
+        )
+        err = _response(sent, 3)
+        assert "error" in err
+        assert err["error"]["code"] == protocol.INVALID_PARAMS
+        assert "turn already running" in err["error"]["message"]
+        for task in list(server._turns.values()):
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    asyncio.run(drive())
+
+
+def test_shutdown_keeps_active_sidecar_while_turns_live(tmp_path):
+    from agentcore.sidecar.server_pkg.core import (
+        get_active_sidecar,
+        reset_active_sidecar_for_tests,
+        set_active_sidecar,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    server._initialized = True
+    set_active_sidecar(server)
+    live: asyncio.Task[None] | None = None
+
+    async def _hang() -> None:
+        await asyncio.Event().wait()
+
+    async def drive() -> None:
+        nonlocal live
+        live = asyncio.create_task(_hang())
+        server._register_turn("t-live", live, conversation_id="c1")
+        await server.handle_line(
+            json.dumps({"jsonrpc": "2.0", "id": 9, "method": "shutdown", "params": {}})
+        )
+        assert get_active_sidecar() is server
+        assert _response(sent, 9)["result"]["ok"] is True
+        live.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await live
+
+    try:
+        asyncio.run(drive())
+    finally:
+        reset_active_sidecar_for_tests()

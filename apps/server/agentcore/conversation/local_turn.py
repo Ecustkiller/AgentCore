@@ -34,6 +34,9 @@ async def record_local_turn(
     trace_id: str,
     finish_reason: str | None = None,
     llm_credentials: LLMCredentials | None = None,
+    origin: str | None = None,
+    execution_id: str | None = None,
+    harvest_kind: str | None = None,
 ) -> dict:
     """Persist a turn that ran on the user's machine via the sidecar.
 
@@ -77,6 +80,9 @@ async def record_local_turn(
             trace_id=trace_id,
             finish_reason=finish_reason,
             llm_credentials=llm_credentials,
+            origin=origin,
+            execution_id=execution_id,
+            harvest_kind=harvest_kind,
         )
         assert result is not None
         return result

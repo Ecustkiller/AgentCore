@@ -118,12 +118,23 @@ describe("teamSynthesisPhase", () => {
     expect(isTeamSynthesizing(e)).toBe(false);
   });
 
-  it("not synthesizing when turnPhase is already terminal but status stuck running", () => {
+  it("still synthesizing after CEO turn ended while harvest is live", () => {
     const e = exec({
       status: "running",
       runs: [
         run({ id: "w1", status: "completed" }),
         run({ id: "w2", status: "completed" }),
+      ],
+    });
+    expect(isTeamSynthesizing(e, { turnTerminal: true })).toBe(true);
+  });
+
+  it("not synthesizing when CEO turn ended but a worker is still live", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "running" }),
       ],
     });
     expect(isTeamSynthesizing(e, { turnTerminal: true })).toBe(false);
@@ -138,6 +149,19 @@ describe("teamSynthesisPhase", () => {
       ],
     });
     expect(isTeamSynthesizing(e)).toBe(false);
+  });
+
+  it("isTeamSynthesizing when workers are terminal beyond completed", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "failed" }),
+        run({ id: "w3", status: "cancelled" }),
+        run({ id: "w4", status: "skipped" }),
+      ],
+    });
+    expect(isTeamSynthesizing(e)).toBe(true);
   });
 
   it("captainSynthesisPreviewText prefers draft body over headline", () => {

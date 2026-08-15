@@ -2,7 +2,10 @@ import { DebateProgressLine } from "@/components/chat/DebateProgressLine";
 import { GraphAppendAnchor } from "@/components/chat/GraphAppendAnchor";
 import { StatusStrip } from "@/components/chat/StatusStrip";
 import { TeamNotesPanel } from "@/components/chat/TeamNotesPanel";
-import { shouldShowTeamGraph } from "@/components/chat/debatePreviewPlacement";
+import {
+  shouldShowTeamGraph,
+  teamGraphVisible,
+} from "@/components/chat/debatePreviewPlacement";
 import { teamNotesDefaultExpanded } from "@/components/chat/teamNotesDefaults";
 import { GraphView } from "@/components/graph/GraphView";
 import {
@@ -17,7 +20,10 @@ import {
   fitWidthBox,
   workerGraphShape,
 } from "@/lib/elk-layout";
-import { useConversationStore } from "@/stores/conversation";
+import {
+  type TeamPreviewDisplay,
+  useConversationStore,
+} from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
 import {
   type ExecutionJournal,
@@ -56,12 +62,15 @@ export function InlineTeamGraph({
   executionId,
   journal,
   kickoffReleased = false,
+  teamPreviews,
 }: {
   messageId: string;
   executionId: string;
   journal?: ExecutionJournal;
   /** 开工卡已授权 continue/adjust：pending 编制也出图，不必等第一人开跑. */
   kickoffReleased?: boolean;
+  /** 本泡开工卡；有则走 {@link teamGraphVisible}（与藏卡同一闸；取消/未开跑不出图）. */
+  teamPreviews?: readonly Pick<TeamPreviewDisplay, "status" | "decision">[];
 }) {
   const navigate = useNavigate();
   const conversationId = useConversationStore((s) => s.currentConversationId);
@@ -135,7 +144,9 @@ export function InlineTeamGraph({
     !execution ||
     execution.id !== executionId ||
     !caps.showsTeamGraph ||
-    !shouldShowTeamGraph(execution.runs, kickoffReleased)
+    !(teamPreviews
+      ? teamGraphVisible(execution.runs, teamPreviews)
+      : shouldShowTeamGraph(execution.runs, kickoffReleased))
   ) {
     return null;
   }

@@ -31,6 +31,7 @@ import { INPUT_ID } from "./constants";
 import { agentNodeToShell } from "./graphLive";
 import {
   aggregateDebateRoundStatus,
+  captainSinkPreview,
   debateRoundActiveBeat,
   debateRoundPhaseLabel,
   debateRoundSettledMark,
@@ -531,13 +532,12 @@ export function projectFlowNodes({
         const sinkStatus: RunStatus = waitCaption
           ? "running"
           : (captainStatus ?? "pending");
-        const answerPreview = finalAnswer ? headText(finalAnswer.content) : "";
-        const synthPreview =
-          !answerPreview && sinkStatus === "running" && !waitCaption
-            ? (captainSynthesisPreview ?? "").trim()
-            : "";
-        // Pure wait: statusCaption carries the short wait line; do not also
-        // fall preview back to the same waitCaption (duplicate identical rows).
+        const preview = captainSinkPreview({
+          captainStatus: captainStatus ?? "pending",
+          answerPreview: finalAnswer ? headText(finalAnswer.content) : "",
+          synthesisPreview: captainSynthesisPreview,
+          waitCaption,
+        });
         nodes.push({
           id: captainRun.id,
           type: "captain",
@@ -555,7 +555,7 @@ export function projectFlowNodes({
                 status: sinkStatus,
                 statusCaption: waitCaption || undefined,
                 label: "",
-                preview: answerPreview || synthPreview,
+                preview,
                 handleDirection,
                 enterIndex: workerRuns.length + 1,
                 focused:

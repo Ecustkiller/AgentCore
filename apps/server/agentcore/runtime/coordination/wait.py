@@ -409,6 +409,8 @@ async def await_coordination_injection(
     has_all = any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in events)
     if has_all:
         session.all_completed_injected = True
+        if not session.harvest_closing:
+            session.stash_terminal_for_harvest(events)
         session.close()
         logger.info(
             "coordination.all_completed",

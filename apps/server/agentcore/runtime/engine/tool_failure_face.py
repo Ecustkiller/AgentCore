@@ -116,11 +116,13 @@ _CURATED_BY_CODE: dict[str, str] = {
         "运行这段代码需要的语言当前用不了，代码没有执行。我会换用可用的语言继续。"
     ),
     "exec_env_no_interpreter": (
-        "这台电脑上没有装运行这段代码所需的程序，代码没有执行。"
+        "这台电脑上没找到运行这条命令的解释器，命令没有执行。"
         "装好之后我可以再试，也可以换一种语言继续。"
     ),
+    # Same fact as the exec-env-dead bubble: startup too slow / the command did
+    # not finish. Vocabulary is「命令」, not「代码执行环境」, so the two faces match.
     "exec_env_probe_timeout": (
-        "本机的代码执行环境启动太慢，这一步没等到它就绪就中止了。稍后再试通常会好转。"
+        "最短的一句命令 5 秒内都没跑完，本机启动得太慢。稍后再试通常会好转。"
     ),
     # The one place where naming security software is honest: the OS refused the spawn.
     "exec_env_spawn_denied": (

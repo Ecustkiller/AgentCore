@@ -1,3 +1,7 @@
+import {
+  EXECUTION_HARVEST_ORIGIN,
+  isExecutionHarvestMessage,
+} from "@/lib/executionHarvest";
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
 import { useInteractionStore } from "@/stores/interactions";
@@ -38,6 +42,19 @@ describe("toMessage (reload hydrate)", () => {
     expect(msg.id).toBe("srv-msg-1");
     expect(msg.role).toBe("assistant");
     expect(msg.serverMessageId).toBe("srv-msg-1");
+  });
+
+  it("stamps execution_harvest origin so hydrate still hides the synthetic user", () => {
+    const msg = toMessage(
+      row({
+        id: "u-harvest",
+        role: "user",
+        content: "hi",
+        origin: EXECUTION_HARVEST_ORIGIN,
+      }),
+    );
+    expect(msg.origin).toBe(EXECUTION_HARVEST_ORIGIN);
+    expect(isExecutionHarvestMessage(msg)).toBe(true);
   });
 
   it("does not stamp serverMessageId on user rows", () => {

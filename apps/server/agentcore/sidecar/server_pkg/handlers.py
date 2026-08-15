@@ -463,18 +463,26 @@ class HandlerMixin:
                 return None
         return None
 
-    def _refresh_permission_axes(self, params: dict[str, Any]) -> None:
+    def _refresh_permission_axes(
+        self, params: dict[str, Any], conversation_id: str = ""
+    ) -> None:
         """Adopt the conversation's CURRENT permission axes from per-turn params.
 
         Permission axes stay client-pushed — the desktop re-sends them on every
         startTurn / resume so a mid-session switch applies to the next turn.
         (``folderId`` is resolved in ``_run_turn`` from params when present; DB
         fallback only when the key is absent.)
-        Absent / invalid ⇒ keep the current value.
+        Absent / invalid ⇒ keep the current bag / initialize default.
+        Per-conversation bag is stamped so harvest never reads another conv's last write.
         """
         parsed = self._parse_permission_axes(params)
         if parsed is not None:
             self._permission_axes = parsed
+        cid = (conversation_id or "").strip()
+        if cid:
+            self._permission_axes_by_conv[cid] = (
+                parsed if parsed is not None else self._permission_axes
+            )
 
     def _refresh_user_id(self, params: dict[str, Any]) -> None:
         """Adopt per-turn ``userId`` when present (mirrors permissionAxes / inference).
@@ -517,6 +525,23 @@ class HandlerMixin:
                 conversation_id=conversation_id,
             )
             return
+        occupying = self.live_turn_task(conversation_id)
+        if occupying is not None:
+            occupying_id = next(
+                (
+                    tid
+                    for tid, task in self._turns.items()
+                    if task is occupying
+                ),
+                turn_id,
+            )
+            await self._reject_turn_already_running(
+                request_id,
+                op="startTurn",
+                turn_id=occupying_id,
+                conversation_id=conversation_id,
+            )
+            return
 
         # Tape bindings live on the cloud process. A local/sidecar turn never sees
         # them — historically this silently became a normal AI reply. When replay
@@ -526,11 +551,11 @@ class HandlerMixin:
 
         # Adopt this turn's cloud-proxy token before it runs (refreshes a rotated TTL).
         self._refresh_creds(params)
-        self._refresh_permission_axes(params)
+        self._refresh_permission_axes(params, conversation_id)
         self._refresh_user_id(params)
         self._declare_fulfill_root(params)
 
-        # The response to startTurn is DEFERRED until the turn completes (it carries
+        # The response to startTurn is DEFERRED until the turn completes (it carries)
         # the final result); the live events flow as ``turn/event`` notifications in
         # the meantime. Spawning a task lets ``respond`` / ``cancel`` be serviced by
         # the read loop while the turn runs. Missing inference is refused inside
@@ -672,7 +697,7 @@ class HandlerMixin:
         # Refresh + gate BEFORE claim so a missing JWT never consumes the pause frame
         # (desktop remints and retries; RESUME_RETRYABLE-class keep-card semantics).
         self._refresh_creds(params)
-        self._refresh_permission_axes(params)
+        self._refresh_permission_axes(params, conversation_id)
         self._refresh_user_id(params)
         self._declare_fulfill_root(params)
         if await self._reject_if_missing_inference(request_id, op="resume"):
@@ -705,6 +730,14 @@ class HandlerMixin:
         from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
 
         apply_rpc_folder_binding_to_suspension(suspension, params)
+        folder_cid = str(getattr(suspension, "conversation_id", "") or "")
+        prior_folder = self.stamp_folder_scope(
+            folder_cid,
+            folder_id=getattr(suspension, "folder_id", None),
+            binding_injected=bool(getattr(suspension, "folder_binding_injected", False)),
+            local_root_id=getattr(suspension, "folder_local_root_id", None),
+            local_subpath=str(getattr(suspension, "folder_local_subpath", "") or ""),
+        )
 
         veto_err = self._validate_resume_team_veto(
             suspension,
@@ -714,6 +747,7 @@ class HandlerMixin:
             model_overrides=model_overrides,
         )
         if veto_err is not None:
+            self.restore_folder_scope(folder_cid, prior_folder)
             await self._paused_store.rollback_claim(message_id)
             await self._send(
                 protocol.make_error(request_id, protocol.INVALID_PARAMS, veto_err)
@@ -892,13 +926,20 @@ class HandlerMixin:
         user_message_id = parsed["user_message_id"]
 
         self._refresh_creds(params)
-        self._refresh_permission_axes(params)
+        self._refresh_permission_axes(params, conversation_id)
         self._refresh_user_id(params)
         self._declare_fulfill_root(params)
         if await self._reject_if_missing_inference(request_id, op="resume"):
             return
         peeked.user_id = self._user_id
         apply_rpc_folder_binding_to_suspension(peeked, params)
+        prior_folder = self.stamp_folder_scope(
+            conversation_id,
+            folder_id=getattr(peeked, "folder_id", None),
+            binding_injected=bool(getattr(peeked, "folder_binding_injected", False)),
+            local_root_id=getattr(peeked, "folder_local_root_id", None),
+            local_subpath=str(getattr(peeked, "folder_local_subpath", "") or ""),
+        )
 
         veto_err = self._validate_resume_team_veto(
             peeked,
@@ -908,6 +949,7 @@ class HandlerMixin:
             model_overrides=model_overrides,
         )
         if veto_err is not None:
+            self.restore_folder_scope(conversation_id, prior_folder)
             await self._send(
                 protocol.make_error(request_id, protocol.INVALID_PARAMS, veto_err)
             )
@@ -963,6 +1005,7 @@ class HandlerMixin:
                 "turn/event",
                 {
                     "turnId": message_id,
+                    "conversationId": conversation_id,
                     "event": {
                         "type": ev.type.value,
                         "timestamp": ev.timestamp,
@@ -1022,6 +1065,17 @@ class HandlerMixin:
                 # keep that stream for pipeline dedupe. Claim only consumed the file.
                 peeked.user_id = self._user_id
                 apply_rpc_folder_binding_to_suspension(peeked, params)
+                self.stamp_folder_scope(
+                    conversation_id,
+                    folder_id=getattr(peeked, "folder_id", None),
+                    binding_injected=bool(
+                        getattr(peeked, "folder_binding_injected", False)
+                    ),
+                    local_root_id=getattr(peeked, "folder_local_root_id", None),
+                    local_subpath=str(
+                        getattr(peeked, "folder_local_subpath", "") or ""
+                    ),
+                )
                 task = asyncio.create_task(
                     self._run_resume(
                         request_id,

@@ -43,6 +43,13 @@ export function hasActiveRunningWorkers(
   return workerRunsOf(runs).some((r) => r.status === "running");
 }
 
+const WORKER_TERMINAL = new Set<string>([
+  "completed",
+  "failed",
+  "cancelled",
+  "skipped",
+]);
+
 export function deriveCaptainStatus(
   execution: Execution,
   captainId: string,
@@ -50,21 +57,46 @@ export function deriveCaptainStatus(
 ): RunStatus {
   if (execution.status === "failed") return "failed";
   if (execution.status === "cancelled") return "cancelled";
-  if (execution.status === "completed") return "completed";
   // Cold pause (ask_user / plan_review / …): workers may all be done, but CEO
   // is waiting on the user — never paint the sink as「正在生成汇总」.
   // RunStatus has no `paused`; `pending` clears the synthesis spinner.
   if (execution.status === "paused") return "pending";
-  // message_end already closed the chat turn; don't keep the CEO sink spinning
-  // on a stuck execution.status=running (captain frame drop / hold race).
-  if (opts?.turnTerminal) return "completed";
   // Exclude *all* captains (not only `captainId`): append-turn captains must not
   // count as incomplete "workers" and stall the sink on pending.
   void captainId;
   const workers = workerRunsOf(execution.runs);
-  const allDone =
-    workers.length > 0 && workers.every((r) => r.status === "completed");
-  return allDone ? "running" : "pending";
+  // 工人未齐 = 待汇总。CEO 已 end_turn（turnTerminal）或 fold 误标
+  // execution.completed 都不能把节点焊成「已汇总」——图是进度真相。
+  if (workers.some((r) => !WORKER_TERMINAL.has(r.status))) return "pending";
+  if (execution.status === "completed") return "completed";
+  // Workers all terminal, execution still live — harvest / in-turn synthesis.
+  if (workers.length > 0) return "running";
+  // No workers: message_end still means this captain-only turn closed.
+  if (opts?.turnTerminal) return "completed";
+  return "pending";
+}
+
+/**
+ * CEO 汇聚点下面那两行摘录。
+ *
+ * 待汇总（工人未齐）：派单正文不是成果，不摘「人已派出 / 还在等」。
+ * 有中间草稿才显示草稿；等待条已在 statusCaption，预览留空以免两行打架。
+ * 人齐之后仍用派单泡开头（图挂在派单泡上，收口另泡不在这刀）。
+ */
+export function captainSinkPreview(opts: {
+  captainStatus: RunStatus;
+  answerPreview?: string | null;
+  synthesisPreview?: string | null;
+  waitCaption?: string | null;
+}): string {
+  const wait = (opts.waitCaption ?? "").trim();
+  const synth = (opts.synthesisPreview ?? "").trim();
+  const answer = (opts.answerPreview ?? "").trim();
+  if (opts.captainStatus === "pending") {
+    return wait ? "" : synth;
+  }
+  if (answer) return answer;
+  return wait ? "" : synth;
 }
 
 export function resolveHandoff(

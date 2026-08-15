@@ -495,6 +495,11 @@ def test_core_teaches_split_criterion_over_count():
     assert "派工·时序诚实" in hint
     assert "先确认再派" in hint or "尚未派工" in hint
     assert "已开工" in hint  # 禁表出现在提示里
+    # 派完若结束本回合：可见正文只留「人已派出」；禁「还在等/你不用管」当终稿。
+    assert "派完·可见面" in hint
+    assert "人已派出" in hint
+    assert "还在等" in hint and "你不用管" in hint
+    assert "谁在后台、完成后会再汇报" not in hint
     # 夜巡残差 A′：无 ask_user 的 kickoff+pause / 「继续」重派；开工预览确认前禁「已跑起来」。
     assert "尚未真正派工" in hint or "还在准备" in hint
     assert "kickoff" in hint or "方向：派团队" in hint
@@ -528,6 +533,8 @@ def test_core_teaches_split_criterion_over_count():
     assert "playbook=none" in skill
     assert "可跑闭环" in skill or "核心运行时" in skill
     assert "根委派切片诚实" in skill or "嵌套扇出" in skill
+    assert "人已派出" in skill
+    assert "谁在后台、完成后会再汇报" not in skill
 
 def test_consult_intensity_lives_only_in_the_core():
     """三条「按场面 consult」强度串只注入常驻核一次；按需目录不再复述（去重定案）。

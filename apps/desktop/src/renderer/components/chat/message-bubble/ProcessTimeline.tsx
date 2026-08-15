@@ -277,6 +277,7 @@ export function ProcessTimeline({
           executionId={node.execution_id}
           journal={journal}
           kickoffReleased={kickoffReleased}
+          teamPreviews={teamPreviews}
         />
       ) : null;
     }

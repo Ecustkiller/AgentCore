@@ -347,6 +347,9 @@ async def test_coordination_start_echo_counts_and_seeds_completed():
     assert "图共 2 名" in out
     assert "其中 1 名已完成" in out
     assert "正在报到" in out or "后台报到" in out
+    assert "人已派出" in out
+    assert "还在等" in out and "你不用管" in out
+    assert "谁在后台、完成后会再汇报" not in out
 
     session = active_coordination("e")
     assert session is not None
@@ -374,6 +377,9 @@ async def test_fresh_coordination_echo_includes_total_and_zero_completed():
     assert "团队已启动" in result.output
     assert "图共 2 名" in result.output
     assert "其中 0 名已完成" in result.output
+    assert "人已派出" in result.output
+    assert "还在等" in result.output and "你不用管" in result.output
+    assert "谁在后台、完成后会再汇报" not in result.output
     session = active_coordination("e")
     assert session is not None
     await asyncio.wait_for(session.drive_task, timeout=10)

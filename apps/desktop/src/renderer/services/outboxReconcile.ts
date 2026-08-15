@@ -3,14 +3,31 @@
  *
  * Main process owns cloud writeback; renderer reflects sync acks (`synced_pending`
  * → `synced`) and flushes pending outbox on window close / app quit.
+ *
+ * Harvest closing turns are siblings of the original pump: after that write-back
+ * acks, soft-refresh the latest window so the new assistant bubble appears.
+ * Do not rely on `execution_completed`'s 6s timer — harvest usually finishes later.
  */
 import { patchConversationCache } from "@/hooks/useConversations";
+import { isHarvestWritebackAck } from "@/lib/executionHarvest";
+import { loadLatestWindow } from "@/services/messages";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { OutboxSyncedPayload } from "@shared/outbox-contract";
+import { whenLocalConversationStreamIdle } from "./turns/streamOwnership";
 
 const SYNCED_HINT_MS = 2500;
 
-function applySynced(payload: OutboxSyncedPayload): void {
+function refreshAfterHarvestWriteback(conversationId: string): void {
+  // 本机流忙则等释放后再 softRefresh 一次；禁止 forceRelease 活用户回合。
+  whenLocalConversationStreamIdle(conversationId, () => {
+    void loadLatestWindow(conversationId, { softRefresh: true }).catch(() => {
+      /* best-effort — reopen still hydrates from REST */
+    });
+  });
+}
+
+/** Reconcile one successful drain ack. Exported for harvest write-back tests. */
+export function applyOutboxSynced(payload: OutboxSyncedPayload): void {
   const { conversationId, userMessageId, cloudUserMessageId, title } = payload;
   if (!conversationId) return;
   const store = useConversationStore.getState();
@@ -42,6 +59,9 @@ function applySynced(payload: OutboxSyncedPayload): void {
   if (title) {
     patchConversationCache(conversationId, { title });
   }
+  if (isHarvestWritebackAck(payload)) {
+    refreshAfterHarvestWriteback(conversationId);
+  }
 }
 
 /** Re-apply synced_pending from main-process outbox status (reload / reopen). */
@@ -69,7 +89,7 @@ export function startOutboxReconcile(): void {
   if (started || typeof window === "undefined" || !window.outboxApi) return;
   started = true;
 
-  window.outboxApi.onSynced(applySynced);
+  window.outboxApi.onSynced(applyOutboxSynced);
   void hydratePendingFromStatus();
 
   const flush = () => {

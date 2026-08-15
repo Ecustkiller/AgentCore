@@ -91,6 +91,13 @@ export interface OutboxRecord {
   retry_count?: number;
   /** Epoch ms — skip POST until this time (unless flushTurn bypasses). */
   next_attempt_at?: number;
+  /**
+   * RecordTurnRequest provenance (sidecar harvest). Optional; ordinary turns omit.
+   * Wire names stay snake_case to match POST `/local-turns`.
+   */
+  origin?: string | null;
+  execution_id?: string | null;
+  harvest_kind?: string | null;
 }
 
 /**
@@ -454,6 +461,12 @@ export function toRecordTurnBody(
   if (journal) body.journal = journal;
   const failures = toolFailuresFromJournal(journal);
   if (failures.length > 0) body.tool_failures = failures;
+  const origin = (record.origin || "").trim();
+  if (origin) body.origin = origin;
+  const executionId = (record.execution_id || "").trim();
+  if (executionId) body.execution_id = executionId;
+  const harvestKind = (record.harvest_kind || "").trim();
+  if (harvestKind) body.harvest_kind = harvestKind;
   return body;
 }
 

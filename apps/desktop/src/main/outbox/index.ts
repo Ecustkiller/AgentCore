@@ -23,6 +23,7 @@ export {
   fillFromCaptainStreamSegments,
   recordHasProcessState,
   shouldDeleteOutboxAfterAck,
+  toRecordTurnBody,
 } from "./strategy";
 
 export { listUnsyncedSummaries } from "./unsynced";

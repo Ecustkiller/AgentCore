@@ -49,6 +49,8 @@ export interface ActiveSidecarTurn extends SidecarTarget {
 }
 
 const activeSidecarTurns = new Map<string, ActiveSidecarTurn>();
+/** 回合结束后仍记住最近 sidecar 目标，供 harvest 等自发回合重新 setActive。 */
+const lastSidecarTargetByCid = new Map<string, SidecarTarget>();
 
 /** 登记：该会话此刻在某 sidecar 目标（root + subpath）上跑回合（回合开始 / attach 时调）。 */
 export function setActiveSidecarTurn(
@@ -58,6 +60,7 @@ export function setActiveSidecarTurn(
   turnId?: string,
 ): void {
   activeSidecarTurns.set(conversationId, { rootId, subpath, turnId });
+  lastSidecarTargetByCid.set(conversationId, { rootId, subpath });
 }
 
 /**
@@ -83,6 +86,19 @@ export function getActiveSidecarTarget(
   conversationId: string,
 ): ActiveSidecarTurn | null {
   return activeSidecarTurns.get(conversationId) ?? null;
+}
+
+/** 该会话最近一次 sidecar 目标（回合结束后仍在）；无则 null。 */
+export function getLastSidecarTarget(
+  conversationId: string,
+): SidecarTarget | null {
+  return lastSidecarTargetByCid.get(conversationId) ?? null;
+}
+
+/** 测试隔离：清空活回合与最近目标。 */
+export function resetSidecarRoutingForTests(): void {
+  activeSidecarTurns.clear();
+  lastSidecarTargetByCid.clear();
 }
 
 /**

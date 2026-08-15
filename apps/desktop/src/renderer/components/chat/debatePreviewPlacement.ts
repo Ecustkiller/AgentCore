@@ -59,12 +59,25 @@ export function kickoffReleasedFromPreviews(
   return previews.some(isKickoffReleased);
 }
 
-/** Chat / canvas / turn-detail share this: workers started or kickoff released. */
+/**
+ * Chat / canvas / turn-detail share this — same gate as
+ * {@link shouldHostPreviewInGraph} (禁止图+废卡双写).
+ * - 工人已开跑：出图（新一波开工卡 pending 也不藏）。
+ * - 本泡有待确认开工卡、工人未跑：不出图（注意力归卡）。
+ * - 已授权 continue/adjust：pending 编制也出图。
+ * - 取消 / 超时 / 失效且卡还在：不出图。
+ * - 回放无卡 + 编制仍有 pending 工人：出图（CEO end_turn 后卡常不在泡上，避免刷新空窗）。
+ */
 export function teamGraphVisible(
   runs: readonly TeamGraphRun[] | null | undefined,
   previews: readonly Pick<TeamPreviewDisplay, "status" | "decision">[],
 ): boolean {
-  return shouldShowTeamGraph(runs, kickoffReleasedFromPreviews(previews));
+  if (shouldShowTeamGraph(runs, kickoffReleasedFromPreviews(previews))) {
+    return true;
+  }
+  if (previews.length > 0) return false;
+  const list = runs ?? [];
+  return list.some((r) => isWorkerRun(r) && r.status === "pending");
 }
 
 /**
@@ -89,7 +102,8 @@ export function shouldShowTeamGraph(
  * when true → 图已出现则不画废卡（hide standalone ResolvedTeamPreview）；
  * when false → keep the standalone card (pending, cancel, or no plan yet).
  *
- * 藏卡与出图同一套闸：`bubblePreviews` 里只要有 pending，leftover go
+ * 藏卡与出图同一套闸（{@link teamGraphVisible}）：图出则藏废卡，
+ * 取消/未开跑则留卡。`bubblePreviews` 里只要有 pending，leftover go
  * 不得藏卡（否则同泡新卡未拍板时图也不出 → 空窗）。缺省只看本卡。
  */
 export function shouldHostPreviewInGraph(
@@ -98,8 +112,5 @@ export function shouldHostPreviewInGraph(
   bubblePreviews?: readonly Pick<TeamPreviewDisplay, "status" | "decision">[],
 ): boolean {
   if (!preview || preview.status !== "resolved" || !runs) return false;
-  return shouldShowTeamGraph(
-    runs,
-    kickoffReleasedFromPreviews(bubblePreviews ?? [preview]),
-  );
+  return teamGraphVisible(runs, bubblePreviews ?? [preview]);
 }

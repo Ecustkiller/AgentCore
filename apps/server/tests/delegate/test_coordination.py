@@ -1581,10 +1581,33 @@ def test_coordination_budget_scales_with_batch_size():
     assert coordination_budget_for_batch(20) == 16  # cap
 
 
+def test_first_turn_all_completed_inject_forbids_final_synthesis():
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    product = "【队员成品】不应出现在首回合注入"
+    text = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 2, "total": 2, "output": product},
+            )
+        ],
+    )
+    assert "勿做最终合成" in text
+    assert "本回合可见面只留人已派出" in text
+    assert "请做最终合成" not in text
+    assert "团队成品" not in text
+    assert product not in text
+    assert "本回合勿做最终合成" in text
+
+
 def test_all_completed_inject_carries_output_and_audit_hint():
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=3)
+    session.harvest_closing = True
     product = "【队员成品】调研报告正文……"
     text = format_coordination_events(
         session,
@@ -1607,6 +1630,7 @@ def test_inject_carries_final_synthesis_discipline():
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
+    session.harvest_closing = True
     text = format_coordination_events(
         session,
         [
@@ -1627,6 +1651,7 @@ def test_all_completed_inject_without_output_still_has_audit_hint():
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
+    session.harvest_closing = True
     text = format_coordination_events(
         session,
         [
@@ -1645,6 +1670,7 @@ def test_all_completed_criteria_unmet_inject_steers_reuse_not_respawn():
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
+    session.harvest_closing = True
     text = format_coordination_events(
         session,
         [
@@ -2057,6 +2083,70 @@ async def test_merge_rearm_wakes_ceo_wait_promptly(monkeypatch):
     assert "all_completed" in (msgs[0].content or "")
     assert session.active is False
     assert session.all_completed_injected is True
+
+
+def test_release_prefers_harvest_after_attached_inject(monkeypatch):
+    """注入已 settle 仍须 harvest：等待气泡不是用户可见收口。"""
+    from structlog.testing import capture_logs
+
+    session = CoordinationSession(
+        execution_id="e-harv-inject",
+        total_workers=2,
+        conversation_id="conv-harv-inject",
+    )
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 2, "total": 2},
+        )
+    )
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    set_active_coordination(session)
+
+    called: dict[str, object] = {}
+
+    def _fake_finish(s: CoordinationSession) -> None:
+        called["session"] = s
+        s.harvest_scheduled = True
+        s.mark_settled("harvest")
+
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.session.finish_detached_coordination",
+        _fake_finish,
+    )
+
+    with capture_logs() as logs:
+        release_turn_coordination("e-harv-inject")
+    assert called.get("session") is session
+    assert session.turn_attached is False
+    assert session.harvest_scheduled is True
+    assert session.settled_via == "harvest"
+    assert any(e.get("event") == "coordination.release_prefers_harvest" for e in logs)
+
+
+def test_release_keeps_session_when_harvest_already_scheduled():
+    """harvest 已在飞：release 只交还附着，禁止裸 clear 掉收口。"""
+    session = CoordinationSession(
+        execution_id="e-harv-inflight",
+        total_workers=1,
+        conversation_id="conv-harv-inflight",
+    )
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1},
+        )
+    )
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    session.harvest_scheduled = True
+    set_active_coordination(session)
+
+    release_turn_coordination("e-harv-inflight")
+    assert active_coordination("e-harv-inflight") is session
+    assert session.turn_attached is False
+    assert session.harvest_scheduled is True
 
 
 def test_release_prefers_harvest_when_terminal_unsettled(monkeypatch):

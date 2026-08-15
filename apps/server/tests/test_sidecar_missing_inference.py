@@ -106,13 +106,15 @@ def test_start_turn_rejects_without_inference_credentials(tmp_path, monkeypatch)
     assert result["runs"]["error"]["code"] == ErrorCode.INFERENCE_TOKEN_EXPIRED
 
     # Live UI gets the same code via turn/event before the deferred result.
-    error_events = [
-        m["params"]["event"]
+    error_notes = [
+        m
         for m in sent
         if m.get("method") == "turn/event" and m["params"]["event"]["type"] == "error"
     ]
-    assert error_events
-    assert error_events[0]["payload"]["code"] == ErrorCode.INFERENCE_TOKEN_EXPIRED
+    assert error_notes
+    assert error_notes[0]["params"]["conversationId"] == "c-missing"
+    assert error_notes[0]["params"]["turnId"] == "t-missing"
+    assert error_notes[0]["params"]["event"]["payload"]["code"] == ErrorCode.INFERENCE_TOKEN_EXPIRED
 
 
 def test_resume_rejects_without_inference_before_claim(tmp_path, monkeypatch):

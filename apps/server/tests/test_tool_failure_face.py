@@ -705,6 +705,23 @@ def test_every_produced_failure_code_has_curated_copy():
     )
 
 
+def test_exec_env_timeout_peek_matches_bubble_fact():
+    """Tool-row timeout and the exec-env-dead bubble state the same cause."""
+    from agentcore.workspace.limits import EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE
+
+    peek = _CURATED_BY_CODE["exec_env_probe_timeout"]
+    bubble = EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE["exec_env_probe_timeout"]
+    for token in ("没跑完", "启动", "太慢", "命令"):
+        assert token in peek, peek
+        assert token in bubble, bubble
+    assert "代码执行环境" not in peek
+    assert bubble.startswith("本机暂时跑不了命令")
+    no_interp_peek = _CURATED_BY_CODE["exec_env_no_interpreter"]
+    assert "Python" not in no_interp_peek
+    assert "python" not in no_interp_peek
+    assert "解释器" in no_interp_peek
+
+
 def test_pre_registered_codes_for_incoming_paths_have_copy():
     """Codes landing with the parallel tool changes — copy ships ahead of the producer."""
     for code in (

@@ -721,6 +721,15 @@ def test_exec_env_dead_lines_fork_per_reason_and_drop_unbacked_advice():
         exec_env_dead_user_visible(EXEC_ENV_NO_INTERPRETER_CODE)
         == EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE[EXEC_ENV_NO_INTERPRETER_CODE]
     )
+    no_interp = EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE[EXEC_ENV_NO_INTERPRETER_CODE]
+    assert "Python" not in no_interp
+    assert "python" not in no_interp
+    assert "解释器" in no_interp
+    timeout = EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE[EXEC_ENV_PROBE_TIMEOUT_CODE]
+    assert "启动" in timeout and "太慢" in timeout
+    assert "没跑完" in timeout
+    assert "命令" in timeout
+    assert "代码执行环境" not in timeout
 
 
 def test_exec_env_dead_notice_speaks_the_classified_cause():

@@ -14,6 +14,10 @@ export interface OutboxSyncedPayload {
   cloudUserMessageId: string;
   assistantMessageId: string | null;
   title: string | null;
+  /** RecordTurnRequest.origin — harvest write-back stamps execution_harvest. */
+  origin?: string | null;
+  /** RecordTurnRequest.harvest_kind when the sealed row was a closing turn. */
+  harvestKind?: string | null;
 }
 
 /** Pending / failed outbox row for status IPC. */

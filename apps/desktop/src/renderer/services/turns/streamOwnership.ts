@@ -95,6 +95,11 @@ export function waitForPrimaryStreamIdle(
 type LocalStreamSlot = {
   /** 当前打开的本端连接数（回合流嵌套 / midFlight 并发）。 */
   count: number;
+  /**
+   * Bumped by {@link forceReleaseLocalConversationStream} so later `finally`
+   * releases from the leftover claim are no-ops (count must not go negative).
+   */
+  generation: number;
   listeners: Set<(busy: boolean) => void>;
 };
 
@@ -103,7 +108,7 @@ const localStreams = new Map<string, LocalStreamSlot>();
 function localSlotOf(conversationId: string): LocalStreamSlot {
   let slot = localStreams.get(conversationId);
   if (!slot) {
-    slot = { count: 0, listeners: new Set() };
+    slot = { count: 0, generation: 0, listeners: new Set() };
     localStreams.set(conversationId, slot);
   }
   return slot;
@@ -126,6 +131,7 @@ export function beginLocalConversationStream(
   conversationId: string,
 ): () => void {
   const slot = localSlotOf(conversationId);
+  const generation = slot.generation;
   slot.count += 1;
   if (slot.count === 1) {
     for (const cb of [...slot.listeners]) cb(true);
@@ -134,6 +140,8 @@ export function beginLocalConversationStream(
   return () => {
     if (released) return;
     released = true;
+    if (slot.generation !== generation) return;
+    if (slot.count <= 0) return;
     slot.count -= 1;
     if (slot.count > 0) return;
     for (const cb of [...slot.listeners]) cb(false);
@@ -143,6 +151,61 @@ export function beginLocalConversationStream(
 
 export function hasLocalConversationStream(conversationId: string): boolean {
   return (localStreams.get(conversationId)?.count ?? 0) > 0;
+}
+
+/**
+ * 本机流空闲时回调一次：已空闲则同步触发；否则等下一次 `count → 0`。
+ *
+ * Harvest 写回 softRefresh 用这条等活用户回合自然释放，禁止
+ * {@link forceReleaseLocalConversationStream} 掐活流。
+ */
+export function whenLocalConversationStreamIdle(
+  conversationId: string,
+  cb: () => void,
+): () => void {
+  let settled = false;
+  const finish = (): void => {
+    if (settled) return;
+    settled = true;
+    cb();
+  };
+  if (!hasLocalConversationStream(conversationId)) {
+    finish();
+    return () => {
+      settled = true;
+    };
+  }
+  const unsub = subscribeLocalConversationStream(conversationId, (busy) => {
+    if (busy) return;
+    unsub();
+    finish();
+  });
+  if (!hasLocalConversationStream(conversationId)) {
+    unsub();
+    finish();
+  }
+  return () => {
+    settled = true;
+    unsub();
+  };
+}
+
+/**
+ * Drop leftover local-stream claims and invalidate in-flight release closures.
+ *
+ * Harvest write-back must not call this on a live user turn — wait for idle
+ * ({@link whenLocalConversationStreamIdle}) instead.
+ */
+export function forceReleaseLocalConversationStream(
+  conversationId: string,
+): boolean {
+  const slot = localStreams.get(conversationId);
+  if (!slot || slot.count === 0) return false;
+  slot.generation += 1;
+  slot.count = 0;
+  for (const cb of [...slot.listeners]) cb(false);
+  dropLocalSlotIfEmpty(conversationId);
+  return true;
 }
 
 /** 订阅本端自有连接的忙/闲翻转（对话级订阅用来让位 / 复位）。 */

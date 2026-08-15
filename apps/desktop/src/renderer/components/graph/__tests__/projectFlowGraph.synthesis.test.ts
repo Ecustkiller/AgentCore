@@ -218,4 +218,69 @@ describe("projectFlowNodes · captain synthesis preview", () => {
     expect(captain?.data.preview ?? "").toBe("");
     expect(String(captain?.data.preview ?? "")).not.toBe(waitCaption);
   });
+
+  it("待汇总不把派单等待句摘上 CEO 格子", () => {
+    const execution = minimalExec();
+    execution.runs.push({
+      id: "w2",
+      agentId: "w2",
+      task: "撰写",
+      status: "running",
+      dependsOn: [],
+      outputSummary: null,
+      outputFiles: [],
+      debrief: null,
+      durationMs: null,
+      startedAt: null,
+      error: null,
+      parentRunId: null,
+      kind: "agent",
+      role: "member",
+      model: null,
+      usage: null,
+      cost: null,
+      stance: null,
+      group: null,
+      round: 0,
+      sideKey: null,
+      continuesRunId: null,
+      continuationIndex: 0,
+      replacesRunId: null,
+      revised: null,
+      checkpoint: null,
+      receivedContext: [],
+      escalations: [],
+      process: [],
+    });
+    const nodes = projectFlowNodes({
+      execution,
+      positions: {
+        [INPUT_ID]: { x: 0, y: 0 },
+        captain: { x: 0, y: 200 },
+        w1: { x: 0, y: 100 },
+        w2: { x: 100, y: 100 },
+      },
+      nodeHeights: {},
+      nodeSizes: {},
+      handleDirection: "vertical",
+      litRunId: null,
+      litEndpointMessageId: null,
+      captainRun: { id: "captain" },
+      captainStatus: "pending",
+      finalAnswer: {
+        id: "ans",
+        content: "人已派出，验证员还在复核，你先忙别的。",
+      },
+      captainSynthesisPreview: "",
+      taskMessage: null,
+      activateNode: () => {},
+      groups: [],
+      scene: buildGraphScene(execution),
+    });
+
+    const captain = nodes.find((n) => n.id === "captain");
+    expect(captain?.data.status).toBe("pending");
+    expect(captain?.data.preview ?? "").toBe("");
+    expect(String(captain?.data.preview ?? "")).not.toContain("人已派出");
+  });
 });

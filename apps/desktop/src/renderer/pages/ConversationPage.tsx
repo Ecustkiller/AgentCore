@@ -29,6 +29,7 @@ import {
   type MemoryUpdate,
   type Message,
   getRuntime,
+  isMessageWindowStrictlyRicher,
   useConversationStore,
 } from "@/stores/conversation";
 import {
@@ -75,7 +76,10 @@ function adoptMessageWindow(
   return true;
 }
 
-/** Cold SWR: overwrite empty/cache-backed slice from network (never a live stream). */
+/** Cold SWR: overwrite empty/cache-backed slice from network (never a live stream).
+ * Same richer-dominance as {@link loadLatestWindow}: a thinner GET (in-flight
+ * journal not flushed / harvest without `run_plan`) must not wipe a cache that
+ * already has the team marker + journal — that is the refresh flash-then-gone. */
 function reconcileMessageWindow(
   id: string,
   messages: Message[],
@@ -85,6 +89,19 @@ function reconcileMessageWindow(
   const s = useConversationStore.getState();
   if (s.currentConversationId !== id) return false;
   if (hasLocalConversationStream(id)) return false;
+  const existing = getRuntime(id).messages;
+  if (
+    existing.length > 0 &&
+    !isMessageWindowStrictlyRicher(messages, existing)
+  ) {
+    logEvent("info", "conversation.slice_diag", {
+      action: "cold_reconcile_reject_not_richer",
+      conversation_id: id,
+      before_count: existing.length,
+      after_count: messages.length,
+    });
+    return false;
+  }
   s.setMessageWindow(messages, flags, id);
   s.setMemoryUpdates(memoryUpdates, id);
   clearLastEventId(id);

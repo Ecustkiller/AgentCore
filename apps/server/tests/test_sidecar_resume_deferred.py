@@ -165,6 +165,13 @@ def test_resume_deferred_wrap_up_then_auto_claim(tmp_path, monkeypatch):
         deferred = _resume_deferred_events(sent, message_id)
         assert len(deferred) == 1
         assert deferred[0]["payload"]["busy_reason"] == "wrap_up"
+        deferred_notes = [
+            m
+            for m in sent
+            if m.get("method") == "turn/event"
+            and (m.get("params") or {}).get("turnId") == message_id
+        ]
+        assert all(n["params"]["conversationId"] == conversation_id for n in deferred_notes)
         assert deferred[0]["payload"]["message_id"] == message_id
         assert conversation_id in server._resume_deferred  # noqa: SLF001
         # Frame still on disk — not claimed yet while waiting.

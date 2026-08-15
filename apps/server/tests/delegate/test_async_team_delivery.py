@@ -8,18 +8,23 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from agentcore.runtime.coordination.inject import format_coordination_events
 from agentcore.runtime.coordination.session import (
+    CoordinationEvent,
+    CoordinationEventKind,
     CoordinationSession,
     active_coordination,
     active_coordination_for_conversation,
     adopt_active_execution,
     bind_host_journal,
     clear_active_coordination,
+    current_execution_id,
     emit_execution_detached,
     finish_detached_coordination,
     release_turn_coordination,
     set_active_coordination,
 )
+from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.events import EventSink, EventType, execution_completed
 from agentcore.runtime.events.types import SSEEvent
 from agentcore.runtime.journal.fold import _splice_synthetic_deltas
@@ -221,6 +226,50 @@ async def test_pillar_b_registry_is_routing_source_for_adopt():
 
 
 @pytest.mark.asyncio
+async def test_inject_close_then_harvest_adopts_stashed_output():
+    """P1：inject+close 后 harvest 能 adopt 并看到成品（不 mock closing turn）。"""
+    product = "【队员成品】调研报告正文……"
+    session = CoordinationSession(
+        execution_id="exec-p1",
+        total_workers=1,
+        conversation_id="conv-p1",
+    )
+    session.post(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": product},
+        )
+    )
+    set_active_coordination(session)
+    token = current_execution_id.set("exec-p1")
+    try:
+        msgs = await await_coordination_injection([])
+        assert session.active is False
+        assert "勿做最终合成" in (msgs[0].content or "")
+        assert "请做最终合成" not in (msgs[0].content or "")
+        assert active_coordination_for_conversation("conv-p1") is None
+
+        assert adopt_active_execution("conv-p1") is None
+        adopted = adopt_active_execution("conv-p1", reopen_harvest=True)
+        assert adopted is session
+        assert session.active is True
+        assert session.harvest_closing is True
+        pending = list(session._pending)
+        assert any(
+            e.kind is CoordinationEventKind.ALL_COMPLETED
+            and e.payload.get("output") == product
+            for e in pending
+        )
+        text = format_coordination_events(session, pending)
+        assert product in text
+        assert "团队成品" in text
+        assert "请做最终合成" in text
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination()
+
+
+@pytest.mark.asyncio
 async def test_pillar_b_release_emits_detached_and_keeps_registry():
     """支柱 B/D：teardown 发 execution_detached，注册表保留 live drive。"""
     writer = _RecordingWriter()
@@ -246,6 +295,30 @@ async def test_pillar_b_release_emits_detached_and_keeps_registry():
     session.drive_task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await session.drive_task
+
+
+@pytest.mark.asyncio
+async def test_pillar_c_injected_already_detached_still_harvests():
+    """CEO 已离开且注入旗标已立 → finish_detached 仍须立刻 harvest，禁止清 session。"""
+    session = CoordinationSession(
+        execution_id="exec-injected-detached",
+        total_workers=1,
+        conversation_id="conv-injected-detached",
+    )
+    session.turn_attached = False
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    set_active_coordination(session)
+
+    with patch(
+        "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+        new_callable=AsyncMock,
+    ) as harvest:
+        finish_detached_coordination(session)
+        assert session.harvest_scheduled is True
+        await asyncio.sleep(0.05)
+        harvest.assert_awaited_once()
+        assert session.settled_via == "harvest"
 
 
 @pytest.mark.asyncio
@@ -324,20 +397,20 @@ async def test_pillar_c_stale_attach_after_terminal_still_harvests():
 
 
 @pytest.mark.asyncio
-async def test_pillar_c_attached_inject_cancels_armed_harvest():
-    """同回合 wait 注入赢了 → 取消已武装的 harvest，避免双收口。"""
+async def test_pillar_c_attached_inject_then_detach_still_harvests():
+    """同回合 wait 注入 ≠ 可见收口：CEO 交还附着后仍须 harvest 新消息。"""
     import agentcore.runtime.coordination.session as session_mod
 
     session = CoordinationSession(
-        execution_id="exec-inject-wins",
+        execution_id="exec-inject-then-harvest",
         total_workers=1,
-        conversation_id="conv-inject-wins",
+        conversation_id="conv-inject-then-harvest",
     )
     session.turn_attached = True
     set_active_coordination(session)
 
     with (
-        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 0.3),
+        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 2.0),
         patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.02),
         patch(
             "agentcore.runtime.coordination.harvest.harvest_detached_execution",
@@ -349,9 +422,51 @@ async def test_pillar_c_attached_inject_cancels_armed_harvest():
         await asyncio.sleep(0.05)
         session.all_completed_injected = True
         session.mark_settled("attached_inject")
-        await asyncio.sleep(0.15)
+        await asyncio.sleep(0.05)
         harvest.assert_not_awaited()
-        assert session.harvest_scheduled is False
+        session.turn_attached = False
+        await asyncio.sleep(0.1)
+        harvest.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_pillar_c_injected_stale_attach_still_harvests():
+    """CEO 已离开但 turn_attached 粘滞 + 注入旗标仍在 → grace 后仍 harvest。"""
+    from structlog.testing import capture_logs
+
+    import agentcore.runtime.coordination.session as session_mod
+
+    session = CoordinationSession(
+        execution_id="exec-inject-stale",
+        total_workers=1,
+        conversation_id="conv-inject-stale",
+    )
+    session.turn_attached = True
+    session.all_completed_injected = True
+    session.mark_settled("attached_inject")
+    set_active_coordination(session)
+
+    with (
+        patch.object(session_mod, "_HARVEST_ATTACH_GRACE_S", 0.05),
+        patch.object(session_mod, "_HARVEST_ATTACH_POLL_S", 0.01),
+        patch(
+            "agentcore.runtime.coordination.harvest.harvest_detached_execution",
+            new_callable=AsyncMock,
+        ) as harvest,
+        capture_logs() as logs,
+    ):
+        finish_detached_coordination(session)
+        assert session.harvest_scheduled is True
+        await asyncio.sleep(0.2)
+        harvest.assert_awaited_once()
+        assert session.turn_attached is False
+        assert not any(
+            e.get("event") == "coordination.harvest_cancelled_attached_inject"
+            for e in logs
+        )
+        assert any(
+            e.get("event") == "coordination.harvest_stale_attach_forcing" for e in logs
+        )
 
 
 @pytest.mark.asyncio

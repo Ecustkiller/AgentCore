@@ -83,6 +83,14 @@ def format_coordination_events(
     from agentcore.runtime.resolve.ceo_surface import COORDINATION_PERIOD_HINT
 
     lines.append(COORDINATION_PERIOD_HINT)
+    first_turn_all_completed = (not session.harvest_closing) and any(
+        ev.kind is CoordinationEventKind.ALL_COMPLETED for ev in events
+    )
+    close_line = (
+        "本回合勿做最终合成；可见收口由系统收口回合完成。"
+        if first_turn_all_completed
+        else "全部完成后做最终合成（走 content_delta），然后退出协调。"
+    )
     lines.append(
         "先判断本批事件要不要你出手：带指令的事件（阻塞仲裁 / 边界让出 / 插话 / 全部完成）"
         "按其指令办；纯进展事件（worker_completed / note）多数【无需处置】——完成计数与"
@@ -90,6 +98,7 @@ def format_coordination_events(
         "也勿用用户可见正文复述进度（【可静默】）。"
         "无需处置时调 wait（或空响应、不写正文），等下一批事件即可——"
         "禁止用 delegate / update_synthesis 占位等待。"
+        "禁止「还在等/你不用管」当终稿。"
         "对用户开口仅三选一：请示用户 / 报告阻塞与选项 / 宣布阶段结论（非纯进度）。"
         "可用工具：wait 确认等待；cancel_worker(run_id, reason) 终止队员；"
         "delegate 再派【全新角色/任务】队员（同回合追加进同一张协作图，不必等全队完成；"
@@ -101,7 +110,7 @@ def format_coordination_events(
         "update_synthesis(draft) 只在【里程碑】写合成草稿——新结论、冲突/方向修正、"
         "一波/一阶段收束、终稿收束；禁止纯进度播报；例行的单个 worker 完成【不写】"
         "（进度已由系统自动呈现），微调措辞更不算里程碑。"
-        "全部完成后做最终合成（走 content_delta），然后退出协调。"
+        f"{close_line}"
         "【终稿纪律】最终合成是给用户的交付、不是协调日志：交付物在前，过程简述至多一段；"
         "协调态进度旁白不得焊进终稿 content；以上协调事件、escalation 原文与合成草稿是你的"
         "工作输入，禁止整段粘进终稿——草稿要用也须重写成交付口吻；"
@@ -186,6 +195,22 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
         done = p.get("completed", 0)
         total = p.get("total", session.total_workers)
         failed = p.get("failed")
+        if not session.harvest_closing:
+            if p.get("cancelled") or p.get("error"):
+                return (
+                    f"- all_completed：调度中断（{done}/{total}）。"
+                    "本回合可见面只留人已派出，勿做最终合成。"
+                )
+            if p.get("criteria_met") is False:
+                failed_n = failed if isinstance(failed, int) else 0
+                return (
+                    f"- all_completed：团队调度结束（完成 {done}/{total}，失败 {failed_n}），"
+                    "但批次验收未满足。本回合可见面只留人已派出，勿做最终合成。"
+                )
+            return (
+                f"- all_completed：团队已结束（{done}/{total}）。"
+                "本回合可见面只留人已派出，勿做最终合成。"
+            )
         if p.get("cancelled") or p.get("error"):
             lines = [
                 f"- all_completed：调度中断，基于已完成部分收口（{done}/{total}）。"

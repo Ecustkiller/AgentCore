@@ -145,4 +145,15 @@ describe("StatusStrip · 不挂合成草稿行", () => {
     expect(screen.queryByTestId("team-synthesis-preview")).toBeNull();
     expect(screen.queryByText("生成汇总")).toBeNull();
   });
+
+  it("execution.completed 但工人未齐时不画完成勾", () => {
+    useExecutionStore.getState().startExecution(plan, MID);
+    const oneStillRunning = bothWorkersDone.slice(0, 3);
+    const execution = projectExecution(plan, oneStillRunning, "completed");
+    expect(execution.runs.some((r) => r.status === "running")).toBe(true);
+
+    renderStrip(execution);
+
+    expect(screen.queryByLabelText("完成")).toBeNull();
+  });
 });

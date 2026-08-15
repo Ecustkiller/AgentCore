@@ -754,6 +754,12 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     # 对用户用人话；字段名只留工具通道
     assert "重新安排人补上" in body or "谁没交齐" in body
     assert "勿复述字段名" in body or "工具通道用语" in body
+    # 派完可见面：只留「人已派出」；禁与 host / COORDINATION_PERIOD_HINT 打架的「谁在后台」。
+    assert "人已派出" in body
+    assert "还在等" in body and "你不用管" in body
+    assert "可静默" in body
+    assert "谁还在跑" in body
+    assert "谁在后台、完成后会再汇报" not in body
     # 纠正「一次只能一个 delegate / 同步阻塞到全队完成」误述：一回合一张图 + 同回合可再追加；
     # 禁止同构重派在跑任务。
     assert "一回合一张协作图" in body

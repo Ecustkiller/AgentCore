@@ -929,6 +929,7 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
     assert "谁还在跑" in brief
     assert "三选一" in brief
     assert "谁在后台推进" not in brief
+    assert "谁在后台、完成后会再汇报" not in brief
     assert "保持静默即可" not in brief
     assert "保持等待" in brief or "保持静默" in brief  # forbid phrasing appears as prohibition
 

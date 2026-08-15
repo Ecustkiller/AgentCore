@@ -3,7 +3,8 @@
  * 页 AbortSignal 只取消该 effect 的窗 GET：cleanup 先 cancelled 再 abort，
  * overlay 只认 cancelled —— 切走不得把第二条对话打成「加载失败」。
  */
-import { useConversationStore } from "@/stores/conversation";
+import { getRuntime, useConversationStore } from "@/stores/conversation";
+import type { Message } from "@/stores/conversation";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { useEffect } from "react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
@@ -155,5 +156,103 @@ describe("ConversationPage hydrate abort", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText("对话加载失败")).toBeNull();
     expect(await screen.findByLabelText("正在加载对话")).toBeTruthy();
+  });
+});
+
+function StaticHarness({ id }: { id: string }) {
+  return (
+    <MemoryRouter initialEntries={[`/c/${id}`]}>
+      <Routes>
+        <Route path="/c/:id" element={<ConversationPage />} />
+      </Routes>
+    </MemoryRouter>
+  );
+}
+
+function bubble(
+  id: string,
+  role: "user" | "assistant",
+  content: string,
+  extra: Partial<Message> = {},
+): Message {
+  return {
+    id,
+    role,
+    content,
+    createdAt: "2026-08-15T00:00:00Z",
+    executionId: extra.executionId ?? null,
+    isStreaming: false,
+    ...extra,
+  };
+}
+
+describe("ConversationPage cold reconcile", () => {
+  beforeEach(() => {
+    useConversationStore.setState({ currentConversationId: null, byId: {} });
+    loadCachedConversation.mockReset();
+    fetchMessageWindow.mockReset();
+    loadRecovery.mockResolvedValue({
+      sidecarLive: false,
+      cloudLive: false,
+      cloudKnown: true,
+      pausedCount: 0,
+      unsynced: [],
+    });
+  });
+
+  it("does not replace a cache that already has the team journal with a thinner GET", async () => {
+    const thick = [
+      bubble("u1", "user", "做 G1-C1"),
+      bubble("a1", "assistant", "等待核验员", {
+        executionId: "exec-1",
+        process: [
+          { kind: "team", execution_id: "exec-1" },
+        ] as Message["process"],
+        runs: {
+          events: [
+            { type: "run_plan", payload: { execution_id: "exec-1" } } as never,
+          ],
+          finishReason: "end_turn",
+        },
+      }),
+    ];
+    const thin = [
+      bubble("u1", "user", "做 G1-C1"),
+      bubble("a1", "assistant", "等待核验员"),
+    ];
+    loadCachedConversation.mockResolvedValue({
+      conversation: {
+        id: "conv-graph",
+        title: "G1-C1",
+        updatedAt: "2026-08-15T00:00:00Z",
+        messageCount: 2,
+        lastMessagePreview: "等待核验员",
+        openedAt: 1,
+        byteSize: 1,
+      },
+      messages: thick,
+      memoryUpdates: [],
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+    });
+    fetchMessageWindow.mockResolvedValue({
+      messages: thin,
+      total: 2,
+      hasMoreBefore: false,
+      hasMoreAfter: false,
+      memoryUpdates: [],
+    });
+
+    render(<StaticHarness id="conv-graph" />);
+
+    await waitFor(() => {
+      expect(fetchMessageWindow).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      const runs = getRuntime("conv-graph").messages.find(
+        (m) => m.id === "a1",
+      )?.runs;
+      expect(runs?.events?.length).toBe(1);
+    });
   });
 });

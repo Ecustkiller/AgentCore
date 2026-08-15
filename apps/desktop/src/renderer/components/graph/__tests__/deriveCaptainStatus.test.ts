@@ -1,6 +1,6 @@
 import type { Execution, RunNode } from "@/stores/execution";
 import { describe, expect, it } from "vitest";
-import { deriveCaptainStatus } from "../helpers";
+import { captainSinkPreview, deriveCaptainStatus } from "../helpers";
 
 function run(
   partial: Partial<RunNode> & Pick<RunNode, "id" | "status">,
@@ -89,6 +89,72 @@ describe("deriveCaptainStatus", () => {
     expect(deriveCaptainStatus(e, "cap")).toBe("pending");
   });
 
+  it("stays pending when CEO turn ended but a worker is still live", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "cap", status: "pending", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "running" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap", { turnTerminal: true })).toBe(
+      "pending",
+    );
+  });
+
+  it("does not trust execution.completed while a worker is still live", () => {
+    const e = exec({
+      status: "completed",
+      runs: [
+        run({ id: "cap", status: "completed", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "running" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap", { turnTerminal: true })).toBe(
+      "pending",
+    );
+  });
+
+  it("stays running after CEO turn ended while harvest/synthesis is live", () => {
+    const e = exec({
+      status: "running",
+      runs: [
+        run({ id: "cap", status: "pending", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "completed" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap", { turnTerminal: true })).toBe(
+      "running",
+    );
+  });
+
+  it("returns completed when execution completed and all workers terminal", () => {
+    const e = exec({
+      status: "completed",
+      runs: [
+        run({ id: "cap", status: "completed", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+        run({ id: "w2", status: "completed" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap", { turnTerminal: true })).toBe(
+      "completed",
+    );
+  });
+
+  it("returns completed for a captain-only turn that already ended", () => {
+    const e = exec({
+      status: "running",
+      runs: [run({ id: "cap", status: "pending", kind: "captain" })],
+    });
+    expect(deriveCaptainStatus(e, "cap", { turnTerminal: true })).toBe(
+      "completed",
+    );
+  });
+
   it("ignores extra append-turn captains when judging worker completion", () => {
     const e = exec({
       status: "running",
@@ -100,5 +166,48 @@ describe("deriveCaptainStatus", () => {
       ],
     });
     expect(deriveCaptainStatus(e, "cap")).toBe("running");
+  });
+});
+
+describe("captainSinkPreview", () => {
+  it("待汇总不摘派单等待句", () => {
+    expect(
+      captainSinkPreview({
+        captainStatus: "pending",
+        answerPreview: "人已派出，验证员还在复核，你先忙别的。",
+        synthesisPreview: "",
+      }),
+    ).toBe("");
+  });
+
+  it("待汇总且无等待条时显示中间草稿", () => {
+    expect(
+      captainSinkPreview({
+        captainStatus: "pending",
+        answerPreview: "人已派出",
+        synthesisPreview: "两边方向一致：优先方案 A。",
+      }),
+    ).toBe("两边方向一致：优先方案 A。");
+  });
+
+  it("待汇总有等待条时预览留空（不重复、不摘派单句）", () => {
+    expect(
+      captainSinkPreview({
+        captainStatus: "pending",
+        answerPreview: "人已派出，还在等。",
+        synthesisPreview: "草稿不应盖过等待文案",
+        waitCaption: "等待「撰写员」(1/2) · 已等 15s",
+      }),
+    ).toBe("");
+  });
+
+  it("人齐后仍用派单泡开头", () => {
+    expect(
+      captainSinkPreview({
+        captainStatus: "completed",
+        answerPreview: "人已派出",
+        synthesisPreview: "草稿不应出现",
+      }),
+    ).toBe("人已派出");
   });
 });

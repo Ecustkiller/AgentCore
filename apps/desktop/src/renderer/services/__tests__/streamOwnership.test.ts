@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  beginLocalConversationStream,
   claimPrimaryStream,
+  forceReleaseLocalConversationStream,
+  hasLocalConversationStream,
   isPrimaryStreamIdle,
   onPrimaryStreamIdle,
   releasePrimaryStream,
   resetStreamOwnershipForTests,
   waitForPrimaryStreamIdle,
+  whenLocalConversationStreamIdle,
 } from "../turns/streamOwnership";
 
 const CID = "conv-ownership";
@@ -52,5 +56,41 @@ describe("streamOwnership — 主路所有权栈", () => {
     releasePrimaryStream(CID, t);
     expect(hits).toEqual([1]);
     unsub();
+  });
+});
+
+describe("streamOwnership — 本机流 leftover 放流", () => {
+  it("forceRelease 清 leftover，后续 finally release 不把 count 打成负", () => {
+    const release = beginLocalConversationStream(CID);
+    expect(hasLocalConversationStream(CID)).toBe(true);
+    expect(forceReleaseLocalConversationStream(CID)).toBe(true);
+    expect(hasLocalConversationStream(CID)).toBe(false);
+    release();
+    expect(hasLocalConversationStream(CID)).toBe(false);
+    expect(forceReleaseLocalConversationStream(CID)).toBe(false);
+  });
+});
+
+describe("streamOwnership — 等本机流空闲", () => {
+  it("已空闲则同步回调一次", () => {
+    const hits: number[] = [];
+    whenLocalConversationStreamIdle(CID, () => hits.push(1));
+    expect(hits).toEqual([1]);
+  });
+
+  it("忙则等释放后再回调一次，取消后不再触发", () => {
+    const release = beginLocalConversationStream(CID);
+    const hits: number[] = [];
+    const cancel = whenLocalConversationStreamIdle(CID, () => hits.push(1));
+    expect(hits).toEqual([]);
+    cancel();
+    release();
+    expect(hits).toEqual([]);
+
+    const release2 = beginLocalConversationStream(CID);
+    whenLocalConversationStreamIdle(CID, () => hits.push(2));
+    expect(hits).toEqual([]);
+    release2();
+    expect(hits).toEqual([2]);
   });
 });

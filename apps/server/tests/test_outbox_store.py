@@ -954,3 +954,70 @@ def test_finalize_omitted_user_message_keeps_prior(tmp_path):
     record = _drive(run())
     assert record["user_message"] == "keep prior"
 
+
+def test_to_record_turn_body_includes_harvest_origin(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        message_id="m1",
+        trace_id="h" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="h" * 32)
+        await store.finalize(
+            mode="local",
+            conversation_id="c1",
+            user_message="【系统收口】后台团队任务已全部完成。",
+            user_message_id="u1",
+            assistant_content="终稿",
+            message_id="m1",
+            trace_id="h" * 32,
+            finish_reason="stop",
+            origin="execution_harvest",
+            execution_id="exec-1",
+            harvest_kind="success",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["origin"] == "execution_harvest"
+    assert record["execution_id"] == "exec-1"
+    assert record["harvest_kind"] == "success"
+    body = to_record_turn_body(record)
+    assert body["origin"] == "execution_harvest"
+    assert body["execution_id"] == "exec-1"
+    assert body["harvest_kind"] == "success"
+
+
+def test_salvage_copies_harvest_origin_from_bind(tmp_path):
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        message_id="m1",
+        trace_id="h" * 32,
+        origin="execution_harvest",
+        execution_id="exec-1",
+        harvest_kind="success",
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="h" * 32)
+        await store.salvage(
+            journal=[],
+            content="半成品",
+            conversation_id="c1",
+            trace_id="h" * 32,
+            message_id="m1",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["origin"] == "execution_harvest"
+    assert record["execution_id"] == "exec-1"
+    assert record["harvest_kind"] == "success"
+

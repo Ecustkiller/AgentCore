@@ -957,6 +957,7 @@ async def test_close_turn_interrupted_ensures_turn_end_when_merge_persist_drops_
 
 def test_inject_cancelled_all_completed_copy():
     session = CoordinationSession(execution_id="e1", total_workers=2)
+    session.harvest_closing = True
     text = format_coordination_events(
         session,
         [

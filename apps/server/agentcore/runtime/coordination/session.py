@@ -167,6 +167,8 @@ class CoordinationSnapshot:
     turn_attached: bool = True
     user_stopped: bool = False
     saw_first_completion: bool = False
+    # Terminal events + artifacts parked for harvest after first-turn inject+close.
+    harvest_stash: list[dict[str, Any]] = field(default_factory=list)
     # C3: ownership ledger snapshot — v3 nested ``{_v, owners, written, …}``
     # (desk×path keys); v≤2 lazy-migrated on restore.
     file_ownership: dict[str, Any] = field(default_factory=dict)
@@ -199,6 +201,7 @@ class CoordinationSnapshot:
             "turn_attached": self.turn_attached,
             "user_stopped": self.user_stopped,
             "saw_first_completion": self.saw_first_completion,
+            "harvest_stash": list(self.harvest_stash),
             "file_ownership": dict(self.file_ownership),
         }
 
@@ -249,6 +252,9 @@ class CoordinationSnapshot:
             turn_attached=bool(data.get("turn_attached", True)),
             user_stopped=bool(data.get("user_stopped", False)),
             saw_first_completion=bool(data.get("saw_first_completion", False)),
+            harvest_stash=[
+                dict(x) for x in (data.get("harvest_stash") or []) if isinstance(x, dict)
+            ],
             file_ownership=file_ownership,
         )
 
@@ -309,6 +315,11 @@ class CoordinationSession:
     # C3: session birth desk (conversation folder_id). Ownership keys use
     # ``target_folder_id or birth_desk_id``; process-local (re-armed from tool).
     birth_desk_id: str | None = None
+    # Sidecar startTurn stamps local folder bind so harvest can rebuild the
+    # workspace without ``resolve_local_binding(db)``. Process-local; not snapshotted.
+    folder_binding_injected: bool = False
+    folder_local_root_id: str | None = None
+    folder_local_subpath: str = ""
     completed_run_ids: set[str] = field(default_factory=set)
     # Terminal FAILED run_ids (subset of completed) — pipeline health / idle brief.
     failed_run_ids: set[str] = field(default_factory=set)
@@ -320,8 +331,13 @@ class CoordinationSession:
     progress_reported_completed: set[str] = field(default_factory=set)
     cancel_ids: set[str] = field(default_factory=set)
     active: bool = True
-    # True after all_completed has been injected into the CEO window.
+    # True after ALL_COMPLETED was injected into a live CEO wait. That is not a
+    # user-visible closing appearance — harvest may still spawn a new turn.
     all_completed_injected: bool = False
+    # True while the system harvest closing turn is the attached CEO (最终合成).
+    harvest_closing: bool = False
+    # Terminal events parked across first-turn close() so harvest can re-queue them.
+    _harvest_stash: list[CoordinationEvent] = field(default_factory=list, repr=False)
     # Background WaveScheduler task (owned by drive); None until started.
     drive_task: asyncio.Task[Any] | None = None
     # ask_user soft-stop sets this before cancelling drive_task so the cancel
@@ -1347,6 +1363,10 @@ class CoordinationSession:
             live_plan=live_plan_json,
             pending_interjections=interjections,
             all_completed_injected=self.all_completed_injected,
+            harvest_stash=[
+                {"kind": e.kind.value, "payload": dict(e.payload)}
+                for e in self._harvest_stash
+            ],
             harvest_scheduled=self.harvest_scheduled,
             terminal_posted=self.terminal_posted,
             settled_via=self.settled_via,
@@ -1411,6 +1431,20 @@ class CoordinationSession:
             session._pending.append(
                 CoordinationEvent(kind=kind, payload=dict(raw.get("payload") or {}))
             )
+        for raw in snap.harvest_stash:
+            kind_raw = str(raw.get("kind") or "")
+            try:
+                kind = CoordinationEventKind(kind_raw)
+            except ValueError:
+                continue
+            if kind not in (
+                CoordinationEventKind.ALL_COMPLETED,
+                CoordinationEventKind.DRIVE_CANCELLED,
+            ):
+                continue
+            session._harvest_stash.append(
+                CoordinationEvent(kind=kind, payload=dict(raw.get("payload") or {}))
+            )
         for raw in snap.pending_arbitrations:
             rid = str(raw.get("run_id") or "").strip()
             if rid:
@@ -1451,8 +1485,76 @@ class CoordinationSession:
             )
         return session
 
+    def stash_terminal_for_harvest(
+        self, events: list[CoordinationEvent] | None = None
+    ) -> None:
+        """Park ALL_COMPLETED / DRIVE_CANCELLED (and leftover queue) for harvest.
+
+        First-turn wait consumes these events then ``close()``; harvest re-queues
+        the stash after ``reopen_for_harvest``.
+        """
+        batch = list(events or [])
+        if events is None:
+            batch.extend(self._pending)
+            while True:
+                try:
+                    batch.append(self._queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+        kept: list[CoordinationEvent] = []
+        seen: set[CoordinationEventKind] = set()
+        for ev in (*self._harvest_stash, *batch):
+            if ev.kind not in (
+                CoordinationEventKind.ALL_COMPLETED,
+                CoordinationEventKind.DRIVE_CANCELLED,
+            ):
+                continue
+            if ev.kind in seen:
+                kept = [e for e in kept if e.kind is not ev.kind]
+            seen.add(ev.kind)
+            kept.append(
+                CoordinationEvent(kind=ev.kind, payload=dict(ev.payload or {}))
+            )
+        self._harvest_stash = kept
+
+    def reopen_for_harvest(self) -> None:
+        """Re-activate a closed session and re-queue stashed terminal events."""
+        self.active = True
+        self.harvest_closing = True
+        if self._harvest_stash:
+            self._pending.extend(
+                CoordinationEvent(kind=e.kind, payload=dict(e.payload or {}))
+                for e in self._harvest_stash
+            )
+            self._harvest_stash = []
+            self._wake.set()
+        logger.info(
+            "coordination.execution_reopened_for_harvest",
+            execution_id=self.execution_id,
+            conversation_id=self.conversation_id or "",
+            pending=len(self._pending),
+        )
+
     def close(self) -> None:
         was_active = self.active
+        if was_active and not self.harvest_closing:
+            leftover = list(self._pending)
+            while True:
+                try:
+                    leftover.append(self._queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+            if leftover:
+                self.stash_terminal_for_harvest(leftover)
+                self._pending = [
+                    ev
+                    for ev in leftover
+                    if ev.kind
+                    not in (
+                        CoordinationEventKind.ALL_COMPLETED,
+                        CoordinationEventKind.DRIVE_CANCELLED,
+                    )
+                ]
         self.active = False
         self.cancel_all_timeouts()
         # 收口：未消化插话升格对话 FIFO（或终局已答 → addressed）。仅从 active→inactive
@@ -1499,20 +1601,44 @@ def resolve_coordination_session(
     return session
 
 
+def registered_coordination_for_conversation(
+    conversation_id: str,
+) -> CoordinationSession | None:
+    """Registry session for ``conversation_id``, including closed harvest-awaiting ones.
+
+    Mid-flight user routing still uses :func:`active_coordination_for_conversation`
+    (active only). Harvest adopt needs the closed-but-registered session.
+    """
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return None
+    eid = _by_conversation.get(cid)
+    if not eid:
+        return None
+    return _sessions.get(eid)
+
+
 def adopt_active_execution(
     conversation_id: str,
     *,
     event_sink: Any | None = None,
+    reopen_harvest: bool = False,
 ) -> CoordinationSession | None:
     """Re-attach the conversation's live execution to the calling turn (pillar B).
 
     Binds :data:`current_execution_id` to the registry session so the CEO wait path
     finds it even when this turn minted a different id. Sets ``turn_attached=True``
-    and optionally refreshes ``event_sink``. Returns the adopted session or ``None``.
+    and optionally refreshes ``event_sink``. Closed harvest-awaiting sessions are
+    reopened only when ``reopen_harvest=True`` (system closing turn). Ordinary
+    user turns must not steal that session. Returns the adopted session or ``None``.
     """
-    session = active_coordination_for_conversation(conversation_id)
-    if session is None or not session.active:
+    session = registered_coordination_for_conversation(conversation_id)
+    if session is None or session.user_stopped or session.soft_stop:
         return None
+    if not session.active:
+        if not reopen_harvest:
+            return None
+        session.reopen_for_harvest()
     current_execution_id.set(session.execution_id)
     session.turn_attached = True
     if event_sink is not None:
@@ -1523,6 +1649,7 @@ def adopt_active_execution(
         execution_id=session.execution_id,
         completed=len(session.completed_run_ids),
         total=session.total_workers,
+        harvest_closing=session.harvest_closing,
     )
     return session
 
@@ -1663,17 +1790,18 @@ def _release_turn_one(eid: str, session: CoordinationSession | None) -> None:
             total=session.total_workers,
         )
         return
-    # Drive finished (or never armed). 案 B：终态已投递却未 inject/harvest 时
-    # 优先补 harvest，勿裸 clear → terminal_unsettled 丢合成路径。
+    # Drive finished (or never armed). Always detach so attach-grace can proceed.
+    # Inject ≠ 用户可见收口：CEO 可能已 end_turn 并留下「人已派出」气泡，
+    # 仍须 harvest 再出一条新消息。已在飞的 harvest 只交还附着、勿裸 clear。
+    session.turn_attached = False
+    if session.harvest_scheduled:
+        return
     if (
         session.terminal_posted
-        and not session.settled_via
         and not session.user_stopped
-        and not session.all_completed_injected
-        and not session.harvest_scheduled
+        and session.settled_via != "harvest"
         and (session.conversation_id or "").strip()
     ):
-        session.turn_attached = False
         logger.info(
             "coordination.release_prefers_harvest",
             execution_id=eid,
@@ -1682,17 +1810,15 @@ def _release_turn_one(eid: str, session: CoordinationSession | None) -> None:
         )
         finish_detached_coordination(session)
         return
-    # Safe to drop — same-turn CEO already closed via all_completed inject, or
-    # append finished before teardown with nobody left to consume the queue.
     if session.active:
         session.close()
     clear_active_coordination(eid)
 
 
-# After drive finally: wait this long for same-turn ALL_COMPLETED inject or
-# release_turn detach before force-harvesting. Covers fire-and-forget and the
-# cross-turn append ContextVar miss (gather child wrote host eid; parent
-# teardown released the mint id → turn_attached stuck True).
+# After drive finally: wait this long for release_turn detach before
+# force-harvesting. Covers fire-and-forget and the cross-turn append
+# ContextVar miss (gather child wrote host eid; parent teardown released
+# the mint id → turn_attached stuck True). Inject does not cancel this wait.
 _HARVEST_ATTACH_GRACE_S = 5.0
 _HARVEST_ATTACH_POLL_S = 0.05
 
@@ -1703,8 +1829,10 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
     ``turn_attached=True`` must **not** silently no-op. The arming turn may have
     fire-and-forget ``end_turn``'d without waiting, or turn teardown may have
     released a different ContextVar eid after cross-turn append — leaving this
-    session flagged attached forever. Defer briefly so a same-turn wait inject
-    can win; then harvest (or explicit fallback inside the harvester).
+    session flagged attached forever. Defer briefly so a still-live CEO turn can
+    finish (harvest defers while the slot is busy); then always harvest. Same-turn
+    ``wait`` inject does **not** cancel harvest — inject is not a user-visible
+    closing appearance.
     """
     if session.user_stopped:
         if session.active:
@@ -1720,11 +1848,9 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
         return
     if session.harvest_scheduled:
         return
-    if session.all_completed_injected:
-        # Attached inject already settled the terminal.
-        if not session.turn_attached:
-            _close_detached_session(session)
-        return
+    # all_completed_injected ≠ 可见收口。同回合 wait 吃到终态后 CEO 仍可能
+    # 留下等待气泡并 end_turn；清 session / 取消 harvest 会让用户再也看不到
+    # 第二条 CEO 消息。注入不在这里短路。
     # Empty conversation_id: orphan / unit sessions sync-clear only when already
     # detached. turn_attached=True must keep attach-grace semantics (same as with
     # a cid) so same-turn CEO wait can inject — never sync-clear into a false
@@ -1778,7 +1904,12 @@ def _arm_harvest_now(session: CoordinationSession) -> None:
 
 
 async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
-    """Wait for inject / detach; on grace expiry force-harvest stale attach."""
+    """Wait for detach; on grace expiry force-harvest stale attach.
+
+    ``all_completed_injected`` is ignored here: the live turn may still be the
+    waiting bubble. Harvest after detach (or stale-attach force) is the
+    user-visible closing appearance.
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + _HARVEST_ATTACH_GRACE_S
     while True:
@@ -1791,13 +1922,6 @@ async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
                 clear_active_coordination(session.execution_id)
             return
         if session.soft_stop:
-            session.harvest_scheduled = False
-            return
-        if session.all_completed_injected:
-            logger.info(
-                "coordination.harvest_cancelled_attached_inject",
-                execution_id=session.execution_id,
-            )
             session.harvest_scheduled = False
             return
         if not session.turn_attached:
@@ -1818,7 +1942,7 @@ async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
             break
         await asyncio.sleep(_HARVEST_ATTACH_POLL_S)
 
-    if session.user_stopped or session.soft_stop or session.all_completed_injected:
+    if session.user_stopped or session.soft_stop:
         session.harvest_scheduled = False
         return
     _arm_harvest_now(session)

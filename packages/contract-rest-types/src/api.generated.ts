@@ -11084,8 +11084,12 @@ export interface components {
             content: string;
             /** Evidence Ledger */
             evidence_ledger?: components["schemas"]["EvidenceLedgerEntryRest"][];
+            /** Execution Id */
+            execution_id?: string | null;
             /** Finish Reason */
             finish_reason?: string | null;
+            /** Harvest Kind */
+            harvest_kind?: string | null;
             /**
              * Input Tokens
              * @default 0
@@ -11097,6 +11101,8 @@ export interface components {
             }[] | null;
             /** Message Id */
             message_id?: string | null;
+            /** Origin */
+            origin?: string | null;
             /**
              * Output Tokens
              * @default 0

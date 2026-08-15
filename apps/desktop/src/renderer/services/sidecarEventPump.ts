@@ -13,6 +13,8 @@ import type { SidecarEventPush } from "@shared/sidecar-contract";
  * - **不同具体 turnId**：D9 冷 resume × live 共存——两路各收各的事件，互不驱逐。
  * - `resume_deferred`：会话级 EPHEMERAL，扇出到该会话全部 owner（turnId 不一致也能进
  *   `dispatchSSEEvent` → `markResumeDeferred`）。
+ * - **未认领 turnId**：交给 `setUnclaimedSidecarTurnHandler`（harvest 认领），
+ *   禁止在泵内新造 SSE。
  *
  * 禁止在 fold/contentBuffer 对相同 delta 去重。
  */
@@ -79,9 +81,35 @@ function ownersToRevoke(existing: Owner[], turnId: string | null): Owner[] {
   return existing.filter((o) => o.turnId === null || o.turnId === turnId);
 }
 
+type UnclaimedSidecarTurnHandler = (push: SidecarEventPush) => boolean;
+
+let unclaimedHandler: UnclaimedSidecarTurnHandler | null = null;
+
+/**
+ * 未认领 turnId 的兜底（harvest 自发回合）。返回 true 表示已 claim，泵应再投递本帧。
+ * 由 harvest claim 模块注册；测试 reset 会清掉。
+ */
+export function setUnclaimedSidecarTurnHandler(
+  handler: UnclaimedSidecarTurnHandler | null,
+): void {
+  unclaimedHandler = handler;
+}
+
+function deliverToMatchingOwners(
+  push: SidecarEventPush,
+  owners: Owner[],
+): boolean {
+  let delivered = false;
+  for (const owner of owners) {
+    if (owner.turnId !== null && owner.turnId !== push.turnId) continue;
+    owner.sink(push);
+    delivered = true;
+  }
+  return delivered;
+}
+
 function routePush(push: SidecarEventPush): void {
   const owners = listOwners(push.conversationId);
-  if (owners.length === 0) return;
 
   const eventType =
     push.event && typeof push.event === "object"
@@ -98,10 +126,9 @@ function routePush(push: SidecarEventPush): void {
     return;
   }
 
-  for (const owner of owners) {
-    if (owner.turnId !== null && owner.turnId !== push.turnId) continue;
-    owner.sink(push);
-  }
+  if (deliverToMatchingOwners(push, owners)) return;
+  if (!unclaimedHandler?.(push)) return;
+  deliverToMatchingOwners(push, listOwners(push.conversationId));
 }
 
 /**
@@ -182,4 +209,5 @@ export function resetSidecarEventPumpForTests(): void {
   unsubscribeIpc?.();
   unsubscribeIpc = null;
   installed = false;
+  unclaimedHandler = null;
 }

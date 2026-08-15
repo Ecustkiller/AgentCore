@@ -218,6 +218,7 @@ class TurnExecutionMixin:
         conversation_id = str(params.get("conversationId") or turn_id)
         user_message = str(params.get("userMessage") or "")
         history = params.get("history") or []
+        self.stamp_turn_history(conversation_id, history)
         # The desktop mints one trace_id per local turn and threads it here + into the
         # write-back, so this turn's proxied LLM calls and its persisted reply share it.
         trace_id = str(params.get("traceId") or "")
@@ -269,7 +270,9 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     message_id=message_id,
                 )
-                pump = asyncio.create_task(self._pump(turn_id, sink))
+                pump = asyncio.create_task(
+                    self._pump(turn_id, sink, conversation_id=conversation_id)
+                )
                 try:
                     sink.emit(
                         error_event(
@@ -310,6 +313,13 @@ class TurnExecutionMixin:
             binding_injected, folder_local_root_id, folder_local_subpath = (
                 resolve_rpc_folder_binding(params)
             )
+            self.stamp_folder_scope(
+                conversation_id,
+                folder_id=folder_id,
+                binding_injected=binding_injected,
+                local_root_id=folder_local_root_id,
+                local_subpath=folder_local_subpath or "",
+            )
 
             # A1+ local：message_id mint + begin_turn 后、pipeline 前打本机基线（resume 不重打）。
             from agentcore.workspace.turn_baseline import maybe_capture_turn_baseline
@@ -322,7 +332,9 @@ class TurnExecutionMixin:
                 backend=backend,
                 workspace_root=self._root,
             )
-            pump = asyncio.create_task(self._pump(turn_id, sink))
+            pump = asyncio.create_task(
+                self._pump(turn_id, sink, conversation_id=conversation_id)
+            )
             try:
                 # Bind the turn's trace_id here (the cloud binds it in stream_chat; the engine
                 # itself doesn't) so the engine's message_start carries it and the live bubble
@@ -379,7 +391,7 @@ class TurnExecutionMixin:
                             folder_local_root_id=folder_local_root_id,
                             folder_local_subpath=folder_local_subpath,
                             approvals_enabled=self._approvals_enabled,
-                            permission_axes=self._permission_axes,
+                            permission_axes=self.permission_axes_for(conversation_id),
                             llm_credentials=turn_creds,
                             session_saver=session_saver,
                             session_loader=session_loader,
@@ -485,6 +497,9 @@ class TurnExecutionMixin:
         user_message_id: str,
         trace_id: str,
         result: dict[str, Any],
+        origin: str | None = None,
+        execution_id: str | None = None,
+        harvest_kind: str | None = None,
     ) -> None:
         """Seal the outbox record as ready for main-process writeback."""
         journal_entries = result.get("journal_entries")
@@ -519,6 +534,9 @@ class TurnExecutionMixin:
             rounds=int(result.get("rounds", 0) or 0),
             trace_id=trace_id,
             finish_reason=finish,
+            origin=origin,
+            execution_id=execution_id,
+            harvest_kind=harvest_kind,
         )
 
     async def _run_resume(
@@ -559,6 +577,7 @@ class TurnExecutionMixin:
         turn_id = suspension.message_id
         conversation_id = suspension.conversation_id
         user_message = suspension.user_message or ""
+        self.stamp_turn_history(conversation_id, suspension.history)
         # Prefer the client-pinned user bubble id; fall back to a stable derived key.
         umid = (user_message_id or getattr(suspension, "user_message_id", None) or "").strip()
         if not umid:
@@ -671,7 +690,9 @@ class TurnExecutionMixin:
             # No outbox ⇒ cannot durable-prewrite; keep legacy confirm-on-success.
             settlement_durable = False
 
-        pump = asyncio.create_task(self._pump(turn_id, sink))
+        pump = asyncio.create_task(
+            self._pump(turn_id, sink, conversation_id=conversation_id)
+        )
         try:
             try:
                 # Bind this continuation's trace_id (same rationale as _run_turn) so the
@@ -711,7 +732,7 @@ class TurnExecutionMixin:
                             session_loader=session_loader,
                             suspension_saver=saver,
                             suspension_deleter=deleter,
-                            permission_axes=self._permission_axes,
+                            permission_axes=self.permission_axes_for(conversation_id),
                             # Same desktop channel as fresh turns — omit ⇒ resume drops MCP/Host.
                             x_client_platform="desktop",
                             excluded_run_ids=excluded,
@@ -836,13 +857,20 @@ class TurnExecutionMixin:
                 outbox.clear_turn(turn_id)
             self._unregister_turn(turn_id)
 
-    async def _pump(self, turn_id: str, sink: EventSink) -> None:
+    async def _pump(
+        self, turn_id: str, sink: EventSink, *, conversation_id: str = ""
+    ) -> None:
         """Drain the turn's EventSink, emitting each event as a notification.
 
         Mirrors the SSE layer's ``_event_generator`` consumer: pull until the sink
         is closed (``None``), forwarding every event verbatim. ``StrEnum`` values in
         the payload (``EventType`` / ``FinishReason``) serialize as plain strings.
+
+        ``conversationId`` rides with ``turnId`` so harvest (no desktop-minted
+        startTurn slot) can still address the live conversation. Desktop may
+        ignore the extra field on user-started turns.
         """
+        cid = (conversation_id or self._turn_conversations.get(turn_id) or "").strip()
         while True:
             event = await sink.get()
             if event is None:
@@ -852,6 +880,7 @@ class TurnExecutionMixin:
                     "turn/event",
                     {
                         "turnId": turn_id,
+                        "conversationId": cid,
                         "event": {
                             "type": event.type.value,
                             "timestamp": event.timestamp,

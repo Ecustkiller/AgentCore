@@ -156,6 +156,12 @@ interface ActiveTurn {
   hasAttached: boolean;
   /** attach 零 await 段内为 true：只入缓冲、不转发（互斥不重不漏）。 */
   attaching: boolean;
+  /**
+   * sidecar 自发回合（如 harvest）按 cid 认领的临时登记。
+   * 不进 {@link SidecarManager.findLiveTurn}，避免 refresh attach 把它当成用户活回合。
+   * fulfill / D4 终态另走 ephemeral 专用路径。
+   */
+  ephemeral?: boolean;
 }
 
 /**
@@ -169,6 +175,10 @@ export function isDestroyedWebContentsError(err: unknown): boolean {
     /render frame was disposed/i.test(msg) ||
     /webframemain was disposed/i.test(msg)
   );
+}
+
+function isTurnEventTerminal(type: string): boolean {
+  return type === "message_end" || type === "error";
 }
 
 /** 流式/状态热路径：先查 isDestroyed，再 try/send，只吞销毁竞态。 */
@@ -190,6 +200,14 @@ function safeWcSend(wc: WebContents, channel: string, payload: unknown): void {
 export class SidecarManager {
   private readonly entries = new Map<string, SidecarEntry>();
   private readonly turns = new Map<string, ActiveTurn>();
+  /**
+   * 原 startTurn/resume finally 会 `turns.delete`；harvest 等自发 `turn/event`
+   * 带着新 turnId 到来时仍须把事件送到该会话窗口。按 cid 记住最近 wc。
+   */
+  private readonly lastWindowByCid = new Map<
+    string,
+    { wc: WebContents; rootId: string; subpath: string }
+  >();
 
   constructor(
     private readonly spawnFn: (
@@ -237,6 +255,7 @@ export class SidecarManager {
     client.onClosed((err) => {
       this.entries.delete(key);
       this.pushStatus({ rootId, phase: "exited", detail: err.message });
+      this.finalizeEphemeralTurns(rootId, subpath, err);
     });
 
     const ready = client
@@ -333,6 +352,7 @@ export class SidecarManager {
     });
     await this.awaitInflightWarms(entry, req.rootId);
 
+    this.dropEphemeralTurns(req.conversationId);
     this.turns.set(req.turnId, {
       wc,
       conversationId: req.conversationId,
@@ -346,6 +366,7 @@ export class SidecarManager {
       hasAttached: false,
       attaching: false,
     });
+    this.rememberWindow(req.conversationId, wc, req.rootId, req.subpath ?? "");
     try {
       const externalMounts = buildExternalMounts(
         listSessionRoots(req.conversationId),
@@ -675,6 +696,7 @@ export class SidecarManager {
     });
     await this.awaitInflightWarms(entry, req.rootId);
 
+    this.dropEphemeralTurns(req.conversationId);
     this.turns.set(req.messageId, {
       wc,
       conversationId: req.conversationId,
@@ -688,6 +710,7 @@ export class SidecarManager {
       hasAttached: false,
       attaching: false,
     });
+    this.rememberWindow(req.conversationId, wc, req.rootId, req.subpath ?? "");
     try {
       const externalMounts = buildExternalMounts(
         listSessionRoots(req.conversationId),
@@ -782,6 +805,12 @@ export class SidecarManager {
     live.turn.attaching = true;
     live.turn.wc = wc;
     live.turn.hasAttached = true;
+    this.rememberWindow(
+      req.conversationId,
+      wc,
+      live.turn.rootId,
+      live.turn.subpath,
+    );
     const events = live.turn.buffer.snapshot();
     live.turn.attaching = false;
     // --- end zero-await section ---
@@ -923,6 +952,7 @@ export class SidecarManager {
     }
     this.entries.clear();
     this.turns.clear();
+    this.lastWindowByCid.clear();
   }
 
   private onNotification(
@@ -934,10 +964,6 @@ export class SidecarManager {
       return;
     }
     if (method !== "turn/event") return;
-    const turnId = String(params.turnId ?? "");
-    const turn = this.turns.get(turnId);
-    if (!turn) return;
-
     const raw = params.event;
     const event =
       raw && typeof raw === "object"
@@ -948,6 +974,10 @@ export class SidecarManager {
           })
         : null;
     if (!event?.type) return;
+
+    const turnId = String(params.turnId ?? "");
+    const turn = this.turns.get(turnId) ?? this.adoptOrphanTurn(turnId, params);
+    if (!turn) return;
 
     const buffered = {
       type: String(event.type),
@@ -961,21 +991,29 @@ export class SidecarManager {
     turn.buffer.record(buffered);
 
     // During attach's zero-await window: buffer only — snapshot owns those events.
-    if (turn.attaching || turn.wc.isDestroyed()) return;
+    if (turn.attaching || turn.wc.isDestroyed()) {
+      if (turn.ephemeral && isTurnEventTerminal(buffered.type)) {
+        this.turns.delete(turnId);
+      }
+      return;
+    }
     safeWcSend(turn.wc, SIDECAR_CHANNELS.event, {
       conversationId: turn.conversationId,
       turnId,
       event: buffered,
     });
+    if (turn.ephemeral && isTurnEventTerminal(buffered.type)) {
+      this.turns.delete(turnId);
+    }
   }
 
   /**
-   * 本机履约帧（`fulfill/frame`）→ 持有该会话活回合的窗口。
+   * 本机履约帧（`fulfill/frame`）→ 该会话窗口。
    *
    * 与回合事件分流：履约不是显示态，不入 `SidecarEventBuffer`（attach 重放会让
-   * 同一 op 再执行一次），也不喂 `dispatchSSEEvent`。会话 id 取自帧 payload——
-   * 本机引擎只在回合内发这类帧，故必有活回合；找不到只记日志丢弃（op 随后按通道
-   * 超时诚实失败，不猜窗口）。
+   * 同一 op 再执行一次），也不喂 `dispatchSSEEvent`。会话 id 取自帧 payload。
+   * 用户活回合优先，否则打到 ephemeral harvest；都找不到只记日志丢弃
+   * （op 随后按通道超时诚实失败，不猜窗口）。
    */
   private onFulfillFrame(params: Record<string, unknown>): void {
     const raw = params.event;
@@ -992,7 +1030,7 @@ export class SidecarManager {
             (payload as { conversation_id?: unknown }).conversation_id ?? "",
           )
         : "";
-    const live = conversationId ? this.findLiveTurn(conversationId) : null;
+    const live = conversationId ? this.findFulfillTurn(conversationId) : null;
     if (!live) {
       logDesktop({
         level: "warn",
@@ -1017,8 +1055,11 @@ export class SidecarManager {
   }
 
   /**
-   * Before `turns.delete`: if an attached window never saw a terminal event,
+   * Before `turns.delete`: if the window never saw a terminal event,
    * synthesize one so the bubble cannot hang on「生成中」(D4 收尾必达).
+   *
+   * 用户回合：`hasAttached` 门闩（refresh attach 才需要合成）。
+   * ephemeral harvest：没有 attach 槽，无 terminal 也要合成。
    */
   private emitSyntheticTerminalIfNeeded(
     turnId: string,
@@ -1026,7 +1067,8 @@ export class SidecarManager {
     err?: unknown,
   ): void {
     const turn = this.turns.get(turnId);
-    if (!turn || !turn.hasAttached) return;
+    if (!turn) return;
+    if (!turn.ephemeral && !turn.hasAttached) return;
     if (turn.buffer.hasTerminal()) return;
 
     const event = {
@@ -1057,11 +1099,143 @@ export class SidecarManager {
     conversationId: string,
   ): { turnId: string; turn: ActiveTurn } | null {
     for (const [turnId, turn] of this.turns) {
+      if (turn.ephemeral) continue;
       if (turn.conversationId === conversationId) {
         return { turnId, turn };
       }
     }
     return null;
+  }
+
+  /** 履约帧：用户活回合优先，否则打到 ephemeral harvest。 */
+  private findFulfillTurn(
+    conversationId: string,
+  ): { turnId: string; turn: ActiveTurn } | null {
+    const live = this.findLiveTurn(conversationId);
+    if (live) return live;
+    for (const [turnId, turn] of this.turns) {
+      if (turn.ephemeral && turn.conversationId === conversationId) {
+        return { turnId, turn };
+      }
+    }
+    return null;
+  }
+
+  private rememberWindow(
+    conversationId: string,
+    wc: WebContents,
+    rootId: string,
+    subpath: string,
+  ): void {
+    if (!conversationId) return;
+    this.lastWindowByCid.set(conversationId, { wc, rootId, subpath });
+  }
+
+  private dropEphemeralTurns(conversationId: string): void {
+    for (const [turnId, turn] of [...this.turns]) {
+      if (turn.ephemeral && turn.conversationId === conversationId) {
+        this.emitSyntheticTerminalIfNeeded(turnId, "message_end");
+        this.turns.delete(turnId);
+      }
+    }
+  }
+
+  private finalizeEphemeralTurns(
+    rootId: string,
+    subpath: string,
+    err?: unknown,
+  ): void {
+    for (const [turnId, turn] of [...this.turns]) {
+      if (!turn.ephemeral) continue;
+      if (turn.rootId !== rootId || turn.subpath !== subpath) continue;
+      this.emitSyntheticTerminalIfNeeded(turnId, "error", err);
+      this.turns.delete(turnId);
+    }
+  }
+
+  /**
+   * 认窗：活回合 → 未销毁的 remembered wc → `getAllWindows` 回退。
+   * remembered 已销毁不得当有效（reload / HMR 死窗）。
+   */
+  private resolveConversationWindow(
+    conversationId: string,
+  ): { wc: WebContents; rootId: string; subpath: string } | null {
+    const live = this.findLiveTurn(conversationId);
+    if (live && !live.turn.wc.isDestroyed()) {
+      return {
+        wc: live.turn.wc,
+        rootId: live.turn.rootId,
+        subpath: live.turn.subpath,
+      };
+    }
+    const remembered = this.lastWindowByCid.get(conversationId);
+    if (remembered && !remembered.wc.isDestroyed()) {
+      return remembered;
+    }
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.isDestroyed()) continue;
+      const wc = win.webContents;
+      if (wc.isDestroyed()) continue;
+      return {
+        wc,
+        rootId: remembered?.rootId || live?.turn.rootId || "",
+        subpath: remembered?.subpath ?? live?.turn.subpath ?? "",
+      };
+    }
+    return null;
+  }
+
+  /**
+   * 未知 turnId 的自发 `turn/event`（harvest）：用 cid 找回窗口、登记临时 turn、转发。
+   * 禁止因「不在 this.turns」丢弃。找不到该会话最近窗口才放弃。
+   */
+  private adoptOrphanTurn(
+    turnId: string,
+    params: Record<string, unknown>,
+  ): ActiveTurn | null {
+    if (!turnId) return null;
+    const conversationId = String(params.conversationId ?? "").trim();
+    if (!conversationId) return null;
+
+    const live = this.findLiveTurn(conversationId);
+    const resolved = this.resolveConversationWindow(conversationId);
+    if (!resolved) {
+      logDesktop({
+        level: "warn",
+        event: "sidecar.turn_unrouted",
+        fields: {
+          conversation_id: conversationId,
+          turn_id: turnId,
+        },
+      });
+      return null;
+    }
+
+    const { wc, rootId, subpath } = resolved;
+    this.rememberWindow(conversationId, wc, rootId, subpath);
+
+    const adopted: ActiveTurn = {
+      wc,
+      conversationId,
+      rootId,
+      subpath,
+      kind: "start",
+      traceId: live?.turn.traceId ?? "",
+      buffer: new SidecarEventBuffer(),
+      hasAttached: false,
+      attaching: false,
+      ephemeral: true,
+    };
+    this.turns.set(turnId, adopted);
+    logDesktop({
+      level: "info",
+      event: "sidecar.orphan_turn_adopted",
+      fields: {
+        conversation_id: conversationId,
+        turn_id: turnId,
+      },
+    });
+    return adopted;
   }
 
   private pushStatus(push: SidecarStatusPush): void {

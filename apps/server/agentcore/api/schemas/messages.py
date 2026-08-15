@@ -1057,6 +1057,11 @@ class RecordTurnRequest(BaseModel):
     # Pipeline finish reason (``FinishReason`` value). ``paused`` / ``error`` skip title +
     # memory consolidation and upsert the assistant snapshot in place (挂起即收口 ②).
     finish_reason: str | None = Field(None, max_length=32)
+    # Optional harvest provenance for the synthetic user row (``usage.origin``).
+    # Omitted by ordinary startTurn write-back; sidecar harvest stamps these.
+    origin: str | None = Field(None, max_length=64)
+    execution_id: str | None = Field(None, max_length=64)
+    harvest_kind: str | None = Field(None, max_length=32)
 
 
 class RecordTurnResponse(BaseModel):

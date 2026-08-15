@@ -659,6 +659,56 @@ def test_resume_rejects_illegal_team_preview_veto(tmp_path, monkeypatch):
     assert err["error"]["code"] == protocol.INVALID_PARAMS
     assert remaining  # frame restored for retry
     assert remaining[0].message_id == "m-bad"
+    scope = server.folder_scope_for("c1")
+    assert scope is None or scope.folder_id != "should-not-stick"
+
+
+def test_resume_veto_rolls_back_stamped_folder(tmp_path, monkeypatch):
+    """resume veto 必须回滚刚 stamp 的 folder_scope。"""
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        raise AssertionError("pipeline must not run on invalid veto")
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    store = LocalPausedTurnStore(tmp_path / "data" / "paused")
+
+    async def drive() -> None:
+        await _initialize(server, tmp_path, data_dir=str(tmp_path / "data"))
+        server.stamp_folder_scope(
+            "c1",
+            folder_id="prior-folder",
+            binding_injected=True,
+            local_root_id="root-prior",
+            local_subpath="sub",
+        )
+        await store.save(_team_preview_suspension("m-bad", "c1"))
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 13,
+                    "method": "resume",
+                    "params": {
+                        "messageId": "m-bad",
+                        "conversationId": "c1",
+                        "decision": "continue",
+                        "note": "",
+                        "excluded_run_ids": ["nope"],
+                    },
+                }
+            )
+        )
+
+    asyncio.run(drive())
+    err = _response(sent, 13)
+    assert "error" in err
+    scope = server.folder_scope_for("c1")
+    assert scope is not None
+    assert scope.folder_id == "prior-folder"
+    assert scope.local_root_id == "root-prior"
 
 
 def test_resume_failure_after_settlement_does_not_restore_frame(tmp_path, monkeypatch):

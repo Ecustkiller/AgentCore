@@ -3,6 +3,7 @@ import { MessageBubble } from "@/components/chat/message-bubble";
 import {
   EXECUTION_HARVEST_ORIGIN,
   isExecutionHarvestMessage,
+  isHarvestWritebackAck,
 } from "@/lib/executionHarvest";
 import type { Message } from "@/stores/conversation";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -42,6 +43,19 @@ describe("execution_harvest 隐藏合成行", () => {
     expect(isExecutionHarvestMessage(userMsg("普通提问"))).toBe(false);
   });
 
+  it("isHarvestWritebackAck：只认 origin / harvest_kind，不扫自由文", () => {
+    expect(isHarvestWritebackAck({ origin: EXECUTION_HARVEST_ORIGIN })).toBe(
+      true,
+    );
+    expect(isHarvestWritebackAck({ harvestKind: "cancelled" })).toBe(true);
+    expect(
+      isHarvestWritebackAck({
+        origin: null,
+        harvestKind: null,
+      }),
+    ).toBe(false);
+  });
+
   it("MessageBubble：harvest 不渲染芯片也不走用户气泡", () => {
     const { container } = render(
       <MessageBubble
@@ -53,5 +67,15 @@ describe("execution_harvest 隐藏合成行", () => {
     expect(container.childElementCount).toBe(0);
     expect(screen.queryByTestId("harvest-system-chip")).toBeNull();
     expect(screen.queryByText(/请综合队员产出/)).toBeNull();
+  });
+
+  it("MessageBubble：仅 origin=execution_harvest 也隐藏（无前缀）", () => {
+    const { container } = render(
+      <MessageBubble
+        message={userMsg("综合队员产出", EXECUTION_HARVEST_ORIGIN)}
+      />,
+    );
+    expect(container.childElementCount).toBe(0);
+    expect(screen.queryByText("综合队员产出")).toBeNull();
   });
 });

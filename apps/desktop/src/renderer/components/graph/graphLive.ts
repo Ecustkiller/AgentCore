@@ -51,6 +51,7 @@ import { INPUT_ID } from "./constants";
 import { useGraphActions } from "./graphActions";
 import {
   aggregateDebateRoundStatus,
+  captainSinkPreview,
   debateRoundActiveBeat,
   debateRoundPhaseLabel,
   debateRoundSettledMark,
@@ -644,16 +645,17 @@ export function useCaptainEndpointLive(runId: string): EndpointLive {
       }) ?? ""
     ).trim();
     const sinkStatus: RunStatus = waitCaption ? "running" : captainStatus;
-    const answerPreview = answer?.content ? headText(answer.content) : "";
-    const synthPreview =
-      !answerPreview && sinkStatus === "running" && !waitCaption
-        ? captainSynthesisPreviewText(teamSynthesisPreview)
-        : "";
+    const preview = captainSinkPreview({
+      captainStatus,
+      answerPreview: answer?.content ? headText(answer.content) : "",
+      synthesisPreview: captainSynthesisPreviewText(teamSynthesisPreview),
+      waitCaption,
+    });
     return {
       status: sinkStatus,
       statusCaption: waitCaption || undefined,
       label: "",
-      preview: answerPreview || synthPreview,
+      preview,
       focused:
         !!actions.finalAnswerId &&
         actions.litEndpointMessageId === actions.finalAnswerId,

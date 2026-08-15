@@ -139,6 +139,9 @@ class OutboxStore:
         user_message: str,
         message_id: str,
         trace_id: str,
+        origin: str | None = None,
+        execution_id: str | None = None,
+        harvest_kind: str | None = None,
     ) -> None:
         """Pin one turn's idempotency keys before begin_turn / pipeline.
 
@@ -146,13 +149,21 @@ class OutboxStore:
         continue alongside another live turn, or concurrent stops) do not steal
         each other's ``user_message_id`` / ``user_message``.
         """
-        self._contexts[message_id] = {
+        ctx: dict[str, Any] = {
             "conversation_id": conversation_id,
             "user_message_id": user_message_id,
             "user_message": user_message,
             "message_id": message_id,
             "trace_id": trace_id,
         }
+        for key, val in (
+            ("origin", origin),
+            ("execution_id", execution_id),
+            ("harvest_kind", harvest_kind),
+        ):
+            if isinstance(val, str) and val.strip():
+                ctx[key] = val.strip()
+        self._contexts[message_id] = ctx
 
     def clear_turn(self, message_id: str | None = None) -> None:
         """Drop a bound turn context. ``message_id=None`` clears all (tests only)."""
@@ -614,6 +625,10 @@ class OutboxStore:
                     record[key] = int(kwargs[key] or 0)
             if kwargs.get("finish_reason") is not None:
                 record["finish_reason"] = kwargs["finish_reason"]
+            for key in ("origin", "execution_id", "harvest_kind"):
+                val = kwargs.get(key)
+                if isinstance(val, str) and val.strip():
+                    record[key] = val.strip()
             record["phase"] = PHASE_READY
             ops = record.setdefault("ops", [])
             if "finalize" not in ops:
@@ -635,6 +650,9 @@ class OutboxStore:
         conversation_id: str,
         trace_id: str,
         message_id: str | None,
+        origin: str | None = None,
+        execution_id: str | None = None,
+        harvest_kind: str | None = None,
     ) -> None:
         """Seal an open umid-keyed record as cancelled+ready (stop / crash).
 
@@ -704,6 +722,19 @@ class OutboxStore:
             # writeback can project the produced journal. No frameless retain-open.
             record["finish_reason"] = "cancelled"
             record["phase"] = PHASE_READY
+            for key, val in (
+                ("origin", origin if origin is not None else ctx.get("origin")),
+                (
+                    "execution_id",
+                    execution_id if execution_id is not None else ctx.get("execution_id"),
+                ),
+                (
+                    "harvest_kind",
+                    harvest_kind if harvest_kind is not None else ctx.get("harvest_kind"),
+                ),
+            ):
+                if isinstance(val, str) and val.strip():
+                    record[key] = val.strip()
             ops = record.setdefault("ops", [])
             if "salvage" not in ops:
                 ops.append("salvage")
@@ -961,6 +992,10 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
         "trace_id": record.get("trace_id") or "",
         "finish_reason": record.get("finish_reason"),
     }
+    for key in ("origin", "execution_id", "harvest_kind"):
+        val = record.get(key)
+        if isinstance(val, str) and val.strip():
+            body[key] = val.strip()
     journal = journal_entries_from_map(record.get("journal"))
     if journal is not None:
         body["journal"] = journal

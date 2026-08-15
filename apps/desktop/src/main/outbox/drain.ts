@@ -262,6 +262,8 @@ async function drainOutboxDetailed(opts?: {
         cloudUserMessageId: body.user_message_id || record.user_message_id,
         assistantMessageId: body.assistant_message_id ?? null,
         title: body.title ?? null,
+        ...(record.origin ? { origin: record.origin } : {}),
+        ...(record.harvest_kind ? { harvestKind: record.harvest_kind } : {}),
       };
       await deleteRecord(record.user_message_id);
       recentSyncedConversation.set(

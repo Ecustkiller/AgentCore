@@ -177,8 +177,10 @@ def _reset_conversation_store():
     """
     yield
     from agentcore.conversation.store import reset_conversation_store_for_tests
+    from agentcore.sidecar.server_pkg.core import reset_active_sidecar_for_tests
 
     reset_conversation_store_for_tests()
+    reset_active_sidecar_for_tests()
 
 
 @pytest_asyncio.fixture(autouse=True)
