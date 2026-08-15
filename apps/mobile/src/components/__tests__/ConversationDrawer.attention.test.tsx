@@ -188,7 +188,7 @@ describe("ConversationDrawer · 行级「等你」灯", () => {
         attention({ interaction_id: "ix-2", state: "resolved" }),
       );
     });
-    expect(lit("部署上线")).toBe(false);
+    await waitFor(() => expect(lit("部署上线")).toBe(false));
   });
 
   it("打开该对话（兜底清理）后灯灭", async () => {
