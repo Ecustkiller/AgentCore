@@ -32,6 +32,12 @@ import contextlib
 from collections import deque
 
 from agentcore.core.logging import get_logger
+from agentcore.observability.stream_timing import (
+    current_http_req_id,
+    elapsed_ms,
+    mono_now,
+    wall_now_iso,
+)
 from agentcore.runtime.events.sink import EventSink
 from agentcore.runtime.events.types import SSEEvent
 
@@ -51,7 +57,16 @@ _SIGNAL_QUEUE_MAXSIZE = 32
 class ConversationWatcher:
     """One端 parked on a conversation, waiting for whatever runs next."""
 
-    __slots__ = ("_ready", "_runs", "_signals", "_tailed_sink", "conversation_id")
+    __slots__ = (
+        "_last_byte_mono",
+        "_ready",
+        "_runs",
+        "_signals",
+        "_started_at",
+        "_started_mono",
+        "_tailed_sink",
+        "conversation_id",
+    )
 
     def __init__(self, conversation_id: str) -> None:
         self.conversation_id = conversation_id
@@ -59,6 +74,23 @@ class ConversationWatcher:
         self._signals: deque[SSEEvent] = deque(maxlen=_SIGNAL_QUEUE_MAXSIZE)
         self._ready = asyncio.Event()
         self._tailed_sink: EventSink | None = None
+        now = mono_now()
+        self._started_mono = now
+        self._last_byte_mono = now
+        self._started_at = wall_now_iso()
+
+    def note_byte(self) -> None:
+        """Mark that this connection just sent a frame or ``: ping`` heartbeat."""
+        self._last_byte_mono = mono_now()
+
+    def stream_timing(self) -> tuple[str, int, int]:
+        """``started_at``, age since watch, idle since last byte (ms)."""
+        now = mono_now()
+        return (
+            self._started_at,
+            elapsed_ms(self._started_mono, now_mono=now),
+            elapsed_ms(self._last_byte_mono, now_mono=now),
+        )
 
     def _offer(self, sink: EventSink) -> bool:
         """Hand a newly started run to this watcher; drop the oldest when full."""
@@ -118,14 +150,27 @@ class ConversationStreamHub:
     def __init__(self) -> None:
         self._watchers: dict[str, set[ConversationWatcher]] = {}
 
-    def watch(self, conversation_id: str) -> ConversationWatcher:
-        """Register a端 following ``conversation_id`` (N per conversation, all equal)."""
+    def watch(
+        self,
+        conversation_id: str,
+        *,
+        message_id: str | None = None,
+    ) -> ConversationWatcher:
+        """Register a端 following ``conversation_id`` (N per conversation, all equal).
+
+        Follow-only (``GET …/stream?follow=true``). Round-level attach never
+        calls this — that path logs ``event_sink.attach`` with ``mode=attach``.
+        """
         watcher = ConversationWatcher(conversation_id)
         self._watchers.setdefault(conversation_id, set()).add(watcher)
-        logger.debug(
+        logger.info(
             "conversation_stream.watch",
             conversation_id=conversation_id,
+            message_id=message_id,
             watchers=len(self._watchers[conversation_id]),
+            started_at=watcher._started_at,
+            mode="follow",
+            http_req_id=current_http_req_id(),
         )
         return watcher
 
@@ -137,7 +182,16 @@ class ConversationStreamHub:
         watchers.discard(watcher)
         if not watchers:
             self._watchers.pop(watcher.conversation_id, None)
-        logger.debug("conversation_stream.unwatch", conversation_id=watcher.conversation_id)
+        started_at, duration_ms, idle_ms = watcher.stream_timing()
+        logger.info(
+            "conversation_stream.unwatch",
+            conversation_id=watcher.conversation_id,
+            started_at=started_at,
+            duration_ms=duration_ms,
+            idle_ms=idle_ms,
+            mode="follow",
+            http_req_id=current_http_req_id(),
+        )
 
     def watcher_count(self, conversation_id: str) -> int:
         """How many端 are currently following ``conversation_id``."""

@@ -21,10 +21,14 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.events import FinishReason
 from agentcore.runtime.turn.interrupt import (
+    HARVEST_YIELD_EMPTY_USER_VISIBLE,
     INTERRUPTED_EMPTY_USER_VISIBLE,
+    MAX_ROUNDS_EMPTY_USER_VISIBLE,
+    OVERLAP_EMPTY_USER_VISIBLE,
     TurnInterruptReason,
     close_turn_interrupted,
     compose_interrupt_body,
+    empty_close_user_visible,
     finish_reason_for,
     normalize_interrupt_reason,
 )
@@ -1009,6 +1013,38 @@ def test_crash_close_with_streamed_text_is_left_alone():
 def test_user_stop_with_nothing_streamed_stays_silent():
     """The user pressed stop — they know why it ended; do not lecture them."""
     assert compose_interrupt_body("", reason=TurnInterruptReason.USER_STOP) == ""
+    assert empty_close_user_visible(TurnInterruptReason.USER_STOP) == ""
+    assert empty_close_user_visible("user_stop") == ""
+
+
+def test_overlap_empty_close_is_user_visible():
+    """New message squeezed the old turn — not a Stop; the bubble must say why."""
+    assert compose_interrupt_body("", reason=TurnInterruptReason.OVERLAP) == (
+        OVERLAP_EMPTY_USER_VISIBLE
+    )
+    assert "新消息" in OVERLAP_EMPTY_USER_VISIBLE
+    assert "run" not in OVERLAP_EMPTY_USER_VISIBLE.lower()
+    assert empty_close_user_visible(TurnInterruptReason.OVERLAP) == OVERLAP_EMPTY_USER_VISIBLE
+    assert normalize_interrupt_reason("overlap") is TurnInterruptReason.OVERLAP
+    assert finish_reason_for(TurnInterruptReason.OVERLAP) is FinishReason.INTERRUPTED
+
+
+def test_empty_close_paths_have_user_visible_copy():
+    """Non-USER_STOP empty closes each have a product-facing sentence."""
+    assert empty_close_user_visible("harvest_yield") == HARVEST_YIELD_EMPTY_USER_VISIBLE
+    assert empty_close_user_visible("max_rounds") == MAX_ROUNDS_EMPTY_USER_VISIBLE
+    assert "未产出回复" in HARVEST_YIELD_EMPTY_USER_VISIBLE
+    assert "未产出回复" in MAX_ROUNDS_EMPTY_USER_VISIBLE
+    for note in (
+        OVERLAP_EMPTY_USER_VISIBLE,
+        HARVEST_YIELD_EMPTY_USER_VISIBLE,
+        MAX_ROUNDS_EMPTY_USER_VISIBLE,
+    ):
+        assert "【中断说明】" in note
+        assert "harvest" not in note.lower()
+        assert "max_rounds" not in note
+        assert "salvage" not in note.lower()
+        assert "已完成" not in note
 
 
 def test_sweeper_reasons_do_not_claim_a_kill_nobody_saw():

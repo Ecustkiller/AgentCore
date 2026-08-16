@@ -166,6 +166,8 @@ class CodeExecuteTool:
         needs_location=True,
         # 间接落盘（沙箱 copy-out）也是落盘：自报 copy-out 的 EXACT 路径。
         file_products=FileProductsContract.SELF_REPORT,
+        # 沙箱预装 python-pptx / openpyxl；无专用 md_to_* 导出器的 Office 走这里。
+        produces_formats=(".xlsx", ".pptx"),
     )
 
     def __init__(
@@ -404,31 +406,32 @@ class CodeExecuteTool:
                 is_exec_env_probe_failure,
                 probe_failure_retire_steer,
                 probe_failure_retire_tools,
+                should_retire_exec_env,
             )
 
             if is_exec_env_probe_failure(stderr_text):
-                # Classified reason (missing interpreter / timeout / denied spawn)
-                # when the probe could prove one — else the generic probe-fail code.
+                # Classified reason (missing interpreter / denied spawn) when the
+                # real run proved one — else the generic env-fail code.
                 probe_code = exec_env_probe_failure_code(stderr_text)
                 meta["code"] = probe_code
                 meta["exec_env_timeout"] = True
-                # The probe covers the language it ran, so the stop covers it too:
-                # a dead python takes test_run with it (every check is a python
+                # A dead python takes test_run with it (every check is a python
                 # script), any other language takes only itself, and a verdict
                 # naming no language (gVisor runtime smoke) still takes the family.
+                # Timeout never retires — that is slow user code, not a dead env.
                 probe_language = exec_env_probe_failure_language(stderr_text)
-                retire = probe_failure_retire_tools(probe_language)
-                if retire:
-                    meta["error_class"] = "permanent"
-                    meta["retire_tools"] = list(retire)
-                    meta["retire_message"] = probe_failure_retire_steer(
-                        probe_code, language=probe_language
-                    )
-                else:
-                    # One interpreter is missing while the rest of the toolset is
-                    # untouched — the same self-correctable「换语言」reject as a
-                    # missing launcher, so it must not retire the tool.
-                    probe_language_unavailable = True
+                if should_retire_exec_env(probe_code, language=probe_language):
+                    retire = probe_failure_retire_tools(probe_language)
+                    if retire:
+                        meta["error_class"] = "permanent"
+                        meta["retire_tools"] = list(retire)
+                        meta["retire_message"] = probe_failure_retire_steer(
+                            probe_code, language=probe_language
+                        )
+                    else:
+                        # One interpreter is missing while the rest of the toolset
+                        # is untouched — switch-the-language reject, not a retire.
+                        probe_language_unavailable = True
             elif (not result.success) and "Timeout: execution exceeded" in stderr_text:
                 meta["code"] = EXEC_TIMEOUT_CODE
                 meta["exec_env_timeout"] = True

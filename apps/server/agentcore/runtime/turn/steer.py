@@ -320,7 +320,7 @@ def _emit_interjection_status(
 
 
 # Wording must stay true for both explicit Stop and overlap-cancel (a newer turn
-# taking the slot also marks the run user_stopped) — do not claim "你按了停止".
+# taking the slot marks the run superseded) — do not claim "你按了停止".
 _USER_STOP_DISCARD_NOTE = "本回合已中止，这条插话未被主 Agent 读取，已丢弃"
 
 

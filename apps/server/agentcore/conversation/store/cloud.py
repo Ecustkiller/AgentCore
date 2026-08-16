@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Sequence
 from typing import Any, Literal
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DataError, IntegrityError
 
 from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
 from agentcore.config import settings
@@ -752,9 +752,14 @@ class CloudStore:
 
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
-            existing_user = await msg_repo.get_by_id(
-                user_message_id, conversation_id=conversation_id
-            )
+            # Non-UUID keys (legacy sidecar ``resume-{turn_id}``) raise on the
+            # PG UUID bind — treat as a miss so assistant-pairing can run.
+            try:
+                existing_user = await msg_repo.get_by_id(
+                    user_message_id, conversation_id=conversation_id
+                )
+            except (ValueError, DataError):
+                existing_user = None
             if existing_user is not None and getattr(existing_user, "role", None) != "user":
                 existing_user = None
             existing_assistant = (

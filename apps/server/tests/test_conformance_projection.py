@@ -257,6 +257,10 @@ def test_single_agent_checkpoint_finalized_stays_paused(projected):
     assert p["interactions"] == parked["interactions"]
     assert p["process"] == parked["process"]
     assert p["content"] == parked["content"]
+    # 模型自写了 question 以外的引导句：气泡必须留下（不再被 checkpoint 无条件吸收）。
+    assert parked["content"] == "开始前我确认一下方向："
+    assert [s["kind"] for s in parked["process"]] == ["reasoning", "content", "checkpoint"]
+    assert parked["process"][1]["text"] == "开始前我确认一下方向："
 
 
 def test_plan_review_finalized_stays_paused(projected):
@@ -1024,8 +1028,13 @@ def test_carrier_means_consult_smartart_boundary(projected):
     p = projected[name]
     assert p["status"] == "paused"
     assert p["finishReason"] == "paused"
-    assert p["content"] == ""  # ask 吸收：边界说明进卡片，气泡空
-    assert p["process"] == [{"kind": "checkpoint", "checkpoint_id": "cp_carrier_smartart"}]
+    assert p["content"] == (
+        "Word 里做不出带框连线的图形 SmartArt 组织架构图；"
+        "我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。"
+    )
+    assert [s["kind"] for s in p["process"]] == ["content", "checkpoint"]
+    assert p["process"][0]["text"] == p["content"]
+    assert p["process"][1] == {"kind": "checkpoint", "checkpoint_id": "cp_carrier_smartart"}
     assert p["interactions"] == [
         {
             "kind": "ask_user",
@@ -1064,8 +1073,13 @@ def test_carrier_means_consult_html_org_tree(projected):
     p = projected[name]
     assert p["status"] == "paused"
     assert p["finishReason"] == "paused"
-    assert p["content"] == ""
-    assert p["process"] == [{"kind": "checkpoint", "checkpoint_id": "cp_carrier_html_tree"}]
+    assert p["content"] == (
+        "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；"
+        "更适合可折叠树或按部门分区，也可仍按原样 HTML。"
+    )
+    assert [s["kind"] for s in p["process"]] == ["content", "checkpoint"]
+    assert p["process"][0]["text"] == p["content"]
+    assert p["process"][1] == {"kind": "checkpoint", "checkpoint_id": "cp_carrier_html_tree"}
     assert p["interactions"] == [
         {
             "kind": "ask_user",

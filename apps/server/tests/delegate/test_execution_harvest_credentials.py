@@ -173,7 +173,7 @@ def test_build_harvest_fallback_prefers_draft_over_terminal():
     assert "额度已满" in text
 
 
-def test_build_harvest_fallback_uses_terminal_when_no_draft():
+def test_build_harvest_fallback_uses_user_facts_not_ceo_terminal():
     import agentcore.conversation.execution_harvest as eh
     from agentcore.runtime.coordination.session import (
         CoordinationEvent,
@@ -184,12 +184,79 @@ def test_build_harvest_fallback_uses_terminal_when_no_draft():
     session._pending.append(
         CoordinationEvent(
             kind=CoordinationEventKind.ALL_COMPLETED,
-            payload={"output": "## 团队成品\n结论 X", "completed": 2, "total": 2},
+            payload={
+                "output": "## 团队成品\n结论 X\n### tool_failures\nlast_error=boom\n【终稿纪律】",
+                "completed": 2,
+                "total": 2,
+                "user_facts": {
+                    "nodes": [
+                        {
+                            "role": "调研",
+                            "status": "completed",
+                            "summary": "结论 X",
+                            "files": [],
+                        }
+                    ],
+                    "files": [],
+                    "outstanding_tool_failures": [],
+                },
+            },
         )
     )
     text = eh.build_harvest_fallback_content(session, kind="success")
     assert "结论 X" in text
+    assert "### tool_failures" not in text
+    assert "last_error=" not in text
+    assert "终稿纪律" not in text
     assert "本地文件暂时连不上" not in text
+
+
+def test_build_harvest_fallback_omits_ceo_internals_keeps_outstanding_failures():
+    """User bubble must not dump CEO-audience blocks; uncompensated failures stay."""
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    ceo = (
+        "## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）\n"
+        "### tool_failures\n"
+        "- `code_execute`：failures=2，succeeded_after=false，last_error=Sandbox crash\n"
+        "【终稿纪律】交付物在前、过程至多一段\n"
+    )
+    session = _session("exec-honest", "conv-honest")
+    session._pending.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={
+                "output": ceo,
+                "completed": 1,
+                "total": 1,
+                "user_facts": {
+                    "nodes": [
+                        {
+                            "role": "工程师",
+                            "status": "completed",
+                            "summary": "脚本已写好",
+                            "files": ["run.py"],
+                        }
+                    ],
+                    "files": ["run.py"],
+                    "outstanding_tool_failures": [{"role": "工程师", "tool_name": "code_execute"}],
+                },
+            },
+        )
+    )
+    text = eh.build_harvest_fallback_content(session, kind="failure")
+    assert "### tool_failures" not in text
+    assert "last_error=" not in text
+    assert "终稿纪律" not in text
+    assert "Sandbox crash" not in text
+    assert "运行代码" in text
+    assert "工程师" in text
+    assert "run.py" in text
+    assert "没做成" in text or "没有成功" in text
 
 
 def test_build_harvest_fallback_channel_dead_notice_from_flag():
@@ -268,12 +335,8 @@ def test_result_is_channel_dead_abort_detects_prepare_abort():
     from agentcore.workspace.limits import CHANNEL_DEAD_PREPARE_ABORT
     from agentcore.workspace.protocol import WorkspaceIOError
 
-    assert eh._result_is_channel_dead_abort(
-        {"error": CHANNEL_DEAD_PREPARE_ABORT, "content": ""}
-    )
-    assert eh._result_is_channel_dead_abort(
-        {"error": {"message": CHANNEL_DEAD_PREPARE_ABORT}}
-    )
+    assert eh._result_is_channel_dead_abort({"error": CHANNEL_DEAD_PREPARE_ABORT, "content": ""})
+    assert eh._result_is_channel_dead_abort({"error": {"message": CHANNEL_DEAD_PREPARE_ABORT}})
     assert not eh._result_is_channel_dead_abort({"error": None, "content": "ok"})
     assert not eh._result_is_channel_dead_abort({"error": "quota exceeded"})
     assert eh._exc_is_channel_dead(WorkspaceIOError(CHANNEL_DEAD_PREPARE_ABORT))
@@ -292,9 +355,7 @@ async def test_harvest_fallback_when_run_returns_channel_dead():
     conv = SimpleNamespace(user_id="user-1", folder_id=None, id="conv-salv")
     user = SimpleNamespace(user_id="user-1")
     selection = SimpleNamespace(origin="byok", provider_id="p", model="m")
-    creds = LLMCredentials(
-        api_key="k", base_url="https://x", source="user", provider_id="p"
-    )
+    creds = LLMCredentials(api_key="k", base_url="https://x", source="user", provider_id="p")
 
     db_cm = MagicMock()
     db_cm.__aenter__ = AsyncMock(return_value=MagicMock())
@@ -342,3 +403,37 @@ async def test_harvest_fallback_when_run_returns_channel_dead():
 
     fallback.assert_awaited()
     assert session.workspace_channel_dead is True
+
+
+def test_collect_harvest_user_facts_outstanding_only():
+    from agentcore.runtime.delegate.drive_terminal import collect_harvest_user_facts
+    from agentcore.runtime.runs.plan import RunPlan
+    from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="跑脚本", role="工程师")])
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="脚本已写好",
+            file_acceptance=[{"path": "run.py", "status": "accepted"}],
+            tool_failures=[
+                {
+                    "tool_name": "code_execute",
+                    "failure_count": 2,
+                    "last_error": "Sandbox crash",
+                    "succeeded_after": False,
+                },
+                {
+                    "tool_name": "web_search",
+                    "failure_count": 1,
+                    "last_error": "tmp",
+                    "succeeded_after": True,
+                },
+            ],
+        )
+    }
+    facts = collect_harvest_user_facts(plan, results)
+    assert facts["files"] == ["run.py"]
+    assert facts["nodes"][0]["role"] == "工程师"
+    names = {row["tool_name"] for row in facts["outstanding_tool_failures"]}
+    assert names == {"code_execute"}

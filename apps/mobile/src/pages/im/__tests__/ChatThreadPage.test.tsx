@@ -211,6 +211,38 @@ describe("ChatThreadPage", () => {
     expect(screen.queryByText("退出会话")).toBeNull();
   });
 
+  it("renders a reply quote as a single-line preview block", async () => {
+    const quoted = "总是与服务器断开连接就是VPN的问题。VPN关掉就好了。";
+    messaging.listMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "m-reply",
+          chat_id: "c1",
+          content: "设置下你的梯子，连我的服务器不开vpn",
+          content_type: "text",
+          created_at: "2026-01-01T00:00:02Z",
+          sender_type: "user",
+          sender_user_id: "me",
+          reply_to_message_id: "m-orig",
+          reply_to: {
+            sender_user_id: "u2",
+            sender_display_name: "Zoo",
+            body_preview: quoted,
+          },
+        },
+      ],
+      total: 1,
+      page: 1,
+      pageSize: 100,
+    });
+    render(<ChatThreadPage />);
+    const quote = await screen.findByLabelText(`回复 Zoo：${quoted}`);
+    expect(quote.className).toMatch(/im-reply-quote/);
+    expect(quote.querySelector(".im-reply-quote-body")?.textContent).toBe(
+      quoted,
+    );
+  });
+
   it("keeps the existing send path", async () => {
     render(<ChatThreadPage />);
     const input = await screen.findByPlaceholderText("发送消息…");

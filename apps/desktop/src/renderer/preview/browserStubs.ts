@@ -161,6 +161,7 @@ const updaterApi: UpdaterApi = {
 
 const logApi: LogApi = {
   write: noop,
+  readTail: async () => [],
 };
 
 const processApi: ProcessApi = {

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 # Shared with按需目录 preamble — carve product UX out of「纯对话无需 consult」.
 CONSULT_PRODUCT_HELP_BY_SCENE = (
-    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 产品面 FAQ / 官网 / 你的网站 / 下载"
+    "按场面：本产品用法 / 入口 / UI / 功能介绍 / 这是什么项目 / 你是什么 / "
+    "产品面 FAQ / 官网 / 你的网站 / 下载"
     "（为何没组团、费用、Key、断网、.md/文件面板怎么打开、"
     "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 必查 `product_help`；"
     "细节按场面再查 `product_help_map` / `product_help_faq`；"
@@ -20,12 +21,16 @@ CONSULT_PRODUCT_BUG_TRIAGE_BY_SCENE = (
 
 _PRODUCT_HELP = """\
 <product_help>
-用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么 / 官网 / 你的网站 / 下载」时的 HOW。先 consult 本 skill，再按场面短答；\
+用户问「本产品怎么用 / 入口在哪 / UI 在哪 / 某功能是什么 / 这是什么项目 / 你是什么 / 官网 / 你的网站 / 下载」时的 HOW。先 consult 本 skill，再按场面短答；\
 入口/UI 点名细节 → `consult(product_help_map)`；FAQ 类 → `consult(product_help_faq)`。
 
 【答法】
 - 聊天短答为主：一两句说清；勿整章粘贴、勿 RAG、勿翻工作区冒充产品文档。
 - 对用户禁内部名（ask_user / SSE / playbook / run 等）；用产品面说法（对话、协作图、工作区、检查点、审批…）。
+- 身份问（「这是什么项目 / 你是什么」）：用户可见正文**首句**用下方【这是什么】；consult 不能代替作答；再谈别的。\
+【禁止】把网上同名他品或第三方 Skill 仓库当成本项目去落地（禁为此读外仓、发落地 ask、写成工作区规则）。
+- 正例：新会话只问「这是什么项目」→ 首句答我方是 Multi-Agent AI 工作台，再按需补一句能做什么。
+- 反例：consult 后去读第三方 Skill 仓、发 ask「这个 Skill 怎么落地到 AgentCore」、写成工作区规则、用户气泡空着。
 - 功能总览（「你有什么功能 / 能做什么」等宽问）：强制短——1 句定位 + ≤3 能力柱 + 1 句试一试；\
 勿整表复述入口地图、勿粘贴 FAQ 清单。
 - 入口定位：仅当用户点名某入口 / UI /「××在哪」时，再查 `product_help_map` 后短答；\
@@ -62,6 +67,7 @@ _PRODUCT_HELP = """\
 域名只许用这三条。【禁止】把当前模型厂商或网上同名他品说成「我的官网」。
 
 【这是什么】（intro·what）
+身份问时本段即用户可见首句，先答再谈别的。\
 AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题直接答，复杂任务组团协作后把结果交给你。\
 「协作，是更高级的智能」。深链：`#/toolbox/manual/intro?s=what`
 
@@ -77,7 +83,7 @@ AgentCore 是 Multi-Agent AI 工作台：你只对接一位 CEO；简单问题�
 深链：`#/toolbox/manual/intro?s=quickstart`
 
 【边界】本 skill 只管产品面怎么用；机制/架构/记忆边界仍按系统提示作答，勿用本 skill 替代。\
-用户主动查/报产品本身可证伪故障 → `consult(product_bug_triage)`（定性+复现）；\
+用户主动查/报产品本身可证伪故障 → `consult(product_bug_triage)`（归因+复现）；\
 勿在本 skill / faq 做四类结论或复现包。\
 完整入口表与 FAQ 清单不在本 body——分别见 `product_help_map` / `product_help_faq`。
 </product_help>"""
@@ -160,14 +166,14 @@ force push / reset·clean / 在 main·master 直接提交或 push / GitLab 开 P
 _PRODUCT_BUG_TRIAGE = """\
 <product_bug_triage>
 用户**主动**查/报 **AgentCore 产品本身**可证伪故障时的 HOW（终端与维护者同一入口）。\
-先 consult 本 skill，再按场面定性 + 交复现要点。非用户项目代码排障。
+先 consult 本 skill，再按场面归因 + 交复现要点（证据不够则不预设归属）。非用户项目代码排障。
 
 【触发】仅用户主动（「帮我查是不是产品 Bug / 排查刚才那次失败 / 像不像产品故障」等）。\
 禁：失败后自动切入、扫长文猜意图、宽「出问题就查」。
 
 【与 product_help* 分轨】
 - FAQ / 用法 / 入口 → `product_help` / `product_help_map` / `product_help_faq`（自助短答）。
-- 本 skill → L1 定性 + L2 复现要点；勿把诊断仪式塞进 FAQ，也勿用 FAQ 短答冒充定性。
+- 本 skill → L1 归因 + L2 复现要点；勿把诊断仪式塞进 FAQ，也勿用 FAQ 短答冒充归因。
 
 【证据上限】仅本会话可见事实 + 必要时 `ask_user` 补口述。\
 不足则结论标「证据不足」/ `unclear`，诚实说明看不到服务端日志。\
@@ -179,13 +185,23 @@ _PRODUCT_BUG_TRIAGE = """\
 - `model_limit`：模型能力或答得差 / 跑偏，且钉不死产品契约或状态错误。
 - `unclear`：证据不足，无法在上述三类间裁定。
 「答得差」默认先落 `model_limit` 或 `usage`；只有可证伪的产品行为才升 `product_bug`。\
+我方执行环境 / 自检 / 运行时报错：见【我方报错·不预设归属】，勿先落 `usage`。\
 附一句依据 + 置信（高/中/低）。
+
+【我方报错·不预设归属】
+用户贴出的报错来自我方产品自身的执行环境 / 自检 / 运行时\
+（例：`ExecEnvProbeFailed`、`exec_env_probe_*`、产品面超时/熔断/工具失败原文）时：\
+- 禁把结论推给「用户机器 / 本机环境 / 起得太慢」等用户侧归因——除非另有独立于该报错的可核对事实。\
+- 禁下「这不是产品 bug」「正常熔断表现」「问题不在产品」这类定性。\
+- 也禁一律认成 `product_bug`。证据只够说明现象 → L1 用 `unclear`，说到现象、写清还缺什么证据、指向 L3 复查/反馈。\
+- 只有本会话可见事实已能证伪产品契约 / 状态错误时，才升 `product_bug`。\
+本条约束怎么下结论，不是意图分类器：勿扫用户长文猜「是不是在报产品故障」。
 
 【L2 复现要点】（必出；结构固定，可复制）
 - 结论：四选一 + 置信
 - 现象：用户可见表现（1–3 句）
 - 依据：可核对事实；无则写「证据不足」
-- 排除：为何不像 / 像用法或模型
+- 排除：为何不像 / 像用法或模型；我方自检/运行时报错不得仅凭该原文排除成用户环境
 - 复现：步骤；期望 vs 实际
 - 定位锚：本会话可见的 conversation_id / 时间 / 端与版本 / 页面或路由（知多少写多少）
 - 建议：规避 / 再试条件；若需上报 → 见 L3
@@ -199,4 +215,5 @@ _PRODUCT_BUG_TRIAGE = """\
 - 跨用户数据 = 禁
 - 翻 AgentCore 源码仓「修产品」= 禁（工作区是用户/worker 产出，不是产品仓排障面）
 - 意图分类器扫用户长文 = 禁
+- 我方自检/运行时报错定性为用户环境 / 「不是产品 bug」= 禁（见【我方报错·不预设归属】）
 </product_bug_triage>"""

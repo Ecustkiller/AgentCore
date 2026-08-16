@@ -81,10 +81,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；更适合可折叠树或按部门分区，也可仍按原样 HTML。",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；更适合可折叠树或按部门分区，也可仍按原样 HTML。"
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_carrier_html_tree"

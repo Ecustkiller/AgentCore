@@ -34,9 +34,21 @@ from pydantic import BaseModel, Field
 
 from agentcore.cache.redis_health import redis_ready
 from agentcore.config import settings
+from agentcore.core.logging import get_logger
 from agentcore.db.base import database_ready
+from agentcore.observability.stream_timing import elapsed_ms, mono_now
 
 router = APIRouter(tags=["system"])
+logger = get_logger(__name__)
+
+# Last HTTP readiness outcome. Success is logged only on transition so K8s
+# probes (every few seconds) do not flood jsonl. not_ready: first hit always,
+# then at most one heartbeat per ``_READYZ_FAIL_INTERVAL_S`` (same posture as
+# backpressure drops — do not lose onset, do not replay db.ping_failed storms).
+_last_readyz_ok: bool | None = None
+_readyz_fail_unlogged = 0
+_readyz_last_fail_log_mono: float | None = None
+_READYZ_FAIL_INTERVAL_S = 10.0
 
 
 class UpdatesPolicyResponse(BaseModel):
@@ -73,8 +85,10 @@ async def readiness(response: Response) -> dict[str, object]:
     limiting: still probed and, when ``rate_limit_backend=redis``, written to
     ``body["redis"]`` for ops/alerting; a Redis outage must not return 503.
     """
+    t0 = mono_now()
     db_ok = await database_ready()
     redis_ok = await redis_ready()
+    probe_ms = elapsed_ms(t0)
     ready = db_ok
     if not ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -84,7 +98,47 @@ async def readiness(response: Response) -> dict[str, object]:
     }
     if settings.rate_limit_backend == "redis":
         body["redis"] = redis_ok
+    _log_readyz(ready=ready, db_ok=db_ok, redis_ok=redis_ok, probe_ms=probe_ms)
     return body
+
+
+def _log_readyz(*, ready: bool, db_ok: bool, redis_ok: bool, probe_ms: int) -> None:
+    """First not_ready + 10s heartbeat; ready only on first probe or recovery."""
+    global _last_readyz_ok, _readyz_fail_unlogged, _readyz_last_fail_log_mono
+    fields: dict[str, object] = {
+        "ok": ready,
+        "status": "ready" if ready else "not_ready",
+        "database": db_ok,
+        "probe_ms": probe_ms,
+    }
+    if settings.rate_limit_backend == "redis":
+        fields["redis"] = redis_ok
+    prev = _last_readyz_ok
+    now = mono_now()
+    if not ready:
+        first = prev is not False
+        if first:
+            _readyz_fail_unlogged = 0
+            _readyz_last_fail_log_mono = now
+            _last_readyz_ok = False
+            logger.warning("http.readyz_failed", fail_count=1, **fields)
+            return
+        _readyz_fail_unlogged += 1
+        last = _readyz_last_fail_log_mono
+        if last is None or (now - last) >= _READYZ_FAIL_INTERVAL_S:
+            fields["fail_count"] = _readyz_fail_unlogged
+            _readyz_fail_unlogged = 0
+            _readyz_last_fail_log_mono = now
+            logger.warning("http.readyz_failed", **fields)
+        _last_readyz_ok = False
+        return
+    _last_readyz_ok = True
+    if prev is None or prev is False:
+        if _readyz_fail_unlogged:
+            fields["unlogged_failures"] = _readyz_fail_unlogged
+        _readyz_fail_unlogged = 0
+        _readyz_last_fail_log_mono = None
+        logger.info("http.readyz", **fields)
 
 
 def app_version() -> str:

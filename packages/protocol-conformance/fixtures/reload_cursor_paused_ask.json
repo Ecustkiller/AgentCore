@@ -43,10 +43,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "我先按 A 方案推进。",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "我先按 A 方案推进。"
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp1"

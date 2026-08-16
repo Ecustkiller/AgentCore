@@ -20,13 +20,16 @@ from agentcore.observability.query.failure_families import (
     FAMILIES_BY_KEY,
     UNKNOWN_FAMILY,
     FailureFamily,
+    clip_diagnostic_value,
     compile_registry,
     family_digests,
     registry_digest,
     resolve_family_key,
 )
 from agentcore.observability.query.patrol import (
+    MUST_REVIEW_FAMILIES,
     SNAPSHOT_SCHEMA_VERSION,
+    TimePulseGate,
     diff_snapshots,
     event_text,
     is_tool_failure,
@@ -116,6 +119,71 @@ def test_event_text_reads_diagnostics_and_nested_payload():
     assert "tool.execute_end" in text
 
 
+def test_event_text_reads_codes_and_tools_arrays_not_content():
+    # codes / tools 是结构化错误码与工具名，不是用户内容；args_preview / content 仍必须排除。
+    text = event_text(
+        {
+            "event": "chat.local_turn_tool_failures",
+            "codes": ["exec_env_probe_timeout", "schema"],
+            "tools": ["code_execute", "file_read"],
+            "content": "用户说：预算耗尽",
+            "args_preview": '{"summary": "本轮预算耗尽"}',
+        }
+    )
+    assert "exec_env_probe_timeout" in text
+    assert "code_execute" in text
+    assert "预算耗尽" not in text
+
+
+def test_clip_diagnostic_value_keeps_header_and_last_line():
+    last = "agentcore.workspace.protocol.NotADirectory: foo/bar"
+    body = "Traceback (most recent call last):\n" + ("  File x\n" * 400) + last
+    assert len(body) > 600
+    clipped = clip_diagnostic_value(body)
+    assert clipped.startswith("Traceback")
+    assert last in clipped
+
+
+def test_event_text_last_line_lets_path_not_dir_claim_long_traceback():
+    last = "agentcore.workspace.protocol.NotADirectory: jinbooks-ui/src/views/x"
+    exc = (
+        "  + Exception Group Traceback (most recent call last):\n"
+        + ("  |   File /app/.venv/lib/x.py\n" * 200)
+        + last
+    )
+    assert len(exc) > 2000
+    text = event_text(
+        {"event": "http.unhandled_error", "level": "error", "exception": exc}
+    )
+    assert last in text
+    reg = compile_registry()
+    assert "path_not_dir" in reg.match(event="http.unhandled_error", text=text)
+
+
+def test_local_turn_and_exec_env_families_claim_their_events():
+    reg = compile_registry()
+    assert "local_turn_tool_failures" in reg.match(
+        event="chat.local_turn_tool_failures", text=""
+    )
+    assert "exec_env_probe_dead" in reg.match(
+        event="sandbox.exec_env_probe_failed", text=""
+    )
+    assert "exec_env_probe_dead" in reg.match(
+        event="coordination.exec_env_dead_user_notice", text=""
+    )
+    assert "exec_env_probe_dead" in reg.match(
+        event="chat.local_turn_tool_failures", text="exec_env_probe_timeout"
+    )
+
+
+def test_registry_digest_moves_with_extract_policy(monkeypatch):
+    from agentcore.observability.query import failure_families as ff
+
+    before = ff.registry_digest()
+    monkeypatch.setattr(ff, "TEXT_EXTRACT_REVISION", ff.TEXT_EXTRACT_REVISION + 1)
+    assert ff.registry_digest() != before
+
+
 def test_event_text_ignores_user_and_model_content():
     # 踩过的坑：把 args_preview / content 也扫进来后，队员交接摘要里一句「预算耗尽」
     # 就把该回合误记成外环验证预算耗尽，失败榜 counts 掺进了模型自述。
@@ -135,6 +203,14 @@ def test_event_text_ignores_user_and_model_content():
 
 def test_family_matching_covers_event_names_patterns_and_tool_detector():
     reg = compile_registry()
+    assert "sse_backpressure_drop" in reg.match(
+        event="event_sink.backpressure_drop", text="event_sink.backpressure_drop"
+    )
+    assert "event_loop_lag" in reg.match(event="event_loop.lag", text="event_loop.lag")
+    assert "readyz_failed" in reg.match(event="http.readyz_failed", text="http.readyz_failed")
+    assert "rate_limit_fail_open" in reg.match(
+        event="rate_limit.redis_fail_open", text="rate_limit.redis_fail_open"
+    )
     assert "contract_failed" in reg.match(event="contract.failed", text="contract.failed")
     assert "path_not_dir" in reg.match(event="tool.execute_end", text="不是目录：xhs")
     assert "tool_failed" in reg.match(event="tool.execute_end", text="", tool_failed=True)
@@ -307,6 +383,45 @@ def test_must_review_flag_follows_the_readme_signal_list(tmp_path):
     assert rows[CID_A].must_review is True  # contract_failed 是必审家族
     assert rows[CID_B].must_review is False  # 工具失败 / 残差不自动升必审
     assert snapshot.conversations[0].conversation_id == CID_A  # 必审排在前面
+    assert "rate_limit_fail_open" in MUST_REVIEW_FAMILIES
+
+
+def test_fail_open_cluster_is_first_hit_then_ten_second_pulse(tmp_path):
+    """A Redis outage must be visible without one family hit per fail-opened request."""
+    rows = [
+        {
+            "event": "rate_limit.redis_fail_open",
+            "level": "warning",
+            "timestamp": f"2026-08-17T10:00:0{i}Z",
+            "prefix": "rl:auth",
+            "error": "Timeout",
+            "count": i + 1,
+        }
+        for i in range(8)
+    ]
+    rows.append(
+        {
+            "event": "rate_limit.redis_fail_open",
+            "level": "warning",
+            "timestamp": "2026-08-17T10:00:15Z",
+            "prefix": "rl:auth",
+            "error": "Timeout",
+            "count": 9,
+        }
+    )
+    log_file = _write_jsonl(tmp_path / "fail_open.jsonl", rows)
+    snapshot = scan_patrol(log_file, include_synthetic=True, window_label="fo")
+    fam = snapshot.families["rate_limit_fail_open"]
+    assert fam.events == 2  # t=0 first pulse + t=15 second pulse
+    assert fam.by_event["rate_limit.redis_fail_open"] == 2
+
+
+def test_time_pulse_gate_keeps_onset():
+    gate = TimePulseGate(interval_s=10.0)
+    t0 = datetime(2026, 8, 17, 10, 0, 0, tzinfo=UTC)
+    assert gate.accept(t0) is True
+    assert gate.accept(datetime(2026, 8, 17, 10, 0, 3, tzinfo=UTC)) is False
+    assert gate.accept(datetime(2026, 8, 17, 10, 0, 10, tzinfo=UTC)) is True
 
 
 def test_conversation_inventory_joins_titles_and_previews(tmp_path):
@@ -358,6 +473,61 @@ def test_conversation_inventory_joins_titles_and_previews(tmp_path):
     totals = snapshot.to_json_dict()["totals"]
     assert totals["nonempty_conversations"] == 1
     assert totals["log_only_conversations"] == 1
+
+
+def test_info_local_turn_tool_failures_reach_the_leaderboard(tmp_path):
+    # info 级且未入家族会被 patrol 直接 continue；本族靠事件名认领，必须露头。
+    rows = [
+        {
+            "event": "chat.local_turn_tool_failures",
+            "timestamp": "2026-08-12T04:00:00Z",
+            "conversation_id": CID_A,
+            "trace_id": "trace-lt",
+            "user_id": "user-su",
+            "level": "info",
+            "codes": ["exec_env_probe_timeout"],
+            "tools": ["code_execute"],
+        }
+    ]
+    log_file = _write_jsonl(tmp_path / "events.jsonl", rows)
+    snapshot = scan_patrol(
+        log_file, since=datetime(2026, 8, 12, tzinfo=UTC), window_label="lt"
+    )
+    assert snapshot.families["local_turn_tool_failures"].events == 1
+    assert snapshot.families["exec_env_probe_dead"].events == 1
+    assert UNKNOWN_FAMILY not in snapshot.families
+
+
+def test_repeat_user_view_surfaces_concentrated_hits(tmp_path):
+    rows = [
+        {
+            "event": "workspace.channel_dead",
+            "timestamp": "2026-08-12T04:00:00Z",
+            "conversation_id": CID_A,
+            "trace_id": f"t-{i}",
+            "user_id": "user-hot",
+            "level": "error",
+        }
+        for i in range(3)
+    ] + [
+        {
+            "event": "workspace.channel_dead",
+            "timestamp": "2026-08-12T04:10:00Z",
+            "conversation_id": CID_B,
+            "trace_id": "t-once",
+            "user_id": "user-once",
+            "level": "error",
+        }
+    ]
+    log_file = _write_jsonl(tmp_path / "events.jsonl", rows)
+    snapshot = scan_patrol(
+        log_file, since=datetime(2026, 8, 12, tzinfo=UTC), window_label="rpt"
+    )
+    keys = {(r.user_id, r.family) for r in snapshot.repeat_users}
+    assert ("user-hot", "channel_dead") in keys
+    assert ("user-once", "channel_dead") not in keys
+    hot = next(r for r in snapshot.repeat_users if r.user_id == "user-hot")
+    assert hot.events == 3
 
 
 def test_max_ids_truncates_but_keeps_the_true_total(tmp_path):

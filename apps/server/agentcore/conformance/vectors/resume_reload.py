@@ -1,9 +1,9 @@
 """Conformance vectors — resumed reload == live (turn_paused batch 8).
 
 Locks deliverable continuity across plan_review resume, G6 content_reset
-reinjection of pre_pause, and ask_user absorb (empty bubble / card carries
-question). Reinjection is encoded as an ordinary ``content_delta`` so the
-oracle needs no special case.
+reinjection of pre_pause, and ask_user absorb (``content_reset(reason=ask_user)``
+clears the bubble; card carries the question). Reinjection is encoded as an
+ordinary ``content_delta`` so the oracle needs no special case.
 """
 
 from __future__ import annotations
@@ -114,10 +114,11 @@ def _resume_content_reset_reinject() -> list[SSEEvent]:
 
 
 def _resume_ask_user_absorb() -> list[SSEEvent]:
-    """ask_user 吸收 → resolved → 续跑；气泡基底为空、卡片承载问句。"""
+    """ask_user 吸收 → resolved → 续跑；content_reset 清气泡、卡片承载问句。"""
     return [
         message_start("m1", conversation_id=_CONV),
         content_delta(_ABSORB_PROSE),
+        content_reset("ask_user"),
         checkpoint_required(
             checkpoint_id="cp_absorb",
             conversation_id=_CONV,
@@ -141,7 +142,7 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         _resume_content_reset_reinject,
     ),
     "resume_ask_user_absorb": (
-        "挂起恢复：ask_user 吸收后气泡空基底、卡片承载问句",
+        "挂起恢复：ask_user 吸收（content_reset）后气泡空基底、卡片承载问句",
         _resume_ask_user_absorb,
     ),
 }

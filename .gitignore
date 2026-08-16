@@ -197,6 +197,8 @@ apps/server/agentcore/evals/fixtures/**/.agentcore/
 
 # Cursor 对话存档（PChat 生成的上下文归档，不应进入代码仓库）
 杂项/
+# 聊天里粘贴的图片/附件落盘（hex 命名，可能含用户材料），仓库根 only
+/attachments/
 
 # Dev-only demo tape session bindings (local conversation_id → tape map)
 demos/bindings.json

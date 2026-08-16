@@ -75,10 +75,14 @@
     "status": "completed",
     "finishReason": "end_turn",
     "error": null,
-    "content": "好，按 PowerPoint（.pptx）推进。",
+    "content": "开始前确认课件交付形态：好，按 PowerPoint（.pptx）推进。",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "开始前确认课件交付形态："
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_fmt"

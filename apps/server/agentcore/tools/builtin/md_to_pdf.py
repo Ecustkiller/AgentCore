@@ -40,6 +40,7 @@ class MdToPdfTool:
         surface=ToolSurface.BUILTIN,
         audience=AUDIENCE_WORKER_ONLY,
         file_products=FileProductsContract.SELF_REPORT,
+        produces_formats=(".pdf",),
     )
 
     @property

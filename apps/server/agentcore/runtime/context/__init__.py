@@ -7,6 +7,10 @@ is intentionally NOT here: unification is injection-side only (文档「守恒�
 搬家不消失).
 """
 
+from agentcore.runtime.context.artifact_formats import (
+    build_artifact_format_line,
+    format_artifact_capability_line,
+)
 from agentcore.runtime.context.assembler import ContextAssembler, assembly_hash
 from agentcore.runtime.context.consultable import Consultable, ConsultDirectoryEntry
 from agentcore.runtime.context.contributor import PromptContributor, SectionOrder
@@ -38,8 +42,10 @@ __all__ = [
     "SectionOrder",
     "WorkspaceGitFact",
     "assembly_hash",
+    "build_artifact_format_line",
     "build_folder_catalog_entries",
     "build_workspace_context",
+    "format_artifact_capability_line",
     "build_workspace_overview",
     "detect_workspace_git",
     "detect_workspace_git_sync",

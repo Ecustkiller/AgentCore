@@ -336,6 +336,10 @@ class CoordinationSession:
     all_completed_injected: bool = False
     # True while the system harvest closing turn is the attached CEO (最终合成).
     harvest_closing: bool = False
+    # Structured user-audience facts (nodes / files / outstanding tool failures)
+    # stamped at drive close, so the no-LLM harvest fallback renders its own
+    # user-facing close instead of reusing the CEO-facing brief.
+    harvest_user_facts: dict[str, Any] | None = None
     # Terminal events parked across first-turn close() so harvest can re-queue them.
     _harvest_stash: list[CoordinationEvent] = field(default_factory=list, repr=False)
     # Background WaveScheduler task (owned by drive); None until started.

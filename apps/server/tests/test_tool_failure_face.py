@@ -711,7 +711,7 @@ def test_exec_env_timeout_peek_matches_bubble_fact():
 
     peek = _CURATED_BY_CODE["exec_env_probe_timeout"]
     bubble = EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE["exec_env_probe_timeout"]
-    for token in ("没跑完", "启动", "太慢", "命令"):
+    for token in ("时限", "就绪", "命令"):
         assert token in peek, peek
         assert token in bubble, bubble
     assert "代码执行环境" not in peek

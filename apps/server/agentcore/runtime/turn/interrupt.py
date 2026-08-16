@@ -46,6 +46,9 @@ class TurnInterruptReason(StrEnum):
     PROCESS_KILL = "process_kill"
     LEASE_EXPIRED = "lease_expired"
     REDRIVE_FAILED = "redrive_failed"
+    # Newer message took the conversation slot. Not a user Stop — do not inherit
+    # the USER_STOP silence whitelist.
+    OVERLAP = "overlap"
 
 
 def normalize_interrupt_reason(reason: str | TurnInterruptReason) -> TurnInterruptReason:
@@ -60,6 +63,8 @@ def normalize_interrupt_reason(reason: str | TurnInterruptReason) -> TurnInterru
     if raw == TurnInterruptReason.PROCESS_KILL.value:
         # Historical rows (and any caller that really did observe a kill).
         return TurnInterruptReason.PROCESS_KILL
+    if raw == TurnInterruptReason.OVERLAP.value:
+        return TurnInterruptReason.OVERLAP
     # no_dag / lease_expired / unknown → we found it dead, we did not see it die
     return TurnInterruptReason.LEASE_EXPIRED
 
@@ -90,6 +95,44 @@ _LEGACY_REDRIVE_MARKERS = ("后台恢复失败",)
 # chrome 救不了一个空气泡：历史里它就是一条什么都没说的助手消息。
 INTERRUPTED_EMPTY_USER_VISIBLE = "【中断说明】本轮意外中断，未产出回复。可直接发送下一条继续。"
 
+OVERLAP_EMPTY_USER_VISIBLE = (
+    "【中断说明】本轮被你的新消息打断，未产出回复。可直接发送下一条继续，或说明要接着刚才的部分。"
+)
+HARVEST_YIELD_EMPTY_USER_VISIBLE = (
+    "【中断说明】后台工作结束后没能完成收口说明，未产出回复。"
+    "已有进展仍在对话和工作区里。可直接发送下一条继续。"
+)
+MAX_ROUNDS_EMPTY_USER_VISIBLE = (
+    "【中断说明】本轮已达回复轮次上限，未产出回复。可直接发送下一条继续，或缩小范围再试。"
+)
+TOKEN_BUDGET_EMPTY_USER_VISIBLE = (
+    "【中断说明】本轮已达回复长度上限，未产出回复。可直接发送下一条继续，或缩小范围再试。"
+)
+
+_EMPTY_CLOSE_BY_REASON: dict[str, str] = {
+    TurnInterruptReason.USER_STOP.value: "",
+    TurnInterruptReason.OVERLAP.value: OVERLAP_EMPTY_USER_VISIBLE,
+    TurnInterruptReason.LEASE_EXPIRED.value: INTERRUPTED_EMPTY_USER_VISIBLE,
+    TurnInterruptReason.PROCESS_KILL.value: INTERRUPTED_EMPTY_USER_VISIBLE,
+    "harvest_yield": HARVEST_YIELD_EMPTY_USER_VISIBLE,
+    "max_rounds": MAX_ROUNDS_EMPTY_USER_VISIBLE,
+    "token_budget": TOKEN_BUDGET_EMPTY_USER_VISIBLE,
+}
+
+
+def empty_close_user_visible(reason: str | TurnInterruptReason) -> str:
+    """User-visible body when a close path has no streamed captain text.
+
+    Only reasons listed in ``_EMPTY_CLOSE_BY_REASON`` produce copy. USER_STOP
+    is silent (the user pressed stop). Unregistered reasons — engine early-stop
+    such as unproductive / validation_thrash — return empty; FinishReason
+    carries the semantics. Do not invent a fallback sentence for them.
+    """
+    key = reason.value if isinstance(reason, TurnInterruptReason) else (reason or "").strip()
+    if key == TurnInterruptReason.USER_STOP.value:
+        return ""
+    return _EMPTY_CLOSE_BY_REASON.get(key, "")
+
 
 def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
     """Return captain text for an interrupted turn.
@@ -111,8 +154,8 @@ def compose_interrupt_body(content: str, *, reason: TurnInterruptReason) -> str:
 
     text = prepare_assistant_content((content or "").strip(), salvage=True)
     if reason is not TurnInterruptReason.REDRIVE_FAILED:
-        if not text and reason is not TurnInterruptReason.USER_STOP:
-            return INTERRUPTED_EMPTY_USER_VISIBLE
+        if not text:
+            return empty_close_user_visible(reason)
         return text
     if REDRIVE_FAILED_USER_VISIBLE in text or any(
         marker in text for marker in _LEGACY_REDRIVE_MARKERS

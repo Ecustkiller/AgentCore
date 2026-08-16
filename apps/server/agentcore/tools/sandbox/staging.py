@@ -30,6 +30,7 @@ count are capped (fail-visible: skipped files are counted and reported).
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import sys
@@ -47,8 +48,31 @@ SANDBOX_OCI_GID = 65534
 _STAGING_DIR_MODE = 0o775
 _STAGING_FILE_MODE = 0o664
 
-#: (size, mtime_ns) fingerprint per workspace-relative path.
-TreeState = dict[str, tuple[int, int]]
+# size + mtime (cheap skip) + content digest (truth when materialize refreshes mtime).
+TreeState = dict[str, tuple[int, int, bytes]]
+
+_DIGEST_CHUNK = 1024 * 1024
+_DIGEST_SIZE = 16
+
+
+def _digest_file(path: Path) -> bytes:
+    """Non-crypto content fingerprint. blake2b-128 is enough to detect a rewrite."""
+    hasher = hashlib.blake2b(digest_size=_DIGEST_SIZE)
+    with path.open("rb") as handle:
+        while chunk := handle.read(_DIGEST_CHUNK):
+            hasher.update(chunk)
+    return hasher.digest()
+
+
+def _copy_and_digest(src: Path, dst: Path) -> bytes:
+    """Like ``shutil.copy2``, hashing bytes in the same read pass (no extra tree walk)."""
+    hasher = hashlib.blake2b(digest_size=_DIGEST_SIZE)
+    with src.open("rb") as reader, dst.open("wb") as writer:
+        while chunk := reader.read(_DIGEST_CHUNK):
+            hasher.update(chunk)
+            writer.write(chunk)
+    shutil.copystat(src, dst)
+    return hasher.digest()
 
 
 @dataclass(frozen=True)
@@ -142,7 +166,7 @@ def snapshot_tree(root: Path) -> TreeState:
     state: TreeState = {}
     for rel, abs_path in _iter_regular_files(root):
         st = abs_path.stat()
-        state[rel] = (st.st_size, st.st_mtime_ns)
+        state[rel] = (st.st_size, st.st_mtime_ns, _digest_file(abs_path))
     return state
 
 
@@ -155,6 +179,7 @@ def stage_workspace(src: Path, dst: Path, *, max_bytes: int) -> TreeState:
     sandbox view.
     """
     total = 0
+    digests: dict[str, bytes] = {}
     dst.mkdir(parents=True, exist_ok=True)
     for dirpath, dirnames, filenames in os.walk(src, followlinks=False):
         rel_dir = Path(dirpath).relative_to(src)
@@ -178,18 +203,43 @@ def stage_workspace(src: Path, dst: Path, *, max_bytes: int) -> TreeState:
                     "action=open_local_project；勿用纯文本询问；bind≠打开项目）"
                     "引导后在本机运行。"
                 )
-            shutil.copy2(src_file, dst / rel_dir / name)
+            dest_file = dst / rel_dir / name
+            digests[(rel_dir / name).as_posix()] = _copy_and_digest(src_file, dest_file)
     prepare_bind_tree_for_sandbox(dst)
-    return snapshot_tree(dst)
+    # chmod/chown do not rewrite bytes; reuse the copy-pass digest and only re-stat.
+    state: TreeState = {}
+    for rel, abs_path in _iter_regular_files(dst):
+        st = abs_path.stat()
+        digest = digests.get(rel)
+        if digest is None:
+            digest = _digest_file(abs_path)
+        state[rel] = (st.st_size, st.st_mtime_ns, digest)
+    return state
 
 
 def collect_changes(staging: Path, before: TreeState) -> list[str]:
-    """Workspace-relative paths of files the execution created or modified."""
+    """Workspace-relative paths of files the execution created or modified.
+
+    ``mtime`` alone is not enough: gVisor artifact materialize ``write_bytes``
+    every path even when the bytes are unchanged, which refreshes mtime and
+    used to make a read-only script look like it delivered the whole tree.
+    Size mismatch is a definite change; identical ``(size, mtime)`` skips
+    digest I/O; only the "same size, newer mtime" band re-hashes.
+    """
     changes: list[str] = []
     for rel, abs_path in _iter_regular_files(staging):
         st = abs_path.stat()
-        fingerprint = (st.st_size, st.st_mtime_ns)
-        if before.get(rel) != fingerprint:
+        prev = before.get(rel)
+        if prev is None:
+            changes.append(rel)
+            continue
+        prev_size, prev_mtime, prev_digest = prev
+        if st.st_size != prev_size:
+            changes.append(rel)
+            continue
+        if st.st_mtime_ns == prev_mtime:
+            continue
+        if _digest_file(abs_path) != prev_digest:
             changes.append(rel)
     changes.sort()
     return changes

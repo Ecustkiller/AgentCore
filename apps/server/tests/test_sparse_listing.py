@@ -145,7 +145,7 @@ def test_partition_bare_lists_all_with_labels():
     )
     assert remaining == 0
     assert rows == [
-        ("attachments/a.txt", "附件"),
+        ("attachments/a.txt", "附件·含历轮"),
         ("out.md", "工作区已有"),
         ("data.csv", "工作区已有"),
     ]
@@ -157,7 +157,7 @@ def test_partition_project_keeps_attachments_and_recent_supplement():
         ["attachments/x.md", *others],
         shared_workspace=True,
     )
-    assert rows[0] == ("attachments/x.md", "附件")
+    assert rows[0] == ("attachments/x.md", "附件·含历轮")
     assert all(label == "最近触达" for _, label in rows[1:])
     assert len(rows) == 1 + PROJECT_RECENT_SUPPLEMENT
     assert remaining == 3

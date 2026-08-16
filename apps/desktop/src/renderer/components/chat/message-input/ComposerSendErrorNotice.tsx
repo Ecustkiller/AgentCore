@@ -5,6 +5,7 @@ import {
   statusChip,
 } from "@/components/ui/tone-presets";
 import { cn } from "@/lib/utils";
+import { isReconnectQuietBanner } from "@/services/turns/helpers";
 import {
   clearComposerSendError,
   useComposerSendError,
@@ -14,7 +15,7 @@ import {
   useActiveErrorAction,
   useConversationStore,
 } from "@/stores/conversation";
-import { AlertTriangle, KeyRound, X } from "lucide-react";
+import { AlertTriangle, Info, KeyRound, X } from "lucide-react";
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -23,7 +24,8 @@ import { useNavigate } from "react-router-dom";
  * ephemeral {@link useComposerSendError} slot so a first-send teardown back to
  * ``__draft__`` still shows; falls back to the session error that regenerate
  * / stream interrupt still write. Dismiss clears both stores.
- * Tone: config action → primary; otherwise {@link noticeChipNeutral}.
+ * Tone: config action → primary; quiet reconnect / finished → Info on
+ * {@link noticeChipNeutral}; otherwise triangle on the same chrome.
  */
 export function ComposerSendErrorNotice({ draftKey }: { draftKey: string }) {
   const composerError = useComposerSendError(draftKey);
@@ -42,18 +44,21 @@ export function ComposerSendErrorNotice({ draftKey }: { draftKey: string }) {
   if (!message) return null;
 
   const needsYou = Boolean(action);
+  const quiet = !needsYou && isReconnectQuietBanner(message);
+  const Icon = quiet ? Info : AlertTriangle;
 
   return (
     <div
       role="alert"
       aria-live="polite"
       data-testid="composer-send-error"
+      data-banner-tone={needsYou ? "primary" : quiet ? "notice" : "alert"}
       className={cn(
         "mx-3 mt-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
         needsYou ? statusChip.primary : noticeChipNeutral,
       )}
     >
-      <AlertTriangle
+      <Icon
         size={15}
         className={cn(
           "shrink-0",

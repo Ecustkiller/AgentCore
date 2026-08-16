@@ -36,13 +36,24 @@ def _fresh_slots_and_linux(monkeypatch):
 
 
 def _install_fake_runsc(
-    tmp_path: Path, *, artifact_rel: str = "out/hello.txt", hang: bool = False
+    tmp_path: Path,
+    *,
+    artifact_rel: str = "out/hello.txt",
+    hang: bool = False,
+    rematerialize: bool = False,
+    rematerialize_edit: dict[str, str] | None = None,
 ) -> str:
-    """Install a cross-platform fake ``runsc`` that writes ``artifact_rel`` into /workspace."""
+    """Install a cross-platform fake ``runsc``.
+
+    Default: write ``artifact_rel`` into the staging mount (legacy bind-write).
+    ``rematerialize``: emit the production artifact trailer (whole-tree
+    base64) so host ``write_bytes`` refreshes mtime — the read-only honesty path.
+    """
     impl = tmp_path / "fake_runsc_impl.py"
     impl.write_text(
         textwrap.dedent(
             f"""\
+            import base64
             import json
             import sys
             from pathlib import Path
@@ -85,6 +96,20 @@ def _install_fake_runsc(
             if {hang!r}:
                 import time
                 time.sleep(99999)
+
+            if {rematerialize!r}:
+                files = {{}}
+                for p in ws.rglob("*"):
+                    if p.is_file():
+                        files[p.relative_to(ws).as_posix()] = (
+                            base64.b64encode(p.read_bytes()).decode("ascii")
+                        )
+                edits = {rematerialize_edit!r} or {{}}
+                for rel, text in edits.items():
+                    files[rel] = base64.b64encode(text.encode("utf-8")).decode("ascii")
+                print("listed dist")
+                print("__AGENTCORE_ARTIFACTS__" + json.dumps(files, separators=(",", ":")))
+                raise SystemExit(0)
 
             rel = Path({artifact_rel!r})
             dest = ws / rel
@@ -137,6 +162,71 @@ async def test_gvisor_write_back_lands_artifact_in_real_workspace(tmp_path: Path
     assert result.write_back_skipped == 0
     assert (ws / "out" / "hello.txt").read_text(encoding="utf-8") == "from-sandbox"
     assert (ws / "seed.txt").read_text(encoding="utf-8") == "keep"
+
+
+async def test_gvisor_readonly_script_does_not_claim_written_files(tmp_path: Path):
+    """Cloud sandbox rematerializes every seed path; same bytes must not be a delivery."""
+    ws = tmp_path / "workspace"
+    (ws / "dist").mkdir(parents=True)
+    seed = ws / "seed.txt"
+    app = ws / "dist" / "app.js"
+    vendor = ws / "dist" / "vendor.js"
+    seed.write_text("keep", encoding="utf-8")
+    app.write_text("bundle-a", encoding="utf-8")
+    vendor.write_text("bundle-b", encoding="utf-8")
+    seed_mtime = seed.stat().st_mtime_ns
+    app_mtime = app.stat().st_mtime_ns
+
+    sandbox = GVisorSandbox(
+        runsc_path=_install_fake_runsc(tmp_path, rematerialize=True),
+        runtime_root=str(tmp_path / "rt"),
+    )
+    result = await sandbox.execute(
+        ExecutionRequest(
+            code="print('ignored-by-fake')",
+            language="python",
+            cwd=str(ws),
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.success is True
+    assert result.written_files == []
+    assert result.write_back_skipped == 0
+    assert seed.read_text(encoding="utf-8") == "keep"
+    assert app.read_text(encoding="utf-8") == "bundle-a"
+    assert seed.stat().st_mtime_ns == seed_mtime
+    assert app.stat().st_mtime_ns == app_mtime
+
+
+async def test_gvisor_rematerialize_reports_only_actual_content_change(tmp_path: Path):
+    """Whole-tree artifact payload + one real edit → only the edited path is delivered."""
+    ws = tmp_path / "workspace"
+    (ws / "dist").mkdir(parents=True)
+    (ws / "seed.txt").write_text("keep", encoding="utf-8")
+    (ws / "dist" / "app.js").write_text("bundle-a", encoding="utf-8")
+
+    sandbox = GVisorSandbox(
+        runsc_path=_install_fake_runsc(
+            tmp_path,
+            rematerialize=True,
+            rematerialize_edit={"seed.txt": "changed-in-sandbox"},
+        ),
+        runtime_root=str(tmp_path / "rt"),
+    )
+    result = await sandbox.execute(
+        ExecutionRequest(
+            code="print('ignored-by-fake')",
+            language="python",
+            cwd=str(ws),
+            timeout_seconds=10,
+        )
+    )
+
+    assert result.success is True
+    assert result.written_files == ["seed.txt"]
+    assert (ws / "seed.txt").read_text(encoding="utf-8") == "changed-in-sandbox"
+    assert (ws / "dist" / "app.js").read_text(encoding="utf-8") == "bundle-a"
 
 
 async def test_gvisor_timeout_skips_write_back(tmp_path: Path, monkeypatch):

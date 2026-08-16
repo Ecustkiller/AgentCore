@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  appendSanitizedDesktopLogExcerpt,
+  buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
@@ -172,6 +174,93 @@ describe("supportDiagnosticExtrasFromError", () => {
       errorCode: "LLM_ERROR",
       bodyKind: "json",
     });
+  });
+});
+
+describe("appendSanitizedDesktopLogExcerpt", () => {
+  it("appends a desktop.jsonl section only when both pack and lines exist", () => {
+    expect(appendSanitizedDesktopLogExcerpt("", ["{}"])).toBe("");
+    expect(appendSanitizedDesktopLogExcerpt("pack", [])).toBe("pack");
+    expect(
+      appendSanitizedDesktopLogExcerpt("pack", ['{"event":"sse.idle_stall"}']),
+    ).toBe(
+      ["pack", "", "--- desktop.jsonl ---", '{"event":"sse.idle_stall"}'].join(
+        "\n",
+      ),
+    );
+  });
+});
+
+describe("buildSupportDiagnosticPack", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stays ids-only when logApi is missing", async () => {
+    vi.stubGlobal("window", {});
+    await expect(
+      buildSupportDiagnosticPack({ conversationId: "conv-1", messageId: "m1" }),
+    ).resolves.toBe(
+      formatSupportDiagnosticText({
+        conversationId: "conv-1",
+        messageId: "m1",
+      }),
+    );
+  });
+
+  it("keeps server_health.offline with no conversation_id in a conversation pack", async () => {
+    vi.stubGlobal("window", {
+      logApi: {
+        write: () => {},
+        readTail: async () => [
+          JSON.stringify({
+            event: "server_health.offline",
+            source: "heartbeat",
+          }),
+          JSON.stringify({
+            event: "sse.idle_stall",
+            conversation_id: "other-chat",
+          }),
+          JSON.stringify({
+            event: "sse.idle_stall",
+            conversation_id: "conv-1",
+          }),
+        ],
+      },
+    });
+    const pack = await buildSupportDiagnosticPack({
+      conversationId: "conv-1",
+      messageId: "m1",
+    });
+    expect(pack).toContain("server_health.offline");
+    expect(pack).toContain('"conversation_id":"conv-1"');
+    expect(pack).not.toContain("other-chat");
+  });
+
+  it("appends sanitized tail lines from logApi.readTail", async () => {
+    vi.stubGlobal("window", {
+      logApi: {
+        write: () => {},
+        readTail: async () => [
+          JSON.stringify({
+            event: "server_health.offline",
+            source: "heartbeat",
+          }),
+          JSON.stringify({
+            event: "sse.idle_stall",
+            conversation_id: "conv-1",
+          }),
+        ],
+      },
+    });
+    const pack = await buildSupportDiagnosticPack({
+      conversationId: "conv-1",
+      messageId: "m1",
+    });
+    expect(pack).toContain("conversation_id: conv-1");
+    expect(pack).toContain("--- desktop.jsonl ---");
+    expect(pack).toContain("server_health.offline");
+    expect(pack).not.toContain("token");
   });
 });
 

@@ -582,8 +582,8 @@ class SubprocessSandbox:
         """Protocol-level health: can this host run python?
 
         Kept python-shaped for the callers that ask about the backend as a whole
-        (cloud boot probe / ``cloud_health``). Per-execution checks go through
-        ``probe_interpreter`` with the language they are about to run.
+        (cloud boot probe / ``cloud_health``). Per-execution classification is
+        driven by the real run, not this check.
         """
         return await self.probe_interpreter("python")
 

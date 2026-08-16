@@ -267,7 +267,7 @@ def _ask_user_shape_reject_then_pick() -> list[SSEEvent]:
                 "同一决策的候选方案 → 合并成 1 个 question 的多个 options。"
             ),
         ),
-        # 自纠正后重发单题单选 → 正常挂起（尾部铺垫文案被 checkpoint 吸收）。
+        # 自纠正后重发单题单选 → 正常挂起（模型自写了 question，引导句留在气泡）。
         content_delta("有三条可行路线，请挑一条："),
         checkpoint_required(
             checkpoint_id="cp_pick",

@@ -7,6 +7,15 @@ hard 429 for every caller (成本配额与计费.md §一). Happy-path fakes pro
 fail-open is scoped to failures and does not blanket-allow.
 """
 
+import contextlib
+import socket
+import threading
+import time
+
+import redis
+from redis.backoff import NoBackoff
+from redis.retry import Retry
+
 from agentcore.middleware import redis_rate_limit as rrl
 from agentcore.middleware.redis_rate_limit import (
     RedisFixedWindowRateLimiter,
@@ -148,6 +157,56 @@ class _WorkingSlidingClient:
         return None
 
 
+class _BlackholeRedis:
+    """Accept TCP, never reply — stands in for a wedged Redis that holds the socket.
+
+    Used with a real ``redis.Redis`` client so ``socket_timeout`` is what unblocks
+    the limiter (the production hang), not a fake that raises immediately.
+    """
+
+    def __init__(self) -> None:
+        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._srv.bind(("127.0.0.1", 0))
+        self._srv.listen(8)
+        self.port = int(self._srv.getsockname()[1])
+        self._stop = threading.Event()
+        self._held: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        self._srv.settimeout(0.1)
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._srv.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                break
+            conn.settimeout(None)
+            self._held.append(conn)
+
+    def client(self, *, timeout_s: float = 0.2) -> redis.Redis:
+        return redis.Redis(
+            host="127.0.0.1",
+            port=self.port,
+            socket_connect_timeout=timeout_s,
+            socket_timeout=timeout_s,
+            decode_responses=False,
+            retry=Retry(NoBackoff(), 0),
+        )
+
+    def close(self) -> None:
+        self._stop.set()
+        for conn in self._held:
+            with contextlib.suppress(OSError):
+                conn.close()
+        with contextlib.suppress(OSError):
+            self._srv.close()
+        self._thread.join(timeout=1.0)
+
+
 # --- fixed window: fail-open ---------------------------------------------------------
 
 
@@ -219,3 +278,47 @@ def test_sliding_window_enforces_when_redis_healthy():
     assert blocked.allowed is False
     assert blocked.retry_after == 8.0  # oldest hit (t=0) frees at t=10
     assert limiter.check("u", now=11).allowed is True  # window slid; t=0/t=1 aged out
+
+
+# --- hang: socket timeout unblocks the limiter (fail-open) -----------------------------
+
+
+def test_fixed_window_does_not_block_when_redis_hangs(monkeypatch):
+    """Wedged Redis must not freeze the caller: timeout → fail-open, bounded wait."""
+    spy = LogSpy()
+    monkeypatch.setattr(rrl, "logger", spy)
+    monkeypatch.setattr(rrl, "_fail_open_count", 0)
+    hole = _BlackholeRedis()
+    try:
+        limiter = RedisFixedWindowRateLimiter(
+            client=hole.client(), prefix="rl:auth", max_requests=1, window_seconds=60
+        )
+        started = time.monotonic()
+        assert limiter.allow("ip") is True
+        elapsed = time.monotonic() - started
+    finally:
+        hole.close()
+    assert elapsed < 2.0, f"limiter hung for {elapsed:.2f}s on a wedged Redis"
+    kw = spy.get(_FAIL_OPEN_LOG)
+    assert kw["prefix"] == "rl:auth"
+    assert kw["count"] == 1
+
+
+def test_sliding_window_does_not_block_when_redis_hangs(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(rrl, "logger", spy)
+    hole = _BlackholeRedis()
+    try:
+        limiter = RedisSlidingWindowRateLimiter(
+            client=hole.client(), prefix="rl:msg", max_requests=1, window_seconds=60
+        )
+        started = time.monotonic()
+        decision = limiter.check("u")
+        elapsed = time.monotonic() - started
+    finally:
+        hole.close()
+    assert decision.allowed is True
+    assert decision.retry_after == 0.0
+    assert elapsed < 2.0, f"limiter hung for {elapsed:.2f}s on a wedged Redis"
+    kw = spy.get(_FAIL_OPEN_LOG)
+    assert kw["prefix"] == "rl:msg"

@@ -15,7 +15,7 @@ from agentcore.runtime.facts import TurnPausedFact, pre_pause_from_journal
 
 logger = get_logger(__name__)
 
-# ask_user absorbs same-round prose into the card — capture the pre-round bubble.
+# ask_user: folded prose → pre-round bubble; model-owned message → keep final_content.
 _ASK_USER_KIND = "ask_user"
 
 
@@ -207,7 +207,7 @@ def _segment_content(suspension_kind: str) -> str:
         return ""
     if mirror is None:
         return ""
-    if suspension_kind == _ASK_USER_KIND:
+    if suspension_kind == _ASK_USER_KIND and mirror.ask_user_content_folded:
         return mirror.content_before_round or ""
     return mirror.final_content or ""
 

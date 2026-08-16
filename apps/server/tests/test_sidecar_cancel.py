@@ -260,6 +260,35 @@ async def test_close_user_stop_turn_emits_message_end_even_when_persist_skipped(
     assert payload["finish_reason"] == FinishReason.CANCELLED
 
 
+async def test_close_user_stop_turn_overlap_uses_visible_reason(monkeypatch):
+    """Overlap closer must not stamp USER_STOP (that path is silent when empty)."""
+    from agentcore.conversation import turn_persistence
+    from agentcore.runtime.turn.interrupt import TurnInterruptReason
+    from agentcore.runtime.turn.runs import turn_runs
+
+    called: list[dict] = []
+
+    async def _fake_close(**kwargs):
+        called.append(kwargs)
+        return True
+
+    monkeypatch.setattr(turn_persistence.settings, "incomplete_turn_persist_enabled", True)
+    monkeypatch.setattr(turn_persistence, "close_turn_interrupted", _fake_close)
+    monkeypatch.setattr(turn_runs, "is_superseded", lambda _cid: True)
+    monkeypatch.setattr(turn_runs, "is_user_stop", lambda _cid: False)
+
+    sink = EventSink()
+    ok = await turn_persistence.close_user_stop_turn(
+        sink=sink,
+        conversation_id="c-overlap",
+        trace_id="t1",
+        message_id="m-overlap",
+    )
+    assert ok is True
+    assert called[0]["reason"] == TurnInterruptReason.OVERLAP
+    assert sink._stream_finish_reason == FinishReason.INTERRUPTED.value
+
+
 async def test_close_user_stop_turn_empty_body_still_durable(monkeypatch):
     """Empty journal + empty content must still durable-close (not skip)."""
     from agentcore.conversation import turn_persistence

@@ -60,7 +60,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
     SystemSkill(
         name="product_help",
         summary=(
-            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 产品面 FAQ / 官网 / 下载"
+            "用户问本产品怎么用 / 入口在哪 / UI·功能介绍 / 这是什么项目 / 你是什么 / "
+            "产品面 FAQ / 官网 / 下载"
             "（为何没组团、费用、Key、.md/文件面板怎么打开、"
             "Cursor 规则 / `.mdc` / 改成 AgentCore 规则…）→ 先查本 skill 再短答；"
             "入口点名再查 product_help_map，FAQ 再查 product_help_faq"
@@ -91,7 +92,8 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         name="product_bug_triage",
         summary=(
             "用户主动查/报产品本身可证伪故障（UI/运行时/工具/编排，像不像产品 Bug）"
-            "→ 四类结论 + 复现要点；FAQ 自助仍走 product_help*；禁 L4/跨用户/假装读服务端日志"
+            "→ 四类结论 + 复现要点；我方自检/运行时报错不预设归用户环境；"
+            "FAQ 自助仍走 product_help*；禁 L4/跨用户/假装读服务端日志"
         ),
         body=_PRODUCT_BUG_TRIAGE,
         audience=AUDIENCE_CEO_ONLY,

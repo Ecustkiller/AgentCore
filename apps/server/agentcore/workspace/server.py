@@ -408,11 +408,9 @@ class ServerWorkspace:
         # When True, AI list_tree / channel list keep archive suffixes visible
         # (file_list pattern targets zip/rar/…). Default False.
         self.ai_list_reveal_archives: bool = False
-        # Exec-env probe memo. Sidecar's SubprocessSandbox answers per language
-        # (a host missing python can still run node), while gVisor's health check
-        # smoke-runs the runsc runtime and keeps one backend-wide verdict. Each
-        # verdict carries its classified reason + raw facts so every later
-        # fail-fast repeats the same honest cause instead of a generic「跑不了」.
+        # gVisor: once-per-backend runsc smoke. Sidecar: sticky hard-evidence
+        # deaths from a real run (missing interpreter / refused spawn), keyed
+        # by language. A timeout never lands here.
         self._exec_env_probe = ExecEnvProbeMemo()
 
     def set_lock_waiting_hook(self, hook: Callable[[bool], None] | None) -> None:
@@ -1393,26 +1391,25 @@ class ServerWorkspace:
         # whole sandbox run (code_execute / test_run). Whole-turn lock used to
         # cover this; without it, execute would race sibling turns' writes.
         async with self._mutation_lock("."):
-            from agentcore.tools.sandbox.exec_env import probe_snippet
+            from agentcore.tools.sandbox.exec_env import annotate_real_exec_failure
             from agentcore.tools.sandbox.protocol import InterpreterProbe
 
-            # Scope the self-check to the language this request asked for, but
-            # only where the probe actually starts an interpreter. gVisor answers
-            # ``health_check`` by smoke-running the runsc runtime — that is not a
-            # language question, and it is cloud's only runtime health signal, so
-            # it keeps one backend-wide verdict (``language=None``).
+            # gVisor: keep the once-per-backend runsc smoke (language=None).
+            # Sidecar / InterpreterProbe: no per-language preflight — the real
+            # run classifies a missing interpreter or refused spawn.
             sandbox = self._sandbox
-            language = (
-                req.language if isinstance(sandbox, InterpreterProbe) else None
-            )
-            if language is None or probe_snippet(language) is not None:
-                verdict = self._exec_env_probe.get(language)
+            if not isinstance(sandbox, InterpreterProbe):
+                verdict = self._exec_env_probe.get(None)
                 if verdict is None:
                     verdict = self._exec_env_probe.record(
-                        language, await self._probe_exec_env(language)
+                        None, await self._probe_exec_env(None)
                     )
                 if not verdict.alive:
-                    return verdict.failure_result(language=language)
+                    return verdict.failure_result(language=None)
+            language = req.language
+            cached = self._exec_env_probe.get(language)
+            if cached is not None and not cached.alive:
+                return cached.failure_result(language=language)
             self._mark_mutated()
             env = dict(req.env or {})
             env.update(build_external_env(self._mounts))
@@ -1422,32 +1419,47 @@ class ServerWorkspace:
                 from agentcore.tools.sandbox.pythonpath import merge_pythonpath_into_env
 
                 env = merge_pythonpath_into_env(Path(cwd), env)
-            return await self._sandbox.execute(
+            result = await self._sandbox.execute(
                 replace(req, cwd=cwd, env=env or None)
             )
+            if isinstance(sandbox, InterpreterProbe):
+                annotated, death = annotate_real_exec_failure(
+                    result, language=language
+                )
+                if death is not None:
+                    self._exec_env_probe.record(language, death)
+                    from agentcore.core.logging import get_logger
+
+                    get_logger(__name__).info(
+                        "sandbox.exec_env_probe_failed",
+                        location=self.location,
+                        language=language,
+                        code=death.code,
+                        reason=(
+                            f"exit={result.exit_code} "
+                            f"duration_ms={result.duration_ms}"
+                        ),
+                        detail=(result.stderr or result.stdout or "").strip()[:200]
+                        or None,
+                    )
+                    return annotated
+            return result
 
     async def _probe_exec_env(self, language: str | None) -> ExecEnvProbeVerdict:
-        """Ask the sandbox whether it can run ``language`` (``None`` = the runtime).
+        """gVisor / backend-wide runtime smoke (``language`` is always ``None``).
 
-        Carries the sandbox's own failure reason: the probe already knew whether
-        this was a timeout, a missing interpreter or a refused spawn, and that
-        verdict rides the tool result instead of dying in the log. Sandboxes that
-        classify nothing (gVisor, a check that raised) keep the unclassified
-        fallback rather than borrowing a cause.
+        Carries the sandbox's own failure reason when it classified one.
+        Sandboxes that classify nothing keep the unclassified fallback.
         """
         from agentcore.core.logging import get_logger
         from agentcore.tools.sandbox.exec_env import (
             EXEC_ENV_PROBE_ALIVE,
             EXEC_ENV_PROBE_FAIL_CODE,
         )
-        from agentcore.tools.sandbox.protocol import InterpreterProbe
 
         sandbox = self._sandbox
         try:
-            if language is not None and isinstance(sandbox, InterpreterProbe):
-                alive = bool(await sandbox.probe_interpreter(language))
-            else:
-                alive = bool(await sandbox.health_check())
+            alive = bool(await sandbox.health_check())
         except Exception:
             alive = False
             get_logger(__name__).info(

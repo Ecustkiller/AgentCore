@@ -67,7 +67,7 @@ class RedisFixedWindowRateLimiter:
             pipe.incr(rkey)
             pipe.expire(rkey, int(math.ceil(self._cfg.window_seconds)) + 1)
             count, _ = pipe.execute()
-        except Exception as exc:  # broad by design: any Redis/backend failure fails open
+        except Exception as exc:  # TimeoutError / ConnectionError / … — fail-open
             _warn_fail_open(self._cfg.prefix, exc)
             return True
         return int(count) <= self._cfg.max_requests
@@ -100,7 +100,7 @@ class RedisSlidingWindowRateLimiter:
                 return RateLimitDecision(allowed=False, retry_after=retry_after)
             self._cfg.client.zadd(rkey, {str(now): now})
             self._cfg.client.expire(rkey, int(math.ceil(self._cfg.window_seconds)) + 1)
-        except Exception as exc:  # broad by design: any Redis/backend failure fails open
+        except Exception as exc:  # TimeoutError / ConnectionError / … — fail-open
             _warn_fail_open(self._cfg.prefix, exc)
             return RateLimitDecision(allowed=True)
         return RateLimitDecision(allowed=True)

@@ -168,17 +168,18 @@ def test_cloud_scratch_facts():
     assert "选择器兜底" not in out
     assert "口头同意闭环" not in out
     assert "失败分型" not in out
-    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型：核里各一份
-    assert hint.count("【口头同意闭环】") == 1
-    assert "等待确认" in hint
-    assert "2～3" in hint
-    assert hint.count("【失败分型】") == 1
-    assert "没找着" in hint
-    assert "为只读新发 `grant_readonly_folder`" in hint
-    # 授权后发现：禁首轮文本题要文件名；须提示 well_known —— 都归核
-    assert hint.count("【授权后发现】") == 1
-    assert "well_known" in hint
-    assert "首轮文本题要文件名/绝对路径" in hint
+    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型 + 授权后发现：各一份，归「装配后的核」——
+    # 这套手册只有桌面回填通道在线才履行得了，跟 `external_mount_readonly` 装配走。
+    granted = assemble_ceo_core({"external_mount_readonly"})
+    assert granted.count("【口头同意闭环】") == 1
+    assert "等待确认" in granted
+    assert "2～3" in granted
+    assert granted.count("【失败分型】") == 1
+    assert "没找着" in granted
+    assert "为只读新发 `grant_readonly_folder`" in granted
+    assert granted.count("【授权后发现】") == 1
+    assert "well_known" in granted
+    assert "首轮文本题要文件名/绝对路径" in granted
     assert "well_known" not in out
     assert "在哪工作" in out
     assert "仅新建会话" in out
@@ -590,10 +591,11 @@ def test_cloud_desktop_online_allows_external_grant_without_bind():
     assert "本机某目录" in out
     assert "区外目录授权需先处在本地工作区" not in out
     assert "选择器兜底" not in out
-    # 怎么定位目录（禁手填绝对路径 / 禁探家目录 / 只读禁再发卡）归核
-    hint = _CEO_CORE_HINT
-    assert "手填绝对路径" in hint and "探主机家目录" in hint
-    assert "为只读新发 `grant_readonly_folder`" in hint
+    # 怎么定位目录（禁手填绝对路径 / 禁探家目录 / 只读禁再发卡）归核——桌面在线这一回合
+    # `external_mount_readonly` 已装配，手册随之挂上；事实块自己不抄这套 HOW。
+    granted = assemble_ceo_core({"external_mount_readonly"})
+    assert "手填绝对路径" in granted and "探主机家目录" in granted
+    assert "为只读新发 `grant_readonly_folder`" in granted
     assert "grant_readonly_folder" not in out
 
 
@@ -758,6 +760,71 @@ def test_local_package_install_follows_execution_class():
         terminal_enabled=False,
     )
     assert "package_install=未装配" in out_off
+
+
+def _xlsx_clause(block: str) -> str:
+    for part in block.split("产物格式：", 1)[-1].split("；"):
+        if part.startswith(".xlsx="):
+            return part
+    raise AssertionError(f"no .xlsx clause in {block!r}")
+
+
+def test_artifact_formats_without_execution_mark_office_honesty():
+    """无执行环境：.xlsx/.pptx 不可产；.docx/.pdf 经 md_to_* 可产。"""
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "产物格式：" in out
+    assert ".xlsx=不可产" in out
+    assert ".pptx=不可产" in out
+    assert "code_execute" in _xlsx_clause(out)
+    assert ".docx=可产" in out and "md_to_docx" in out
+    assert ".pdf=可产" in out and "md_to_pdf" in out
+    assert "不吃沙箱" in out
+
+
+def test_artifact_formats_follow_real_assembly_not_constants(monkeypatch):
+    """装配态变化时表随之变化——读的是注册表+闸，不是写死的格式清单。"""
+    from dataclasses import replace
+
+    from agentcore.runtime.context.artifact_formats import build_artifact_format_line
+    from agentcore.tools.builtin.md_to_docx import MdToDocxTool
+
+    off = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    on = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+    )
+    assert ".xlsx=不可产" in off
+    assert ".xlsx=可产" in on
+    assert "code_execute" in _xlsx_clause(on)
+    assert ".docx=可产" in on and "md_to_docx" in on
+
+    exporters_only = build_artifact_format_line({"md_to_docx", "md_to_pdf"})
+    with_exec = build_artifact_format_line({"md_to_docx", "md_to_pdf", "code_execute"})
+    assert ".xlsx=不可产" in exporters_only
+    assert ".xlsx=可产" in with_exec
+    assert exporters_only != with_exec
+
+    monkeypatch.setattr(
+        MdToDocxTool,
+        "registration",
+        replace(MdToDocxTool.registration, produces_formats=(".docx", ".odt")),
+    )
+    mutated = build_artifact_format_line({"md_to_docx", "md_to_pdf"})
+    assert ".odt=可产" in mutated
+    assert "md_to_docx" in mutated
+    assert ".odt=" not in exporters_only
 
 
 def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():

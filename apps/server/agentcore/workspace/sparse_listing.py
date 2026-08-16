@@ -2,7 +2,8 @@
 
 Default injection is relevance-first (双模式工作区 · 清单稀疏化):
 
-- **本回合附件** — paths under ``attachments/``
+- **附件·含历轮** — paths under ``attachments/`` (disk-resident across turns, not
+  this-message-only)
 - **本对话 scratch** — for 裸聊 the whole workspace *is* the scratch, so non-
   attachment files list normally (capped); project chats have no per-conv
   scratch under the shared folder, so scratch entries are empty here
@@ -148,7 +149,7 @@ def partition_sparse_paths(
     ``index_paths`` should already be newest-first when order matters (project
     supplement). Each row is ``(path, label)``:
 
-    - attachments → 「附件」
+    - attachments → 「附件·含历轮」
     - bare-chat scratch / project recent supplement → 「工作区已有」/「最近触达」
     - ``remaining`` is the count of shared project files *not* listed (0 for 裸聊)
     """
@@ -160,7 +161,7 @@ def partition_sparse_paths(
         else:
             others.append(path)
 
-    rows: list[tuple[str, str]] = [(p, "附件") for p in attachments]
+    rows: list[tuple[str, str]] = [(p, "附件·含历轮") for p in attachments]
 
     if not shared_workspace:
         rows.extend((p, "工作区已有") for p in others)

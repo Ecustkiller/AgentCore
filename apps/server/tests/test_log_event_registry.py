@@ -52,6 +52,24 @@ def test_backpressure_drop_fields_registered():
         assert "dropped_total" in fields
 
 
+def test_stream_detach_timing_fields_registered():
+    detach = get_registry().requires("event_sink.detach").fields
+    assert "duration_ms" in detach
+    assert "idle_ms" in detach
+    assert "started_at" in detach
+    assert "mode" in detach
+    assert "http_req_id" in detach
+    attach = get_registry().requires("event_sink.attach").fields
+    assert attach["mode"].name == "str"
+    assert "message_id" in attach
+    assert "http_req_id" in attach
+    unwatch = get_registry().requires("conversation_stream.unwatch").fields
+    assert "duration_ms" in unwatch
+    assert "idle_ms" in unwatch
+    assert "http.readyz_failed" in get_registry().names()
+    assert "event_loop.lag" in get_registry().names()
+
+
 def test_catalog_registers_failure_and_build_provenance_fields():
     """两个定性字段登记在册：包装层归因 + 线上版本归属（勿手改 catalog，跑同步脚本）。"""
     reg = get_registry()

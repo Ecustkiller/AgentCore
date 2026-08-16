@@ -48,7 +48,7 @@ from .tool_exec_coalesce import _clone_tool_result, _file_read_round_coalesce_ke
 from .tool_exec_gates import _check_safety_and_approval_gates
 from .tool_failure_face import tool_failure_fields, tool_failure_from_result
 from .tool_protocol_sanitize import (
-    salvage_handoff_raw_arguments,
+    parse_tool_call_arguments,
     sanitize_raw_tool_arguments,
     sanitize_tool_args,
     sanitize_tool_name,
@@ -103,23 +103,21 @@ async def run_one_tool(
     fingerprint = fingerprint_tool_call(name, raw_args)
     parse_exc: json.JSONDecodeError | None = None
     try:
-        args = json.loads(raw_args) if raw_args else {}
+        args, repaired = parse_tool_call_arguments(raw_args, tool_name=name or raw_name)
     except json.JSONDecodeError as exc:
         parse_exc = exc
-        salvaged = salvage_handoff_raw_arguments(raw_args, tool_name=name or raw_name)
-        if salvaged is not None:
-            # Guaranteed loadable object by salvage; continue as a normal parse.
-            args = json.loads(salvaged)
-            parse_exc = None
+        args = {}
+    else:
+        if repaired is not None:
             logger.info(
                 "tool.args_salvaged",
                 tool=name or raw_name,
                 tool_call_id=tc.id,
-                args_preview=salvaged[:200],
+                args_preview=repaired[:200],
             )
             with contextlib.suppress(TypeError, ValueError):
-                tc.function.arguments = salvaged
-            raw_args = salvaged
+                tc.function.arguments = repaired
+            raw_args = repaired
             fingerprint = fingerprint_tool_call(name, raw_args)
     if parse_exc is not None:
         model_msg, user_msg, parse_class = _format_args_parse_error(

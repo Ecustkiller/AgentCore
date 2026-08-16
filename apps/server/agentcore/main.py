@@ -392,6 +392,12 @@ async def lifespan(app: FastAPI):
 
         default_browser_takeover_service()
 
+    # Single-process event-loop lag: 1 Hz sleep overrun. Answers「当时卡没卡」
+    # without a metrics backend; cancelled on shutdown with the other loops.
+    from agentcore.observability.event_loop_lag import event_loop_lag_loop
+
+    event_loop_lag_task = asyncio.create_task(event_loop_lag_loop())
+
     # Cost ledger durable drain (as-built: 成本配额 §三): shared Postgres
     # ``cost_ledger_outbox``; each process self-drains (SKIP LOCKED). Multi-worker
     # API also needs ``RATE_LIMIT_BACKEND=redis`` (startup guardrail).
@@ -416,6 +422,11 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         boot_log.info("server.shutdown", reason="lifespan")
+        # Signal the lag probe to stop *before* salvage: a 20s salvage busy-loop
+        # would otherwise look like event-loop stall and spam event_loop.lag.
+        # Do not await here — cancel of sleep(1) is enough to silence it; the
+        # await stays after salvage so a stuck probe cannot squeeze the 20s grace.
+        event_loop_lag_task.cancel()
         # Graceful turn salvage BEFORE tearing down DB consumers / sweeper reclaim:
         # interrupt live turns like /stop, await unwind (grace), force-release leftovers.
         # Stop the lease sweeper first so it cannot race reclaim during salvage.
@@ -460,6 +471,9 @@ async def lifespan(app: FastAPI):
             standing_task_scheduler_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await standing_task_scheduler_task
+        event_loop_lag_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await event_loop_lag_task
         if browser_reaper_task is not None:
             browser_reaper_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

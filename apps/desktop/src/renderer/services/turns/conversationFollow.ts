@@ -39,13 +39,11 @@ import {
 } from "@/services/streamConversation";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import type { MessageStartPayload, SSEEvent } from "@/types/events";
+import { reconnectBackoffMs } from "./reconnectBackoff";
 import {
   hasLocalConversationStream,
   subscribeLocalConversationStream,
 } from "./streamOwnership";
-
-const RECONNECT_BASE_MS = 1_000;
-const RECONNECT_MAX_MS = 30_000;
 
 type FollowSlot = {
   conversationId: string;
@@ -349,12 +347,9 @@ async function runFollowLoop(slot: FollowSlot): Promise<void> {
       return;
     }
     if (slot.suspended) continue; // 让位导致的断流：立刻回到等待，不退避
-    const delay = Math.min(
-      RECONNECT_BASE_MS * 2 ** slot.attempts,
-      RECONNECT_MAX_MS,
-    );
+    const delay = reconnectBackoffMs(slot.attempts);
     slot.attempts += 1;
-    await sleep(slot, delay + Math.random() * 500);
+    await sleep(slot, delay);
   }
 }
 

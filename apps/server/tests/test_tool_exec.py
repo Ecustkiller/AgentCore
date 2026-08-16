@@ -455,7 +455,8 @@ async def test_remember_parse_failure_truncated_vs_escape_copy():
     reg = ToolRegistry()
     reg.register(tracked)
 
-    trunc = '{"content":"请始终用中文回复用户的问题'
+    # Unsalvageable truncated: unclosed key, close still leaves invalid JSON.
+    trunc = '{"content": "hello", "bad'
     sink = EventSink()
     with capture_logs() as logs:
         messages, terminal, attempts = await execute_tools(
@@ -504,7 +505,7 @@ async def test_default_parse_failure_truncated_forbids_full_replay():
     reg = ToolRegistry()
     reg.register(tracked)
 
-    trunc = '{"query":"半截搜索词'
+    trunc = '{"query": "hello", "bad'
     messages, _, attempts = await execute_tools(
         [_call("c1", "ok_a", trunc)],
         reg,
@@ -618,6 +619,27 @@ def test_unwrap_nested_delegate_arguments_success_and_no_false_positive():
         )
         is None
     )
+
+
+async def test_execute_tools_keeps_truncated_args_on_the_honest_failure_path():
+    """截断参数不许闭合后执行：工具一次都不能碰，走 args_parse_failed 那张脸。"""
+    tracked = _CapturingArgsTool("ok_a")
+    reg = ToolRegistry()
+    reg.register(tracked)
+    raw = '{"query":"半截搜索词'
+    sink = EventSink()
+    _messages, terminal, attempts = await execute_tools(
+        [_call("c1", "ok_a", raw)],
+        reg,
+        _ctx(),
+        sink,
+        approval_gate=None,
+        run_id="r1",
+    )
+    assert terminal is None
+    assert attempts[0].success is False
+    assert attempts[0].parse_failure is True
+    assert tracked.seen_args is None
 
 
 async def test_execute_tools_salvages_handoff_bare_next_steps():

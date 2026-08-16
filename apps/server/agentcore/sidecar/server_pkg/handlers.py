@@ -881,7 +881,10 @@ class HandlerMixin:
         assert self._paused_store is not None
         from agentcore.runtime.events import resume_deferred
         from agentcore.sidecar.server_pkg.core import SidecarResumeDeferredWaiter
-        from agentcore.sidecar.server_pkg.turns import apply_rpc_folder_binding_to_suspension
+        from agentcore.sidecar.server_pkg.turns import (
+            apply_rpc_folder_binding_to_suspension,
+            resolve_resume_user_message_id,
+        )
 
         existing = self._resume_deferred.get(conversation_id)
         if existing is not None and existing.message_id == message_id:
@@ -955,10 +958,9 @@ class HandlerMixin:
             )
             return
 
-        umid = (
-            user_message_id
-            or str(getattr(peeked, "user_message_id", None) or "").strip()
-            or f"resume-{message_id}"
+        umid = resolve_resume_user_message_id(
+            user_message_id,
+            getattr(peeked, "user_message_id", None),
         )
         decision_value = decision.value if hasattr(decision, "value") else str(decision)
         outbox = self._outbox_store

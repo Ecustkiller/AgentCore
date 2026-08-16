@@ -485,8 +485,33 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='conversation_stream.signal_backlog_drop'),
     EventSpec(name='conversation_stream.signal_publish_failed'),
     EventSpec(name='conversation_stream.signal_published'),
-    EventSpec(name='conversation_stream.unwatch'),
-    EventSpec(name='conversation_stream.watch'),
+    EventSpec(
+        name='conversation_stream.unwatch',
+        description='对话级 SSE 断开；duration_ms=连接总长，idle_ms=距上一帧/心跳（含 : ping）',
+        fields={
+            'conversation_id': FieldType('str'),
+            'duration_ms': FieldType('int'),
+            'http_req_id': FieldType('str'),
+            'idle_ms': FieldType('int'),
+            'mode': FieldType('str'),
+            'started_at': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='conversation_stream.watch',
+        description=(
+            '仅 follow 模式（GET /stream?follow=true）开始跟播；attach 不走这条，看 event_sink.atta'
+            'ch'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'http_req_id': FieldType('str'),
+            'message_id': FieldType('str'),
+            'mode': FieldType('str'),
+            'started_at': FieldType('str'),
+            'watchers': FieldType('int'),
+        },
+    ),
     EventSpec(name='coordination.all_completed'),
     EventSpec(name='coordination.all_completed_backfill'),
     EventSpec(name='coordination.append_overlap_rejected'),
@@ -502,9 +527,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.exec_env_dead_user_notice'),
     EventSpec(name='coordination.exec_env_dead_user_notice_failed'),
     EventSpec(name='coordination.execution_adopted'),
-    EventSpec(name='coordination.execution_reopened_for_harvest'),
     EventSpec(name='coordination.execution_completed_emitted'),
     EventSpec(name='coordination.execution_detached_emitted'),
+    EventSpec(name='coordination.execution_reopened_for_harvest'),
     EventSpec(name='coordination.file_ownership_snapshot_failed'),
     EventSpec(name='coordination.harvest_armed_while_attached'),
     EventSpec(name='coordination.harvest_attach_cleared'),
@@ -523,7 +548,6 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.harvest_missing_conversation'),
     EventSpec(name='coordination.harvest_no_session'),
     EventSpec(name='coordination.harvest_not_ready'),
-    EventSpec(name='coordination.harvest_sidecar_not_ready'),
     EventSpec(name='coordination.harvest_skipped_reattached'),
     EventSpec(name='coordination.harvest_stale_attach_forcing'),
     EventSpec(name='coordination.harvest_user_missing'),
@@ -1100,6 +1124,42 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='evals.documents_purge_skipped'),
     EventSpec(name='evals.run_case_failed'),
     EventSpec(
+        name='event_loop.lag',
+        description='事件环 sleep 超限（默认 ≥250ms）；lag_ms 即卡住多久',
+        fields={
+            'interval_s': FieldType('float'),
+            'lag_ms': FieldType('int'),
+            'suppressed': FieldType('int'),
+            'threshold_ms': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='event_loop.lag_summary',
+        description='事件环 60s 摘要（max_lag_ms / over_threshold；沉默≠没探针）',
+        fields={
+            'max_lag_ms': FieldType('int'),
+            'over_threshold': FieldType('int'),
+            'samples': FieldType('int'),
+            'threshold_ms': FieldType('int'),
+            'window_s': FieldType('float'),
+        },
+    ),
+    EventSpec(
+        name='event_sink.attach',
+        description=(
+            'SSE 消费者 subscribe（连上）；mode=attach|follow|turn，与同 conversation_id+message_id'
+            ' 的 event_sink.detach 对表'
+        ),
+        fields={
+            'conversation_id': FieldType('str'),
+            'http_req_id': FieldType('str'),
+            'label': FieldType('str'),
+            'message_id': FieldType('str'),
+            'mode': FieldType('str'),
+            'started_at': FieldType('str'),
+        },
+    ),
+    EventSpec(
         name='event_sink.backpressure_drop',
         description='SSE 慢消费者弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数',
         fields={
@@ -1124,13 +1184,21 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='event_sink.detach',
         description=(
-            'SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach'
+            'SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach；durati'
+            'on_ms=订阅后第几毫秒断开，idle_ms=距上一帧/心跳空闲（看门狗看空闲不是总长）；mode/http'
+            '_req_id 与后续 attach 配对'
         ),
         fields={
             'already_detached': FieldType('bool'),
             'conversation_id': FieldType('str'),
+            'duration_ms': FieldType('int'),
+            'http_req_id': FieldType('str'),
+            'idle_ms': FieldType('int'),
+            'label': FieldType('str'),
             'message_id': FieldType('str'),
+            'mode': FieldType('str'),
             'reason': FieldType('str'),
+            'started_at': FieldType('str'),
         },
     ),
     EventSpec(name='event_sink.seq_backfill_failed'),
@@ -1280,6 +1348,30 @@ EVENTS: list[EventSpec] = [
             'error': FieldType('str'),
             'method': FieldType('str'),
             'path': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='http.readyz',
+        description='/readyz 首次就绪或从失败恢复（状态翻转才记，避免探针刷屏）',
+        fields={
+            'database': FieldType('bool'),
+            'ok': FieldType('bool'),
+            'probe_ms': FieldType('int'),
+            'redis': FieldType('bool'),
+            'status': FieldType('str'),
+            'unlogged_failures': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='http.readyz_failed',
+        description='/readyz 失败（每次 not_ready；database 硬依赖决定 503）',
+        fields={
+            'database': FieldType('bool'),
+            'fail_count': FieldType('int'),
+            'ok': FieldType('bool'),
+            'probe_ms': FieldType('int'),
+            'redis': FieldType('bool'),
+            'status': FieldType('str'),
         },
     ),
     EventSpec(
@@ -1959,10 +2051,13 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='suspension.saver_failed'),
     EventSpec(name='suspension.turn_paused_capture_failed'),
     EventSpec(name='team_preview.finalized'),
+    EventSpec(name='team_preview.list_pending_failed'),
+    EventSpec(name='team_preview.orphaned'),
     EventSpec(name='team_preview.persist_failed'),
     EventSpec(name='team_preview.persist_unavailable'),
     EventSpec(name='team_preview.research_first_rejected'),
     EventSpec(name='team_preview.resolved'),
+    EventSpec(name='team_preview.supersede_prior_failed'),
     EventSpec(name='test_run.verify_shared'),
     EventSpec(name='title.empty_retry'),
     EventSpec(name='title.timeout'),

@@ -1,6 +1,6 @@
 {
   "name": "resume_ask_user_absorb",
-  "description": "挂起恢复：ask_user 吸收后气泡空基底、卡片承载问句",
+  "description": "挂起恢复：ask_user 吸收（content_reset）后气泡空基底、卡片承载问句",
   "events": [
     {
       "type": "message_start",
@@ -18,6 +18,13 @@
       "timestamp": "2026-01-01T00:00:00.002Z"
     },
     {
+      "type": "content_reset",
+      "payload": {
+        "reason": "ask_user"
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
       "type": "checkpoint_required",
       "payload": {
         "checkpoint_id": "cp_absorb",
@@ -28,7 +35,7 @@
         "questions": [],
         "intent": "kickoff"
       },
-      "timestamp": "2026-01-01T00:00:00.003Z"
+      "timestamp": "2026-01-01T00:00:00.004Z"
     },
     {
       "type": "checkpoint_resolved",
@@ -38,14 +45,14 @@
         "note": "继续",
         "selected": []
       },
-      "timestamp": "2026-01-01T00:00:00.004Z"
+      "timestamp": "2026-01-01T00:00:00.005Z"
     },
     {
       "type": "content_delta",
       "payload": {
         "delta": "收到，继续推进交付。"
       },
-      "timestamp": "2026-01-01T00:00:00.005Z"
+      "timestamp": "2026-01-01T00:00:00.006Z"
     },
     {
       "type": "message_end",
@@ -68,7 +75,7 @@
         },
         "rounds": 0
       },
-      "timestamp": "2026-01-01T00:00:00.006Z"
+      "timestamp": "2026-01-01T00:00:00.007Z"
     }
   ],
   "projected": {

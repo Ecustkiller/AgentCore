@@ -653,6 +653,7 @@ class OutboxStore:
         origin: str | None = None,
         execution_id: str | None = None,
         harvest_kind: str | None = None,
+        interrupt_reason: str | None = None,
     ) -> None:
         """Seal an open umid-keyed record as cancelled+ready (stop / crash).
 
@@ -711,7 +712,16 @@ class OutboxStore:
             record["user_message_id"] = user_message_id
             if bound_user_message:
                 record["user_message"] = bound_user_message
-            record["content"] = pick_monotonic_content(record.get("content"), content)
+            from agentcore.runtime.turn.interrupt import (
+                compose_interrupt_body,
+                normalize_interrupt_reason,
+            )
+
+            merged = pick_monotonic_content(record.get("content"), content)
+            record["content"] = compose_interrupt_body(
+                merged or "",
+                reason=normalize_interrupt_reason(interrupt_reason or ""),
+            )
             journal_map = record.setdefault("journal", {})
             for i, entry in enumerate(journal or []):
                 # Salvage journal may lack seq — use enumerate offset past existing keys.

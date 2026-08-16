@@ -12,7 +12,8 @@ import {
  * 「在哪工作」说明弹窗——只回答用户的三个问题：文件放在哪、改的是哪一份、怎么拿回自己电脑。
  *
  * 文案面向普通用户：入口名与「在哪工作」菜单逐字一致，内部实现词与设计文档术语一律不出现
- * （同名测试守着，防抄设计文档回潮）。云是推荐默认，本机只作并列说明、不给推荐标。
+ * （同名测试守着，防抄设计文档回潮）。菜单没有「我的文件」这一项，弹窗也不把它当入口。
+ * 云是推荐默认，本机只作并列说明、不给推荐标。
  */
 export function WorkspaceChannelGuideDialog({
   open,
@@ -30,18 +31,20 @@ export function WorkspaceChannelGuideDialog({
         <DialogHeader>
           <DialogTitle>在哪工作：怎么选</DialogTitle>
           <DialogDescription>
-            默认把文件放在云上的「我的文件」；也可以直接改你电脑上的文件夹。
+            默认把文件放在云上；也可以直接改你电脑上的文件夹。
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 px-5 pb-2 text-sm text-foreground">
           <section className="space-y-2 rounded-lg border border-border bg-muted/20 p-3">
             <div className="flex items-center gap-1.5">
-              <h3 className="text-sm font-medium text-foreground">我的文件</h3>
+              <h3 className="text-sm font-medium text-foreground">
+                文件放在云上
+              </h3>
               <Badge tone="primary">推荐</Badge>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              文件存在云上，你在电脑、手机、网页看到的是同一份。它不会自动同步到你电脑：想在自己电脑上拿到，手动导出到某个文件夹，或者导出
+              你在电脑、手机、网页看到的是同一份。它不会自动同步到你电脑：想在自己电脑上拿到，手动导出到某个文件夹，或者导出
               ZIP。
             </p>
             <dl className="space-y-2">
@@ -94,7 +97,7 @@ export function WorkspaceChannelGuideDialog({
           <section className="space-y-1.5 px-0.5">
             <h3 className="text-sm font-medium text-foreground">怎么选</h3>
             <ul className="space-y-1 text-xs leading-relaxed text-muted-foreground">
-              <li>日常用、想在手机和网页接着看 → 「我的文件」里的任一个</li>
+              <li>日常用、想在手机和网页接着看 → 上面四个</li>
               {showLocalTraditional ? (
                 <li>
                   东西已经在你电脑上、又要用你电脑上的环境 → 打开本机文件夹

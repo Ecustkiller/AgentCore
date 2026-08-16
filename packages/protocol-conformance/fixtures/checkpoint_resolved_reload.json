@@ -75,10 +75,14 @@
     "status": "completed",
     "finishReason": "end_turn",
     "error": null,
-    "content": "好，按 A 推进。",
+    "content": "开始前我确认一下方向：好，按 A 推进。",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "开始前我确认一下方向："
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp1"

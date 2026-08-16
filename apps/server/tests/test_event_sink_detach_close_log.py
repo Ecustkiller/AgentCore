@@ -9,6 +9,53 @@ from agentcore.runtime.events.sink import _SUBSCRIBER_QUEUE_MAXSIZE, EventSink
 from tests.conftest import LogSpy
 
 
+def test_subscribe_logs_attach_with_mode_and_ids(monkeypatch):
+    """Connect must be visible: attach vs follow, pairable with sse_disconnect."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+    monkeypatch.setattr(sink_mod, "current_http_req_id", lambda: "req-attach")
+
+    sink = EventSink(conversation_id="c1", message_id="m1")
+    sink.subscribe(label="attach")
+    attached = spy.get("event_sink.attach")
+    assert attached["mode"] == "attach"
+    assert attached["label"] == "attach"
+    assert attached["conversation_id"] == "c1"
+    assert attached["message_id"] == "m1"
+    assert attached["http_req_id"] == "req-attach"
+    assert isinstance(attached["started_at"], str)
+
+    spy.events.clear()
+    monkeypatch.setattr(sink_mod, "current_http_req_id", lambda: "req-follow")
+    sink.subscribe(label="conversation_stream")
+    followed = spy.get("event_sink.attach")
+    assert followed["mode"] == "follow"
+    assert followed["http_req_id"] == "req-follow"
+    assert followed["message_id"] == "m1"
+
+
+def test_unsubscribe_logs_duration_and_idle_since_last_byte(monkeypatch):
+    """Detach must answer age-since-subscribe AND idle-since-last-byte (watchdog)."""
+    spy = LogSpy()
+    monkeypatch.setattr(sink_mod, "logger", spy)
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(sink_mod, "mono_now", lambda: clock["t"])
+
+    sink = EventSink(conversation_id="c1", message_id="m1")
+    sub = sink.subscribe()
+    clock["t"] = 1010.0
+    sub.note_byte()
+    clock["t"] = 1070.0
+    sink.unsubscribe(sub, reason="sse_disconnect")
+
+    logged = spy.get("event_sink.detach")
+    assert logged["reason"] == "sse_disconnect"
+    assert logged["duration_ms"] == 70_000
+    assert logged["idle_ms"] == 60_000
+    assert logged["mode"] == "other"
+    assert isinstance(logged["started_at"], str) and logged["started_at"].endswith("Z")
+
+
 def test_unsubscribe_logs_reason_and_already_detached(monkeypatch):
     spy = LogSpy()
     monkeypatch.setattr(sink_mod, "logger", spy)

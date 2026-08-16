@@ -116,40 +116,17 @@ async def _round_trip(coro, registry: InteractionRegistry, response: dict):
     return await task, event
 
 
-# LocalWorkspace.execute always probes once with print('ok') before the real run.
-_PROBE_OK_RESPONSE = {
-    "ok": True,
-    "value": {
-        "success": True,
-        "stdout": "ok\n",
-        "stderr": "",
-        "exit_code": 0,
-        "duration_ms": 1,
-    },
-}
-
-
 async def _round_trip_execute(
     coro,
     registry: InteractionRegistry,
     response: dict,
-    *,
-    probe_response: dict | None = None,
 ):
-    """Drive execute: answer once-per-backend probe, then the real EXECUTE."""
+    """Drive execute: one desktop EXECUTE (no shortest-program preflight)."""
     task = asyncio.create_task(coro)
-    probe_event = await _await_request()
-    assert probe_event.payload["op"] == WorkspaceOp.EXECUTE
-    assert probe_event.payload["args"]["code"] == "print('ok')"
-    assert registry.resolve(
-        probe_event.payload["request_id"],
-        probe_response if probe_response is not None else _PROBE_OK_RESPONSE,
-        conversation_id=CONV,
-    )
     event = await _await_request()
     assert event.payload["op"] == WorkspaceOp.EXECUTE
     assert registry.resolve(event.payload["request_id"], response, conversation_id=CONV)
-    return await task, event, probe_event
+    return await task, event
 
 
 # --- LocalWorkspace read-only ops (the P2a "打通") --------------------------
@@ -303,7 +280,7 @@ async def test_execute_parses_result_and_marks_dirty():
         },
     }
     req = ExecutionRequest(code="print('hi')", language="python")
-    result, event, _probe = await _round_trip_execute(
+    result, event = await _round_trip_execute(
         local.execute(req), registry, response
     )
     assert event.payload["op"] == WorkspaceOp.EXECUTE
@@ -329,11 +306,9 @@ async def test_execute_forwards_registry_env():
         language="python",
         env={"NPM_CONFIG_REGISTRY": "https://registry.npmjs.org/", "SECRET": "no"},
     )
-    _result, event, probe_event = await _round_trip_execute(
+    _result, event = await _round_trip_execute(
         local.execute(req), registry, response
     )
-    # Probe has no env; real execute forwards the registry pin.
-    assert "env" not in probe_event.payload["args"]
     assert event.payload["args"]["env"]["NPM_CONFIG_REGISTRY"].startswith("https://")
     assert event.payload["args"]["env"]["SECRET"] == "no"
 
@@ -1154,8 +1129,7 @@ async def test_execute_extends_transport_deadline_past_code_timeout(monkeypatch)
         },
     }
     await _round_trip_execute(local.execute(req), registry, response)
-    # Probe uses timeout_seconds=5 → 5+15=20; real run 10+15=25 (not flat 30s).
-    assert captured[-2] == 20.0
+    # Real run 10+15=25 (not flat 30s). No 5s preflight.
     assert captured[-1] == 25.0
 
 

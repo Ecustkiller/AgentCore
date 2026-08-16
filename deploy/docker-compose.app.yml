@@ -37,6 +37,10 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
         BUILT_AT: ${BUILT_AT:-unknown}
     restart: unless-stopped
+    # lifespan 抢救窗口 20s（turn_shutdown_grace_seconds），之后还要收 ledger /
+    # browser / compaction。Docker 默认 10s 会中途 SIGKILL、制造孤儿 lease。
+    # 40s = 20s 抢救 + 收尾 + 余量。
+    stop_grace_period: 40s
     # 与 Dockerfile CMD 对齐。sandbox overlay 会换 entrypoint；Compose 此时若
     # 未显式 command，会把镜像 CMD 清成 null，api 空跑秒退。
     command: ["python", "-m", "agentcore"]

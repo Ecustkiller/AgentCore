@@ -74,10 +74,13 @@ async def handle_tool_calls_round(
     round_idx: int,
 ) -> ToolRoundResult:
     """Execute tools for a round that produced tool calls; return next directive."""
-    tool_calls = prepare_blocking_ask_user_tool_calls(
+    tool_calls, content_folded = prepare_blocking_ask_user_tool_calls(
         outcome.tool_calls,
         outcome.content or "",
     )
+    from agentcore.runtime.engine.loop import sync_captain_loop_mirror
+
+    sync_captain_loop_mirror(ask_user_content_folded=content_folded)
     messages.append(
         LLMMessage(
             role="assistant",
@@ -144,6 +147,7 @@ async def handle_tool_calls_round(
             attempts=attempts,
             terminal_effect=terminal.effect,
             emit_reset=emit_reset,
+            content_folded=content_folded,
         ):
             # Prose folded into the ask_user card; roll bubble back (may be empty).
             # Do not engine-inject wait-confirm copy — the card is the pause face.

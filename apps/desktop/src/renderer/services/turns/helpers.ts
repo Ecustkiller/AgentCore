@@ -94,18 +94,65 @@ export function isTransportDrop(err: unknown): boolean {
   return err instanceof StreamError && err.kind === "network";
 }
 
-/** zh banner for a reconnect that could not be held — the run is still alive in
- * the background (auto rejoin / reopen may pick it up; no one-click banner action). */
-export const RECONNECT_BANNER =
-  "连接中断，回合仍在后台继续。稍后查看或重新打开对话即可接上。";
+/** Quiet — backoff attach is still running; no recovery verdict yet. */
+export const RECONNECTING_BANNER = "连接中断，正在重连…";
+
+/**
+ * Confirmed live via ``loadRecovery`` (``live_running`` / sidecar live).
+ * Quiet reconnect, not the old false-promise「稍后查看即可接上」.
+ */
+export const RECONNECT_LIVE_BANNER = "连接中断，回合仍在继续，正在重连…";
+
+/** Confirmed settled: persisted assistant is complete. */
+export const RECONNECT_FINISHED_BANNER =
+  "连接曾中断，回合已完成。可直接查看结果。";
+
+/** Confirmed settled: no complete reply (dead lease / empty / interrupted). */
+export const RECONNECT_INTERRUPTED_BANNER =
+  "连接中断，本回合未能完成。可重新发送继续。";
+
+/**
+ * @deprecated Prefer {@link RECONNECT_LIVE_BANNER}. Kept as the same string so
+ * existing equality checks / reopen settle stay aligned.
+ */
+export const RECONNECT_BANNER = RECONNECT_LIVE_BANNER;
 
 /**
  * zh banner when recovery could not confirm cloud live/idle (``!cloudKnown``).
- * Not a transport drop — do not reuse {@link RECONNECT_BANNER}. Never ghost,
+ * Not a transport drop — do not reuse live/finished/interrupted copy. Never ghost,
  * never resend; reopen / later settle may refresh facts (no one-click banner action).
  */
 export const UNKNOWN_CLOUD_BANNER =
   "暂时无法确认回合状态。请稍后再试或重新打开对话。";
+
+const RECONNECT_RETRY_BANNERS = new Set<string>([
+  RECONNECTING_BANNER,
+  RECONNECT_LIVE_BANNER,
+  UNKNOWN_CLOUD_BANNER,
+]);
+
+/** Banners that mean "still trying to rejoin" — markOnline / reopen may wake. */
+export function isReconnectRetryBanner(
+  message: string | null | undefined,
+): boolean {
+  return Boolean(message && RECONNECT_RETRY_BANNERS.has(message));
+}
+
+const RECONNECT_QUIET_BANNERS = new Set<string>([
+  RECONNECTING_BANNER,
+  RECONNECT_LIVE_BANNER,
+  RECONNECT_FINISHED_BANNER,
+]);
+
+/**
+ * Reconnect copy that is not a confirmed-bad outcome — RetryBanner uses the
+ * existing Info + {@link noticeChipNeutral} notice chrome (not the triangle).
+ */
+export function isReconnectQuietBanner(
+  message: string | null | undefined,
+): boolean {
+  return Boolean(message && RECONNECT_QUIET_BANNERS.has(message));
+}
 
 /** The latest user message of a conversation's slice, or null. */
 export function lastUserMessageOf(conversationId: string): Message | null {

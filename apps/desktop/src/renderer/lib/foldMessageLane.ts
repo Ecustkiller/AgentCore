@@ -214,18 +214,6 @@ export function foldInteractionTimelineMarker(
   marker: TimelineMarkerDef,
   id: string,
 ): MessageLaneState {
-  if (marker.absorbTrailingContent) {
-    const clearedProcess = dropTrailingContentSteps(state.process);
-    const process = appendMarkerStep(clearedProcess, marker, id);
-    if (
-      process === state.process &&
-      clearedProcess === state.process &&
-      !state.content
-    ) {
-      return state;
-    }
-    return { ...state, content: "", process };
-  }
   const process = appendMarkerStep(state.process, marker, id);
   return process === state.process ? state : { ...state, process };
 }
@@ -266,8 +254,8 @@ function requiredTimeline(kind: InteractionKind): TimelineMarkerDef {
 }
 
 /** Fold a `checkpoint_required` into the timeline as a positional `checkpoint` marker.
- * Also absorbs same-round CEO prose into the card (mirrors backend ``content_reset`` on
- * a successful blocking ``ask_user``) so streamed text never duplicates the card. */
+ * Does not drop bubble text — absorb is ``content_reset(reason=ask_user)`` only when
+ * the engine folded this round's prose into the card. */
 export function foldCheckpointMarker(
   state: MessageLaneState,
   checkpointId: string,
@@ -457,9 +445,9 @@ function journalMarkerInsertIndex(
  * (insertBeforeTeam 语义由 appendTeamPreviewStep 内建)。保证不变量「有交互卡必有时间线
  * 标记」在重载后成立（底部堆叠回退已废除，缺标记的卡会整段消失）。
  *
- * 纯补标记：绝不吞正文 —— absorbTrailingContent 只属于 live 时刻（事件到来时尾部
- * content 是同回合被吞的草稿）；重载的 process 是终态，resolved 后 CEO 的收尾正文
- * 必须保留。全部 append* 自带 dedup no-op，后端已写标记时原样返回。
+ * 纯补标记：绝不吞正文。absorb 只走 ``content_reset``；重载的 process 是终态，
+ * resolved 后 CEO 的收尾正文必须保留。全部 append* 自带 dedup no-op，后端已写
+ * 标记时原样返回。
  *
  * `team` / `graph_append` / `user_interjection` 按 journal 相对时序插入（禁止一律
  * 尾部 append），避免队后进展/终稿 content 被挤到图/插话上方。 */

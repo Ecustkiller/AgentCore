@@ -41,6 +41,7 @@ class MdToDocxTool:
         audience=AUDIENCE_WORKER_ONLY,
         # 漏账事故的原点：它从注册那天起就没进过任何一份工具名白名单。
         file_products=FileProductsContract.SELF_REPORT,
+        produces_formats=(".docx",),
     )
 
     @property

@@ -361,6 +361,78 @@ describe("coldResume · live Interaction authority", () => {
     });
     expect(visible).toEqual([]);
   });
+
+  it("two pending team_preview cards paint only the latest (IX + paused shell)", () => {
+    upsertColdRequired({
+      kind: "ask_user",
+      conversationId: "conv-live",
+      messageId: "m-server-tp",
+      payload: { checkpoint_id: "cp-ask-keep", question: "这次讨论怎么推进？" },
+    });
+    upsertColdRequired({
+      kind: "plan_review",
+      conversationId: "conv-live",
+      messageId: "m-server-tp",
+      payload: {
+        checkpoint_id: "pr-keep",
+        steps: [{ run_id: "r1", role: "研" }],
+        pending: [],
+      },
+    });
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-server-tp",
+      payload: { ...tpPayload("tp-old-ix"), headline: "旧 IX 开工卡" },
+    });
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-server-tp",
+      payload: { ...tpPayload("tp-latest"), headline: "最新开工卡" },
+    });
+
+    const oldShell: PausedTurnSummary = {
+      message_id: "m-server-tp",
+      checkpoint_id: "tp-paused-old",
+      kind: "team_preview",
+      user_message: "",
+      user_message_id: "",
+      question: "",
+      context: "",
+      form: "",
+      headline: "旧开工卡 · 预计 1 人",
+      motion: "",
+      primitive: "delegate",
+      max_rounds: 0,
+      thorough: true,
+      browser_login: false,
+      steps: [],
+      pending: [],
+    };
+
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [oldShell],
+      hosts: [
+        {
+          role: "assistant",
+          id: "client-uuid",
+          serverMessageId: "m-server-tp",
+        },
+      ],
+    });
+    expect(visible.map((v) => v.kind).sort()).toEqual([
+      "ask_user",
+      "plan_review",
+      "team_preview",
+    ]);
+    const kickoffs = visible.filter((v) => v.kind === "team_preview");
+    expect(kickoffs).toHaveLength(1);
+    expect(kickoffs[0]?.checkpoint_id).toBe("tp-latest");
+    expect(kickoffs[0]?.headline).toBe("最新开工卡");
+  });
 });
 
 describe("coldResume · resolveColdBindHostId (投影键不断档)", () => {

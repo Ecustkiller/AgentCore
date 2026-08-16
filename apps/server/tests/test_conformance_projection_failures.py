@@ -255,8 +255,8 @@ def test_checkpoint_resolved_reload_has_no_fake_pending(projected):
     must fold the answered shape. The single-slot era regressed to a fake pending card
     whenever the resolved write lost the race — pinned here as a ratchet.
 
-    Also pins ask 吸收: the pre-question narration ("开始前我确认一下方向：") belongs to
-    the card, not the bubble, so `content` is only the post-answer text.
+    Also pins: the pre-question narration ("开始前我确认一下方向：") stays in the
+    bubble when the card question is a different, model-owned ``message``.
     """
     p = projected["checkpoint_resolved_reload"]
     assert p["status"] == "completed"
@@ -271,8 +271,9 @@ def test_checkpoint_resolved_reload_has_no_fake_pending(projected):
             "context": "两条路线各有取舍。",
         }
     ]
-    assert [s["kind"] for s in p["process"]] == ["checkpoint", "content"]
-    assert p["content"] == "好，按 A 推进。"
+    assert [s["kind"] for s in p["process"]] == ["content", "checkpoint", "content"]
+    assert p["process"][0]["text"] == "开始前我确认一下方向："
+    assert p["content"] == "开始前我确认一下方向：好，按 A 推进。"
 
 
 # ── 中止族：整轮 stop / 单点 stop / 级联跳过 / 改方向接手 ──────────────────────

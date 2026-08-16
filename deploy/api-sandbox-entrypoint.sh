@@ -22,8 +22,23 @@ if [ "$(id -u)" = "0" ]; then
   fi
   chown app:app /run/netns
   chmod 0755 /run/netns
-  # setpriv 不改环境：不重置 HOME 的话仍是 /root，asyncpg/libpq 会去读
-  # /root/.postgresql/postgresql.key → uid app 得到 PermissionError，/readyz 判库挂。
+  # setpriv 不改环境：compose user 0:0 会把 HOME 设成 /root。asyncpg 默认
+  # ssl=prefer，按 Path.home() 读 ~/.postgresql/postgresql.key；uid app 读
+  # 0600 root 私钥 → PermissionError → /readyz 误判库挂。
+  # 私钥必须 app 可读且不过宽（0600；0644 会被 OpenSSL/libpq 拒绝）。
+  mkdir -p /home/app
+  if [ -d /root/.postgresql ]; then
+    mkdir -p /home/app/.postgresql
+    cp -a /root/.postgresql/. /home/app/.postgresql/
+    chown -R app:app /home/app/.postgresql
+    chmod 0700 /home/app/.postgresql
+    find /home/app/.postgresql -type f -name '*.key' -exec chmod 0600 {} +
+    find /home/app/.postgresql -type f ! -name '*.key' -exec chmod 0644 {} +
+  fi
+  chown app:app /home/app
+  chmod 0700 /home/app
+  # 即使 HOME 仍漏成 /root，uid app 也进不去（官方镜像 /root 常是 0755）。
+  chmod 0700 /root 2>/dev/null || true
   export HOME=/home/app
   export USER=app
   export LOGNAME=app

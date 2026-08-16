@@ -24,9 +24,13 @@ from agentcore.conversation.store import (
 )
 from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
-from agentcore.runtime.events import EventSink, FinishReason, content_delta, message_end
+from agentcore.runtime.events import EventSink, content_delta, message_end
 from agentcore.runtime.facts import current_fact_log, pre_pause_from_journal
-from agentcore.runtime.turn.interrupt import TurnInterruptReason, close_turn_interrupted
+from agentcore.runtime.turn.interrupt import (
+    TurnInterruptReason,
+    close_turn_interrupted,
+    finish_reason_for,
+)
 from agentcore.workspace.protocol import WorkspaceBackend
 
 logger = get_logger(__name__)
@@ -156,7 +160,7 @@ async def close_user_stop_turn(
     Callers must only ``release_turn_lease`` when this returns ``True``; on
     ``False`` they must ``orphan_turn_lease`` so a RUNNING row never loses its lease.
 
-    Always emits live ``message_end(cancelled)`` first so an attached SSE client can
+    Always emits live ``message_end`` first so an attached SSE client can
     leave ``stopping``. Empty journal / empty captain body must still durable-close
     (tool-only / pre-stream cancel); open durable pause keeps the pause frame and
     returns ``True`` (safe to release — pause owns continuation).
@@ -164,9 +168,17 @@ async def close_user_stop_turn(
     After ``content_reset`` with no new delta, reinjects stashed prose via
     ``content_delta`` before ``message_end`` so the live bubble is not left empty.
     """
+    from agentcore.runtime.turn.runs import turn_runs
+
     journal = sink.execution_journal()
     salvage = sink.interrupt_salvage_content()
     content = compose_salvage_content(salvage, journal_entries)
+    reason = TurnInterruptReason.USER_STOP
+    if turn_runs.is_superseded(conversation_id) and not turn_runs.is_user_stop(
+        conversation_id
+    ):
+        reason = TurnInterruptReason.OVERLAP
+    finish = finish_reason_for(reason)
     # Live confirmation before durable close — FE confirms stop on this frame.
     # If finish_guard cleared the bubble and no rewrite started, push salvage
     # text so attached clients see what already streamed before cancelled.
@@ -176,7 +188,7 @@ async def close_user_stop_turn(
             with contextlib.suppress(Exception):
                 sink.emit(content_delta(salvage))
         with contextlib.suppress(Exception):
-            sink.emit(message_end(FinishReason.CANCELLED))
+            sink.emit(message_end(finish))
     if not settings.incomplete_turn_persist_enabled:
         return False
     if not message_id:
@@ -189,7 +201,7 @@ async def close_user_stop_turn(
         message_id=message_id,
         conversation_id=conversation_id,
         trace_id=trace_id,
-        reason=TurnInterruptReason.USER_STOP,
+        reason=reason,
         content=content,
         journal=list(journal) if journal else [],
         load_stream_state=True,

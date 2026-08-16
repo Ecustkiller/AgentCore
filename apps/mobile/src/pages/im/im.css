@@ -127,6 +127,7 @@
   display: flex;
   flex-direction: column;
   max-width: 92%;
+  min-width: 0;
 }
 
 .im-msg.mine {
@@ -143,6 +144,8 @@
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .im-msg.mine .im-msg-row {
@@ -160,6 +163,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  max-width: 100%;
 }
 
 .im-msg.mine .im-msg-body {
@@ -177,6 +181,9 @@
 }
 
 .im-bubble {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
   padding: 9px 13px;
   font-size: 15px;
   line-height: 1.45;
@@ -201,8 +208,15 @@
 }
 
 .im-reply-quote {
+  /* Isolate from .im-bubble pre-wrap/break-word so 1-line clamp can fire.
+     min-width:0 + overflow so the preview cannot inflate past the 92% bubble cap. */
   margin: 0 0 6px;
   padding: 4px 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: normal;
+  word-break: normal;
   border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
   border-radius: 6px;
   background: color-mix(in srgb, var(--border) 55%, transparent);
@@ -215,17 +229,19 @@
 
 .im-reply-quote-name,
 .im-reply-quote-body {
-  display: block;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   font-size: 12px;
   line-height: 1.35;
 }
 
 .im-reply-quote-name {
+  display: block;
   font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .im-msg.mine .im-reply-quote-name {
@@ -233,6 +249,11 @@
 }
 
 .im-reply-quote-body {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  white-space: normal;
+  word-break: break-word;
   opacity: 0.85;
   color: var(--muted);
 }

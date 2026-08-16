@@ -202,14 +202,6 @@ function pushGraphAppendMarker(
   });
 }
 
-/** Pop trailing `content` steps (交付前 blocking ask_user 吸收同轮 CEO 导语进卡，不重复进时间线).
- * Mirrors desktop `dropTrailingContentSteps` + backend `EventSink._accumulate_process`. */
-function dropTrailingContentSteps(process: ProcessStep[]): void {
-  while (process.length > 0 && process[process.length - 1].kind === "content") {
-    process.pop();
-  }
-}
-
 /** Drop a `checkpoint` marker (blocking ask_user) at its chronological slot. */
 function pushCheckpointMarker(process: ProcessStep[], id: string): void {
   if (!id) return;
@@ -1140,10 +1132,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         break;
       case "checkpoint_required": {
         const p = ev.payload as CheckpointRequiredPayload;
-        // Absorb same-round CEO prose into the checkpoint card (mirrors desktop
-        // foldCheckpointMarker): drop trailing content steps + clear content scalar.
-        dropTrailingContentSteps(process);
-        content = "";
+        // Positional marker only. Absorb is content_reset(reason=ask_user) when
+        // the engine folded this round's prose into the card — do not drop bubble text.
         pushCheckpointMarker(process, p.checkpoint_id);
         break;
       }

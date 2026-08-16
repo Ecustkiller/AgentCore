@@ -8,6 +8,10 @@ Failed assistant turns (empty content + failed status) are folded into a short
 system-framed note so the next turn can attribute prior failures correctly
 instead of inventing causes. Error prose stays in the note — never as ordinary
 assistant content back to the LLM.
+
+Empty user turns that carry attachment metadata become a short system note
+listing names / workspace paths, so later turns still see that files were sent.
+No fake user prose; empty user turns without attachments stay dropped.
 """
 
 from datetime import datetime
@@ -29,6 +33,9 @@ _is_failed_empty_assistant = is_failed_empty_assistant
 _failure_category_label = failure_category_label
 
 _DETAIL_CLIP = 120
+# Attachment-only user notes enter every later turn's window — keep them short.
+_ATTACHMENT_NOTE_MAX_ITEMS = 3
+_ATTACHMENT_NOTE_CLIP = 160
 
 # The whole context a chat gets when it has no rolling summary to lean on — the
 # safety cap in :func:`load_chat_context`, not a tuning knob. Named because it is
@@ -86,6 +93,48 @@ def _failure_note(categories: list[str], details: list[str] | None = None) -> di
     return {"role": "assistant", "content": body}
 
 
+def _attachments_of(msg: Any) -> list[Any]:
+    raw = getattr(msg, "attachments", None)
+    return raw if isinstance(raw, list) else []
+
+
+def _attachment_label(att: Any) -> str | None:
+    """``name → workspace_path`` (or whichever side is present)."""
+    if not isinstance(att, dict):
+        return None
+    name = att.get("name")
+    name = name.strip() if isinstance(name, str) else ""
+    path = att.get("workspace_path") or att.get("path")
+    path = path.strip() if isinstance(path, str) else ""
+    if name and path:
+        return f"{name} → {path}"
+    return name or path or None
+
+
+def _user_attachment_note(attachments: list[Any]) -> dict:
+    """Keep an empty user turn that carried files — system note, not fake prose.
+
+    User role so compaction's ``_from_first_user`` still sees a user-turn boundary.
+    """
+    labels: list[str] = []
+    for a in attachments:
+        label = _attachment_label(a)
+        if label:
+            labels.append(label)
+    shown = labels[:_ATTACHMENT_NOTE_MAX_ITEMS]
+    extra = len(labels) - len(shown)
+    if shown:
+        listed = "；".join(shown)
+        if extra > 0:
+            listed = f"{listed}；另有 {extra} 个"
+        body = f"（系统注记：用户未写文字，仅上传附件：{listed}。）"
+    else:
+        body = "（系统注记：用户未写文字，仅上传附件。）"
+    if len(body) > _ATTACHMENT_NOTE_CLIP:
+        body = body[: _ATTACHMENT_NOTE_CLIP - 1] + "…）"
+    return {"role": "user", "content": body}
+
+
 def _fold_history_messages(messages: list[Any]) -> list[dict]:
     """Fold ORM message rows into ``[{role, content}]``, merging consecutive failures."""
     history: list[dict] = []
@@ -101,9 +150,13 @@ def _fold_history_messages(messages: list[Any]) -> list[dict]:
     for msg in messages:
         role = getattr(msg, "role", None)
         content = getattr(msg, "content", None) or ""
+        atts = _attachments_of(msg) if role == "user" else []
         if role == "user" and content:
             flush_failures()
             history.append({"role": "user", "content": content})
+        elif role == "user" and atts:
+            flush_failures()
+            history.append(_user_attachment_note(atts))
         elif role == "assistant" and content:
             flush_failures()
             item: dict[str, Any] = {"role": "assistant", "content": content}

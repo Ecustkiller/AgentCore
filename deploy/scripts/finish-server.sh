@@ -176,7 +176,9 @@ else
 fi
 
 echo "== [6/13] 停 api（关闭旧代码 + 新 schema 窗口）=="
-"${COMPOSE[@]}" stop api 2>/dev/null || true
+# 须与 compose stop_grace_period=40s 对齐。裸 stop 默认 10s，会在抢救窗口
+# （turn_shutdown_grace_seconds=20）内 SIGKILL，制造孤儿 lease。
+"${COMPOSE[@]}" stop --timeout 40 api 2>/dev/null || true
 
 echo "== [7/13] alembic upgrade head =="
 "${COMPOSE_BASE[@]}" run --rm api alembic upgrade head

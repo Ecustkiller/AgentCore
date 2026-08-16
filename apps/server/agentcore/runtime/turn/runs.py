@@ -72,6 +72,9 @@ class TurnRun:
     # tell clean cancel (terminal + release) from true hard kill (orphan lease for
     # sweeper).
     user_stopped: bool = False
+    # Newer message took this conversation's slot. Clean-cancel (release lease)
+    # but not a user Stop — the interrupt body must not inherit USER_STOP silence.
+    superseded: bool = False
     # True once ``task.cancel()`` has been delivered for this run, so a repeat Stop
     # (or an overlap supersede landing on an already-unwinding run) does not deliver
     # a second CancelledError into the turn's teardown ``finally``.
@@ -138,10 +141,12 @@ class ResumeDeferredWaiter:
                 fut.cancel()
 
 
-# Set on an ``asyncio.Task`` when that specific run was cancelled by user stop /
-# overlap supersede — survives slot replacement so the old task's CancelledError
-# salvage still sees :meth:`is_user_stop` as True.
+# Set on an ``asyncio.Task`` when that specific run was cancelled by user stop —
+# survives slot replacement so the old task's CancelledError salvage still sees
+# :meth:`is_user_stop` as True.
 _TASK_USER_STOPPED = "_agentcore_user_stopped"
+# Same survival trick for overlap supersede (not a user Stop).
+_TASK_SUPERSEDED = "_agentcore_superseded"
 
 # Lifespan finally: graceful shutdown salvage (interrupt + release, never orphan).
 # True hard kill / crash without lifespan still orphans for the sweeper.
@@ -153,9 +158,10 @@ class TurnRunRegistry:
 
     Turns for one conversation are serialized client-side (and by per-mutation
     ``workspace_lock`` sinks), so one active run per ``conversation_id`` is the
-    model. A rare overlap (e.g. a regenerate fired before the prior run cleared)
-    cancels the older task (marked user-stopped) before the newer run takes the
-    slot — otherwise the orphaned task can no longer be addressed by :meth:`stop`.
+    model.     A rare overlap (e.g. a regenerate fired before the prior run cleared)
+    cancels the older task (marked superseded, not user-stopped) before the
+    newer run takes the slot — otherwise the orphaned task can no longer be
+    addressed by :meth:`stop`.
     """
 
     def __init__(self) -> None:
@@ -170,6 +176,11 @@ class TurnRunRegistry:
     def _mark_user_stopped(run: TurnRun) -> None:
         run.user_stopped = True
         setattr(run.task, _TASK_USER_STOPPED, True)
+
+    @staticmethod
+    def _mark_superseded(run: TurnRun) -> None:
+        run.superseded = True
+        setattr(run.task, _TASK_SUPERSEDED, True)
 
     @staticmethod
     def _cancel_once(run: TurnRun) -> bool:
@@ -216,7 +227,7 @@ class TurnRunRegistry:
 
         Installs a done-callback that drops the run from the registry when it ends —
         only if it is still the registered one, so a newer run is never evicted by an
-        older task finishing. An in-flight prior run is cancelled (user-stop salvage)
+        older task finishing. An in-flight prior run is cancelled (supersede salvage)
         so overlap cannot leave an unstoppable orphan.
         """
         run_id = new_id()
@@ -228,7 +239,7 @@ class TurnRunRegistry:
                 existing_run_id=existing.run_id,
                 new_run_id=run_id,
             )
-            self._mark_user_stopped(existing)
+            self._mark_superseded(existing)
             with contextlib.suppress(Exception):
                 from agentcore.runtime.coordination.session import (
                     cancel_coordination_on_user_stop,
@@ -538,10 +549,11 @@ class TurnRunRegistry:
         return True
 
     def is_user_stop(self, conversation_id: str) -> bool:
-        """True when the current (or still-unwinding superseded) run is a hard 停止.
+        """True when the current (or still-unwinding) run is a hard 停止.
 
-        Checks the calling task first so an overlap-cancelled older task still
-        salvages as user-stop after the newer run has taken the registry slot.
+        Checks the calling task first so a stop-cancelled task still salvages as
+        user-stop after a newer run has taken the registry slot. Overlap
+        supersede is :meth:`is_superseded`, not this flag.
         """
         task = asyncio.current_task()
         if task is not None and getattr(task, _TASK_USER_STOPPED, False):
@@ -549,13 +561,25 @@ class TurnRunRegistry:
         run = self._runs.get(conversation_id)
         return bool(run is not None and run.user_stopped)
 
+    def is_superseded(self, conversation_id: str) -> bool:
+        """True when this task was squeezed out by a newer message on the slot."""
+        task = asyncio.current_task()
+        if task is not None and getattr(task, _TASK_SUPERSEDED, False):
+            return True
+        run = self._runs.get(conversation_id)
+        return bool(run is not None and run.superseded)
+
     def is_clean_cancel(self, conversation_id: str) -> bool:
         """True when CancelledError should terminal-close + release (not orphan).
 
-        Covers explicit ``/stop`` (and overlap supersede) plus lifespan shutdown
+        Covers explicit ``/stop``, overlap supersede, and lifespan shutdown
         salvage. True hard kill without lifespan still orphans.
         """
-        return self.is_user_stop(conversation_id) or self.is_shutdown_salvage()
+        return (
+            self.is_user_stop(conversation_id)
+            or self.is_superseded(conversation_id)
+            or self.is_shutdown_salvage()
+        )
 
     def live_runs(self) -> list[TurnRun]:
         """Snapshot of runs whose tasks are still not done."""

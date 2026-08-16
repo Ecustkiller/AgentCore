@@ -40,7 +40,12 @@ from agentcore.observability.query.patrol import (
     scan_patrol,
     write_snapshot,
 )
-from agentcore.observability.query.stats import StatsQueryResult, compute_stats
+from agentcore.observability.query.stats import (
+    StatsQueryResult,
+    compute_stats,
+    fail_open_summary,
+    stream_health_summary,
+)
 from agentcore.observability.query.store import (
     ConversationStore,
     ExportConversationStore,
@@ -81,6 +86,7 @@ __all__ = [
     "compute_stats",
     "detect_traffic",
     "diff_snapshots",
+    "fail_open_summary",
     "discover_log_files",
     "family_digests",
     "format_decision_spine",
@@ -100,6 +106,7 @@ __all__ = [
     "resolve_database_url",
     "resolve_family_key",
     "scan_patrol",
+    "stream_health_summary",
     "write_investigation_pack",
     "write_snapshot",
 ]

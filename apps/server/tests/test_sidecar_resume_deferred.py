@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -390,3 +391,74 @@ def test_resume_deferred_different_id_still_supersedes(tmp_path, monkeypatch):
     assert "error" not in winner
     assert winner["result"]["content"] == f"winner-{second_id}"
     assert winner["result"]["messageId"] == second_id
+
+
+def test_resume_deferred_without_umid_mints_uuid_outbox_key(tmp_path, monkeypatch):
+    """Busy-path prewrite must not mint ``resume-{turn_id}`` as the outbox key."""
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        kwargs["sink"].close()
+        return {
+            "finish_reason": "end_turn",
+            "content": "deferred-uuid-ok",
+            "rounds": 1,
+            "message_id": kwargs["suspension"].message_id,
+        }
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    data = tmp_path / "data"
+    store = LocalPausedTurnStore(data / "paused")
+    message_id = "11111111-1111-4111-8111-111111111111"
+    conversation_id = "c-umid"
+
+    async def drive() -> None:
+        await _initialize(server, tmp_path, data_dir=str(data))
+        await store.save(_suspension(message_id, conversation_id))
+        host = asyncio.create_task(_never())
+        server._register_turn(message_id, host, conversation_id=conversation_id)
+
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "resume",
+                    "params": {
+                        "messageId": message_id,
+                        "conversationId": conversation_id,
+                        "decision": "continue",
+                        "traceId": "a" * 32,
+                    },
+                }
+            )
+        )
+        for _ in range(20):
+            if _resume_deferred_events(sent, message_id):
+                break
+            await asyncio.sleep(0.01)
+
+        from agentcore.conversation.store.outbox import list_outbox_records
+
+        records = list_outbox_records(data / "outbox")
+        assert records
+        umid = str(records[0]["user_message_id"])
+        UUID(umid)
+        assert not umid.startswith("resume-")
+        assert umid != f"resume-{message_id}"
+
+        host.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await host
+        server._unregister_turn(message_id)
+        for _ in range(80):
+            if any(m.get("id") == 7 for m in sent):
+                break
+            await asyncio.sleep(0.025)
+
+    asyncio.run(drive())
+    done = _response(sent, 7)
+    assert "error" not in done
+    assert done["result"]["content"] == "deferred-uuid-ok"

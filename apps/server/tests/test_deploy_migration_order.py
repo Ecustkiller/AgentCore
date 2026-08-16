@@ -72,10 +72,10 @@ def _first_exact(lines: list[str], text: str) -> int:
 _SCRIPTS = [
     (
         "finish-server.sh",
-        '"${COMPOSE[@]}" stop api 2>/dev/null || true',
+        '"${COMPOSE[@]}" stop --timeout 40 api 2>/dev/null || true',
         '"${COMPOSE[@]}" up -d',
     ),
-    ("deploy-server.sh", "dc stop api 2>/dev/null || true", "dc up -d"),
+    ("deploy-server.sh", "dc stop --timeout 40 api 2>/dev/null || true", "dc up -d"),
 ]
 
 
@@ -181,6 +181,19 @@ def test_deploy_scripts_use_unix_newlines(filename: str, stop_api: str, start_ap
     assert b"\r\n" not in raw
 
 
+def test_api_stop_grace_exceeds_salvage_window():
+    """Compose + both deploy stop paths must outlast lifespan salvage (20s) + slack.
+
+    Docker's default 10s SIGKILLs mid-salvage and orphans leases. 40s = 20s salvage
+    + leftover teardown (ledger / browsers / compaction) + margin.
+    """
+    app_yml = _DEPLOY_SCRIPTS.parent / "docker-compose.app.yml"
+    assert "stop_grace_period: 40s" in app_yml.read_text(encoding="utf-8")
+    for name in ("deploy-server.sh", "finish-server.sh", "restore.sh"):
+        text = (_DEPLOY_SCRIPTS / name).read_text(encoding="utf-8")
+        assert "stop --timeout 40 api" in text
+
+
 def test_rollback_does_not_repeat_the_workspace_backup():
     """回滚不跑正向盘上迁移，也就不该再备一份。finish-server.sh 没有回滚分支。"""
     lines = _command_lines(_DEPLOY_SCRIPTS / "deploy-server.sh")
@@ -188,6 +201,6 @@ def test_rollback_does_not_repeat_the_workspace_backup():
         lines, '$IS_ROLLBACK" -eq 0 && "${SKIP_WORKSPACE_SNAPSHOT:-0}" != "1"'
     )
     archived = _first_containing(lines, _WORKSPACE_ARCHIVE)
-    stopped = _first_exact(lines, "dc stop api 2>/dev/null || true")
+    stopped = _first_exact(lines, "dc stop --timeout 40 api 2>/dev/null || true")
     assert guard < archived < stopped
     assert "${SKIP_WORKSPACE_SNAPSHOT:-0}" in lines[guard]

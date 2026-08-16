@@ -33,7 +33,7 @@ import {
   isAbort,
   isTransportDrop,
 } from "./helpers";
-import { rejoinLiveTurn } from "./recovery";
+import { cancelRejoinLiveTurn, rejoinLiveTurn } from "./recovery";
 
 /** Durable resume routes to the local sidecar engine when the frame lives there. */
 function shouldResumeViaSidecar(origin: "sidecar" | "server"): boolean {
@@ -115,6 +115,7 @@ export async function runRegenerate(
   const conversationId = store.currentConversationId;
   if (!conversationId || getRuntime(conversationId).isGenerating) return;
 
+  cancelRejoinLiveTurn(conversationId);
   // Route every turn write to this conversation's slice by id, not the active
   // key — the user may switch away mid-stream and the turn keeps running in the
   // background (switchConversation no longer aborts it).
@@ -215,6 +216,7 @@ export async function runResume(
     throw new Error("resume blocked: turn is still generating");
   }
 
+  cancelRejoinLiveTurn(conversationId);
   store.clearError(conversationId);
   bumpConversationCache(conversationId);
 

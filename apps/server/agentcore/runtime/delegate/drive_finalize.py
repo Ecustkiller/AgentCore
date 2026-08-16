@@ -15,7 +15,10 @@ from agentcore.runtime.delegate.accumulate import (
 )
 from agentcore.runtime.delegate.ceo_format import format_for_ceo
 from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
-from agentcore.runtime.delegate.drive_terminal import post_session_all_completed
+from agentcore.runtime.delegate.drive_terminal import (
+    collect_harvest_user_facts,
+    post_session_all_completed,
+)
 from agentcore.runtime.delegate.nesting import absorb_children
 from agentcore.runtime.delegate.supervised import (
     SupervisedRun,
@@ -74,9 +77,7 @@ def emit_batch_metrics(
     # 深层诊断指标 (前端UX设计.md §十): surface the scheduler snapshot to the client so
     # 诊断模式 shows it in run detail (journaled → replays on reload). Whole-batch verbatim
     # — the host already logged it; this just also hands it to the UI fold.
-    tool._sink.emit(
-        batch_metrics_event(execution_id=execution_id, metrics=dataclasses.asdict(m))
-    )
+    tool._sink.emit(batch_metrics_event(execution_id=execution_id, metrics=dataclasses.asdict(m)))
 
 
 def handle_pending_pause(
@@ -229,7 +230,11 @@ def handle_partial_failure(
     # Coordination terminal: workers are all marked done; without ALL_COMPLETED the
     # CEO idle-waits the full coordination timeout (same class of bug as criteria gap).
     if session is not None:
-        post_session_all_completed(session, output=partial_output)
+        post_session_all_completed(
+            session,
+            output=partial_output,
+            user_facts=collect_harvest_user_facts(plan, results),
+        )
     from agentcore.runtime.delegate.delivery_status import build_delivery_status
 
     delivery_meta = build_delivery_status(
@@ -301,16 +306,10 @@ async def finalize_successful_drive(
         from agentcore.runtime.delegate.graph_integrity import load_source_file_map
         from agentcore.runtime.runs import RunPhase as _RunPhase
 
-        completed = [
-            s for s in results.values() if s.phase is _RunPhase.COMPLETED
-        ]
+        completed = [s for s in results.values() if s.phase is _RunPhase.COMPLETED]
         if _batch_landed_graph_sources(completed):
-            file_map = await load_source_file_map(
-                backend, _collect_graph_source_paths(completed)
-            )
-    soft_notes = collect_completion_soft_notes(
-        results, backend=backend, file_map=file_map or None
-    )
+            file_map = await load_source_file_map(backend, _collect_graph_source_paths(completed))
+    soft_notes = collect_completion_soft_notes(results, backend=backend, file_map=file_map or None)
 
     # 交付状态（诚实对账）：正常收尾——有落盘文件或缺口才发，
     # 纯 prose 成功批次保持无声。Soft overlay notes → state=notes（不 blocking）。
@@ -326,7 +325,11 @@ async def finalize_successful_drive(
 
     output = format_for_ceo(tool, plan, results, call_idx=call_idx)
     if session is not None:
-        post_session_all_completed(session, output=output)
+        post_session_all_completed(
+            session,
+            output=output,
+            user_facts=collect_harvest_user_facts(plan, results),
+        )
     return ToolResult(
         tool_call_id="",
         success=True,
@@ -370,9 +373,7 @@ async def finalize_drive(
         call_idx=call_idx,
         complexity_hint=complexity_hint,
     )
-    paused = handle_pending_pause(
-        tool, session=session, call_idx=call_idx, results=results
-    )
+    paused = handle_pending_pause(tool, session=session, call_idx=call_idx, results=results)
     if paused is not None:
         return paused
     boundary = handle_pending_boundary(

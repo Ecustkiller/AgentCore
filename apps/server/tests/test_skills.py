@@ -228,6 +228,9 @@ def test_product_help_consult_carved_out_and_owned_by_core():
     assert "官网" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "你的网站" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert "下载" in CONSULT_PRODUCT_HELP_BY_SCENE
+    # 身份问：这是什么项目 / 你是什么 → 必查 product_help（先答我方，再谈别的）
+    assert "这是什么项目" in CONSULT_PRODUCT_HELP_BY_SCENE
+    assert "你是什么" in CONSULT_PRODUCT_HELP_BY_SCENE
     # 定案 A：Cursor / .mdc / 改成 AgentCore 规则 → 必查 product_help*
     assert "Cursor" in CONSULT_PRODUCT_HELP_BY_SCENE
     assert ".mdc" in CONSULT_PRODUCT_HELP_BY_SCENE
@@ -604,6 +607,7 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert help_skill is not None
     assert "Cursor" in help_skill.summary and "改成 AgentCore 规则" in help_skill.summary
     assert "官网" in help_skill.summary
+    assert "这是什么项目" in help_skill.summary and "你是什么" in help_skill.summary
     faq_skill = build_system_skill_registry().get("product_help_faq")
     assert faq_skill is not None
     assert "Cursor" in faq_skill.summary
@@ -616,6 +620,25 @@ def test_product_help_skill_teaches_short_answers_and_manual_deeplinks():
     assert "【L1" not in help_body and "【L1" not in faq_body
     assert "【L2" not in help_body and "【L2" not in faq_body
     assert "`product_bug`" not in help_body and "`model_limit`" not in help_body
+
+
+def test_product_help_teaches_identity_first_then_other_topics():
+    """身份问：可见正文先一句话答我方产品；禁把同名他品 / 第三方 Skill 仓当成本项目落地。"""
+    help_body = _body("product_help")
+    assert "这是什么项目" in help_body
+    assert "你是什么" in help_body
+    assert "首句" in help_body
+    assert "consult 不能代替作答" in help_body
+    assert "第三方" in help_body and "Skill" in help_body
+    assert "落地" in help_body
+    assert "同名他品" in help_body
+    assert "用户气泡空着" in help_body or "写成工作区规则" in help_body
+    # 08-15 官网钉：本条不改坏
+    assert "https://fashitianxia.xyz" in help_body
+    assert "https://fashitianxia.xyz/download" in help_body
+    # map/faq 既有「项目」漂移锁：身份 HOW 只留在 product_help
+    assert "项目" not in _body("product_help_map")
+    assert "项目" not in _body("product_help_faq")
 
 
 def test_product_bug_triage_skill_teaches_l1_l2_and_ceilings():
@@ -639,9 +662,25 @@ def test_product_bug_triage_skill_teaches_l1_l2_and_ceilings():
     assert skill is not None
     assert skill.requires_tools == ()
     assert "主动" in skill.summary
+    assert "不预设归用户环境" in skill.summary
     assert "product_bug_triage" in render_skill_directory(
         build_system_skill_registry(), _NO_LIVE_USER
     )
+
+
+def test_product_bug_triage_does_not_attribute_our_selfcheck_to_user_env():
+    """回归（cid bceeaa74）：我方自检/运行时报错不得被定性为用户环境 / 「不是产品 bug」。"""
+    body = _body("product_bug_triage")
+    assert "【我方报错·不预设归属】" in body
+    assert "ExecEnvProbeFailed" in body
+    assert "用户机器" in body or "本机环境" in body
+    assert "这不是产品 bug" in body
+    assert "一律认成" in body and "product_bug" in body
+    assert "还缺什么证据" in body
+    assert "L3" in body
+    # 结论约束，不是扫原文分叉
+    assert "不是意图分类器" in body
+    assert "勿扫用户长文" in body
 
 
 def test_team_orchestration_skill_teaches_cross_folder_parallel():
@@ -838,7 +877,7 @@ def test_team_orchestration_skill_teaches_deterministic_word_pdf_export():
     body = _body("team_orchestration_advanced")
     assert "md_to_docx" in body
     assert "python-docx" in body  # 只作禁用主路径出现
-    assert "Office · 无执行" in body
+    assert "目标格式标不可产" in body
     assert "`.docx`/`.pptx`/`.xlsx` 等且能力行" not in body
 
 

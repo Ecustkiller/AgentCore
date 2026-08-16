@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -772,3 +773,68 @@ def test_resume_missing_frame_reports_not_found(tmp_path):
 
     asyncio.run(drive())
     assert _response(sent, 8)["error"]["code"] == protocol.PAUSED_TURN_NOT_FOUND
+
+
+def test_resolve_resume_user_message_id_mints_uuid_when_missing():
+    from agentcore.sidecar.server_pkg.turns import resolve_resume_user_message_id
+
+    umid = resolve_resume_user_message_id("", None)
+    UUID(umid)
+    assert not umid.startswith("resume-")
+    assert resolve_resume_user_message_id("client-id", "frame-id") == "client-id"
+    assert resolve_resume_user_message_id("", "frame-id") == "frame-id"
+    assert resolve_resume_user_message_id("  ", "frame-id") == "frame-id"
+
+
+def test_resume_without_user_message_id_mints_uuid_outbox_key(tmp_path, monkeypatch):
+    """Cold resume must not mint ``resume-{turn_id}`` as the outbox / finalize key."""
+
+    async def fake_resume(**kwargs: Any) -> dict[str, Any]:
+        kwargs["sink"].close()
+        return {
+            "finish_reason": "end_turn",
+            "content": "续跑完成",
+            "rounds": 1,
+            "message_id": kwargs["suspension"].message_id,
+        }
+
+    monkeypatch.setattr("agentcore.sidecar.server.resume_chat_pipeline", fake_resume)
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+    data = tmp_path / "data"
+    store = LocalPausedTurnStore(data / "paused")
+    turn_id = "11111111-1111-4111-8111-111111111111"
+
+    async def drive() -> None:
+        await _initialize(server, tmp_path, data_dir=str(data))
+        await store.save(_suspension(turn_id, "c1"))
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "resume",
+                    "params": {
+                        "messageId": turn_id,
+                        "conversationId": "c1",
+                        "decision": "continue",
+                        "traceId": "a" * 32,
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    done = _response(sent, 7)
+    assert done["result"]["content"] == "续跑完成"
+
+    from agentcore.conversation.store.outbox import list_outbox_records
+
+    records = list_outbox_records(data / "outbox")
+    assert records
+    umid = str(records[0]["user_message_id"])
+    UUID(umid)
+    assert not umid.startswith("resume-")
+    assert umid != f"resume-{turn_id}"

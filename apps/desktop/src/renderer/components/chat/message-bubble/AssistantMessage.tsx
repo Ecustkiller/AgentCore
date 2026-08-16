@@ -40,6 +40,7 @@ import {
 } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
 import {
+  buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
@@ -191,7 +192,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     emptyDiagnosis,
     message: displayError?.message ?? message.error?.message,
   });
-  const supportDiagnosticText = formatSupportDiagnosticText({
+  const supportDiagnosticIds = {
     conversationId,
     messageId: assistantProjectionId(message),
     userMessageId: precedingUserMessageId(
@@ -201,11 +202,16 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     traceId: message.traceId,
     executionId: message.executionId,
     ...supportDiagnosticExtrasFromError(message.error),
-  });
+  };
+  const supportDiagnosticText =
+    formatSupportDiagnosticText(supportDiagnosticIds);
   const copySupportDiagnostics = () => {
     if (!supportDiagnosticText) return;
-    void copyText(supportDiagnosticText).then((ok) => {
-      if (ok) notifySuccess("已复制排查包");
+    void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
+      if (!text) return;
+      void copyText(text).then((ok) => {
+        if (ok) notifySuccess("已复制排查包");
+      });
     });
   };
   const hasReasoning =

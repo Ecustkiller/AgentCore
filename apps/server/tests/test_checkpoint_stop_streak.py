@@ -65,6 +65,15 @@ def test_compose_repeated_stop_closing_never_empty():
     assert "先到这" in compose_repeated_stop_closing(note="先到这")
 
 
+def test_compose_repeated_stop_closing_with_note_does_not_ask_user_to_restate():
+    """卡上已写下一步 → 禁止再要用户「发新消息说明」（他刚说过）。"""
+    body = compose_repeated_stop_closing(note="这 10 款都不行，换新的")
+    assert "这 10 款都不行，换新的" in body
+    assert "请发新消息说明" not in body
+    # 无 note 那支仍得请用户开口，原引导保留。
+    assert "请发新消息说明" in compose_repeated_stop_closing()
+
+
 def _ask_frame(*, journal_entries: list[dict] | None = None) -> AskUserSuspension:
     return AskUserSuspension(
         message_id="m1",

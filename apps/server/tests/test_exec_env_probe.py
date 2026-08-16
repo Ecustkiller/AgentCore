@@ -1,13 +1,10 @@
-"""Exec-env probe: once-per-language gate + honest failure attribution.
+"""Exec-env failure: first real run classifies; only hard evidence retires.
 
-The probe already holds the facts that name its own failure (exit code, duration,
-stderr). These tests pin that verdict travelling all the way out — wire code,
-model-facing text, user sentence — instead of five different causes collapsing
-into one guess about the desktop / security software.
-
-They also pin its *scope*: the probe runs the language the request asked for, so
-a machine without python still runs JavaScript, and only the language that was
-actually probed gets taken out.
+Classification still names a failure from exit code / duration / stderr. The
+trigger is the real execute, not a shortest-program preflight. A missing
+interpreter or refused spawn retires what it proved; a timeout never does.
+gVisor keeps one backend-wide runtime smoke. ``probe_interpreter`` stays for
+cloud boot / ``cloud_health``.
 """
 
 from __future__ import annotations
@@ -23,6 +20,7 @@ from agentcore.tools.sandbox.exec_env import (
     EXEC_ENV_PROBE_FAIL_MARKER,
     EXEC_ENV_PROBE_TIMEOUT_CODE,
     EXEC_ENV_SPAWN_DENIED_CODE,
+    annotate_real_exec_failure,
     classify_probe_failure,
     exec_env_probe_failure_code,
     exec_env_probe_failure_language,
@@ -31,6 +29,7 @@ from agentcore.tools.sandbox.exec_env import (
     probe_failure_result,
     probe_failure_retire_steer,
     probe_failure_retire_tools,
+    should_retire_exec_env,
 )
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace.channel import WorkspaceOp
@@ -112,6 +111,17 @@ class _HostSandbox(_FakeSandbox):
         self.last_health_failure_code = EXEC_ENV_NO_INTERPRETER_CODE
         self.last_health_evidence = f"exit=127 duration_ms=7 stderr={detail}"
         return False
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        self.execute_calls += 1
+        if request.language in self._available:
+            return ExecutionResult(
+                success=True, stdout="hi", stderr="", exit_code=0, duration_ms=5
+            )
+        detail = _missing_launcher_stderr(request.language)
+        return ExecutionResult(
+            success=False, stdout="", stderr=detail, exit_code=127, duration_ms=7
+        )
 
 
 class _FakeChannel:
@@ -244,6 +254,44 @@ def test_classify_probe_failure_only_names_provable_causes(
     )
 
 
+def test_should_retire_exec_env_only_on_hard_evidence():
+    assert should_retire_exec_env(EXEC_ENV_NO_INTERPRETER_CODE, language="python")
+    assert should_retire_exec_env(EXEC_ENV_SPAWN_DENIED_CODE, language="python")
+    assert not should_retire_exec_env(EXEC_ENV_PROBE_TIMEOUT_CODE, language="python")
+    assert not should_retire_exec_env(EXEC_ENV_PROBE_FAIL_CODE, language="python")
+    # Backend-wide smoke (gVisor) still retires the family.
+    assert should_retire_exec_env(EXEC_ENV_PROBE_TIMEOUT_CODE, language=None)
+    assert should_retire_exec_env(EXEC_ENV_PROBE_FAIL_CODE, language=None)
+
+
+def test_annotate_real_exec_failure_timeout_passes_through():
+    raw = ExecutionResult(
+        success=False,
+        stdout="",
+        stderr="Timeout: forced stop after 30s (forced stop)",
+        exit_code=-1,
+        duration_ms=30012,
+    )
+    annotated, verdict = annotate_real_exec_failure(raw, language="python")
+    assert annotated is raw
+    assert verdict is None
+
+
+def test_annotate_real_exec_failure_exit_127_wraps():
+    raw = ExecutionResult(
+        success=False,
+        stdout="",
+        stderr=_LAUNCHER_MISSING,
+        exit_code=127,
+        duration_ms=8,
+    )
+    annotated, verdict = annotate_real_exec_failure(raw, language="python")
+    assert verdict is not None
+    assert verdict.code == EXEC_ENV_NO_INTERPRETER_CODE
+    assert exec_env_probe_failure_code(annotated.stderr) == EXEC_ENV_NO_INTERPRETER_CODE
+    assert "自检" not in annotated.stderr
+
+
 def test_probe_failure_result_carries_reason_and_evidence():
     result = probe_failure_result(
         duration_ms=8,
@@ -374,28 +422,15 @@ async def test_server_workspace_probe_fail_keeps_sandbox_verdict(tmp_path: Path)
         ),
         (
             _envelope(
-                stderr="Timeout: forced stop after 5s (forced stop)",
-                exit_code=-1,
-                duration_ms=5044,
-            ),
-            EXEC_ENV_PROBE_TIMEOUT_CODE,
-        ),
-        (
-            _envelope(
                 stderr="Failed to start process: spawn python EACCES",
                 exit_code=-1,
                 duration_ms=12,
             ),
             EXEC_ENV_SPAWN_DENIED_CODE,
         ),
-        # Launcher ran, printed nothing (App Execution Alias stub) — unprovable.
-        (
-            _envelope(success=True, stdout="", exit_code=0, duration_ms=90),
-            EXEC_ENV_PROBE_FAIL_CODE,
-        ),
     ],
 )
-async def test_local_workspace_probe_classifies_desktop_envelope(
+async def test_local_workspace_real_run_wraps_hard_evidence(
     envelope: dict[str, object], expected: str
 ):
     channel = _FakeChannel(envelope)
@@ -405,9 +440,9 @@ async def test_local_workspace_probe_classifies_desktop_envelope(
     )
     assert result.success is False
     assert exec_env_probe_failure_code(result.stderr) == expected
-    # Only the probe reached the desktop; the real run never ran.
+    # The real run reached the desktop — no shortest-program preflight.
     assert len(channel.calls) == 1
-    assert channel.calls[0]["args"]["code"] == "print('ok')"
+    assert channel.calls[0]["args"]["code"] == "print(1)"
 
 
 @pytest.mark.anyio
@@ -429,7 +464,9 @@ async def test_local_workspace_sticky_fail_repeats_the_same_cause():
     assert exec_env_probe_failure_code(first.stderr) == EXEC_ENV_SPAWN_DENIED_CODE
     assert exec_env_probe_failure_code(again.stderr) == EXEC_ENV_SPAWN_DENIED_CODE
     assert "EACCES" in again.stderr
+    # First real run proved the death; the repeat is fail-fast.
     assert len(channel.calls) == 1
+    assert channel.calls[0]["args"]["code"] == "print(1)"
 
 
 def test_probe_failure_text_names_the_language_it_actually_ran():
@@ -440,7 +477,7 @@ def test_probe_failure_text_names_the_language_it_actually_ran():
     assert "找不到 node 解释器" in js
     # The old text claimed「自检固定用 python，所以本次即便要跑 JavaScript 也一并被停用」.
     assert "python" not in js
-    assert "不在本次自检范围内" in js
+    assert "不在本次判定范围内" in js
 
     py = probe_failure_result(code=EXEC_ENV_NO_INTERPRETER_CODE, language="python").stderr
     assert "找不到 python 解释器" in py
@@ -480,13 +517,9 @@ async def test_local_workspace_runs_javascript_on_a_host_without_python():
     )
 
     assert result.success is True
-    # The probe ran the requested language, then the real code went through.
-    assert [c["args"]["language"] for c in channel.calls] == [
-        "javascript",
-        "javascript",
-    ]
-    assert channel.calls[0]["args"]["code"] == "console.log('ok')"
-    assert channel.calls[1]["args"]["code"] == "console.log(1)"
+    # No preflight — only the real JavaScript run reached the desktop.
+    assert [c["args"]["language"] for c in channel.calls] == ["javascript"]
+    assert channel.calls[0]["args"]["code"] == "console.log(1)"
 
 
 @pytest.mark.anyio
@@ -509,21 +542,17 @@ async def test_local_workspace_verdicts_never_leak_across_languages():
     )
     assert alive.success is True
 
-    # python stays sticky-dead with the same cause, without re-probing.
+    # python stays sticky-dead with the same cause, without re-hitting the desktop.
     again = await ws.execute(
         ExecutionRequest(code="print(2)", language="python", timeout_seconds=30)
     )
     assert exec_env_probe_failure_code(again.stderr) == EXEC_ENV_NO_INTERPRETER_CODE
-    assert [c["args"]["language"] for c in channel.calls] == [
-        "python",
-        "javascript",
-        "javascript",
-    ]
+    assert [c["args"]["language"] for c in channel.calls] == ["python", "javascript"]
 
 
 @pytest.mark.anyio
-async def test_server_workspace_probes_the_requested_language(tmp_path: Path):
-    """Sidecar SubprocessSandbox: one verdict per language, probed on demand."""
+async def test_server_workspace_classifies_the_requested_language(tmp_path: Path):
+    """Sidecar SubprocessSandbox: first real failure per language, no preflight."""
     sandbox = _HostSandbox("javascript", "bash")
     ws = ServerWorkspace(root=tmp_path, sandbox=sandbox, location="local")
 
@@ -539,11 +568,10 @@ async def test_server_workspace_probes_the_requested_language(tmp_path: Path):
     assert ok.success is True
     assert dead.success is False
     assert exec_env_probe_failure_language(dead.stderr) == "python"
-    assert sandbox.probed == ["javascript", "python"]
-    # The language-free health check never runs on this path…
+    # Per-language preflight is gone — health_check / probe_interpreter stay idle.
+    assert sandbox.probed == []
     assert sandbox.health_calls == 0
-    # …and only the language that passed reached the sandbox for real.
-    assert sandbox.execute_calls == 1
+    assert sandbox.execute_calls == 2
 
 
 @pytest.mark.anyio
@@ -613,6 +641,95 @@ async def test_code_execute_retires_only_what_the_probe_proved():
     assert py.metadata.get("error_class") == "permanent"
     assert "test_run" in (py.metadata.get("retire_message") or "")
     assert py.contract_failure is False
+
+
+@pytest.mark.anyio
+async def test_real_execution_timeout_does_not_retire():
+    """Acceptance: a real-run timeout is not an env death — no wrap, no retire."""
+    from agentcore.tools.builtin.code_execute import CodeExecuteTool
+    from agentcore.tools.protocol import ToolContext
+
+    timeout_stderr = "Timeout: forced stop after 30s (forced stop)"
+    channel = _FakeChannel(
+        _envelope(stderr=timeout_stderr, exit_code=-1, duration_ms=30012)
+    )
+    ws = LocalWorkspace(channel)  # type: ignore[arg-type]
+    raw = await ws.execute(
+        ExecutionRequest(code="print(1)", language="python", timeout_seconds=30)
+    )
+    assert raw.success is False
+    assert not is_exec_env_probe_failure(raw.stderr)
+    assert timeout_stderr in raw.stderr
+    # Not memoized as dead — a second run hits the desktop again.
+    again = await ws.execute(
+        ExecutionRequest(code="print(2)", language="python", timeout_seconds=30)
+    )
+    assert not is_exec_env_probe_failure(again.stderr)
+    assert len(channel.calls) == 2
+
+    class _TimeoutBackend:
+        async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+            return ExecutionResult(
+                success=False,
+                stdout="",
+                stderr=timeout_stderr,
+                exit_code=-1,
+                duration_ms=30012,
+            )
+
+    tool = await CodeExecuteTool().execute(
+        {"code": "print(1)", "language": "python"},
+        ToolContext.create(
+            execution_id="e",
+            run_id="s",
+            agent_id="a",
+            backend=_TimeoutBackend(),  # type: ignore[arg-type]
+            user_id="u",
+        ),
+    )
+    assert tool.success is False
+    assert tool.metadata is None or "retire_tools" not in tool.metadata
+    assert (tool.metadata or {}).get("error_class") != "permanent"
+
+
+@pytest.mark.anyio
+async def test_real_execution_exit_127_still_retires_with_honest_reason():
+    """Acceptance: exit 127 on the real run still retires and names the cause."""
+    from agentcore.tools.builtin.code_execute import CodeExecuteTool
+    from agentcore.tools.protocol import ToolContext
+
+    channel = _FakeChannel(
+        _envelope(stderr=_LAUNCHER_MISSING, exit_code=127, duration_ms=8)
+    )
+    ws = LocalWorkspace(channel)  # type: ignore[arg-type]
+    wrapped = await ws.execute(
+        ExecutionRequest(code="print(1)", language="python", timeout_seconds=30)
+    )
+    assert exec_env_probe_failure_code(wrapped.stderr) == EXEC_ENV_NO_INTERPRETER_CODE
+    assert "找不到 python 解释器" in wrapped.stderr
+    assert "退出码 127" in wrapped.stderr
+    assert "自检" not in wrapped.stderr
+
+    class _DeadPythonBackend:
+        async def execute(self, request: ExecutionRequest) -> ExecutionResult:
+            return wrapped
+
+    tool = await CodeExecuteTool().execute(
+        {"code": "print(1)", "language": "python"},
+        ToolContext.create(
+            execution_id="e",
+            run_id="s",
+            agent_id="a",
+            backend=_DeadPythonBackend(),  # type: ignore[arg-type]
+            user_id="u",
+        ),
+    )
+    assert tool.success is False
+    assert tool.metadata is not None
+    assert tool.metadata.get("code") == EXEC_ENV_NO_INTERPRETER_CODE
+    assert tool.metadata.get("retire_tools") == ["test_run"]
+    assert tool.metadata.get("error_class") == "permanent"
+    assert "PATH 上没有 python 解释器" in (tool.metadata.get("retire_message") or "")
 
 
 @pytest.mark.anyio
@@ -726,8 +843,8 @@ def test_exec_env_dead_lines_fork_per_reason_and_drop_unbacked_advice():
     assert "python" not in no_interp
     assert "解释器" in no_interp
     timeout = EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE[EXEC_ENV_PROBE_TIMEOUT_CODE]
-    assert "启动" in timeout and "太慢" in timeout
-    assert "没跑完" in timeout
+    assert "时限" in timeout
+    assert "就绪" in timeout
     assert "命令" in timeout
     assert "代码执行环境" not in timeout
 

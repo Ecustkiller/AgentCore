@@ -79,10 +79,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "请确认整理方案（取消勾选即剔除）：",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "请确认整理方案（取消勾选即剔除）："
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_org"

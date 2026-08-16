@@ -223,7 +223,7 @@ describe("foldMessageLane", () => {
     expect(after).toBe(base);
   });
 
-  it("foldCheckpointMarker absorbs trailing content into the card slot", () => {
+  it("foldCheckpointMarker keeps trailing content (absorb is content_reset)", () => {
     const base = messageLaneFromMessage({
       content: "帮你梳理一下起步方案：",
       process: [
@@ -232,9 +232,10 @@ describe("foldMessageLane", () => {
       ],
     });
     const next = foldCheckpointMarker(base, "cp_1");
-    expect(next.content).toBe("");
+    expect(next.content).toBe("帮你梳理一下起步方案：");
     expect(next.process).toEqual([
       { kind: "reasoning", text: "想一下" },
+      { kind: "content", text: "帮你梳理一下起步方案：" },
       { kind: "checkpoint", checkpoint_id: "cp_1" },
     ]);
   });
@@ -286,7 +287,7 @@ describe("ensureTimelineMarkersFromJournal", () => {
     expect(process).toEqual([...persisted]);
   });
 
-  it("never absorbs settled trailing content (unlike the live checkpoint fold)", () => {
+  it("never absorbs settled trailing content", () => {
     const process = ensureTimelineMarkersFromJournal(
       [{ kind: "content", text: "定稿正文，resolve 后的收尾。" }],
       [{ type: "checkpoint_required", payload: { checkpoint_id: "cp9" } }],

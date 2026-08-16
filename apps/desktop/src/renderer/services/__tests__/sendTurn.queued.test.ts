@@ -43,6 +43,7 @@ vi.mock("@/lib/toast", () => ({
 }));
 vi.mock("@/services/turns/recovery", () => ({
   rejoinLiveTurn: vi.fn(),
+  cancelRejoinLiveTurn: vi.fn(),
   attachOnOpen: vi.fn(),
   markGhostInterrupted: vi.fn(),
   settleCloudRunningAssistant: vi.fn(),

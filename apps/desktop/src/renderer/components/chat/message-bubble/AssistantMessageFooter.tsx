@@ -14,6 +14,7 @@ import { copyText } from "@/lib/clipboard";
 import { formatCompact, formatDuration } from "@/lib/format";
 import { formatMessageExport } from "@/lib/messageExport";
 import {
+  buildSupportDiagnosticPack,
   formatSupportDiagnosticText,
   precedingUserMessageId,
   supportDiagnosticExtrasFromError,
@@ -167,7 +168,7 @@ function MessageMoreMenu({
   // 「复制排查包」恒可用（对齐错误卡；行业常见：支持 ID 可复制，底层检视才 gated）。
   // 诊断模式只管运行详情里的裸 ID / 调度埋点等噪声，不挡报障出口。
   const serverMessageId = assistantProjectionId(message);
-  const diagnosticText = formatSupportDiagnosticText({
+  const diagnosticIds = {
     conversationId,
     messageId: serverMessageId,
     userMessageId: precedingUserMessageId(
@@ -177,7 +178,8 @@ function MessageMoreMenu({
     traceId: message.traceId,
     executionId: message.executionId,
     ...supportDiagnosticExtrasFromError(message.error),
-  });
+  };
+  const diagnosticText = formatSupportDiagnosticText(diagnosticIds);
   const finishLabel = finishReason
     ? FINISH_REASON_META[finishReason]?.label
     : null;
@@ -263,7 +265,13 @@ function MessageMoreMenu({
             <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
-                onSelect={() => void copyDiagnostic("排查包", diagnosticText)}
+                onSelect={() => {
+                  void buildSupportDiagnosticPack(diagnosticIds).then(
+                    (text) => {
+                      if (text) void copyDiagnostic("排查包", text);
+                    },
+                  );
+                }}
               >
                 <Fingerprint
                   size={14}

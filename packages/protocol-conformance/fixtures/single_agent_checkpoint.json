@@ -42,13 +42,17 @@
     "status": "paused",
     "finishReason": null,
     "error": null,
-    "content": "",
+    "content": "开始前我确认一下方向：",
     "reasoning": "这个需求有歧义，先问清楚。",
     "captainContext": [],
     "process": [
       {
         "kind": "reasoning",
         "text": "这个需求有歧义，先问清楚。"
+      },
+      {
+        "kind": "content",
+        "text": "开始前我确认一下方向："
       },
       {
         "kind": "checkpoint",

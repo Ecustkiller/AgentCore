@@ -65,9 +65,57 @@ async def persist_kickoff(
     *,
     plan: Any | None = None,
 ) -> bool:
-    """Capture + persist the durable kickoff frame. Returns True iff saved."""
+    """Capture + persist the durable kickoff frame. Returns True iff saved.
+
+    Same-conversation persist is serial. Before save, prior pending ``team_preview``
+    cards are orphaned (journal ∪ in-process) so gather dual-send cannot leave two
+    clickable kickoff cards. Required SSE emits under the same lock.
+    """
     if not can_persist_kickoff(host):
         return False
+    from agentcore.runtime.kickoff.orphan import (
+        orphan_conversation_team_previews,
+        persist_lock_for,
+        remember_live_team_preview,
+    )
+
+    conversation_id = host._conversation_id or ""
+    async with persist_lock_for(conversation_id):
+        try:
+            await orphan_conversation_team_previews(
+                conversation_id,
+                sink=host._sink,
+                reason="superseded",
+                exclude_ids={checkpoint_id},
+            )
+        except Exception as exc:  # noqa: BLE001 — 清旧卡失败不阻断建新卡
+            logger.warning(
+                "team_preview.supersede_prior_failed",
+                conversation_id=conversation_id,
+                error=str(exc),
+            )
+        saved = await _persist_kickoff_frame(
+            host, checkpoint_id, summary, required_event, plan=plan
+        )
+        if saved:
+            remember_live_team_preview(
+                conversation_id, checkpoint_id, host._message_id or ""
+            )
+            # Emit under the persist lock so a sibling persist cannot orphan this
+            # card and then lose a late required SSE from the first caller.
+            if host._sink is not None:
+                host._sink.emit(required_event)
+        return saved
+
+
+async def _persist_kickoff_frame(
+    host: KickoffHost,
+    checkpoint_id: str,
+    summary: KickoffSummary,
+    required_event: Any,
+    *,
+    plan: Any | None = None,
+) -> bool:
     from agentcore.runtime.runs.plan import RunPlan
     from agentcore.runtime.suspension import TeamPreviewSuspension, find_tool_call_id
     from agentcore.runtime.suspension.capture import SuspensionCapture, persist_suspension_capture
@@ -185,7 +233,6 @@ async def await_kickoff(
         )
         raise
     if saved:
-        host._sink.emit(required)
         host._pending_pause = True
         logger.info(
             "team_preview.finalized",

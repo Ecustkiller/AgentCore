@@ -11,8 +11,9 @@ model selection + billing preflight) — never hardcode ``llm_credentials=None``
 
 When preflight refuses (quota / BYOK missing), or the local workspace channel is
 already sticky-dead / dies during the closing turn, :func:`persist_harvest_fallback`
-pushes any existing synthesis draft / ALL_COMPLETED terminal body to the user
-as an assistant message — no second LLM call (A1 / channel-dead harvest).
+renders a **user-facing** close from session facts (products, node terminals,
+uncompensated tool failures) — never ``format_for_ceo`` / ALL_COMPLETED.output,
+which is CEO-audience text. No second LLM call (A1 / channel-dead harvest).
 
 崩溃重驱恢复（D5 定案）走同一条收口，但**归属原回合**：``session.recovered_turn_id``
 是被中断的那条助手消息，这次收口续写它（不建合成用户消息、不新开助手消息），成果
@@ -89,19 +90,49 @@ _HARVEST_PUSH: dict[HarvestKind, tuple[str, str]] = {
     "cancelled": ("团队任务已取消", "后台团队已取消或中断，打开对话查看收尾。"),
 }
 
-_HARVEST_FALLBACK_EMPTY: dict[HarvestKind, str] = {
+_HARVEST_USER_LEAD: dict[HarvestKind, str] = {
     "success": (
-        "后台团队已完成，但系统收口未能调用模型生成新综合。"
-        "请查看上方团队进展与交付状态；也可稍后在额度恢复后让我继续汇总。"
+        "后台团队已经做完这一轮，但系统没能再生成一份新的综合说明。下面按已经拿到的结果直接收口。"
     ),
     "failure": (
-        "后台团队已结束（含失败），但系统收口未能调用模型生成新综合。"
-        "请查看上方团队进展与交付状态中的缺口说明。"
+        "后台团队这一轮已经结束，其中有没做成的部分；"
+        "系统没能再生成一份新的综合说明。下面按已经拿到的结果如实交代。"
     ),
     "cancelled": (
-        "后台团队已取消或中断，且系统收口未能调用模型生成新综合。"
-        "请查看上方已完成部分与交付状态。"
+        "后台团队这一轮已取消或中断；系统没能再生成一份新的综合说明。"
+        "下面按已完成和未完成的部分收口。"
     ),
+}
+
+_NODE_STATUS_FACE: dict[str, str] = {
+    "completed": "已完成",
+    "failed": "没有完成",
+    "cancelled": "已取消",
+    "skipped": "没有执行",
+    "queued": "尚未开始",
+    "running": "进行中",
+    "retrying": "进行中",
+    "pending": "尚未完成",
+}
+
+# Display table only — not an intent classifier. Unknown names stay generic.
+_TOOL_FACE: dict[str, str] = {
+    "web_search": "网页搜索",
+    "read_url": "打开网页",
+    "download_url": "下载文件",
+    "file_write": "写入文件",
+    "file_read": "读取文件",
+    "file_edit": "编辑文件",
+    "str_replace": "改写文件",
+    "write_section": "改写文件",
+    "code_execute": "运行代码",
+    "terminal": "运行命令",
+    "host_shell": "运行本机命令",
+    "test_run": "运行测试",
+    "browser_navigate": "浏览网页",
+    "git": "版本管理",
+    "md_to_docx": "导出 Word",
+    "md_to_pdf": "导出 PDF",
 }
 
 _CHANNEL_DEAD_BODY_MARKERS = (
@@ -139,8 +170,7 @@ def harvest_closing_kind(session: CoordinationSession) -> HarvestKind:
     if session.soft_stop:
         return "cancelled"
     if any(
-        ev.kind is CoordinationEventKind.DRIVE_CANCELLED
-        for ev in _iter_terminal_events(session)
+        ev.kind is CoordinationEventKind.DRIVE_CANCELLED for ev in _iter_terminal_events(session)
     ):
         return "cancelled"
     if session.failed_run_ids:
@@ -186,12 +216,150 @@ def _all_completed_terminal_output(session: CoordinationSession) -> str:
     return "\n\n".join(chunks)
 
 
-def _session_synthesis_or_terminal(session: CoordinationSession) -> str:
-    """Prefer CEO ``update_synthesis`` draft; else ALL_COMPLETED terminal body."""
+def _tool_face(tool_name: str) -> str:
+    name = (tool_name or "").strip()
+    return _TOOL_FACE.get(name) or "有一步操作"
+
+
+def _node_status_face(status: str) -> str:
+    key = (status or "").strip().lower()
+    return _NODE_STATUS_FACE.get(key, "尚未完成")
+
+
+def _payload_user_facts(session: CoordinationSession) -> dict[str, Any] | None:
+    raw = session.harvest_user_facts
+    has_posted = isinstance(raw, dict) and (
+        raw.get("nodes") or raw.get("outstanding_tool_failures")
+    )
+    if has_posted:
+        return raw
+    from agentcore.runtime.coordination.session import CoordinationEventKind
+
+    for ev in _iter_terminal_events(session):
+        if getattr(ev, "kind", None) is not CoordinationEventKind.ALL_COMPLETED:
+            continue
+        facts = (getattr(ev, "payload", None) or {}).get("user_facts")
+        if isinstance(facts, dict):
+            return facts
+    return None
+
+
+def _worker_completed_rows(session: CoordinationSession) -> list[dict[str, Any]]:
+    from agentcore.runtime.coordination.session import CoordinationEventKind
+
+    rows: list[dict[str, Any]] = []
+    for ev in _iter_terminal_events(session):
+        if getattr(ev, "kind", None) is not CoordinationEventKind.WORKER_COMPLETED:
+            continue
+        payload = getattr(ev, "payload", None) or {}
+        role = str(payload.get("role") or "").strip() or "队员"
+        status = str(payload.get("status") or "completed").strip() or "completed"
+        summary = str(payload.get("summary") or "").strip()
+        rows.append({"role": role, "status": status, "summary": summary, "files": []})
+    return rows
+
+
+def _facts_from_session_leftovers(session: CoordinationSession) -> dict[str, Any]:
+    """Assemble user facts from live_plan / completion sets / worker events."""
+    nodes: list[dict[str, Any]] = []
+    files: list[str] = []
+    seen_files: set[str] = set()
+    own = getattr(session, "file_ownership", None)
+    live = getattr(session, "live_plan", None)
+    completed = set(getattr(session, "completed_run_ids", ()) or ())
+    failed = set(getattr(session, "failed_run_ids", ()) or ())
+    cancelled = set(getattr(session, "cancel_ids", ()) or ())
+    vacated = set(getattr(session, "vacated_run_ids", ()) or ())
+
+    def _owned(run_id: str) -> list[str]:
+        if own is None or not hasattr(own, "owned_paths"):
+            return []
+        return [p for p in own.owned_paths(run_id) if p]
+
+    if live is not None:
+        for node in getattr(live, "nodes", ()) or ():
+            rid = str(getattr(node, "run_id", "") or "")
+            role = str(getattr(node, "role", None) or getattr(node, "agent_name", None) or "队员")
+            if rid in failed:
+                status = "failed"
+            elif rid in cancelled:
+                status = "cancelled"
+            elif rid in vacated:
+                status = "skipped"
+            elif rid in completed:
+                status = "completed"
+            else:
+                status = "pending"
+            node_files = _owned(rid)
+            for path in node_files:
+                if path not in seen_files:
+                    seen_files.add(path)
+                    files.append(path)
+            nodes.append({"role": role, "status": status, "summary": "", "files": node_files})
+    by_role = {str(row["role"]): i for i, row in enumerate(nodes)}
+    for row in _worker_completed_rows(session):
+        idx = by_role.get(str(row["role"]))
+        if idx is None:
+            nodes.append(row)
+            by_role[str(row["role"])] = len(nodes) - 1
+            continue
+        existing = nodes[idx]
+        existing["status"] = row["status"] or existing["status"]
+        if row["summary"]:
+            existing["summary"] = row["summary"]
+    return {
+        "nodes": nodes,
+        "files": files,
+        "outstanding_tool_failures": [],
+    }
+
+
+def _session_user_facts(session: CoordinationSession) -> dict[str, Any]:
+    posted = _payload_user_facts(session)
+    if posted is not None:
+        return posted
+    return _facts_from_session_leftovers(session)
+
+
+def _render_user_harvest_body(session: CoordinationSession, kind: HarvestKind) -> str:
+    """User-audience close from session facts. Never copies ``format_for_ceo``."""
+    parts: list[str] = [_HARVEST_USER_LEAD[kind]]
     draft = (getattr(session, "draft", None) or "").strip()
     if draft:
-        return draft
-    return _all_completed_terminal_output(session)
+        parts.append(draft)
+    facts = _session_user_facts(session)
+    files = [str(p).strip() for p in (facts.get("files") or []) if str(p).strip()]
+    if files:
+        parts.append("已有这些文件：\n" + "\n".join(f"- {path}" for path in files))
+    node_lines: list[str] = []
+    unfinished: list[str] = []
+    for raw in facts.get("nodes") or []:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip() or "队员"
+        status = str(raw.get("status") or "").strip()
+        summary = str(raw.get("summary") or "").strip()
+        face = _node_status_face(status)
+        line = f"- {role}：{face}"
+        if summary:
+            line += f" — {summary}"
+        node_lines.append(line)
+        if status and status != "completed":
+            unfinished.append(f"{role}（{face}）")
+    if node_lines:
+        parts.append("各成员这一轮的结果：\n" + "\n".join(node_lines))
+    if unfinished:
+        parts.append("还没做成的部分：" + "、".join(unfinished) + "。")
+    failure_lines: list[str] = []
+    for raw in facts.get("outstanding_tool_failures") or []:
+        if not isinstance(raw, dict):
+            continue
+        role = str(raw.get("role") or "").strip() or "队员"
+        step = _tool_face(str(raw.get("tool_name") or ""))
+        failure_lines.append(f"- {role}的{step}没有成功")
+    if failure_lines:
+        parts.append("有些步骤没做成：\n" + "\n".join(failure_lines))
+    return "\n\n".join(parts)
 
 
 def _session_saw_channel_dead(session: CoordinationSession, body: str) -> bool:
@@ -222,9 +390,7 @@ def _result_is_channel_dead_abort(result: dict[str, Any] | None) -> bool:
         return False
     err = result.get("error")
     if isinstance(err, dict):
-        return _is_channel_dead_failure_text(
-            str(err.get("message") or err.get("detail") or "")
-        )
+        return _is_channel_dead_failure_text(str(err.get("message") or err.get("detail") or ""))
     return _is_channel_dead_failure_text(err if isinstance(err, str) else None)
 
 
@@ -234,22 +400,19 @@ def build_harvest_fallback_content(
     kind: HarvestKind,
     error_message: str = "",
 ) -> str:
-    """Assemble a no-LLM user-visible closing from existing synthesis/terminal (A1/A2)."""
-    body = _session_synthesis_or_terminal(session)
+    """Assemble a no-LLM user-visible closing from session facts (A1/A2).
+
+    Does not copy ``format_for_ceo`` / ALL_COMPLETED.output — that text is for
+    the CEO model. Draft (CEO ``update_synthesis``) is already user-intended.
+    """
+    draft = (getattr(session, "draft", None) or "").strip()
     parts: list[str] = []
-    if _session_saw_channel_dead(session, body):
+    if _session_saw_channel_dead(session, draft):
         parts.append(CHANNEL_DEAD_USER_VISIBLE)
-    if getattr(session, "exec_env_dead", False) or (
-        body and EXEC_ENV_DEAD_BODY_MARKER in body
-    ):
+    if getattr(session, "exec_env_dead", False) or (draft and EXEC_ENV_DEAD_BODY_MARKER in draft):
         # Same classified cause the live notice gave (None → cause-free fallback).
-        parts.append(
-            exec_env_dead_user_visible(getattr(session, "exec_env_dead_reason", None))
-        )
-    if body:
-        parts.append(body)
-    else:
-        parts.append(_HARVEST_FALLBACK_EMPTY[kind])
+        parts.append(exec_env_dead_user_visible(getattr(session, "exec_env_dead_reason", None)))
+    parts.append(_render_user_harvest_body(session, kind))
     err = (error_message or "").strip()
     if err:
         parts.append(f"（系统说明：{err}）")
@@ -276,9 +439,7 @@ async def persist_harvest_fallback(
     from agentcore.core.message_merge import MESSAGE_STATUS_COMPLETE
     from agentcore.db.repositories import MessageRepository
 
-    content = build_harvest_fallback_content(
-        session, kind=kind, error_message=error_message
-    )
+    content = build_harvest_fallback_content(session, kind=kind, error_message=error_message)
     metadata = {
         "origin": "execution_harvest_fallback",
         "execution_id": execution_id,
@@ -343,9 +504,7 @@ async def _persist_harvest_fallback_local(
     trace_id: str,
 ) -> None:
     """No-LLM harvest close via outbox (never MessageRepository / local PG)."""
-    content = build_harvest_fallback_content(
-        session, kind=kind, error_message=error_message
-    )
+    content = build_harvest_fallback_content(session, kind=kind, error_message=error_message)
     outbox = sidecar._outbox_store
     if outbox is None:
         logger.warning(
@@ -551,14 +710,10 @@ async def _run_local_harvest_closing_turn(
     async def _run() -> None:
         from agentcore.runtime.coordination.session import adopt_active_execution
 
-        adopt_active_execution(
-            conversation_id, event_sink=sink, reopen_harvest=True
-        )
+        adopt_active_execution(conversation_id, event_sink=sink, reopen_harvest=True)
         origin_token = bind_user_message_origin(EXECUTION_HARVEST_ORIGIN)
         result: dict[str, Any] | None = None
-        pump = asyncio.create_task(
-            sidecar._pump(message_id, sink, conversation_id=conversation_id)
-        )
+        pump = asyncio.create_task(sidecar._pump(message_id, sink, conversation_id=conversation_id))
         try:
             try:
                 with (
@@ -568,9 +723,7 @@ async def _run_local_harvest_closing_turn(
                         user_id=user_id,
                         message_id=message_id,
                     ),
-                    inference_search_credentials_scope(
-                        _inference_search_creds(turn_creds)
-                    ),
+                    inference_search_credentials_scope(_inference_search_creds(turn_creds)),
                     folders_credentials_scope(sidecar._folders_creds),
                     account_credentials_scope(sidecar._account_creds),
                 ):
@@ -586,9 +739,7 @@ async def _run_local_harvest_closing_turn(
                         folder_local_root_id=folder_local_root_id,
                         folder_local_subpath=folder_local_subpath,
                         approvals_enabled=sidecar._approvals_enabled,
-                        permission_axes=sidecar.permission_axes_for(
-                            conversation_id
-                        ),
+                        permission_axes=sidecar.permission_axes_for(conversation_id),
                         llm_credentials=turn_creds,
                         session_saver=session_saver,
                         session_loader=session_loader,
@@ -854,9 +1005,7 @@ async def run_harvest_closing_turn(
         conversation_history_access = await resolve_conversation_history_access(db, user_id)
         permission_axes = await resolve_permission_axes(db, conversation_id)
 
-        board = await BoardRepository(db).get_by_conversation_id(
-            conversation_id, user_id=user_id
-        )
+        board = await BoardRepository(db).get_by_conversation_id(conversation_id, user_id=user_id)
         board_id = board.id if board else None
         from agentcore.db.repositories import MessageRepository, TurnJournalRepository
 
@@ -900,9 +1049,7 @@ async def run_harvest_closing_turn(
         )
 
         # Adopt before pipeline so CEO wait binds the live execution_id.
-        adopt_active_execution(
-            conversation_id, event_sink=sink, reopen_harvest=True
-        )
+        adopt_active_execution(conversation_id, event_sink=sink, reopen_harvest=True)
         origin_token = bind_user_message_origin(EXECUTION_HARVEST_ORIGIN)
         try:
             try:
@@ -993,9 +1140,7 @@ async def run_harvest_closing_turn(
         _run(),
         name=f"harvest-close-{execution_id[:8]}",
     )
-    turn_runs.register(
-        conversation_id=conversation_id, task=task, sink=sink, user_id=user_id
-    )
+    turn_runs.register(conversation_id=conversation_id, task=task, sink=sink, user_id=user_id)
     # Wait for the closing turn so the harvester can clear the registry afterward
     # if the turn never re-attached (edge failure).
     with contextlib.suppress(asyncio.CancelledError):

@@ -81,10 +81,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "Word 里做不出带框连线的图形 SmartArt 组织架构图；我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "Word 里做不出带框连线的图形 SmartArt 组织架构图；我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。"
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_carrier_smartart"

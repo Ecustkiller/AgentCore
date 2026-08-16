@@ -927,13 +927,10 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
 
         elif etype == "checkpoint_required":
             cid = p.get("checkpoint_id", "")
-            # ask_user 正文吸收：same-round prose folds into the card — drop bubble text
-            # so a streamed lead-in never duplicates the checkpoint card on replay.
-            content = ""
-            while process and process[-1].get("kind") == "content":
-                process.pop()
             # 检查点时间线落点: positional marker so the card replays at its real spot
-            # (card body folds separately, keyed by id). Mirrors EventSink.
+            # (card body folds separately, keyed by id). Mirrors EventSink — do not
+            # drop bubble text here. Absorb is ``content_reset(reason=ask_user)`` only
+            # when the engine folded this round's prose into the card.
             if cid and not has_marker("checkpoint", "checkpoint_id", cid):
                 process.append({"kind": "checkpoint", "checkpoint_id": cid})
 

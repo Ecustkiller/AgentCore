@@ -105,6 +105,40 @@ def test_collect_changes_reports_new_and_modified_only(tmp_path: Path):
     assert collect_changes(staged, before) == ["edit.txt", "out/chart.png"]
 
 
+def test_collect_changes_ignores_identical_rewrite_that_only_refreshes_mtime(
+    tmp_path: Path,
+):
+    """gVisor materialize ``write_bytes`` 同内容也刷新 mtime，不得算交付。"""
+    staged = tmp_path / "staged"
+    (staged / "dist").mkdir(parents=True)
+    keep = staged / "keep.txt"
+    app = staged / "dist" / "app.js"
+    keep.write_text("same", encoding="utf-8")
+    app.write_text("bundle", encoding="utf-8")
+    before = snapshot_tree(staged)
+
+    keep.write_bytes(keep.read_bytes())
+    app.write_bytes(app.read_bytes())
+    # materialize always moves mtime; force a 1s bump so this stays red on the
+    # old (size, mtime) comparator even if the host FS coalesces timestamps.
+    for path in (keep, app):
+        st = path.stat()
+        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000_000))
+
+    assert collect_changes(staged, before) == []
+
+
+def test_collect_changes_reports_same_size_content_edit(tmp_path: Path):
+    staged = tmp_path / "staged"
+    staged.mkdir()
+    (staged / "edit.txt").write_text("v1", encoding="utf-8")
+    before = snapshot_tree(staged)
+
+    (staged / "edit.txt").write_text("v2", encoding="utf-8")
+
+    assert collect_changes(staged, before) == ["edit.txt"]
+
+
 def test_write_back_lands_changes_and_never_propagates_deletes(tmp_path: Path):
     ws = tmp_path / "ws"
     ws.mkdir()
@@ -187,9 +221,7 @@ def test_write_back_containment_blocks_symlinked_parent_escape(tmp_path: Path):
     (staged / "evil").mkdir(parents=True)
     (staged / "evil" / "payload.txt").write_text("x", encoding="utf-8")
 
-    report = write_back(
-        staged, ws, ["evil/payload.txt"], max_bytes=1024, max_files=10
-    )
+    report = write_back(staged, ws, ["evil/payload.txt"], max_bytes=1024, max_files=10)
 
     assert report.written == []
     assert report.skipped == ["evil/payload.txt"]

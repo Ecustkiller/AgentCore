@@ -15,11 +15,14 @@ Covered:
 * a retried write-back is an idempotent D7 merge upsert (no early-return abandon);
 * ``finish_reason=paused`` upserts an assistant snapshot without title / consolidation;
 * resume completion updates a paused snapshot in place;
-* a re-pause write-back with a fresh client user id reuses the paired user row.
+* a re-pause write-back with a fresh client user id reuses the paired user row;
+* a non-UUID ``user_message_id`` (sidecar ``resume-{turn_id}``) does not throw
+  and reuses the assistant-paired user row.
 """
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 
@@ -56,6 +59,7 @@ def _patch_persistence(
     existing_usage: dict[str, dict] | None = None,
     existing_content: dict[str, str] | None = None,
     paired_user_by_assistant: dict[str, str] | None = None,
+    raise_on_invalid_uuid: bool = False,
 ):
     """Fake CloudStore DB collaborators, recording calls into ``events``."""
     seeded = existing_ids or set()
@@ -84,11 +88,26 @@ def _patch_persistence(
             return SimpleNamespace(id="assistant-id")
 
         async def get_by_id(self, message_id, *, conversation_id):
+            if raise_on_invalid_uuid:
+                try:
+                    UUID(str(message_id))
+                except ValueError as exc:
+                    raise ValueError(
+                        f"invalid UUID '{message_id}': length must be between 32..36"
+                    ) from exc
             if message_id in seeded:
+                role = (
+                    "assistant"
+                    if (
+                        str(message_id).startswith("m")
+                        or message_id in paired_user_by_assistant
+                    )
+                    else "user"
+                )
                 return SimpleNamespace(
                     id=message_id,
                     conversation_id=conversation_id,
-                    role="assistant" if message_id.startswith("m") else "user",
+                    role=role,
                     usage=usage_by_id.get(message_id),
                     content=content_by_id.get(message_id, ""),
                 )
@@ -591,6 +610,49 @@ async def test_record_local_turn_resume_after_pause_updates_assistant(monkeypatc
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "complete"
     assert "paused" not in usage[2]
+
+
+async def test_record_local_turn_non_uuid_umid_reuses_paired_user(monkeypatch):
+    """Legacy sidecar ``resume-{turn_id}`` must not throw; pair via assistant id.
+
+    Production ``Message.id`` is a PG UUID column: ``get_by_id(resume-*)`` raises
+    before the assistant-pairing fallback. This test mirrors that bind error so
+    the case is red on the old intercept.
+    """
+    events: list = []
+    assistant_id = "11111111-1111-4111-8111-111111111111"
+    paired_user_id = "22222222-2222-4222-8222-222222222222"
+    resume_umid = f"resume-{assistant_id}"
+    assert len(resume_umid) == 43
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        existing_ids={assistant_id},
+        existing_usage={assistant_id: {"status": "running", "paused": True}},
+        existing_content={assistant_id: "partial"},
+        paired_user_by_assistant={assistant_id: paired_user_id},
+        raise_on_invalid_uuid=True,
+    )
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="原始问题",
+        assistant_content="续跑完成",
+        journal=[{"kind": "turn_end", "payload": {"finish_reason": "end_turn"}, "ts": "t1"}],
+        user_message_id=resume_umid,
+        message_id=assistant_id,
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert ("upsert", "assistant", "c1") in events
+    assert any(e[0] == "journal" for e in events)
+    assert result["user_message_id"] == paired_user_id
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["noop"] is False
 
 
 async def test_record_local_turn_repause_reuses_paired_user_row(monkeypatch):

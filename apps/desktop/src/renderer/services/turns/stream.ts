@@ -40,7 +40,11 @@ import {
   isAbort,
   isTransportDrop,
 } from "./helpers";
-import { rejoinLiveTurn, settleOrphanEmptyAssistants } from "./recovery";
+import {
+  cancelRejoinLiveTurn,
+  rejoinLiveTurn,
+  settleOrphanEmptyAssistants,
+} from "./recovery";
 import { runRegenerate } from "./regenerate";
 import { claimPrimaryStream, releasePrimaryStream } from "./streamOwnership";
 import { inspectZeroOutputSendRollback } from "./zeroOutputSendRollback";
@@ -161,6 +165,9 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     delivery = "steer",
   } = spec;
   const store = useConversationStore.getState();
+  // A new send takes the stream — stop GET-attach retries so we never race a
+  // rejoin attach against this POST (that would double-fold, not double-run).
+  cancelRejoinLiveTurn(conversationId);
   // Every turn write routes to this conversation's slice by id (not the active
   // key), so a turn keeps streaming into its own bubble after the user switches
   // away to another conversation.

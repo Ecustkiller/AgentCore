@@ -1,16 +1,14 @@
-"""Local / sidecar execution-environment probe + failure markers.
+"""Execution-environment failure markers + remaining health-check probes.
 
-Industry-aligned: before burning long runs, confirm the host can run a
-minimal ``print``. Probe failures and sandbox hangs share markers so
-tools / loop_controller / local-turn stats stay aligned.
+Per-execute classification is driven by the **first real run**, not a
+shortest-program preflight. A missing interpreter or a refused spawn retires
+the language it proved; a timeout never does (that is slow user code or
+machine jitter, not a dead environment).
 
-The probe runs **the language this request asked for**, and its verdict is
-scoped to that language: a machine without ``python`` must still be able to run
-JavaScript. (It used to be a hardcoded ``print('ok')``, so one missing
-interpreter retired the whole ``code_execute`` / ``test_run`` family.) The one
-exception is a sandbox whose health signal starts no interpreter at all —
-gVisor smoke-runs the ``runsc`` runtime — which keeps a single backend-wide
-verdict, expressed here as ``language=None``.
+The one remaining pre-run is a sandbox whose health signal starts no
+interpreter at all — gVisor smoke-runs the ``runsc`` runtime — which keeps a
+single backend-wide verdict, expressed here as ``language=None``.
+``probe_interpreter`` stays for cloud boot / ``cloud_health`` only.
 
 Timeout redesign (定案): idle/silence is the primary kill; a high disaster
 wall is only a safety net — not a「verify budget」contract.
@@ -28,15 +26,17 @@ EXEC_ENV_PROBE_FAIL_MARKER = "ExecEnvProbeFailed:"
 # ``tool_use_end.failure`` via curated code — keep byte-equal with
 # ``runtime.engine.tool_failure_face._CURATED_BY_CODE``).
 EXEC_ENV_PROBE_FAIL_USER_MESSAGE = (
-    "本机执行环境自检未通过：连一句最短的程序都没能跑完，代码没有运行。"
-    "这次没能判断出具体原因，我会换个方式继续。"
+    "本机执行环境不可用：这次没能判断出具体原因，代码没有运行。"
+    "我会换个方式继续。"
 )
 # Stable wire code for probe fail (distinct from idle ``exec_timeout``).
 EXEC_ENV_PROBE_FAIL_CODE = "exec_env_probe_failed"
 # Classified reasons. A code is only assigned when one of the three fields the
-# probe already hands back (exit_code / duration_ms / stderr) proves it; anything
+# failure already hands back (exit_code / duration_ms / stderr) proves it; anything
 # else stays on ``EXEC_ENV_PROBE_FAIL_CODE`` rather than inventing a cause.
 EXEC_ENV_NO_INTERPRETER_CODE = "exec_env_no_interpreter"
+# Only a health check can reach this now: a real run that times out keeps its own
+# ``exec_timeout`` envelope and retires nothing.
 EXEC_ENV_PROBE_TIMEOUT_CODE = "exec_env_probe_timeout"
 EXEC_ENV_SPAWN_DENIED_CODE = "exec_env_spawn_denied"
 EXEC_ENV_PROBE_FAIL_CODES: frozenset[str] = frozenset(
@@ -48,13 +48,12 @@ EXEC_ENV_PROBE_FAIL_CODES: frozenset[str] = frozenset(
     }
 )
 
-# Probe budget shared by both backends (desktop channel + SubprocessSandbox).
+# Budget for the health checks that remain (cloud boot / ``cloud_health``); no
+# per-execute preflight spends it anymore.
 EXEC_ENV_PROBE_TIMEOUT_S = 5
 
-# Shortest program per language that proves the launcher starts and can print.
-# Keyed by the language the caller asked for — the probe follows the request, it
-# does not impose one. A language absent here has no probe, and the caller runs
-# the real request instead of inventing a verdict for it.
+# Shortest program per language, for the ``cloud_health`` interpreter check.
+# Per-execute paths do not run these — they classify the real run instead.
 _PROBE_SNIPPETS: dict[str, str] = {
     "python": "print('ok')",
     "javascript": "console.log('ok')",
@@ -154,32 +153,32 @@ _NO_INTERPRETER_MARKERS = (
 # POSIX / desktop convention for "launcher not found" (both backends answer 127).
 _NO_INTERPRETER_EXIT_CODE = 127
 
-# Closing advice, identical whatever the probe hit — the scope sentence in front
+# Closing advice, identical whatever the failure hit — the scope sentence in front
 # of it is what varies by language.
 _PROBE_FAIL_MODEL_ADVICE = (
-    "若本回合有 terminal 工具，它走桌面进程通道、不经本自检，可改用它跑命令；"
+    "若本回合有 terminal 工具，它走桌面进程通道，可改用它跑命令；"
     "否则请改静态核验，并如实说明命令未实跑。"
 )
 
 # Model-facing head per reason: state the fact the evidence supports, and what it
 # rules out. ``{interpreter}`` / ``{snippet}`` are filled from the language the
-# probe actually ran. The user-facing wording lives in ``tool_failure_face`` /
+# failed run asked for. The user-facing wording lives in ``tool_failure_face`` /
 # ``limits``.
 _PROBE_FAIL_MODEL_HEAD: dict[str, str] = {
     EXEC_ENV_NO_INTERPRETER_CODE: (
-        "本机执行环境自检未通过：PATH 上找不到{interpreter}（自检退出码 127）。"
+        "本机执行失败：PATH 上找不到{interpreter}（退出码 127）。"
         "缺的是解释器本身，与权限或安全软件无关。"
     ),
     EXEC_ENV_PROBE_TIMEOUT_CODE: (
-        f"本机执行环境自检超时：一句 {{snippet}} 在 {EXEC_ENV_PROBE_TIMEOUT_S}s 内没跑完。"
+        f"执行环境健康检查超时：一句 {{snippet}} 在 {EXEC_ENV_PROBE_TIMEOUT_S}s 内没跑完。"
         "解释器在，只是起得太慢；既不是缺解释器，也不是被系统拒绝。"
     ),
     EXEC_ENV_SPAWN_DENIED_CODE: (
-        "本机执行环境自检被拒：启动{interpreter}进程时被系统拒绝（EACCES / EPERM）。"
+        "本机执行被拒：启动{interpreter}进程时被系统拒绝（EACCES / EPERM）。"
         "解释器在，是进程启动这一步被拦下的。"
     ),
     EXEC_ENV_PROBE_FAIL_CODE: (
-        "本机执行环境自检未通过：最短的一次试跑都没能完成；"
+        "本机执行失败：这次运行没能完成；"
         "退出码 / 用时 / stderr 都不足以判定具体原因。"
     ),
 }
@@ -236,11 +235,11 @@ def _probe_fail_scope_sentence(language: str | None) -> str:
         return (
             "本回合 python 执行与 `test_run` 已停用"
             "（test_run 把每条 check 都包成 python 脚本跑），原样重试只会再失败一次；"
-            "其它语言不在本次自检范围内，可另行尝试；"
+            "其它语言不在本次判定范围内，可另行尝试；"
         )
     return (
         f"本回合 {lang} 执行已停用，原样重试只会再失败一次；"
-        "`test_run` 与其它语言不在本次自检范围内，可另行尝试；"
+        "`test_run` 与其它语言不在本次判定范围内，可另行尝试；"
     )
 
 
@@ -290,6 +289,66 @@ def classify_probe_failure(
     return EXEC_ENV_PROBE_FAIL_CODE
 
 
+# Real-run retire is only these two. Timeout / unclassified stay on the original
+# result so a slow script or a 5s jitter never takes ``test_run`` down with it.
+_HARD_EXEC_ENV_RETIRE_CODES: frozenset[str] = frozenset(
+    {EXEC_ENV_NO_INTERPRETER_CODE, EXEC_ENV_SPAWN_DENIED_CODE}
+)
+
+
+def should_retire_exec_env(code: str, *, language: str | None) -> bool:
+    """Whether this classified failure should retire tools.
+
+    Backend-wide smoke (``language`` empty — gVisor ``runsc``) still retires the
+    family on any classified death. A per-language real run retires only on
+    hard evidence: missing interpreter or refused spawn. Timeout never retires.
+    """
+    if not (language or "").strip():
+        return True
+    return code in _HARD_EXEC_ENV_RETIRE_CODES
+
+
+def annotate_real_exec_failure(
+    result: ExecutionResult, *, language: str | None
+) -> tuple[ExecutionResult, ExecEnvProbeVerdict | None]:
+    """Wrap a real-run failure when it proves the environment is dead.
+
+    Returns ``(result, None)`` when the run succeeded, timed out, or failed
+    without hard evidence — the original envelope stands. A missing interpreter
+    or refused spawn becomes the sticky marker consumers already know how to
+    retire on, plus a dead verdict the workspace can memo.
+    """
+    if result.success:
+        return result, None
+    # A real run always names its language. Without one there is no per-language
+    # verdict to record, and inheriting the backend-wide「any death retires the
+    # family」rule here would rebuild the over-reach this redesign removed.
+    if not (language or "").strip():
+        return result, None
+    stderr = result.stderr or result.stdout
+    if is_exec_env_probe_failure(stderr):
+        return result, None
+    code = classify_probe_failure(
+        exit_code=result.exit_code,
+        duration_ms=result.duration_ms,
+        stderr=stderr,
+        timeout_seconds=0,
+    )
+    if not should_retire_exec_env(code, language=language):
+        return result, None
+    verdict = ExecEnvProbeVerdict(
+        alive=False,
+        code=code,
+        evidence=probe_evidence(
+            exit_code=result.exit_code,
+            duration_ms=result.duration_ms,
+            stderr=stderr,
+        ),
+    )
+    wrapped = verdict.failure_result(language=language, duration_ms=result.duration_ms)
+    return wrapped, verdict
+
+
 def probe_evidence(
     *,
     exit_code: int | None = None,
@@ -330,7 +389,7 @@ def probe_failure_stderr(
     )
     lang_tag = f"[lang:{lang}] " if lang else ""
     scope = _probe_fail_scope_sentence(lang)
-    tail = f"（自检证据：{evidence}）" if (evidence or "").strip() else ""
+    tail = f"（证据：{evidence}）" if (evidence or "").strip() else ""
     return (
         f"{EXEC_ENV_PROBE_FAIL_MARKER} [{resolved}] {lang_tag}"
         f"{head}{scope}{_PROBE_FAIL_MODEL_ADVICE}{tail}"
@@ -353,11 +412,11 @@ def probe_failure_retire_steer(
     lang = (language or "").strip()
     scope = f"本回合起停用 {retired}" if retired else "本回合起停用该语言的执行"
     if lang:
-        scope += f"（自检跑的是 {lang}，其它语言未被本次自检判定）"
+        scope += f"（这次跑的是 {lang}，其它语言未被本次判定）"
     return (
-        f"本机执行环境自检未通过（{cause}），{scope}——"
+        f"本机执行环境不可用（{cause}），{scope}——"
         "请改静态核验 / 读文件取证，并如实报告「执行环境不可用、验证未实跑」；"
-        "本机若有 `terminal` 工具，它走桌面进程通道、不经本自检，可用它跑命令；"
+        "本机若有 `terminal` 工具，它走桌面进程通道，可用它跑命令；"
         "禁止再原样重试跑命令。"
     )
 
@@ -387,7 +446,7 @@ def probe_failure_result(
     language: str | None = None,
     evidence: str | None = None,
 ) -> ExecutionResult:
-    """Canonical fail-fast result when the once-per-language probe failed."""
+    """Canonical fail-fast result when a real run proved the environment dead."""
     return ExecutionResult(
         success=False,
         stdout="",
@@ -424,12 +483,13 @@ EXEC_ENV_PROBE_ALIVE = ExecEnvProbeVerdict(alive=True)
 
 
 class ExecEnvProbeMemo:
-    """Once-per-language memo of the pre-execute exec-env probe.
+    """Once-per-language memo of a proved-dead execution environment.
 
-    Keyed by the language the probe ran, so a host missing ``python`` still gets
-    a fresh ``node`` probe instead of inheriting python's verdict. ``None`` is a
-    single backend-wide key for probes that start no interpreter (gVisor's
-    ``runsc`` smoke test), which is what the old pair of booleans always was.
+    Keyed by the language the failed run asked for, so a host missing
+    ``python`` still runs ``node``. ``None`` is a single backend-wide key for
+    health checks that start no interpreter (gVisor's ``runsc`` smoke).
+    Only hard-evidence deaths are recorded on the per-language path; a timeout
+    never lands here.
     """
 
     __slots__ = ("_verdicts",)

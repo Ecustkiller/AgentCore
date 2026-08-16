@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/log", () => ({
   logEvent: vi.fn(),
 }));
 
 import { logEvent } from "@/lib/log";
-import { useServerHealthStore } from "@/stores/serverHealth";
+import {
+  setServerHealthRecoveredHandler,
+  useServerHealthStore,
+} from "@/stores/serverHealth";
 
 const logEventMock = vi.mocked(logEvent);
 
@@ -19,6 +22,10 @@ describe("useServerHealthStore edge logs", () => {
       justRecovered: false,
       offlineSince: null,
     });
+  });
+
+  afterEach(() => {
+    setServerHealthRecoveredHandler(null);
   });
 
   it("logs server_health.offline once on the offline edge", () => {
@@ -84,6 +91,24 @@ describe("useServerHealthStore edge logs", () => {
     expect(fields.since_offline_ms).toBeGreaterThanOrEqual(1_500);
     expect(useServerHealthStore.getState().justRecovered).toBe(true);
     expect(useServerHealthStore.getState().offlineSince).toBeNull();
+  });
+
+  it("notifies the recovered handler only on offline → online", () => {
+    const fn = vi.fn();
+    setServerHealthRecoveredHandler(fn);
+
+    useServerHealthStore.getState().markOnline();
+    expect(fn).not.toHaveBeenCalled();
+
+    useServerHealthStore.setState({
+      status: "offline",
+      lastOkAt: Date.now() - 1_000,
+      reason: "网络已断开，请检查网络连接",
+      justRecovered: false,
+      offlineSince: Date.now() - 1_000,
+    });
+    useServerHealthStore.getState().markOnline();
+    expect(fn).toHaveBeenCalledOnce();
   });
 
   it("logs consecutive_failures on offline edge when provided", () => {

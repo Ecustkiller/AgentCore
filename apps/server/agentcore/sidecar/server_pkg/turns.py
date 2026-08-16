@@ -22,6 +22,21 @@ from agentcore.sidecar.server_pkg.result import trim_result
 logger = get_logger(__name__)
 
 
+def resolve_resume_user_message_id(
+    client_id: str = "",
+    frame_id: str | None = None,
+) -> str:
+    """Outbox / finalize key for a sidecar resume.
+
+    Prefer the client-pinned user bubble, then the pause-frame id. When both
+    are missing, mint a real UUID — same as ``startTurn``. Never derive
+    ``resume-{turn_id}``: that 43-char token is not a ``messages.id`` UUID and
+    cloud ``_finalize_local`` ``get_by_id`` raises (整请求 500).
+    """
+    umid = str(client_id or "").strip() or str(frame_id or "").strip()
+    return umid or new_id()
+
+
 def structured_missing_inference_error() -> dict[str, str]:
     """``{code, message}`` for sidecar turns that lack inference credentials.
 
@@ -162,6 +177,20 @@ def _inference_search_creds(creds: Any):
         base_url=creds.base_url,
         extra_headers=creds.extra_headers,
     )
+
+
+def _salvage_interrupt_reason() -> str:
+    """Map the sidecar cancel stamp onto interrupt-body silence vs honesty.
+
+    Only an explicit ``user_stop`` stamp stays silent when nothing streamed.
+    Process / unspecified / abort cancels owe the user a sentence.
+    """
+    from agentcore.sidecar.server_pkg.cancel_mark import cancel_reason_from_task
+
+    raw = cancel_reason_from_task(asyncio.current_task())
+    if raw == "user_stop":
+        return "user_stop"
+    return "lease_expired"
 
 
 def _emit_user_stop_message_end(sink: EventSink) -> None:
@@ -445,6 +474,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=message_id,
+                    interrupt_reason=_salvage_interrupt_reason(),
                 )
             self._log_turn_cancelled(
                 turn_id=turn_id,
@@ -474,6 +504,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=message_id,
+                    interrupt_reason="lease_expired",
                 )
             if pump is not None:
                 with contextlib.suppress(Exception):
@@ -578,10 +609,11 @@ class TurnExecutionMixin:
         conversation_id = suspension.conversation_id
         user_message = suspension.user_message or ""
         self.stamp_turn_history(conversation_id, suspension.history)
-        # Prefer the client-pinned user bubble id; fall back to a stable derived key.
-        umid = (user_message_id or getattr(suspension, "user_message_id", None) or "").strip()
-        if not umid:
-            umid = f"resume-{turn_id}"
+        # Prefer the client-pinned user bubble id; else the frame; else mint UUID.
+        umid = resolve_resume_user_message_id(
+            user_message_id,
+            getattr(suspension, "user_message_id", None),
+        )
         decision_value = decision.value if hasattr(decision, "value") else str(decision)
         excluded = list(excluded_run_ids or [])
         overrides = list(write_capability_overrides or [])
@@ -796,6 +828,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=turn_id,
+                    interrupt_reason=_salvage_interrupt_reason(),
                 )
             self._log_turn_cancelled(
                 turn_id=turn_id,
@@ -837,6 +870,7 @@ class TurnExecutionMixin:
                     conversation_id=conversation_id,
                     trace_id=trace_id,
                     message_id=turn_id,
+                    interrupt_reason="lease_expired",
                 )
             with contextlib.suppress(Exception):
                 await pump

@@ -68,7 +68,7 @@ async def test_labels_attachments():
     out = await build_workspace_overview(
         _FakeBackend(["attachments/a.pdf", "notes.md"])
     )
-    assert "attachments/a.pdf（附件）" in out
+    assert "attachments/a.pdf（附件·含历轮）" in out
     assert "notes.md（工作区已有）" in out
 
 
@@ -90,7 +90,7 @@ async def test_project_mode_keeps_attachments_and_summarizes_rest():
     out = await build_workspace_overview(
         _FakeBackend(paths), shared_workspace=True
     )
-    assert "attachments/brief.md（附件）" in out
+    assert "attachments/brief.md（附件·含历轮）" in out
     assert "另有 5 个文件，需要时用 file_list / grep" in out
 
 

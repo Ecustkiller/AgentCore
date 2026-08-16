@@ -9,6 +9,7 @@ from httpx import ASGITransport
 
 from agentcore.api.routes import system
 from agentcore.main import app
+from tests.conftest import LogSpy
 
 
 def _client() -> httpx.AsyncClient:
@@ -39,6 +40,86 @@ async def test_readyz_returns_200_when_database_reachable(monkeypatch):
 
     assert r.status_code == 200
     assert r.json() == {"status": "ready", "database": True}
+
+
+async def test_readyz_failure_is_logged(monkeypatch):
+    """Probe failure must land in server logs (http.readyz_failed)."""
+    spy = LogSpy()
+    monkeypatch.setattr(system, "logger", spy)
+    monkeypatch.setattr(system, "_last_readyz_ok", True)
+
+    async def _down() -> bool:
+        return False
+
+    async def _redis_ok() -> bool:
+        return True
+
+    monkeypatch.setattr(system, "database_ready", _down)
+    monkeypatch.setattr(system, "redis_ready", _redis_ok)
+    async with _client() as c:
+        r = await c.get("/readyz")
+
+    assert r.status_code == 503
+    logged = spy.get("http.readyz_failed")
+    assert logged["ok"] is False
+    assert logged["status"] == "not_ready"
+    assert logged["database"] is False
+    assert isinstance(logged["probe_ms"], int)
+
+
+async def test_readyz_failed_coalesces_clustered_probes(monkeypatch):
+    """First not_ready always logs; repeats inside 10s are swallowed."""
+    spy = LogSpy()
+    monkeypatch.setattr(system, "logger", spy)
+    monkeypatch.setattr(system, "_last_readyz_ok", True)
+    monkeypatch.setattr(system, "_readyz_fail_unlogged", 0)
+    monkeypatch.setattr(system, "_readyz_last_fail_log_mono", None)
+    clock = {"t": 0.0}
+    monkeypatch.setattr(system, "mono_now", lambda: clock["t"])
+
+    async def _down() -> bool:
+        return False
+
+    async def _redis_ok() -> bool:
+        return True
+
+    monkeypatch.setattr(system, "database_ready", _down)
+    monkeypatch.setattr(system, "redis_ready", _redis_ok)
+    async with _client() as c:
+        first = await c.get("/readyz")
+        clock["t"] = 1.0
+        second = await c.get("/readyz")
+        clock["t"] = 10.0
+        third = await c.get("/readyz")
+
+    assert first.status_code == 503
+    assert second.status_code == 503
+    assert third.status_code == 503
+    fails = [kw for name, kw in spy.events if name == "http.readyz_failed"]
+    assert len(fails) == 2
+    assert fails[0]["fail_count"] == 1
+    assert fails[1]["fail_count"] == 2
+
+
+async def test_readyz_success_logs_only_on_recovery(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(system, "logger", spy)
+    monkeypatch.setattr(system, "_last_readyz_ok", False)
+
+    async def _ready() -> bool:
+        return True
+
+    monkeypatch.setattr(system, "database_ready", _ready)
+    monkeypatch.setattr(system, "redis_ready", _ready)
+    async with _client() as c:
+        first = await c.get("/readyz")
+        second = await c.get("/readyz")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    recoveries = [kw for name, kw in spy.events if name == "http.readyz"]
+    assert len(recoveries) == 1
+    assert recoveries[0]["ok"] is True
 
 
 async def test_readyz_returns_503_when_database_down(monkeypatch):

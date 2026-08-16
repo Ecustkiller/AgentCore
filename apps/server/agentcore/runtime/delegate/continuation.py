@@ -160,9 +160,12 @@ async def resolve_session(
     if session is None:
         raise _miss_rejected(tool, target)
     if session.recall_count >= DEFAULT_RECALL_LIMIT:
+        # 与其它 cause 不同：这条不是「参数填错」，而是业务上限，CEO 会拿它向用户解释
+        # 为什么这块还没改好（案 b25bdb59 实测被转述进用户气泡）。故用人话写——万一
+        # 原样外露，用户读到的仍是一句能懂的话，不是内部编排术语。
         raise ContinuationRejectedError(
-            f"队员 `{target}` 的带现场续派已达上限（{DEFAULT_RECALL_LIMIT} 次）。"
-            "请改用冷委派重派，并设 replaces_run_id 标接手。",
+            f"队员 `{target}` 已经返工 {DEFAULT_RECALL_LIMIT} 次，不能再找同一个人改了。"
+            "换一位队员接手：`delegate` 时设 `replaces_run_id` 指向它。",
             cause="recall_limit",
         )
     return session

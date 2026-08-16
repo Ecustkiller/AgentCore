@@ -105,8 +105,8 @@ _CURATED_BY_CODE: dict[str, str] = {
     "exec_timeout": "执行超时，请缩小范围后重试。",
     "exec_forced_stop": "执行已强制中止，请缩小范围后重试。",
     "exec_env_probe_failed": (
-        "本机执行环境自检未通过：连一句最短的程序都没能跑完，代码没有运行。"
-        "这次没能判断出具体原因，我会换个方式继续。"
+        "本机执行环境不可用：这次没能判断出具体原因，代码没有运行。"
+        "我会换个方式继续。"
     ),
     # --- 代码执行：环境起不来 / 语言缺失 / 联网不支持 ---
     # Distinct from the probe above: nothing about the machine is broken, the requested
@@ -122,7 +122,7 @@ _CURATED_BY_CODE: dict[str, str] = {
     # Same fact as the exec-env-dead bubble: startup too slow / the command did
     # not finish. Vocabulary is「命令」, not「代码执行环境」, so the two faces match.
     "exec_env_probe_timeout": (
-        "最短的一句命令 5 秒内都没跑完，本机启动得太慢。稍后再试通常会好转。"
+        "执行环境没有在时限内就绪，命令没有运行。稍后再试通常会好转。"
     ),
     # The one place where naming security software is honest: the OS refused the spawn.
     "exec_env_spawn_denied": (

@@ -5,12 +5,13 @@ import {
   statusChip,
 } from "@/components/ui/tone-presets";
 import { cn } from "@/lib/utils";
+import { isReconnectQuietBanner } from "@/services/turns/helpers";
 import {
   useActiveError,
   useActiveErrorAction,
   useConversationStore,
 } from "@/stores/conversation";
-import { AlertTriangle, KeyRound, X } from "lucide-react";
+import { AlertTriangle, Info, KeyRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 /**
@@ -22,8 +23,9 @@ import { useNavigate } from "react-router-dom";
  * user to fix the cause (e.g. "去配置" → model config for a missing BYOK key);
  * dismissing only hides the banner.
  *
- * Tone: config remedy (去配置) = blue `primary`; everything else on this banner
- * is a recoverable interruption → {@link noticeChipNeutral} (not danger red).
+ * Tone: config remedy (去配置) = blue `primary`; quiet reconnect / finished
+ * copy uses Info on {@link noticeChipNeutral}; confirmed-bad reconnect and
+ * other recoverable interruptions keep the triangle (not danger red).
  *
  * Conversation-scoped (reads the active conversation's error state) and therefore
  * self-contained wherever it mounts — mirrors {@link import("./ApprovalPrompt").ApprovalPrompt}
@@ -37,15 +39,18 @@ export function RetryBanner() {
   if (!error) return null;
 
   const needsYou = Boolean(action);
+  const quiet = !needsYou && isReconnectQuietBanner(error);
+  const Icon = quiet ? Info : AlertTriangle;
 
   return (
     <div
+      data-banner-tone={needsYou ? "primary" : quiet ? "notice" : "alert"}
       className={cn(
         "mx-4 mb-2 flex items-center gap-2 rounded-lg border px-3 py-2 text-sm",
         needsYou ? statusChip.primary : noticeChipNeutral,
       )}
     >
-      <AlertTriangle
+      <Icon
         size={15}
         className={cn(
           "shrink-0",

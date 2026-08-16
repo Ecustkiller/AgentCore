@@ -687,7 +687,7 @@ function ReplyQuote({
   return (
     <div
       className={`im-reply-quote${mine ? " mine" : ""}`}
-      aria-label={`回复 ${reply.sender_display_name}`}
+      aria-label={`回复 ${reply.sender_display_name}：${reply.body_preview}`}
     >
       <span className="im-reply-quote-name">{reply.sender_display_name}</span>
       <span className="im-reply-quote-body">{reply.body_preview}</span>

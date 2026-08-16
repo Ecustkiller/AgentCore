@@ -184,6 +184,86 @@ def test_compute_stats_json_serializable(tmp_path: Path):
     assert again["event_counts"]["chat.turn_complete"] == 1
 
 
+def test_compute_stats_aggregates_stream_health(tmp_path: Path):
+    primary = tmp_path / "dev.jsonl"
+    _write_jsonl(
+        primary,
+        [
+            {
+                "event": "event_sink.detach",
+                "timestamp": "2026-08-17T10:00:00Z",
+                "conversation_id": "c1",
+                "reason": "sse_disconnect",
+                "duration_ms": 70_000,
+                "idle_ms": 60_000,
+            },
+            {
+                "event": "event_sink.attach",
+                "timestamp": "2026-08-17T10:00:00.500Z",
+                "conversation_id": "c1",
+                "message_id": "m1",
+                "mode": "attach",
+            },
+            {
+                "event": "conversation_stream.unwatch",
+                "timestamp": "2026-08-17T10:00:01Z",
+                "conversation_id": "c1",
+                "duration_ms": 80_000,
+                "idle_ms": 1_000,
+            },
+            {
+                "event": "http.readyz_failed",
+                "timestamp": "2026-08-17T10:00:02Z",
+                "ok": False,
+            },
+            {
+                "event": "event_loop.lag",
+                "timestamp": "2026-08-17T10:00:03Z",
+                "lag_ms": 1200,
+            },
+            {
+                "event": "event_sink.backpressure_drop",
+                "timestamp": "2026-08-17T10:00:04Z",
+                "dropped_delta": 10,
+                "dropped_total": 6264,
+            },
+            {
+                "event": "rate_limit.redis_fail_open",
+                "timestamp": "2026-08-17T10:00:05Z",
+                "prefix": "rl:auth",
+                "count": 3,
+            },
+            {
+                "event": "rate_limit.redis_fail_open",
+                "timestamp": "2026-08-17T10:00:06Z",
+                "prefix": "rl:auth",
+                "count": 4,
+            },
+            {
+                "event": "rate_limit.redis_fail_open",
+                "timestamp": "2026-08-17T10:00:16Z",
+                "prefix": "rl:api",
+                "count": 5,
+            },
+        ],
+    )
+    result = compute_stats(primary, include_synthetic=True, window_label="test")
+    health = result.summaries["stream_health"]
+    assert health["count"] == 3
+    assert health["idle_ge_60s"] == 1
+    assert health["idle_max_ms"] == 60_000
+    assert health["attach_by_mode"] == {"attach": 1}
+    assert result.summaries["readyz"]["failed"] == 1
+    assert result.summaries["event_loop"]["max_lag_ms"] == 1200
+    assert result.summaries["sse_backpressure"]["dropped_total_max"] == 6264
+    fail_open = result.summaries["rate_limit_fail_open"]
+    assert fail_open["requests"] == 3
+    assert fail_open["pulses"] == 2
+    assert fail_open["severity"] == "must_review"
+    assert fail_open["by_prefix"]["rl:auth"] == 2
+    assert fail_open["process_count_max"] == 5
+
+
 def test_accumulate_trace_folds_collab_signals():
     rec = new_trace()
     accumulate_trace(rec, "chat.turn_complete", {"delegated": True, "finish_reason": "end_turn"})

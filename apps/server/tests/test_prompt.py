@@ -286,6 +286,12 @@ def test_capability_how_gated_on_ceo_tool_names():
     assert "ask_user(browser_login=true)" in browser
     assert "wait_for" not in browser
 
+    grant = assemble_ceo_core({"external_mount_readonly"})
+    assert "授权后发现" in grant
+    assert "wait_for" not in grant
+    assert "通识长文当交付" not in grant
+    assert "授权后发现" not in browser
+
     ceo = compose_ceo_chat_prompt(
         assemble_system_prompt(),
         ceo_tool_names={"delegate", "consult"},
@@ -394,7 +400,6 @@ def test_core_teaches_split_criterion_over_count():
     assert "SmartArt" not in hint and "DrawingML" not in hint
     assert "极宽" not in hint
     assert "format_options" in hint  # 禁复活（以禁止语境出现）
-    assert "pptx" in hint.lower() and "marp" in hint.lower()
     assert "先设计再实现" in hint
     assert "只留方向句" in hint
     assert "1 人两段" in hint or "一人两段" in hint
@@ -917,15 +922,18 @@ def test_core_teaches_presentation_honesty():
     # 须真目标后缀；无执行禁再派跑脚本；当模板须 file_copy。
     # 案 5d25 / 08-08④：图形组织图直接拒+替代；仅文本/表格 Word；禁说满空派。
     hint = _CEO_CORE_HINT
-    assert "pptx" in hint.lower()
-    assert "Office 已落盘可直接使用" in hint or "PPT 已落盘可直接使用" in hint
-    assert "静默" in hint or "只交" in hint
-    assert "再派" in hint or "ask_user" in hint
-    assert "图形组织图" in hint
-    assert "直接拒" in hint
-    assert "文本" in hint and "表格" in hint
+    # 案 0a71：核里原来枚举后缀 + 散文断言导出器装配态，逼模型自己推理「团队能产什么」，
+    # 烧掉整段思考链。诚实钩子保留但通用化——只认 `产物格式` 事实行，核不再点格式。
+    assert "产物格式" in hint
+    assert "不可产" in hint and "等效替代" in hint
+    assert "已落盘可直接使用" in hint
+    assert "静默降级" in hint
+    assert "ask_user" in hint
     assert "说满" in hint and "空派" in hint
+    assert "pptx" not in hint.lower() and "xlsx" not in hint.lower()
     assert "SmartArt" not in hint and "DrawingML" not in hint
+    # 图形组织图的 HOW（直接拒 + 文本/表格版替代）在编排 skill；核只留短指针。
+    assert "图形组织图" in hint
     # 当模板 / 压体积 / Presentation()：HOW 在编排 skill（核只留短指针）
     kickoff = build_system_skill_registry().get("ask_user_kickoff").body
     # 场面 format_options 已退役；仅允许以「禁复活」语境出现，不得当字段教
@@ -942,15 +950,27 @@ def test_core_teaches_presentation_honesty():
     assert "压体积" in orch and "模板保真" in orch
     assert "*_slim.pptx" in orch or "slim.pptx" in orch
     assert "图形组织图" in orch
+    assert "直接拒" in orch
+    assert "文本" in orch and "表格版" in orch
     assert "说满" in orch and "空派" in orch
 
 
-def test_core_teaches_word_pdf_orthogonal_to_execution():
-    """CEO 常驻：`.docx`/`.pdf` 走确定性导出，无 code_execute 也照交；缺口只覆盖 pptx/xlsx。"""
+def test_core_defers_format_capability_to_facts_not_prose():
+    """`.docx`/`.pdf` 与执行正交这条知识，权威在事实行 + 编排 skill，不在常驻核。
+
+    原为 test_core_teaches_word_pdf_orthogonal_to_execution：核里散文断言
+    「md_to_docx / md_to_pdf 无条件装配」，而 CEO 不持这两把工具、在自己的工具列表里
+    看不到它们（案 0a71 的思考链有三轮在猜 worker 有没有）。现在装配态由
+    `<workspace_context>` 的 `产物格式：` 行按注册表真实闸算出来，核只负责怎么用那行。
+    """
     hint = _CEO_CORE_HINT
-    assert "md_to_docx" in hint and "md_to_pdf" in hint
-    assert "`.pptx`/`.xlsx`" in hint
-    assert "`.pptx`/`.docx`/`.xlsx`" not in hint
+    assert "md_to_docx" not in hint and "md_to_pdf" not in hint
+    assert "产物格式" in hint
+    orch = _TEAM_ORCHESTRATION_ADVANCED
+    assert "md_to_docx" in orch and "md_to_pdf" in orch
+    assert "与执行正交" in orch
+    assert "产物格式" in orch  # skill 也改口径：装配态看事实行，不再自称无条件装配
+    assert "无条件装配" not in orch
 
 
 def test_core_teaches_required_sections_same_literal():
@@ -1169,27 +1189,40 @@ def test_ceo_core_teaches_empty_shell_dual_folder_kickoff():
 
 
 def test_core_guides_out_of_workspace_absolute_paths():
-    # 区外路径：对照 workspace_context 能力行；仅桌面已装配才挂载/整理；操作手册在 ask_user_*。
+    """区外路径：常驻只留底线 + 指针；可履约的授权手册跟 ``external_mount_readonly`` 装配走。
+
+    授权全流程（挂载 / 升整理 / well_known 选点 / 失败分型）只有桌面回填通道在线才做得成，
+    而该工具是 ``desktop_online_class``——装配即通道在线。通道不在的回合把这 900 字符手册
+    常驻，等于让模型读一份本回合证明履行不了的操作说明。底线相反：它恰在通道缺失时才生效，
+    所以留在核里。
+    """
     hint = _CEO_CORE_HINT
     assert "工作区外" in hint
     assert "workspace_context" in hint
     assert "external_mount_readonly" in hint
     assert "grant_organize_folder" in hint
     assert "ask_user" in hint
-    # 只读禁新发 grant_readonly 卡；整理仍确认。
-    assert "禁止" in hint and "grant_readonly_folder" in hint
-    # 授权后发现：带 well_known；模糊指代禁首轮要文件名。
-    assert "授权后发现" in hint
-    assert "well_known" in hint
+    # 通道不在时的底线：勿挂载 / 勿发卡 / 勿假装 / 勿拿文本题要手填路径。
+    assert "host=未装配" in hint
+    assert "勿挂载" in hint and "勿发卡" in hint
     assert "禁止" in hint and "文件名" in hint
-    # 口头同意闭环 + 歧义 2～3 候选 + 失败分型（提示面；禁空心等待）。
-    assert "口头同意" in hint
-    assert "等待确认" in hint and "禁止" in hint
-    assert "2～3" in hint or "2-3" in hint
-    assert "失败分型" in hint
-    assert "没找着" in hint
+    assert "手填" in hint
+    assert "ask_user_*" in hint  # 手册指针
+    # 可履约手册不常驻，装配后才挂。
+    for manual_only in ("授权后发现", "well_known", "口头同意", "失败分型", "没找着"):
+        assert manual_only not in hint, f"{manual_only} 应只在装配后的手册里"
+    granted = assemble_ceo_core({"external_mount_readonly"})
+    assert "授权后发现" in granted
+    assert "well_known" in granted
+    assert "口头同意" in granted
+    assert "等待确认" in granted and "禁止" in granted
+    assert "2～3" in granted or "2-3" in granted
+    assert "失败分型" in granted
+    assert "没找着" in granted
+    assert "禁止" in granted and "grant_readonly_folder" in granted
     # 不得无条件鼓动「立即发卡」——本机 Host/区外叙述只留在 workspace_context。
     assert "立即发卡" not in hint
+    assert "立即发卡" not in granted
     mid = build_system_skill_registry().get("ask_user_midtask")
     assert mid is not None
     assert "external_mount_readonly" in mid.body or "区外目录" in mid.body
@@ -1356,6 +1389,50 @@ def test_ceo_core_platform_knowledge_two_way_routing():
     assert ".mdc" in block
     assert "skills/*.json" in block
     assert "Cursor" in block and "AgentCore" in block
+
+
+def test_ceo_core_teaches_identity_question_answers_our_product_first():
+    """身份问走自己答：可见正文先答我方产品，禁把第三方 Skill 仓当成本项目落地。"""
+    hint = _CEO_CORE_HINT
+    assert "【身份问·先答我方】" in hint
+    ask_self = hint.split("② 自己答", 1)[1]
+    hook = ask_self.split("【身份问·先答我方】", 1)[1].split("【问方法 ≠ 要结果】", 1)[0]
+    assert "这是什么项目" in hook
+    assert "你是什么" in hook
+    assert "自己答" in hook
+    assert "首句" in hook
+    assert "【品类】" in hook
+    assert "第三方" in hook and "Skill" in hook
+    assert "落地" in hook
+    assert "consult(product_help)" in hook
+    # 不下发 worker
+    worker = compose_worker_base_prompt(assemble_system_prompt())
+    assert "【身份问·先答我方】" not in worker
+    # 不改坏 08-15 官网 / 识图
+    assert "https://fashitianxia.xyz" in hint
+    assert "附件·勿否认" in hint
+    assert "没看到照片" in hint
+
+
+def test_ceo_core_teaches_existing_tool_results_must_not_be_denied():
+    """收口对照已有工具/队员结果；禁止有结果却说还没拿到。"""
+    hint = _CEO_CORE_HINT
+    assert "【已有结果·勿否认】" in hint
+    pin = hint.split("【已有结果·勿否认】", 1)[1].split("【多源合并·成篇优先】", 1)[0]
+    assert "stdout" in pin or "版本" in pin
+    assert "还没拿到" in pin
+    assert "没查到" in pin
+    assert "限流" in pin
+    assert "再派" in pin
+    # 紧挨附件勿否认（同属收口诚实，不下发 worker）
+    honesty = hint.split("【附件·勿否认】", 1)[1]
+    assert honesty.index("【已有结果·勿否认】") < honesty.index("【多源合并·成篇优先】")
+    worker = compose_worker_base_prompt(assemble_system_prompt())
+    assert "【已有结果·勿否认】" not in worker
+    # 不改坏识图纪律原文
+    assert "没看到照片 / 没有附带图片 / 工作区是空的" in hint
+    assert "图已收到 + 失败原因 + 请压缩或换图" in hint
+    assert "空口说读不了" in hint
 
 
 def test_ceo_core_cross_product_rule_paradigm_routing_hook():

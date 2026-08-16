@@ -538,11 +538,70 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "dropped_delta": "int",
         "dropped_total": "int",
     },
+    "event_sink.attach": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "label": "str",
+        "mode": "str",
+        "started_at": "str",
+        "http_req_id": "str",
+    },
     "event_sink.detach": {
         "reason": "str",
         "conversation_id": "str",
         "message_id": "str",
         "already_detached": "bool",
+        "started_at": "str",
+        "duration_ms": "int",
+        "idle_ms": "int",
+        "label": "str",
+        "mode": "str",
+        "http_req_id": "str",
+    },
+    "conversation_stream.watch": {
+        "conversation_id": "str",
+        "message_id": "str",
+        "watchers": "int",
+        "started_at": "str",
+        "mode": "str",
+        "http_req_id": "str",
+    },
+    "conversation_stream.unwatch": {
+        "conversation_id": "str",
+        "started_at": "str",
+        "duration_ms": "int",
+        "idle_ms": "int",
+        "mode": "str",
+        "http_req_id": "str",
+    },
+    "http.readyz": {
+        "ok": "bool",
+        "status": "str",
+        "database": "bool",
+        "redis": "bool",
+        "probe_ms": "int",
+        "unlogged_failures": "int",
+    },
+    "http.readyz_failed": {
+        "ok": "bool",
+        "status": "str",
+        "database": "bool",
+        "redis": "bool",
+        "probe_ms": "int",
+        "fail_count": "int",
+    },
+    "event_loop.lag": {
+        "lag_ms": "int",
+        "interval_s": "float",
+        "threshold_ms": "int",
+        "suppressed": "int",
+    },
+    "event_loop.lag_summary": {
+        "max_lag_ms": "int",
+        "samples": "int",
+        "over_threshold": "int",
+        "threshold_ms": "int",
+        "window_s": "float",
     },
     "event_sink.close": {
         "reason": "str",
@@ -749,9 +808,25 @@ KEY_DESC: dict[str, str] = {
     "firehose.backpressure_drop": (
         "IM firehose 慢连接弃最旧帧：首丢立刻一条，之后心跳，订阅结束冲余数"
     ),
-    "event_sink.detach": (
-        "SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach"
+    "event_sink.attach": (
+        "SSE 消费者 subscribe（连上）；mode=attach|follow|turn，"
+        "与同 conversation_id+message_id 的 event_sink.detach 对表"
     ),
+    "event_sink.detach": (
+        "SSE 消费者 detach（断线/排队无 waiter 等）；already_detached 区分幂等再 detach；"
+        "duration_ms=订阅后第几毫秒断开，idle_ms=距上一帧/心跳空闲（看门狗看空闲不是总长）；"
+        "mode/http_req_id 与后续 attach 配对"
+    ),
+    "conversation_stream.watch": (
+        "仅 follow 模式（GET /stream?follow=true）开始跟播；attach 不走这条，看 event_sink.attach"
+    ),
+    "conversation_stream.unwatch": (
+        "对话级 SSE 断开；duration_ms=连接总长，idle_ms=距上一帧/心跳（含 : ping）"
+    ),
+    "http.readyz": "/readyz 首次就绪或从失败恢复（状态翻转才记，避免探针刷屏）",
+    "http.readyz_failed": "/readyz 失败（每次 not_ready；database 硬依赖决定 503）",
+    "event_loop.lag": "事件环 sleep 超限（默认 ≥250ms）；lag_ms 即卡住多久",
+    "event_loop.lag_summary": "事件环 60s 摘要（max_lag_ms / over_threshold；沉默≠没探针）",
     "event_sink.close": (
         "EventSink 真 close（开→关仅一条）；was_detached 区分先前仅断线 vs 仍附着收口"
     ),

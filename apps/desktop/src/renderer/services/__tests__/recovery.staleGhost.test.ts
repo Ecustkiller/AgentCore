@@ -8,7 +8,7 @@
  */
 import { useConversationStore } from "@/stores/conversation";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const apiGet = vi.fn();
 
@@ -29,6 +29,7 @@ vi.mock("@/services/messages", () => ({
 import { UNKNOWN_CLOUD_BANNER } from "../turns/helpers";
 import {
   markGhostInterrupted,
+  resetRejoinLiveTurnForTests,
   settleCloudRunningAssistant,
 } from "../turns/recovery";
 
@@ -86,6 +87,10 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   // Web path: cloud-only loadRecovery (no sidecar IPC).
   vi.stubGlobal("window", { __WEB__: true });
+});
+
+afterEach(() => {
+  resetRejoinLiveTurnForTests();
 });
 
 describe("settleCloudRunningAssistant (stale recovery race)", () => {

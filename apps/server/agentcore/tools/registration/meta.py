@@ -105,6 +105,11 @@ class ToolRegistration:
     # 引擎 / 台账一律读 ``ToolResult.file_products``，绝不按这个字段（更不按工具名）判谁产了
     # 文件。落盘面上留着默认值 = 棘轮红灯。
     file_products: FileProductsContract = FileProductsContract.UNDECLARED
+    # 本工具能落地的目标后缀（带点，如 ``.docx``）。空 = 不是格式生产者，不进
+    # ``<workspace_context>`` 产物格式行。专用导出器写自己的输出；``execution_class``
+    # 工具只写「没有专用导出器、靠脚本才能产」的格式。事实行读本字段 + 本回合装配闸，
+    # 不另维护一份格式白名单。
+    produces_formats: tuple[str, ...] = ()
 
 
 def tool_registration(cls: type) -> ToolRegistration:

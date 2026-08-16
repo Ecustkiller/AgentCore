@@ -48,7 +48,7 @@ def test_workspace_manifest_lists_attachments_with_label():
     manifest = _workspace_manifest(
         plan, {}, ["attachments/brief.pdf", "notes.md"], exclude_runs=set()
     )
-    assert "attachments/brief.pdf（附件）" in manifest
+    assert "attachments/brief.pdf（附件·含历轮）" in manifest
     assert "notes.md（工作区已有）" in manifest
 
 
@@ -60,7 +60,7 @@ def test_workspace_manifest_project_summarizes_shared_files():
         plan, completed, index, exclude_runs=set(), shared_workspace=True
     )
     assert "peer_out.py" in manifest and "队友A" in manifest
-    assert "attachments/in.md（附件）" in manifest
+    assert "attachments/in.md（附件·含历轮）" in manifest
     assert "最近触达" in manifest
     assert "另有 5 个文件，需要时用 file_list / grep" in manifest
     # Shared tree is not fully enumerated.

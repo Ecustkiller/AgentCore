@@ -1167,36 +1167,38 @@ class TestRunTool:
                 is_exec_env_probe_failure,
                 probe_failure_retire_steer,
                 probe_failure_retire_tools,
+                should_retire_exec_env,
             )
 
             if is_exec_env_probe_failure(exec_result.stderr) or is_exec_env_probe_failure(
                 exec_result.stdout
             ):
                 msg = (exec_result.stderr or exec_result.stdout or "").strip()
-                # Classified probe reason when provable, else generic.
                 probe_code = exec_env_probe_failure_code(msg)
                 # Every check runs as a python script (see ``_python_argv_runner``),
                 # so a dead python retires this tool — but it no longer drags
-                # ``code_execute`` down with it: other languages were not probed.
+                # ``code_execute`` down with it. Timeout never retires.
                 probe_language = exec_env_probe_failure_language(msg)
+                meta: dict[str, object] = {
+                    "check": check,
+                    "code": probe_code,
+                    "exec_env_timeout": True,
+                }
+                if should_retire_exec_env(probe_code, language=probe_language):
+                    meta["error_class"] = "permanent"
+                    meta["retire_tools"] = list(
+                        probe_failure_retire_tools(probe_language)
+                    )
+                    meta["retire_message"] = probe_failure_retire_steer(
+                        probe_code, language=probe_language
+                    )
                 return ToolResult(
                     tool_call_id="",
                     success=False,
                     output=msg,
                     error=msg,
                     duration_ms=duration_ms,
-                    metadata={
-                        "check": check,
-                        "code": probe_code,
-                        "exec_env_timeout": True,
-                        "error_class": "permanent",
-                        "retire_tools": list(
-                            probe_failure_retire_tools(probe_language)
-                        ),
-                        "retire_message": probe_failure_retire_steer(
-                            probe_code, language=probe_language
-                        ),
-                    },
+                    metadata=meta,
                     display={
                         "check": check,
                         "command": command_shell,

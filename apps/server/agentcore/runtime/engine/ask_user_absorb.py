@@ -1,8 +1,13 @@
 """Content absorption for blocking ``ask_user``.
 
-When the model streams prose and calls blocking ``ask_user`` in the same round, the
-engine folds that prose into the card (or discards it when ``message`` is explicit)
-instead of leaving duplicate text in the bubble / transcript.
+When the model streams prose and calls blocking ``ask_user`` without its own
+``message``, the engine folds that prose into the card. When the model already
+wrote ``message``, the same-round guidance stays in the bubble (CheckpointCard
+pending renders nothing so that body remains the visible face).
+
+Parse failure never rewrites arguments — the unique parse
+(:func:`parse_tool_call_arguments`) either succeeds or the call falls through
+to the existing ``args_parse_failed`` path.
 """
 
 from __future__ import annotations
@@ -13,23 +18,34 @@ from typing import Any
 
 from agentcore.core.types import ToolEffect
 from agentcore.llm.provider.protocol import LLMMessage, ToolCall
+from agentcore.runtime.engine.tool_protocol_sanitize import parse_tool_call_arguments
 from agentcore.runtime.facts import FactKind, current_fact_log
 from agentcore.runtime.loop_controller import ToolAttempt
 
 from .segments import tool_calls_to_dicts
 
 
-def _parse_args(tc: ToolCall) -> dict[str, Any]:
+def _try_parse_args(tc: ToolCall) -> tuple[dict[str, Any], str | None] | None:
+    """``None`` = parse failed (do not rewrite). Empty dict = parsed empty object."""
     try:
-        return json.loads(tc.function.arguments) if tc.function.arguments else {}
+        parsed, repaired = parse_tool_call_arguments(
+            tc.function.arguments or "",
+            tool_name=tc.function.name or "",
+        )
     except json.JSONDecodeError:
-        return {}
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    return parsed, repaired
 
 
 def is_blocking_ask_user(tc: ToolCall) -> bool:
     if tc.function.name != "ask_user":
         return False
-    args = _parse_args(tc)
+    parsed = _try_parse_args(tc)
+    if parsed is None:
+        return True
+    args, _repaired = parsed
     blocking_arg = args.get("blocking")
     return True if blocking_arg is None else bool(blocking_arg)
 
@@ -44,27 +60,47 @@ def _patch_tool_call_args(tc: ToolCall, args: dict[str, Any]) -> ToolCall:
     )
 
 
+def _with_repaired_args(tc: ToolCall, repaired: str) -> ToolCall:
+    return replace(tc, function=replace(tc.function, arguments=repaired))
+
+
 def prepare_blocking_ask_user_tool_calls(
     tool_calls: list[ToolCall],
     round_content: str,
-) -> list[ToolCall]:
+) -> tuple[list[ToolCall], bool]:
     """Inject ``round_content`` into a blocking ``ask_user`` when ``message`` is empty.
 
-    Does not rewrite card copy — model/prompt own the wording; the card is the pause face.
+    Returns ``(patched_calls, content_folded)``. ``content_folded`` is True only
+    when the engine actually wrote ``message`` from this round's prose.
+
+    Parse failure leaves the raw arguments untouched. Does not rewrite card copy
+    when the model already set ``message``.
     """
     content = (round_content or "").strip()
     patched: list[ToolCall] = []
+    content_folded = False
     for tc in tool_calls:
-        if not is_blocking_ask_user(tc):
+        if tc.function.name != "ask_user":
             patched.append(tc)
             continue
-        args = _parse_args(tc)
+        parsed = _try_parse_args(tc)
+        if parsed is None:
+            patched.append(tc)
+            continue
+        args, repaired = parsed
+        if repaired is not None:
+            tc = _with_repaired_args(tc, repaired)
+        blocking_arg = args.get("blocking")
+        if blocking_arg is not None and not bool(blocking_arg):
+            patched.append(tc)
+            continue
         if str(args.get("message") or "").strip() or not content:
             patched.append(tc)
             continue
         args["message"] = content
         patched.append(_patch_tool_call_args(tc, args))
-    return patched
+        content_folded = True
+    return patched, content_folded
 
 
 def _blocking_ask_user_succeeded(
@@ -106,11 +142,15 @@ def absorb_blocking_ask_user_content(
     attempts: list[ToolAttempt],
     terminal_effect: ToolEffect | None,
     emit_reset: Any,
+    content_folded: bool,
 ) -> bool:
     """Clear absorbed assistant prose after a successful blocking ``ask_user`` pause.
 
-    Returns ``True`` when content was absorbed (caller should roll back ``final_content``).
+    Only when the engine folded this round's prose into ``message``. Returns
+    ``True`` when content was absorbed (caller should roll back ``final_content``).
     """
+    if not content_folded:
+        return False
     if terminal_effect is not ToolEffect.SUSPEND:
         return False
     if not _blocking_ask_user_succeeded(tool_calls, attempts):

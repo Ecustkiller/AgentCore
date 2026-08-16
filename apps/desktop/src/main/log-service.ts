@@ -10,8 +10,15 @@
  * - **dev 镜像**：未打包态额外打到 stdout，`pnpm dev` 终端直接可见。
  */
 
-import { appendFile, mkdir, rename, stat } from "node:fs/promises";
+import {
+  appendFile,
+  open as fsOpen,
+  mkdir,
+  rename,
+  stat,
+} from "node:fs/promises";
 import { join } from "node:path";
+import { sanitizeDesktopLogLines } from "@shared/desktop-log-sanitize";
 import {
   LOG_CHANNELS,
   type LogEntry,
@@ -19,6 +26,9 @@ import {
   type LogRecord,
 } from "@shared/log-contract";
 import { app, ipcMain } from "electron";
+
+/** Tail window for 排查包 — recent connectivity events, not the whole 5MB file. */
+const TAIL_BYTES = 64 * 1024;
 
 // 5MB 后滚动到单个 `.jsonl.1` 备份——产品日志事件稀疏，足够覆盖问题窗口又不撑爆磁盘。
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -113,12 +123,55 @@ export function logDesktop(entry: LogEntry): void {
   queue = queue.then(() => writeRecord(record)).catch(() => {});
 }
 
+async function readTailBytes(file: string, maxBytes: number): Promise<string> {
+  let fh: Awaited<ReturnType<typeof fsOpen>> | undefined;
+  try {
+    fh = await fsOpen(file, "r");
+    const st = await fh.stat();
+    const start = Math.max(0, st.size - maxBytes);
+    const len = st.size - start;
+    if (len <= 0) return "";
+    const buf = Buffer.alloc(len);
+    await fh.read(buf, 0, len, start);
+    return buf.toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    await fh?.close().catch(() => {});
+  }
+}
+
 /**
- * 注册渲染层日志通道（`app:log`，单向 send）。在 `app.whenReady` 内调用一次。
- * 用 `.on` 而非 `.handle`：日志是 fire-and-forget，renderer 不等回执、失败不阻塞 UI。
+ * Read the recent ``desktop.jsonl`` window (and ``.1`` if the live file is
+ * short after a roll) and return allowlisted diagnostic lines.
+ */
+export async function readDesktopLogTail(
+  conversationId?: string | null,
+): Promise<string[]> {
+  try {
+    const { file } = paths();
+    const current = await readTailBytes(file, TAIL_BYTES);
+    const need = TAIL_BYTES - current.length;
+    const prev = need > 0 ? await readTailBytes(`${file}.1`, need) : "";
+    return sanitizeDesktopLogLines(prev + current, { conversationId });
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 注册渲染层日志通道（`app:log` 单向 send；`app:log:readTail` 给排查包）。
+ * 在 `app.whenReady` 内调用一次。
  */
 export function registerLogIpc(): void {
   ipcMain.on(LOG_CHANNELS.write, (_event, entry: LogEntry) =>
     logDesktop(entry),
   );
+  ipcMain.handle(LOG_CHANNELS.readTail, async () => {
+    try {
+      return await readDesktopLogTail();
+    } catch {
+      return [];
+    }
+  });
 }

@@ -89,6 +89,38 @@ class FailureFamily:
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
+# event_text 抽取口径。改首部 / 末行规则必须 +1，并进 :func:`registry_digest`，
+# 否则各族命中数会跨窗静默漂移。本模块不得 import patrol（别成环）；
+# patrol.event_text 必须走 :func:`clip_diagnostic_value`。
+TEXT_EXTRACT_REVISION = 2
+TEXT_EXTRACT_HEAD = 480
+TEXT_EXTRACT_TAIL_MAX = 240
+
+
+def clip_diagnostic_value(
+    value: str,
+    *,
+    head: int = TEXT_EXTRACT_HEAD,
+    tail_max: int = TEXT_EXTRACT_TAIL_MAX,
+) -> str:
+    """取诊断字段的首部 + 末行。
+
+    长 traceback（约 11k）的异常类型在末尾；只切前 N 字会让
+    ``workspace.protocol.NotADirectory`` 永远进不了匹配面。
+    """
+    if len(value) <= head:
+        return value
+    header = value[:head]
+    stripped = value.rstrip("\n")
+    last_nl = stripped.rfind("\n")
+    tail = stripped[-tail_max:] if last_nl < 0 else stripped[last_nl + 1 :]
+    if len(tail) > tail_max:
+        tail = tail[-tail_max:]
+    if not tail or tail in header:
+        return header
+    return f"{header}\n{tail}"
+
+
 # ---------------------------------------------------------------------------
 # 表本体
 #
@@ -243,9 +275,15 @@ FAILURE_FAMILIES: tuple[FailureFamily, ...] = (
     FailureFamily(
         key="path_not_dir",
         label="路径不是目录",
-        patterns=(r"不是目录", r"not\s+a\s+directory", r"NotADirectoryError"),
+        patterns=(r"不是目录", r"not\s+a\s+directory", r"NotADirectory"),
+        revision=2,
         since="2026-08-11",
-        note="2026-08-11 午后窗 108 次；跨窗核验的典型样本。",
+        note=(
+            "2026-08-11 午后窗 108 次；跨窗核验的典型样本。"
+            "rev2：产品异常是 workspace.protocol.NotADirectory（不是 stdlib "
+            "NotADirectoryError）；配合 event_text 首部+末行，11k traceback 末行才能入匹配面。"
+            "与 rev1 计数不可比。"
+        ),
     ),
     FailureFamily(
         key="queue_pool",
@@ -280,7 +318,146 @@ FAILURE_FAMILIES: tuple[FailureFamily, ...] = (
         patterns=(r"consolidation_failed", r"consolidation_window_dropped"),
         since="2026-08-12",
     ),
+    FailureFamily(
+        key="db_client_cert_perm",
+        label="DB 客户端证书权限拒绝",
+        events=("cost.ledger_drain_failed",),
+        patterns=(r"\.postgresql[/\\]", r"postgresql\.key"),
+        since="2026-08-16",
+        note=(
+            "0.6.3 拉起瞬间 6058 次 cost.ledger_drain_failed + 21 次 http.unhandled_error 同根："
+            "PermissionError '/root/.postgresql/postgresql.key'。属容器启动期而非产品会话失败；"
+            "认领它是为了别让启动洪峰淹掉 unknown_or_new 残差。"
+        ),
+    ),
+    FailureFamily(
+        key="local_turn_id_invalid",
+        label="本机回合 id 非 UUID",
+        patterns=(r"invalid UUID '", r"length must be between 32\.\.36"),
+        since="2026-08-16",
+        note=(
+            "sidecar 冷 resume 缺 user_message_id 时 mint 'resume-{turn_id}'（43 字符），"
+            "云端当 messages.id 查即 500，桌面按 5xx 无限退避重试（约 6min/次）。"
+            "不用 events 收 chat.regenerate_error——那个事件名下还有桌面离线闸，非同根。"
+        ),
+    ),
+    FailureFamily(
+        key="local_turn_tool_failures",
+        label="本机回合工具失败",
+        events=("chat.local_turn_tool_failures",),
+        since="2026-08-16",
+        note=(
+            "云端唯一能看见本机回合工具失败的事件（info 级，codes/tools 原样透传）。"
+            "本机回合 runtime 日志在用户机器 desktop.jsonl，云端 jsonl 没有"
+            " sandbox.exec_env_probe_failed；榜上 0 次 ≠ 没发生——看本族。"
+        ),
+    ),
+    FailureFamily(
+        key="exec_env_probe_dead",
+        label="执行环境判死",
+        events=(
+            "sandbox.exec_env_probe_failed",
+            "coordination.exec_env_dead_user_notice",
+        ),
+        patterns=(
+            r"exec_env_probe_timeout",
+            r"exec_env_probe_failed",
+            r"exec_env_no_interpreter",
+            r"exec_env_spawn_denied",
+        ),
+        since="2026-08-16",
+        note=(
+            "执行环境被判死并停用工具；云端 gVisor 侧同形也走这两个事件名。"
+            "本机回合的 runtime 日志在用户机器 desktop.jsonl，云端只能靠"
+            " chat.local_turn_tool_failures（codes 含 exec_env_*）汇总看见——"
+            "本族事件名在云端榜上 0 次 ≠ 没发生。"
+            "回归哨兵：执行前预跑自检已撤，判死只认 127 / EACCES，超时不再判死；"
+            " exec_env_probe_timeout 此后只应来自 cloud_health / gVisor runsc 冒烟，"
+            "再从本机通道冒出来即回归（旧误伤规模见 20260816 纪要）。"
+        ),
+    ),
+    FailureFamily(
+        key="force_finalize_failed",
+        label="强制收尾自身超时",
+        events=("engine.force_finalize_failed",),
+        patterns=(r"force_finalize wall clock exceeded",),
+        since="2026-08-16",
+        note="硬顶后连强制收尾都没做完；与 ceiling_finalize 重叠但更严重，单列以免被硬顶量盖住。",
+    ),
+    FailureFamily(
+        key="stream_closed_by_consumer",
+        label="SSE 被消费方关闭",
+        patterns=(r"stream_closed_by_consumer",),
+        since="2026-08-16",
+        note="2026-08-15 窗 12 次残差未认领。多为客户端主动断流，命中不等于缺陷。",
+    ),
+    FailureFamily(
+        key="asyncio_task_destroyed",
+        label="asyncio 任务未收尾即销毁",
+        patterns=(r"Task was destroyed but it is pending",),
+        since="2026-08-16",
+        note="事件循环退出时仍挂着的 Queue.get() / 长命请求；观测噪音档，认领只为不重复发现。",
+    ),
+    FailureFamily(
+        key="desktop_offline_gate",
+        label="桌面离线闸拒绝",
+        patterns=(r"本机桌面未连接",),
+        case_sensitive=True,
+        since="2026-08-16",
+        note=(
+            "门闸的诚实拒绝（提示用户开桌面后点重新生成），**不是**缺陷。"
+            "认领它是为了让 unknown_or_new 只剩真未知；量涨才值得看。"
+        ),
+    ),
+    FailureFamily(
+        key="sse_backpressure_drop",
+        label="SSE 背压弃帧",
+        events=("event_sink.backpressure_drop",),
+        since="2026-08-17",
+        note=(
+            "慢消费者弃最旧；事件本身已心跳聚合（首丢 + 1s/1000 帧 + 结束冲余数），"
+            "族计数是心跳条数不是弃帧总数。看 dropped_total。"
+        ),
+    ),
+    FailureFamily(
+        key="event_loop_lag",
+        label="事件环卡顿",
+        events=("event_loop.lag",),
+        since="2026-08-17",
+        note=(
+            "单进程 uvicorn 事件环 sleep 超限（默认 ≥250ms）。"
+            "首卡立刻一条，之后 10s 心跳（suppressed=其间超限次数），"
+            "避免 1Hz 探针在持续 300ms 负载下刷屏。lag_summary 不入本族。"
+        ),
+    ),
+    FailureFamily(
+        key="readyz_failed",
+        label="/readyz 探针失败",
+        events=("http.readyz_failed",),
+        since="2026-08-17",
+        note=(
+            "HTTP 503 / not_ready（硬依赖 Postgres）。首败立刻一条，之后 10s 心跳"
+            "（fail_count=本拍探针次数），避免 db.ping_failed 那种 9s/14 次刷屏。"
+            "恢复走 http.readyz，不入本族。"
+        ),
+    ),
+    FailureFamily(
+        key="rate_limit_fail_open",
+        label="限流 Redis 失败开放（安全）",
+        events=("rate_limit.redis_fail_open",),
+        since="2026-08-17",
+        note=(
+            "Redis 超时/不可用时限流 fail-open 放行——限流失效窗口存在滥用风险，"
+            "MUST_REVIEW，不是普通 warning。"
+            "发射侧每请求一条（限流逻辑不改）；巡检按 10s 心跳记脉冲以免刷榜，"
+            "原始放行次数看 log_stats summaries.rate_limit_fail_open.requests。"
+        ),
+    ),
 )
+
+# Patrol / stats share this so a Redis outage is first-hit + 10s pulses, not 1 line/request.
+FAIL_OPEN_FAMILY_KEY = "rate_limit_fail_open"
+FAIL_OPEN_PULSE_S = 10.0
 
 UNKNOWN_FAMILY = "unknown_or_new"
 """伪家族：level=error / warning 却没被任何家族认领的失败文本。
@@ -326,9 +503,16 @@ def family_digests() -> dict[str, str]:
 
 
 def registry_digest() -> str:
-    """整表指纹。一眼看出两份快照是不是同一张表跑出来的。"""
+    """整表指纹。一眼看出两份快照是不是同一张表跑出来的。
+
+    抽取口径（首部+末行）也进指纹：改 ``event_text`` 取值会让各族命中数漂移，
+    必须标成整表变了，不能假装还是同一口径。
+    """
     joined = "\x1f".join(f"{k}:{v}" for k, v in sorted(family_digests().items()))
-    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:12]
+    extract = (
+        f"extract:{TEXT_EXTRACT_REVISION}:{TEXT_EXTRACT_HEAD}:{TEXT_EXTRACT_TAIL_MAX}"
+    )
+    return hashlib.sha256(f"{joined}\x1f{extract}".encode()).hexdigest()[:12]
 
 
 @dataclass(frozen=True, slots=True)

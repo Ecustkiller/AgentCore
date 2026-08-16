@@ -17,7 +17,10 @@
 import { flushPendingContent } from "@/services/sse/contentBuffer";
 import { dispatchSSEEvent } from "@/services/sse/dispatch";
 import { attachConversation } from "@/services/streamConversation";
-import { rejoinLiveTurn } from "@/services/turns/recovery";
+import {
+  rejoinLiveTurn,
+  resetRejoinLiveTurnForTests,
+} from "@/services/turns/recovery";
 import { resetStreamOwnershipForTests } from "@/services/turns/streamOwnership";
 import { getRuntime, useConversationStore } from "@/stores/conversation";
 import {
@@ -120,6 +123,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  resetRejoinLiveTurnForTests();
   resetStreamOwnershipForTests();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();

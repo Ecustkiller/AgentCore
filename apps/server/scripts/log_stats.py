@@ -42,6 +42,7 @@ from agentcore.observability.query.stats import (  # noqa: E402
     error_signature,
     new_trace,
     prefix_cache_summary,
+    stream_health_summary,
 )
 from agentcore.observability.query.timeutil import parse_since, parse_timestamp  # noqa: E402
 
@@ -321,6 +322,7 @@ def _print_human(
     llm_calls: list[dict] = []
     cost_records: list[dict] = []
     prefix_cache_rows: list[dict] = []
+    stream_timing_rows: list[dict] = []
     traces: dict[str, dict] = {}
     ceiling_reasons: Counter[str] = Counter()
     read_stats = ReadStats()
@@ -348,6 +350,8 @@ def _print_human(
             cost_records.append(obj)
         elif event == "cost.prefix_cache":
             prefix_cache_rows.append(obj)
+        if event in ("event_sink.detach", "conversation_stream.unwatch"):
+            stream_timing_rows.append(obj)
 
     total = read_stats.total_kept
     bad_lines = read_stats.bad_lines
@@ -518,6 +522,22 @@ def _print_human(
                 )
 
     _print_prefix_cache(prefix_cache_rows)
+
+    if stream_timing_rows:
+        health = stream_health_summary(stream_timing_rows)
+        print(f"\n── Stream Health (detach/unwatch: {health['count']}) ──")
+        print(
+            f"  Duration   avg={health['duration_avg_ms']}ms  "
+            f"max={health['duration_max_ms']}ms"
+        )
+        print(
+            f"  Idle       avg={health['idle_avg_ms']}ms  "
+            f"max={health['idle_max_ms']}ms  "
+            f"idle≥60s={health['idle_ge_60s']}"
+        )
+        if health["by_reason"]:
+            reasons = "  ".join(f"{k}×{v}" for k, v in health["by_reason"].items())
+            print(f"  By reason  {reasons}")
 
     if tool_calls:
         print(f"\n── Tool Calls ({len(tool_calls)} total) ──")

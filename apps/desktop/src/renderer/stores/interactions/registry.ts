@@ -40,8 +40,6 @@ export interface TimelineMarkerDef {
     | "approval_id"
     | "authorization_id"
     | "stage_card_id";
-  /** Drop trailing content into the card (blocking ask_user). */
-  absorbTrailingContent?: boolean;
   /** Insert before the last `team` marker (team_preview product order). */
   insertBeforeTeam?: boolean;
 }
@@ -111,7 +109,6 @@ export const INTERACTION_REGISTRY: readonly InteractionKindDef[] = [
     timeline: {
       processKind: "checkpoint",
       stepIdField: "checkpoint_id",
-      absorbTrailingContent: true,
     },
     sseRequired: { flushBuffers: true },
     sseResolved: { removePausedTurn: true },

@@ -3,7 +3,8 @@
 根治「模型环境盲」：每回合把执行位置、工作区身份、桌面通道、本回合可执行能力写成显式
 事实块注入 system prompt，避免 CEO 在云端 scratch 上规划「打开本机软件」并空跑委派。
 
-**只陈述本回合事实**（位置 / 能力行 / 挂载 / 产物出口路径 / 某能力装没装配、宿主是哪种）。
+**只陈述本回合事实**（位置 / 能力行 / 产物格式 / 挂载 / 产物出口路径 /
+某能力装没装配、宿主是哪种）。
 「该怎么做 / 禁止什么」的 HOW 不在这里——往本文件加禁令前，先确认它不在
 ``resolve/prompt/ceo_core.py`` / ``resolve/prompt/base.py`` / 工具 schema 里。
 分层与理由 → docs/03-AI核心/上下文工程.md「分层边界」。
@@ -496,6 +497,16 @@ def build_workspace_context(
     caps.append(f"host={'已装配' if host_on else '未装配'}")
     caps.append(f"mcp={mcp_cap}")
     capability_line = "本回合执行能力：" + "；".join(caps) + "。"
+    from agentcore.runtime.context.artifact_formats import format_artifact_capability_line
+
+    artifact_format_line = format_artifact_capability_line(
+        include_execution=exec_on,
+        include_browser=browser_on,
+        include_host=host_on,
+        include_git=git_on,
+        desktop_online=desktop_online,
+        location=location,
+    )
     if is_local:
         if pkg_on:
             package_guide_line = (
@@ -678,6 +689,7 @@ def build_workspace_context(
         grant_line,
         mounts_line,
         capability_line,
+        *([artifact_format_line] if artifact_format_line else []),
         package_guide_line,
         *([exec_guide_line] if exec_guide_line else []),
         host_guide_line,

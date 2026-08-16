@@ -240,8 +240,8 @@ async def test_overlapping_run_cancels_old_and_stop_targets_new():
                 t.cancel()
 
 
-async def test_overlap_cancel_marks_old_task_as_user_stop():
-    """Superseded task must salvage as user-stop even after the slot is replaced."""
+async def test_overlap_cancel_marks_old_task_as_superseded_not_user_stop():
+    """Superseded task is a clean cancel, but must not inherit USER_STOP silence."""
     reg = TurnRunRegistry()
     saw: dict[str, bool] = {}
 
@@ -250,6 +250,8 @@ async def test_overlap_cancel_marks_old_task_as_user_stop():
             await asyncio.Event().wait()
         except asyncio.CancelledError:
             saw["user_stop"] = reg.is_user_stop("c1")
+            saw["superseded"] = reg.is_superseded("c1")
+            saw["clean_cancel"] = reg.is_clean_cancel("c1")
             raise
 
     first = asyncio.create_task(_old())
@@ -260,7 +262,9 @@ async def test_overlap_cancel_marks_old_task_as_user_stop():
         reg.register(conversation_id="c1", task=second, sink=EventSink())
         with pytest.raises(asyncio.CancelledError):
             await first
-        assert saw.get("user_stop") is True
+        assert saw.get("user_stop") is False
+        assert saw.get("superseded") is True
+        assert saw.get("clean_cancel") is True
     finally:
         for t in (first, second):
             if not t.done():

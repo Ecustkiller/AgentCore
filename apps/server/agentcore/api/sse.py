@@ -52,6 +52,17 @@ _HEARTBEAT_INTERVAL_S = 15.0
 _ATTACH_CAUGHT_UP = ": attach-caught-up\n\n"
 
 
+def _note_sse_byte(
+    sub: SinkSubscription | None = None,
+    watcher: ConversationWatcher | None = None,
+) -> None:
+    """Record a yielded SSE frame / heartbeat so detach idle includes pings."""
+    if sub is not None:
+        sub.note_byte()
+    if watcher is not None:
+        watcher.note_byte()
+
+
 @dataclass(frozen=True, slots=True)
 class ReplayCursor:
     """A parsed ``Last-Event-ID``: how far the client read, and in WHICH turn.
@@ -166,6 +177,7 @@ async def _live_tail(
                 for signal in ambient.drain_signals():
                     signalled = True
                     yield _format_sse(signal)
+                    _note_sse_byte(sub, ambient)
                 if signal_task is not None and signal_task.done():
                     signal_task = None
             if get_task not in done:
@@ -173,12 +185,14 @@ async def _live_tail(
                 # still behind a persist barrier). Do not cancel get_task here.
                 if not signalled:
                     yield ": ping\n\n"
+                    _note_sse_byte(sub, ambient)
                 continue
             event = get_task.result()
             get_task = None
             if event is None:
                 return
             yield _format_sse(event, turn_id=sink.message_id)
+            _note_sse_byte(sub, ambient)
     finally:
         if get_task is not None:
             get_task.cancel()
@@ -324,8 +338,10 @@ async def _attach_frames(
     replay = await _catch_up_replay(sink, cursor=cursor)
     if lead is not None:
         yield _format_sse(lead)
+        _note_sse_byte(sub, ambient)
     for event in replay:
         yield _format_sse(event, turn_id=sink.message_id)
+        _note_sse_byte(sub, ambient)
     # Hot re-hang: after journal/history replay (DURABLE-only for cursor path),
     # re-emit still-open answerable hot cards (approval / delegation / user
     # escalation) so a refresh cannot drop an in-process pending Future.
@@ -340,8 +356,10 @@ async def _attach_frames(
 
         for event in pending_hot_interaction_events(conv_id):
             yield _format_sse(event, turn_id=sink.message_id)
+            _note_sse_byte(sub, ambient)
     # Boundary: everything above is catch-up; clients one-shot fold then live.
     yield _ATTACH_CAUGHT_UP
+    _note_sse_byte(sub, ambient)
     async for frame in _live_tail(sink, sub, ambient=ambient):
         yield frame
 
@@ -445,6 +463,7 @@ async def _conversation_generator(
                 for signal in watcher.drain_signals():
                     signalled = True
                     yield _format_sse(signal)
+                    watcher.note_byte()
                 if signal_task.done():
                     signal_task = None
                 if wait_task not in done:
@@ -452,6 +471,7 @@ async def _conversation_generator(
                     # watchdog can tell "nothing happening" from "socket is dead".
                     if not signalled:
                         yield ": ping\n\n"
+                        watcher.note_byte()
                     continue
                 published = wait_task.result()
                 wait_task = None
@@ -498,7 +518,15 @@ def sse_conversation_response(
     """
     from agentcore.runtime.turn.runs import turn_runs
 
-    watcher = conversation_streams.watch(conversation_id)
+    # Peek only — watch still happens before the live-run slot is *consumed* as
+    # initial_sink, so a turn starting in the window is published to this watcher.
+    peek = turn_runs.get(conversation_id)
+    peek_id = (
+        peek.sink.message_id
+        if peek is not None and not peek.task.done()
+        else None
+    )
+    watcher = conversation_streams.watch(conversation_id, message_id=peek_id)
     run = turn_runs.get(conversation_id)
     initial_sink = run.sink if run is not None and not run.task.done() else None
     return StreamingResponse(

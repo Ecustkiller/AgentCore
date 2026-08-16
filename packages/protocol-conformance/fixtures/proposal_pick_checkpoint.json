@@ -80,10 +80,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "有三条可行路线，请挑一条：",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "有三条可行路线，请挑一条："
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_pick"

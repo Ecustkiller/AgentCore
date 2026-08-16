@@ -506,6 +506,25 @@ export function resolveColdResumeKey(
 }
 
 /**
+ * One pending kickoff card per conversation — latest by `surfacedSeq`
+ * (missing seq = earliest). ask_user / plan_review are not collapsed.
+ */
+function keepLatestTeamPreview(cards: PendingResume[]): PendingResume[] {
+  let best = -1;
+  let bestSeq = Number.NEGATIVE_INFINITY;
+  for (let i = 0; i < cards.length; i++) {
+    if (cards[i].kind !== "team_preview") continue;
+    const seq = cards[i].surfacedSeq ?? 0;
+    if (best < 0 || seq > bestSeq) {
+      best = i;
+      bestSeq = seq;
+    }
+  }
+  if (best < 0) return cards;
+  return cards.filter((c, i) => c.kind !== "team_preview" || i === best);
+}
+
+/**
  * Pure paint selector: InteractionStore cold pending is live authority;
  * pausedTurns covers recovery/`setForConversation` shells not covered by IX.
  */
@@ -558,7 +577,11 @@ export function selectVisibleColdResumes(args: {
       origin,
     });
     if (!turn) continue;
-    out.push(turn);
+    out.push(
+      typeof full.surfacedSeq === "number"
+        ? { ...turn, surfacedSeq: full.surfacedSeq }
+        : turn,
+    );
     covered.add(full.id);
   }
 
@@ -569,7 +592,7 @@ export function selectVisibleColdResumes(args: {
     out.push(p);
   }
 
-  return out;
+  return keepLatestTeamPreview(out);
 }
 
 /**

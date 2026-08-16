@@ -675,6 +675,33 @@ async def test_pillar_c_harvest_deferred_does_not_close_on_slot_busy():
     assert active_coordination("exec-busy") is session
 
 
+@pytest.mark.asyncio
+async def test_harvest_giving_up_keeps_registry_without_assistant_row():
+    """Retry exhaustion keeps registry; do not invent a closing assistant row."""
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.runtime.coordination import harvest as harvest_mod
+
+    session = CoordinationSession(
+        execution_id="exec-give-up",
+        total_workers=1,
+        conversation_id="conv-give-up",
+    )
+    session.turn_attached = False
+    set_active_coordination(session)
+
+    async def _always_fail(**_kwargs):
+        raise RuntimeError("closing boom")
+
+    with (
+        patch.object(harvest_mod, "_HARVEST_MAX_ATTEMPTS", 2),
+        patch.object(harvest_mod, "_HARVEST_RETRY_DELAY_S", 0.01),
+        patch.object(eh, "run_harvest_closing_turn", new=_always_fail),
+    ):
+        await harvest_mod.harvest_detached_execution(session)
+
+    assert active_coordination("exec-give-up") is session
+
+
 def test_harvest_user_text_distinguishes_outcomes():
     from agentcore.conversation.execution_harvest import (
         format_harvest_user_text,

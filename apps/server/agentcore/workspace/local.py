@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
-from agentcore.tools.sandbox.exec_env import ExecEnvProbeMemo, ExecEnvProbeVerdict
+from agentcore.tools.sandbox.exec_env import ExecEnvProbeMemo
 from agentcore.tools.sandbox.protocol import ExecutionRequest, ExecutionResult
 from agentcore.workspace._paths import normalize_workspace_path
 from agentcore.workspace.channel import WorkspaceChannel, WorkspaceOp
@@ -128,10 +128,9 @@ class LocalWorkspace:
         self.ai_list_materials: frozenset[str] = frozenset()
         # When True, channel list/list_tree keep archive suffixes visible.
         self.ai_list_reveal_archives: bool = False
-        # Once-per-language exec-env probe (desktop channel EXECUTE). Each
-        # verdict keeps its classified reason + raw facts so every later
-        # fail-fast repeats the same honest cause instead of a generic「跑不了」,
-        # and a dead python never speaks for node or bash.
+        # Sticky hard-evidence deaths from a real EXECUTE (missing interpreter /
+        # refused spawn). A timeout never lands here. Keyed by language so a
+        # dead python never speaks for node or bash.
         self._exec_env_probe = ExecEnvProbeMemo()
 
     @property
@@ -628,77 +627,28 @@ class LocalWorkspace:
         # W3: pass conversation_id + external root_ids so the desktop injects
         # ``AGENTCORE_EXTERNAL_<ALIAS>`` abs paths into the subprocess env — absolute
         # paths never enter the model prompt.
-        from agentcore.tools.sandbox.exec_env import (
-            EXEC_ENV_PROBE_TIMEOUT_S,
-            probe_snippet,
-        )
+        from agentcore.tools.sandbox.exec_env import annotate_real_exec_failure
 
-        # The self-check runs the language THIS request asked for, and its verdict
-        # only covers that language: a desktop without python must still be able
-        # to run JavaScript (the probe was a hardcoded python print, so one
-        # missing interpreter killed every run on the machine).
         language = req.language
-        snippet = probe_snippet(language)
-        if snippet is not None:
-            verdict = self._exec_env_probe.get(language)
-            if verdict is None:
-                probe = await self._channel_execute(
-                    ExecutionRequest(
-                        code=snippet,
-                        language=language,
-                        timeout_seconds=EXEC_ENV_PROBE_TIMEOUT_S,
-                    )
-                )
-                verdict = self._exec_env_probe.record(
-                    language, self._read_probe(probe, language)
-                )
-                if not verdict.alive:
-                    return verdict.failure_result(
-                        language=language, duration_ms=probe.duration_ms
-                    )
-            elif not verdict.alive:
-                return verdict.failure_result(language=language)
-        return await self._channel_execute(req)
-
-    def _read_probe(self, probe: ExecutionResult, language: str) -> ExecEnvProbeVerdict:
-        """Turn a desktop probe envelope into a verdict (and log a failed one)."""
-        from agentcore.tools.sandbox.exec_env import (
-            EXEC_ENV_PROBE_ALIVE,
-            PROBE_OK_TOKEN,
-            classify_probe_failure,
-            probe_evidence,
-        )
-
-        if probe.success and PROBE_OK_TOKEN in (probe.stdout or ""):
-            return EXEC_ENV_PROBE_ALIVE
-        probe_stderr = probe.stderr or probe.stdout
-        # The facts the log already carried now also reach the model and the user
-        # face, instead of collapsing into one opaque sentence.
-        verdict = ExecEnvProbeVerdict(
-            alive=False,
-            code=classify_probe_failure(
-                exit_code=probe.exit_code,
-                duration_ms=probe.duration_ms,
-                stderr=probe_stderr,
-            ),
-            evidence=probe_evidence(
-                exit_code=probe.exit_code,
-                duration_ms=probe.duration_ms,
-                stderr=probe_stderr,
-            ),
-        )
-        logger.info(
-            "sandbox.exec_env_probe_failed",
-            location="local",
-            language=language,
-            code=verdict.code,
-            reason=f"exit={probe.exit_code} duration_ms={probe.duration_ms}",
-            detail=(probe_stderr or "").strip()[:200] or None,
-        )
-        return verdict
+        cached = self._exec_env_probe.get(language)
+        if cached is not None and not cached.alive:
+            return cached.failure_result(language=language)
+        result = await self._channel_execute(req)
+        annotated, verdict = annotate_real_exec_failure(result, language=language)
+        if verdict is not None:
+            self._exec_env_probe.record(language, verdict)
+            logger.info(
+                "sandbox.exec_env_probe_failed",
+                location="local",
+                language=language,
+                code=verdict.code,
+                reason=f"exit={result.exit_code} duration_ms={result.duration_ms}",
+                detail=(result.stderr or result.stdout or "").strip()[:200] or None,
+            )
+        return annotated
 
     async def _channel_execute(self, req: ExecutionRequest) -> ExecutionResult:
-        """Raw desktop EXECUTE (no probe) — used by probe + real runs."""
+        """Raw desktop EXECUTE — the real run, no preflight."""
         self._mark_mutated()
         external_roots = {
             alias: m.root_id

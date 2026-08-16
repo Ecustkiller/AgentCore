@@ -30,6 +30,19 @@ async def test_none_and_empty_return_none():
 
 
 @pytest.mark.asyncio
+async def test_attachment_block_frames_this_message_vs_workspace_history():
+    """附件段须框定本条消息附件，并说明 attachments/ 同名跨轮覆盖、索引其余属历史轮。"""
+    out = await _build_attachment_context(
+        [{"name": "shot.png", "path": "/local/shot.png", "text": "pixels"}]
+    )
+    assert out is not None
+    assert "以下是本条消息的附件" in out
+    assert "同名" in out and "覆盖" in out
+    assert "历史轮" in out
+    assert "attachments/" in out
+
+
+@pytest.mark.asyncio
 async def test_unresident_file_uses_local_path_no_hint():
     out = await _build_attachment_context(
         [{"name": "a.py", "path": "/local/a.py", "text": "print(1)"}]

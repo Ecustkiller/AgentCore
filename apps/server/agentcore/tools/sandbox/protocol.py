@@ -110,13 +110,14 @@ class InterpreterProbe(Protocol):
     """Sandboxes whose exec-env health is a per-language question.
 
     ``SubprocessSandbox`` runs whatever the host happens to have on PATH, so
-   「能不能跑」has one answer per language and callers must ask about the language
-    they are about to run. gVisor deliberately does NOT implement this: its
-    ``health_check`` smoke-runs the ``runsc`` runtime, which is cloud's only
-    runtime health signal and says nothing about interpreters — one verdict for
-    the whole backend is the correct scope there.
+   「能不能跑」has one answer per language. ``probe_interpreter`` is the cloud
+    boot / ``cloud_health`` hook — per-execute classification is driven by the
+    real run. gVisor deliberately does NOT implement this: its ``health_check``
+    smoke-runs the ``runsc`` runtime, which is cloud's only runtime health
+    signal and says nothing about interpreters — one verdict for the whole
+    backend is the correct scope there.
     """
 
     async def probe_interpreter(self, language: str) -> bool:
-        """Verify ``language`` can run a minimal print on this host."""
+        """Cloud-health hook: can ``language`` run a minimal print on this host."""
         ...

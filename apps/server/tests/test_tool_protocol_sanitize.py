@@ -281,6 +281,41 @@ def test_debrief_strips_protocol_tags_from_handoff_fields():
     assert debrief["key_points"] == ["共识"]
 
 
+def test_parse_trailing_extra_brace_keeps_object():
+    from agentcore.runtime.engine.tool_protocol_sanitize import parse_tool_call_arguments
+
+    raw = '{"message":"先确认——","questions":[{"id":"q1"}],"default":"A"}}'
+    parsed, repaired = parse_tool_call_arguments(raw, tool_name="ask_user")
+    assert isinstance(parsed, dict)
+    assert parsed["message"] == "先确认——"
+    assert parsed["default"] == "A"
+    assert len(parsed["questions"]) == 1
+    assert repaired is not None
+    assert json.loads(repaired) == parsed
+
+
+def test_parse_does_not_close_truncated_json():
+    """截断 ≠ 尾部垃圾：值没写完就诚实失败，不许闭合后冒充成功。
+
+    上一条（尾部多个 ``}``）丢掉的只是垃圾，值本身是完整的。截断相反：模型没发出来的内容
+    补不回来，闭合只是给缺失盖章——``file_write`` 会把半截正文落盘并配一张成功回执。
+    诚实失败那条路的模型面本来就教「缩短单次参数 / 拆成多次调用」。
+    """
+    from agentcore.runtime.engine.tool_protocol_sanitize import parse_tool_call_arguments
+
+    with pytest.raises(json.JSONDecodeError):
+        parse_tool_call_arguments('{"query":"半截搜索词', tool_name="web_search")
+    with pytest.raises(json.JSONDecodeError):
+        parse_tool_call_arguments('{"path":"a.md","content":"半截正文', tool_name="file_write")
+
+
+def test_parse_unrepairable_raises():
+    from agentcore.runtime.engine.tool_protocol_sanitize import parse_tool_call_arguments
+
+    with pytest.raises(json.JSONDecodeError):
+        parse_tool_call_arguments("{@@@}", tool_name="ask_user")
+
+
 def test_salvage_handoff_quotes_bare_next_steps():
     from agentcore.runtime.engine.tool_protocol_sanitize import (
         salvage_handoff_raw_arguments,

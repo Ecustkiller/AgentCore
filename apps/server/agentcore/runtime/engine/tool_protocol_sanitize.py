@@ -14,14 +14,16 @@ Also used **before** ``json.loads`` on raw tool-call arguments: models sometimes
 Anthropic-style ``<parameter>`` / ``<object>`` fragments into OpenAI JSON args, which
 would otherwise hard-fail as ``args_parse_failed``.
 
-After a successful ``json.loads``, :func:`unwrap_nested_delegate_arguments` eats one
+After a successful parse, :func:`unwrap_nested_delegate_arguments` eats one
 known protocol fumble: double-wrapping the payload as ``{"arguments"|"parameters"|"input":
 "<json>"}`` (wire field name collision / mistaken nesting) — same family as
 ``coerce_list_arg`` / hoist, not generic JSON repair.
 
-:func:`salvage_handoff_raw_arguments` is a second, **handoff-only** narrow pass after
-sanitize when ``json.loads`` still fails: quote known bare string fields and close
-truncated brackets/strings. Structural only — no generic JSON-repair black box.
+:func:`parse_tool_call_arguments` is the unique post-sanitize parse: ``raw_decode``
+accepts a complete value plus trailing junk (lossless — only junk is dropped), and
+never closes a truncated value (lossy — see its docstring).
+:func:`salvage_handoff_raw_arguments` remains the **handoff-only** bare-field quote
+pass — no third per-tool salvage, no generic JSON-repair black box.
 """
 
 from __future__ import annotations
@@ -42,6 +44,7 @@ from agentcore.core.assistant_content import (
 __all__ = [
     "ASSISTANT_CONTENT_MAX_CHARS",
     "ASSISTANT_CONTENT_OVERSIZE_FACE",
+    "parse_tool_call_arguments",
     "prepare_assistant_content",
     "salvage_handoff_raw_arguments",
     "sanitize_protocol_text",
@@ -317,12 +320,12 @@ def _close_truncated_json(raw: str) -> str:
 
 
 def salvage_handoff_raw_arguments(raw: str, *, tool_name: str = "") -> str | None:
-    """Narrow salvage for handoff raw args after sanitize when ``json.loads`` fails.
+    """Handoff-only bare-field quote (+ EOF close) after the unique parse fails.
 
-    Repairs only:
-    - known string fields (``summary`` / ``assumptions`` / ``next_steps``) with
-      bare unquoted text → quote + escape;
-    - truncated unclosed string / array / object brackets at EOF.
+    Repairs only known string fields (``summary`` / ``assumptions`` / ``next_steps``)
+    emitted as bare text. Truncated-close itself lives on
+    :func:`parse_tool_call_arguments` for every tool — do not add a third per-tool
+    salvage.
 
     Returns a JSON object string when salvage yields a loadable ``dict`` that
     differs from ``raw``; otherwise ``None`` (caller keeps honest parse failure).
@@ -344,3 +347,45 @@ def salvage_handoff_raw_arguments(raw: str, *, tool_name: str = "") -> str | Non
     if not isinstance(parsed, dict):
         return None
     return repaired
+
+
+def parse_tool_call_arguments(raw: str, *, tool_name: str = "") -> tuple[Any, str | None]:
+    """Unique tool-argument parse after protocol sanitize.
+
+    1. Empty → ``({}, None)``.
+    2. ``JSONDecoder.raw_decode`` — a complete value plus trailing junk is success
+       (the Extra-data class: legal object + leftover ``}``).
+    3. Still failing + ``handoff`` → :func:`salvage_handoff_raw_arguments`.
+
+    A **truncated** payload is deliberately not closed here. ``raw_decode`` succeeding
+    means the model finished the value and only junk trailed — nothing is lost by
+    dropping the junk. Closing an unfinished value is the opposite: the content the
+    model never emitted stays missing, and for the write family that lands a half file
+    under a success receipt. Truncation keeps the honest ``args_parse_failed`` face,
+    whose model-side copy already teaches segmented writes.
+
+    Returns ``(parsed, repaired_raw)``. ``repaired_raw`` is the accepted prefix /
+    quoted string when a structural repair was used; ``None`` when the original ``raw``
+    already decoded cleanly. Raises ``JSONDecodeError`` when unparseable — callers must
+    not rewrite arguments.
+    """
+    if not raw:
+        return {}, None
+
+    decoder = json.JSONDecoder()
+    first_exc: json.JSONDecodeError | None = None
+    try:
+        obj, end = decoder.raw_decode(raw)
+    except json.JSONDecodeError as exc:
+        first_exc = exc
+    else:
+        if raw[end:].strip():
+            return obj, raw[:end]
+        return obj, None
+
+    salvaged = salvage_handoff_raw_arguments(raw, tool_name=tool_name)
+    if salvaged is not None:
+        return json.loads(salvaged), salvaged
+
+    assert first_exc is not None
+    raise first_exc

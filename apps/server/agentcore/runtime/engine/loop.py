@@ -64,13 +64,16 @@ class CaptainLoopMirror:
 
     Published only while ``react_loop(..., role="captain")`` is running. Holds a
     reference to the run's :class:`LoopController` plus the two content
-    accumulators a suspending face needs (ask_user → ``content_before_round``;
-    delegate / team_preview / plan_review → ``final_content``).
+    accumulators a suspending face needs (ask_user folded → ``content_before_round``;
+    ask_user with its own ``message`` / delegate / team_preview / plan_review →
+    ``final_content``). ``ask_user_content_folded`` is set by the tool-round
+    prepare so pause capture matches the absorb decision.
     """
 
     controller: LoopController
     content_before_round: str = ""
     final_content: str = ""
+    ask_user_content_folded: bool = False
 
 
 current_captain_loop: ContextVar[CaptainLoopMirror | None] = ContextVar(
@@ -103,6 +106,7 @@ def sync_captain_loop_mirror(
     *,
     content_before_round: str | None = None,
     final_content: str | None = None,
+    ask_user_content_folded: bool | None = None,
 ) -> None:
     """Update the published captain mirror in place (no-op when unset / non-captain)."""
     mirror = current_captain_loop.get()
@@ -112,6 +116,8 @@ def sync_captain_loop_mirror(
         mirror.content_before_round = content_before_round
     if final_content is not None:
         mirror.final_content = final_content
+    if ask_user_content_folded is not None:
+        mirror.ask_user_content_folded = ask_user_content_folded
 
 
 async def react_loop(
@@ -1444,7 +1450,9 @@ async def react_loop(
             if leftovers:
                 # Stop = silent: unread classic steers must not become a new turn.
                 # User-initiated FIFO is untouched (Stop ≠ 取消排队).
-                if turn_runs.is_user_stop(steer_cid):
+                if turn_runs.is_user_stop(steer_cid) or turn_runs.is_superseded(
+                    steer_cid
+                ):
                     discard_leftovers_on_user_stop(leftovers)
                 else:
                     promote_leftovers_to_queue(leftovers)

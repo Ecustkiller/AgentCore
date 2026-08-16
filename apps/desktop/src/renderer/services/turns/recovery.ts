@@ -1,4 +1,5 @@
 import { describeStreamError, streamErrorAction } from "@/lib/errors";
+import { logEvent } from "@/lib/log";
 import { loadLatestWindow } from "@/services/messages";
 import { type ConversationRecovery, loadRecovery } from "@/services/resume";
 import {
@@ -10,16 +11,131 @@ import { beginTurnPreflight } from "@/stores/conversation/turnPhaseActions";
 import { useExecutionStore } from "@/stores/execution";
 import { clearInteractionPrompts } from "@/stores/interactionPrompts";
 import { usePausedTurnStore } from "@/stores/pausedTurns";
+import { setServerHealthRecoveredHandler } from "@/stores/serverHealth";
 import {
-  RECONNECT_BANNER,
+  RECONNECTING_BANNER,
+  RECONNECT_FINISHED_BANNER,
+  RECONNECT_INTERRUPTED_BANNER,
+  RECONNECT_LIVE_BANNER,
   UNKNOWN_CLOUD_BANNER,
   finalizeGeneratingForPausedConversation,
   finalizeHonestStopAbort,
   isAbort,
+  isReconnectRetryBanner,
   isTransportDrop,
   lastUserMessageOf,
 } from "./helpers";
+import { reconnectBackoffMs } from "./reconnectBackoff";
 import { hasLocalConversationStream } from "./streamOwnership";
+
+type RejoinOnceResult = "ok" | "empty" | "retry" | "abort";
+
+type RejoinSlot = {
+  conversationId: string;
+  stopped: boolean;
+  attempts: number;
+  ac: AbortController | null;
+  wake: (() => void) | null;
+  unsubStore: (() => void) | null;
+};
+
+const rejoinSlots = new Map<string, RejoinSlot>();
+
+function wakeSlot(slot: RejoinSlot): void {
+  slot.wake?.();
+}
+
+function sleepRejoin(slot: RejoinSlot, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      slot.wake = null;
+      resolve();
+    }, ms);
+    slot.wake = () => {
+      clearTimeout(timer);
+      slot.wake = null;
+      resolve();
+    };
+  });
+}
+
+function stopRejoinSlot(slot: RejoinSlot, reason: string): void {
+  if (slot.stopped) return;
+  slot.stopped = true;
+  slot.unsubStore?.();
+  slot.unsubStore = null;
+  slot.ac?.abort();
+  slot.ac = null;
+  wakeSlot(slot);
+  if (rejoinSlots.get(slot.conversationId) === slot) {
+    rejoinSlots.delete(slot.conversationId);
+  }
+  logEvent("info", "conversation.rejoin_closed", {
+    conversation_id: slot.conversationId,
+    reason,
+  });
+}
+
+/** Why this slot must stop — empty string = keep retrying. */
+function rejoinStopReason(slot: RejoinSlot): string {
+  const state = useConversationStore.getState();
+  if (!state.byId[slot.conversationId]) return "slice_dropped";
+  if (state.currentConversationId !== slot.conversationId) {
+    return "window_closed";
+  }
+  const rt = getRuntime(slot.conversationId);
+  if (rt.turnPhase === "stopping") return "user_stop";
+  // Our own attach holds the local-stream gate — only yield when idle
+  // (backoff) and someone else opened a POST / attach.
+  if (!slot.ac && hasLocalConversationStream(slot.conversationId)) {
+    return "local_stream";
+  }
+  if (rt.abort && rt.abort !== slot.ac) return "user_takeover";
+  return "";
+}
+
+function watchRejoinTakeover(slot: RejoinSlot): void {
+  slot.unsubStore = useConversationStore.subscribe(() => {
+    if (slot.stopped) return;
+    const reason = rejoinStopReason(slot);
+    if (reason) stopRejoinSlot(slot, reason);
+  });
+}
+
+/** Abort in-flight / scheduled attach retries so a user send / stop / resume can take over. */
+export function cancelRejoinLiveTurn(conversationId: string): void {
+  const slot = rejoinSlots.get(conversationId);
+  if (slot) stopRejoinSlot(slot, "cancelled");
+}
+
+/** Skip remaining backoff. Returns true when a retry slot was waiting. */
+export function wakeRejoinLiveTurn(conversationId: string): boolean {
+  const slot = rejoinSlots.get(conversationId);
+  if (!slot || slot.stopped) return false;
+  wakeSlot(slot);
+  return true;
+}
+
+export function resetRejoinLiveTurnForTests(): void {
+  for (const slot of [...rejoinSlots.values()])
+    stopRejoinSlot(slot, "test_reset");
+  rejoinSlots.clear();
+}
+
+export function handleServerHealthRecovered(): void {
+  const conv = useConversationStore.getState();
+  const bannerIds: string[] = [];
+  for (const [id, rt] of Object.entries(conv.byId)) {
+    if (isReconnectRetryBanner(rt.error)) bannerIds.push(id);
+  }
+  for (const id of bannerIds) conv.clearError(id);
+  for (const slot of rejoinSlots.values()) wakeSlot(slot);
+  for (const id of bannerIds) {
+    if (!rejoinSlots.has(id)) void rejoinLiveTurn(id);
+  }
+}
+
+setServerHealthRecoveredHandler(handleServerHealthRecovered);
 
 /** Cold-load pause latch is ``status=running`` + ``finishReason=paused``. */
 function isPausedFinish(message: {
@@ -29,6 +145,88 @@ function isPausedFinish(message: {
   return (
     message.finishReason === "paused" || message.runs?.finishReason === "paused"
   );
+}
+
+function isFinishedAssistant(message: {
+  role: string;
+  status?: string | null;
+  content?: string;
+  finishReason?: string;
+  runs?: { finishReason?: string } | null;
+}): boolean {
+  if (message.role !== "assistant") return false;
+  if (message.status === "complete") return true;
+  const fr = message.finishReason ?? message.runs?.finishReason;
+  if (
+    fr === "interrupted" ||
+    fr === "error" ||
+    fr === "cancelled" ||
+    fr === "unproductive" ||
+    fr === "paused"
+  ) {
+    return false;
+  }
+  return (
+    Boolean((message.content ?? "").trim()) && message.status !== "running"
+  );
+}
+
+/**
+ * After attach 204 / recovery says idle: reload already applied. Speak from
+ * the persisted tail — no extra poller.
+ */
+function applySettledWindowBanner(conversationId: string): "ok" | "empty" {
+  const store = useConversationStore.getState();
+  const last = getRuntime(conversationId).messages.at(-1);
+  if (last?.role === "assistant" && isPausedFinish(last)) {
+    store.clearError(conversationId);
+    finalizeGeneratingForPausedConversation(conversationId, { force: true });
+    return "ok";
+  }
+  if (last?.role === "assistant" && last.status === "running") {
+    markGhostInterrupted(conversationId);
+  }
+  const tail = getRuntime(conversationId).messages.at(-1);
+  if (tail && isFinishedAssistant(tail)) {
+    store.setError(RECONNECT_FINISHED_BANNER, null, conversationId, null);
+    return "ok";
+  }
+  store.setError(RECONNECT_INTERRUPTED_BANNER, null, conversationId, null);
+  return tail?.role === "assistant" ? "ok" : "empty";
+}
+
+/**
+ * Reuse ``loadRecovery`` + ``loadLatestWindow`` (hydrate / reopen path) to
+ * decide copy. Never a new poller — one snapshot per failed attach.
+ */
+async function settleDroppedTurnFromRecovery(
+  conversationId: string,
+): Promise<"retry" | "stop"> {
+  const store = useConversationStore.getState();
+  try {
+    const snap = await loadRecovery(conversationId);
+    if (snap.pausedCount > 0) {
+      store.clearError(conversationId);
+      finalizeGeneratingForPausedConversation(conversationId, { force: true });
+      return "stop";
+    }
+    if (snap.sidecarLive || snap.cloudLive) {
+      store.setError(RECONNECT_LIVE_BANNER, null, conversationId, null);
+      return "retry";
+    }
+    if (!snap.cloudKnown && !snap.sidecarLive) {
+      store.setError(UNKNOWN_CLOUD_BANNER, null, conversationId, null);
+      return "retry";
+    }
+    store.setGenerating(false, conversationId);
+    await loadLatestWindow(conversationId);
+    applySettledWindowBanner(conversationId);
+    return "stop";
+  } catch {
+    // Snapshot / window reload failed — never leave the quiet "重连中" face.
+    store.setError(UNKNOWN_CLOUD_BANNER, null, conversationId, null);
+    return "retry";
+  }
 }
 
 /**
@@ -58,6 +256,129 @@ function finalizeRunningExecutionSlots(
 }
 
 /**
+ * One GET attach (never POST / resend). Shared by the first drop and bounded
+ * retries — a resend would double-run a turn that is still alive server-side.
+ */
+async function attemptRejoinOnce(
+  conversationId: string,
+  ac: AbortController,
+  opts: { silentAbort: boolean; keepBanner: boolean },
+): Promise<RejoinOnceResult> {
+  const lastUser = lastUserMessageOf(conversationId);
+  if (!lastUser) return "empty";
+
+  const store = useConversationStore.getState();
+  if (!opts.keepBanner) store.clearError(conversationId);
+
+  store.setAbort(ac, conversationId);
+  beginTurnPreflight(conversationId);
+  try {
+    const outcome = await attachConversation(conversationId, ac.signal);
+    if (outcome === "attached") {
+      store.clearError(conversationId);
+      return "ok";
+    }
+    // No live run — the detached turn already finished + persisted. Reload it so
+    // the saved reply replaces whatever partial we still hold. Clear generating
+    // first so the whole-window write gate does not reject the reload.
+    useConversationStore.getState().setGenerating(false, conversationId);
+    await loadLatestWindow(conversationId);
+    return applySettledWindowBanner(conversationId);
+  } catch (err) {
+    if (isAbort(err)) {
+      if (!opts.silentAbort) finalizeHonestStopAbort(conversationId);
+      return "abort";
+    }
+    const s = useConversationStore.getState();
+    if (getRuntime(conversationId).isGenerating) {
+      s.finalizeLastMessage(conversationId);
+    }
+    clearInteractionPrompts(conversationId);
+    if (!isTransportDrop(err)) {
+      const msg = describeStreamError(err);
+      if (msg) {
+        s.setError(msg, null, conversationId, streamErrorAction(err));
+      }
+      return "ok";
+    }
+    // Quiet while we ask the existing recovery snapshot — never a "querying" face.
+    if (
+      !opts.keepBanner ||
+      isReconnectRetryBanner(getRuntime(conversationId).error)
+    ) {
+      s.setError(RECONNECTING_BANNER, null, conversationId, null);
+    }
+    const verdict = await settleDroppedTurnFromRecovery(conversationId);
+    return verdict === "retry" ? "retry" : "ok";
+  } finally {
+    if (getRuntime(conversationId).abort === ac) {
+      useConversationStore.getState().setAbort(null, conversationId);
+    }
+  }
+}
+
+async function runRejoinLoop(slot: RejoinSlot): Promise<void> {
+  watchRejoinTakeover(slot);
+  // No attempt cap: a live turn can run 10+ minutes. Stay on the 1s→30s
+  // curve (storm risk is the first seconds) until the server says the run
+  // is gone, attach holds, the chat window closes, or the user takes over.
+  // One slot + one timer per conversation; stopRejoinSlot always unsubs.
+  while (!slot.stopped) {
+    const yieldReason = rejoinStopReason(slot);
+    if (yieldReason) {
+      stopRejoinSlot(slot, yieldReason);
+      return;
+    }
+    const delay = reconnectBackoffMs(slot.attempts);
+    logEvent("info", "conversation.rejoin_retry", {
+      conversation_id: slot.conversationId,
+      attempt: slot.attempts + 1,
+      delay_ms: delay,
+    });
+    slot.attempts += 1;
+    await sleepRejoin(slot, delay);
+    if (slot.stopped) return;
+    const afterSleep = rejoinStopReason(slot);
+    if (afterSleep) {
+      stopRejoinSlot(slot, afterSleep);
+      return;
+    }
+    const ac = new AbortController();
+    slot.ac = ac;
+    const result = await attemptRejoinOnce(slot.conversationId, ac, {
+      silentAbort: true,
+      keepBanner: true,
+    });
+    if (slot.ac === ac) slot.ac = null;
+    if (slot.stopped) return;
+    if (result === "retry") continue;
+    stopRejoinSlot(
+      slot,
+      result === "ok" ? "reattached" : result === "empty" ? "none" : "abort",
+    );
+    return;
+  }
+}
+
+function startRejoinLoop(conversationId: string): void {
+  const existing = rejoinSlots.get(conversationId);
+  if (existing && !existing.stopped) {
+    wakeSlot(existing);
+    return;
+  }
+  const slot: RejoinSlot = {
+    conversationId,
+    stopped: false,
+    attempts: 0,
+    ac: null,
+    wake: null,
+    unsubStore: null,
+  };
+  rejoinSlots.set(conversationId, slot);
+  void runRejoinLoop(slot);
+}
+
+/**
  * Rejoin a turn whose live stream dropped mid-flight (实时重连续看 C1 · slice 1b).
  *
  * Post-decoupling (slice 1a) a dropped connection no longer kills a turn — it
@@ -65,7 +386,9 @@ function finalizeRunningExecutionSlots(
  * resend / regenerate would double-run a turn that is still alive). Attaches as-is:
  * replay + live tail. On `"none"` the run already finished — reload the persisted
  * transcript (its reply is saved). If reconnect itself drops, surface a banner
- * explaining the drop (no one-click reconnect; auto rejoin / reopen remain available).
+ * and keep GET-attaching on the same 1s→30s backoff as conversation follow
+ * until the run settles, the chat window closes, or the user takes over.
+ * Never POST.
  *
  * **不在这里清屏。** 手上这半场要不要抹，由 attach 段首的 ``full_replay`` 说了算
  * （``streamConversation.foldAttachSegment``）：服务端认得我们的游标时只补游标之后的
@@ -76,50 +399,23 @@ function finalizeRunningExecutionSlots(
  * caller can fall back to its resend / regenerate banner.
  */
 export async function rejoinLiveTurn(conversationId: string): Promise<boolean> {
-  const lastUser = lastUserMessageOf(conversationId);
-  if (!lastUser) return false;
-
-  const store = useConversationStore.getState();
-  store.clearError(conversationId);
+  const pending = rejoinSlots.get(conversationId);
+  if (pending && !pending.stopped) {
+    wakeSlot(pending);
+    return true;
+  }
 
   const ac = new AbortController();
-  store.setAbort(ac, conversationId);
-  beginTurnPreflight(conversationId);
-  try {
-    const outcome = await attachConversation(conversationId, ac.signal);
-    if (outcome === "attached") return true;
-    // No live run — the detached turn already finished + persisted. Reload it so
-    // the saved reply replaces whatever partial we still hold. Clear generating
-    // first so the whole-window write gate does not reject the reload.
-    useConversationStore.getState().setGenerating(false, conversationId);
-    await loadLatestWindow(conversationId);
-    const last = getRuntime(conversationId).messages.at(-1);
-    // A persisted assistant reply means the detached turn delivered — handled.
-    // Still ending on the user message means it produced nothing → let the caller
-    // offer a resend.
-    return last?.role === "assistant";
-  } catch (err) {
-    if (isAbort(err)) {
-      finalizeHonestStopAbort(conversationId);
-      return true;
-    }
-    const s = useConversationStore.getState();
-    if (getRuntime(conversationId).isGenerating) {
-      s.finalizeLastMessage(conversationId);
-    }
-    clearInteractionPrompts(conversationId);
-    // A reconnect drop → explain (never resend); an auth failure stays silent
-    // (the api layer already redirected to login). No one-click reconnect.
-    const msg = isTransportDrop(err)
-      ? RECONNECT_BANNER
-      : describeStreamError(err);
-    if (msg) {
-      s.setError(msg, null, conversationId, streamErrorAction(err));
-    }
+  const result = await attemptRejoinOnce(conversationId, ac, {
+    silentAbort: false,
+    keepBanner: false,
+  });
+  if (result === "empty") return false;
+  if (result === "retry") {
+    startRejoinLoop(conversationId);
     return true;
-  } finally {
-    useConversationStore.getState().setAbort(null, conversationId);
   }
+  return true;
 }
 
 /**
@@ -294,6 +590,7 @@ export async function settleCloudRunningAssistant(
 export async function attachOnOpen(conversationId: string): Promise<void> {
   const store = useConversationStore.getState();
   if (hasLocalConversationStream(conversationId)) return;
+  if (wakeRejoinLiveTurn(conversationId)) return;
 
   const ac = new AbortController();
   store.setAbort(ac, conversationId);
@@ -310,7 +607,8 @@ export async function attachOnOpen(conversationId: string): Promise<void> {
     // and we lost it); a pre-event drop / 204 stays silent.
     if (getRuntime(conversationId).isGenerating) {
       s.finalizeLastMessage(conversationId);
-      s.setError(RECONNECT_BANNER, null, conversationId, null);
+      s.setError(RECONNECTING_BANNER, null, conversationId, null);
+      startRejoinLoop(conversationId);
     }
   } finally {
     useConversationStore.getState().setAbort(null, conversationId);

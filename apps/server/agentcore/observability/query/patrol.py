@@ -28,10 +28,13 @@ from pathlib import Path
 from typing import Any
 
 from agentcore.observability.query.failure_families import (
+    FAIL_OPEN_FAMILY_KEY,
+    FAIL_OPEN_PULSE_S,
     FAILURE_FAMILIES,
     FAMILIES_BY_KEY,
     UNKNOWN_FAMILY,
     CompiledRegistry,
+    clip_diagnostic_value,
     compile_registry,
     family_digests,
     registry_digest,
@@ -77,18 +80,40 @@ MUST_REVIEW_FAMILIES = frozenset(
         "turn_phase_gate",
         "memory_consolidation",
         "queue_pool",
+        "rate_limit_fail_open",
     }
 )
 """README 里点名「有量或新模式必审」的家族。命中即把该会话标 must_review。
 
 刻意只做**标注**，不做拦截、不自动开案——巡检纪律见 .cursor/rules/intercept-discipline.mdc。
+``rate_limit_fail_open`` 是安全信号（限流失效），不是普通 warning。
 """
+
+
+class TimePulseGate:
+    """First hit always; later hits in the same ``interval_s`` window are suppressed."""
+
+    def __init__(self, interval_s: float = FAIL_OPEN_PULSE_S) -> None:
+        self.interval_s = interval_s
+        self._last: datetime | None = None
+
+    def accept(self, ts: datetime | None) -> bool:
+        if self._last is None:
+            self._last = ts
+            return True
+        if ts is None:
+            return False
+        if (ts - self._last).total_seconds() >= self.interval_s:
+            self._last = ts
+            return True
+        return False
 
 DIAGNOSTIC_FIELDS = frozenset(
     {
         "body_preview",
         "cause",
         "code",
+        "codes",
         "command",
         "detail",
         "details",
@@ -113,6 +138,7 @@ DIAGNOSTIC_FIELDS = frozenset(
         "status",
         "stderr",
         "tool",
+        "tools",
     }
 )
 """家族 pattern 只匹配这些**诊断**字段，不匹配用户/模型内容。
@@ -123,8 +149,12 @@ counts 一旦掺进模型自述，跨窗序列就没意义了。
 """
 
 _TEXT_LIMIT = 4000
-_VALUE_LIMIT = 600
 _SAMPLE_LIMIT = 200
+DEFAULT_REPEAT_USER_MIN = 3
+"""同一用户在窗内重复撞同一家族 ≥ 此次数才进「单用户重复」视图。
+
+总次数排序会把「一人 8 小时 17 次」沉到榜底；3 能捞出集中爆发，又滤掉偶发 1–2 次。
+"""
 
 
 def is_tool_failure(obj: dict[str, Any]) -> bool:
@@ -146,9 +176,10 @@ def event_text(obj: dict[str, Any], *, limit: int = _TEXT_LIMIT) -> str:
     """把一条事件压成用于家族匹配的失败文本。
 
     只取 :data:`DIAGNOSTIC_FIELDS` 里的字符串值（顶层 + 一层嵌套，覆盖 ``payload.reason``
-    这种形状），不是整行 JSON。除了避开用户内容误伤，还有一条：导出的 JSONL 里中文是
-    ``\\uXXXX`` 转义的——直接扫原始行的话，「不是目录」这类中文标记**永远匹配不到**
-    （旧的一次性脚本正踩在这上面，只有工具 reason 那条支路把它救了回来）。
+    这种形状），不是整行 JSON。每个值走 :func:`clip_diagnostic_value`（首部 + 末行），
+    长 traceback 的异常类型才进得了匹配面。除了避开用户内容误伤，还有一条：导出的
+    JSONL 里中文是 ``\\uXXXX`` 转义的——直接扫原始行的话，「不是目录」这类中文标记
+    **永远匹配不到**（旧的一次性脚本正踩在这上面，只有工具 reason 那条支路把它救了回来）。
     """
     parts: list[str] = []
     size = 0
@@ -157,10 +188,15 @@ def event_text(obj: dict[str, Any], *, limit: int = _TEXT_LIMIT) -> str:
         nonlocal size
         if not isinstance(value, str) or not value:
             return True
-        chunk = value[:_VALUE_LIMIT]
+        chunk = clip_diagnostic_value(value)
         parts.append(chunk)
         size += len(chunk) + 1
         return size < limit
+
+    def push_maybe_list(value: object) -> bool:
+        if isinstance(value, list):
+            return all(push(nested) for nested in value[:20])
+        return push(value)
 
     for key, value in obj.items():
         if isinstance(value, str):
@@ -169,19 +205,13 @@ def event_text(obj: dict[str, Any], *, limit: int = _TEXT_LIMIT) -> str:
         elif isinstance(value, dict):
             stop = False
             for nested_key, nested in value.items():
-                if nested_key in DIAGNOSTIC_FIELDS and not push(nested):
+                if nested_key in DIAGNOSTIC_FIELDS and not push_maybe_list(nested):
                     stop = True
                     break
             if stop:
                 break
-        elif isinstance(value, list) and key in DIAGNOSTIC_FIELDS:
-            stop = False
-            for nested in value[:20]:
-                if not push(nested):
-                    stop = True
-                    break
-            if stop:
-                break
+        elif isinstance(value, list) and key in DIAGNOSTIC_FIELDS and not push_maybe_list(value):
+            break
     return "\n".join(parts)
 
 
@@ -254,6 +284,30 @@ class FamilyTally:
             "traces": self.traces.to_json(),
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
+            "sample": self.sample,
+        }
+
+
+@dataclass
+class RepeatUserRow:
+    """同一用户在窗内重复撞同一家族——捞「总量低、但集中在少数人」的问题。"""
+
+    user_id: str
+    family: str
+    events: int = 0
+    conversations: IdBag = field(default_factory=IdBag)
+    traces: IdBag = field(default_factory=IdBag)
+    sample: str = ""
+
+    def to_json(self) -> dict[str, Any]:
+        fam = FAMILIES_BY_KEY.get(self.family)
+        return {
+            "user_id": self.user_id,
+            "family": self.family,
+            "label": fam.label if fam else self.family,
+            "events": self.events,
+            "conversations": self.conversations.to_json(),
+            "traces": self.traces.to_json(),
             "sample": self.sample,
         }
 
@@ -346,7 +400,9 @@ class PatrolSnapshot:
     families: dict[str, FamilyTally] = field(default_factory=dict)
     clusters: list[ClusterRow] = field(default_factory=list)
     conversations: list[ConversationRow] = field(default_factory=list)
+    repeat_users: list[RepeatUserRow] = field(default_factory=list)
     failure_events: int = 0
+    repeat_user_min: int = DEFAULT_REPEAT_USER_MIN
 
     def to_json_dict(self) -> dict[str, Any]:
         return {
@@ -387,8 +443,11 @@ class PatrolSnapshot:
                 # 窗内只有日志事件、没有消息的会话（消息在窗外 / 只有系统活动）。
                 "log_only_conversations": sum(1 for c in self.conversations if not c.nonempty),
                 "must_review_conversations": sum(1 for c in self.conversations if c.must_review),
+                "repeat_users": len(self.repeat_users),
+                "repeat_user_min": self.repeat_user_min,
             },
             "families": {k: v.to_json() for k, v in self.families.items()},
+            "repeat_users": [r.to_json() for r in self.repeat_users],
             "clusters": [c.to_json() for c in self.clusters],
             "conversations": [
                 c.to_json(messages_available=self.messages_available) for c in self.conversations
@@ -488,6 +547,7 @@ def scan_patrol(
     export_dir: Path | None = None,
     max_ids: int = DEFAULT_MAX_IDS,
     cluster_limit: int = DEFAULT_CLUSTER_LIMIT,
+    repeat_user_min: int = DEFAULT_REPEAT_USER_MIN,
     registry: CompiledRegistry | None = None,
 ) -> PatrolSnapshot:
     """扫一个窗，产出 CID 清单 + 失败榜 + 快照。"""
@@ -504,11 +564,13 @@ def scan_patrol(
 
     families: dict[str, FamilyTally] = {}
     clusters: dict[str, ClusterRow] = {}
+    repeat_acc: dict[tuple[str, str], RepeatUserRow] = {}
     first_at: datetime | None = None
     last_at: datetime | None = None
     failure_events = 0
     cid_event_counts: Counter[str] = Counter()
     cid_traces: dict[str, IdBag] = defaultdict(lambda: IdBag(max_ids))
+    fail_open_pulse = TimePulseGate()
 
     def tally(key: str) -> FamilyTally:
         row = families.get(key)
@@ -532,6 +594,7 @@ def scan_patrol(
         event = str(obj.get("event") or "")
         cid = str(obj.get("conversation_id") or "")
         trace_id = str(obj.get("trace_id") or "")
+        user_id = str(obj.get("user_id") or "")
         if cid:
             cid_event_counts[cid] += 1
 
@@ -539,6 +602,8 @@ def scan_patrol(
         level = str(obj.get("level") or "").lower()
         text = event_text(obj)
         hits = reg.match(event=event, text=text, tool_failed=tool_failed)
+        if FAIL_OPEN_FAMILY_KEY in hits and not fail_open_pulse.accept(ts):
+            hits = [key for key in hits if key != FAIL_OPEN_FAMILY_KEY]
 
         if not hits and level not in ("error", "critical"):
             continue
@@ -562,6 +627,22 @@ def scan_patrol(
                     row.last_seen = stamp
             if not row.sample:
                 row.sample = sample
+            if user_id:
+                uk = (user_id, key)
+                ru = repeat_acc.get(uk)
+                if ru is None:
+                    ru = RepeatUserRow(
+                        user_id=user_id,
+                        family=key,
+                        conversations=IdBag(max_ids),
+                        traces=IdBag(max_ids),
+                    )
+                    repeat_acc[uk] = ru
+                ru.events += 1
+                ru.conversations.add(cid)
+                ru.traces.add(trace_id)
+                if not ru.sample:
+                    ru.sample = sample
 
         signature = error_signature(f"[{event or '?'}] {sample}")
         cluster = clusters.get(signature)
@@ -596,6 +677,10 @@ def scan_patrol(
         if bag is not None:
             row_c.traces = bag
 
+    repeat_users = sorted(
+        (r for r in repeat_acc.values() if r.events >= repeat_user_min),
+        key=lambda r: (-r.events, r.family, r.user_id),
+    )
     ordered_clusters = sorted(clusters.values(), key=lambda c: -c.count)[:cluster_limit]
     ordered_conversations = sorted(
         conversations.values(),
@@ -624,7 +709,9 @@ def scan_patrol(
         families=families,
         clusters=ordered_clusters,
         conversations=ordered_conversations,
+        repeat_users=repeat_users,
         failure_events=failure_events,
+        repeat_user_min=repeat_user_min,
     )
 
 

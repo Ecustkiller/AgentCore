@@ -18,6 +18,7 @@ def _msg(
     error_code=None,
     finish_reason=None,
     error_message=None,
+    attachments=None,
 ):
     usage = {}
     if status is not None:
@@ -28,7 +29,9 @@ def _msg(
         usage["finish_reason"] = finish_reason
     if error_message is not None:
         usage["error_message"] = error_message
-    return SimpleNamespace(role=role, content=content, usage=usage or None)
+    return SimpleNamespace(
+        role=role, content=content, usage=usage or None, attachments=attachments
+    )
 
 
 def test_failed_empty_assistant_detection():
@@ -91,3 +94,65 @@ def test_failure_note_single():
     assert "上一轮" in note["content"]
     assert "连接超时" in note["content"]
     assert "不要编造" in note["content"]
+
+
+def test_fold_empty_user_with_attachments_keeps_system_note():
+    rows = [
+        _msg(
+            "user",
+            "",
+            attachments=[
+                {"name": "截图.png", "workspace_path": "attachments/截图.png"},
+            ],
+        ),
+        _msg("assistant", "收到"),
+    ]
+    out = _fold_history_messages(rows)
+    assert len(out) == 2
+    assert out[0]["role"] == "user"
+    note = out[0]["content"]
+    assert note.startswith("（系统注记：")
+    assert "截图.png" in note
+    assert "attachments/截图.png" in note
+    assert out[1] == {"role": "assistant", "content": "收到"}
+
+
+def test_fold_empty_user_without_attachments_still_dropped():
+    rows = [
+        _msg("user", "hi"),
+        _msg("assistant", "ok"),
+        _msg("user", ""),
+        _msg("assistant", "later"),
+        _msg("user", "", attachments=[]),
+    ]
+    out = _fold_history_messages(rows)
+    assert out == [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "assistant", "content": "later"},
+    ]
+
+
+def test_fold_nonempty_user_with_attachments_keeps_original_content():
+    rows = [
+        _msg(
+            "user",
+            "请看这张图",
+            attachments=[{"name": "a.png", "workspace_path": "attachments/a.png"}],
+        ),
+    ]
+    out = _fold_history_messages(rows)
+    assert out == [{"role": "user", "content": "请看这张图"}]
+
+
+def test_fold_empty_user_many_attachments_truncates_note():
+    atts = [
+        {"name": f"f{i}.png", "workspace_path": f"attachments/f{i}.png"} for i in range(8)
+    ]
+    out = _fold_history_messages([_msg("user", "", attachments=atts)])
+    assert len(out) == 1
+    note = out[0]["content"]
+    assert note.startswith("（系统注记：")
+    assert "f0.png" in note
+    assert "另有 5 个" in note
+    assert "f7.png" not in note

@@ -11,6 +11,13 @@ from typing import Any
 
 from agentcore.core.logging import get_logger
 from agentcore.observability.drop_heartbeat import DropLogHeartbeat, DropPulse
+from agentcore.observability.stream_timing import (
+    consumer_mode,
+    current_http_req_id,
+    elapsed_ms,
+    mono_now,
+    wall_now_iso,
+)
 from agentcore.runtime.events.chat import content_delta
 from agentcore.runtime.events.journal_config import (
     _HISTORY_COALESCE_RUN,
@@ -221,7 +228,15 @@ class SinkSubscription:
     unsubscribe`), which is exactly the 断开连坐 bug the single-queue sink had.
     """
 
-    __slots__ = ("_drop_log", "_queue", "dropped", "label")
+    __slots__ = (
+        "_drop_log",
+        "_last_byte_mono",
+        "_queue",
+        "_started_at",
+        "_started_mono",
+        "dropped",
+        "label",
+    )
 
     def __init__(self, *, label: str) -> None:
         self.label = label
@@ -229,6 +244,23 @@ class SinkSubscription:
         self._drop_log = DropLogHeartbeat()
         self._queue: asyncio.Queue[_Frame | None] = asyncio.Queue(
             maxsize=_SUBSCRIBER_QUEUE_MAXSIZE
+        )
+        now = mono_now()
+        self._started_mono = now
+        self._last_byte_mono = now
+        self._started_at = wall_now_iso()
+
+    def note_byte(self) -> None:
+        """Mark that this consumer just received a frame or SSE heartbeat byte."""
+        self._last_byte_mono = mono_now()
+
+    def stream_timing(self) -> tuple[str, int, int]:
+        """``started_at``, age since subscribe, idle since last byte (ms)."""
+        now = mono_now()
+        return (
+            self._started_at,
+            elapsed_ms(self._started_mono, now_mono=now),
+            elapsed_ms(self._last_byte_mono, now_mono=now),
         )
 
     def _offer(self, frame: _Frame) -> bool:
@@ -274,6 +306,7 @@ class SinkSubscription:
                 # streams over transport metadata. Our OWN cancellation still unwinds.
                 if not ready.cancelled():
                     raise
+        self.note_byte()
         return frame.event
 
     async def __aiter__(self) -> AsyncIterator[SSEEvent]:
@@ -340,6 +373,9 @@ class EventSink:
         self._has_tool = False
         self._conversation_id = conversation_id
         self._message_id = message_id
+        now = mono_now()
+        self._created_mono = now
+        self._created_at = wall_now_iso()
         self._checkpointer: StreamCheckpointer | None = None
         # G6: after content_reset, display-only reinject this text into history + SSE
         # (skip process / checkpointer). None = hook unset (status-quo behaviour).
@@ -502,6 +538,15 @@ class EventSink:
         self._subscribers.append(sub)
         if self._closed:
             sub._close()
+        logger.info(
+            "event_sink.attach",
+            conversation_id=self._conversation_id,
+            message_id=self._message_id,
+            label=label,
+            mode=consumer_mode(label),
+            started_at=sub._started_at,
+            http_req_id=current_http_req_id(),
+        )
         return sub
 
     def unsubscribe(self, sub: SinkSubscription, *, reason: str = "unspecified") -> None:
@@ -516,12 +561,19 @@ class EventSink:
             self._consumer_dropped = True
         self._flush_backpressure_drop(sub)
         sub._close()
+        started_at, duration_ms, idle_ms = sub.stream_timing()
         logger.info(
             "event_sink.detach",
             reason=reason,
             conversation_id=self._conversation_id,
             message_id=self._message_id,
             already_detached=already_detached,
+            started_at=started_at,
+            duration_ms=duration_ms,
+            idle_ms=idle_ms,
+            label=sub.label,
+            mode=consumer_mode(sub.label),
+            http_req_id=current_http_req_id(),
         )
 
     def note_no_consumer(self, *, reason: str) -> None:
@@ -531,12 +583,16 @@ class EventSink:
         journal, so a later观察端 catches up by replay.
         """
         self._consumer_dropped = True
+        now = mono_now()
         logger.info(
             "event_sink.detach",
             reason=reason,
             conversation_id=self._conversation_id,
             message_id=self._message_id,
             already_detached=not self._subscribers,
+            started_at=self._created_at,
+            duration_ms=elapsed_ms(self._created_mono, now_mono=now),
+            idle_ms=elapsed_ms(self._created_mono, now_mono=now),
         )
 
     def _deliver(self, event: SSEEvent, barrier: asyncio.Future[int | None] | None) -> bool:

@@ -38,6 +38,8 @@
  * `inflight_total` / `queue_depth` / `duration_ms`）/ `workspace_op.fulfill_begin`
  *（debug）/ `workspace_op.resolve`（`outcome`=ok|stale_404|fail；可含
  * `resolve_attempts` / `resolve_ms`）/ `workspace_op.resolve_retry` /
+ * 回合掉线重连（GET attach，禁止 POST 重发）：`conversation.rejoin_retry` /
+ * `conversation.rejoin_closed`。
  * `workspace_op.settle_exhausted`（`stream_nudged`）/ `sse.idle_stall`（泵空闲 60s）/
  * `sse.forced_transport_drop`（settle 耗尽后踢泵 → rejoin）。字段对齐服务端
  * `workspace.op_timeout`：`conversation_id` / `request_id` / `op`。
@@ -81,10 +83,20 @@ export interface LogRecord extends LogEntry {
 export const LOG_CHANNELS = {
   /** renderer → main，单向 send（fire-and-forget，日志失败绝不回灌阻塞 UI）。 */
   write: "app:log",
+  /**
+   * renderer → main：读 ``desktop.jsonl`` 尾部并返回**已脱敏**的 JSON 行
+   * （只含连通性 / 重连诊断事件与允许字段；无正文 / token / 文件内容）。
+   */
+  readTail: "app:log:readTail",
 } as const;
 
 /** 暴露在 `window.logApi` 上的 renderer 端 API 面。 */
 export interface LogApi {
   /** 记一条结构化日志到产品日志文件（fire-and-forget；失败静默吞掉）。 */
   write(entry: LogEntry): void;
+  /**
+   * 排查包用：本机 ``desktop.jsonl`` 尾部的脱敏行。纯浏览器 / 单测可缺失。
+   * 失败时返回空数组，绝不抛到 UI。
+   */
+  readTail(): Promise<string[]>;
 }

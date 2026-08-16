@@ -431,7 +431,7 @@ def escalation_resolved(
 def interaction_orphaned(
     *, interaction_id: str, kind: str, reason: str | None = None
 ) -> SSEEvent:
-    """pending 交互失效。``kind`` ∈ 热路 kind / stage_card。"""
+    """pending 交互失效。``kind`` ∈ 热路 kind / stage_card / team_preview。"""
     payload: dict[str, Any] = {"interaction_id": interaction_id, "kind": kind}
     text = (reason or "").strip()
     if text:

@@ -60,6 +60,24 @@ def test_get_redis_client_is_process_singleton(monkeypatch, clear_redis_cache):
     assert len(created) == 1
 
 
+def test_get_redis_client_sets_socket_timeouts(monkeypatch, clear_redis_cache):
+    """Sync Redis on the event loop must have connect + I/O ceilings (not None)."""
+    captured: dict[str, object] = {}
+
+    def _from_url(*_args, **kwargs):
+        captured.update(kwargs)
+        return _FakeRedis()
+
+    _install_fake_redis(monkeypatch, factory=_from_url)
+    redis_mod.get_redis_client()
+    assert captured["socket_connect_timeout"] == redis_mod.REDIS_SOCKET_CONNECT_TIMEOUT_S
+    assert captured["socket_timeout"] == redis_mod.REDIS_SOCKET_TIMEOUT_S
+    assert captured["socket_connect_timeout"] is not None
+    assert captured["socket_timeout"] is not None
+    assert captured["decode_responses"] is False
+    assert captured["retry"] is None
+
+
 def test_redis_client_pings_shared_instance(monkeypatch, clear_redis_cache):
     fake = _FakeRedis()
     monkeypatch.setattr(redis_mod, "get_redis_client", lambda: fake)

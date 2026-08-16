@@ -115,6 +115,13 @@ _IMAGE_NATIVE_INDEX = (
     "勿再要求 code_execute 开图，也勿假定未看见像素。"
 )
 
+# 本条 vs 工作区历轮 attachments/：同名跨轮复用同一路径是故意设计，缺判别位会让模型
+# 把上一轮同名文件当成本条、或把「无 [resident missing]」误读成「本条没传文件」。
+_ATTACH_THIS_MESSAGE_FRAME = (
+    "以下是本条消息的附件。attachments/ 同名跨轮复用同一路径，最新上传覆盖旧字节；"
+    "工作区索引里其它 attachments/ 条目属历史轮。"
+)
+
 
 def _wire_worker_conversation_log_tools(
     worker_tools: ToolRegistry,
@@ -705,6 +712,7 @@ async def _build_attachment_context(
     )
     return (
         "<attached_files>\n"
+        f"{_ATTACH_THIS_MESSAGE_FRAME} "
         "The user attached the following files, directories and past "
         "conversations as actionable inputs for this turn—not mere optional "
         "reference. When the user narrows scope to these materials and/or "

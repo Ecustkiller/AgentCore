@@ -127,10 +127,7 @@ async def test_local_harvest_does_not_write_pg(tmp_path):
         )
 
     assert captured["llm_credentials"].api_key == "sidecar-key"
-    assert (
-        captured["llm_credentials"].extra_headers[INFERENCE_CONVERSATION_HEADER]
-        == "conv-local"
-    )
+    assert captured["llm_credentials"].extra_headers[INFERENCE_CONVERSATION_HEADER] == "conv-local"
     assert captured.get("continue_message_id") is None
     assert sidecar._turns == {}
 
@@ -468,3 +465,64 @@ async def test_local_harvest_reads_this_conversation_permission_axes(tmp_path):
         )
 
     assert captured["axes"] == managed
+
+
+@pytest.mark.asyncio
+async def test_local_harvest_fallback_persists_user_face_not_ceo_terminal(tmp_path):
+    """Sidecar no-LLM fallback uses the same user renderer (not format_for_ceo)."""
+    import agentcore.conversation.execution_harvest as eh
+    from agentcore.runtime.coordination.session import (
+        CoordinationEvent,
+        CoordinationEventKind,
+    )
+
+    session = _session("exec-fb", "conv-local")
+    session.workspace_channel_dead = True
+    session._pending.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={
+                "output": (
+                    "### tool_failures\n"
+                    "- `code_execute`：last_error=Sandbox crash\n"
+                    "【终稿纪律】交付物在前"
+                ),
+                "completed": 1,
+                "total": 1,
+                "user_facts": {
+                    "nodes": [
+                        {
+                            "role": "工程师",
+                            "status": "completed",
+                            "summary": "脚本已写好",
+                            "files": ["run.py"],
+                        }
+                    ],
+                    "files": ["run.py"],
+                    "outstanding_tool_failures": [{"role": "工程师", "tool_name": "code_execute"}],
+                },
+            },
+        )
+    )
+    set_active_coordination(session)
+    _sidecar(tmp_path)
+
+    with (
+        patch.object(eh, "async_session_factory", side_effect=_pg_forbidden),
+        patch.object(eh, "persist_harvest_fallback", side_effect=_pg_forbidden),
+        patch.object(eh, "notify_user", AsyncMock()),
+        patch("agentcore.sidecar.server.run_chat_pipeline", side_effect=_pg_forbidden),
+    ):
+        await eh.run_harvest_closing_turn(
+            conversation_id="conv-local",
+            execution_id="exec-fb",
+        )
+
+    records = list_outbox_records(tmp_path / "outbox")
+    assert len(records) == 1
+    content = to_record_turn_body(records[0])["content"]
+    assert "### tool_failures" not in content
+    assert "last_error=" not in content
+    assert "终稿纪律" not in content
+    assert "运行代码" in content
+    assert "工程师" in content

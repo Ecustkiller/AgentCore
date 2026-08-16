@@ -232,6 +232,45 @@ export function pausedSummaryToRequiredPayload(
 }
 
 /**
+ * One pending kickoff card per conversation. Mobile has no `surfacedSeq`;
+ * equivalent order = later stamped host, then live IX over paused shell,
+ * then encounter order. ask_user / plan_review are not collapsed.
+ */
+function keepLatestTeamPreview(
+  cards: VisibleColdResume[],
+  hosts: ColdResumeHost[],
+  ixIds: Set<string>,
+): VisibleColdResume[] {
+  let best = -1;
+  let bestHost = Number.NEGATIVE_INFINITY;
+  let bestIx = false;
+  let bestI = -1;
+  for (let i = 0; i < cards.length; i++) {
+    const card = cards[i];
+    if (card.kind !== "team_preview") continue;
+    const host = hosts.findIndex(
+      (h) =>
+        h.id === card.message_id ||
+        (h.serverMessageId != null && h.serverMessageId === card.message_id),
+    );
+    const ix = ixIds.has(card.checkpoint_id);
+    const later =
+      best < 0 ||
+      host > bestHost ||
+      (host === bestHost && ix && !bestIx) ||
+      (host === bestHost && ix === bestIx && i > bestI);
+    if (later) {
+      best = i;
+      bestHost = host;
+      bestIx = ix;
+      bestI = i;
+    }
+  }
+  if (best < 0) return cards;
+  return cards.filter((c, i) => c.kind !== "team_preview" || i === best);
+}
+
+/**
  * Pure paint selector: cold Interaction pending is live authority;
  * recovery `paused` covers reopen shells not already covered by IX.
  */
@@ -276,5 +315,5 @@ export function selectVisibleColdResumes(args: {
     out.push(p);
   }
 
-  return out;
+  return keepLatestTeamPreview(out, hosts, covered);
 }

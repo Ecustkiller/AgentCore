@@ -80,10 +80,14 @@
     "status": "paused",
     "finishReason": "paused",
     "error": null,
-    "content": "",
+    "content": "落地前请勾选要一并处理的风险：",
     "reasoning": "",
     "captainContext": [],
     "process": [
+      {
+        "kind": "content",
+        "text": "落地前请勾选要一并处理的风险："
+      },
       {
         "kind": "checkpoint",
         "checkpoint_id": "cp_risk"

@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from agentcore.observability.query.failure_families import FAIL_OPEN_PULSE_S
 from agentcore.observability.query.jsonl import JsonlLogSource, ReadFilter, ReadStats, iter_events
+from agentcore.observability.query.timeutil import parse_timestamp
 
 _EARLY_FINISH_FLAGS = {"length", "max_rounds", "degraded", "unproductive"}
 # Convergence-governance events → per-trace tally field. Aligned to what the
@@ -154,8 +157,72 @@ def classify_worker(agent_id: str) -> tuple[str, str]:
     return agent_id, "other"
 
 
-def _avg(xs: list[float]) -> float:
+def _avg(xs: Sequence[float]) -> float:
     return sum(xs) / len(xs) if xs else 0.0
+
+
+_STREAM_TIMING_EVENTS = frozenset(
+    {
+        "event_sink.detach",
+        "event_sink.attach",
+        "conversation_stream.unwatch",
+        "conversation_stream.watch",
+    }
+)
+_WATCHDOG_IDLE_MS = 60_000
+
+
+def stream_health_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate detach / unwatch timing so CLI can answer idle vs age."""
+    durations = [int(r["duration_ms"]) for r in rows if r.get("duration_ms") is not None]
+    idles = [int(r["idle_ms"]) for r in rows if r.get("idle_ms") is not None]
+    by_event: Counter[str] = Counter(str(r.get("event") or "?") for r in rows)
+    by_reason: Counter[str] = Counter(
+        str(r.get("reason") or "?") for r in rows if r.get("event") == "event_sink.detach"
+    )
+    by_mode: Counter[str] = Counter(
+        str(r.get("mode") or "?") for r in rows if r.get("event") == "event_sink.attach"
+    )
+    return {
+        "count": len(rows),
+        "by_event": dict(by_event),
+        "by_reason": dict(by_reason),
+        "attach_by_mode": dict(by_mode),
+        "duration_avg_ms": _avg(durations) if durations else None,
+        "duration_max_ms": max(durations) if durations else None,
+        "idle_avg_ms": _avg(idles) if idles else None,
+        "idle_max_ms": max(idles) if idles else None,
+        "idle_ge_60s": sum(1 for idle in idles if idle >= _WATCHDOG_IDLE_MS),
+    }
+
+
+def fail_open_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate ``rate_limit.redis_fail_open``: raw requests + 10s pulses.
+
+    ``requests`` is how many times the limiter fail-opened (abuse-window size).
+    ``pulses`` is first-hit + 10s heartbeat so a long outage is visible without
+    drowning the board. ``severity=must_review`` — this is a security signal.
+    """
+    by_prefix: Counter[str] = Counter(str(r.get("prefix") or "?") for r in rows)
+    process_counts = [int(r["count"]) for r in rows if r.get("count") is not None]
+    last_pulse: datetime | None = None
+    pulses = 0
+    for row in rows:
+        ts = parse_timestamp(row.get("timestamp"))
+        if last_pulse is None:
+            pulses += 1
+            last_pulse = ts
+            continue
+        if ts is not None and (ts - last_pulse).total_seconds() >= FAIL_OPEN_PULSE_S:
+            pulses += 1
+            last_pulse = ts
+    return {
+        "requests": len(rows),
+        "pulses": pulses,
+        "by_prefix": dict(by_prefix),
+        "process_count_max": max(process_counts) if process_counts else None,
+        "severity": "must_review",
+    }
 
 
 # Prompt-token buckets for the prefix-cache readout (审计议题 D4 第三问: 命中率随对话
@@ -370,6 +437,12 @@ def compute_stats(
     llm_calls: list[dict[str, Any]] = []
     cost_records: list[dict[str, Any]] = []
     prefix_cache_rows: list[dict[str, Any]] = []
+    stream_timing_rows: list[dict[str, Any]] = []
+    readyz_failed = 0
+    lag_warnings = 0
+    lag_max_ms = 0
+    backpressure_rows: list[dict[str, Any]] = []
+    fail_open_rows: list[dict[str, Any]] = []
     traces: dict[str, dict[str, Any]] = {}
     ceiling_reasons: Counter[str] = Counter()
 
@@ -395,6 +468,23 @@ def compute_stats(
             cost_records.append(obj)
         elif event == "cost.prefix_cache":
             prefix_cache_rows.append(obj)
+        if event in _STREAM_TIMING_EVENTS:
+            stream_timing_rows.append(obj)
+        elif event == "http.readyz_failed":
+            readyz_failed += 1
+        elif event == "event_loop.lag":
+            lag_warnings += 1
+            lag_ms = obj.get("lag_ms")
+            if isinstance(lag_ms, (int, float)):
+                lag_max_ms = max(lag_max_ms, int(lag_ms))
+        elif event == "event_loop.lag_summary":
+            max_lag = obj.get("max_lag_ms")
+            if isinstance(max_lag, (int, float)):
+                lag_max_ms = max(lag_max_ms, int(max_lag))
+        elif event == "event_sink.backpressure_drop":
+            backpressure_rows.append(obj)
+        elif event == "rate_limit.redis_fail_open":
+            fail_open_rows.append(obj)
 
     clusters: dict[str, dict[str, Any]] = {}
     for e in errors:
@@ -455,6 +545,32 @@ def compute_stats(
         }
     if prefix_cache_rows:
         summaries["prefix_cache"] = prefix_cache_summary(prefix_cache_rows)
+    if stream_timing_rows:
+        summaries["stream_health"] = stream_health_summary(stream_timing_rows)
+    if readyz_failed:
+        summaries["readyz"] = {"failed": readyz_failed}
+    if lag_warnings or lag_max_ms:
+        summaries["event_loop"] = {
+            "lag_warnings": lag_warnings,
+            "max_lag_ms": lag_max_ms,
+        }
+    if backpressure_rows:
+        dropped_totals = [
+            int(r["dropped_total"])
+            for r in backpressure_rows
+            if r.get("dropped_total") is not None
+        ]
+        summaries["sse_backpressure"] = {
+            "pulses": len(backpressure_rows),
+            "dropped_total_max": max(dropped_totals) if dropped_totals else 0,
+            "dropped_delta_sum": sum(
+                int(r["dropped_delta"])
+                for r in backpressure_rows
+                if r.get("dropped_delta") is not None
+            ),
+        }
+    if fail_open_rows:
+        summaries["rate_limit_fail_open"] = fail_open_summary(fail_open_rows)
 
     return StatsQueryResult(
         total=read_stats.total_kept,

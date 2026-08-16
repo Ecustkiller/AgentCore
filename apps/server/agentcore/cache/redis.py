@@ -12,6 +12,13 @@ from typing import Any
 
 from agentcore.config import settings
 
+# Event-loop bound: the API is a single uvicorn process. A sync Redis call with
+# no socket timeout can freeze every in-flight SSE stream and ``/readyz``.
+# Local Redis RTT is milliseconds; these are hang/partition ceilings, not
+# latency targets. Rate-limit I/O fail-opens on timeout (see redis_rate_limit).
+REDIS_SOCKET_CONNECT_TIMEOUT_S = 1.0
+REDIS_SOCKET_TIMEOUT_S = 1.0
+
 
 @lru_cache(maxsize=1)
 def get_redis_client() -> Any:
@@ -20,10 +27,20 @@ def get_redis_client() -> Any:
     ``decode_responses=False`` matches rate-limiter key/member handling (bytes).
     Does not ping — connectivity checks belong at construct (``redis_client``)
     or the soft ``/readyz`` body probe (``redis_ready``; does not decide HTTP 503).
+    Connect and read/write each have a hard socket ceiling so a wedged Redis
+    cannot block the event loop without bound.
     """
     import redis
 
-    return redis.Redis.from_url(settings.redis_url, decode_responses=False)
+    return redis.Redis.from_url(
+        settings.redis_url,
+        decode_responses=False,
+        socket_connect_timeout=REDIS_SOCKET_CONNECT_TIMEOUT_S,
+        socket_timeout=REDIS_SOCKET_TIMEOUT_S,
+        # redis-py 8 retries TimeoutError 10× by default — a 1s hang becomes ~10s
+        # on the event loop. ``retry=None`` → Connection uses Retry(..., 0).
+        retry=None,
+    )
 
 
 def redis_client() -> Any:

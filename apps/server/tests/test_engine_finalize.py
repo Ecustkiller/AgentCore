@@ -14,6 +14,7 @@ from agentcore.runtime.engine.governance import (
     finalize_allows_persist,
     resolve_finalize_coordination_tools,
 )
+from agentcore.runtime.turn.interrupt import MAX_ROUNDS_EMPTY_USER_VISIBLE
 from agentcore.tools.protocol import ToolResult, ToolSchema
 from agentcore.tools.registry import ToolRegistry
 from tests.llm_helpers import make_profile_params
@@ -289,7 +290,8 @@ async def test_force_finalize_skips_empty_inventory():
         run_id="w1",
     )
     assert coordination is None
-    assert content == ""
+    assert content == MAX_ROUNDS_EMPTY_USER_VISIBLE
+    assert "未产出回复" in content
     assert provider.calls == 0
 
 

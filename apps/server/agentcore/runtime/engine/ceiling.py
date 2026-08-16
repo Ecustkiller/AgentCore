@@ -235,10 +235,14 @@ async def ceiling_finalize(
                 sync_captain_loop_mirror(final_content=final_content)
         if coordination.reasoning:
             final_reasoning += coordination.reasoning
-        tool_calls = prepare_blocking_ask_user_tool_calls(
+        tool_calls, folded = prepare_blocking_ask_user_tool_calls(
             coordination.tool_calls or [],
             coordination.content or "",
         )
+        if role == "captain":
+            from agentcore.runtime.engine.loop import sync_captain_loop_mirror
+
+            sync_captain_loop_mirror(ask_user_content_folded=folded)
         messages.append(
             LLMMessage(
                 role="assistant",

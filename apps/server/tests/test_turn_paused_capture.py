@@ -109,6 +109,7 @@ async def test_ask_user_capture_assembles_turn_paused_with_checkpoint_marker() -
         controller=controller,
         content_before_round="气泡基底",
         final_content="同轮将被吸收的散文",
+        ask_user_content_folded=True,
     )
     mirror_token = current_captain_loop.set(mirror)
     cit_token = turn_citations.set([{"url": "https://a.example", "title": "A"}])
@@ -149,17 +150,17 @@ async def test_ask_user_capture_assembles_turn_paused_with_checkpoint_marker() -
 
 
 @pytest.mark.asyncio
-async def test_ask_user_explicit_message_absorb_uses_content_before_round() -> None:
-    """Explicit ``message`` still absorbs/clears same-round prose; capture must not fork."""
+async def test_ask_user_explicit_message_keeps_round_prose_in_bubble() -> None:
+    """Model-owned ``message`` does not fold: capture keeps same-round guidance."""
     fl_token = _bind_fact_log()
     sink = EventSink()
     controller = LoopController()
-    # After absorb_blocking_ask_user_content the engine rolls final_content back to
-    # content_before_round; mirror keeps both so a wrong branch would pick the prose.
+    prose = "这段同轮引导句应留在气泡"
     mirror = CaptainLoopMirror(
         controller=controller,
-        content_before_round="",  # fresh turn / absorb cleared bubble
-        final_content="这段同轮散文进了显式 message 卡，不应留在气泡",
+        content_before_round="",
+        final_content=prose,
+        ask_user_content_folded=False,
     )
     mirror_token = current_captain_loop.set(mirror)
     try:
@@ -173,11 +174,8 @@ async def test_ask_user_explicit_message_absorb_uses_content_before_round() -> N
         current_fact_log.reset(fl_token)
 
     snap = _last_turn_paused(frame)
-    assert snap.content == ""
-    assert paused_content == ""
-    # Pause finalize would persist the rolled-back final_content (== content_before_round).
-    message_content_after_absorb = mirror.content_before_round
-    assert message_content_after_absorb == snap.content
+    assert snap.content == prose
+    assert paused_content == prose
 
 
 @pytest.mark.asyncio
@@ -372,6 +370,7 @@ def test_build_turn_paused_fact_direct_ask_user_vs_other() -> None:
         controller=controller,
         content_before_round="absorb-base",
         final_content="keep-deliverable",
+        ask_user_content_folded=True,
     )
     token = current_captain_loop.set(mirror)
     sink = EventSink()
@@ -421,6 +420,7 @@ async def test_paused_message_content_same_origin_with_prior_cycle() -> None:
         controller=controller,
         content_before_round="本段基底",
         final_content="不应出现",
+        ask_user_content_folded=True,
     )
     t = current_captain_loop.set(mirror)
     try:

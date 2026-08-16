@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import type { ErrorAction } from "@/lib/errors";
 import {
+  RECONNECTING_BANNER,
   RECONNECT_BANNER,
+  RECONNECT_FINISHED_BANNER,
+  RECONNECT_INTERRUPTED_BANNER,
   UNKNOWN_CLOUD_BANNER,
 } from "@/services/turns/helpers";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
@@ -42,20 +45,44 @@ describe("RetryBanner", () => {
     expect(clearError).toHaveBeenCalledOnce();
   });
 
-  it("shows reconnect drop copy without a 重连 button", () => {
+  it("shows confirmed-live reconnect copy without a 重连 button", () => {
     error = RECONNECT_BANNER;
-    render(<RetryBanner />);
+    const { container } = render(<RetryBanner />);
     expect(screen.getByText(RECONNECT_BANNER)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+    expect(container.firstElementChild?.getAttribute("data-banner-tone")).toBe(
+      "notice",
+    );
   });
 
-  it("shows unknown-cloud settle copy without a 重试 button", () => {
-    error = UNKNOWN_CLOUD_BANNER;
-    render(<RetryBanner />);
-    expect(screen.getByText(UNKNOWN_CLOUD_BANNER)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+  it("uses notice chrome for quiet reconnect / finished copy", () => {
+    for (const copy of [RECONNECTING_BANNER, RECONNECT_FINISHED_BANNER]) {
+      error = copy;
+      const { container, unmount } = render(<RetryBanner />);
+      expect(screen.getByText(copy)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+      expect(
+        container.firstElementChild?.getAttribute("data-banner-tone"),
+      ).toBe("notice");
+      expect(container.firstElementChild?.className).toContain("bg-muted/40");
+      unmount();
+    }
+  });
+
+  it("uses alert chrome for interrupted / unknown-cloud copy", () => {
+    for (const copy of [RECONNECT_INTERRUPTED_BANNER, UNKNOWN_CLOUD_BANNER]) {
+      error = copy;
+      const { container, unmount } = render(<RetryBanner />);
+      expect(screen.getByText(copy)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "重试" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "重连" })).toBeNull();
+      expect(
+        container.firstElementChild?.getAttribute("data-banner-tone"),
+      ).toBe("alert");
+      expect(container.firstElementChild?.className).toContain("bg-muted/40");
+      unmount();
+    }
   });
 
   it("renders nothing when there is no error", () => {

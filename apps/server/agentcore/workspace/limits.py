@@ -90,11 +90,11 @@ EXEC_ENV_DEAD_BODY_MARKER = "本机暂时跑不了命令"
 EXEC_ENV_DEAD_USER_VISIBLE_BY_CODE: dict[str, str] = {
     # No language on this path — do not name Python (or any other interpreter).
     "exec_env_no_interpreter": (
-        "本机暂时跑不了命令：这台电脑上没找到运行这条命令的解释器（跑一句最短的命令就退出了）。"
+        "本机暂时跑不了命令：这台电脑上没找到运行这条命令的解释器。"
         "装好之后可以重试；我将基于已有材料收口。"
     ),
     "exec_env_probe_timeout": (
-        "本机暂时跑不了命令：最短的一句命令 5 秒内都没跑完，本机启动得太慢。"
+        "本机暂时跑不了命令：执行环境没有在时限内就绪。"
         "稍后重试通常就好；我将基于已有材料收口。"
     ),
     "exec_env_spawn_denied": (

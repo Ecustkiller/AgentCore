@@ -137,10 +137,21 @@ WORKDIR /app
 
 # 非 root 运行 + 预建 /data 并归属 app：命名卷首次挂载会继承该归属，
 # 避免非 root 进程写挂载点失败的经典坑（DATA_DIR=/data 写工作区/记忆/快照）。
+# 必须建 /home/app：sandbox overlay 以 root 起再 setpriv 降权，HOME 若仍是 /root，
+# asyncpg ssl=prefer 会去读 /root/.postgresql/postgresql.key（0600 root）→
+# PermissionError → /readyz 误判库挂。私钥必须 app 可读且不过宽（0600；0644
+# 会被 OpenSSL/libpq 拒绝）。
 RUN groupadd --system app \
-    && useradd --system --gid app --no-create-home app \
+    && useradd --system --gid app --create-home --home-dir /home/app app \
     && mkdir -p /data \
-    && chown app:app /data
+    && chown app:app /data /home/app \
+    && chmod 0700 /home/app
+
+# After the home exists: compose user 0:0 still resets HOME=/root at start;
+# entrypoint puts it back. Non-sandbox runs (USER app) keep this ENV.
+ENV HOME=/home/app \
+    USER=app \
+    LOGNAME=app
 
 COPY --from=builder --chown=app:app /app /app
 

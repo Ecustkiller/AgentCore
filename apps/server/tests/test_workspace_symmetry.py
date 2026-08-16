@@ -148,17 +148,13 @@ def _exec_value(**extra) -> dict:
 
 
 async def _execute_past_probe(local, registry, response: dict):
-    """Drive ``execute`` through its once-per-backend probe to the real run."""
+    """Drive ``execute`` through its single CLIENT_TOOL round-trip."""
     task = asyncio.create_task(
         local.execute(ExecutionRequest(code="print(1)", language="python"))
     )
-    probe_event = await _await_request()
+    event = await _await_request()
     assert registry.resolve(
-        probe_event.payload["request_id"], _exec_value(), conversation_id=CONV
-    )
-    run_event = await _await_request()
-    assert registry.resolve(
-        run_event.payload["request_id"], response, conversation_id=CONV
+        event.payload["request_id"], response, conversation_id=CONV
     )
     return await task
 

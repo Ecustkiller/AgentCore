@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
 import type { ErrorAction } from "@/lib/errors";
+import {
+  RECONNECTING_BANNER,
+  RECONNECT_INTERRUPTED_BANNER,
+} from "@/services/turns/helpers";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerSendErrorNotice } from "../ComposerSendErrorNotice";
@@ -43,6 +47,22 @@ describe("ComposerSendErrorNotice", () => {
     const banner = screen.getByTestId("composer-send-error");
     expect(banner.className).toContain("bg-muted/40");
     expect(banner.className).not.toContain("destructive");
+  });
+
+  it("uses notice chrome for a quiet reconnect session banner", () => {
+    sessionError = RECONNECTING_BANNER;
+    render(<ComposerSendErrorNotice draftKey="__draft__" />);
+    const banner = screen.getByTestId("composer-send-error");
+    expect(banner.getAttribute("data-banner-tone")).toBe("notice");
+    expect(banner.className).toContain("bg-muted/40");
+  });
+
+  it("uses alert chrome for an interrupted session banner", () => {
+    sessionError = RECONNECT_INTERRUPTED_BANNER;
+    render(<ComposerSendErrorNotice draftKey="__draft__" />);
+    const banner = screen.getByTestId("composer-send-error");
+    expect(banner.getAttribute("data-banner-tone")).toBe("alert");
+    expect(banner.className).toContain("bg-muted/40");
   });
 
   it("uses primary chrome when a config action is offered", () => {

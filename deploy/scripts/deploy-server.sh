@@ -243,7 +243,9 @@ migrate_step() {
 # 第一个打开云文件夹的用户就把搬迁目标建成空目录，而搬迁「目标已存在就跳过、绝不合并」
 # ——事后补跑会被判 skipped，文件永久停在旧的平铺目录里。
 if [[ "$IS_ROLLBACK" -eq 0 ]]; then
-  dc stop api 2>/dev/null || true
+  # 须与 compose stop_grace_period=40s 对齐。裸 stop 默认 10s，会在抢救窗口
+  # （turn_shutdown_grace_seconds=20）内 SIGKILL，制造孤儿 lease。
+  dc stop --timeout 40 api 2>/dev/null || true
   stage "api stopped before migrate"
   dc_oneshot run --rm api alembic upgrade head
   stage "alembic upgrade head"

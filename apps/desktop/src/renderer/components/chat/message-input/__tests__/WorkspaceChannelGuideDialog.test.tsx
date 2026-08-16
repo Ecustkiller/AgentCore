@@ -10,7 +10,7 @@ afterEach(() => {
 const dialogText = () => screen.getByRole("dialog").textContent ?? "";
 
 describe("WorkspaceChannelGuideDialog", () => {
-  it("讲清「我的文件」在云上、不自动同步、要手动导出", () => {
+  it("讲清文件在云上、不自动同步、要手动导出", () => {
     render(
       <WorkspaceChannelGuideDialog
         open
@@ -19,10 +19,14 @@ describe("WorkspaceChannelGuideDialog", () => {
       />,
     );
     expect(screen.getByText("在哪工作：怎么选")).toBeTruthy();
-    expect(screen.getByText("我的文件")).toBeTruthy();
+    expect(screen.getByText("文件放在云上")).toBeTruthy();
+    expect(screen.queryByText("我的文件")).toBeNull();
     expect(screen.getByText(/看到的是同一份/)).toBeTruthy();
     expect(screen.getByText(/不会自动同步到你电脑/)).toBeTruthy();
     expect(dialogText()).toContain("导出 ZIP");
+    expect(
+      screen.getByText(/日常用、想在手机和网页接着看 → 上面四个/),
+    ).toBeTruthy();
     expect(screen.getByRole("button", { name: "知道了" })).toBeTruthy();
   });
 
@@ -90,7 +94,8 @@ describe("WorkspaceChannelGuideDialog", () => {
         showLocalTraditional={false}
       />,
     );
-    expect(screen.getByText("我的文件")).toBeTruthy();
+    expect(screen.getByText("文件放在云上")).toBeTruthy();
+    expect(screen.queryByText("我的文件")).toBeNull();
     expect(screen.getByText("推荐")).toBeTruthy();
     expect(screen.getByText(/不会自动同步到你电脑/)).toBeTruthy();
     expect(screen.queryByText("打开本机文件夹")).toBeNull();

@@ -274,7 +274,14 @@ async def force_finalize(
             run_id=run_id,
             had_author_brief=debrief_meets_minimum(prior_brief),
         )
-        return final_content, final_reasoning, total_usage, rounds, None
+        body = (final_content or "").strip()
+        if not body:
+            from agentcore.runtime.turn.interrupt import empty_close_user_visible
+
+            body = empty_close_user_visible(reason)
+            if body:
+                emit_content(body)
+        return body, final_reasoning, total_usage, rounds, None
 
     try:
         soft = await run_finalize_round(

@@ -54,6 +54,17 @@ interface ServerHealthState {
   clearRecovered: () => void;
 }
 
+/**
+ * Fired on the offline → online edge so turn rejoin can clear the reconnect
+ * banner and skip remaining backoff. Registered from ``turns/recovery`` —
+ * this store must not import that service (cycle).
+ */
+let recoveredHandler: (() => void) | null = null;
+
+export function setServerHealthRecoveredHandler(fn: (() => void) | null): void {
+  recoveredHandler = fn;
+}
+
 export const useServerHealthStore = create<ServerHealthState>((set, get) => ({
   status: "checking",
   lastOkAt: null,
@@ -80,6 +91,7 @@ export const useServerHealthStore = create<ServerHealthState>((set, get) => ({
         since_offline_ms: sinceOfflineMs,
         last_ok_at: prev.lastOkAt,
       });
+      recoveredHandler?.();
     }
   },
   markOffline: (reason, source, meta) => {

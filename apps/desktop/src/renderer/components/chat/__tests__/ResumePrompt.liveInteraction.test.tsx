@@ -395,6 +395,97 @@ describe("ResumePrompt · live InteractionStore authority", () => {
       "sidecar",
     );
   });
+
+  it("two pending team_preview cards paint only the latest (IX + paused shell)", () => {
+    useInteractionStore.getState().upsertRequired({
+      kind: "ask_user",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: {
+        checkpoint_id: "cp-ask-keep",
+        conversation_id: CID,
+        question: "这次讨论怎么推进？",
+        context: "",
+        assumptions: [],
+        questions: [],
+      },
+    });
+    useInteractionStore.getState().upsertRequired({
+      kind: "plan_review",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: {
+        checkpoint_id: "pr-keep",
+        conversation_id: CID,
+        steps: [{ run_id: "r1", role: "研" }],
+        pending: [],
+      },
+    });
+    // Older recovery shell — different checkpoint, would paint a second kickoff.
+    usePausedTurnStore.getState().addLiveResume({
+      messageId: "m-server-tp",
+      conversationId: CID,
+      checkpointId: "tp-paused-old",
+      kind: "team_preview",
+      userMessage: "组团做定价",
+      userMessageId: "u1",
+      steps: [],
+      pending: [],
+      workers: [{ run_id: "old", role: "旧", task: "旧", depends_on: [] }],
+      tools: [],
+      primitive: "delegate",
+      headline: "旧开工卡 · 预计 1 人",
+      motion: "",
+      form: "",
+      sides: [],
+      maxRounds: 0,
+      thorough: true,
+      question: "",
+      context: "",
+      assumptions: [],
+      questions: [],
+      intent: "kickoff",
+      origin: "server",
+    });
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: tpPayload("tp-old-ix", { headline: "旧 IX 开工卡" }),
+    });
+    useInteractionStore.getState().upsertRequired({
+      kind: "team_preview",
+      conversationId: CID,
+      messageId: "m-server-tp",
+      origin: "server",
+      payload: tpPayload("tp-latest", { headline: "最新开工卡" }),
+    });
+
+    const visible = selectVisibleColdResumes({
+      conversationId: CID,
+      byId: useInteractionStore.getState().byId,
+      pausedPending: usePausedTurnStore.getState().pending,
+      messages: useConversationStore.getState().byId[CID]?.messages ?? [],
+    });
+    expect(visible.map((v) => v.kind).sort()).toEqual([
+      "ask_user",
+      "plan_review",
+      "team_preview",
+    ]);
+    const kickoffs = visible.filter((v) => v.kind === "team_preview");
+    expect(kickoffs).toHaveLength(1);
+    expect(kickoffs[0]?.checkpointId).toBe("tp-latest");
+
+    renderResume();
+    expect(screen.getByText("这次讨论怎么推进？")).toBeTruthy();
+    expect(screen.getByText("最新开工卡")).toBeTruthy();
+    expect(screen.queryByText("旧开工卡 · 预计 1 人")).toBeNull();
+    expect(screen.queryByText("旧 IX 开工卡")).toBeNull();
+    expect(screen.getAllByText("授权并开工")).toHaveLength(1);
+  });
 });
 
 describe("ResumePrompt · ask continue → same-turn team_preview", () => {

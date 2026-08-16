@@ -38,6 +38,7 @@ from agentcore.observability.query.jsonl import discover_log_files  # noqa: E402
 from agentcore.observability.query.patrol import (  # noqa: E402
     DEFAULT_CLUSTER_LIMIT,
     DEFAULT_MAX_IDS,
+    DEFAULT_REPEAT_USER_MIN,
     MUST_REVIEW_FAMILIES,
     PatrolSnapshot,
     diff_snapshots,
@@ -67,6 +68,7 @@ class _Options:
         self.as_json = False
         self.max_ids = DEFAULT_MAX_IDS
         self.cluster_limit = DEFAULT_CLUSTER_LIMIT
+        self.repeat_user_min = DEFAULT_REPEAT_USER_MIN
         self.top = _DEFAULT_TOP
         self.snapshot_out: Path | None = None
         self.baseline: Path | None = None
@@ -110,6 +112,9 @@ def _parse_cli(argv: list[str]) -> _Options:
             i += 2
         elif arg == "--clusters" and i + 1 < len(argv):
             opts.cluster_limit = int(argv[i + 1])
+            i += 2
+        elif arg == "--repeat-user-min" and i + 1 < len(argv):
+            opts.repeat_user_min = int(argv[i + 1])
             i += 2
         elif arg == "--top" and i + 1 < len(argv):
             opts.top = int(argv[i + 1])
@@ -217,6 +222,24 @@ def _print_snapshot(snapshot: PatrolSnapshot, *, top: int) -> None:
                 f"{_ids_note(j['conversations'], 2):<22} {_ids_note(j['traces'], 2):<22} "
                 f"{row.sample[:60]}"
             )
+
+    print(
+        f"\n── 单用户重复命中 (≥{snapshot.repeat_user_min} 次同族，"
+        f"{len(snapshot.repeat_users)} 行) ──"
+    )
+    print("  捞「总次数低、但集中在少数用户」：一人窗内反复撞同族，比榜底 3 次更像「经常」。")
+    if not snapshot.repeat_users:
+        print("  (无)")
+    else:
+        print(f"  {'次数':>6}  {'用户':<10} {'家族':<22} 会话")
+        for row in snapshot.repeat_users[:top]:
+            j = row.to_json()
+            print(
+                f"  {row.events:>6}  {_short(row.user_id):<10} {row.family:<22} "
+                f"{_ids_note(j['conversations'], 2)}"
+            )
+        if len(snapshot.repeat_users) > top:
+            print(f"  … +{len(snapshot.repeat_users) - top} more (use --json)")
 
     print(f"\n── 高频精确文案 (top {len(snapshot.clusters)}) ──")
     if not snapshot.clusters:
@@ -381,6 +404,7 @@ def main() -> None:
         export_dir=opts.export_dir,
         max_ids=opts.max_ids,
         cluster_limit=opts.cluster_limit,
+        repeat_user_min=opts.repeat_user_min,
     )
 
     diff: dict[str, Any] | None = None

@@ -16,6 +16,7 @@ from agentcore.conversation.store.outbox import (
     list_outbox_records,
     to_record_turn_body,
 )
+from agentcore.runtime.turn.interrupt import INTERRUPTED_EMPTY_USER_VISIBLE
 
 
 @pytest.fixture(autouse=True)
@@ -990,6 +991,61 @@ def test_to_record_turn_body_includes_harvest_origin(tmp_path):
     assert body["origin"] == "execution_harvest"
     assert body["execution_id"] == "exec-1"
     assert body["harvest_kind"] == "success"
+
+
+def test_salvage_empty_non_user_stop_writes_honesty_note(tmp_path):
+    """Local salvage used to seal an empty cancelled bubble; user saw nothing."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="s" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="s" * 32)
+        await store.salvage(
+            journal=[],
+            content="",
+            conversation_id="c1",
+            trace_id="s" * 32,
+            message_id="m1",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["content"] == INTERRUPTED_EMPTY_USER_VISIBLE
+    assert record["finish_reason"] == "cancelled"
+
+
+def test_salvage_empty_user_stop_stays_silent(tmp_path):
+    """User pressed stop — local salvage must not invent an explanation."""
+    store = OutboxStore(tmp_path / "outbox")
+    store.bind_turn(
+        conversation_id="c1",
+        user_message_id="u1",
+        user_message="hi",
+        message_id="m1",
+        trace_id="t" * 32,
+    )
+
+    async def run() -> dict:
+        await store.begin_turn(conversation_id="c1", message_id="m1", trace_id="t" * 32)
+        await store.salvage(
+            journal=[],
+            content="",
+            conversation_id="c1",
+            trace_id="t" * 32,
+            message_id="m1",
+            interrupt_reason="user_stop",
+        )
+        return json.loads((tmp_path / "outbox" / "u1.json").read_text(encoding="utf-8"))
+
+    record = _drive(run())
+    assert record["content"] == ""
+    assert record["finish_reason"] == "cancelled"
 
 
 def test_salvage_copies_harvest_origin_from_bind(tmp_path):
