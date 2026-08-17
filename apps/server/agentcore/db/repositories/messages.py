@@ -3,7 +3,7 @@
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -114,6 +114,48 @@ class MessageRepository:
                 continue
             out.append(row)
         return out
+
+    async def get_execution_harvest_user(
+        self,
+        *,
+        conversation_id: str,
+        execution_id: str,
+    ) -> Message | None:
+        """The synthetic 系统收口 user row for this execution, if the claim exists."""
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.role == "user",
+                Message.usage["origin"].astext == "execution_harvest",
+                Message.usage["execution_id"].astext == execution_id,
+            )
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_first_assistant_after(
+        self,
+        *,
+        conversation_id: str,
+        after: datetime,
+        after_id: str,
+    ) -> Message | None:
+        """Earliest assistant row strictly after ``(after, after_id)``."""
+        result = await self._session.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id,
+                Message.role == "assistant",
+                or_(
+                    Message.created_at > after,
+                    and_(Message.created_at == after, Message.id > after_id),
+                ),
+            )
+            .order_by(Message.created_at.asc(), Message.id.asc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
 
     async def upsert_assistant(
         self,

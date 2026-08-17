@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
 from sqlalchemy.exc import DataError, IntegrityError
@@ -27,6 +28,7 @@ from agentcore.conversation.turn_stats import turn_worker_stats
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory, telemetry_session_factory
+from agentcore.db.models.conversations import is_execution_harvest_conflict
 from agentcore.db.repositories import (
     ConversationRepository,
     MessageRepository,
@@ -814,13 +816,75 @@ class CloudStore:
                             metadata=user_usage or None,
                         )
                         user_msg_id = user_msg.id
-                except IntegrityError:
-                    logger.info(
-                        "chat.local_turn_idempotent_race",
-                        conversation_id=conversation_id,
-                        message_id=message_id,
-                    )
-                    user_msg_id = user_message_id
+                except IntegrityError as exc:
+                    if origin == "execution_harvest" and is_execution_harvest_conflict(exc):
+                        from agentcore.runtime.leases.repo import TurnLeaseRepository
+
+                        claimed = None
+                        following = None
+                        in_flight = False
+                        async with async_session_factory() as lookup:
+                            repo = MessageRepository(lookup)
+                            if execution_id:
+                                claimed = await repo.get_execution_harvest_user(
+                                    conversation_id=conversation_id,
+                                    execution_id=execution_id,
+                                )
+                            fresh_after = datetime.now(UTC) - timedelta(
+                                seconds=settings.turn_lease_ttl_seconds
+                            )
+                            in_flight = await TurnLeaseRepository(
+                                lookup
+                            ).exists_fresh_for_conversation(
+                                conversation_id, after=fresh_after
+                            )
+                            if claimed is not None:
+                                following = await repo.get_first_assistant_after(
+                                    conversation_id=conversation_id,
+                                    after=claimed.created_at,
+                                    after_id=claimed.id,
+                                )
+                        if claimed is not None:
+                            user_msg_id = claimed.id
+                        following_status = (
+                            following.usage.get("status")
+                            if following is not None and isinstance(following.usage, dict)
+                            else None
+                        )
+                        settled = following_status in {
+                            MESSAGE_STATUS_COMPLETE,
+                            MESSAGE_STATUS_FAILED,
+                            MESSAGE_STATUS_INCOMPLETE,
+                        }
+                        if settled or in_flight:
+                            logger.info(
+                                "chat.local_turn_harvest_idempotent",
+                                conversation_id=conversation_id,
+                                message_id=message_id,
+                                execution_id=execution_id,
+                                settled=settled,
+                                in_flight=in_flight,
+                            )
+                            return {
+                                "user_message_id": user_msg_id,
+                                "assistant_message_id": None,
+                                "title": None,
+                                "followups": None,
+                                "noop": True,
+                            }
+                        logger.info(
+                            "chat.local_turn_harvest_claim_continue",
+                            conversation_id=conversation_id,
+                            message_id=message_id,
+                            execution_id=execution_id,
+                        )
+                    else:
+                        logger.info(
+                            "chat.local_turn_idempotent_race",
+                            conversation_id=conversation_id,
+                            message_id=message_id,
+                        )
+                        user_msg_id = user_message_id
 
         assistant_message_id: str | None = None
         if is_paused:

@@ -5,6 +5,12 @@ When a detached coordination drive finishes, the harvester calls
 execution, consumes queued ``ALL_COMPLETED``, and delivers a final assistant
 message. Meta stamps ``origin=execution_harvest`` for attribution.
 
+The synthetic user row is the durable cross-process *claim* (partial unique
+index ``uq_messages_execution_harvest``). A second insert for the same
+``execution_id`` is ``IntegrityError`` → look up the claim: skip only when
+the closing assistant already settled or a live turn lease is still beating;
+otherwise continue the CEO turn (crash after insert must not drop the draft).
+
 Credential routing matches ordinary turns / standing-task fires (conversation
 model selection + billing preflight) — never hardcode ``llm_credentials=None``
 (that silently falls through to the platform key).
@@ -23,9 +29,13 @@ which is CEO-audience text. No second LLM call (A1 / channel-dead harvest).
 from __future__ import annotations
 
 import contextlib
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
 
+from sqlalchemy.exc import IntegrityError
+
 from agentcore.billing.gate import preflight_llm_credentials
+from agentcore.config import settings
 from agentcore.conversation.common import (
     resolve_conversation_history_access,
     resolve_local_binding,
@@ -38,7 +48,14 @@ from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_runner import run_and_persist
 from agentcore.core.errors import AgentCoreError
 from agentcore.core.logging import get_logger
+from agentcore.core.message_merge import (
+    MESSAGE_STATUS_COMPLETE,
+    MESSAGE_STATUS_FAILED,
+    MESSAGE_STATUS_INCOMPLETE,
+    MESSAGE_STATUS_RUNNING,
+)
 from agentcore.db.base import async_session_factory
+from agentcore.db.models.conversations import is_execution_harvest_conflict
 from agentcore.db.repositories import (
     BoardRepository,
     ConversationRepository,
@@ -69,20 +86,37 @@ logger = get_logger(__name__)
 
 HarvestKind = Literal["success", "failure", "cancelled"]
 
+# Prompt copy only. Persisted ``harvest_kind`` stays success/failure/cancelled
+# (soft_stop still classifies as cancelled); wording is picked separately.
+_HARVEST_DONT_PASTE = (
+    "勿粘贴协调事件 / 队员终态名册 / escalation 原文 / 中间合成草稿"
+)
+
 _HARVEST_USER_TEXT: dict[HarvestKind, str] = {
     "success": (
-        "【系统收口】后台团队任务已全部完成。请综合队员产出，按终稿纪律交付给老板："
-        "交付物在前，过程简述至多一段；勿粘贴协调事件原文。"
+        "【系统收口】后台团队本波任务已全部完成。请综合队员产出，按终稿纪律向老板报告本波结果："
+        f"交付物在前，过程简述从简；{_HARVEST_DONT_PASTE}；"
+        "未交付的承诺产物须显式列出。"
+        "活没干完就接着干；不需要后续动作则按终稿交付即可。"
     ),
     "failure": (
         "【系统收口】后台团队任务已结束，但有队员失败。请综合已有产出与失败情况向老板交代："
-        "交付物/缺口在前，失败原因简述至多一段；勿粘贴协调事件原文；勿假装全员成功。"
+        f"交付物/缺口在前，失败原因简述从简；{_HARVEST_DONT_PASTE}；"
+        "未交付的承诺产物须显式列出；勿假装全员成功。"
+        "不要把失败当成功继续铺开。"
     ),
     "cancelled": (
-        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板简要收尾："
-        "已交付与未完成清单在前，说明已取消；勿粘贴协调事件原文；勿宣称已全部完成。"
+        "【系统收口】后台团队任务已取消或中断。请基于已完成部分向老板交代："
+        f"已交付与未完成清单在前，说明已取消；{_HARVEST_DONT_PASTE}；"
+        "勿宣称已全部完成。调度已停，不要接着派活。"
     ),
 }
+
+_HARVEST_SOFT_STOP_USER_TEXT = (
+    "【系统收口】后台团队因请示用户而暂停。请基于已完成部分向老板交代当前进展与待决问题："
+    f"已交付与未完成清单在前；{_HARVEST_DONT_PASTE}；"
+    "勿宣称已全部完成。等用户拍板后再继续，不要自行接着干。"
+)
 
 _HARVEST_PUSH: dict[HarvestKind, tuple[str, str]] = {
     "success": ("团队任务已完成", "后台团队已交付终稿，打开对话查看。"),
@@ -182,8 +216,15 @@ def harvest_closing_kind(session: CoordinationSession) -> HarvestKind:
 
 
 def format_harvest_user_text(session: CoordinationSession) -> str:
-    """Synthetic harvest user text; attach draft / 团队成品 when present."""
-    base = _HARVEST_USER_TEXT[harvest_closing_kind(session)]
+    """Synthetic harvest user text; attach draft / 团队成品 when present.
+
+    When 团队成品 is inlined here, stamp ``session.harvest_user_embedded_output``
+    so the harvest-closing coordination inject can skip the same blob.
+    """
+    if session.soft_stop:
+        base = _HARVEST_SOFT_STOP_USER_TEXT
+    else:
+        base = _HARVEST_USER_TEXT[harvest_closing_kind(session)]
     extras: list[str] = []
     draft = (getattr(session, "draft", None) or "").strip()
     if draft:
@@ -191,6 +232,7 @@ def format_harvest_user_text(session: CoordinationSession) -> str:
     output = _all_completed_terminal_output(session)
     if output and output != draft:
         extras.append(f"团队成品：\n{output}")
+        session.harvest_user_embedded_output = output
     if extras:
         return base + "\n\n" + "\n\n".join(extras)
     return base
@@ -839,6 +881,58 @@ async def _run_local_harvest_closing_turn(
     )
 
 
+_SETTLED_HARVEST_STATUSES = frozenset(
+    {
+        MESSAGE_STATUS_COMPLETE,
+        MESSAGE_STATUS_FAILED,
+        MESSAGE_STATUS_INCOMPLETE,
+    }
+)
+
+
+async def _existing_harvest_claim_action(
+    db: Any,
+    *,
+    conversation_id: str,
+    execution_id: str,
+) -> tuple[Literal["skip", "continue"], str | None]:
+    """Decide what a unique-index claim means.
+
+    The user row is only a claim. Skip when a closing assistant already
+    settled, or when a fresh turn lease says another process is still in
+    the CEO turn. Otherwise continue (optionally resuming a zombie assistant).
+    """
+    from agentcore.db.repositories import MessageRepository
+    from agentcore.runtime.leases.repo import TurnLeaseRepository
+
+    repo = MessageRepository(db)
+    claimed = await repo.get_execution_harvest_user(
+        conversation_id=conversation_id,
+        execution_id=execution_id,
+    )
+    fresh_after = datetime.now(UTC) - timedelta(seconds=settings.turn_lease_ttl_seconds)
+    if await TurnLeaseRepository(db).exists_fresh_for_conversation(
+        conversation_id, after=fresh_after
+    ):
+        return "skip", None
+    if claimed is None:
+        return "continue", None
+    following = await repo.get_first_assistant_after(
+        conversation_id=conversation_id,
+        after=claimed.created_at,
+        after_id=claimed.id,
+    )
+    if following is None:
+        return "continue", None
+    usage = following.usage if isinstance(following.usage, dict) else {}
+    status = usage.get("status")
+    if status in _SETTLED_HARVEST_STATUSES:
+        return "skip", None
+    if status == MESSAGE_STATUS_RUNNING:
+        return "continue", following.id
+    return "continue", None
+
+
 async def run_harvest_closing_turn(
     *,
     conversation_id: str,
@@ -1016,16 +1110,44 @@ async def run_harvest_closing_turn(
             # facts recover.py already wrote stay put) instead of overwriting at seq 0.
             inherited_entries = await TurnJournalRepository(db).load(recovered_turn_id)
         else:
-            await MessageRepository(db).create(
-                conversation_id=conversation_id,
-                role="user",
-                content=user_text,
-                metadata={
-                    "origin": "execution_harvest",
-                    "execution_id": execution_id,
-                    "harvest_kind": kind,
-                },
-            )
+            try:
+                await MessageRepository(db).create(
+                    conversation_id=conversation_id,
+                    role="user",
+                    content=user_text,
+                    metadata={
+                        "origin": "execution_harvest",
+                        "execution_id": execution_id,
+                        "harvest_kind": kind,
+                    },
+                )
+            except IntegrityError as exc:
+                await db.rollback()
+                if not is_execution_harvest_conflict(exc):
+                    raise
+                action, resume_id = await _existing_harvest_claim_action(
+                    db,
+                    conversation_id=conversation_id,
+                    execution_id=execution_id,
+                )
+                if action == "skip":
+                    logger.info(
+                        "coordination.harvest_idempotent_skip",
+                        conversation_id=conversation_id,
+                        execution_id=execution_id,
+                    )
+                    return
+                if resume_id:
+                    recovered_turn_id = resume_id
+                    inherited_entries = await TurnJournalRepository(db).load(
+                        recovered_turn_id
+                    )
+                else:
+                    logger.info(
+                        "coordination.harvest_claim_continue",
+                        conversation_id=conversation_id,
+                        execution_id=execution_id,
+                    )
         history = await load_chat_context(db, conversation_id)
         # The synthetic user row is passed to the pipeline as ``user_message``, so drop
         # it from the window tail. Nothing was appended on the continuation path.

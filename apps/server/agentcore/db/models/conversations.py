@@ -232,6 +232,27 @@ class Folder(Base):
 
 # --- Messages ---
 
+# One visible 系统收口 user row per execution. Process-local ``harvest_scheduled``
+# does not survive restart / multi-instance; this index is the durable *claim*.
+# Losing the insert means another process already claimed — skip only when a
+# closing assistant already settled or a fresh turn lease is still beating.
+UQ_MESSAGES_EXECUTION_HARVEST = "uq_messages_execution_harvest"
+_HARVEST_USER_EXECUTION_WHERE = (
+    "role = 'user' "
+    "AND usage ->> 'origin' = 'execution_harvest' "
+    "AND COALESCE(usage ->> 'execution_id', '') <> ''"
+)
+
+
+def is_execution_harvest_conflict(exc: BaseException) -> bool:
+    """True when ``exc`` is the harvest-user unique index losing the race."""
+    orig = getattr(exc, "orig", None)
+    diag = getattr(orig, "diag", None)
+    name = getattr(diag, "constraint_name", None)
+    if name == UQ_MESSAGES_EXECUTION_HARVEST:
+        return True
+    return UQ_MESSAGES_EXECUTION_HARVEST in f"{exc} {orig or ''}"
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -244,6 +265,12 @@ class Message(Base):
         # 覆盖「仅按 conversation_id 过滤」(counts_for_conversations / journal load_map 的
         # IN(...)), 故无需再单列索引 conversation_id (项目审计-成本性能专项 PERF-001)。
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
+        Index(
+            UQ_MESSAGES_EXECUTION_HARVEST,
+            text("(usage ->> 'execution_id')"),
+            unique=True,
+            postgresql_where=text(_HARVEST_USER_EXECUTION_WHERE),
+        ),
     )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)

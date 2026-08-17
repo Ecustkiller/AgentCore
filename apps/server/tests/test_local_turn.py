@@ -60,6 +60,10 @@ def _patch_persistence(
     existing_content: dict[str, str] | None = None,
     paired_user_by_assistant: dict[str, str] | None = None,
     raise_on_invalid_uuid: bool = False,
+    user_create_error: BaseException | None = None,
+    harvest_claimed: SimpleNamespace | None = None,
+    harvest_following: SimpleNamespace | None = None,
+    harvest_in_flight: bool = False,
 ):
     """Fake CloudStore DB collaborators, recording calls into ``events``."""
     seeded = existing_ids or set()
@@ -72,6 +76,8 @@ def _patch_persistence(
             pass
 
         async def create(self, **kw):
+            if user_create_error is not None:
+                raise user_create_error
             role = kw.get("role")
             events.append(("msg", role, kw.get("conversation_id")))
             events.append(("msg_id", role, kw.get("message_id")))
@@ -113,6 +119,12 @@ def _patch_persistence(
                 )
             return None
 
+        async def get_execution_harvest_user(self, *, conversation_id, execution_id):
+            return harvest_claimed
+
+        async def get_first_assistant_after(self, *, conversation_id, after, after_id):
+            return harvest_following
+
         async def user_message_for_assistant(self, *, conversation_id, assistant_message_id):
             paired_id = paired_user_by_assistant.get(assistant_message_id)
             if not paired_id:
@@ -149,8 +161,19 @@ def _patch_persistence(
 
     consolidation_calls: list[str] = []
 
+    class _FakeLeaseRepo:
+        def __init__(self, _session):
+            pass
+
+        async def exists_fresh_for_conversation(self, conversation_id, *, after):
+            return harvest_in_flight
+
     monkeypatch.setattr(cloud_mod, "async_session_factory", lambda: _FakeSessionCM())
     monkeypatch.setattr(cloud_mod, "MessageRepository", _FakeMsgRepo)
+    monkeypatch.setattr(
+        "agentcore.runtime.leases.repo.TurnLeaseRepository",
+        _FakeLeaseRepo,
+    )
     monkeypatch.setattr(cloud_mod, "ConversationRepository", _FakeConvRepo)
     monkeypatch.setattr(cloud_mod, "persist_turn_journal", _fake_journal)
     monkeypatch.setattr(
@@ -961,3 +984,117 @@ async def test_record_local_turn_strips_harvest_origin_for_title_skip(monkeypatc
     assert usage[2]["execution_id"] == "exec-1"
     assert usage[2]["harvest_kind"] == "success"
     assert not any(e[0] == "title_mint" for e in events)
+
+
+async def test_record_local_turn_skips_settled_harvest_execution(monkeypatch):
+    """Claim + settled assistant → do not write a second closing draft."""
+    from sqlalchemy.exc import IntegrityError
+
+    from agentcore.db.models.conversations import UQ_MESSAGES_EXECUTION_HARVEST
+
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        user_create_error=IntegrityError(
+            "INSERT", {}, Exception(UQ_MESSAGES_EXECUTION_HARVEST)
+        ),
+        harvest_claimed=SimpleNamespace(
+            id="user-harvest-existing",
+            created_at="t0",
+        ),
+        harvest_following=SimpleNamespace(id="asst-done", usage={"status": "complete"}),
+    )
+
+    result = await record_local_turn(
+        conversation_id="c-harvest-dup",
+        user_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        assistant_content="第二份终稿不应落库。",
+        user_message_id="user-harvest-dup",
+        message_id="m-harvest-dup",
+        input_tokens=1,
+        output_tokens=2,
+        rounds=1,
+        trace_id=_TRACE,
+        origin="execution_harvest",
+        execution_id="exec-1",
+        harvest_kind="success",
+    )
+
+    assert result["noop"] is True
+    assert result["assistant_message_id"] is None
+    assert not any(e[0] == "upsert" for e in events)
+
+
+async def test_record_local_turn_harvest_conflict_still_writes_assistant(monkeypatch):
+    """Crash after the harvest user row still persists the closing assistant."""
+    from sqlalchemy.exc import IntegrityError
+
+    from agentcore.db.models.conversations import UQ_MESSAGES_EXECUTION_HARVEST
+
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        user_create_error=IntegrityError(
+            "INSERT", {}, Exception(UQ_MESSAGES_EXECUTION_HARVEST)
+        ),
+        harvest_claimed=SimpleNamespace(
+            id="user-harvest-existing",
+            created_at="t0",
+        ),
+    )
+
+    result = await record_local_turn(
+        conversation_id="c-harvest-retry",
+        user_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        assistant_content="终稿。",
+        user_message_id="user-harvest-retry",
+        message_id="m-harvest-retry",
+        input_tokens=1,
+        output_tokens=2,
+        rounds=1,
+        trace_id=_TRACE,
+        origin="execution_harvest",
+        execution_id="exec-1",
+        harvest_kind="success",
+    )
+
+    assert result["assistant_message_id"] == "assistant-id"
+    assert any(e[0] == "upsert" for e in events)
+
+
+async def test_record_local_turn_harvest_pk_race_still_settles(monkeypatch):
+    """Same user_message_id retry is not a harvest-execution conflict."""
+    from sqlalchemy.exc import IntegrityError
+
+    events: list = []
+    _patch_persistence(
+        monkeypatch,
+        events,
+        existing_title="已有标题",
+        user_create_error=IntegrityError("INSERT", {}, Exception("messages_pkey")),
+    )
+
+    result = await record_local_turn(
+        conversation_id="c-harvest-pk",
+        user_id="u1",
+        user_message="【系统收口】后台团队任务已全部完成。",
+        assistant_content="终稿。",
+        user_message_id="user-harvest-pk",
+        message_id="m-harvest-pk",
+        input_tokens=1,
+        output_tokens=2,
+        rounds=1,
+        trace_id=_TRACE,
+        origin="execution_harvest",
+        execution_id="exec-1",
+        harvest_kind="success",
+    )
+
+    assert result["assistant_message_id"] == "assistant-id"
+    assert any(e[0] == "upsert" for e in events)
