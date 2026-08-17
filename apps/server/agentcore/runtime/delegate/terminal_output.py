@@ -183,7 +183,7 @@ def _fit_middle(
         if len(rendered) <= budget:
             return rendered
 
-    headings_only = _join(h for h, _ in units if h)
+    headings_only = _join([h for h, _ in units if h])
     marker = _omit_workers_line(n_omit) if n_omit else ""
     stub = _join([headings_only, marker])
     if stub and len(stub) <= budget:
