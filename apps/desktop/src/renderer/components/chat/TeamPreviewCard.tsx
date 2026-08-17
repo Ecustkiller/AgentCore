@@ -20,10 +20,10 @@ import { useMessageExecution } from "@/stores/execution";
  *
  * Branches on ``primitive``: delegate = 队员分工表; debate = 辩题 / 立场 / 轮次预算.
  *
- * Resolved continue/adjust + 编制已在 store：图立刻接管，本卡返回 null
+ * Resolved continue + 编制已在 store：图立刻接管，本卡返回 null
  * （see {@link shouldHostPreviewInGraph}）— 图已出现则不画废卡.
  * 同泡仍有 pending 开工卡时 leftover go 不藏（与出图同一套闸）.
- * 取消 / 超时 / 尚未铺节点时仍留一行结论文.
+ * 取消 / 调整回灌 / 超时 / 尚未铺节点时仍留一行结论文.
  *
  * Resolved copy / icons come from the shared decision meta ({@link TEAM_PRIMITIVE_META}).
  */
@@ -59,10 +59,7 @@ function summarySuffix(preview: TeamPreviewDisplay): string {
     workerCount: preview.workers.length,
     sideCount: preview.sides.length,
   };
-  if (
-    preview.status === "resolved" &&
-    (preview.decision === "continue" || preview.decision === "adjust")
-  ) {
+  if (preview.status === "resolved" && preview.decision === "continue") {
     return teamPreviewSettledLead(args);
   }
   return teamPreviewLead(args);

@@ -16,7 +16,7 @@ function isWorkerRun(run: TeamGraphRun): boolean {
  * turn itself (often emitted before `run_plan` / kickoff) and must not count —
  * live SSE drops that frame; journal hydrate restores it.
  * Hang / stop-before-start stay graph-less unless {@link shouldShowTeamGraph}
- * also sees a continue/adjust kickoff.
+ * also sees a continue kickoff. team_preview `adjust` 是回灌 CEO、不开工.
  * plan_review mid-wave pause (completed worker nodes exist) still shows the graph.
  */
 export function teamHasStartedRuns(runs: readonly TeamGraphRun[]): boolean {
@@ -25,11 +25,15 @@ export function teamHasStartedRuns(runs: readonly TeamGraphRun[]): boolean {
   );
 }
 
-/** 授权并开工 / 调整后开做 — 不是取消、超时、失效. */
+/**
+ * 开工卡「已授权开工」族：仅 `continue`。
+ * `adjust` 按卡种区分——team_preview 上是不开工、回灌 CEO，不得当已开工；
+ * plan_review 的 adjust 不走此闸（波间复核，不藏进协作图）。
+ */
 export function isKickoffGoDecision(
   decision: TeamPreviewDisplay["decision"] | string | null | undefined,
 ): boolean {
-  return decision === "continue" || decision === "adjust";
+  return decision === "continue";
 }
 
 export function isKickoffReleased(
@@ -64,8 +68,8 @@ export function kickoffReleasedFromPreviews(
  * {@link shouldHostPreviewInGraph} (禁止图+废卡双写).
  * - 工人已开跑：出图（新一波开工卡 pending 也不藏）。
  * - 本泡有待确认开工卡、工人未跑：不出图（注意力归卡）。
- * - 已授权 continue/adjust：pending 编制也出图。
- * - 取消 / 超时 / 失效且卡还在：不出图。
+ * - 已授权 continue：pending 编制也出图。
+ * - 取消 / 调整回灌 / 超时 / 失效且卡还在：不出图。
  * - 回放无卡 + 编制仍有 pending 工人：出图（CEO end_turn 后卡常不在泡上，避免刷新空窗）。
  */
 export function teamGraphVisible(
@@ -84,8 +88,8 @@ export function teamGraphVisible(
  * Inline graph visibility.
  * - 开工挂起（未拍板）：false，即使 run_plan 已把节点铺成 pending。
  * - captain-only running（CEO 本轮已开、工人未跑）：false，与「零 worker」同。
- * - 已授权 continue/adjust 且编制已在：true（pending 节点也画，不必等第一人开跑）。
- * - 取消 / 超时 / 失效且从未开跑：false。
+ * - 已授权 continue 且编制已在：true（pending 节点也画，不必等第一人开跑）。
+ * - 取消 / 调整回灌 / 超时 / 失效且从未开跑：false。
  * - 已有工人开跑（含 plan_review 波间）：true，不依赖开工卡。
  */
 export function shouldShowTeamGraph(

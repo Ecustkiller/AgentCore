@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * 开工卡可操作面：delegate / debate 均两键，底栏左次右主（取消 / 授权开工·开赛）；
- * continue + 非空备注 = 嘱咐注入；debate 无「调整」。
+ * 开工卡可操作面：delegate / debate 均三键，底栏左次右主（取消 / 调整 / 授权开工·开赛）；
+ * continue + 非空备注 = 嘱咐注入；调整时空备注不可提交，有备注发 adjust（不带修正字段）。
  */
 
 import {
@@ -196,22 +196,92 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.queryByText(/工作区 ·/)).toBeNull();
   });
 
-  it("仅两按钮：左取消 + 右授权并开工；无逐次审批 / 调整 / 停止", () => {
+  it("三按钮：左取消 + 中调整 + 右授权并开工；无逐次审批 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开工")).toBeNull();
     expect(screen.getByText("预计 1 人开工")).toBeTruthy();
     const cancel = screen.getByRole("button", { name: "取消" });
+    const adjust = screen.getByRole("button", { name: "调整" });
     const primary = screen.getByRole("button", { name: "授权并开工" });
     expect(
-      cancel.compareDocumentPosition(primary) &
+      cancel.compareDocumentPosition(adjust) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      adjust.compareDocumentPosition(primary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByText("停止")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
-    expect(screen.queryByText("调整")).toBeNull();
     expect(screen.getByText("将授权的执行能力")).toBeTruthy();
     expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
     expect(screen.queryByPlaceholderText(/开工时注入全体队员/)).toBeNull();
+  });
+
+  it("无备注时点「调整」只展开并 focus 备注框而不提交", () => {
+    render(<ResumePrompt />);
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(screen.getByTestId("team-preview-note")).toBeTruthy();
+    expect(screen.getByText("调整意见（必填）")).toBeTruthy();
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it("有备注时点「调整」提交 adjust，不带修正字段", () => {
+    render(<ResumePrompt />);
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
+      target: { value: "  改成两人，先做竞品  " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "adjust",
+          note: "改成两人，先做竞品",
+        }),
+      }),
+    );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.write_capability_overrides).toBeUndefined();
+    expect(cold.model_overrides).toBeUndefined();
+  });
+
+  it("收紧写盘后点调整仍不带 write_capability_overrides", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        workers: [
+          {
+            run_id: "r1",
+            role: "研究员",
+            task: "调研",
+            depends_on: [],
+            write_capability: "can_write_files",
+            write_capability_label: "可改文件",
+          },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
+    );
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
+      target: { value: "先改分工" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.decision).toBe("adjust");
+    expect(cold.note).toBe("先改分工");
+    expect(cold.write_capability_overrides).toBeUndefined();
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.model_overrides).toBeUndefined();
   });
 
   it("主按钮带非空备注发 continue（非 adjust）", () => {
@@ -480,23 +550,57 @@ describe("ResumePrompt · team_preview debate", () => {
     ];
   });
 
-  it("仅两按钮：左取消 + 右授权开赛；无调整 / 逐次审批 / 停止", () => {
+  it("三按钮：左取消 + 中调整 + 右授权开赛；无逐次审批 / 停止", () => {
     render(<ResumePrompt />);
     expect(screen.queryByText("等你确认 · 确认后才会开赛")).toBeNull();
     expect(screen.getByText("预计 2 方开赛")).toBeTruthy();
     const cancel = screen.getByRole("button", { name: "取消" });
+    const adjust = screen.getByRole("button", { name: "调整" });
     const primary = screen.getByRole("button", { name: "授权开赛" });
     expect(
-      cancel.compareDocumentPosition(primary) &
+      cancel.compareDocumentPosition(adjust) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      adjust.compareDocumentPosition(primary) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(screen.queryByText("停止")).toBeNull();
-    expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
     expect(screen.queryByPlaceholderText(/开赛时注入各方/)).toBeNull();
     // cold Badge 与 hot DebateBody 共用 formatDebateBudgetLabel（含「上限」）
     expect(screen.getByText("认真辩透 · 上限 5 轮")).toBeTruthy();
+  });
+
+  it("辩论无备注时点「调整」不提交", () => {
+    render(<ResumePrompt />);
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(screen.getByTestId("team-preview-note")).toBeTruthy();
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it("辩论有备注时点「调整」提交 adjust，不带修正字段", () => {
+    render(<ResumePrompt />);
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开赛时注入各方/), {
+      target: { value: "改辩题，先谈成本" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "adjust",
+          note: "改辩题，先谈成本",
+        }),
+      }),
+    );
+    const cold = submitInteraction.mock.calls[0][0].cold as Record<
+      string,
+      unknown
+    >;
+    expect(cold.excluded_run_ids).toBeUndefined();
+    expect(cold.write_capability_overrides).toBeUndefined();
+    expect(cold.model_overrides).toBeUndefined();
   });
 
   it("主按钮带嘱咐发 continue；辩论未改模型不附修正字段", () => {

@@ -1,0 +1,337 @@
+{
+  "name": "team_preview_resolved_adjust",
+  "description": "开工卡：adjust 不授权不开工、意见回灌 CEO（无 worker start）",
+  "events": [
+    {
+      "type": "message_start",
+      "payload": {
+        "message_id": "m1",
+        "conversation_id": "conv_demo"
+      },
+      "timestamp": "2026-01-01T00:00:00.001Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "我来安排团队。"
+      },
+      "timestamp": "2026-01-01T00:00:00.002Z"
+    },
+    {
+      "type": "tool_use_start",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "arguments": {
+          "tasks": [
+            {
+              "role": "调研"
+            },
+            {
+              "role": "撰写"
+            }
+          ],
+          "coordinate": false
+        }
+      },
+      "timestamp": "2026-01-01T00:00:00.003Z"
+    },
+    {
+      "type": "run_plan",
+      "payload": {
+        "execution_id": "exec1",
+        "plan_type": "multi_agent",
+        "task_summary": "构建 X",
+        "agents": [
+          {
+            "id": "w1",
+            "role": "调研",
+            "thinking": true
+          },
+          {
+            "id": "w2",
+            "role": "撰写",
+            "thinking": true
+          }
+        ],
+        "runs": [
+          {
+            "id": "r1",
+            "agent_id": "w1",
+            "task": "调研方案",
+            "depends_on": []
+          },
+          {
+            "id": "r2",
+            "agent_id": "w2",
+            "task": "写初稿",
+            "depends_on": [
+              "r1"
+            ]
+          }
+        ]
+      },
+      "timestamp": "2026-01-01T00:00:00.004Z"
+    },
+    {
+      "type": "team_preview_required",
+      "payload": {
+        "checkpoint_id": "tp1",
+        "conversation_id": "conv_demo",
+        "workers": [
+          {
+            "run_id": "r1",
+            "role": "调研",
+            "task": "调研方案",
+            "depends_on": []
+          },
+          {
+            "run_id": "r2",
+            "role": "撰写",
+            "task": "写初稿",
+            "depends_on": [
+              "r1"
+            ]
+          }
+        ],
+        "tools": [
+          "code_execute",
+          "file_write",
+          "test_run"
+        ],
+        "primitive": "delegate",
+        "motion": "",
+        "form": "",
+        "sides": [],
+        "max_rounds": 0,
+        "thorough": true
+      },
+      "timestamp": "2026-01-01T00:00:00.005Z"
+    },
+    {
+      "type": "team_preview_resolved",
+      "payload": {
+        "checkpoint_id": "tp1",
+        "decision": "adjust",
+        "note": "人太多，改成两人调研"
+      },
+      "timestamp": "2026-01-01T00:00:00.006Z"
+    },
+    {
+      "type": "run_skipped",
+      "payload": {
+        "run_id": "r1",
+        "agent_id": "w1",
+        "reason": "abort"
+      },
+      "timestamp": "2026-01-01T00:00:00.007Z"
+    },
+    {
+      "type": "run_skipped",
+      "payload": {
+        "run_id": "r2",
+        "agent_id": "w2",
+        "reason": "abort"
+      },
+      "timestamp": "2026-01-01T00:00:00.008Z"
+    },
+    {
+      "type": "tool_use_end",
+      "payload": {
+        "tool_call_id": "dc1",
+        "tool_name": "delegate",
+        "status": "success",
+        "result": "用户要求调整开工方案，团队未启动。用户意见：人太多，改成两人调研\n请按用户意见修订方案后重新调用 delegate；修订后须再次经开工确认，未获确认不得开工。下一步是改方案并重新提交，而不是再问用户同一件事。"
+      },
+      "timestamp": "2026-01-01T00:00:00.009Z"
+    },
+    {
+      "type": "content_delta",
+      "payload": {
+        "delta": "好的，我按你的意见改方案再提交开工。"
+      },
+      "timestamp": "2026-01-01T00:00:00.010Z"
+    },
+    {
+      "type": "message_end",
+      "payload": {
+        "finish_reason": "end_turn",
+        "usage": {
+          "input_tokens": 1600,
+          "output_tokens": 120,
+          "reasoning_tokens": 0,
+          "cache_hit_tokens": 0,
+          "cache_miss_tokens": 0
+        },
+        "cost": {
+          "input": 240000,
+          "cached": 64000,
+          "output": 120000,
+          "total": 360000,
+          "currency": "CNY",
+          "pricing_source": "curated"
+        },
+        "rounds": 0
+      },
+      "timestamp": "2026-01-01T00:00:00.011Z"
+    }
+  ],
+  "projected": {
+    "status": "completed",
+    "finishReason": "end_turn",
+    "error": null,
+    "content": "我来安排团队。好的，我按你的意见改方案再提交开工。",
+    "reasoning": "",
+    "captainContext": [],
+    "process": [
+      {
+        "kind": "content",
+        "text": "我来安排团队。"
+      },
+      {
+        "kind": "team_preview",
+        "checkpoint_id": "tp1"
+      },
+      {
+        "kind": "team",
+        "execution_id": "exec1"
+      },
+      {
+        "kind": "content",
+        "text": "好的，我按你的意见改方案再提交开工。"
+      }
+    ],
+    "citations": [],
+    "evidenceLedger": [],
+    "citedIds": [],
+    "agents": [
+      {
+        "id": "w1",
+        "role": "调研",
+        "thinking": true,
+        "status": "idle",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      },
+      {
+        "id": "w2",
+        "role": "撰写",
+        "thinking": true,
+        "status": "idle",
+        "currentRunId": null,
+        "output": "",
+        "reasoning": "",
+        "toolProgress": null
+      }
+    ],
+    "runs": [
+      {
+        "id": "r1",
+        "agentId": "w1",
+        "task": "调研方案",
+        "status": "skipped",
+        "dependsOn": [],
+        "outputSummary": null,
+        "debrief": null,
+        "durationMs": null,
+        "error": null,
+        "failureKind": null,
+        "productLanded": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": null,
+        "model": null,
+        "usage": null,
+        "cost": null,
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "continuesRunId": null,
+        "revised": null,
+        "replacesRunId": null,
+        "actId": "act-1",
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": [],
+        "process": []
+      },
+      {
+        "id": "r2",
+        "agentId": "w2",
+        "task": "写初稿",
+        "status": "skipped",
+        "dependsOn": [
+          "r1"
+        ],
+        "outputSummary": null,
+        "debrief": null,
+        "durationMs": null,
+        "error": null,
+        "failureKind": null,
+        "productLanded": null,
+        "parentRunId": null,
+        "kind": "agent",
+        "role": null,
+        "model": null,
+        "usage": null,
+        "cost": null,
+        "stance": null,
+        "group": null,
+        "round": 0,
+        "continuesRunId": null,
+        "revised": null,
+        "replacesRunId": null,
+        "actId": "act-1",
+        "checkpoint": null,
+        "receivedContext": [],
+        "escalations": [],
+        "process": []
+      }
+    ],
+    "acts": [
+      {
+        "actId": "act-1",
+        "kind": "multi_agent",
+        "title": null,
+        "anchorRunId": null,
+        "authorizedBy": null
+      }
+    ],
+    "progress": {
+      "completed": 0,
+      "total": 2
+    },
+    "interactions": [
+      {
+        "kind": "team_preview",
+        "id": "tp1",
+        "status": "resolved",
+        "workerIds": [
+          "r1",
+          "r2"
+        ]
+      }
+    ],
+    "cost": {
+      "input": 240000,
+      "cached": 64000,
+      "output": 120000,
+      "total": 360000,
+      "currency": "CNY",
+      "pricing_source": "curated"
+    },
+    "debate": null,
+    "debateRounds": [],
+    "debatePretrial": null,
+    "crossExamEnabled": false,
+    "debateOpening": null,
+    "teamSynthesisPreview": null,
+    "deliveryStatus": null,
+    "turnWarning": null,
+    "autoFolder": null,
+    "teamNotes": [],
+    "userInterjections": []
+  }
+}

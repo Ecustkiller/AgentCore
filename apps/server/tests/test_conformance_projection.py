@@ -320,6 +320,31 @@ def test_team_preview_resolved_continue(projected):
     ]
 
 
+def test_team_preview_resolved_adjust(projected):
+    """开工卡 adjust：卡已结算、无 worker 开跑、意见在 resolved 事件里。"""
+    from agentcore.conformance.vectors import VECTORS
+    from agentcore.runtime.events.types import EventType
+
+    p = projected["team_preview_resolved_adjust"]
+    assert p["status"] == "completed"
+    assert _pending_gates(p) == []
+    tp = next(i for i in p["interactions"] if i["kind"] == "team_preview")
+    assert tp["status"] == "resolved"
+    assert p["progress"]["completed"] == 0
+    assert all(r["status"] != "running" for r in p["runs"])
+    assert all(r["status"] != "completed" for r in p["runs"])
+
+    _description, builder = VECTORS["team_preview_resolved_adjust"]
+    events = builder()
+    resolved = next(e for e in events if e.type == EventType.TEAM_PREVIEW_RESOLVED)
+    assert resolved.payload["decision"] == "adjust"
+    assert "人太多" in (resolved.payload.get("note") or "")
+    assert not any(e.type == EventType.RUN_STARTED for e in events)
+    ended = next(e for e in events if e.type == EventType.TOOL_USE_END)
+    assert "宜先问" not in (ended.payload.get("result") or "")
+    assert "重新调用 delegate" in (ended.payload.get("result") or "")
+
+
 def test_team_preview_exclude_one_continue(projected):
     p = projected["team_preview_exclude_one_continue"]
     assert p["status"] == "completed"
@@ -380,6 +405,33 @@ def test_debate_team_preview_research_first(projected):
     assert p.get("debate") is None
     assert p.get("debateRounds") == []
     assert "team" not in [s["kind"] for s in p["process"]]
+
+
+def test_debate_team_preview_resolved_adjust(projected):
+    """辩论开工卡 adjust：不开赛、无辩手 runs、意见回灌。"""
+    from agentcore.conformance.vectors import VECTORS
+    from agentcore.runtime.events.types import EventType
+
+    p = projected["debate_team_preview_resolved_adjust"]
+    assert p["status"] == "completed"
+    assert _pending_gates(p) == []
+    assert any(
+        i["kind"] == "team_preview" and i["status"] == "resolved" for i in p["interactions"]
+    )
+    assert p["runs"] == []
+    assert p.get("debate") is None
+    assert p.get("debateRounds") == []
+    assert "team" not in [s["kind"] for s in p["process"]]
+
+    _description, builder = VECTORS["debate_team_preview_resolved_adjust"]
+    events = builder()
+    resolved = next(e for e in events if e.type == EventType.TEAM_PREVIEW_RESOLVED)
+    assert resolved.payload["decision"] == "adjust"
+    assert "先改命题" in (resolved.payload.get("note") or "")
+    assert not any(e.type == EventType.RUN_STARTED for e in events)
+    ended = next(e for e in events if e.type == EventType.TOOL_USE_END)
+    assert "宜先问" not in (ended.payload.get("result") or "")
+    assert "重新调用 debate" in (ended.payload.get("result") or "")
 
 
 def test_debate_pretrial_fast_projection(projected):

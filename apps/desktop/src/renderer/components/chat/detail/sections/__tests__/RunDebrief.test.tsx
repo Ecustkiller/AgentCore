@@ -2,7 +2,7 @@
 
 import { DebriefSection } from "@/components/chat/detail/sections/RunDebrief";
 import type { RunDebrief } from "@/types/events";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/components/chat/Markdown", () => ({
@@ -27,18 +27,39 @@ const motionCard = {
   form: "debate" as const,
 };
 
+function expandDebrief(summary = "交叉验证完成") {
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(summary) }));
+}
+
 describe("DebriefSection", () => {
-  it("renders core brief fields without a motion card", () => {
+  it("defaults to a collapsed relay card: summary visible, details hidden", () => {
     render(<DebriefSection debrief={baseDebrief} />);
-    expect(screen.getByText("结论")).toBeTruthy();
+    expect(screen.getByText("交接简报")).toBeTruthy();
     expect(screen.getByText("交叉验证完成")).toBeTruthy();
+    expect(screen.queryByText("结论")).toBeNull();
+    expect(screen.queryByText("关键要点")).toBeNull();
+    expect(screen.queryByText("关键假设")).toBeNull();
+    expect(screen.queryByText("建议下一步")).toBeNull();
     expect(screen.queryByText("命题卡")).toBeNull();
   });
 
-  it("renders a structured motion card block when present", () => {
+  it("expands to show points / assumptions / next steps", () => {
+    render(<DebriefSection debrief={baseDebrief} />);
+    expandDebrief();
+    expect(screen.getByText("关键要点")).toBeTruthy();
+    expect(screen.getByText("共识：一周内需清晰立场")).toBeTruthy();
+    expect(screen.getByText("关键假设")).toBeTruthy();
+    expect(screen.getByText("争议事实以公开报道为准")).toBeTruthy();
+    expect(screen.getByText("建议下一步")).toBeTruthy();
+    expect(screen.getByText("若用户同意，建议开辩")).toBeTruthy();
+  });
+
+  it("renders a structured motion card block when expanded", () => {
     render(
       <DebriefSection debrief={{ ...baseDebrief, motion_card: motionCard }} />,
     );
+    expect(screen.queryByText("命题卡")).toBeNull();
+    expandDebrief();
     expect(screen.getByText("命题卡")).toBeTruthy();
     expect(screen.getByText("命题")).toBeTruthy();
     expect(screen.getByText(motionCard.motion)).toBeTruthy();
@@ -60,6 +81,7 @@ describe("DebriefSection", () => {
         }}
       />,
     );
+    expandDebrief();
     expect(screen.getByText("红队")).toBeTruthy();
     rerender(
       <DebriefSection
@@ -70,5 +92,23 @@ describe("DebriefSection", () => {
       />,
     );
     expect(screen.getByText("圆桌")).toBeTruthy();
+  });
+
+  it("degraded brief shows a notice and hides the body slice", () => {
+    const degraded = {
+      ...baseDebrief,
+      degraded: true,
+    } as RunDebrief;
+    render(<DebriefSection debrief={degraded} />);
+    expect(screen.getByText("简报由系统降级生成")).toBeTruthy();
+    expect(screen.queryByText("交叉验证完成")).toBeNull();
+    expect(screen.queryByText("关键要点")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("summary-only brief stays a one-line card without a toggle", () => {
+    render(<DebriefSection debrief={{ summary: "只写了结论" }} />);
+    expect(screen.getByText("只写了结论")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

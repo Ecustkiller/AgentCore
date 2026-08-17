@@ -1,5 +1,8 @@
 import { Markdown } from "@/components/chat/Markdown";
+import { Button } from "@/components/ui";
 import type { MotionCard, RunDebrief } from "@/types/events";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { useState } from "react";
 import { Section } from "./shared";
 
 const FORM_LABEL: Record<MotionCard["form"], string> = {
@@ -8,59 +11,119 @@ const FORM_LABEL: Record<MotionCard["form"], string> = {
   roundtable: "圆桌",
 };
 
+const DEGRADED_NOTICE = "简报由系统降级生成";
+
 /**
- * 完工交接简报 (run_completed.debrief) — the worker's OWN structured wrap-up, surfaced in
- * place of the old head-truncated「摘要」. Renders only the sections the worker authored
- * (结论 / 关键要点 / 关键假设 / 建议下一步 / 命题卡); a worker that wrote none falls back to its full
- * 输出 above (this component isn't rendered). This is the deliberate 退休截断 — the summary
- * is authored, never a machine slice of prose.
+ * Live SSE carries `degraded` as an extra dict key on the debrief object
+ * (`synthesize_debrief`). It is not on the `RunDebrief` wire type — read it
+ * here, do not widen the contract.
+ */
+function isDegradedDebrief(debrief: RunDebrief): boolean {
+  return (
+    "degraded" in debrief &&
+    (debrief as { degraded?: unknown }).degraded === true
+  );
+}
+
+function hasDebriefDetails(debrief: RunDebrief): boolean {
+  return Boolean(
+    (debrief.key_points && debrief.key_points.length > 0) ||
+      debrief.assumptions ||
+      debrief.next_steps ||
+      debrief.motion_card,
+  );
+}
+
+/**
+ * 完工交接简报 (run_completed.debrief) — the worker's OWN structured wrap-up.
+ * Defaults to a collapsed relay card (title row = `summary`); expand to read
+ * 要点 / 假设 / 下一步 / 命题卡. Engine-synthesized (`degraded`) briefs show a
+ * notice only — their summary is a 200-char slice of the body already above.
  */
 export function DebriefSection({ debrief }: { debrief: RunDebrief }) {
-  const { summary, key_points, assumptions, next_steps, motion_card } = debrief;
+  const degraded = isDegradedDebrief(debrief);
+  const details = !degraded && hasDebriefDetails(debrief);
+  const [open, setOpen] = useState(false);
+  const summary = debrief.summary?.trim() ?? "";
+
   return (
     <Section title="交接简报">
       <div className="space-y-3 rounded-lg bg-muted p-3">
-        {summary && (
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              结论
-            </p>
-            <Markdown content={summary} />
-          </div>
-        )}
-        {key_points && key_points.length > 0 && (
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              关键要点
-            </p>
-            <ul className="list-disc space-y-0.5 pl-4 text-sm text-foreground">
-              {key_points.map((pt, i) => (
-                <li key={`${i}:${pt}`}>{pt}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {assumptions && (
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              关键假设
-            </p>
-            <p className="whitespace-pre-wrap break-words text-sm text-foreground">
-              {assumptions}
-            </p>
-          </div>
-        )}
-        {next_steps && (
-          <div>
-            <p className="mb-1 text-xs font-medium text-muted-foreground">
-              建议下一步
-            </p>
-            <Markdown content={next_steps} />
-          </div>
-        )}
-        {motion_card && <MotionCardBlock card={motion_card} />}
+        {degraded ? (
+          <p className="text-sm text-muted-foreground">{DEGRADED_NOTICE}</p>
+        ) : details ? (
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              className="h-auto w-full justify-start gap-2 px-0 py-0 hover:bg-transparent"
+            >
+              <span className="flex w-full items-start gap-2 text-left">
+                {open ? (
+                  <ChevronDown
+                    size={14}
+                    className="mt-0.5 shrink-0 text-muted-foreground"
+                  />
+                ) : (
+                  <ChevronRight
+                    size={14}
+                    className="mt-0.5 shrink-0 text-muted-foreground"
+                  />
+                )}
+                <span className="line-clamp-2 min-w-0 flex-1 break-words text-sm text-foreground">
+                  {summary || "交接简报"}
+                </span>
+              </span>
+            </Button>
+            {open && <DebriefDetails debrief={debrief} />}
+          </>
+        ) : summary ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+            {summary}
+          </p>
+        ) : null}
       </div>
     </Section>
+  );
+}
+
+function DebriefDetails({ debrief }: { debrief: RunDebrief }) {
+  const { key_points, assumptions, next_steps, motion_card } = debrief;
+  return (
+    <div className="space-y-3">
+      {key_points && key_points.length > 0 && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            关键要点
+          </p>
+          <ul className="list-disc space-y-0.5 pl-4 text-sm text-foreground">
+            {key_points.map((pt, i) => (
+              <li key={`${i}:${pt}`}>{pt}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {assumptions && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            关键假设
+          </p>
+          <p className="whitespace-pre-wrap break-words text-sm text-foreground">
+            {assumptions}
+          </p>
+        </div>
+      )}
+      {next_steps && (
+        <div>
+          <p className="mb-1 text-xs font-medium text-muted-foreground">
+            建议下一步
+          </p>
+          <Markdown content={next_steps} />
+        </div>
+      )}
+      {motion_card && <MotionCardBlock card={motion_card} />}
+    </div>
   );
 }
 

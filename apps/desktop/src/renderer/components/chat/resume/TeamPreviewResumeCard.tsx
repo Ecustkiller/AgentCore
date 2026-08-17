@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Loader2,
   OctagonX,
+  Pencil,
   Users,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -36,6 +37,7 @@ import { useColdSubmit } from "./useColdSubmit";
 export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
   const [note, setNote] = useState("");
   const [noteOpen, setNoteOpen] = useState(false);
+  const [noteRequired, setNoteRequired] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const [capsOpen, setCapsOpen] = useState(false);
   const [textOnlyRunIds, setTextOnlyRunIds] = useState<ReadonlySet<string>>(
@@ -208,7 +210,7 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                   }`}
                 />
                 <span className="shrink-0 text-xs text-muted-foreground">
-                  加一句嘱咐（可选）
+                  {noteRequired ? "调整意见（必填）" : "加一句嘱咐（可选）"}
                 </span>
                 {!noteOpen && note.trim() && (
                   <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground/70">
@@ -224,8 +226,13 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                     onChange={(e) => setNote(e.target.value)}
                     disabled={busy}
                     rows={2}
-                    placeholder={family.notePlaceholder}
+                    placeholder={
+                      noteRequired
+                        ? "填写意见，交给 CEO 修订开工方案"
+                        : family.notePlaceholder
+                    }
                     className="w-full border-border bg-card/70 focus:border-primary/60"
+                    data-testid="team-preview-note"
                   />
                 </div>
               ) : null}
@@ -243,23 +250,45 @@ export function TeamPreviewResumeCard({ turn }: { turn: PendingResume }) {
                 取消
               </Button>
             ) : null}
-            <span className="ml-auto" />
-            <Button
-              variant="primary"
-              icon={spinnerOr("continue", <CheckCheck size={13} />)}
-              disabled={busy}
-              onClick={() =>
-                send("continue", [], note.trim(), buildCorrections())
-              }
-            >
-              {settlementLocked
-                ? "已记下"
-                : isDebate
-                  ? family.resumeCta
-                  : showCapabilities
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {!settlementLocked ? (
+                <Button
+                  variant="neutral"
+                  icon={spinnerOr("adjust", <Pencil size={13} />)}
+                  disabled={busy}
+                  onClick={() => {
+                    if (!note.trim()) {
+                      setNoteRequired(true);
+                      if (noteOpen) {
+                        noteRef.current?.focus();
+                      } else {
+                        setNoteOpen(true);
+                      }
+                      return;
+                    }
+                    send("adjust", [], note.trim());
+                  }}
+                >
+                  调整
+                </Button>
+              ) : null}
+              <Button
+                variant="primary"
+                icon={spinnerOr("continue", <CheckCheck size={13} />)}
+                disabled={busy}
+                onClick={() =>
+                  send("continue", [], note.trim(), buildCorrections())
+                }
+              >
+                {settlementLocked
+                  ? "已记下"
+                  : isDebate
                     ? family.resumeCta
-                    : "开做"}
-            </Button>
+                    : showCapabilities
+                      ? family.resumeCta
+                      : "开做"}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

@@ -198,7 +198,7 @@ export const TEAM_PRIMITIVE_META = {
       },
       adjust: {
         icon: Pencil,
-        label: "已调整 · 备注已注入队员并开做",
+        label: "已调整 · 已交回修订",
       },
       stop: { icon: OctagonX, label: "已取消 · 团队未启动" },
       // research_first 仅辩论开工卡合法；误落到 delegate 时按取消文案降级展示。
@@ -226,10 +226,9 @@ export const TEAM_PRIMITIVE_META = {
         icon: Check,
         label: "已授权开赛 · 辩论已放行",
       },
-      // 历史 adjust 消息保留原渲染文案（旧「改辩题」语义）；新路径不再发 adjust。
       adjust: {
         icon: Pencil,
-        label: "已调整辩题 · 开赛",
+        label: "已调整 · 已交回修订",
       },
       stop: { icon: OctagonX, label: "已取消 · 辩论未开赛" },
       research_first: {

@@ -1,4 +1,5 @@
 import {
+  isKickoffGoDecision,
   kickoffReleasedFromPreviews,
   shouldHostPreviewInGraph,
   shouldShowTeamGraph,
@@ -23,6 +24,10 @@ describe("shouldHostPreviewInGraph", () => {
   const stopped = {
     status: "resolved" as const,
     decision: "stop" as const,
+  };
+  const adjusted = {
+    status: "resolved" as const,
+    decision: "adjust" as const,
   };
   const pending = {
     status: "pending" as const,
@@ -53,6 +58,13 @@ describe("shouldHostPreviewInGraph", () => {
   it("resolved stop + never started → keep standalone card", () => {
     expect(shouldHostPreviewInGraph(stopped, pendingOnly)).toBe(false);
     expect(shouldHostPreviewInGraph(stopped, dormant)).toBe(false);
+  });
+
+  it("resolved adjust + pending roster → keep standalone card (not go)", () => {
+    expect(isKickoffGoDecision("adjust")).toBe(false);
+    expect(isKickoffGoDecision("continue")).toBe(true);
+    expect(shouldHostPreviewInGraph(adjusted, pendingOnly)).toBe(false);
+    expect(shouldHostPreviewInGraph(adjusted, dormant)).toBe(false);
   });
 
   it("pending → never host (standalone DormantTeamPreview)", () => {
@@ -146,6 +158,12 @@ describe("kickoffReleasedFromPreviews", () => {
 
   it("仅已授权 → released", () => {
     expect(kickoffReleasedFromPreviews([go])).toBe(true);
+  });
+
+  it("仅 adjust → 不放行（回灌 CEO，不开工）", () => {
+    expect(
+      kickoffReleasedFromPreviews([{ status: "resolved", decision: "adjust" }]),
+    ).toBe(false);
   });
 
   it("仅待确认 → 不放行", () => {

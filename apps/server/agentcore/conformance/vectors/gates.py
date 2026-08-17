@@ -25,6 +25,7 @@ from agentcore.runtime.events import (
     run_completed,
     run_output_delta,
     run_plan,
+    run_skipped,
     run_started,
     team_preview_required,
     team_preview_resolved,
@@ -644,6 +645,21 @@ def _debate_team_preview_research_first() -> list[SSEEvent]:
     ]
 
 
+def _debate_team_preview_resolved_adjust() -> list[SSEEvent]:
+    """辩论开工卡 adjust：不开赛，意见回灌 CEO；无辩手 / 主持人 start。"""
+    from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
+
+    note = "先改命题再辩"
+    refeed = format_kickoff_adjust_result(primitive="debate", note=note)
+    return [
+        *_debate_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp-debate", decision="adjust", note=note),
+        tool_use_end("db1", "debate", success=True, output=refeed),
+        content_delta("好的，我按你的意见改开赛方案再提交。"),
+        message_end(FinishReason.END_TURN, input_tokens=900, output_tokens=60, cost=_COST),
+    ]
+
+
 def _debate_team_preview_research_first_recommended() -> list[SSEEvent]:
     """退役棘轮：不再点亮 research_first_recommended；普通开工卡挂起。"""
     motion = "LV 案模拟法庭：一审判决是否过重？"
@@ -806,6 +822,23 @@ def _team_preview_resolved_continue() -> list[SSEEvent]:
         tool_use_end("dc1", "delegate", success=True, output="团队完成"),
         content_delta("团队已交付。"),
         message_end(FinishReason.END_TURN, input_tokens=3000, output_tokens=400, cost=_COST),
+    ]
+
+
+def _team_preview_resolved_adjust() -> list[SSEEvent]:
+    """开工卡 adjust：不授权、不开工，意见回灌 CEO；无 worker start。"""
+    from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
+
+    note = "人太多，改成两人调研"
+    refeed = format_kickoff_adjust_result(primitive="delegate", note=note)
+    return [
+        *_team_preview_finalized()[:-1],
+        team_preview_resolved(checkpoint_id="tp1", decision="adjust", note=note),
+        run_skipped("r1", "w1", reason="abort"),
+        run_skipped("r2", "w2", reason="abort"),
+        tool_use_end("dc1", "delegate", success=True, output=refeed),
+        content_delta("好的，我按你的意见改方案再提交开工。"),
+        message_end(FinishReason.END_TURN, input_tokens=1600, output_tokens=120, cost=_COST),
     ]
 
 
@@ -1108,6 +1141,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "plan_review_finalized": ("结构化挂起：计划复核收口即终止（②，plan_review_required→message_end(paused)，单一冷路 resume）", _plan_review_finalized),
     "team_preview_finalized": ("团队预审：首波前挂起收口（finish_reason=paused）", _team_preview_finalized),
     "team_preview_resolved_continue": ("团队预审：开做后跑完首波", _team_preview_resolved_continue),
+    "team_preview_resolved_adjust": (
+        "开工卡：adjust 不授权不开工、意见回灌 CEO（无 worker start）",
+        _team_preview_resolved_adjust,
+    ),
     "team_preview_exclude_one_continue": (
         "开工组队有限否决：排除一人 continue → resolved 投影 excluded_run_ids",
         _team_preview_exclude_one_continue,
@@ -1132,6 +1169,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "debate_team_preview_research_first": (
         "辩论开工卡：offer_research_first → resolve research_first（不开赛·回灌文案）",
         _debate_team_preview_research_first,
+    ),
+    "debate_team_preview_resolved_adjust": (
+        "辩论开工卡：adjust 不开赛、意见回灌 CEO（无辩手 start）",
+        _debate_team_preview_resolved_adjust,
     ),
     "debate_team_preview_research_first_recommended": (
         "辩论开工卡：research_first_recommended 键位反转（挂起·第三键升主键）",

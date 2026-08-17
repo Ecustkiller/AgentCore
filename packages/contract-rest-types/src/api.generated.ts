@@ -7888,10 +7888,10 @@ export interface components {
          *
          *     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
          *     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
-         *     (non-empty ``note`` steers all unrun workers — former adjust semantics).
-         *     ``ADJUST`` remains for debate kickoff (开赛嘱咐：note 只注入首轮焦点，
-         *     不改 motion / sides；与 CONTINUE+note 同构) and plan_review steer,
-         *     plus historical non-debate kickoff resolves.
+         *     (non-empty ``note`` steers all unrun workers — 嘱咐). ``ADJUST`` on
+         *     team_preview does **not** grant or start: user ``note`` is fed back so the
+         *     CEO revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
+         *     plan_review still steers then continues. ask_user rejects ``ADJUST``.
          *     ``RESEARCH_FIRST`` is debate kickoff only: 不开赛，回灌固定文案令 CEO 立即挂
          *     ``multi_lens_research``（与 STOP 同构的恢复分支；非辩论开工卡须拒绝/降级）。
          *
@@ -10820,8 +10820,7 @@ export interface components {
          *
          *     Surfaced on conversation reopen so the client can re-render the right resume card
          *     by ``kind`` and offer the kind-appropriate actions → the resume endpoint
-         *     (kickoff delegate: continue[+嘱咐] / stop; debate: continue / adjust / stop;
-         *     plan_review: continue / adjust / stop).
+         *     (kickoff: continue[+嘱咐] / adjust / stop; plan_review: continue / adjust / stop).
          *     ``message_id`` is both the pause key and the id the resumed assistant message will
          *     reuse, so an optimistic bubble reconciles cleanly.
          *
@@ -11484,8 +11483,10 @@ export interface components {
          *     DURABLY persisted (so it survived a client disconnect / server restart — the live
          *     in-process resolve is the corresponding interaction instead). Same decision
          *     vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
-         *     for plan_review / accept the CEO direction for ask_user), ``adjust`` (inject
-         *     ``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``
+         *     for plan_review / accept the CEO direction for ask_user / grant+start kickoff),
+         *     ``adjust`` (plan_review: inject ``note`` as a steer then continue; team_preview:
+         *     do not grant or start — feed ``note`` back so the CEO revises and resubmits),
+         *     or ``stop`` (end the turn here). ``selected``
          *     carries the option(s) the user picked from an ask_user menu (ignored for
          *     plan_review; the server drops any pick not actually offered). The engine-only
          *     ``timeout`` is never sent by a client.

@@ -184,7 +184,7 @@ describe("TeamPreviewCard", () => {
   });
 
   it.each([
-    ["adjust", "已调整 · 备注已注入队员并开做 · 2 人"],
+    ["adjust", "已调整 · 已交回修订 · 预计 2 人开工"],
     ["stop", "已取消 · 团队未启动 · 预计 2 人开工"],
     ["timeout", "未及时回应，团队未启动 · 预计 2 人开工"],
     ["orphaned", "已失效（回合已结束或服务已重启） · 预计 2 人开工"],
@@ -278,7 +278,7 @@ describe("TeamPreviewCard", () => {
     ).toBeTruthy();
   });
 
-  it("debate 历史 adjust 仍渲染「已调整辩题」", () => {
+  it("debate resolved adjust 渲染交回修订，展开可见意见原文", () => {
     renderCard(
       <TeamPreviewCard
         preview={makePreview({
@@ -297,11 +297,30 @@ describe("TeamPreviewCard", () => {
         })}
       />,
     );
-    expect(
-      screen.getByRole("button", {
-        name: /已调整辩题 · 开赛 · 2 方/,
-      }),
-    ).toBeTruthy();
+    const toggle = screen.getByRole("button", {
+      name: /已调整 · 已交回修订 · 预计 2 方开赛/,
+    });
+    expect(toggle).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(screen.getByText("旧路径改辩题")).toBeTruthy();
+  });
+
+  it("delegate resolved adjust 展开可见意见原文，编制已在也不藏卡", () => {
+    useExecutionStore.getState().startExecution(debatePlan, MID);
+    renderCard(
+      <TeamPreviewCard
+        preview={makePreview({
+          decision: "adjust",
+          note: "改成两人，先做竞品",
+        })}
+        messageId={MID}
+      />,
+    );
+    const toggle = screen.getByRole("button", {
+      name: /已调整 · 已交回修订 · 预计 2 人开工/,
+    });
+    fireEvent.click(toggle);
+    expect(screen.getByText("改成两人，先做竞品")).toBeTruthy();
   });
 
   it("debate pending 不占时间线（辩题立场只在拍板卡）", () => {

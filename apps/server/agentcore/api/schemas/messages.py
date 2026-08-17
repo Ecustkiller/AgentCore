@@ -448,8 +448,10 @@ class ResumeTurnRequest(BaseModel):
     DURABLY persisted (so it survived a client disconnect / server restart — the live
     in-process resolve is the corresponding interaction instead). Same decision
     vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
-    for plan_review / accept the CEO direction for ask_user), ``adjust`` (inject
-    ``note`` as a steer, then continue), or ``stop`` (end the turn here). ``selected``
+    for plan_review / accept the CEO direction for ask_user / grant+start kickoff),
+    ``adjust`` (plan_review: inject ``note`` as a steer then continue; team_preview:
+    do not grant or start — feed ``note`` back so the CEO revises and resubmits),
+    or ``stop`` (end the turn here). ``selected``
     carries the option(s) the user picked from an ask_user menu (ignored for
     plan_review; the server drops any pick not actually offered). The engine-only
     ``timeout`` is never sent by a client.
@@ -499,8 +501,7 @@ class PausedTurnSummary(BaseModel):
 
     Surfaced on conversation reopen so the client can re-render the right resume card
     by ``kind`` and offer the kind-appropriate actions → the resume endpoint
-    (kickoff delegate: continue[+嘱咐] / stop; debate: continue / adjust / stop;
-    plan_review: continue / adjust / stop).
+    (kickoff: continue[+嘱咐] / adjust / stop; plan_review: continue / adjust / stop).
     ``message_id`` is both the pause key and the id the resumed assistant message will
     reuse, so an optimistic bubble reconciles cleanly.
 
