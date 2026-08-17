@@ -213,6 +213,15 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "agents": "list",
         "plan": "list",
         "waves": "list",
+        "task_chars": "list",
+    },
+    "delegate.context_capped": {
+        "site": "str",
+        "original_chars": "int",
+        "final_chars": "int",
+        "original_count": "int",
+        "final_count": "int",
+        "execution_id": "str",
     },
     "delegate.completed": {
         "escalations": "int",
@@ -525,6 +534,17 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "version": "str",
         "git_sha": "str",
     },
+    "server.shutdown_teardown_timeout": {
+        "timeout_seconds": "float",
+    },
+    "browser.close_all_timeout": {
+        "session_count": "int",
+        "timeout_seconds": "float",
+    },
+    "compaction.shutdown_timeout": {
+        "pending": "int",
+        "timeout_seconds": "float",
+    },
     "rate_limit.redis_fail_open": {
         "prefix": "str",
         "error": "str",
@@ -704,7 +724,10 @@ KEY_DESC: dict[str, str] = {
     "desktop.mcp_list_cache_hit": "MCP list 命中进程内缓存（含 cache_scope / duration_ms）",
     "desktop.mcp_list_cache_miss": "MCP list 只读缓存未命中（prepare/resume；不发 ClientTool）",
     "desktop.mcp_list_cache_seed": "MCP list 结果写入进程内缓存（非回合暖）",
-    "delegate.started": "编排委派开始（agents/plan/waves）",
+    "delegate.started": "编排委派开始（agents/plan/waves；task_chars=完整 task 长度）",
+    "delegate.context_capped": (
+        "上下文管线帽触发（site + 原长/切后长或条数；不落正文）"
+    ),
     "delegate.completed": "委派批次完成（escalations/scope）",
     "delegate.yielded": "委派中途让出（replan 边界）",
     "delegate.completion_criteria_ignored": (
@@ -795,6 +818,9 @@ KEY_DESC: dict[str, str] = {
         "服务端启动完成；version（包元数据 semver）+ git_sha（构建期注入）"
         "标明该进程构建来源，与 GET /version 同源"
     ),
+    "server.shutdown_teardown_timeout": "lifespan 抢救后的收尾超过 shutdown_teardown_seconds",
+    "browser.close_all_timeout": "停机 close_all 超过墙钟上限，放弃等待交重启/reaper",
+    "compaction.shutdown_timeout": "停机 flush 在飞 fold 超时（best-effort，取消剩余 task）",
     "memory.consolidation_window_dropped": (
         "不可重试 consolidation 失败：推进水位并丢弃本窗口（防 sweeper 无限重选）"
     ),

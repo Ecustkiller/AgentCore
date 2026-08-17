@@ -56,7 +56,7 @@ class KickoffSummary:
     ``primitive`` discriminates card layout. ``workers`` is the delegate分工表;
     debate fills ``motion`` / ``sides`` / ``max_rounds`` / ``thorough`` instead
     (``workers`` stays empty). ``debate_arguments`` is the resume blob so
-    ``recover_turn`` can re-enter ``DebateTool.execute`` after CONTINUE/ADJUST.
+    ``recover_turn`` can re-enter ``DebateTool.execute`` after CONTINUE.
     ``headline`` is the user-facing lead (交付档 + 人数); empty = old frames.
     """
 

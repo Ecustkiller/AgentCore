@@ -93,7 +93,15 @@ async def team_preview_before_workers(
         if playbook_name == "multi_lens_research":
             clear_turn_keeps_stage_card()
         return await finalize_stopped(tool, plan, {}, kickoff_cancelled=True)
-    # CONTINUE / ADJUST：MLR 真正开跑 → keep。
+    if preview_decision is CheckpointDecision.ADJUST:
+        from agentcore.runtime.delegate.supervised import finalize_stopped
+        from agentcore.runtime.kickoff.stage_card import clear_turn_keeps_stage_card
+
+        # 用户 ADJUST：不开工，清 keep；意见回灌走 resume 路径（此处无 note）。
+        if playbook_name == "multi_lens_research":
+            clear_turn_keeps_stage_card()
+        return await finalize_stopped(tool, plan, {}, kickoff_adjusted=True)
+    # CONTINUE：MLR 真正开跑 → keep。
     if playbook_name == "multi_lens_research":
         from agentcore.runtime.kickoff.stage_card import mark_turn_keeps_stage_card
 

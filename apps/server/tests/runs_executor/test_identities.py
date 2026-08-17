@@ -309,10 +309,44 @@ async def test_handoff_prompt_splits_by_topology():
         has_dependents=False, captain=False, form="files"
     )
     assert "交接勿回灌" in files_leaf
+    assert "落盘产物是给人读的完整说明" in files_leaf
+    # files 叶子走 pointer：简报是 CEO 唯一信息源，必须保留结论性。
+    assert "summary（结论）" in files_leaf
+    assert "一句话说清你这次做出了什么" in files_leaf
+    assert "正文里已经写过的结论" not in files_leaf
+    assert "一行标题" not in files_leaf
+    artifacts_leaf = build_worker_identity(
+        has_dependents=False, artifacts=["report.md"]
+    )
+    assert "form=files" in artifacts_leaf
+    assert "summary（结论）" in artifacts_leaf
+    assert "正文里已经写过的结论" not in artifacts_leaf
+
+    prose_leaf = build_worker_identity(
+        has_dependents=False, captain=False, form="prose"
+    )
+    assert "给人读的说明" in prose_leaf
+    assert "结论、根因、关键取舍" in prose_leaf
+    assert "一行标题" in prose_leaf
+    assert "接力状态" in prose_leaf
+    assert "正文里已经写过的结论" in prose_leaf
+    assert "summary（结论）" not in prose_leaf
+    assert "一句话说清你这次做出了什么" not in prose_leaf
 
     assert "不必为交而交" in leaf
     assert "接力契约 + 增量交代" in leaf
     assert "必须调用 handoff" not in leaf
+    # 省略 form 的叶子也可能落盘 → 保留结论性，宁可重复不要空洞。
+    assert "给人读的说明" in leaf
+    assert "结论、根因、关键取舍" in leaf
+    assert "summary（结论）" in leaf
+    assert "一句话说清你这次做出了什么" in leaf
+    assert "正文里已经写过的结论" not in leaf
+    assert "一行标题" not in leaf
+    assert "正文里已经写过的结论" not in upstream
+    assert "summary（结论）" in upstream
+    assert "一句话说清你这次做出了什么" in upstream
+    assert "一行标题" not in upstream
     # 巡检定案 B：交付各一句防回灌（leaf / upstream / 各 form 同源）
     assert "交接勿回灌" in leaf and "交接勿回灌" in upstream
     assert "修复完成" in leaf and "已修复" in leaf

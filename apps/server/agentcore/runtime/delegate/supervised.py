@@ -424,6 +424,7 @@ async def finalize_stopped(
     *,
     kickoff_cancelled: bool = False,
     kickoff_timeout: bool = False,
+    kickoff_adjusted: bool = False,
     note: str = "",
 ) -> ToolResult:
     """Wrap up a partial plan without running the tail.
@@ -431,8 +432,10 @@ async def finalize_stopped(
     ``kickoff_cancelled`` marks team_preview STOP (drive_preview / resume_plan with
     ``apply_kickoff_grant``). ``kickoff_timeout`` marks team_preview TIMEOUT on
     the same grant path — no grant, no drive; copy aligns with ask timeout.
-    Those paths replace ``format_for_ceo`` with soft guidance — plan_review /
-    replan stop keep the normal CEO brief.
+    ``kickoff_adjusted`` marks team_preview ADJUST — same no-grant path, but
+    revise-and-resubmit guidance (not cancel「宜先问」). Those paths replace
+    ``format_for_ceo`` with soft guidance — plan_review / replan stop keep the
+    normal CEO brief.
     """
     from agentcore.runtime.delegate.accumulate import (
         accumulate_usage,
@@ -480,6 +483,10 @@ async def finalize_stopped(
         from agentcore.runtime.kickoff.cancel_guidance import format_kickoff_timeout_result
 
         output = format_kickoff_timeout_result(primitive="delegate", note=note)
+    elif kickoff_adjusted:
+        from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
+
+        output = format_kickoff_adjust_result(primitive="delegate", note=note)
     elif kickoff_cancelled:
         from agentcore.runtime.kickoff.cancel_guidance import format_kickoff_cancel_result
 

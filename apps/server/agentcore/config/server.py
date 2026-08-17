@@ -13,6 +13,13 @@ class ServerSettings(BaseModel):
     # DEBUG=true (dev logs / auto-migrate) but disables uvicorn hot-reload for
     # long live collaboration runs. Env: AGENTCORE_RELOAD.
     agentcore_reload: bool | None = None
+    # Production uvicorn drain after SIGTERM. None used to wait forever on SSE
+    # keep-alives and never reach FastAPI lifespan (Docker then SIGKILL at 40s).
+    # Reload mode still uses a 2s hard cap in ``__main__`` (WatchFiles + long SSE).
+    uvicorn_graceful_shutdown_seconds: float = 5.0
+    # Hard cap for lifespan work after turn salvage (ledger / browsers / folds).
+    # Docker stop_grace_period stays 40s: 5 drain + 20 salvage + 8 teardown + 7 slack.
+    shutdown_teardown_seconds: float = 8.0
 
     log_level: str = "info"
     log_file: str = ""

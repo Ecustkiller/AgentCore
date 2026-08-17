@@ -6,6 +6,11 @@ asks the gate whether to durable-pause before fan-out / moderator start.
 
 from __future__ import annotations
 
+from agentcore.runtime.kickoff.adjust_guidance import (
+    KICKOFF_ADJUST_GUIDANCE_DEBATE,
+    KICKOFF_ADJUST_GUIDANCE_DELEGATE,
+    format_kickoff_adjust_result,
+)
 from agentcore.runtime.kickoff.cancel_guidance import (
     KICKOFF_CANCEL_GUIDANCE,
     KICKOFF_TIMEOUT_GUIDANCE,
@@ -83,9 +88,12 @@ __all__ = [
     "enrich_worker_desk_names",
     "format_kickoff_headline",
     "grant_mlr_preauth",
+    "format_kickoff_adjust_result",
     "format_kickoff_cancel_result",
     "format_kickoff_timeout_result",
     "intensity_short_label",
+    "KICKOFF_ADJUST_GUIDANCE_DEBATE",
+    "KICKOFF_ADJUST_GUIDANCE_DELEGATE",
     "KICKOFF_CANCEL_GUIDANCE",
     "KICKOFF_TIMEOUT_GUIDANCE",
     "kickoff_tools",

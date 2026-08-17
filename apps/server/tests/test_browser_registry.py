@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 
 import pytest
 
+from agentcore.config import settings
 from agentcore.runtime.browser.registry import BrowserSessionRegistry
 from agentcore.tools.sandbox.browser.protocol import (
     BrowserCommand,
@@ -239,6 +241,30 @@ async def test_close_all_tears_down_every_session():
     sessions = [(await reg.acquire(_req(f"c{i}")))[0] for i in range(3)]
     await reg.close_all()
     assert all(s.closed for s in sessions)
+    assert len(reg) == 0
+
+
+class _HangingBrowserSession(FakeBrowserSession):
+    async def close(self) -> None:
+        await asyncio.Event().wait()
+
+
+@pytest.mark.asyncio
+async def test_close_all_abandons_after_wall_clock(monkeypatch: pytest.MonkeyPatch):
+    """Shutdown must not wait runsc's 180s bound, nor drain hangers serially."""
+    monkeypatch.setattr(settings, "browser_shutdown_close_all_seconds", 0.1)
+
+    async def factory(request: BrowserSessionRequest) -> _HangingBrowserSession:
+        return _HangingBrowserSession(request.conversation_id)
+
+    reg = BrowserSessionRegistry(factory=factory, max_sessions=8)
+    for i in range(3):
+        await reg.acquire(_req(f"c{i}"))
+    started = time.monotonic()
+    await asyncio.wait_for(reg.close_all(), timeout=1)
+    elapsed = time.monotonic() - started
+    # Wall-clock of the whole gather (~0.1s). Serial per-session 0.1s × 3 ≈ 0.3s.
+    assert elapsed < 0.25
     assert len(reg) == 0
 
 

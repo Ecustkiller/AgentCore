@@ -60,6 +60,18 @@ def test_streak_empty_and_first_stop():
     assert is_repeated_checkpoint_stop([], CheckpointDecision.CONTINUE) is False
 
 
+def test_streak_excludes_consecutive_adjust():
+    """team_preview adjust shares STOP's no-grant path but must not count as STOP."""
+    entries = [
+        _resolved("team_preview_resolved", "adjust", checkpoint_id="tp1"),
+        _resolved("team_preview_resolved", "adjust", checkpoint_id="tp2"),
+        _resolved("team_preview_resolved", "adjust", checkpoint_id="tp3"),
+    ]
+    assert consecutive_checkpoint_stops(entries) == 0
+    assert is_repeated_checkpoint_stop(entries, CheckpointDecision.ADJUST) is False
+    assert is_repeated_checkpoint_stop(entries, CheckpointDecision.STOP) is False
+
+
 def test_compose_repeated_stop_closing_never_empty():
     assert "已按你的意思停下" in compose_repeated_stop_closing()
     assert "先到这" in compose_repeated_stop_closing(note="先到这")
@@ -206,3 +218,39 @@ async def test_second_team_preview_stop_after_ask_stop_terminates(monkeypatch):
     assert "已按你的意思停下" in settled.terminal_text
     # Worker finalize still ran (skip / cancel path) before upgrade.
     delegate.resume_plan.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_three_team_preview_adjusts_do_not_terminate():
+    """Consecutive team_preview ADJUST stays CONTINUE-feed (no INTERACT upgrade)."""
+    prior = [
+        _resolved("team_preview_resolved", "adjust", checkpoint_id="tp0"),
+        _resolved("team_preview_resolved", "adjust", checkpoint_id="tp1"),
+    ]
+    sink = _sink_with_required(kind=EventType.TEAM_PREVIEW_REQUIRED)
+    delegate = MagicMock()
+    delegate.resume_plan = AsyncMock(
+        return_value=MagicMock(
+            output="用户要求调整开工方案，团队未启动。用户意见：再瘦一圈\n请按用户意见修订",
+            effect=ToolEffect.CONTINUE,
+        )
+    )
+    settled = await settle_resumed_suspension(
+        _team_frame(journal_entries=prior),
+        decision=CheckpointDecision.ADJUST,
+        note="再瘦一圈",
+        selected=[],
+        sink=sink,
+        delegate_tool=delegate,
+        execution_id="exec1",
+    )
+    assert settled.effect is ToolEffect.CONTINUE
+    assert settled.terminal_text is None
+    delegate.resume_plan.assert_awaited_once()
+    assert delegate.resume_plan.await_args.kwargs["decision"] is CheckpointDecision.ADJUST
+    journal = sink.execution_journal() or []
+    assert any(
+        e["type"] == EventType.TEAM_PREVIEW_RESOLVED.value
+        and e.get("payload", {}).get("decision") == "adjust"
+        for e in journal
+    )

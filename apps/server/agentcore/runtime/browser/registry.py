@@ -695,33 +695,47 @@ class BrowserSessionRegistry:
         self._active.pop(conversation_id, None)
         self._locks.pop(conversation_id, None)
 
-    async def close_all(self) -> None:
-        for sid in list(self._entries):
-            await self._drop(sid, reason="shutdown")
+    async def close_all(self, *, timeout: float | None = None) -> None:
+        """Tear down every live session under a wall-clock cap (lifespan shutdown).
+
+        Bookkeeping is instant; session ``close()`` (runsc kill/delete) runs in
+        parallel. The bound is the whole gather — not runsc's 180s per-command
+        wait, and not one session after another. Timed-out sandboxes are left
+        for process exit / the reaper.
+        """
+        items = [(sid, entry) for sid, entry in list(self._entries.items())]
+        self._entries.clear()
         self._by_conversation.clear()
         self._active.clear()
         self._locks.clear()
-
-    async def _drop(self, session_id: str, *, reason: str) -> None:
-        entry = self._entries.pop(session_id, None)
-        if entry is None:
+        if not items:
             return
+        grace = (
+            float(timeout)
+            if timeout is not None
+            else float(settings.browser_shutdown_close_all_seconds)
+        )
+        tasks = [
+            asyncio.create_task(self._teardown_entry(sid, entry, reason="shutdown"))
+            for sid, entry in items
+        ]
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=grace,
+            )
+        except TimeoutError:
+            logger.warning(
+                "browser.close_all_timeout",
+                session_count=len(items),
+                timeout_seconds=grace,
+            )
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _teardown_entry(self, session_id: str, entry: _Entry, *, reason: str) -> None:
         cid = entry.conversation_id
-        bucket = self._by_conversation.get(cid)
-        if bucket is not None:
-            with contextlib.suppress(ValueError):
-                bucket.remove(session_id)
-            if not bucket:
-                self._by_conversation.pop(cid, None)
-        if self._active.get(cid) == session_id:
-            remaining = self._by_conversation.get(cid) or []
-            if remaining:
-                self._active[cid] = remaining[-1]
-            else:
-                self._active.pop(cid, None)
-        # Complete the durable takeover record BEFORE teardown so it lands on EVERY end path
-        # (reap / crash / shutdown / delete) — D17. Cleared explicit-end marks are already
-        # gone, so this only fires for a still-active takeover.
         if entry.takeover is not None:
             await self._finalize_takeover(entry.takeover, reason)
             entry.takeover = None
@@ -740,6 +754,25 @@ class BrowserSessionRegistry:
             reason=reason,
         )
         self._notify_gone(cid, session_id)
+
+    async def _drop(self, session_id: str, *, reason: str) -> None:
+        entry = self._entries.pop(session_id, None)
+        if entry is None:
+            return
+        cid = entry.conversation_id
+        bucket = self._by_conversation.get(cid)
+        if bucket is not None:
+            with contextlib.suppress(ValueError):
+                bucket.remove(session_id)
+            if not bucket:
+                self._by_conversation.pop(cid, None)
+        if self._active.get(cid) == session_id:
+            remaining = self._by_conversation.get(cid) or []
+            if remaining:
+                self._active[cid] = remaining[-1]
+            else:
+                self._active.pop(cid, None)
+        await self._teardown_entry(session_id, entry, reason=reason)
         # If another tab remains (and became active), announce ready so live viewers can
         # re-attach screencast to the new default.
         new_active = self._active.get(cid)

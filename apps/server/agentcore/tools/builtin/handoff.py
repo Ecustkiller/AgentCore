@@ -1,9 +1,12 @@
 """handoff — a worker's structured 交接简报 + finish signal (完工交接简报单一源).
 
 Worker-only, terminal. Semantics: 简报 = 【接力契约 + 增量交代】. A delegated worker calls
-``handoff`` ONCE, in the SAME turn as its finished deliverable, to submit a STRUCTURED brief
-(给主管 / 下游队员看): 结论 / 关键要点 / 关键假设 / 建议下一步；可选 ``motion_card``
-（发现核心争议命题时建议开辩的唯一契约载体）。
+``handoff`` ONCE, in the SAME turn as its finished deliverable, to submit a STRUCTURED brief.
+Topology splits the brief's job (identity copy; this schema stays shared):
+- Nodes with dependents, or leaves that may land files: brief stays conclusion-bearing
+  (CEO / 下游 may only see the brief).
+- ``form=prose`` leaves: brief is relay status only；结论在正文 (CEO reads the body).
+可选 ``motion_card``（发现核心争议命题时建议开辩的唯一契约载体）。
 
 Topology (prompt + this description say the same thing; engine gate unchanged):
 - Nodes with downstream dependents **must** handoff — downstream relays on the brief

@@ -139,7 +139,7 @@ CEO 是**管理者**（不是调查员）：主要持只读 / 检索工具，用
 | 字段 / 概念 | 语义要点 |
 |---|---|
 | `depends_on` | 并行 / 串行的唯一开关；空 = 可立即并行；调度器据依赖定并行度。同回合二次委派解析范围 = 本批 ∪ 宿主图（活跃 `live_plan` 或本回合上一张图）；失败回执列可用节点 + 可执行下一步（角色名 / id） |
-| `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述 |
+| `result_handling` | 上游→下游注入保真：`pass_through`（默认偏全文）/ `summarize`；**不**作用于 CEO 综述。综述是否带 worker 正文另由「叶子 + 无落盘」判定（有下游 / 落盘者只吃交接简报）→ [Agent 协作模式 · handoff](/docs/03-AI核心/Agent协作模式.md) |
 | `complexity_hint` | `light`/`standard`：编排姿态（如 light 隐含 `coordination=none`），**不**映射 worker token/超时 |
 | `coordination` | 便签墙档；缺省 `none`；权威 → [Agent 协作模式](/docs/03-AI核心/Agent协作模式.md) |
 | `deliverable` | 落盘契约 = `form=files` 和/或非空 `artifacts`（否决悬空 `output_schema`）。`form=prose` = 纯文字交付（写工具仍装配，靠角色提示自觉勿乱写）；`form=files` / 省略 = 可写盘。`form=prose` 不得同时声明非空 `artifacts`（硬拒）。**`form` 只表交付形态，不再代理探索期「别乱写工程」、也不再硬卸写工具**。约定文档中间笔记（`AgentCore/文档/{research,reviews,debate}/`）默认**不**计入 `form=files` 修码产品落盘（零写 soft），除非 `artifacts` 声明该路径。✅ S3：不再有按 criteria kind 的队形闸。✅ 已删 `requires_files` / `name` / `must_contain` / `min_length`（见下节） |

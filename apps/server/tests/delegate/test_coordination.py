@@ -1626,7 +1626,7 @@ def test_all_completed_inject_carries_output_and_audit_hint():
 
 def test_inject_carries_final_synthesis_discipline():
     # 终稿纪律（B4·协调出口）：footer 与 all_completed 都提醒——交付物在前、过程简述
-    # 至多一段、协调事件 / escalation 原文 / 合成草稿不整段进终稿、未交付产物显式列出。
+    # 从简、协调事件 / 名册 / escalation 原文 / 合成草稿不整段进终稿、未交付产物显式列出。
     from agentcore.runtime.coordination.inject import format_coordination_events
 
     session = CoordinationSession(execution_id="e", total_workers=2)
@@ -1642,9 +1642,14 @@ def test_inject_carries_final_synthesis_discipline():
     )
     assert "【终稿纪律】" in text  # footer（每次注入都带）
     assert "交付物在前" in text
+    assert "过程简述从简" in text
+    assert "至多一段" not in text
     assert "禁止整段粘进终稿" in text
     assert "未交付的承诺产物" in text
     assert "终稿纪律】写" in text  # all_completed 分支的强化提醒
+    assert "报告本波结果" in text
+    assert "活没干完就接着干" in text
+    assert "然后退出协调" not in text
 
 
 def test_all_completed_inject_without_output_still_has_audit_hint():
@@ -1690,6 +1695,71 @@ def test_all_completed_criteria_unmet_inject_steers_reuse_not_respawn():
     assert "勿再启同服" in text
     assert "复用" in text or "只补浏览器" in text
     assert "团队已全部结束" not in text
+    assert "活没干完就接着干" not in text
+
+
+def test_harvest_inject_close_line_differs_by_outcome():
+    from agentcore.runtime.coordination.inject import format_coordination_events
+
+    ok = CoordinationSession(execution_id="e-ok", total_workers=1)
+    ok.harvest_closing = True
+    ok_text = format_coordination_events(
+        ok,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 1, "total": 1},
+            )
+        ],
+    )
+    assert "活没干完就接着干" in ok_text
+    assert "然后退出协调" not in ok_text
+
+    fail = CoordinationSession(execution_id="e-fail", total_workers=2)
+    fail.harvest_closing = True
+    fail.failed_run_ids = {"b"}
+    fail_text = format_coordination_events(
+        fail,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 2, "total": 2, "failed": 1},
+            )
+        ],
+    )
+    assert "不要把失败当成功继续铺开" in fail_text
+    assert "活没干完就接着干" not in fail_text
+
+    cancelled = CoordinationSession(execution_id="e-c", total_workers=1)
+    cancelled.harvest_closing = True
+    cancelled_text = format_coordination_events(
+        cancelled,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.DRIVE_CANCELLED,
+                payload={"completed": 0, "total": 1},
+            )
+        ],
+    )
+    assert "不要接着派活" in cancelled_text
+    assert "活没干完就接着干" not in cancelled_text
+
+    paused = CoordinationSession(execution_id="e-soft", total_workers=1)
+    paused.harvest_closing = True
+    paused.soft_stop = True
+    paused_text = format_coordination_events(
+        paused,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 1, "total": 1},
+            )
+        ],
+    )
+    assert "不要自行接着干" in paused_text
+    assert "请示用户而暂停" in paused_text
+    assert "报告本波结果" not in paused_text
+    assert "活没干完就接着干" not in paused_text
 
 
 def test_checkpoint_boundary_yield_instructs_ask_user():
@@ -1790,8 +1860,107 @@ async def test_wait_shortcircuit_guard_when_terminal_missing(monkeypatch):
     assert elapsed < 2.0
     assert len(msgs) == 1
     assert "all_completed" in (msgs[0].content or "")
+    assert "团队已全部结束" not in (msgs[0].content or "")
     assert session.active is False
     assert session.all_completed_injected is True
+
+
+def test_synthetic_all_completed_stamps_cancel_and_fail_flags():
+    """Bag-full shortcircuit must carry cancel / fail flags; success stays flag-less."""
+    from agentcore.runtime.coordination.wait import _synthetic_all_completed
+
+    ok = CoordinationSession(execution_id="exec-short-ok", total_workers=2)
+    ok.completed_run_ids = {"w1", "w2"}
+    ok_ev = _synthetic_all_completed(ok)
+    assert ok_ev.kind is CoordinationEventKind.ALL_COMPLETED
+    assert ok_ev.payload.get("reason") == "team_done_shortcircuit"
+    assert "cancelled" not in ok_ev.payload
+    assert "failed" not in ok_ev.payload
+    assert "criteria_met" not in ok_ev.payload
+
+    cancelled = CoordinationSession(execution_id="exec-short-cancel", total_workers=1)
+    cancelled.completed_run_ids = {"never-ran"}
+    cancelled.cancel_ids = {"never-ran"}
+    cancel_ev = _synthetic_all_completed(cancelled)
+    assert cancel_ev.kind is CoordinationEventKind.ALL_COMPLETED
+    assert cancel_ev.payload.get("cancelled") is True
+    assert cancel_ev.payload.get("completed") == 1
+    assert cancel_ev.payload.get("total") == 1
+    assert "criteria_met" not in cancel_ev.payload
+
+    failed = CoordinationSession(execution_id="exec-short-fail", total_workers=2)
+    failed.completed_run_ids = {"ok", "boom"}
+    failed.failed_run_ids = {"boom"}
+    fail_ev = _synthetic_all_completed(failed)
+    assert fail_ev.kind is CoordinationEventKind.ALL_COMPLETED
+    assert fail_ev.payload.get("failed") == 1
+    assert fail_ev.payload.get("criteria_met") is False
+    assert "cancelled" not in fail_ev.payload
+
+
+async def test_wait_shortcircuit_cancelled_bag_does_not_claim_all_done(monkeypatch):
+    """Field shape: 1/1 bag filled by unsettled cancel must not say「团队已全部结束」."""
+    import agentcore.runtime.coordination.wait as coord_wait
+    from agentcore.runtime.coordination.session import (
+        current_execution_id,
+        set_active_coordination,
+    )
+    from agentcore.runtime.coordination.wait import await_coordination_injection
+
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 30.0)
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="exec-short-cancel-wait", total_workers=1)
+    session.completed_run_ids = {"never-ran"}
+    session.cancel_ids = {"never-ran"}
+    session.harvest_closing = True
+    session.drive_task = asyncio.get_running_loop().create_future()
+    session.drive_task.set_result(None)
+    set_active_coordination(session)
+    token = current_execution_id.set("exec-short-cancel-wait")
+    try:
+        msgs = await asyncio.wait_for(await_coordination_injection([]), timeout=2.0)
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination()
+
+    text = msgs[0].content or ""
+    assert "all_completed" in text
+    assert "调度中断" in text
+    assert "团队已全部结束" not in text
+    assert session.active is False
+    assert session.all_completed_injected is True
+
+
+async def test_wait_shortcircuit_failed_bag_does_not_claim_all_done(monkeypatch):
+    """Failed ids in a full bag must not inject a flag-less「团队已全部结束」."""
+    import agentcore.runtime.coordination.wait as coord_wait
+    from agentcore.runtime.coordination.session import (
+        current_execution_id,
+        set_active_coordination,
+    )
+    from agentcore.runtime.coordination.wait import await_coordination_injection
+
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 30.0)
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="exec-short-fail-wait", total_workers=2)
+    session.completed_run_ids = {"ok", "boom"}
+    session.failed_run_ids = {"boom"}
+    session.harvest_closing = True
+    session.drive_task = asyncio.get_running_loop().create_future()
+    session.drive_task.set_result(None)
+    set_active_coordination(session)
+    token = current_execution_id.set("exec-short-fail-wait")
+    try:
+        msgs = await asyncio.wait_for(await_coordination_injection([]), timeout=2.0)
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination()
+
+    text = msgs[0].content or ""
+    assert "all_completed" in text
+    assert "团队已全部结束" not in text
+    assert "失败" in text
+    assert session.active is False
 
 
 async def test_retired_criteria_kind_still_posts_all_completed_without_host_backfill(

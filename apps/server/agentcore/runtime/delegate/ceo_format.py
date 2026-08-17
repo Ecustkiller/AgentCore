@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from agentcore.core.logging import get_logger
@@ -169,6 +170,7 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
         CEO_SYNTHESIS_BUDGET,
         CEO_SYNTHESIS_POINTER_CHARS,
     )
+    from agentcore.runtime.runs.contract import node_has_dependents
     from agentcore.runtime.runs.fidelity import allocate, truncate_head_tail
     from agentcore.runtime.runs.types import RunPhase
 
@@ -286,17 +288,28 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
             fidelity, truncated = "pointer", True
         elif mode == "pass_through":
             allowance = next(allowances)
-            # With a structured brief, keep prose short (pointer-like); otherwise
-            # water-fill the shared budget as before.
+            # Leaves (no files, no downstream): after debrief de-conclusioning the
+            # conclusion lives in the body — include it, sized to the shared budget
+            # (do not clip to CEO_SYNTHESIS_POINTER_CHARS). Intermediate nodes:
+            # downstream already read the full body via the 16k dep-context pool;
+            # CEO only needs the brief.
+            prefer_brief = bool(author_summary or key_points) and node_has_dependents(
+                plan, node.run_id
+            )
             if author_summary or key_points:
                 body = _compact_worker_body(
                     clean=clean,
                     author_summary=author_summary,
                     key_points=key_points,
-                    prose_limit=min(allowance, CEO_SYNTHESIS_POINTER_CHARS),
-                    prefer_brief=True,
+                    prose_limit=allowance,
+                    prefer_brief=prefer_brief,
                 )
-                truncated = len(clean) > CEO_SYNTHESIS_POINTER_CHARS
+                # Mid-node prefer_brief drops the body — that is a cut, not "intact".
+                truncated = (
+                    bool(clean.strip())
+                    if prefer_brief
+                    else len(clean) > allowance
+                )
             else:
                 body = truncate_head_tail(clean, allowance)
                 truncated = len(clean) > allowance
@@ -372,7 +385,7 @@ def _compact_worker_body(
     prose_limit: int,
     prefer_brief: bool,
 ) -> str:
-    """Pointer-first body: summary + short bullets; optional tiny prose digest."""
+    """Brief-first body: summary + short bullets; optional prose when not prefer_brief."""
     from agentcore.runtime.runs.fidelity import truncate_head_tail
 
     parts: list[str] = []
@@ -382,7 +395,7 @@ def _compact_worker_body(
         bullets = "\n".join(f"- {p}" for p in key_points[:6])
         parts.append(f"要点：\n{bullets}")
     if prefer_brief and (author_summary or key_points):
-        # Structured brief present — skip dumping the full deliverable.
+        # Pointer / mid-node: structured brief present — skip dumping the full body.
         return "\n\n".join(parts) if parts else "（无摘要）"
     if clean.strip():
         parts.append(truncate_head_tail(clean, prose_limit))
@@ -438,8 +451,15 @@ def team_notes_block(tool: DelegateTool) -> str:
     return "\n" + format_notes_for_synthesis(notes)
 
 
-def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) -> str:
-    """Deterministic per-run roster so CEO synthesis cannot invent「全部交付」."""
+def _roster_facts(
+    plan: RunPlan, results: dict, products: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Deterministic per-run roster counters so CEO synthesis cannot invent「全部交付」.
+
+    Ground truth, not prose. Kept structured so the harvest path can render it
+    *after* worker prose is truncated — a roster that lost a truncation race is
+    worse than useless: the closing discipline still tells the CEO to check it.
+    """
     from agentcore.runtime.runs.types import RunPhase
 
     replaced_ids = {n.replaces_run_id for n in plan.nodes if n.replaces_run_id}
@@ -510,11 +530,44 @@ def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) 
     from agentcore.runtime.delegate.delivery_status import acceptance_counts
 
     accepted_n, rejected_n = acceptance_counts(results)
+    return {
+        "completed": completed,
+        "failed": failed,
+        "skipped": skipped,
+        "cancelled": cancelled,
+        "other": other,
+        "products": len(products),
+        "product_failed": product_failed,
+        "accepted_files": accepted_n,
+        "rejected_files": rejected_n,
+        "failed_lines": failed_lines,
+        "budget_skip_lines": budget_skip_lines,
+        "cancel_cascade_lines": cancel_cascade_lines,
+        "replaced_lines": replaced_lines,
+    }
+
+
+def render_roster_block(facts: dict[str, Any]) -> str:
+    """Render :func:`_roster_facts` counters into the CEO-facing roster section."""
+    completed = int(facts.get("completed") or 0)
+    failed = int(facts.get("failed") or 0)
+    skipped = int(facts.get("skipped") or 0)
+    cancelled = int(facts.get("cancelled") or 0)
+    other = int(facts.get("other") or 0)
+    products_n = int(facts.get("products") or 0)
+    product_failed = int(facts.get("product_failed") or 0)
+    accepted_n = int(facts.get("accepted_files") or 0)
+    rejected_n = int(facts.get("rejected_files") or 0)
+    failed_lines = list(facts.get("failed_lines") or [])
+    budget_skip_lines = list(facts.get("budget_skip_lines") or [])
+    cancel_cascade_lines = list(facts.get("cancel_cascade_lines") or [])
+    replaced_lines = list(facts.get("replaced_lines") or [])
+
     lines = [
         "\n### 队员终态名册（地面真相——写终稿必须对照，禁止编造「全部交付」）\n"
         f"计划节点：完成 {completed} · 失败 {failed} · 跳过 {skipped} · 取消 {cancelled}"
         + (f" · 其他 {other}" if other else "")
-        + f"；综述可见产物 {len(products)} 条"
+        + f"；综述可见产物 {products_n} 条"
         + (f"（其中非完成 {product_failed}）" if product_failed else "")
         + f"；文件验收：已验收 {accepted_n} · 未通过 {rejected_n}"
         + "。"
@@ -544,10 +597,32 @@ def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) 
     return "\n".join(lines)
 
 
-def format_for_ceo(
+def _roster_block(plan: RunPlan, results: dict, products: list[dict[str, Any]]) -> str:
+    return render_roster_block(_roster_facts(plan, results, products))
+
+
+@dataclass(frozen=True)
+class CeoSynthesis:
+    """One drive-terminal synthesis, split by what may and may not be truncated.
+
+    ``text`` is the CEO's in-turn ToolResult read (unchanged). ``prose`` is the
+    lossy part alone: the harvest path trims that and re-attaches ``roster_text``
+    / ``closing_text`` afterwards, so ground truth never loses a budget race
+    against worker prose — the closing discipline orders the CEO to check the
+    roster, and a silently elided roster turns that check into a rubber stamp.
+    """
+
+    text: str
+    prose: str
+    roster_text: str
+    roster_facts: dict[str, Any]
+    closing_text: str
+
+
+def build_ceo_synthesis(
     tool: DelegateTool, plan: RunPlan, results: dict, *, call_idx: int | None = None
-) -> str:
-    """Render the workers' products as the CEO's overview input."""
+) -> CeoSynthesis:
+    """Render the workers' products as the CEO's overview input, split by loss policy."""
     lines = ["## 团队执行结果（据此写一段简短概览交给用户；完整详情用户自行查看）"]
     escalation = escalation_block(tool, plan, results)
     if escalation:
@@ -589,7 +664,10 @@ def format_for_ceo(
     tool_failures_block = format_team_tool_failures_block(products)
     if tool_failures_block:
         lines.append(tool_failures_block)
-    lines.append(_roster_block(plan, results, products))
+    roster_facts = _roster_facts(plan, results, products)
+    roster_text = render_roster_block(roster_facts)
+    head_lines = list(lines)
+    lines = []
     emit_captain_readback(tool, products)
     # 命题卡 → 建议开辩：显著专节；自治生效且未超限时指引可直接调 debate。
     from agentcore.runtime.deep_research_auto import tool_may_auto_debate
@@ -628,7 +706,7 @@ def format_for_ceo(
             if auto_adopt
             else "有【建议开辩】卡：概览呈报命题+各方；勿口头征求、本回合勿直接 debate。\n"
         )
-    lines.append(
+    closing_text = (
         "\n---\n以上为团队产出。「文件产出（已验收）」= 落盘且路径验收通过的地面真相。\n"
         "⚠️ 防幻觉铁律：是否真交付文件只看「文件产出（已验收）」行——"
         "正文声称写了却无此行 = 未真正落盘【未达成】，用 continue_from_run_id 续派或冷委派；"
@@ -636,15 +714,15 @@ def format_for_ceo(
         "相互依赖时【语义边界对账】（冲突/缺口/重复；有便签一并对照）；"
         "【完工核验】对照用户请求：未达成就补，已达成则短概览收口。\n"
         + debate_tail
-        + "【终稿纪律】交付物在前、过程至多一段；对照【队员终态名册】，"
+        + "【终稿纪律】交付物在前、过程简述从简；对照【队员终态名册】"
+        "（名册是对账输入，禁止整段粘进终稿），"
         "失败/跳过/接替必须写入，禁止编造「全部交付」。"
         "要 PPT 却无 .pptx：禁止写「PPT 已落盘」。"
     )
-    output = "\n".join(lines)
     if any(wp["status"] != "completed" for wp in products) or any(
         n.replaces_run_id for n in plan.nodes
     ):
-        output += (
+        closing_text += (
             "\n---\n**有队员失败/被跳过/被接替。** 终稿须点名说明，不得写成全员成功。"
             "如需补跑，请在同一计划用 `replan(add=[...])` **按缺口点名**追加"
             "（设 `replaces_run_id` 或 `continue_from_run_id` 指向失败/跳过节点；"
@@ -654,6 +732,8 @@ def format_for_ceo(
             "（系统会 auto-replaces 并转写锁），勿另起 `-v2` 角色名抢路径，"
             "勿让队员 escalate 请用户「移交写权」。"
         )
+    prose = "\n".join([*head_lines, *lines])
+    output = "\n".join([*head_lines, roster_text, *lines, closing_text])
     raw_chars = sum(len(s.content) for s in results.values() if s and s.content)
     output, ratio_capped = _cap_synthesis_output(output, raw_chars)
     limit = _synthesis_char_cap(raw_chars)
@@ -670,4 +750,17 @@ def format_for_ceo(
         synthesis_cap=limit,
         ratio_capped=ratio_capped,
     )
-    return output
+    return CeoSynthesis(
+        text=output,
+        prose=prose,
+        roster_text=roster_text,
+        roster_facts=roster_facts,
+        closing_text=closing_text,
+    )
+
+
+def format_for_ceo(
+    tool: DelegateTool, plan: RunPlan, results: dict, *, call_idx: int | None = None
+) -> str:
+    """Render the workers' products as the CEO's overview input."""
+    return build_ceo_synthesis(tool, plan, results, call_idx=call_idx).text

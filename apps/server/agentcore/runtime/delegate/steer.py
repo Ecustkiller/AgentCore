@@ -19,7 +19,7 @@ def record_plan_snapshot(plan: RunPlan) -> None:
 
 
 def apply_steer(plan: RunPlan, completed: dict, checkpoint_ids: set[str], note: str) -> None:
-    """Inject a plan_review ``adjust`` / kickoff CONTINUE|ADJUST note onto not-yet-run targets.
+    """Inject a plan_review ``adjust`` / kickoff CONTINUE note onto not-yet-run targets.
 
     With non-empty ``checkpoint_ids`` (plan_review), targets are the transitive
     dependents of those checkpoint nodes. With empty roots (team_preview — no worker
@@ -46,13 +46,35 @@ def compress_ceo_review_for_gate(review: dict[str, Any] | None) -> str | None:
     """
     if not isinstance(review, dict) or review.get("source") != "llm":
         return None
+    from agentcore.runtime.context_cap import log_context_capped
+
     conclusion = str(review.get("conclusion") or "").strip()
-    if len(conclusion) > _GATE_CONCLUSION_CHARS:
+    original_conclusion = len(conclusion)
+    if original_conclusion > _GATE_CONCLUSION_CHARS:
         conclusion = conclusion[:_GATE_CONCLUSION_CHARS] + "…"
-    risks = [str(r).strip() for r in (review.get("risks") or []) if str(r).strip()][:3]
-    suggestions = [
+        log_context_capped(
+            site="gate_conclusion",
+            original_chars=original_conclusion,
+            final_chars=len(conclusion),
+        )
+    raw_risks = [str(r).strip() for r in (review.get("risks") or []) if str(r).strip()]
+    risks = raw_risks[:3]
+    if len(raw_risks) > 3:
+        log_context_capped(
+            site="gate_risks",
+            original_count=len(raw_risks),
+            final_count=len(risks),
+        )
+    raw_suggestions = [
         str(s).strip() for s in (review.get("suggestions") or []) if str(s).strip()
-    ][:2]
+    ]
+    suggestions = raw_suggestions[:2]
+    if len(raw_suggestions) > 2:
+        log_context_capped(
+            site="gate_suggestions",
+            original_count=len(raw_suggestions),
+            final_count=len(suggestions),
+        )
     parts = ["（用户已放行；以下为注意事项，非否决，请据此推进，勿停工另起炉灶）"]
     if conclusion:
         parts.append(f"结论：{conclusion}")

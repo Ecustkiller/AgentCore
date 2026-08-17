@@ -439,60 +439,73 @@ async def lifespan(app: FastAPI):
 
         with contextlib.suppress(Exception):
             await salvage_turns_on_shutdown()
-        await cost_ledger_queue.stop()
-        # Stop the boot probe if shutdown races its short window (no-op once done).
-        searxng_probe_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await searxng_probe_task
-        if retention_task is not None:
-            retention_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await retention_task
-        if consolidation_task is not None:
-            consolidation_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await consolidation_task
-        if session_retention_task is not None:
-            session_retention_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await session_retention_task
-        if audit_retention_task is not None:
-            audit_retention_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await audit_retention_task
-        refresh_token_retention_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await refresh_token_retention_task
-        if paused_turn_retention_task is not None:
-            paused_turn_retention_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await paused_turn_retention_task
-        if standing_task_scheduler_task is not None:
-            standing_task_scheduler_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await standing_task_scheduler_task
-        event_loop_lag_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await event_loop_lag_task
-        if browser_reaper_task is not None:
-            browser_reaper_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await browser_reaper_task
-            # Tear down any live browser sandboxes + the shared egress proxy.
-            from agentcore.runtime.browser.registry import shutdown_browser_sessions
 
-            await shutdown_browser_sessions()
-        # Flush in-flight debounced passes and cancel pending timers.
-        await shutdown_scheduler()
-        await shutdown_explore_refresh_scheduler()
-        # Flush in-flight long-conversation compaction folds.
-        await shutdown_compaction()
-        # Release the shared SearXNG keep-alive pool.
-        await aclose_search_backend()
-        if settings.demo_tape_record_enabled:
-            from agentcore.demo_tape.recorder import uninstall_recorder
+        async def _teardown_after_salvage() -> None:
+            await cost_ledger_queue.stop()
+            # Stop the boot probe if shutdown races its short window (no-op once done).
+            searxng_probe_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await searxng_probe_task
+            if retention_task is not None:
+                retention_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await retention_task
+            if consolidation_task is not None:
+                consolidation_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await consolidation_task
+            if session_retention_task is not None:
+                session_retention_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await session_retention_task
+            if audit_retention_task is not None:
+                audit_retention_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await audit_retention_task
+            refresh_token_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await refresh_token_retention_task
+            if paused_turn_retention_task is not None:
+                paused_turn_retention_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await paused_turn_retention_task
+            if standing_task_scheduler_task is not None:
+                standing_task_scheduler_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await standing_task_scheduler_task
+            event_loop_lag_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await event_loop_lag_task
+            if browser_reaper_task is not None:
+                browser_reaper_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await browser_reaper_task
+                # Tear down any live browser sandboxes + the shared egress proxy.
+                from agentcore.runtime.browser.registry import shutdown_browser_sessions
 
-            uninstall_recorder()
+                await shutdown_browser_sessions()
+            # Flush in-flight debounced passes and cancel pending timers.
+            await shutdown_scheduler()
+            await shutdown_explore_refresh_scheduler()
+            # Flush in-flight long-conversation compaction folds.
+            await shutdown_compaction()
+            # Release the shared SearXNG keep-alive pool.
+            await aclose_search_backend()
+            if settings.demo_tape_record_enabled:
+                from agentcore.demo_tape.recorder import uninstall_recorder
+
+                uninstall_recorder()
+
+        try:
+            await asyncio.wait_for(
+                _teardown_after_salvage(),
+                timeout=float(settings.shutdown_teardown_seconds),
+            )
+        except TimeoutError:
+            boot_log.warning(
+                "server.shutdown_teardown_timeout",
+                timeout_seconds=settings.shutdown_teardown_seconds,
+            )
 
 
 app = FastAPI(

@@ -38,6 +38,8 @@ _ACTIVE_DECISION_EVENTS = frozenset(
         "delegate.acceptance_resolved",
         "delegate.continuation_ok",
         "delegate.continuation_rejected",
+        "delegate.post_close_gap_fill_rejected",
+        "delegate.post_close_redelegation_rejected",
         "delegate.run_redirect_hot",
         "worker.escalate",
         "worker.handoff",

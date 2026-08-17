@@ -36,10 +36,10 @@ class CheckpointDecision(StrEnum):
 
     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
-    (non-empty ``note`` steers all unrun workers — former adjust semantics).
-    ``ADJUST`` remains for debate kickoff (开赛嘱咐：note 只注入首轮焦点，
-    不改 motion / sides；与 CONTINUE+note 同构) and plan_review steer,
-    plus historical non-debate kickoff resolves.
+    (non-empty ``note`` steers all unrun workers — 嘱咐). ``ADJUST`` on
+    team_preview does **not** grant or start: user ``note`` is fed back so the
+    CEO revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
+    plan_review still steers then continues. ask_user rejects ``ADJUST``.
     ``RESEARCH_FIRST`` is debate kickoff only: 不开赛，回灌固定文案令 CEO 立即挂
     ``multi_lens_research``（与 STOP 同构的恢复分支；非辩论开工卡须拒绝/降级）。
 
@@ -48,7 +48,7 @@ class CheckpointDecision(StrEnum):
     """
 
     CONTINUE = "continue"  # proceed (kickoff: grant + start; note → steer)
-    ADJUST = "adjust"  # steer with a note, then continue (kickoff: also grants)
+    ADJUST = "adjust"  # plan_review: steer then continue; kickoff: no grant, feed CEO
     STOP = "stop"  # end this turn gracefully
     RESEARCH_FIRST = "research_first"  # debate kickoff only: 先多视角调研再辩
     TIMEOUT = "timeout"  # 运维上限触发；开工卡不 grant / 不开工，回灌 CEO 收尾（对齐 ask）
@@ -59,9 +59,10 @@ class CheckpointDecision(StrEnum):
 class CheckpointResponse:
     """The settled outcome of a checkpoint: a decision + an optional note + picks.
 
-    ``note`` carries the user's steer for ``ADJUST``, an optional 嘱咐 on kickoff
-    ``CONTINUE`` (steers unrun workers), and an optional closing remark for
-    ``STOP``; it is empty for ``TIMEOUT``. ``selected`` holds the option(s) the
+    ``note`` carries the user's steer for plan_review ``ADJUST``, the revise
+    opinion on kickoff ``ADJUST`` (fed back to the CEO; no grant), an optional
+    嘱咐 on kickoff ``CONTINUE`` (steers unrun workers), and an optional closing
+    remark for ``STOP``; it is empty for ``TIMEOUT``. ``selected`` holds the option(s) the
     user picked from the CEO's ``options`` menu — one for a single-select ask,
     several when the ask is ``multiple`` — and is a first-class part of the
     answer (no longer folded into ``note``), so ``CONTINUE`` carries the pick

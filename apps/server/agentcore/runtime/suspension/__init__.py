@@ -369,8 +369,9 @@ class TeamPreviewSuspension(TurnSuspension):
 
     Shared by ``delegate`` (workers wave) and ``debate`` (moderator loop). Resume
     branches on ``primitive``: delegate → ``delegate.resume_plan``; debate →
-    ``debate.execute`` with the stored ``debate_arguments``. ``plan`` / ``completed``
-    are in-memory carriers only for delegate (journal rebuild on claim).
+    ``debate.resume_after_kickoff`` with the stored ``debate_arguments``.
+    ``plan`` / ``completed`` are in-memory carriers only for delegate (journal
+    rebuild on claim).
     """
 
     kind: ClassVar[SuspensionKind] = SuspensionKind.TEAM_PREVIEW

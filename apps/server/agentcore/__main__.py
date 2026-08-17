@@ -87,12 +87,14 @@ def main() -> None:
         # the reloader doesn't churn through shutdown/start cycles that can leave
         # port 8000 empty while the terminal still looks "running".
         reload_delay=0.5 if reload else None,
-        # In dev, reload must not block forever draining the long-lived SSE stream
-        # ("Waiting for connections to close" → no new worker → API dead). Cap the
-        # graceful wait so a save force-closes lingering streams and the worker
-        # restarts; the desktop EventSource reconnects. Prod / demo-tape (reload
-        # off) keep the default (None).
-        timeout_graceful_shutdown=2 if reload else None,
+        # Reload: a save must not block forever draining the long-lived SSE stream
+        # ("Waiting for connections to close" → no new worker → API dead). Cap at
+        # 2s so WatchFiles force-closes lingering streams and the worker restarts.
+        # Prod / demo-tape (reload off): a finite drain so SIGTERM reaches FastAPI
+        # lifespan before Docker's 40s grace; None waits forever on SSE keep-alives.
+        timeout_graceful_shutdown=(
+            2 if reload else settings.uvicorn_graceful_shutdown_seconds
+        ),
     )
 
 

@@ -487,11 +487,11 @@ class DebateTool:
         note: str,
         arguments: dict[str, Any],
     ) -> ToolResult:
-        """Settle a debate kickoff: STOP / TIMEOUT / RESEARCH_FIRST → no execute;
-        CONTINUE/ADJUST → run moderator.
+        """Settle a debate kickoff: STOP / TIMEOUT / RESEARCH_FIRST / ADJUST → no execute;
+        CONTINUE → run moderator.
 
-        CONTINUE/ADJUST + note → 开赛嘱咐（首轮全场插话），不覆写 motion / 不改 sides。
-        ADJUST 枚举保留供历史挂起帧 / API；语义与 CONTINUE+note 同构。
+        CONTINUE + note → 开赛嘱咐（首轮全场插话），不覆写 motion / 不改 sides。
+        ADJUST → 不开赛，意见回灌 CEO 修订后重新调用 debate（经开工闸重出卡）。
         TIMEOUT → 未开赛，回灌 CEO 自行收尾（对齐 ask timeout；不套用取消「宜先问」）。
         RESEARCH_FIRST → 不开赛，固定回灌文案令 CEO 挂 multi_lens_research（与 STOP 同构）。
         """
@@ -505,6 +505,18 @@ class DebateTool:
                 tool_call_id="",
                 success=True,
                 output=format_kickoff_cancel_result(primitive="debate", note=note),
+                effect=ToolEffect.CONTINUE,
+            )
+
+        if decision is CheckpointDecision.ADJUST:
+            from agentcore.runtime.kickoff.adjust_guidance import (
+                format_kickoff_adjust_result,
+            )
+
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=format_kickoff_adjust_result(primitive="debate", note=note),
                 effect=ToolEffect.CONTINUE,
             )
 
@@ -536,10 +548,7 @@ class DebateTool:
 
         args = dict(arguments)
         note_text = (note or "").strip()
-        if note_text and decision in (
-            CheckpointDecision.CONTINUE,
-            CheckpointDecision.ADJUST,
-        ):
+        if note_text and decision is CheckpointDecision.CONTINUE:
             args["_kickoff_ask"] = note_text
 
         return await self.execute(args, self._base_tool_context, skip_kickoff=True)
@@ -614,6 +623,17 @@ class DebateTool:
                 tool_call_id="",
                 success=True,
                 output=format_kickoff_cancel_result(primitive="debate"),
+                effect=ToolEffect.CONTINUE,
+            )
+        if decision is CheckpointDecision.ADJUST:
+            from agentcore.runtime.kickoff.adjust_guidance import (
+                format_kickoff_adjust_result,
+            )
+
+            return ToolResult(
+                tool_call_id="",
+                success=True,
+                output=format_kickoff_adjust_result(primitive="debate"),
                 effect=ToolEffect.CONTINUE,
             )
         return None

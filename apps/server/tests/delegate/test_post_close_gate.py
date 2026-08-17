@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -14,7 +15,10 @@ from agentcore.runtime.delegate.force_scopes import (
 )
 from agentcore.runtime.delegate.post_close_gate import (
     EXECUTION_HARVEST_ORIGIN,
+    POST_CLOSE_REJECT_COLD_OPEN,
+    POST_CLOSE_REJECT_GAP_FILL,
     post_close_cold_open_error,
+    post_close_reject,
 )
 from agentcore.runtime.runs.constants import MAX_GAP_FILL_ADDS
 from agentcore.runtime.runs.plan import RunPlan
@@ -57,11 +61,13 @@ def _named_replaces(gap_ids: list[str]) -> RunPlan:
 
 def test_post_close_rejects_unnamed_substantial_fanout():
     """三元组①：收口后无缺口/未点名大扇出 → 拒。"""
-    err = post_close_cold_open_error(
+    reject = post_close_reject(
         _tool(origin=EXECUTION_HARVEST_ORIGIN),
         _substantial_unnamed(n=3),
     )
-    assert err is not None
+    assert reject is not None
+    assert reject.kind == POST_CLOSE_REJECT_COLD_OPEN
+    err = reject.message
     assert "收口后拒绝整团重派" in err
     # 拒绝正文指向真实可用的续派入口 + 本闸自己的 scope（不再是一键全开）。
     assert "continue_from_run_id" in err
@@ -114,11 +120,13 @@ def test_post_close_rejects_named_over_cap(monkeypatch):
     session.active = False
     set_active_coordination(session)
     try:
-        err = post_close_cold_open_error(
+        reject = post_close_reject(
             _tool(origin=EXECUTION_HARVEST_ORIGIN),
             _named_replaces(gap_ids),
         )
-        assert err is not None
+        assert reject is not None
+        assert reject.kind == POST_CLOSE_REJECT_GAP_FILL
+        err = reject.message
         assert "补跑一次最多" in err
         assert str(MAX_GAP_FILL_ADDS) in err
     finally:
@@ -227,20 +235,31 @@ async def test_drive_post_close_unnamed_substantial_contract_reject():
     t = tool(_SlowWorkers(["ok", "ok", "ok"], delay=0.01), sink=sink)
     t._user_message_origin = EXECUTION_HARVEST_ORIGIN
 
-    result = await t.execute(
-        {
-            "tasks": [
-                {"role": "A", "task": "one"},
-                {"role": "B", "task": "two"},
-                {"role": "C", "task": "three"},
-            ],
-            "coordinate": False,
-        },
-        ctx(),
-    )
+    from structlog.testing import capture_logs
+
+    with capture_logs() as logs:
+        result = await t.execute(
+            {
+                "tasks": [
+                    {"role": "A", "task": "one"},
+                    {"role": "B", "task": "two"},
+                    {"role": "C", "task": "three"},
+                ],
+                "coordinate": False,
+            },
+            ctx(),
+        )
     assert result.success is False
     assert result.contract_failure is True
     assert "收口后拒绝整团重派" in (result.error or "")
+    events = [e.get("event") for e in logs]
+    assert "delegate.post_close_redelegation_rejected" in events
+    assert "delegate.post_close_gap_fill_rejected" not in events
+    hit = next(
+        e for e in logs if e.get("event") == "delegate.post_close_redelegation_rejected"
+    )
+    assert hit.get("kind") == POST_CLOSE_REJECT_COLD_OPEN
+    assert "收口后拒绝整团重派" in (hit.get("error") or "")
     clear_active_coordination()
 
 
@@ -271,3 +290,188 @@ async def test_drive_post_close_force_allows_substantial():
     )
     assert result.success is True
     clear_active_coordination()
+
+
+@pytest.mark.asyncio
+async def test_drive_post_close_gap_fill_over_cap_emits_distinct_event():
+    """drive 补跑超限：事件名与冷开整团拒分轨，且带 error 正文。"""
+    from structlog.testing import capture_logs
+
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink
+    from tests.delegate.conftest import ctx, tool
+    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
+
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e", total_workers=1)
+    session.conversation_id = "c"
+    session.completed_run_ids = {"f1"}
+    session.failed_run_ids = {"f1"}
+    session.active = False
+    set_active_coordination(session)
+    try:
+        sink = EventSink()
+        t = tool(_SlowWorkers(["ok", "ok"], delay=0.01), sink=sink)
+        t._user_message_origin = EXECUTION_HARVEST_ORIGIN
+        with capture_logs() as logs:
+            result = await t.execute(
+                {
+                    "tasks": [
+                        {"role": "A", "task": "retry1", "replaces_run_id": "f1"},
+                        {"role": "B", "task": "retry2", "replaces_run_id": "f1"},
+                    ],
+                    "coordinate": False,
+                },
+                ctx(),
+            )
+        assert result.success is False
+        assert result.contract_failure is True
+        assert "补跑一次最多" in (result.error or "")
+        events = [e.get("event") for e in logs]
+        assert "delegate.post_close_gap_fill_rejected" in events
+        assert "delegate.post_close_redelegation_rejected" not in events
+        hit = next(
+            e for e in logs if e.get("event") == "delegate.post_close_gap_fill_rejected"
+        )
+        assert hit.get("kind") == POST_CLOSE_REJECT_GAP_FILL
+        assert "补跑一次最多" in (hit.get("error") or "")
+    finally:
+        clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_drive_post_close_empty_roster_replaces_still_rejected_on_foreground():
+    """前台 session is None：空名册 + replaces 仍拒（闸判定与拒绝范围未改）。"""
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink
+    from tests.delegate.conftest import ctx, tool
+    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
+
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e", total_workers=1)
+    session.conversation_id = "c"
+    session.active = False
+    set_active_coordination(session)
+    try:
+        sink = EventSink()
+        t = tool(_SlowWorkers(["ok"], delay=0.01), sink=sink)
+        t._user_message_origin = EXECUTION_HARVEST_ORIGIN
+        result = await t.execute(
+            {
+                "tasks": [
+                    {"role": "A", "task": "retry f1", "replaces_run_id": "f1"},
+                ],
+                "coordinate": False,
+            },
+            ctx(),
+        )
+        assert result.success is False
+        assert result.contract_failure is True
+        assert "无缺口" in (result.error or "")
+    finally:
+        clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_drive_coordinated_skips_post_close_reentry_on_empty_roster():
+    """后台带 session：不重跑 post_close（空名册会把已准入的 replaces 误拒）。"""
+    from structlog.testing import capture_logs
+
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.delegate.drive import drive_coordinated
+    from agentcore.runtime.events import EventSink
+    from agentcore.runtime.runs import build_run_plan
+    from tests.delegate.conftest import tool
+    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
+
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e", total_workers=1)
+    session.conversation_id = "c"
+    set_active_coordination(session)
+    try:
+        sink = EventSink()
+        t = tool(_SlowWorkers(["retry-ok"], delay=0.01), sink=sink)
+        t._user_message_origin = EXECUTION_HARVEST_ORIGIN
+        plan, errors = build_run_plan(
+            [{"role": "A", "task": "retry f1", "replaces_run_id": "f1"}]
+        )
+        assert not errors
+        with capture_logs() as logs:
+            result = await drive_coordinated(
+                t,
+                plan,
+                execution_id="e",
+                seed_completed=None,
+                seed_notes=None,
+                complexity_hint="standard",
+                coordination="none",
+                call_idx=0,
+                session=session,
+            )
+        events = [e.get("event") for e in logs]
+        assert "delegate.post_close_gap_fill_rejected" not in events
+        assert result.success is True
+        assert len(session.completed_run_ids) >= 1
+    finally:
+        clear_active_coordination("e")
+
+
+@pytest.mark.asyncio
+async def test_coordinate_background_does_not_rerun_post_close_after_admit():
+    """前台已过 post_close 后，后台不得拿刚建的空名册再拒 replaces。"""
+    from structlog.testing import capture_logs
+
+    from agentcore.runtime.coordination.session import (
+        CoordinationSession,
+        active_coordination,
+        clear_active_coordination,
+        set_active_coordination,
+    )
+    from agentcore.runtime.events import EventSink
+    from tests.delegate.conftest import ctx, tool
+    from tests.delegate.test_coordination_secondary_delegate import _SlowWorkers
+
+    clear_active_coordination()
+    prior = CoordinationSession(execution_id="e", total_workers=1)
+    prior.conversation_id = "c"
+    prior.completed_run_ids = {"f1"}
+    prior.failed_run_ids = {"f1"}
+    prior.active = False
+    set_active_coordination(prior)
+    try:
+        sink = EventSink()
+        t = tool(_SlowWorkers(["retry-ok"], delay=0.01), sink=sink)
+        t._user_message_origin = EXECUTION_HARVEST_ORIGIN
+        with capture_logs() as logs:
+            result = await t.execute(
+                {
+                    "tasks": [
+                        {"role": "A", "task": "retry f1", "replaces_run_id": "f1"},
+                    ],
+                    "coordinate": True,
+                },
+                ctx(),
+            )
+            assert result.success is True
+            assert "团队已启动" in result.output
+            session = active_coordination("e")
+            assert session is not None
+            assert session.drive_task is not None
+            await asyncio.wait_for(session.drive_task, timeout=10)
+        events = [e.get("event") for e in logs]
+        assert "delegate.post_close_gap_fill_rejected" not in events
+        assert len(session.completed_run_ids) >= 1
+    finally:
+        clear_active_coordination("e")

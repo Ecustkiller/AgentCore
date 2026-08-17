@@ -314,7 +314,7 @@ class ModelOverride(WirePayload):
 
 class TeamPreviewResolvedPayload(WirePayload):
     checkpoint_id: str
-    # continue(=grant[+steer]) / adjust / stop / research_first / …
+    # continue(=grant[+steer]) / adjust(=no grant, feed CEO) / stop / research_first / …
     decision: CheckpointDecision
     note: str
     # 开工组队有限否决：缺省 / 空 = 全员开工、无写盘收紧（旧客户端兼容）。

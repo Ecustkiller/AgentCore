@@ -4,7 +4,10 @@ First STOP keeps the CONTINUE-feed-to-CEO path (拒答可见). A second consecut
 STOP in the same turn (same user message / journal) force-closes via terminal
 ``INTERACT`` so no further CEO round starts. Streak is derived from durable
 ``*_resolved`` journal facts — survives suspend / resume without a soft-reminder
-counter. Non-STOP decisions (CONTINUE / ADJUST / …) reset the streak.
+counter. Non-STOP decisions reset the streak.
+
+``ADJUST`` is excluded even though team_preview adjust shares STOP's no-grant
+feed-CEO path: consecutive revises must not escalate the turn to terminal.
 """
 
 from __future__ import annotations
@@ -43,7 +46,11 @@ def consecutive_checkpoint_stops(entries: Sequence[Mapping[str, Any]] | None) ->
             streak = 0
             continue
         raw = str(payload.get("decision") or "").strip().lower()
-        if raw == CheckpointDecision.STOP.value:
+        if raw == CheckpointDecision.ADJUST.value:
+            # team_preview adjust reuses STOP's no-grant feed-CEO path but must
+            # never increment the consecutive-stop terminal (multi-round revise).
+            streak = 0
+        elif raw == CheckpointDecision.STOP.value:
             streak += 1
         else:
             streak = 0
@@ -54,7 +61,11 @@ def is_repeated_checkpoint_stop(
     entries: Sequence[Mapping[str, Any]] | None,
     decision: CheckpointDecision,
 ) -> bool:
-    """True when ``decision`` is STOP and the journal already ends on ≥1 STOP."""
+    """True when ``decision`` is STOP and the journal already ends on ≥1 STOP.
+
+    ``ADJUST`` is never a repeated stop — even on team_preview, where it shares
+    STOP's no-grant feed-CEO path.
+    """
     return (
         decision is CheckpointDecision.STOP
         and consecutive_checkpoint_stops(entries) >= 1

@@ -131,8 +131,16 @@ def _extract_identifiers(text: str) -> set[str]:
 def _clean_one_line(text: str) -> str:
     """Collapse a note to a single hard-capped line —便签短·一行·有硬长度上限."""
     collapsed = " ".join(text.split())
-    if len(collapsed) > MAX_NOTE_CHARS:
+    original = len(collapsed)
+    if original > MAX_NOTE_CHARS:
         collapsed = collapsed[: MAX_NOTE_CHARS - 1].rstrip() + "…"
+        from agentcore.runtime.context_cap import log_context_capped
+
+        log_context_capped(
+            site="team_note",
+            original_chars=original,
+            final_chars=len(collapsed),
+        )
     return collapsed
 
 

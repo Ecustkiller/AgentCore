@@ -64,12 +64,21 @@ def test_post_collapses_to_one_line():
     assert note.text == "多 空格 带换行"
 
 
-def test_post_truncates_over_length_cap():
+def test_post_truncates_over_length_cap(monkeypatch):
+    from agentcore.runtime import context_cap
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
     wall = NoteWall()
     note = wall.post(run_id="r1", agent_id="w1", role="r", kind=NOTE_KIND_HEADS_UP, text="字" * 500)
     assert note is not None
     assert len(note.text) == MAX_NOTE_CHARS
     assert note.text.endswith("…")
+    fields = spy.get("delegate.context_capped")
+    assert fields["site"] == "team_note"
+    assert fields["original_chars"] == 500
+    assert fields["final_chars"] == MAX_NOTE_CHARS
 
 
 def test_post_coerces_unknown_kind_to_heads_up():

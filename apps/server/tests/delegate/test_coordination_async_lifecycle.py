@@ -311,6 +311,64 @@ async def test_background_drive_exception_posts_drive_cancelled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_background_drive_logs_contract_failure(monkeypatch):
+    """后台 drive success=False 不得静默丢弃，须带 error 落日志（不推 CEO）。"""
+    import importlib
+
+    from structlog.testing import capture_logs
+
+    from agentcore.core.types import ToolEffect
+    from agentcore.runtime.coordination.host import _background_drive
+    from agentcore.runtime.coordination.session import CoordinationEventKind
+    from agentcore.runtime.runs import build_run_plan
+    from agentcore.tools.protocol import ToolResult
+
+    drive_mod = importlib.import_module("agentcore.runtime.delegate.drive")
+
+    plan, errors = build_run_plan(
+        [{"role": "研究员", "task": "做A"}, {"role": "写手", "task": "做B"}]
+    )
+    assert not errors
+    session = CoordinationSession(execution_id="e-contract", total_workers=2)
+    set_active_coordination(session)
+    t = tool(Provider(["x"]))
+
+    async def _reject(*_a, **_k):
+        return ToolResult(
+            tool_call_id="",
+            success=False,
+            output="",
+            error="补跑拒绝：当前无失败/跳过缺口，禁止无缺口整团重开",
+            effect=ToolEffect.CONTINUE,
+            contract_failure=True,
+        )
+
+    monkeypatch.setattr(drive_mod, "drive_coordinated", _reject)
+
+    with capture_logs() as logs:
+        await _background_drive(
+            t,
+            plan,
+            execution_id="e-contract",
+            seed_completed=None,
+            seed_notes=None,
+            complexity_hint="standard",
+            call_idx=0,
+            session=session,
+            coordination="wall",
+        )
+
+    events_logged = [e.get("event") for e in logs]
+    hit = next((e for e in logs if e.get("event") == "delegate.coordinate_failed"), None)
+    assert hit is not None, f"expected coordinate_failed log, got {events_logged}"
+    assert "无缺口" in (hit.get("error") or "")
+    assert hit.get("contract_failure") is True
+    events = session.drain_nowait()
+    assert not any(e.kind is CoordinationEventKind.ALL_COMPLETED for e in events)
+    assert not any(e.kind is CoordinationEventKind.DRIVE_CANCELLED for e in events)
+
+
+@pytest.mark.asyncio
 async def test_coordination_start_echo_counts_and_seeds_completed():
     """决策3：回显新增/总数/已完成；seed 预填 completed_run_ids。"""
     provider = Provider(["NEWOUT"])

@@ -34,7 +34,12 @@ def test_context_inject_blocks_skip_empty():
 
 
 @pytest.mark.asyncio
-async def test_load_context_inject_files_truncates(tmp_path: Path):
+async def test_load_context_inject_files_truncates(tmp_path: Path, monkeypatch):
+    from agentcore.runtime import context_cap
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
     (tmp_path / "site").mkdir()
     (tmp_path / "site" / "CONTRACT.md").write_text("X" * 5000, encoding="utf-8")
     backend = ServerWorkspace(root=tmp_path, sandbox=SubprocessSandbox())
@@ -43,6 +48,10 @@ async def test_load_context_inject_files_truncates(tmp_path: Path):
     )
     assert "site/CONTRACT.md" in loaded
     assert len(loaded["site/CONTRACT.md"]) <= 220  # trim + marker headroom
+    fields = spy.get("delegate.context_capped")
+    assert fields["site"] == "context_inject"
+    assert fields["original_chars"] == 5000
+    assert fields["final_chars"] == len(loaded["site/CONTRACT.md"])
 
 
 def test_build_messages_includes_inject_block():

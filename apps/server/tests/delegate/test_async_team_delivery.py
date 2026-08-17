@@ -247,6 +247,7 @@ async def test_inject_close_then_harvest_adopts_stashed_output():
         assert session.active is False
         assert "勿做最终合成" in (msgs[0].content or "")
         assert "请做最终合成" not in (msgs[0].content or "")
+        assert "报告本波结果" not in (msgs[0].content or "")
         assert active_coordination_for_conversation("conv-p1") is None
 
         assert adopt_active_execution("conv-p1") is None
@@ -263,10 +264,154 @@ async def test_inject_close_then_harvest_adopts_stashed_output():
         text = format_coordination_events(session, pending)
         assert product in text
         assert "团队成品" in text
-        assert "请做最终合成" in text
+        assert "报告本波结果" in text
+        assert "活没干完就接着干" in text
     finally:
         current_execution_id.reset(token)
         clear_active_coordination()
+
+
+def test_harvest_user_text_embeds_product_and_inject_skips_duplicate():
+    """User row keeps 团队成品; harvest-closing inject drops the same blob."""
+    from agentcore.conversation.execution_harvest import format_harvest_user_text
+
+    product = "【队员成品】调研报告正文……"
+    session = CoordinationSession(execution_id="h-dup", total_workers=1)
+    session._harvest_stash.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": product},
+        )
+    )
+    user_text = format_harvest_user_text(session)
+    assert f"团队成品：\n{product}" in user_text
+    assert session.harvest_user_embedded_output == product
+
+    session.harvest_closing = True
+    session.reopen_for_harvest()
+    inject = format_coordination_events(session, list(session._pending))
+    assert product not in inject
+    assert "团队成品" not in inject
+    assert "报告本波结果" in inject
+    assert "活没干完就接着干" in inject
+    assert "独立审计" in inject
+
+
+@pytest.mark.asyncio
+async def test_harvest_wait_drain_skips_embedded_product():
+    """reopen_for_harvest + round-0 drain must not re-inject the user-row product."""
+    from agentcore.conversation.execution_harvest import format_harvest_user_text
+
+    product = "【队员成品】调研报告正文……"
+    session = CoordinationSession(
+        execution_id="exec-h-drain",
+        total_workers=1,
+        conversation_id="conv-h-drain",
+    )
+    session._harvest_stash.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": product},
+        )
+    )
+    format_harvest_user_text(session)
+    set_active_coordination(session)
+    token = current_execution_id.set("exec-h-drain")
+    try:
+        session.reopen_for_harvest()
+        msgs = await await_coordination_injection([])
+        assert msgs
+        text = msgs[0].content or ""
+        assert product not in text
+        assert "团队成品" not in text
+        assert "报告本波结果" in text
+    finally:
+        current_execution_id.reset(token)
+        clear_active_coordination()
+
+
+def test_harvest_inject_keeps_product_when_user_text_did_not_embed():
+    """Empty ALL_COMPLETED.output at format time — inject is the only source."""
+    from agentcore.conversation.execution_harvest import format_harvest_user_text
+
+    session = CoordinationSession(execution_id="h-only-inject", total_workers=1)
+    user_text = format_harvest_user_text(session)
+    assert "团队成品" not in user_text
+    assert session.harvest_user_embedded_output == ""
+
+    session.harvest_closing = True
+    later = "【后到成品】只在注入里"
+    inject = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 1, "total": 1, "output": later},
+            )
+        ],
+    )
+    assert later in inject
+    assert "团队成品" in inject
+
+
+def test_harvest_later_all_completed_with_new_product_still_injects():
+    """After CEO continues coordinating, a new product must still inject."""
+    from agentcore.conversation.execution_harvest import format_harvest_user_text
+
+    first = "【首轮成品】已进 user 行"
+    session = CoordinationSession(execution_id="h-later", total_workers=1)
+    session._harvest_stash.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": first},
+        )
+    )
+    format_harvest_user_text(session)
+    session.harvest_closing = True
+
+    second = "【续派成品】新产出"
+    inject = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.ALL_COMPLETED,
+                payload={"completed": 2, "total": 2, "output": second},
+            )
+        ],
+    )
+    assert second in inject
+    assert "团队成品" in inject
+    assert first not in inject
+
+
+def test_harvest_subsequent_progress_inject_unaffected_by_embedded_product():
+    """After harvest ALL_COMPLETED, later worker_completed inject stays intact."""
+    from agentcore.conversation.execution_harvest import format_harvest_user_text
+
+    product = "【首轮成品】已进 user 行"
+    session = CoordinationSession(execution_id="h-progress", total_workers=2)
+    session._harvest_stash.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": product},
+        )
+    )
+    format_harvest_user_text(session)
+    session.harvest_closing = True
+    session.completed_run_ids = {"w2"}
+    inject = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.WORKER_COMPLETED,
+                payload={"run_id": "w2", "role": "审计", "status": "completed", "summary": "过了"},
+            )
+        ],
+    )
+    assert "worker_completed" in inject
+    assert "审计" in inject
+    assert "过了" in inject
+    assert "团队成品" not in inject
 
 
 @pytest.mark.asyncio
@@ -715,32 +860,56 @@ def test_harvest_user_text_distinguishes_outcomes():
     ok = CoordinationSession(execution_id="h-ok", total_workers=2)
     ok.completed_run_ids = {"a", "b"}
     assert harvest_closing_kind(ok) == "success"
-    assert "已全部完成" in format_harvest_user_text(ok)
+    text_ok = format_harvest_user_text(ok)
+    assert text_ok.startswith("【系统收口】")
+    assert "已全部完成" in text_ok
+    assert "活没干完就接着干" in text_ok
+    assert "过程简述从简" in text_ok
+    assert "至多一段" not in text_ok
 
     fail = CoordinationSession(execution_id="h-fail", total_workers=2)
     fail.completed_run_ids = {"a", "b"}
     fail.failed_run_ids = {"b"}
     assert harvest_closing_kind(fail) == "failure"
     text_fail = format_harvest_user_text(fail)
+    assert text_fail.startswith("【系统收口】")
     assert "失败" in text_fail
     assert "任务已全部完成" not in text_fail
+    assert "活没干完就接着干" not in text_fail
+    assert "不要把失败当成功继续铺开" in text_fail
 
-    cancelled = CoordinationSession(execution_id="h-cancel", total_workers=1)
-    cancelled.soft_stop = True
-    assert harvest_closing_kind(cancelled) == "cancelled"
-    text_c = format_harvest_user_text(cancelled)
-    assert "取消" in text_c
-    assert "任务已全部完成" not in text_c
-    assert text_c.startswith("【系统收口】后台团队任务已取消")
+    paused = CoordinationSession(execution_id="h-soft", total_workers=1)
+    paused.soft_stop = True
+    assert harvest_closing_kind(paused) == "cancelled"
+    text_soft = format_harvest_user_text(paused)
+    assert text_soft.startswith("【系统收口】")
+    assert "暂停" in text_soft
+    assert "请示用户" in text_soft
+    assert "活没干完就接着干" not in text_soft
+    assert "不要自行接着干" in text_soft
+    assert "后台团队任务已取消" not in text_soft
 
     drive_c = CoordinationSession(execution_id="h-drive-c", total_workers=1)
     drive_c._pending.append(
         CoordinationEvent(kind=CoordinationEventKind.DRIVE_CANCELLED, payload={})
     )
     assert harvest_closing_kind(drive_c) == "cancelled"
-    assert format_harvest_user_text(drive_c).startswith(
-        "【系统收口】后台团队任务已取消"
+    text_c = format_harvest_user_text(drive_c)
+    assert text_c.startswith("【系统收口】后台团队任务已取消")
+    assert "活没干完就接着干" not in text_c
+    assert "不要接着派活" in text_c
+
+    with_out = CoordinationSession(execution_id="h-out", total_workers=1)
+    product = "【队员成品】应进合成 user 行"
+    with_out._pending.append(
+        CoordinationEvent(
+            kind=CoordinationEventKind.ALL_COMPLETED,
+            payload={"completed": 1, "total": 1, "output": product},
+        )
     )
+    text_out = format_harvest_user_text(with_out)
+    assert f"团队成品：\n{product}" in text_out
+    assert with_out.harvest_user_embedded_output == product
 
 
 @pytest.mark.asyncio

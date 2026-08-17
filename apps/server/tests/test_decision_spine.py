@@ -94,6 +94,63 @@ def test_build_decision_spine_covers_key_decisions() -> None:
     assert spine["health"]["drift_l2"]["reason"] == "turn_metrics_missing"
 
 
+def test_post_close_reject_events_are_distinct_on_spine() -> None:
+    """补跑超限与收口后冷开整团拒在 spine 上分事件，且保留 error 正文。"""
+    tid = "b" * 32
+    events = [
+        {
+            "type": "log",
+            "event": "chat.turn_start",
+            "timestamp": "2026-08-15T17:00:00Z",
+            "trace_id": tid,
+            "preview": "【系统收口】",
+            "chars": 8,
+        },
+        {
+            "type": "log",
+            "event": "delegate.post_close_gap_fill_rejected",
+            "timestamp": "2026-08-15T17:00:01Z",
+            "trace_id": tid,
+            "kind": "gap_fill",
+            "error": "补跑一次最多追加 1 个缺口点名节点（缺口 1，上限 3，收到 2）",
+            "nodes": 2,
+            "call": 2,
+        },
+        {
+            "type": "log",
+            "event": "delegate.post_close_redelegation_rejected",
+            "timestamp": "2026-08-15T17:00:02Z",
+            "trace_id": tid,
+            "kind": "cold_open",
+            "error": "收口后拒绝整团重派：本批有 3 个既不续派、也不补缺口的冷开节点。",
+            "nodes": 3,
+            "call": 3,
+        },
+        {
+            "type": "log",
+            "event": "chat.turn_complete",
+            "timestamp": "2026-08-15T17:00:03Z",
+            "trace_id": tid,
+            "finish_reason": "stop",
+            "delegated": False,
+            "duration_ms": 100,
+        },
+    ]
+    spine = build_decision_spine(events, trace_id=tid)
+    names = [d["event"] for d in spine["decisions"]]
+    assert "delegate.post_close_gap_fill_rejected" in names
+    assert "delegate.post_close_redelegation_rejected" in names
+    by_event = {d["event"]: d["detail"] for d in spine["decisions"]}
+    assert by_event["delegate.post_close_gap_fill_rejected"]["kind"] == "gap_fill"
+    assert "补跑一次最多" in (
+        by_event["delegate.post_close_gap_fill_rejected"].get("error") or ""
+    )
+    assert by_event["delegate.post_close_redelegation_rejected"]["kind"] == "cold_open"
+    assert "收口后拒绝整团重派" in (
+        by_event["delegate.post_close_redelegation_rejected"].get("error") or ""
+    )
+
+
 def test_head_via_orthogonal_to_location() -> None:
     """via is execution path; location remains workspace locality."""
     tid = "c" * 32

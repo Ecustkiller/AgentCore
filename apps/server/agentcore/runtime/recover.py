@@ -51,6 +51,7 @@ class SettledSuspension(NamedTuple):
     effect (in-band closing without another CEO round). First ask_user /
     team_preview STOP feeds CONTINUE like timeout / kickoff cancel; a second
     consecutive STOP in the same turn upgrades to ``INTERACT`` (no CEO round).
+    team_preview ``ADJUST`` shares the no-grant feed-CEO path but never upgrades.
     """
 
     output: str
@@ -171,6 +172,7 @@ async def _settle_resume(
 
     # Same-turn consecutive STOP → terminal INTERACT (no further CEO round).
     # Streak is journal-derived so it survives suspend/resume; first STOP unchanged.
+    # ADJUST is excluded inside the helper (team_preview revise can repeat).
     force_close = is_repeated_checkpoint_stop(suspension.journal_entries, decision)
     prior_stops = (
         consecutive_checkpoint_stops(suspension.journal_entries) if force_close else 0
@@ -453,16 +455,16 @@ async def _settle_resume(
                 note=note,
                 arguments=dict(suspension.debate_arguments),
             )
-            # STOP / RESEARCH_FIRST：tool result 回灌 CEO 续跑（terminal_text=None）；
-            # 同回合连续第二次 STOP 由 ``_after_settle`` 升格 INTERACT。
+            # STOP / RESEARCH_FIRST / ADJUST：tool result 回灌 CEO 续跑（terminal_text=None）；
+            # 同回合连续第二次 STOP 由 ``_after_settle`` 升格 INTERACT；ADJUST 不计入。
             return _after_settle(
                 SettledSuspension(debate_result.output, None, debate_result.effect)
             )
 
         eid = state.execution_id or execution_id
-        # Preview hung before the coordinate fork; CONTINUE/ADJUST must arm the
+        # Preview hung before the coordinate fork; CONTINUE must arm the
         # background scheduler (product default for ≥1 worker).
-        # RESEARCH_FIRST 已在入口降级为 STOP，不会静默开做。
+        # ADJUST / STOP / TIMEOUT：不 grant、不 drive。RESEARCH_FIRST 已在入口降级为 STOP。
         delegate_result = await delegate_tool.resume_plan(
             plan,
             seed_completed,

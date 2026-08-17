@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.context_cap import log_context_capped
 from agentcore.runtime.events import team_note_posted
 from agentcore.runtime.runs.notewall import (
     MAX_NOTE_CHARS,
@@ -70,25 +71,36 @@ def resolve_coordination(
     return resolved
 
 
-def _clean_brief(text: str) -> str:
+def _clean_brief(text: str, *, execution_id: str | None = None) -> str:
     collapsed = "\n".join(line.rstrip() for line in text.splitlines()).strip()
-    if len(collapsed) > MAX_TEAM_BRIEF_CHARS:
+    original = len(collapsed)
+    if original > MAX_TEAM_BRIEF_CHARS:
         collapsed = collapsed[: MAX_TEAM_BRIEF_CHARS - 1].rstrip() + "…"
+        log_context_capped(
+            site="team_brief",
+            original_chars=original,
+            final_chars=len(collapsed),
+            execution_id=execution_id,
+        )
     return collapsed
 
 
-def parse_team_brief(raw: Any) -> tuple[str | None, str | None]:
+def parse_team_brief(
+    raw: Any, *, execution_id: str | None = None
+) -> tuple[str | None, str | None]:
     if raw is None:
         return None, None
     if not isinstance(raw, str):
         return None, "team_brief 必须是字符串。"
-    brief = _clean_brief(raw)
+    brief = _clean_brief(raw, execution_id=execution_id)
     if not brief:
         return None, "team_brief 清理后为空。"
     return brief, None
 
 
-def parse_seed_notes(raw: Any) -> tuple[list[dict[str, str]], str | None]:
+def parse_seed_notes(
+    raw: Any, *, execution_id: str | None = None
+) -> tuple[list[dict[str, str]], str | None]:
     if raw is None:
         return [], None
     if not isinstance(raw, list):
@@ -107,8 +119,16 @@ def parse_seed_notes(raw: Any) -> tuple[list[dict[str, str]], str | None]:
         if not isinstance(text, str) or not text.strip():
             return [], f"seed_notes[{i}].text 必须是非空字符串。"
         collapsed = " ".join(text.split())
-        if len(collapsed) > MAX_NOTE_CHARS:
+        original = len(collapsed)
+        if original > MAX_NOTE_CHARS:
             collapsed = collapsed[: MAX_NOTE_CHARS - 1].rstrip() + "…"
+            log_context_capped(
+                site="seed_note",
+                original_chars=original,
+                final_chars=len(collapsed),
+                execution_id=execution_id,
+                kind=kind,
+            )
         out.append({"kind": kind, "text": collapsed})
     return out, None
 

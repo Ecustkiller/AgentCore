@@ -625,13 +625,17 @@ async def test_debate_resume_stop_continue_adjust():
     assert captured[-1]["arguments"]["motion"] == "原命题"
     assert captured[-1]["arguments"]["_kickoff_ask"] == "最关心成本谁买单"
 
-    # ADJUST 历史语义：与 CONTINUE+note 同构（嘱咐注入），不再覆写 motion。
+    # ADJUST：不开赛、不 execute；意见回灌 CEO（不套用取消「宜先问」）。
+    before_adjust = len(captured)
     adj = await tool.resume_after_kickoff(
         decision=CheckpointDecision.ADJUST, note="改成新命题", arguments=args
     )
-    assert adj.output == "ran"
-    assert captured[-1]["arguments"]["motion"] == "原命题"
-    assert captured[-1]["arguments"]["_kickoff_ask"] == "改成新命题"
+    assert len(captured) == before_adjust
+    assert "改成新命题" in adj.output
+    assert "未开赛" in adj.output
+    assert "重新调用 debate" in adj.output
+    assert "宜先问" not in adj.output
+    assert adj.effect is ToolEffect.CONTINUE
 
     before_timeout = len(captured)
     timed_out = await tool.resume_after_kickoff(

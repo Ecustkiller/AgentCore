@@ -310,14 +310,16 @@ def test_format_for_ceo_short_prose_passes_through_whole():
 
 
 def test_format_for_ceo_surfaces_next_steps_advisory_and_leads_with_summary():
-    # 完工交接简报: structured brief leads; with a summary present CEO synthesis prefers
-    # pointer/short bullets over re-dumping the full deliverable body (B 控长).
+    # 完工交接简报: structured brief still leads; a leaf (no files, no dependents)
+    # also keeps the body — conclusions now live there after debrief de-conclusioning.
+    # The 240-char pointer cap must not clip that body, and truncated follows allowance.
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="调研", role="研究员")])
+    long_tail = "详" * 300
     results = {
         "w1": RunState(
             phase=RunPhase.COMPLETED,
-            content="一段研究综述正文。",
+            content="一段研究综述正文。" + long_tail,
             debrief={
                 "summary": "结论是甲",
                 "key_points": ["要点一", "要点二"],
@@ -325,13 +327,51 @@ def test_format_for_ceo_surfaces_next_steps_advisory_and_leads_with_summary():
             },
         )
     }
+    products = worker_products(t, plan, results)
+    assert products[0]["fidelity"] == "pass_through"
+    assert products[0]["truncated"] is False
     out = format_for_ceo(t, plan, results)
     assert "队员建议的下一步" in out
     assert "补做竞品对比" in out
     assert "交接结论：结论是甲" in out
     assert "要点一" in out and "要点二" in out
-    # Full body is omitted when structured brief is present (prefer short).
+    assert "一段研究综述正文。" in out
+    assert long_tail in out
+
+
+def test_format_for_ceo_mid_node_with_dependents_keeps_brief_only():
+    """有下游的中间节点：CEO 只吃简报；叶子仍带正文。"""
+    t = tool(Provider([]))
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="w1", task="调研", role="研究员"),
+            RunSpec(run_id="w2", task="写稿", role="撰稿", depends_on=["w1"]),
+        ]
+    )
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="一段研究综述正文。",
+            debrief={
+                "summary": "接力给撰稿",
+                "key_points": ["上游已交"],
+            },
+        ),
+        "w2": RunState(
+            phase=RunPhase.COMPLETED,
+            content="终稿正文。",
+            debrief={"summary": "稿已成"},
+        ),
+    }
+    products = worker_products(t, plan, results)
+    by_id = {p["run_id"]: p for p in products}
+    assert "交接结论：接力给撰稿" in by_id["w1"]["body"]
+    assert "一段研究综述正文。" not in by_id["w1"]["body"]
+    assert by_id["w1"]["truncated"] is True
+    assert "终稿正文。" in by_id["w2"]["body"]
+    out = format_for_ceo(t, plan, results)
     assert "一段研究综述正文。" not in out
+    assert "终稿正文。" in out
 
 
 def test_format_for_ceo_no_next_steps_section_when_none():
@@ -345,15 +385,17 @@ def test_format_for_ceo_no_next_steps_section_when_none():
 
 
 def test_format_for_ceo_includes_final_synthesis_discipline():
-    # 终稿纪律（瘦 footer）：交付物在前、过程至多一段、名册铁律、PPT 诚实一句。
+    # 终稿纪律（瘦 footer）：交付物在前、过程简述从简、名册铁律、PPT 诚实一句。
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="做课件", role="课件工程师")])
     results = {"w1": RunState(phase=RunPhase.COMPLETED, content="脚本已写好")}
     out = format_for_ceo(t, plan, results)
     assert "【终稿纪律】" in out
     assert "交付物在前" in out
-    assert "至多一段" in out
+    assert "过程简述从简" in out
+    assert "至多一段" not in out
     assert "队员终态名册" in out
+    assert "禁止整段粘进终稿" in out
     assert "禁止编造" in out and "全部交付" in out
     assert "PPT 已落盘" in out and ".pptx" in out
     # 无命题卡时不塞开辩死文案

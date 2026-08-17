@@ -608,7 +608,10 @@ class DelegateTool:
             resolve_coordination,
         )
 
-        seed_notes, seed_err = parse_seed_notes(arguments.get("seed_notes"))
+        seed_notes, seed_err = parse_seed_notes(
+            arguments.get("seed_notes"),
+            execution_id=kickoff_execution_id,
+        )
         if seed_err:
             return ToolResult(
                 tool_call_id="",
@@ -619,7 +622,9 @@ class DelegateTool:
             )
         brief_raw = arguments.get("team_brief")
         if brief_raw is not None:
-            brief, brief_err = parse_team_brief(brief_raw)
+            brief, brief_err = parse_team_brief(
+                brief_raw, execution_id=kickoff_execution_id
+            )
             if brief_err:
                 return ToolResult(
                     tool_call_id="",
@@ -762,6 +767,7 @@ class DelegateTool:
                 f"{n.role or n.agent_name or n.run_id}: {clip_preview(n.task, 80)}"
                 for n in plan.nodes[:_DELEGATE_LOG_AGENTS_CAP]
             ],
+            task_chars=[len(n.task or "") for n in plan.nodes],
         )
         # Plan-only eval: real plan path done (build + validate + run_plan). Skip drive
         # so workers / coordination never start; HANDOFF ends the CEO loop immediately.
@@ -954,8 +960,18 @@ class DelegateTool:
                 kickoff_timeout=True,
                 note=note,
             )
+        if decision is CheckpointDecision.ADJUST and apply_kickoff_grant:
+            # team_preview ADJUST：不 grant、不开工，意见回灌 CEO 修订后重出卡。
+            # plan_review ADJUST（apply_kickoff_grant=False）仍走下方 steer + drive。
+            return await finalize_stopped(
+                self,
+                plan,
+                seed_completed,
+                kickoff_adjusted=True,
+                note=note,
+            )
 
-        # Steer: ADJUST always; kickoff CONTINUE+note ≡ former adjust (嘱咐注入未跑队员).
+        # Steer: plan_review ADJUST; kickoff CONTINUE+note ≡ 嘱咐注入未跑队员.
         # plan_review CONTINUE+note does not steer (apply_kickoff_grant=False; UI still has 调整).
         if note.strip() and (
             decision is CheckpointDecision.ADJUST
@@ -977,16 +993,12 @@ class DelegateTool:
             gate_body = compress_ceo_review_for_gate(ceo_review)
             if gate_body:
                 apply_gate_notes(plan, seed_completed, checkpoint_run_ids, gate_body)
-        # Kickoff (开工卡): continue / adjust → grant. TIMEOUT already returned above.
+        # Kickoff (开工卡): continue → grant. ADJUST / TIMEOUT / STOP already returned above.
         # apply_kickoff_grant is True only when resuming a team_preview suspension.
         if (
             apply_kickoff_grant
             and self._approval_gate is not None
-            and decision
-            in (
-                CheckpointDecision.CONTINUE,
-                CheckpointDecision.ADJUST,
-            )
+            and decision is CheckpointDecision.CONTINUE
         ):
             self._approval_gate.grant_delegation(execution_id)
         # Resume never re-runs the original execute() path, so re-emit run_plan here:

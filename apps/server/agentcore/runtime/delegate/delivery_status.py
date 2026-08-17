@@ -964,7 +964,17 @@ def build_delivery_status(
 
         note_cancel_zero_output()
     # 用户面：零落盘按队员 soft 投影（本队员本波未交卷）；仅批次谓词时合并。
-    gaps = _project_user_gaps(raw_gaps, results)[:_MAX_GAPS]
+    projected = _project_user_gaps(raw_gaps, results)
+    gaps = projected[:_MAX_GAPS]
+    if len(projected) > _MAX_GAPS:
+        from agentcore.runtime.context_cap import log_context_capped
+
+        log_context_capped(
+            site="delivery_gaps",
+            original_count=len(projected),
+            final_count=len(gaps),
+            execution_id=execution_id,
+        )
     # 刀1 / 方案 A：有 accepted 落盘时 degraded_handoff 降为 warning 备注。
     gaps = _soften_landed_degraded_gaps(gaps, files_landed=bool(delivered))
     # 文献证据降档仅绑 research_report / 同等成文综述；非该形态丢弃误入的

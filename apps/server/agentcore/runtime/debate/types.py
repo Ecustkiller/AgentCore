@@ -136,7 +136,7 @@ class DebateConfig:
     # 可选案件底料（CEO 发起前已核实的客观事实清单）。空串 = 未传，首轮 debater_task
     # 零行为变化；非空时仅首轮以主持人名义喂给全部辩手（后续轮靠 session 记忆，不重复注入）。
     background: str = ""
-    # 开赛嘱咐（开工卡 CONTINUE/ADJUST+note）——内部字段，非 wire。非空时作首轮全场定向
+    # 开赛嘱咐（开工卡 CONTINUE+note）——内部字段，非 wire。非空时作首轮全场定向
     # 用户插话：主持人定首轮焦点可见、首轮辩手 prompt 可见、verbatim 进 rounds[0].user_interjections。
     # 不覆写 motion / 不改 sides。
     kickoff_ask: str = ""

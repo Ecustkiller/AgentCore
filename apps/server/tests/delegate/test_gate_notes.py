@@ -27,7 +27,12 @@ def _completed() -> dict[str, RunState]:
     return {"r1": RunState(phase=RunPhase.COMPLETED, content="ok")}
 
 
-def test_compress_llm_review_template():
+def test_compress_llm_review_template(monkeypatch):
+    from agentcore.runtime import context_cap
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
     body = compress_ceo_review_for_gate(
         {
             "source": "llm",
@@ -44,6 +49,13 @@ def test_compress_llm_review_template():
     assert body.count("- r") == 3  # Top3 risks
     assert "- s1" in body and "- s2" in body
     assert "- s3" not in body
+    sites = {kw["site"]: kw for name, kw in spy.events if name == "delegate.context_capped"}
+    assert sites["gate_conclusion"]["original_chars"] == 250
+    assert sites["gate_conclusion"]["final_chars"] < 250
+    assert sites["gate_risks"]["original_count"] == 4
+    assert sites["gate_risks"]["final_count"] == 3
+    assert sites["gate_suggestions"]["original_count"] == 3
+    assert sites["gate_suggestions"]["final_count"] == 2
 
 
 def test_compress_deterministic_and_absent_yield_none():
@@ -124,7 +136,7 @@ def test_old_frame_missing_ceo_review_safe():
 
 def test_plan_review_continue_note_does_not_steer():
     """定案：plan_review CONTINUE+note 仍不 apply_steer（与 kickoff 分叉）。"""
-    # 行为钉在 resume_plan 条件：仅 ADJUST 或 kickoff CONTINUE 才 steer。
+    # 行为钉在 resume_plan 条件：仅 plan_review ADJUST 或 kickoff CONTINUE 才 steer。
     # 此处钉 gate 与 steer 分通道：CONTINUE 路径只写 gate_notes。
     plan = _plan()
     body = compress_ceo_review_for_gate(

@@ -13,7 +13,7 @@ from agentcore.runtime.delegate.accumulate import (
     collect_ledger,
     register_sessions,
 )
-from agentcore.runtime.delegate.ceo_format import format_for_ceo
+from agentcore.runtime.delegate.ceo_format import build_ceo_synthesis
 from agentcore.runtime.delegate.delivery_status import maybe_emit_delivery_status
 from agentcore.runtime.delegate.drive_terminal import (
     collect_harvest_user_facts,
@@ -226,13 +226,17 @@ def handle_partial_failure(
         backend=tool._base_tool_context.backend,
         promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
-    partial_output = format_for_ceo(tool, plan, results, call_idx=call_idx)
+    synthesis = build_ceo_synthesis(tool, plan, results, call_idx=call_idx)
+    partial_output = synthesis.text
     # Coordination terminal: workers are all marked done; without ALL_COMPLETED the
     # CEO idle-waits the full coordination timeout (same class of bug as criteria gap).
     if session is not None:
         post_session_all_completed(
             session,
-            output=partial_output,
+            output=synthesis.prose,
+            roster_text=synthesis.roster_text,
+            roster_facts=synthesis.roster_facts,
+            closing_text=synthesis.closing_text,
             user_facts=collect_harvest_user_facts(plan, results),
         )
     from agentcore.runtime.delegate.delivery_status import build_delivery_status
@@ -323,11 +327,15 @@ async def finalize_successful_drive(
         promotion_ledger=tool._base_tool_context.promotion_ledger,
     )
 
-    output = format_for_ceo(tool, plan, results, call_idx=call_idx)
+    synthesis = build_ceo_synthesis(tool, plan, results, call_idx=call_idx)
+    output = synthesis.text
     if session is not None:
         post_session_all_completed(
             session,
-            output=output,
+            output=synthesis.prose,
+            roster_text=synthesis.roster_text,
+            roster_facts=synthesis.roster_facts,
+            closing_text=synthesis.closing_text,
             user_facts=collect_harvest_user_facts(plan, results),
         )
     return ToolResult(

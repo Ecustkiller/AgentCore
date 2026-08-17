@@ -481,6 +481,21 @@ async def test_delegate_started_logs_who_what_and_first_wave_parallel(monkeypatc
     assert started["parallel"] == 2
     # who + what, in plan order — the delegation's actual content
     assert started["agents"] == ["研究员: 调研市场规模", "写手: 撰写初稿"]
+    # 80-char preview is not the only evidence: full task lengths ride the same event.
+    assert started["task_chars"] == [len("调研市场规模"), len("撰写初稿")]
+
+
+async def test_delegate_started_logs_full_task_chars_not_just_preview(monkeypatch):
+    spy = LogSpy()
+    monkeypatch.setattr(delegate_tool_mod, "logger", spy)
+    long_task = "已确认约束：" + ("甲" * 200)
+    t = tool(Provider(["OUT"]))
+    await t.execute({"tasks": [{"role": "写手", "task": long_task}]}, ctx())
+    started = spy.get("delegate.started")
+    assert started["task_chars"] == [len(long_task)]
+    preview = started["agents"][0]
+    assert "写手:" in preview
+    assert len(preview) < len(long_task)
 
 
 async def test_delegate_started_parallel_reflects_dag_first_wave(monkeypatch):

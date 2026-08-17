@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from contextvars import ContextVar
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -94,8 +95,20 @@ def _completed_snapshot_for_post_close(tool: DelegateTool) -> dict[str, RunState
     return out
 
 
-def post_close_cold_open_error(tool: DelegateTool, plan: RunPlan) -> str | None:
-    """Return contract reject message, or ``None`` if the batch is admitted."""
+POST_CLOSE_REJECT_GAP_FILL = "gap_fill"
+POST_CLOSE_REJECT_COLD_OPEN = "cold_open"
+
+
+@dataclass(frozen=True, slots=True)
+class PostCloseReject:
+    """Which post-close refuse branch fired. Tag only — does not change admission."""
+
+    kind: str
+    message: str
+
+
+def post_close_reject(tool: DelegateTool, plan: RunPlan) -> PostCloseReject | None:
+    """Same admission as :func:`post_close_cold_open_error`, plus a kind tag."""
     from agentcore.runtime.delegate.batch_shape import is_substantial_batch
     from agentcore.runtime.delegate.force_scopes import GATE_POST_CLOSE, force_allows
     from agentcore.runtime.delegate.team_continuation import (
@@ -117,9 +130,18 @@ def post_close_cold_open_error(tool: DelegateTool, plan: RunPlan) -> str | None:
     # 补缺口按缺口限流（与同图 replan 补跑闸同判定）；续派那堆不进限流。
     gap_error = gap_fill_admission_error(shape, completed)
     if gap_error is not None:
-        return gap_error
+        return PostCloseReject(kind=POST_CLOSE_REJECT_GAP_FILL, message=gap_error)
 
     # 冷开那堆单独判大扇出：与续派/补缺口同批时，不再把整批算成「整团重派」。
     if not is_substantial_batch(len(shape.cold), shape.cold_has_deps):
         return None
-    return cold_open_reject_message(shape)
+    return PostCloseReject(
+        kind=POST_CLOSE_REJECT_COLD_OPEN,
+        message=cold_open_reject_message(shape),
+    )
+
+
+def post_close_cold_open_error(tool: DelegateTool, plan: RunPlan) -> str | None:
+    """Return contract reject message, or ``None`` if the batch is admitted."""
+    reject = post_close_reject(tool, plan)
+    return None if reject is None else reject.message

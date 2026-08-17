@@ -551,7 +551,17 @@ async def load_context_inject_files(
             continue
         if not isinstance(content, str) or not content.strip():
             continue
-        out[path] = truncate_head_tail(content, per_file_chars)
+        original = len(content)
+        trimmed = truncate_head_tail(content, per_file_chars)
+        out[path] = trimmed
+        if len(trimmed) < original:
+            from agentcore.runtime.context_cap import log_context_capped
+
+            log_context_capped(
+                site="context_inject",
+                original_chars=original,
+                final_chars=len(trimmed),
+            )
     return out
 
 
@@ -585,10 +595,10 @@ def _dep_context_blocks(
     never consume a non-completed body as an upstream deliverable.
     COMPLETED + 空 content 但 debrief.summary 在 → 升格简报为 body，不当前置缺席。"""
     # mode ∈ {"pointer", "summarize", "pass_through"}
-    # (dep_id, label, clean_content, files, mode, author_summary)
+    # (dep_id, label, clean_content, files, mode, author_summary, promoted_from_brief)
     from agentcore.runtime.runs.research_quality import promote_brief_to_deliverable
 
-    deps: list[tuple[str, str, str, list[str], str, str]] = []
+    deps: list[tuple[str, str, str, list[str], str, str, bool]] = []
     absence_blocks: list[ContextBlock] = []
     for dep_id in depends_on:
         state = completed.get(dep_id)
@@ -621,25 +631,40 @@ def _dep_context_blocks(
         # 完工交接简报: the content is already the pure deliverable (the brief rides the run's
         # structured ``debrief``, submitted via the handoff tool — never appended to the prose), so
         # the body sizes on the deliverable alone and the author's own 结论 can LEAD the block.
-        # 同轮 0 字仅简报：升格为下游可读 body（可再带 author_summary lead）。
+        # 同轮 0 字仅简报：升格为下游可读 body；升格路径不再 prepend 同一句结论。
         clean = state.content or ""
+        promoted_from_brief = False
         if not clean.strip() and has_brief:
             clean = promote_brief_to_deliverable(author_summary, key_points)
+            promoted_from_brief = True
         if state.files_touched:
             mode = "pointer"
         elif dep_spec and dep_spec.policy.result_handling == "summarize":
             mode = "summarize"
         else:
             mode = "pass_through"
-        deps.append((dep_id, label, clean, list(state.files_touched), mode, author_summary))
+        deps.append(
+            (
+                dep_id,
+                label,
+                clean,
+                list(state.files_touched),
+                mode,
+                author_summary,
+                promoted_from_brief,
+            )
+        )
 
     # Only PROSE pass_through deps draw on the shared budget; pointer / summarize deps
     # are already compact and sized independently.
     allowances = iter(
-        allocate([len(c) for (_, _, c, _, m, _) in deps if m == "pass_through"], DEP_CONTEXT_BUDGET)
+        allocate(
+            [len(c) for (_, _, c, _, m, _, _) in deps if m == "pass_through"],
+            DEP_CONTEXT_BUDGET,
+        )
     )
     blocks: list[ContextBlock] = list(absence_blocks)
-    for dep_id, label, content, files, mode, author_summary in deps:
+    for dep_id, label, content, files, mode, author_summary, promoted_from_brief in deps:
         if mode == "pointer":
             body = pointer_body(content, files)
             # full product is on disk (递指针); body is a digest, not a budget trim.
@@ -655,14 +680,33 @@ def _dep_context_blocks(
                 # opening AND its tail (结论/取舍 often land last) instead of dropping the tail.
                 body = truncate_head_tail(content, DEP_SUMMARY_CHARS)
                 truncated = len(content) > DEP_SUMMARY_CHARS
+                if truncated:
+                    from agentcore.runtime.context_cap import log_context_capped
+
+                    log_context_capped(
+                        site="dep_context",
+                        original_chars=len(content),
+                        final_chars=len(body),
+                        fidelity=mode,
+                    )
         else:
             allowance = next(allowances)
             body = truncate_head_tail(content, allowance)
             truncated = len(content) > allowance
+            if truncated:
+                from agentcore.runtime.context_cap import log_context_capped
+
+                log_context_capped(
+                    site="dep_context",
+                    original_chars=len(content),
+                    final_chars=len(body),
+                    fidelity=mode,
+                )
         # Let the downstream see the upstream author's own 结论 FIRST — cheapest to read and the
-        # one line that should survive even when the body below is budget-trimmed. (summarize
-        # already IS that line, so skip the lead there to avoid repeating it.)
-        if author_summary and mode != "summarize":
+        # one line that should survive even when the body below is budget-trimmed. Skip when
+        # summarize already IS that line, or when the body was promoted from the same brief
+        # (empty content → promote_brief_to_deliverable already starts with summary).
+        if author_summary and mode != "summarize" and not promoted_from_brief:
             body = f"【上游交接结论】{author_summary}\n\n{body}"
         blocks.append(
             ContextBlock(

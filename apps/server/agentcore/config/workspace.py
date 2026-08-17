@@ -132,6 +132,10 @@ class WorkspaceSettings(BaseModel):
     browser_session_max_lifetime_seconds: float = 2 * 3600.0
     # Reaper sweep cadence (lifespan background loop, mirrors session_retention).
     browser_reaper_interval_seconds: float = 60.0
+    # Lifespan ``close_all`` wall-clock cap. Shutdown must not wait runsc's 180s
+    # per-command bound, nor drain sessions serially; leftover sandboxes are left
+    # for restart / the reaper.
+    browser_shutdown_close_all_seconds: float = 6.0
     # Per-command RPC deadline (host waits this long for one driver response before
     # treating the driver as wedged). Navigation is the slow leg.
     browser_command_timeout_seconds: float = 60.0

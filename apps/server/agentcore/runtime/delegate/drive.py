@@ -363,28 +363,46 @@ async def _drive_body(
 
     # 收口后冷开整团重派硬闸（与同图 replan 补跑闸分轨；共用 MAX_GAP_FILL_ADDS）。
     # 须在 team_preview 之前拒，避免开工卡先弹出。append / 并入活跃图不走本闸。
+    # 后台 drive_coordinated 带 session：前台 try_start 已过本闸，跳过（同 team_preview）。
+    # session 路径 merging_into_active 恒 False、seed_completed 常为 None，且此时
+    # active session 是刚建的空名册，重入会把已准入的 replaces/continue 误拒。
     # 逐闸 force：本闸只认 force=["post_close"]，判定在闸内（同队续派另有入口）。
-    if not merging_into_active and seed_completed is None:
+    if session is None and not merging_into_active and seed_completed is None:
         from agentcore.core.logging import get_logger
         from agentcore.core.types import ToolEffect
         from agentcore.runtime.delegate.batch_shape import annotate_batch_meta
-        from agentcore.runtime.delegate.post_close_gate import post_close_cold_open_error
+        from agentcore.runtime.delegate.post_close_gate import (
+            POST_CLOSE_REJECT_GAP_FILL,
+            post_close_reject,
+        )
         from agentcore.tools.protocol import ToolResult
 
-        post_close_err = post_close_cold_open_error(tool, plan)
-        if post_close_err is not None:
-            get_logger(__name__).info(
-                "delegate.post_close_redelegation_rejected",
-                execution_id=execution_id,
-                nodes=len(plan.nodes),
-                call=call_idx,
-            )
+        post_close = post_close_reject(tool, plan)
+        if post_close is not None:
+            # 事件名必须是字面量：sync_log_event_registry 静态扫参数，条件表达式会丢名。
+            _post_close_fields = {
+                "execution_id": execution_id,
+                "nodes": len(plan.nodes),
+                "call": call_idx,
+                "kind": post_close.kind,
+                "error": post_close.message,
+            }
+            if post_close.kind == POST_CLOSE_REJECT_GAP_FILL:
+                get_logger(__name__).info(
+                    "delegate.post_close_gap_fill_rejected",
+                    **_post_close_fields,
+                )
+            else:
+                get_logger(__name__).info(
+                    "delegate.post_close_redelegation_rejected",
+                    **_post_close_fields,
+                )
             return annotate_batch_meta(
                 ToolResult(
                     tool_call_id="",
                     success=False,
                     output="",
-                    error=post_close_err,
+                    error=post_close.message,
                     effect=ToolEffect.CONTINUE,
                     contract_failure=True,
                 ),

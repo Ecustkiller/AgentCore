@@ -182,16 +182,44 @@ def test_deploy_scripts_use_unix_newlines(filename: str, stop_api: str, start_ap
 
 
 def test_api_stop_grace_exceeds_salvage_window():
-    """Compose + both deploy stop paths must outlast lifespan salvage (20s) + slack.
+    """Compose + deploy stop paths stay at 40s; in-process budget must fit inside.
 
-    Docker's default 10s SIGKILLs mid-salvage and orphans leases. 40s = 20s salvage
-    + leftover teardown (ledger / browsers / compaction) + margin.
+    Docker's default 10s SIGKILLs mid-salvage and orphans leases. The 40s grace is
+    not lengthened: uvicorn drain + salvage + teardown hard cap + slack ≤ 40.
+    Prod must not use uvicorn ``timeout_graceful_shutdown=None`` (SSE drain never
+    reaches lifespan).
     """
+    from agentcore.config.checkpoint import CheckpointSettings
+    from agentcore.config.persistence import PersistenceSettings
+    from agentcore.config.server import ServerSettings
+    from agentcore.config.workspace import WorkspaceSettings
+
+    docker_grace = 40.0
+    drain = float(ServerSettings.model_fields["uvicorn_graceful_shutdown_seconds"].default)
+    salvage = float(CheckpointSettings.model_fields["turn_shutdown_grace_seconds"].default)
+    teardown = float(ServerSettings.model_fields["shutdown_teardown_seconds"].default)
+    close_all = float(
+        WorkspaceSettings.model_fields["browser_shutdown_close_all_seconds"].default
+    )
+    compaction = float(PersistenceSettings.model_fields["compaction_shutdown_seconds"].default)
+    slack = docker_grace - drain - salvage - teardown
+    assert drain == 5.0
+    assert salvage == 20.0
+    assert teardown == 8.0
+    assert slack == 7.0
+    assert drain + salvage + teardown + slack <= docker_grace
+    assert close_all + compaction <= teardown
+
     app_yml = _DEPLOY_SCRIPTS.parent / "docker-compose.app.yml"
     assert "stop_grace_period: 40s" in app_yml.read_text(encoding="utf-8")
     for name in ("deploy-server.sh", "finish-server.sh", "restore.sh"):
         text = (_DEPLOY_SCRIPTS / name).read_text(encoding="utf-8")
         assert "stop --timeout 40 api" in text
+
+    main_py = Path(__file__).resolve().parents[1] / "agentcore" / "__main__.py"
+    main_text = main_py.read_text(encoding="utf-8")
+    assert "timeout_graceful_shutdown=2 if reload else None" not in main_text
+    assert "uvicorn_graceful_shutdown_seconds" in main_text
 
 
 def test_rollback_does_not_repeat_the_workspace_backup():

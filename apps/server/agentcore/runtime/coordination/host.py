@@ -476,7 +476,9 @@ def _ensure_terminal_all_completed(
         "total": session.total_workers,
     }
     if output.strip():
-        payload["output"] = output.strip()[:4000]
+        from agentcore.runtime.delegate.terminal_output import cap_all_completed_output
+
+        payload["output"] = cap_all_completed_output(output.strip())
     session.post(
         CoordinationEvent(kind=CoordinationEventKind.ALL_COMPLETED, payload=payload)
     )
@@ -1058,6 +1060,16 @@ async def _background_drive(
             _ensure_terminal_all_completed(
                 session,
                 output=(result.output if result is not None else "") or "",
+            )
+        elif result is not None:
+            # 契约失败（success=False）此前被静默丢弃。只落日志，不推 CEO / 不自愈。
+            logger.info(
+                "delegate.coordinate_failed",
+                execution_id=execution_id,
+                error=result.error or "",
+                contract_failure=bool(result.contract_failure),
+                nodes=len(plan.nodes),
+                call=call_idx,
             )
     except asyncio.CancelledError:
         logger.info("delegate.coordinate_cancelled", execution_id=execution_id)

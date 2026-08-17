@@ -94,6 +94,9 @@ class PersistenceSettings(BaseModel):
     compaction_near_context_ratio: float = 0.8
     compaction_near_context_tokens: int = 200_000
     compaction_near_max_passes: int = 3
+    # Lifespan flush of in-flight folds. Fold is best-effort; do not hold the
+    # Docker stop window for a wedged LLM call.
+    compaction_shutdown_seconds: float = 2.0
 
     # Standing tasks / 定时自动化 L1: in-process DB poll of next_run_at + lease.
     standing_task_scheduler_enabled: bool = True

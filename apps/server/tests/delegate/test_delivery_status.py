@@ -858,6 +858,39 @@ def test_maybe_emit_logs_empty_gate_counts(monkeypatch):
     assert not any(name == "delegate.delivery_status_emitted" for name, _ in spy.events)
 
 
+def test_gaps_cap_emits_context_capped(monkeypatch):
+    """缺口列表超过 _MAX_GAPS 时切掉并打 context_capped（只落条数）。"""
+    from agentcore.runtime import context_cap
+    from agentcore.runtime.delegate.delivery_status import _MAX_GAPS
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
+    plan = _plan(RunSpec(run_id="w1", task="写文件", role="工程师"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        )
+    }
+    raw_n = _MAX_GAPS + 8
+    payload = build_delivery_status(
+        plan,
+        results,
+        execution_id="e-gaps-cap",
+        criteria_gaps=[f"验收缺口{i}" for i in range(raw_n)],
+    )
+    assert payload is not None
+    assert len(payload["gaps"]) == _MAX_GAPS
+    fields = spy.get("delegate.context_capped")
+    assert fields["site"] == "delivery_gaps"
+    assert fields["original_count"] >= raw_n
+    assert fields["final_count"] == _MAX_GAPS
+    assert fields["execution_id"] == "e-gaps-cap"
+
+
 def test_maybe_emit_logs_emitted_counts(monkeypatch):
     """有物质发射时打成功日志，载荷带 artifacts/accepted/rejected/gaps 数量。"""
     from agentcore.runtime.delegate import delivery_status as mod

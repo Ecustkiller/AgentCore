@@ -68,13 +68,29 @@ def _wall_zero_still_pending(session: CoordinationSession) -> bool:
 
 
 def _synthetic_all_completed(session: CoordinationSession) -> CoordinationEvent:
+    """Race fallback when the bag is full and drive is gone but no terminal posted.
+
+    Keep ``ALL_COMPLETED`` so wait still closes / stashes (``DRIVE_CANCELLED``
+    would not). Bag-full only means the terminal count filled — cancel into the
+    bag is intentional — so stamp cancel / fail flags. A flag-less
+    ``ALL_COMPLETED`` is the path host.py already rejected (fake「全员完成」).
+    """
+    cancelled = (session.cancel_ids & session.completed_run_ids) - session.failed_run_ids
+    failed_n = len(session.failed_run_ids)
+    payload: dict[str, object] = {
+        "completed": len(session.completed_run_ids),
+        "total": session.total_workers,
+        "reason": "team_done_shortcircuit",
+    }
+    if cancelled:
+        payload["cancelled"] = True
+    if failed_n:
+        payload["failed"] = failed_n
+        if "cancelled" not in payload:
+            payload["criteria_met"] = False
     return CoordinationEvent(
         kind=CoordinationEventKind.ALL_COMPLETED,
-        payload={
-            "completed": len(session.completed_run_ids),
-            "total": session.total_workers,
-            "reason": "team_done_shortcircuit",
-        },
+        payload=payload,
     )
 
 
@@ -244,13 +260,16 @@ async def await_coordination_injection(
             # 竞态兜底（非主保障）：主保障见终态对账（附着注入 / harvest）。
             wait_reason = "team_done_shortcircuit"
             events = [_synthetic_all_completed(session)]
+            short = events[0].payload
             logger.warning(
                 "coordination.team_done_shortcircuit",
                 execution_id=session.execution_id,
                 completed=len(session.completed_run_ids),
                 total=session.total_workers,
+                cancelled=bool(short.get("cancelled")),
+                failed=short.get("failed", 0),
                 detail=(
-                    "竞态兜底：全员已完成且 drive 已结束，队列仍无终态事件。"
+                    "竞态兜底：终态袋已满且 drive 已结束，队列仍无终态事件。"
                     "主保障是终态对账（附着注入/harvest）；请追查 drive/host 漏投竞态。"
                 ),
             )

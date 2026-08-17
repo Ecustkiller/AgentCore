@@ -8,6 +8,8 @@ factory + repositories + provider all faked, so no DB is required).
 """
 
 import asyncio
+import contextlib
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -1689,3 +1691,29 @@ async def test_only_long_chats_pay_for_the_backlog_query():
     assert asked == [["long", "folded"]]
     # 查过但没有 un-folded 行 → 0（已全部折进摘要），而不是「没算过」。
     assert out == {"long": 120, "folded": 0}
+
+
+async def test_shutdown_compaction_abandons_after_timeout():
+    """In-flight folds are best-effort; shutdown must not wait a wedged gather."""
+
+    async def _hang() -> None:
+        await asyncio.Event().wait()
+
+    task = asyncio.create_task(_hang())
+    compaction._tasks.add(task)
+    try:
+        started = time.monotonic()
+        await compaction.shutdown_compaction(timeout=0.05)
+        assert time.monotonic() - started < 0.5
+        await asyncio.sleep(0)
+        assert task.done()
+    finally:
+        task.cancel()
+        compaction._tasks.discard(task)
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+async def test_shutdown_compaction_noop_without_tasks():
+    assert not compaction._tasks
+    await compaction.shutdown_compaction(timeout=0.01)

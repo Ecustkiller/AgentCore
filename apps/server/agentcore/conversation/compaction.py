@@ -744,7 +744,29 @@ async def _run(
     )
 
 
-async def shutdown_compaction() -> None:
-    """Await in-flight folds on app shutdown (clean lifespan exit)."""
-    if _tasks:
-        await asyncio.gather(*_tasks, return_exceptions=True)
+async def shutdown_compaction(*, timeout: float | None = None) -> None:
+    """Await in-flight folds on app shutdown; abandon after a short bound.
+
+    Fold is best-effort enrichment. A wedged LLM call must not hold the Docker
+    stop window — leftover tasks are cancelled and left for process exit.
+    """
+    pending = [task for task in _tasks if not task.done()]
+    if not pending:
+        return
+    grace = (
+        float(timeout) if timeout is not None else float(settings.compaction_shutdown_seconds)
+    )
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*pending, return_exceptions=True),
+            timeout=grace,
+        )
+    except TimeoutError:
+        logger.warning(
+            "compaction.shutdown_timeout",
+            pending=len(pending),
+            timeout_seconds=grace,
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)

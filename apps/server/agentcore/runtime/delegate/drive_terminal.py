@@ -5,6 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from agentcore.core.logging import get_logger
+from agentcore.runtime.delegate.terminal_output import (
+    ALL_COMPLETED_OUTPUT_LIMIT,
+    compose_all_completed_output,
+)
 
 logger = get_logger(__name__)
 
@@ -67,12 +71,22 @@ def post_session_all_completed(
     output: str,
     completed: int | None = None,
     total: int | None = None,
-    output_limit: int = 4000,
+    output_limit: int = ALL_COMPLETED_OUTPUT_LIMIT,
     criteria_met: bool | None = None,
     failed: int | None = None,
     user_facts: dict[str, Any] | None = None,
+    roster_text: str = "",
+    roster_facts: dict[str, Any] | None = None,
+    closing_text: str = "",
 ) -> None:
-    """Post the coordination terminal event (happy path + criteria-gap / partial-fail)."""
+    """Post the coordination terminal event (happy path + criteria-gap / partial-fail).
+
+    ``output`` is the lossy synthesis prose (worker bodies + advisory sections).
+    The roster and closing are reserved first; long per-worker bodies shrink
+    before any tail of the assembled document is touched. Harvest replays this
+    payload, so a roster that lost a budget race would order the CEO to
+    reconcile against something that is not there.
+    """
     from agentcore.runtime.coordination.session import (
         CoordinationEvent,
         CoordinationEventKind,
@@ -80,18 +94,30 @@ def post_session_all_completed(
 
     completed_n = completed if completed is not None else len(session.completed_run_ids)
     total_n = total if total is not None else session.total_workers
+    raw_join = "\n".join(
+        p for p in (output.strip(), roster_text.strip(), closing_text.strip()) if p
+    )
+    composed = compose_all_completed_output(
+        output,
+        roster_text,
+        closing_text,
+        limit=output_limit,
+    )
     payload: dict[str, Any] = {
         "completed": completed_n,
         "total": total_n,
-        "output": output[:output_limit],
+        "output": composed,
     }
     if criteria_met is False:
         payload["criteria_met"] = False
     if failed is not None:
         payload["failed"] = failed
-    if user_facts:
-        payload["user_facts"] = user_facts
-        session.harvest_user_facts = user_facts
+    facts = dict(user_facts) if user_facts else {}
+    if roster_facts:
+        facts["roster"] = roster_facts
+    if facts:
+        payload["user_facts"] = facts
+        session.harvest_user_facts = facts
     session.post(
         CoordinationEvent(
             kind=CoordinationEventKind.ALL_COMPLETED,
@@ -106,5 +132,8 @@ def post_session_all_completed(
         total=total_n,
         failed=failed,
         criteria_met=criteria_met,
-        output_chars=min(len(output), output_limit),
+        output_chars=len(composed),
+        prose_chars=len(output),
+        prose_trimmed=len(raw_join) > len(composed),
+        roster_attached=bool(roster_text.strip()),
     )

@@ -14,6 +14,52 @@ from agentcore.runtime.coordination.session import (
 )
 from agentcore.runtime.delegate.team_synthesis import worker_output_blurb
 
+_COORD_HINT_CLOSED_TAIL = "全部完成后做最终合成（正文），然后退出协调。"
+
+_HARVEST_CLOSE_LINE = {
+    "success": (
+        "本波结果按终稿纪律向用户交代（走 content_delta）；"
+        "活没干完就接着干，不需要后续动作则按终稿交付即可。"
+    ),
+    "failure": (
+        "按终稿纪律向用户交代已有产出与失败缺口（走 content_delta）；"
+        "勿假装全员成功，不要把失败当成功继续铺开。"
+    ),
+    "cancelled": (
+        "按终稿纪律基于已完成部分向用户交代（走 content_delta）；"
+        "说明已取消，调度已停，不要接着派活。"
+    ),
+    "soft_stop": (
+        "按终稿纪律向用户交代当前进展与待决问题（走 content_delta）；"
+        "等用户拍板后再继续，不要自行接着干。"
+    ),
+}
+
+
+def _harvest_close_kind(
+    session: CoordinationSession,
+    events: list[CoordinationEvent],
+) -> str:
+    """Wording key for harvest inject close_line. Not a persisted harvest_kind."""
+    if session.soft_stop:
+        return "soft_stop"
+    if any(ev.kind is CoordinationEventKind.DRIVE_CANCELLED for ev in events):
+        return "cancelled"
+    for ev in events:
+        if ev.kind is not CoordinationEventKind.ALL_COMPLETED:
+            continue
+        payload = ev.payload or {}
+        if payload.get("cancelled") or payload.get("error"):
+            return "cancelled"
+        if payload.get("criteria_met") is False:
+            return "failure"
+    if session.failed_run_ids:
+        return "failure"
+    cancelled = (session.cancel_ids & session.completed_run_ids) - session.failed_run_ids
+    if cancelled:
+        return "cancelled"
+    return "success"
+
 
 def _format_ownership_escalation_hint(payload: dict) -> str:
     """Optional ownership conflict briefing for CEO escalate inject."""
@@ -82,15 +128,19 @@ def format_coordination_events(
     lines.append("")
     from agentcore.runtime.resolve.ceo_surface import COORDINATION_PERIOD_HINT
 
-    lines.append(COORDINATION_PERIOD_HINT)
+    hint = COORDINATION_PERIOD_HINT
+    if session.harvest_closing and hint.endswith(_COORD_HINT_CLOSED_TAIL):
+        hint = hint[: -len(_COORD_HINT_CLOSED_TAIL)].rstrip()
+    lines.append(hint)
     first_turn_all_completed = (not session.harvest_closing) and any(
         ev.kind is CoordinationEventKind.ALL_COMPLETED for ev in events
     )
-    close_line = (
-        "本回合勿做最终合成；可见收口由系统收口回合完成。"
-        if first_turn_all_completed
-        else "全部完成后做最终合成（走 content_delta），然后退出协调。"
-    )
+    if first_turn_all_completed:
+        close_line = "本回合勿做最终合成；可见收口由系统收口回合完成。"
+    elif session.harvest_closing:
+        close_line = _HARVEST_CLOSE_LINE[_harvest_close_kind(session, events)]
+    else:
+        close_line = "全部完成后做最终合成（走 content_delta），然后退出协调。"
     lines.append(
         "先判断本批事件要不要你出手：带指令的事件（阻塞仲裁 / 边界让出 / 插话 / 全部完成）"
         "按其指令办；纯进展事件（worker_completed / note）多数【无需处置】——完成计数与"
@@ -111,9 +161,9 @@ def format_coordination_events(
         "一波/一阶段收束、终稿收束；禁止纯进度播报；例行的单个 worker 完成【不写】"
         "（进度已由系统自动呈现），微调措辞更不算里程碑。"
         f"{close_line}"
-        "【终稿纪律】最终合成是给用户的交付、不是协调日志：交付物在前，过程简述至多一段；"
-        "协调态进度旁白不得焊进终稿 content；以上协调事件、escalation 原文与合成草稿是你的"
-        "工作输入，禁止整段粘进终稿——草稿要用也须重写成交付口吻；"
+        "【终稿纪律】最终合成是给用户的交付、不是协调日志：交付物在前，过程简述从简；"
+        "协调态进度旁白不得焊进终稿 content；以上协调事件、队员终态名册、escalation 原文"
+        "与合成草稿是你的工作输入，禁止整段粘进终稿——草稿要用也须重写成交付口吻；"
         "未交付的承诺产物须显式列出，不得含糊带过。"
     )
     return "\n".join(lines)
@@ -223,21 +273,41 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
                 "勿向用户宣称全部完成。"
                 "调度已结束：勿再启同服，优先复用已有进程或只补浏览器。"
             ]
+        elif session.soft_stop:
+            lines = [
+                f"- all_completed：团队因请示用户而暂停（{done}/{total}）。"
+                "请交代当前进展与待决问题。"
+            ]
         else:
             lines = [
-                f"- all_completed：团队已全部结束（{done}/{total}）。请做最终合成并收口。"
+                f"- all_completed：团队已全部结束（{done}/{total}）。"
+                "请按终稿纪律报告本波结果。"
             ]
         output = p.get("output")
-        if isinstance(output, str) and output.strip():
+        embedded = (session.harvest_user_embedded_output or "").strip()
+        # Same ALL_COMPLETED.output already sits in the synthetic harvest user row
+        # (落库可查). Re-inject only when the user text did not embed it (empty
+        # output at format time, output == draft, later new product).
+        already_embedded = bool(
+            session.harvest_closing
+            and embedded
+            and isinstance(output, str)
+            and output.strip() == embedded
+        )
+        if isinstance(output, str) and output.strip() and not already_embedded:
             lines.append(f"团队成品：\n{output.strip()}")
         if not (p.get("cancelled") or p.get("error")):
             lines.append(
                 "质量面敏感成品（成篇/构建/审查类）若未经独立审计，先派审计再收尾。"
             )
-        lines.append(
-            "最终合成按【终稿纪律】写：交付物在前、过程简述至多一段，"
-            "不粘贴协调事件 / escalation 原文 / 中间合成草稿；未交付的承诺产物显式列出。"
-        )
+        if not already_embedded:
+            # The synthesis package ends with its own【终稿纪律】; only restate it
+            # when that package is not already in front of the model.
+            lines.append(
+                "最终合成按【终稿纪律】写：交付物在前、过程简述从简，"
+                "不粘贴协调事件 / 队员终态名册 / escalation 原文 / 中间合成草稿；"
+                "未交付的承诺产物显式列出。"
+            )
         return "\n".join(lines)
     if ev.kind is CoordinationEventKind.DRIVE_CANCELLED:
         done = p.get("completed", 0)

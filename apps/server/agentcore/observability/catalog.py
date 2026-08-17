@@ -199,6 +199,14 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='board.read_billing_failed'),
     EventSpec(name='board.read_timeout'),
     EventSpec(name='board.read_vision_failed'),
+    EventSpec(
+        name='browser.close_all_timeout',
+        description='停机 close_all 超过墙钟上限，放弃等待交重启/reaper',
+        fields={
+            'session_count': FieldType('int'),
+            'timeout_seconds': FieldType('float'),
+        },
+    ),
     EventSpec(name='browser.desktop_bridge_probe_error'),
     EventSpec(name='browser.desktop_bridge_probe_failed'),
     EventSpec(name='browser.desktop_bridge_turn_applied'),
@@ -261,6 +269,8 @@ EVENTS: list[EventSpec] = [
             'user': FieldType('str'),
         },
     ),
+    EventSpec(name='chat.local_turn_harvest_idempotent'),
+    EventSpec(name='chat.local_turn_harvest_claim_continue'),
     EventSpec(name='chat.local_turn_idempotent_race'),
     EventSpec(name='chat.local_turn_recorded'),
     EventSpec(name='chat.local_turn_reuse_paired_user'),
@@ -433,6 +443,14 @@ EVENTS: list[EventSpec] = [
         },
     ),
     EventSpec(
+        name='compaction.shutdown_timeout',
+        description='停机 flush 在飞 fold 超时（best-effort，取消剩余 task）',
+        fields={
+            'pending': FieldType('int'),
+            'timeout_seconds': FieldType('float'),
+        },
+    ),
+    EventSpec(
         name='compaction.timeout',
         description='长对话压缩 LLM 超时（空摘要；不推水位）',
         fields={
@@ -545,6 +563,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.harvest_failed'),
     EventSpec(name='coordination.harvest_fallback_persisted'),
     EventSpec(name='coordination.harvest_giving_up'),
+    EventSpec(name='coordination.harvest_idempotent_skip'),
+    EventSpec(name='coordination.harvest_claim_continue'),
     EventSpec(name='coordination.harvest_missing_conversation'),
     EventSpec(name='coordination.harvest_no_session'),
     EventSpec(name='coordination.harvest_not_ready'),
@@ -818,6 +838,18 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.complexity_hint_ignored'),
     EventSpec(name='delegate.complexity_hint_inferred'),
     EventSpec(name='delegate.consumer_deps_soft_warn'),
+    EventSpec(
+        name='delegate.context_capped',
+        description='上下文管线帽触发（site + 原长/切后长或条数；不落正文）',
+        fields={
+            'execution_id': FieldType('str'),
+            'final_chars': FieldType('int'),
+            'final_count': FieldType('int'),
+            'original_chars': FieldType('int'),
+            'original_count': FieldType('int'),
+            'site': FieldType('str'),
+        },
+    ),
     EventSpec(name='delegate.continuation_alias_rehydrated'),
     EventSpec(name='delegate.continuation_failed'),
     EventSpec(
@@ -884,6 +916,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.playbook_declaration'),
     EventSpec(name='delegate.playbook_declaration_rejected'),
     EventSpec(name='delegate.playbook_rejected'),
+    EventSpec(name='delegate.post_close_gap_fill_rejected'),
     EventSpec(name='delegate.post_close_redelegation_rejected'),
     EventSpec(name='delegate.rejected'),
     EventSpec(name='delegate.resume_plan'),
@@ -909,13 +942,14 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='delegate.seed_notes'),
     EventSpec(
         name='delegate.started',
-        description='编排委派开始（agents/plan/waves）',
+        description='编排委派开始（agents/plan/waves；task_chars=完整 task 长度）',
         fields={
             'agents': FieldType('list'),
             'call': FieldType('str'),
             'nodes': FieldType('int'),
             'parallel': FieldType('int'),
             'plan': FieldType('list'),
+            'task_chars': FieldType('list'),
             'waves': FieldType('list'),
         },
     ),
@@ -1883,6 +1917,13 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='security.insecure_jwt_secret'),
     EventSpec(name='security.rate_limit_redis_fallback'),
     EventSpec(name='server.shutdown'),
+    EventSpec(
+        name='server.shutdown_teardown_timeout',
+        description='lifespan 抢救后的收尾超过 shutdown_teardown_seconds',
+        fields={
+            'timeout_seconds': FieldType('float'),
+        },
+    ),
     EventSpec(
         name='server.started',
         description=(

@@ -121,6 +121,20 @@ def test_dep_block_promotes_brief_when_content_empty():
     assert "风险可控" in block.body
 
 
+def test_dep_block_promoted_brief_does_not_prepend_author_summary():
+    """正文为空 + 简报升格：body 已是 summary（+ key_points），不再 prepend 同一句。"""
+    plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
+    state = _state(
+        "",
+        debrief={"summary": "方案A更优", "key_points": ["成本更低"]},
+    )
+    block = _dep_context_blocks(plan, ["u"], {"u": state})[0]
+    assert block.body.startswith("方案A更优")
+    assert block.body.count("方案A更优") == 1
+    assert "【上游交接结论】" not in block.body
+    assert "成本更低" in block.body
+
+
 def test_dep_block_empty_completed_without_brief_still_absent():
     """COMPLETED 但无 content / files / debrief summary → 仍前置缺席。"""
     plan = _plan(RunSpec(run_id="u", agent_id="u", role="研究员", task="调研"))
@@ -130,8 +144,14 @@ def test_dep_block_empty_completed_without_brief_still_absent():
     assert "前置缺席" in blocks[0].heading
 
 
-def test_dep_summarize_uses_author_summary_over_blind_head_chop():
+def test_dep_summarize_uses_author_summary_over_blind_head_chop(monkeypatch):
     # summarize fidelity: the author's own 结论 beats a mechanical head-chop of noisy prose.
+    # Author digest is not a char-cap — do not emit context_capped.
+    from agentcore.runtime import context_cap
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
     spec = RunSpec(
         run_id="u",
         agent_id="u",
@@ -145,6 +165,32 @@ def test_dep_summarize_uses_author_summary_over_blind_head_chop():
     assert block.fidelity == "summarize"
     assert block.body == "真正重要的一句结论"  # author 结论, not 噪噪噪… head-chop
     assert block.truncated is True  # the full product is longer than the digest
+    assert not any(name == "delegate.context_capped" for name, _ in spy.events)
+
+
+def test_dep_summarize_mechanical_cap_logs(monkeypatch):
+    from agentcore.runtime import context_cap
+    from agentcore.runtime.runs.constants import DEP_SUMMARY_CHARS
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(context_cap, "logger", spy)
+    spec = RunSpec(
+        run_id="u",
+        agent_id="u",
+        role="研究员",
+        task="调研",
+        policy=RunPolicy(result_handling="summarize"),
+    )
+    content = "头" + ("噪" * (DEP_SUMMARY_CHARS + 200)) + "尾结论"
+    block = _dep_context_blocks(_plan(spec), ["u"], {"u": _state(content)})[0]
+    assert block.fidelity == "summarize"
+    assert block.truncated is True
+    fields = spy.get("delegate.context_capped")
+    assert fields["site"] == "dep_context"
+    assert fields["fidelity"] == "summarize"
+    assert fields["original_chars"] == len(content)
+    assert fields["final_chars"] == len(block.body)
 
 
 async def test_dag_file_writing_upstream_passes_pointer_downstream():

@@ -336,6 +336,10 @@ class CoordinationSession:
     all_completed_injected: bool = False
     # True while the system harvest closing turn is the attached CEO (最终合成).
     harvest_closing: bool = False
+    # ALL_COMPLETED.output already inlined into the synthetic harvest user row
+    # (落库可查). Harvest-closing inject must not repeat that 团队成品.
+    # Process-local; not snapshotted — ``format_harvest_user_text`` restamps.
+    harvest_user_embedded_output: str = ""
     # Structured user-audience facts (nodes / files / outstanding tool failures)
     # stamped at drive close, so the no-LLM harvest fallback renders its own
     # user-facing close instead of reusing the CEO-facing brief.
