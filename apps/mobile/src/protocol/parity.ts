@@ -765,7 +765,7 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
   "conversations/ConversationsPage": {
     verdict: "ported",
     surface:
-      "ChatPage · 会话列表（抽屉按文件夹分组；云组头进我的文件、＋ 在此新开）",
+      "ChatPage · 会话列表（抽屉置顶三区；云组头进我的文件、＋ 在此新开；已归档 / 最近删除 / 分享）",
   },
   MorePage: { verdict: "ported", surface: "MorePage（设置中心）" },
   OnboardingPreviewPage: {
@@ -1022,9 +1022,9 @@ export const DESKTOP_PAGE_PARITY: Record<string, ParityEntry> = {
       "「最近删除」文件夹列表行渲染叶（ConversationsPage 拆件，非独立面）",
   },
   "conversations/DeletedConversationManageRow": {
-    verdict: "simplified",
-    reason:
-      "「最近删除」的已删对话那半。与同视图的文件夹行（上一条记 internal 的纯渲染叶）刻意不同裁：手机上删对话同样是软删、行还在库里，但既没有回收站也没有「撤销」toast，用户面事实就是「删了找不回来」——这是能力缺口，不是 chrome 差异，故记 simplified 让报告列出，勿改回 internal。恢复只认 access session，无手机侧障碍，后置纯属未做",
+    verdict: "ported",
+    surface:
+      "ConversationDrawer · 最近删除（对话行恢复；无文件夹那半、无彻底删除）",
   },
   "conversations/CollaborationTimeline": {
     verdict: "simplified",

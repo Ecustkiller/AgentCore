@@ -123,6 +123,22 @@ export async function renameConversation(
   return (await res.json()) as ConversationSummary;
 }
 
+/** Pin / unpin a conversation (置顶对话). Returns the updated summary. */
+export async function setConversationPinned(
+  id: string,
+  pinned: boolean,
+): Promise<ConversationSummary> {
+  const res = await apiFetch(`/v1/conversations/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pinned }),
+  });
+  if (!res.ok) {
+    throw new Error(`${pinned ? "置顶" : "取消置顶"}失败 (${res.status})`);
+  }
+  return (await res.json()) as ConversationSummary;
+}
+
 /** Switch this conversation's model combination (定案 B · 拍快照).
  *  Pass a concrete profile id to re-snapshot, or null to re-pin the then-current
  *  account default (not live follow). Returns the updated summary
@@ -165,13 +181,63 @@ export async function setConversationArchived(
   }
 }
 
+/** A recoverable row in「最近删除」(server-shaped). */
+export type DeletedConversationSummary = Schemas["DeletedConversationSummary"];
+
+/** OpenAPI body for `GET /v1/conversations/trash`. */
+export type DeletedConversationListResponse =
+  Schemas["DeletedConversationListResponse"];
+
+/** Client view of the conversation recycle bin. */
+export interface ConversationTrash {
+  items: DeletedConversationSummary[];
+  retention_days: number;
+  total: number;
+}
+
 /** Delete a conversation (对话管理 · 删除).
  *
- *  Server-side this is a **soft** delete:桌面可从「最近删除」保留期内恢复。手机暂无回收站
- *  入口，故此处删完即消失——但**不要**据此对用户说「永久删除 / 无法恢复」。 */
+ *  Server-side this is a **soft** delete: 可从「最近删除」保留期内恢复
+ *  （见 {@link listConversationTrash}）。不要对用户说「永久删除 / 无法恢复」。 */
 export async function deleteConversation(id: string): Promise<void> {
   const res = await apiFetch(`/v1/conversations/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`删除失败 (${res.status})`);
+}
+
+/** 最近删除 — conversations still inside the retention window. */
+export async function listConversationTrash(): Promise<ConversationTrash> {
+  const res = await apiFetch("/v1/conversations/trash");
+  if (!res.ok) throw new Error(`加载最近删除失败 (${res.status})`);
+  const data = (await res.json()) as DeletedConversationListResponse;
+  return {
+    items: data.data,
+    retention_days: data.retention_days,
+    total: data.total,
+  };
+}
+
+/**
+ * Restore a soft-deleted conversation. Past the retention window (or losing the
+ * purge race) the server answers 409 with a real reason — surface that, never
+ * pretend the row came back.
+ */
+export async function restoreConversation(
+  id: string,
+): Promise<ConversationSummary> {
+  const res = await apiFetch(`/v1/conversations/trash/${id}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    let message = `恢复失败 (${res.status})`;
+    try {
+      const body = (await res.json()) as { error?: { message?: string } };
+      if (body.error?.message) message = body.error.message;
+    } catch {
+      /* non-JSON body — keep the status-only phrasing */
+    }
+    throw new Error(message);
+  }
+  return (await res.json()) as ConversationSummary;
 }
 
 /** Create a fresh cloud conversation and return its id (skeleton: no folder/mode).

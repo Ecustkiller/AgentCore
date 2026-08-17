@@ -1,32 +1,163 @@
 import { getTokens } from "@/api/client";
 import {
+  type AlwaysQuota,
+  type DocumentApplyMode,
+  type DocumentNode,
+  createRuleDocument,
+  deleteDocument,
+  getAlwaysQuota,
+  getDocument,
+  isDocumentsUnavailable,
+  listScopeEntries,
+  renameDocument,
+  updateDocumentApplyMode,
+  writeDocument,
+} from "@/api/documents";
+import {
   type MemoryKind,
   type MemoryUpdateFeedEntry,
   getMemoryFile,
   getMemoryTopic,
   isFeatureUnavailable,
-  listMemoryTopics,
   listMemoryUpdates,
   writeMemoryFile,
   writeMemoryTopic,
 } from "@/api/memory";
-// 全局设定 (/memory) — the mobile 查看 + 改 + 删 lens on long-term memory (Agent记忆与知识系统
-// §一). Reached from the 文件 tab: cross-conversation「最近更新」feed, the two always-
-// injected GLOBAL core leaves (偏好 / 画像) as editable text, and the on-demand 主题 notes
-// as a view/edit/delete list. GLOBAL scope only — per-project memory stays a desktop task
-// (减法 boundary). Each section self-loads (mobile has no global store), and edits are
-// CAS-guarded: a stale baseline reloads the live copy rather than clobbering it.
+// 全局设定 (/memory) — mobile form of the desktop file-rail「全局设定」after 三分
+// 取消: flat GLOBAL entries + always-pool meter +「最近更新」. Not a memory-only
+// half form. 偏好/画像 (incl. placeholders) keep the memory-files API; 主题/… keep
+// the topics API; everything else is documents. No 纠错通道, no folder scope.
 import { ChevronLeft } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import "@/pages/more/more.css";
+
+const APPLY_LABEL: Record<DocumentApplyMode, string> = {
+  always: "常驻",
+  on_demand: "按需",
+};
+
+const APPLY_HINT: Record<DocumentApplyMode, string> = {
+  always: "每次对话都会带上",
+  on_demand: "需要时再查阅",
+};
+
+const AI_CORE_NAMES = new Set(["偏好.md", "画像.md", "导航.md"]);
+const NEAR_FULL_PERCENT = 80;
+const ROW_CHARS_FLOOR = 1000;
+
+type EntrySource =
+  | { channel: "memory-file"; memoryKind: MemoryKind }
+  | { channel: "memory-topic"; slug: string }
+  | { channel: "document"; id: string };
+
+type DisplayRow =
+  | { kind: "doc"; doc: DocumentNode }
+  | { kind: "placeholder"; name: string; applyMode: DocumentApplyMode };
+
+function isAiCoreMemoryLeaf(
+  doc: Pick<DocumentNode, "name" | "aiMaintained">,
+): boolean {
+  return doc.aiMaintained && AI_CORE_NAMES.has(doc.name);
+}
+
+function ensureMdName(name: string): string {
+  return /\.(md|markdown)$/i.test(name) ? name : `${name}.md`;
+}
+
+function nextEntryName(existing: Iterable<string>): string {
+  const taken = new Set(existing);
+  const base = "新条目";
+  if (!taken.has(`${base}.md`)) return `${base}.md`;
+  for (let i = 2; ; i++) {
+    const candidate = `${base} ${i}.md`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+function mergeDisplayRows(docs: DocumentNode[]): DisplayRow[] {
+  const present = new Set(docs.map((d) => d.name));
+  const rows: DisplayRow[] = [
+    ...docs.map((doc): DisplayRow => ({ kind: "doc", doc })),
+    ...(["偏好.md", "画像.md"] as const)
+      .filter((name) => !present.has(name))
+      .map(
+        (name): DisplayRow => ({
+          kind: "placeholder",
+          name,
+          applyMode: "always",
+        }),
+      ),
+  ];
+  return rows.sort((a, b) => {
+    const an = a.kind === "doc" ? a.doc.name : a.name;
+    const bn = b.kind === "doc" ? b.doc.name : b.name;
+    return an.localeCompare(bn, "zh");
+  });
+}
+
+function entrySource(name: string, docId: string | null): EntrySource | null {
+  if (name === "偏好.md")
+    return { channel: "memory-file", memoryKind: "preferences" };
+  if (name === "画像.md")
+    return { channel: "memory-file", memoryKind: "profile" };
+  const topic = /^主题\/(.+?)(?:\.md)?$/i.exec(name);
+  if (topic?.[1]) return { channel: "memory-topic", slug: topic[1] };
+  if (docId) return { channel: "document", id: docId };
+  return null;
+}
+
+function formatRoughChars(n: number): string {
+  const chars = Math.max(0, Math.round(n));
+  if (chars === 0) return "0 字";
+  if (chars < 1000) return "不足千字";
+  if (chars < 9500) return `约 ${Math.max(1, Math.round(chars / 1000))} 千字`;
+  const wan = Math.round(chars / 1000) / 10;
+  const label = Number.isInteger(wan) ? String(wan) : wan.toFixed(1);
+  return `约 ${label} 万字`;
+}
+
+function alwaysMeterTone(q: AlwaysQuota): "ok" | "near" | "over" {
+  if (q.maxChars > 0 && q.usedChars > q.maxChars) return "over";
+  if (q.usedChars <= 0) return "ok";
+  if (q.percent >= NEAR_FULL_PERCENT) return "near";
+  return "ok";
+}
+
+function glueCapacity(verb: "还剩" | "超出", amount: string): string {
+  if (amount.startsWith("约 ")) return `${verb}${amount}`;
+  if (amount === "0 字") return `${verb} ${amount}`;
+  return `${verb}${amount}`;
+}
+
+/** Global-only meter line (desktop `formatMeterHeadline` · variant=global). */
+function formatMeterHeadline(q: AlwaysQuota): string {
+  const tone = alwaysMeterTone(q);
+  if (tone === "over") {
+    const overBy = Math.max(0, q.usedChars - q.maxChars);
+    return `常驻 · 已满，${glueCapacity("超出", formatRoughChars(overBy))}`;
+  }
+  const remain = glueCapacity(
+    "还剩",
+    formatRoughChars(Math.max(0, q.maxChars - q.usedChars)),
+  );
+  if (tone === "near") return `常驻 · 快满了，${remain}`;
+  return `常驻 · ${remain}`;
+}
+
+function entryDescription(doc: DocumentNode): string {
+  return (doc.description ?? "").trim();
+}
+
+function entryFrontmatterError(doc: DocumentNode): string | null {
+  const raw = doc.frontmatterError?.trim();
+  return raw ? raw : null;
+}
 
 export function MemoryPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // A 401 anywhere on the page (after apiFetch's refresh attempt) means the session is
-  // gone — bounce to login, mirroring the other mobile pages' guard.
   const onAuthError = useCallback(
     (e: unknown) => {
       if (!getTokens()) navigate("/login", { replace: true });
@@ -35,8 +166,6 @@ export function MemoryPage() {
     [navigate],
   );
 
-  // Deep-link from the chat「记忆已更新」卡 (`/memory#updates`) — scroll the feed into view
-  // once the page chrome is up (section mounts immediately; list may still be loading).
   useEffect(() => {
     if (location.hash !== "#updates") return;
     const el = document.getElementById("memory-updates");
@@ -60,43 +189,72 @@ export function MemoryPage() {
 
       <div className="settings-body">
         <p className="settings-desc">
-          AI
-          会从对话里记下关于你的长期偏好与事实，并在后续对话中参考。你可以在这里查看、编辑或清空。
+          短硬约束用常驻，厚知识用按需。你可以在这里查看、编辑或删除条目；AI
+          也会从对话记下长期偏好与事实。
         </p>
+        <AlwaysQuotaBlock onAuthError={onAuthError} />
         <RecentUpdates onAuthError={onAuthError} />
-        <LeafEditor
-          kind="preferences"
-          title="偏好"
-          note="你的长期偏好（全局）。留空并保存即清空。"
-          onAuthError={onAuthError}
-        />
-        <LeafEditor
-          kind="profile"
-          title="画像"
-          note="AI 对你的画像（全局）。留空并保存即清空。"
-          onAuthError={onAuthError}
-        />
-        <TopicList onAuthError={onAuthError} />
+        <EntryList onAuthError={onAuthError} />
       </div>
     </div>
   );
 }
 
-function Section({
-  title,
-  note,
-  children,
+function AlwaysQuotaBlock({
+  onAuthError,
 }: {
-  title: string;
-  note?: string;
-  children: ReactNode;
+  onAuthError: (e: unknown) => unknown;
 }) {
+  const [quota, setQuota] = useState<AlwaysQuota | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  const load = useCallback(() => {
+    setUnavailable(false);
+    setFailed(false);
+    getAlwaysQuota()
+      .then(setQuota)
+      .catch((e) => {
+        onAuthError(e);
+        if (isDocumentsUnavailable(e)) {
+          setUnavailable(true);
+          setQuota(null);
+        } else {
+          setFailed(true);
+          setQuota(null);
+        }
+      });
+  }, [onAuthError]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  if (unavailable) return null;
+  if (failed) {
+    return (
+      <button type="button" className="mem-quota-retry" onClick={load}>
+        用量加载失败，点此重试
+      </button>
+    );
+  }
+  if (!quota) return null;
+
+  const tone = alwaysMeterTone(quota);
+  const headline = formatMeterHeadline(quota);
+  if (tone === "ok") {
+    return (
+      <p className="mem-quota" title="每次对话都会带上">
+        {headline}
+      </p>
+    );
+  }
+
   return (
-    <section className="section">
-      <h2 className="section-title">{title}</h2>
-      {note && <p className="section-note">{note}</p>}
-      <div className="section-card">{children}</div>
-    </section>
+    <div className="mem-quota-need">
+      <p className="mem-quota-headline">{headline}</p>
+      <p className="mem-quota-hint">去整理</p>
+    </div>
   );
 }
 
@@ -115,11 +273,6 @@ function formatWhen(iso: string): string {
   )}:${pad(d.getMinutes())}`;
 }
 
-/**
- * Cross-conversation「最近更新」feed (§1.6) — answers「AI 最近都学了什么」. The chat-tail
- * card only covers the open thread; this is the write-side home on mobile (desktop's
- * MemoryUpdatesView lite). Deep-linked as `/memory#updates`.
- */
 function RecentUpdates({
   onAuthError,
 }: {
@@ -239,164 +392,188 @@ function RecentUpdates({
   );
 }
 
-/** An editable always-injected core leaf (偏好 / 画像), CAS-guarded full-text edit. */
-function LeafEditor({
-  kind,
-  title,
-  note,
+function EntryList({
   onAuthError,
 }: {
-  kind: MemoryKind;
-  title: string;
-  note: string;
   onAuthError: (e: unknown) => unknown;
 }) {
-  const [loading, setLoading] = useState(true);
-  const [content, setContent] = useState("");
-  const [saved, setSaved] = useState("");
-  const [version, setVersion] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
+  const [entries, setEntries] = useState<DocumentNode[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-    getMemoryFile(kind)
-      .then((d) => {
-        if (!alive) return;
-        setContent(d.content);
-        setSaved(d.content);
-        setVersion(d.version);
-      })
+  const load = useCallback(() => {
+    setError(null);
+    setUnavailable(false);
+    listScopeEntries(null)
+      .then((rows) => setEntries(rows.filter((r) => r.kind === "document")))
       .catch((e) => {
         onAuthError(e);
-        if (alive) setError("加载失败");
-      })
-      .finally(() => alive && setLoading(false));
-    return () => {
-      alive = false;
-    };
-  }, [kind, onAuthError]);
+        if (isDocumentsUnavailable(e)) {
+          setUnavailable(true);
+          setEntries([]);
+        } else {
+          setError("加载失败");
+          setEntries([]);
+        }
+      });
+  }, [onAuthError]);
 
-  const dirty = content !== saved;
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  async function save() {
-    setSaving(true);
+  async function createEntry() {
+    if (creating || unavailable) return;
+    setCreating(true);
+    setStatus(null);
     setError(null);
     try {
-      const r = await writeMemoryFile(kind, content, version);
-      if (r.conflict) {
-        // Someone (another device / the AI) wrote since we loaded — pull the live copy
-        // so the user re-edits against it rather than clobbering it.
-        const live = await getMemoryFile(kind);
-        setContent(live.content);
-        setSaved(live.content);
-        setVersion(live.version);
-        setError("内容已在别处更新，已为你刷新，请重新编辑后保存。");
-        return;
-      }
-      setSaved(content);
-      setVersion(r.version);
+      const name = nextEntryName((entries ?? []).map((r) => r.name));
+      const doc = await createRuleDocument(name);
+      setEntries((prev) =>
+        [...(prev ?? []).filter((r) => r.id !== doc.id), doc].sort((a, b) =>
+          a.name.localeCompare(b.name, "zh"),
+        ),
+      );
+      setCreatedId(doc.id);
+      setStatus("已新建条目（默认常驻）");
     } catch (e) {
       onAuthError(e);
-      setError("保存失败，请重试");
+      if (isDocumentsUnavailable(e)) {
+        setUnavailable(true);
+        setError(null);
+      } else {
+        setError("新建条目失败，请重试");
+      }
     } finally {
-      setSaving(false);
+      setCreating(false);
     }
   }
 
+  function patchEntry(id: string, next: DocumentNode) {
+    setEntries((prev) =>
+      (prev ?? [])
+        .map((r) => (r.id === id ? next : r))
+        .sort((a, b) => a.name.localeCompare(b.name, "zh")),
+    );
+  }
+
+  function removeFromList(id: string) {
+    setEntries((prev) => (prev ?? []).filter((r) => r.id !== id));
+  }
+
+  const rows = mergeDisplayRows(entries ?? []);
+  const ready = entries !== null;
+
   return (
-    <Section title={title} note={note}>
-      {loading ? (
-        <p className="section-note">加载中…</p>
-      ) : (
-        <>
-          <textarea
-            className="mem-textarea"
-            value={content}
-            placeholder="（空）"
-            rows={5}
-            onChange={(e) => setContent(e.target.value)}
-          />
-          {error && <p className="error">{error}</p>}
-          <div className="field-actions">
-            <button
-              type="button"
-              disabled={!dirty || saving}
-              onClick={() => void save()}
-            >
-              {saving ? "保存中…" : "保存"}
-            </button>
-          </div>
-        </>
-      )}
-    </Section>
+    <section className="section">
+      <div className="rule-section-head">
+        <h2 className="section-title">条目</h2>
+        <button
+          type="button"
+          className="btn-outline"
+          disabled={creating || unavailable}
+          onClick={() => void createEntry()}
+        >
+          {creating ? "新建中…" : "新建条目"}
+        </button>
+      </div>
+      <p className="section-note">点开可编辑。常驻 / 按需仅用户条目可切换。</p>
+      <div className="section-card mem-entry-card">
+        {!ready ? (
+          <p className="section-note">加载中…</p>
+        ) : (
+          <>
+            {unavailable && <p className="section-note">暂不可用</p>}
+            {error && !unavailable && (
+              <>
+                <p className="error">{error}</p>
+                {entries.length === 0 && (
+                  <button type="button" className="btn-outline" onClick={load}>
+                    重试
+                  </button>
+                )}
+              </>
+            )}
+            {rows.map((row) =>
+              row.kind === "doc" ? (
+                <EntryItem
+                  key={row.doc.id}
+                  name={row.doc.name}
+                  doc={row.doc}
+                  initialOpen={row.doc.id === createdId}
+                  onPatched={(next) => patchEntry(row.doc.id, next)}
+                  onDeleted={() => removeFromList(row.doc.id)}
+                  onStatus={setStatus}
+                  onAuthError={onAuthError}
+                />
+              ) : (
+                <EntryItem
+                  key={`placeholder:${row.name}`}
+                  name={row.name}
+                  doc={null}
+                  applyMode={row.applyMode}
+                  onPatched={() => undefined}
+                  onDeleted={() => undefined}
+                  onStatus={setStatus}
+                  onAuthError={onAuthError}
+                />
+              ),
+            )}
+          </>
+        )}
+        {status && <p className="section-note">{status}</p>}
+      </div>
+    </section>
   );
 }
 
-/** The on-demand 主题 notes (view / edit / delete), GLOBAL layer. */
-function TopicList({ onAuthError }: { onAuthError: (e: unknown) => unknown }) {
-  const [slugs, setSlugs] = useState<string[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // A 404/501 = this deployed backend predates the 主题 endpoint (前后端版本漂移). Held
-  // apart from `error` so it shows as a calm note (服务端待升级), not a red failure.
-  const [unavailable, setUnavailable] = useState(false);
-
-  useEffect(() => {
-    let alive = true;
-    listMemoryTopics()
-      .then((s) => alive && setSlugs(s))
-      .catch((e) => {
-        onAuthError(e);
-        if (!alive) return;
-        if (isFeatureUnavailable(e)) setUnavailable(true);
-        else setError("加载主题失败");
-        setSlugs([]);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [onAuthError]);
-
-  return (
-    <Section
-      title="主题记忆"
-      note="AI 按需查阅的主题笔记。可查看、编辑或删除。"
-    >
-      {slugs === null && !error && !unavailable && (
-        <p className="section-note">加载中…</p>
-      )}
-      {unavailable && (
-        <p className="section-note">主题记忆暂不可用（服务端待升级）。</p>
-      )}
-      {error && <p className="error">{error}</p>}
-      {slugs !== null && slugs.length === 0 && !error && !unavailable && (
-        <p className="section-note">还没有主题记忆。</p>
-      )}
-      {slugs?.map((slug) => (
-        <TopicItem
-          key={slug}
-          slug={slug}
-          onDeleted={() =>
-            setSlugs((prev) => (prev ?? []).filter((s) => s !== slug))
-          }
-          onAuthError={onAuthError}
-        />
-      ))}
-    </Section>
-  );
-}
-
-/** One 主题 note — collapsed to a row, expands to a CAS-guarded editor + delete. */
-function TopicItem({
-  slug,
+function EntryItem({
+  name,
+  doc,
+  applyMode: placeholderMode = "always",
+  initialOpen = false,
+  onPatched,
   onDeleted,
+  onStatus,
   onAuthError,
 }: {
-  slug: string;
+  name: string;
+  doc: DocumentNode | null;
+  applyMode?: DocumentApplyMode;
+  initialOpen?: boolean;
+  onPatched: (next: DocumentNode) => void;
   onDeleted: () => void;
+  onStatus: (msg: string | null) => void;
   onAuthError: (e: unknown) => unknown;
 }) {
-  const [open, setOpen] = useState(false);
+  const source = useMemo(
+    () => entrySource(name, doc?.id ?? null),
+    [doc?.id, name],
+  );
+  const mode = doc?.applyMode ?? placeholderMode;
+  const other: DocumentApplyMode = mode === "always" ? "on_demand" : "always";
+  const fmError = doc ? entryFrontmatterError(doc) : null;
+  const description = doc ? entryDescription(doc) : "";
+  const canToggleApply = Boolean(doc && !doc.aiMaintained && !fmError);
+  const canRename = Boolean(
+    doc && !doc.aiMaintained && source?.channel === "document",
+  );
+  const canDelete = Boolean(
+    doc && !isAiCoreMemoryLeaf(doc) && source?.channel !== "memory-file",
+  );
+  const alwaysChars = doc?.alwaysChars;
+  const showAlwaysChars =
+    mode === "always" &&
+    doc?.disputedAt == null &&
+    typeof alwaysChars === "number" &&
+    Number.isFinite(alwaysChars) &&
+    alwaysChars >= ROW_CHARS_FLOOR;
+
+  const [open, setOpen] = useState(initialOpen);
   const [loaded, setLoaded] = useState(false);
   const [content, setContent] = useState("");
   const [saved, setSaved] = useState("");
@@ -404,38 +581,112 @@ function TopicItem({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function expand() {
-    const next = !open;
-    setOpen(next);
-    if (!next || loaded) return;
+  const loadBody = useCallback(async () => {
+    if (!source) {
+      setError("无法打开此条目");
+      return;
+    }
     setError(null);
     try {
-      const d = await getMemoryTopic(slug);
-      setContent(d.content);
-      setSaved(d.content);
-      setVersion(d.version);
+      if (source.channel === "memory-file") {
+        const d = await getMemoryFile(source.memoryKind);
+        setContent(d.content);
+        setSaved(d.content);
+        setVersion(d.version);
+      } else if (source.channel === "memory-topic") {
+        const d = await getMemoryTopic(source.slug);
+        setContent(d.content);
+        setSaved(d.content);
+        setVersion(d.version);
+      } else {
+        const d = await getDocument(source.id);
+        setContent(d.content);
+        setSaved(d.content);
+        setVersion(d.version);
+        if (doc && (d.applyMode !== doc.applyMode || d.name !== doc.name)) {
+          onPatched({ ...doc, applyMode: d.applyMode, name: d.name });
+        }
+      }
       setLoaded(true);
     } catch (e) {
       onAuthError(e);
       setError("加载失败");
     }
+  }, [doc, onAuthError, onPatched, source]);
+
+  // Created rows open once on mount; later expands go through expand().
+  // biome-ignore lint/correctness/useExhaustiveDependencies: open-once on create
+  useEffect(() => {
+    if (!initialOpen) return;
+    void loadBody();
+  }, [initialOpen]);
+
+  function expand() {
+    setOpen((cur) => {
+      const next = !cur;
+      if (next && !loaded) void loadBody();
+      return next;
+    });
+  }
+
+  async function toggleApplyMode() {
+    if (!doc || !canToggleApply || busy) return;
+    setBusy(true);
+    setError(null);
+    onStatus(null);
+    try {
+      const next = await updateDocumentApplyMode(doc.id, other);
+      onPatched(next);
+      onStatus(`已设为${APPLY_LABEL[other]}`);
+    } catch (e) {
+      onAuthError(e);
+      setError("切换失败，请重试");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reloadLive() {
+    if (!source) return;
+    if (source.channel === "memory-file") {
+      const live = await getMemoryFile(source.memoryKind);
+      setContent(live.content);
+      setSaved(live.content);
+      setVersion(live.version);
+      return;
+    }
+    if (source.channel === "memory-topic") {
+      const live = await getMemoryTopic(source.slug);
+      setContent(live.content);
+      setSaved(live.content);
+      setVersion(live.version);
+      return;
+    }
+    const live = await getDocument(source.id);
+    setContent(live.content);
+    setSaved(live.content);
+    setVersion(live.version);
   }
 
   async function save() {
+    if (!source) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await writeMemoryTopic(slug, content, version);
+      const r =
+        source.channel === "memory-file"
+          ? await writeMemoryFile(source.memoryKind, content, version)
+          : source.channel === "memory-topic"
+            ? await writeMemoryTopic(source.slug, content, version)
+            : await writeDocument(source.id, content, version);
       if (r.conflict) {
-        const live = await getMemoryTopic(slug);
-        setContent(live.content);
-        setSaved(live.content);
-        setVersion(live.version);
+        await reloadLive();
         setError("内容已在别处更新，已为你刷新，请重新编辑后保存。");
         return;
       }
       setSaved(content);
       setVersion(r.version);
+      onStatus("已保存");
     } catch (e) {
       onAuthError(e);
       setError("保存失败，请重试");
@@ -444,15 +695,44 @@ function TopicItem({
     }
   }
 
-  async function remove() {
-    if (!window.confirm(`确定删除记忆主题「${slug}」？此操作不可撤销。`))
-      return;
+  async function rename() {
+    if (!doc || !canRename) return;
+    const input = window.prompt("条目名称", doc.name);
+    if (input === null) return;
+    const nextName = ensureMdName(input.trim());
+    if (nextName === ".md" || nextName === doc.name) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await writeMemoryTopic(slug, "", null);
-      if (!r.ok) throw new Error("写入冲突");
+      const next = await renameDocument(doc.id, nextName);
+      onPatched(next);
+      onStatus("已重命名");
+    } catch (e) {
+      onAuthError(e);
+      setError("重命名失败，请重试");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    if (!doc || !canDelete || !source) return;
+    if (!window.confirm(`确定删除「${doc.name}」？此操作不可撤销。`)) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (source.channel === "memory-topic") {
+        const r = await writeMemoryTopic(source.slug, "", null);
+        if (!r.ok) throw new Error("写入冲突");
+      } else if (source.channel === "document") {
+        const r = await deleteDocument(doc.id);
+        if (!r.ok) throw new Error("删除冲突");
+      } else {
+        setBusy(false);
+        return;
+      }
       onDeleted();
+      onStatus("已删除");
     } catch (e) {
       onAuthError(e);
       setError("删除失败，请重试");
@@ -461,42 +741,95 @@ function TopicItem({
   }
 
   const dirty = loaded && content !== saved;
+  const leafNote =
+    source?.channel === "memory-file"
+      ? "留空并保存即清空。"
+      : `${APPLY_LABEL[mode]} · ${APPLY_HINT[mode]}`;
 
   return (
     <div className="mem-topic">
-      <button
-        type="button"
-        className="mem-topic-head"
-        aria-expanded={open}
-        onClick={() => void expand()}
-      >
-        <span className="mem-topic-name">{slug}.md</span>
-        <span className="mem-topic-chevron" aria-hidden>
-          {open ? "▾" : "›"}
-        </span>
-      </button>
+      <div className="mem-entry-row">
+        <button
+          type="button"
+          className="mem-topic-head mem-entry-main"
+          aria-expanded={open}
+          onClick={() => void expand()}
+        >
+          <span className="mem-entry-meta">
+            <span className="mem-entry-title">
+              <span className="mem-topic-name">{name}</span>
+              {fmError ? (
+                <span className="mem-entry-invalid">不生效</span>
+              ) : null}
+            </span>
+            {fmError ? (
+              <span className="mem-entry-desc">{fmError}</span>
+            ) : description ? (
+              <span className="mem-entry-desc">{description}</span>
+            ) : null}
+          </span>
+          {showAlwaysChars ? (
+            <span className="mem-entry-chars">
+              {formatRoughChars(alwaysChars)}
+            </span>
+          ) : null}
+          <span className="mem-topic-chevron" aria-hidden>
+            {open ? "▾" : "›"}
+          </span>
+        </button>
+        {canToggleApply ? (
+          <button
+            type="button"
+            className="rule-apply-chip"
+            title={`${APPLY_LABEL[mode]} · ${APPLY_HINT[mode]}（点击切换）`}
+            aria-label={`生效方式：${APPLY_LABEL[mode]}，点击切换`}
+            disabled={busy}
+            onClick={() => void toggleApplyMode()}
+          >
+            {APPLY_LABEL[mode]}
+          </button>
+        ) : (
+          <span className="rule-apply-chip" aria-hidden>
+            {APPLY_LABEL[mode]}
+          </span>
+        )}
+      </div>
       {open && (
         <div className="mem-topic-body">
           {!loaded && !error ? (
             <p className="section-note">加载中…</p>
           ) : (
             <>
+              <p className="section-note">{leafNote}</p>
               <textarea
                 className="mem-textarea"
                 value={content}
-                rows={5}
+                placeholder="（空）"
+                rows={6}
                 onChange={(e) => setContent(e.target.value)}
               />
               {error && <p className="error">{error}</p>}
               <div className="field-actions">
-                <button
-                  type="button"
-                  className="btn-danger-outline"
-                  disabled={busy}
-                  onClick={() => void remove()}
-                >
-                  删除
-                </button>
+                {canRename && (
+                  <button
+                    type="button"
+                    className="btn-outline"
+                    disabled={busy}
+                    onClick={() => void rename()}
+                  >
+                    重命名
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="btn-danger-outline"
+                    disabled={busy}
+                    onClick={() => void remove()}
+                  >
+                    删除
+                  </button>
+                )}
                 <button
                   type="button"
                   disabled={!dirty || busy}
@@ -509,6 +842,7 @@ function TopicItem({
           )}
         </div>
       )}
+      {!open && error && <p className="error">{error}</p>}
     </div>
   );
 }

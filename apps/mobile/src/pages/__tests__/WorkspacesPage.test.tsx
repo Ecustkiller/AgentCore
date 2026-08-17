@@ -59,7 +59,8 @@ describe("WorkspacesPage · 我的文件", () => {
     expect(screen.getByText("一次快速对话")).toBeTruthy();
     expect(screen.getByText("我的文件")).toBeTruthy();
     expect(screen.getByText("全局设定")).toBeTruthy();
-    expect(screen.getByText("规则")).toBeTruthy();
+    expect(screen.getByText("会进模型的条目 · 常驻 / 按需")).toBeTruthy();
+    expect(screen.queryByText("规则")).toBeNull();
 
     expect(screen.getByText("文件夹")).toBeTruthy();
     expect(screen.getByText("对话产物")).toBeTruthy();

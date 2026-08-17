@@ -1,15 +1,20 @@
 import { getTokens } from "@/api/client";
 import {
   type ConversationSummary,
+  type ConversationTrash,
+  type DeletedConversationSummary,
   type FolderGroup,
-  type GroupedConversations,
   deleteConversation,
+  listConversationTrash,
   listConversations,
   listConversationsGrouped,
   renameConversation,
+  restoreConversation,
   setConversationArchived,
+  setConversationPinned,
 } from "@/api/conversations";
 import { type SearchSection, search } from "@/api/search";
+import { ShareConversationSheet } from "@/components/ShareConversationSheet";
 import {
   ActionSheet,
   ConfirmDialog,
@@ -17,8 +22,33 @@ import {
   SearchResults,
   timeLabel,
 } from "@/components/conversations";
-import { useConversationAwaitingAttention } from "@/lib/aiAttention";
+import {
+  useAiAttention,
+  useConversationAwaitingAttention,
+} from "@/lib/aiAttention";
+import { useConversationCloudRunning } from "@/lib/aiTurnActivity";
 import { folderWorkspaceId } from "@/lib/cloudFolder";
+import {
+  DELETE_CONVERSATION_LABEL,
+  deleteConversationConfirmLabel,
+} from "@/lib/conversationDeleteCopy";
+import {
+  isDrawerGroupExpanded,
+  readDrawerGroupExpand,
+  writeDrawerGroupExpand,
+} from "@/lib/conversationDrawerExpand";
+import { buildConversationDrawerRail } from "@/lib/conversationDrawerRail";
+import {
+  getConversationListArchived,
+  insertRestored,
+  patchConversation,
+  removeConversation,
+  replaceArchived,
+  replaceGrouped,
+  useConversationListArchived,
+  useConversationListGrouped,
+} from "@/lib/conversationListCache";
+import { retentionRemainingLabel } from "@/lib/conversationTrash";
 import {
   ChevronDown,
   ChevronRight,
@@ -33,34 +63,26 @@ import {
 // that used to be the landing list lives here, as a left slide-in drawer opened from the chat
 // header's ☰. Mirrors the desktop sidebar's recent-conversations + the industry pattern
 // (ChatGPT/Claude 左抽屉历史). Hosts the same management surface the old list page had —
-// 搜索 / 已归档 / 行内 重命名·归档·删除 — reusing the shared primitives in conversations.tsx.
+// 搜索 / 已归档 / 最近删除 / 行内 置顶·重命名·分享·归档·删除 — reusing the
+// shared primitives in conversations.tsx. 最近删除 is a drawer view (no
+// /conversations route); it has no folder half and no 彻底删除.
 //
-// Live list is folder-grouped (`listConversationsGrouped`); archived stays a flat
-// `listConversations(true)`. Data is fetched lazily on open (and refetched when the
-// archived view toggles), so a closed drawer costs nothing. Picking a conversation
-// routes to /c/:id and closes; ✎ starts a new draft (routes to /, the draft home)
-// and closes. Cloud group「＋」lands on / with draftFolder state.
+// Live list is folder-grouped (`listConversationsGrouped`) then cut into the
+// 方案 C rail (置顶 / 组 / 裸聊); archived stays a flat `listConversations(true)`.
+// Trash fetches `listConversationTrash` only when that view is open. Cache is
+// the list truth: open / 切已归档 still fetch then replace; rename / pin /
+// delete / undo / trash-restore patch the cache. Stream title_generated /
+// message_start (and fulfill bump) update the open drawer. Group expand persist
+// survives close; 等你 on a rail row force-expands without writing back.
+// Picking a conversation routes to /c/:id and closes; trash rows cannot open.
+// ✎ starts a new draft (routes to /, the draft home) and closes. Cloud group
+// 「＋」lands on / with draftFolder state.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-function mapGroupedConversations(
-  grouped: GroupedConversations | null,
-  fn: (c: ConversationSummary) => ConversationSummary | null,
-): GroupedConversations | null {
-  if (!grouped) return grouped;
-  const apply = (rows: ConversationSummary[]) =>
-    rows.flatMap((c) => {
-      const next = fn(c);
-      return next ? [next] : [];
-    });
-  return {
-    folders: grouped.folders.map((f) => ({
-      ...f,
-      conversations: apply(f.conversations),
-    })),
-    ungrouped: apply(grouped.ungrouped),
-  };
-}
+const UNDO_MS = 8000;
+
+type DrawerListView = "live" | "archived" | "trash";
 
 export function ConversationDrawer({
   open,
@@ -75,13 +97,15 @@ export function ConversationDrawer({
   activeId?: string;
 }) {
   const navigate = useNavigate();
-  const [items, setItems] = useState<ConversationSummary[] | null>(null);
-  const [grouped, setGrouped] = useState<GroupedConversations | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [archivedView, setArchivedView] = useState(false);
+  const grouped = useConversationListGrouped();
+  const items = useConversationListArchived();
+  const attention = useAiAttention();
+  const [expandMap, setExpandMap] = useState(readDrawerGroupExpand);
+  const [view, setView] = useState<DrawerListView>("live");
+  const [trash, setTrash] = useState<ConversationTrash | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Search (跨会话搜索) — independent of the archived view; an empty query shows the list.
+  // Search (跨会话搜索) — independent of the list view; an empty query shows the list.
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchSection[] | null>(null);
   const [searching, setSearching] = useState(false);
@@ -89,6 +113,12 @@ export function ConversationDrawer({
   const [menuFor, setMenuFor] = useState<ConversationSummary | null>(null);
   const [renaming, setRenaming] = useState<ConversationSummary | null>(null);
   const [deleting, setDeleting] = useState<ConversationSummary | null>(null);
+  const [sharing, setSharing] = useState<ConversationSummary | null>(null);
+  const [undo, setUndo] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Drag gestures: left-edge swipe opens, leftward swipe on the open panel closes. The panel
   // follows the finger (`drag.x` = live translateX), then CSS settles on release. `open` and
   // the callbacks are read via refs so the touch listeners can attach exactly once.
@@ -103,26 +133,48 @@ export function ConversationDrawer({
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // Lazy fetch: only when open (a closed drawer costs nothing), and refetch when the
-  // archived view toggles. A cleared token routes to login (mirrors the chat page gate).
+  // Lazy fetch: only when open (a closed drawer costs nothing), and refetch when
+  // the list view changes. Trash is fetched only while that view is open. A
+  // cleared token routes to login (mirrors the chat page gate). Cache stays the
+  // render truth — do not null it at fetch start.
   useEffect(() => {
     if (!open) return;
-    setItems(null);
-    setGrouped(null);
     setError(null);
-    const req = archivedView
-      ? listConversations(true).then(setItems)
-      : listConversationsGrouped().then(setGrouped);
+    if (view === "trash") {
+      listConversationTrash()
+        .then(setTrash)
+        .catch((e) => {
+          if (!getTokens()) {
+            navigate("/login", { replace: true });
+            return;
+          }
+          setError(e instanceof Error ? e.message : "加载最近删除失败");
+          setTrash({ items: [], retention_days: 0, total: 0 });
+        });
+      return;
+    }
+    const req =
+      view === "archived"
+        ? listConversations(true).then(replaceArchived)
+        : listConversationsGrouped().then(replaceGrouped);
     req.catch((e) => {
       if (!getTokens()) {
         navigate("/login", { replace: true });
         return;
       }
       setError(e instanceof Error ? e.message : "加载会话列表失败");
-      setItems([]);
-      setGrouped({ folders: [], ungrouped: [] });
+      if (view === "archived") replaceArchived([]);
+      else replaceGrouped({ folders: [], ungrouped: [] });
     });
-  }, [open, archivedView, navigate]);
+  }, [open, view, navigate]);
+
+  function clearUndo() {
+    if (undoTimerRef.current != null) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndo(null);
+  }
 
   // Reset transient surfaces when the drawer closes, so reopening is clean.
   useEffect(() => {
@@ -131,8 +183,21 @@ export function ConversationDrawer({
     setMenuFor(null);
     setRenaming(null);
     setDeleting(null);
-    setCollapsed(new Set());
+    setSharing(null);
+    if (undoTimerRef.current != null) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndo(null);
   }, [open]);
+
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current != null) {
+        clearTimeout(undoTimerRef.current);
+      }
+    };
+  }, []);
 
   // Touch-drag open/close (attached once; reads state via refs). A drag from the left-edge
   // strip pulls the panel in; a leftward drag on the open panel pushes it out. Direction-
@@ -246,13 +311,9 @@ export function ConversationDrawer({
     onClose();
   }
 
-  function toggleGroup(id: string) {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function toggleGroup(id: string, displayed: boolean) {
+    writeDrawerGroupExpand(id, !displayed);
+    setExpandMap(readDrawerGroupExpand());
   }
 
   function openFolderFiles(folder: FolderGroup) {
@@ -273,17 +334,7 @@ export function ConversationDrawer({
     setError(null);
     try {
       const updated = await renameConversation(conv.id, title);
-      setItems(
-        (xs) =>
-          xs?.map((x) =>
-            x.id === conv.id ? { ...x, title: updated.title } : x,
-          ) ?? xs,
-      );
-      setGrouped((g) =>
-        mapGroupedConversations(g, (x) =>
-          x.id === conv.id ? { ...x, title: updated.title } : x,
-        ),
-      );
+      patchConversation(conv.id, { title: updated.title });
       setRenaming(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "重命名失败");
@@ -297,10 +348,7 @@ export function ConversationDrawer({
     setError(null);
     try {
       await setConversationArchived(conv.id, !conv.archived);
-      setItems((xs) => xs?.filter((x) => x.id !== conv.id) ?? xs);
-      setGrouped((g) =>
-        mapGroupedConversations(g, (x) => (x.id === conv.id ? null : x)),
-      );
+      removeConversation(conv.id);
       setMenuFor(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "操作失败");
@@ -309,16 +357,40 @@ export function ConversationDrawer({
     }
   }
 
+  async function doPinToggle(conv: ConversationSummary) {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await setConversationPinned(conv.id, !conv.pinned);
+      patchConversation(conv.id, { pinned: updated.pinned });
+      setMenuFor(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "操作失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function armUndo(conv: ConversationSummary) {
+    if (undoTimerRef.current != null) {
+      clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+    setUndo({ id: conv.id, title: conv.title || "新对话" });
+    undoTimerRef.current = setTimeout(() => {
+      undoTimerRef.current = null;
+      setUndo(null);
+    }, UNDO_MS);
+  }
+
   async function doDelete(conv: ConversationSummary) {
     setBusy(true);
     setError(null);
     try {
       await deleteConversation(conv.id);
-      setItems((xs) => xs?.filter((x) => x.id !== conv.id) ?? xs);
-      setGrouped((g) =>
-        mapGroupedConversations(g, (x) => (x.id === conv.id ? null : x)),
-      );
+      removeConversation(conv.id);
       setDeleting(null);
+      armUndo(conv);
     } catch (e) {
       setError(e instanceof Error ? e.message : "删除失败");
     } finally {
@@ -326,15 +398,85 @@ export function ConversationDrawer({
     }
   }
 
-  const searchMode = query.trim().length > 0;
-  const loading = !error && (archivedView ? items === null : grouped === null);
-  const empty = archivedView
-    ? items?.length === 0
-    : Boolean(
-        grouped &&
-          grouped.ungrouped.length === 0 &&
-          grouped.folders.every((f) => f.conversations.length === 0),
+  function applyRestored(restored: ConversationSummary) {
+    if (restored.archived) {
+      const current = getConversationListArchived();
+      replaceArchived([
+        restored,
+        ...(current ?? []).filter((x) => x.id !== restored.id),
+      ]);
+    } else {
+      insertRestored(restored);
+    }
+  }
+
+  async function doUndo() {
+    if (!undo) return;
+    const id = undo.id;
+    setBusy(true);
+    setError(null);
+    try {
+      const restored = await restoreConversation(id);
+      applyRestored(restored);
+      clearUndo();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "恢复失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function doRestoreTrash(row: DeletedConversationSummary) {
+    setBusy(true);
+    setError(null);
+    try {
+      const restored = await restoreConversation(row.id);
+      applyRestored(restored);
+      setTrash((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.filter((x) => x.id !== row.id),
+              total: Math.max(0, prev.total - 1),
+            }
+          : prev,
       );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "恢复失败");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const searchMode = query.trim().length > 0;
+  const loading =
+    !error &&
+    (view === "archived"
+      ? items === null
+      : view === "trash"
+        ? trash === null
+        : grouped === null);
+  const empty =
+    view === "archived"
+      ? items?.length === 0
+      : view === "trash"
+        ? trash?.items.length === 0
+        : Boolean(
+            grouped &&
+              grouped.ungrouped.length === 0 &&
+              grouped.folders.every((f) => f.conversations.length === 0),
+          );
+  const emptyHint =
+    view === "archived"
+      ? "没有已归档的对话。"
+      : view === "trash"
+        ? trash && trash.retention_days > 0
+          ? `最近删除是空的。删除的对话会在这里保留 ${trash.retention_days} 天，其间随时可以恢复。`
+          : "最近删除是空的。"
+        : "还没有对话，点 ✎ 开始。";
+  const archivedView = view === "archived";
+  const rail = grouped ? buildConversationDrawerRail(grouped) : null;
+  const requiredIds = new Set(attention.map((e) => e.conversationId));
 
   return (
     <div
@@ -359,25 +501,34 @@ export function ConversationDrawer({
         aria-label="对话历史"
       >
         <header className="bar">
-          {archivedView ? (
+          {view === "live" ? (
+            <span>对话历史</span>
+          ) : (
             <button
               type="button"
               className="link"
-              onClick={() => setArchivedView(false)}
+              onClick={() => setView("live")}
             >
               ← 对话
             </button>
-          ) : (
-            <span>对话历史</span>
           )}
           <div className="bar-right">
-            {!archivedView && (
+            {view !== "archived" && (
               <button
                 type="button"
                 className="link"
-                onClick={() => setArchivedView(true)}
+                onClick={() => setView("archived")}
               >
                 已归档
+              </button>
+            )}
+            {view !== "trash" && (
+              <button
+                type="button"
+                className="link"
+                onClick={() => setView("trash")}
+              >
+                最近删除
               </button>
             )}
             <button
@@ -419,54 +570,100 @@ export function ConversationDrawer({
         ) : (
           <div className="list">
             {loading && <p className="muted hint">加载中…</p>}
-            {empty && (
-              <p className="muted hint">
-                {archivedView
-                  ? "没有已归档的对话。"
-                  : "还没有对话，点 ✎ 开始。"}
-              </p>
-            )}
-            {archivedView
-              ? items?.map((c) => (
-                  <ConversationRow
-                    key={c.id}
-                    conv={c}
-                    active={c.id === activeId}
-                    onOpen={() => openConversation(c.id)}
-                    onMenu={() => setMenuFor(c)}
+            {empty && <p className="muted hint">{emptyHint}</p>}
+            {view === "trash"
+              ? trash?.items.map((row) => (
+                  <TrashConversationRow
+                    key={row.id}
+                    row={row}
+                    busy={busy}
+                    onRestore={() => void doRestoreTrash(row)}
                   />
                 ))
-              : grouped && (
-                  <>
-                    {grouped.folders
-                      .filter((f) => f.conversations.length > 0)
-                      .map((folder) => (
-                        <FolderGroupBlock
-                          key={folder.id}
-                          folder={folder}
-                          expanded={!collapsed.has(folder.id)}
-                          activeId={activeId}
-                          onToggle={() => toggleGroup(folder.id)}
-                          onOpenFiles={() => openFolderFiles(folder)}
-                          onNewInFolder={() => newInFolder(folder)}
-                          onOpenConv={openConversation}
-                          onMenu={setMenuFor}
-                        />
-                      ))}
-                    {grouped.ungrouped.map((c) => (
-                      <ConversationRow
-                        key={c.id}
-                        conv={c}
-                        active={c.id === activeId}
-                        onOpen={() => openConversation(c.id)}
-                        onMenu={() => setMenuFor(c)}
-                      />
-                    ))}
-                  </>
-                )}
+              : archivedView
+                ? items?.map((c) => (
+                    <ConversationRow
+                      key={c.id}
+                      conv={c}
+                      active={c.id === activeId}
+                      onOpen={() => openConversation(c.id)}
+                      onMenu={() => setMenuFor(c)}
+                    />
+                  ))
+                : rail && (
+                    <>
+                      {rail.pinned.length > 0 && (
+                        <div className="drawer-rail-zone">
+                          {rail.pinned.map((c) => (
+                            <ConversationRow
+                              key={c.id}
+                              conv={c}
+                              active={c.id === activeId}
+                              onOpen={() => openConversation(c.id)}
+                              onMenu={() => setMenuFor(c)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                      {rail.groups.length > 0 && (
+                        <div className="drawer-rail-zone">
+                          {rail.groups.map((folder) => {
+                            const hasRequired = folder.conversations.some((c) =>
+                              requiredIds.has(c.id),
+                            );
+                            const expanded = isDrawerGroupExpanded({
+                              stored: expandMap[folder.id],
+                              hasRequired,
+                            });
+                            return (
+                              <FolderGroupBlock
+                                key={folder.id}
+                                folder={folder}
+                                expanded={expanded}
+                                activeId={activeId}
+                                onToggle={() =>
+                                  toggleGroup(folder.id, expanded)
+                                }
+                                onOpenFiles={() => openFolderFiles(folder)}
+                                onNewInFolder={() => newInFolder(folder)}
+                                onOpenConv={openConversation}
+                                onMenu={setMenuFor}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                      {rail.bare.length > 0 && (
+                        <div className="drawer-rail-zone">
+                          {rail.bare.map((c) => (
+                            <ConversationRow
+                              key={c.id}
+                              conv={c}
+                              active={c.id === activeId}
+                              onOpen={() => openConversation(c.id)}
+                              onMenu={() => setMenuFor(c)}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
           </div>
         )}
 
+        {undo && (
+          <output className="drawer-undo">
+            <span>已删除「{undo.title}」</span>
+            <button
+              type="button"
+              className="drawer-undo-action"
+              disabled={busy}
+              onClick={() => void doUndo()}
+            >
+              撤销
+            </button>
+          </output>
+        )}
         {error && <div className="error bar">{error}</div>}
       </aside>
 
@@ -480,12 +677,30 @@ export function ConversationDrawer({
             setMenuFor(null);
             setRenaming(c);
           }}
+          onPin={() => void doPinToggle(menuFor)}
+          onShare={
+            view === "live"
+              ? () => {
+                  const c = menuFor;
+                  setMenuFor(null);
+                  setSharing(c);
+                }
+              : undefined
+          }
           onArchive={() => void doArchiveToggle(menuFor)}
           onDelete={() => {
             const c = menuFor;
             setMenuFor(null);
             setDeleting(c);
           }}
+        />
+      )}
+
+      {sharing && (
+        <ShareConversationSheet
+          conversationId={sharing.id}
+          title={sharing.title}
+          onClose={() => setSharing(null)}
         />
       )}
 
@@ -500,14 +715,44 @@ export function ConversationDrawer({
 
       {deleting && (
         <ConfirmDialog
-          title="删除对话"
-          message={`删除「${deleting.title || "新对话"}」？此操作不可撤销。`}
-          confirmLabel="删除"
+          title={DELETE_CONVERSATION_LABEL}
+          message={`删除「${deleting.title || "新对话"}」？${deleteConversationConfirmLabel()}`}
+          confirmLabel={DELETE_CONVERSATION_LABEL}
           busy={busy}
           onCancel={() => setDeleting(null)}
           onConfirm={() => void doDelete(deleting)}
         />
       )}
+    </div>
+  );
+}
+
+function TrashConversationRow({
+  row,
+  busy,
+  onRestore,
+}: {
+  row: DeletedConversationSummary;
+  busy: boolean;
+  onRestore: () => void;
+}) {
+  const remain = retentionRemainingLabel(row.purge_at);
+  return (
+    <div className="conv-row">
+      <div className="conv conv-trash">
+        <span className="conv-title">{row.title || "新对话"}</span>
+        <span className="conv-meta">
+          {row.message_count} 条{remain ? ` · ${remain}` : ""}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="conv-restore"
+        disabled={busy}
+        onClick={onRestore}
+      >
+        恢复
+      </button>
     </div>
   );
 }
@@ -600,12 +845,12 @@ function FolderGroupBlock({
 }
 
 /**
- * One history row + its「等你」灯.
+ * One history row + its「等你」/ running 灯.
  *
- * The list itself is a snapshot (fetched on open, then static), so the light can't come from
- * it — each row subscribes to the firehose `ai_attention` signal on its own (desktop lights the
- * same rows from its local interaction stores; on mobile the firehose is the only source).
- * Opening the conversation clears its entries, so entering the chat turns the light off.
+ * Title / rank come from the list cache; the lights can't — each row subscribes to
+ * firehose `ai_attention` and account-level `ai_turn_activity` on its own. 等你光环
+ * 压过 running；本机容器不吃云 running。Opening the conversation clears its
+ * attention entries, so entering the chat turns that light off.
  */
 function ConversationRow({
   conv,
@@ -619,6 +864,11 @@ function ConversationRow({
   onMenu: () => void;
 }) {
   const awaiting = useConversationAwaitingAttention(conv.id);
+  const cloudRunning = useConversationCloudRunning(
+    conv.id,
+    conv.local_container_root_id,
+  );
+  const showRunning = !awaiting && cloudRunning;
   return (
     <div className="conv-row">
       <button
@@ -634,6 +884,9 @@ function ConversationRow({
                 role="img"
                 aria-label="等你决策"
               />
+            )}
+            {showRunning && (
+              <span className="conv-running" role="img" aria-label="执行中" />
             )}
           </span>
           <span className="conv-title">{conv.title || "新对话"}</span>

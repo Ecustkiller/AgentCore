@@ -20,6 +20,7 @@ import {
   type BrowserLoginSubmitKind,
   type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
+import { DebriefBlock } from "@/components/DebriefBlock";
 import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
@@ -52,7 +53,6 @@ import type {
   ProjectedAgent,
   ProjectedRun,
   ProjectedTeamNote,
-  RunDebrief,
   RunEscalation,
   RunStatus,
   TurnStatus,
@@ -1657,46 +1657,6 @@ function ContextBlockRow({ block }: { block: ContextBlockWire }) {
         <div className="recv-trunc">已截断（完整内容已传给 AI）</div>
       )}
     </div>
-  );
-}
-
-/** 完工交接简报 (run_completed.debrief) — the worker's OWN structured wrap-up (结论 / 关键要点 /
- *  关键假设 / 建议下一步); renders only the sections it authored. */
-function DebriefBlock({ debrief }: { debrief: RunDebrief }) {
-  const { summary, key_points, assumptions, next_steps } = debrief;
-  return (
-    <RunSection title="交接简报">
-      <div className="rd-debrief">
-        {summary && (
-          <div className="rd-debrief-part">
-            <div className="rd-part-label">结论</div>
-            <Markdown content={summary} evidence />
-          </div>
-        )}
-        {key_points && key_points.length > 0 && (
-          <div className="rd-debrief-part">
-            <div className="rd-part-label">关键要点</div>
-            <ul className="rd-points">
-              {key_points.map((pt, i) => (
-                <li key={`${i}:${pt}`}>{pt}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        {assumptions && (
-          <div className="rd-debrief-part">
-            <div className="rd-part-label">关键假设</div>
-            <p className="rd-assume">{assumptions}</p>
-          </div>
-        )}
-        {next_steps && (
-          <div className="rd-debrief-part">
-            <div className="rd-part-label">建议下一步</div>
-            <Markdown content={next_steps} evidence />
-          </div>
-        )}
-      </div>
-    </RunSection>
   );
 }
 

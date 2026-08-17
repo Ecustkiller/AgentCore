@@ -1,7 +1,7 @@
 import { getTokens } from "@/api/client";
 import { type WorkspaceSummary, listWorkspaces } from "@/api/workspaces";
 import { workspaceKind } from "@/lib/cloudFolder";
-import { Brain, ChevronRight, Cloud, Folder, ScrollText } from "lucide-react";
+import { Brain, ChevronRight, Cloud, Folder } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -66,24 +66,7 @@ export function WorkspacesPage() {
           </span>
           <span className="file-row-main">
             <span className="file-name">全局设定</span>
-            <span className="file-sub">画像、偏好与主题笔记</span>
-          </span>
-          <span className="file-chevron" aria-hidden>
-            <ChevronRight size={18} />
-          </span>
-        </button>
-
-        <button
-          type="button"
-          className="file-row"
-          onClick={() => navigate("/rules")}
-        >
-          <span className="file-icon" aria-hidden>
-            <ScrollText size={16} />
-          </span>
-          <span className="file-row-main">
-            <span className="file-name">规则</span>
-            <span className="file-sub">常驻 / 按需 · 指导 AI 做事</span>
+            <span className="file-sub">会进模型的条目 · 常驻 / 按需</span>
           </span>
           <span className="file-chevron" aria-hidden>
             <ChevronRight size={18} />

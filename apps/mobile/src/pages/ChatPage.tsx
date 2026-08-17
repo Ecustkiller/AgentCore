@@ -56,7 +56,6 @@ import { BrowserLiveSheet } from "@/components/BrowserLiveSheet";
 import type { OpenBrowserLiveOpts } from "@/components/BrowserLoginDecisionCard";
 import { CollapsibleUserText } from "@/components/CollapsibleUserText";
 import { ComposerMentionSheet } from "@/components/ComposerMentionSheet";
-import { ComposerModelBar } from "@/components/ComposerModelBar";
 import { ComposerMoreSheet } from "@/components/ComposerMoreSheet";
 import { ConversationDrawer } from "@/components/ConversationDrawer";
 import { DelegationAuthorizationCard } from "@/components/DelegationAuthorizationCard";
@@ -115,6 +114,7 @@ import {
   toOutgoingAgentMentions,
 } from "@/lib/composerMention";
 import { composerTrailingSlots } from "@/lib/composerTrailing";
+import { noteConversationStreamEvent } from "@/lib/conversationListCache";
 import {
   type ErrorAction,
   StreamHttpError,
@@ -1629,6 +1629,7 @@ export function ChatPage() {
   // Append an event to a specific turn (主路 / mid-flight 续流各写各的；勿依赖「最后一项」).
   // Lazily opens a userText-less turn when none exists yet (reattach on reopen).
   const appendEventToTurn = (turnId: string | null, event: SSEEvent) => {
+    if (conversationId) noteConversationStreamEvent(conversationId, event);
     // 诚实停止：stopping 丢弃正文/工具突变，仍消费 run_* + 终态确认。
     if (
       stopPhaseRef.current === "stopping" &&
@@ -3245,7 +3246,7 @@ export function ChatPage() {
     }
   }
 
-  // 当前组合：会话快照 → account default → placeholder（composer 上方常驻 + 「＋」菜单）。
+  // 当前组合：会话快照 → account default → placeholder（「＋」菜单）。
   const currentProfile = resolveDisplayProfile(modelProfiles, currentProfileId);
   const modelLabel = currentProfile?.name ?? "默认组合";
   const modelIsPreset = currentProfile?.kind === "system";
@@ -3743,12 +3744,6 @@ export function ChatPage() {
         >
           ＋
         </button>
-        <ComposerModelBar
-          label={modelLabel}
-          preset={modelIsPreset}
-          disabled={history === null || busy}
-          onOpen={() => setPickerOpen(true)}
-        />
         <textarea
           ref={composerInputRef}
           className="composer-input"
@@ -3833,9 +3828,15 @@ export function ChatPage() {
 
       {moreOpen && (
         <ComposerMoreSheet
+          modelLabel={modelLabel}
+          modelPreset={modelIsPreset}
           permissionLabel={permissionLabel}
           disabled={history === null || busy}
           onClose={() => setMoreOpen(false)}
+          onOpenModel={() => {
+            setMoreOpen(false);
+            setPickerOpen(true);
+          }}
           onOpenPermission={() => {
             setMoreOpen(false);
             setPermissionSheetOpen(true);

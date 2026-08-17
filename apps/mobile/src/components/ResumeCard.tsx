@@ -31,6 +31,7 @@ import {
 // Delegate team_preview：写盘单向收紧 + 嘱咐（确认面不提供排除岗 / 人改模；
 // excluded_run_ids / model_overrides 契约可保留，本卡 continue 不附）。
 // Debate team_preview：辩手 / 裁判节点显式；不展示模型下拉、不附 model_overrides。
+// 开工卡三键：继续 / 调整 / 取消。调整 = 不开工、回灌 CEO；复用嘱咐框且必填，不附写盘/模型修正。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
 // Cold × live deferred：``resume_deferred`` →「放行已记下…」；settlement 已锁，不可再改口取消。
 // Dense kinds use Latch + Interaction Sheet so long worker lists never inflate .screen.
@@ -634,6 +635,7 @@ function ResumeCardBody({
 
   const submit = (decision: CheckpointDecision) => {
     if (busy) return;
+    if (decision === "adjust" && !note.trim()) return;
     if (decision === "continue" && findPendingFolderOption()) {
       setPickerFailure({ kind: "unavailable" });
       return;
@@ -1246,7 +1248,7 @@ function ResumeCardBody({
       >
         {busy ? "提交中…" : primaryCta}
       </button>
-      {isPlanReview && (
+      {(isPlanReview || isTeamPreview) && (
         <button
           type="button"
           className="pause-btn pause-btn-neutral"

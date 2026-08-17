@@ -1,7 +1,7 @@
-// Document tree REST client for mobile (`/v1/documents`) — user rules carrier
-// (Agent记忆与知识系统 §5.7 / §5.2). Mirrors desktop `services/documents.ts` over
-// bearer-token `apiFetch`. 精简版 (手机端): GLOBAL scope only — list / create /
-// edit / delete / apply_mode; per-project rules stay a desktop task (减法).
+// Document tree REST client for mobile (`/v1/documents`) — unified md entries
+// under the convention root. Mirrors desktop `services/documents.ts` over
+// bearer-token `apiFetch`. Scope is `folderId` (`null` = GLOBAL); the file
+// rail lists entries flat by scope (no 记忆/规则 grouping, no role filter).
 import { apiFetch } from "@/api/client";
 import type { components } from "@/types/api.generated";
 
@@ -13,31 +13,48 @@ type DocumentWriteWire = Schemas["DocumentWriteResult"];
 /** Cloud-documents convention root name (§5.0). */
 export const AGENTCORE_ROOT_NAME = "AgentCore";
 
-/** User-rules directory under the convention root. */
+/** Legacy rules directory under the convention root. */
 export const RULES_DIR_NAME = "规则";
 
+/** Legacy memory directory under the convention root (AI-maintained notes). */
+export const MEMORY_DIR_NAME = "记忆";
+
 /**
- * User-facing injection mode for rules (§5.4). API also stores `conditional` for
- * scene rules; mobile only offers these two (no globs / conditions UI).
+ * User-facing injection mode (§5.4). API may still store other values;
+ * the mobile surface only offers these two.
  */
 export type DocumentApplyMode = "always" | "on_demand";
 
-/** Map wire `apply_mode` onto the two-state UI (unknown / conditional → always). */
+/** Map wire `apply_mode` onto the two-state UI (unknown → on_demand per frontmatter default). */
 export function toApplyMode(raw: string): DocumentApplyMode {
-  return raw === "on_demand" ? "on_demand" : "always";
+  return raw === "always" ? "always" : "on_demand";
 }
 
 /** A tree node's metadata (list rows — body omitted). */
 export interface DocumentNode {
   id: string;
   parentId: string | null;
-  /** Scope: null = GLOBAL layer, else the project (folder) this rule is bound to. */
+  /** Scope: null = GLOBAL layer, else the project (folder) this entry is bound to. */
   folderId: string | null;
   kind: "folder" | "document";
   role: "rule" | "general";
   aiMaintained: boolean;
   applyMode: DocumentApplyMode;
+  /** One-line summary from frontmatter; empty is fine (not an error). */
+  description: string;
   name: string;
+  /** Structural frontmatter failure — entry does not inject; UI must report it. */
+  frontmatterError: string | null;
+  /**
+   * Chars this entry contributes to the always pool (`null` when not always).
+   * Matches server `always_entry_chars` so row totals == meter `usedChars`.
+   */
+  alwaysChars: number | null;
+  /**
+   * When the user marked this entry wrong (`null` = live). Disputed entries are kept
+   * and still editable, but the AI stops injecting / consulting them.
+   */
+  disputedAt: string | null;
 }
 
 /** A node plus its markdown body + content-hash CAS tag. */
@@ -50,6 +67,28 @@ export interface DocumentWriteResult {
   ok: boolean;
   version: string;
   conflict: boolean;
+}
+
+/**
+ * Always-pool usage for the UI meter.
+ * `usedChars == globalChars + projectChars` (project scope includes global).
+ */
+export interface AlwaysQuota {
+  usedChars: number;
+  maxChars: number;
+  percent: number;
+  /** Global-scope always chars in this meter context. */
+  globalChars: number;
+  /** Project-scope always chars (0 when the meter is global-only). */
+  projectChars: number;
+}
+
+interface AlwaysQuotaWire {
+  used_chars: number;
+  max_chars: number;
+  percent: number;
+  global_chars?: number;
+  project_chars?: number;
 }
 
 /**
@@ -106,7 +145,14 @@ const toNode = (w: DocumentNodeWire): DocumentNode => ({
   role: w.role === "rule" ? "rule" : "general",
   aiMaintained: w.ai_maintained,
   applyMode: toApplyMode(w.apply_mode),
+  description: (w.description ?? "").trim(),
   name: w.name,
+  frontmatterError: w.frontmatter_error?.trim() || null,
+  alwaysChars:
+    typeof w.always_chars === "number" && Number.isFinite(w.always_chars)
+      ? w.always_chars
+      : null,
+  disputedAt: w.disputed_at?.trim() || null,
 });
 
 const toDetail = (w: DocumentDetailWire): DocumentDetail => ({
@@ -130,9 +176,67 @@ export function listDocuments(
 }
 
 /**
- * GLOBAL user rule documents (§5.2 / §5.0). Collects leaves under
- * `AgentCore/规则/` (folder_id null) plus leftover top-level GLOBAL rule docs.
- * Per-project rules are omitted (手机端减法 — manage on desktop).
+ * Flat list of inject-able **entries** for one scope (global when `folderId` is null).
+ * Walks `AgentCore/{规则,记忆}/` (and one nested level) plus leftover top-level docs.
+ * Does **not** group by `role` — UI partitions by scope only.
+ */
+export async function listScopeEntries(
+  folderId: string | null = null,
+): Promise<DocumentNode[]> {
+  const tops = await listDocuments(null);
+  const byId = new Map<string, DocumentNode>();
+
+  const takeDoc = (n: DocumentNode) => {
+    if (n.kind === "document" && n.folderId === folderId) byId.set(n.id, n);
+  };
+
+  for (const n of tops) takeDoc(n);
+
+  const agentcores = tops.filter(
+    (n) =>
+      n.kind === "folder" &&
+      n.name === AGENTCORE_ROOT_NAME &&
+      n.folderId === folderId,
+  );
+
+  await Promise.all(
+    agentcores.map(async (ac) => {
+      const kids = await listDocuments(ac.id);
+      await Promise.all(
+        kids.map(async (kid) => {
+          if (kid.kind === "document") {
+            takeDoc(kid);
+            return;
+          }
+          if (
+            kid.kind !== "folder" ||
+            (kid.name !== RULES_DIR_NAME && kid.name !== MEMORY_DIR_NAME)
+          ) {
+            return;
+          }
+          const leaves = await listDocuments(kid.id);
+          await Promise.all(
+            leaves.map(async (leaf) => {
+              if (leaf.kind === "document") {
+                takeDoc(leaf);
+                return;
+              }
+              if (leaf.kind !== "folder") return;
+              const nested = await listDocuments(leaf.id);
+              for (const n of nested) takeDoc(n);
+            }),
+          );
+        }),
+      );
+    }),
+  );
+
+  return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
+}
+
+/**
+ * GLOBAL user rule documents (legacy helper). Prefer {@link listScopeEntries}
+ * for the flat file-rail list. Per-project rules are omitted.
  */
 export async function listUserRules(): Promise<DocumentNode[]> {
   const tops = await listDocuments(null);
@@ -163,6 +267,38 @@ export async function listUserRules(): Promise<DocumentNode[]> {
   );
 
   return [...byId.values()].sort((a, b) => a.name.localeCompare(b.name, "zh"));
+}
+
+/** Always-pool usage for the injection context (global + optional project). */
+export function getAlwaysQuota(
+  folderId: string | null = null,
+): Promise<AlwaysQuota> {
+  const q =
+    folderId != null ? `?folder_id=${encodeURIComponent(folderId)}` : "";
+  return getJson<AlwaysQuotaWire>(
+    `/v1/documents/always-quota${q}`,
+    "加载常驻配额失败",
+  ).then((w) => {
+    const globalChars =
+      typeof w.global_chars === "number" && Number.isFinite(w.global_chars)
+        ? w.global_chars
+        : folderId == null
+          ? w.used_chars
+          : 0;
+    const projectChars =
+      typeof w.project_chars === "number" && Number.isFinite(w.project_chars)
+        ? w.project_chars
+        : folderId != null
+          ? Math.max(0, w.used_chars - globalChars)
+          : 0;
+    return {
+      usedChars: w.used_chars,
+      maxChars: w.max_chars,
+      percent: w.percent,
+      globalChars,
+      projectChars,
+    };
+  });
 }
 
 /** Load one document's body + CAS version. */

@@ -7,7 +7,7 @@
  * stream ENDS at a checkpoint (message_end finish_reason=paused → ChatPage.refreshPaused).
  * Unlike PauseCard it reads a PERSISTED PausedTurnSummary and asks the parent to drive a
  * fresh resume stream. These assert the two kind branches (ask_user / plan_review), that the
- * note rides along, and the plan_review-only 调整 gating — coverage the durable path lacked.
+ * note rides along, and plan_review / team_preview 调整 gating — coverage the durable path lacked.
  * Dense kinds (team_preview / walls) use Latch + Interaction Sheet; Modal is stubbed (jsdom
  * lacks showModal). The block comment keeps the @vitest-environment directive file-leading
  * past organizeImports.
@@ -59,7 +59,7 @@ describe("ResumeCard · ask_user", () => {
     expect(screen.getByText("做 A 还是 B？")).toBeTruthy();
     expect(screen.getByText("先做 A 还是 B?")).toBeTruthy();
     expect(screen.getByText("两条路线各有取舍。")).toBeTruthy();
-    // ask_user has no 调整 (that is plan_review-only steer).
+    // ask_user has no 调整 (that is plan_review / team_preview steer).
     expect(screen.queryByText("调整")).toBeNull();
   });
 
@@ -447,11 +447,11 @@ describe("ResumeCard · team_preview", () => {
       ...over,
     });
 
-  it("非 debate 仅授权并开工 + 取消，无调整 / 逐次审批 / 排除岗", () => {
+  it("三键：授权并开工 + 调整 + 取消；无逐次审批 / 排除岗", () => {
     render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
     expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(screen.getByText("调整")).toBeTruthy();
     expect(screen.getByText("取消")).toBeTruthy();
-    expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("逐次审批开工")).toBeNull();
     expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.getByText("本批工具：file_write")).toBeTruthy();
@@ -481,6 +481,35 @@ describe("ResumeCard · team_preview", () => {
     });
     fireEvent.click(screen.getByText("授权并开工"));
     expect(onResume).toHaveBeenCalledWith("continue", "更简洁", []);
+    expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("调整时空意见不可提交；有意见发 adjust，不带修正字段", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    const adjust = screen.getByText("调整") as HTMLButtonElement;
+    expect(adjust.disabled).toBe(true);
+    fireEvent.click(adjust);
+    expect(onResume).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+      target: { value: "  改成两人，先做竞品  " },
+    });
+    expect(adjust.disabled).toBe(false);
+    fireEvent.click(adjust);
+    expect(onResume).toHaveBeenCalledWith("adjust", "改成两人，先做竞品", []);
+    expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("收紧写盘后点调整仍不带 write_capability_overrides", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    fireEvent.click(screen.getByText("改为仅文字"));
+    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+      target: { value: "先改分工" },
+    });
+    fireEvent.click(screen.getByText("调整"));
+    expect(onResume).toHaveBeenCalledWith("adjust", "先改分工", []);
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
 
@@ -709,7 +738,7 @@ describe("ResumeCard · team_preview", () => {
     expect(onResume).toHaveBeenCalledWith("stop", "", []);
   });
 
-  it("debate 仅开赛 + 取消；嘱咐走 continue；无纳入控件", () => {
+  it("debate 开赛 + 调整 + 取消；嘱咐走 continue；无纳入控件", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -723,8 +752,8 @@ describe("ResumeCard · team_preview", () => {
       />,
     );
     expect(screen.getByText("开赛")).toBeTruthy();
+    expect(screen.getByText("调整")).toBeTruthy();
     expect(screen.getByText("取消")).toBeTruthy();
-    expect(screen.queryByText("调整")).toBeNull();
     expect(screen.queryByText("纳入本轮")).toBeNull();
     expect(screen.queryByText("先多视角调研再辩")).toBeNull();
     expect(screen.queryByTestId(/team-worker-model-/)).toBeNull();
@@ -733,6 +762,30 @@ describe("ResumeCard · team_preview", () => {
     });
     fireEvent.click(screen.getByText("开赛"));
     expect(onResume).toHaveBeenCalledWith("continue", "最关心成本谁买单", []);
+  });
+
+  it("辩论有备注时点「调整」提交 adjust，不带修正字段", () => {
+    const onResume = vi.fn();
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          primitive: "debate",
+          workers: [],
+          motion: "辩题",
+          sides: [{ name: "正方", stance: "赞成" }],
+        })}
+        onResume={onResume}
+      />,
+    );
+    const adjust = screen.getByText("调整") as HTMLButtonElement;
+    expect(adjust.disabled).toBe(true);
+    fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
+      target: { value: "旧路径改辩题" },
+    });
+    expect(adjust.disabled).toBe(false);
+    fireEvent.click(adjust);
+    expect(onResume).toHaveBeenCalledWith("adjust", "旧路径改辩题", []);
+    expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
 
   it("辩论有 run_id：裁判节点显式；无模型下拉；continue 不附 model_overrides", () => {

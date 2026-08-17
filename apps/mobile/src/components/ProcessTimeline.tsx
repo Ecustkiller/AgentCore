@@ -92,12 +92,13 @@ export function teamHasStartedRuns(
   );
 }
 
+/** 开工卡「已授权开工」：仅 `continue`。team_preview 上 `adjust` 是回灌 CEO、不开工. */
 export function isKickoffGoDecision(decision: unknown): boolean {
-  return decision === "continue" || decision === "adjust";
+  return decision === "continue";
 }
 
 /**
- * Hang stays graph-less. After authorize (continue/adjust) pending nodes still
+ * Hang stays graph-less. After authorize (continue) pending nodes still
  * show. Aligns desktop `shouldShowTeamGraph`.
  */
 export function shouldShowTeamGraph(
@@ -500,7 +501,7 @@ export function ProcessTimeline({
   userInterjections?: readonly InterjectionItem[];
   /** 回合已收口 → received 派生态「未被主 Agent 读取」。 */
   turnClosed?: boolean;
-  /** 开工卡已授权 continue/adjust：pending 编制也出图. */
+  /** 开工卡已授权 continue：pending 编制也出图. */
   kickoffReleased?: boolean;
   onFill?: (text: string) => void;
   onOpenBrowserLive?: (opts?: { runId?: string }) => void;

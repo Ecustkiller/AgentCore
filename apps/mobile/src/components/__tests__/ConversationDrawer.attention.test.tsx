@@ -15,10 +15,12 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { listConversations, listConversationsGrouped } = vi.hoisted(() => ({
-  listConversations: vi.fn(),
-  listConversationsGrouped: vi.fn(),
-}));
+const { listConversations, listConversationsGrouped, listConversationTrash } =
+  vi.hoisted(() => ({
+    listConversations: vi.fn(),
+    listConversationsGrouped: vi.fn(),
+    listConversationTrash: vi.fn(),
+  }));
 
 const navigate = vi.fn();
 
@@ -26,9 +28,12 @@ vi.mock("@/api/client", () => ({ getTokens: () => ({ access: "token" }) }));
 vi.mock("@/api/conversations", () => ({
   listConversations,
   listConversationsGrouped,
+  listConversationTrash,
   deleteConversation: vi.fn(),
   renameConversation: vi.fn(),
   setConversationArchived: vi.fn(),
+  setConversationPinned: vi.fn(),
+  restoreConversation: vi.fn(),
 }));
 vi.mock("@/api/search", () => ({ search: vi.fn() }));
 vi.mock("react-router-dom", async () => {
@@ -50,6 +55,8 @@ import {
   applyAiAttention,
   clearAiAttentionForConversation,
 } from "@/lib/aiAttention";
+import { resetDrawerGroupExpandForTests } from "@/lib/conversationDrawerExpand";
+import { __resetConversationListCacheForTests } from "@/lib/conversationListCache";
 import { ConversationDrawer } from "../ConversationDrawer";
 
 function conv(over: Partial<ConversationSummary> = {}): ConversationSummary {
@@ -127,11 +134,15 @@ beforeEach(() => {
     }),
   );
   __resetAiAttentionForTests();
+  __resetConversationListCacheForTests();
+  resetDrawerGroupExpandForTests();
 });
 
 afterEach(() => {
   cleanup();
   __resetAiAttentionForTests();
+  __resetConversationListCacheForTests();
+  resetDrawerGroupExpandForTests();
 });
 
 describe("ConversationDrawer · 行级「等你」灯", () => {
@@ -256,6 +267,26 @@ describe("ConversationDrawer · 文件夹分组", () => {
     expect(
       navigate.mock.calls.some((c) => String(c[0]).startsWith("/files")),
     ).toBe(false);
+  });
+
+  it("全员置顶仍留组头", async () => {
+    listConversationsGrouped.mockResolvedValue(
+      grouped({
+        folders: [
+          folderGroup({
+            id: "f-all-pin",
+            name: "全员置顶组",
+            conversations: [
+              conv({ id: "only-pin", title: "置顶的", pinned: true }),
+            ],
+          }),
+        ],
+      }),
+    );
+    renderDrawer();
+    await screen.findByText("全员置顶组");
+    expect(screen.getByText("置顶的")).toBeTruthy();
+    expect(screen.getAllByText("置顶的")).toHaveLength(1);
   });
 
   it("空组不出现", async () => {

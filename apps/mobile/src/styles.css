@@ -2316,6 +2316,58 @@ dialog.run-detail::backdrop {
   gap: 10px;
 }
 
+.rd-debrief-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rd-debrief-toggle:active {
+  opacity: 0.7;
+}
+
+.rd-debrief-chevron {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--muted);
+}
+
+.rd-debrief-summary {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--fg);
+  word-break: break-word;
+}
+
+.rd-debrief-notice {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.rd-debrief-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .rd-part-label {
   margin-bottom: 3px;
   font-size: 12px;
@@ -3181,47 +3233,6 @@ dialog.run-detail::backdrop {
   color: var(--muted);
 }
 
-/* 模型 chip 挂在 composer 同行：窄屏限宽省略，完整名走 aria-label / title。 */
-.composer .composer-model-chip {
-  display: inline-flex;
-  flex: 0 1 auto;
-  flex-shrink: 1;
-  align-items: center;
-  align-self: flex-end;
-  gap: 4px;
-  max-width: 6.75rem;
-  min-width: 0;
-  min-height: 32px;
-  padding: 0 8px;
-  font-size: 12px;
-  line-height: 1;
-  color: var(--muted);
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  white-space: nowrap;
-}
-
-@media (min-width: 768px) {
-  .composer .composer-model-chip {
-    max-width: 12rem;
-  }
-}
-
-.composer .composer-model-chip:disabled {
-  opacity: 0.55;
-}
-
-.composer-model-icon {
-  flex: 0 0 auto;
-}
-
-.composer-model-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
 .composer {
   display: flex;
   flex-shrink: 0;
@@ -3685,6 +3696,25 @@ dialog.run-detail::backdrop {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
+/* 云 running 脉动 —— 等你光环优先，本机容器不亮（hook 已滤）。执行态走品牌色. */
+.conv-running {
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 999px;
+  animation: conv-running-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes conv-running-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 .conv-title {
   max-width: 100%;
   overflow: hidden;
@@ -3725,6 +3755,27 @@ dialog.run-detail::backdrop {
 
 .conv-actions:active {
   background: var(--panel);
+}
+
+/* 最近删除行：标题不可点进对话，右侧只留「恢复」。 */
+.conv-trash {
+  pointer-events: none;
+}
+
+.conv-restore {
+  min-width: 44px;
+  padding: 0 12px;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.conv-restore:active:not(:disabled) {
+  background: var(--panel);
+  color: var(--fg);
 }
 
 /* 对话抽屉：文件夹组（对等桌面侧栏 WorkspaceGroups，精简版） */
@@ -3796,10 +3847,19 @@ dialog.run-detail::backdrop {
   padding-left: 6px;
 }
 
-/* Header right-aligned action group (已归档 / 退出). */
+/* 抽屉三区：无区标题，相邻区用分隔线区分（置顶 / 组 / 裸聊）. */
+.drawer-rail-zone + .drawer-rail-zone {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* Header right-aligned action group (已归档 / 最近删除 / 新对话). */
 .bar-right {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 2px;
 }
 
@@ -4014,6 +4074,98 @@ dialog.sheet::backdrop {
 .sheet-cancel {
   margin-top: 8px;
   color: var(--muted);
+}
+
+/* 对话分享 sheet（所见即所享只读链接） */
+dialog.sheet.share-sheet,
+.share-sheet {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.share-sheet-lead {
+  margin: 0 8px 8px;
+  line-height: 1.5;
+}
+
+.share-sheet-label {
+  margin: 12px 8px 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.share-sheet-note {
+  margin: 8px;
+  padding: 0;
+  text-align: left;
+}
+
+.share-expiry {
+  display: flex;
+  gap: 8px;
+  margin: 0 8px 8px;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.share-expiry-opt {
+  flex: 1;
+  min-height: 44px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.share-expiry-opt[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--accent) 12%, var(--bg));
+  border-color: transparent;
+}
+
+.share-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+}
+
+.share-card {
+  margin: 8px 8px 0;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.share-card-url {
+  overflow: hidden;
+  font-size: 14px;
+  word-break: break-all;
+}
+
+.share-card-meta {
+  margin-top: 4px;
+}
+
+.share-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.share-card-actions button {
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 500;
 }
 
 /* Composer「＋」更多选项 / 本会话权限 sheet */
@@ -5236,6 +5388,34 @@ dialog.viewer::backdrop {
 .drawer .list {
   flex: 1;
   overflow-y: auto;
+}
+
+/* 删除成功后的抽屉内撤销条（约 8s；关抽屉清掉）. 可恢复中断 = 灰壳 + 前景；动作走品牌色. */
+.drawer-undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 10px 16px;
+  color: var(--fg);
+  background: color-mix(in oklch, var(--muted) 12%, transparent);
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.drawer-undo-action {
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 8px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  font-weight: 600;
+}
+
+.drawer-undo-action:active {
+  background: var(--panel);
 }
 
 /* Draft chat welcome (开盖即聊 empty state) — the single visual focal point of a fresh draft,

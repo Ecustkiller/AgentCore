@@ -9,10 +9,13 @@ import {
   hydrateTokens,
   setTokens,
 } from "@/api/client";
+import { startFulfill, stopFulfill } from "@/api/fulfill";
 import { disablePush, enablePush } from "@/api/push";
 import { startRealtime, stopRealtime } from "@/api/realtime";
 import { clearAiAttention } from "@/lib/aiAttention";
+import { clearAiTurnActivity } from "@/lib/aiTurnActivity";
 import { clientHeaders } from "@/lib/clientBuildInfo";
+import { clearConversationListCache } from "@/lib/conversationListCache";
 import type { components } from "@/types/api.generated";
 
 type Schemas = components["schemas"];
@@ -75,6 +78,7 @@ export async function login(username: string, password: string): Promise<User> {
   });
   void enablePush();
   startRealtime();
+  startFulfill();
   return data.user ?? (await me());
 }
 
@@ -100,7 +104,10 @@ export async function logout(): Promise<void> {
     }).catch(() => {});
   }
   stopRealtime();
+  stopFulfill();
   clearAiAttention();
+  clearAiTurnActivity();
+  clearConversationListCache();
   clearTokens();
 }
 
@@ -137,6 +144,7 @@ async function runBootstrap(): Promise<BootstrapResult> {
       if (res.ok) {
         void enablePush();
         startRealtime();
+        startFulfill();
         return { kind: "authenticated" };
       }
       if (res.status !== 401) {

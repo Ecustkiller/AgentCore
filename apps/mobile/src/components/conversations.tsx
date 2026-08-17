@@ -107,6 +107,8 @@ export function ActionSheet({
   archivedView,
   onClose,
   onRename,
+  onPin,
+  onShare,
   onArchive,
   onDelete,
 }: {
@@ -114,6 +116,10 @@ export function ActionSheet({
   archivedView: boolean;
   onClose: () => void;
   onRename: () => void;
+  /** Live list only — archived rows stay where they are. */
+  onPin?: () => void;
+  /** Live list only — host opens the share sheet. */
+  onShare?: () => void;
   onArchive: () => void;
   onDelete: () => void;
 }) {
@@ -124,6 +130,16 @@ export function ActionSheet({
       <button type="button" className="sheet-item" onClick={onRename}>
         重命名
       </button>
+      {!archivedView && onPin && (
+        <button type="button" className="sheet-item" onClick={onPin}>
+          {conv.pinned ? "取消置顶" : "置顶"}
+        </button>
+      )}
+      {!archivedView && onShare && (
+        <button type="button" className="sheet-item" onClick={onShare}>
+          分享
+        </button>
+      )}
       <button type="button" className="sheet-item" onClick={onArchive}>
         {archivedView ? "恢复" : "归档"}
       </button>

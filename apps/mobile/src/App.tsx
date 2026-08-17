@@ -13,7 +13,6 @@ import { MemoryPage } from "@/pages/MemoryPage";
 import { MessagesPage } from "@/pages/MessagesPage";
 import { MorePage } from "@/pages/MorePage";
 import { PreviewPage } from "@/pages/PreviewPage";
-import { RulesPage } from "@/pages/RulesPage";
 import { ServiceUnavailablePage } from "@/pages/ServiceUnavailablePage";
 import { WorkspaceFilesPage } from "@/pages/WorkspaceFilesPage";
 import { WorkspacesPage } from "@/pages/WorkspacesPage";
@@ -164,14 +163,7 @@ function AppShell() {
             </RequireAuth>
           }
         />
-        <Route
-          path="/rules"
-          element={
-            <RequireAuth>
-              <RulesPage />
-            </RequireAuth>
-          }
-        />
+        <Route path="/rules" element={<Navigate to="/memory" replace />} />
         <Route
           path="/more"
           element={

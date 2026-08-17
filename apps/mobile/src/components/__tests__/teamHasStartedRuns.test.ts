@@ -1,4 +1,5 @@
 import {
+  isKickoffGoDecision,
   kickoffReleasedFromCold,
   shouldShowTeamGraph,
   teamHasStartedRuns,
@@ -147,6 +148,24 @@ describe("kickoffReleasedFromCold", () => {
             messageId: "m1",
             status: "pending",
             resolution: { decision: "continue" },
+          },
+        ],
+        "m1",
+      ),
+    ).toBe(false);
+  });
+
+  it("team_preview adjust 不开工（回灌 CEO）", () => {
+    expect(isKickoffGoDecision("adjust")).toBe(false);
+    expect(isKickoffGoDecision("continue")).toBe(true);
+    expect(
+      kickoffReleasedFromCold(
+        [
+          {
+            kind: "team_preview",
+            messageId: "m1",
+            status: "resolved",
+            resolution: { decision: "adjust" },
           },
         ],
         "m1",
