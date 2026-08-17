@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,8 @@ _EXPECTED_SHAPE_KEYS = frozenset(
         "plan_types",
     }
 )
+# 质量案 ID：``qc-<YYYYMMDD>-<slug>``（slug = 小写字母/数字/连字符）。只校验格式，不查案册是否存在。
+_QUALITY_CASE_ID_RE = re.compile(r"^qc-\d{8}-[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
 def _lint_milestones(cid: str, raw: dict[str, Any]) -> list[str]:
@@ -78,6 +81,27 @@ def _lint_milestones(cid: str, raw: dict[str, Any]) -> list[str]:
         except (TypeError, ValueError):
             errors.append(f"[{cid}] milestone_threshold 须为数值")
 
+    return errors
+
+
+def _lint_quality_case(cid: str, raw: dict[str, Any]) -> list[str]:
+    """可选反向指针：有则须为 ``qc-<YYYYMMDD>-<slug>`` 字符串数组。缺省不填。
+
+    只看 ``quality_case`` 本键；未知顶层键（如 ``_note``）仍忽略，不改成 allowlist 拒未知键。
+    """
+    if "quality_case" not in raw:
+        return []
+    value = raw["quality_case"]
+    if not isinstance(value, list):
+        return [f"[{cid}] quality_case 须为字符串数组"]
+    errors: list[str] = []
+    for i, item in enumerate(value):
+        if not isinstance(item, str) or not item:
+            errors.append(f"[{cid}] quality_case[{i}] 须为非空字符串")
+        elif not _QUALITY_CASE_ID_RE.fullmatch(item):
+            errors.append(
+                f"[{cid}] quality_case[{i}]={item!r} 非法（须为 qc-<YYYYMMDD>-<slug>）"
+            )
     return errors
 
 
@@ -166,6 +190,8 @@ def lint_case(
                 )
             if "plan_types" in shape and not isinstance(shape["plan_types"], list):
                 errors.append(f"[{cid}] expected_shape.plan_types 须为列表")
+
+    errors.extend(_lint_quality_case(cid, raw))
 
     # documents_fixture：夹具目录 + documents.json（对齐 workspace_fixture 心智）。
     docs_fx = raw.get("documents_fixture")

@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-intercept",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "能力缺失时仍假装可跑，需拦截提案",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "走拦截三项后进 fixed",
+  "fix_class": "intercept",
+  "intercept_proposal": {
+    "false_positive_surface": "仅无执行环境却要外环验证的结构化请求",
+    "why_ladder_insufficient": "提示词挡不住无环境仍声称已验证",
+    "soft_net_negative": "一次性软提示会被忽略，且会污染成功路径"
+  },
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"]
+  },
+  "duplicate_of": null,
+  "status": "fixed",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "挂上复现题"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["reproduced", "fixed"],
+      "verdict": ["defect", "defect"],
+      "note": "拦截提案已齐"
+    }
+  ]
+}

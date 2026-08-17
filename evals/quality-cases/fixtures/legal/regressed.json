@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-regressed",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "同一案在新窗同形态再失败，标复发",
+  "family": "run_failed",
+  "family_candidate": null,
+  "suspected_knobs": ["skill:verify_and_fix"],
+  "knobs_changed": ["skill:verify_and_fix"],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [
+      { "window": "2026-08-01..2026-08-07", "n": 2 },
+      { "window": "2026-08-10..2026-08-17", "n": 1 }
+    ],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "题重新失败，回到 reproduced 前先标 regressed",
+  "fix_class": "structural",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": ["cccccccccccccccccccccccccccccccccccccccc"]
+  },
+  "duplicate_of": null,
+  "status": "regressed",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-10",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-11",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "挂上复现题"
+    },
+    {
+      "at": "2026-08-12",
+      "status": ["reproduced", "fixed"],
+      "verdict": ["defect", "defect"],
+      "note": "当时已绿"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["fixed", "regressed"],
+      "verdict": ["defect", "defect"],
+      "note": "新窗再失败"
+    }
+  ]
+}

@@ -61,6 +61,9 @@ class EvalCase:
     # 协作形状评测（阶段 1）：声明式期望 DAG 形状，由 ``shape_score`` 打 0~1 匹配分（报告指标，
     # 非 L0 硬门）。键集见 ``evals/shape_score.py``；缺省 None=不打形状分。
     expected_shape: dict[str, Any] | None = None
+    # 反向指回质量案 ID（可选数组，一题可覆盖多案）。缺省空列表；有则 seed_lint 校验
+    # ``qc-<YYYYMMDD>-<slug>``。不设必填——现有用例 JSON 无须改。
+    quality_case: list[str] = field(default_factory=list)
 
 
 @dataclass

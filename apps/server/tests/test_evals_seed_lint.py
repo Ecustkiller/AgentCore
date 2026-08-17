@@ -86,3 +86,41 @@ def test_lint_suite_flags_duplicate_ids():
     case = {"id": "dup", "category": "qa", "user_message": "q", "checks": [{"name": "NonEmpty"}]}
     errors = lint_suite([case, dict(case)])
     assert any("id 重复" in e for e in errors)
+
+
+def _lint_base(**extra) -> dict:
+    raw = {"id": "x", "category": "qa", "user_message": "q", "checks": [{"name": "NonEmpty"}]}
+    raw.update(extra)
+    return raw
+
+
+def test_lint_quality_case_valid_array():
+    errors = lint_case(
+        _lint_base(
+            quality_case=[
+                "qc-20260817-delegate-skipped-on-multifile-edit",
+                "qc-20260818-empty-delivery",
+            ]
+        )
+    )
+    assert errors == []
+
+
+def test_lint_quality_case_rejects_bad_format():
+    assert any(
+        "quality_case" in e
+        for e in lint_case(_lint_base(quality_case="qc-20260817-foo"))
+    )
+    assert any(
+        "quality_case" in e for e in lint_case(_lint_base(quality_case=["not-a-case-id"]))
+    )
+    assert any("quality_case" in e for e in lint_case(_lint_base(quality_case=[123])))
+
+
+def test_lint_quality_case_absent_is_ok():
+    assert lint_case(_lint_base()) == []
+
+
+def test_lint_keeps_unknown_comment_keys():
+    """``_note`` 等未知顶层键仍合法——不得因 quality_case 改成 allowlist 拒未知键。"""
+    assert lint_case(_lint_base(_note="注释字段，靠未知键存活")) == []

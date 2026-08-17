@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-bad-repro-gate",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "标了 reproduced 但没有任何可复跑指针",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "缺指针",
+  "fix_class": null,
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": [],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "reproduced",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "无指针仍标 reproduced"
+    }
+  ]
+}

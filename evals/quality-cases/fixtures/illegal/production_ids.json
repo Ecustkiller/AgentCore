@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-bad-prod-ids",
+  "opened_at": "2026-08-17",
+  "opened_by": "patrol",
+  "symptom": "声称生产证据却没有任何 id",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 3 }],
+    "signal_tier": "production",
+    "repro_tier": null
+  },
+  "verdict": "undecided",
+  "verdict_note": "",
+  "fix_class": null,
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": [],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "open",
+  "close_reason": null,
+  "history": []
+}

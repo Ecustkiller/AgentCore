@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-dup",
+  "opened_at": "2026-08-17",
+  "opened_by": "patrol",
+  "symptom": "与已开案同一写盘耗尽形态，关为重复",
+  "family": "write_pass_exhausted",
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "dogfood",
+    "repro_tier": null
+  },
+  "verdict": "defect",
+  "verdict_note": "重复开案，并入已有案",
+  "fix_class": null,
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": [],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": "qc-20260817-legal-open",
+  "status": "closed",
+  "close_reason": "duplicate",
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "closed"],
+      "verdict": ["undecided", "defect"],
+      "note": "重复，并入 legal-open"
+    }
+  ]
+}

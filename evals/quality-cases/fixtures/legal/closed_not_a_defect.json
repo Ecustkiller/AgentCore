@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-noise",
+  "opened_at": "2026-08-17",
+  "opened_by": "patrol",
+  "symptom": "超时事件实为用户取消，不是缺陷",
+  "family": "stream_stall",
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 4 }],
+    "signal_tier": "dogfood",
+    "repro_tier": null
+  },
+  "verdict": "noise",
+  "verdict_note": "同窗取消与超时成对出现，判为噪声",
+  "fix_class": "observe",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": [],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "closed",
+  "close_reason": "not_a_defect",
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "noise"],
+      "note": "分诊为噪声"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "closed"],
+      "verdict": ["noise", "noise"],
+      "note": "同批关案"
+    }
+  ]
+}

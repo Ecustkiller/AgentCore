@@ -51,6 +51,7 @@ _CASE_FIELDS = frozenset(
         "prompt_profile",
         "mast",
         "expected_shape",
+        "quality_case",
     }
 )
 

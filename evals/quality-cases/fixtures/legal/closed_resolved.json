@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-resolved",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "写盘耗尽后未换路径，交付空壳",
+  "family": "write_pass_exhausted",
+  "family_candidate": null,
+  "suspected_knobs": ["playbook:repair_code"],
+  "knobs_changed": ["playbook:repair_code"],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 2 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "题已红转绿",
+  "fix_class": "structural",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+  },
+  "duplicate_of": null,
+  "status": "closed",
+  "close_reason": "resolved",
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "挂上复现题"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["reproduced", "fixed"],
+      "verdict": ["defect", "defect"],
+      "note": "修在 sha aaaa"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["fixed", "closed"],
+      "verdict": ["defect", "defect"],
+      "note": "关案"
+    }
+  ]
+}

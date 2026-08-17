@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-bad-regressed",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "新 id 直接标复发，从未进过 fixed",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "伪复发",
+  "fix_class": null,
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "regressed",
+  "close_reason": null,
+  "history": []
+}

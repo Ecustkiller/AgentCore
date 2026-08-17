@@ -12,7 +12,7 @@ kappa 校准回路 + MAST 标签聚合 + CI nightly（evals-nightly.yml）。
 裁判被评口径 = ``judged_text``（聊天 ``content`` + 终版 ``artifacts``，末次 file_write）；
 多评委可选 ``EnsemblePairwiseJudge``（``EVAL_JUDGE_ENSEMBLE``）。
 P2+（待落，皆非代码缺口）：L2/L3 真模型出数（需 EVAL_DEEPSEEK_API_KEY + 预算）+
-gold-set 人工核验（kappa 门，cases/gold/labels.json 现 30 条 seed「暂定·待人核」）。
+gold-set 人工核验（kappa 门，cases/gold/labels.json 现 100 条：30 human + 70 rubric_derived）。
 
 本 ``__init__`` 只暴露**纯静态**部分（types + checks 注册表 + seed_lint）——故意不在此
 import ``harness`` / ``runner`` / ``report``，让 ``seed_lint`` 这类零 LLM 静态校验

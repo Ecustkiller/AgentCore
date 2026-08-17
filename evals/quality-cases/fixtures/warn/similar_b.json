@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-write-pass-exhaust",
+  "opened_at": "2026-08-17",
+  "opened_by": "patrol",
+  "symptom": "写盘耗尽草稿乙",
+  "family": "write_pass_exhausted",
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": null
+  },
+  "verdict": "undecided",
+  "verdict_note": "",
+  "fix_class": null,
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": [],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "open",
+  "close_reason": null,
+  "history": []
+}

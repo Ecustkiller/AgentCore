@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-bad-transition",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "从分诊直接标已修，跳过复现门",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "非法直跳",
+  "fix_class": "structural",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": ["dddddddddddddddddddddddddddddddddddddddd"]
+  },
+  "duplicate_of": null,
+  "status": "fixed",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "fixed"],
+      "verdict": ["defect", "defect"],
+      "note": "跳过 reproduced"
+    }
+  ]
+}

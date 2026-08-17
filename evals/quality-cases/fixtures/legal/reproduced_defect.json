@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-legal-reproduced",
+  "opened_at": "2026-08-17",
+  "opened_by": "feedback",
+  "symptom": "多文件编辑时未走委派，直接单 Agent 改写",
+  "family": "contract_failed",
+  "family_candidate": null,
+  "suspected_knobs": ["skill:verify_and_fix"],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 2 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "已挂复现题",
+  "fix_class": "structural",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": []
+  },
+  "duplicate_of": null,
+  "status": "reproduced",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "挂上复现题"
+    }
+  ]
+}

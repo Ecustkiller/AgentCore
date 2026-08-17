@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentcore.local/evals/quality-cases/schema.json",
+  "title": "AgentCore quality case",
+  "description": "仓内质量案卡（Q3）。状态机与纪律由 lint_cases.py 执行，本文件只约束字段形状。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "id",
+    "opened_at",
+    "opened_by",
+    "symptom",
+    "family",
+    "family_candidate",
+    "suspected_knobs",
+    "knobs_changed",
+    "evidence",
+    "verdict",
+    "verdict_note",
+    "fix_class",
+    "intercept_proposal",
+    "disposition",
+    "duplicate_of",
+    "status",
+    "close_reason",
+    "history"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": {
+      "type": "string",
+      "pattern": "^qc-[0-9]{8}-[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "opened_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+    "opened_by": { "enum": ["patrol", "feedback", "manual"] },
+    "symptom": { "type": "string" },
+    "family": { "type": ["string", "null"] },
+    "family_candidate": { "type": ["string", "null"] },
+    "suspected_knobs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "knobs_changed": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["traces", "conversations", "occurrence_log", "signal_tier", "repro_tier"],
+      "properties": {
+        "traces": { "type": "array", "items": { "type": "string", "pattern": "^[0-9a-f]{32}$" } },
+        "conversations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+          }
+        },
+        "occurrence_log": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["window", "n"],
+            "properties": {
+              "window": { "type": "string", "minLength": 1 },
+              "n": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "signal_tier": { "enum": ["production", "dogfood", "L1_synthetic"] },
+        "repro_tier": { "enum": ["production", "dogfood", "L1_synthetic", null] }
+      }
+    },
+    "verdict": { "enum": ["undecided", "defect", "noise", "honest_refusal", "wont_fix"] },
+    "verdict_note": { "type": "string" },
+    "fix_class": { "enum": ["structural", "observe", "intercept", "other", null] },
+    "intercept_proposal": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "false_positive_surface",
+            "why_ladder_insufficient",
+            "soft_net_negative"
+          ],
+          "properties": {
+            "false_positive_surface": { "type": "string", "minLength": 1 },
+            "why_ladder_insufficient": { "type": "string", "minLength": 1 },
+            "soft_net_negative": { "type": "string", "minLength": 1 }
+          }
+        }
+      ]
+    },
+    "disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "eval_cases",
+        "conformance_vectors",
+        "dogfood_slots",
+        "family_entry",
+        "fix_commits"
+      ],
+      "properties": {
+        "eval_cases": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "conformance_vectors": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "dogfood_slots": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "family_entry": { "type": ["string", "null"] },
+        "fix_commits": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }
+        }
+      }
+    },
+    "duplicate_of": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "pattern": "^qc-[0-9]{8}-[a-z0-9]+(?:-[a-z0-9]+)*$" }
+      ]
+    },
+    "status": {
+      "enum": ["open", "triaged", "reproduced", "fixed", "regressed", "closed"]
+    },
+    "close_reason": {
+      "enum": ["resolved", "not_a_defect", "wont_fix", "duplicate", "abandoned", null]
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at", "status", "verdict", "note"],
+        "properties": {
+          "at": { "type": "string", "minLength": 1 },
+          "status": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "enum": ["open", "triaged", "reproduced", "fixed", "regressed", "closed"]
+            }
+          },
+          "verdict": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "items": {
+              "enum": ["undecided", "defect", "noise", "honest_refusal", "wont_fix"]
+            }
+          },
+          "note": { "type": "string" }
+        }
+      }
+    }
+  }
+}

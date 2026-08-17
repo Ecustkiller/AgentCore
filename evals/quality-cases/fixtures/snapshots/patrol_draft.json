@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-17T12:00:00Z",
+  "window": {
+    "label": "--since 2d",
+    "since": "2026-08-15T00:00:00Z",
+    "until": "2026-08-17T12:00:00Z",
+    "first_event_at": "2026-08-15T01:00:00Z",
+    "last_event_at": "2026-08-17T11:00:00Z"
+  },
+  "families": {
+    "write_pass_exhausted": {
+      "key": "write_pass_exhausted",
+      "label": "写盘次数耗尽",
+      "events": 3,
+      "conversations": {
+        "ids": ["11111111-2222-3333-4444-555555555555"],
+        "total": 1,
+        "truncated": false
+      },
+      "traces": {
+        "ids": ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"],
+        "total": 1,
+        "truncated": false
+      }
+    },
+    "unknown_or_new": {
+      "key": "unknown_or_new",
+      "label": "残差",
+      "events": 2,
+      "conversations": {
+        "ids": ["22222222-3333-4444-5555-666666666666"],
+        "total": 1,
+        "truncated": false
+      },
+      "traces": {
+        "ids": ["bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+        "total": 1,
+        "truncated": false
+      }
+    },
+    "stream_stall": {
+      "key": "stream_stall",
+      "label": "流停滞",
+      "events": 4,
+      "conversations": { "ids": [], "total": 0, "truncated": false },
+      "traces": { "ids": [], "total": 0, "truncated": false }
+    }
+  },
+  "conversations": [
+    {
+      "conversation_id": "11111111-2222-3333-4444-555555555555",
+      "title": "对齐首页",
+      "first_user_preview": "帮我对齐 UI 风格并且不要写进任何案卡字段",
+      "last_user_preview": "把按钮改成品牌蓝然后把间距也调一下谢谢"
+    }
+  ]
+}

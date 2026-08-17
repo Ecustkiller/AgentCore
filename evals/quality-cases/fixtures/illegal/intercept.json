@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "id": "qc-20260817-bad-intercept",
+  "opened_at": "2026-08-17",
+  "opened_by": "manual",
+  "symptom": "拦截类修复却未交三项提案",
+  "family": null,
+  "family_candidate": null,
+  "suspected_knobs": [],
+  "knobs_changed": [],
+  "evidence": {
+    "traces": [],
+    "conversations": [],
+    "occurrence_log": [{ "window": "2026-08-10..2026-08-17", "n": 1 }],
+    "signal_tier": "L1_synthetic",
+    "repro_tier": "L1_synthetic"
+  },
+  "verdict": "defect",
+  "verdict_note": "缺拦截三项",
+  "fix_class": "intercept",
+  "intercept_proposal": null,
+  "disposition": {
+    "eval_cases": ["core/fixture_only.json"],
+    "conformance_vectors": [],
+    "dogfood_slots": [],
+    "family_entry": null,
+    "fix_commits": ["eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"]
+  },
+  "duplicate_of": null,
+  "status": "fixed",
+  "close_reason": null,
+  "history": [
+    {
+      "at": "2026-08-17",
+      "status": ["open", "triaged"],
+      "verdict": ["undecided", "defect"],
+      "note": "分诊为缺陷"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["triaged", "reproduced"],
+      "verdict": ["defect", "defect"],
+      "note": "挂上复现题"
+    },
+    {
+      "at": "2026-08-17",
+      "status": ["reproduced", "fixed"],
+      "verdict": ["defect", "defect"],
+      "note": "进 fixed 但提案为空"
+    }
+  ]
+}
