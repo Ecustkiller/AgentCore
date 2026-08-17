@@ -1,4 +1,8 @@
-import type { MessageStartPayload, SSEEvent } from "@agentcore/contract-types";
+import type {
+  ErrorPayload,
+  MessageStartPayload,
+  SSEEvent,
+} from "@agentcore/contract-types";
 
 export type SupportDiagnosticIds = {
   conversationId?: string | null;
@@ -54,7 +58,7 @@ export function formatSupportDiagnosticText(ids: SupportDiagnosticIds): string {
 }
 
 /** Pull support ids from a live/history SSE journal (message_start + first run_plan). */
-export function extractSupportIdsFromEvents(events: SSEEvent[]): {
+export function extractSupportIdsFromEvents(events: readonly SSEEvent[]): {
   messageId?: string;
   traceId?: string;
   executionId?: string;
@@ -73,4 +77,44 @@ export function extractSupportIdsFromEvents(events: SSEEvent[]): {
     }
   }
   return { messageId, traceId, executionId };
+}
+
+/**
+ * Single builder for every「复制排查包」entry (bubble / footer / page bar).
+ * Same events + conversationId → identical paste text.
+ */
+export function supportIdsFromEvents(
+  conversationId: string | null | undefined,
+  events: readonly SSEEvent[],
+  rest?: {
+    messageId?: string | null;
+    traceId?: string | null;
+  },
+): SupportDiagnosticIds {
+  const ids = extractSupportIdsFromEvents(events);
+  let errorCode: string | undefined;
+  let emptyDiagnosis: string | undefined;
+  let bodyKind: string | undefined;
+  let baseUrl: string | undefined;
+  for (const ev of events) {
+    if (ev.type !== "error") continue;
+    const p = ev.payload as ErrorPayload;
+    errorCode = p.code;
+    emptyDiagnosis = p.context?.empty_diagnosis;
+    bodyKind = p.context?.body_kind;
+    baseUrl = p.context?.base_url;
+  }
+  const stream =
+    !!emptyDiagnosis || errorCode === "LLM_EMPTY_RESPONSE" ? true : undefined;
+  return {
+    conversationId: conversationId || undefined,
+    messageId: rest?.messageId || ids.messageId,
+    traceId: rest?.traceId || ids.traceId,
+    executionId: ids.executionId,
+    errorCode,
+    emptyDiagnosis,
+    bodyKind,
+    baseUrl,
+    stream,
+  };
 }

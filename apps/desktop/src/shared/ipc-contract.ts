@@ -2,14 +2,21 @@
  * 本地文件系统 IPC 契约 —— 主进程 / preload / renderer 三端共享的单一真相源。
  *
  * 设计约束：
- * - renderer 仅以 `{ rootId, relPath }` 寻址，绝对路径只存在于主进程（不下发本机绝对路径）。
+ * - renderer 寻址仍以 `{ rootId, relPath }`。`listRoots` 带 `absPath` 供 @ 提及折叠嵌套根
+ *   与同名消歧（本机可有两个同名根指向不同路径）；读写文件等其它 IPC 仍不回传绝对路径。
  * - 所有可能失败的操作统一返回 `FsResult`（判别结果），不向 renderer 抛异常。
  */
 
-/** 一个已授权的本地根目录（对 renderer 只暴露 id 与显示名）。 */
+/** 一个已授权的本地根目录。 */
 export interface FsRoot {
   id: string;
   name: string;
+  /**
+   * 本机绝对路径。`listRoots` 必带，供 @ 提及嵌套折叠与同名消歧。
+   * 寻址仍用 `{ rootId, relPath }`，不要拿本字段去读文件。
+   * 会话授权根（grant / `listSessionReadonlyRoots`）不下发。
+   */
+  absPath?: string;
   /** W3 session grant alias under ``external/<alias>/`` (omit for permanent roots). */
   alias?: string;
   /** Session access mode (readonly | organize); omit for permanent roots. */
@@ -42,6 +49,23 @@ export interface FsFileRef {
   relPath: string;
   /** 文件名（relPath 的最后一段）。 */
   name: string;
+  /**
+   * 本机 mtime（毫秒）。仅 `listFiles({ order: "recent" })` 带上；
+   * 默认 path 序不 stat、不填，避免 OneDrive 占位水合与空态误用 0。
+   */
+  mtimeMs?: number;
+}
+
+/** @ 提及扁平索引排序：字母序（默认）或按本机 mtime 倒序。 */
+export type FsListFilesOrder = "path" | "recent";
+
+/**
+ * `listFiles` 成功载荷。`truncated` 表示命中单根上限（`LIST_FILES_CAP`），
+ * 列表不完整——调用方必须看见，不能当「根里就这些文件」。
+ */
+export interface FsListFilesResult {
+  files: FsFileRef[];
+  truncated: boolean;
 }
 
 /** 工作区 ``AgentCore/trash`` 条目（产品一键还原；非 OS 回收站）。 */
@@ -501,8 +525,16 @@ export interface FsApi {
     alias: string,
   ): Promise<boolean>;
   listDir(rootId: string, relPath: string): Promise<FsResult<FsEntry[]>>;
-  /** 递归列出根内的全部文件（用于 @ 提及检索；忽略常见无关目录，有数量上限）。 */
-  listFiles(rootId: string): Promise<FsResult<FsFileRef[]>>;
+  /**
+   * 递归列出根内的全部文件（用于 @ 提及检索）。
+   * 忽略常见无关目录 + 根 `.gitignore`，有数量上限；`truncated` 必须透出。
+   * `order: "recent"` 按 mtime 倒序（会 stat，文件项带 `mtimeMs`）；
+   * 默认 `"path"` 字母序且不 stat、不带 `mtimeMs`。
+   */
+  listFiles(
+    rootId: string,
+    opts?: { order?: FsListFilesOrder },
+  ): Promise<FsResult<FsListFilesResult>>;
   readFile(rootId: string, relPath: string): Promise<FsResult<FilePreview>>;
   /**
    * 读完整文本文件用于**编辑**（正文 + 基线 mtime/编码/换行）。与预览 `readFile` 分工：

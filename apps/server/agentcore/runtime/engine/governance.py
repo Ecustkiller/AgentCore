@@ -896,7 +896,20 @@ def apply_circuit_breaker(
     return CircuitBreakerOutcome(message=breaker_message, refresh_tool_defs=refresh)
 
 
-def decide_llm_failure(*, final_content: str) -> LoopDirective:
+def decide_llm_failure(
+    *,
+    final_content: str,
+    error_code: str = "",
+    role: str = "",
+) -> LoopDirective:
+    from agentcore.runtime.turn.ceo_continue import should_pause_ceo_rate_limit
+
+    if should_pause_ceo_rate_limit(role=role, error_code=error_code):
+        logger.warning(
+            "engine.llm_rate_limit_paused",
+            has_content=bool(final_content),
+        )
+        return Return(finish_reason=FinishReason.PAUSED)
     reason = FinishReason.DEGRADED if final_content else FinishReason.ERROR
     logger.warning(
         "engine.llm_failed_terminal", reason=reason.value, has_content=bool(final_content)

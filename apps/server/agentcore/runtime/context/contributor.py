@@ -65,6 +65,8 @@ class SectionOrder(IntEnum):
     # Cross-turn soft nudge when the prior turn journal fingerprints empty-delegate /
     # unproductive (history drops tool I/O — same volatile-tail reason as recent graph).
     PRIOR_DELEGATE_RETRY = 860
+    # Sticky pending non-blocking questions (fold pending, not prior-turn one-shot).
+    PENDING_QUESTIONS = 865
     ATTACHMENT = 900
     # 已登记来源台账 (#rN): hydrated from the whole conversation's assistant rows, so it
     # grows monotonically with the chat — the most volatile section there is, and the one

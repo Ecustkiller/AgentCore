@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from agentcore.conversation.ask_reply import format_ask_reply_prompt, normalize_ask_id
+from agentcore.conversation.mentions import (
+    format_agent_mention_prompt,
+    resolve_interjection_mentions,
+)
 from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.coordination.pipeline_view import (
     format_idle_yield_brief,
@@ -167,6 +172,15 @@ def format_coordination_events(
         "未交付的承诺产物须显式列出，不得含糊带过。"
     )
     return "\n".join(lines)
+
+
+def _interjection_mentions(
+    session: CoordinationSession, payload: dict
+) -> list[dict] | None:
+    """Mentions ride the event payload when present; otherwise the process-local stash."""
+    iid = str(payload.get("interjection_id") or "").strip()
+    stashed = session.get_interjection(iid) if iid else None
+    return resolve_interjection_mentions(payload, stashed)
 
 
 def events_to_messages(
@@ -345,6 +359,17 @@ def _format_one(session: CoordinationSession, ev: CoordinationEvent) -> str:
                 path_bit = f" → {wp}" if isinstance(wp, str) and wp.strip() else ""
                 mark = "（二进制）" if binary else ""
                 lines.append(f"  附件：{name}{path_bit}{mark}")
+        mention = format_agent_mention_prompt(_interjection_mentions(session, p))
+        if mention:
+            lines.extend(mention.splitlines())
+        aid = normalize_ask_id(p.get("ask_id"))
+        if not aid:
+            iid_key = str(p.get("interjection_id") or "").strip()
+            stashed = session.get_interjection(iid_key) if iid_key else None
+            aid = normalize_ask_id((stashed or {}).get("ask_id"))
+        reply = format_ask_reply_prompt(aid)
+        if reply:
+            lines.extend(reply.splitlines())
         lines.append(
             "  【先回用户】须先用可见正文响应该句（哪怕极短「收到，仍按原计划」），"
             "再谈团队；禁止把旧进度旁白当成对插话的答复。"

@@ -144,6 +144,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "去做深研。队员超时交卷，以下为已有产出。",
     "reasoning": "",

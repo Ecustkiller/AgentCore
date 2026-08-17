@@ -299,7 +299,7 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     );
   });
 
-  it("附件退云 + 绑本机 → cloud_bridge（无恐吓 toast；弱状态由 executionVia 驱动）", async () => {
+  it("附件退云 + 绑本机 → cloud_bridge，并提示改走云端", async () => {
     resolveSidecarRootMock.mockResolvedValue(null);
     resolveLocalTargetMock.mockResolvedValue(TARGET);
 
@@ -323,7 +323,9 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
     expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
       "cloud_bridge",
     );
-    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(notifyInfoMock).toHaveBeenCalledWith(
+      "本轮因附件改走云端，未使用本机引擎",
+    );
     expect(logEventMock).toHaveBeenCalledWith(
       "info",
       "turn.stream_path",
@@ -332,6 +334,78 @@ describe("sendTurn — 探活路由 / 降级收敛（探活增强）", () => {
         reason: "attachments",
         bridging: true,
       }),
+    );
+  });
+
+  it("附件+点名仍只因附件退云（点名不改路、不进退云文案）", async () => {
+    resolveSidecarRootMock.mockResolvedValue(null);
+    resolveLocalTargetMock.mockResolvedValue(TARGET);
+
+    await sendTurn({
+      ...spec(),
+      attachments: [
+        {
+          name: "f.txt",
+          path: "/tmp/f.txt",
+          text: "x",
+          truncated: false,
+          kind: "file",
+        },
+      ],
+      agentMentions: [{ agent_id: "a1", role: "研究员" }],
+    });
+
+    expect(streamViaSidecarMock).not.toHaveBeenCalled();
+    expect(streamConversationMock).toHaveBeenCalledTimes(1);
+    expect(notifyInfoMock).toHaveBeenCalledWith(
+      "本轮因附件改走云端，未使用本机引擎",
+    );
+    expect(notifyInfoMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("点名"),
+    );
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({
+        via: "cloud",
+        reason: "attachments",
+      }),
+    );
+  });
+
+  it("点名不退云：绑本机 → 走 sidecar，并把点名转给本机链路", async () => {
+    resolveSidecarRootMock.mockResolvedValue(TARGET);
+    probeSidecarMock.mockResolvedValue({
+      healthy: true,
+      probed: true,
+      detail: null,
+    });
+    streamViaSidecarMock.mockResolvedValue(undefined as never);
+    const agentMentions = [{ agent_id: "a1", role: "研究员" }];
+
+    await sendTurn({
+      ...spec(),
+      agentMentions,
+    });
+
+    expect(resolveSidecarRootMock).toHaveBeenCalled();
+    expect(probeSidecarMock).toHaveBeenCalledTimes(1);
+    expect(streamViaSidecarMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: "c1",
+        rootId: "r1",
+        agentMentions,
+      }),
+    );
+    expect(streamConversationMock).not.toHaveBeenCalled();
+    expect(useConversationStore.getState().byId.c1?.executionVia).toBe(
+      "sidecar",
+    );
+    expect(notifyInfoMock).not.toHaveBeenCalled();
+    expect(logEventMock).toHaveBeenCalledWith(
+      "info",
+      "turn.stream_path",
+      expect.objectContaining({ via: "sidecar", reason: "probe_ok" }),
     );
   });
 

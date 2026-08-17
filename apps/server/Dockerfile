@@ -104,11 +104,11 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig nodejs npm git; \
     rm -rf /var/lib/apt/lists/*
 
-# ③ 文档/数据常用库装进【系统 site-packages】（沙箱 python3 可见；按大众文档场景选型：
-#    pptx/docx/xlsx 生成 + 数据分析 + 图表 + PDF）。装最新版即可——沙箱库不是应用依赖，
-#    不进 uv.lock；升级随镜像重建。
-RUN pip install --no-cache-dir -i "${PYPI_INDEX}" \
-    python-pptx python-docx openpyxl pandas numpy matplotlib reportlab pypdf pillow
+# ③ 文档/数据常用库装进【系统 site-packages】（沙箱 python3 可见）。
+#    清单单一事实源：agentcore/tools/sandbox/cloud_python.txt（勿在此手写包名）。
+#    装最新版即可——沙箱库不是应用依赖，不进 uv.lock；升级随镜像重建。
+COPY agentcore/tools/sandbox/cloud_python.txt /tmp/cloud_python.txt
+RUN pip install --no-cache-dir -i "${PYPI_INDEX}" -r /tmp/cloud_python.txt
 
 # ⑤ L3 团队浏览器（内置浏览器与Agent浏览器提案.md · M0，PoC 已验证）：
 #    Playwright 装进【系统 site-packages】（沙箱 python3 经 /usr bind 可见，同 ③）；

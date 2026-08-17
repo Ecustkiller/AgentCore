@@ -236,6 +236,7 @@ describe("sidecar IPC contract (TS ↔ Python single source)", () => {
       traceId: "trace_id",
       userMessage: "user_message",
       optimisticUserId: "user_message_id",
+      agentMentions: "agent_mentions",
     });
   });
 

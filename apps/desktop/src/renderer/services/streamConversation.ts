@@ -419,6 +419,9 @@ export async function attachConversation(
   }
 }
 
+/** 本发是否已提交一条回合。云端见过 `turn_saved` 则置位；sidecar 见 outbox flush 成功。 */
+export type TurnCommitReport = { committed: boolean };
+
 /**
  * POST to an SSE endpoint and route every event through `dispatchSSEEvent`.
  *
@@ -430,6 +433,7 @@ async function runMessageStream(
   body: string,
   conversationId: string,
   signal?: AbortSignal,
+  turnCommit?: TurnCommitReport,
 ): Promise<void> {
   clearInteractionPrompts(conversationId);
   throwIfCannotOpenStream(conversationId, signal);
@@ -512,7 +516,19 @@ async function runMessageStream(
       });
     }
 
-    await pumpSseBody(response, conversationId);
+    await pumpSseBody(
+      response,
+      conversationId,
+      turnCommit
+        ? (event) => {
+            if (event.type === "turn_saved") turnCommit.committed = true;
+            dispatchFoldedSseEvent(event, {
+              conversationId,
+              source: "server",
+            });
+          }
+        : undefined,
+    );
 
     if (getRuntime(conversationId).isGenerating) {
       throw new StreamError("network");
@@ -556,7 +572,11 @@ export interface StreamConversationOptions {
   agentMentions?: OutgoingAgentMention[];
   /** 必填分流（缺 → 服务端 422）。空闲开跑客户端仍带 ``steer``。 */
   delivery: "steer" | "queue";
+  /** 答非阻塞提问时与出站 ``question_posted.ask_id`` 对上。缺省 = 普通消息。 */
+  askId?: string | null;
   signal?: AbortSignal;
+  /** 本发泵到 `turn_saved` 时置 `committed`。Class B 回滚读这个事实，不嗅消息 id。 */
+  turnCommit?: TurnCommitReport;
 }
 
 /** Send a user message and consume the SSE response stream (发送即有流).
@@ -569,18 +589,22 @@ export async function streamConversation({
   attachments,
   agentMentions,
   delivery,
+  askId,
   signal,
+  turnCommit,
 }: StreamConversationOptions): Promise<void> {
   const payload: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) payload.attachments = attachments;
   if (agentMentions && agentMentions.length > 0) {
     payload.agent_mentions = agentMentions;
   }
+  if (askId) payload.ask_id = askId;
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages`,
     JSON.stringify(payload),
     conversationId,
     signal,
+    turnCommit,
   );
 }
 
@@ -655,6 +679,26 @@ export async function resumeConversation({
   await runMessageStream(
     `/v1/conversations/${conversationId}/messages/${messageId}/resume`,
     body,
+    conversationId,
+    signal,
+  );
+}
+
+export interface ContinueConversationOptions {
+  conversationId: string;
+  messageId: string;
+  signal?: AbortSignal;
+}
+
+/** Same-turn continue after attested `outcome=paused` (empty body, SSE). */
+export async function continueConversation({
+  conversationId,
+  messageId,
+  signal,
+}: ContinueConversationOptions): Promise<void> {
+  await runMessageStream(
+    `/v1/conversations/${conversationId}/messages/${messageId}/continue`,
+    "{}",
     conversationId,
     signal,
   );

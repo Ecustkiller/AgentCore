@@ -365,6 +365,15 @@ def transcript_from_json(data: list[dict[str, Any]] | None) -> list[LLMMessage]:
     return [message_from_dict(d) for d in (data or [])]
 
 
+def _optional_float(raw: Any) -> float | None:
+    if raw is None or raw == "":
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
 def _filtered(cls: type, data: dict[str, Any] | None) -> dict[str, Any]:
     """Keep only keys that are real fields of ``cls`` — tolerate schema drift so a
     row written by an older/newer build still loads."""
@@ -419,6 +428,8 @@ def state_to_json(state: RunState) -> dict[str, Any]:
         # older frames unchanged). Omitted from the shape for COMPLETED nodes is fine — the
         # deserializer defaults it True.
         "error_retryable": state.error_retryable,
+        "error_code": state.error_code,
+        "error_retry_after": state.error_retry_after,
         "warnings": list(state.warnings),
         "delivery_gaps": [
             dict(g) for g in (state.delivery_gaps or []) if isinstance(g, dict)
@@ -450,6 +461,8 @@ def state_from_json(data: dict[str, Any]) -> RunState:
         reasoning=data.get("reasoning", "") or "",
         error=data.get("error", "") or "",
         error_retryable=bool(data.get("error_retryable", True)),
+        error_code=str(data.get("error_code") or ""),
+        error_retry_after=_optional_float(data.get("error_retry_after")),
         warnings=list(data.get("warnings") or []),
         delivery_gaps=[
             dict(g) for g in (data.get("delivery_gaps") or []) if isinstance(g, dict)

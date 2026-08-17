@@ -45,6 +45,7 @@
   "projected": {
     "status": "failed",
     "finishReason": "error",
+    "outcome": "error",
     "error": {
       "code": "LLM_ERROR",
       "message": "This token has no access to model kimi-k3"

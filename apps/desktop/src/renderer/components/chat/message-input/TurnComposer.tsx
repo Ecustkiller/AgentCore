@@ -3,21 +3,33 @@ import { MentionMenu } from "@/components/chat/MentionMenu";
 import { Button, IconButton } from "@/components/ui";
 import { useConversations } from "@/hooks/useConversations";
 import { useFolders } from "@/hooks/useFolders";
+import { copyText } from "@/lib/clipboard";
 import {
   COMPOSER_CONTINUE_PLACEHOLDER,
   COMPOSER_EMPTY_INTERRUPTED_HINT,
   isContinuableAssistant,
-  isEmptyInterruptedAssistant,
 } from "@/lib/composerContinueHint";
+import {
+  buildSupportDiagnosticPack,
+  formatSupportDiagnosticText,
+  precedingUserMessageId,
+  supportDiagnosticExtrasFromError,
+} from "@/lib/supportDiagnostics";
+import { notifySuccess } from "@/lib/toast";
+import { turnOutcomeForAssistant } from "@/lib/turnOutcome";
 import {
   useBackgroundTasksStore,
   useHandoffArmed,
 } from "@/stores/backgroundTasks";
 import { draftKeyFor, useComposerDraftStore } from "@/stores/composer";
 import {
+  assistantProjectionId,
+  getActiveRuntime,
+  useActiveError,
   useActiveGenerating,
   useConversationStore,
 } from "@/stores/conversation";
+import { useExecutionStore } from "@/stores/execution";
 import { useFoldersStore } from "@/stores/folders";
 import {
   usePendingApprovals,
@@ -28,6 +40,7 @@ import { useServerHealthStore } from "@/stores/serverHealth";
 import {
   AtSign,
   CloudUpload,
+  Copy,
   ListPlus,
   Loader2,
   Send,
@@ -40,7 +53,6 @@ import { AttachmentChips } from "./AttachmentChips";
 import { ComposerCloudBridgeHint } from "./ComposerCloudBridgeHint";
 import { ComposerContextCompactedHint } from "./ComposerContextCompactedHint";
 import { ComposerGitStatusChip } from "./ComposerGitStatusChip";
-import { ComposerNoLocalChip } from "./ComposerNoLocalChip";
 import { ComposerPendingHintNotice } from "./ComposerPendingHintNotice";
 import { ComposerPlusMenu, useComposerPlusClose } from "./ComposerPlusMenu";
 import { ComposerSendErrorNotice } from "./ComposerSendErrorNotice";
@@ -151,11 +163,46 @@ export function TurnComposer({
     (hasPausedDecision ||
       pendingApprovals.length > 0 ||
       pendingDelegations.length > 0);
-  // 空中断层 1：轻提示、无按钮；有挂起卡时优先挂起弱提示。
-  const showEmptyInterruptedHint =
-    !isGenerating &&
-    !showPendingHint &&
-    isEmptyInterruptedAssistant(lastMessage);
+  const lastSlot = useExecutionStore((s) => {
+    if (!lastMessage || lastMessage.role !== "assistant") return undefined;
+    return s.byId[assistantProjectionId(lastMessage)];
+  });
+  const sessionError = useActiveError();
+  const lastOutcome =
+    lastMessage?.role === "assistant"
+      ? turnOutcomeForAssistant(lastMessage, lastSlot, {
+          hasPendingDecision: showPendingHint,
+          conversationError: sessionError,
+        })
+      : null;
+  const showComposerHint =
+    !isGenerating && Boolean(lastOutcome?.showComposerHint);
+  const supportDiagnosticIds =
+    lastMessage?.role === "assistant"
+      ? {
+          conversationId,
+          messageId: assistantProjectionId(lastMessage),
+          userMessageId: precedingUserMessageId(
+            getActiveRuntime().messages,
+            lastMessage.id,
+          ),
+          traceId: lastMessage.traceId,
+          executionId: lastMessage.executionId,
+          ...supportDiagnosticExtrasFromError(lastMessage.error),
+        }
+      : null;
+  const supportDiagnosticText = supportDiagnosticIds
+    ? formatSupportDiagnosticText(supportDiagnosticIds)
+    : "";
+  const copySupportDiagnostics = () => {
+    if (!supportDiagnosticIds || !supportDiagnosticText) return;
+    void buildSupportDiagnosticPack(supportDiagnosticIds).then((text) => {
+      if (!text) return;
+      void copyText(text).then((ok) => {
+        if (ok) notifySuccess("已复制排查包");
+      });
+    });
+  };
   const serverStatus = useServerHealthStore((s) => s.status);
   const serverUnhealthy = serverStatus === "offline";
   const resolvedPlaceholder = useMemo(() => {
@@ -447,7 +494,7 @@ export function TurnComposer({
     ? charCount >= CHAR_COUNT_NEAR_LIMIT
     : charCount > 0;
 
-  // 左簇顺序：工作区 · Git? · 网页无本机? · 模型 · 权限 · @
+  // 左簇顺序：工作区 · Git? · 模型 · 权限 · @
   // bar：整簇收进 ComposerPlusMenu（权限/@ 带文案）；card：底栏摊开（iconOnly）。
   // 否决 Composer 并排「本地引擎/云端过桥」切换器；过桥事后弱提示见 ComposerCloudBridgeHint。
   // 遗留 handoff 武装在 ModeControl，不进「＋」。
@@ -455,7 +502,6 @@ export function TurnComposer({
     <>
       <ComposerWorkspaceChip conversationId={conversationId} />
       <ComposerGitStatusChip conversationId={conversationId} />
-      <ComposerNoLocalChip />
       <ModelPicker disabled={isGenerating} />
       <PermissionAxesBadge disabled={isGenerating} iconOnly={!isBar} />
     </>
@@ -637,7 +683,15 @@ export function TurnComposer({
           </button>
         </output>
       )}
-      <ComposerSendErrorNotice draftKey={draftKey} />
+      <ComposerSendErrorNotice
+        draftKey={draftKey}
+        suppressSession={Boolean(lastOutcome && !lastOutcome.showSessionBanner)}
+        onCopySupportPack={
+          lastOutcome?.supportPackHost === "session" && supportDiagnosticText
+            ? copySupportDiagnostics
+            : undefined
+        }
+      />
       {menuOpen && (
         <MentionMenu
           sections={mention.sections}
@@ -696,14 +750,27 @@ export function TurnComposer({
       {/* 挂起弱提示：有待确认/续跑卡时常驻；不强拦发送（发送前二次确认见 useComposerSend）。 */}
       <ComposerPendingHintNotice show={showPendingHint} />
 
-      {/* 空中断层 1：无救火按钮；发送下一条=新回合重试。 */}
-      {showEmptyInterruptedHint && (
+      {/* 输入区轻提示：空中断 send_next / 部分完成+限流 wait_then_retry。发送下一条即恢复。报障跟 supportPackHost。 */}
+      {showComposerHint && (
         <div
           aria-live="polite"
           data-testid="composer-empty-interrupted-hint"
           className="flex items-center gap-1.5 px-4 pt-2 text-xs text-muted-foreground"
         >
-          {COMPOSER_EMPTY_INTERRUPTED_HINT}
+          <span className="min-w-0 flex-1">
+            {lastOutcome?.message ?? COMPOSER_EMPTY_INTERRUPTED_HINT}
+          </span>
+          {lastOutcome?.supportPackHost === "composer" &&
+            supportDiagnosticText && (
+              <Button
+                variant="ghost"
+                className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+                icon={<Copy size={13} />}
+                onClick={copySupportDiagnostics}
+              >
+                复制排查包
+              </Button>
+            )}
         </div>
       )}
 

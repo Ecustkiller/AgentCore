@@ -11,7 +11,10 @@ import type { PendingResume } from "@/stores/pausedTurns";
 import { useState } from "react";
 
 /** Shared cold-path submit hook for plan_review / team_preview resume cards. */
-export function useColdSubmit(turn: PendingResume) {
+export function useColdSubmit(
+  turn: PendingResume,
+  onSubmitted?: (decision: PlanReviewUserDecision) => void,
+) {
   const [submitting, setSubmitting] = useState<PlanReviewUserDecision | null>(
     null,
   );
@@ -72,7 +75,10 @@ export function useColdSubmit(turn: PendingResume) {
         if (result !== "ok") {
           notifySubmitInteractionResult(result);
           setSubmitting(null);
+          return;
         }
+        onSubmitted?.(decision);
+        setSubmitting(null);
       })
       .catch((err) => {
         notifyError(err, "提交失败");

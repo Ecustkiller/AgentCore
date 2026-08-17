@@ -333,27 +333,28 @@ def worker_products(tool: DelegateTool, plan: RunPlan, results: dict) -> list[di
             )
         files = []
         rejected_files: list[tuple[str, str]] = []
-        # 只认 file_acceptance 戳；无戳 → 不写「已验收 / 未通过验收」（勿用 files_touched 冒充）。
-        if state and state.file_acceptance:
-            from agentcore.runtime.runs.file_acceptance import accepted_paths
+        # 与 delivery_status 同源：COMPLETED 只认 file_acceptance 戳；FAILED 未盖戳但已落盘
+        # 的产物仍计入（勿用 COMPLETED 的 files_touched 冒充验收）。
+        if state:
+            from agentcore.runtime.delegate.delivery_status import _collect_artifacts
 
-            files = accepted_paths(state.file_acceptance)
-            for row in state.file_acceptance:
-                if not isinstance(row, dict) or row.get("status") != "rejected":
+            for row in _collect_artifacts({node.run_id: state}, plan):
+                path = str(row.get("path") or "").strip()
+                if not path:
                     continue
-                p = str(row.get("path") or "").strip()
-                if not p:
-                    continue
-                detail = str(row.get("detail") or row.get("reason") or "").strip()
-                rejected_files.append((p, detail))
+                if row.get("status") == "accepted":
+                    files.append(path)
+                elif row.get("status") == "rejected":
+                    detail = str(row.get("detail") or row.get("reason") or "").strip()
+                    rejected_files.append((path, detail))
         if files:
             produced = "、".join(f"`{p}`" for p in files)
-            body += f"\n\n> 文件产出（已验收）：{produced}"
+            body += f"\n\n> 文件产出（路径已核）：{produced}"
         if rejected_files:
             bits = []
             for p, detail in rejected_files[:8]:
                 bits.append(f"`{p}`" + (f"（{detail}）" if detail else ""))
-            body += f"\n\n> 未通过验收：{'、'.join(bits)}"
+            body += f"\n\n> 路径未核：{'、'.join(bits)}"
         tool_failures = (
             [dict(row) for row in state.tool_failures if isinstance(row, dict)]
             if state and state.tool_failures
@@ -569,7 +570,7 @@ def render_roster_block(facts: dict[str, Any]) -> str:
         + (f" · 其他 {other}" if other else "")
         + f"；综述可见产物 {products_n} 条"
         + (f"（其中非完成 {product_failed}）" if product_failed else "")
-        + f"；文件验收：已验收 {accepted_n} · 未通过 {rejected_n}"
+        + f"；路径核对：已核 {accepted_n} · 未通过 {rejected_n}"
         + "。"
     ]
     if failed_lines:
@@ -707,10 +708,11 @@ def build_ceo_synthesis(
             else "有【建议开辩】卡：概览呈报命题+各方；勿口头征求、本回合勿直接 debate。\n"
         )
     closing_text = (
-        "\n---\n以上为团队产出。「文件产出（已验收）」= 落盘且路径验收通过的地面真相。\n"
-        "⚠️ 防幻觉铁律：是否真交付文件只看「文件产出（已验收）」行——"
+        "\n---\n以上为团队产出。「文件产出（路径已核）」= 落盘且路径核对通过的地面真相。\n"
+        "⚠️ 防幻觉铁律：是否真交付文件只看「文件产出（路径已核）」行——"
         "正文声称写了却无此行 = 未真正落盘【未达成】，用 continue_from_run_id 续派或冷委派；"
-        "「未通过验收」不得当已交付；纯文本无文件属正常。\n"
+        "「路径未核」不得当已交付；纯文本无文件属正常。"
+        "路径已核 ≠ 脚本已跑通 / 内容已校验。\n"
         "相互依赖时【语义边界对账】（冲突/缺口/重复；有便签一并对照）；"
         "【完工核验】对照用户请求：未达成就补，已达成则短概览收口。\n"
         + debate_tail
@@ -737,19 +739,26 @@ def build_ceo_synthesis(
     raw_chars = sum(len(s.content) for s in results.values() if s and s.content)
     output, ratio_capped = _cap_synthesis_output(output, raw_chars)
     limit = _synthesis_char_cap(raw_chars)
-    logger.info(
-        "delegate.synthesis",
-        call=call_idx if call_idx is not None else tool._calls,
-        workers=len(plan.nodes),
-        pointers=sum(1 for p in products if p["fidelity"] == "pointer"),
-        prose=sum(1 for p in products if p["fidelity"] == "pass_through"),
-        raw_chars=raw_chars,
-        final_chars=len(output),
-        ratio=round(len(output) / raw_chars, 2) if raw_chars else 1.0,
-        capped=len(output) > DELEGATE_OUTPUT_LIMIT or ratio_capped,
-        synthesis_cap=limit,
-        ratio_capped=ratio_capped,
+    execution_id = str(
+        getattr(getattr(tool, "_base_tool_context", None), "execution_id", "") or ""
     )
+    fingerprint = f"{len(plan.nodes)}:{raw_chars}:{len(output)}:{output[:128]}:{output[-128:]}"
+    prev = getattr(tool, "_ceo_synthesis_emitted", None)
+    if prev != (execution_id, fingerprint):
+        tool._ceo_synthesis_emitted = (execution_id, fingerprint)
+        logger.info(
+            "delegate.synthesis",
+            call=call_idx if call_idx is not None else tool._calls,
+            workers=len(plan.nodes),
+            pointers=sum(1 for p in products if p["fidelity"] == "pointer"),
+            prose=sum(1 for p in products if p["fidelity"] == "pass_through"),
+            raw_chars=raw_chars,
+            final_chars=len(output),
+            ratio=round(len(output) / raw_chars, 2) if raw_chars else 1.0,
+            capped=len(output) > DELEGATE_OUTPUT_LIMIT or ratio_capped,
+            synthesis_cap=limit,
+            ratio_capped=ratio_capped,
+        )
     return CeoSynthesis(
         text=output,
         prose=prose,

@@ -20,17 +20,14 @@ import {
 import { SourceCards, buildCitationDisplayMap } from "@/components/SourceCards";
 import { TeamView } from "@/components/TeamView";
 import { useColdInteractions } from "@/lib/coldInteractions";
-import { copyText } from "@/lib/messageExport";
-import {
-  type SupportDiagnosticIds,
-  formatSupportDiagnosticText,
-} from "@/lib/supportDiagnostics";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
 import type {
   EscalationSlot,
   HotDecisionTrace,
   NonBlockingAsk,
   StageCardTrace,
 } from "@/protocol/fold";
+import type { TeamPreviewTrace } from "@/protocol/teamPreviewTraces";
 // Rich assistant rendering shared by live turns and history replay (前端技术与架构 §七 ·
 // 富渲染 + 多 Agent 团队视图). One {@link AssistantContent} consumes the same fields whether
 // they come from the live fold (ProjectedTurn) or a persisted message (MessageDetail).
@@ -40,7 +37,8 @@ import type {
 // carries a `team` positional marker in that timeline — the collaboration graph slots inline
 // at the marker (协作图时间线落点), re-folded from MessageDetail.runs.events for history.
 // The checkpoint·ask·plan_review markers are anchors for desktop's inline cards; mobile owns
-// those interactions via its PauseCard, so they no-op in the timeline.
+// those interactions via PauseCard / ResumeCard. team_preview pending 仍 no-op；resolved
+// 痕迹（已调整 · 已交回修订）走时间线。
 // user_interjection markers pin mid-turn 插话 bubbles at their chronological slot (正文/五态
 // 旁路查 userInterjections)；旧 journal 无 marker 时由调用方挂尾部回退条。
 //
@@ -55,7 +53,7 @@ import type {
   ToolPhase,
   UsageBreakdown,
 } from "@agentcore/contract-types";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 
 export {
   graphAppendAnchorLabel,
@@ -86,6 +84,7 @@ export function AssistantContent({
   escalationSlots,
   hotTraces,
   stageCardTraces,
+  teamPreviewTraces,
   toolPhases,
   graphAppendActKinds,
   graphAppendAuthorizedBy,
@@ -136,6 +135,8 @@ export function AssistantContent({
   hotTraces?: Map<string, HotDecisionTrace>;
   /** 阶段推进卡时间线痕迹：id → resolved/orphaned 轻行 (extractStageCardTraces)。 */
   stageCardTraces?: Map<string, StageCardTrace>;
+  /** 开工卡 / 开赛卡 resolved 痕迹（extractTeamPreviewTraces）。 */
+  teamPreviewTraces?: Map<string, TeamPreviewTrace>;
   /** 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id → latest coarse phase for a still-running
    *  tool, from the transport-only live sibling {@link extractToolPhases}. Live turns only; absent
    *  on history replay (the events are never journaled) → tool rows show plain status. */
@@ -246,6 +247,7 @@ export function AssistantContent({
           escalationSlots={escalationSlots}
           hotTraces={hotTraces}
           stageCardTraces={stageCardTraces}
+          teamPreviewTraces={teamPreviewTraces}
           toolPhases={toolPhases}
           graphAppendActKinds={graphAppendActKinds}
           graphAppendAuthorizedBy={graphAppendAuthorizedBy}
@@ -305,28 +307,4 @@ export function AssistantContent({
   );
 }
 
-/** Inline error-row「复制排查包」(empty failure bubbles have no footer copy row). */
-export function SupportDiagnosticCopyButton({
-  ids,
-}: {
-  ids: SupportDiagnosticIds;
-}) {
-  const [copied, setCopied] = useState(false);
-  const text = formatSupportDiagnosticText(ids);
-  if (!text) return null;
-  return (
-    <button
-      type="button"
-      className="msg-copy-btn"
-      onClick={() => {
-        void copyText(text).then((ok) => {
-          if (!ok) return;
-          setCopied(true);
-          window.setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-    >
-      {copied ? "已复制" : "复制排查包"}
-    </button>
-  );
-}
+export { SupportDiagnosticCopyButton } from "@/components/SupportDiagnosticCopyButton";

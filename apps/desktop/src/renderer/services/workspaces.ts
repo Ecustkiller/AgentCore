@@ -86,14 +86,19 @@ export async function wsListFiles(
  * Flat file-path list for @ mentions (文件中枢统一 F4). Files only, ignore-pruned,
  * capped server-side — the cloud counterpart to `fsApi.listFiles` over a local
  * root, so @ indexes cloud and local workspaces the same way. Cloud-only (the
- * server refuses local workspaces with 409). `truncated` is dropped here: the @
- * index is best-effort, matching how local indexing ignores its own cap.
+ * server refuses local workspaces with 409). `truncated` 与本地索引同一形状透出。
  */
-export async function wsListFileIndex(wsId: string): Promise<string[]> {
+export async function wsListFileIndex(wsId: string): Promise<{
+  files: Array<{ relPath: string }>;
+  truncated: boolean;
+}> {
   const res = await api.get<Schemas["WorkspaceFileIndexResponse"]>(
     `${wsPath(wsId)}/file-index`,
   );
-  return res.data;
+  return {
+    files: res.data.map((relPath) => ({ relPath })),
+    truncated: res.truncated ?? false,
+  };
 }
 
 /** Upload (create/overwrite) a workspace file from raw bytes. */

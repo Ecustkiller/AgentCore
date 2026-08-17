@@ -23,6 +23,13 @@ class WorkspaceSettings(BaseModel):
     workspace_system_baseline_snapshot_max: int = 5
     workspace_system_other_snapshot_max: int = 10
     workspace_system_snapshot_retention_days: int = 30
+    # Third retention axis on the same storage key: total zip bytes (count + TTL
+    # stay). Whole-tree zips have no increment/dedup — a 84MB workspace at the
+    # count caps still grows without bound. 0 disables this leg. User-named kept
+    # versions and open-handoff / turn-baseline pins are never evicted here;
+    # oldest evictable first. A single zip over the cap is kept (do not erase
+    # the restore point just written).
+    workspace_snapshot_max_bytes: int = 500 * 1024 * 1024
 
     # Local turn baseline zips (``AgentCore/baselines/<message_id>.zip``, sidecar +
     # desktop channel): same D+C shape as the cloud system caps above, pruned right

@@ -218,6 +218,9 @@ def test_schema_exposes_form_enum():
     assert "建站必填 topic" in pa
     assert "勿空对象" in pa
     assert "快捷" in pa or "手写" in pa
+    # code_audit.modules 必须出现在 CEO 工具面（扇出靠填槽，不从 scope 推断）
+    assert "code_audit" in pa and "modules" in pa
+    assert "不从 scope 自动拆" in pa
     deps = DELEGATE_PARAMETERS["properties"]["tasks"]["items"]["properties"]["depends_on"][
         "description"
     ]

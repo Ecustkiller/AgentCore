@@ -144,7 +144,11 @@ const fsApi: FsApi = {
     }),
   listDir: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.listDir, { rootId, relPath }),
-  listFiles: (rootId) => ipcRenderer.invoke(FS_CHANNELS.listFiles, { rootId }),
+  listFiles: (rootId, opts) =>
+    ipcRenderer.invoke(FS_CHANNELS.listFiles, {
+      rootId,
+      ...(opts?.order ? { order: opts.order } : {}),
+    }),
   readFile: (rootId, relPath) =>
     ipcRenderer.invoke(FS_CHANNELS.readFile, { rootId, relPath }),
   readTextFile: (rootId, relPath) =>

@@ -66,6 +66,10 @@ EVENT_DISPOSITION: dict[EventType, tuple[Disposition, str]] = {
     EventType.CHECKPOINT_REQUIRED: (Disposition.DURABLE, "检查点挂起（耐久帧）——reload 重现待裁决卡"),
     EventType.CHECKPOINT_RESOLVED: (Disposition.DURABLE, "检查点已裁决——重放裁决结果"),
     EventType.QUESTION_POSTED: (Disposition.DURABLE, "非阻断/阻断提问（耐久帧）——reload 重现提问"),
+    EventType.QUESTION_RESOLVED: (
+        Disposition.DURABLE,
+        "非阻塞提问已答/已作废——reload 重放三态（悬着/已答/已作废）",
+    ),
     EventType.PLAN_REVIEW_REQUIRED: (Disposition.DURABLE, "计划复核挂起（耐久帧）——reload 重现复核卡"),
     EventType.PLAN_REVIEW_RESOLVED: (Disposition.DURABLE, "计划复核已裁决——重放裁决"),
     EventType.TEAM_PREVIEW_REQUIRED: (

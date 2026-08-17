@@ -37,6 +37,11 @@ export interface NonBlockingAskDisplay {
   context: string;
   assumptions: AskAssumption[];
   questions: AskQuestion[];
+  status: "pending" | "resolved";
+  /** Fold 三态里的已答 / 已作废；pending 时 absent。 */
+  settlement?: "answered" | "discarded";
+  answer?: string;
+  note?: string;
 }
 
 export interface PlanReviewDisplay {
@@ -106,6 +111,12 @@ export interface TeamPreviewDisplay {
    * Backend lead（交付档 + 预计人数）. Absent on old payloads → local headcount fallback.
    */
   headline?: string;
+  /** 修订代数；首版 1 / 旧帧缺省。 */
+  revision?: number;
+  /** 上一张开工卡 checkpoint_id；首版缺省。 */
+  revisedFrom?: string;
+  /** 触发本次修订的用户意见原文；首版缺省。 */
+  revisionNote?: string;
   motion: string;
   form: string;
   sides: TeamPreviewSideDisplay[];
@@ -207,6 +218,12 @@ export interface MessageAttachmentMeta {
   conversationId?: string;
 }
 
+/** Conversation-page ``@`` role chip (soft mention; not an attachment kind). */
+export interface AgentMentionMeta {
+  agentId: string;
+  role: string;
+}
+
 /** One applied change in a「记忆已更新」card (记忆更新对话内可见, Agent记忆与知识系统 §1.6).
  * `file` is a friendly label (偏好 / 画像 / 主题·<slug>); `scope` is `"global"` |
  * `"project"`; `content` is the bullet (add/update) or matched text (remove); `target`
@@ -272,6 +289,8 @@ export interface Message {
   status?: "running" | "complete" | "incomplete" | "failed" | null;
   composingTool?: { toolName: string; chars: number } | null;
   attachments?: MessageAttachmentMeta[];
+  /** Conversation-page ``@`` role chips (REST ``agent_mentions``; 旁路 attachments). */
+  agentMentions?: AgentMentionMeta[];
   citations?: Citation[];
   /** 回合调研台账（`evidence_ledger` SSE / Message.evidence_ledger）；缺省 []。 */
   evidenceLedger?: import("@/types/events").TurnEvidenceLedgerEntry[];
@@ -283,6 +302,12 @@ export interface Message {
   /** 回合墙钟用时 (ms)：live 自 message_end.duration_ms；重载自 MessageDetail.duration_ms。 */
   durationMs?: number;
   finishReason?: string;
+  /**
+   * Server-attested turn result (`message_end.outcome` live; REST
+   * `MessageDetail.outcome` on reload). Product UI feeds this to the arbitrator
+   * as `attestedKind`; local delivery/productLanded bits are fallback only.
+   */
+  outcome?: "ok" | "partial" | "paused" | "error" | null;
   /** 协作质量 (学·度量 §2.5): turn-level orchestration signals. Live via
    * message_end; reload via messages API (nested in usage column). Orchestration
    * counts also surface in the assistant footer; audit_drops is diagnostic-only. */
@@ -307,6 +332,8 @@ export interface Message {
       recovery_at?: string | null;
       /** 平台配额闸门的重置时刻（ISO8601 UTC），同上。 */
       reset_at?: string | null;
+      /** 上游 429 Retry-After 秒数；生产上常缺（无 attested 头）。 */
+      retry_after?: number | null;
     };
   };
   /** 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction rating on this assistant

@@ -1,10 +1,20 @@
-import { type Message, getRuntime } from "@/stores/conversation";
 /**
- * Class B 零产出回滚：本发已落库、助手空失败、能力/限流码 → 撤用户泡+空助手。
+ * Class B 零产出回滚：本发已提交一条回合、助手空失败、能力/限流码 → 撤用户泡+空助手。
  * 与 Class A（`isUnstartedSendRefusal` · SSE 未开 / 用户句未落库）分立，禁止并进。
  *
- * 桌面在 store 上判定（SSE error 后 `streamConversation` 常 resolve），不扫 SSE 列表。
+ * 「本发是否已提交」由传输显式报告（云端 = 见过 `turn_saved`；sidecar = outbox
+ * flush 成功），不嗅消息 id。桌面在 store 上判定（SSE error 后 `streamConversation`
+ * 常 resolve），不扫 SSE 列表。
  */
+import {
+  type SupportDiagnosticIds,
+  supportDiagnosticExtrasFromError,
+} from "@/lib/supportDiagnostics";
+import {
+  type Message,
+  assistantProjectionId,
+  getRuntime,
+} from "@/stores/conversation";
 import { isZeroOutputSendRefusalCode } from "@agentcore/contract-types";
 
 export type ZeroOutputSendRollback = {
@@ -13,6 +23,8 @@ export type ZeroOutputSendRollback = {
     code: string;
     message: string;
   };
+  /** Collected before bubbles are removed — composer notice 复制排查包. */
+  supportPack: SupportDiagnosticIds;
 };
 
 function assistantHasBody(assistant: Message): boolean {
@@ -37,17 +49,35 @@ function assistantHasTokens(assistant: Message): boolean {
   );
 }
 
+function collectSupportPack(
+  conversationId: string,
+  user: Message,
+  assistant: Message,
+  code: string,
+): SupportDiagnosticIds {
+  const attached = assistant.error ?? assistant.usage?.error ?? null;
+  return {
+    conversationId,
+    messageId: assistantProjectionId(assistant),
+    userMessageId: user.id,
+    traceId: assistant.traceId ?? null,
+    executionId: assistant.executionId,
+    ...supportDiagnosticExtrasFromError(attached ?? { code, message: "" }),
+  };
+}
+
 /**
- * 只根据本发 store 态判定是否 Class B。`runRegenerate` 不得调用。
+ * 只根据本发 store 态 + 传输提交报告判定是否 Class B。`runRegenerate` 不得调用。
  * `thrownCode`：catch 路径上 SSE 可能还没把 error 贴到助手泡。
  */
 export function inspectZeroOutputSendRollback(
   conversationId: string,
-  optimisticUserId: string,
+  turnCommitted: boolean,
   thrownCode?: string,
 ): ZeroOutputSendRollback | null {
+  if (!turnCommitted) return null;
+
   const messages = getRuntime(conversationId).messages;
-  if (messages.some((m) => m.id === optimisticUserId)) return null;
 
   let assistantIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -75,5 +105,6 @@ export function inspectZeroOutputSendRollback(
       code,
       message: attached?.message ?? "",
     },
+    supportPack: collectSupportPack(conversationId, user, assistant, code),
   };
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * 开工卡可操作面：delegate / debate 均三键，底栏左次右主（取消 / 调整 / 授权开工·开赛）；
- * continue + 非空备注 = 嘱咐注入；调整时空备注不可提交，有备注发 adjust（不带修正字段）。
+ * 开工卡两态：确认态三键（取消 / 调整 / 授权开工·开赛），嘱咐可选且跟 continue；
+ * 调整态只有必填意见 + 交回修订 + 返回，不渲染开工；提交中保留表单、CTA loading。
  */
 
 import {
@@ -13,6 +13,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResumePrompt } from "../ResumePrompt";
+import { clearTeamPreviewKickoffDraft } from "../resume/teamPreviewKickoffDraft";
 
 const submitInteraction = vi.fn().mockResolvedValue("ok");
 const notifyError = vi.fn();
@@ -62,6 +63,10 @@ vi.mock("@/hooks/useLlmProviders", () => ({
 }));
 
 const pendingRef: { current: unknown[] } = { current: [] };
+const interactionById = new Map<
+  string,
+  { kind?: string; payload?: Record<string, unknown>; status?: string }
+>();
 
 vi.mock("@/stores/conversation", () => ({
   useConversationStore: (
@@ -75,12 +80,25 @@ vi.mock("@/stores/pausedTurns", () => ({
 }));
 
 vi.mock("@/stores/interactions", () => ({
-  useInteractionStore: (sel: (s: { byId: Map<string, unknown> }) => unknown) =>
-    sel({ byId: new Map() }),
+  useInteractionStore: (
+    sel: (s: {
+      byId: Map<
+        string,
+        { kind?: string; payload?: Record<string, unknown>; status?: string }
+      >;
+    }) => unknown,
+  ) => sel({ byId: interactionById }),
 }));
 
 function openKickoffNote() {
   fireEvent.click(screen.getByRole("button", { name: /加一句嘱咐/ }));
+}
+
+function enterAdjust(note: string) {
+  fireEvent.click(screen.getByRole("button", { name: "调整" }));
+  fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
+    target: { value: note },
+  });
 }
 
 function makeTeamPreview(over: Record<string, unknown> = {}) {
@@ -122,6 +140,9 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   pendingRef.current = [];
+  interactionById.clear();
+  clearTeamPreviewKickoffDraft("c1", "cp1");
+  clearTeamPreviewKickoffDraft("c1", "cp2");
 });
 
 beforeEach(() => {
@@ -138,6 +159,82 @@ describe("ResumePrompt · team_preview delegate", () => {
     ];
     render(<ResumePrompt />);
     expect(screen.getByText("MVP主流程 · 预计 1 人")).toBeTruthy();
+  });
+
+  it("首版无版本标记", () => {
+    pendingRef.current = [makeTeamPreview({ revision: 1 })];
+    render(<ResumePrompt />);
+    expect(screen.queryByTestId("team-preview-revision")).toBeNull();
+    expect(screen.queryByTestId("team-preview-revision-version")).toBeNull();
+    expect(screen.queryByText("第 1 版")).toBeNull();
+    expect(screen.queryByText("按你的意见修订")).toBeNull();
+  });
+
+  it("第 2 版显示版本 + 意见", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        revision: 2,
+        revisedFrom: "cp-prev",
+        revisionNote: "改成两人，先做竞品",
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(
+      screen.getByTestId("team-preview-revision-version").textContent,
+    ).toBe("第 2 版");
+    expect(screen.getByText("按你的意见修订")).toBeTruthy();
+    expect(
+      screen.getByTestId("team-preview-revision-note").textContent,
+    ).toContain("改成两人，先做竞品");
+  });
+
+  it("上一版缺失时不画 diff", () => {
+    pendingRef.current = [
+      makeTeamPreview({
+        revision: 2,
+        revisedFrom: "cp-prev",
+        revisionNote: "改成两人，先做竞品",
+        workers: [
+          { run_id: "r1", role: "研究员", task: "调研", depends_on: [] },
+          { run_id: "r2", role: "撰写员", task: "写报告", depends_on: [] },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.getByText("第 2 版")).toBeTruthy();
+    expect(screen.getByText("改成两人，先做竞品")).toBeTruthy();
+    expect(screen.queryByTestId("team-preview-revision-changes")).toBeNull();
+    expect(screen.queryByText("相对上一版")).toBeNull();
+    expect(screen.queryByText("无变化")).toBeNull();
+    expect(screen.queryByText("新增 撰写员")).toBeNull();
+  });
+
+  it("上一版在本地时画出成员增删", () => {
+    interactionById.set("cp-prev", {
+      kind: "team_preview",
+      status: "resolved",
+      payload: {
+        primitive: "delegate",
+        workers: [
+          { run_id: "r1", role: "研究员", task: "调研", depends_on: [] },
+        ],
+      },
+    });
+    pendingRef.current = [
+      makeTeamPreview({
+        revision: 2,
+        revisedFrom: "cp-prev",
+        revisionNote: "加一个撰写",
+        workers: [
+          { run_id: "r1", role: "研究员", task: "调研", depends_on: [] },
+          { run_id: "r2", role: "撰写员", task: "写报告", depends_on: [] },
+        ],
+      }),
+    ];
+    render(<ResumePrompt />);
+    expect(screen.getByTestId("team-preview-revision-changes")).toBeTruthy();
+    expect(screen.getByText("相对上一版")).toBeTruthy();
+    expect(screen.getByText("新增 撰写员")).toBeTruthy();
   });
 
   it("全员同桌时冷拍板分工表不画工作区", () => {
@@ -217,21 +314,36 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(screen.queryByPlaceholderText(/开工时注入全体队员/)).toBeNull();
   });
 
-  it("无备注时点「调整」只展开并 focus 备注框而不提交", () => {
+  it("调整态不渲染开工按钮，且不提交", () => {
     render(<ResumePrompt />);
     fireEvent.click(screen.getByRole("button", { name: "调整" }));
-    expect(screen.getByTestId("team-preview-note")).toBeTruthy();
+    expect(screen.getByTestId("team-preview-adjust-note")).toBeTruthy();
     expect(screen.getByText("调整意见（必填）")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "授权并开工" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "开做" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /加一句嘱咐/ })).toBeNull();
     expect(submitInteraction).not.toHaveBeenCalled();
   });
 
-  it("有备注时点「调整」提交 adjust，不带修正字段", () => {
+  it("返回丢弃调整意见并回到确认态", () => {
     render(<ResumePrompt />);
-    openKickoffNote();
-    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
-      target: { value: "  改成两人，先做竞品  " },
-    });
+    enterAdjust("改成两人，先做竞品");
+    fireEvent.click(screen.getByRole("button", { name: "返回" }));
+    expect(screen.getByRole("button", { name: "授权并开工" })).toBeTruthy();
+    expect(screen.queryByTestId("team-preview-adjust-note")).toBeNull();
+    expect(screen.getByRole("button", { name: /加一句嘱咐/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    expect(
+      (screen.getByTestId("team-preview-adjust-note") as HTMLTextAreaElement)
+        .value,
+    ).toBe("");
+    expect(submitInteraction).not.toHaveBeenCalled();
+  });
+
+  it("调整态提交 adjust，不带修正字段", () => {
+    render(<ResumePrompt />);
+    enterAdjust("  改成两人，先做竞品  ");
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
     expect(submitInteraction).toHaveBeenCalledWith(
       expect.objectContaining({
         cold: expect.objectContaining({
@@ -247,6 +359,78 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(cold.excluded_run_ids).toBeUndefined();
     expect(cold.write_capability_overrides).toBeUndefined();
     expect(cold.model_overrides).toBeUndefined();
+  });
+
+  it("adjust 提交中保留调整表单，不换等待卡；新卡到达后回到确认态", async () => {
+    let resolveSubmit: (value: string) => void = () => {};
+    submitInteraction.mockReturnValue(
+      new Promise((resolve) => {
+        resolveSubmit = resolve;
+      }),
+    );
+    const { rerender } = render(<ResumePrompt />);
+    enterAdjust("改成两人，先做竞品");
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
+    expect(screen.queryByTestId("team-preview-adjust-wait")).toBeNull();
+    expect(screen.queryByText("CEO 正在按你的意见重排团队")).toBeNull();
+    expect(screen.getByTestId("team-preview-adjust-note")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "交回修订" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(screen.queryByRole("button", { name: "授权并开工" })).toBeNull();
+
+    resolveSubmit("ok");
+    await waitFor(() => {
+      expect(
+        (screen.getByRole("button", { name: "交回修订" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false);
+    });
+    expect(screen.getByTestId("team-preview-adjust-note")).toBeTruthy();
+    expect(screen.queryByTestId("team-preview-adjust-wait")).toBeNull();
+
+    pendingRef.current = [makeTeamPreview({ checkpointId: "cp2" })];
+    rerender(<ResumePrompt />);
+    expect(screen.queryByTestId("team-preview-adjust-wait")).toBeNull();
+    expect(screen.getByRole("button", { name: "授权并开工" })).toBeTruthy();
+  });
+
+  it("调整意见草稿在卸载后仍在调整态", () => {
+    const { unmount } = render(<ResumePrompt />);
+    enterAdjust("改成两人，先做竞品");
+    unmount();
+    render(<ResumePrompt />);
+    expect(
+      (screen.getByTestId("team-preview-adjust-note") as HTMLTextAreaElement)
+        .value,
+    ).toBe("改成两人，先做竞品");
+    expect(screen.queryByRole("button", { name: "授权并开工" })).toBeNull();
+  });
+
+  it("调整态 Enter 提交 adjust；确认态 Enter 不开工", () => {
+    render(<ResumePrompt />);
+    openKickoffNote();
+    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
+      target: { value: "先做公开竞品" },
+    });
+    fireEvent.keyDown(screen.getByTestId("team-preview-note"), {
+      key: "Enter",
+    });
+    expect(submitInteraction).not.toHaveBeenCalled();
+
+    enterAdjust("改成两人");
+    fireEvent.keyDown(screen.getByTestId("team-preview-adjust-note"), {
+      key: "Enter",
+    });
+    expect(submitInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cold: expect.objectContaining({
+          decision: "adjust",
+          note: "改成两人",
+        }),
+      }),
+    );
   });
 
   it("收紧写盘后点调整仍不带 write_capability_overrides", () => {
@@ -268,11 +452,8 @@ describe("ResumePrompt · team_preview delegate", () => {
     fireEvent.click(
       screen.getByRole("button", { name: "研究员 收紧为仅文字" }),
     );
-    openKickoffNote();
-    fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
-      target: { value: "先改分工" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    enterAdjust("先改分工");
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
     const cold = submitInteraction.mock.calls[0][0].cold as Record<
       string,
       unknown
@@ -284,7 +465,7 @@ describe("ResumePrompt · team_preview delegate", () => {
     expect(cold.model_overrides).toBeUndefined();
   });
 
-  it("主按钮带非空备注发 continue（非 adjust）", () => {
+  it("确认态嘱咐跟 continue，不跟 adjust", () => {
     render(<ResumePrompt />);
     openKickoffNote();
     fireEvent.change(screen.getByPlaceholderText(/开工时注入全体队员/), {
@@ -572,20 +753,18 @@ describe("ResumePrompt · team_preview debate", () => {
     expect(screen.getByText("认真辩透 · 上限 5 轮")).toBeTruthy();
   });
 
-  it("辩论无备注时点「调整」不提交", () => {
+  it("辩论调整态不渲染开赛按钮，且不提交", () => {
     render(<ResumePrompt />);
     fireEvent.click(screen.getByRole("button", { name: "调整" }));
-    expect(screen.getByTestId("team-preview-note")).toBeTruthy();
+    expect(screen.getByTestId("team-preview-adjust-note")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "授权开赛" })).toBeNull();
     expect(submitInteraction).not.toHaveBeenCalled();
   });
 
-  it("辩论有备注时点「调整」提交 adjust，不带修正字段", () => {
+  it("辩论调整态提交 adjust，不带修正字段", () => {
     render(<ResumePrompt />);
-    openKickoffNote();
-    fireEvent.change(screen.getByPlaceholderText(/开赛时注入各方/), {
-      target: { value: "改辩题，先谈成本" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "调整" }));
+    enterAdjust("改辩题，先谈成本");
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
     expect(submitInteraction).toHaveBeenCalledWith(
       expect.objectContaining({
         cold: expect.objectContaining({

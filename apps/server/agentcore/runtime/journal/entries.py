@@ -59,10 +59,13 @@ def entries_from_runs(runs: dict[str, Any] | None) -> list[dict[str, Any]]:
     # outcome fact is its only durable home. Emitted when EITHER is present.
     finish_reason = runs.get("finish_reason")
     run_error = runs.get("error")
+    outcome = runs.get("outcome")
     if finish_reason is not None or run_error is not None:
         payload: dict[str, Any] = {"finish_reason": finish_reason}
         if run_error is not None:
             payload["error"] = run_error
+        if outcome in ("ok", "partial", "paused", "error"):
+            payload["outcome"] = outcome
         entries.append({"kind": KIND_TURN_END, "payload": payload, "ts": None})
     return entries
 

@@ -10,6 +10,7 @@ from agentcore.core.errors import (
     LLMAuthError,
     LLMError,
     LLMInsufficientBalanceError,
+    LLMRateLimitError,
     LLMUpstreamError,
 )
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
@@ -17,13 +18,13 @@ from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest, ToolCall, ToolCallFunction
 
 
-async def _mock_provider(handler, *, name: str = "test") -> OpenAICompatibleProvider:
-    provider = OpenAICompatibleProvider(
-        name=name, api_key="k", base_url="http://example.invalid/v1"
-    )
+async def _mock_provider(
+    handler, *, name: str = "test", base_url: str = "http://example.invalid/v1"
+) -> OpenAICompatibleProvider:
+    provider = OpenAICompatibleProvider(name=name, api_key="k", base_url=base_url)
     await provider._client.aclose()
     provider._client = httpx.AsyncClient(
-        base_url="http://example.invalid/v1",
+        base_url=base_url,
         transport=httpx.MockTransport(handler),
     )
     return provider
@@ -113,9 +114,36 @@ async def test_probe_401_with_credits_body_is_balance():
         await provider.close()
 
 
+async def test_probe_credits_error_is_credits_family_copy():
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_GO_NO_PAYMENT_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
 _AUTH_BODY = (
     b'{"error":{"message":"invalid api key","type":"authentication_error",'
     b'"code":"invalid_api_key"}}'
+)
+
+_GO_URL = "https://opencode.ai/zen/go/v1"
+_ZEN_URL = "https://opencode.ai/zen/v1"
+_GO_NO_PAYMENT_BODY = (
+    b'{"type":"error","error":{"type":"CreditsError","message":'
+    b'"No payment method. Add a payment method here: '
+    b'https://opencode.ai/workspace/wrk_test/billing"}}'
+)
+_GO_UNKNOWN_CREDITS_BODY = (
+    b'{"type":"error","error":{"type":"CreditsError","message":"Credits declined"}}'
 )
 
 
@@ -206,6 +234,620 @@ def test_balance_detection_does_not_swallow_real_auth_failures():
     assert is_auth_rejection(401, _CREDITS_BODY) is False
     assert is_auth_rejection(401, auth_body) is True
     assert is_auth_rejection(401, None) is True
+
+
+@pytest.mark.parametrize("code", [401, 403])
+async def test_credits_error_on_go_is_credits_family_not_quota(code):
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_CREDITS_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMRateLimitError)
+        assert ei.value.details.get("upstream_status") == code
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("code", [401, 403])
+async def test_credits_error_no_payment_is_same_family_copy(code):
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE, is_balance_exhausted
+
+    assert is_balance_exhausted(_GO_NO_PAYMENT_BODY) is True
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_GO_NO_PAYMENT_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+        assert not isinstance(ei.value, LLMAuthError)
+    finally:
+        await provider.close()
+
+
+async def test_credits_error_unknown_message_still_credits_family():
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_GO_UNKNOWN_CREDITS_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_zen_credits_error_uses_same_family_copy():
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_CREDITS_BODY),
+        base_url=_ZEN_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_platform_go_credits_keeps_platform_copy():
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_CREDITS_BODY),
+        name="platform",
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert "请充值" not in ei.value.message
+        assert "自己的 API Key" in ei.value.message
+        assert "Use balance" not in ei.value.message
+        assert ei.value.details.get("credential_source") == "platform"
+    finally:
+        await provider.close()
+
+
+async def test_credits_error_on_402_still_credits_family_not_quota():
+    from agentcore.llm.errors import OPENCODE_CREDITS_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(402, content=_CREDITS_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_CREDITS_MESSAGE
+        assert "Use balance" not in ei.value.message
+        assert ei.value.details.get("upstream_status") == 402
+    finally:
+        await provider.close()
+
+
+# 2026-08-18 production: Go + deepseek-v4-flash, workspace id redacted.
+_REGION_WS = "https://opencode.ai/workspace/wrk_test/go"
+_REGION_BODY = (
+    b'{"type":"error","error":{"type":"RegionError","message":'
+    b'"The latest version of this model is only available hosted in China '
+    b'and requires explicit opt in: https://opencode.ai/workspace/wrk_test/go"}}'
+)
+_REGION_BODY_NO_URL = (
+    b'{"type":"error","error":{"type":"RegionError","message":'
+    b'"The latest version of this model is only available hosted in China '
+    b'and requires explicit opt in"}}'
+)
+_REGION_FREE_TEXT_NO_TYPE = (
+    b'{"error":{"message":"hosted in China and requires explicit opt in: '
+    b'https://opencode.ai/workspace/wrk_test/go"}}'
+)
+
+
+def test_region_error_classifies_on_structured_type_not_free_text():
+    from agentcore.llm.errors import (
+        is_auth_rejection,
+        is_balance_exhausted,
+        is_opencode_region_error,
+        opencode_structured_error_type,
+        opencode_typed_client_error,
+    )
+
+    assert opencode_structured_error_type(_REGION_BODY) == "regionerror"
+    assert is_opencode_region_error(_REGION_BODY) is True
+    assert is_opencode_region_error(_REGION_BODY_NO_URL) is True
+    assert is_opencode_region_error(_CREDITS_BODY) is False
+    assert is_opencode_region_error(_REGION_FREE_TEXT_NO_TYPE) is False
+    assert is_opencode_region_error(None) is False
+    assert is_balance_exhausted(_REGION_BODY) is False
+    assert is_auth_rejection(401, _REGION_BODY) is False
+    assert is_auth_rejection(403, _REGION_BODY) is False
+    # Unknown type: extension slot returns the value, but no product copy.
+    unknown = b'{"error":{"type":"SomethingNewError","message":"nope"}}'
+    assert opencode_structured_error_type(unknown) == "somethingnewerror"
+    assert (
+        opencode_typed_client_error(unknown, status=400, platform=False)
+        is None
+    )
+
+
+def test_region_product_message_forks_by_billing_leaf():
+    from agentcore.llm.errors import (
+        OPENCODE_REGION_BYOK_MESSAGE,
+        OPENCODE_REGION_PLATFORM_MESSAGE,
+        opencode_region_product_message,
+    )
+
+    byok = opencode_region_product_message(_REGION_BODY, platform=False)
+    assert byok.startswith(OPENCODE_REGION_BYOK_MESSAGE)
+    assert _REGION_WS in byok
+    assert "hosted in China" not in byok
+    platform = opencode_region_product_message(_REGION_BODY, platform=True)
+    assert platform == OPENCODE_REGION_PLATFORM_MESSAGE
+    assert "opencode.ai/workspace" not in platform
+    assert "wrk_" not in platform
+    no_url = opencode_region_product_message(_REGION_BODY_NO_URL, platform=False)
+    assert no_url == OPENCODE_REGION_BYOK_MESSAGE
+    assert "opencode.ai/workspace" not in no_url
+
+
+@pytest.mark.parametrize("code", [400, 401, 403])
+async def test_go_region_error_is_opt_in_copy_not_balance_or_auth(code):
+    from agentcore.llm.errors import OPENCODE_REGION_BYOK_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_REGION_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.message.startswith(OPENCODE_REGION_BYOK_MESSAGE)
+        assert _REGION_WS in ei.value.message
+        assert "余额" not in ei.value.message
+        assert "请充值" not in ei.value.message
+        assert "API Key 无效" not in ei.value.message
+        assert "hosted in China" not in ei.value.message
+        assert ei.value.details.get("upstream_status") == code
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("code", [400, 401, 403])
+async def test_platform_region_error_never_leaks_workspace(code):
+    from agentcore.llm.errors import OPENCODE_REGION_PLATFORM_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_REGION_BODY),
+        name="platform",
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.message == OPENCODE_REGION_PLATFORM_MESSAGE
+        assert "opencode.ai/workspace" not in ei.value.message
+        assert "wrk_" not in ei.value.message
+        assert "余额" not in ei.value.message
+        assert "请充值" not in ei.value.message
+        assert "API Key 无效" not in ei.value.message
+        assert "hosted in China" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_platform_region_error_leak_safe_even_off_go_url():
+    """Platform must never echo the operator workspace URL, whatever the base_url."""
+    from agentcore.llm.errors import OPENCODE_REGION_PLATFORM_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_REGION_BODY),
+        name="platform",
+        base_url="http://example.invalid/v1",
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert ei.value.message == OPENCODE_REGION_PLATFORM_MESSAGE
+        assert "opencode.ai/workspace" not in ei.value.message
+        assert "wrk_" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_region_error_on_unknown_endpoint_still_uses_type_table():
+    """OpenCode class names are unique — RegionError copy is not Go-URL-gated."""
+    from agentcore.llm.errors import OPENCODE_REGION_BYOK_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(403, content=_REGION_BODY),
+        base_url="http://example.invalid/v1",
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.message.startswith(OPENCODE_REGION_BYOK_MESSAGE)
+        assert "API Key 无效" not in ei.value.message
+        assert "余额不足" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("code", [400, 401])
+async def test_probe_go_region_error_is_opt_in_copy(code):
+    from agentcore.llm.errors import OPENCODE_REGION_BYOK_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(code, content=_REGION_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.probe(model=DEEPSEEK_V4_FLASH)
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.message.startswith(OPENCODE_REGION_BYOK_MESSAGE)
+        assert _REGION_WS in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_list_models_go_region_error_is_not_auth():
+    from agentcore.llm.errors import OPENCODE_REGION_BYOK_MESSAGE
+
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_REGION_BODY),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.list_models()
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert ei.value.message.startswith(OPENCODE_REGION_BYOK_MESSAGE)
+        assert _REGION_WS in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_probe_and_list_models_platform_region_never_leaks_workspace():
+    from agentcore.llm.errors import OPENCODE_REGION_PLATFORM_MESSAGE
+
+    async def _assert_platform(factory):
+        provider = await _mock_provider(
+            lambda request: httpx.Response(401, content=_REGION_BODY),
+            name="platform",
+            base_url=_GO_URL,
+        )
+        try:
+            with pytest.raises(LLMError) as ei:
+                await factory(provider)
+            assert ei.value.message == OPENCODE_REGION_PLATFORM_MESSAGE
+            assert "opencode.ai/workspace" not in ei.value.message
+            assert "wrk_" not in ei.value.message
+        finally:
+            await provider.close()
+
+    await _assert_platform(lambda p: p.probe(model=DEEPSEEK_V4_FLASH))
+    await _assert_platform(lambda p: p.list_models())
+
+
+def _oc(kind: str, message: str = "x", metadata: dict | None = None) -> bytes:
+    err: dict = {"type": kind, "message": message}
+    if metadata is not None:
+        err["metadata"] = metadata
+    return json.dumps({"type": "error", "error": err}).encode()
+
+
+def test_opencode_type_table_covers_proven_kinds_only():
+    from agentcore.llm.errors import OPENCODE_TYPED_KINDS, opencode_structured_error_type
+
+    proven = {
+        "RegionError": "regionerror",
+        "AuthError": "autherror",
+        "CreditsError": "creditserror",
+        "MonthlyLimitError": "monthlylimiterror",
+        "UserLimitError": "userlimiterror",
+        "ModelError": "modelerror",
+        "RateLimitError": "ratelimiterror",
+        "FreeUsageLimitError": "freeusagelimiterror",
+        "GoUsageLimitError": "gousagelimiterror",
+        "BlackUsageLimitError": "blackusagelimiterror",
+        "error": "error",
+    }
+    assert set(proven.values()) == set(OPENCODE_TYPED_KINDS)
+    for raw, lowered in proven.items():
+        assert opencode_structured_error_type(_oc(raw)) == lowered
+    # Different envelope — not nested error.type.
+    router = b'{"type":"Router.Unavailable","modelID":"gpt-5.6-luna"}'
+    assert opencode_structured_error_type(router) is None
+    assert "router.unavailable" not in OPENCODE_TYPED_KINDS
+
+
+def test_passthrough_region_403_is_not_regionerror():
+    from agentcore.llm.errors import (
+        is_auth_rejection,
+        is_opencode_region_error,
+        opencode_typed_client_error,
+    )
+
+    body = b'{"error":{"message":"This model is not available in your region"}}'
+    assert is_opencode_region_error(body) is False
+    assert opencode_typed_client_error(body, status=403, platform=False) is None
+    assert is_auth_rejection(403, body) is False
+
+
+async def test_passthrough_region_403_does_not_offer_china_opt_in():
+    from agentcore.llm.errors import OPENCODE_REGION_BYOK_MESSAGE
+
+    body = b'{"error":{"message":"This model is not available in your region"}}'
+    provider = await _mock_provider(
+        lambda request: httpx.Response(403, content=body),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert OPENCODE_REGION_BYOK_MESSAGE not in ei.value.message
+        assert "中国区" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_router_unavailable_is_not_on_the_type_table():
+    body = b'{"type":"Router.Unavailable","modelID":"gpt-5.6-luna"}'
+    provider = await _mock_provider(lambda request: httpx.Response(500, content=body))
+    try:
+        with pytest.raises(LLMUpstreamError) as ei:
+            provider._raise_for_status(500, 1.0, httpx.Headers(), body=body)
+        assert "中国区" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+        assert "API Key 无效" not in ei.value.message
+        assert "上游模型服务暂时不可用" in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_autherror_401_is_key_invalid():
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_oc("AuthError", "invalid key")),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMAuthError) as ei:
+            await provider.complete(_req())
+        assert "API Key 无效" in ei.value.message
+        assert "余额" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize(
+    ("kind", "byok"),
+    [
+        ("MonthlyLimitError", "OPENCODE_MONTHLY_LIMIT_MESSAGE"),
+        ("UserLimitError", "OPENCODE_USER_LIMIT_MESSAGE"),
+        ("ModelError", "OPENCODE_MODEL_UNAVAILABLE_MESSAGE"),
+    ],
+)
+async def test_opencode_401_limit_and_model_types(kind, byok):
+    from agentcore.llm import errors as errmod
+
+    copy = getattr(errmod, byok)
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=_oc(kind)),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        assert not isinstance(ei.value, LLMAuthError)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert not isinstance(ei.value, LLMRateLimitError)
+        assert ei.value.message == copy
+        assert "余额" not in ei.value.message
+        assert "API Key 无效" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+@pytest.mark.parametrize("kind", ["MonthlyLimitError", "UserLimitError", "ModelError"])
+async def test_platform_401_limit_and_model_never_leaks_workspace(kind):
+    from agentcore.llm.errors import (
+        OPENCODE_PLATFORM_MODEL_MESSAGE,
+        OPENCODE_PLATFORM_USAGE_MESSAGE,
+    )
+
+    body = _oc(kind, metadata={"workspace": "wrk_secret", "limitName": "month"})
+    provider = await _mock_provider(
+        lambda request: httpx.Response(401, content=body),
+        name="platform",
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMError) as ei:
+            await provider.complete(_req())
+        expected = (
+            OPENCODE_PLATFORM_MODEL_MESSAGE
+            if kind == "ModelError"
+            else OPENCODE_PLATFORM_USAGE_MESSAGE
+        )
+        assert ei.value.message == expected
+        assert "opencode.ai/workspace" not in ei.value.message
+        assert "wrk_" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+def _raise_429(provider, body: bytes, headers=None):
+    provider._raise_for_status(
+        429,
+        1.0,
+        httpx.Headers(headers or {"retry-after": "2"}),
+        body=body,
+    )
+
+
+async def test_go_usage_limit_without_limit_name_uses_stem_copy():
+    from agentcore.llm.errors import OPENCODE_GO_QUOTA_MESSAGE
+
+    body = _oc("GoUsageLimitError", "Go usage limit")
+    provider = await _mock_provider(lambda request: httpx.Response(429, content=body))
+    try:
+        with pytest.raises(LLMRateLimitError) as ei:
+            _raise_429(provider, body)
+        assert ei.value.message == OPENCODE_GO_QUOTA_MESSAGE
+    finally:
+        await provider.close()
+
+
+async def test_go_usage_limit_429_is_quota_copy_not_balance():
+    from agentcore.llm.errors import is_balance_exhausted
+
+    body = _oc(
+        "GoUsageLimitError",
+        "Go usage limit",
+        metadata={"workspace": "wrk_secret", "limitName": "5h"},
+    )
+    assert is_balance_exhausted(body) is False
+    provider = await _mock_provider(
+        lambda request: httpx.Response(429, content=body),
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMRateLimitError) as ei:
+            _raise_429(provider, body)
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert not isinstance(ei.value, LLMAuthError)
+        assert ei.value.message.startswith("OpenCode Go 订阅配额已用尽（5h）")
+        assert "Use balance" in ei.value.message
+        assert "wrk_" not in ei.value.message
+        assert "余额不足" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_platform_go_usage_limit_429_never_leaks_workspace():
+    from agentcore.llm.errors import OPENCODE_PLATFORM_USAGE_MESSAGE, is_auth_rejection
+
+    body = _oc(
+        "GoUsageLimitError",
+        "Go usage limit",
+        metadata={"workspace": "wrk_secret", "limitName": "5h"},
+    )
+    assert is_auth_rejection(401, body) is False
+    provider = await _mock_provider(
+        lambda request: httpx.Response(429, content=body),
+        name="platform",
+        base_url=_GO_URL,
+    )
+    try:
+        with pytest.raises(LLMRateLimitError) as ei:
+            _raise_429(provider, body)
+        assert ei.value.message == OPENCODE_PLATFORM_USAGE_MESSAGE
+        assert "opencode.ai/workspace" not in ei.value.message
+        assert "wrk_" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+        assert "5h" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_free_usage_limit_429_is_not_balance():
+    from agentcore.llm.errors import OPENCODE_FREE_USAGE_MESSAGE
+
+    body = _oc("FreeUsageLimitError", "free usage")
+    provider = await _mock_provider(
+        lambda request: httpx.Response(429, content=body),
+        base_url=_ZEN_URL,
+    )
+    try:
+        with pytest.raises(LLMRateLimitError) as ei:
+            _raise_429(provider, body)
+        assert ei.value.message == OPENCODE_FREE_USAGE_MESSAGE
+        assert not isinstance(ei.value, LLMInsufficientBalanceError)
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_rate_limit_and_black_usage_keep_existing_429_copy():
+    for kind in ("RateLimitError", "BlackUsageLimitError"):
+        body = _oc(kind, "slow down")
+        provider = await _mock_provider(
+            lambda request, b=body: httpx.Response(429, content=b),
+            base_url=_GO_URL,
+        )
+        try:
+            with pytest.raises(LLMRateLimitError) as ei:
+                _raise_429(provider, body)
+            assert "上游限流" in ei.value.message
+            assert "Use balance" not in ei.value.message
+            assert "余额" not in ei.value.message
+        finally:
+            await provider.close()
+
+
+async def test_opencode_500_literal_error_uses_existing_5xx_copy():
+    body = _oc("error", "Internal server error")
+    provider = await _mock_provider(lambda request: httpx.Response(500, content=body))
+    try:
+        with pytest.raises(LLMUpstreamError) as ei:
+            provider._raise_for_status(500, 1.0, httpx.Headers(), body=body)
+        assert "上游模型服务暂时不可用" in ei.value.message
+        assert "Internal server error" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_deepseek_402_without_opencode_type_still_asks_to_topup():
+    """Non-OpenCode vendors must not pick up the CreditsError family copy."""
+    provider = await _mock_provider(lambda request: httpx.Response(402))
+    try:
+        with pytest.raises(LLMInsufficientBalanceError) as ei:
+            await provider.complete(_req())
+        assert "余额不足" in ei.value.message
+        assert "请充值" in ei.value.message
+        assert "OpenCode" not in ei.value.message
+        assert "Use balance" not in ei.value.message
+    finally:
+        await provider.close()
+
+
+async def test_bare_401_still_invalid_key():
+    provider = await _mock_provider(lambda request: httpx.Response(401))
+    try:
+        with pytest.raises(LLMAuthError) as ei:
+            await provider.complete(_req())
+        assert "API Key 无效" in ei.value.message
+        assert "OpenCode" not in ei.value.message
+    finally:
+        await provider.close()
 
 
 @pytest.mark.parametrize("code", [401, 403])

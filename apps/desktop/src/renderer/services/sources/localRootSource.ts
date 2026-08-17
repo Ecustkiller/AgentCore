@@ -113,26 +113,43 @@ export function createLocalRootSource(
     async listFileIndex() {
       // Flat file list for the @ index (文件中枢统一 F4); the IPC already prunes
       // node_modules/.git… and caps the count, matching the cloud /file-index.
-      // A subpath workspace indexes the whole container root then filters to its
-      // subtree — wasteful but self-contained (no IPC surface), and rarely hit:
-      // the /files rail browses via listDir, and @ mention sources are built at
-      // root level. Best-effort like the rest of the @ index.
+      // `order: "recent"` 带 mtime，空态按最近修改排。A subpath workspace indexes
+      // the whole container root then filters to its subtree — wasteful but
+      // self-contained (no IPC surface), and rarely hit: the /files rail browses
+      // via listDir, and @ mention sources are built at root level.
       //
       // Lazy workspace: probe base first — missing ≡ empty index (no full scan).
       if (base) {
         const probe = await window.fsApi.listDir(rootId, base);
         if (!probe.ok) {
-          if (probe.code === "not_found") return [];
+          if (probe.code === "not_found") {
+            return { files: [], truncated: false };
+          }
           throwFs(probe.reason, probe.code);
         }
       }
-      const res = await window.fsApi.listFiles(rootId);
+      const res = await window.fsApi.listFiles(rootId, { order: "recent" });
       if (!res.ok) throwFs(res.reason, res.code);
-      if (!base) return res.data.map((f) => f.relPath);
+      const { files, truncated } = res.data;
+      if (!base) {
+        return {
+          files: files.map((f) => ({
+            relPath: f.relPath,
+            mtimeMs: f.mtimeMs,
+          })),
+          truncated,
+        };
+      }
       const prefix = `${base}/`;
-      return res.data
-        .filter((f) => f.relPath.startsWith(prefix))
-        .map((f) => f.relPath.slice(prefix.length));
+      return {
+        files: files
+          .filter((f) => f.relPath.startsWith(prefix))
+          .map((f) => ({
+            relPath: f.relPath.slice(prefix.length),
+            mtimeMs: f.mtimeMs,
+          })),
+        truncated,
+      };
     },
     async read(path): Promise<FilePreviewResult> {
       const resolvedPath = inPath(path);

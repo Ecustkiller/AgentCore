@@ -45,6 +45,7 @@
   "projected": {
     "status": "failed",
     "finishReason": "error",
+    "outcome": "error",
     "error": {
       "code": "STREAM_ERROR",
       "message": "本机工作区通道无响应（已挂起 / channel dead）。请检查桌面连接后重试。"

@@ -77,7 +77,7 @@ async def test_resident_file_uses_workspace_path_and_hint():
 
 
 @pytest.mark.asyncio
-async def test_binary_resident_has_no_inline_body():
+async def test_spreadsheet_without_preview_omits_code_execute_when_unassembled():
     out = await _build_attachment_context(
         [
             {
@@ -87,22 +87,44 @@ async def test_binary_resident_has_no_inline_body():
                 "binary": True,
                 "workspace_path": "attachments/report.xlsx",
             }
-        ]
+        ],
+        available_tools=frozenset({"file_read", "file_write"}),
     )
     assert out is not None
-    assert "--- File: report.xlsx (attachments/report.xlsx) [binary] ---" in out
-    assert "code_execute" in out
-    assert "delegate" in out.lower()
-    assert "CEO has no code_execute" in out
+    assert "[table / path only]" in out
+    assert "includes code_execute" not in out
+    assert "with code_execute" not in out
     assert "Do NOT use an OS absolute path" in out
-    assert "Never hard-read an OS absolute path" in out
     assert "Do NOT treat file_list emptiness as missing" in out
     assert "saved into your workspace" in out
-    # Must not imply CEO can call code_execute directly.
-    assert "Open and parse it with code_execute" not in out
-    # Prompt must not leak a client OS absolute path for binary residents.
     assert "C:\\" not in out
     assert "/Users/" not in out
+
+
+@pytest.mark.asyncio
+async def test_spreadsheet_mentions_code_execute_only_when_in_tool_table():
+    att = {
+        "name": "report.xlsx",
+        "path": "attachments/report.xlsx",
+        "text": "",
+        "binary": True,
+        "workspace_path": "attachments/report.xlsx",
+    }
+    with_exec = await _build_attachment_context(
+        [att], available_tools=frozenset({"file_read", "code_execute"})
+    )
+    assert with_exec is not None
+    assert "code_execute" in with_exec
+    assert "CEO has no code_execute" in with_exec
+    assert "Open and parse it with code_execute" not in with_exec
+
+    without_exec = await _build_attachment_context([att], available_tools=frozenset())
+    assert without_exec is not None
+    assert "includes code_execute" not in without_exec
+    assert "with code_execute" not in without_exec
+    assert "does not include code_execute" in without_exec
+    assert "structure report" in without_exec
+    assert "transform script" in without_exec
 
 
 @pytest.mark.asyncio
@@ -666,7 +688,7 @@ async def test_image_without_vision_reader_honest_unconfigured():
 
 
 @pytest.mark.asyncio
-async def test_non_image_binary_unchanged():
+async def test_non_image_spreadsheet_skips_vision():
     out = await _build_attachment_context(
         [
             {
@@ -679,12 +701,71 @@ async def test_non_image_binary_unchanged():
         ],
         vision_reader=_StubVisionReader(),  # type: ignore[arg-type]
         backend=_StubBackend(),  # type: ignore[arg-type]
+        available_tools=frozenset(),
     )
     assert out is not None
-    assert "[binary]" in out
-    assert "code_execute" in out
+    assert "[table /" in out
     assert "[image" not in out
     assert "未配置识图" not in out
+    assert "includes code_execute" not in out
+    assert "with code_execute" not in out
+
+
+@pytest.mark.asyncio
+async def test_table_structure_preview_hides_full_body():
+    rows = ["date,amount,memo"]
+    secret = "UNIQUE_TAIL_ROW_SHOULD_NOT_ENTER_PROMPT"
+    for i in range(1, 21):
+        memo = secret if i == 20 else f"item-{i}"
+        rows.append(f"2024-01-{i:02d},{i}.0,{memo}")
+    body = "\n".join(rows)
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "ledger.csv",
+                "path": "attachments/ledger.csv",
+                "text": body,
+                "workspace_path": "attachments/ledger.csv",
+            }
+        ],
+        available_tools=frozenset(),
+    )
+    assert out is not None
+    assert "[table / structure]" in out
+    assert "rows: 20" in out
+    assert "date:date" in out
+    assert "amount:float" in out or "amount:int" in out
+    assert secret not in out
+    assert "includes code_execute" not in out
+    assert "with code_execute" not in out
+    assert "structure preview only" in out
+
+
+@pytest.mark.asyncio
+async def test_office_extract_declares_lossy_tables_without_code_execute():
+    out = await _build_attachment_context(
+        [
+            {
+                "name": "voucher.pdf",
+                "path": "attachments/voucher.pdf",
+                "binary": True,
+                "workspace_path": "attachments/voucher.pdf",
+                "parsed_workspace_path": "attachments/voucher.pdf.md",
+                "parse_status": "ok",
+                "text": "转账时间 收款方 金额\n2024-01-01 张三 12.00",
+            }
+        ],
+        available_tools=frozenset({"file_read"}),
+    )
+    assert out is not None
+    assert "lossy for tabular content" in out
+    assert "Do not use this extract as the data source" in out
+    assert "includes code_execute" not in out
+    assert "with code_execute" not in out
+    assert "Parse the original workspace file with code_execute" not in out
+    assert "structure report" in out
+    assert "transform script" in out
+    assert "hand-copied" in out
 
 
 @pytest.mark.asyncio

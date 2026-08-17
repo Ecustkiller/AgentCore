@@ -1,5 +1,6 @@
 import { AssistantContent } from "@/components/AssistantView";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
+import { HangingQuestionBar } from "@/components/HangingQuestionBar";
 import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
 import { PREVIEW_FIXTURES } from "@/preview/fixtures";
 import {
@@ -16,6 +17,7 @@ import {
   extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
+import { extractTeamPreviewTraces } from "@/protocol/teamPreviewTraces";
 import type { SSEEvent } from "@agentcore/contract-types";
 import { turnElapsedMs } from "@agentcore/protocol-fold-kit";
 import { useMemo } from "react";
@@ -59,6 +61,10 @@ export function PreviewPage() {
   const hotTraces = useMemo(() => extractHotDecisionTraces(events), [events]);
   const stageCardTraces = useMemo(
     () => extractStageCardTraces(events),
+    [events],
+  );
+  const teamPreviewTraces = useMemo(
+    () => extractTeamPreviewTraces(events),
     [events],
   );
   const toolPhases = useMemo(() => extractToolPhases(events), [events]);
@@ -193,6 +199,7 @@ export function PreviewPage() {
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}
             stageCardTraces={stageCardTraces}
+            teamPreviewTraces={teamPreviewTraces}
             toolPhases={toolPhases}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
@@ -206,6 +213,10 @@ export function PreviewPage() {
           )}
         </div>
       </div>
+      <HangingQuestionBar
+        asks={asks.filter((a) => a.status === "pending")}
+        readOnly
+      />
     </div>
   );
 }

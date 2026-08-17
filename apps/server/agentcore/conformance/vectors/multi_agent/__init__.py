@@ -34,9 +34,11 @@ from .delegate import (
     _multi_agent_worker_tool,
 )
 from .delivery import (
+    _multi_agent_ceo_rate_limit_paused,
     _multi_agent_delivery_status_partial,
     _multi_agent_export_docx_artifacts,
     _multi_agent_pptx_promised_md_only,
+    _multi_agent_worker_rate_limit_partial,
 )
 from .escalation import (
     _multi_agent_blocking_escalate,
@@ -54,6 +56,7 @@ from .interjection import (
     _multi_agent_user_interjection_handled,
     _multi_agent_user_interjection_queued,
     _multi_agent_user_interjection_with_attachments,
+    _multi_agent_user_interjection_with_mentions,
 )
 from .mlr_debate_acts import _multi_agent_mlr_debate_acts
 from .mlr_debate_witness import _multi_agent_mlr_debate_witness
@@ -136,6 +139,10 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "multi_agent_user_interjection_with_attachments": (
         "协调带附件插话：user_interjection(received) 携带 attachments 元数据 → userInterjections",
         _multi_agent_user_interjection_with_attachments,
+    ),
+    "multi_agent_user_interjection_with_mentions": (
+        "协调带点名插话：user_interjection(received) 携带 agent_mentions 软芯片 → userInterjections",
+        _multi_agent_user_interjection_with_mentions,
     ),
     "multi_agent_solo_coordinate_interjection": (
         "单 worker+协调：非阻塞 kickoff → 执行期插话 → cancel_worker 终止"
@@ -225,6 +232,17 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "选 pptx 却只落 md/脚本：delivery_status=partial 可见缺口；"
         "假「PPT 已可打开」经 finish_guard content_reset 回炉为诚实终稿",
         _multi_agent_pptx_promised_md_only,
+    ),
+    "multi_agent_worker_rate_limit_partial": (
+        "委派·限流：worker 落盘 3 个 CSV 后撞 429（仅一帧 run_failed + LLM_RATE_LIMIT/"
+        "retryable；未 attested 秒数不上线）；delivery_status=partial 认 3 产物；CEO 汇总再 429 "
+        "把 delegate 交代渲染成回复（outcome=partial，正文非空）",
+        _multi_agent_worker_rate_limit_partial,
+    ),
+    "multi_agent_ceo_rate_limit_paused": (
+        "委派·限流暂停：worker 一帧 run_failed（LLM_RATE_LIMIT/retryable）；delegate 已闭合；"
+        "CEO 429 → message_end(finish=paused, outcome=paused)；无 *_required、无系统收口用户行",
+        _multi_agent_ceo_rate_limit_paused,
     ),
     "multi_agent_team_notes": (
         "多 Agent·通·便签墙：并行队员贴 decision/heads_up/claim 便签，折到 teamNotes（按序去重，与图节点正交）",

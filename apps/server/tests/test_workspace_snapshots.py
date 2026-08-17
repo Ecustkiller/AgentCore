@@ -226,6 +226,94 @@ async def test_system_prune_keeps_pinned_over_cap(fs_storage, monkeypatch):
     assert old_handoff.snapshot_id in ids
 
 
+async def test_byte_cap_prunes_oldest(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_system_other_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_snapshot_max_bytes", 10**12)
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="bcap")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    first = await create_snapshot(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bcap"
+    )
+    monkeypatch.setattr(
+        settings, "workspace_snapshot_max_bytes", first.size_bytes * 2 + first.size_bytes // 2
+    )
+    second = await create_snapshot(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bcap"
+    )
+    third = await create_snapshot(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bcap"
+    )
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="bcap")
+    ids = {r.snapshot_id for r in listed}
+    assert first.snapshot_id not in ids
+    assert second.snapshot_id in ids
+    assert third.snapshot_id in ids
+
+
+async def test_byte_cap_keeps_labeled(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_snapshot_max_bytes", 10**12)
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="bkept")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    kept = await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        folder_rel_path=None,
+        conversation_id="bkept",
+        label="v1",
+    )
+    monkeypatch.setattr(settings, "workspace_snapshot_max_bytes", kept.size_bytes)
+    for _ in range(3):
+        await create_snapshot(
+            user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bkept"
+        )
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="bkept")
+    assert kept.snapshot_id in {r.snapshot_id for r in listed}
+    assert any(r.snapshot_id == kept.snapshot_id and r.label == "v1" for r in listed)
+
+
+async def test_byte_cap_keeps_pinned(fs_storage, monkeypatch):
+    monkeypatch.setattr(settings, "workspace_auto_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_system_baseline_snapshot_max", 10)
+    monkeypatch.setattr(settings, "workspace_snapshot_max_bytes", 10**12)
+    root = resolve_workspace_root(user_id="u1", folder_rel_path=None, conversation_id="bpin")
+    (root / "f.txt").write_text("x", encoding="utf-8")
+
+    pinned = await create_snapshot(
+        user_id="u1",
+        folder_id=None,
+        folder_rel_path=None,
+        conversation_id="bpin",
+        label="turn-baseline:old",
+    )
+
+    async def _pins(**_kwargs):
+        return {pinned.snapshot_id}
+
+    monkeypatch.setattr(
+        "agentcore.workspace.snapshots.collect_pinned_system_snapshot_ids",
+        _pins,
+    )
+    monkeypatch.setattr(
+        settings, "workspace_snapshot_max_bytes", pinned.size_bytes * 2 + pinned.size_bytes // 2
+    )
+    mid = await create_snapshot(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bpin"
+    )
+    newest = await create_snapshot(
+        user_id="u1", folder_id=None, folder_rel_path=None, conversation_id="bpin"
+    )
+    listed = await list_snapshots(user_id="u1", folder_id=None, conversation_id="bpin")
+    ids = {r.snapshot_id for r in listed}
+    assert pinned.snapshot_id in ids
+    assert newest.snapshot_id in ids
+    assert mid.snapshot_id not in ids
+
+
 async def test_purge_snapshots_clears_history(fs_storage):
     root = resolve_workspace_root(user_id="u1", folder_rel_path="f1", conversation_id="c1")
     (root / "a.txt").write_text("x", encoding="utf-8")

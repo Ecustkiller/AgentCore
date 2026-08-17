@@ -66,6 +66,7 @@ vi.mock("@/hooks/useFolders", () => ({
 }));
 vi.mock("@/hooks/useConversations", () => ({
   useConversations: () => [],
+  getConversations: () => [],
   useGroupedConversations: () => ({ data: { folders: [] } }),
   patchConversationCache: vi.fn(),
 }));
@@ -224,12 +225,50 @@ vi.mock("@/stores/conversation", async (importOriginal) => {
 });
 
 import {
+  COMPOSER_CONTINUE_PLACEHOLDER,
+  COMPOSER_EMPTY_INTERRUPTED_HINT,
+} from "@/lib/composerContinueHint";
+import { LLM_RATE_LIMIT_MESSAGE, LLM_RATE_LIMIT_WHY } from "@/lib/errors";
+import {
   setComposerSendError,
   useComposerSendErrorStore,
 } from "@/stores/composerSendError";
-import { getActiveRuntime, useConversationStore } from "@/stores/conversation";
+import {
+  type Message,
+  getActiveRuntime,
+  useConversationStore,
+} from "@/stores/conversation";
+import { EMPTY_RUNTIME } from "@/stores/conversation/runtime";
 import { useServerHealthStore } from "@/stores/serverHealth";
 import { TurnComposer } from "../TurnComposer";
+
+const OUTCOME_CID = "conv-composer-outcome";
+
+function seedLastAssistant(
+  partial: Partial<Message> & Pick<Message, "finishReason">,
+  sessionError: string | null = null,
+) {
+  const message: Message = {
+    id: "a1",
+    role: "assistant",
+    content: "",
+    createdAt: new Date().toISOString(),
+    executionId: "exec-1",
+    isStreaming: false,
+    traceId: "trace-1",
+    ...partial,
+  };
+  useConversationStore.setState({
+    currentConversationId: OUTCOME_CID,
+    byId: {
+      [OUTCOME_CID]: {
+        ...EMPTY_RUNTIME,
+        error: sessionError,
+        messages: [message],
+      },
+    },
+  });
+}
 
 function renderComposer(variant?: "card" | "bar") {
   return render(
@@ -493,6 +532,135 @@ describe("TurnComposer variants", () => {
       useComposerSendErrorStore.getState().byKey.__draft__,
     ).toBeUndefined();
     expect(getActiveRuntime().error).toBeNull();
+  });
+
+  it("empty interrupt: composer hint hosts 复制排查包", () => {
+    seedLastAssistant({ finishReason: "interrupted", content: "" });
+    renderComposer();
+    const hint = screen.getByTestId("composer-empty-interrupted-hint");
+    expect(hint.textContent).toContain("发送下一条");
+    expect(hint.textContent).toContain(COMPOSER_EMPTY_INTERRUPTED_HINT);
+    expect(
+      within(hint).getByRole("button", { name: "复制排查包" }),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+  });
+
+  it("partial + rate-limit: composer hint hosts why and 复制排查包", () => {
+    seedLastAssistant({
+      finishReason: "error",
+      content: "",
+      outcome: "partial",
+      error: {
+        code: "LLM_RATE_LIMIT",
+        message: LLM_RATE_LIMIT_MESSAGE,
+      },
+    });
+    renderComposer();
+    const hint = screen.getByTestId("composer-empty-interrupted-hint");
+    expect(hint.textContent).toContain(LLM_RATE_LIMIT_WHY);
+    expect(hint.textContent).not.toContain("发送下一条");
+    expect(hint.textContent).not.toContain("未能交付");
+    expect(
+      within(hint).getByRole("button", { name: "复制排查包" }),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+  });
+
+  it("empty interrupt: sessionError is suppressed (hint is the unique verdict)", () => {
+    seedLastAssistant(
+      { finishReason: "interrupted", content: "" },
+      "网络中断，请重试。",
+    );
+    renderComposer();
+    expect(screen.getByTestId("composer-empty-interrupted-hint")).toBeTruthy();
+    expect(
+      within(screen.getByTestId("composer-empty-interrupted-hint")).getByRole(
+        "button",
+        { name: "复制排查包" },
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+  });
+
+  it("empty user-stop is not an error: no composer hint", () => {
+    seedLastAssistant({ finishReason: "cancelled", content: "" });
+    renderComposer();
+    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+  });
+
+  it("session banner lights when the arbitrator has no other verdict", () => {
+    seedLastAssistant(
+      { finishReason: "end_turn", content: "已写出正文" },
+      "网络中断，请重试。",
+    );
+    renderComposer();
+    const banner = screen.getByTestId("composer-send-error");
+    expect(banner.textContent).toContain("网络中断，请重试。");
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
+    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+  });
+
+  it("bubble-owned failure does not duplicate sessionError on the composer", () => {
+    seedLastAssistant(
+      {
+        finishReason: "error",
+        content: "",
+        error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
+      },
+      "模型调用失败，请重试。",
+    );
+    renderComposer();
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+  });
+
+  it("composerError still shows when the turn would suppress sessionError", () => {
+    seedLastAssistant(
+      {
+        finishReason: "error",
+        content: "",
+        error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
+      },
+      "模型调用失败，请重试。",
+    );
+    setComposerSendError(OUTCOME_CID, {
+      message: "发送失败：没有可用的模型密钥",
+      action: null,
+    });
+    renderComposer();
+    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+      "发送失败：没有可用的模型密钥",
+    );
+    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
+  });
+
+  it("composerError with supportPack hosts 复制排查包 after bubbles are gone", () => {
+    setComposerSendError("__draft__", {
+      message: "上游限流，暂时无法继续本回合。",
+      action: null,
+      supportPack: {
+        conversationId: "c1",
+        userMessageId: "u1",
+        messageId: "a1",
+        errorCode: "LLM_RATE_LIMIT",
+      },
+    });
+    renderComposer();
+    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+      "上游限流",
+    );
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
+  });
+
+  it("interrupted-with-body: continue placeholder, no empty-interrupt hint", () => {
+    seedLastAssistant({ finishReason: "interrupted", content: "半成品" });
+    renderComposer();
+    expect(
+      screen.getByPlaceholderText(COMPOSER_CONTINUE_PLACEHOLDER),
+    ).toBeTruthy();
+    expect(screen.queryByTestId("composer-empty-interrupted-hint")).toBeNull();
   });
 
   it("发送中：按钮进入 in-flight 态并挡住连点", async () => {

@@ -235,6 +235,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "partial",
     "error": null,
     "content": "讲稿与生成脚本已就绪；pptx 尚未生成，请绑定本机执行环境后运行脚本。",
     "reasoning": "",

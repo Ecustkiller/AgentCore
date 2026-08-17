@@ -1,6 +1,10 @@
+import type {
+  OutgoingAgentMention,
+  OutgoingAttachment,
+} from "@/services/streamConversation";
 import { create } from "zustand";
 
-/** 同对话 FIFO 排队项（live · 设备通道快照为权威；进程内，重启丢）。
+/** 同对话 FIFO 排队项（live · 设备通道快照为权威；进程内无持久化，重连靠账号快照回填）。
  * 连接播种 `turn_queue_account_snapshot` 整表替换云队；增量 `turn_queue_snapshot`。 */
 export interface QueuedTurnEntry {
   queueId: string;
@@ -11,6 +15,15 @@ export interface QueuedTurnEntry {
    */
   messageId?: string;
   content: string;
+  /**
+   * 排队附件（含 ``workspace_path`` 等驻留引用）。
+   * 真源是服务端 ``QueuedTurnItem.attachments``；禁止另造路径。
+   */
+  attachments?: OutgoingAttachment[];
+  /** 排队 ``@`` 点名；真源是服务端 ``QueuedTurnItem.agent_mentions``。 */
+  agentMentions?: OutgoingAgentMention[];
+  /** 答非阻塞提问时与出站 ``question_posted.ask_id`` 对上。 */
+  askId?: string;
   position: number;
   queueDepth: number;
   degradedFrom?: "steer";

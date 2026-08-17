@@ -17,6 +17,10 @@ Canonical keys (bound where they first become known):
   - ``message_id``      assistant message (= durable journal/audit turn_id)
   - ``agent_id``        current agent (turn start; re-scoped per delegation run)
   - ``run_id`` / ``depth``  delegation / DAG sub-node (scoped via ``log_context``)
+  - ``http_method`` / ``http_path`` / ``http_req_id``  request identity
+    (``RequestAttributionMiddleware``; request-scoped)
+  - ``client_platform`` / ``client_version``  raw ``X-Client-*`` headers
+    (same middleware; ``-`` = header absent, ``""`` = present but empty)
 
 ``attempt_id`` is the N-th run of a turn (fresh on resume). It is deliberately
 *not* named ``turn_id`` — that name belongs to the durable journal/audit identity
@@ -45,6 +49,13 @@ def bind_log_context(**ids: Any) -> None:
     cleaned = {k: v for k, v in ids.items() if v}
     if cleaned:
         structlog.contextvars.bind_contextvars(**cleaned)
+
+
+def unbind_log_context(*keys: str) -> None:
+    """Drop bound keys so a later call in the same task cannot leak stale values."""
+    cleaned = [k for k in keys if k]
+    if cleaned:
+        structlog.contextvars.unbind_contextvars(*cleaned)
 
 
 def clear_log_context() -> None:

@@ -1,6 +1,6 @@
 [project]
 name = "agentcore"
-version = "0.6.5"
+version = "0.6.6"
 description = "AgentCore - Multi-Agent AI Workspace Backend"
 requires-python = ">=3.12"
 dependencies = [
@@ -73,6 +73,11 @@ agentcore = "agentcore.__main__:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Wheel otherwise drops non-.py package data; the sandbox list must ship so
+# ``code_execute`` descriptions can read it from a non-editable install.
+[tool.hatch.build.targets.wheel.force-include]
+"agentcore/tools/sandbox/cloud_python.txt" = "agentcore/tools/sandbox/cloud_python.txt"
 
 [tool.ruff]
 target-version = "py312"

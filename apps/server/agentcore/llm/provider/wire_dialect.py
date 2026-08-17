@@ -98,7 +98,7 @@ _DIALECT_OVERLAYS: tuple[_DialectOverlay, ...] = (
             "mythos-5",
         )
     ),
-    # Kimi leaf ids (incl. OpenCode Zen / other relays hosting ``kimi-*``).
+    # Kimi leaf ids (incl. OpenCode Zen / Go / other relays hosting ``kimi-*``).
     # Do not blanket whole endpoints that happen to list Kimi models.
     _DialectOverlay("prefix", "kimi-", omit_temperature=True),
 )
@@ -108,8 +108,8 @@ def resolve_wire_dialect(model: str, *, base_url: str | None = None) -> WireDial
     """Look up wire dialect flags for ``model`` (supports ``provider/leaf`` ids).
 
     Optional ``base_url`` enables vendor-endpoint overlays (e.g. Moonshot BYOK
-    short ids like ``k3``). Multi-model hubs (OpenCode Zen) must not omit for
-    every model just because the catalog includes ``kimi-*`` — Zen relies on
+    short ids like ``k3``). Multi-model hubs (OpenCode Zen / Go) must not omit
+    for every model just because the catalog includes ``kimi-*`` — both rely on
     the ``kimi-`` leaf rule above.
     """
     leaf = wire_model_leaf(model)

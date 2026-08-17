@@ -13,14 +13,8 @@ export function precedingUserMessageId(
   return null;
 }
 
-/**
- * Format a paste-ready「排查包」for support / Cursor AI log lookup.
- * Lead line triggers conversation-logs workflow; trailing line is log_timeline.py.
- * Always available from error cards and bubble「更多」(not gated by 诊断模式).
- * Requires at least one id; optional extras (errorCode / emptyDiagnosis / …) append
- * after ids when present — extras alone never produce a pack.
- */
-export function formatSupportDiagnosticText(ids: {
+/** Ids + optional extras for a paste-ready「排查包」(bubble / composer / strip). */
+export type SupportDiagnosticIds = {
   conversationId?: string | null;
   /** Prefer preceding user bubble when copying from an assistant error/regenerate face. */
   messageId?: string | null;
@@ -34,7 +28,16 @@ export function formatSupportDiagnosticText(ids: {
   baseUrl?: string | null;
   /** Product default is streaming; pass true for empty-response 排查. */
   stream?: boolean | null;
-}): string {
+};
+
+/**
+ * Format a paste-ready「排查包」for support / Cursor AI log lookup.
+ * Lead line triggers conversation-logs workflow; trailing line is log_timeline.py.
+ * Always available from error cards and bubble「更多」(not gated by 诊断模式).
+ * Requires at least one id; optional extras (errorCode / emptyDiagnosis / …) append
+ * after ids when present — extras alone never produce a pack.
+ */
+export function formatSupportDiagnosticText(ids: SupportDiagnosticIds): string {
   const conversationId = ids.conversationId?.trim() || "";
   const userMessageId = ids.userMessageId?.trim() || "";
   const messageId = ids.messageId?.trim() || "";
@@ -136,18 +139,9 @@ export function appendSanitizedDesktopLogExcerpt(
  * Paste-ready 排查包 including a sanitized desktop.jsonl tail when the
  * main-process log API is available. IDs-only if the tail is empty or unreadable.
  */
-export async function buildSupportDiagnosticPack(ids: {
-  conversationId?: string | null;
-  messageId?: string | null;
-  userMessageId?: string | null;
-  traceId?: string | null;
-  executionId?: string | null;
-  errorCode?: string | null;
-  emptyDiagnosis?: string | null;
-  bodyKind?: string | null;
-  baseUrl?: string | null;
-  stream?: boolean | null;
-}): Promise<string> {
+export async function buildSupportDiagnosticPack(
+  ids: SupportDiagnosticIds,
+): Promise<string> {
   const base = formatSupportDiagnosticText(ids);
   if (!base) return "";
   try {

@@ -1,11 +1,15 @@
 import type { MentionSectionId } from "./composerAttachments";
 
+/** 按实际频率：文件/文件夹前移，团队下沉。附件仍由调用方置顶。 */
 export const MENTION_CATEGORY_ORDER: MentionSectionId[] = [
-  "team",
-  "conversation",
-  "folder",
   "file",
+  "folder",
+  "conversation",
+  "team",
 ];
+
+export const MENTION_LIST_TRUNCATED_HINT =
+  "仅显示部分结果，输入关键词可搜索全部";
 
 export const MENTION_CATEGORY_LABEL: Record<MentionSectionId, string> = {
   team: "团队",
@@ -59,29 +63,36 @@ export function buildMentionCategoryRows(input: {
 }): MentionCategoryRow[] {
   return [
     MENTION_ATTACH_CATEGORY,
-    ...MENTION_CATEGORY_ORDER.map((id) => {
+    ...MENTION_CATEGORY_ORDER.flatMap((id): MentionCategoryRow[] => {
       const count = input.counts[id];
-      if (id === "team") {
-        return {
+      if (id === "team" && count === 0) return [];
+      return [
+        {
           id,
           label: MENTION_CATEGORY_LABEL[id],
           count,
-          disabled: count === 0,
-          hint: count === 0 ? "多 Agent 回合后可点名" : undefined,
-        };
-      }
-      return {
-        id,
-        label: MENTION_CATEGORY_LABEL[id],
-        count,
-        disabled: false,
-        loading:
-          Boolean(input.loadingFiles) &&
-          (id === "folder" || id === "file") &&
-          count === 0,
-      };
+          disabled: false,
+          loading:
+            Boolean(input.loadingFiles) &&
+            (id === "folder" || id === "file") &&
+            count === 0,
+        },
+      ];
     }),
   ];
+}
+
+/** 手打 @ 优先团队；团队隐藏时落到文件，避免高亮空附件行。 */
+export function categoryHighlightIndex(
+  categories: readonly { id: string }[],
+  want: "team" | "attach" | "file",
+): number {
+  const exact = categories.findIndex((c) => c.id === want);
+  if (exact >= 0) return exact;
+  const file = categories.findIndex((c) => c.id === "file");
+  if (file >= 0) return file;
+  const next = categories.findIndex((c) => c.id !== "attach");
+  return next >= 0 ? next : 0;
 }
 
 export type MentionMenuKeyAction =

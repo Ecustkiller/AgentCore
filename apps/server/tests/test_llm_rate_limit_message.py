@@ -56,8 +56,18 @@ def _declared_429(retry_after: float, **kwargs) -> LLMError:
     )
 
 
-def test_rate_limit_error_zh_message_short_retry():
+def test_rate_limit_error_zh_message_short_retry_unattested():
+    """未 attested 的短冷却：文案不报秒数，线上也不带 retry_after。"""
     e = LLMRateLimitError(retry_after=12)
+    assert e.code == ErrorCode.LLM_RATE_LIMIT
+    assert e.message == "上游限流，暂时无法继续本回合。请稍后再试。"
+    assert "12" not in e.message
+    ctx = error_context_from(e)
+    assert ctx is None or ctx.get("retry_after") is None
+
+
+def test_rate_limit_error_zh_message_short_retry_attested():
+    e = LLMRateLimitError(retry_after=12, retry_after_source=RETRY_AFTER_FROM_HEADER)
     assert e.code == ErrorCode.LLM_RATE_LIMIT
     assert "上游限流" in e.message
     assert "12" in e.message
@@ -71,9 +81,9 @@ def test_rate_limit_error_zh_message_long_retry_no_hour_promise():
     assert "上游限流" in e.message
     assert "3600" not in e.message
     assert "一小时" not in e.message
+    assert e.retry_after == 3600.0
     ctx = error_context_from(e)
-    assert ctx is not None
-    assert ctx.get("retry_after") == 3600.0
+    assert ctx is None or ctx.get("retry_after") is None
 
 
 # ---- single source of the ceiling -------------------------------------------
@@ -105,12 +115,21 @@ def test_error_retryable_agrees_with_engine_decision(retry_after, source):
 
 @pytest.mark.parametrize("source", [None, "user", "platform"])
 def test_exactly_at_ceiling_keeps_the_retryable_seconds_copy(source):
-    err = upstream_rate_limit_error(MAX_RETRY_AFTER, credential_source=source, now=_NOW)
+    err = _declared_429(MAX_RETRY_AFTER, credential_source=source)
     assert isinstance(err, LLMRateLimitError)
     assert err.code == ErrorCode.LLM_RATE_LIMIT
     assert err.retryable is True
     assert err.message == "上游限流，暂时无法继续本回合。请约 30 秒后再试。"
     assert "点重试" not in err.message
+
+
+@pytest.mark.parametrize("source", [None, "user", "platform"])
+def test_exactly_at_ceiling_unattested_does_not_invent_seconds(source):
+    err = upstream_rate_limit_error(MAX_RETRY_AFTER, credential_source=source, now=_NOW)
+    assert isinstance(err, LLMRateLimitError)
+    assert err.retryable is True
+    assert err.message == "上游限流，暂时无法继续本回合。请稍后再试。"
+    assert "30" not in err.message
 
 
 @pytest.mark.parametrize("source", [None, "user", "platform"])
@@ -211,7 +230,7 @@ def test_an_undeclared_cooldown_dates_nothing(source):
 
 def test_short_cooldown_never_reaches_the_quota_face():
     """Inside the ceiling a platform 429 is an ordinary retryable throttle."""
-    err = upstream_rate_limit_error(5.0, credential_source="platform", now=_NOW)
+    err = _declared_429(5.0, credential_source="platform")
     assert isinstance(err, LLMRateLimitError)
     assert err.retryable is True
     assert "5 秒" in err.message

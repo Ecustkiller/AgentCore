@@ -7,8 +7,10 @@
 #   sudo systemctl enable --now agentcore-backup.timer
 #   # 手动跑一次验证：sudo systemctl start agentcore-backup.service
 #   #                journalctl -u agentcore-backup.service
+# 未配 ALERT_WEBHOOK_URL：失败只进 journald（与 healthcheck 同口径）。
 #
 # 非默认部署根（AGENTCORE_HOME）需同步改下方 Environment 与 ExecStart 路径。
+# 活栈不在 repo/deploy 时：把 AGENTCORE_DEPLOY_DIR 写进 /opt/agentcore/.env（勿写进本 unit）。
 
 [Unit]
 Description=AgentCore 数据库全量备份（pg_dump|gzip + 轮转）

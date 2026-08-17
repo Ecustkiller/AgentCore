@@ -50,6 +50,7 @@ from agentcore.api.routes import (
 from agentcore.auth.retention import refresh_token_retention_loop
 from agentcore.config import settings
 from agentcore.conversation.compaction import shutdown_compaction
+from agentcore.conversation.question_retention import question_posted_retention_loop
 from agentcore.core.errors import AgentCoreError, wire_moments
 from agentcore.core.logging import get_logger, setup_logging
 from agentcore.db.migration_check import check_migrations
@@ -63,6 +64,7 @@ from agentcore.middleware.rate_limit import AuthRateLimitMiddleware
 from agentcore.middleware.request_attribution import RequestAttributionMiddleware
 from agentcore.runtime.audit_retention import audit_retention_loop
 from agentcore.runtime.session_retention import session_retention_loop
+from agentcore.runtime.stream_state_retention import stream_state_retention_loop
 from agentcore.runtime.suspension.retention import paused_turn_retention_loop
 from agentcore.security.keys import KeyEncryptor
 from agentcore.standing_tasks.scheduler import standing_task_scheduler_loop
@@ -303,6 +305,17 @@ async def lifespan(app: FastAPI):
     # on a core endpoint.
     await check_migrations()
 
+    # Platform credential pool: decrypt into the process snapshot so the sync
+    # pick path (platform_llm_credentials) does not open a session. Empty pool
+    # → env PLATFORM_API_KEY fallback. Failure here must not block boot.
+    from agentcore.llm.platform_credential_service import (
+        platform_credential_pool_refresh_loop,
+        reload_platform_credential_pool_from_factory,
+    )
+
+    await reload_platform_credential_pool_from_factory()
+    pool_refresh_task = asyncio.create_task(platform_credential_pool_refresh_loop())
+
     # Background retention sweep (决策⑦): physically purge soft-deleted workspaces
     # past their grace period. Best-effort and self-contained; cancelled cleanly
     # on shutdown. Disabled config → no task.
@@ -354,6 +367,15 @@ async def lifespan(app: FastAPI):
     paused_turn_retention_task: asyncio.Task | None = None
     if settings.structured_suspension_persist_enabled:
         paused_turn_retention_task = asyncio.create_task(paused_turn_retention_loop())
+
+    # In-flight stream snapshot TTL (mirror paused_turns 7d): prune leftover
+    # turn_stream_state rows. Live finalize / delete cascade drop the connected
+    # path; this only catches the disconnected remainder. days<=0 disables.
+    stream_state_retention_task = asyncio.create_task(stream_state_retention_loop())
+
+    # Non-blocking question 7-day hard cap: own journal sweep (paused_turns never
+    # holds these cards — 定案 §二·③).
+    question_posted_retention_task = asyncio.create_task(question_posted_retention_loop())
 
     # Standing tasks / 定时自动化 L1: poll next_run_at + lease, spawn cloud runs.
     standing_task_scheduler_task: asyncio.Task | None = None
@@ -469,6 +491,15 @@ async def lifespan(app: FastAPI):
                 paused_turn_retention_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await paused_turn_retention_task
+            stream_state_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await stream_state_retention_task
+            question_posted_retention_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await question_posted_retention_task
+            pool_refresh_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pool_refresh_task
             if standing_task_scheduler_task is not None:
                 standing_task_scheduler_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
@@ -517,8 +548,9 @@ app = FastAPI(
 
 # Middleware runs outermost-last-added: register the rate limiter first so CORS
 # wraps it and even a 429 response carries the CORS headers the browser needs.
-# Innermost: stamp http_method/path/req_id onto the same task that checkouts use
-# (must sit inside BaseHTTPMiddleware so contextvars are not stranded on a parent).
+# Innermost: stamp http_method/path/req_id + client_platform/version onto the
+# same task that checkouts use (must sit inside BaseHTTPMiddleware so
+# contextvars are not stranded on a parent).
 app.add_middleware(RequestAttributionMiddleware)
 # Also innermost + pure ASGI: the turn task created by a route handler copies this
 # context, so CLIENT_TOOL ops can be pinned to the device that sent the request.

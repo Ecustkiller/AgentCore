@@ -29,6 +29,7 @@ from agentcore.tools.registration import (
     ToolRegistration,
     ToolSurface,
 )
+from agentcore.tools.sandbox.cloud_python import format_cloud_python_libs
 from agentcore.tools.sandbox.exec_languages import (
     ALL_EXEC_LANGUAGES,
     language_labels,
@@ -125,8 +126,7 @@ def code_execute_description(
         where = (
             f"在【服务端云端沙箱】工作区目录中执行代码（{support}），"
             "可访问工作区内的文件。沙箱触达不了用户的电脑、本机应用与本机文件。"
-            "沙箱 Python 已预装常用文档 / 数据库：python-pptx、python-docx、openpyxl、"
-            "pandas、numpy、matplotlib、reportlab、pypdf、Pillow（画图含中文时先设置"
+            f"沙箱 Python 已预装常用文档 / 数据库：{format_cloud_python_libs()}（画图含中文时先设置"
             "字体如 Noto Sans CJK SC）。代码写到工作区相对路径的文件会在执行结束后"
             "保存进工作区（结果会列出写回的文件），用户可直接预览 / 下载。"
         )
@@ -166,7 +166,7 @@ class CodeExecuteTool:
         needs_location=True,
         # 间接落盘（沙箱 copy-out）也是落盘：自报 copy-out 的 EXACT 路径。
         file_products=FileProductsContract.SELF_REPORT,
-        # 沙箱预装 python-pptx / openpyxl；无专用 md_to_* 导出器的 Office 走这里。
+        # 沙箱预装库见 cloud_python.txt；无专用 md_to_* 导出器的 Office 走这里。
         produces_formats=(".xlsx", ".pptx"),
     )
 

@@ -80,6 +80,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "Word 里做不出带框连线的图形 SmartArt 组织架构图；我这边能交的是文本层级 docx、PPT 连线版，或可折叠交互 HTML。",
     "reasoning": "",

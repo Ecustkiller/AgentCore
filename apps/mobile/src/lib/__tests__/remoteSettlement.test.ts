@@ -52,6 +52,13 @@ describe("settlementFromResolvedEvent · 契约表反查", () => {
         status: "resolved",
       }),
     ).toEqual({ kind: "escalation", interactionId: "esc-1" });
+    expect(
+      settlementFromResolvedEvent("question_resolved", {
+        ask_id: "n1",
+        status: "answered",
+        answer: "也要 PDF。",
+      }),
+    ).toEqual({ kind: "question_posted", interactionId: "n1" });
   });
 
   it("非收口事件 / 缺 id → null（`*_required` 与正文帧一律不算）", () => {
@@ -101,6 +108,22 @@ describe("answeredByAPerson · 无人参与的收口", () => {
     expect(answeredByAPerson("escalation", { status: "orphaned" })).toBe(false);
     expect(answeredByAPerson("escalation", undefined)).toBe(false);
     expect(answeredByAPerson("escalation", {})).toBe(false);
+  });
+
+  it("question_posted：已答算人；已作废是 CEO 故障态不算另一端的人", () => {
+    expect(answeredByAPerson("question_posted", { status: "answered" })).toBe(
+      true,
+    );
+    expect(answeredByAPerson("question_posted", { status: "discarded" })).toBe(
+      false,
+    );
+    expect(
+      settlementFromResolvedEvent("question_resolved", {
+        ask_id: "n1",
+        status: "discarded",
+        note: "后半等你",
+      }),
+    ).toBeNull();
   });
 
   it("仲裁通道不算这张卡被人拍了（含 via_user：人答的是主管的问，不是这张卡）", () => {

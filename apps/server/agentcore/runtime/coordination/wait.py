@@ -19,9 +19,10 @@ logger = get_logger(__name__)
 
 # Base idle wait for the next team event when the CEO has nothing else to do.
 _COORD_WAIT_TIMEOUT_S = 120.0
-# Idle backoff cap: each consecutive「无新事件」idle timeout doubles the wait
-# (``base * 2**idle_streak``) up to this ceiling, so a quiet team stops burning a
-# full LLM patrol round every ~2 min. Real events reset the streak (see wait.py).
+# Idle backoff cap: each consecutive「无新事件」idle timeout *or* busy-wait yield
+# doubles the wait (``base * 2**idle_streak``) up to this ceiling, so a quiet
+# team stops burning a full LLM patrol/yield round every ~2 min. Real events
+# reset the streak (see wait.py).
 _COORD_WAIT_TIMEOUT_MAX_S = 600.0
 # Frontend UX heartbeat while blocked in wait_events (≤15s per task constraint).
 _WAIT_HEARTBEAT_S = 15.0
@@ -223,12 +224,11 @@ async def await_coordination_injection(
     唤醒降噪（协调层记账开销治理）：
     - 进展攒批（:func:`_accumulate_batch`）：非必要的 worker_completed / note 合并成一次
       唤醒（≥3 事件或距上次唤醒≥60s），而非每个完成都醒。
-    - 空转退避（:func:`_idle_wait_timeout`）：无事件的 idle 巡查按 ``2**idle_streak`` 拉长
-      等待，不再每~2 分钟烧一次全量 LLM 轮；仍保留卡死巡查（周期性 patrol nudge）。
-    - 两池预算（进度池 / 决策池，见 session.py）：例行进展消耗【进度池】；必要决策
-      （终局 / 升级 / 冲突 / 插话 / 单员超时 / 边界）消耗【决策池】但永不因预算被跳过。
-      进度池耗尽 → 例行进展攒进 ``held``、不再唤醒 LLM，随下次必要唤醒（或空转巡查 / 终局）
-      一并注入——信息不丢、不烧 LLM 轮；决策池专款专用，派批 / 仲裁 / 终稿始终有预算。
+    - 空转退避（:func:`_idle_wait_timeout`）：无事件的 idle 巡查 **与** 忙等 yield 都按
+      ``2**idle_streak`` 拉长等待，不再每~2 分钟烧一次全量 LLM 轮；真卡死仍发
+      周期性 patrol nudge。wall+0 继续等（不让出）不 bump。
+    - 两池预算（进度池 / 决策池，见 session.py）：纯遥测计数，不闸唤醒。例行进展记
+      【进度池】；必要决策记【决策池】。池耗尽仍唤醒（合并窗口仍攒批）。
     """
     session = active_coordination()
     if session is None or not session.active:
@@ -242,6 +242,7 @@ async def await_coordination_injection(
         total=session.total_workers,
         progress_budget=session.progress_budget_remaining,
         decision_budget=session.decision_budget_remaining,
+        idle_streak=session.idle_streak,
         drive_done=(
             session.drive_task is None or session.drive_task.done()
         ),
@@ -284,8 +285,8 @@ async def await_coordination_injection(
                 # No coordination events for the idle window. If workers still have
                 # in-flight LLM/tool calls, progress simply has not posted yet —
                 # do NOT fire a TIMEOUT patrol nudge (那会烧冤枉 LLM 轮). Instead:
-                # one short re-wait for real events, then yield empty so the captain
-                # can still act (ask_user / cancel_worker) while the team stays busy.
+                # one short re-wait for real events, then yield a progress brief so
+                # the captain can still act (ask_user / cancel_worker) while busy.
                 # Infinite ``continue`` would park the CEO until workers finish and
                 # break mid-wave soft-stop / 显式转后台.
                 if session.has_inflight_work():
@@ -317,12 +318,16 @@ async def await_coordination_injection(
                                 busy=len(session._busy_workers),
                             )
                             continue
+                        # Same wake timing (still yield a progress brief). Participate
+                        # in idle backoff so the *next* wait uses ``2**idle_streak``.
+                        session.bump_idle_backoff()
                         logger.info(
                             "coordination.idle_yield_to_captain",
                             execution_id=session.execution_id,
                             completed=len(session.completed_run_ids),
                             total=session.total_workers,
                             busy=len(session._busy_workers),
+                            idle_streak=session.idle_streak,
                         )
                         # Same wake timing; inject pipeline progress so CEO does not
                         # read「闲着了」and append overlapping workers.
@@ -397,7 +402,7 @@ async def await_coordination_injection(
     session.note_decision_points(events)
     from agentcore.runtime.coordination.interjections import note_interjections_injected
 
-    note_interjections_injected(session, events)
+    await note_interjections_injected(session, events)
 
     waited_ms = int((time.perf_counter() - t0) * 1000)
     event_kinds = [e.kind.value for e in events]

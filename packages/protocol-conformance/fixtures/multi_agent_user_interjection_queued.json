@@ -241,6 +241,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队并行推进。当前任务已收口；你的贺卡请求已排队，下一回合处理。",
     "reasoning": "",

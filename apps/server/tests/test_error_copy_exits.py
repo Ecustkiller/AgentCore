@@ -19,6 +19,7 @@ from agentcore.conversation.quota import _BYOK_EXIT
 from agentcore.core.errors import (
     BYOK_KEY_REQUIRED_MESSAGE,
     MAX_RETRY_AFTER,
+    RETRY_AFTER_FROM_HEADER,
     InferenceTokenExpiredError,
     LLMAuthError,
     LLMInsufficientBalanceError,
@@ -26,6 +27,19 @@ from agentcore.core.errors import (
     LLMQuotaExceededError,
     LLMRateLimitError,
     upstream_rate_limit_error,
+)
+from agentcore.llm.errors import (
+    OPENCODE_CREDITS_MESSAGE,
+    OPENCODE_FREE_USAGE_MESSAGE,
+    OPENCODE_GO_QUOTA_MESSAGE,
+    OPENCODE_MODEL_UNAVAILABLE_MESSAGE,
+    OPENCODE_MONTHLY_LIMIT_MESSAGE,
+    OPENCODE_PLATFORM_MODEL_MESSAGE,
+    OPENCODE_PLATFORM_USAGE_MESSAGE,
+    OPENCODE_REGION_BYOK_MESSAGE,
+    OPENCODE_REGION_PLATFORM_MESSAGE,
+    OPENCODE_USER_LIMIT_MESSAGE,
+    opencode_region_product_message,
 )
 from agentcore.llm.factory import _MISSING_LLM_CREDENTIALS_USER_MESSAGE
 from agentcore.llm.tools_gate import (
@@ -45,9 +59,27 @@ _USER_FACING_COPY: dict[str, str] = {
     "auth_platform": LLMAuthError(provider_name="platform").message,
     "balance_byok": LLMInsufficientBalanceError(provider_name="user").message,
     "balance_platform": LLMInsufficientBalanceError(provider_name="platform").message,
+    "balance_opencode_credits": OPENCODE_CREDITS_MESSAGE,
+    "opencode_go_quota": OPENCODE_GO_QUOTA_MESSAGE,
+    "opencode_free_usage": OPENCODE_FREE_USAGE_MESSAGE,
+    "opencode_monthly_limit": OPENCODE_MONTHLY_LIMIT_MESSAGE,
+    "opencode_user_limit": OPENCODE_USER_LIMIT_MESSAGE,
+    "opencode_model_unavailable": OPENCODE_MODEL_UNAVAILABLE_MESSAGE,
+    "opencode_platform_usage": OPENCODE_PLATFORM_USAGE_MESSAGE,
+    "opencode_platform_model": OPENCODE_PLATFORM_MODEL_MESSAGE,
+    "opencode_region_byok": opencode_region_product_message(
+        b'{"error":{"type":"RegionError","message":'
+        b'"opt in: https://opencode.ai/workspace/wrk_test/go"}}',
+        platform=False,
+    ),
+    "opencode_region_byok_stem": OPENCODE_REGION_BYOK_MESSAGE,
+    "opencode_region_platform": OPENCODE_REGION_PLATFORM_MESSAGE,
     "inference_token_expired": InferenceTokenExpiredError().message,
     "rate_limit_unknown_cooldown": LLMRateLimitError().message,
     "rate_limit_short_cooldown": LLMRateLimitError(retry_after=12).message,
+    "rate_limit_short_cooldown_attested": LLMRateLimitError(
+        retry_after=12, retry_after_source=RETRY_AFTER_FROM_HEADER
+    ).message,
     "rate_limit_day_reset_byok": upstream_rate_limit_error(
         59760.0, credential_source="user"
     ).message,
@@ -98,3 +130,14 @@ def test_key_related_copy_points_at_the_provider_page_not_the_model_page():
     assert "设置 · 服务商" in LLMAuthError(provider_name="user").message
     assert "设置 · 模型" in TOOLS_UNAVAILABLE_RUNTIME_MESSAGE
     assert "设置 · 模型" in _MISSING_LLM_CREDENTIALS_USER_MESSAGE
+
+
+def test_platform_region_copy_does_not_leak_workspace():
+    for copy in (
+        OPENCODE_REGION_PLATFORM_MESSAGE,
+        OPENCODE_PLATFORM_USAGE_MESSAGE,
+        OPENCODE_PLATFORM_MODEL_MESSAGE,
+    ):
+        assert "opencode.ai/workspace" not in copy
+        assert "wrk_" not in copy
+        assert "opencode.ai" not in copy

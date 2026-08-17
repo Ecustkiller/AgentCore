@@ -42,3 +42,4 @@ export {
   type SendTurnSpec,
   type SendTurnResult,
 } from "./turns/stream";
+export { continuePausedTurn } from "./turns/continuePaused";

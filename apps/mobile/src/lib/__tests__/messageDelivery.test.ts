@@ -6,6 +6,7 @@ function bareTurn(over: Partial<ProjectedTurn> = {}): ProjectedTurn {
   const base: ProjectedTurn = {
     status: "running",
     finishReason: null,
+    outcome: null,
     error: null,
     content: "",
     reasoning: "",

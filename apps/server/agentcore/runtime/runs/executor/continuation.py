@@ -27,7 +27,11 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.facts import MessageFinalFact, RunHeadFact, record_turn_fact
 from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
-from agentcore.runtime.runs.contract import check_contract, needs_file_contents
+from agentcore.runtime.runs.contract import (
+    check_contract,
+    collect_opaque_source_data_paths,
+    needs_file_contents,
+)
 from agentcore.runtime.runs.executor.context import (
     _context_block_payloads,
     _load_artifact_contents,
@@ -297,6 +301,7 @@ async def _continue_run_scoped(
             worker_tools = _registry_without(worker_tools, *RETRIEVAL_TOOL_NAMES)
             if allowed_tools is not None:
                 allowed_tools = [t for t in allowed_tools if t not in RETRIEVAL_TOOL_NAMES]
+        can_execute = worker_tools.get_optional("code_execute") is not None
         # Same as executor.node: restricted allow-list must still keep handoff.
         if allowed_tools is not None and HANDOFF_TOOL_NAME not in allowed_tools:
             allowed_tools = [*allowed_tools, HANDOFF_TOOL_NAME]
@@ -426,6 +431,11 @@ async def _continue_run_scoped(
                 artifact_contents,
                 web_quality_scan=True,
             )
+        source_data_paths = collect_opaque_source_data_paths(
+            material_paths=getattr(tool_ctx, "material_paths", None),
+            workspace_paths=workspace_paths,
+            landed_paths=touched_for_gate,
+        )
         turn_ledger = _turn_ledger_var.get()
         artifacts = (
             list(deliverable.artifacts)
@@ -449,6 +459,8 @@ async def _continue_run_scoped(
                 turn_ledger.draft_citable_ids() if turn_ledger is not None else None
             ),
             landing_failure_kind=landing_write_failure_kind(messages),
+            can_execute=can_execute,
+            source_data_paths=source_data_paths,
         )
         record_turn_fact(
             MessageFinalFact(
@@ -516,11 +528,27 @@ async def _continue_run_scoped(
     except Exception as e:  # noqa: BLE001 — surface any continuation failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
         partial = inflight[0] if inflight else TokenUsage()
+        from agentcore.runtime.runs.error_signal import run_error_signal
+
+        signal = run_error_signal(e)
         logger.error(
-            "run.continuation_failed", run_id=continuation_run_id, error=str(e), exc_info=True
+            "run.continuation_failed",
+            run_id=continuation_run_id,
+            error=str(signal.exc),
+            retryable=signal.retryable,
+            error_code=signal.error_code,
+            exc_info=True,
         )
         sink.emit(
-            run_failed(continuation_run_id, agent_id, str(e), failure_kind="call")
+            run_failed(
+                continuation_run_id,
+                agent_id,
+                str(signal.exc),
+                failure_kind="call",
+                error_code=signal.error_code,
+                retryable=signal.retryable,
+                retry_after=signal.retry_after,
+            )
         )
         from agentcore.runtime.runs.salvage import (
             content_from_transcript,
@@ -529,11 +557,14 @@ async def _continue_run_scoped(
 
         frozen = freeze_partial_transcript(messages) if messages else []
         return _priced_failure(
-            str(e),
+            str(signal.exc),
             model=priced_model,
             usage=partial,
             rounds=0,
             duration_ms=duration_ms,
+            retryable=signal.retryable,
+            error_code=signal.error_code or "",
+            retry_after=signal.retry_after,
             transcript=frozen or None,
             content=content_from_transcript(frozen) if frozen else "",
         )

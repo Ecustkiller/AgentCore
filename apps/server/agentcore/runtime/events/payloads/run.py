@@ -436,6 +436,13 @@ class UserInterjectionAttachment(WirePayload):
     binary: bool = False
 
 
+class UserInterjectionAgentMention(WirePayload):
+    """Soft @Agent chip on a mid-flight interjection (prompt hint, not a hard route)."""
+
+    agent_id: str
+    role: str
+
+
 class UserInterjectionPayload(WirePayload):
     """Mid-flight user interjection into a live turn (经典 steer + 协调插话共用).
 
@@ -451,6 +458,11 @@ class UserInterjectionPayload(WirePayload):
     status: Literal["received", "injected", "addressed", "queued", "failed"]
     note: str | None = absent()
     attachments: list[UserInterjectionAttachment] | None = absent()
+    agent_mentions: list[UserInterjectionAgentMention] | None = absent()
+    ask_id: str | None = absent(
+        "若本插话是在回答非阻塞提问，出站 question_posted.ask_id。"
+        "缺省=普通插话，照常消化；禁止塞进 agent_mentions。"
+    )
 
 
 class TurnQueuedPayload(WirePayload):
@@ -578,6 +590,11 @@ class RunFailedPayload(WirePayload):
     execution_id: str | None = absent()
     # Additive：失败前已有产物落盘（文件写成功后上游再挂）→ 脸「产出已落盘」。
     product_landed: bool | None = absent()
+    # Additive：与 ``AgentCoreError.code`` / ``retryable`` / ``retry_after`` 同语义，
+    # 让客户端区分瞬时限流与真终态。缺省 = 旧 journal / 契约硬失败未分类。
+    error_code: str | None = absent()
+    retryable: bool | None = absent()
+    retry_after: float | None = absent()
 
 
 class RunCancelledPayload(WirePayload):

@@ -95,6 +95,7 @@ async def prepare_fresh_turn(
     x_client_platform: str | None,
     profiles: TurnProfiles | None = None,
     agent_mentions: list[dict] | None = None,
+    ask_id: str | None = None,
     folder_binding_injected: bool = False,
     folder_local_root_id: str | None = None,
     folder_local_subpath: str | None = None,
@@ -186,6 +187,10 @@ async def prepare_fresh_turn(
         )
         # exists/.git (and similar) may sticky-dead after prior timeouts — stop here.
         raise_if_backend_channel_dead(backend)
+    from agentcore.workspace.sparse_listing import collect_turn_material_paths
+
+    material_paths = collect_turn_material_paths(attachments)
+    backend.ai_list_materials = material_paths
     workspace_facts = build_workspace_context(
         backend,
         desktop_online=desktop_online,
@@ -215,6 +220,15 @@ async def prepare_fresh_turn(
     # Curated table only — never keyword-derived catalog tags (false vision → 400).
     main_native_vision = model_has_curated_vision(main_model)
     native_image_parts: list[dict] = []
+    # Built before the attachment block: its ``code_execute`` steer must follow this
+    # turn's real worker assembly, never a second predicate. MCP / consult wiring
+    # below only adds tools and cannot flip the execution class.
+    worker_tools = build_worker_registry(
+        backend=backend,
+        permission_axes=permission_axes,
+        languages=exec_languages if backend.location == "local" else None,
+        desktop_online=desktop_online,
+    )
     attachment_context = await _timed_phase(
         "attachments",
         _build_attachment_context(
@@ -227,26 +241,17 @@ async def prepare_fresh_turn(
             cost_sink=None if main_native_vision else vision_cost_sink,
             main_native_vision=main_native_vision,
             native_image_parts=native_image_parts if main_native_vision else None,
+            available_tools=worker_tools.names,
         ),
     )
     attachment_context = merge_attachment_and_mention_context(
-        attachment_context, agent_mentions
+        attachment_context, agent_mentions, ask_id=ask_id
     )
-    from agentcore.workspace.sparse_listing import collect_turn_material_paths
-
-    material_paths = collect_turn_material_paths(attachments)
-    backend.ai_list_materials = material_paths
     # Workers hold no CEO hints; their base is the shared base + the same
     # ``<按需目录>`` (name＋摘要) + the same attachment block at the end.
     from agentcore.runtime.capability_packs import enabled_packs
 
     skill_registry = build_system_skill_registry(enabled_packs=enabled_packs())
-    worker_tools = build_worker_registry(
-        backend=backend,
-        permission_axes=permission_axes,
-        languages=exec_languages if backend.location == "local" else None,
-        desktop_online=desktop_online,
-    )
     register_mcp_tools(worker_tools, mcp_discover)
     await _wire_worker_consult_tools(
         worker_tools,

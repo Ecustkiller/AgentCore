@@ -570,6 +570,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "按此开辩。## 辩论收报\n倾向冷静观望。",
     "reasoning": "",

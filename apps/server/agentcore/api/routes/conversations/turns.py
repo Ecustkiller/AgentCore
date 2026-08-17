@@ -20,12 +20,13 @@ from agentcore.api.schemas import (
 )
 from agentcore.api.sse import (
     release_request_db_before_sse,
+    sse_attach_response,
     sse_response,
     sse_resume_deferred_response,
     sse_resume_settled_response,
 )
 from agentcore.conversation.rate_limit import enforce_user_message_rate_limit
-from agentcore.conversation.service import regenerate_chat, resume_chat
+from agentcore.conversation.service import continue_chat, regenerate_chat, resume_chat
 from agentcore.core.errors import NotFoundError
 from agentcore.core.logging import get_logger
 from agentcore.db.base import async_session_factory
@@ -476,6 +477,59 @@ async def resume_message(
     )
     # 执行与请求解耦 (C1 · slice 1a): track the resumed run so a disconnect lets it
     # finish + persist and 停止 routes through POST .../stop, same as a fresh send.
+    turn_runs.register(
+        conversation_id=conversation_id, task=task, sink=sink, user_id=user.user_id
+    )
+    return sse_response(sink, detach_on_disconnect=True)
+
+
+@router.post("/{conversation_id}/messages/{message_id}/continue")
+async def continue_message(
+    conversation_id: str,
+    message_id: str,
+    user: AuthUser,
+    session: AsyncSession = Depends(get_db),
+):
+    """Continue a cloud CEO turn paused on exhausted rate limit (no checkpoint card)."""
+    from agentcore.runtime.turn.ceo_continue import claim_ceo_continue_lock
+
+    await enforce_user_message_rate_limit(user.user_id)
+    preflight = await _preflight_owned_chat_turn(conversation_id, user, session)
+    await release_request_db_before_sse(session)
+
+    run = turn_runs.get(conversation_id)
+    if run is not None and not run.task.done():
+        mid = getattr(run.sink, "message_id", None) or getattr(
+            run.sink, "_message_id", None
+        )
+        if str(mid or "") == message_id:
+            return sse_attach_response(run.sink)
+
+    claimed = await claim_ceo_continue_lock(
+        message_id, conversation_id=conversation_id, user_id=user.user_id
+    )
+    if claimed is None:
+        run = turn_runs.get(conversation_id)
+        if run is not None and not run.task.done():
+            mid = getattr(run.sink, "message_id", None) or getattr(
+                run.sink, "_message_id", None
+            )
+            if str(mid or "") == message_id:
+                return sse_attach_response(run.sink)
+        raise HTTPException(status_code=404, detail={"code": "continue_not_available"})
+
+    sink = EventSink(message_id=message_id)
+    emit_preflight_warnings(sink, preflight)
+    task = asyncio.create_task(
+        continue_chat(
+            conversation_id=conversation_id,
+            message_id=message_id,
+            user_id=user.user_id,
+            sink=sink,
+            llm_credentials=preflight.credentials,
+            llm_supports_tools=preflight.supports_tools,
+        )
+    )
     turn_runs.register(
         conversation_id=conversation_id, task=task, sink=sink, user_id=user.user_id
     )

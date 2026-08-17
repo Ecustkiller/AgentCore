@@ -39,7 +39,7 @@ vi.mock("@/services/workspaces", () => ({
   wsDeleteFile: vi.fn(),
   wsDownloadFile: vi.fn(),
   wsExportMdToDocx: vi.fn(),
-  wsListFileIndex: vi.fn(async () => []),
+  wsListFileIndex: vi.fn(async () => ({ files: [], truncated: false })),
   openCloudWorkspaceInBrowser: vi.fn(),
 }));
 vi.mock("@/lib/openWorkspaceHtmlInBrowser", () => ({

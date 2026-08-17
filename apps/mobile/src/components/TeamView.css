@@ -113,6 +113,14 @@
   cursor: pointer;
 }
 
+.team-strip-verdict {
+  padding: 0 0 4px;
+}
+
+.team-strip-verdict .error.inline-actions {
+  padding: 8px 10px;
+}
+
 .team-bar {
   height: 3px;
   overflow: hidden;

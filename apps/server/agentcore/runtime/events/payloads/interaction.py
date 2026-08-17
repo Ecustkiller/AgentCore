@@ -152,7 +152,7 @@ class CheckpointResolvedPayload(WirePayload):
 
 class QuestionPostedPayload(WirePayload):
     """A non-blocking ask the CEO posted (ask_user blocking=false): it already has a
-    default and KEPT WORKING — no suspend, no resolve."""
+    default and KEPT WORKING — no suspend. Settlement is ``question_resolved``."""
 
     ask_id: str
     conversation_id: str
@@ -160,6 +160,23 @@ class QuestionPostedPayload(WirePayload):
     context: str
     assumptions: list[AskAssumption]
     questions: list[AskQuestion]
+    unlocks: str | None = absent(
+        "这个答案回来后解锁哪批活。新非阻塞提问必填；旧事件缺字段。"
+    )
+
+
+class QuestionResolvedPayload(WirePayload):
+    """Journal fact that folds a ``question_posted`` into 已答 / 已作废.
+
+    ``answered`` = the user submitted a reply (``answer`` is the text).
+    ``discarded`` = CEO closed it without waiting (``note`` is the required 人话).
+    Both are visible settlements — not a silent chip the CEO can ignore.
+    """
+
+    ask_id: str
+    status: Literal["answered", "discarded"]
+    answer: str
+    note: str
 
 
 class PlanReviewStep(WirePayload):
@@ -292,6 +309,9 @@ class TeamPreviewRequiredPayload(WirePayload):
     headline: str | None = absent(
         "开工卡主导语（如「MVP主流程 · 预计 3 人」）；旧帧缺省。"
     )
+    revision: int | None = absent("修订代数；首版 1。旧帧缺省（前端按 1）。")
+    revised_from: str | None = absent("上一张开工卡 checkpoint_id；首版缺省。")
+    revision_note: str | None = absent("触发本次修订的用户意见原文；首版缺省。")
 
 
 class WriteCapabilityOverride(WirePayload):

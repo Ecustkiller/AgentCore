@@ -33,12 +33,15 @@ export interface paths {
         };
         /**
          * Readiness
-         * @description Readiness probe: HTTP 200/503 follows DB only; Redis is observational.
+         * @description Readiness probe: HTTP 200/503 follows DB only; Redis/disk are observational.
          *
          *     PostgreSQL is the hard dependency that decides ``ready`` / ``not_ready``
          *     (and thus 200 vs 503). Redis is a soft dependency for distributed rate
          *     limiting: still probed and, when ``rate_limit_backend=redis``, written to
          *     ``body["redis"]`` for ops/alerting; a Redis outage must not return 503.
+         *     Disk watermark is always written to ``body["disk"]`` (host volume via
+         *     ``DATA_DIR``, overlay skipped) and likewise must not return 503 — a high
+         *     watermark that flipped readiness would restart a still-serving instance.
          */
         get: operations["readiness_readyz_get"];
         put?: never;
@@ -771,6 +774,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/platform-credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Platform Credentials
+         * @description List platform-pool members. Ciphertext only; ``masked_key`` is last-4.
+         */
+        get: operations["list_platform_credentials_v1_admin_platform_credentials_get"];
+        put?: never;
+        /**
+         * Create Platform Credential
+         * @description Add a pool member. Key is encrypted at rest and never returned.
+         */
+        post: operations["create_platform_credential_v1_admin_platform_credentials_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/platform-credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Platform Credential
+         * @description Remove a pool member. Does not touch ``cost_calls`` history.
+         */
+        delete: operations["delete_platform_credential_v1_admin_platform_credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Platform Credential
+         * @description Patch a member. Omit ``api_key`` to keep the stored ciphertext.
+         */
+        patch: operations["update_platform_credential_v1_admin_platform_credentials__credential_id__patch"];
+        trace?: never;
+    };
     "/v1/admin/simulation/show/episodes/{episode_id}/publish": {
         parameters: {
             query?: never;
@@ -808,6 +859,33 @@ export interface paths {
          *     ``/version`` so the panel never drifts from the real signals.
          */
         get: operations["system_status_v1_admin_system_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/usage/go-windows": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Go Windows
+         * @description OpenCode Go 5h / week / month windows from Go-endpoint ledger rows.
+         *
+         *     Two columns: curated nominal nano-CNY, plus a read-time public-list USD
+         *     estimate. Neither is an upstream bill. Pool members and env / per-model
+         *     overrides whose bound endpoint exact-matches the Go preset count; Zen /
+         *     untagged pre-pool / BYOK / vendor extras stay out. Top-level monthly uses
+         *     the env ``PLATFORM_GO_SUBSCRIPTION_DAY``. Go pool members are repeated in
+         *     ``members`` with each account's own subscription day.
+         */
+        get: operations["go_windows_v1_admin_usage_go_windows_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -2092,6 +2170,7 @@ export interface paths {
          * @description Settle any paused hot-path interaction over the unified bridge (§8.2).
          *
          *     ``stage_card``：跨回合耐久卡 → 校验后起新回合 SSE（机制直起辩论或回灌调研）。
+         *     ``question_posted``：非阻塞提问收口 → journal ``question_resolved`` + 多端 signal，不起新回合。
          *     其它 kind（approval / delegation / client_tool / escalation）：Settlement 预写 (D8)
          *     后 settle Future；journal 有 required、无 Future → 410。
          *     Cold-path ``ask_user`` / ``plan_review`` / ``team_preview`` 不在此 endpoint。
@@ -2268,6 +2347,26 @@ export interface paths {
         get: operations["list_turn_audit_v1_conversations__conversation_id__messages__message_id__audit_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/conversations/{conversation_id}/messages/{message_id}/continue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Continue Message
+         * @description Continue a cloud CEO turn paused on exhausted rate limit (no checkpoint card).
+         */
+        post: operations["continue_message_v1_conversations__conversation_id__messages__message_id__continue_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6637,6 +6736,93 @@ export interface components {
             turns: number;
         };
         /**
+         * AdminGoCredentialWindows
+         * @description One pool member's Go windows (that account's own subscription day).
+         */
+        AdminGoCredentialWindows: {
+            /** Enabled */
+            enabled: boolean;
+            five_hour: components["schemas"]["AdminGoWindow"];
+            /** Label */
+            label: string;
+            monthly: components["schemas"]["AdminGoWindow"];
+            /** Platform Credential Id */
+            platform_credential_id: string;
+            /** Subscription Day */
+            subscription_day: number;
+            weekly: components["schemas"]["AdminGoWindow"];
+        };
+        /**
+         * AdminGoWindow
+         * @description One OpenCode Go-style window, summed from our platform-prepaid ledger.
+         *
+         *     ``cost_total_nano`` is curated **nominal** nano-CNY. ``estimated_usd_nano``
+         *     is a read-time public-list USD estimate (nano-USD) — not an upstream bill
+         *     or balance. Empty / idle-reset 5h windows have ``started_at`` null; weekly
+         *     and monthly always have both bounds.
+         */
+        AdminGoWindow: {
+            /** Calls */
+            calls: number;
+            /** Cost Total Nano */
+            cost_total_nano: number;
+            /** Estimated Usd Nano */
+            estimated_usd_nano: number;
+            /** Reset At */
+            reset_at: string | null;
+            /** Started At */
+            started_at: string | null;
+        };
+        /**
+         * AdminGoWindows
+         * @description ``GET /v1/admin/usage/go-windows`` — calibration baseline, not a balance.
+         *
+         *     Three windows follow Go's own reset rules (UTC week / subscription-day
+         *     month / fixed 5h + idle zero). ``cost_basis`` labels the CNY column
+         *     (curated nominal). ``estimate_*`` labels the separate public-list USD
+         *     column — not an FX of the nominal, not an upstream bill.
+         *
+         *     Top-level monthly uses ``PLATFORM_GO_SUBSCRIPTION_DAY`` (env-fallback /
+         *     all-calls coarse total). When the pool has members, ``members`` repeats
+         *     the three windows per account using that row's subscription day.
+         */
+        AdminGoWindows: {
+            /**
+             * As Of
+             * Format: date-time
+             */
+            as_of: string;
+            /**
+             * Cost Basis
+             * @constant
+             */
+            cost_basis: "nominal_nano_cny";
+            /**
+             * Estimate Basis
+             * @constant
+             */
+            estimate_basis: "opencode_public_list";
+            /**
+             * Estimate Currency
+             * @constant
+             */
+            estimate_currency: "USD";
+            /** Estimate Model */
+            estimate_model: string;
+            /**
+             * Estimate Price As Of
+             * Format: date
+             */
+            estimate_price_as_of: string;
+            five_hour: components["schemas"]["AdminGoWindow"];
+            /** Members */
+            members?: components["schemas"]["AdminGoCredentialWindows"][];
+            monthly: components["schemas"]["AdminGoWindow"];
+            /** Subscription Day */
+            subscription_day: number;
+            weekly: components["schemas"]["AdminGoWindow"];
+        };
+        /**
          * AdminMuteRequest
          * @description Admin 禁言 toggle for a group member (muted = can read, can't send).
          */
@@ -6796,8 +6982,11 @@ export interface components {
             output_tokens: number;
             /** Rounds */
             rounds: number;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "partial" | "paused" | "error";
             /** Trace Id */
             trace_id: string | null;
             /** Turn Id */
@@ -7888,9 +8077,10 @@ export interface components {
          *
          *     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
          *     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
-         *     (non-empty ``note`` steers all unrun workers — 嘱咐). ``ADJUST`` on
-         *     team_preview does **not** grant or start: user ``note`` is fed back so the
-         *     CEO revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
+         *     (non-empty ``note`` steers all unrun workers — 嘱咐, **not** a substitute
+         *     for ``ADJUST``). ``ADJUST`` on team_preview does **not** grant or start:
+         *     user ``note`` (required, non-empty on resume) is fed back so the CEO
+         *     revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
          *     plan_review still steers then continues. ask_user rejects ``ADJUST``.
          *     ``RESEARCH_FIRST`` is debate kickoff only: 不开赛，回灌固定文案令 CEO 立即挂
          *     ``multi_lens_research``（与 STOP 同构的恢复分支；非辩论开工卡须拒绝/降级）。
@@ -8508,6 +8698,32 @@ export interface components {
             surface: "banner" | "inbox" | "both" | "modal";
             /** Title */
             title: string;
+        };
+        /**
+         * CreatePlatformCredentialRequest
+         * @description Add one platform-pool member. ``base_url`` is required and bound to this key.
+         */
+        CreatePlatformCredentialRequest: {
+            /**
+             * Api Key
+             * @description Plaintext API key (AES-256-GCM at rest; never returned).
+             */
+            api_key: string;
+            /**
+             * Base Url
+             * @description OpenAI-compatible endpoint bound to this key (e.g. Go /zen/go/v1).
+             * @example https://opencode.ai/zen/go/v1
+             */
+            base_url: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Label */
+            label: string;
+            /** Subscription Day */
+            subscription_day: number;
         };
         /**
          * CreateShareRequest
@@ -10398,6 +10614,11 @@ export interface components {
         };
         /** MessageDetail */
         MessageDetail: {
+            /**
+             * Agent Mentions
+             * @description Conversation-page @Agent chips (soft mention). Orthogonal to attachments; not MessageAttachment.kind. Empty on assistant / pre-feature rows.
+             */
+            agent_mentions?: components["schemas"]["AgentMention"][];
             /** Attachments */
             attachments?: components["schemas"]["StoredAttachment"][];
             /** Citations */
@@ -10425,6 +10646,8 @@ export interface components {
             id: string;
             /** Origin */
             origin?: string | null;
+            /** Outcome */
+            outcome?: ("ok" | "partial" | "paused" | "error") | null;
             /** Paused */
             paused?: boolean | null;
             /** Reasoning Content */
@@ -10892,6 +11115,12 @@ export interface components {
             questions?: {
                 [key: string]: unknown;
             }[];
+            /** Revised From */
+            revised_from?: string | null;
+            /** Revision */
+            revision?: number | null;
+            /** Revision Note */
+            revision_note?: string | null;
             /** Sides */
             sides?: {
                 [key: string]: unknown;
@@ -10967,6 +11196,45 @@ export interface components {
             permission_axes: components["schemas"]["PermissionAxesModel"];
         };
         /**
+         * PlatformCredentialListResponse
+         * @description ``GET /v1/admin/platform-credentials``.
+         *
+         *     ``fallback`` tells ops which key path ``platform_llm_credentials`` will take:
+         *     ``pool`` = at least one enabled member; ``env`` = empty/disabled pool falls
+         *     back to ``PLATFORM_API_KEY``; ``none`` = no usable platform key at all.
+         */
+        PlatformCredentialListResponse: {
+            /** Data */
+            data: components["schemas"]["PlatformCredentialView"][];
+            /**
+             * Fallback
+             * @enum {string}
+             */
+            fallback: "pool" | "env" | "none";
+        };
+        /**
+         * PlatformCredentialView
+         * @description Admin view of one platform-pool member — never the plaintext key.
+         */
+        PlatformCredentialView: {
+            /** Base Url */
+            base_url: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Masked Key */
+            masked_key?: string | null;
+            /** Subscription Day */
+            subscription_day: number;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
          * PlaybookSlotChoice
          * @description One allowed value of an enumerated slot (render a picker, not a textbox).
          */
@@ -11015,8 +11283,21 @@ export interface components {
          *     ``interjection_id`` is set when the entry was promoted from a user interjection
          *     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
          *     ``position`` is 1-based FIFO index.
+         *     ``attachments`` / ``agent_mentions`` are the same fields drain forwards to
+         *     ``stream_chat`` (optional additive — old clients ignore).
+         *     ``ask_id`` is the non-blocking question return-path slot (must survive
+         *     steer leftover / 协调升队 degraded enqueue).
          */
         QueuedTurnItem: {
+            /** Agent Mentions */
+            agent_mentions?: components["schemas"]["AgentMention"][];
+            /**
+             * Ask Id
+             * @description 可选。答非阻塞提问时与出站 question_posted.ask_id 对上。
+             */
+            ask_id?: string | null;
+            /** Attachments */
+            attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
             content: string;
             /** Interjection Id */
@@ -11064,6 +11345,8 @@ export interface components {
          *     must not insert a visible user row when there is no real user intent.
          */
         RecordTurnRequest: {
+            /** Agent Mentions */
+            agent_mentions?: components["schemas"]["AgentMention"][];
             /**
              * Cache Hit Tokens
              * @default 0
@@ -11450,6 +11733,35 @@ export interface components {
             use_assumption: boolean;
         };
         /**
+         * ResolveQuestionPostedInteraction
+         * @description Settle a non-blocking ``question_posted`` (journal fold 三态).
+         *
+         *     ``answered``：用户提交答复（``answer`` 必填）。``discarded``：CEO 作废（``note`` 必填人话）。
+         *     两者都是可见收口，不是客户端本地标记。
+         */
+        ResolveQuestionPostedInteraction: {
+            /**
+             * Answer
+             * @default
+             */
+            answer: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "question_posted";
+            /**
+             * Note
+             * @default
+             */
+            note: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "answered" | "discarded";
+        };
+        /**
          * ResolveStageCardInteraction
          * @description Settle a stage progression card（批 B · 阶段推进卡）.
          *
@@ -11485,7 +11797,8 @@ export interface components {
          *     vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
          *     for plan_review / accept the CEO direction for ask_user / grant+start kickoff),
          *     ``adjust`` (plan_review: inject ``note`` as a steer then continue; team_preview:
-         *     do not grant or start — feed ``note`` back so the CEO revises and resubmits),
+         *     do not grant or start — feed ``note`` back so the CEO revises and resubmits;
+         *     ``note`` must be non-empty),
          *     or ``stop`` (end the turn here). ``selected``
          *     carries the option(s) the user picked from an ask_user menu (ignored for
          *     plan_review; the server drops any pick not actually offered). The engine-only
@@ -11511,6 +11824,7 @@ export interface components {
             };
             /**
              * Note
+             * @description adjust 必须非空（修订意见）。kickoff continue 上非空=嘱咐，不是 former adjust。stop 可选收场。
              * @default
              */
             note: string;
@@ -11780,6 +12094,11 @@ export interface components {
         SendMessageRequest: {
             /** Agent Mentions */
             agent_mentions?: components["schemas"]["AgentMention"][];
+            /**
+             * Ask Id
+             * @description 可选。若本条是在回答非阻塞提问，填出站 question_posted.ask_id。缺省/空=普通消息，照常消化。禁止塞进 agent_mentions。
+             */
+            ask_id?: string | null;
             /** Attachments */
             attachments?: components["schemas"]["MessageAttachment"][];
             /** Content */
@@ -12972,8 +13291,11 @@ export interface components {
             output_tokens: number;
             /** Rounds */
             rounds: number;
-            /** Status */
-            status: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "partial" | "paused" | "error";
             /** Trace Id */
             trace_id: string | null;
             /** Turn Id */
@@ -13134,6 +13456,22 @@ export interface components {
             surface?: ("banner" | "inbox" | "both" | "modal") | null;
             /** Title */
             title?: string | null;
+        };
+        /**
+         * UpdatePlatformCredentialRequest
+         * @description Partial update. Omitted ``api_key`` keeps the stored ciphertext.
+         */
+        UpdatePlatformCredentialRequest: {
+            /** Api Key */
+            api_key?: string | null;
+            /** Base Url */
+            base_url?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Label */
+            label?: string | null;
+            /** Subscription Day */
+            subscription_day?: number | null;
         };
         /**
          * UpdateProfileRequest
@@ -15080,6 +15418,150 @@ export interface operations {
             };
         };
     };
+    list_platform_credentials_v1_admin_platform_credentials_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCredentialListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_platform_credential_v1_admin_platform_credentials_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreatePlatformCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_platform_credential_v1_admin_platform_credentials__credential_id__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                credential_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatusResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_platform_credential_v1_admin_platform_credentials__credential_id__patch: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                credential_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePlatformCredentialRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformCredentialView"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     patch_episode_publish_v1_admin_simulation_show_episodes__episode_id__publish_patch: {
         parameters: {
             query?: never;
@@ -15139,6 +15621,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AdminSystemStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    go_windows_v1_admin_usage_go_windows_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path?: never;
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminGoWindows"];
                 };
             };
             /** @description Validation Error */
@@ -17542,7 +18057,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveDelegationAuthorizationInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveStageCardInteraction"];
+                "application/json": components["schemas"]["ResolveApprovalInteraction"] | components["schemas"]["ResolveDelegationAuthorizationInteraction"] | components["schemas"]["ResolveClientToolInteraction"] | components["schemas"]["ResolveEscalationInteraction"] | components["schemas"]["ResolveStageCardInteraction"] | components["schemas"]["ResolveQuestionPostedInteraction"];
             };
         };
         responses: {
@@ -17794,6 +18309,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentAuditListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    continue_message_v1_conversations__conversation_id__messages__message_id__continue_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+            };
+            path: {
+                conversation_id: string;
+                message_id: string;
+            };
+            cookie?: {
+                access_token?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */

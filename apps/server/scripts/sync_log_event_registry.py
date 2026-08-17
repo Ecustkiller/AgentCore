@@ -34,6 +34,25 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "ceiling_sec": "float",
         "reason": "str",
     },
+    "platform_pool.blocked": {
+        "credential_id": "str",
+        "reason": "str",
+    },
+    "platform_pool.cooling": {
+        "credential_id": "str",
+        "status": "str",
+        "limit_name": "str",
+        "recovery_at": "float",
+        "source": "str",
+    },
+    "platform_pool.failover": {
+        "from_credential_id": "str",
+        "to_credential_id": "str",
+    },
+    "platform_pool.redis_fail_open": {
+        "op": "str",
+        "error": "str",
+    },
     "chat.turn_start": {
         "preview": "str",
         "chars": "int",
@@ -137,6 +156,39 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "request_id": "str",
         "user": "str",
         "conversation_id": "str",
+    },
+    "pending_questions.load_failed": {
+        "conversation_id": "str",
+        "error": "str",
+    },
+    "question_posted.settled": {
+        "conversation_id": "str",
+        "ask_id": "str",
+        "status": "str",
+        "turn_id": "str",
+    },
+    "question_posted.retention_swept": {
+        "settled": "int",
+    },
+    "question_posted.retention_failed": {
+        "error": "str",
+    },
+    "question_posted.retention_settle_failed": {
+        "conversation_id": "str",
+        "turn_id": "str",
+        "ask_id": "str",
+        "error": "str",
+    },
+    "question_posted.ingest_settle_failed": {
+        "conversation_id": "str",
+        "ask_id": "str",
+        "error": "str",
+    },
+    "stream_state.retention_swept": {
+        "deleted": "int",
+    },
+    "stream_state.retention_failed": {
+        "error": "str",
     },
     "desktop.mcp_list_ok": {
         "duration_ms": "int",
@@ -335,6 +387,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "reasoning_tokens": "int",
         "stream": "bool",
         "cost_nano": "int",
+        "platform_credential_id": "str",
     },
     "llm.request": {"scenario": "str", "model": "str"},
     "llm.response": {"scenario": "str", "model": "str"},
@@ -344,6 +397,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "model": "str",
         "credential_source": "str",
         "provider_id": "str",
+        "platform_credential_id": "str",
     },
     "llm.stream_stalled": {
         "model": "str",
@@ -351,6 +405,7 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "provider_id": "str",
         "scenario": "str",
         "committed": "bool",
+        "platform_credential_id": "str",
     },
     "contract.retry": {},
     "contract.failed": {},
@@ -610,6 +665,22 @@ KEY_FIELDS: dict[str, dict[str, str]] = {
         "probe_ms": "int",
         "fail_count": "int",
     },
+    "disk.high_watermark": {
+        "used_pct": "float",
+        "path": "str",
+        "total_bytes": "int",
+        "free_bytes": "int",
+        "fstype": "str",
+        "overlay": "bool",
+        "threshold_pct": "float",
+        "suppressed": "int",
+        "reason": "str",
+    },
+    "disk.probe_failed": {
+        "path": "str",
+        "error": "str",
+        "suppressed": "int",
+    },
     "event_loop.lag": {
         "lag_ms": "int",
         "interval_s": "float",
@@ -685,6 +756,19 @@ KEY_DESC: dict[str, str] = {
         "不再走 2→4→8→16；retry_after_sec 只记上游声明值，无头时为 null；"
         "ceiling_sec = 该上限（后台一次性调用按剩余预算算，交互回合为 30s）"
     ),
+    "platform_pool.blocked": (
+        "平台池成员 401（封号或坏 key）或 403 RegionError 已摘除，需人工重新启用。"
+        "401 不换号重试；403 允许 commit 前换号"
+    ),
+    "platform_pool.cooling": (
+        "平台池成员因上游 429 进入 cooling/exhausted；recovery_at 为 unix 秒（上游 Retry-After）"
+    ),
+    "platform_pool.failover": (
+        "流式 commit 前换号：from_credential_id → to_credential_id（稳定账号 id，非 key）"
+    ),
+    "platform_pool.redis_fail_open": (
+        "池状态 Redis 读写失败，本操当无记录（fail-open）；construct 失败则退回内存实现"
+    ),
     "chat.zero_output_send_deleted": (
         "本发新建 user + 空失败助手（LLM_RATE_LIMIT / KEY_INVALID / 余额不足，"
         "无正文/工具/token）已硬删，发送在库里当没发生；cost_events 留下"
@@ -751,11 +835,16 @@ KEY_DESC: dict[str, str] = {
     "engine.retrieval_budget_awareness": (
         "检索余额注入（分项用量变化记一行；final=true 是每个 worker run 的最终 searches/reads）"
     ),
-    "llm.call": "单次 LLM 调用（latency/tokens/cost_nano）",
+    "llm.call": "单次 LLM 调用（latency/tokens/cost_nano；平台代付可带 platform_credential_id）",
     "llm.request": "LLM prompt 截断脱敏（需 LOG_LLM_BODIES）",
     "llm.response": "LLM 回复截断脱敏（需 LOG_LLM_BODIES）",
-    "llm.call_failed": "LLM 调用失败（model/credential_source；可取则带 provider_id）",
-    "llm.stream_stalled": "LLM 流式空闲超时（model/credential_source；可取则带 provider_id）",
+    "llm.call_failed": (
+        "LLM 调用失败（model/credential_source；可取则带 provider_id / platform_credential_id）"
+    ),
+    "llm.stream_stalled": (
+        "LLM 流式空闲超时（model/credential_source；可取则带 provider_id / "
+        "platform_credential_id）"
+    ),
     "cost.recorded": "回合落账成功（含 by_role 角色拆解）",
     "cost.currency_mixed": (
         "同一钱袋汇总到两种币种（平台模型漏配 curated CNY 卡）；无 FX 不可相加，保留首个"
@@ -851,6 +940,10 @@ KEY_DESC: dict[str, str] = {
     ),
     "http.readyz": "/readyz 首次就绪或从失败恢复（状态翻转才记，避免探针刷屏）",
     "http.readyz_failed": "/readyz 失败（每次 not_ready；database 硬依赖决定 503）",
+    "disk.high_watermark": (
+        "宿主挂载点用量达到阈值（默认 80%）；/readyz body 可观测但不参与 200/503"
+    ),
+    "disk.probe_failed": "读磁盘水位失败（水位缺测；同样不翻转 /readyz 状态）",
     "event_loop.lag": "事件环 sleep 超限（默认 ≥250ms）；lag_ms 即卡住多久",
     "event_loop.lag_summary": "事件环 60s 摘要（max_lag_ms / over_threshold；沉默≠没探针）",
     "event_sink.close": (
@@ -877,9 +970,17 @@ KEY_DESC: dict[str, str] = {
     "account.rules_memory_cache_seed": "账户 rules/memory 快照写入进程缓存（非回合暖）",
     "account.rules_memory_warm_failed": "warm 拉取 rules/memory 部分失败（degraded seed）",
     "attention.signalled": (
-        "「AI 停住在等你」信号已发；push_outcome = delivered / undelivered / "
-        "skipped_mobile_online / not_requested，pushed 只在真有设备收下时为 true"
+        "「在等你」信号已发（阻塞卡或未答的非阻塞提问）；push_outcome = delivered / "
+        "undelivered / skipped_mobile_online / not_requested，pushed 只在真有设备收下时为 true"
     ),
+    "pending_questions.load_failed": "CEO 易变尾悬题清单读 journal 失败（本回合不注入该段）",
+    "question_posted.settled": "非阻塞提问已答或已作废（journal question_resolved）",
+    "question_posted.retention_swept": "悬题 7 天硬上限扫表作废的张数（自有 journal 路径，不碰 paused_turns）",
+    "question_posted.retention_failed": "悬题 7 天硬上限扫表整轮失败",
+    "question_posted.retention_settle_failed": "悬题硬上限作废单张失败（其余继续）",
+    "question_posted.ingest_settle_failed": "发送提交事实成立后关悬题 journal 失败（不让回合失败）",
+    "stream_state.retention_swept": "流式在飞快照超保留期扫表删除的行数（对齐 paused_turns 7 天）",
+    "stream_state.retention_failed": "流式在飞快照 TTL 扫表整轮失败",
     "push.fcm_configured": "FCM sender 装配成功；project_id 须与真机注册的 Firebase 项目一致",
     "push.fcm_token_minted": (
         "服务账号 JWT 换 OAuth2 access token 成功（凭据可用；此后未达即非凭据问题）"

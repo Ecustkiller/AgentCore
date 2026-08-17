@@ -194,6 +194,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "交给调研员。 调研已完成。",
     "reasoning": "",

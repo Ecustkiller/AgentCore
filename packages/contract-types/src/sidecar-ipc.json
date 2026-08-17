@@ -117,7 +117,8 @@
     "contextFields": {
       "traceId": "trace_id",
       "userMessage": "user_message",
-      "optimisticUserId": "user_message_id"
+      "optimisticUserId": "user_message_id",
+      "agentMentions": "agent_mentions"
     }
   }
 }

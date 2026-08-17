@@ -142,6 +142,12 @@ export type RunFrame =
       failureKind?: import("@/types/events").RunFailureKind;
       /** Files already on disk before failure; absent on old journals. */
       productLanded?: boolean | null;
+      /** `run_failed.error_code` — desktop-local; not projected to golden. */
+      errorCode?: string | null;
+      /** `run_failed.retryable` — desktop-local; not projected to golden. */
+      retryable?: boolean | null;
+      /** `run_failed.retry_after` seconds — desktop-local; not projected to golden. */
+      retryAfter?: number | null;
       // 完工交接简报: a contract-missing run's authored wrap-up; absent for infra failures.
       debrief?: import("@/types/events").RunDebrief;
     }
@@ -411,6 +417,9 @@ export function frameFromEvent(event: SSEEvent): RunFrame | null {
         error: p.error,
         failureKind: p.failure_kind,
         productLanded: p.product_landed ?? null,
+        errorCode: p.error_code ?? null,
+        retryable: p.retryable ?? null,
+        retryAfter: p.retry_after ?? null,
         debrief: p.debrief,
       };
     }

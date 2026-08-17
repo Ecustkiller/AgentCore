@@ -132,6 +132,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "",
     "reasoning": "",

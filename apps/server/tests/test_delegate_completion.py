@@ -125,6 +125,104 @@ def test_format_worker_gaps_block_empty():
     assert format_worker_gaps_block([]) == ""
 
 
+_HARD_CLOSING = (
+    "**【终稿诚实性·部分交付】**上方契约缺口非空：终稿必须使用「部分交付 / 尚未齐备」"
+    "类措辞，点明未闭合缺口与建议下一步；"
+    "【禁止】写「完整交付 / 全部完成 / 可运行无缺 / 无需审计 / 团队已交付完毕」等完成度断言。"
+)
+
+
+def test_format_soft_only_unverified_note_bans_completeness_not_partial():
+    """仅软缺口：禁完成度断言，不强制「部分交付 / 尚未齐备」。"""
+    gaps = [
+        (
+            "数据处理员",
+            [
+                {
+                    "description": (
+                        "含示例/虚构自注（1 处）：`structure.md` · 虚构/示意 · 「虚构演示账单」。"
+                    ),
+                    "reason": "unverified_note",
+                    "severity": "warning",
+                }
+            ],
+        )
+    ]
+    block = format_worker_gaps_block(gaps)
+    assert "【禁止】" in block
+    assert "完整交付" in block
+    assert "全部完成" in block
+    assert "可运行无缺" in block
+    assert "部分交付" not in block
+    assert "尚未齐备" not in block
+    assert "终稿必须使用" not in block
+    assert _HARD_CLOSING not in block
+
+
+def test_format_soft_only_dogfood_601863c9_unverified_note_shape():
+    """dogfood cid 601863c9 同形：仅 unverified_note，缺 .xlsx 不得改口成未交付。"""
+    gaps = [
+        (
+            "数据处理员",
+            [
+                {
+                    "description": (
+                        "含示例/虚构自注（2 处）："
+                        "`synthetic_bill_structure.md` · 虚构/示意 · 「虚构演示账单」。"
+                    ),
+                    "reason": "unverified_note",
+                    "severity": "warning",
+                }
+            ],
+        )
+    ]
+    block = format_worker_gaps_block(gaps)
+    assert "部分交付" not in block
+    assert "尚未齐备" not in block
+    assert "完整交付" in block
+
+
+def test_format_soft_only_dogfood_9628a2f7_unverified_note_shape():
+    """dogfood cid 9628a2f7 同形：仅 unverified_note，诚实终稿不得被改口成部分交付。"""
+    gaps = [
+        (
+            "数据处理员",
+            [
+                {
+                    "description": (
+                        "含示例/虚构自注（1 处）：`build_excel.py` 旁报告 · 示例数据 · 「示例行」。"
+                    ),
+                    "reason": "unverified_note",
+                    "severity": "warning",
+                }
+            ],
+        )
+    ]
+    block = format_worker_gaps_block(gaps)
+    assert "部分交付" not in block
+    assert "尚未齐备" not in block
+    assert "【禁止】" in block
+    assert "完整交付" in block
+
+
+def test_format_hard_gap_keeps_partial_delivery_wording():
+    """有硬缺口：收口指令与原先逐字一致。"""
+    gaps = [
+        (
+            "研究员",
+            [
+                {
+                    "description": "队员因 token 预算触顶被迫收口，产出可能不完整",
+                    "reason": "token_budget",
+                }
+            ],
+        )
+    ]
+    block = format_worker_gaps_block(gaps)
+    assert _HARD_CLOSING in block
+    assert "不必逐条复述" in block
+
+
 def test_collect_worker_gaps_empty_when_clean():
     plan = RunPlan(
         nodes=[RunSpec(run_id="a", role="dev", task="写")]

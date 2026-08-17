@@ -216,6 +216,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排起草起诉状并导出 Word。 Word 版起诉状已生成：`抚养费起诉状-昝雯.docx`。",
     "reasoning": "",

@@ -1,4 +1,5 @@
 import { CollapsibleUserText } from "@/components/CollapsibleUserText";
+import { UserBubbleChips } from "@/components/UserBubbleChips";
 import {
   interjectionStatusLabel,
   interjectionStatusTone,
@@ -10,6 +11,7 @@ export type InterjectionItem = {
   status: string;
   note?: string | null;
   attachments?: Array<{ name: string; workspacePath?: string }>;
+  agentMentions?: Array<{ agentId: string; role: string }>;
 };
 
 /**
@@ -31,7 +33,6 @@ export function InterjectionBubbles({
     <div className="interjection-timeline" data-testid="interjection-timeline">
       {items.map((item) => {
         const tone = interjectionStatusTone(item.status);
-        const atts = item.attachments ?? [];
         const label = interjectionStatusLabel(item.status, { turnClosed });
 
         if (item.status === "queued") {
@@ -41,19 +42,10 @@ export function InterjectionBubbles({
               className="interjection-turn"
               data-testid={`interjection-bubble-${item.interjectionId}`}
             >
-              {atts.length > 0 ? (
-                <div className="attach-chips">
-                  {atts.map((a) => (
-                    <span
-                      key={`${item.interjectionId}:${a.name}`}
-                      className="attach-chip"
-                      title={a.workspacePath ?? a.name}
-                    >
-                      {a.name}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+              <UserBubbleChips
+                attachments={item.attachments}
+                agentMentions={item.agentMentions}
+              />
               <div
                 className="interjection-queued-note"
                 data-testid={`interjection-queued-note-${item.interjectionId}`}
@@ -84,19 +76,10 @@ export function InterjectionBubbles({
             className="interjection-turn"
             data-testid={`interjection-bubble-${item.interjectionId}`}
           >
-            {atts.length > 0 ? (
-              <div className="attach-chips">
-                {atts.map((a) => (
-                  <span
-                    key={`${item.interjectionId}:${a.name}`}
-                    className="attach-chip"
-                    title={a.workspacePath ?? a.name}
-                  >
-                    {a.name}
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            <UserBubbleChips
+              attachments={item.attachments}
+              agentMentions={item.agentMentions}
+            />
             <div className="bubble user">
               <CollapsibleUserText contentKey={item.content}>
                 {item.content}

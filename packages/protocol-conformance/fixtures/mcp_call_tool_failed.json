@@ -81,6 +81,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "本机 MCP 不可用，已如实说明。",
     "reasoning": "",

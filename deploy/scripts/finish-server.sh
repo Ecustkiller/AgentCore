@@ -253,6 +253,22 @@ if [[ -n "$_reg" ]]; then
   fi
   # latest 浮动标签与当前 sha 共存；清掉已无引用的悬空层
   docker image prune -f >/dev/null 2>&1 || true
-  docker builder prune -af --filter until=168h >/dev/null 2>&1 || true
+fi
+# BuildKit 缓存：只靠 until=168h 在频繁部署下清不掉（2026-08 一次手动 prune 清出 16.69G）。
+# 先按时间窗丢掉闲置层，再用体积上界卡住剩余缓存。可覆盖 BUILDER_PRUNE_UNTIL / BUILDER_CACHE_MAX。
+BUILDER_PRUNE_UNTIL="${BUILDER_PRUNE_UNTIL:-48h}"
+BUILDER_CACHE_MAX="${BUILDER_CACHE_MAX:-12gb}"
+echo "== prune builder cache (until=${BUILDER_PRUNE_UNTIL}, max=${BUILDER_CACHE_MAX}) =="
+docker builder prune -af --filter "until=${BUILDER_PRUNE_UNTIL}" >/dev/null 2>&1 || true
+_builder_help="$(docker builder prune --help 2>&1 || true)"
+if grep -q -- '--max-used-space' <<<"$_builder_help"; then
+  docker builder prune -af --max-used-space "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+elif grep -q -- '--keep-storage' <<<"$_builder_help"; then
+  docker builder prune -af --keep-storage "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+else
+  _buildx_help="$(docker buildx prune --help 2>&1 || true)"
+  if grep -q -- '--max-used-space' <<<"$_buildx_help"; then
+    docker buildx prune -af --max-used-space "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+  fi
 fi
 echo "FINISH DONE ✓"

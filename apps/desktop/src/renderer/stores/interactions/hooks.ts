@@ -78,6 +78,24 @@ export function usePendingApprovals(
   }, [byId, conversationId]);
 }
 
+/** Conversation-wide pending hanging questions (bottom bar; not the timeline). */
+export function usePendingHangingQuestions(
+  conversationId: string | null,
+): NonBlockingAskDisplay[] {
+  const byId = useInteractionStore((s) => s.byId);
+  return useMemo(() => {
+    if (!conversationId) return [];
+    const out: NonBlockingAskDisplay[] = [];
+    for (const e of byId.values()) {
+      if (e.conversationId !== conversationId) continue;
+      if (e.kind !== "question_posted") continue;
+      if (e.status !== "pending" && e.status !== "submitting") continue;
+      out.push(entryToNonBlockingAsk(e));
+    }
+    return out;
+  }, [byId, conversationId]);
+}
+
 export function usePendingDelegations(
   conversationId: string | null,
 ): DelegationAuthView[] {

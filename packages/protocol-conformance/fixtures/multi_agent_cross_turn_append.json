@@ -382,6 +382,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "再往上一张图加一位撰写员。 已新开撰写队，接续上一张图。",
     "reasoning": "",

@@ -297,6 +297,14 @@ def test_turn_end_close_event_finished_turn_emits_message_end():
     assert ev.payload == {"finish_reason": "end_turn"}
 
 
+def test_turn_end_close_event_copies_outcome():
+    ev = _turn_end_close_event(
+        [{"kind": "turn_end", "payload": {"finish_reason": "degraded", "outcome": "partial"}}]
+    )
+    assert ev is not None
+    assert ev.payload == {"finish_reason": "degraded", "outcome": "partial"}
+
+
 def test_turn_end_close_event_paused_preserves_reason():
     """paused must survive so the client routes to the durable resume card, not complete."""
     ev = _turn_end_close_event([{"kind": "turn_end", "payload": {"finish_reason": "paused"}}])

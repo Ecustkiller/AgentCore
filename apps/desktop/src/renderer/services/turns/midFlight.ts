@@ -64,12 +64,14 @@ export async function sendMidFlightMessage(
   attachments: OutgoingAttachment[] | undefined,
   delivery: MessageDelivery,
   agentMentions?: OutgoingAgentMention[],
+  askId?: string | null,
 ): Promise<MidFlightSendResult> {
   const body: Record<string, unknown> = { content, delivery };
   if (attachments && attachments.length > 0) body.attachments = attachments;
   if (agentMentions && agentMentions.length > 0) {
     body.agent_mentions = agentMentions;
   }
+  if (askId) body.ask_id = askId;
 
   const ac = new AbortController();
   let abortRegistered = false;
@@ -117,6 +119,13 @@ export async function sendMidFlightMessage(
                 kind: a.kind,
                 conversationId: a.conversation_id,
                 workspacePath: a.workspace_path,
+              }))
+            : undefined,
+        agentMentions:
+          agentMentions && agentMentions.length > 0
+            ? agentMentions.map((a) => ({
+                agentId: a.agent_id,
+                role: a.role,
               }))
             : undefined,
       },
@@ -319,6 +328,16 @@ export async function sendMidFlightMessage(
               queueId,
               conversationId,
               content,
+              // 云快照只有正文：本机留下已收口附件 / 点名，立刻插队才能原样重发。
+              attachments:
+                attachments && attachments.length > 0
+                  ? attachments.map((a) => ({ ...a }))
+                  : undefined,
+              agentMentions:
+                agentMentions && agentMentions.length > 0
+                  ? agentMentions.map((a) => ({ ...a }))
+                  : undefined,
+              askId: askId || undefined,
               position,
               queueDepth,
               degradedFrom: p.degraded_from === "steer" ? "steer" : undefined,

@@ -6,11 +6,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 
 def new_id() -> str:
     return str(uuid4())
+
+
+def is_uuid_id(value: str | None) -> bool:
+    """True when ``value`` is safe to bind as a PG UUID ``messages.id``."""
+    if not value:
+        return False
+    try:
+        UUID(str(value))
+    except ValueError:
+        return False
+    return True
 
 
 # --- Core Enumerations ---

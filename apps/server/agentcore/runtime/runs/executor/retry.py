@@ -6,9 +6,11 @@ and existing test imports stay re-exported from ``.node``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from agentcore.config import settings
+from agentcore.llm.provider.protocol import LLMMessage
 from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
@@ -31,6 +33,154 @@ _LIGHT_REPAIR_TOOL_NAMES: frozenset[str] = frozenset(
     }
 )
 _LIGHT_REPAIR_MAX_ROUNDS = 4
+
+# Per-pass remaining-rounds readout (BATS-style：只报引擎已在算的已用/上限/剩余).
+# Distinct from retrieval-budget awareness and from token/timeout wind_down —
+# numbers only; no tool narrowing, no completion / quality steer.
+ROUND_BUDGET_AWARENESS_PREFIX = "[系统提示] 轮次余额"
+
+
+def _pass_max_rounds(*, light_pass: bool, profile_max: int) -> int:
+    """ReAct cap for this produce pass.
+
+    ``light_repair`` / ``write_pass`` / cite-upgrade short passes get a dedicated
+    :data:`_LIGHT_REPAIR_MAX_ROUNDS` — not leftover from the main pool.
+    Those passes start only after the main ReAct finished (often at
+    ``max_rounds``), so ``min(4, max(1, pool - spent))`` collapses to 1 in the
+    only scene the constant exists for. Cross-attempt total-round caps are
+    intentionally not applied here.
+    """
+    if light_pass:
+        return _LIGHT_REPAIR_MAX_ROUNDS
+    return max(1, int(profile_max))
+
+
+def format_round_budget_awareness(*, used: int, limit: int) -> str:
+    """One-line pass-local used / remaining / cap. No advice, no intercept."""
+    used_n = max(0, int(used))
+    limit_n = max(0, int(limit))
+    remaining = max(0, limit_n - used_n)
+    return (
+        f"{ROUND_BUDGET_AWARENESS_PREFIX}：已用 {used_n} 轮，剩余 {remaining} 轮"
+        f"（本段上限 {limit_n} 轮）。"
+    )
+
+
+def _is_round_budget_awareness(msg: LLMMessage) -> bool:
+    return (
+        msg.role == "user"
+        and isinstance(msg.content, str)
+        and msg.content.startswith(ROUND_BUDGET_AWARENESS_PREFIX)
+    )
+
+
+def drop_round_budget_awareness(messages: list[LLMMessage]) -> bool:
+    """Remove the pass-local rounds readout; True ⇒ transcript changed."""
+    if not any(_is_round_budget_awareness(m) for m in messages):
+        return False
+    messages[:] = [m for m in messages if not _is_round_budget_awareness(m)]
+    return True
+
+
+def sync_round_budget_awareness(
+    messages: list[LLMMessage],
+    *,
+    used: int,
+    limit: int,
+    before_last_user: bool = False,
+) -> str | None:
+    """Refresh the single rounds-balance message.
+
+    ``limit <= 0`` ⇒ skip (no cap to report). Refresh = drop stale copy then
+    insert, so the transcript never carries two contradicting balances.
+    Counts are this pass's ``used`` / ``pass_profile.max_rounds`` — not
+    cross-attempt ``run_rounds`` (that accumulator is billing/logs only).
+
+    Default appends at the tail (adjacent to the next think). ``before_last_user``
+    parks the fact under the latest user instruction (light_repair / retry
+    shortfall stays last).
+    """
+    if limit <= 0:
+        return None
+    drop_round_budget_awareness(messages)
+    text = format_round_budget_awareness(used=used, limit=limit)
+    msg = LLMMessage(role="user", content=text)
+    if (
+        before_last_user
+        and messages
+        and messages[-1].role == "user"
+        and not _is_round_budget_awareness(messages[-1])
+    ):
+        messages.insert(-1, msg)
+    else:
+        messages.append(msg)
+    return text
+
+
+def stamp_coord_round_budget(
+    run_id: str,
+    *,
+    used: int,
+    limit: int,
+    tokens_spent: int | None = None,
+    kind: str = "llm",
+) -> None:
+    """Piggyback pass-local used/limit (and run tokens) on the busy channel.
+
+    Same 口径 as :func:`sync_round_budget_awareness`. No-op without a live
+    coordination session. Once per round / pass start — not per token.
+    """
+    rid = (run_id or "").strip()
+    if not rid or limit <= 0:
+        return
+    from agentcore.runtime.coordination.session import note_coord_worker_busy
+
+    note_coord_worker_busy(
+        rid,
+        kind,
+        rounds_used=max(0, int(used)),
+        rounds_limit=int(limit),
+        tokens_spent=None if tokens_spent is None else max(0, int(tokens_spent)),
+    )
+
+
+def bind_round_budget_on_begin(
+    messages: list[LLMMessage],
+    pull_notes: Callable[[], list[LLMMessage]],
+    used_box: list[int],
+    limit_box: list[int],
+    *,
+    run_id: str = "",
+    tokens_spent_of: Callable[[], int] | None = None,
+) -> Callable[[], list[LLMMessage]]:
+    """``on_round_begin`` wrapper: refresh pass-local remaining rounds, then notes.
+
+    The engine calls the hook at the start of every round after the first, so
+    each invocation means ``used`` completed rounds and ``limit - used`` left
+    including the round about to start. Mutates ``messages`` (drop+append) and
+    returns only the notes list for the engine to extend.
+
+    When ``run_id`` is set, the same used/limit (and optional run-level tokens)
+    are stamped onto the coordination busy channel for the CEO idle brief.
+    """
+
+    def _on_round_begin() -> list[LLMMessage]:
+        used_box[0] += 1
+        sync_round_budget_awareness(
+            messages, used=used_box[0], limit=limit_box[0]
+        )
+        spent: int | None = None
+        if tokens_spent_of is not None:
+            spent = int(tokens_spent_of())
+        stamp_coord_round_budget(
+            run_id,
+            used=used_box[0],
+            limit=limit_box[0],
+            tokens_spent=spent,
+        )
+        return pull_notes()
+
+    return _on_round_begin
 
 
 def _files_expected(deliverable: Any) -> bool:

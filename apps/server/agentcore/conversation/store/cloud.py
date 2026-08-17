@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from sqlalchemy.exc import DataError, IntegrityError
+from sqlalchemy.exc import IntegrityError
 
 from agentcore.billing.gate import BackgroundLlmResult, run_background_llm
 from agentcore.config import settings
@@ -27,6 +27,7 @@ from agentcore.conversation.store.merge import (
 from agentcore.conversation.turn_stats import turn_worker_stats
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.logging import get_logger
+from agentcore.core.types import is_uuid_id
 from agentcore.db.base import async_session_factory, telemetry_session_factory
 from agentcore.db.models.conversations import is_execution_harvest_conflict
 from agentcore.db.repositories import (
@@ -52,6 +53,7 @@ from agentcore.runtime.journal import (
     journal_entries_from_display_runs,
     persist_turn_journal,
 )
+from agentcore.runtime.turn.outcome import coerce_produced_outcome
 from agentcore.workspace.protocol import WorkspaceBackend
 from agentcore.workspace.snapshots import create_snapshot
 
@@ -188,6 +190,9 @@ def _usage_metadata(
     collab = result.get("collab")
     if collab:
         meta["collab"] = collab
+    outcome = coerce_produced_outcome(result.get("outcome"))
+    if outcome is not None:
+        meta["outcome"] = outcome
     # 回合用时：优先 result，其次 finalize 参数（与 turn_metrics / message_end 同锚）。
     dm = result.get("duration_ms", duration_ms)
     if dm is not None:
@@ -415,6 +420,24 @@ class CloudStore:
         finish = result.get("finish_reason")
         finish_value = getattr(finish, "value", finish)
         if finish_value == FinishReason.PAUSED.value:
+            outcome = coerce_produced_outcome(result.get("outcome"))
+            if outcome == "paused":
+                await self._finalize_ceo_continue_pause(
+                    result=result,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    assistant_reply=assistant_reply,
+                    assistant_reasoning=assistant_reasoning,
+                    assistant_citations=assistant_citations,
+                    assistant_evidence_ledger=assistant_evidence_ledger,
+                    journal_entries=journal_entries,
+                    trace_id=trace_id,
+                    turn_id=turn_id,
+                    duration_ms=duration_ms,
+                    kind=kind,
+                    finish_value=finish_value,
+                )
+                return
             logger.info(
                 "chat.turn_paused",
                 conversation_id=conversation_id,
@@ -461,21 +484,35 @@ class CloudStore:
         else:
             turn_error_message = None
         message_id = result.get("message_id")
-        terminal_status = (
-            MESSAGE_STATUS_FAILED
-            if turn_error or finish_value == FinishReason.ERROR.value
-            else MESSAGE_STATUS_COMPLETE
-        )
+        outcome = coerce_produced_outcome(result.get("outcome"))
+        if outcome is None:
+            outcome = (
+                "error"
+                if turn_error or finish_value == FinishReason.ERROR.value
+                else "ok"
+            )
+        # Message lifecycle (complete/failed) is orthogonal to turn outcome.
+        # Partial with a visible reply is COMPLETE so the body is the face;
+        # structured error still rides usage + journal (ERROR SSE is not journaled).
+        has_reply = bool((assistant_reply or "").strip())
+        if outcome == "partial" and has_reply:
+            terminal_status = MESSAGE_STATUS_COMPLETE
+        elif turn_error or finish_value == FinishReason.ERROR.value:
+            terminal_status = MESSAGE_STATUS_FAILED
+        else:
+            terminal_status = MESSAGE_STATUS_COMPLETE
+        stamp_error = bool(turn_error) or finish_value == FinishReason.ERROR.value
         # FAILED/ERROR settle: structured error is the authority for failure copy.
         # Synthesize {code, message} when missing so journal/usage never lack an
-        # error object while content stays empty (or partial only).
+        # error object while content stays empty (or partial only). Also stamp
+        # when the reply was salvaged into a COMPLETE partial face.
         run_error = (
             _ensure_structured_run_error(
                 existing=turn_error if isinstance(turn_error, dict) else None,
                 error_code=result.get("error_code"),
                 error_message=turn_error_message,
             )
-            if terminal_status == MESSAGE_STATUS_FAILED
+            if stamp_error
             else None
         )
         abnormal = bool(turn_error) or (
@@ -483,7 +520,11 @@ class CloudStore:
         )
         synth_entries = (
             journal_entries_from_display_runs(
-                {"finish_reason": finish_value, "error": run_error}
+                {
+                    "finish_reason": finish_value,
+                    "error": run_error,
+                    **({"outcome": outcome} if outcome else {}),
+                }
             )
             if journal_entries is None and abnormal
             else None
@@ -491,7 +532,7 @@ class CloudStore:
         durable_entries = journal_entries if journal_entries is not None else synth_entries
         # Progressive journal may lack / sparseness turn_end.error — merge before
         # persist so durable facts carry the same structured error as usage.
-        if terminal_status == MESSAGE_STATUS_FAILED and run_error is not None:
+        if stamp_error and run_error is not None:
             durable_entries = _merge_run_error_into_journal_entries(
                 durable_entries,
                 run_error,
@@ -499,7 +540,7 @@ class CloudStore:
             )
         if terminal_status == MESSAGE_STATUS_FAILED:
             assistant_reply = visible_failed_assistant_content(content=assistant_reply)
-        usage_extra: dict[str, Any] = {"paused": False}
+        usage_extra: dict[str, Any] = {"paused": False, "outcome": outcome}
         if run_error is not None:
             usage_extra["error_code"] = run_error["code"]
             usage_extra["error"] = run_error
@@ -617,11 +658,7 @@ class CloudStore:
                     trace_id=trace_id,
                     agent_id="CEO",
                     kind=kind,
-                    status=(
-                        "error"
-                        if turn_error or finish_value == FinishReason.ERROR.value
-                        else "ok"
-                    ),
+                    status=outcome,
                     finish_reason=finish_value,
                     error=str(turn_error)[:1000] if turn_error else None,
                     rounds=int(result.get("rounds", 0) or 0),
@@ -710,6 +747,111 @@ class CloudStore:
                 )
                 sink.emit(workspace_snapshot_failed(conversation_id=conversation_id))
 
+    async def _finalize_ceo_continue_pause(
+        self,
+        *,
+        result: dict[str, Any],
+        conversation_id: str,
+        user_id: str,
+        assistant_reply: str,
+        assistant_reasoning: str | None,
+        assistant_citations: list[dict] | None,
+        assistant_evidence_ledger: list[dict] | None,
+        journal_entries: list[dict[str, Any]] | None,
+        trace_id: str,
+        turn_id: str,
+        duration_ms: int,
+        kind: str,
+        finish_value: str,
+    ) -> None:
+        """Persist a CEO rate-limit pause: journal + ``turn_metrics`` + continue lock."""
+        from agentcore.runtime.turn.ceo_continue import save_ceo_continue_lock
+
+        message_id = result.get("message_id")
+        logger.info(
+            "chat.turn_paused",
+            conversation_id=conversation_id,
+            message_id=message_id,
+            outcome="paused",
+        )
+        if not message_id:
+            return
+        turn_error = result.get("error")
+        try:
+            async with async_session_factory() as session:
+                await MessageRepository(session).upsert_assistant(
+                    conversation_id=conversation_id,
+                    message_id=message_id,
+                    content=assistant_reply,
+                    reasoning_content=assistant_reasoning,
+                    citations=assistant_citations,
+                    evidence_ledger=assistant_evidence_ledger,
+                    trace_id=trace_id,
+                    metadata=_usage_metadata(
+                        result,
+                        status=MESSAGE_STATUS_RUNNING,
+                        duration_ms=duration_ms,
+                        extra={"paused": True, "outcome": "paused"},
+                    ),
+                    merge=True,
+                )
+                if journal_entries:
+                    await persist_turn_journal(
+                        session,
+                        message_id=message_id,
+                        conversation_id=conversation_id,
+                        trace_id=trace_id,
+                        entries=journal_entries,
+                    )
+                delegated, workers = turn_worker_stats(result)
+                collab = result.get("collab") or {}
+                try:
+                    await TurnMetricsRepository(session).record(
+                        turn_id=turn_id,
+                        conversation_id=conversation_id,
+                        user_id=user_id,
+                        trace_id=trace_id,
+                        agent_id="CEO",
+                        kind=kind,
+                        status="paused",
+                        finish_reason=finish_value,
+                        error=str(turn_error)[:1000] if turn_error else None,
+                        rounds=int(result.get("rounds", 0) or 0),
+                        duration_ms=duration_ms,
+                        delegated=delegated,
+                        workers=workers,
+                        input_tokens=int(result.get("input_tokens", 0) or 0),
+                        output_tokens=int(result.get("output_tokens", 0) or 0),
+                        boundary_yields=int(collab.get("boundary_yields", 0) or 0),
+                        scope_signals=int(collab.get("scope_signals", 0) or 0),
+                        revises=int(collab.get("revises", 0) or 0),
+                        escalations=int(collab.get("escalations", 0) or 0),
+                        audit_drops=int(result.get("audit_drops", 0) or 0),
+                    )
+                except Exception as e:
+                    await session.rollback()
+                    logger.warning(
+                        "observability.turn_metrics_write_failed",
+                        conversation_id=conversation_id,
+                        turn_id=turn_id,
+                        error=str(e),
+                    )
+            with contextlib.suppress(Exception):
+                await self.clear_stream_segments(turn_id=message_id)
+        except Exception as e:
+            logger.warning(
+                "chat.pause_snapshot_failed",
+                conversation_id=conversation_id,
+                message_id=message_id,
+                error=str(e),
+            )
+        await save_ceo_continue_lock(
+            message_id=message_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            trace_id=trace_id,
+        )
+
     async def _finalize_local(
         self,
         *,
@@ -736,11 +878,15 @@ class CloudStore:
         origin: str | None = None,
         execution_id: str | None = None,
         harvest_kind: str | None = None,
+        agent_mentions: list[dict] | None = None,
     ) -> dict[str, Any]:
         """Local write-back via finalize(mode=local): content + status + journal."""
         origin = (origin or "").strip() or None
         execution_id = (execution_id or "").strip() or None
         harvest_kind = (harvest_kind or "").strip() or None
+        from agentcore.conversation.mentions import to_stored_agent_mentions
+
+        stored_mentions = to_stored_agent_mentions(agent_mentions)
         finish_value = finish_reason
         is_paused = finish_value == FinishReason.PAUSED.value
         is_incomplete = finish_value == FinishReason.CANCELLED.value
@@ -754,14 +900,16 @@ class CloudStore:
 
         async with async_session_factory() as session:
             msg_repo = MessageRepository(session)
-            # Non-UUID keys (legacy sidecar ``resume-{turn_id}``) raise on the
-            # PG UUID bind — treat as a miss so assistant-pairing can run.
-            try:
-                existing_user = await msg_repo.get_by_id(
+            # Non-UUID keys (legacy sidecar ``resume-{turn_id}``) miss before
+            # the PG UUID bind so assistant-pairing can run. Do not wait for
+            # asyncpg: it wraps as ``DBAPIError``, not ``DataError``.
+            existing_user = (
+                await msg_repo.get_by_id(
                     user_message_id, conversation_id=conversation_id
                 )
-            except (ValueError, DataError):
-                existing_user = None
+                if is_uuid_id(user_message_id)
+                else None
+            )
             if existing_user is not None and getattr(existing_user, "role", None) != "user":
                 existing_user = None
             existing_assistant = (
@@ -812,8 +960,13 @@ class CloudStore:
                             conversation_id=conversation_id,
                             role="user",
                             content=user_message,
-                            message_id=user_message_id,
+                            message_id=(
+                                user_message_id
+                                if is_uuid_id(user_message_id)
+                                else None
+                            ),
                             metadata=user_usage or None,
+                            agent_mentions=stored_mentions or None,
                         )
                         user_msg_id = user_msg.id
                 except IntegrityError as exc:
@@ -892,7 +1045,15 @@ class CloudStore:
         elif is_incomplete:
             terminal_status = MESSAGE_STATUS_INCOMPLETE
         elif finish_value == FinishReason.ERROR.value:
-            terminal_status = MESSAGE_STATUS_FAILED
+            raw_local_outcome = (
+                coerce_produced_outcome(runs.get("outcome"))
+                if isinstance(runs, dict)
+                else None
+            )
+            if raw_local_outcome == "partial" and (assistant_content or "").strip():
+                terminal_status = MESSAGE_STATUS_COMPLETE
+            else:
+                terminal_status = MESSAGE_STATUS_FAILED
         else:
             terminal_status = MESSAGE_STATUS_COMPLETE
 
@@ -909,6 +1070,13 @@ class CloudStore:
             "cache_miss_tokens": cache_miss_tokens,
             "rounds": rounds,
         }
+        local_outcome = (
+            coerce_produced_outcome(runs.get("outcome"))
+            if isinstance(runs, dict)
+            else None
+        )
+        if local_outcome is not None:
+            usage_metadata["outcome"] = local_outcome
         if is_paused:
             usage_metadata["paused"] = True
         else:
@@ -946,6 +1114,8 @@ class CloudStore:
             err_code = run_error.get("code")
             if err_code:
                 usage_metadata["error_code"] = err_code
+            if err_code or run_error.get("message"):
+                usage_metadata["error"] = run_error
 
         # Settle whenever the turn has a terminal/pause surface — including empty
         # ERROR (soft-fail / first-turn crash) and empty bubble with process state

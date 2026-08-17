@@ -296,6 +296,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "回放一场旧红队磁带。",
     "reasoning": "",

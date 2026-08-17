@@ -1,10 +1,16 @@
-"""「AI 停住在等你」的账号级信号 (云对话多端同权 B2 · L1).
+"""账号级「在等你」信号 (云对话多端同权 B2 · L1).
 
-A blocking card is the one moment a turn genuinely cannot move without the
-person: the AI stopped and will stay stopped. Every other beat of a turn is
-either progress (they will see it when they look) or completion (nothing is
-waiting). So this module has exactly two triggers — a card went up, a card came
-down — and two transports:
+Two product shapes share this channel:
+
+- **Turn stopped**: a blocking card (approval / ask_user / plan_review / …). The
+  AI cannot move without the person.
+- **Turn still running**: a non-blocking ``question_posted`` is pending. The team
+  keeps working, but the baseline is the user has left — classifying that as
+  progress-only never calls them back.
+
+Every other beat of a turn is either progress (they will see it when they look)
+or completion (nothing is waiting). So this module has two triggers — a card went
+up, a card came down — and two transports:
 
 - **firehose** (``/v1/realtime``): a thin ``ai_attention`` event to every live
   connection of that user. It carries only *which* conversation needs them plus a
@@ -16,7 +22,7 @@ down — and two transports:
   incremental during the transition; clients replace only from the fulfill
   snapshot.
 - **native push**: the last resort, only for ``required``, only when no mobile
-  firehose is live. Push vibrates a pocket, so it is gated on「AI 已停住在等人」and
+  firehose is live. Push vibrates a pocket, so it is gated on「在等你」and
   never on progress or turn completion (设计 §8.1).
 
 The dedupe is deliberately **per-surface, not per-account**: an open desktop says
@@ -60,13 +66,12 @@ PUSH_NOT_REQUESTED = "not_requested"
 
 
 class AttentionKind(StrEnum):
-    """Blocking card kinds that stop the turn on a human.
+    """Card kinds that wait on the human — the 「在等你」 signal.
 
-    Hot (in-process Future, settled over the unified resolve endpoint) and cold
-    (durable frame, settled over ``POST .../resume``) both appear here: the
-    distinction is a resume mechanism, and from the user's side both mean「它停
-    了，在等我」. Progress-only surfaces (``stage_card``, ``question_posted``,
-    ``client_tool``) are deliberately absent — nothing is blocked on the user.
+    Blocking kinds stop the turn. ``QUESTION_POSTED`` does not — the team keeps
+    working — but it still waits on the user, so it belongs here rather than on
+    the progress surface. Progress-only surfaces (``stage_card``, ``client_tool``)
+    stay absent.
 
     ``DELEGATION_AUTHORIZATION`` currently has no live producer: the hot
     ``request_delegation_authorization`` path is retired (see
@@ -82,6 +87,7 @@ class AttentionKind(StrEnum):
     ASK_USER = "ask_user"
     PLAN_REVIEW = "plan_review"
     TEAM_PREVIEW = "team_preview"
+    QUESTION_POSTED = "question_posted"
 
 
 # Per-kind headline used when the card carries no question of its own. Also the
@@ -93,16 +99,23 @@ _KIND_HEADLINE: Mapping[AttentionKind, str] = {
     AttentionKind.ASK_USER: "AI 需要你的回应",
     AttentionKind.PLAN_REVIEW: "AI 计划待你确认",
     AttentionKind.TEAM_PREVIEW: "团队开工待你确认",
+    # Non-blocking: the headline itself must carry「团队没停」. It is the push's
+    # title line, and the body is normally the question text — so a headline that
+    # only said「等你拍板」would read exactly like a blocking checkpoint, which is
+    # the one misread worse than not notifying at all. 「拍板」is reserved for the
+    # turn-freezing kinds above; this one asks for a reply, not a gate.
+    AttentionKind.QUESTION_POSTED: "团队还在跑，有问题等你",
 }
 
 _PUSH_FALLBACK_BODY = "AI 已停下来等你处理。"
+_QUESTION_POSTED_PUSH_FALLBACK = "团队还在跑，有个问题等你答复。"
 
 
 def attention_kind_of(raw: str) -> AttentionKind | None:
-    """Map an interaction / suspension kind string to a blocking card kind.
+    """Map an interaction / suspension kind string to an 「在等你」 kind.
 
-    ``None`` for anything that does not stop the turn on a human (``client_tool``,
-    ``stage_card``, ``question_posted``) — the caller then emits nothing.
+    ``None`` for anything that does not wait on the user (``client_tool``,
+    ``stage_card``) — the caller then emits nothing.
     """
     try:
         return AttentionKind(raw)
@@ -195,11 +208,16 @@ async def _push(
     from agentcore.push import PushNotification, notify_user
 
     headline = _KIND_HEADLINE[kind]
+    fallback = (
+        _QUESTION_POSTED_PUSH_FALLBACK
+        if kind is AttentionKind.QUESTION_POSTED
+        else _PUSH_FALLBACK_BODY
+    )
     delivered = await notify_user(
         user_id,
         PushNotification(
             title=headline,
-            body=title if title != headline else _PUSH_FALLBACK_BODY,
+            body=title if title != headline else fallback,
             data={
                 "conversation_id": conversation_id,
                 # ``message_id`` keeps the deep-link key the mobile client already
@@ -421,4 +439,49 @@ def signal_hot_card_resolved(
             kind=kind,
             title=attention_title(kind, payload),
         )
+    )
+
+
+async def _conversation_owner(conversation_id: str) -> str:
+    """Owner of a live conversation; ``\"\"`` on miss / DB fault (signal degrades)."""
+    cid = (conversation_id or "").strip()
+    if not cid:
+        return ""
+    try:
+        from agentcore.db.base import async_session_factory
+        from agentcore.db.repositories import ConversationRepository
+
+        async with async_session_factory() as db:
+            conv = await ConversationRepository(db).get_by_id_unscoped(cid)
+            return conv.user_id if conv else ""
+    except Exception:  # noqa: BLE001 — a signal must never break settle / sweep
+        return ""
+
+
+async def signal_question_posted_resolved(
+    *,
+    conversation_id: str,
+    turn_id: str,
+    interaction_id: str,
+    payload: Mapping[str, Any] | None = None,
+) -> None:
+    """Clear the 「在等你」badge for a non-blocking question (HTTP settle / TTL).
+
+    Live posting uses :func:`signal_hot_card_required` (ambient turn scope). Settle
+    and the 7-day sweep run outside a turn, so the addressee is the conversation
+    owner when no scope is bound.
+    """
+    scope = current_attention_scope.get()
+    user_id = scope.user_id if scope is not None else ""
+    if not user_id:
+        user_id = await _conversation_owner(conversation_id)
+    if not user_id:
+        return
+    await signal_attention_resolved(
+        user_id=user_id,
+        conversation_id=conversation_id,
+        turn_id=turn_id or (scope.turn_id if scope is not None else ""),
+        interaction_id=interaction_id,
+        kind=AttentionKind.QUESTION_POSTED,
+        title=attention_title(AttentionKind.QUESTION_POSTED, payload),
     )

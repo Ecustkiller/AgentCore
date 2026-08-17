@@ -65,7 +65,8 @@
           }
         ],
         "max_rounds": 5,
-        "thorough": true
+        "thorough": true,
+        "revision": 1
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
     },
@@ -96,6 +97,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "我来组织一场辩论。",
     "reasoning": "",

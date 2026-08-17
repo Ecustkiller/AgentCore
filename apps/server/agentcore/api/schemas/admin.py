@@ -4,7 +4,7 @@ The cross-user counterparts of the per-user usage schemas, plus user management
 and 会话复盘. All admin-gated (管理员后台.md); reuses the per-user usage schemas.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -158,6 +158,116 @@ class AdminUsageSummary(BaseModel):
     billing_mode: str
 
 
+class AdminGoWindow(BaseModel):
+    """One OpenCode Go-style window, summed from our platform-prepaid ledger.
+
+    ``cost_total_nano`` is curated **nominal** nano-CNY. ``estimated_usd_nano``
+    is a read-time public-list USD estimate (nano-USD) — not an upstream bill
+    or balance. Empty / idle-reset 5h windows have ``started_at`` null; weekly
+    and monthly always have both bounds.
+    """
+
+    cost_total_nano: int
+    estimated_usd_nano: int
+    calls: int
+    started_at: datetime | None
+    reset_at: datetime | None
+
+
+class AdminGoCredentialWindows(BaseModel):
+    """One pool member's Go windows (that account's own subscription day)."""
+
+    platform_credential_id: str
+    label: str
+    enabled: bool
+    subscription_day: int
+    five_hour: AdminGoWindow
+    weekly: AdminGoWindow
+    monthly: AdminGoWindow
+
+
+class AdminGoWindows(BaseModel):
+    """``GET /v1/admin/usage/go-windows`` — calibration baseline, not a balance.
+
+    Three windows follow Go's own reset rules (UTC week / subscription-day
+    month / fixed 5h + idle zero). ``cost_basis`` labels the CNY column
+    (curated nominal). ``estimate_*`` labels the separate public-list USD
+    column — not an FX of the nominal, not an upstream bill.
+
+    Top-level monthly uses ``PLATFORM_GO_SUBSCRIPTION_DAY`` (env-fallback /
+    all-calls coarse total). When the pool has members, ``members`` repeats
+    the three windows per account using that row's subscription day.
+    """
+
+    five_hour: AdminGoWindow
+    weekly: AdminGoWindow
+    monthly: AdminGoWindow
+    # Echo of ``PLATFORM_GO_SUBSCRIPTION_DAY`` so the card can label the month.
+    subscription_day: int
+    cost_basis: Literal["nominal_nano_cny"]
+    estimate_basis: Literal["opencode_public_list"]
+    estimate_currency: Literal["USD"]
+    estimate_price_as_of: date
+    estimate_model: str
+    as_of: datetime
+    members: list[AdminGoCredentialWindows] = Field(default_factory=list)
+
+
+class PlatformCredentialView(BaseModel):
+    """Admin view of one platform-pool member — never the plaintext key."""
+
+    id: str
+    label: str
+    base_url: str
+    subscription_day: int = Field(ge=1, le=31)
+    enabled: bool
+    masked_key: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PlatformCredentialListResponse(BaseModel):
+    """``GET /v1/admin/platform-credentials``.
+
+    ``fallback`` tells ops which key path ``platform_llm_credentials`` will take:
+    ``pool`` = at least one enabled member; ``env`` = empty/disabled pool falls
+    back to ``PLATFORM_API_KEY``; ``none`` = no usable platform key at all.
+    """
+
+    data: list[PlatformCredentialView]
+    fallback: Literal["pool", "env", "none"]
+
+
+class CreatePlatformCredentialRequest(BaseModel):
+    """Add one platform-pool member. ``base_url`` is required and bound to this key."""
+
+    label: str = Field(..., min_length=1, max_length=100)
+    api_key: str = Field(
+        ...,
+        max_length=400,
+        description="Plaintext API key (AES-256-GCM at rest; never returned).",
+    )
+    base_url: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="OpenAI-compatible endpoint bound to this key (e.g. Go /zen/go/v1).",
+        examples=["https://opencode.ai/zen/go/v1"],
+    )
+    subscription_day: int = Field(..., ge=1, le=31)
+    enabled: bool = True
+
+
+class UpdatePlatformCredentialRequest(BaseModel):
+    """Partial update. Omitted ``api_key`` keeps the stored ciphertext."""
+
+    label: str | None = Field(default=None, min_length=1, max_length=100)
+    api_key: str | None = Field(default=None, max_length=400)
+    base_url: str | None = Field(default=None, min_length=1, max_length=500)
+    subscription_day: int | None = Field(default=None, ge=1, le=31)
+    enabled: bool | None = None
+
+
 class AdminSystemStatus(BaseModel):
     """Read-only platform status for the admin console (``GET /v1/admin/system``).
 
@@ -262,7 +372,7 @@ class TurnMetricLine(BaseModel):
     agent_id: str | None
     trace_id: str | None
     kind: str
-    status: str
+    status: Literal["ok", "partial", "paused", "error"]
     finish_reason: str | None
     error: str | None
     rounds: int

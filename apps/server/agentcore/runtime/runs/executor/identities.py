@@ -60,8 +60,9 @@ _WORKER_NO_PREAMBLE = (
 # the files handoff field guide may still mention 短骨架.
 _WORKER_LANDING_DISCIPLINE = """\
 写文件类工具（file_write / file_append / str_replace）返回成功即代表已落盘；写/append \
-回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——【以此验真】，\
-【禁止】为质检再 code_execute / file_read（含回读刚写自产物正文）。下一步仅 \
+回执为 artifact manifest（path / chars / lines / hash / 标题树 / 末段预览）——成篇 md / 源码\
+【以此验真】，【禁止】为空转质检再 code_execute / file_read 回读刚写正文。本 run 刚落盘的\
+表格（csv/xlsx/tsv 等）可用 file_read 回读自检。下一步仅 \
 str_replace（局部修订）或同轮 handoff，勿为空转自检。成篇 md【禁止】用 write_section \
 或 `<!-- SECTION: -->`（二者仅用于建站 site HTML）。超长成篇细则 consult(long_form_landing)。"""
 
@@ -296,7 +297,11 @@ _WORKER_NO_EXECUTION_POLICY = """\
 你【能】用写文件工具把脚本 / 源码 / 配置 / 文档落盘，但【不能】运行它们，也无法生成\
 需要运行程序才能产出的二进制 / 可播放文件（如 .pptx / .xlsx / 图片 / 可执行文件）。\
 不要为等一个本回合不会出现的执行工具反复升级或空转；也绝不要谎称「已运行 / 已验证 / 已生成」。\
-如实交付你真正落盘的内容，并在正文与交接简报里注明「未运行验证，需在有执行环境的机器上运行生成」。"""
+如实交付你真正落盘的内容，并在正文与交接简报里注明「未运行验证，需在有执行环境的机器上运行生成」。\
+【表格/数据】没有代码执行时，完整交付是原件结构报告（只写附件结构面已给的列名/行数/类型/样例，\
+或抽出文本里能看见的形态）+ 待跑变换脚本 + 一句「运算环境暂时不可用，稍后再试」。\
+这就是完成，不是缺口。【禁止】手抄单元格交差、禁止谎称已生成/已校验。你本 run 刚 file_write \
+落盘的表格可以 file_read 回读自检，但不能替代对用户原表的解析。"""
 
 # Shared by every delegated worker (leaf + captain): the environment-mutation caution
 # (按角色 right-size, 反向). It used to live in the SHARED base prompt, so the CEO carried

@@ -10,7 +10,11 @@
  * buildDirListing 生成「文件清单」作为上下文（不读取文件正文）。
  */
 
-import { type FileSource, baseName } from "@/lib/fileSource";
+import {
+  type FileIndexListing,
+  type FileSource,
+  baseName,
+} from "@/lib/fileSource";
 
 // "file" / "dir" come from FileSource indexing below; "conversation" entries are
 // not indexed here — they are produced on demand from /v1/search results
@@ -28,6 +32,10 @@ export interface IndexedEntry {
   /** "sourceLabel/relPath"，用于展示与匹配。 */
   display: string;
   kind: EntryKind;
+  /** 最近修改（epoch ms）；索引未给出时缺省。空态排序用。 */
+  mtimeMs?: number | null;
+  /** 本机最近一次从 @ 菜单选中（epoch ms）；由调用方盖戳。 */
+  lastUsedAt?: number | null;
 }
 
 export interface FileIndex {
@@ -37,6 +45,33 @@ export interface FileIndex {
   dirs: IndexedEntry[];
   /** 可索引来源数量：用于区分「无来源」与「有来源但无文件」。 */
   sourceCount: number;
+  /** 任一源的扁平索引被上限截断。调用方必须看见，不能当「根里就这些文件」。 */
+  truncated: boolean;
+}
+
+/** 空态只出 1–2 层；更深路径与点路径要搜才见。 */
+export const EMPTY_STATE_MAX_DEPTH = 2;
+
+/**
+ * 单一真实形状：`{ files: [{ relPath, mtimeMs? }], truncated }`。
+ * 丢掉空路径与非正 mtime，避免空态把 0 当成「刚改过」。
+ */
+export function normalizeFileIndexListing(raw: FileIndexListing): {
+  items: Array<{ relPath: string; mtimeMs?: number }>;
+  truncated: boolean;
+} {
+  const items: Array<{ relPath: string; mtimeMs?: number }> = [];
+  for (const file of raw.files) {
+    if (!file.relPath) continue;
+    items.push({
+      relPath: file.relPath,
+      mtimeMs:
+        typeof file.mtimeMs === "number" && file.mtimeMs > 0
+          ? file.mtimeMs
+          : undefined,
+    });
+  }
+  return { items, truncated: raw.truncated === true };
 }
 
 /**
@@ -49,22 +84,26 @@ export async function loadFileIndex(sources: FileSource[]): Promise<FileIndex> {
   // sourceId -> 该源下出现过的目录相对路径集合
   const dirPaths = new Map<string, Set<string>>();
   const labels = new Map<string, string>();
+  let truncated = false;
 
   for (const source of sources) {
     if (!source.listFileIndex) continue;
     labels.set(source.id, source.label);
-    let rels: string[];
+    let raw: FileIndexListing;
     try {
-      rels = await source.listFileIndex();
+      raw = await source.listFileIndex();
     } catch {
       continue;
     }
+    const listing = normalizeFileIndexListing(raw);
+    if (listing.truncated) truncated = true;
     let dirs = dirPaths.get(source.id);
     if (!dirs) {
       dirs = new Set<string>();
       dirPaths.set(source.id, dirs);
     }
-    for (const rel of rels) {
+    for (const item of listing.items) {
+      const rel = item.relPath;
       files.push({
         sourceId: source.id,
         sourceLabel: source.label,
@@ -72,6 +111,7 @@ export async function loadFileIndex(sources: FileSource[]): Promise<FileIndex> {
         name: baseName(rel),
         display: `${source.label}/${rel}`,
         kind: "file",
+        mtimeMs: item.mtimeMs,
       });
       // 由文件路径派生各级父目录（去掉文件名后逐级累加）。
       const segs = rel.split("/");
@@ -84,11 +124,26 @@ export async function loadFileIndex(sources: FileSource[]): Promise<FileIndex> {
     }
   }
 
+  const dirMtime = new Map<string, number>();
+  for (const f of files) {
+    if (f.mtimeMs == null || f.mtimeMs <= 0) continue;
+    const segs = f.relPath.split("/");
+    segs.pop();
+    let acc = "";
+    for (const seg of segs) {
+      acc = acc ? `${acc}/${seg}` : seg;
+      const k = `${f.sourceId}\0${acc}`;
+      const prev = dirMtime.get(k) ?? 0;
+      if (f.mtimeMs > prev) dirMtime.set(k, f.mtimeMs);
+    }
+  }
+
   const dirs: IndexedEntry[] = [];
   for (const [sourceId, set] of dirPaths) {
     const label = labels.get(sourceId) ?? sourceId;
     for (const rel of set) {
       const slash = rel.lastIndexOf("/");
+      const mtimeMs = dirMtime.get(`${sourceId}\0${rel}`);
       dirs.push({
         sourceId,
         sourceLabel: label,
@@ -96,11 +151,12 @@ export async function loadFileIndex(sources: FileSource[]): Promise<FileIndex> {
         name: slash >= 0 ? rel.slice(slash + 1) : rel,
         display: `${label}/${rel}`,
         kind: "dir",
+        mtimeMs,
       });
     }
   }
 
-  return { files, dirs, sourceCount: sources.length };
+  return { files, dirs, sourceCount: sources.length, truncated };
 }
 
 /** 子序列匹配：query 的字符按序出现在 text 中（不要求连续）。 */
@@ -123,14 +179,46 @@ function score(entry: IndexedEntry, q: string): number {
   return 0;
 }
 
-/** 按 query 过滤并排序；空 query 返回前 limit 个（按传入顺序）。 */
+export function pathDepth(relPath: string): number {
+  return relPath.split("/").filter((s) => s.length > 0).length;
+}
+
+/** 任一层段以 `.` 开头（`.cursor`、`.gitignore`）即点路径。 */
+export function isDotPath(relPath: string): boolean {
+  return relPath.split("/").some((seg) => seg.startsWith(".") && seg !== ".");
+}
+
+/** 空态可见：浅层（1–2 层）且非点路径。 */
+export function isEmptyStateEligible(entry: IndexedEntry): boolean {
+  const depth = pathDepth(entry.relPath);
+  return (
+    depth >= 1 && depth <= EMPTY_STATE_MAX_DEPTH && !isDotPath(entry.relPath)
+  );
+}
+
+function emptyStateRank(a: IndexedEntry, b: IndexedEntry): number {
+  const used = (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0);
+  if (used !== 0) return used;
+  const mt = (b.mtimeMs ?? 0) - (a.mtimeMs ?? 0);
+  if (mt !== 0) return mt;
+  const depth = pathDepth(a.relPath) - pathDepth(b.relPath);
+  if (depth !== 0) return depth;
+  return a.display.localeCompare(b.display, "zh");
+}
+
+/** 空 query：浅层非点路径按最近使用 / 最近修改；有 query：全量子序列打分（含深层与点路径）。 */
 export function filterEntries(
   index: IndexedEntry[],
   query: string,
   limit = 50,
 ): IndexedEntry[] {
   const q = query.trim().toLowerCase();
-  if (!q) return index.slice(0, limit);
+  if (!q) {
+    return index
+      .filter(isEmptyStateEligible)
+      .sort(emptyStateRank)
+      .slice(0, limit);
+  }
 
   const scored: Array<{ entry: IndexedEntry; s: number }> = [];
   for (const entry of index) {
@@ -141,6 +229,20 @@ export function filterEntries(
     (a, b) => b.s - a.s || a.entry.display.localeCompare(b.entry.display, "zh"),
   );
   return scored.slice(0, limit).map((x) => x.entry);
+}
+
+/** 与 {@link filterEntries} 同一可见池的总数（未截 limit），供截断提示。 */
+export function mentionFilterTotal(
+  index: IndexedEntry[],
+  query: string,
+): number {
+  const q = query.trim().toLowerCase();
+  if (!q) return index.filter(isEmptyStateEligible).length;
+  let n = 0;
+  for (const entry of index) {
+    if (score(entry, q) > 0) n++;
+  }
+  return n;
 }
 
 // 小目录平铺完整清单；超过此阈值切换为「目录树骨架 + 计数」概览。

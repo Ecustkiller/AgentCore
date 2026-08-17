@@ -1,3 +1,4 @@
+import { PausedContinueSurface } from "@/components/chat/PausedContinueSurface";
 import {
   isTeamSynthesizing,
   workerProgress,
@@ -11,6 +12,7 @@ import {
 } from "@/components/graph/helpers";
 import { Badge, Button, IconButton as UiIconButton } from "@/components/ui";
 import { SimpleTooltip } from "@/components/ui/tooltip";
+import { copyText } from "@/lib/clipboard";
 import { hasUnpricedUsage, resolveTurnDisplayMoney } from "@/lib/cost";
 import {
   COST_UNPRICED_LABEL,
@@ -18,15 +20,33 @@ import {
   formatDuration,
 } from "@/lib/format";
 import {
+  buildSupportDiagnosticPack,
+  formatSupportDiagnosticText,
+  precedingUserMessageId,
+  supportDiagnosticExtrasFromError,
+} from "@/lib/supportDiagnostics";
+import { notifySuccess } from "@/lib/toast";
+import {
+  PARTIAL_STATUS_LABEL,
+  arbitrateTurnOutcome,
+  failedRunsFromFrames,
+  isAttestedPauseContinue,
+  parseTurnOutcomeKind,
+} from "@/lib/turnOutcome";
+import { continuePausedTurn } from "@/services/turns/continuePaused";
+import {
+  getActiveRuntime,
   isTerminalPhase,
   useActiveError,
   useActiveTurnPhase,
+  useConversationStore,
 } from "@/stores/conversation";
 import {
   type Execution,
   elapsedMs,
   isDebate,
   useActiveExecField,
+  useExecutionScope,
 } from "@/stores/execution";
 import type { ExecutionDetachedPayload } from "@/types/events";
 import {
@@ -35,6 +55,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Copy,
   Loader2,
   Maximize2,
   MessagesSquare,
@@ -76,30 +97,127 @@ function canPaintTeamCompleted(execution: Execution): boolean {
  * Lifecycle icon + n/m + completed duration/cost + fold / canvas / replay.
  * No talking titles; Stop lives on the composer, not here.
  *
- * ``cancelled`` → CompletedStrip(stopped)「已停止」——忠实跟 execution.status.
+ * Terminal faces follow the turn arbitrator (`showStripFailure` /
+ * `showStripStopped` / `showStripIdle`), not `switch execution.status`.
+ * User-stop is not an error; rate-limit / partial must not paint「已停止」.
+ * Empty interrupt (`send_next`) is idle chrome — verdict lives on the composer.
+ * Partial + rate-limit keeps this scoreboard; why + 排查包 follow `showComposerHint`.
  *
  * Incremental kickoff (`paused` while first batch still running): keep the
  * running chrome and overlay a「新批次待确认」badge.
  */
 export function StatusStrip(props: StatusStripProps) {
-  switch (props.execution.status) {
-    case "completed":
-      if (!canPaintTeamCompleted(props.execution)) {
-        return <RunningOrBackgroundStrip {...props} />;
-      }
-      return <CompletedStrip {...props} />;
-    case "cancelled":
-      return <CompletedStrip {...props} stopped />;
-    case "failed":
-      return <FailureStrip {...props} />;
-    case "paused":
-      if (hasActiveRunningRuns(props.execution)) {
-        return <RunningStrip {...props} pendingBatchBadge />;
-      }
-      return <PausedStrip {...props} />;
-    default:
-      return <RunningOrBackgroundStrip {...props} />;
+  const delivery = useActiveExecField((rt) => rt.deliveryStatus);
+  const frames = useActiveExecField((rt) => rt.frames);
+  const fromFrames = failedRunsFromFrames(frames);
+  const fromExec = props.execution.runs
+    .filter((r) => r.status === "failed")
+    .map((r) => ({
+      id: r.id,
+      status: r.status,
+      error: r.error,
+      errorCode: r.errorCode ?? null,
+      retryable: r.retryable ?? null,
+      retryAfter: r.retryAfter ?? null,
+      productLanded: r.productLanded ?? null,
+    }));
+  const runs = fromFrames.length > 0 ? fromFrames : fromExec;
+  const attestedKind = useActiveExecField((rt) => rt.attestedOutcome);
+  const scopeId = useExecutionScope();
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const scopedAssistant = useConversationStore((s) => {
+    const cid = s.currentConversationId;
+    if (!cid || !scopeId) return null;
+    const messages = s.byId?.[cid]?.messages;
+    if (!messages) return null;
+    return (
+      messages.find(
+        (m) =>
+          m.role === "assistant" &&
+          (m.id === scopeId || m.serverMessageId === scopeId),
+      ) ?? null
+    );
+  });
+  const runErr = runs.find((r) => r.errorCode || r.error);
+  const sessionError = useActiveError();
+  const turnOutcome = arbitrateTurnOutcome({
+    attestedKind:
+      parseTurnOutcomeKind(scopedAssistant?.outcome) ?? attestedKind,
+    isStreaming: Boolean(scopedAssistant?.isStreaming),
+    executionStatus: props.execution.status,
+    deliveryState: delivery?.state ?? null,
+    deliverySummary: delivery?.summary ?? null,
+    runs,
+    messageError: scopedAssistant?.error ?? null,
+    runsError: runErr
+      ? { code: runErr.errorCode, message: runErr.error }
+      : null,
+    usageError: scopedAssistant?.usage?.error ?? null,
+    finishReason:
+      scopedAssistant?.finishReason ??
+      scopedAssistant?.runs?.finishReason ??
+      null,
+    conversationError: sessionError,
+    content: scopedAssistant?.content,
+    reasoning: scopedAssistant?.reasoning,
+    processLength: scopedAssistant?.process?.length ?? 0,
+    citationCount: scopedAssistant?.citations?.length ?? 0,
+    turnWarning: Boolean(scopedAssistant?.turnWarning),
+    hasTeamStrip: true,
+    credentialSource:
+      scopedAssistant?.error?.context?.credential_source ?? null,
+  });
+  const showSupportPack = turnOutcome.supportPackHost === "strip";
+  if (turnOutcome.kind === "partial") {
+    return <PartialStrip {...props} showSupportPack={showSupportPack} />;
   }
+  if (turnOutcome.kind === "paused") {
+    if (hasActiveRunningRuns(props.execution)) {
+      return <RunningStrip {...props} pendingBatchBadge />;
+    }
+    return (
+      <PausedStrip
+        {...props}
+        continueAction={
+          isAttestedPauseContinue(turnOutcome) && conversationId && scopeId
+            ? {
+                reason: turnOutcome.message,
+                retryAfterSec: turnOutcome.recovery.retryAfterSec ?? null,
+                onContinue: () => {
+                  void continuePausedTurn({
+                    conversationId,
+                    messageId: scopeId,
+                  });
+                },
+              }
+            : null
+        }
+      />
+    );
+  }
+  if (turnOutcome.showStripFailure) {
+    return (
+      <FailureStrip
+        {...props}
+        verdictMessage={turnOutcome.message}
+        sessionError={sessionError}
+        showSupportPack={showSupportPack}
+      />
+    );
+  }
+  if (turnOutcome.showStripStopped) {
+    return <CompletedStrip {...props} stopped />;
+  }
+  if (turnOutcome.showStripIdle) {
+    return <IdleStrip {...props} />;
+  }
+  if (
+    canPaintTeamCompleted(props.execution) &&
+    !isTeamSynthesizing(props.execution)
+  ) {
+    return <CompletedStrip {...props} />;
+  }
+  return <RunningOrBackgroundStrip {...props} />;
 }
 
 /** running：有 execution_detached → 静态后台条；否则 RunningStrip。
@@ -279,7 +397,14 @@ function PausedStrip({
   onToggle,
   onMaximize,
   onReplay,
-}: StatusStripProps) {
+  continueAction,
+}: StatusStripProps & {
+  continueAction?: {
+    reason: string | null;
+    retryAfterSec?: number | null;
+    onContinue: () => void;
+  } | null;
+}) {
   const { completed, total } = execution.progress;
 
   return (
@@ -289,7 +414,16 @@ function PausedStrip({
           <Pause size={14} className="text-primary" />
         </LifeIcon>
         {isDebate(execution) && <DebateTag />}
-        <span className="min-w-0 flex-1" />
+        {continueAction ? (
+          <PausedContinueSurface
+            compact
+            reason={continueAction.reason}
+            retryAfterSec={continueAction.retryAfterSec}
+            onContinue={continueAction.onContinue}
+          />
+        ) : (
+          <span className="min-w-0 flex-1" />
+        )}
         <span className="shrink-0 text-xs text-muted-foreground">
           {completed}/{total}
         </span>
@@ -338,6 +472,102 @@ function BackgroundRunningStrip({
         <span className="min-w-0 flex-1" />
         <span className="shrink-0 text-xs text-muted-foreground">
           {completed}/{total}
+        </span>
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
+          onReplay={onReplay}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StripSupportPack() {
+  const conversationId = useConversationStore((s) => s.currentConversationId);
+  const scopeId = useExecutionScope();
+  const scopedAssistant = useConversationStore((s) => {
+    const cid = s.currentConversationId;
+    if (!cid || !scopeId) return null;
+    const messages = s.byId?.[cid]?.messages;
+    if (!messages) return null;
+    return (
+      messages.find(
+        (m) =>
+          m.role === "assistant" &&
+          (m.id === scopeId || m.serverMessageId === scopeId),
+      ) ?? null
+    );
+  });
+  const ids = {
+    conversationId,
+    messageId: scopeId ?? scopedAssistant?.id,
+    userMessageId: scopedAssistant
+      ? precedingUserMessageId(getActiveRuntime().messages, scopedAssistant.id)
+      : null,
+    traceId: scopedAssistant?.traceId,
+    executionId: scopedAssistant?.executionId,
+    ...supportDiagnosticExtrasFromError(scopedAssistant?.error),
+  };
+  const diagnosticText = formatSupportDiagnosticText(ids);
+  if (!diagnosticText) return null;
+  return (
+    <Button
+      variant="ghost"
+      className="shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+      icon={<Copy size={13} />}
+      data-testid="status-strip-support-pack"
+      onClick={() => {
+        void buildSupportDiagnosticPack(ids).then((text) => {
+          if (!text) return;
+          void copyText(text).then((ok) => {
+            if (ok) notifySuccess("已复制排查包");
+          });
+        });
+      }}
+    >
+      复制排查包
+    </Button>
+  );
+}
+
+/**
+ * Empty interrupt (`send_next`): n/m chrome only. Verdict lives on the composer.
+ * No spinner, no「已停止」, no failure strip.
+ */
+function IdleStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+  onReplay,
+}: StatusStripProps) {
+  const frames = useActiveExecField((rt) => rt.frames);
+  const { completed, total } = execution.progress;
+  const ms = elapsedMs(frames);
+  const duration = ms > 0 ? formatDuration(ms) : "";
+  const money = resolveTurnDisplayMoney(
+    null,
+    execution.runs.map((r) => r.cost),
+  );
+  const costSegment =
+    money && money.nano > 0
+      ? ` · ${formatCostCaption(money.nano, money.estimated, money.currency)}`
+      : hasUnpricedUsage(execution.runs)
+        ? ` · ${COST_UNPRICED_LABEL}`
+        : "";
+
+  return (
+    <div className="px-3 py-1.5" data-testid="status-strip-idle">
+      <div className="flex items-center gap-2">
+        {isDebate(execution) && <DebateTag />}
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm text-foreground">
+          <span className="text-muted-foreground">
+            {`${completed}/${total}${duration ? ` · 用时 ${duration}` : ""}`}
+          </span>
+          <span className="text-muted-foreground">{costSegment}</span>
         </span>
         <StripControls
           execution={execution}
@@ -417,16 +647,72 @@ function CompletedStrip({
   );
 }
 
+function PartialStrip({
+  execution,
+  expanded,
+  onToggle,
+  onMaximize,
+  onReplay,
+  showSupportPack,
+}: StatusStripProps & {
+  showSupportPack: boolean;
+}) {
+  const frames = useActiveExecField((rt) => rt.frames);
+  const { completed, total } = execution.progress;
+  const ms = elapsedMs(frames);
+  const duration = ms > 0 ? formatDuration(ms) : "";
+  const money = resolveTurnDisplayMoney(
+    null,
+    execution.runs.map((r) => r.cost),
+  );
+  const costSegment =
+    money && money.nano > 0
+      ? ` · ${formatCostCaption(money.nano, money.estimated, money.currency)}`
+      : hasUnpricedUsage(execution.runs)
+        ? ` · ${COST_UNPRICED_LABEL}`
+        : "";
+
+  return (
+    <div className="px-3 py-1.5" data-testid="status-strip-partial">
+      <div className="flex items-center gap-2">
+        <LifeIcon label={PARTIAL_STATUS_LABEL}>
+          <CheckCircle2 size={14} className="text-muted-foreground" />
+        </LifeIcon>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 truncate text-sm text-foreground">
+          <span className="font-medium">{PARTIAL_STATUS_LABEL}</span>
+          <span className="text-muted-foreground">
+            {`${completed}/${total}${duration ? ` · 用时 ${duration}` : ""}`}
+          </span>
+          <span className="text-muted-foreground">{costSegment}</span>
+        </span>
+        {showSupportPack ? <StripSupportPack /> : null}
+        <StripControls
+          execution={execution}
+          expanded={expanded}
+          onToggle={onToggle}
+          onMaximize={onMaximize}
+          onReplay={onReplay}
+        />
+      </div>
+    </div>
+  );
+}
+
 function FailureStrip({
   execution,
   expanded,
   onToggle,
   onMaximize,
   onReplay,
-}: StatusStripProps) {
+  verdictMessage,
+  sessionError,
+  showSupportPack,
+}: StatusStripProps & {
+  verdictMessage: string | null;
+  sessionError: string | null;
+  showSupportPack: boolean;
+}) {
   const detached = useActiveExecField((rt) => rt.executionDetached);
-  // Same session error RetryBanner / 底栏 already shows (e.g. stream interrupt).
-  const sessionError = useActiveError();
   // Long task briefs (e.g. code_audit instructions) must not explode the strip —
   // default clamp; click to expand.
   const [detailOpen, setDetailOpen] = useState(false);
@@ -438,11 +724,13 @@ function FailureStrip({
 
   // Prefer the failed run, curated by failureKind — `run.error` is model-facing
   // (`str(exception)` / engine gate names) and reading it as advice sends users hunting
-  // for material they never owed. Else session-level error (底栏同源, already a product
-  // sentence). Never claim「未获取到」when the banner has one (91eb strip vs banner).
+  // for material they never owed. Else the arbitrator verdict (same sentence as the
+  // bubble / session banner). `run.error` is never the user face.
   const errorDetail = failedRun
     ? failureDetailSentence(failedRun.failureKind, failedRun.productLanded)
-    : sessionError?.trim() || "未获取到具体错误信息。";
+    : verdictMessage?.trim() ||
+      sessionError?.trim() ||
+      "未获取到具体错误信息。";
 
   const taskText = failedRun?.task?.trim() ?? "";
   const canToggleDetail =
@@ -488,6 +776,7 @@ function FailureStrip({
             <span className="text-muted-foreground">{spentSegment}</span>
           )}
         </span>
+        {showSupportPack ? <StripSupportPack /> : null}
         <StripControls
           execution={execution}
           expanded={expanded}

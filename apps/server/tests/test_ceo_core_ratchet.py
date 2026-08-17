@@ -37,8 +37,9 @@ import pytest
 
 from agentcore.runtime.resolve.prompt import _CEO_CORE_HINT, assemble_ceo_core
 
-# 当次实测 18716（Office 通用化 + 生图去重 + 区外授权手册挂门之后）。
-_CORE_CAP = 18720
+# 当次实测 19085（编排姿态【非阻塞问·压单】入常驻核：派活前可能未 consult，
+# 不能进按需 skill。较原 18860 上限 +230）。
+_CORE_CAP = 19090
 
 # (门工具, 该手册的签名字面) —— 手册只在门开的回合出现，不许常驻。
 _GATED_MANUALS: tuple[tuple[str, str], ...] = (

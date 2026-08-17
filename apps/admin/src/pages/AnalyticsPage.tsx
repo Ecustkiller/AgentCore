@@ -1,5 +1,6 @@
 import { CostTrendBars, TurnTrendBars } from "@/components/charts";
 import { AuditSummaryWidget } from "@/components/AuditSummaryWidget";
+import { GoWindowsCard } from "@/components/GoWindowsCard";
 import { CopyableId } from "@/components/CopyableId";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -39,9 +40,11 @@ import {
   fetchObservabilitySummary,
 } from "@/services/adminObservability";
 import {
+  type AdminGoWindows,
   type AdminUsageSummary,
   type ModelCostLine,
   type UsageWindow,
+  fetchGoWindows,
   fetchUsageSummary,
 } from "@/services/adminUsage";
 import { errorMessage } from "@/services/api";
@@ -97,7 +100,7 @@ export function AnalyticsPage() {
   const activeLoading = segment === "cost" ? costLoading : healthLoading;
   const subtitle =
     segment === "cost"
-      ? "跨用户聚合 · 今日 / 本月成本、按模型 / 角色拆分、Top 花销用户、近 7 日趋势"
+      ? "跨用户聚合 · Go 三窗口名义价校准、今日 / 本月成本、按模型拆分、Top 花销用户、近 7 日趋势"
       : "跨用户聚合 · 回合健康（错误率 / P95 延迟 / 委派率 / 协作质量）、近 7 日趋势、近期错误";
 
   return (
@@ -215,6 +218,8 @@ function CostPanel({
   onOpenUser: (userId: string) => void;
 }) {
   const [data, setData] = useState<AdminUsageSummary | null>(null);
+  const [goWindows, setGoWindows] = useState<AdminGoWindows | null>(null);
+  const [goError, setGoError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -222,10 +227,24 @@ function CostPanel({
     setLoading(true);
     onLoadingChange(true);
     setError(null);
+    setGoError(null);
     try {
-      setData(await fetchUsageSummary());
-    } catch (err) {
-      setError(errorMessage(err));
+      const [usageResult, goResult] = await Promise.allSettled([
+        fetchUsageSummary(),
+        fetchGoWindows(),
+      ]);
+      if (usageResult.status === "fulfilled") {
+        setData(usageResult.value);
+      } else {
+        setData(null);
+        setError(errorMessage(usageResult.reason));
+      }
+      if (goResult.status === "fulfilled") {
+        setGoWindows(goResult.value);
+      } else {
+        setGoWindows(null);
+        setGoError(errorMessage(goResult.reason));
+      }
     } finally {
       setLoading(false);
       onLoadingChange(false);
@@ -271,6 +290,12 @@ function CostPanel({
             </span>
           </div>
         )}
+
+        <GoWindowsCard
+          data={goWindows}
+          error={goError}
+          onRetry={() => void load()}
+        />
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <CostWindowCard label="今日" window={data.today} byok={byok} />

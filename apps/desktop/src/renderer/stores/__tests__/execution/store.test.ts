@@ -559,6 +559,35 @@ describe("hydrateFromJournal (reload replay, §9.3)", () => {
       },
     ]);
   });
+
+  it("restores user_interjection agentMentions on journal replay", () => {
+    store().hydrateFromJournal(MID, {
+      finishReason: "stop",
+      events: [
+        {
+          type: "user_interjection",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          payload: {
+            interjection_id: "inj-mention",
+            execution_id: "exec-classic",
+            content: "请让研究员再核一遍成本。",
+            status: "received",
+            agent_mentions: [{ agent_id: "agent_research", role: "研究员" }],
+          },
+        },
+      ],
+    });
+    expect(rt().userInterjections).toEqual([
+      {
+        interjectionId: "inj-mention",
+        executionId: "exec-classic",
+        content: "请让研究员再核一遍成本。",
+        status: "received",
+        note: null,
+        agentMentions: [{ agentId: "agent_research", role: "研究员" }],
+      },
+    ]);
+  });
 });
 
 describe("ingestPlan (multi-batch delegate merge)", () => {

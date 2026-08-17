@@ -34,6 +34,7 @@ _COMPARE_KEYS = (
     "cost_estimated_nano",
     "currency",
     "duration_ms",
+    "platform_credential_id",
 )
 
 

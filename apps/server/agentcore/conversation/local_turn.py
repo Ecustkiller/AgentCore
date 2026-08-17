@@ -4,6 +4,11 @@ from collections.abc import Sequence
 from typing import Any
 
 from agentcore.conversation.store import get_cloud_store
+from agentcore.conversation.zero_output_rollback import (
+    error_code_from_turn_result,
+    result_from_local_turn_writeback,
+    should_delete_zero_output_send_result,
+)
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
 from agentcore.llm.resolve import LLMCredentials
@@ -37,6 +42,7 @@ async def record_local_turn(
     origin: str | None = None,
     execution_id: str | None = None,
     harvest_kind: str | None = None,
+    agent_mentions: list[dict] | None = None,
 ) -> dict:
     """Persist a turn that ran on the user's machine via the sidecar.
 
@@ -58,6 +64,39 @@ async def record_local_turn(
                 codes=codes,
                 tools=tools,
             )
+        # Harvest / origin write-backs are not this-send creates (cloud continue
+        # / workflow pass False). Ordinary startTurn write-back is this-send.
+        user_created_this_send = not (
+            (origin or "").strip() or (harvest_kind or "").strip()
+        )
+        result_like = result_from_local_turn_writeback(
+            message_id=message_id,
+            content=assistant_content,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            reasoning_tokens=reasoning_tokens,
+            cache_hit_tokens=cache_hit_tokens,
+            cache_miss_tokens=cache_miss_tokens,
+            journal=journal,
+            runs=runs,
+        )
+        if should_delete_zero_output_send_result(
+            result_like, user_created_this_send=user_created_this_send
+        ):
+            logger.info(
+                "chat.zero_output_send_deleted",
+                conversation_id=conversation_id,
+                message_id=str(message_id or ""),
+                user_message_id=user_message_id,
+                error_code=error_code_from_turn_result(result_like),
+            )
+            return {
+                "user_message_id": user_message_id,
+                "assistant_message_id": None,
+                "title": None,
+                "followups": None,
+                "noop": True,
+            }
         result = await get_cloud_store().finalize(
             mode="local",
             conversation_id=conversation_id,
@@ -83,6 +122,19 @@ async def record_local_turn(
             origin=origin,
             execution_id=execution_id,
             harvest_kind=harvest_kind,
+            agent_mentions=agent_mentions,
         )
         assert result is not None
+        if user_created_this_send:
+            from agentcore.conversation.question_resolve import (
+                is_abort_finish_reason,
+                note_ask_replies_for_committed_send,
+            )
+
+            if not is_abort_finish_reason(finish_reason):
+                await note_ask_replies_for_committed_send(
+                    conversation_id=conversation_id,
+                    answer=user_message,
+                    journal=journal,
+                )
         return result

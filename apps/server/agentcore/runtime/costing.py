@@ -12,6 +12,7 @@ Ledger routing by ``credential_source`` (on the priced ``Cost`` / cost dict):
 platform/vendor → ``cost_total_nano`` (quota / admin); user → ``cost_estimated_nano``
 (``cost_total_nano`` stays 0 so BYOK estimates never pollute ``enforce_quota``).
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -124,9 +125,7 @@ def member_run_cost(
     )
 
 
-def arena_run_cost(
-    spec: RunSpec, state: RunState, *, parent_run_id: str | None
-) -> RunCost:
+def arena_run_cost(spec: RunSpec, state: RunState, *, parent_run_id: str | None) -> RunCost:
     """Debate-path ledger row (``role=arena``) — same reshape as :func:`member_run_cost`."""
     return member_run_cost(spec, state, parent_run_id=parent_run_id, role=ROLE_ARENA)
 
@@ -198,6 +197,8 @@ def captain_run_cost_from_state(run_id: str, state: RunState) -> RunCost:
         rounds=state.rounds,
         duration_ms=state.duration_ms,
     )
+
+
 def priced_call_cost(
     *,
     model: str,
@@ -210,17 +211,28 @@ def priced_call_cost(
     call_id: str | None = None,
     duration_ms: int = 0,
     credential_source: CredentialSource | None = None,
+    platform_credential_id: str | None = None,
 ) -> CallCost:
     """Price one LLM call into a ``cost_calls`` detail row (不变量 #2).
     Used by the inference proxy (sidecar path) and in-process cloud metering.
     ``call_id`` is the idempotency key; when omitted a fresh id is minted.
     ``run_id`` defaults to a fresh id when the caller has no run tree (title /
     memory / unattributed proxy call) — each such call is its own run aggregate.
+    ``platform_credential_id`` is the platform-pool member (logs + ledger). When
+    omitted, ambient log context is used — only stamped when the priced source
+    is ``platform`` (BYOK stays NULL even if a prior extra left ambient state).
     """
     body, billed, estimated, currency = _split_cost(
         asdict(calculate_cost(model, usage, credential_source=credential_source))
     )
     rid = run_id or new_id()
+    cid = (platform_credential_id or "").strip() or None
+    if cid is None and str(body.get("credential_source") or "") == "platform":
+        from agentcore.core.log_context import get_log_value
+
+        cid = get_log_value("platform_credential_id") or None
+    elif str(body.get("credential_source") or "") != "platform":
+        cid = None
     return CallCost(
         call_id=call_id or f"call_{new_id()}",
         run_id=rid,
@@ -235,7 +247,10 @@ def priced_call_cost(
         cost_estimated_nano=estimated,
         currency=currency,
         duration_ms=duration_ms,
+        platform_credential_id=cid,
     )
+
+
 def vision_run_cost(
     model: str,
     usage: TokenUsage,
@@ -362,6 +377,8 @@ def _bucket_currency(currencies: Sequence[str], *, bucket: str) -> str:
             kept=first,
         )
     return first
+
+
 class WorkerResultAccumulator:
     """The shared「用量 + 账目 + 引用」roll-up for orchestration tools.
     ``delegate`` (cold workers) and ``revise`` (a recalled author) both spin up
@@ -373,6 +390,7 @@ class WorkerResultAccumulator:
     All three collections are mutated in place — a tool exposes them read-only and
     the pipeline reads ``usage`` / ``run_ledger`` / ``citations`` after the loop.
     """
+
     def __init__(self) -> None:
         self.usage: dict[str, int] = {key: 0 for key in _USAGE_KEYS}
         self.run_ledger: list[RunCost] = []
@@ -399,10 +417,12 @@ class WorkerResultAccumulator:
         self.continuations: list[str] = []
         # 上面那批里由用户「立即改此人」促成的子集（redirect 热修）；队友续派不入。
         self.user_continuations: list[str] = []
+
     def add_usage(self, usage: Mapping[str, int]) -> None:
         """Fold one run's (or sub-team's) short-key token usage into the total."""
         for key in self.usage:
             self.usage[key] += usage.get(key, 0)
+
     def add_run_cost(
         self,
         spec: RunSpec,
@@ -420,6 +440,7 @@ class WorkerResultAccumulator:
             self.run_ledger.append(
                 member_run_cost(spec, state, parent_run_id=parent_run_id, role=role)
             )
+
     def add_citations(self, state: RunState) -> None:
         """Merge a COMPLETED run's web sources into the shared card (de-duped/capped).
         Only COMPLETED runs contribute — a hard-failed worker's output is discarded
@@ -427,6 +448,7 @@ class WorkerResultAccumulator:
         """
         if state.phase is RunPhase.COMPLETED and state.citations:
             merge_citations(self.citations, state.citations)
+
     def add_run(
         self,
         spec: RunSpec,
@@ -443,6 +465,7 @@ class WorkerResultAccumulator:
         self.add_usage(state.usage)
         self.add_run_cost(spec, state, parent_run_id=parent_run_id, role=role)
         self.add_citations(state)
+
     def merge(self, other: WorkerResultAccumulator) -> None:
         """Fold another accumulator into this one (a nested sub-team's roll-up).
         Used by ``delegate.nesting.absorb_children`` to roll a re-delegating worker's

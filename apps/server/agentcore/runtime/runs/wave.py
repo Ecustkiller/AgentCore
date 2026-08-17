@@ -1,7 +1,7 @@
 """WaveScheduler — the concrete RunScheduler: continuous, dependency-driven execution.
 
 The system's one scheduler. It owns *scheduling* control flow only —
-ready-selection, the skip cascade, abort, the concurrency cap, per-node retry, and
+ready-selection, the skip cascade, abort, the concurrency cap, and
 accepting nodes appended mid-run — while *how* a node runs is the injected
 :class:`RunExecutor`'s, and event emission / dependency-context assembly stay the
 host's.
@@ -26,10 +26,12 @@ Dispatch slot ``width`` still respects ``max_parallel`` / tree budget (overflow
 queues). Recomputed each dispatch cycle so overlapping continuous waves keep the
 sum of concurrent child budgets ≤ the parent budget without a tree-shared lock.
 
-Failure strategy per node is :attr:`RunPolicy.on_failure` (retry → re-run then
-cascade-skip dependents; skip → cascade-skip dependents; abort → drain in-flight
-then stop; degrade → dependents proceed). Cascade-skipped dependents revive when a
-``replaces_run_id`` rewrite removes the failed edge (协调补派 / replan add).
+Failure strategy per node is :attr:`RunPolicy.on_failure` (retry → one
+``run_failed`` then cascade-skip dependents; skip → cascade-skip dependents;
+abort → drain in-flight then stop; degrade → dependents proceed).
+Cascade-skipped dependents revive when a ``replaces_run_id`` rewrite removes
+the failed edge (协调补派 / replan add). Wave dispatches each node once;
+transient rate-limit retry lives on the LLM leaf, not a remount here.
 
 → 见设计: docs/03-AI核心/执行引擎架构设计.md §八（Run 模型）
 """
@@ -40,7 +42,6 @@ import asyncio
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import replace
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.runs.concurrency import (
@@ -75,32 +76,6 @@ OnNodeDone = Callable[[str, RunState], None | Awaitable[None]]
 # Host skip-materialisation hook: (run_id, agent_id, reason) where reason is
 # ``cascade`` | ``abort``. Drive wires this to ``sink.emit(run_skipped(...))``.
 OnSkipped = Callable[[str, str, str], None]
-
-
-def _merge_retry_billing(prior: RunState, current: RunState) -> RunState:
-    """Fold token/cost spend from earlier infra-retry attempts into the returned state.
-
-    B-deep 失败计费 survives scheduler retries: a node that metered spend on attempt 1
-    then fails again on attempt 2 must not drop attempt 1 from the final RunState the
-    ledger and UI read.
-    """
-    if not prior.usage:
-        return current
-    merged_usage = dict(current.usage)
-    for key, value in prior.usage.items():
-        merged_usage[key] = merged_usage.get(key, 0) + value
-    merged_cost = dict(current.cost)
-    for key, value in prior.cost.items():
-        # String annotations (currency / pricing_source / credential_source) are not
-        # summable — keep current's value, fall back to prior's when absent.
-        if isinstance(value, str):
-            merged_cost.setdefault(key, value)
-        else:
-            existing = merged_cost.get(key, 0)
-            if isinstance(existing, str):
-                continue
-            merged_cost[key] = int(existing) + int(value)
-    return replace(current, usage=merged_usage, cost=merged_cost)
 
 
 class WaveScheduler:
@@ -760,78 +735,32 @@ class WaveScheduler:
         completed: Mapping[str, RunState],
         budget: int,
     ) -> RunState:
-        """Run one node (with its retry policy) inside its own task context.
+        """Run one node once inside its own task context.
 
         Installs this child's reduced tree budget on the task-local context (no reset
         — the task's context copy is discarded when it ends) so a nested scheduler the
-        executor may spawn divides from here, not from the root. ``retry`` re-runs up
-        to ``max_retries`` (hard-capped at 3) with exponential backoff, returning the
-        first completed state or the last failed one; any other policy runs exactly
-        once. An executor crash is captured as a ``FAILED`` state (parity with the
-        legacy ``gather(return_exceptions=True)``); a cancellation re-raises so the
-        run-level cleanup can cancel siblings.
+        executor may spawn divides from here, not from the root. Transient
+        rate-limit retry lives on the LLM leaf; this method dispatches once.
+        A terminal (``error_retryable=False``) FAILED is recorded
+        on the audit trail. An executor crash is captured as ``FAILED`` (parity
+        with the legacy ``gather(return_exceptions=True)``); a cancellation
+        re-raises so the run-level cleanup can cancel siblings.
         """
         set_budget(budget)
-        policy = spec.policy
-        attempts = 1 + max(0, min(policy.max_retries, 3))
-        last: RunState | None = None
         try:
-            for attempt in range(attempts):
-                if attempt > 0:
-                    delay = policy.retry_delay_ms / 1000 * (2 ** (attempt - 1))
-                    if delay > 0:
-                        await asyncio.sleep(delay)
-                    from agentcore.runtime.audit.hooks import on_run_retry
+            state = await executor(spec, completed)
+            if state.phase is RunPhase.FAILED and not state.error_retryable:
+                from agentcore.runtime.audit.hooks import on_run_deterministic_failure
 
-                    on_run_retry(
-                        run_id=spec.run_id,
-                        attempt=attempt,
-                        source="on_failure",
-                        error=str(last.error) if last and last.error else None,
-                    )
-                # Infra-retry 热续: prior FAILED with a non-empty transcript is seeded
-                # into the completed snapshot under this run_id so the executor consumes
-                # that site (continue semantics) instead of cold-opening from scratch.
-                dispatch_completed: Mapping[str, RunState] = completed
-                if (
-                    last is not None
-                    and last.phase is RunPhase.FAILED
-                    and last.transcript
-                    and last.error_retryable
-                ):
-                    seeded = dict(completed)
-                    seeded[spec.run_id] = last
-                    dispatch_completed = seeded
-                state = await executor(spec, dispatch_completed)
-                state.attempt = attempt
-                if last is not None:
-                    state = _merge_retry_billing(last, state)
-                if state.phase is RunPhase.COMPLETED:
-                    return state
-                # Redirect salvage returns CANCELLED — never infra-retry a user cancel.
-                if state.phase is RunPhase.CANCELLED:
-                    return state
-                last = state
-                if policy.on_failure != "retry":
-                    break
-                # 确定性失败区分 (BL-6): a FAILED run flagged non-retryable (prompt 超长 /
-                # 鉴权 / 余额 — an AgentCoreError.retryable=False threaded onto the state)
-                # will re-fail identically, so stop burning ``max_retries`` + tokens on a
-                # known-futile re-run. Record it (后端补记) so the deterministic acceptance
-                # is visible in the delegated-turn audit trail instead of silent.
-                if state.phase is RunPhase.FAILED and not state.error_retryable:
-                    from agentcore.runtime.audit.hooks import on_run_deterministic_failure
-
-                    on_run_deterministic_failure(
-                        run_id=spec.run_id,
-                        error=str(state.error) if state.error else None,
-                    )
-                    break
+                on_run_deterministic_failure(
+                    run_id=spec.run_id,
+                    error=str(state.error) if state.error else None,
+                )
+            return state
         except asyncio.CancelledError:
             raise
         except BaseException as exc:  # noqa: BLE001 — an executor crash becomes FAILED
             return RunState(phase=RunPhase.FAILED, error=str(exc))
-        return last or RunState(phase=RunPhase.FAILED)
 
     @staticmethod
     def _has_pending_ceiling_priority(

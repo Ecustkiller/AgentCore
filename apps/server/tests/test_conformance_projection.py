@@ -81,6 +81,26 @@ def test_single_agent_user_interjection_steer_marker(projected):
     ]
 
 
+def test_multi_agent_user_interjection_with_mentions(projected):
+    """Hand-derived: payload agent_mentions fold to camelCase chips; latest status wins."""
+    p = projected["multi_agent_user_interjection_with_mentions"]
+    marker = next(s for s in p["process"] if s["kind"] == "user_interjection")
+    assert marker == {
+        "kind": "user_interjection",
+        "interjection_id": "inj-mention",
+    }
+    assert p["userInterjections"] == [
+        {
+            "interjectionId": "inj-mention",
+            "executionId": "exec1",
+            "content": "请让研究员再核一遍成本。",
+            "status": "addressed",
+            "note": "已在合成草稿中承接",
+            "agentMentions": [{"agentId": "agent_research", "role": "研究员"}],
+        }
+    ]
+
+
 def test_single_agent_tool_timeline(projected):
     p = projected["single_agent_tool"]
     assert [s["kind"] for s in p["process"]] == ["reasoning", "tool", "content"]
@@ -343,6 +363,97 @@ def test_team_preview_resolved_adjust(projected):
     ended = next(e for e in events if e.type == EventType.TOOL_USE_END)
     assert "宜先问" not in (ended.payload.get("result") or "")
     assert "重新调用 delegate" in (ended.payload.get("result") or "")
+
+
+def test_team_preview_resolved_adjust_pre_ttft(projected):
+    """adjust 后 CEO 已续跑、尚未吐首 token：挂起后续跑、气泡无新正文。
+
+    手工推导（不抄 golden）：生产冷恢复在 captain ``run_started`` 之后、上游 TTFT
+    之前有一段无 delta 窗口。折完应是 running、开工卡已结算、未跑 worker 为
+    skipped、captain 为 running、正文仍是挂起前那句、过程时间线不再长出新
+    content/reasoning。
+    """
+    from agentcore.conformance.vectors import VECTORS
+    from agentcore.runtime.events.types import EventType
+
+    p = projected["team_preview_resolved_adjust_pre_ttft"]
+    assert p["status"] == "running"
+    assert p["finishReason"] is None
+    assert p["outcome"] is None
+    assert _pending_gates(p) == []
+    assert p["content"] == "我来安排团队。"
+    assert p["reasoning"] == ""
+    assert [s["kind"] for s in p["process"]] == ["content", "team_preview", "team"]
+    assert p["process"][0]["text"] == "我来安排团队。"
+
+    tp = next(i for i in p["interactions"] if i["kind"] == "team_preview")
+    assert tp["status"] == "resolved"
+    assert tp["id"] == "tp1"
+
+    by_id = {r["id"]: r for r in p["runs"]}
+    assert by_id["c1"]["status"] == "running"
+    assert by_id["c1"]["kind"] == "captain"
+    assert by_id["r1"]["status"] == "skipped"
+    assert by_id["r2"]["status"] == "skipped"
+    assert p["progress"] == {"completed": 0, "total": 3}
+
+    _description, builder = VECTORS["team_preview_resolved_adjust_pre_ttft"]
+    events = builder()
+    assert events[-1].type == EventType.RUN_STARTED
+    assert events[-1].payload["kind"] == "captain"
+    assert events[-1].payload["run_id"] == "c1"
+    assert events[-1].payload["agent_id"] == "c1"
+
+    starts = [e for e in events if e.type == EventType.MESSAGE_START]
+    assert len(starts) == 2
+    assert {e.payload["message_id"] for e in starts} == {"m1"}
+    assert all("full_replay" not in e.payload for e in starts)
+
+    last_end = max(i for i, e in enumerate(events) if e.type == EventType.TOOL_USE_END)
+    after_end = events[last_end + 1 :]
+    assert [e.type for e in after_end] == [EventType.RUN_STARTED]
+    assert not any(
+        e.type
+        in (EventType.CONTENT_DELTA, EventType.REASONING_DELTA, EventType.TOOL_USE_START)
+        for e in after_end
+    )
+
+    resolved = next(e for e in events if e.type == EventType.TEAM_PREVIEW_RESOLVED)
+    assert resolved.payload["decision"] == "adjust"
+    assert "人太多" in (resolved.payload.get("note") or "")
+    skipped = [e for e in events if e.type == EventType.RUN_SKIPPED]
+    assert len(skipped) == 2
+    assert all(e.payload["reason"] == "abort" for e in skipped)
+    ended = next(e for e in events if e.type == EventType.TOOL_USE_END)
+    assert "宜先问" not in (ended.payload.get("result") or "")
+    assert "重新调用 delegate" in (ended.payload.get("result") or "")
+
+
+def test_team_preview_revised_card(projected):
+    """修订卡：pending 是第二张；谱系字段在 required payload 上递增串起。"""
+    from agentcore.conformance.vectors import VECTORS
+    from agentcore.runtime.events.types import EventType
+
+    p = projected["team_preview_revised_card"]
+    assert p["status"] == "paused"
+    assert p["finishReason"] == "paused"
+    pending = _pending_gates(p)
+    assert len(pending) == 1
+    assert pending[0]["id"] == "tp2"
+    assert pending[0]["kind"] == "team_preview"
+
+    _description, builder = VECTORS["team_preview_revised_card"]
+    events = builder()
+    requireds = [e for e in events if e.type == EventType.TEAM_PREVIEW_REQUIRED]
+    assert len(requireds) == 2
+    assert requireds[0].payload["checkpoint_id"] == "tp1"
+    assert requireds[0].payload.get("revision", 1) == 1
+    assert "revised_from" not in requireds[0].payload
+    assert requireds[1].payload["checkpoint_id"] == "tp2"
+    assert requireds[1].payload["revision"] == 2
+    assert requireds[1].payload["revised_from"] == "tp1"
+    assert requireds[1].payload["revision_note"] == "人太多，改成一个人做"
+    assert not any(e.type == EventType.RUN_STARTED for e in events)
 
 
 def test_team_preview_exclude_one_continue(projected):
@@ -907,9 +1018,11 @@ def test_multi_agent_team_notes_ceo_seed_and_brief(projected):
 def test_process_tool_result_cap_matches_sink():
     """>8KB tool results: sink process timeline and oracle projection must agree.
 
-    Journal stores the full wire payload; reload folds through ``project_turn``. Live
-    runtime caps in ``EventSink._accumulate_process`` — the oracle must apply the same
-    ``cap_process_result`` so golden/reload/live stay aligned."""
+    Journal persist of ``tool_use_end.result`` now uses the same ``cap_process_result``
+    as the process lane (live SSE stays full). Reload folds through ``project_turn``,
+    which applies the cap again (idempotent on an already-capped string). Live runtime
+    also caps in ``EventSink._accumulate_process`` — the oracle must apply the same
+    helper so golden/reload/live stay aligned."""
     from agentcore.conformance.projection import project_turn
     from agentcore.runtime.events import EventSink, tool_use_end, tool_use_start
     from agentcore.runtime.events.journal_config import _PROCESS_RESULT_CAP, cap_process_result
@@ -1201,10 +1314,45 @@ def test_multi_agent_export_docx_artifacts(projected):
     assert "derived_from" not in by_path[md]
 
 
+def test_single_agent_non_blocking_ask_pending(projected):
+    """悬着：question_posted 无收口帧，interactions 仍 pending；时间线有 ask 标记。"""
+    p = projected["single_agent_non_blocking_ask"]
+    assert p["status"] == "completed"
+    asks = [i for i in p["interactions"] if i["kind"] == "question_posted"]
+    assert len(asks) == 1
+    assert asks[0]["id"] == "ask1"
+    assert asks[0]["status"] == "pending"
+    assert "settlement" not in asks[0]
+    assert {"kind": "ask", "ask_id": "ask1"} in p["process"]
+
+
+def test_single_agent_non_blocking_ask_answered(projected):
+    """已答：fold resolved + settlement answered，答复对人可见。"""
+    p = projected["single_agent_non_blocking_ask_answered"]
+    assert p["status"] == "completed"
+    ask = next(i for i in p["interactions"] if i["kind"] == "question_posted")
+    assert ask["status"] == "resolved"
+    assert ask["settlement"] == "answered"
+    assert ask["answer"] == "也要 PDF。"
+    assert "note" not in ask
+    assert {"kind": "ask", "ask_id": "ask1"} in p["process"]
+
+
+def test_single_agent_non_blocking_ask_discarded(projected):
+    """已作废：fold resolved + discarded，CEO note 必须留下。"""
+    p = projected["single_agent_non_blocking_ask_discarded"]
+    assert p["status"] == "completed"
+    ask = next(i for i in p["interactions"] if i["kind"] == "question_posted")
+    assert ask["status"] == "resolved"
+    assert ask["settlement"] == "discarded"
+    assert ask["note"]
+    assert "answer" not in ask
+
+
 # Vectors with no hand-verified assertion in any sentinel module. Ratchet: only down.
 # Raising it means a new vector shipped judged solely by "both folds agree with the
 # golden the oracle wrote" — legal, but it has to be an explicit line in the diff.
-_SENTINEL_UNCOVERED_BASELINE = 68
+_SENTINEL_UNCOVERED_BASELINE = 67
 
 
 def _sentinel_sources() -> str:

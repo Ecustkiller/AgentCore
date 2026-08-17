@@ -448,6 +448,9 @@ export function applyFrame(s: FoldState, f: RunFrame): void {
         run.error = f.error;
         run.failureKind = f.failureKind ?? null;
         run.productLanded = f.productLanded ?? null;
+        run.errorCode = f.errorCode ?? null;
+        run.retryable = f.retryable ?? null;
+        run.retryAfter = f.retryAfter ?? null;
         run.debrief = f.debrief ?? null;
         run.phase = null;
         run.phaseTool = null;

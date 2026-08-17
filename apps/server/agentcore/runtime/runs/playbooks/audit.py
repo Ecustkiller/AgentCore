@@ -10,6 +10,7 @@ from agentcore.runtime.runs.playbooks._common import (
     clean_str_list,
     fold_fanout_slots,
 )
+from agentcore.workspace._paths import clean_path_segment, sanitize_write_relpath
 from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
 # 与规划定案一致：每工人模块 Phase B 最多定案条数。
@@ -35,6 +36,11 @@ def companion_audit_json_path(artifact: str) -> str:
     if artifact.endswith(".md"):
         return artifact[:-3] + ".audit.json"
     return f"{artifact}.audit.json"
+
+
+def _landed_artifact_path(path: str) -> str:
+    """Declared artifact = write-sanitizer fixpoint (the name that lands on disk)."""
+    return sanitize_write_relpath(path)
 
 
 def apply_inherited_code_audit_discipline(tasks: list[Any]) -> list[dict[str, Any]]:
@@ -129,21 +135,43 @@ _SLUG_HEAD_SEPS = ("：", ":", "（", "(", "—", "–", " - ", " — ")
 _CODE_AUDIT_SUMMARY_ARTIFACT = f"{REVIEWS_DIR}/code-audit-summary.md"
 
 
+def _strip_module_file_suffix(hint: str) -> str:
+    """Drop a trailing source-file suffix so ``Foo.tsx`` slugs as ``Foo``, not ``Foo.tsx``.
+
+    Last-segment only; ``Analytics.test.tsx`` keeps ``.test``. Short alphanumeric
+    suffixes (``.ts`` / ``.tsx`` / ``.py``) match; names without a suffix are unchanged.
+    """
+    unified = hint.replace("\\", "/").rstrip("/")
+    if not unified:
+        return hint
+    parent, sep, name = unified.rpartition("/")
+    stem, dot, ext = name.rpartition(".")
+    if not (dot and stem and ext.isalnum() and 1 <= len(ext) <= 8):
+        return unified
+    return f"{parent}{sep}{stem}" if sep else stem
+
+
 def _module_slug(hint: str) -> str:
-    """Short filename token from a module hint (head before descriptive tail)."""
+    """Short filename token from a module hint (head before descriptive tail).
+
+    Uses the same segment cleaner as write-path sanitize (collapse ``_+``, strip
+    trailing ``.`` / spaces) so declared artifacts match the name that lands.
+    """
     s = hint.strip()
     for sep in _SLUG_HEAD_SEPS:
         if sep in s:
             s = s.split(sep, 1)[0].strip()
             break
+    s = _strip_module_file_suffix(s)
     s = s.replace("\\", "_").replace("/", "_").replace("..", "_")
     s = "_".join(s.split())  # collapse whitespace
-    return (s[:_SLUG_MAX] or "scope")
+    s = clean_path_segment(s, empty_fallback="scope")
+    return (s[:_SLUG_MAX].rstrip(" ._") or "scope")
 
 
 def _report_artifact(slot: int, hint: str) -> str:
     """Stable short path: numeric slot disambiguates; slug is human skim only."""
-    return f"{REVIEWS_DIR}/code-audit-{slot}-{_module_slug(hint)}.md"
+    return _landed_artifact_path(f"{REVIEWS_DIR}/code-audit-{slot}-{_module_slug(hint)}.md")
 
 
 def _auditor_task_body(
@@ -155,7 +183,7 @@ def _auditor_task_body(
     artifact: str,
 ) -> str:
     focus_line = f"侧重：{focus}。" if focus else "全类问题均可报，按 rubric 定严重度。"
-    json_artifact = companion_audit_json_path(artifact)
+    json_artifact = _landed_artifact_path(companion_audit_json_path(artifact))
     return (
         f"对范围【{scope}】中的模块【{module}】做代码审计（只读调查：默认不改业务源码；"
         f"允许 file_write/str_replace 写入约定文档报告，除此以外勿改工程）。{focus_line}"
@@ -183,7 +211,7 @@ def _auditor_task_body(
 
 
 def _auditor_deliverable(artifact: str) -> dict[str, Any]:
-    json_artifact = companion_audit_json_path(artifact)
+    json_artifact = _landed_artifact_path(companion_audit_json_path(artifact))
     # 写盘靠 form=files + artifacts；原 must_contain（验证方式/定案）已在 task 纪律正文。
     return {
         "form": "files",
@@ -224,7 +252,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
 
     if not modules:
         label = clean_str(args.get("label")) or "main"
-        artifact = out_override or _report_artifact(0, label)
+        artifact = _landed_artifact_path(out_override or _report_artifact(0, label))
         return [
             {
                 "id": "audit_0",
@@ -277,7 +305,7 @@ def code_audit(args: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
             body["playbook_note"] = fold_note
         tasks.append(body)
 
-    synth_path = out_override or _CODE_AUDIT_SUMMARY_ARTIFACT
+    synth_path = _landed_artifact_path(out_override or _CODE_AUDIT_SUMMARY_ARTIFACT)
     tasks.append(
         {
             "id": "audit_synth",

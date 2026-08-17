@@ -66,7 +66,7 @@ class InteractionKind(StrEnum):
     DELEGATION_AUTHORIZATION = "delegation_authorization"
     # Non-blocking ask card (ask_user tool with blocking=false). Not awaited on the
     # bridge Future — journal / InteractionStore still track it as a first-class kind
-    # so reload re-renders the card. Wire event is ``question_posted`` (no resolve).
+    # so reload re-renders the card. Wire pair: ``question_posted`` / ``question_resolved``.
     QUESTION_POSTED = "question_posted"
     # 阶段推进卡（批 B）：幕 1 收尾后耐久登记；resolve 起新回合开辩 / 回灌调研；
     # 不挂起幕 1，不占 bridge Future。用户绕过发消息 → orphaned。
@@ -110,7 +110,7 @@ INTERACTION_KIND_SPECS: Mapping[InteractionKind, InteractionKindSpec] = {
         "team_preview_required", "team_preview_resolved", "checkpoint_id"
     ),
     InteractionKind.QUESTION_POSTED: InteractionKindSpec(
-        "question_posted", None, "ask_id"
+        "question_posted", "question_resolved", "ask_id"
     ),
     InteractionKind.STAGE_CARD: InteractionKindSpec(
         "stage_card_required", "stage_card_resolved", "stage_card_id"

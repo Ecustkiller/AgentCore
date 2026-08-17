@@ -3,9 +3,11 @@ import {
   FINISH_TO_STATUS,
   MARKER_STANDIN_TOOLS,
   ORCHESTRATION_TOOLS,
+  coerceProducedOutcome,
   isMarkerStandinTool,
   isOrchestrationTool,
   isRunFrameEvent,
+  resolveTurnOutcome,
   turnElapsedMs,
   turnStatusFromFinish,
 } from "./index";
@@ -44,6 +46,54 @@ describe("turnStatusFromFinish", () => {
   it("exposes the same table used by folds", () => {
     expect(FINISH_TO_STATUS.paused).toBe("paused");
     expect(FINISH_TO_STATUS.unproductive).toBe("completed");
+  });
+});
+
+describe("resolveTurnOutcome", () => {
+  it("produces paused only when explicit", () => {
+    expect(coerceProducedOutcome("paused")).toBe("paused");
+    expect(resolveTurnOutcome({ explicit: "paused", finishReason: "paused" })).toBe(
+      "paused",
+    );
+    expect(resolveTurnOutcome({ finishReason: "paused" })).toBeNull();
+  });
+
+  it("explicit paused wins over partial bits", () => {
+    expect(
+      resolveTurnOutcome({
+        events: [{ type: "delivery_status", payload: { state: "partial" } }],
+        explicit: "paused",
+        finishReason: "paused",
+      }),
+    ).toBe("paused");
+  });
+
+  it("aggregates existing partial bits", () => {
+    expect(
+      resolveTurnOutcome({
+        events: [{ type: "delivery_status", payload: { state: "partial" } }],
+      }),
+    ).toBe("partial");
+    expect(
+      resolveTurnOutcome({
+        events: [{ type: "run_failed", payload: { product_landed: true } }],
+        finishReason: "error",
+        hasError: true,
+      }),
+    ).toBe("partial");
+    expect(
+      resolveTurnOutcome({
+        events: [{ type: "tool_use_end", payload: { partial_failure: true } }],
+      }),
+    ).toBe("partial");
+  });
+
+  it("returns null while running and error/ok otherwise", () => {
+    expect(resolveTurnOutcome({ running: true })).toBeNull();
+    expect(resolveTurnOutcome({ finishReason: "error", hasError: true })).toBe(
+      "error",
+    );
+    expect(resolveTurnOutcome({ finishReason: "end_turn" })).toBe("ok");
   });
 });
 

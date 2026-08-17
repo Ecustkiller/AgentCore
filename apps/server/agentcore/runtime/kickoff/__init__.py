@@ -33,6 +33,12 @@ from agentcore.runtime.kickoff.research_first import (
     should_offer_research_first,
     should_recommend_research_first,
 )
+from agentcore.runtime.kickoff.revision import (
+    KickoffAdjustState,
+    has_unfulfilled_kickoff_adjust,
+    kickoff_adjust_state,
+    kickoff_turn_journal,
+)
 from agentcore.runtime.kickoff.stage_card import (
     apply_motion_override,
     build_stage_card_payload,
@@ -69,6 +75,7 @@ from agentcore.runtime.kickoff.team_veto import (
 
 __all__ = [
     "DebateHostAttach",
+    "KickoffAdjustState",
     "KickoffPrimitive",
     "KickoffSummary",
     "SESSION_DESK_LABEL",
@@ -90,6 +97,9 @@ __all__ = [
     "grant_mlr_preauth",
     "format_kickoff_adjust_result",
     "format_kickoff_cancel_result",
+    "has_unfulfilled_kickoff_adjust",
+    "kickoff_adjust_state",
+    "kickoff_turn_journal",
     "format_kickoff_timeout_result",
     "intensity_short_label",
     "KICKOFF_ADJUST_GUIDANCE_DEBATE",

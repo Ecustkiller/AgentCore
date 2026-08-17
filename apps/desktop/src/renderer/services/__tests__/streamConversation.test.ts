@@ -238,6 +238,74 @@ describe("streamConversation (refused turn)", () => {
       }),
     );
   });
+
+  it("includes ask_id when answering a hanging question", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(new ReadableStream({ start: (c) => c.close() }), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          }),
+        ),
+      ),
+    );
+    await streamConversation({
+      conversationId: "c1",
+      content: "也要 PDF。",
+      delivery: "steer",
+      askId: "ask1",
+    });
+    const body = JSON.parse(
+      (vi.mocked(fetch).mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { ask_id?: string };
+    expect(body.ask_id).toBe("ask1");
+  });
+
+  it("sets turnCommit.committed when this send's pump sees turn_saved", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            'data: {"type":"turn_saved","timestamp":"t","payload":{"user_message_id":"u1"}}\n\n',
+            { status: 200, headers: { "Content-Type": "text/event-stream" } },
+          ),
+        ),
+      ),
+    );
+    const turnCommit = { committed: false };
+    await streamConversation({
+      conversationId: "c1",
+      content: "hi",
+      delivery: "steer",
+      turnCommit,
+    });
+    expect(turnCommit.committed).toBe(true);
+  });
+
+  it("leaves turnCommit.committed false when the pump never sees turn_saved", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() =>
+        Promise.resolve(
+          new Response(
+            'data: {"type":"message_end","timestamp":"t","payload":{"finish_reason":"end_turn"}}\n\n',
+            { status: 200, headers: { "Content-Type": "text/event-stream" } },
+          ),
+        ),
+      ),
+    );
+    const turnCommit = { committed: false };
+    await streamConversation({
+      conversationId: "c1",
+      content: "hi",
+      delivery: "steer",
+      turnCommit,
+    });
+    expect(turnCommit.committed).toBe(false);
+  });
 });
 
 /**

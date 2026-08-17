@@ -8,6 +8,9 @@ message ``delete_by_id`` — cascade the journal identically: a future delete pa
 calls one of these instead of re-inlining ``delete(TurnJournalRow)`` and risking a
 missed cascade (the invariant-drift risk that motivated extracting this).
 
+In-flight ``turn_stream_state`` snapshots ride a sibling cascade
+(``_stream_state_cascade``); a new delete path must call both.
+
 None of these commit; the calling repository commits the surrounding unit of work,
 so the cascade stays atomic with the row delete it accompanies.
 """

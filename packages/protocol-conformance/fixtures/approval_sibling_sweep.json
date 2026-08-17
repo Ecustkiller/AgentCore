@@ -120,6 +120,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "需要写几个文件。 三个文件都写好了。",
     "reasoning": "",

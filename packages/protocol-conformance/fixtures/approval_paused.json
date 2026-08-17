@@ -34,6 +34,7 @@
   "projected": {
     "status": "paused",
     "finishReason": null,
+    "outcome": "ok",
     "error": null,
     "content": "我需要运行代码。",
     "reasoning": "",

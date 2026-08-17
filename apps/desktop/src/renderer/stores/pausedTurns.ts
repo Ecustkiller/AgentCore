@@ -100,6 +100,12 @@ export interface PendingResume {
   primitive: "delegate" | "debate";
   /** team_preview lead（交付档 + 人数）；旧帧 absent → 前端按人数回退. */
   headline?: string;
+  /** team_preview 修订代数；首版 1 / 旧帧缺省。 */
+  revision?: number;
+  /** 上一张开工卡 checkpoint_id；首版缺省。 */
+  revisedFrom?: string;
+  /** 触发本次修订的用户意见原文；首版缺省。 */
+  revisionNote?: string;
   /** debate kickoff: motion / form / sides / budget. */
   motion: string;
   form: string;
@@ -385,6 +391,21 @@ function entryFromSummary(
     ...(() => {
       const h = (s as { headline?: unknown }).headline;
       return typeof h === "string" && h.trim() ? { headline: h.trim() } : {};
+    })(),
+    ...(() => {
+      const n = Number((s as { revision?: unknown }).revision);
+      const revision = Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+      const from = (s as { revised_from?: unknown }).revised_from;
+      const note = (s as { revision_note?: unknown }).revision_note;
+      return {
+        ...(revision != null ? { revision } : {}),
+        ...(typeof from === "string" && from.trim()
+          ? { revisedFrom: from.trim() }
+          : {}),
+        ...(typeof note === "string" && note.trim()
+          ? { revisionNote: note.trim() }
+          : {}),
+      };
     })(),
     motion: String((s as { motion?: unknown }).motion ?? ""),
     form: String((s as { form?: unknown }).form ?? ""),

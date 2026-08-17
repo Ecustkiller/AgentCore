@@ -140,11 +140,7 @@ async def stream_llm_round(
 
     try:
         for attempt in range(MAX_RETRIES):
-            if (
-                budget is not None
-                and not retry_committed
-                and (time.monotonic() - start) >= budget
-            ):
+            if budget is not None and not retry_committed and (time.monotonic() - start) >= budget:
                 if last_stall_error is not None:
                     raise last_stall_error
                 break
@@ -239,6 +235,10 @@ async def stream_llm_round(
                 provider_id = get_log_value("provider_id")
                 if provider_id:
                     stall_extra["provider_id"] = provider_id
+                if cred_src == "platform":
+                    cred_id = get_log_value("platform_credential_id")
+                    if cred_id:
+                        stall_extra["platform_credential_id"] = cred_id
                 logger.warning(
                     "llm.stream_stalled",
                     scenario=request.scenario,

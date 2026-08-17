@@ -8,9 +8,11 @@ expanded ``tasks`` list is actually runnable: it round-trips through the REAL
 
 from agentcore.runtime.runs.builder import build_run_plan
 from agentcore.runtime.runs.playbooks import (
+    CODE_AUDIT_FANOUT,
     PLAYBOOKS,
     available_playbooks,
     expand_playbook,
+    playbook_args_schema_description,
 )
 from agentcore.workspace.stage_dirs import REVIEWS_DIR
 
@@ -131,6 +133,47 @@ def test_code_audit_artifact_uses_task_id_slug_not_essay_filename():
     assert by_id["audit_0"]["deliverable"]["artifacts"][1] == md0[:-3] + ".audit.json"
 
 
+def test_code_audit_slug_matches_write_sanitize_for_dunder_dir_and_file_ext():
+    """Declared artifacts must be write-sanitizer fixpoints (dogfood ace942af).
+
+    ``__tests__`` must not keep collapsed-vs-raw underscore drift; a ``.tsx``
+    module must not land as ``Name..md`` / ``Name..audit.json``.
+    """
+    from agentcore.runtime.runs.playbooks.audit import _module_slug
+    from agentcore.workspace._paths import sanitize_write_relpath
+
+    dunder = "apps/admin/src/pages/__tests__/AnalyticsPage.tsx"
+    tsx = "apps/admin/src/components/GoWindowsCard.tsx"
+    assert "___" not in _module_slug(dunder)
+    assert _module_slug(dunder) == "apps_admin_src_pages_tests_AnalyticsPage"
+    assert _module_slug(tsx) == "apps_admin_src_components_GoWindowsCard"
+    assert not _module_slug(tsx).endswith(".")
+    assert ".tsx" not in _module_slug(tsx)
+
+    tasks, errors = expand_playbook(
+        "code_audit",
+        {"scope": "apps/admin", "modules": [dunder, tsx]},
+    )
+    assert errors == []
+    by_id = _by_id(tasks)
+    md0, json0 = by_id["audit_0"]["deliverable"]["artifacts"]
+    md1, json1 = by_id["audit_1"]["deliverable"]["artifacts"]
+    assert md0 == (
+        f"{REVIEWS_DIR}/code-audit-0-apps_admin_src_pages_tests_AnalyticsPage.md"
+    )
+    assert json0 == md0[:-3] + ".audit.json"
+    assert "___tests___" not in md0
+    assert md1 == (
+        f"{REVIEWS_DIR}/code-audit-1-apps_admin_src_components_GoWindowsCard.md"
+    )
+    assert json1 == md1[:-3] + ".audit.json"
+    assert ".." not in md1
+    assert ".." not in json1
+    assert ".tsx" not in md1
+    for path in (md0, json0, md1, json1):
+        assert sanitize_write_relpath(path) == path
+
+
 def test_code_audit_requires_scope_and_rejects_single_module_list():
     tasks, errors = expand_playbook("code_audit", {"modules": ["a", "b"]})
     assert tasks == []
@@ -192,6 +235,25 @@ def test_available_playbooks_lists_code_audit():
     assert "代码审计" in listing
     assert "4–8" in listing or "4-8" in listing
     assert "自然缝" in listing or "能少则少" in listing
+    assert "上限" in listing and str(CODE_AUDIT_FANOUT) in listing
+
+
+def test_playbook_args_schema_surfaces_code_audit_modules():
+    """CEO 工具面必须看见 code_audit.modules（扇出靠填槽；引擎不从 scope 拆）。"""
+    desc = playbook_args_schema_description()
+    slots = PLAYBOOKS["code_audit"].slots
+    assert "modules(" in slots
+    assert "modules" in desc
+    assert "code_audit" in desc
+    assert "可选" in desc
+    assert "不从 scope 自动拆" in desc
+    assert "并行" in desc or "扇出" in desc
+    assert "整仓" in desc or "多子系统" in desc
+    # 上限 / 单缝 / 折叠 HOW 在 slots（校验报错）+ 编排 skill，不占每轮 schema
+    assert str(CODE_AUDIT_FANOUT) in slots
+    assert "单缝省略" in slots
+    # 必填抽取仍在（建站常驻路径勿先 consult）
+    assert "build_website→topic" in desc or ("build_website" in desc and "topic" in desc)
 
 
 # ── parallel_brief ────────────────────────────────────────────────────────────

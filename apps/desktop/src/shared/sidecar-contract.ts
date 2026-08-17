@@ -65,6 +65,12 @@ export interface SidecarPermissionAxes {
   host: SidecarHostAxis;
 }
 
+/** Conversation-page soft @Agent mention (prompt hint; not a hard route). */
+export interface SidecarAgentMention {
+  agent_id: string;
+  role: string;
+}
+
 /** renderer 发起一次本地回合所需的入参（主进程据此驱动对应 root 的 sidecar）。 */
 export interface SidecarStartTurnRequest {
   /** 目标会话 id —— 回流的 `turn/event` 用它定位 renderer 侧的会话切片。 */
@@ -101,6 +107,17 @@ export interface SidecarStartTurnRequest {
   userMessageId: string;
   /** 用户本轮消息正文。 */
   userMessage: string;
+  /**
+   * Soft @Agent mentions (optional). Forwarded to ``run_chat_pipeline.agent_mentions``.
+   * Omitted / empty = no prompt injection. Soft hint only — not a hard route.
+   * Inner shape matches REST ``AgentMention`` (``agent_id`` / ``role``).
+   */
+  agentMentions?: SidecarAgentMention[];
+  /**
+   * 答非阻塞提问时与出站 ``question_posted.ask_id`` 对上。
+   * 缺省 / 空 = 普通消息。Python sidecar 读 ``askId`` / ``ask_id``。
+   */
+  askId?: string | null;
   /**
    * 先前对话历史（`{role, content}` 列表）。云模式由服务端从库里取；sidecar 无库
    * （Slice 1 的 `ConversationStore` 为 no-op），故由 renderer 从本地会话切片喂入。

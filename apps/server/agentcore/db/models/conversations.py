@@ -283,6 +283,13 @@ class Message(Base):
     attachments: Mapped[list] = mapped_column(
         JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
     )
+    # Conversation-page ``@`` team-role chips (soft mention). List of
+    # {agent_id, role}. Orthogonal to ``attachments`` — never a
+    # MessageAttachment.kind; never a hard-route. Empty [] on assistant /
+    # legacy rows.
+    agent_mentions: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
     # Web sources consulted for this (assistant) message: list of
     # {url, title, snippet, site}. Rendered as source cards; UI-only metadata.
     citations: Mapped[list] = mapped_column(

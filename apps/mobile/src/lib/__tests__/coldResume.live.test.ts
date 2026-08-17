@@ -67,6 +67,35 @@ describe("coldResume · live Interaction authority", () => {
     expect(visible[0]?.headline).toBe("预计 1 人开工");
   });
 
+  it("entryToPausedSummary copies revision lineage from required payload", () => {
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-server-tp",
+      payload: {
+        ...tpPayload("tp-rev2"),
+        revision: 2,
+        revised_from: "tp-rev1",
+        revision_note: "人太多，改成一个人做",
+      },
+    });
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts: [
+        {
+          role: "assistant",
+          id: "client-uuid",
+          serverMessageId: "m-server-tp",
+        },
+      ],
+    });
+    expect(visible[0]?.revision).toBe(2);
+    expect(visible[0]?.revised_from).toBe("tp-rev1");
+    expect(visible[0]?.revision_note).toBe("人太多，改成一个人做");
+  });
+
   it("does not paint clickable card before serverMessageId stamp", () => {
     upsertColdRequired({
       kind: "team_preview",
@@ -360,6 +389,57 @@ describe("coldResume · live Interaction authority", () => {
       ],
     });
     expect(visible).toEqual([]);
+  });
+
+  it("resolved adjust does not paint a ResumeCard", () => {
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-adj",
+      payload: tpPayload("tp-adj"),
+    });
+    markColdResolved({
+      kind: "team_preview",
+      id: "tp-adj",
+      resolution: { decision: "adjust", note: "改成两人" },
+    });
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts: [{ role: "assistant", id: "m-adj", serverMessageId: "m-adj" }],
+    });
+    expect(visible).toEqual([]);
+  });
+
+  it("resolved adjust yields to a newer pending team_preview", () => {
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-adj",
+      payload: tpPayload("tp-old"),
+    });
+    markColdResolved({
+      kind: "team_preview",
+      id: "tp-old",
+      resolution: { decision: "adjust" },
+    });
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "conv-live",
+      messageId: "m-adj",
+      payload: tpPayload("tp-new"),
+    });
+    const visible = selectVisibleColdResumes({
+      conversationId: "conv-live",
+      byId: getColdInteractionSnapshot(),
+      paused: [],
+      hosts: [{ role: "assistant", id: "m-adj", serverMessageId: "m-adj" }],
+    });
+    const kickoffs = visible.filter((v) => v.kind === "team_preview");
+    expect(kickoffs).toHaveLength(1);
+    expect(kickoffs[0]?.checkpoint_id).toBe("tp-new");
+    expect(kickoffs[0]?.interactionStatus).toBe("pending");
   });
 
   it("two pending team_preview cards paint only the latest (IX + paused shell)", () => {

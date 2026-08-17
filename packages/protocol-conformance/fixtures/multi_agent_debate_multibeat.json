@@ -1151,6 +1151,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "多轮对抗辩论，每轮质询后结辩。",
     "reasoning": "",

@@ -98,6 +98,16 @@ BYOK_PROVIDER_PRESETS: tuple[ByokProviderPreset, ...] = (
         # Short seed for discovery-miss; full catalog = GET /models union.
         models=("deepseek-v4-flash", "kimi-k2.6", "glm-5.2"),
     ),
+    ByokProviderPreset(
+        id="opencode_go",
+        label="OpenCode Go",
+        # Sibling of Zen — exact match only. ``…/zen/go/v1`` must never be
+        # swallowed by a prefix/contains check on ``…/zen/v1``.
+        base_url="https://opencode.ai/zen/go/v1",
+        default_model="deepseek-v4-flash",
+        # chat/completions seed only; /responses and /messages ids stay off-seed.
+        models=("deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"),
+    ),
 )
 
 
@@ -114,7 +124,11 @@ def _preset_base_urls(preset: ByokProviderPreset) -> tuple[str, ...]:
 
 
 def match_byok_provider_preset(base_url: str) -> ByokProviderPreset | None:
-    """Return the preset whose canonical / alias base_url matches, else None."""
+    """Return the preset whose canonical / alias base_url matches, else None.
+
+    Equality after normalize only — never ``in`` / ``startswith``. OpenCode Go
+    (``…/zen/go/v1``) and Zen (``…/zen/v1``) would cross-hit under prefix checks.
+    """
     normalized = normalize_byok_base_url(base_url)
     if not normalized:
         return None
@@ -125,6 +139,18 @@ def match_byok_provider_preset(base_url: str) -> ByokProviderPreset | None:
         ):
             return preset
     return None
+
+
+def is_opencode_go_base_url(base_url: str) -> bool:
+    """True only for the OpenCode Go canonical endpoint (exact preset match)."""
+    preset = match_byok_provider_preset(base_url)
+    return preset is not None and preset.id == "opencode_go"
+
+
+def is_opencode_zen_base_url(base_url: str) -> bool:
+    """True only for the OpenCode Zen canonical endpoint (exact preset match)."""
+    preset = match_byok_provider_preset(base_url)
+    return preset is not None and preset.id == "opencode_zen"
 
 
 def preset_models_for_base_url(base_url: str) -> tuple[str, ...]:

@@ -1,6 +1,7 @@
 import { AutoFolderNoticeCard } from "@/components/chat/AutoFolderNoticeCard";
 import { FileArtifactsCard } from "@/components/chat/FileArtifactsCard";
 import { Markdown } from "@/components/chat/Markdown";
+import { PausedContinueSurface } from "@/components/chat/PausedContinueSurface";
 import { SourceCards } from "@/components/chat/SourceCards";
 import { TurnWarningBanner } from "@/components/chat/TurnWarningBanner";
 import { CollapsibleSpeech } from "@/components/chat/debate/CollapsibleSpeech";
@@ -22,15 +23,10 @@ import {
 import { SimpleTooltip } from "@/components/ui/tooltip";
 import { buildCitationDisplayMap } from "@/lib/citationDisplayMap";
 import { copyText } from "@/lib/clipboard";
-import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import {
   connectivityEscalationSuffix,
   degradedFinishChipLabel,
-  errorActionForCode,
   formatAssistantErrorMessage,
-  isEmptyResponseUserSurface,
-  resolveAssistantFailureFace,
-  visibleMessageText,
 } from "@/lib/errors";
 import { resolveFileArtifactsForCard } from "@/lib/fileArtifacts";
 import {
@@ -46,8 +42,13 @@ import {
   supportDiagnosticExtrasFromError,
 } from "@/lib/supportDiagnostics";
 import { notifySuccess } from "@/lib/toast";
+import {
+  isAttestedPauseContinue,
+  turnOutcomeForAssistant,
+} from "@/lib/turnOutcome";
 import { cn } from "@/lib/utils";
 import { runRegenerate } from "@/services/turns";
+import { continuePausedTurn } from "@/services/turns/continuePaused";
 import {
   type AutoFolderNotice,
   assistantProjectionId,
@@ -155,19 +156,18 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     nonBlockingAsks.length > 0 ||
     planReviews.length > 0 ||
     teamPreviews.length > 0;
-  // Empty-face redesign: single selector — structured error OR failure finish → face;
-  // short exemptions (user stop; paused/ask with dedicated card).
-  const resolvedFace = resolveAssistantFailureFace({
-    content: message.content,
-    isStreaming: message.isStreaming,
-    error: message.error,
-    runsError: message.runs?.error,
-    usageError: message.usage?.error,
-    finishReason,
+  const execSlot = useExecutionStore((s) => s.byId[projectionId]);
+  const hasTeamStrip =
+    Boolean(execSlot?.plan) ||
+    (message.process ?? []).some((s) => s.kind === "team");
+  const outcome = turnOutcomeForAssistant(message, execSlot, {
     hasDedicatedPauseOrAskUi,
+    hasTeamStrip,
+    finishReason,
   });
   // Prefer live message.error when it is the face source so context (upstream
-  // preview / credential_source) survives formatAssistantErrorMessage.
+  // preview / credential_source / empty_diagnosis) survives formatAssistantErrorMessage.
+  const resolvedFace = outcome.face;
   const displayError =
     resolvedFace == null
       ? null
@@ -176,22 +176,14 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
             message.error.code === resolvedFace.code)
         ? message.error
         : resolvedFace;
-  const errorAction = displayError
-    ? errorActionForCode(displayError.code, {
-        credentialSource: message.error?.context?.credential_source,
-        message: displayError.message,
-      })
-    : null;
-  // Empty interrupted = layer-1 composer recoverability only (no bubble retry).
-  // User-stop: no chat-timeline「已停止」face (P1); team StatusStrip still labels cancelled.
-  // 定案 A：错误卡不挂「重新生成」（整轮推翻易乱；失败救火改再说/改发）。底栏 footer 仍保留。
-  const isUserStopped = displayError?.code === "TURN_CANCELLED";
+  const errorAction =
+    outcome.recovery.kind === "configure" && outcome.recovery.href
+      ? {
+          label: outcome.recovery.label ?? "去设置",
+          href: outcome.recovery.href,
+        }
+      : null;
   const emptyDiagnosis = message.error?.context?.empty_diagnosis;
-  const hideFinishReasonChip = isEmptyResponseUserSurface({
-    code: displayError?.code ?? message.error?.code,
-    emptyDiagnosis,
-    message: displayError?.message ?? message.error?.message,
-  });
   const supportDiagnosticIds = {
     conversationId,
     messageId: assistantProjectionId(message),
@@ -326,9 +318,9 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
     if (userId) void runRegenerate(userId);
   };
 
-  // Empty user-stop with nothing else to show: MessageBubble also gates this;
-  // keep the early return so direct renders stay clean.
-  if (isEmptyCancelledAssistant(message)) {
+  // Empty user-stop: MessageBubble is the list-level omit (hideEmptyBubble).
+  // Keep this short path so direct renders (tests) stay clean — not a second verdict.
+  if (outcome.hideEmptyBubble) {
     return null;
   }
 
@@ -420,7 +412,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
   return (
     <div className="group min-w-0" onMouseEnter={onPeekCost}>
       {message.recovered && <RecoveredChip />}
-      {!hideFinishReasonChip && (
+      {outcome.showFinishReasonChip && (
         <FinishReasonChip
           reason={finishReason}
           diagnosisLabel={degradedFinishChipLabel(
@@ -448,8 +440,20 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           journal={message.runs}
         />
       )}
+      {isAttestedPauseContinue(outcome) && !hasTeamStrip && conversationId && (
+        <PausedContinueSurface
+          reason={outcome.message}
+          retryAfterSec={outcome.recovery.retryAfterSec}
+          onContinue={() => {
+            void continuePausedTurn({
+              conversationId,
+              messageId: projectionId,
+            });
+          }}
+        />
+      )}
       {/* Tone: 去配置 action → primary；限流 / 无 action → noticeChipNeutral（非危险红）。 */}
-      {displayError && !isUserStopped && (
+      {outcome.showBubbleBanner && displayError && (
         <div
           className={cn(
             "mt-2 flex items-start gap-2 rounded-lg border px-3 py-2.5 text-sm",
@@ -472,7 +476,7 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
               conversationId,
             })}
           </p>
-          {supportDiagnosticText && (
+          {outcome.supportPackHost === "bubble" && supportDiagnosticText && (
             <Button
               variant="ghost"
               className={
@@ -557,29 +561,16 @@ export function AssistantMessage({ message }: MessageBubbleProps) {
           <SyncStatusHint syncStatus={message.syncStatus} />
         </div>
       )}
-      {!message.isStreaming &&
-        displayError?.code !== "TURN_INTERRUPTED" &&
-        (message.content.length > 0 ||
-          // User-stop has no chat face (P1); don't open footer on cancelled alone.
-          (!isUserStopped &&
-            (!!displayError ||
-              // runs.error may still ride the export duck type before / beside message.error lift.
-              !!visibleMessageText({
-                content: "",
-                error: message.error,
-                runs: message.runs as {
-                  error?: { message?: string } | null;
-                } | null,
-              })))) && (
-          <AssistantMessageFooter
-            message={message}
-            captainContext={captainContext}
-            costText={costText}
-            finishReason={finishReason}
-            onRegenerate={handleRegenerate}
-            displayError={displayError}
-          />
-        )}
+      {outcome.showFooter && (
+        <AssistantMessageFooter
+          message={message}
+          captainContext={captainContext}
+          costText={costText}
+          finishReason={finishReason}
+          onRegenerate={handleRegenerate}
+          displayError={displayError}
+        />
+      )}
     </div>
   );
 }

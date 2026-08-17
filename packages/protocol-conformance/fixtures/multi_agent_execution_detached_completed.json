@@ -154,6 +154,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "已派出团队，我先收口；队员后台继续。",
     "reasoning": "",

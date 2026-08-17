@@ -388,3 +388,156 @@ def test_merge_race_secondary_delegate_joins_one_execution(projected):
     assert by_id["r2"]["dependsOn"] == ["r1"]
     assert p["progress"] == {"completed": 2, "total": 2}
     assert p["content"] == "先调研。 再追加校对。都完成了。"
+
+
+def test_multi_agent_worker_rate_limit_partial_pins_landed_transient(projected):
+    """委派回合：worker 落盘 3 CSV 后撞 429，CEO 汇总再撞 429，交代成回复。
+
+    手工推导（不抄 golden）。生产实测 trace 933d81fea6cf4b278ee6ce1e0d607e86。
+    期望从 ``LLMRateLimitError`` + ``run_error_signal`` + ``build_delivery_status``
+    独立算出，四处事故面任一回潮都必须红：
+
+    1. 该 worker 全链路只有一帧终态（历史：同 run_id 两帧 run_failed + fold
+       last-write-wins → 直播 2 / 重载 1）。
+    2. run_failed 载荷 error_code=LLM_RATE_LIMIT、retryable=true
+       （叶层用尽后 ``exc.retryable`` 已是 False，瞬时性读 ``llm_failure_class``）。
+       未 attested 的退避秒数不进 ``retry_after`` / 用户文案。
+    3. delivery_status=partial 且认到 3 个产物（历史：blocked / artifacts_count=0）。
+    4. 回合结果 ``partial`` 且回复点名三份 CSV（历史：空正文 + 二元 error）。
+    """
+    from agentcore.core.error_codes import ErrorCode
+    from agentcore.core.errors import LLMRateLimitError, mark_llm_leaf_exhausted
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.runs.error_signal import run_error_signal
+
+    retry_after = 4.0
+    exc = LLMRateLimitError(retry_after=retry_after)
+    mark_llm_leaf_exhausted(exc)
+    signal = run_error_signal(exc)
+    # 叶层用尽把 HTTP 预算翻成 False；限流分类仍是瞬时。
+    assert exc.retryable is False
+    assert signal.retryable is True
+    assert signal.error_code == ErrorCode.LLM_RATE_LIMIT
+    # 引擎仍握着退避秒数；线上不把它当 Retry-After。
+    assert exc.retry_after == retry_after
+    assert signal.retry_after is None
+    error = str(exc)
+    assert "请约" not in error
+    assert "4 秒" not in error
+
+    events = VECTORS["multi_agent_worker_rate_limit_partial"][1]()
+    terminals = [
+        e
+        for e in events
+        if e.type
+        in {
+            EventType.RUN_FAILED,
+            EventType.RUN_COMPLETED,
+            EventType.RUN_CANCELLED,
+            EventType.RUN_SKIPPED,
+        }
+        and e.payload.get("run_id") == "r1"
+    ]
+    assert len(terminals) == 1
+    failed = terminals[0]
+    assert failed.type is EventType.RUN_FAILED
+    assert failed.payload["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    assert failed.payload["retryable"] is True
+    assert failed.payload.get("retry_after") is None
+    assert failed.payload["error"] == error
+    assert failed.payload["failure_kind"] == "call"
+    assert failed.payload["product_landed"] is True
+
+    csv_paths = ["订单.csv", "明细.csv", "汇总.csv"]
+    p = projected["multi_agent_worker_rate_limit_partial"]
+    assert p["content"]
+    assert all(name in p["content"] for name in csv_paths)
+    assert p["outcome"] == "partial"
+    assert p["status"] == "completed"
+    assert p["finishReason"] == "degraded"
+    assert p["error"] == {"code": ErrorCode.LLM_RATE_LIMIT, "message": error}
+    assert [r["id"] for r in p["runs"]] == ["r1"]
+    run = p["runs"][0]
+    assert run["status"] == "failed"
+    assert run["error"] == error
+    assert run["failureKind"] == "call"
+    assert run["productLanded"] is True
+    tools = [s for s in run["process"] if s["kind"] == "tool"]
+    assert [t["tool_name"] for t in tools] == ["file_write", "file_write", "file_write"]
+    assert all(t["status"] == "success" for t in tools)
+    assert [t["arguments"]["path"] for t in tools] == csv_paths
+    assert p["progress"] == {"completed": 0, "total": 1}
+    assert [s["kind"] for s in p["process"]] == ["team", "content"]
+    assert p["process"][1]["text"] == p["content"]
+
+    ds = p["deliveryStatus"]
+    assert ds is not None
+    assert ds["state"] == "partial"
+    assert ds["delivered_files"] == csv_paths
+    assert [a["path"] for a in ds["artifacts"]] == csv_paths
+    assert all(a["status"] == "accepted" for a in ds["artifacts"])
+    assert ds["summary"] == "已交付 3 个文件；1 项未完成"
+    assert any(g.get("reason") == "node_failed" for g in ds["gaps"])
+
+
+def test_multi_agent_ceo_rate_limit_paused_pins_continue_face(projected):
+    """CEO 限流暂停：worker 一帧失败、delegate 闭合、无卡、无收口、outcome=paused。
+
+    手工推导（不抄 golden）。与 ``multi_agent_worker_rate_limit_partial`` 对照：
+    那条是 CEO 收口成功的 partial；本条是回合权威 paused，pending 闸为空。
+    """
+    from agentcore.core.error_codes import ErrorCode
+    from agentcore.core.errors import LLMRateLimitError, mark_llm_leaf_exhausted
+    from agentcore.runtime.events import EventType
+    from agentcore.runtime.runs.error_signal import run_error_signal
+
+    retry_after = 4.0
+    exc = LLMRateLimitError(retry_after=retry_after)
+    mark_llm_leaf_exhausted(exc)
+    signal = run_error_signal(exc)
+    error = str(exc)
+    assert signal.retry_after is None
+    assert "请约" not in error
+    assert "4 秒" not in error
+
+    events = VECTORS["multi_agent_ceo_rate_limit_paused"][1]()
+    kinds = [e.type for e in events]
+    assert EventType.PLAN_REVIEW_REQUIRED not in kinds
+    assert EventType.CHECKPOINT_REQUIRED not in kinds
+    assert EventType.TEAM_PREVIEW_REQUIRED not in kinds
+    starts = [e for e in events if e.type is EventType.MESSAGE_START]
+    assert len(starts) == 1
+
+    terminals = [
+        e
+        for e in events
+        if e.type
+        in {
+            EventType.RUN_FAILED,
+            EventType.RUN_COMPLETED,
+            EventType.RUN_CANCELLED,
+            EventType.RUN_SKIPPED,
+        }
+        and e.payload.get("run_id") == "r1"
+    ]
+    assert len(terminals) == 1
+    failed = terminals[0]
+    assert failed.type is EventType.RUN_FAILED
+    assert failed.payload["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    assert failed.payload["retryable"] is True
+    assert failed.payload.get("retry_after") is None
+    assert failed.payload["error"] == error
+
+    ends = [e for e in events if e.type is EventType.MESSAGE_END]
+    assert len(ends) == 1
+    assert ends[0].payload["finish_reason"] == "paused"
+    assert ends[0].payload["outcome"] == "paused"
+
+    p = projected["multi_agent_ceo_rate_limit_paused"]
+    assert p["outcome"] == "paused"
+    assert p["finishReason"] == "paused"
+    assert p["status"] == "paused"
+    assert _pending_gates(p) == []
+    assert p["error"] == {"code": ErrorCode.LLM_RATE_LIMIT, "message": error}
+    assert [r["id"] for r in p["runs"]] == ["r1"]
+    assert p["runs"][0]["status"] == "failed"

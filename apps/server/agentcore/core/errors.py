@@ -11,6 +11,14 @@ from datetime import UTC, datetime, timedelta
 
 from agentcore.core.error_codes import ErrorCode
 
+# How the layer *above* the provider leaf should treat an LLM failure.
+# Distinct from ``retryable``, which is the leaf's remaining HTTP budget.
+# Wave reads :func:`llm_failure_class` — not ``retryable`` — to fork
+# wait-and-resume vs fail-the-node (a short 429 the leaf already sat out
+# comes back ``retryable=False`` and still ``transient``).
+LLM_FAILURE_TRANSIENT = "transient"
+LLM_FAILURE_TERMINAL = "terminal"
+
 
 class AgentCoreError(Exception):
     """Base exception for all AgentCore errors."""
@@ -18,6 +26,7 @@ class AgentCoreError(Exception):
     code: str = ErrorCode.INTERNAL_ERROR
     retryable: bool = False
     status_code: int = 500
+    failure_class: str = LLM_FAILURE_TERMINAL
 
     def __init__(self, message: str = "", **kwargs):
         self.message = message
@@ -154,16 +163,22 @@ class LLMRateLimitError(LLMError):
 
     ``retry_after_source`` says whose number ``retry_after`` is — upstream's header,
     our own backoff standing in for a missing one, or unattested — and it decides how
-    much this copy is allowed to claim. Only a declared cooldown may name a moment or
-    an allowance: on a header-less 429 the number is the last link of our own backoff
-    chain, and wording it as「额度将于 X 恢复」told users a minute-precise recovery
-    time upstream never mentioned, on a 429 that may have been plain throttling. What
-    is left to say there is what we actually know — we stopped retrying — plus, for a
-    platform key, the BYOK exit that genuinely does bypass the limit right now.
+    much this copy is allowed to claim. Only a declared cooldown may name a moment,
+    an allowance, or a wait in seconds: on a header-less 429 the number is the last
+    link of our own backoff chain, and wording it as「请约 N 秒后再试」told users a
+    vendor deadline nobody declared (production ``retry_after=None`` /
+    ``cooldown_source=local_backoff``). What is left to say there is what we actually
+    know — we stopped retrying — plus, for a platform key, the BYOK exit that
+    genuinely does bypass the limit right now.
+
+    ``self.retry_after`` keeps the engine number (including our backoff). The wire
+    envelope and user-facing sentence only carry a duration when the source is
+    :data:`RETRY_AFTER_FROM_HEADER`.
     """
 
     code = ErrorCode.LLM_RATE_LIMIT
     retryable = True
+    failure_class = LLM_FAILURE_TRANSIENT
 
     def __init__(
         self,
@@ -200,15 +215,18 @@ class LLMRateLimitError(LLMError):
                 if kwargs.get("credential_source") == "platform"
                 else "上游限流，本回合无法继续。请稍后重新发送。"
             )
-        elif retry_after is not None and 0 < retry_after <= MAX_RETRY_AFTER:
-            # Provenance-agnostic on purpose: this names a wait, not a moment, and
-            # our backoff is as good a pacing hint as upstream's when we are about to
-            # sit the cooldown out anyway.
-            message = f"上游限流，暂时无法继续本回合。请约 {int(retry_after)} 秒后再试。"
+        elif declared is not None and 0 < declared <= MAX_RETRY_AFTER:
+            message = (
+                f"上游限流，暂时无法继续本回合。请约 {int(declared)} 秒后再试。"
+            )
         else:
+            # Unattested short cooldown (local backoff / unknown): we know we
+            # stopped, not when the vendor will take us back.
             message = "上游限流，暂时无法继续本回合。请稍后再试。"
-        # retry_after 进 details，供 SSE ErrorContext / history 复用。
-        super().__init__(message, retry_after=retry_after, **kwargs)
+        # Wire ``retry_after`` is the attested header only — ErrorContext documents
+        # it as 上游 Retry-After. The engine still has ``self.retry_after``.
+        kwargs.pop("retry_after", None)
+        super().__init__(message, **kwargs, retry_after=declared)
 
 
 class LLMQuotaExceededError(LLMError):
@@ -316,6 +334,37 @@ def upstream_rate_limit_error(
         retry_after_source=retry_after_source,
         **details,
     )
+
+
+def llm_failure_class(exc: BaseException) -> str:
+    """``transient`` vs ``terminal`` for the layer above the provider leaf.
+
+    Wave (and any other run-level retry) must read this, not ``retryable``:
+
+    - ``transient`` — upstream pressure that clears on a clock. Do **not**
+      re-run the node from round 0. Wait until ``retry_after`` / ``recovery_at``
+      and resume the transcript. Rate limits are always this, even after the
+      leaf spent its in-place retries (``retryable`` is then False).
+    - ``terminal`` — will not clear by waiting (auth, balance, undated quota).
+
+    A platform 429 that took the dated quota face still counts as transient:
+    the allowance returns, the node must not be rebuilt.
+    """
+    if isinstance(exc, LLMRateLimitError):
+        return LLM_FAILURE_TRANSIENT
+    if isinstance(exc, LLMQuotaExceededError) and exc.details.get("recovery_at"):
+        return LLM_FAILURE_TRANSIENT
+    if isinstance(exc, AgentCoreError):
+        return exc.failure_class
+    return LLM_FAILURE_TERMINAL
+
+
+def mark_llm_leaf_exhausted(exc: AgentCoreError) -> None:
+    """The leaf spent its in-place retry; Wave must not treat this as a node retry.
+
+    Leaves ``failure_class`` untouched so a rate limit stays transient.
+    """
+    exc.retryable = False
 
 
 class LLMTimeoutError(LLMError):

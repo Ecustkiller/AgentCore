@@ -41,6 +41,7 @@ export {
   entryToTeamPreview,
   isToolGranted,
   listColdPendingEntries,
+  listPendingHangingQuestions,
   listMessageEntries,
   messageCheckpoints,
   messageNonBlockingAsks,
@@ -52,4 +53,5 @@ export {
   useMessageInteractionCards,
   usePendingApprovals,
   usePendingDelegations,
+  usePendingHangingQuestions,
 } from "./hooks";

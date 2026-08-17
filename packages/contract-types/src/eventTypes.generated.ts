@@ -48,6 +48,7 @@ export type SSEEventType =
   | "plan_review_resolved"
   | "plan_revised"
   | "question_posted"
+  | "question_resolved"
   | "reasoning_delta"
   | "resume_deferred"
   | "resume_settled"

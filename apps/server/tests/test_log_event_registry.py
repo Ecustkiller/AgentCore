@@ -68,6 +68,8 @@ def test_stream_detach_timing_fields_registered():
     assert "idle_ms" in unwatch
     assert "http.readyz_failed" in get_registry().names()
     assert "event_loop.lag" in get_registry().names()
+    assert "disk.high_watermark" in get_registry().names()
+    assert "disk.high_watermark" in get_registry().names()
 
 
 def test_catalog_registers_failure_and_build_provenance_fields():

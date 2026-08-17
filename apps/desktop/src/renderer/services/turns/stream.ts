@@ -11,6 +11,8 @@ import {
   streamErrorAction,
 } from "@/lib/errors";
 import { logEvent } from "@/lib/log";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
+import { notifyInfo } from "@/lib/toast";
 import { markSidecarUnhealthy, probeSidecar } from "@/services/sidecarHealth";
 import {
   buildSidecarHistory,
@@ -21,6 +23,7 @@ import {
 import {
   type OutgoingAgentMention,
   type OutgoingAttachment,
+  type TurnCommitReport,
   streamConversation,
 } from "@/services/streamConversation";
 import { streamConversationViaSidecar } from "@/services/streamConversationViaSidecar";
@@ -54,12 +57,12 @@ export interface SendTurnSpec {
   content: string;
   attachments: OutgoingAttachment[];
   agentMentions?: OutgoingAgentMention[];
-  /** Optimistic client id of the user bubble (already added to the store).
-   * After `turn_saved` reconciles it, this id is gone — the signal that the
-   * turn is persisted and a retry must regenerate rather than resend. */
+  /** Optimistic client id of the user bubble (already added to the store). */
   optimisticUserId: string;
   /** 必填分流；空闲开跑传 ``steer``。 */
   delivery?: "steer" | "queue";
+  /** 答非阻塞提问时与出站 ``question_posted.ask_id`` 对上。缺省 = 普通消息。 */
+  askId?: string | null;
 }
 
 function setExecutionVia(
@@ -72,7 +75,6 @@ function setExecutionVia(
 /** 云端分支原因——写入 turnTrace + desktop.jsonl，对照服务端 via=cloud。 */
 type CloudPathReason =
   | "attachments"
-  | "agent_mentions"
   | "switch_off"
   | "no_local_engine"
   | "probe_unhealthy"
@@ -82,19 +84,22 @@ type CloudPathReason =
 
 function resolveCloudPathReason(args: {
   attachments: number;
-  agentMentions: number;
   hadSidecarTarget: boolean;
   probeHealthy: boolean | null;
   probeProbed: boolean | null;
 }): CloudPathReason {
   if (args.attachments > 0) return "attachments";
-  if (args.agentMentions > 0) return "agent_mentions";
   if (!hasLocalEngine()) return "no_local_engine";
   if (!isSidecarEnabled()) return "switch_off";
   if (args.hadSidecarTarget && args.probeHealthy === false) {
     return args.probeProbed ? "probe_unhealthy" : "probe_cache_bad";
   }
   return "no_local_target";
+}
+
+function cloudFallbackHint(attachments: number): string | null {
+  if (attachments > 0) return "本轮因附件改走云端，未使用本机引擎";
+  return null;
 }
 
 function logStreamPath(
@@ -114,14 +119,17 @@ function logStreamPath(
  *
  * The user bubble is added optimistically by the caller before this runs. On a
  * transport failure it raises an error banner (no one-click re-send). Once the
- * backend has saved the turn (`turn_saved` swaps the optimistic id), a later
- * regenerate from the saved message is the persistence-aware re-run path —
- * resending would duplicate the user turn.
+ * transport reports this send committed a turn (cloud: `turn_saved`; sidecar:
+ * outbox flush), a later regenerate from the saved message is the
+ * persistence-aware re-run path — resending would duplicate the user turn.
  *
  * 发送即有流：POST 恒返回 SSE；in-flight 时先到 ``turn_queued``（dispatch 呈现
  * 「已排队」），drain 后同连接续流——不再有 202 JSON / 另行 attach 守望。
  */
-export type SendTurnResult = { unstartedRefusal: boolean };
+export type SendTurnResult = {
+  unstartedRefusal: boolean;
+  supportPack?: SupportDiagnosticIds;
+};
 
 function rollbackUnstartedOptimisticTurn(
   conversationId: string,
@@ -163,6 +171,7 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     agentMentions = [],
     optimisticUserId,
     delivery = "steer",
+    askId,
   } = spec;
   const store = useConversationStore.getState();
   // A new send takes the stream — stop GET-attach retries so we never race a
@@ -221,14 +230,16 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
   beginTurnPreflight(conversationId);
   // 探活窗口起即占主路——midFlight 排队缓冲等到本回合整段泵（含 finally）释放。
   const primaryToken = claimPrimaryStream(conversationId);
+  const turnCommit: TurnCommitReport = { committed: false };
   try {
     traceTurnMilestone(conversationId, "send_start");
     // 路由（双模式工作区 §7.2）：本机传统默认同侧 sidecar =
-    //   有本地引擎 + 未显式强制关（sidecarPreference!=="off"；unset 不挡）+ 会话绑本机根 + 无附件/点名。
-    // 云链路：纯云会话 / 显式强制关 / 探活失败 / 附件·agent_mentions 退云。勿把 unset→SIDECAR_DEFAULT_ENABLED
-    // 误读成「整段过桥」。resolveSidecarRoot 早退不 probe；健康由下方 probe 仅在有 target 时收敛。
+    //   有本地引擎 + 未显式强制关（sidecarPreference!=="off"；unset 不挡）+ 会话绑本机根 + 无附件。
+    // 云链路：纯云会话 / 显式强制关 / 探活失败 / 附件退云。点名是 prompt 软提示，不挡本机。
+    // 勿把 unset→SIDECAR_DEFAULT_ENABLED 误读成「整段过桥」。resolveSidecarRoot 早退不 probe；
+    // 健康由下方 probe 仅在有 target 时收敛。
     const sidecarTarget =
-      attachments.length === 0 && agentMentions.length === 0
+      attachments.length === 0
         ? await resolveSidecarRoot(conversationId)
         : null;
     throwIfCannotOpenStream(conversationId, ac.signal);
@@ -264,7 +275,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
           content,
           history: buildSidecarHistory(conversationId, optimisticUserId),
           optimisticUserId,
+          agentMentions,
+          askId,
           signal: ac.signal,
+          turnCommit,
         });
       } catch (sidecarErr) {
         // 探活已过、但回合「启动期」仍失败的边缘（拉不起 / 握手失败，一个事件都没派发 →
@@ -298,19 +312,21 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
           attachments,
           agentMentions,
           delivery,
+          askId,
           signal: ac.signal,
+          turnCommit,
         });
       }
     } else {
-      // 云链路：探活失败 / bad 缓存 / 显式强制关 / 附件·点名退云 / 纯云会话。
-      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia（ComposerCloudBridgeHint 弱状态，无 toast）。
+      // 云链路：探活失败 / bad 缓存 / 显式强制关 / 附件退云 / 纯云会话。
+      // 绑本机工作区却走云 = 云端过桥 → 写 executionVia（ComposerCloudBridgeHint）。
+      // 附件退云另给 info 提示，避免静默改路。
       const bridging =
         sidecarTarget !== null ||
         (await resolveConversationLocalTarget(conversationId)) !== null;
       setExecutionVia(conversationId, bridging ? "cloud_bridge" : null);
       const reason = resolveCloudPathReason({
         attachments: attachments.length,
-        agentMentions: agentMentions.length,
         hadSidecarTarget: sidecarTarget !== null,
         probeHealthy: probe ? probe.healthy : null,
         probeProbed: probe ? probe.probed : null,
@@ -320,6 +336,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
         root_id: sidecarTarget?.rootId ?? null,
         probe_detail: probe?.detail ?? null,
       });
+      if (bridging) {
+        const hint = cloudFallbackHint(attachments.length);
+        if (hint) notifyInfo(hint);
+      }
       // 本地意向已是会话状态（Conversation.local_container_root_id，建会话时定型，
       // 工作区对称化 D1a），服务端据此在裸聊首次产文件时懒建本地 / 云端文件夹——
       // 回合不再携带容器根。
@@ -331,22 +351,24 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
         attachments,
         agentMentions,
         delivery,
+        askId,
         signal: ac.signal,
+        turnCommit,
       });
     }
     const zero = inspectZeroOutputSendRollback(
       conversationId,
-      optimisticUserId,
+      turnCommit.committed,
     );
     if (zero) {
-      // SSE error 后 stream 常 resolve：本发已落库 + 空失败 + Class B 码也要回滚。
+      // SSE error 后 stream 常 resolve：本发已提交 + 空失败 + Class B 码也要回滚。
       rollbackUnstartedOptimisticTurn(conversationId, zero.userId);
       surfaceTurnBanner(
         conversationId,
         streamErrorFromZeroOutput(zero.error.code, zero.error.message),
       );
       traceTurnEnd(conversationId, "error");
-      return { unstartedRefusal: true };
+      return { unstartedRefusal: true, supportPack: zero.supportPack };
     }
     traceTurnEnd(conversationId, "ok");
     return { unstartedRefusal: false };
@@ -369,20 +391,18 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     // A failed turn never delivers `approval_resolved`; drop this conversation's
     // paused prompt (other conversations keep theirs).
     clearInteractionPrompts(conversationId);
-    // If the turn never persisted (no `turn_saved` reconciled the optimistic
-    // id), the server order never changed — undo the optimistic bump.
-    const notPersisted = getRuntime(conversationId).messages.some(
-      (m) => m.id === optimisticUserId,
-    );
-    if (notPersisted && origIndex >= 0 && origUpdatedAt !== null) {
+    // If the turn never committed (no `turn_saved` / outbox flush this send),
+    // the server order never changed — undo the optimistic bump.
+    if (!turnCommit.committed && origIndex >= 0 && origUpdatedAt !== null) {
       restoreConversationCache(conversationId, origIndex, origUpdatedAt);
     }
-    const unstartedRefusal = notPersisted && isUnstartedSendRefusal(err);
+    const unstartedRefusal =
+      !turnCommit.committed && isUnstartedSendRefusal(err);
     const zero = unstartedRefusal
       ? null
       : inspectZeroOutputSendRollback(
           conversationId,
-          optimisticUserId,
+          turnCommit.committed,
           thrownErrorCode(err),
         );
     if (unstartedRefusal) {
@@ -395,7 +415,10 @@ export async function sendTurn(spec: SendTurnSpec): Promise<SendTurnResult> {
     }
     surfaceTurnBanner(conversationId, err);
     traceTurnEnd(conversationId, "error");
-    return { unstartedRefusal: unstartedRefusal || zero != null };
+    return {
+      unstartedRefusal: unstartedRefusal || zero != null,
+      ...(zero ? { supportPack: zero.supportPack } : {}),
+    };
   } finally {
     // 仅清自己的 abort——midFlight 排队续流可能已接手同一会话的 abort 槽。
     if (getRuntime(conversationId).abort === ac) {

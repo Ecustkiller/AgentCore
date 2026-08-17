@@ -30,7 +30,9 @@ def _should_persist_journal(sink: EventSink) -> bool:
     )
 
 
-def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any] | None:
+def _build_runs_payload(
+    sink: EventSink, finish: FinishReason, *, outcome: str | None = None
+) -> dict[str, Any] | None:
     """Assemble the client-facing ``runs`` replay payload from the turn's sink.
 
     Used only to project ``journal_entries`` back into the wire shape the desktop /
@@ -48,6 +50,8 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any]
         "events": journal or [],
         "finish_reason": finish.value,
     }
+    if outcome in ("ok", "partial", "paused", "error"):
+        payload["outcome"] = outcome
     if process:
         payload["process"] = process
     if run_processes:
@@ -68,10 +72,17 @@ def _build_runs_payload(sink: EventSink, finish: FinishReason) -> dict[str, Any]
     return payload
 
 
-def _turn_end_entry(finish: FinishReason, *, error: dict[str, Any] | None = None) -> dict[str, Any]:
+def _turn_end_entry(
+    finish: FinishReason,
+    *,
+    error: dict[str, Any] | None = None,
+    outcome: str | None = None,
+) -> dict[str, Any]:
     payload: dict[str, Any] = {"finish_reason": finish.value}
     if error is not None:
         payload["error"] = error
+    if outcome in ("ok", "partial", "paused", "error"):
+        payload["outcome"] = outcome
     return {"kind": KIND_TURN_END, "payload": payload, "ts": None}
 
 
@@ -93,6 +104,7 @@ def _journal_entries_for_turn(
     *,
     sink: EventSink,
     finish: FinishReason,
+    outcome: str | None = None,
 ) -> list[dict[str, Any]] | None:
     """Compose durable journal entries for a completed turn (or None when gated off).
 
@@ -103,7 +115,7 @@ def _journal_entries_for_turn(
     Resume / paths without a fact log still flatten the sink's display replay via
     :func:`journal_entries_from_display_runs` (legacy / salvage).
     """
-    runs = _build_runs_payload(sink, finish)
+    runs = _build_runs_payload(sink, finish, outcome=outcome)
     if runs is None:
         return None
 
@@ -124,11 +136,12 @@ def _journal_entries_for_turn(
                     "run_processes": runs.get("run_processes"),
                     "finish_reason": runs.get("finish_reason"),
                     **({"error": turn_error} if turn_error is not None else {}),
+                    **({"outcome": outcome} if outcome else {}),
                 }
             )
             return entries + (tail or [])
         if not _entries_already_have_turn_end(entries):
-            return entries + [_turn_end_entry(finish, error=turn_error)]
+            return entries + [_turn_end_entry(finish, error=turn_error, outcome=outcome)]
         return entries
 
     return journal_entries_from_display_runs(runs)

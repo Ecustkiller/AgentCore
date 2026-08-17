@@ -46,8 +46,9 @@ const BY_RESOLVED_EVENT = new Map<
   { kind: UserInteractionKind; idField: string }
 >();
 for (const [kind, wire] of Object.entries(INTERACTION_KIND_WIRE)) {
-  if (!wire.resolvedEvent) continue;
-  BY_RESOLVED_EVENT.set(wire.resolvedEvent, {
+  const resolvedEvent = wire.resolvedEvent;
+  if (!resolvedEvent) continue;
+  BY_RESOLVED_EVENT.set(resolvedEvent, {
     kind: kind as UserInteractionKind,
     idField: wire.idField,
   });
@@ -71,6 +72,9 @@ export function answeredByAPerson(
   kind: string,
   payload: Record<string, unknown> | undefined,
 ): boolean {
+  if (kind === "question_posted") {
+    return payload?.status === "answered";
+  }
   if (kind !== "escalation") return true;
   // resolved 之外（assumed / timed_out / orphaned）都是运行时兜底，没有人参与。
   if (payload?.status !== "resolved") return false;

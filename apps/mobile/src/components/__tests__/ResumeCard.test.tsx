@@ -15,6 +15,12 @@
 
 import type { PausedTurnSummary } from "@/api/turn";
 import { ResumeCard } from "@/components/ResumeCard";
+import {
+  clearColdInteractions,
+  markColdResolved,
+  upsertColdRequired,
+} from "@/lib/coldInteractions";
+import { resetKickoffAdjustDraftsForTests } from "@/lib/kickoffAdjustDraft";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -29,7 +35,11 @@ vi.mock("@/components/Modal", () => ({
   }) => <div className={className}>{children}</div>,
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  resetKickoffAdjustDraftsForTests();
+  clearColdInteractions();
+});
 
 function summary(over: Partial<PausedTurnSummary> = {}): PausedTurnSummary {
   return {
@@ -484,31 +494,119 @@ describe("ResumeCard · team_preview", () => {
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
 
-  it("调整时空意见不可提交；有意见发 adjust，不带修正字段", () => {
+  it("调整进入调整态：空意见不可提交；有意见发 adjust，不带修正字段", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
-    const adjust = screen.getByText("调整") as HTMLButtonElement;
-    expect(adjust.disabled).toBe(true);
-    fireEvent.click(adjust);
+    fireEvent.click(screen.getByText("调整"));
+    expect(onResume).not.toHaveBeenCalled();
+    const submitAdjust = screen.getByRole("button", {
+      name: "交回修订",
+    }) as HTMLButtonElement;
+    expect(submitAdjust.disabled).toBe(true);
+    fireEvent.click(submitAdjust);
     expect(onResume).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
       target: { value: "  改成两人，先做竞品  " },
     });
-    expect(adjust.disabled).toBe(false);
-    fireEvent.click(adjust);
+    expect(submitAdjust.disabled).toBe(false);
+    fireEvent.click(submitAdjust);
     expect(onResume).toHaveBeenCalledWith("adjust", "改成两人，先做竞品", []);
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("调整态不渲染开工按钮", () => {
+    render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    fireEvent.click(screen.getByText("调整"));
+    expect(screen.queryByText("授权并开工")).toBeNull();
+    expect(screen.getByRole("button", { name: "交回修订" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "返回" })).toBeTruthy();
+    expect(screen.queryByText("取消")).toBeNull();
+  });
+
+  it("返回丢弃调整输入并回到确认态", () => {
+    const onResume = vi.fn();
+    render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
+    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+      target: { value: "确认态嘱咐" },
+    });
+    fireEvent.click(screen.getByText("调整"));
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
+      target: { value: "要丢掉的调整意见" },
+    });
+    fireEvent.click(screen.getByText("返回"));
+    expect(screen.getByText("授权并开工")).toBeTruthy();
+    expect(screen.queryByTestId("team-preview-adjust-note")).toBeNull();
+    expect(
+      (screen.getByPlaceholderText(/对全体队员的嘱咐/) as HTMLTextAreaElement)
+        .value,
+    ).toBe("确认态嘱咐");
+    fireEvent.click(screen.getByText("调整"));
+    expect(
+      (screen.getByTestId("team-preview-adjust-note") as HTMLTextAreaElement)
+        .value,
+    ).toBe("");
+    expect(onResume).not.toHaveBeenCalled();
+  });
+
+  it("调整意见草稿扛住重挂载", () => {
+    const { unmount } = render(
+      <ResumeCard paused={teamPreview()} onResume={vi.fn()} />,
+    );
+    fireEvent.click(screen.getByText("调整"));
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
+      target: { value: "改分工" },
+    });
+    unmount();
+    render(<ResumeCard paused={teamPreview()} onResume={vi.fn()} />);
+    expect(
+      (screen.getByTestId("team-preview-adjust-note") as HTMLTextAreaElement)
+        .value,
+    ).toBe("改分工");
+    expect(screen.queryByText("授权并开工")).toBeNull();
+  });
+
+  it("交回修订后保留调整表单，CTA 进提交中，不整卡换成等待面", () => {
+    const onResume = vi.fn();
+    const { rerender } = render(
+      <ResumeCard paused={teamPreview()} onResume={onResume} />,
+    );
+    fireEvent.click(screen.getByText("调整"));
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
+      target: { value: "改成两人" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
+    expect(onResume).toHaveBeenCalledWith("adjust", "改成两人", []);
+    rerender(
+      <ResumeCard
+        paused={{ ...teamPreview(), interactionStatus: "submitting" }}
+        onResume={onResume}
+      />,
+    );
+    expect(screen.getByTestId("team-preview-adjust-note")).toBeTruthy();
+    expect(
+      (screen.getByTestId("team-preview-adjust-note") as HTMLTextAreaElement)
+        .value,
+    ).toBe("改成两人");
+    const submitting = screen.getByRole("button", {
+      name: "提交中…",
+    }) as HTMLButtonElement;
+    expect(submitting.disabled).toBe(true);
+    expect(screen.queryByTestId("kickoff-adjust-waiting")).toBeNull();
+    expect(screen.queryByText("CEO 正在按你的意见重排团队")).toBeNull();
+    expect(screen.queryByText("授权并开工")).toBeNull();
   });
 
   it("收紧写盘后点调整仍不带 write_capability_overrides", () => {
     const onResume = vi.fn();
     render(<ResumeCard paused={teamPreview()} onResume={onResume} />);
     fireEvent.click(screen.getByText("改为仅文字"));
-    fireEvent.change(screen.getByPlaceholderText(/对全体队员的嘱咐/), {
+    fireEvent.click(screen.getByText("调整"));
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
       target: { value: "先改分工" },
     });
-    fireEvent.click(screen.getByText("调整"));
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
     expect(onResume).toHaveBeenCalledWith("adjust", "先改分工", []);
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
@@ -764,7 +862,7 @@ describe("ResumeCard · team_preview", () => {
     expect(onResume).toHaveBeenCalledWith("continue", "最关心成本谁买单", []);
   });
 
-  it("辩论有备注时点「调整」提交 adjust，不带修正字段", () => {
+  it("辩论调整态：开赛按钮不渲染；提交 adjust 不带修正字段", () => {
     const onResume = vi.fn();
     render(
       <ResumeCard
@@ -777,13 +875,12 @@ describe("ResumeCard · team_preview", () => {
         onResume={onResume}
       />,
     );
-    const adjust = screen.getByText("调整") as HTMLButtonElement;
-    expect(adjust.disabled).toBe(true);
-    fireEvent.change(screen.getByPlaceholderText(/开赛嘱咐/), {
+    fireEvent.click(screen.getByText("调整"));
+    expect(screen.queryByText("开赛")).toBeNull();
+    fireEvent.change(screen.getByTestId("team-preview-adjust-note"), {
       target: { value: "旧路径改辩题" },
     });
-    expect(adjust.disabled).toBe(false);
-    fireEvent.click(adjust);
+    fireEvent.click(screen.getByRole("button", { name: "交回修订" }));
     expect(onResume).toHaveBeenCalledWith("adjust", "旧路径改辩题", []);
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
   });
@@ -831,6 +928,106 @@ describe("ResumeCard · team_preview", () => {
     fireEvent.click(screen.getByText("开赛"));
     expect(onResume).toHaveBeenCalledWith("continue", "", []);
     expect(onResume.mock.calls[0]?.[3]).toBeUndefined();
+  });
+
+  it("首版无版本标记", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({ revision: 1, revision_note: "" })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("kickoff-revision")).toBeNull();
+    expect(screen.queryByText("第 1 版")).toBeNull();
+    expect(screen.queryByText("第 2 版")).toBeNull();
+    expect(screen.queryByText("按你的意见修订")).toBeNull();
+    expect(screen.getAllByText("团队预审 · 开干前确认").length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  it("第 2 版显示版本 + 意见", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          checkpoint_id: "tp2",
+          revision: 2,
+          revised_from: "tp1",
+          revision_note: "人太多，改成一个人做",
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("kickoff-revision")).toBeTruthy();
+    expect(screen.getByText("第 2 版 · 按你的意见修订")).toBeTruthy();
+    expect(screen.getByText("你交回的意见")).toBeTruthy();
+    expect(screen.getByText("人太多，改成一个人做")).toBeTruthy();
+    expect(screen.getAllByText(/第 2 版/).length).toBeGreaterThan(0);
+  });
+
+  it("上一版缺失时不画 diff", () => {
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          checkpoint_id: "tp2",
+          revision: 2,
+          revised_from: "tp-gone",
+          revision_note: "人太多，改成一个人做",
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("第 2 版 · 按你的意见修订")).toBeTruthy();
+    expect(screen.getByText("人太多，改成一个人做")).toBeTruthy();
+    expect(screen.queryByTestId("kickoff-revision-diff")).toBeNull();
+    expect(screen.queryByText("无变化")).toBeNull();
+    expect(screen.queryByText(/相对上一版/)).toBeNull();
+  });
+
+  it("上一版在冷 store 时标注成员增删", () => {
+    upsertColdRequired({
+      kind: "team_preview",
+      conversationId: "c1",
+      messageId: "m1",
+      payload: {
+        checkpoint_id: "tp1",
+        primitive: "delegate",
+        workers: [
+          { run_id: "r1", role: "调研", task: "做A", depends_on: [] },
+          { run_id: "r2", role: "审校", task: "做B", depends_on: [] },
+        ],
+      },
+    });
+    markColdResolved({
+      kind: "team_preview",
+      id: "tp1",
+      resolution: { decision: "adjust", note: "改成一个人" },
+    });
+    render(
+      <ResumeCard
+        paused={teamPreview({
+          checkpoint_id: "tp2",
+          revision: 2,
+          revised_from: "tp1",
+          revision_note: "改成一个人",
+          workers: [
+            {
+              run_id: "n1",
+              role: "调研",
+              task: "做A",
+              depends_on: [],
+              write_capability: "can_write_files",
+              write_capability_label: "可改文件",
+            },
+          ],
+        })}
+        onResume={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("kickoff-revision-diff").textContent).toContain(
+      "去掉 审校",
+    );
+    expect(screen.getByText("相对上一版")).toBeTruthy();
   });
 
   it("开工卡不再提供 research_first 第三键（庭前取证内化）", () => {

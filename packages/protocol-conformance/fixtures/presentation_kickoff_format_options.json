@@ -74,6 +74,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "开始前确认课件交付形态：好，按 PowerPoint（.pptx）推进。",
     "reasoning": "",

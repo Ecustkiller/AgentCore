@@ -269,6 +269,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来把前端整块交给一位负责人。 前端已完成（负责人据子队员的偏离信号中途校准了下游）。",
     "reasoning": "",

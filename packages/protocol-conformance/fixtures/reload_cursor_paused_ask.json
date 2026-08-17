@@ -42,6 +42,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "我先按 A 方案推进。",
     "reasoning": "",

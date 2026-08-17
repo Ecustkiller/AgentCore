@@ -103,6 +103,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队，先请你授权工具。 已获授权，开工。",
     "reasoning": "",

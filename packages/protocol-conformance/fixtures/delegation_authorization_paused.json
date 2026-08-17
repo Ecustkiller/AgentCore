@@ -64,6 +64,7 @@
   "projected": {
     "status": "paused",
     "finishReason": null,
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队，先请你授权工具。",
     "reasoning": "",

@@ -14,8 +14,9 @@ import {
  * standalone「已停止」row (P1). No “saved” reassurance chip
  * (对齐主流对话 AI · 前端UX设计.md §三).
  *
- * `error` stays in the map for footer / export copy («调用失败»), but
- * {@link FinishReasonChip} never paints it — hard failures use the red bar only.
+ * `error` stays in the map so this chip can paint «调用失败» when asked.
+ * Callers gate with `showFinishReasonChip` — hard failures are the red card,
+ * not a muted chip stacked on top.
  */
 export const FINISH_REASON_META: Record<
   string,
@@ -54,8 +55,7 @@ export function FinishReasonChip({
   diagnosisLabel?: string;
   className?: string;
 }) {
-  // Hard fail → red error bar only; never stack a muted「调用失败」chip.
-  if (!reason || reason === "error") return null;
+  if (!reason) return null;
   const meta = FINISH_REASON_META[reason];
   if (!meta) return null;
   const { Icon } = meta;

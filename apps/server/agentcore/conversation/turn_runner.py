@@ -77,6 +77,7 @@ async def run_and_persist(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
+    ask_id: str | None = None,
     continue_message_id: str | None = None,
     inherited_journal_entries: list[dict] | None = None,
 ) -> dict | None:
@@ -292,6 +293,7 @@ async def run_and_persist(
                             message_id=message_id,
                             x_client_platform=x_client_platform,
                             agent_mentions=agent_mentions,
+                            ask_id=ask_id,
                             inherited_journal_entries=inherited_journal_entries,
                         )
                     except asyncio.CancelledError:
@@ -324,9 +326,15 @@ async def run_and_persist(
                     provider_id = get_log_value("provider_id")
                     if provider_id:
                         turn_extra["provider_id"] = provider_id
+                    turn_outcome = result.get("outcome")
                     logger.info(
                         "chat.turn_complete",
                         finish_reason=getattr(finish, "value", finish),
+                        **(
+                            {"outcome": turn_outcome}
+                            if turn_outcome in ("ok", "partial", "paused", "error")
+                            else {}
+                        ),
                         rounds=result.get("rounds", 0),
                         input_tokens=result.get("input_tokens", 0),
                         output_tokens=result.get("output_tokens", 0),

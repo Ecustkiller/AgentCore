@@ -60,6 +60,13 @@ class PlatformProvider:
         mid = (model or "").strip()
         creds = platform_llm_credentials(model=mid or None)
         if creds is None:
+            from agentcore.llm.platform_pool_scheduler import (
+                platform_pool_unavailable_error,
+                pool_has_enabled_members,
+            )
+
+            if pool_has_enabled_members():
+                raise platform_pool_unavailable_error(blocked=True)
             label = mid or "(empty)"
             raise LLMError(
                 f"平台模型 {label} 无可用凭据，"
@@ -67,7 +74,11 @@ class PlatformProvider:
             )
         key: _LeafKey = (creds.api_key, creds.base_url)
         leaf = self._leaves.get(key)
-        if leaf is None:
+        if (
+            leaf is None
+            or leaf._api_key != creds.api_key
+            or leaf._base_url.rstrip("/") != creds.base_url.rstrip("/")
+        ):
             leaf = OpenAICompatibleProvider(
                 name="platform",
                 api_key=creds.api_key,

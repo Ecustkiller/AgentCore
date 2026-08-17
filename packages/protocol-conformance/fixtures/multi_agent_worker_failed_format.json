@@ -129,6 +129,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排审计报告。 结构字段需按 schema 补齐。",
     "reasoning": "",

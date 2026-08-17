@@ -470,6 +470,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "附件截断，跳过外证舰队直接开辩。",
     "reasoning": "",

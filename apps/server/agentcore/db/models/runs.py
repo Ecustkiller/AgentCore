@@ -290,7 +290,8 @@ class TurnStreamStateRow(Base):
 
     __tablename__ = "turn_stream_state"
     __table_args__ = (
-        # TTL sweep (mirror paused_turns 7d) scans by last-touch.
+        # TTL sweep (mirror paused_turns 7d) scans by last-touch —
+        # ``stream_state_retention_loop``; 0 days disables.
         Index("ix_turn_stream_state_updated", "updated_at"),
     )
 
@@ -382,7 +383,10 @@ class TurnMetricsRow(Base):
 
     __tablename__ = "turn_metrics"
     __table_args__ = (
-        CheckConstraint("status in ('ok', 'error')", name="ck_turn_metrics_status"),
+        CheckConstraint(
+            "status in ('ok', 'partial', 'paused', 'error')",
+            name="ck_turn_metrics_status",
+        ),
         CheckConstraint("kind in ('turn', 'resume')", name="ck_turn_metrics_kind"),
         # 全站健康看板: window aggregates + the daily trend filter/group on created_at.
         Index("ix_turn_metrics_created", "created_at"),
@@ -402,6 +406,7 @@ class TurnMetricsRow(Base):
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     # turn = fresh send / regenerate; resume = 结构化挂起 continuation.
     kind: Mapped[str] = mapped_column(String(16), default="turn", server_default=text("'turn'"))
+    # ok | partial | paused | error. ``paused`` is reserved (not written this wave).
     status: Mapped[str] = mapped_column(String(8), default="ok", server_default=text("'ok'"))
     # The turn's terminal finish_reason (FinishReason value), e.g. stop / length / error.
     finish_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+from typing import Any
+
 from agentcore.runtime.events.disposition import DURABLE_EVENT_TYPES
 from agentcore.runtime.events.types import EventType
 
@@ -35,15 +38,74 @@ _JOURNAL_SURFACE_TYPES = frozenset(
 
 _PROCESS_RESULT_CAP = 8000
 
+# Disk-bomb backstop for DURABLE display payloads that have **no** execution-side
+# full-text twin (unlike ``tool_use_end.result`` ↔ ``tool_call.result``). Not a
+# display budget: ``team_preview_resolved`` is median 98B / ~184KB mean / 7.9MB max
+# — 1 MiB sits above legitimate notes and below "one row fills the disk". Marker
+# includes original length so a cap is visible. ``run_context`` is excluded (own
+# 16KB head+tail + captain ``system`` exemption).
+_JOURNAL_PAYLOAD_SAFETY_CAP = 1_048_576
+
 
 def cap_process_result(result: object) -> object:
-    """Cap a tool result string for process projection / history replay.
+    """Cap a tool result string for process projection / history / journal replay.
 
-    Shared by ``EventSink._accumulate_process`` and the conformance oracle so live,
-    reload, and golden agree on oversized tool outputs."""
+    Shared by ``EventSink._accumulate_process``, journal persist of
+    ``tool_use_end.result``, and the conformance oracle so live process, reload,
+    and golden agree on oversized tool outputs. Live SSE still carries the
+    uncapped wire payload; the execution-side full text stays on ``tool_call``."""
     if isinstance(result, str) and len(result) > _PROCESS_RESULT_CAP:
         return result[:_PROCESS_RESULT_CAP] + "…"
     return result
+
+
+def cap_journal_safety_string(
+    value: object, *, limit: int = _JOURNAL_PAYLOAD_SAFETY_CAP
+) -> object:
+    """Head-clip a pathological journal string; mark original length.
+
+    Idempotent: a capped value's length equals ``limit``, so a second pass is a
+    no-op. Short strings (ids, enums, notes) are untouched.
+    """
+    if not isinstance(value, str) or len(value) <= limit:
+        return value
+    marker = f"\n\n[journal_capped original_chars={len(value)} cap={limit}]"
+    keep = limit - len(marker)
+    if keep < 1:
+        return value[: max(limit - 1, 0)] + "…"
+    return value[:keep] + marker
+
+
+def _cap_oversized_strings(value: object) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(item, str):
+                value[key] = cap_journal_safety_string(item)
+            else:
+                _cap_oversized_strings(item)
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            if isinstance(item, str):
+                value[index] = cap_journal_safety_string(item)
+            else:
+                _cap_oversized_strings(item)
+
+
+def journal_payload_for_persist(
+    event_type: str, payload: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Copy a DURABLE payload for journal persist; leave the live SSE payload intact.
+
+    ``tool_use_end.result`` uses the process-lane 8k budget. Other string fields get
+    the 1 MiB safety cap, except ``run_context`` (already budgeted at emit).
+    """
+    persisted = copy.deepcopy(payload) if payload else {}
+    if event_type == EventType.TOOL_USE_END.value:
+        persisted["result"] = cap_process_result(persisted.get("result"))
+    if event_type != EventType.RUN_CONTEXT.value:
+        _cap_oversized_strings(persisted)
+    return persisted
+
 
 _HISTORY_SKIP_TYPES = frozenset(
     {

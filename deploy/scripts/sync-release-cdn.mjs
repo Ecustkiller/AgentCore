@@ -8,6 +8,12 @@
  *   pnpm sync:release-cdn --from-github --desktop-only
  *   pnpm sync:release-cdn --from-github --android-only
  *   pnpm sync:release-cdn --install-nginx            # one-time nginx site on :8092
+ *   pnpm sync:release-cdn --prune-only [--channel stable|beta] [--prune-dry-run]
+ *   pnpm sync:release-cdn --prune-only --android-only [--prune-dry-run]
+ *
+ * After a successful sync, each dest dir is pruned to the current feed version
+ * (see prune-release-cdn.mjs). `--prune-dry-run` lists deletes without rm;
+ * `--skip-prune` leaves old artifacts in place.
  *
  * Desktop channels (§7.6c):
  *   stable (default) → write desktop/stable/* and mirror same content to flat desktop/
@@ -36,6 +42,7 @@ import {
   loadDeployEnv,
   requireEnv,
   scp,
+  sshCapture,
   sshScript,
 } from "./load-deploy-env.mjs";
 import {
@@ -55,6 +62,14 @@ import {
   normalizeDesktopChannel,
   winInstallerFilename,
 } from "../../apps/website/functions/_lib/downloadsCdn.mjs";
+import {
+  desktopArtifactNames,
+  isAndroidArtifact,
+  isDesktopArtifact,
+  isSafeBasename,
+  keepHintsFromManifests,
+  planPrune,
+} from "./prune-release-cdn.mjs";
 
 function parseArgs(argv) {
   /** @type {Record<string, string | boolean>} */
@@ -67,6 +82,9 @@ function parseArgs(argv) {
     desktopOnly: false,
     androidOnly: false,
     installNginx: false,
+    pruneDryRun: false,
+    skipPrune: false,
+    pruneOnly: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -79,6 +97,9 @@ function parseArgs(argv) {
     else if (a === "--desktop-only") out.desktopOnly = true;
     else if (a === "--android-only") out.androidOnly = true;
     else if (a === "--install-nginx") out.installNginx = true;
+    else if (a === "--prune-dry-run") out.pruneDryRun = true;
+    else if (a === "--skip-prune") out.skipPrune = true;
+    else if (a === "--prune-only") out.pruneOnly = true;
     else if (a === "--help" || a === "-h") out.help = true;
   }
   return out;
@@ -87,7 +108,7 @@ function parseArgs(argv) {
 function downloadsRoot() {
   return (
     process.env.AGENTCORE_DOWNLOADS_ROOT?.trim() || "/opt/agentcore/downloads"
-  );
+  ).replace(/\/+$/, "");
 }
 
 function downloadsHost() {
@@ -119,6 +140,186 @@ function putRemoteDirFiles(localDir, remoteAbsDir, names) {
     putRemoteFile(join(localDir, n), `${remoteAbsDir}/${n}`);
   }
   return list;
+}
+
+/** @type {{ dryRun: boolean, skip: boolean }} */
+let pruneMode = { dryRun: false, skip: false };
+
+const PRUNE_DEST_RELS = Object.freeze([
+  "desktop",
+  "desktop/stable",
+  "desktop/beta",
+  "android",
+]);
+
+function allowedPruneAbsDir(remoteAbsDir) {
+  const root = downloadsRoot().replace(/\/$/, "").replace(/\\/g, "/");
+  const normalized = String(remoteAbsDir).replace(/\\/g, "/").replace(/\/$/, "");
+  return PRUNE_DEST_RELS.some((rel) => normalized === `${root}/${rel}`);
+}
+
+function bashQuote(value) {
+  return JSON.stringify(String(value));
+}
+
+/** Depth-1 regular files only (never descend into stable/ / beta/). */
+function listRemoteFiles(remoteAbsDir) {
+  const { status, stdout, stderr } = sshCapture(
+    `set -euo pipefail
+if [[ ! -d ${bashQuote(remoteAbsDir)} ]]; then
+  echo "__AC_PRUNE_MISSING__"
+  exit 0
+fi
+find ${bashQuote(remoteAbsDir)} -maxdepth 1 -type f -exec basename {} \\;
+`,
+    { allowFail: true },
+  );
+  if (status !== 0) {
+    throw new Error(
+      `cannot list ${remoteAbsDir}: ${(stderr || stdout || `exit ${status}`).trim()}`,
+    );
+  }
+  const text = stdout.replace(/\r\n/g, "\n");
+  if (text.trim() === "__AC_PRUNE_MISSING__") return null;
+  return text
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((n) => n !== "__AC_PRUNE_MISSING__");
+}
+
+/**
+ * ``""`` when the file is absent, ``null`` when the read itself failed.
+ *
+ * The two must not collapse: the keep set is built from these feeds, so a
+ * transient SSH failure read as "absent" silently shrinks it. On a win-only
+ * bump that deletes the mac artifacts while ``latest-mac.yml`` survives and
+ * keeps naming them — mac clients 404 until the next mac release.
+ */
+function readRemoteOptionalFile(remoteAbsPath) {
+  const { status, stdout } = sshCapture(
+    `set -euo pipefail
+if [[ -f ${bashQuote(remoteAbsPath)} ]]; then
+  cat ${bashQuote(remoteAbsPath)}
+fi
+`,
+    { allowFail: true },
+  );
+  if (status !== 0) return null;
+  return stdout;
+}
+
+function deleteRemoteFiles(remoteAbsDir, names) {
+  for (const n of names) {
+    if (!isSafeBasename(n)) {
+      throw new Error(`refusing to delete unsafe name ${JSON.stringify(n)}`);
+    }
+  }
+  if (names.length === 0) return;
+  const payload = names.join("\n");
+  sshScript(`set -euo pipefail
+cd ${bashQuote(remoteAbsDir)}
+while IFS= read -r n; do
+  [[ -z "$n" ]] && continue
+  [[ "$n" == */* || "$n" == "." || "$n" == ".." ]] && continue
+  if [[ -f "$n" && ! -L "$n" ]]; then
+    rm -f -- "$n"
+  fi
+done <<'AC_PRUNE_EOF'
+${payload}
+AC_PRUNE_EOF
+`);
+}
+
+/**
+ * @param {string} remoteAbsDir
+ * @param {{ kind: "desktop" | "android", currentVersion: string }} opts
+ */
+function pruneRemoteDest(remoteAbsDir, { kind, currentVersion }) {
+  if (pruneMode.skip) return;
+  if (!allowedPruneAbsDir(remoteAbsDir)) {
+    throw new Error(`refusing prune outside downloads dest: ${remoteAbsDir}`);
+  }
+  const listed = listRemoteFiles(remoteAbsDir);
+  if (listed === null) {
+    console.warn(`⚠ prune skip (missing dir): ${remoteAbsDir}`);
+    return;
+  }
+  const feeds = {
+    latestJson: readRemoteOptionalFile(`${remoteAbsDir}/latest.json`),
+    latestYml: readRemoteOptionalFile(`${remoteAbsDir}/latest.yml`),
+    latestMacYml: readRemoteOptionalFile(`${remoteAbsDir}/latest-mac.yml`),
+  };
+  const unreadable = Object.keys(feeds).filter((k) => feeds[k] === null);
+  if (unreadable.length > 0) {
+    console.warn(
+      `⚠ prune skip (feed unreadable: ${unreadable.join(", ")}): ${remoteAbsDir} — ` +
+        `keep all ${listed.length} files. Same posture as a failed listing: without ` +
+        `every feed we cannot prove a version has no consumer.`,
+    );
+    return;
+  }
+  const hints = keepHintsFromManifests(feeds);
+  const version = String(currentVersion || "").trim() || hints.extraVersions[0] || "";
+  const plan = planPrune({
+    listedNames: listed,
+    kind,
+    currentVersion: version,
+    extraVersions: hints.extraVersions,
+    extraFilenames: hints.extraFilenames,
+  });
+  if (plan.skipped) {
+    console.warn(
+      `⚠ prune skip (${plan.skipped}): ${remoteAbsDir} — keep all ${listed.length} files`,
+    );
+    return;
+  }
+  const deletable = plan.delete.filter((n) =>
+    kind === "android" ? isAndroidArtifact(n) : isDesktopArtifact(n),
+  );
+  if (deletable.length !== plan.delete.length) {
+    console.warn(
+      `⚠ prune dropped ${plan.delete.length - deletable.length} names that failed the artifact re-check`,
+    );
+  }
+  const keepVers = plan.keepVersions.join(", ");
+  if (deletable.length === 0) {
+    console.log(
+      `✓ prune ${remoteAbsDir}: nothing to remove (keep versions: ${keepVers}; ${plan.keep.length} files)`,
+    );
+    return;
+  }
+  if (pruneMode.dryRun) {
+    console.log(
+      `⚠ prune dry-run ${remoteAbsDir}: would delete ${deletable.length} files (keep versions: ${keepVers})`,
+    );
+    for (const n of deletable) console.log(`    ${n}`);
+    return;
+  }
+  deleteRemoteFiles(remoteAbsDir, deletable);
+  console.log(
+    `✓ prune ${remoteAbsDir}: deleted ${deletable.length} old artifacts (keep versions: ${keepVers})`,
+  );
+}
+
+/**
+ * @param {string} version
+ * @param {import("../../apps/website/functions/_lib/downloadsCdn.mjs").DesktopChannel} channel
+ */
+function pruneDesktopDests(version, channel) {
+  const root = downloadsRoot();
+  for (const rel of desktopSyncDestPrefixes(channel)) {
+    pruneRemoteDest(`${root}/${rel}`, { kind: "desktop", currentVersion: version });
+  }
+}
+
+/** @param {string} version */
+function pruneAndroidDest(version) {
+  const root = downloadsRoot();
+  pruneRemoteDest(`${root}/${DOWNLOADS_ANDROID_PREFIX}`, {
+    kind: "android",
+    currentVersion: version,
+  });
 }
 
 async function fetchJson(url) {
@@ -177,15 +378,9 @@ async function mergeDesktopLatestJson(channel, nextPartial) {
 function collectDesktopNames(version, desktopDir) {
   const winName = winInstallerFilename(version);
   const macName = macDmgFilename(version);
-  const macZip = `AgentCore-${version}-mac-arm64.zip`;
   const candidates = [
-    winName,
-    `${winName}.blockmap`,
+    ...desktopArtifactNames(version),
     "latest.yml",
-    macName,
-    `${macName}.blockmap`,
-    macZip,
-    `${macZip}.blockmap`,
     "latest-mac.yml",
   ];
   const present = candidates.filter((n) => existsSync(join(desktopDir, n)));
@@ -342,13 +537,8 @@ async function syncFromGithub({ desktopOnly, androidOnly, channel }) {
       const { mkdirSync } = await import("node:fs");
       mkdirSync(dir, { recursive: true });
       const want = new Set([
-        winInstallerFilename(version),
-        `${winInstallerFilename(version)}.blockmap`,
+        ...desktopArtifactNames(version),
         "latest.yml",
-        macDmgFilename(version),
-        `${macDmgFilename(version)}.blockmap`,
-        `AgentCore-${version}-mac-arm64.zip`,
-        `AgentCore-${version}-mac-arm64.zip.blockmap`,
         "latest-mac.yml",
       ]);
       for (const asset of assets) {
@@ -358,6 +548,7 @@ async function syncFromGithub({ desktopOnly, androidOnly, channel }) {
       }
       const flags = syncDesktopDir(version, dir, channel);
       await writeDesktopManifest(version, flags, channel);
+      pruneDesktopDests(version, channel);
     }
 
     if (!desktopOnly) {
@@ -386,6 +577,7 @@ async function syncFromGithub({ desktopOnly, androidOnly, channel }) {
         console.log(`→ download GH ${found.apk.name}`);
         await downloadTo(found.apk.browser_download_url, dest);
         await syncAndroidFile(found.version, dest);
+        pruneAndroidDest(found.version);
       }
     }
   } finally {
@@ -419,9 +611,28 @@ async function main() {
   pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]
   pnpm sync:release-cdn --android <apk> --version <ver>
   pnpm sync:release-cdn --from-github [--channel stable|beta] [--desktop-only|--android-only]
+  pnpm sync:release-cdn --prune-only [--channel stable|beta] [--version <ver>] [--prune-dry-run]
+  pnpm sync:release-cdn --prune-only --android-only [--version <ver>] [--prune-dry-run]
+
+  --prune-dry-run   list old artifacts that would be deleted (no rm)
+  --skip-prune      sync without removing older version files
 `);
     process.exit(0);
   }
+
+  if (args.pruneOnly && (args.installNginx || args.fromGithub || args.desktopDir || args.androidPath)) {
+    console.error("--prune-only cannot be combined with sync / --install-nginx");
+    process.exit(1);
+  }
+  if (args.skipPrune && (args.pruneDryRun || args.pruneOnly)) {
+    console.error("cannot combine --skip-prune with --prune-dry-run / --prune-only");
+    process.exit(1);
+  }
+
+  pruneMode = {
+    dryRun: Boolean(args.pruneDryRun),
+    skip: Boolean(args.skipPrune),
+  };
 
   // Touch SSH early so missing keys fail before long GH downloads.
   requireEnv("DEPLOY_SSH_HOST");
@@ -435,6 +646,27 @@ async function main() {
   const channel = normalizeDesktopChannel(
     /** @type {string} */ (args.channel || DESKTOP_CHANNEL_DEFAULT),
   );
+
+  if (args.pruneOnly) {
+    const version = String(args.version || "").trim();
+    if (args.androidOnly) {
+      console.log(
+        `→ prune android` +
+          (version ? ` version=${version}` : " (version from latest.json)") +
+          (pruneMode.dryRun ? " [dry-run]" : ""),
+      );
+      pruneAndroidDest(version);
+    } else {
+      console.log(
+        `→ prune desktop channel=${channel}` +
+          (version ? ` version=${version}` : " (version from latest.json)") +
+          (pruneMode.dryRun ? " [dry-run]" : ""),
+      );
+      pruneDesktopDests(version, channel);
+    }
+    console.log("✓ prune complete");
+    return;
+  }
 
   if (args.fromGithub) {
     console.log(
@@ -456,6 +688,7 @@ async function main() {
       "usage: pnpm sync:release-cdn --desktop <dir> --version <ver> [--channel stable|beta]\n" +
         "       pnpm sync:release-cdn --android <apk> --version <ver>\n" +
         "       pnpm sync:release-cdn --from-github [--channel stable|beta]\n" +
+        "       pnpm sync:release-cdn --prune-only [--channel stable|beta] [--prune-dry-run]\n" +
         "       pnpm sync:release-cdn --install-nginx",
     );
     process.exit(1);
@@ -476,6 +709,7 @@ async function main() {
       flags,
       channel,
     );
+    pruneDesktopDests(/** @type {string} */ (args.version), channel);
   }
   if (args.androidPath) {
     if (channel === "beta") {
@@ -487,6 +721,7 @@ async function main() {
       /** @type {string} */ (args.version),
       /** @type {string} */ (args.androidPath),
     );
+    pruneAndroidDest(/** @type {string} */ (args.version));
   }
   console.log(`✓ CDN sync complete → ${cdnUrl("")}`);
 }

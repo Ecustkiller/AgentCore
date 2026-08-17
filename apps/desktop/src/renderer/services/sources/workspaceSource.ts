@@ -1,6 +1,7 @@
 import { getConversations } from "@/hooks/useConversations";
 import { hasInAppPreview } from "@/lib/capabilities";
 import {
+  type FileIndexListing,
   type FileNode,
   type FilePreviewResult,
   type FileSource,
@@ -176,7 +177,7 @@ interface CloudFileClient {
   /** Raw bytes (no save dialog) — backs 「用本机默认应用打开」's temp copy. */
   fetchBytes(path: string): Promise<Blob>;
   exportMdToDocx(path: string): Promise<{ path: string; warnings: string[] }>;
-  listFileIndex?(): Promise<string[]>;
+  listFileIndex?(): Promise<FileIndexListing>;
 }
 
 /**

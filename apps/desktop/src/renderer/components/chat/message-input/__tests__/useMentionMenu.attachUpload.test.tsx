@@ -15,6 +15,7 @@ vi.mock("@/services/workspaceBinding", () => ({
   getWorkspaceBinding: vi.fn(),
 }));
 vi.mock("@/lib/capabilities", () => ({ hasLocalFiles: () => true }));
+vi.mock("@/lib/log", () => ({ logEvent: vi.fn() }));
 vi.mock("../resideAttachment", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../resideAttachment")>();
   return {

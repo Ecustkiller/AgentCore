@@ -163,6 +163,7 @@ export function emptyFailureNotice(
     return "工具连续无有效进展或参数无效，请重试。";
   if (finishReason === "degraded") return "模型返回空内容，请重试。";
   if (finishReason === "interrupted") return "已中断。直接发送下一条即可重试。";
+  if (finishReason === "max_rounds") return "已达最大轮次 · 提前收尾";
   return null;
 }
 

@@ -79,6 +79,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "落地前请勾选要一并处理的风险：",
     "reasoning": "",

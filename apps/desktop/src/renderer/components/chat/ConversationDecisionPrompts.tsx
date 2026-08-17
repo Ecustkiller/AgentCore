@@ -8,6 +8,7 @@
  */
 import { ApprovalPrompt } from "./ApprovalPrompt";
 import { DelegationAuthorizationPrompt } from "./DelegationAuthorizationCard";
+import { HangingQuestionBar } from "./HangingQuestionBar";
 import { ResumePrompt } from "./ResumePrompt";
 import { ResumeSettledNotices } from "./ResumeSettledNotices";
 import { RunConfirmPrompt } from "./RunConfirmPrompt";
@@ -31,6 +32,7 @@ export function ConversationDecisionPrompts({
           中性/信息态，不是故障。 */}
       <ResumeSettledNotices />
       <ResumePrompt />
+      <HangingQuestionBar />
       <DelegationAuthorizationPrompt />
       {!omitApproval && <ApprovalPrompt />}
       <RunConfirmPrompt />

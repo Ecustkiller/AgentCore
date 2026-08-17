@@ -171,6 +171,7 @@ export async function streamMessage(
   attachments?: MessageAttachment[],
   delivery: "steer" | "queue" = "steer",
   agentMentions?: { agent_id: string; role: string }[],
+  askId?: string | null,
 ): Promise<void> {
   const path = `/v1/conversations/${conversationId}/messages`;
   const payload: Record<string, unknown> = { content, delivery };
@@ -178,6 +179,7 @@ export async function streamMessage(
   if (agentMentions && agentMentions.length > 0) {
     payload.agent_mentions = agentMentions;
   }
+  if (askId) payload.ask_id = askId;
   const response = await sseFetch(() =>
     fetch(apiUrl(path), {
       method: "POST",
@@ -336,6 +338,32 @@ export async function resumeStream(
         ...authHeader(),
       },
       body: JSON.stringify(body),
+      signal,
+    }),
+  );
+  if (!response.ok) throw await streamErrorFromResponse(response);
+  await pumpSSE(response, onEvent, conversationId);
+}
+
+/**
+ * Continue a CEO rate-limit pause (`outcome=paused`) via SSE
+ * (`POST .../messages/{id}/continue`, empty body). Not the checkpoint `/resume`.
+ */
+export async function continueStream(
+  conversationId: string,
+  messageId: string,
+  onEvent: (event: SSEEvent) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const path = `/v1/conversations/${conversationId}/messages/${messageId}/continue`;
+  const response = await sseFetch(() =>
+    fetch(apiUrl(path), {
+      method: "POST",
+      headers: {
+        ...clientHeaders(),
+        Accept: "text/event-stream",
+        ...authHeader(),
+      },
       signal,
     }),
   );

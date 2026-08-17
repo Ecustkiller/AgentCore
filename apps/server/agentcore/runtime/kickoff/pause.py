@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Protocol
 
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.runtime.checkpoints import CheckpointDecision
 from agentcore.runtime.events import team_preview_required
+from agentcore.runtime.kickoff.revision import kickoff_adjust_state, kickoff_turn_journal
 from agentcore.runtime.kickoff.summary import KickoffSummary
 from agentcore.tools.registration import execution_class_tool_names
 
@@ -160,6 +162,9 @@ async def _persist_kickoff_frame(
             thorough=summary.thorough,
             debate_arguments=dict(summary.debate_arguments),
             headline=summary.headline or "",
+            revision=summary.revision if summary.revision >= 1 else 1,
+            revised_from=summary.revised_from or "",
+            revision_note=summary.revision_note or "",
             # 委派批次协作参数：挂起点在 setup_note_wall 之前，这三样只活在工具实例上，
             # 不落帧则耐久恢复（全新工具实例）后 wall 批降级 none、seed 便签丢失。
             # DebateTool 无这些属性 → getattr 缺省（辩论批无便签墙）。
@@ -200,6 +205,14 @@ async def await_kickoff(
         return CheckpointDecision.CONTINUE
 
     checkpoint_id = new_id()
+    lineage = kickoff_adjust_state(kickoff_turn_journal(sink=host._sink))
+    if lineage.unfulfilled:
+        summary = replace(
+            summary,
+            revision=lineage.revision,
+            revised_from=lineage.revised_from or "",
+            revision_note=lineage.revision_note or "",
+        )
     card = summary.card_payload()
     required = team_preview_required(
         checkpoint_id=checkpoint_id,
@@ -219,6 +232,9 @@ async def await_kickoff(
         same_model_debate=bool(card.get("same_model_debate")),
         model_candidates=list(card.get("model_candidates") or []) or None,
         headline=str(card.get("headline") or ""),
+        revision=int(card.get("revision") or 1),
+        revised_from=str(card.get("revised_from") or ""),
+        revision_note=str(card.get("revision_note") or ""),
     )
     try:
         saved = await persist_kickoff(

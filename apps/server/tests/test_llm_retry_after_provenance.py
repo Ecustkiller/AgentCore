@@ -26,6 +26,7 @@ from agentcore.core.errors import (
 )
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
 from agentcore.llm.provider import openai_compatible
+from agentcore.llm.provider.cooldown_gate import reset_cooldown_gate
 from agentcore.llm.provider.openai_compatible import (
     OpenAICompatibleProvider,
     _parse_retry_after,
@@ -38,6 +39,13 @@ _LAST_BACKOFF = 32.0
 _OUR_BACKOFF_CHAIN = [2.0, 4.0, 8.0, 16.0]
 # 另外那 92%：平台号日配额打光，上游真的声明了小时级冷却。
 _DAY_RESET = 46440.0
+
+
+@pytest.fixture(autouse=True)
+def _reset_cooldown_gate():
+    reset_cooldown_gate()
+    yield
+    reset_cooldown_gate()
 
 
 def _req(scenario: str = "title") -> LLMRequest:
@@ -209,45 +217,48 @@ async def test_the_streaming_loop_tells_the_same_story(spy, sleeps):
     assert row["cooldown_source"] == RETRY_AFTER_FROM_BACKOFF
 
 
-async def test_chat_headerless_429_fails_fast_without_our_backoff_chain(spy, sleeps):
-    """Interactive turns no longer sit out 2→4→8→16 on a 429 that stated nothing."""
+async def test_chat_headerless_429_fails_immediately(spy, sleeps):
+    """Interactive header-less 429 returns immediately — local backoff is not sat out."""
     calls = {"n": 0}
     provider = await _mock_provider(_throttled(None, calls))
     try:
-        with pytest.raises(LLMRateLimitError):
+        with pytest.raises(LLMRateLimitError) as ei:
             await provider.complete(_req("chat"))
+        assert ei.value.retryable is False
     finally:
         await provider.close()
 
     row = spy.get("llm.rate_limit_no_retry")
-    assert (row["attempt"], calls["n"], sleeps) == (1, 1, [])
+    assert (row["attempt"], calls["n"]) == (1, 1)
+    assert sleeps == []
     assert row["retry_after_sec"] is None
     assert row["cooldown_source"] == RETRY_AFTER_FROM_BACKOFF
     assert row["reason"] == "interactive_fail_fast"
     assert row["scenario"] == "chat"
 
 
-async def test_chat_short_retry_after_waits_at_most_once(spy, sleeps):
-    """Attested ≤2s header: one sleep, then interactive_fail_fast on the next 429."""
+async def test_chat_short_retry_after_waits_in_place_until_budget(spy, sleeps):
+    """Attested 2s header: interactive leaf sits it out until RATE_LIMIT_MAX_RETRIES."""
+    from agentcore.llm.provider.openai_compatible import _RATE_LIMIT_MAX_RETRIES
+
     calls = {"n": 0}
     provider = await _mock_provider(_throttled({"retry-after": "2"}, calls))
     try:
-        with pytest.raises(LLMRateLimitError):
+        with pytest.raises(LLMRateLimitError) as ei:
             await provider.complete(_req("chat"))
+        assert ei.value.retryable is False
     finally:
         await provider.close()
 
-    row = spy.get("llm.rate_limit_no_retry")
-    assert sleeps == [2.0]
-    assert calls["n"] == 2
-    assert row["attempt"] == 2
-    assert row["retry_after_sec"] == 2.0
-    assert row["cooldown_source"] == RETRY_AFTER_FROM_HEADER
-    assert row["reason"] == "interactive_fail_fast"
+    assert sleeps == [2.0] * (_RATE_LIMIT_MAX_RETRIES - 1)
+    assert calls["n"] == _RATE_LIMIT_MAX_RETRIES
+    assert not any(name == "llm.rate_limit_no_retry" for name, _ in spy.events)
+    retried = [kw for name, kw in spy.events if name == "llm.call_retried"]
+    assert len(retried) == _RATE_LIMIT_MAX_RETRIES - 1
 
 
-async def test_chat_stream_headerless_429_fails_fast_too(spy, sleeps):
-    """The streaming loop is the turn-scale path — same fail-fast, not a second policy."""
+async def test_chat_stream_headerless_429_fails_immediately_too(spy, sleeps):
+    """Streaming turn-scale path: header-less 429 returns immediately, same as complete()."""
     calls = {"n": 0}
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -256,13 +267,15 @@ async def test_chat_stream_headerless_429_fails_fast_too(spy, sleeps):
 
     provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMRateLimitError):
+        with pytest.raises(LLMRateLimitError) as ei:
             _ = [c async for c in provider.stream(_req("chat"))]
+        assert ei.value.retryable is False
     finally:
         await provider.close()
 
     row = spy.get("llm.rate_limit_no_retry")
-    assert (row["stream"], row["attempt"], calls["n"], sleeps) == (True, 1, 1, [])
+    assert (row["stream"], row["attempt"], calls["n"]) == (True, 1, 1)
+    assert sleeps == []
     assert row["reason"] == "interactive_fail_fast"
 
 
@@ -295,3 +308,18 @@ def test_provenance_is_observability_only_and_stays_off_the_wire():
         ).retryable
         is True
     )
+
+
+def test_unattested_short_cooldown_does_not_enter_copy_or_wire():
+    """生产那条 local_backoff：引擎握着秒数，用户面和 ErrorContext 都不报。"""
+    from agentcore.llm.errors import error_context_from
+
+    err = LLMRateLimitError(
+        retry_after=4.0, retry_after_source=RETRY_AFTER_FROM_BACKOFF
+    )
+    assert err.retry_after == 4.0
+    assert "请约" not in err.message
+    assert "4 秒" not in err.message
+    assert err.details.get("retry_after") is None
+    ctx = error_context_from(err)
+    assert ctx is None or ctx.get("retry_after") is None

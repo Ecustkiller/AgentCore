@@ -110,6 +110,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "需要调用本机 MCP 工具。已获授权并完成 MCP 调用。",
     "reasoning": "",

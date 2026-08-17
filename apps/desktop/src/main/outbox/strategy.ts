@@ -98,6 +98,8 @@ export interface OutboxRecord {
   origin?: string | null;
   execution_id?: string | null;
   harvest_kind?: string | null;
+  /** Soft @Agent chips on the local user bubble (optional; old records omit). */
+  agent_mentions?: Array<{ agent_id: string; role: string }>;
 }
 
 /**
@@ -467,6 +469,17 @@ export function toRecordTurnBody(
   if (executionId) body.execution_id = executionId;
   const harvestKind = (record.harvest_kind || "").trim();
   if (harvestKind) body.harvest_kind = harvestKind;
+  const mentions = Array.isArray(record.agent_mentions)
+    ? record.agent_mentions.filter(
+        (m) =>
+          m &&
+          typeof m.agent_id === "string" &&
+          m.agent_id.trim() &&
+          typeof m.role === "string" &&
+          m.role.trim(),
+      )
+    : [];
+  if (mentions.length > 0) body.agent_mentions = mentions;
   return body;
 }
 

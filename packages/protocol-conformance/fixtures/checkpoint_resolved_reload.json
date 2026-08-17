@@ -74,6 +74,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "开始前我确认一下方向：好，按 A 推进。",
     "reasoning": "",

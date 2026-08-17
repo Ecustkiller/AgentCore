@@ -275,12 +275,59 @@ async def test_file_read_pdf_transparent_extract(tmp_path: Path):
 
 
 async def test_file_read_xlsx_does_not_extract(tmp_path: Path):
+    from unittest.mock import patch
+
     (tmp_path / "report.xlsx").write_bytes(b"PK\x03\x04")
-    result = await FileReadTool().execute({"path": "report.xlsx"}, _ctx(tmp_path))
+    with patch(
+        "agentcore.tools.builtin.file_ops.read._code_execute_assembled",
+        return_value=True,
+    ):
+        result = await FileReadTool().execute({"path": "report.xlsx"}, _ctx(tmp_path))
     assert result.success is False
     assert result.error is not None
     assert "code_execute" in result.error
     assert not (tmp_path / "report.xlsx.md").exists()
+
+
+async def test_file_read_table_without_code_execute_omits_tool_name(tmp_path: Path):
+    from unittest.mock import patch
+
+    (tmp_path / "report.xlsx").write_bytes(b"PK\x03\x04")
+    (tmp_path / "upload.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    with patch(
+        "agentcore.tools.builtin.file_ops.read._code_execute_assembled",
+        return_value=False,
+    ):
+        xlsx = await FileReadTool().execute({"path": "report.xlsx"}, _ctx(tmp_path))
+        csv = await FileReadTool().execute({"path": "upload.csv"}, _ctx(tmp_path))
+    assert xlsx.success is False
+    assert csv.success is False
+    assert "code_execute" not in (xlsx.error or "")
+    assert "code_execute" not in (csv.error or "")
+    assert "手抄" in (xlsx.error or "")
+    assert "结构报告" in (xlsx.error or "")
+    assert "待跑" in (xlsx.error or "")
+    assert "无法可靠处理" not in (xlsx.error or "")
+
+
+async def test_file_read_landed_csv_is_readable(tmp_path: Path):
+    """Worker 自产表格认落盘台账，可 file_read 回读；未入账的同扩展名仍拒。"""
+    ctx = _ctx(tmp_path)
+    written = await FileWriteTool().execute(
+        {"path": "out/data.csv", "content": "name,n\nalice,1\n"},
+        ctx,
+    )
+    assert written.success is True
+    assert ctx.landed_artifact_kinds.get("out/data.csv") is not None
+
+    ok = await FileReadTool().execute({"path": "out/data.csv"}, ctx)
+    assert ok.success is True
+    assert "alice,1" in (ok.output or "")
+
+    (tmp_path / "foreign.csv").write_text("x,y\n9,8\n", encoding="utf-8")
+    blocked = await FileReadTool().execute({"path": "foreign.csv"}, ctx)
+    assert blocked.success is False
+    assert "code_execute" not in (blocked.error or "")
 
 
 async def test_file_read_scanned_pdf_notice(tmp_path: Path):
@@ -690,6 +737,8 @@ def test_file_read_schema_teaches_default_full_read():
     assert "默认整读" in desc
     assert "grep" in desc or "code_search" in desc
     assert "开窗" in desc
+    assert "默认不抽文本" in desc
+    assert "请用 code_execute。" not in desc
 
 
 async def test_write_hard_rejects_substantial_prose_with_omission(tmp_path: Path):

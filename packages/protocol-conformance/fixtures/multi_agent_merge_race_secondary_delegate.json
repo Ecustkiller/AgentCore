@@ -232,6 +232,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "先调研。 再追加校对。都完成了。",
     "reasoning": "",

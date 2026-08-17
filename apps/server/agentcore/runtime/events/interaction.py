@@ -109,16 +109,42 @@ def question_posted(
     context: str = "",
     assumptions: list[dict[str, Any]] | None = None,
     questions: list[dict[str, Any]] | None = None,
+    unlocks: str = "",
 ) -> SSEEvent:
+    payload: dict[str, Any] = {
+        "ask_id": ask_id,
+        "conversation_id": conversation_id,
+        "question": question,
+        "context": context,
+        "assumptions": assumptions or [],
+        "questions": questions or [],
+    }
+    text = str(unlocks or "").strip()
+    if text:
+        payload["unlocks"] = text
     return SSEEvent(
         type=EventType.QUESTION_POSTED,
+        payload=payload,
+    )
+
+
+def question_resolved(
+    *,
+    ask_id: str,
+    status: str,
+    answer: str = "",
+    note: str = "",
+) -> SSEEvent:
+    """Settle a non-blocking question: ``answered`` (user) or ``discarded`` (CEO)."""
+    if status not in ("answered", "discarded"):
+        status = "discarded"
+    return SSEEvent(
+        type=EventType.QUESTION_RESOLVED,
         payload={
             "ask_id": ask_id,
-            "conversation_id": conversation_id,
-            "question": question,
-            "context": context,
-            "assumptions": assumptions or [],
-            "questions": questions or [],
+            "status": status,
+            "answer": answer or "",
+            "note": note or "",
         },
     )
 
@@ -189,6 +215,9 @@ def team_preview_required(
     same_model_debate: bool = False,
     model_candidates: list[dict[str, Any]] | None = None,
     headline: str = "",
+    revision: int = 1,
+    revised_from: str = "",
+    revision_note: str = "",
 ) -> SSEEvent:
     """开工卡：编排原语 fan-out 前的计划预览 + 能力授权（两卡合一）。
 
@@ -198,6 +227,7 @@ def team_preview_required(
     debate 辩手只读 → 常空；full_auto / always_ask 亦可空）。
     ``headline`` = 主导语（交付档 + 人数）；空则 ABSENT（旧客户端兼容）。
     ``moderator_run_id`` / ``sides[].run_id`` = 开赛前预分配稳定槽位（人盖键）。
+    ``revision`` = 修订代数（首版 1）；``revised_from`` / ``revision_note`` 仅修订卡。
     """
     payload: dict[str, Any] = {
         "checkpoint_id": checkpoint_id,
@@ -210,9 +240,14 @@ def team_preview_required(
         "sides": list(sides or []),
         "max_rounds": max_rounds,
         "thorough": thorough,
+        "revision": revision if revision >= 1 else 1,
     }
     if headline:
         payload["headline"] = headline
+    if revised_from:
+        payload["revised_from"] = revised_from
+    if revision_note:
+        payload["revision_note"] = revision_note
     if moderator_run_id:
         payload["moderator_run_id"] = moderator_run_id
     if moderator_model:

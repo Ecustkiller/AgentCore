@@ -39,6 +39,16 @@ _MSG_MAX_CHARS = 600
 _BODY_MAX_CHARS = 2000
 
 
+def _platform_credential_log_fields(*, source: str | None) -> dict[str, str]:
+    """Attach pool-member id on platform-paid calls only (never BYOK / vendor)."""
+    if source != "platform":
+        return {}
+    from agentcore.core.log_context import get_log_value
+
+    cid = get_log_value("platform_credential_id")
+    return {"platform_credential_id": cid} if cid else {}
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + f"…(+{len(text) - limit})"
 
@@ -103,6 +113,7 @@ def log_llm_call(
     extra: dict[str, Any] = {}
     if tool_names:
         extra["tool_names"] = tool_names
+    extra.update(_platform_credential_log_fields(source=source))
     logger.info(
         "llm.call",
         scenario=scenario,
@@ -214,6 +225,7 @@ def log_llm_call_failed(
     provider_id = get_log_value("provider_id")
     if provider_id:
         extra["provider_id"] = provider_id
+    extra.update(_platform_credential_log_fields(source=cred_src or None))
     if upstream_status is not None:
         extra["upstream_status"] = int(upstream_status)
     if upstream_body_preview:

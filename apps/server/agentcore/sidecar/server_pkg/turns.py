@@ -7,6 +7,7 @@ import contextlib
 from typing import Any
 
 from agentcore.conversation.common import preview
+from agentcore.conversation.zero_output_rollback import maybe_discard_zero_output_outbox
 from agentcore.core.errors import InferenceTokenExpiredError
 from agentcore.core.log_context import log_context
 from agentcore.core.logging import get_logger
@@ -81,6 +82,26 @@ def normalize_local_subpath_param(raw: Any) -> str:
     if raw is None:
         return ""
     return str(raw).strip()
+
+
+def rpc_agent_mentions(params: dict[str, Any]) -> list[dict[str, Any]]:
+    """startTurn ``agentMentions`` / ``agent_mentions`` → sanitized ``{agent_id, role}``."""
+    from agentcore.conversation.mentions import to_stored_agent_mentions
+
+    raw = params.get("agentMentions")
+    if raw is None:
+        raw = params.get("agent_mentions")
+    return to_stored_agent_mentions(raw if isinstance(raw, list) else None)
+
+
+def rpc_ask_id(params: dict[str, Any]) -> str | None:
+    """startTurn ``askId`` / ``ask_id`` → inbound return-path slot (or None)."""
+    from agentcore.conversation.ask_reply import normalize_ask_id
+
+    raw = params.get("askId")
+    if raw is None:
+        raw = params.get("ask_id")
+    return normalize_ask_id(raw)
 
 
 def resolve_rpc_folder_binding(
@@ -166,6 +187,42 @@ def _finish_str(result: dict[str, Any]) -> str | None:
     return finish.value if hasattr(finish, "value") else str(finish)
 
 
+async def _settle_ask_replies_if_committed(
+    *,
+    conversation_id: str,
+    result: dict[str, Any] | None,
+    sink: EventSink,
+    user_message: str,
+    ask_id: str | None = None,
+    user_created_this_send: bool = True,
+) -> None:
+    """Settle hanging asks after this sidecar send stuck (before sink.close)."""
+    from agentcore.conversation.question_resolve import (
+        is_abort_finish_reason,
+        note_ask_replies_for_committed_send,
+    )
+    from agentcore.conversation.zero_output_rollback import (
+        should_delete_zero_output_send_result,
+    )
+
+    if result is None:
+        return
+    if should_delete_zero_output_send_result(
+        result, user_created_this_send=user_created_this_send
+    ):
+        return
+    if is_abort_finish_reason(_finish_str(result)):
+        return
+    journal = result.get("journal_entries")
+    await note_ask_replies_for_committed_send(
+        conversation_id=conversation_id,
+        sink=sink,
+        ask_id=ask_id,
+        answer=user_message,
+        journal=journal if isinstance(journal, list) else None,
+    )
+
+
 def _inference_search_creds(creds: Any):
     """Map turn ``LLMCredentials`` → leaf ``InferenceSearchCredentials`` (no llm import in web)."""
     from agentcore.tools.builtin.web.cloud_fallback import InferenceSearchCredentials
@@ -248,6 +305,8 @@ class TurnExecutionMixin:
         user_message = str(params.get("userMessage") or "")
         history = params.get("history") or []
         self.stamp_turn_history(conversation_id, history)
+        agent_mentions = rpc_agent_mentions(params)
+        ask_id = rpc_ask_id(params)
         # The desktop mints one trace_id per local turn and threads it here + into the
         # write-back, so this turn's proxied LLM calls and its persisted reply share it.
         trace_id = str(params.get("traceId") or "")
@@ -271,6 +330,7 @@ class TurnExecutionMixin:
                 user_message=user_message,
                 message_id=message_id,
                 trace_id=trace_id,
+                agent_mentions=agent_mentions or None,
             )
             await outbox.begin_turn(
                 conversation_id=conversation_id,
@@ -311,6 +371,13 @@ class TurnExecutionMixin:
                     )
                     sink.emit(message_end(FinishReason.ERROR))
                 finally:
+                    await _settle_ask_replies_if_committed(
+                        conversation_id=conversation_id,
+                        result=result,
+                        sink=sink,
+                        user_message=user_message,
+                        ask_id=ask_id,
+                    )
                     sink.close(reason="sidecar_missing_inference")
                 await pump
                 if outbox is not None:
@@ -321,6 +388,7 @@ class TurnExecutionMixin:
                         user_message_id=user_message_id,
                         trace_id=trace_id,
                         result=result,
+                        user_created_this_send=True,
                     )
                 await self._send(
                     protocol.make_result(
@@ -428,6 +496,8 @@ class TurnExecutionMixin:
                             suspension_deleter=deleter,
                             message_id=message_id,
                             x_client_platform="desktop",
+                            agent_mentions=agent_mentions or None,
+                            ask_id=ask_id,
                         )
                         # Pillar D1: keep sink open while a detached background drive is
                         # still live so run_completed / execution_completed reach the UI
@@ -436,6 +506,13 @@ class TurnExecutionMixin:
                         from agentcore.runtime.coordination import await_live_detached_drive
 
                         await await_live_detached_drive(conversation_id)
+                        await _settle_ask_replies_if_committed(
+                            conversation_id=conversation_id,
+                            result=result,
+                            sink=sink,
+                            user_message=user_message,
+                            ask_id=ask_id,
+                        )
             finally:
                 # Cancel path: emit confirmation *before* close so the pump still
                 # delivers ``message_end(cancelled)`` (TURN_CANCELLED alone is not enough).
@@ -456,6 +533,7 @@ class TurnExecutionMixin:
                     user_message_id=user_message_id,
                     trace_id=trace_id,
                     result=result,
+                    user_created_this_send=True,
                 )
             # Surface the model this turn actually ran on (cloud-proxy / account model).
             await self._send(
@@ -531,8 +609,17 @@ class TurnExecutionMixin:
         origin: str | None = None,
         execution_id: str | None = None,
         harvest_kind: str | None = None,
+        user_created_this_send: bool = False,
     ) -> None:
         """Seal the outbox record as ready for main-process writeback."""
+        if await maybe_discard_zero_output_outbox(
+            outbox,
+            conversation_id=conversation_id,
+            user_message_id=user_message_id,
+            result=result,
+            user_created_this_send=user_created_this_send,
+        ):
+            return
         journal_entries = result.get("journal_entries")
         runs = runs_from_entries(journal_entries) if journal_entries else None
         finish = _finish_str(result)
@@ -775,6 +862,13 @@ class TurnExecutionMixin:
                         from agentcore.runtime.coordination import await_live_detached_drive
 
                         await await_live_detached_drive(conversation_id)
+                        await _settle_ask_replies_if_committed(
+                            conversation_id=conversation_id,
+                            result=result,
+                            sink=sink,
+                            user_message=user_message,
+                            user_created_this_send=False,
+                        )
             finally:
                 _emit_cancel_end_if_cancelling(sink)
                 # The pipeline no longer closes the sink (its owner does); the sidecar owns

@@ -370,6 +370,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排并行审查。 审查完成。",
     "reasoning": "",

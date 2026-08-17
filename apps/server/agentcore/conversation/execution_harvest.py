@@ -973,6 +973,23 @@ async def run_harvest_closing_turn(
             execution_id=execution_id,
         )
         return
+    if getattr(session, "host_turn_paused", False):
+        logger.info(
+            "coordination.harvest_skipped_host_paused",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+        )
+        return
+    from agentcore.runtime.turn.ceo_continue import host_turn_is_ceo_paused
+
+    if await host_turn_is_ceo_paused(conversation_id, session.host_turn_id):
+        logger.info(
+            "coordination.harvest_skipped_host_paused",
+            conversation_id=conversation_id,
+            execution_id=execution_id,
+            via="persisted",
+        )
+        return
 
     # Another turn already owns the conversation slot — keep registry; retry later.
     existing = turn_runs.get(conversation_id)

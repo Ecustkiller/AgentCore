@@ -5,11 +5,14 @@ from __future__ import annotations
 import json
 from typing import Self
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 class PlatformSettings(BaseModel):
     platform_api_key: str = ""
+    # Optional operator alias for the shared default key (logs + cost_calls only).
+    # Empty = stable hash of (api_key, base_url). Never a key / last-4.
+    platform_credential_id: str = ""
     platform_base_url: str = "https://api.deepseek.com"
     platform_model: str = "deepseek-v4-flash"
     # Background purposes (title/memory/compaction); empty = follow platform_model.
@@ -23,11 +26,16 @@ class PlatformSettings(BaseModel):
     # members — fail-fast at settings load (no silent drift).
     platform_models: str = ""
     # Per-model platform credential overrides (运营中转「一 key 一模型」, 成本配额与计费
-    # §〇·六 F3): a JSON object mapping model id → {"api_key"?, "base_url"?, "upstream_model"?}.
-    # When a model in the catalog has an entry, its api_key / base_url win for that model;
-    # each missing field falls back to platform_api_key / platform_base_url.
+    # §〇·六 F3): a JSON object mapping model id →
+    # {"api_key"?, "base_url"?, "upstream_model"?, "id"?}.
+    # When a model in the catalog has an entry **with its own api_key**, that
+    # pair wins (missing base_url → PLATFORM_BASE_URL). Otherwise the operator
+    # pool's first enabled member is used as a bound pair; a base_url-only
+    # override is not mixed with a pool key (it still applies on the empty-pool
+    # env fallback).
     # Optional upstream_model: catalog id may differ from the id sent to the upstream
-    # (e.g. glm-5.2-jiu → glm-5.2 on a second relay). Empty = every platform model shares
+    # (e.g. glm-5.2-jiu → glm-5.2 on a second relay). Optional id: operator alias for
+    # logs / cost_calls.platform_credential_id. Empty = every platform model shares
     # the default key/base_url; omitted upstream_model = send catalog id as-is.
     platform_model_credentials: str = ""
 
@@ -54,12 +62,20 @@ class PlatformSettings(BaseModel):
     # --- 计费模式 ---
     billing_mode: str = "byok"
 
+    # OpenCode Go monthly window anniversary (UTC day-of-month, 1–31). Short
+    # months clamp to the last day. Used as the empty-pool / env-fallback
+    # aggregate on admin Go-window calibration. Pool members each carry their
+    # own subscription_day (accounts are bought in batches). Ops must set the
+    # env value to the real Go billing anniversary of the env key — default 1
+    # is only a bootable fallback.
+    platform_go_subscription_day: int = Field(default=1, ge=1, le=31)
+
     # Sub2API 管理 API（可选）。配置后 platform 模式 503 时自动探测账号状态生成诊断。
     sub2api_admin_url: str = ""
     sub2api_admin_email: str = ""
     sub2api_admin_password: str = ""
 
-    # AES-256-GCM 主密钥，用于把 BYOK API Key 加密后落库。
+    # AES-256-GCM 主密钥：BYOK API Key、平台额度账号池、Git PAT、admin TOTP。
     encryption_key: str = ""
 
     @model_validator(mode="after")
@@ -93,12 +109,13 @@ class PlatformSettings(BaseModel):
 def parse_platform_model_credentials(raw: str) -> dict[str, dict[str, str]]:
     """Parse ``PLATFORM_MODEL_CREDENTIALS`` JSON into model credential maps.
 
-    Shape: ``{model_id: {api_key?, base_url?, upstream_model?}}``.
+    Shape: ``{model_id: {api_key?, base_url?, upstream_model?, id?}}``.
 
     Malformed JSON / wrong shape degrades to ``{}`` (logged) so an operator typo never
     crashes a turn — the platform then serves every model on the shared default key.
-    Only non-blank ``api_key`` / ``base_url`` / ``upstream_model`` fields are kept; an
-    empty object drops out.
+    Only non-blank ``api_key`` / ``base_url`` / ``upstream_model`` / ``id`` fields are
+    kept; an empty object drops out. ``id`` is an operator alias for the resolved
+    ``(api_key, base_url)`` pair (logs + ``cost_calls`` only).
     """
     text = (raw or "").strip()
     if not text:
@@ -130,6 +147,9 @@ def parse_platform_model_credentials(raw: str) -> dict[str, dict[str, str]]:
             creds["base_url"] = base_url
         if upstream_model:
             creds["upstream_model"] = upstream_model
+        ident = str(entry.get("id", "") or "").strip()
+        if ident:
+            creds["id"] = ident
         if creds:
             result[mid] = creds
     return result

@@ -26,6 +26,7 @@ from agentcore.runtime.events.journal_config import (
     _JOURNAL_EVENT_TYPES,
     _JOURNAL_SURFACE_TYPES,
     cap_process_result,
+    journal_payload_for_persist,
 )
 from agentcore.runtime.events.process_persist import (
     ProcessPersistCursor,
@@ -34,6 +35,18 @@ from agentcore.runtime.events.process_persist import (
 from agentcore.runtime.events.stream_checkpointer import StreamCheckpointer
 from agentcore.runtime.events.types import EventType, SSEEvent
 from agentcore.runtime.facts import Fact, record_turn_fact
+
+# One run_id may enter a terminal face once (live + journal). Duplicate
+# run_failed / run_completed / run_cancelled / run_skipped for the same id
+# are dropped so fold last-write-wins cannot diverge from the live stream.
+_RUN_TERMINAL_TYPES = frozenset(
+    {
+        EventType.RUN_COMPLETED,
+        EventType.RUN_FAILED,
+        EventType.RUN_CANCELLED,
+        EventType.RUN_SKIPPED,
+    }
+)
 
 # Orchestration tools hand the turn to a sub-team and open a team execution. Their
 # captain-level call is NOT rendered as a tool step — the `team` marker (emitted at
@@ -391,6 +404,9 @@ class EventSink:
         # so :meth:`history_snapshot` can synthesize the close frame — same role as
         # ``_turn_end_close_event`` on the journal cursor-replay path (收口窗对齐).
         self._stream_finish_reason: str | None = None
+        self._stream_outcome: str | None = None
+        # First terminal event per run_id wins; later terminals are dropped.
+        self._terminal_run_ids: set[str] = set()
         if conversation_id and message_id:
             self._try_start_stream_checkpointer()
 
@@ -663,6 +679,17 @@ class EventSink:
         live consumer* — not "bridge dead". CLIENT_TOOL delivery is independent of
         this sink.
         """
+        if event.type in _RUN_TERMINAL_TYPES:
+            run_id = (event.payload or {}).get("run_id")
+            if isinstance(run_id, str) and run_id:
+                if run_id in self._terminal_run_ids:
+                    logger.info(
+                        "run.terminal_duplicate_dropped",
+                        run_id=run_id,
+                        type=event.type.value,
+                    )
+                    return False
+                self._terminal_run_ids.add(run_id)
         if self._closed:
             # Pillar A: DURABLE display facts persist at execution/host journal scope
             # even after the turn sink closes; SSE / history are best-effort only.
@@ -673,6 +700,9 @@ class EventSink:
             finish = (event.payload or {}).get("finish_reason")
             if finish is not None:
                 self._stream_finish_reason = str(finish)
+            raw_outcome = (event.payload or {}).get("outcome")
+            if raw_outcome in ("ok", "partial", "paused", "error"):
+                self._stream_outcome = str(raw_outcome)
         if event.type is EventType.ERROR:
             self._last_error = dict(event.payload)
         # Accumulate FIRST: closed process_* / run_process_* schedule before the
@@ -716,10 +746,12 @@ class EventSink:
                 str(event.payload.get("execution_id") or ""),
                 self._message_id,
             )
+        # Copy+cap for JSONB only — live SSE keeps the uncapped wire payload.
+        persist_payload = journal_payload_for_persist(event.type.value, event.payload)
         self._journal.append(
             {
                 "type": event.type.value,
-                "payload": event.payload,
+                "payload": persist_payload,
                 "timestamp": event.timestamp,
             }
         )
@@ -734,7 +766,7 @@ class EventSink:
             return record_turn_fact(
                 Fact(
                     kind=event.type.value,
-                    payload=event.payload,
+                    payload=persist_payload,
                     ts=event.timestamp,
                 )
             )
@@ -742,14 +774,14 @@ class EventSink:
             return host_writer.schedule_append(
                 {
                     "kind": event.type.value,
-                    "payload": event.payload,
+                    "payload": persist_payload,
                     "ts": event.timestamp,
                 }
             )
         return record_turn_fact(
             Fact(
                 kind=event.type.value,
-                payload=event.payload,
+                payload=persist_payload,
                 ts=event.timestamp,
             )
         )
@@ -836,10 +868,13 @@ class EventSink:
         """
         snapshot = list(self._history)
         if self._stream_finish_reason is not None:
+            close_payload: dict[str, Any] = {"finish_reason": self._stream_finish_reason}
+            if self._stream_outcome is not None:
+                close_payload["outcome"] = self._stream_outcome
             snapshot.append(
                 SSEEvent(
                     type=EventType.MESSAGE_END,
-                    payload={"finish_reason": self._stream_finish_reason},
+                    payload=close_payload,
                 )
             )
         return snapshot

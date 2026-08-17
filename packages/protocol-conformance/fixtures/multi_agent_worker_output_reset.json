@@ -173,6 +173,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排队员起草。队员已修正产出。",
     "reasoning": "",

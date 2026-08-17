@@ -197,9 +197,22 @@ FAILURE_FAMILIES: tuple[FailureFamily, ...] = (
     FailureFamily(
         key="runner_mismatch",
         label="test_run runner 错配",
-        patterns=(r"purpose\W{0,3}vitest[^\n]{0,80}jest", r"npx\s+jest", r"jest[^\n]{0,40}vitest"),
+        patterns=(
+            r"purpose\W{0,3}vitest[^\n]{0,80}(?:npx\s+)?jest",
+            r"framework\W{0,3}vitest[^\n]{0,80}npx\s+jest",
+            r"npx\s+jest[^\n]{0,80}(?:purpose|framework)\W{0,3}vitest",
+            r"vitest\s+npx\s+jest",
+            r"npx\s+jest\s+vitest",
+        ),
+        revision=2,
         since="2026-08-06",
-        note="模型误填 runner（purpose=vitest 而 command=npx jest）；与预算耗尽常纠缠。",
+        note=(
+            "模型误填 runner（purpose/framework=vitest 而 command=npx jest）；与预算耗尽常纠缠。"
+            "rev2：撤掉 `jest.{0,40}vitest`（扫中 test_run 帮助文案"
+            "「…scripts.test（vitest/jest）、vitest.config…」）和裸 `npx jest`"
+            "（正当 jest 仓库也会命中）。只认 vitest 意图与 jest 命令同时出现的错配。"
+            "与 rev1 计数不可比。"
+        ),
     ),
     FailureFamily(
         key="channel_dead",
@@ -333,12 +346,27 @@ FAILURE_FAMILIES: tuple[FailureFamily, ...] = (
     FailureFamily(
         key="local_turn_id_invalid",
         label="本机回合 id 非 UUID",
-        patterns=(r"invalid UUID '", r"length must be between 32\.\.36"),
+        patterns=(
+            r"http\.unhandled_error[\s\S]{0,4000}pgproto\.uuid_encode",
+            r"pgproto\.uuid_encode[\s\S]{0,4000}http\.unhandled_error",
+            r"http\.unhandled_error[\s\S]{0,4000}pg_uuid_bytes_from_str",
+            r"pg_uuid_bytes_from_str[\s\S]{0,4000}http\.unhandled_error",
+            r"invalid UUID '",
+            r"length must be between 32\.\.36",
+        ),
+        revision=2,
         since="2026-08-16",
         note=(
             "sidecar 冷 resume 缺 user_message_id 时 mint 'resume-{turn_id}'（43 字符），"
             "云端当 messages.id 查即 500，桌面按 5xx 无限退避重试（约 6min/次）。"
             "不用 events 收 chat.regenerate_error——那个事件名下还有桌面离线闸，非同根。"
+            "rev2：生产是 http.unhandled_error + sqlalchemy.exc.DBAPIError，13k traceback"
+            "经 clip（首 480 + 末行）后头停在 `asyncpg.pgproto.pgproto.uuid_encode` /"
+            " `uuid.pyx`，`ValueError: invalid UUID '…'` 是下一行被切掉，末行是"
+            " sqlalche.me/e/20/dbapi。rev1 只匹 Python uuid.UUID 文案，整窗假阴性。"
+            "改认 clip 里仍在的 `pgproto.uuid_encode`（UUID bind 专属栈帧，不是泛 DBAPIError），"
+            "且要求同条诊断文本带 `http.unhandled_error`，以免工具把路径当 UUID 的 bind 误入本族；"
+            "短 traceback 仍认 invalid UUID 原文。与 rev1 计数不可比。"
         ),
     ),
     FailureFamily(
@@ -439,6 +467,18 @@ FAILURE_FAMILIES: tuple[FailureFamily, ...] = (
             "HTTP 503 / not_ready（硬依赖 Postgres）。首败立刻一条，之后 10s 心跳"
             "（fail_count=本拍探针次数），避免 db.ping_failed 那种 9s/14 次刷屏。"
             "恢复走 http.readyz，不入本族。"
+        ),
+    ),
+    FailureFamily(
+        key="disk_high_watermark",
+        label="磁盘水位过高",
+        events=("disk.high_watermark", "disk.probe_failed"),
+        since="2026-08-17",
+        note=(
+            "宿主挂载点用量 ≥80%（或水位读失败）。/readyz body 带 used_pct，"
+            "但不参与 200/503——盘快满把还能服务的实例判不可用会触发编排器重启循环。"
+            "path 走 DATA_DIR 的非 overlay 挂载（容器 overlay 的 df / 是假数字）。"
+            "首超立刻一条，之后 10s 心跳。"
         ),
     ),
     FailureFamily(

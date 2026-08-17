@@ -148,6 +148,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来整理成一份文档。要点已整理完成，文件在「竞品定价调研」文件夹里。",
     "reasoning": "",

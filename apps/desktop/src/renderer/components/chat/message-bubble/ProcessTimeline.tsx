@@ -7,7 +7,11 @@ import {
   ToolLine,
   ToolLineGroup,
 } from "@/components/chat/ToolLine";
-import { kickoffReleasedFromPreviews } from "@/components/chat/debatePreviewPlacement";
+import {
+  kickoffReleasedFromPreviews,
+  teamGraphVisible,
+} from "@/components/chat/debatePreviewPlacement";
+import { executionGraphCapabilities } from "@/components/graph/planCapabilities";
 import {
   type TimelineNode,
   groupToolRuns,
@@ -21,7 +25,7 @@ import type {
   TeamPreviewDisplay,
 } from "@/stores/conversation";
 import { useStreamAwareDisclosure } from "@/stores/disclosure";
-import type { ExecutionJournal } from "@/stores/execution";
+import { type ExecutionJournal, useMessageExecution } from "@/stores/execution";
 import { renderTimelineInteractionCard } from "@/stores/interactions/registryUi";
 import type {
   Citation,
@@ -90,7 +94,7 @@ function InlineReasoning({
   );
 
   return (
-    <div className="process-thought">
+    <div className="process-thought min-w-0 max-w-full">
       <ThinkingHeader
         isStreaming={streaming}
         expanded={expanded}
@@ -99,7 +103,7 @@ function InlineReasoning({
         onToggle={toggle}
       />
       {expanded && (
-        <div className="mt-1.5 text-muted-foreground">
+        <div className="mt-1.5 min-w-0 max-w-full text-muted-foreground">
           <Markdown content={text} isStreaming={streaming} muted />
         </div>
       )}
@@ -146,7 +150,7 @@ function ProcessRow({
   if (step.kind === "content") {
     // 旁白/正文：前景色（vs Thought 的 muted）+ 时间线 space-y，不用左边线区分（S4）。
     return (
-      <div className="process-narration text-foreground">
+      <div className="process-narration min-w-0 max-w-full text-foreground">
         <Markdown
           content={step.text}
           citations={citations}
@@ -172,6 +176,43 @@ function ProcessRow({
       <ToolLine step={step} turnKey={turnKey} conversationId={conversationId} />
     );
   return null;
+}
+
+/**
+ * In-stream fallback: generic Thinking… when the tail has no live node.
+ * Live chrome = running/wait tool, streaming reasoning/content, in-progress rework,
+ * composing tool, visible collaboration graph (StatusStrip) at the tail, or a
+ * pending user gate. Markers are not live by themselves — delegate/debate omit
+ * tool steps (isMarkerStandinTool) and stand in as `team` / interaction markers.
+ */
+/** Markers that anchor the collaboration graph slot. `graph_append` only paints an
+ * anchor label, so its liveness is the graph it belongs to — same gate as `team`. */
+export function graphSlotExecutionId(
+  step: ProcessStep | undefined,
+): string | null {
+  if (step?.kind === "team" || step?.kind === "graph_append")
+    return step.execution_id;
+  return null;
+}
+
+export function shouldShowThinkingTail(args: {
+  isStreaming: boolean;
+  composingTool: boolean;
+  last: ProcessStep | undefined;
+  graphVisibleAtTail: boolean;
+  pendingUserGate: boolean;
+}): boolean {
+  if (!args.isStreaming || args.composingTool) return false;
+  if (args.pendingUserGate || args.graphVisibleAtTail) return false;
+  const last = args.last;
+  if (!last) return true;
+  if (last.kind === "reasoning" || last.kind === "content") return false;
+  if (last.kind === "rework") return false;
+  if (last.kind === "tool") {
+    if (last.tool_name === "wait") return false;
+    return last.status !== "running";
+  }
+  return true;
 }
 
 export function ProcessTimeline({
@@ -211,16 +252,31 @@ export function ProcessTimeline({
   teamPreviews: TeamPreviewDisplay[];
   collapseProcessSteps?: boolean;
 }) {
+  const execution = useMessageExecution(messageId ?? null);
   const last = process[process.length - 1];
   const hasContentStep = process.some((s) => s.kind === "content");
+  const kickoffReleased = kickoffReleasedFromPreviews(teamPreviews);
+  const graphVisibleAtTail = (() => {
+    const slotExecutionId = graphSlotExecutionId(last);
+    if (!slotExecutionId) return false;
+    if (!execution || execution.id !== slotExecutionId) return false;
+    if (!executionGraphCapabilities(execution).showsTeamGraph) return false;
+    // Same gate as InlineTeamGraph: empty teamPreviews is still a provided list.
+    return teamGraphVisible(execution.runs, teamPreviews);
+  })();
+  const pendingUserGate =
+    teamPreviews.some((p) => p.status === "pending") ||
+    checkpoints.some((c) => c.status === "pending") ||
+    planReviews.some((p) => p.status === "pending");
   // wait 结束后不刷 Thinking 尾迹（S4）；下一轮有真实动作再出现。wait / wait-idle
   // reasoning 行本身仍展示（CEO 气泡与 run 详情同源 process）。
-  const showThinkingTail =
-    isStreaming &&
-    !composingTool &&
-    last?.kind === "tool" &&
-    last.status !== "running" &&
-    last.tool_name !== "wait";
+  const showThinkingTail = shouldShowThinkingTail({
+    isStreaming,
+    composingTool: Boolean(composingTool),
+    last,
+    graphVisibleAtTail,
+    pendingUserGate,
+  });
 
   // 摘要步数与可见行同源，避免「Thought 10」展开只剩 3 行。
   // collapseProcessSteps 只控制折叠 chrome，不再 omit wait。
@@ -241,7 +297,6 @@ export function ProcessTimeline({
     { settledDefault: false },
   );
   const processSummary = formatProcessSummary(reasoningCount, toolCount);
-  const kickoffReleased = kickoffReleasedFromPreviews(teamPreviews);
 
   // 协作图应在 CEO 回复下方: when prose only exists as fallbackContent (no content
   // step), slot it before the first team/graph_append marker — never after the
@@ -254,7 +309,10 @@ export function ProcessTimeline({
     !hasContentStep && Boolean(fallbackContent) && fallbackBeforeTeamIdx < 0;
 
   const renderFallback = (key: string) => (
-    <div key={key} className="process-narration text-foreground">
+    <div
+      key={key}
+      className="process-narration min-w-0 max-w-full text-foreground"
+    >
       <Markdown
         content={fallbackContent}
         citations={citations}
@@ -370,7 +428,7 @@ export function ProcessTimeline({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="min-w-0 max-w-full space-y-2">
       {nodes.map((node, i) => {
         const prefix =
           i === fallbackBeforeTeamIdx

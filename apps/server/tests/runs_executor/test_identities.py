@@ -410,9 +410,20 @@ def test_worker_identity_states_no_execution_capability():
     assert "二进制" in no_exec
     assert "已运行 / 已验证 / 已生成" in no_exec
     assert "未运行验证" in no_exec
+    assert "手抄" in no_exec
+    assert "表格" in no_exec
+    assert "结构报告" in no_exec
+    assert "待跑" in no_exec
+    assert "暂时不可用" in no_exec
+    assert "不是缺口" in no_exec
+    assert "无法可靠完成" not in no_exec
+    assert "不可靠" not in no_exec
 
     with_exec = build_worker_identity(has_dependents=False, can_execute=True)
     assert "本回合执行环境未装配" not in with_exec
+    assert "手抄" not in with_exec
+    assert "刚落盘的表格" in with_exec
+    assert "file_read 回读自检" in with_exec
     # 默认参数与显式 True 字节一致（不惊扰既有路径）。
     assert with_exec == build_worker_identity(has_dependents=False)
 

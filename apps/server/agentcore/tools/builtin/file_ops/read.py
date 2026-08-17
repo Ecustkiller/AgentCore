@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from typing import Any
 
-from agentcore.core.types import ToolApproval, ToolCategory
+from agentcore.core.types import PermissionAxes, ToolApproval, ToolCategory
 from agentcore.tools.protocol import ToolContext, ToolResult, ToolSchema
 from agentcore.tools.registration import (
     AUDIENCE_BOTH,
@@ -118,6 +119,53 @@ def _as_int(value: object) -> int:
     if isinstance(value, str):
         return int(value)
     raise TypeError(f"expected int, got {type(value).__name__}")
+
+
+def _permission_axes_of(context: ToolContext) -> PermissionAxes | None:
+    """Parse ``ToolContext.permission_axes`` JSON; ``None`` if absent / unusable."""
+    raw = getattr(context, "permission_axes", None)
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        data = json.loads(raw) if raw.lstrip().startswith("{") else None
+        if isinstance(data, dict):
+            return PermissionAxes.from_mapping(data)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return None
+    return None
+
+
+def _code_execute_assembled(context: ToolContext) -> bool:
+    """Same include predicate as this-turn worker registry (not a second truth)."""
+    from agentcore.tools.builtin import execution_class_enabled_for
+
+    return execution_class_enabled_for(context.backend, _permission_axes_of(context))
+
+
+def _is_run_landed_path(context: ToolContext, path_key: str) -> bool:
+    """True when this execution's write ledger already recorded ``path_key``.
+
+    Ledger membership — not a content heuristic about whether the file 'looks'
+    self-produced.
+    """
+    if not path_key:
+        return False
+    kinds = getattr(context, "landed_artifact_kinds", None) or {}
+    return path_key in kinds
+
+
+def _spreadsheet_skip_error(path: str, *, code_execute_assembled: bool) -> str:
+    """Reject-table copy that follows the assembled tool table."""
+    if code_execute_assembled:
+        return (
+            f"`{path}` 是表格/分隔数据文件，file_read 不自动抽文本；"
+            "请用 code_execute（如 openpyxl / pandas）按工作区相对路径解析。"
+        )
+    return (
+        f"`{path}` 是表格/分隔数据文件，file_read 不自动抽文本。"
+        "本回合没有按单元格解析表格的执行工具；"
+        "请用已给的结构面写原件结构报告并落盘待跑变换脚本，不要手抄数据冒充已整理的表。"
+    )
 
 
 def _effective_offset(offset: object) -> int:
@@ -490,8 +538,9 @@ class FileReadTool:
             name="file_read",
             description=(
                 "读取工作区内某个文件的内容（相对路径）。"
-                "Office/PDF（docx/pdf/pptx/odt/rtf）自动抽取文本；表格（xlsx/csv 等）请用 "
-                "code_execute。"
+                "Office/PDF（docx/pdf/pptx/odt/rtf）自动抽取文本；表格（xlsx/csv 等）"
+                "默认不抽文本（本回合若有 code_execute 用它按路径解析；"
+                "本 run 刚落盘的表格可回读自检）。"
                 "定位请用 grep / code_search；单文件默认整读"
                 "（省略则尽量整读，超安全顶截断）。"
                 "仅当页脚已标明截断或已有行号时再用 offset/limit 开窗。"
@@ -576,11 +625,11 @@ class FileReadTool:
                     # Cleared: allow recovery full-read (no grant required).
 
         ext = extension_of(path_key or rel_path)
-        if ext in SKIP_EXTENSIONS:
+        if ext in SKIP_EXTENSIONS and not _is_run_landed_path(context, path_key):
             return _error(
-                (
-                    f"`{path_key or rel_path}` 是表格/分隔数据文件，file_read 不自动抽文本；"
-                    "请用 code_execute（如 openpyxl / pandas）按工作区相对路径解析。"
+                _spreadsheet_skip_error(
+                    path_key or rel_path,
+                    code_execute_assembled=_code_execute_assembled(context),
                 ),
                 start,
             )

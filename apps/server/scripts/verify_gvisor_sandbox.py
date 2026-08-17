@@ -100,7 +100,7 @@ def check_repo_assets() -> list[str]:
             _fail(f"missing {path.relative_to(REPO_ROOT)}")
 
     dockerfile = (SERVER_ROOT / "Dockerfile").read_text(encoding="utf-8")
-    for needle in ("runsc", "python-pptx", "fonts-noto-cjk", "INSTALL_RUNSC"):
+    for needle in ("runsc", "cloud_python.txt", "fonts-noto-cjk", "INSTALL_RUNSC"):
         if needle in dockerfile:
             _ok(f"Dockerfile mentions {needle}")
         else:

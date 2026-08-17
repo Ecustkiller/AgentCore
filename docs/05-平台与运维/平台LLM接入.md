@@ -10,7 +10,7 @@ skip_if:
 
 # 平台 LLM 接入
 
-> **现状**：目标仍是 `billing_mode=platform`（额度 `quota_*` · ¥10/月·¥10/日 · 台账 **nano-CNY**，无 FX）；**现网可临时 `byok`**（见 [成本配额与计费](/docs/05-平台与运维/成本配额与计费.md) 文首）。**dev 默认仍 BYOK**。本文只记上游接入事实（厂商坑、BYOK 去向、platform 排查）。
+> **现状**：目标仍是 `billing_mode=platform`（额度 `quota_*` · ¥5/月·¥5/日 · 台账 **nano-CNY**，无 FX）；**现网可临时 `byok`**（见 [成本配额与计费](/docs/05-平台与运维/成本配额与计费.md) 文首）。**dev 默认仍 BYOK**。本文只记上游接入事实（厂商坑、BYOK 去向、platform 排查）。
 
 ## 一、三条上游路径
 
@@ -84,7 +84,7 @@ skip_if:
 | 模型名 | 预设种子 `kimi-k2.6` / `kimi-k3` / `kimi-k2.5`；legacy `moonshot-v1-*` 仍可自由采样 |
 | base_url | `https://api.moonshot.cn/v1`（别名 `.ai`） |
 | 温度坑 | `kimi-*`：**勿显式传** `temperature`（k3 / k2.7-code 固定 1.0；k2.5/k2.6 = thinking 1.0 / non-thinking 0.6）。传 0.7 等 → `invalid temperature: only 1 is allowed` |
-| 出站 | `wire_dialect.omit_temperature`：`kimi-` 叶 + Moonshot 预设 base_url（非 `moonshot-v1*`）省略；OpenCode Zen 等多模型端点**不**整端 omit，靠叶规则 |
+| 出站 | `wire_dialect.omit_temperature`：`kimi-` 叶 + Moonshot 预设 base_url（非 `moonshot-v1*`）省略；OpenCode Zen / Go 等多模型端点**不**整端 omit，靠叶规则 |
 | 未做 | 不为 Kimi 单开 `thinking.type` / `reasoning_effort` 产品档；不做 400 自适应重试补 temperature |
 
 ## 四·附、腾讯 Hy / TokenHub（BYOK 预设）
@@ -98,45 +98,74 @@ BYOK 厂商预设 id=`hy`；canonical `https://tokenhub.tencentmaas.com/v1`（�
 | 工具调用 | 有 tool call 的回合必须回传 `reasoning_content` |
 | 未做 | 不暴露 `reasoning_effort` UI；不做 `hy/` 平台前缀路由 |
 
-## 四·附、OpenCode Zen（BYOK 预设 + 可作 platform 上游）
+## 四·附、OpenCode Zen / Go（BYOK 预设 + 可作 platform 上游）
 
-BYOK 厂商预设 id=`opencode_zen`；canonical `https://opencode.ai/zen/v1`。品牌对外暴露为「OpenCode Zen」。预设 `models` 仅短种子（发现失败兜底）；全量目录靠上游 `GET /models` 与现有 BYOK 发现合并。
+OpenCode 两条 OpenAI 兼容上游，**计费与目录不同，必须按精确 base_url 分预设**（禁止前缀 / 包含匹配：`…/zen/go/v1` 不得吃成 Zen，反之亦然）。预设 `models` 仅短种子（发现失败兜底）；全量目录靠上游 `GET /models` 与现有 BYOK 发现合并。
+
+| | Zen | Go |
+|---|---|---|
+| 预设 id / label | `opencode_zen` · OpenCode Zen | `opencode_go` · OpenCode Go |
+| base_url | `https://opencode.ai/zen/v1` | `https://opencode.ai/zen/go/v1` |
+| 计费 | 按量余额（含 `-free` 档） | $10/月订阅配额（5 小时 / 周 / 月）；目录**没有** `-free` |
+| 默认模型 | `deepseek-v4-flash` | `deepseek-v4-flash` |
+| 短种子 | Flash / `kimi-k2.6` / `glm-5.2` | Flash / Pro / `glm-5.2` |
 
 | 项 | 约束 |
 |---|---|
-| 协议 | 主路仍 OpenAI `chat/completions`（Flash / GLM 等兼容行）；目录有 ≠ 一定能跑（Claude / GPT 等可能需其它协议） |
-| BYOK | 用户自备 Zen key；估算价卡按现有 BYOK 两层解析；**不**进平台配额 |
-| 平台代付 | ✅ 可经 `PLATFORM_*` 指向同一 Zen 端点；**现网定案**：只上架 `deepseek-v4-flash-free`（见 §五·附） |
-| 上下文 | 付费 `deepseek-v4-flash` **1M**；免费档 `deepseek-v4-flash-free` **200K**（Zen 网关 cap，非模型原生）。近顶压缩按 **SKU id** 取窗，不按 origin 分叉 |
-| 未做 | `zen/` 前缀路由；为本网关单独开 Anthropic/Responses 分叉 |
-| 隐私 | free 档限时且可能用于改进模型——产品公告须诚实；勿当永久免费算力承诺 |
+| 协议 | 只跑 OpenAI `chat/completions` 子集。Go 目录里走 `/responses`（Grok 4.5、GPT 5.6 Luna）与 `/messages`（MiniMax、Qwen）的模型**不进种子、不开新协议分叉**。`GET /models` **仍会列出**被区域闸住的 id——目录有 ≠ 一定能跑（与 Zen 同姿势；影响发现与默认选模） |
+| BYOK | 用户自备**对应端点**的 key；估算价卡按现有 BYOK 两层解析；**不**进平台配额。打错端点时付费 Flash 会在 Zen 路上 `CreditsError`（扣的是 Zen 余额，Go 订阅管不到） |
+| 平台代付 | ✅ `PLATFORM_*` 可指向 Zen **或** Go；**现网钉 Go + 付费 Flash**（见 §五·附）。换上游 / 改 `quota_*` 须改生产 `.env` 并重启 api |
+| 上下文 | 按 **SKU id**：付费 `deepseek-v4-flash` **1M**；仅 `deepseek-v4-flash-free` **200K**（Zen 网关 cap）。禁止按端点猜窗（Go 无 free 档也不把 Flash 当成 200K） |
+| 错误分类 | 一张按上游嵌套 `error.type` 的表（信封 `{"type":"error","error":{"type":…}}`），禁止扫 `error.message`。**`GoUsageLimitError`（429）= Go 订阅配额用尽**（等窗口或控制台 `Use balance`），不是余额不足；**`CreditsError`（401）**收窄为无支付方式 / 订阅未激活 / 余额空；`MonthlyLimitError` / `UserLimitError` = 工作区月限或成员限；`ModelError` = 模型不支持 / 禁用 / trial 结束；`AuthError` 才是 Key 废；`RegionError`（403）= 中国区托管 opt-in。BYOK 可带用户自己的工作区链接；**platform 叶绝不回显工作区 URL / id**。上游透传的 `403 This model is not available in your region` **不是** `RegionError`；顶层 `Router.Unavailable` 不在本表。未知 type 走现有兜底 |
+| 未做 | `zen/` / `opencode-go/` 前缀路由；为本网关开 Anthropic / Responses 分叉 |
+| 隐私 | Zen **BYOK** free 档限时且可能用于改进模型。**现网 platform 走 Go**：DeepSeek ZDR 写到 **2026-08-31 且按月续约**（见 §五·附），不得写成永久承诺，也不得沿用免费档措辞。中国区托管 opt-in 是另一维度，勿与 ZDR 混成一句 |
 
 ## 五、platform 模式与故障排查
 
-`billing_mode=platform` 走 `PLATFORM_*`；改三项须重启后端。
+`billing_mode=platform` 走 `PLATFORM_*` 与账号池；改 env 三项须重启后端。池成员的增删改/禁用经 admin 热更，不须重启。
 
-**多模型 + 每模型凭据覆盖**（成本 §〇·六 F3）：`PLATFORM_MODELS` allowlist（非空时 `PLATFORM_MODEL` / 后台档须 ∈ 列表，否则启动 fail-fast）；`PLATFORM_MODEL_CREDENTIALS`（JSON `{model → {api_key?, base_url?, upstream_model?}}`）给「一 key 一模型」中转绑独立凭据；可选 `upstream_model` 让目录 id 与上游 id 解耦（如 `glm-5.2-jiu` → 上游仍发 `glm-5.2`；计费 / 目录仍用目录 id）。单点 `platform_llm_credentials(model=…)` + 出站改写 `platform_wire_model`（`PlatformProvider`）。可用性 = 默认 key **或**任一覆盖有 key。缺 curated 价卡的 allowlist id → 不上架。
+**多模型 + 每模型凭据覆盖**（成本 §〇·六 F3）：`PLATFORM_MODELS` allowlist（非空时 `PLATFORM_MODEL` / 后台档须 ∈ 列表，否则启动 fail-fast）；`PLATFORM_MODEL_CREDENTIALS`（JSON `{model → {api_key?, base_url?, upstream_model?, id?}}`）给「一 key 一模型」中转绑独立凭据；可选 `upstream_model` 让目录 id 与上游 id 解耦（如 `glm-5.2-jiu` → 上游仍发 `glm-5.2`；计费 / 目录仍用目录 id）。单点 `platform_llm_credentials(model=…)` + 出站改写 `platform_wire_model`（`PlatformProvider`）。
+
+**平台额度账号池**（admin 可热更）：成员表 `platform_credentials`，每行是绑定的 `(api_key, base_url)` + 该号自己的订阅日。Key 走既有 `KeyEncryptor` / `ENCRYPTION_KEY`（与 BYOK 同主密钥），明文永不回前端。选钥：fill-first（打满一个再用下一个；冷却 / 月耗尽 / 401·403 封禁的号跳过）+ 同一 `conversation_id` 钉在同一号（该号耗尽才换，避免打散 prompt cache）。流式 **commit 前** 的 429 与 403 `RegionError` 换到下一个启用号；commit 后维持现状（半成品 + `LLM_ERROR`，不做续写拼接）。401（封号与坏 key 不可区分）摘除该号并告警，**不**拿其余号重试同一请求。403 `RegionError`（漏做中国区托管 opt-in）同样摘除并告警，但允许 commit 前换号；分类只认上游嵌套 `error.type`。全池冷却或封禁时诚实报错（既有「接入自己的 Key」CTA），**不**回落 env、不假装排队、不静默降级模型。**池为空或全禁用 → 回落现有 `PLATFORM_API_KEY` / `PLATFORM_BASE_URL`**。带自己 `api_key` 的 `PLATFORM_MODEL_CREDENTIALS` 覆盖仍优先于池。本轮不做 80% 阈值提前切（名义价 ↔ 上游美元尚未校准）。可用性 = 默认 env key **或**任一覆盖有 key **或**池中有启用成员。缺 curated 价卡的 allowlist id → 不上架。
+
+平台代付每次调用在日志（`llm.call` / `llm.call_failed`）与 `cost_calls.platform_credential_id` 记下用的是哪把凭据：池成员 = 该行 UUID；env / 覆盖路径 = `PLATFORM_CREDENTIAL_ID` 或覆盖 `id`，否则 `(api_key, base_url)` 稳定哈希；非 key 明文 / 后四位。只进日志与台账，不进用户可见 SSE error context。BYOK 该列为空。
 
 **排查**：curl 直连 `{PLATFORM_BASE_URL}/chat/completions` 分辨代理 vs 上游；日志 `inference.proxy_upstream_error` / `llm.*`。可选 `SUB2API_ADMIN_*` 探测（非当前上游）。
 
 **本机系统代理**：产品出网 httpx 默认 `trust_env=False`（不继承 `HTTP(S)_PROXY` / `ALL_PROXY`）。用户装 Clash 等把 `ALL_PROXY` 设成 `socks5://…` 时，旧行为会因缺少可选依赖 `socksio` 报「调用失败」；桌面 sidecar 启动时另剥离 SOCKS 类代理环境变量（HTTP 代理保留）。显式应用内代理配置仍可后续加，不靠默吃系统 SOCKS。
 
-## 五·附、现网单模型：OpenCode Zen · DeepSeek V4 Flash Free
+## 五·附、现网单模型：OpenCode Go · DeepSeek V4 Flash
 
-> 运维定案（内测恢复平台额度）：平台目录只上架 **一个**模型；BYOK 仍为高级选项（F7）。先本地 `BILLING_MODE=platform` 冒烟，再改生产。
+> 运维定案：平台目录只上架 **一个**模型；BYOK 仍为高级选项（F7）。改生产 `.env` 的 `PLATFORM_*` / `QUOTA_*` 后**必须重启 api**（无热更）。**加 / 改 / 禁用池成员不须重启**（admin「系统」页 · 平台额度账号）——但**每个新成员入池前必须单独完成下条硬前置**（opt-in 是逐工作区的，老号做过不代表新号做过；漏做的号上游回 403 `RegionError`）。真实 key 只在不入仓的部署凭据文件或加密库里。
 >
-> **模型修订**：本地账号实际可用的是 Zen 限时免费档 `deepseek-v4-flash-free`（付费 `deepseek-v4-flash` 同 key 会 `CreditsError`）。平台现网钉 **free**；诚实告知限时 / 可能用于改进模型（见 Zen 隐私条款）。
+> **上游修订**：从 Zen 限时免费档切到 OpenCode **Go** 端点上的付费 `deepseek-v4-flash`。Zen 控制台同一把 key 两个端点通用（不必换 `PLATFORM_API_KEY`）。Go 目录**没有** `-free`。这不是免费档，也不是无限算力。
+>
+> **硬前置**：贴这套 `.env` / 上线前，必须先在 OpenCode 控制台为该工作区完成 DeepSeek 的中国区托管 opt-in，并用同一把 key 打 `POST https://opencode.ai/zen/go/v1/chat/completions` + `deepseek-v4-flash` 实测通过。未同意时上游回结构化 `RegionError`，平台代付一上线**全体用户**一起撞（不是个别账号）。已证事实仅限 **Go 端点的 DeepSeek**。
 
 | 项 | 值 |
 |---|---|
 | `BILLING_MODE` | `platform` |
-| `PLATFORM_BASE_URL` | `https://opencode.ai/zen/v1` |
-| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4-flash-free`（仅此） |
-| 后台档 | 同钉 `deepseek-v4-flash-free`（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
-| 额度 | 月 ¥10 · 日 ¥10 · 日请求 500（`quota_*` 不变） |
-| 价卡 | curated 名义价 **同** 付费 Flash（¥0.02 / ¥1 / ¥2）——上游免费，产品仍按名义价扣额度 |
-| 上下文窗 | `deepseek-v4-flash-free` **200K**（Zen 免费档网关；原生 Flash 是 1M）。目录展示与近顶压缩（窗 × 80% ≈ 160K）跟 SKU，禁止把 free 行写成 1M |
+| `PLATFORM_BASE_URL` | `https://opencode.ai/zen/go/v1` |
+| `PLATFORM_MODEL` / `PLATFORM_MODELS` | `deepseek-v4-flash`（仅此；须有 CNY curated 价卡，否则启动后不上架 / allowlist 与默认冲突则 fail-fast） |
+| 后台档 | 同钉 `deepseek-v4-flash`（可显式 `PLATFORM_BACKGROUND_MODEL`，须 ∈ allowlist） |
+| `PLATFORM_API_KEY` | 与 Zen 控制台同一把（不换） |
+| 额度 | 月 ¥5 · 日 ¥5 · 日请求 500（`quota_*`） |
+| 价卡 | curated 名义价 **同** 付费 Flash（¥0.02 / ¥1 / ¥2）——上游成本由 Go 订阅月费摊，产品仍按名义价扣额度 |
+| 上下文窗 | `deepseek-v4-flash` **1M**（SKU）。目录展示与近顶压缩（窗 × 80% ≈ 800K）跟 SKU，禁止按端点猜成 Zen free 的 200K |
 | Vision | 本阶段不配 `VISION_*`（白板读图仅用户 BYOK 填 vision 槽时可用） |
 | 公告 | 恢复时归档 `quota_jiurelay`；发模板 **`quota_platform_restored`** → [产品公告文案模板 §4.2](/docs/05-平台与运维/产品公告文案模板.md) |
 
-验收信号：无 Key 账号可开聊并扣额度；`GET /v1/users/me/models` 平台行仅 `deepseek-v4-flash-free`；输入区徽章 / `run_completed.model` / `cost_events.model` 同为该 id。
+**运维动作（按序，不得跳）**
+
+1. **硬前置**：上条 opt-in + 实测通过——排在贴 `.env`、切流量、以及下面 `Use balance` 之前。
+2. Go 共享帽打满时，控制台开 `Use balance` 回落 Zen 余额（须 Zen 账户有钱）。这是人工运维动作，代码不能保证。
+
+**Go 订阅共享限额（不得省略）**：OpenCode Go 的 5 小时 $12 / 周 $30 / 月 $60 是**整个订阅共享**，不是按 AgentCore 用户分。单账号窗口打满时池会换到下一个号；**全池**打满时全体用户一起被挡（产品侧每用户 ¥5 额度拦不住这条上游共享帽）。上游类型是 **`GoUsageLimitError`（429）**，不是 `CreditsError`。兜底见上条 `Use balance`，以及用户侧「接入自己的 Key」。
+
+Admin「分析 · 成本」展示这三个窗口的**我方名义价累计**，外加一列按 OpenCode 公开单价读时估算的美元（`GET /v1/admin/usage/go-windows`）——名义价用来在撞 429 时对上「那一刻我们记了多少」；美元列只用来看离 $12 / $30 / $60 还有多远。**禁止**把任一列当成上游账单或余额，也禁止据此写死换算系数。公开单价表与 curated 名义价卡分开放，取值日期随调价更新。估算有两处未证死：Go 计入窗口前可能乘未公开的 `costMultiplier`（默认 1）；上游网关是否识别 DeepSeek cache 命中未经实包验证，若不识别则估算偏低。空池时月窗锚 `PLATFORM_GO_SUBSCRIPTION_DAY`（UTC 日，短月钳到月末），须配成 env 那把 key 的真实 Go 订阅日，默认 1 只是能启动的回退。池中每个成员带自己的订阅日（号是分批买的，锚点不同）；响应 `members[]` 按账号拆窗。周窗按 UTC 周一；5 小时是固定窗 + 空闲超窗归零，不是近 5 小时滑动求和。→ [管理员后台](/docs/05-平台与运维/管理员后台.md)
+
+**隐私**：Go 路上的 DeepSeek 走 zero-retention（ZDR **声明写到 2026-08-31，且按月续约**，以 OpenCode 当期条款为准；**不得写成永久承诺**，月底复查）。与 Zen `-free`「限时免费、可能用于改进模型」不是同一事实；公告与对外叙述不得沿用免费档措辞，也不得把 Go 说成免费或无限。
+
+**中国区托管 opt-in**（另一维度，勿与上段 ZDR 混成一句）：Go 端点的 DeepSeek 需工作区在 OpenCode 控制台显式同意中国区托管后才放行。未同意时上游回结构化 `RegionError`。`GET /models` **仍会列出**被闸住的 id（目录有 ≠ 能跑）。此处只记 opt-in 事实，不据此推断数据驻留或训练条款。
+
+验收信号：无 Key 账号可开聊并扣额度；`GET /v1/users/me/models` 平台行仅 `deepseek-v4-flash`；输入区徽章 / `run_completed.model` / `cost_events.model` 同为该 id。

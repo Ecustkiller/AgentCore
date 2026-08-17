@@ -15,6 +15,7 @@ import {
 } from "@/lib/draftRequestId";
 import { isReadOnlyOffline } from "@/lib/offlineMode";
 import { redirectLocalWorkspaceAskAction } from "@/lib/redirectLocalWorkspaceAsk";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
 import { notifyError } from "@/lib/toast";
 import { api } from "@/services/api";
 import {
@@ -117,6 +118,7 @@ async function restoreAfterUnstartedRefusal({
   createdFolderId,
   draft,
   navigate,
+  supportPack,
 }: {
   conversationId: string;
   createdNew: boolean;
@@ -127,8 +129,12 @@ async function restoreAfterUnstartedRefusal({
     agentMentions: PendingAgentMention[];
   };
   navigate: (to: string) => void;
+  supportPack?: SupportDiagnosticIds;
 }): Promise<void> {
   const sendError = composerSendErrorFromRuntime(conversationId);
+  const error = sendError
+    ? { ...sendError, ...(supportPack ? { supportPack } : {}) }
+    : null;
   const shouldTeardown =
     createdNew && getRuntime(conversationId).messages.length === 0;
 
@@ -137,7 +143,7 @@ async function restoreAfterUnstartedRefusal({
       await deleteConversation(conversationId);
     } catch {
       restoreComposerDraft(conversationId, draft);
-      if (sendError) setComposerSendError(conversationId, sendError);
+      if (error) setComposerSendError(conversationId, error);
       return;
     }
     applyDeletedConversationLocally(conversationId);
@@ -147,7 +153,7 @@ async function restoreAfterUnstartedRefusal({
       ...draft,
       attachments: attachmentsForUnstartedRetry(draft.attachments),
     });
-    if (sendError) setComposerSendError(draftKey, sendError);
+    if (error) setComposerSendError(draftKey, error);
     if (createdFolderId) {
       useFoldersStore.getState().setDraftWorkspaceIntent({
         kind: "folder",
@@ -160,7 +166,7 @@ async function restoreAfterUnstartedRefusal({
   }
 
   restoreComposerDraft(conversationId, draft);
-  if (sendError) setComposerSendError(conversationId, sendError);
+  if (error) setComposerSendError(conversationId, error);
 }
 
 export function useComposerSend({
@@ -433,6 +439,12 @@ export function useComposerSend({
                 workspacePath: a.workspacePath,
               }))
             : undefined,
+          agentMentions: agentMentions.length
+            ? agentMentions.map((a) => ({
+                agentId: a.agentId,
+                role: a.role,
+              }))
+            : undefined,
         });
         clearComposer();
 
@@ -516,6 +528,7 @@ export function useComposerSend({
                 agentMentions,
               },
               navigate,
+              supportPack: sent.supportPack,
             });
           }
         } finally {

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { InterjectionTimeline } from "@/components/chat/InterjectionTimeline";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { DRAFT_KEY, useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -268,6 +269,36 @@ describe("InterjectionTimeline", () => {
       expect(screen.queryByTestId(`interjection-note-ij-${status}`)).toBeNull();
       expect(screen.getByText(`正文-${status}`)).toBeTruthy();
     }
+  });
+
+  it("renders @ role chips matching history user bubbles", () => {
+    seedStreamingAssistant();
+    useExecutionStore.setState({
+      byId: {
+        m1: {
+          userInterjections: [
+            {
+              interjectionId: "ij-mention",
+              executionId: "e1",
+              content: "请让研究员再核一遍成本。",
+              status: "received",
+              note: null,
+              agentMentions: [{ agentId: "agent_research", role: "研究员" }],
+            },
+          ],
+        },
+      },
+    } as never);
+
+    render(
+      <TooltipProvider>
+        <InterjectionTimeline messageId="m1" interjectionId="ij-mention" />
+      </TooltipProvider>,
+    );
+    expect(screen.getByTestId("interjection-bubble-ij-mention")).toBeTruthy();
+    expect(screen.getByText("研究员")).toBeTruthy();
+    expect(screen.getByText("点名")).toBeTruthy();
+    expect(screen.getByText("请让研究员再核一遍成本。")).toBeTruthy();
   });
 
   it("renders unread copy when turn closed and status stays received", () => {

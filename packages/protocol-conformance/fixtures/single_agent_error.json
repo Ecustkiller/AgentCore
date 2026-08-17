@@ -29,6 +29,7 @@
   "projected": {
     "status": "failed",
     "finishReason": null,
+    "outcome": "error",
     "error": {
       "code": "llm_error",
       "message": "模型超时"

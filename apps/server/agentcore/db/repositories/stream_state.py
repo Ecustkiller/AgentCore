@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -167,6 +167,28 @@ class TurnStreamStateRepository:
         """
         result = await self._session.execute(
             delete(TurnStreamStateRow).where(TurnStreamStateRow.turn_id == turn_id)
+        )
+        await self._session.commit()
+        return result.rowcount or 0
+
+    async def delete_stale(self, *, before: datetime, limit: int) -> int:
+        """Delete up to ``limit`` snapshots idle since before ``before`` (TTL sweep).
+
+        ``updated_at`` advances on every accepted UPSERT, so a live stream stays
+        alive; a leftover after finalize / delete (or a disconnected never-finalized
+        remainder) past the window is pruned. Batched so a sweep never holds one
+        huge transaction. Returns rows removed.
+        """
+        stale = (
+            select(TurnStreamStateRow.turn_id, TurnStreamStateRow.channel)
+            .where(TurnStreamStateRow.updated_at < before)
+            .order_by(TurnStreamStateRow.updated_at.asc())
+            .limit(limit)
+        )
+        result = await self._session.execute(
+            delete(TurnStreamStateRow).where(
+                tuple_(TurnStreamStateRow.turn_id, TurnStreamStateRow.channel).in_(stale)
+            )
         )
         await self._session.commit()
         return result.rowcount or 0

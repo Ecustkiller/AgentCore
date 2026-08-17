@@ -66,6 +66,17 @@ describe("toMessageDetail evidence_ledger", () => {
     expect(toMessageDetail(baseRow({ recovered: true })).recovered).toBe(true);
     expect(toMessageDetail(baseRow()).recovered).toBeNull();
   });
+
+  it("maps REST agent_mentions onto history user-bubble chips", () => {
+    const m = toMessageDetail(
+      baseRow({
+        role: "user",
+        content: "帮我调研",
+        agent_mentions: [{ agent_id: "w1", role: "研究员" }],
+      }),
+    );
+    expect(m.agentMentions).toEqual([{ agentId: "w1", role: "研究员" }]);
+  });
 });
 
 describe("toMessageDetail runs.error (cold-load failure)", () => {
@@ -95,6 +106,26 @@ describe("toMessageDetail runs.error (cold-load failure)", () => {
         errorMessage: m.runs?.error?.message,
       }),
     ).toBe("API Key 已吊销，请重新配置。");
+  });
+
+  it("maps REST outcome so CEO pause hydrates without waiting on journal", () => {
+    const m = toMessageDetail(
+      baseRow({
+        paused: true,
+        outcome: "paused",
+        runs: {
+          events: [],
+          finish_reason: "paused",
+          process: null,
+          error: {
+            code: "LLM_RATE_LIMIT",
+            message: "上游限流，暂时无法继续本回合。",
+          },
+        },
+      }),
+    );
+    expect(m.outcome).toBe("paused");
+    expect(m.paused).toBe(true);
   });
 
   it("keeps null error on clean turns", () => {

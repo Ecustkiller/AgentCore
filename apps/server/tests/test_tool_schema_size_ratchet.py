@@ -50,12 +50,12 @@ _CAPS: dict[str, int] = {
     "git": 2590,
     "terminal": 1440,
     "delegate": 5400,
-    "ask_user": 3390,
+    "ask_user": 3510,  # +10：schema 触发句扩成「按默认继续或声明后半等人」
 }
 _TOTAL_CAP = sum(_CAPS.values())
 
 # 非桌面（web）态 ask_user：桌面独有的 action / well_known 等选项不装配。
-_ASK_USER_WEB_CAP = 2450
+_ASK_USER_WEB_CAP = 2560  # 与桌面同一次语义扩展，实测 2553
 
 # Worker-only：escalate / handoff / 写盘三件套曾把身份段或 consult HOW 再抄一遍到按钮上。
 _WORKER_CAPS: dict[str, int] = {

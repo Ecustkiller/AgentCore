@@ -59,6 +59,62 @@ def _isolate_coordination_registry():
     clear_active_coordination()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _isolate_index_registry() -> AsyncIterator[None]:
+    """Abort leftover ``code-index-maintain`` tasks before the test loop closes.
+
+    ``ServerWorkspace`` mutations fire-and-forget ``IndexMaintainer.schedule``.
+    Under xdist load that task is often still inside ``asyncio.to_thread`` when
+    pytest-asyncio shuts the function-scoped loop's default executor —
+    ``RuntimeError: Executor shutdown has been called`` on
+    ``BM25Index.list_indexed_paths``. Drain while the loop is still alive.
+    """
+    from agentcore.workspace.indexing.registry import drain_index_registry
+
+    await drain_index_registry()
+    yield
+    await drain_index_registry()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_llm_cooldown_gate():
+    """Drop the process-wide 429 cooldown so a leaked day-reset cannot starve later tests.
+
+    Provider tests reuse api_key ``k``; without a reset the next case would wait
+    at the gate (or refuse) instead of hitting the mock transport.
+    """
+    from agentcore.llm.provider.cooldown_gate import reset_cooldown_gate
+
+    reset_cooldown_gate()
+    yield
+    reset_cooldown_gate()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_platform_credential_pool():
+    """Empty the in-memory platform-pool snapshot around every test.
+
+    ``platform_llm_credentials`` reads this snapshot synchronously; a leaked
+    enabled member would silently replace the env key the rest of the suite
+    expects.
+    """
+    from agentcore.llm.platform_pool import replace_platform_pool_snapshot
+
+    replace_platform_pool_snapshot(())
+    yield
+    replace_platform_pool_snapshot(())
+
+
+@pytest.fixture(autouse=True)
+def _isolate_platform_pool_state():
+    """Drop fill-first / 429 cooling / sticky pins so suite order cannot leak."""
+    from agentcore.llm.platform_pool_state import reset_pool_state_store
+
+    reset_pool_state_store()
+    yield
+    reset_pool_state_store()
+
+
 @pytest.fixture(autouse=True)
 def _isolate_turn_scoped_closing_state():
     """Give every test the turn-entry reset that prepare / resume wire perform.

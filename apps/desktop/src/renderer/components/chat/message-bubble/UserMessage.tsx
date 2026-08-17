@@ -10,6 +10,7 @@ import {
 } from "@/stores/conversation";
 import { Check, Copy, Pencil, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AgentMentionChip } from "./AgentMentionChip";
 import { AttachmentChip } from "./AttachmentChip";
 import { MessageAction, MessageTime } from "./MessageActions";
 import { SyncStatusHint } from "./SyncStatusHint";
@@ -24,6 +25,7 @@ export function UserMessage({ message }: MessageBubbleProps) {
   const { copied, onCopy } = useCopyAction(() => message.content);
   const conversationId = useConversationStore((s) => s.currentConversationId);
   const attachments = message.attachments ?? [];
+  const agentMentions = message.agentMentions ?? [];
 
   const startEdit = () => {
     setDraft(message.content);
@@ -102,8 +104,11 @@ export function UserMessage({ message }: MessageBubbleProps) {
 
   return (
     <div className="group flex flex-col items-end gap-1.5">
-      {attachments.length > 0 && (
+      {(agentMentions.length > 0 || attachments.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          {agentMentions.map((a) => (
+            <AgentMentionChip key={a.agentId} role={a.role} />
+          ))}
           {attachments.map((a) => (
             <AttachmentChip
               key={a.id}

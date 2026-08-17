@@ -394,6 +394,10 @@ class TeamPreviewSuspension(TurnSuspension):
     debate_arguments: dict[str, Any] = field(default_factory=dict)
     # 主文案（交付档 + 人数）；缺省空 = 旧帧兼容。
     headline: str = ""
+    # 修订谱系（与 team_preview_required 同名字段）；旧帧 revision 缺省 1。
+    revision: int = 1
+    revised_from: str = ""
+    revision_note: str = ""
     # 委派批次协作参数：开工卡挂在 setup_note_wall **之前**，coordination / team_brief /
     # seed_notes 此刻只活在 DelegateTool 实例上（未上墙、未进 journal）。耐久恢复走全新
     # 工具实例（_coordination 缺省 "none"），不随帧回灌则 wall 批降级为 none —— worker 被
@@ -430,6 +434,14 @@ class AskUserSuspension(TurnSuspension):
     # CEO browser login gate (ask_user browser_login=true) — resume card mirrors
     # escalate's「需要你登录 / 已登录，继续」; absent/false on older frames.
     browser_login: bool = False
+
+
+def _revision_from_frame(raw: Any) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    return value if value >= 1 else 1
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +539,11 @@ def _team_preview_frame_extras(s: TurnSuspension) -> dict[str, Any]:
     }
     if s.headline:
         extras["headline"] = s.headline
+    extras["revision"] = s.revision if s.revision >= 1 else 1
+    if s.revised_from:
+        extras["revised_from"] = s.revised_from
+    if s.revision_note:
+        extras["revision_note"] = s.revision_note
     # 委派批次协作参数（见类注释）：非缺省才落帧，旧帧读回走缺省。
     if s.coordination != "none":
         extras["coordination"] = s.coordination
@@ -552,6 +569,9 @@ def _team_preview_from_extras(data: dict[str, Any]) -> dict[str, Any]:
         "thorough": bool(data.get("thorough", True)),
         "debate_arguments": dict(data.get("debate_arguments") or {}),
         "headline": str(data.get("headline") or ""),
+        "revision": _revision_from_frame(data.get("revision")),
+        "revised_from": str(data.get("revised_from") or ""),
+        "revision_note": str(data.get("revision_note") or ""),
         "coordination": str(data.get("coordination") or "none"),
         "team_brief": data.get("team_brief") or None,
         "seed_notes": list(data.get("seed_notes") or []),
@@ -573,6 +593,11 @@ def _team_preview_summary_extras(s: TurnSuspension) -> dict[str, Any]:
     }
     if s.headline:
         out["headline"] = s.headline
+    out["revision"] = s.revision if s.revision >= 1 else 1
+    if s.revised_from:
+        out["revised_from"] = s.revised_from
+    if s.revision_note:
+        out["revision_note"] = s.revision_note
     return out
 
 

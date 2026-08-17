@@ -170,6 +170,7 @@ def _ceo_turn(**overrides: object) -> str:
         "recent_team_graph": "",
         "prior_delivery_gaps": "",
         "prior_delegate_retry": "",
+        "pending_questions": "",
         "attachment_context": "",
         "registered_sources": "",
         "soft_cap": None,
@@ -186,6 +187,14 @@ def test_ceo_turn_renders_the_source_ledger_after_the_volatile_tail():
         registered_sources="<registered_sources/>",
     )
     assert out == "CEO\n<attachments/>\n<registered_sources/>"
+
+
+def test_ceo_turn_pending_questions_sit_on_the_volatile_tail_before_attachments():
+    out = _ceo_turn(
+        pending_questions="<pending_questions/>",
+        attachment_context="<attachments/>",
+    )
+    assert out == "CEO\n<pending_questions/>\n<attachments/>"
 
 
 def test_ceo_turn_observation_covers_the_source_ledger(monkeypatch):

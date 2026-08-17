@@ -42,14 +42,18 @@ vi.mock("@/stores/execution", () => ({
   ) => sel({ byId: {} }),
 }));
 
-vi.mock("@/stores/interactions", () => ({
-  useMessageInteractionCards: () => ({
-    checkpoints: [],
-    nonBlockingAsks: [],
-    planReviews: [],
-    teamPreviews: [],
-  }),
-}));
+vi.mock("@/stores/interactions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/interactions")>();
+  return {
+    ...actual,
+    useMessageInteractionCards: () => ({
+      checkpoints: [],
+      nonBlockingAsks: [],
+      planReviews: [],
+      teamPreviews: [],
+    }),
+  };
+});
 
 vi.mock("@/services/turns", () => ({
   runRegenerate: vi.fn(),

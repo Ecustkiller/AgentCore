@@ -67,6 +67,18 @@ describe("toMessage (reload hydrate)", () => {
     expect(msg.serverMessageId).toBeUndefined();
   });
 
+  it("maps REST agent_mentions onto history user-bubble chips", () => {
+    const msg = toMessage(
+      row({
+        id: "u-mention",
+        role: "user",
+        content: "帮我调研",
+        agent_mentions: [{ agent_id: "w1", role: "研究员" }],
+      }),
+    );
+    expect(msg.agentMentions).toEqual([{ agentId: "w1", role: "研究员" }]);
+  });
+
   it("maps status=running (no paused) to isStreaming for overlay partial", () => {
     const msg = toMessage(
       row({

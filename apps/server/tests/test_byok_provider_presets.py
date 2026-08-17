@@ -1,7 +1,11 @@
 """Unit tests for BYOK vendor presets (Moonshot / Kimi catalog seed)."""
 
 from agentcore.llm.byok_provider_presets import (
+    BYOK_PROVIDER_PRESETS,
+    is_opencode_go_base_url,
+    is_opencode_zen_base_url,
     match_byok_provider_preset,
+    normalize_byok_base_url,
     preset_models_for_base_url,
 )
 
@@ -80,3 +84,55 @@ def test_opencode_zen_trailing_slash_matches():
         "kimi-k2.6",
         "glm-5.2",
     )
+
+
+def test_opencode_go_preset_defaults_and_seed():
+    preset = match_byok_provider_preset("https://opencode.ai/zen/go/v1")
+    assert preset is not None
+    assert preset.id == "opencode_go"
+    assert preset.label == "OpenCode Go"
+    assert preset.default_model == "deepseek-v4-flash"
+    assert preset.models == ("deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2")
+    # /responses and /messages catalog ids stay off the chat/completions seed.
+    assert "grok-4.5" not in preset.models
+    assert "gpt-5.6-luna" not in preset.models
+    assert "minimax-m2.7" not in preset.models
+    assert "qwen3.7-max" not in preset.models
+    assert "deepseek-v4-flash-free" not in preset.models
+
+
+def test_opencode_go_trailing_slash_matches():
+    preset = match_byok_provider_preset("https://opencode.ai/zen/go/v1/")
+    assert preset is not None
+    assert preset.id == "opencode_go"
+    assert preset_models_for_base_url("https://opencode.ai/zen/go/v1/") == (
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "glm-5.2",
+    )
+
+
+def test_opencode_zen_and_go_urls_do_not_cross_match():
+    zen = "https://opencode.ai/zen/v1"
+    go = "https://opencode.ai/zen/go/v1"
+    assert is_opencode_zen_base_url(zen) is True
+    assert is_opencode_go_base_url(go) is True
+    assert is_opencode_zen_base_url(go) is False
+    assert is_opencode_go_base_url(zen) is False
+    assert is_opencode_zen_base_url(go + "/") is False
+    assert is_opencode_go_base_url(zen + "/") is False
+    # Prefix/contains would lie; equality after normalize must not.
+    assert go.startswith(zen) is False
+    assert zen not in go
+    assert match_byok_provider_preset("https://opencode.ai/zen") is None
+    assert match_byok_provider_preset("https://opencode.ai/zen/v1/extra") is None
+
+
+def test_byok_preset_base_urls_are_unique():
+    seen: set[str] = set()
+    for preset in BYOK_PROVIDER_PRESETS:
+        urls = (preset.base_url, *preset.base_url_aliases)
+        for url in urls:
+            key = normalize_byok_base_url(url)
+            assert key not in seen, key
+            seen.add(key)

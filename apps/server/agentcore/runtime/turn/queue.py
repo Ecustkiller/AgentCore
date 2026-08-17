@@ -65,6 +65,9 @@ class QueuedTurn:
     # Set when this entry was promoted from a user interjection (协调升队 /
     # 经典 steer leftover). Plain ``delivery=queue`` enqueues leave it None.
     interjection_id: str | None = None
+    # Return-path slot for a non-blocking ``question_posted`` answer. Must survive
+    # degraded enqueue (收口窗 leftover / 协调升队). None = ordinary message.
+    ask_id: str | None = None
     # Set by the enqueueing SSE when it opens: drain resolves with the live turn sink
     # so the waiting connection can continue on the same stream. None → no waiter
     # (tests / detached-only start) → sink starts detached as before.
@@ -190,16 +193,29 @@ class TurnQueue:
         return queue_account_snapshot_frame(queues)
 
     def _items_of(self, conversation_id: str) -> list[dict[str, Any]]:
-        """Pending entries as wire dicts, FIFO, 1-based ``position`` recomputed."""
-        return [
-            {
+        """Pending entries as wire dicts, FIFO, 1-based ``position`` recomputed.
+
+        Same fields as ``GET …/queued-turns`` ``QueuedTurnItem`` so a fulfill
+        replace can show attachments / ``@`` chips without a second GET.
+        Empty ``attachments`` / ``agent_mentions`` / ``ask_id`` are omitted
+        (GET empty lists are equivalent on the client).
+        """
+        rows: list[dict[str, Any]] = []
+        for idx, item in enumerate(self.list_pending(conversation_id), start=1):
+            row: dict[str, Any] = {
                 "queue_id": item.queue_id,
                 "content": item.content,
                 "position": idx,
                 "interjection_id": item.interjection_id,
             }
-            for idx, item in enumerate(self.list_pending(conversation_id), start=1)
-        ]
+            if item.ask_id:
+                row["ask_id"] = item.ask_id
+            if item.attachments:
+                row["attachments"] = item.attachments
+            if item.agent_mentions:
+                row["agent_mentions"] = item.agent_mentions
+            rows.append(row)
+        return rows
 
     def enqueue_and_ensure_drain(
         self,
@@ -422,6 +438,7 @@ async def _start_queued_turn(conversation_id: str, item: QueuedTurn) -> None:
                 llm_supports_tools=item.llm_supports_tools,
                 x_client_platform=item.x_client_platform,
                 agent_mentions=item.agent_mentions,
+                ask_id=item.ask_id,
             )
         )
     turn_runs.register(
@@ -444,6 +461,7 @@ def new_queued_turn(
     llm_credentials: Any = None,
     llm_supports_tools: bool | None = None,
     interjection_id: str | None = None,
+    ask_id: str | None = None,
     started: asyncio.Future[Any] | None = None,
 ) -> QueuedTurn:
     return QueuedTurn(
@@ -458,6 +476,7 @@ def new_queued_turn(
         llm_credentials=llm_credentials,
         llm_supports_tools=llm_supports_tools,
         interjection_id=interjection_id,
+        ask_id=ask_id,
         started=started,
     )
 

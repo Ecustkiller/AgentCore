@@ -32,6 +32,7 @@ import type {
   ExecutionStatus,
   UserInterjection,
 } from "./types";
+import { userInterjectionFromPayload } from "./userInterjection";
 
 /**
  * True when every projected **worker** has left pending/running (图收口 by run 终态).
@@ -115,6 +116,11 @@ export interface ExecutionRuntime {
   deliveryStatus: DeliveryStatusPayload | null;
   /** 用户插话（`user_interjection` · 经典/协调；同 interjectionId 保最新）。DURABLE。 */
   userInterjections: UserInterjection[];
+  /**
+   * Server-attested `message_end.outcome`. Product StatusStrip / arbitrator
+   * consume this as `attestedKind`; local delivery bits are fallback only.
+   */
+  attestedOutcome: "ok" | "partial" | "paused" | "error" | null;
 }
 
 /**
@@ -200,6 +206,11 @@ interface ExecutionState {
   /** Upsert a mid-flight user interjection (`user_interjection`, same id keeps latest). */
   upsertUserInterjection: (item: UserInterjection, messageId: string) => void;
   setStatus: (status: ExecutionStatus, messageId: string) => void;
+  /** Stamp server-attested `message_end.outcome` onto the live / hydrated slot. */
+  setAttestedOutcome: (
+    outcome: "ok" | "partial" | "paused" | "error" | null,
+    messageId: string,
+  ) => void;
   setPlayhead: (index: number | null, messageId: string) => void;
   goLive: (messageId: string) => void;
   /**
@@ -238,6 +249,7 @@ const EMPTY_EXEC: ExecutionRuntime = {
   executionDetached: null,
   deliveryStatus: null,
   userInterjections: [],
+  attestedOutcome: null,
 };
 
 const RUN_TERMINAL = new Set(["completed", "failed", "cancelled", "skipped"]);
@@ -401,6 +413,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         executionDetached: null,
         deliveryStatus: null,
         userInterjections: [],
+        attestedOutcome: null,
       })),
 
     ingestPlan: (plan, messageId) => {
@@ -635,6 +648,11 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         return cur.status === status ? null : { status };
       }),
 
+    setAttestedOutcome: (outcome, messageId) =>
+      patchExec(messageId, (cur) =>
+        cur.attestedOutcome === outcome ? null : { attestedOutcome: outcome },
+      ),
+
     setPlayhead: (index, messageId) =>
       patchExec(messageId, () => ({ playhead: index })),
 
@@ -654,6 +672,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         let deliveryStatus: DeliveryStatusPayload | null = null;
         /** journal 内 `execution_completed.status`（若有）→ 覆盖 finishReason 投影。 */
         let fromExecutionCompleted: ExecutionStatus | null = null;
+        let attestedOutcome: ExecutionRuntime["attestedOutcome"] = null;
         const userInterjections: UserInterjection[] = [];
         const interjectionIndex = new Map<string, number>();
         for (const event of journal.events) {
@@ -669,50 +688,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               evidenceLedger = debate.evidence_ledger;
             }
           } else if (event.type === "user_interjection") {
-            const p = event.payload as {
-              interjection_id?: string;
-              execution_id?: string;
-              content?: string;
-              status?: string;
-              note?: string | null;
-              attachments?: Array<{
-                name?: string;
-                workspace_path?: string;
-                binary?: boolean;
-              }>;
-            };
-            const iid = (p.interjection_id || "").trim();
-            if (!iid) continue;
-            const attachments = (p.attachments ?? [])
-              .filter(
-                (
-                  a,
-                ): a is {
-                  name: string;
-                  workspace_path?: string;
-                  binary?: boolean;
-                } => typeof a.name === "string" && Boolean(a.name.trim()),
-              )
-              .map((a) => ({
-                name: a.name.trim(),
-                workspacePath:
-                  typeof a.workspace_path === "string" &&
-                  a.workspace_path.trim()
-                    ? a.workspace_path
-                    : undefined,
-                binary: Boolean(a.binary),
-              }));
-            const leaf: UserInterjection = {
-              interjectionId: iid,
-              executionId: p.execution_id || "",
-              content: p.content || "",
-              status: p.status || "received",
-              note: typeof p.note === "string" ? p.note : null,
-              ...(attachments.length > 0 ? { attachments } : {}),
-            };
-            const idx = interjectionIndex.get(iid);
+            const leaf = userInterjectionFromPayload(event.payload);
+            if (!leaf) continue;
+            const idx = interjectionIndex.get(leaf.interjectionId);
             if (idx === undefined) {
-              interjectionIndex.set(iid, userInterjections.length);
+              interjectionIndex.set(
+                leaf.interjectionId,
+                userInterjections.length,
+              );
               userInterjections.push(leaf);
             } else {
               userInterjections[idx] = leaf;
@@ -788,6 +771,16 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
               raw === "cancelled" || raw === "failed" || raw === "completed"
                 ? raw
                 : "completed";
+          } else if (event.type === "message_end") {
+            const raw = (event.payload as { outcome?: unknown }).outcome;
+            if (
+              raw === "ok" ||
+              raw === "partial" ||
+              raw === "paused" ||
+              raw === "error"
+            ) {
+              attestedOutcome = raw;
+            }
           } else {
             const frame = frameFromEvent(event);
             if (frame) frames.push(frame);
@@ -796,7 +789,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         // No run_plan：经典单聊 / 可用性短问——无协作图骨架，仍恢复 DURABLE 插话
         // 与 deliveryStatus（刷新后 InterjectionTimeline / 交付卡可读）。
         if (!plan) {
-          if (!deliveryStatus && userInterjections.length === 0) return {};
+          if (
+            !deliveryStatus &&
+            userInterjections.length === 0 &&
+            attestedOutcome == null
+          )
+            return {};
           const cur = state.byId[messageId] ?? EMPTY_EXEC;
           return {
             byId: {
@@ -805,6 +803,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
                 ...cur,
                 ...(deliveryStatus ? { deliveryStatus } : {}),
                 ...(userInterjections.length > 0 ? { userInterjections } : {}),
+                ...(attestedOutcome != null ? { attestedOutcome } : {}),
               },
             },
           };
@@ -816,7 +815,10 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
         // still run — keep graph running + background stamp so soft refresh can
         // heal worker terminals without collapsing the strip to「团队完成」.
         const finishStatus =
-          fromExecutionCompleted ?? statusFromFinish(journal.finishReason);
+          attestedOutcome === "paused"
+            ? "paused"
+            : (fromExecutionCompleted ??
+              statusFromFinish(journal.finishReason));
         const provisional: ExecutionRuntime = {
           ...EMPTY_EXEC,
           plan,
@@ -858,6 +860,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => {
                 : null,
               deliveryStatus,
               userInterjections,
+              attestedOutcome,
             },
           },
         };

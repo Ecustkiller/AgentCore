@@ -18,7 +18,10 @@ import type {
   MentionCategoryId,
   MentionCategoryRow,
 } from "./message-input/mentionMenuLevel";
-import { isMentionSectionId } from "./message-input/mentionMenuLevel";
+import {
+  MENTION_LIST_TRUNCATED_HINT,
+  isMentionSectionId,
+} from "./message-input/mentionMenuLevel";
 
 export type MentionMenuSelectable =
   | { kind: "agent"; agentId: string; role: string }
@@ -30,6 +33,8 @@ export interface MentionMenuSection {
   items: MentionMenuSelectable[];
   /** 分区无候选时的一行软提示（团队空态）。 */
   emptyHint?: string;
+  /** 列表被条数上限或源索引截断。 */
+  truncated?: boolean;
 }
 
 interface Props {
@@ -337,7 +342,7 @@ export function MentionMenu({
                           </span>
                           <span className="ml-auto truncate text-xs text-muted-foreground">
                             {isAgent(item)
-                              ? "角色"
+                              ? "点名"
                               : item.kind === "conversation"
                                 ? "对话"
                                 : item.display}
@@ -347,6 +352,14 @@ export function MentionMenu({
                     </div>
                   );
                 })}
+                {section.truncated && section.items.length > 0 && (
+                  <div
+                    data-mention-truncated={section.id}
+                    className="px-3 py-1.5 text-xs text-muted-foreground"
+                  >
+                    {MENTION_LIST_TRUNCATED_HINT}
+                  </div>
+                )}
               </li>
             );
           })}

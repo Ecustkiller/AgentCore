@@ -55,20 +55,25 @@ export function deriveCaptainStatus(
   captainId: string,
   opts?: { turnTerminal?: boolean },
 ): RunStatus {
-  if (execution.status === "failed") return "failed";
   if (execution.status === "cancelled") return "cancelled";
   // Cold pause (ask_user / plan_review / …): workers may all be done, but CEO
   // is waiting on the user — never paint the sink as「正在生成汇总」.
   // RunStatus has no `paused`; `pending` clears the synthesis spinner.
   if (execution.status === "paused") return "pending";
+  // Captain paints failed only from its own run_failed — whole-graph
+  // execution.failed (worker 429 / synthesis miss) must not redden「CEO 汇总」.
+  const captainRun = execution.runs.find((r) => r.id === captainId);
+  if (captainRun?.status === "failed") return "failed";
+  if (captainRun?.status === "cancelled") return "cancelled";
   // Exclude *all* captains (not only `captainId`): append-turn captains must not
   // count as incomplete "workers" and stall the sink on pending.
-  void captainId;
   const workers = workerRunsOf(execution.runs);
   // 工人未齐 = 待汇总。CEO 已 end_turn（turnTerminal）或 fold 误标
   // execution.completed 都不能把节点焊成「已汇总」——图是进度真相。
   if (workers.some((r) => !WORKER_TERMINAL.has(r.status))) return "pending";
   if (execution.status === "completed") return "completed";
+  // Workers all terminal but captain never failed: not synthesizing, not 失败.
+  if (execution.status === "failed") return "pending";
   // Workers all terminal, execution still live — harvest / in-turn synthesis.
   if (workers.length > 0) return "running";
   // No workers: message_end still means this captain-only turn closed.

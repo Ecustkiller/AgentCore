@@ -20,6 +20,7 @@ dir so overlapping PAUSED flush and a new turn do not open two SQLite handles.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -92,3 +93,22 @@ def clear_index_registry() -> None:
         manager.release()
     _managers.clear()
     _maintainers.clear()
+
+
+async def drain_index_registry() -> None:
+    """Abort in-flight maintenance and drop all entries (tests only).
+
+    ``clear_index_registry`` only cancels; the cancelled ``code-index-maintain``
+    task can still resume into ``asyncio.to_thread`` after pytest-asyncio shuts
+    the function-scoped loop's default executor
+    (``RuntimeError: Executor shutdown has been called``). Await here while the
+    loop is still alive.
+    """
+    pending: list[asyncio.Task[None]] = []
+    for maintainer in list(_maintainers.values()):
+        task = maintainer.abort()
+        if task is not None:
+            pending.append(task)
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    clear_index_registry()

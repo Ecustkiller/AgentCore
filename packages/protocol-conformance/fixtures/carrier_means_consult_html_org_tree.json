@@ -80,6 +80,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "这棵组织树很宽，静态 HTML 1:1 照搬几乎看不全；更适合可折叠树或按部门分区，也可仍按原样 HTML。",
     "reasoning": "",

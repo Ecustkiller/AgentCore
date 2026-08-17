@@ -1,21 +1,11 @@
 import { promises as fs } from "node:fs";
 import { join } from "node:path";
 import type { WorkspaceOpResult } from "@shared/ipc-contract";
-import ignore, { type Ignore } from "ignore";
 import JSZip from "jszip";
-import {
-  ARCHIVE_MAX_BYTES,
-  ARCHIVE_MAX_FILES,
-  LIST_FILES_SKIP_DIRS,
-} from "../constants";
+import { ARCHIVE_MAX_BYTES, ARCHIVE_MAX_FILES } from "../constants";
+import { loadIgnore } from "../loadIgnore";
 import { toReason } from "../pathGuard";
 import type { StoredRoot } from "../roots";
-import {
-  BASELINES_REL,
-  INDEX_REL,
-  TRASH_REL,
-  VERSIONS_REL,
-} from "../workspaceIgnore";
 import { opErr, opOk } from "./result";
 
 // --- 本地→云交接打包 op（双模式工作区 P2e / e1）---
@@ -24,26 +14,6 @@ import { opErr, opOk } from "./result";
 // 默认跳过集（与 @ 提及列举一致的依赖/构建/VCS 噪音）+ 根 .gitignore，避免把 node_modules
 // 之类塞进交接。设文件数/字节上限防超大仓 OOM 或撑爆通道，超限置 truncated（部分交接好过
 // 整体失败）。只在根内 walk 且不跟随符号链接，故越界天然不可能。
-
-/** 载入忽略规则：默认跳过集 + 路径感知内部区 + 根 `.gitignore`（缺失则仅默认集）。 */
-async function loadIgnore(rootAbs: string): Promise<Ignore> {
-  const ig = ignore();
-  // 默认跳过集按目录规则加入（"name/" 匹配整棵子树）+ *.db。
-  ig.add([...LIST_FILES_SKIP_DIRS].map((d) => `${d}/`));
-  ig.add([
-    `${INDEX_REL}/`,
-    `${TRASH_REL}/`,
-    `${BASELINES_REL}/`,
-    `${VERSIONS_REL}/`,
-  ]);
-  ig.add(["*.db"]);
-  try {
-    ig.add(await fs.readFile(join(rootAbs, ".gitignore"), "utf-8"));
-  } catch {
-    // 无 .gitignore —— 仅用默认集
-  }
-  return ig;
-}
 
 export async function opArchive(
   root: StoredRoot,

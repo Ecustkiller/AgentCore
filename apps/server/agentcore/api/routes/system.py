@@ -11,6 +11,8 @@ acts on the right signal:
   (rate-limit backend) is probed as a soft dependency: when
   ``rate_limit_backend=redis`` the body still includes ``redis``, but a Redis
   failure does **not** flip the status to ``503`` (limiters fail-open / degrade).
+  Disk watermark is the same posture: ``body["disk"]`` is observational (host
+  volume, not container overlay) and **never** participates in 200/503.
 - ``GET /version`` — build provenance (semantic version + git SHA + build time)
   for traceability and instant rollback.
 - ``GET /updates/policy`` — desktop auto-update remote circuit breaker + hard
@@ -36,6 +38,7 @@ from agentcore.cache.redis_health import redis_ready
 from agentcore.config import settings
 from agentcore.core.logging import get_logger
 from agentcore.db.base import database_ready
+from agentcore.observability.disk import observe_disk
 from agentcore.observability.stream_timing import elapsed_ms, mono_now
 
 router = APIRouter(tags=["system"])
@@ -78,16 +81,20 @@ async def liveness() -> dict[str, str]:
 
 @router.get("/readyz")
 async def readiness(response: Response) -> dict[str, object]:
-    """Readiness probe: HTTP 200/503 follows DB only; Redis is observational.
+    """Readiness probe: HTTP 200/503 follows DB only; Redis/disk are observational.
 
     PostgreSQL is the hard dependency that decides ``ready`` / ``not_ready``
     (and thus 200 vs 503). Redis is a soft dependency for distributed rate
     limiting: still probed and, when ``rate_limit_backend=redis``, written to
     ``body["redis"]`` for ops/alerting; a Redis outage must not return 503.
+    Disk watermark is always written to ``body["disk"]`` (host volume via
+    ``DATA_DIR``, overlay skipped) and likewise must not return 503 — a high
+    watermark that flipped readiness would restart a still-serving instance.
     """
     t0 = mono_now()
     db_ok = await database_ready()
     redis_ok = await redis_ready()
+    disk = observe_disk()
     probe_ms = elapsed_ms(t0)
     ready = db_ok
     if not ready:
@@ -95,6 +102,7 @@ async def readiness(response: Response) -> dict[str, object]:
     body: dict[str, object] = {
         "status": "ready" if ready else "not_ready",
         "database": db_ok,
+        "disk": disk.to_readyz_field(),
     }
     if settings.rate_limit_backend == "redis":
         body["redis"] = redis_ok

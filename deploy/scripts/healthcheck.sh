@@ -5,9 +5,9 @@
 # 单次探测 /readyz：HTTP 200/503 **仅由 PostgreSQL 决定**（Redis 是限流软依赖，
 # 不因 redis 失败回 503；详见 body 字段 / 日志 redis.probe_failed）。HTTP 非 200
 # → 连续 N 次失败才告警（防抖）→ 恢复时补一条恢复通知。HTTP 200 但 body 含
-# `"redis": false` 时另发一条软告警（不挡部署、不计入失败计数）。由 systemd
-# timer（或 cron）每 1–2 分钟驱动一次；本脚本自身无状态循环，连续失败计数落
-# STATE_FILE 跨次累积。
+# `"redis": false`、或 `disk.used_pct` 越过 DISK_WARN_PCT 时，各发一条软告警
+# （不挡部署、不计入失败计数、边沿触发一次）。由 systemd timer（或 cron）每 1–2
+# 分钟驱动一次；本脚本自身无状态循环，连续失败计数落 STATE_FILE 跨次累积。
 #
 # 告警出口是「可插拔 notifier」：配了 ALERT_WEBHOOK_URL（飞书群机器人）就推飞书，
 # 没配就降级到 journald（stderr，systemd 自动收）+ 非零退出。换钉钉/换渠道只改
@@ -23,6 +23,7 @@
 #   FAIL_THRESHOLD     连续失败几次才首次告警    （默认 3，防抖）
 #   REALERT_EVERY      持续失败每隔几次再报一次  （默认 30，0=只报一次直到恢复）
 #   STATE_FILE         连续失败计数文件          （默认 $AGENTCORE_HOME/.healthcheck.state）
+#   DISK_WARN_PCT      磁盘水位软告警阈值(%)     （默认 80，与 observability/disk.py 同口径）
 #   ALERT_WEBHOOK_URL  飞书群机器人 webhook      （未配则降级 journald）
 #   ALERT_KEYWORD      告警前缀/飞书自定义关键词 （默认 AgentCore）
 
@@ -39,8 +40,12 @@ HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-10}"
 FAIL_THRESHOLD="${FAIL_THRESHOLD:-3}"
 REALERT_EVERY="${REALERT_EVERY:-30}"
 STATE_FILE="${STATE_FILE:-$AGENTCORE_HOME/.healthcheck.state}"
-# Redis 软依赖告警边沿状态（0=正常/未知，1=已报过 redis=false）；与 HTTP 失败计数分离
+# 软依赖告警边沿状态（0=正常/未知，1=已报过）；各自独立，与 HTTP 失败计数分离
 REDIS_STATE_FILE="${REDIS_STATE_FILE:-$AGENTCORE_HOME/.healthcheck.redis.state}"
+DISK_STATE_FILE="${DISK_STATE_FILE:-$AGENTCORE_HOME/.healthcheck.disk.state}"
+# 磁盘水位告警阈值（%）。与 server 端 observability/disk.py 的 HIGH_WATERMARK_PCT
+# 同口径；那边写 jsonl 供事后巡检，这里负责当场推人。
+DISK_WARN_PCT="${DISK_WARN_PCT:-80}"
 ALERT_WEBHOOK_URL="${ALERT_WEBHOOK_URL:-}"
 ALERT_KEYWORD="${ALERT_KEYWORD:-AgentCore}"
 
@@ -89,17 +94,17 @@ write_state() {  # 写计数；状态目录不可写则仅告警（防抖退化�
   fi
 }
 
-read_redis_state() {
+read_edge_state() {  # $1=state file；只认 0/1，其余当 0（未报过）
   local v=0
-  if [[ -f "$REDIS_STATE_FILE" ]]; then
-    v="$(cat "$REDIS_STATE_FILE" 2>/dev/null || echo 0)"
+  if [[ -f "$1" ]]; then
+    v="$(cat "$1" 2>/dev/null || echo 0)"
     [[ "$v" =~ ^[01]$ ]] || v=0
   fi
   printf '%s' "$v"
 }
-write_redis_state() {
-  mkdir -p "$(dirname "$REDIS_STATE_FILE")" 2>/dev/null || true
-  printf '%s' "$1" >"$REDIS_STATE_FILE" 2>/dev/null || true
+write_edge_state() {  # $1=state file, $2=0|1
+  mkdir -p "$(dirname "$1")" 2>/dev/null || true
+  printf '%s' "$2" >"$1" 2>/dev/null || true
 }
 
 # ── 单次探测：仅 HTTP 200 视为健康（DB ready）。curl 的 %{http_code} 在连接失败
@@ -116,19 +121,38 @@ if [[ "$code" == "200" ]]; then
   fi
   write_state 0
   # Redis 软依赖：HTTP 仍健康；body redis=false 时边沿告警一次（不 exit 1、不挡部署）
-  redis_prev="$(read_redis_state)"
+  redis_prev="$(read_edge_state "$REDIS_STATE_FILE")"
   if grep -Eq '"redis"[[:space:]]*:[[:space:]]*false' "$body_file" 2>/dev/null; then
     if [[ "$redis_prev" != "1" ]]; then
       send_alert "⚠️ Redis 软依赖异常：$HEALTH_URL 200 但 body redis=false（限流可降级；见日志 redis.probe_failed）"
-      write_redis_state 1
+      write_edge_state "$REDIS_STATE_FILE" 1
     fi
     warn "redis soft-dep unhealthy: $HEALTH_URL 200 redis=false"
   else
     if [[ "$redis_prev" == "1" ]]; then
       send_alert "✅ Redis 软依赖已恢复：$HEALTH_URL body redis 不再为 false"
-      write_redis_state 0
+      write_edge_state "$REDIS_STATE_FILE" 0
     fi
     log "healthy: $HEALTH_URL 200"
+  fi
+
+  # 磁盘水位：同样是观测字段（/readyz 200/503 只看 Postgres），但盘满会让 Postgres
+  # checkpoint 写不出去 → PANIC 恢复循环（2026-08-17 线上全挂即此形态）。所以在还只是
+  # 高水位时就推人，是这条分支存在的唯一理由。used_pct 为 null（探测失败）时不报——
+  # server 端已写 disk.probe_failed，这里再报一次只是噪音。
+  disk_pct="$(sed -n 's/.*"disk"[[:space:]]*:[[:space:]]*{[^}]*"used_pct"[[:space:]]*:[[:space:]]*\([0-9.]\{1,\}\).*/\1/p' \
+    "$body_file" 2>/dev/null | head -1)"
+  disk_prev="$(read_edge_state "$DISK_STATE_FILE")"
+  if [[ -n "$disk_pct" ]] \
+    && awk -v p="$disk_pct" -v t="$DISK_WARN_PCT" 'BEGIN { exit !(p + 0 >= t + 0) }'; then
+    if [[ "$disk_prev" != "1" ]]; then
+      send_alert "⚠️ 磁盘水位 ${disk_pct}% ≥ ${DISK_WARN_PCT}%：$HEALTH_URL 仍 200，但盘满会让 Postgres/Redis 写失败（清理或扩容）"
+      write_edge_state "$DISK_STATE_FILE" 1
+    fi
+    warn "disk watermark high: ${disk_pct}% >= ${DISK_WARN_PCT}%"
+  elif [[ -n "$disk_pct" && "$disk_prev" == "1" ]]; then
+    send_alert "✅ 磁盘水位已回落：${disk_pct}% < ${DISK_WARN_PCT}%"
+    write_edge_state "$DISK_STATE_FILE" 0
   fi
   exit 0
 fi

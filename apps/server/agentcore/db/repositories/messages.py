@@ -7,7 +7,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from agentcore.core.types import new_id
+from agentcore.core.types import is_uuid_id, new_id
 from agentcore.db.models import (
     Conversation,
     Message,
@@ -20,6 +20,7 @@ from agentcore.db.models import (
 from ._audit_cascade import delete_audit_after, delete_audit_for_message
 from ._base import _ilike_pattern, commit_or_flush, strip_nul
 from ._journal_cascade import delete_journal_after, delete_journal_for_message
+from ._stream_state_cascade import delete_stream_state_after, delete_stream_state_for_message
 
 
 class MessageRepository:
@@ -35,6 +36,7 @@ class MessageRepository:
         reasoning_content: str | None = None,
         metadata: dict | None = None,
         attachments: list | None = None,
+        agent_mentions: list | None = None,
         citations: list | None = None,
         evidence_ledger: list | None = None,
         message_id: str | None = None,
@@ -43,10 +45,13 @@ class MessageRepository:
         # `message_id` lets the caller pin the row id to the pipeline's id (the
         # one already sent to the client on `message_start`), so the streamed and
         # persisted assistant message agree; defaults to a fresh id otherwise.
+        # Non-UUID pins (legacy sidecar ``resume-{turn_id}``) are dropped — the
+        # column is PG UUID and must not bind an illegal key.
         # `trace_id` (the turn's log correlation key) is supplied by the caller —
         # which owns the contextvar scope — so this row joins to its log trace.
+        pinned_id = message_id if is_uuid_id(message_id) else None
         msg = Message(
-            id=message_id or new_id(),
+            id=pinned_id or new_id(),
             conversation_id=conversation_id,
             role=role,
             content=strip_nul(content),
@@ -56,6 +61,8 @@ class MessageRepository:
         )
         if attachments is not None:
             msg.attachments = strip_nul(attachments)
+        if agent_mentions is not None:
+            msg.agent_mentions = strip_nul(agent_mentions)
         if citations is not None:
             msg.citations = strip_nul(citations)
         if evidence_ledger is not None:
@@ -321,7 +328,8 @@ class MessageRepository:
         Backs 克隆对话 (duplicate a conversation): the target is a freshly-created empty
         conversation, so this bulk-inserts fresh-id copies of the source's rows, preserving
         render order (``created_at`` copied verbatim) and content-level fields (role /
-        content / reasoning / usage / attachments / citations / followups / cost).
+        content / reasoning / usage / attachments / agent_mentions / citations /
+        followups / cost).
 
         Intentionally NOT copied: ``trace_id`` (a copy is not a real turn — reusing it would
         double-link the original turn's logs), ``feedback`` (a rating belongs to the turn the
@@ -339,6 +347,7 @@ class MessageRepository:
                 reasoning_content=r.reasoning_content,
                 usage=r.usage,
                 attachments=list(r.attachments or []),
+                agent_mentions=list(r.agent_mentions or []),
                 citations=list(r.citations or []),
                 evidence_ledger=list(r.evidence_ledger or []),
                 followups=list(r.followups or []),
@@ -751,13 +760,17 @@ class MessageRepository:
         soft-delete column — replacing a turn means the old branch is gone
         (conversation branching is a separate, later feature). Each dropped
         message's ``turn_journal`` replay stream goes with it (§8.3 唯一事实源 — it
-        could never project without its message). Any matching ``paused_turns`` frame
+        could never project without its message), as do leftover ``turn_stream_state``
+        snapshots. Any matching ``paused_turns`` frame
         is dropped too — otherwise resume would find a frame whose journal is gone —
         together with the frame's recorded outcome: a card whose turn no longer exists
         must read as「已重新生成」, not go on reporting the decision that once settled it.
 
         Pass ``commit=False`` when pairing with :meth:`update_content` in one txn.
         """
+        await delete_stream_state_after(
+            self._session, conversation_id, after_created_at=after_created_at
+        )
         await delete_journal_after(
             self._session, conversation_id, after_created_at=after_created_at
         )
@@ -813,7 +826,8 @@ class MessageRepository:
         IDOR-safe; the turn_journal delete is scoped the same way, so a cross-tenant
         id touches neither row). Messages have no soft-delete column, so this is a
         physical delete; its ``turn_journal`` replay stream is dropped with it (§8.3
-        唯一事实源), and any matching ``paused_turns`` frame is dropped too (otherwise
+        唯一事实源), leftover ``turn_stream_state`` snapshots go too, and any matching
+        ``paused_turns`` frame is dropped too (otherwise
         resume would find a frame whose journal is gone) along with that frame's
         recorded outcome (a deleted turn reports「已重新生成或删除」, never its old
         decision), but the append-only ``cost_events`` ledger is intentionally left
@@ -822,6 +836,7 @@ class MessageRepository:
         Pass ``commit=False`` when pairing two deletes in one txn. Default
         ``commit=True`` keeps standalone delete atomicity for other callers.
         """
+        await delete_stream_state_for_message(self._session, conversation_id, message_id)
         await delete_journal_for_message(self._session, conversation_id, message_id)
         await delete_audit_for_message(self._session, conversation_id, message_id)
         await self._session.execute(

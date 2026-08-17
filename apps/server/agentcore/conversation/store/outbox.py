@@ -142,6 +142,7 @@ class OutboxStore:
         origin: str | None = None,
         execution_id: str | None = None,
         harvest_kind: str | None = None,
+        agent_mentions: list[dict] | None = None,
     ) -> None:
         """Pin one turn's idempotency keys before begin_turn / pipeline.
 
@@ -163,6 +164,12 @@ class OutboxStore:
         ):
             if isinstance(val, str) and val.strip():
                 ctx[key] = val.strip()
+        if agent_mentions:
+            from agentcore.conversation.mentions import to_stored_agent_mentions
+
+            stored = to_stored_agent_mentions(agent_mentions)
+            if stored:
+                ctx["agent_mentions"] = stored
         self._contexts[message_id] = ctx
 
     def clear_turn(self, message_id: str | None = None) -> None:
@@ -379,6 +386,9 @@ class OutboxStore:
             record["user_message_id"] = user_message_id
             if user_message:
                 record["user_message"] = user_message
+            mentions = ctx.get("agent_mentions")
+            if isinstance(mentions, list) and mentions:
+                record["agent_mentions"] = mentions
             record["phase"] = PHASE_OPEN
             record.setdefault("ops", []).append("begin_turn")
 
@@ -629,6 +639,15 @@ class OutboxStore:
                 val = kwargs.get(key)
                 if isinstance(val, str) and val.strip():
                     record[key] = val.strip()
+            mentions = kwargs.get("agent_mentions")
+            if mentions is not None:
+                from agentcore.conversation.mentions import to_stored_agent_mentions
+
+                stored = to_stored_agent_mentions(
+                    mentions if isinstance(mentions, list) else None
+                )
+                if stored:
+                    record["agent_mentions"] = stored
             record["phase"] = PHASE_READY
             ops = record.setdefault("ops", [])
             if "finalize" not in ops:
@@ -838,6 +857,13 @@ class OutboxStore:
 
         await self._mutate(user_message_id, mutate)
 
+    async def discard(self, user_message_id: str) -> None:
+        """Drop the outbox file so write-back cannot resurrect this turn."""
+        if not _is_safe_id(user_message_id):
+            return
+        async with self._lock_for(user_message_id):
+            await asyncio.to_thread(delete_outbox_record, self._base, user_message_id)
+
 
 def captain_text_from_stream_segments(
     stream_segments: dict[str, Any] | None,
@@ -1012,4 +1038,11 @@ def to_record_turn_body(record: dict[str, Any]) -> dict[str, Any]:
     failures = tool_failures_from_journal(journal)
     if failures:
         body["tool_failures"] = failures
+    mentions = record.get("agent_mentions")
+    if isinstance(mentions, list) and mentions:
+        from agentcore.conversation.mentions import to_stored_agent_mentions
+
+        stored = to_stored_agent_mentions(mentions)
+        if stored:
+            body["agent_mentions"] = stored
     return body

@@ -11,7 +11,7 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, NamedTuple
 
 from agentcore.core.logging import get_logger
 
@@ -34,6 +34,7 @@ _INTERJECTION_SNAPSHOT_KEYS = frozenset(
         "conversation_id",
         "attachments",
         "agent_mentions",
+        "ask_id",
         "requires_tools",
         "x_client_platform",
         "llm_supports_tools",
@@ -299,6 +300,14 @@ def should_enter_coordination(
     return worker_count >= 1
 
 
+class _WorkerSpend(NamedTuple):
+    """Process-local live spend for one in-flight worker. Not snapshotted."""
+
+    rounds_used: int | None = None
+    rounds_limit: int | None = None
+    tokens_spent: int | None = None
+
+
 @dataclass
 class CoordinationSession:
     """In-process coordination state for one non-blocking delegate batch."""
@@ -346,6 +355,9 @@ class CoordinationSession:
     harvest_user_facts: dict[str, Any] | None = None
     # Terminal events parked across first-turn close() so harvest can re-queue them.
     _harvest_stash: list[CoordinationEvent] = field(default_factory=list, repr=False)
+    # Strong refs for fire-and-forget harvest tasks (bare create_task is a weak
+    # ref; the loop may destroy a pending task before it runs).
+    _harvest_tasks: set[asyncio.Task[Any]] = field(default_factory=set, repr=False)
     # Background WaveScheduler task (owned by drive); None until started.
     drive_task: asyncio.Task[Any] | None = None
     # ask_user soft-stop sets this before cancelling drive_task so the cancel
@@ -366,6 +378,9 @@ class CoordinationSession:
     # Deliberately NOT snapshotted: a soft-stop/resume hands the turn back to the
     # resume pipeline, which already reuses the original id on its own.
     recovered_turn_id: str = ""
+    # Process-local: CEO rate-limit continue pause. Not snapshotted — harvest
+    # also checks persisted ``outcome=paused`` / the ``ceo_continue`` lock.
+    host_turn_paused: bool = False
     # Set when a harvest closing turn has been scheduled (idempotent).
     harvest_scheduled: bool = False
     # Drive posted ALL_COMPLETED / DRIVE_CANCELLED (终态对账前置条件).
@@ -397,6 +412,10 @@ class CoordinationSession:
     #   summary, but does NOT count as has_inflight_work — CEO may patrol /
     #   cancel_worker instead of parking behind wall+0. 不快照。
     _busy_workers: dict[str, str] = field(default_factory=dict, repr=False)
+    # Live used/limit/tokens last stamped via ``note_coord_worker_busy``.
+    # Survives clear_busy (轮间 / verify still need the last known spend);
+    # dropped with the running-worker registry. 不快照。
+    _worker_spend: dict[str, _WorkerSpend] = field(default_factory=dict, repr=False)
     # Sibling verify coalesce (same execution): fingerprint → inflight Future /
     # completed ToolResult snapshot. Process-local; not snapshotted (resume
     # re-runs unfinished workers). Generation bumps on successful land so a
@@ -670,13 +689,58 @@ class CoordinationSession:
         """
         return sorted(self._running_workers.items())
 
-    def mark_worker_busy(self, run_id: str, kind: str) -> None:
-        """Stamp that ``run_id`` is inside an LLM stream, tool call, or verify."""
+    def mark_worker_busy(
+        self,
+        run_id: str,
+        kind: str,
+        *,
+        rounds_used: int | None = None,
+        rounds_limit: int | None = None,
+        tokens_spent: int | None = None,
+    ) -> None:
+        """Stamp that ``run_id`` is inside an LLM stream, tool call, or verify.
+
+        Optional spend kwargs piggyback engine-already-tracked numbers onto the
+        same busy channel (once per LLM/tool/round — not per token). Omit a
+        kwarg to leave that field unchanged. Spend survives ``clear_worker_busy``.
+        """
         rid = (run_id or "").strip()
         if not rid or rid not in self._running_workers:
             return
         label = kind if kind in ("llm", "tool", "verify") else "llm"
         self._busy_workers[rid] = label
+        self._merge_worker_spend(
+            rid,
+            rounds_used=rounds_used,
+            rounds_limit=rounds_limit,
+            tokens_spent=tokens_spent,
+        )
+
+    def _merge_worker_spend(
+        self,
+        rid: str,
+        *,
+        rounds_used: int | None,
+        rounds_limit: int | None,
+        tokens_spent: int | None,
+    ) -> None:
+        if rounds_used is None and rounds_limit is None and tokens_spent is None:
+            return
+        prev = self._worker_spend.get(rid)
+        used = int(rounds_used) if rounds_used is not None else (
+            prev.rounds_used if prev is not None else None
+        )
+        limit = int(rounds_limit) if rounds_limit is not None else (
+            prev.rounds_limit if prev is not None else None
+        )
+        if tokens_spent is not None:
+            prior = 0
+            if prev is not None and prev.tokens_spent is not None:
+                prior = prev.tokens_spent
+            spent: int | None = max(int(tokens_spent), prior)
+        else:
+            spent = prev.tokens_spent if prev is not None else None
+        self._worker_spend[rid] = _WorkerSpend(used, limit, spent)
 
     def clear_worker_busy(self, run_id: str) -> None:
         self._busy_workers.pop((run_id or "").strip(), None)
@@ -689,8 +753,54 @@ class CoordinationSession:
         """True when any registered worker is inside a bounded verify."""
         return any(kind == "verify" for kind in self._busy_workers.values())
 
+    def worker_budget_facts(self, run_id: str) -> list[str]:
+        """Engine-already-tracked budget numbers for one in-flight worker.
+
+        Live spend (pass-local used/limit + tokens_spent) when the executor has
+        stamped via ``note_coord_worker_busy``; otherwise the plan's static
+        ceilings. Facts only — no runaway / quality heuristic. Omit a field
+        when neither the live stamp nor the plan has it.
+        """
+        bits: list[str] = []
+        from agentcore.runtime.runs.timeout_hard import get_hard_timeout
+
+        guard = get_hard_timeout(run_id)
+        if guard is not None:
+            bits.append(f"超时阈值 {int(guard.threshold_s)}s")
+            phase = getattr(guard.phase, "value", "") or ""
+            if phase and phase not in ("armed", "disarmed"):
+                bits.append(f"超时态 {phase}")
+        spec = None
+        live = self.live_plan
+        if live is not None:
+            for node in getattr(live, "nodes", None) or []:
+                if getattr(node, "run_id", None) == run_id:
+                    spec = node
+                    break
+        spend = self._worker_spend.get(run_id)
+        live_used = spend.rounds_used if spend is not None else None
+        live_limit = spend.rounds_limit if spend is not None else None
+        live_tokens = spend.tokens_spent if spend is not None else None
+        ceiling = getattr(spec, "token_ceiling", None) if spec is not None else None
+        spec_rounds = getattr(spec, "max_rounds", None) if spec is not None else None
+        if spec is not None and guard is None:
+            timeout_s = getattr(getattr(spec, "policy", None), "timeout_s", None)
+            if timeout_s:
+                bits.append(f"超时阈值 {int(timeout_s)}s")
+        if live_used is not None and live_limit is not None and live_limit > 0:
+            bits.append(f"已用 {int(live_used)}/{int(live_limit)} 轮")
+        elif spec_rounds:
+            bits.append(f"轮次上限 {int(spec_rounds)}")
+        if live_tokens is not None and ceiling:
+            bits.append(f"已花 {int(live_tokens)}/{int(ceiling)}")
+        elif live_tokens is not None:
+            bits.append(f"已花 {int(live_tokens)}")
+        elif ceiling:
+            bits.append(f"token 顶 {int(ceiling)}")
+        return bits
+
     def worker_progress_summary(self) -> str:
-        """Human lines for idle-patrol nudge: role / elapsed / busy-or-idle."""
+        """Human lines for idle-patrol / idle-yield: role / elapsed / busy / budgets."""
         now = time.monotonic()
         lines: list[str] = []
         busy_label = {
@@ -702,7 +812,8 @@ class CoordinationSession:
             started = self._worker_started_at.get(run_id)
             elapsed = int(now - started) if started is not None else 0
             status = busy_label.get(self._busy_workers.get(run_id, ""), "轮间/无进行中调用")
-            lines.append(f"  - 【{role}】run_id={run_id} 已运行 {elapsed}s · {status}")
+            bits = [f"已运行 {elapsed}s", status, *self.worker_budget_facts(run_id)]
+            lines.append(f"  - 【{role}】run_id={run_id} " + " · ".join(bits))
         done = len(self.completed_run_ids)
         total = self.total_workers
         head = f"队员进展（已完成 {done}/{total}）："
@@ -1138,6 +1249,7 @@ class CoordinationSession:
         # longer resolvable (mark_worker_completed routes through here too).
         self._running_workers.pop(run_id, None)
         self._busy_workers.pop(run_id, None)
+        self._worker_spend.pop(run_id, None)
 
     def cancel_all_timeouts(self) -> None:
         for run_id in list(self._timeout_tasks):
@@ -1224,7 +1336,7 @@ class CoordinationSession:
         return time.monotonic() - self.last_wake_monotonic
 
     def bump_idle_backoff(self) -> None:
-        """One more consecutive idle-patrol timeout (widen the next idle wait)."""
+        """One more consecutive idle timeout or busy-wait yield (widen next wait)."""
         self.idle_streak += 1
 
     def reset_idle_backoff(self) -> None:
@@ -1882,12 +1994,42 @@ def finish_detached_coordination(session: CoordinationSession) -> None:
             completed=len(session.completed_run_ids),
             total=session.total_workers,
         )
-        loop.create_task(
+        task = loop.create_task(
             _run_harvest_after_attach_grace(session),
             name=f"coord-harvest-grace-{session.execution_id[:8]}",
         )
+        _retain_harvest_task(session, task)
         return
     _arm_harvest_now(session)
+
+
+_HARVEST_CANCEL_LOGGED = "_harvest_cancel_logged"
+
+
+def _log_harvest_cancelled(session: CoordinationSession, task: asyncio.Task[Any]) -> None:
+    """Emit at most one cancel event (3.13 may never enter the coroutine)."""
+    if getattr(task, _HARVEST_CANCEL_LOGGED, False):
+        return
+    setattr(task, _HARVEST_CANCEL_LOGGED, True)
+    logger.warning(
+        "coordination.harvest_cancelled",
+        execution_id=session.execution_id,
+        conversation_id=session.conversation_id or "",
+    )
+
+
+def _retain_harvest_task(
+    session: CoordinationSession, task: asyncio.Task[Any]
+) -> None:
+    """Keep a strong ref until the task finishes (loop only holds weak refs)."""
+    session._harvest_tasks.add(task)
+
+    def _on_done(done: asyncio.Task[Any]) -> None:
+        session._harvest_tasks.discard(done)
+        if done.cancelled():
+            _log_harvest_cancelled(session, done)
+
+    task.add_done_callback(_on_done)
 
 
 def _arm_harvest_now(session: CoordinationSession) -> None:
@@ -1905,10 +2047,11 @@ def _arm_harvest_now(session: CoordinationSession) -> None:
     except RuntimeError:
         _close_detached_session(session)
         return
-    loop.create_task(
+    task = loop.create_task(
         _run_harvest(session),
         name=f"coord-harvest-{session.execution_id[:8]}",
     )
+    _retain_harvest_task(session, task)
 
 
 async def _run_harvest_after_attach_grace(session: CoordinationSession) -> None:
@@ -1976,6 +2119,14 @@ async def _run_harvest(session: CoordinationSession) -> None:
         from agentcore.runtime.coordination.harvest import harvest_detached_execution
 
         await harvest_detached_execution(session)
+    except asyncio.CancelledError:
+        # BaseException since 3.9: ``except Exception`` does not catch this.
+        # 3.13 may also cancel a never-started task without entering this body;
+        # the retain done-callback logs that case.
+        task = asyncio.current_task()
+        if task is not None:
+            _log_harvest_cancelled(session, task)
+        raise
     except Exception:  # noqa: BLE001 — harvest must never leak into drive task
         logger.exception(
             "coordination.harvest_failed",
@@ -2109,12 +2260,28 @@ async def await_live_detached_drive(conversation_id: str) -> bool:
     return True
 
 
-def note_coord_worker_busy(run_id: str, kind: str) -> None:
-    """Best-effort stamp: worker ``run_id`` is inside LLM / tool / verify."""
+def note_coord_worker_busy(
+    run_id: str,
+    kind: str,
+    *,
+    rounds_used: int | None = None,
+    rounds_limit: int | None = None,
+    tokens_spent: int | None = None,
+) -> None:
+    """Best-effort stamp: worker ``run_id`` is inside LLM / tool / verify.
+
+    Optional spend kwargs are the same channel — not a second reporter.
+    """
     session = active_coordination()
     if session is None or not session.active:
         return
-    session.mark_worker_busy(run_id, kind)
+    session.mark_worker_busy(
+        run_id,
+        kind,
+        rounds_used=rounds_used,
+        rounds_limit=rounds_limit,
+        tokens_spent=tokens_spent,
+    )
 
 
 def clear_coord_worker_busy(run_id: str) -> None:

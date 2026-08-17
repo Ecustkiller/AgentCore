@@ -79,6 +79,24 @@ def test_dossier_filename_truncated_under_name_max():
     assert len(basename.encode()) < len(f"{long_label}方向笔记.md".encode())
 
 
+def test_dossier_collapses_dunder_directory_underscores():
+    """``__tests__`` flattened through reviews must match playbook slug collapse."""
+    assert (
+        sanitize_write_relpath(
+            f"{REVIEWS_PREFIX}code-audit-0-pages___tests___Analytics.md"
+        )
+        == f"{REVIEWS_PREFIX}code-audit-0-pages_tests_Analytics.md"
+    )
+
+
+def test_dossier_strips_isolated_dot_left_by_chopped_extension():
+    """``Name.tsx`` truncated at the dot must not land as ``Name..md``."""
+    assert (
+        sanitize_write_relpath(f"{REVIEWS_PREFIX}code-audit-0-GoWindowsCard..md")
+        == f"{REVIEWS_PREFIX}code-audit-0-GoWindowsCard.md"
+    )
+
+
 def test_dossier_unsafe_chars_in_flat_name():
     assert (
         sanitize_write_relpath(f'{RESEARCH_PREFIX}报告:终稿?.md')

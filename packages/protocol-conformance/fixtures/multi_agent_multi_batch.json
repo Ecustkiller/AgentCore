@@ -193,6 +193,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "先调研。 再撰写。",
     "reasoning": "",

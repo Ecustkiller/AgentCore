@@ -367,7 +367,7 @@ def test_wait_in_gated_set():
 # --- assembly-level 分态（真实 _assemble_ceo_toolset） -----------------------
 
 
-def _ctx():
+def _ctx(*, vision_reader=None):
     from pathlib import Path
 
     from agentcore.tools.protocol import ToolContext
@@ -381,10 +381,16 @@ def _ctx():
         agent_id="a",
         backend=ServerWorkspace(root=Path("."), sandbox=SubprocessSandbox()),
         user_id="u",
+        vision_reader=vision_reader,
     )
 
 
-def _assemble(*, checkpoint_enabled: bool = True) -> ToolRegistry:
+def _assemble(
+    *,
+    checkpoint_enabled: bool = True,
+    vision_reader=None,
+    model: str | None = None,
+) -> ToolRegistry:
     from agentcore.llm.profiles import default_turn_profiles
     from agentcore.runtime.events import EventSink
     from agentcore.runtime.resolve.prepare import _assemble_ceo_toolset
@@ -397,8 +403,8 @@ def _assemble(*, checkpoint_enabled: bool = True) -> ToolRegistry:
         user_message="原始请求",
         history=[],
         worker_tools=ToolRegistry(),
-        base_tool_context=_ctx(),
-        profiles=default_turn_profiles(),
+        base_tool_context=_ctx(vision_reader=vision_reader),
+        profiles=default_turn_profiles(model=model),
         approval_gate=None,
         session_store=None,
         session_saver=None,
@@ -455,6 +461,24 @@ def test_register_always_ceo_tools_declare_loop():
     } <= names
     assert "consult" not in names  # CeoWire.CONSULT — hand-wired with has_entries
     assert names.isdisjoint({"delegate", "debate", "ask_user", "remember", "wait"})
+
+
+def test_assembled_omits_read_image_when_vision_unconfigured():
+    """未配 VisionReader 且主模型非原生多模态 → 不把 read_image 装进 CEO 工具面。"""
+    names = set(_assemble().names)
+    assert "read_image" not in names
+
+
+def test_assembled_offers_read_image_when_vision_reader():
+    """vision 槽已解析出 VisionReader → read_image 仍在 live CEO 装配。"""
+    names = set(_assemble(vision_reader=object()).names)
+    assert "read_image" in names
+
+
+def test_assembled_offers_read_image_when_main_native_vision():
+    """主模型 curated 原生多模态、无 VisionReader → 仍装配（同一能力位）。"""
+    names = set(_assemble(model="gpt-4o").names)
+    assert "read_image" in names
 
 
 def test_assembled_coordination_surface_split():

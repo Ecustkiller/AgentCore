@@ -1,8 +1,11 @@
 /**
  * In-memory conversation-slice LRU for warm reopen after switch.
- * Busy slices (generating / pending interaction) are never evicted.
+ * Busy slices (generating / non-compose pending interaction) are never evicted.
  */
-import { useInteractionStore } from "@/stores/interactions";
+import {
+  INTERACTION_SUBMIT_PATH,
+  useInteractionStore,
+} from "@/stores/interactions";
 import { DRAFT_KEY } from "./runtime";
 import type { ConversationRuntime } from "./types";
 
@@ -14,10 +17,10 @@ export function isConversationSliceBusy(
   slice: ConversationRuntime | undefined,
 ): boolean {
   if (!slice) return false;
-  return (
-    slice.isGenerating ||
-    useInteractionStore.getState().listPending(key).length > 0
-  );
+  if (slice.isGenerating) return true;
+  // Non-blocking asks stay pending without pausing the turn; they must not pin LRU.
+  const pending = useInteractionStore.getState().listPending(key);
+  return pending.some((e) => INTERACTION_SUBMIT_PATH[e.kind] !== "compose");
 }
 
 /** Move `key` to most-recent; drafts are not tracked. */

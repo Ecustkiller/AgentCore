@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 from agentcore.config import settings
 from agentcore.config.platform import parse_platform_model_credentials
 from agentcore.core.logging import get_logger
-from agentcore.llm.credentials import LLMCredentials
+from agentcore.llm.credentials import LLMCredentials, derive_platform_credential_id
 from agentcore.llm.profiles import PLATFORM_MODEL_FLASH
 
 logger = get_logger(__name__)
@@ -96,19 +96,56 @@ def platform_llm_credentials(model: str | None = None) -> LLMCredentials | None:
     """Platform upstream credentials — the single point of per-model resolution.
 
     ``model`` selects a per-model override (运营中转「一 key 一模型」, 成本配额与计费
-    §〇·六 F3): when the id has an entry in ``platform_model_credentials`` its api_key /
-    base_url win (each missing field falls back to the shared default), and the returned
-    ``default_model`` is that **catalog** model (not ``upstream_model``). A no-arg call is
-    unchanged — the shared ``platform_api_key`` / ``platform_base_url`` with
-    ``default_model=platform_model``. Returns ``None`` when no usable key resolves for
-    this model (override nor default).
+    §〇·六 F3): when the id has an entry in ``platform_model_credentials`` **with its
+    own api_key**, that pair wins (missing ``base_url`` falls back to the shared
+    default). Otherwise the operator pool is fill-first among schedulable members
+    (sticky on ``conversation_id``; cooling / exhausted / blocked skipped). Key
+    and ``base_url`` stay bound; the global ``PLATFORM_BASE_URL`` is not mixed in. An
+    empty / all-disabled pool falls back to ``platform_api_key`` / ``platform_base_url``
+    (and a base_url-only override still applies on that env path). A non-empty pool
+    that is entirely unschedulable does **not** fall back to env. A no-arg call
+    uses ``default_model=platform_model``. Returns ``None`` when no usable key
+    resolves for this model.
     """
     entry: dict[str, str] = {}
     if model:
         entry = parse_platform_model_credentials(settings.platform_model_credentials).get(
             model, {}
         )
-    api_key = (entry.get("api_key") or "").strip() or settings.platform_api_key.strip()
+    override_key = (entry.get("api_key") or "").strip()
+    if override_key:
+        base_url = (entry.get("base_url") or "").strip() or settings.platform_base_url
+        return LLMCredentials(
+            api_key=override_key,
+            base_url=base_url,
+            default_model=model or settings.platform_model,
+            source="platform",
+            platform_credential_id=derive_platform_credential_id(override_key, base_url) or None,
+        )
+
+    from agentcore.llm.platform_pool_scheduler import (
+        pick_last_resort_platform_pool_member,
+        pick_schedulable_platform_pool_member,
+        pool_has_enabled_members,
+    )
+
+    member = pick_schedulable_platform_pool_member()
+    if member is None and pool_has_enabled_members():
+        # Pool is in use: never fall through to PLATFORM_API_KEY. A cooling
+        # member lets the leaf raise the existing 429 CTA; all-blocked → None.
+        member = pick_last_resort_platform_pool_member()
+        if member is None:
+            return None
+    if member is not None:
+        return LLMCredentials(
+            api_key=member.api_key,
+            base_url=member.base_url,
+            default_model=model or settings.platform_model,
+            source="platform",
+            platform_credential_id=member.id,
+        )
+
+    api_key = settings.platform_api_key.strip()
     if not api_key:
         return None
     base_url = (entry.get("base_url") or "").strip() or settings.platform_base_url
@@ -117,6 +154,7 @@ def platform_llm_credentials(model: str | None = None) -> LLMCredentials | None:
         base_url=base_url,
         default_model=model or settings.platform_model,
         source="platform",
+        platform_credential_id=derive_platform_credential_id(api_key, base_url) or None,
     )
 
 
@@ -159,9 +197,7 @@ def _decrypt_provider(row: UserLlmProvider, user_id: str) -> LLMCredentials | No
     try:
         api_key = enc.decrypt(row.api_key_enc).decode()
     except Exception as e:  # noqa: BLE001 — corrupt cipher / rotated master key degrades to None
-        logger.warning(
-            "byok.decrypt_failed", user_id=user_id, provider_id=row.id, error=str(e)
-        )
+        logger.warning("byok.decrypt_failed", user_id=user_id, provider_id=row.id, error=str(e))
         return None
     return _credentials_from_provider(row, api_key)
 
@@ -191,15 +227,11 @@ async def _default_chat_provider_row(
     repo = UserLlmProviderRepository(session)
     if user is None:
         user = await UserRepository(session).get_by_id(user_id)
-    profile_id = (
-        getattr(user, "default_model_profile_id", None) if user is not None else None
-    )
+    profile_id = getattr(user, "default_model_profile_id", None) if user is not None else None
     if profile_id and not is_system_profile_id(profile_id):
         from agentcore.db.repositories import LlmModelProfileRepository
 
-        row_prof = await LlmModelProfileRepository(session).get(
-            profile_id, user_id=user_id
-        )
+        row_prof = await LlmModelProfileRepository(session).get(profile_id, user_id=user_id)
         if row_prof is not None and row_prof.main_provider_id:
             row = await repo.get(row_prof.main_provider_id, user_id=user_id)
             if row is not None:
@@ -265,9 +297,7 @@ async def resolve_user_llm_credentials(
     return _decrypt_provider(row, user_id)
 
 
-async def resolve_account_default_model(
-    session: AsyncSession, user_id: str
-) -> ModelSelection:
+async def resolve_account_default_model(session: AsyncSession, user_id: str) -> ModelSelection:
     """Account default main slot (default profile / system glm-5.2 preset)."""
     from agentcore.llm.model_profiles import LlmModelProfileService
 
@@ -287,9 +317,7 @@ async def resolve_conversation_model_selection(
     """
     from agentcore.llm.model_profiles import LlmModelProfileService
 
-    expanded = await LlmModelProfileService(session).expand_for_conversation(
-        user_id, conv
-    )
+    expanded = await LlmModelProfileService(session).expand_for_conversation(user_id, conv)
     return expanded.main
 
 
@@ -345,9 +373,7 @@ async def _resolve_background(
     return creds, bg.model
 
 
-def _model_config_from_creds(
-    creds: LLMCredentials, model: str, purpose: str
-) -> ModelConfig:
+def _model_config_from_creds(creds: LLMCredentials, model: str, purpose: str) -> ModelConfig:
     return ModelConfig(
         model=model,
         base_url=creds.base_url,
@@ -397,9 +423,7 @@ async def resolve_background_user_fallback(
     if row is not None:
         creds = _decrypt_provider(row, user_id)
         if creds is not None:
-            model = _model_for_purpose(
-                purpose, chat_model=chat_model, user_background_model=None
-            )
+            model = _model_for_purpose(purpose, chat_model=chat_model, user_background_model=None)
             return _model_config_from_creds(creds, model, purpose)
     return None
 

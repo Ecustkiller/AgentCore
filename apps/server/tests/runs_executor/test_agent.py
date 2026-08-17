@@ -207,6 +207,7 @@ async def test_run_started_carries_parent_and_kind_slots():
 
 async def test_executor_failure_emits_run_failed_and_state():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    plan.nodes[0].policy.retry_delay_ms = 0
     sink = EventSink()
 
     class _Boom:
@@ -229,8 +230,12 @@ async def test_executor_failure_emits_run_failed_and_state():
     sink.close()
     assert res["t_1"].phase is RunPhase.FAILED
     assert "provider down" in res["t_1"].error
-    types = [e.type async for e in sink]
-    assert EventType.RUN_FAILED in types
+    events = [e async for e in sink]
+    types = [e.type for e in events]
+    assert types.count(EventType.RUN_STARTED) == 1
+    assert types.count(EventType.RUN_FAILED) == 1
+    failed = next(e for e in events if e.type == EventType.RUN_FAILED)
+    assert failed.payload.get("retryable") is False
 
 
 async def test_deterministic_llm_error_marks_state_not_retryable():
@@ -310,9 +315,9 @@ async def test_closed_llm_client_marks_state_not_retryable():
     assert res2["u_1"].error_retryable is False
 
 
-async def test_unknown_crash_stays_retryable():
-    # A plain crash carries no ``retryable`` attr → defaults True, so only KNOWN-
-    # deterministic upstream failures opt out of retry (ordinary crashes retry as before).
+async def test_unknown_crash_is_terminal():
+    # ``llm_failure_class`` maps an unknown crash to terminal — not leaf
+    # ``exc.retryable`` (which a bare RuntimeError does not carry).
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
 
     class _Boom:
@@ -333,14 +338,123 @@ async def test_unknown_crash_stays_retryable():
     )
     res = await WaveScheduler().run(plan, executor)
     assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is False
+
+
+async def test_headerless_rate_limit_emits_one_run_failed_no_rerun():
+    """无 attested 头的 429：一帧 run_failed，不整节点重跑。"""
+    from agentcore.core.error_codes import ErrorCode
+    from agentcore.core.errors import RETRY_AFTER_FROM_BACKOFF, upstream_rate_limit_error
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    plan.nodes[0].policy.retry_delay_ms = 0
+    sink = EventSink()
+
+    class _HeaderlessLimit:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request):  # noqa: ANN001
+            self.calls += 1
+            raise upstream_rate_limit_error(
+                2.0, credential_source="user", retry_after_source=RETRY_AFTER_FROM_BACKOFF
+            )
+            yield  # pragma: no cover
+
+    provider = _HeaderlessLimit()
+    res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
+    sink.close()
+    events = [e async for e in sink]
+    failed = [e for e in events if e.type == EventType.RUN_FAILED]
+    assert res["t_1"].phase is RunPhase.FAILED
     assert res["t_1"].error_retryable is True
+    assert res["t_1"].error_code == ErrorCode.LLM_RATE_LIMIT
+    assert provider.calls == 1
+    assert [e.type for e in events].count(EventType.RUN_STARTED) == 1
+    assert len(failed) == 1
+    assert failed[0].payload["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    assert failed[0].payload["retryable"] is True
+
+
+async def test_transient_exhausted_emits_one_run_failed_with_signal():
+    """瞬时预算用尽：全链路只有一帧 run_failed，并带 error_code / retryable。
+
+    未 attested 的退避秒数不上 ``retry_after``（该字段是上游 Retry-After）。
+    """
+    from agentcore.core.error_codes import ErrorCode
+    from agentcore.core.errors import LLMRateLimitError
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    plan.nodes[0].policy.retry_delay_ms = 0
+    sink = EventSink()
+
+    class _AlwaysLimit:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request):  # noqa: ANN001
+            self.calls += 1
+            raise LLMRateLimitError(retry_after=0.0)
+            yield  # pragma: no cover
+
+    provider = _AlwaysLimit()
+    res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
+    sink.close()
+    events = [e async for e in sink]
+    failed = [e for e in events if e.type == EventType.RUN_FAILED]
+    assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is True
+    assert res["t_1"].error_code == ErrorCode.LLM_RATE_LIMIT
+    assert provider.calls == 1
+    assert [e.type for e in events].count(EventType.RUN_STARTED) == 1
+    assert len(failed) == 1
+    payload = failed[0].payload
+    assert payload["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    assert payload["retryable"] is True
+    assert "retry_after" not in payload
+
+
+async def test_leaf_exhausted_rate_limit_stays_transient_on_wire():
+    """叶层用尽就地重试后限流仍是瞬时：不整跑、run_failed.retryable=True。"""
+    from agentcore.core.error_codes import ErrorCode
+    from agentcore.core.errors import LLMRateLimitError, mark_llm_leaf_exhausted
+
+    plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
+    plan.nodes[0].policy.retry_delay_ms = 0
+    sink = EventSink()
+
+    class _LeafExhausted:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def stream(self, request):  # noqa: ANN001
+            self.calls += 1
+            exc = LLMRateLimitError(retry_after=4.0)
+            mark_llm_leaf_exhausted(exc)
+            raise exc
+            yield  # pragma: no cover
+
+    provider = _LeafExhausted()
+    res = await WaveScheduler().run(plan, _executor(plan, provider, sink))
+    sink.close()
+    events = [e async for e in sink]
+    failed = [e for e in events if e.type == EventType.RUN_FAILED]
+    assert provider.calls == 1
+    assert res["t_1"].phase is RunPhase.FAILED
+    assert res["t_1"].error_retryable is True
+    assert res["t_1"].error_code == ErrorCode.LLM_RATE_LIMIT
+    assert [e.type for e in events].count(EventType.RUN_STARTED) == 1
+    assert len(failed) == 1
+    assert failed[0].payload["retryable"] is True
+    assert failed[0].payload["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    assert "retry_after" not in failed[0].payload
 
 
 async def test_worker_hard_failure_bills_completed_rounds():
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
     reg = ToolRegistry()
     reg.register(_GrantableTool("noop"))  # un-gated here → the metered round runs
-    # Isolate from Wave infra-retry so we assert the first FAILED state's transcript.
+    # Isolate from in-node infra continue so we assert the first FAILED state's transcript.
     plan.nodes[0].policy.max_retries = 0
     executor = build_agent_executor(
         plan=plan,
@@ -367,7 +481,7 @@ async def test_worker_hard_failure_bills_completed_rounds():
 
 
 async def test_executor_infra_retry_consumes_seeded_transcript():
-    """Wave seeds FAILED+transcript into completed[self] → executor 热续, not cold open."""
+    """A transient FAILED+transcript in completed[self] → executor 热续, not cold open."""
     from agentcore.llm.provider.protocol import LLMMessage
     from agentcore.runtime.runs.types import RunState
 
@@ -395,6 +509,7 @@ async def test_executor_infra_retry_consumes_seeded_transcript():
             error="upstream disconnect",
             transcript=prior,
             content="半成品草稿",
+            error_retryable=True,
         )
     }
     state = await executor(plan.nodes[0], seeded)
@@ -415,7 +530,7 @@ async def test_failed_worker_run_final_fact_reseeds_from_journal():
     # the billed pre-crash usage — not only COMPLETED nodes. Drives the REAL executor under
     # a bound fact log so the recording site + the projector are exercised together.
     plan, _ = build_run_plan([{"role": "A", "task": "做A"}], id_prefix="t")
-    # Isolate executor billing/journal from the wave scheduler's infra-retry loop.
+    # Isolate executor billing/journal from the in-node infra continue.
     plan.nodes[0].policy.max_retries = 0
     reg = ToolRegistry()
     reg.register(_GrantableTool("noop"))  # un-gated → the metered round runs before the boom

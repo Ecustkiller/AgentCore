@@ -83,6 +83,7 @@ import type {
   ProjectedRun,
   ProjectedTeamNote,
   ProjectedTurn,
+  ProjectedUserInterjection,
   RunEscalation,
   TurnStatus,
 } from "@agentcore/protocol-conformance";
@@ -91,6 +92,7 @@ import {
   FINISH_TO_STATUS,
   MARKER_STANDIN_TOOLS,
   ORCHESTRATION_TOOLS,
+  resolveTurnOutcome,
 } from "@agentcore/protocol-fold-kit";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
@@ -530,6 +532,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let acts: ProjectedAct[] = [];
   let planId: string | null = null;
   let finishReason: string | null = null;
+  let explicitOutcome: string | null = null;
   let cost: CostBreakdown | null = null;
   let debate: DebateResultPayload | null = null;
   let debateRounds: DebateNarrativeRound[] = [];
@@ -544,18 +547,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   let autoFolder: ProjectedTurn["autoFolder"] = null;
   // 团队便签墙 (§2.2 通): notes broadcast to siblings this turn, in post order (deduped by noteId).
   const teamNotes: ProjectedTeamNote[] = [];
-  const userInterjections: {
-    interjectionId: string;
-    executionId: string;
-    content: string;
-    status: string;
-    note: string | null;
-    attachments?: {
-      name: string;
-      workspacePath?: string;
-      binary?: boolean;
-    }[];
-  }[] = [];
+  const userInterjections: ProjectedUserInterjection[] = [];
   const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
   let turnError: { code: string; message: string } | null = null;
@@ -1181,6 +1173,8 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         pushAskMarker(process, p.ask_id);
         break;
       }
+      case "question_resolved":
+        break;
       case "error": {
         sawError = true;
         const p = ev.payload as { code?: string; message?: string };
@@ -1194,6 +1188,15 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
         cost = p.cost ?? null;
+        const raw = p.outcome;
+        if (
+          raw === "ok" ||
+          raw === "partial" ||
+          raw === "paused" ||
+          raw === "error"
+        ) {
+          explicitOutcome = raw;
+        }
         break;
       }
       case "message_start": {
@@ -1209,6 +1212,7 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
           reasoning = "";
           process.length = 0;
           finishReason = null;
+          explicitOutcome = null;
           cost = null;
           turnError = null;
         }
@@ -1322,14 +1326,27 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
                   : undefined,
               binary: Boolean(a.binary),
             }));
+          const agentMentions = (p.agent_mentions ?? [])
+            .filter(
+              (m): m is { agent_id: string; role: string } =>
+                typeof m?.agent_id === "string" &&
+                Boolean(m.agent_id.trim()) &&
+                typeof m?.role === "string" &&
+                Boolean(m.role.trim()),
+            )
+            .map((m) => ({
+              agentId: m.agent_id.trim(),
+              role: m.role.trim(),
+            }));
           const status = p.status || "received";
-          const leaf = {
+          const leaf: ProjectedUserInterjection = {
             interjectionId: iid,
             executionId: p.execution_id || "",
             content: p.content || "",
             status,
             note: typeof p.note === "string" ? p.note : null,
             ...(attachments.length > 0 ? { attachments } : {}),
+            ...(agentMentions.length > 0 ? { agentMentions } : {}),
           };
           const idx = userInterjectionIndex.get(iid);
           if (idx === undefined) {
@@ -1388,6 +1405,16 @@ export function fold(events: SSEEvent[]): ProjectedTurn {
   return {
     status,
     finishReason,
+    outcome: resolveTurnOutcome({
+      events: events as {
+        type: string;
+        payload?: Record<string, unknown> | null;
+      }[],
+      finishReason,
+      hasError: sawError,
+      explicit: explicitOutcome,
+      running: status === "running",
+    }),
     error: turnError,
     content,
     reasoning,
@@ -1658,6 +1685,10 @@ export interface NonBlockingAsk {
   context: string;
   assumptions: AskAssumption[];
   questions: AskQuestion[];
+  status: "pending" | "resolved" | "orphaned";
+  settlement?: "answered" | "discarded";
+  answer?: string;
+  note?: string;
 }
 
 /**
@@ -1683,7 +1714,23 @@ export function extractAsks(events: SSEEvent[]): NonBlockingAsk[] {
       context: p.context,
       assumptions: p.assumptions ?? [],
       questions: p.questions ?? [],
+      status: "pending",
     });
+  }
+  for (const rec of foldInteractions(events)) {
+    if (rec.kind !== "question_posted") continue;
+    const existing = byId.get(rec.id);
+    if (!existing) continue;
+    if (rec.status === "resolved") {
+      existing.status = "resolved";
+      if (rec.settlement === "answered" || rec.settlement === "discarded") {
+        existing.settlement = rec.settlement;
+      }
+      if (rec.answer) existing.answer = rec.answer;
+      if (rec.note) existing.note = rec.note;
+    } else if (rec.status === "orphaned") {
+      existing.status = "orphaned";
+    }
   }
   return order.map((id) => byId.get(id) as NonBlockingAsk);
 }

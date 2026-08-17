@@ -193,6 +193,55 @@ async def test_record_calls_is_idempotent_by_call_id(session_factory):
     assert events[0].cost_total_nano == 2500
 
 
+async def test_record_calls_persists_platform_credential_id(session_factory):
+    """Platform-paid call rows keep the pool-member id; BYOK rows stay NULL."""
+    from dataclasses import asdict
+
+    from agentcore.llm.provider.protocol import TokenUsage
+    from agentcore.runtime.costing import priced_call_cost
+
+    user_id, conv_id, msg_id = new_id(), new_id(), new_id()
+    usage = TokenUsage(input_tokens=10, output_tokens=2, cache_miss_tokens=10)
+    platform = priced_call_cost(
+        model="deepseek-v4-flash",
+        usage=usage,
+        role="captain",
+        run_id=new_id(),
+        call_id=f"call_{new_id()}",
+        credential_source="platform",
+        platform_credential_id="go-1",
+    )
+    byok = priced_call_cost(
+        model="deepseek-v4-flash",
+        usage=usage,
+        role="captain",
+        run_id=new_id(),
+        call_id=f"call_{new_id()}",
+        credential_source="user",
+        platform_credential_id="go-1",  # must be ignored on BYOK
+    )
+    async with session_factory() as session:
+        await CostEventRepository(session).record_calls(
+            user_id=user_id,
+            conversation_id=conv_id,
+            message_id=msg_id,
+            calls=[asdict(platform), asdict(byok)],
+        )
+    async with session_factory() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(CostCall).where(CostCall.call_id.in_([platform.call_id, byok.call_id]))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    by_id = {r.call_id: r for r in rows}
+    assert by_id[platform.call_id].platform_credential_id == "go-1"
+    assert by_id[byok.call_id].platform_credential_id is None
+
+
 async def test_record_runs_empty_is_noop(session_factory):
     async with session_factory() as session:
         written = await CostEventRepository(session).record_runs(

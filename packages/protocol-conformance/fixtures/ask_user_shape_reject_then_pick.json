@@ -109,6 +109,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "有三条可行路线，请挑一条：",
     "reasoning": "",

@@ -238,6 +238,7 @@ def format_idle_yield_brief(session: CoordinationSession) -> str:
             "宣布阶段结论（非纯进度）。禁止只回「保持等待/保持静默」而无下文。"
             "无需对用户开口时可空响应；等 worker_completed / 波次前进事件再处置；"
             "仅当出现失败、升级仲裁、老板插话或明确缺口时再出手。"
+            "cancel_worker 可用。"
         )
     else:
         lines.append(

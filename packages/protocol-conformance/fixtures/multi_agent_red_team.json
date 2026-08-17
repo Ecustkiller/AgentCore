@@ -863,6 +863,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我发起一场红队审查来压测这个方案。",
     "reasoning": "",

@@ -608,6 +608,8 @@ async def run_one_tool(
         }
         if not result.success:
             end_kwargs["failure"] = tool_failure_from_result(result)
+        if result.metadata.get("partial_failure"):
+            end_kwargs["partial_failure"] = True
         sink.emit(
             tool_use_end(
                 tc.id,

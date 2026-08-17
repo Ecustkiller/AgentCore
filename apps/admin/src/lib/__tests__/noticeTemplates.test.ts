@@ -91,15 +91,22 @@ describe("noticeTemplates", () => {
     expect(withNote.body).toContain("补充：预计明日恢复");
   });
 
-  it("quota_platform_restored seeds Flash Free restore copy", () => {
+  it("quota_platform_restored seeds Flash restore copy via OpenCode Go", () => {
     const t = NOTICE_TEMPLATES.find((x) => x.id === "quota_platform_restored")!;
     expect(t).toBeTruthy();
     const seed = templateToFormSeed(t);
-    expect(seed.title).toBe("平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free");
+    expect(seed.title).toBe("平台额度已恢复 · 当前仅 DeepSeek V4 Flash");
     expect(seed.body).toContain("内测期提供测试额度");
-    expect(seed.body).toContain("OpenCode Zen");
-    expect(seed.body).toContain("Flash Free");
-    expect(seed.body).toContain("设置 · 模型配置");
+    expect(seed.body).toContain("OpenCode Go");
+    expect(seed.body).toContain("DeepSeek V4 Flash");
+    expect(seed.body).toContain("非免费档");
+    expect(seed.body).toContain("zero-retention");
+    expect(seed.body).toContain("零留存");
+    expect(seed.body).toContain("2026-08-31");
+    expect(seed.body).toContain("按月续约");
+    expect(seed.body).toContain("非永久承诺");
+    expect(seed.body).toContain("设置 · 服务商");
+    expect(seed.body).not.toMatch(/Flash Free|限时免费|OpenCode Zen|模型配置/);
     expect(seed.body).not.toMatch(/送\s*\d+\s*元|jiurelay/);
     expect(seed.surface).toBe("both");
     expect(seed.severity).toBe("normal");

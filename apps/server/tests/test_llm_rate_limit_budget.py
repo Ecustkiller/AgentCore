@@ -41,6 +41,7 @@ from agentcore.llm.provider.call_budget import (
     provider_retry_ceiling,
     retry_after_ceiling,
 )
+from agentcore.llm.provider.cooldown_gate import reset_cooldown_gate
 from agentcore.llm.provider.openai_compatible import OpenAICompatibleProvider
 from agentcore.llm.provider.protocol import LLMMessage, LLMRequest
 
@@ -91,6 +92,13 @@ def _throttled(headers: dict[str, str] | None, calls: dict[str, int]):
         )
 
     return handler
+
+
+@pytest.fixture(autouse=True)
+def _reset_cooldown_gate():
+    reset_cooldown_gate()
+    yield
+    reset_cooldown_gate()
 
 
 @pytest.fixture
@@ -145,11 +153,14 @@ async def test_a_budget_does_not_buy_back_the_headerless_giveups(clock):
     2 秒」，而是我们自己退避链的末项，走到它已经花掉 30 秒。谁再想靠放宽预算救回这 138
     条，先让这条用例红。
     """
+    from agentcore.llm.provider.cooldown_gate import reset_cooldown_gate
+
     runs: dict[str, tuple[int, list[float], float | None]] = {}
     for label, scenario, patience in (
         ("interactive", "title", None),
         ("budgeted", "compaction", _COMPACT_BUDGET),
     ):
+        reset_cooldown_gate()
         calls = {"n": 0}
         clock.clear()
         provider = await _mock_provider(_throttled(None, calls))
@@ -366,9 +377,9 @@ async def test_stream_path_does_not_take_a_budget_on_the_callers_word(sleeps):
     """流式回合被塞了 5 秒 patience：仍不按 patience 收窄，短头照等一次。
 
     这条口子只靠调用方自觉时，一个仍在交互上限内的 429 会当场放弃，而气泡上写着
-    「请约 2 秒后再试」——引擎已经否决了它自己印出来的那句话。交互回合不再坐等
-    长头（>2s），所以这条用不了 20 秒来钉 patience 被忽略；≤2s 的短头仍能证明
-    patience=5 没有把上限收到 0。
+    「请约 2 秒后再试」——引擎已经否决了它自己印出来的那句话。交互回合会静默坐等
+    短冷却（≤ silent threshold），所以这条用不了长头来钉 patience 被忽略；2s 的短头
+    仍能证明 patience=5 没有把上限收到 0。
     """
     calls = {"n": 0}
     sse = (

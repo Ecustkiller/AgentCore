@@ -52,11 +52,16 @@ def _delivery_gaps_from_warnings(
     debrief: dict[str, Any] | None,
     *,
     files_landed: bool = False,
+    stamped_rows: list[dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Build first-class delivery_gaps rows from soft-accept warnings + debrief.
 
     ``files_landed``: 刀1 / 方案 A — 已有声明路径落盘时，``degraded_handoff`` 只记
     warning 备注，不抬成硬缺口。
+
+    ``stamped_rows``: contract-source reason/severity keyed by description. Prefer
+    these over copy-marker inference so placeholder self-notes carry
+    ``unverified_note`` before CEO collect/format.
     """
     from agentcore.runtime.delegate.delivery_status import (
         REASON_FILES_NOT_LANDED,
@@ -72,6 +77,11 @@ def _delivery_gaps_from_warnings(
     path_hint_markers = ("产物未写入约定文档目录", "声明的交付物路径未落盘")
     # 甲⁺：零落盘 soft tip（与 delivery_status._ZERO_LANDING_MARKERS 对齐）。
     zero_landing_markers = ("本队员本波未交卷", "未把产物写入工作区", "本批未见落盘")
+    stamped_by_desc = {
+        str(row.get("description") or "").strip(): row
+        for row in (stamped_rows or [])
+        if isinstance(row, dict) and str(row.get("description") or "").strip()
+    }
 
     gaps: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -80,7 +90,18 @@ def _delivery_gaps_from_warnings(
         if not text or text in seen:
             continue
         seen.add(text)
-        row: dict[str, str] = {"description": text}
+        stamped = stamped_by_desc.get(text)
+        if stamped:
+            row = {"description": text}
+            reason = str(stamped.get("reason") or "").strip()
+            severity = str(stamped.get("severity") or "").strip()
+            if reason:
+                row["reason"] = reason
+            if severity:
+                row["severity"] = severity
+            gaps.append(row)
+            continue
+        row = {"description": text}
         code = reason_for_warning(text)
         if code:
             row["reason"] = code
@@ -224,6 +245,8 @@ def _priced_failure(
     rounds: int,
     duration_ms: int,
     retryable: bool = True,
+    error_code: str = "",
+    retry_after: float | None = None,
     transcript: list[LLMMessage] | None = None,
     content: str = "",
 ) -> RunState:
@@ -238,21 +261,42 @@ def _priced_failure(
     the model tier resolved), so the per-run accumulator's ``if state.usage`` guard
     still skips a never-metered failure — no spurious zero rows.
 
-    ``retryable`` (确定性失败区分, BL-6) rides onto the state so the WaveScheduler can
-    skip its infra retry for a deterministic upstream failure (prompt 超长 / 鉴权 / 余额)
-    that would just re-fail identically. Defaults True (transient / unknown crash → retry
-    as before).
+    ``retryable`` (确定性失败区分, BL-6) is ``llm_failure_class == transient``
+    so a leaf-exhausted rate-limit stays continuable. Terminal (prompt 超长 /
+    鉴权 / 余额 / 合同硬失败) is False. Defaults True when the caller omits it.
 
     ``transcript`` / ``content`` (optional): same recoverable-site contract as contract
     hard-fail / salvage — when the exception path already had turns, hang them on the
-    FAILED state so ``register_completed_session`` and Wave infra-retry can hot-continue.
+    FAILED state so a later hop can hot-continue from that site.
     Omit (empty) when the run died before any messages → still not continuable.
+
+    Landed products already self-reported on that transcript (``file_write`` ok,
+    then the LLM call died) ride on the same FAILED state — ``files_touched`` /
+    ``file_acceptance``. Writes succeeded; path status is accepted. The FAILED
+    phase is the node gap, not a path-level rejection (contract hard-fail stamps
+    rejected separately). All exception callers share this constructor.
     """
     has_usage = bool(usage.input_tokens or usage.output_tokens)
+    files_touched: list[str] = []
+    file_acceptance: list[dict[str, Any]] = []
+    if transcript:
+        from agentcore.runtime.runs.file_acceptance import build_file_acceptance
+        from agentcore.runtime.runs.serialize import file_products_from_transcript
+
+        products = file_products_from_transcript(transcript)
+        files_touched = [p.path for p in products]
+        if files_touched:
+            file_acceptance = build_file_acceptance(
+                files_touched,
+                phase=RunPhase.COMPLETED,
+                products=products,
+            )
     return RunState(
         phase=RunPhase.FAILED,
         error=error,
         error_retryable=retryable,
+        error_code=error_code,
+        error_retry_after=retry_after,
         content=content,
         model=model or "",
         duration_ms=duration_ms,
@@ -260,6 +304,8 @@ def _priced_failure(
         usage=usage.as_dict() if has_usage else {},
         cost=asdict(calculate_cost(model, usage)) if (model and has_usage) else {},
         transcript=list(transcript) if transcript else [],
+        files_touched=files_touched,
+        file_acceptance=file_acceptance,
     )
 
 

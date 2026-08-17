@@ -8,8 +8,10 @@ with ``binary=True`` and empty ``text``.
 
 Text-like binaries (docx/pdf/pptx/txt …) are **pre-parsed** after residency
 (``attachment_parse``): a readable ``*.md`` copy is written beside the original
-when extraction succeeds. Spreadsheets (xlsx/csv) are left untouched for runtime
-``code_execute``. Parse failures never break the turn — path-hint fallback remains.
+when extraction succeeds. Spreadsheets (xlsx/csv/tsv) get a **structure preview**
+only (columns / row count / types / sample rows) — the full table stays on disk
+and is never inlined. Parse failures never break the turn — path-hint fallback
+remains.
 
 Directory attachments carry only a listing (no file bodies), so nothing is
 written for them. Conversation references likewise pass through untouched.
@@ -23,7 +25,16 @@ from __future__ import annotations
 import os
 
 from agentcore.core.logging import get_logger
-from agentcore.workspace.attachment_parse import ParseStatus, preparse_resident, should_preparse
+from agentcore.workspace.attachment_parse import (
+    ParseStatus,
+    TablePreviewResult,
+    extension_of,
+    extract_table_preview,
+    preparse_resident,
+    preview_table_resident,
+    should_preparse,
+    should_preview_table,
+)
 from agentcore.workspace.protocol import WorkspaceBackend, WorkspaceError
 
 logger = get_logger(__name__)
@@ -94,25 +105,41 @@ def _normalize_client_workspace_path(raw: str | None) -> str | None:
     return f"{ATTACHMENTS_DIR}/{_safe_attachment_name(rest)}"
 
 
+def _apply_table_preview(item: dict, result: TablePreviewResult) -> None:
+    """Attach a structure preview and drop any inline table body from the item."""
+    item["parse_status"] = result.status.value
+    if result.preview is not None:
+        item["table_preview"] = result.preview.to_dict()
+    # Data stays on disk. Prompt assembly must not see the raw table body.
+    item["text"] = ""
+
+
 async def _enrich_with_preparse(
     backend: WorkspaceBackend, item: dict, *, workspace_path: str
 ) -> None:
     """Attempt分流预解析 for a binary resident; mutate ``item`` in place on success."""
+    if should_preview_table(item.get("name"), workspace_path):
+        preview = await preview_table_resident(
+            backend, workspace_path=workspace_path, name=item.get("name")
+        )
+        _apply_table_preview(item, preview)
+        return
+
     if not should_preparse(item.get("name"), workspace_path):
         item["parse_status"] = ParseStatus.SKIPPED.value
         return
 
-    result = await preparse_resident(
+    parsed = await preparse_resident(
         backend, workspace_path=workspace_path, name=item.get("name")
     )
-    item["parse_status"] = result.status.value
-    if result.parsed_workspace_path:
-        item["parsed_workspace_path"] = result.parsed_workspace_path
-    if result.status == ParseStatus.OK and result.text:
-        item["text"] = result.text
-    elif result.status == ParseStatus.SCANNED and result.text:
+    item["parse_status"] = parsed.status.value
+    if parsed.parsed_workspace_path:
+        item["parsed_workspace_path"] = parsed.parsed_workspace_path
+    if parsed.status == ParseStatus.OK and parsed.text:
+        item["text"] = parsed.text
+    elif parsed.status == ParseStatus.SCANNED and parsed.text:
         # Surface the scan notice as the attachment body so prompt assembly sees it.
-        item["text"] = result.text
+        item["text"] = parsed.text
     # FAILED / SKIPPED: leave text empty → prompt falls back to binary path hint.
 
 
@@ -131,7 +158,9 @@ async def persist_attachments(
     failure is logged and skipped — a bad attachment must never break the turn.
 
     Binary residents in the text-document bucket may also gain ``text``,
-    ``parsed_workspace_path``, and ``parse_status`` from pre-parse.
+    ``parsed_workspace_path``, and ``parse_status`` from pre-parse. Spreadsheet
+    / delimited residents gain ``table_preview`` (structure only) and have
+    ``text`` cleared so the full table never rides into the prompt.
     """
     if not attachments:
         return []
@@ -163,7 +192,7 @@ async def persist_attachments(
                 item["binary"] = binary
                 item.pop("resident_missing", None)
                 item.pop("claimed_workspace_path", None)
-                if binary:
+                if binary or should_preview_table(item.get("name"), pre):
                     await _enrich_with_preparse(backend, item, workspace_path=pre)
         elif kind == "file" and text.strip() and not binary:
             item.pop("workspace_path", None)
@@ -171,6 +200,11 @@ async def persist_attachments(
             try:
                 await backend.write(rel, text)
                 item["workspace_path"] = rel
+                if should_preview_table(item.get("name"), rel):
+                    ext = extension_of(item.get("name"), rel)
+                    _apply_table_preview(
+                        item, extract_table_preview(text.encode("utf-8"), ext)
+                    )
             except WorkspaceError as e:
                 logger.warning(
                     "attachment.persist_failed",

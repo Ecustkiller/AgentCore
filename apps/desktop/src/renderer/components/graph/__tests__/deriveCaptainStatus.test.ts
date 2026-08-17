@@ -167,6 +167,41 @@ describe("deriveCaptainStatus", () => {
     });
     expect(deriveCaptainStatus(e, "cap")).toBe("running");
   });
+
+  it("does not paint captain failed from whole-graph execution.failed", () => {
+    const e = exec({
+      status: "failed",
+      runs: [
+        run({ id: "cap", status: "pending", kind: "captain" }),
+        run({ id: "w1", status: "failed" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap")).toBe("pending");
+    expect(deriveCaptainStatus(e, "cap")).not.toBe("failed");
+  });
+
+  it("paused execution does not redden CEO 汇总 even if captain run failed", () => {
+    const e = exec({
+      status: "paused",
+      runs: [
+        run({ id: "cap", status: "failed", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap")).toBe("pending");
+    expect(deriveCaptainStatus(e, "cap")).not.toBe("failed");
+  });
+
+  it("paints captain failed only when the captain run itself failed", () => {
+    const e = exec({
+      status: "failed",
+      runs: [
+        run({ id: "cap", status: "failed", kind: "captain" }),
+        run({ id: "w1", status: "completed" }),
+      ],
+    });
+    expect(deriveCaptainStatus(e, "cap")).toBe("failed");
+  });
 });
 
 describe("captainSinkPreview", () => {

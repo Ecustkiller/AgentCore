@@ -805,6 +805,43 @@ def collect_worker_gaps(
             out.append((label, gaps))
     return out
 
+# Exact hard-gap closing copy — do not rephrase (soft-only path drops this block).
+_HARD_GAPS_CLOSING = (
+    "\n**【终稿诚实性·部分交付】**上方契约缺口非空：终稿必须使用「部分交付 / 尚未齐备」"
+    "类措辞，点明未闭合缺口与建议下一步；"
+    "【禁止】写「完整交付 / 全部完成 / 可运行无缺 / 无需审计 / 团队已交付完毕」等完成度断言。"
+)
+_SOFT_GAPS_CLOSING = (
+    "\n**【终稿诚实性】**"
+    "【禁止】写「完整交付 / 全部完成 / 可运行无缺 / 无需审计 / 团队已交付完毕」等完成度断言。"
+)
+
+
+def _gap_description_and_reason(gap: dict[str, str] | str) -> tuple[str, str]:
+    if isinstance(gap, dict):
+        return (
+            str(gap.get("description") or "").strip(),
+            str(gap.get("reason") or "").strip(),
+        )
+    return str(gap).strip(), ""
+
+
+def _worker_gaps_have_hard(
+    gaps_by_worker: list[tuple[str, list[dict[str, str]]]] | list[tuple[str, list[str]]],
+) -> bool:
+    """True when any listed gap is outside ``_SOFT_GAP_REASONS`` (missing reason = hard)."""
+    from agentcore.runtime.delegate.delivery_status import _SOFT_GAP_REASONS
+
+    for _, gaps in gaps_by_worker:
+        for gap in gaps:
+            desc, reason = _gap_description_and_reason(gap)
+            if not desc:
+                continue
+            if reason not in _SOFT_GAP_REASONS:
+                return True
+    return False
+
+
 def format_worker_gaps_block(
     gaps_by_worker: list[tuple[str, list[dict[str, str]]]] | list[tuple[str, list[str]]],
     *,
@@ -817,13 +854,17 @@ def format_worker_gaps_block(
     by structured ``delivery_status.gaps`` + the presentation layer — the synopsis
     only gets a light anti-contradiction discipline (no completeness claims).
 
-    When any gaps exist, the closing instruction forces「部分交付」wording and bans
-    「完整 / 无需审计」assertions. ``audit_off_with_token_budget`` injects a
-    sampling-check tip when policy.audit is off and a token_budget gap is present.
+    Soft-only gaps (``_SOFT_GAP_REASONS``) ban completeness assertions but do **not**
+    force「部分交付 / 尚未齐备」. Any hard gap keeps the partial-delivery closing
+    copy unchanged. ``audit_off_with_token_budget`` injects a sampling-check tip
+    when policy.audit is off and a token_budget gap is present.
     """
+    from agentcore.runtime.runs.cutoff import CUTOFF_REASONS
+
     if not gaps_by_worker:
         return ""
     has_cutoff = False
+    has_hard = _worker_gaps_have_hard(gaps_by_worker)
     lines = [
         "\n### ⚠️ 契约缺口（请据缺口同图点名补，勿整团重开）\n"
         "以下是各队员收尾后仍未对齐的声明交付物 / 交接缺口（含收敛强制收尾后无法再写文件"
@@ -834,26 +875,18 @@ def format_worker_gaps_block(
     for label, gaps in gaps_by_worker:
         parts: list[str] = []
         for gap in gaps:
-            if isinstance(gap, dict):
-                desc = str(gap.get("description") or "").strip()
-                reason = str(gap.get("reason") or "").strip()
-            else:
-                desc = str(gap).strip()
-                reason = ""
+            desc, reason = _gap_description_and_reason(gap)
             if not desc:
                 continue
             if reason:
-                has_cutoff = True
+                if reason in CUTOFF_REASONS:
+                    has_cutoff = True
                 parts.append(f"{desc}〔原因码 {reason}〕")
             else:
                 parts.append(desc)
         if parts:
             lines.append(f"- **{label}**：{'；'.join(parts)}")
-    lines.append(
-        "\n**【终稿诚实性·部分交付】**上方契约缺口非空：终稿必须使用「部分交付 / 尚未齐备」"
-        "类措辞，点明未闭合缺口与建议下一步；"
-        "【禁止】写「完整交付 / 全部完成 / 可运行无缺 / 无需审计 / 团队已交付完毕」等完成度断言。"
-    )
+    lines.append(_HARD_GAPS_CLOSING if has_hard else _SOFT_GAPS_CLOSING)
     if has_cutoff:
         lines.append(
             "结构化交付缺口已由系统对账卡呈现，概览正文不必逐条复述掐断原因；"

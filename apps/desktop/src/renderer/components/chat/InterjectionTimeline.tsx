@@ -8,6 +8,7 @@ import {
   interjectionStatusTone,
   isInterjectionTurnTerminal,
 } from "@/components/chat/interjectionStatus";
+import { AgentMentionChip } from "@/components/chat/message-bubble/AgentMentionChip";
 import {
   activeRuntime,
   assistantProjectionId,
@@ -127,13 +128,17 @@ function InterjectionUserBubble({
 }) {
   const tone = interjectionStatusTone(item.status);
   const atts = item.attachments ?? [];
+  const mentions = item.agentMentions ?? [];
   return (
     <div
       className="flex flex-col items-end gap-1.5"
       data-testid={`interjection-bubble-${item.interjectionId}`}
     >
-      {atts.length > 0 && (
+      {(mentions.length > 0 || atts.length > 0) && (
         <div className="flex max-w-[80%] flex-wrap justify-end gap-1.5">
+          {mentions.map((a) => (
+            <AgentMentionChip key={a.agentId} role={a.role} />
+          ))}
           {atts.map((a) => (
             <span
               key={`${item.interjectionId}:${a.name}`}

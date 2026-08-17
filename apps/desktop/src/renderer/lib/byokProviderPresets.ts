@@ -15,6 +15,7 @@ export type ByokProviderId =
   | "hy"
   | "openrouter"
   | "opencode_zen"
+  | "opencode_go"
   | "custom";
 
 export interface ByokProviderPreset {
@@ -119,6 +120,17 @@ export const BYOK_PROVIDER_PRESETS: readonly ByokProviderPreset[] = [
     models: ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
     keyHelpUrl: "https://opencode.ai/auth",
   },
+  {
+    id: "opencode_go",
+    label: "OpenCode Go",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    defaultModel: "deepseek-v4-flash",
+    // Subscription quota (not Zen pay-as-you-go / -free). Seed = OpenAI
+    // chat/completions only; Grok/GPT Luna (/responses) and MiniMax/Qwen
+    // (/messages) stay out. Full catalog = GET /models union.
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
+    keyHelpUrl: "https://opencode.ai/auth",
+  },
 ] as const;
 
 export const DEFAULT_BYOK_PROVIDER_ID: Exclude<ByokProviderId, "custom"> =
@@ -157,7 +169,10 @@ export function isCustomByokProvider(
   return id === BYOK_CUSTOM_PROVIDER_ID;
 }
 
-/** Match stored base_url to a preset, or fall back to custom. */
+/** Match stored base_url to a preset, or fall back to custom.
+ * Equality is after normalize only — never prefix-match, or
+ * OpenCode `/zen/v1` and `/zen/go/v1` would collide.
+ */
 export function resolveByokProviderFromConfig(baseUrl: string): ByokProviderId {
   const trimmed = baseUrl.trim();
   if (!trimmed) return DEFAULT_BYOK_PROVIDER_ID;

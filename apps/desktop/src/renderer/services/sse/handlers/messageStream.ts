@@ -3,6 +3,7 @@ import { queryClient } from "@/lib/queryClient";
 import { conversationKeys } from "@/lib/queryKeys";
 import { parseResumeDeferredPayload } from "@/lib/resumeDeferred";
 import { parseResumeSettledPayload } from "@/lib/resumeSettled";
+import { parseTurnOutcomeKind } from "@/lib/turnOutcome";
 import { surfaceResumeFromLiveTurn } from "@/services/resume";
 import { traceTurnEnd } from "@/services/sseTrace";
 import { clearQueuedTurnLocally } from "@/services/turns/cancelQueuedTurn";
@@ -281,6 +282,7 @@ export function handleMessageStreamEvent(
               : undefined,
           finishReason: payload.finish_reason,
           collab: payload.collab,
+          outcome: payload.outcome ?? null,
         },
         conversationId,
       );
@@ -299,8 +301,12 @@ export function handleMessageStreamEvent(
         getRuntime(conversationId).messages,
       );
       if (mid) {
+        const attested = parseTurnOutcomeKind(payload.outcome);
+        if (attested && useExecutionStore.getState().byId[mid]) {
+          useExecutionStore.getState().setAttestedOutcome(attested, mid);
+        }
         const rt = execRuntime(useExecutionStore.getState(), mid);
-        if (rt.plan && rt.status !== "failed") {
+        if (rt.plan) {
           // 后台托管继续跑 (coordination.turn_detached): CEO 回合结束时图内仍有
           // running/pending **worker** —— 不塌成 completed（否则状态条冻在残缺计数、
           // finalizeFold 把未跑节点标「未执行」，而其余节点还显示「执行中」）。保持
@@ -309,15 +315,19 @@ export function handleMessageStreamEvent(
           // 两条路径不变。Captain 假 pending（pre-plan run_started 被丢）不参与 hold，
           // 否则 end_turn 后会永久钉在「正在生成汇总」。
           // cancelled/interrupted：后端终态权威，立刻定格（finalizeFold 冻残留 running）。
+          // attested/finish paused wins over a preceding error event's failed stamp
+          // so CEO 汇总 stays pending, not a second red failure.
           const cancelled =
             payload.finish_reason === "cancelled" ||
             payload.finish_reason === "interrupted";
-          if (paused) {
+          if (paused || attested === "paused") {
             useExecutionStore.getState().setStatus("paused", mid);
-          } else if (cancelled) {
-            useExecutionStore.getState().setStatus("cancelled", mid);
-          } else if (!hasUnsettledRuns(rt)) {
-            useExecutionStore.getState().setStatus("completed", mid);
+          } else if (rt.status !== "failed") {
+            if (cancelled) {
+              useExecutionStore.getState().setStatus("cancelled", mid);
+            } else if (!hasUnsettledRuns(rt)) {
+              useExecutionStore.getState().setStatus("completed", mid);
+            }
           }
         }
       }
@@ -336,11 +346,17 @@ export function handleMessageStreamEvent(
       if (paused) surfaceResumeFromLiveTurn(conversationId, ctx.source);
       // 正常完成 / 停止确认：推进生命周期。stopping → stopped；其余 → completed。
       // 超时已进 terminal 则不覆盖（避免 stopped 被迟到 message_end 改成 completed）。
-      if (!isTerminalPhase(getTurnPhase(conversationId))) {
-        completeTurnPhase(
-          conversationId,
-          getTurnPhase(conversationId) === "stopping" ? "stopped" : "completed",
-        );
+      // attested/finish paused is a settled pause, not a failure — override a
+      // preceding error event's failed phase so continue can open a stream.
+      const phase = getTurnPhase(conversationId);
+      if (phase === "stopping") {
+        completeTurnPhase(conversationId, "stopped");
+      } else if (paused || parseTurnOutcomeKind(payload.outcome) === "paused") {
+        if (phase !== "stopped") {
+          completeTurnPhase(conversationId, "completed");
+        }
+      } else if (!isTerminalPhase(phase)) {
+        completeTurnPhase(conversationId, "completed");
       }
       return true;
     }

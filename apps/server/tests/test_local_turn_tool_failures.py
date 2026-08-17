@@ -302,6 +302,27 @@ def test_to_record_turn_body_omits_tool_failures_when_none():
     assert "tool_failures" not in body
 
 
+def test_to_record_turn_body_includes_agent_mentions():
+    mentions = [{"agent_id": "w1", "role": "研究员"}]
+    body = to_record_turn_body(
+        {
+            "user_message_id": "u1",
+            "user_message": "hi",
+            "trace_id": _TRACE,
+            "agent_mentions": mentions,
+        }
+    )
+    assert body["agent_mentions"] == mentions
+    omitted = to_record_turn_body(
+        {
+            "user_message_id": "u2",
+            "user_message": "hi",
+            "trace_id": _TRACE,
+        }
+    )
+    assert "agent_mentions" not in omitted
+
+
 async def test_record_local_turn_logs_tool_failures(monkeypatch):
     logged: list[tuple] = []
 

@@ -17,6 +17,7 @@ from agentcore.runtime.runs.constants import HANDOFF_TOOL_NAME
 from agentcore.runtime.runs.contract import (
     ContractVerdict,
     check_contract,
+    collect_opaque_source_data_paths,
     format_cite_upgrade_feedback,
     format_feedback,
     format_handoff_feedback,
@@ -40,13 +41,16 @@ from agentcore.runtime.runs.executor.context import (
 from agentcore.runtime.runs.executor.env import AgentExecutorEnv
 from agentcore.runtime.runs.executor.hooks import _grant_citation_rework_reread
 from agentcore.runtime.runs.executor.retry import (
-    _LIGHT_REPAIR_MAX_ROUNDS,
     _can_light_repair,
     _can_write_pass,
     _narrow_for_light_repair,
+    _pass_max_rounds,
     _retry_token_budget,
     _wind_down_entered,
+    bind_round_budget_on_begin,
     should_skip_contract_retry_for_budget,
+    stamp_coord_round_budget,
+    sync_round_budget_awareness,
 )
 from agentcore.runtime.runs.executor.setup import AgentNodePrepared
 from agentcore.runtime.runs.executor.shared import _react_and_capture, _retry_message
@@ -119,6 +123,7 @@ async def run_contract_loop(
     request_model = prepared.request_model
     tool_ctx = prepared.tool_ctx
     worker_tools = prepared.worker_tools
+    can_execute = worker_tools.get_optional("code_execute") is not None
     allowed_tools = prepared.allowed_tools
     files_expected = prepared.files_expected
     report_delivery = prepared.report_delivery
@@ -133,6 +138,24 @@ async def run_contract_loop(
 
     run_usage = run_usage_box[0]
     run_rounds = run_rounds_box[0]
+    # Pass-local round counter for remaining-rounds awareness. ``run_rounds``
+    # still accumulates every produce pass (billing / exception path); the
+    # injected fact reports this pass's used vs ``pass_profile.max_rounds``.
+    pass_round_used = [0]
+    pass_round_limit = [profile.max_rounds]
+
+    def _live_tokens_spent() -> int:
+        extra = inflight[0].total_tokens if inflight else 0
+        return run_usage_box[0].total_tokens + extra
+
+    on_round_begin = bind_round_budget_on_begin(
+        messages,
+        pull_notes,
+        pass_round_used,
+        pass_round_limit,
+        run_id=spec.run_id,
+        tokens_spent_of=_live_tokens_spent,
+    )
 
     # Produce → check contract → re-prompt with the specific shortfalls.
     # This content-quality retry is intentionally separate from the
@@ -177,6 +200,7 @@ async def run_contract_loop(
     visual_rework_used = 0
     artifact_contents: dict[str, str] | None = None
     workspace_paths: list[str] | None = None
+    source_data_paths: list[str] | None = None
     attempt = 0
     while attempt < attempts:
         streamed_content.clear()
@@ -190,18 +214,38 @@ async def run_contract_loop(
         pass_profile = profile
         pass_tools = worker_tools
         pass_allowed = allowed_tools
+        is_light_pass = light_mode
         if light_mode:
-            # 不重置 rounds：扣减已消耗轮次；工具面收窄，禁止重新调查。
-            remaining_rounds = max(1, profile.max_rounds - run_rounds)
+            # Dedicated short-pass cap (not leftover from the exhausted main pool).
+            # Tools narrow; run_rounds still accumulates whatever this pass spends.
             pass_profile = replace(
                 profile,
-                max_rounds=min(_LIGHT_REPAIR_MAX_ROUNDS, remaining_rounds),
+                max_rounds=_pass_max_rounds(
+                    light_pass=True, profile_max=profile.max_rounds
+                ),
             )
             pass_tools, pass_allowed = _narrow_for_light_repair(
                 worker_tools,
                 allowed_tools,
             )
             light_mode = False
+        pass_round_used[0] = 0
+        pass_round_limit[0] = pass_profile.max_rounds
+        stamp_coord_round_budget(
+            spec.run_id,
+            used=0,
+            limit=pass_profile.max_rounds,
+            tokens_spent=_live_tokens_spent(),
+        )
+        if is_light_pass or attempt > 0:
+            # Round 0 of a new react_loop skips on_round_begin — announce the
+            # new pass cap immediately (light_repair after 56/56 must see 4).
+            sync_round_budget_awareness(
+                messages,
+                used=0,
+                limit=pass_profile.max_rounds,
+                before_last_user=True,
+            )
         use_rtd = (
             attempt == 0
             and not light_repair_used
@@ -229,7 +273,7 @@ async def run_contract_loop(
                 side_key=spec.side_key,
                 check_evidence_ledger=spec.evidence_ledger_check,
                 usage_sink=inflight,
-                on_round_begin=pull_notes,
+                on_round_begin=on_round_begin,
                 streamed_content=streamed_content,
                 gate_escalation_sink=gate_escalations,
                 token_budget=pass_token_budget,
@@ -253,7 +297,7 @@ async def run_contract_loop(
                 ledger_registrant=ledger_registrant,
                 approval_gate=env.approval_gate,
                 usage_sink=inflight,
-                on_round_begin=pull_notes,
+                on_round_begin=on_round_begin,
                 streamed_content=streamed_content,
                 gate_escalation_sink=gate_escalations,
                 token_budget=pass_token_budget,
@@ -357,6 +401,11 @@ async def run_contract_loop(
                 artifact_contents,
                 web_quality_scan=True,
             )
+        source_data_paths = collect_opaque_source_data_paths(
+            material_paths=getattr(tool_ctx, "material_paths", None),
+            workspace_paths=workspace_paths,
+            landed_paths=touched_now,
+        )
         # 调研阶段 A：广搜草案不跑成稿引用闸；升 B（cite_upgrade_used）后再验。
         in_phase_a = two_phase and not cite_upgrade_used
         turn_ledger_entries = (
@@ -376,6 +425,8 @@ async def run_contract_loop(
             citable_ids=turn_citable_ids,
             enforce_citations=not in_phase_a,
             landing_failure_kind=landing_fail_kind,
+            can_execute=can_execute,
+            source_data_paths=source_data_paths,
         )
         # P1c visual critic: only after web_quality / contract **hard** gates pass.
         if (
@@ -452,6 +503,8 @@ async def run_contract_loop(
                 citable_ids=turn_citable_ids,
                 enforce_citations=True,
                 landing_failure_kind=landing_fail_kind,
+                can_execute=can_execute,
+                source_data_paths=source_data_paths,
             )
             cite_fail, other_fail = partition_citation_failures(probe.failures)
             if other_fail:
@@ -494,6 +547,8 @@ async def run_contract_loop(
                         citable_ids=turn_citable_ids,
                         enforce_citations=True,
                         landing_failure_kind=landing_fail_kind,
+                        can_execute=can_execute,
+                        source_data_paths=source_data_paths,
                     )
                     cite_fail, other_fail = partition_citation_failures(
                         probe.failures
@@ -770,6 +825,8 @@ async def run_contract_loop(
             ),
             enforce_citations=True,
             landing_failure_kind=landing_write_failure_kind(messages),
+            can_execute=can_execute,
+            source_data_paths=source_data_paths,
         )
         cite_fail, other_fail = partition_citation_failures(probe.failures)
         if other_fail:
@@ -779,6 +836,7 @@ async def run_contract_loop(
                 ok=False,
                 failures=cite_fail,
                 warnings=list(probe.warnings),
+                warning_rows=list(probe.warning_rows),
                 soft_failures=list(probe.soft_failures),
                 visual_failures=list(probe.visual_failures),
             )

@@ -198,7 +198,10 @@ async def _resolve_inference_credentials(
         # Per-model platform credential (运营中转「一 key 一模型」): the selected model's
         # override key/base_url win, else the shared default.
         platform = platform_llm_credentials(model=selection.model)
-        assert platform is not None  # preflight already verified platform availability
+        if platform is None:
+            from agentcore.llm.platform_pool_scheduler import platform_pool_unavailable_error
+
+            raise platform_pool_unavailable_error(blocked=True)
         cfg = ModelConfig(
             model=selection.model,
             base_url=platform.base_url,

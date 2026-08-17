@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractSupportIdsFromEvents,
   formatSupportDiagnosticText,
+  supportIdsFromEvents,
 } from "../supportDiagnostics";
 
 describe("formatSupportDiagnosticText", () => {
@@ -126,5 +127,48 @@ describe("extractSupportIdsFromEvents", () => {
       traceId: "a".repeat(32),
       executionId: "ex1",
     });
+  });
+});
+
+describe("supportIdsFromEvents", () => {
+  it("bubble and page-bar builders emit the same pack for one journal", () => {
+    const events = [
+      {
+        type: "message_start",
+        timestamp: "t0",
+        payload: {
+          message_id: "m1",
+          conversation_id: "c1",
+          trace_id: "a".repeat(32),
+        },
+      },
+      {
+        type: "run_plan",
+        timestamp: "t1",
+        payload: { execution_id: "ex1" },
+      },
+      {
+        type: "error",
+        timestamp: "t2",
+        payload: {
+          code: "LLM_RATE_LIMIT",
+          message: "限流",
+          context: { empty_diagnosis: undefined },
+        },
+      },
+    ] as SSEEvent[];
+    const bubble = supportIdsFromEvents("c1", events);
+    const bar = supportIdsFromEvents("c1", events);
+    expect(formatSupportDiagnosticText(bubble)).toBe(
+      formatSupportDiagnosticText(bar),
+    );
+    expect(formatSupportDiagnosticText(bar)).toContain("message_id: m1");
+    expect(formatSupportDiagnosticText(bar)).toContain("execution_id: ex1");
+    expect(formatSupportDiagnosticText(bar)).toContain(
+      "error_code: LLM_RATE_LIMIT",
+    );
+    expect(formatSupportDiagnosticText(bar)).not.toBe(
+      formatSupportDiagnosticText({ conversationId: "c1" }),
+    );
   });
 });

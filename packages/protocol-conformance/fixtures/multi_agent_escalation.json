@@ -193,6 +193,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队。 团队已完成（有 1 条待你拍板的升级）。",
     "reasoning": "",

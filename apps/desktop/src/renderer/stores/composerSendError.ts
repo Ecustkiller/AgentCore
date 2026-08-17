@@ -1,4 +1,5 @@
 import type { ErrorAction } from "@/lib/errors";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
 import { create } from "zustand";
 
 /**
@@ -10,6 +11,8 @@ import { create } from "zustand";
 export type ComposerSendError = {
   message: string;
   action: ErrorAction | null;
+  /** Class B 撤泡前收集的 ids；通知条据此挂「复制排查包」（消息已不在时间线）。 */
+  supportPack?: SupportDiagnosticIds;
 };
 
 type ComposerSendErrorState = {

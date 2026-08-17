@@ -73,6 +73,28 @@ def test_drain_as_messages_surfaces_attachments():
     _reset_for_tests()
 
 
+def test_drain_as_messages_surfaces_agent_mentions():
+    _reset_for_tests()
+    begin_accepting("c-mention")
+    assert (
+        try_enqueue(
+            conversation_id="c-mention",
+            content="让写手收紧口径",
+            agent_mentions=[{"agent_id": "agent_writer", "role": "写手"}],
+        )
+        is not None
+    )
+    msgs = drain_as_messages("c-mention")
+    assert len(msgs) == 1
+    body = msgs[0].content or ""
+    assert "让写手收紧口径" in body
+    assert "用户点名关注以下 Agent（软提示，非强制派单/非硬路由）" in body
+    assert "- 写手 (id=agent_writer)" in body
+    assert "<agent_mentions>" in body
+    end_accepting("c-mention")
+    _reset_for_tests()
+
+
 def test_try_enqueue_requires_accepting_window():
     _reset_for_tests()
     assert try_enqueue(conversation_id="c1", content="x") is None

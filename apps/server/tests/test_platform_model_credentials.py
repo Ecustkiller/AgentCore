@@ -51,7 +51,7 @@ def _user():
 
 def test_parse_valid_json_keeps_only_nonblank_fields():
     parsed = parse_platform_model_credentials(
-        '{"a": {"api_key": "k1", "base_url": "u1"},'
+        '{"a": {"api_key": "k1", "base_url": "u1", "id": "go-relay"},'
         ' "b": {"api_key": "k2"},'
         ' "c": {"base_url": "u3"},'
         ' "d": {"api_key": "", "base_url": "  "},'
@@ -61,7 +61,7 @@ def test_parse_valid_json_keeps_only_nonblank_fields():
         ' "g": {"api_key": "k3", "upstream_model": "  "}}'
     )
     assert parsed == {
-        "a": {"api_key": "k1", "base_url": "u1"},
+        "a": {"api_key": "k1", "base_url": "u1", "id": "go-relay"},
         "b": {"api_key": "k2"},
         "c": {"base_url": "u3"},
         "f": {"upstream_model": "glm-5.2"},
@@ -90,6 +90,9 @@ def test_no_arg_call_unchanged(monkeypatch):
     assert creds.base_url == "https://default/v1"
     assert creds.default_model == "glm-5.2"
     assert creds.source == "platform"
+    assert creds.platform_credential_id
+    assert creds.platform_credential_id != "sk-default"
+    assert creds.api_key[-4:] not in creds.platform_credential_id
 
 
 def test_override_model_uses_its_own_key_and_base_url(monkeypatch):
@@ -104,6 +107,9 @@ def test_override_model_uses_its_own_key_and_base_url(monkeypatch):
     # default_model is the requested model, not settings.platform_model.
     assert creds.default_model == "relay-b"
     assert creds.source == "platform"
+    assert creds.platform_credential_id
+    assert creds.platform_credential_id != creds.api_key
+    assert creds.api_key[-4:] not in creds.platform_credential_id
 
 
 def test_unlisted_model_falls_back_to_default_key(monkeypatch):

@@ -158,8 +158,8 @@ export function isEmptyResponseUserSurface(opts: {
 }
 
 /** Product copy for upstream 429 (mirrors backend LLMRateLimitError / history 注记). */
-export const LLM_RATE_LIMIT_MESSAGE =
-  "上游限流，暂时无法继续本回合。请稍后再试。";
+export const LLM_RATE_LIMIT_WHY = "上游限流，暂时无法继续本回合。";
+export const LLM_RATE_LIMIT_MESSAGE = `${LLM_RATE_LIMIT_WHY}请稍后再试。`;
 
 /** Product copy when the desktop client is below the server force-update floor. */
 export const CLIENT_TOO_OLD_MESSAGE = "桌面端版本过旧，请更新后再试";
@@ -423,6 +423,14 @@ const PRODUCT_COPY_BY_CODE: Record<string, string> = {
   PLATFORM_BILLING_UNAVAILABLE: OUR_SERVICE_UNAVAILABLE_MESSAGE,
   INTERNAL_ERROR: OUR_SERVICE_UNAVAILABLE_MESSAGE,
 };
+
+/** Product sentence for a known failure code, or undefined to keep the server message. */
+export function productCopyForCode(
+  code: string | undefined,
+): string | undefined {
+  if (!code) return undefined;
+  return PRODUCT_COPY_BY_CODE[code];
+}
 
 export type AssistantFailureFace = { code: string; message: string };
 

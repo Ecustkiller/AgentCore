@@ -3,9 +3,11 @@ export {
   ASK_RESOLVED_DECISION_ICON,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  fillTeamRevisionTemplate,
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPreviewLead,
+  teamPreviewRevisionVersionLabel,
   teamPreviewSettledLead,
   teamResolvedOutcome,
 } from "./meta";
@@ -15,5 +17,6 @@ export type {
   ResolvedToneKey,
   TeamPrimitiveMeta,
   TeamResolvedOutcome,
+  TeamRevisionMeta,
 } from "./meta";
 export { ResolvedDecisionRecord } from "./ResolvedDecisionRecord";

@@ -23,7 +23,7 @@ from agentcore.runtime.coordination.session import (
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.delegate.force_scopes import EMPTY_FORCE_SCOPES
 from agentcore.runtime.runs.plan import RunPlan
-from agentcore.runtime.runs.types import RunSpec
+from agentcore.runtime.runs.types import RunPolicy, RunSpec
 from agentcore.runtime.turn.interrupt import TurnInterruptReason, compose_interrupt_body
 from agentcore.runtime.turn.runs import TurnRun, turn_runs
 
@@ -61,6 +61,100 @@ def test_has_inflight_work_and_progress_summary():
     assert "cancel_worker" in s.worker_progress_summary()
     s.clear_worker_busy("w1")
     assert s.has_verify_busy() is False
+
+
+def test_worker_budget_facts_only_lists_stamped_numbers():
+    """队员预算行只列引擎已盖章的数字，缺字段不编造。"""
+    live = _plan(
+        RunSpec(
+            run_id="w1",
+            role="研究员",
+            task="调研",
+            token_ceiling=4_000_000,
+            max_rounds=56,
+            policy=RunPolicy(timeout_s=1200),
+        ),
+        RunSpec(run_id="w2", role="写手", task="撰写"),
+    )
+    s = CoordinationSession(execution_id="e-budget", total_workers=2)
+    s.live_plan = live
+    s._running_workers["w1"] = "研究员"
+    s._running_workers["w2"] = "写手"
+    s._worker_started_at["w1"] = s._worker_started_at["w2"] = __import__("time").monotonic()
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "轮次上限 56",
+        "token 顶 4000000",
+    ]
+    assert s.worker_budget_facts("w2") == []
+    summary = s.worker_progress_summary()
+    assert "token 顶 4000000" in summary
+    assert "轮次上限 56" in summary
+    assert "超时阈值 1200s" in summary
+    assert "已用" not in summary
+    assert "已花" not in summary
+
+
+def test_worker_budget_facts_use_live_spend_not_just_ceilings():
+    """Executor-stamped used/tokens replace static caps; kind-only busy invents nothing."""
+    live = _plan(
+        RunSpec(
+            run_id="w1",
+            role="研究员",
+            task="调研",
+            token_ceiling=4_000_000,
+            max_rounds=56,
+            policy=RunPolicy(timeout_s=1200),
+        )
+    )
+    s = CoordinationSession(execution_id="e-spend", total_workers=1)
+    s.live_plan = live
+    s._running_workers["w1"] = "研究员"
+    s._worker_started_at["w1"] = __import__("time").monotonic()
+    s.mark_worker_busy("w1", "llm")
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "轮次上限 56",
+        "token 顶 4000000",
+    ]
+    s.mark_worker_busy(
+        "w1",
+        "llm",
+        rounds_used=52,
+        rounds_limit=56,
+        tokens_spent=2_700_000,
+    )
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "已用 52/56 轮",
+        "已花 2700000/4000000",
+    ]
+    summary = s.worker_progress_summary()
+    assert "已用 52/56 轮" in summary
+    assert "已花 2700000/4000000" in summary
+    assert "轮次上限 56" not in summary
+    assert "token 顶 4000000" not in summary
+    # 轮间 clear 必须保住数字，否则 idle 巡查刚好赶上空窗。
+    s.clear_worker_busy("w1")
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "已用 52/56 轮",
+        "已花 2700000/4000000",
+    ]
+    # Pass-local round reset (light_repair) last-write-wins; tokens keep the max
+    # so a new pass's 0 cannot wipe prior-pass spend.
+    s.mark_worker_busy("w1", "llm", rounds_used=0, rounds_limit=4, tokens_spent=0)
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "已用 0/4 轮",
+        "已花 2700000/4000000",
+    ]
+    s.disarm_worker_timeout("w1")
+    assert s.worker_budget_facts("w1") == [
+        "超时阈值 1200s",
+        "轮次上限 56",
+        "token 顶 4000000",
+    ]
 
 
 async def test_idle_timeout_defers_when_workers_busy(monkeypatch):
@@ -895,6 +989,9 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
             role="内容文案",
             task="写 site/copy.md",
             deliverable=Deliverable(artifacts=["site/copy.md"]),
+            token_ceiling=4_000_000,
+            max_rounds=56,
+            policy=RunPolicy(timeout_s=1200),
         ),
         RunSpec(
             run_id="skeleton",
@@ -932,6 +1029,13 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
     assert "谁在后台、完成后会再汇报" not in brief
     assert "保持静默即可" not in brief
     assert "保持等待" in brief or "保持静默" in brief  # forbid phrasing appears as prohibition
+    assert "cancel_worker" in brief
+    assert "token 顶 4000000" in brief
+    assert "轮次上限 56" in brief
+    assert "超时阈值 1200s" in brief
+    assert "疑似卡死" not in brief
+    assert "上方进展行" not in brief
+    assert "已运行墙钟" not in brief
 
     msgs = idle_yield_messages(session)
     assert len(msgs) == 1
@@ -939,6 +1043,50 @@ def test_healthy_idle_inject_has_progress_and_no_action_guidance():
     assert "无需追加" in (msgs[0].content or "")
     assert "可静默" in (msgs[0].content or "")
     assert "保持静默即可" not in (msgs[0].content or "")
+    assert "cancel_worker" in (msgs[0].content or "")
+    assert "token 顶 4000000" in (msgs[0].content or "")
+
+
+def test_healthy_idle_brief_shows_live_spend_when_stamped():
+    """CEO idle brief lists 已用/已花 once the executor has stamped spend."""
+    from agentcore.runtime.coordination.pipeline_view import format_idle_yield_brief
+    from agentcore.runtime.runs.types import Deliverable
+
+    live = _plan(
+        RunSpec(
+            run_id="copy",
+            role="内容文案",
+            task="写 site/copy.md",
+            deliverable=Deliverable(artifacts=["site/copy.md"]),
+            token_ceiling=4_000_000,
+            max_rounds=56,
+            policy=RunPolicy(timeout_s=1200),
+        ),
+        RunSpec(
+            run_id="skeleton",
+            role="骨架工程师",
+            task="写 site/index.html",
+            depends_on=["copy"],
+        ),
+    )
+    session = CoordinationSession(execution_id="e-idle-spend", total_workers=2)
+    session.live_plan = live
+    session._running_workers["copy"] = "内容文案"
+    session._worker_started_at["copy"] = __import__("time").monotonic()
+    session.mark_worker_busy(
+        "copy",
+        "llm",
+        rounds_used=52,
+        rounds_limit=56,
+        tokens_spent=2_700_000,
+    )
+    brief = format_idle_yield_brief(session)
+    assert "已用 52/56 轮" in brief
+    assert "已花 2700000/4000000" in brief
+    assert "轮次上限 56" not in brief
+    assert "token 顶 4000000" not in brief
+    assert "疑似卡死" not in brief
+    assert "上方进展行" not in brief
 
 
 def test_idle_yield_brief_pending_approval_forbids_wait(monkeypatch):
@@ -1011,6 +1159,7 @@ async def test_idle_yield_injects_healthy_brief_instead_of_empty(monkeypatch):
         assert "流水线进度" in text
         assert "无需追加" in text or "正常推进" in text
         assert "等待团队事件超时" not in text
+        assert session.idle_streak == 1
     finally:
         session.drive_task.cancel()
         with pytest.raises(asyncio.CancelledError):

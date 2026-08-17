@@ -17,15 +17,20 @@ import {
   fetchObservabilitySummary,
 } from "@/services/adminObservability";
 import {
+  type AdminGoWindows,
   type AdminUsageSummary,
   type UsageWindow,
+  fetchGoWindows,
   fetchUsageSummary,
 } from "@/services/adminUsage";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useParams } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@/services/adminUsage", () => ({ fetchUsageSummary: vi.fn() }));
+vi.mock("@/services/adminUsage", () => ({
+  fetchUsageSummary: vi.fn(),
+  fetchGoWindows: vi.fn(),
+}));
 vi.mock("@/services/adminObservability", () => ({
   fetchObservabilitySummary: vi.fn(),
 }));
@@ -58,6 +63,41 @@ function usageWindow(cnyTotal: number, requests: number): UsageWindow {
     },
     usage: { cache_hit: 0, cache_miss: 0, input: 0, output: 0, reasoning: 0 },
     requests,
+  };
+}
+
+function goWindows(p?: Partial<AdminGoWindows>): AdminGoWindows {
+  return {
+    as_of: "2026-08-18T12:00:00Z",
+    cost_basis: "nominal_nano_cny",
+    estimate_basis: "opencode_public_list",
+    estimate_currency: "USD",
+    estimate_price_as_of: "2026-08-18",
+    estimate_model: "deepseek-v4-flash",
+    subscription_day: 15,
+    five_hour: {
+      cost_total_nano: 2_000_000_000,
+      estimated_usd_nano: 1_230_000_000,
+      calls: 4,
+      started_at: "2026-08-18T10:00:00Z",
+      reset_at: "2026-08-18T15:00:00Z",
+    },
+    weekly: {
+      cost_total_nano: 3_000_000_000,
+      estimated_usd_nano: 4_500_000_000,
+      calls: 8,
+      started_at: "2026-08-17T00:00:00Z",
+      reset_at: "2026-08-24T00:00:00Z",
+    },
+    monthly: {
+      cost_total_nano: 4_000_000_000,
+      estimated_usd_nano: 8_000_000_000,
+      calls: 12,
+      started_at: "2026-08-15T00:00:00Z",
+      reset_at: "2026-09-15T00:00:00Z",
+    },
+    members: [],
+    ...p,
   };
 }
 
@@ -158,6 +198,10 @@ function renderAnalytics(initial = "/analytics/cost") {
 }
 
 describe("AnalyticsPage", () => {
+  beforeEach(() => {
+    vi.mocked(fetchGoWindows).mockResolvedValue(goWindows());
+  });
+
   it("renders the 成本 lens: window totals + top spenders + trend", async () => {
     vi.mocked(fetchUsageSummary).mockResolvedValue(usageSummary());
     renderAnalytics("/analytics/cost");
@@ -168,6 +212,17 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Alice")).toBeTruthy(); // top spender row
     expect(screen.getByTestId("cost-trend")).toBeTruthy();
     expect(fetchUsageSummary).toHaveBeenCalledTimes(1);
+    expect(fetchGoWindows).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("OpenCode Go 窗口")).toBeTruthy();
+    expect(screen.getByText("5 小时窗")).toBeTruthy();
+    expect(screen.getByText("本周（UTC 周一）")).toBeTruthy();
+    expect(screen.getByText("本月（订阅日 15）")).toBeTruthy();
+    expect(screen.getByText(/不是上游美元用量/)).toBeTruthy();
+    expect(screen.getByText(/costMultiplier/)).toBeTruthy();
+    expect(screen.getByText(/会低估/)).toBeTruthy();
+    expect(screen.getByText(/≈\$1\.23/)).toBeTruthy();
+    expect(screen.getByText(/\/ \$12/)).toBeTruthy();
+    expect(screen.getAllByText(/公开单价估算 · 非上游账单/).length).toBeGreaterThan(0);
   });
 
   it("shows the BYOK framing when billing_mode is byok", async () => {

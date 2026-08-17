@@ -436,6 +436,8 @@ def test_priced_failure_without_transcript_does_not_register():
         duration_ms=1,
     )
     assert state.transcript == []
+    assert state.files_touched == []
+    assert state.file_acceptance == []
     assert register_completed_session(tool, plan, "t_1", state) is None
     assert store.get("t_1") is None
 

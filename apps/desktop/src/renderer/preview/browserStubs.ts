@@ -38,7 +38,10 @@ const fsApi: FsApi = {
   clearSessionReadonlyRoots: async () => {},
   adoptSessionRootAlias: async () => false,
   listDir: async () => ({ ok: true, data: [] }),
-  listFiles: async () => ({ ok: true, data: [] }),
+  listFiles: async () => ({
+    ok: true,
+    data: { files: [], truncated: false },
+  }),
   readFile: async () => fail(),
   readTextFile: async () => fail(),
   writeFile: async () => ({

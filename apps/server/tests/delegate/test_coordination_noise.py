@@ -2,7 +2,7 @@
 
 对应五项降噪措施中的协调层部分（前端团队进展卡片见桌面端 vitest）：
 1. 事件合并唤醒：攒批（≥N 事件或距上次唤醒≥窗口），必要决策点立即唤醒、终局不拖延。
-2. 空转唤醒降频：idle 巡查按 ``2**idle_streak`` 退避；真实事件重置；保留卡死巡查 nudge。
+2. 空转唤醒降频：idle 巡查与忙等 yield 按 ``2**idle_streak`` 退避；真实事件重置；保留卡死巡查 nudge。
 3. synthesis 里程碑化：工具描述 / 注入文案强调里程碑，例行完成不写。
 5. suspect_missing_dep 搭车既有注入通道呈现给 CEO（不新增独立唤醒）。
 """
@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import asyncio
+
+import pytest
 
 import agentcore.runtime.coordination.wait as coord_wait
 from agentcore.runtime.coordination.inject import format_coordination_events
@@ -25,6 +27,7 @@ from agentcore.runtime.coordination.tools import UpdateSynthesisTool
 from agentcore.runtime.coordination.wait import await_coordination_injection
 from agentcore.runtime.events import EventSink
 from agentcore.runtime.runs.builder import build_run_plan
+from tests.conftest import LogSpy
 
 
 def _wc(run_id: str, role: str = "R") -> CoordinationEvent:
@@ -202,6 +205,97 @@ def test_idle_wait_timeout_backoff(monkeypatch):
     assert coord_wait._idle_wait_timeout(s) == 100.0  # cap
     s.idle_streak = 12
     assert coord_wait._idle_wait_timeout(s) == 100.0
+    s.idle_streak = -3
+    assert coord_wait._idle_wait_timeout(s) == 10.0  # max(0, streak)
+
+
+def test_idle_wait_timeout_production_curve():
+    """生产常数：base 120s × 2**streak，封顶 600s。"""
+    s = CoordinationSession(execution_id="e-prod", total_workers=2)
+    assert coord_wait._COORD_WAIT_TIMEOUT_S == 120.0
+    assert coord_wait._COORD_WAIT_TIMEOUT_MAX_S == 600.0
+    s.idle_streak = 0
+    assert coord_wait._idle_wait_timeout(s) == 120.0
+    s.idle_streak = 1
+    assert coord_wait._idle_wait_timeout(s) == 240.0
+    s.idle_streak = 2
+    assert coord_wait._idle_wait_timeout(s) == 480.0
+    s.idle_streak = 3
+    assert coord_wait._idle_wait_timeout(s) == 600.0
+    s.idle_streak = 8
+    assert coord_wait._idle_wait_timeout(s) == 600.0
+
+
+async def test_idle_yield_second_wait_uses_widened_timeout(monkeypatch):
+    """第二次空转等待吃加宽后的 timeout；wait_start 带进入时的 idle_streak。"""
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 10.0)
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_MAX_S", 100.0)
+    seen_timeouts: list[float] = []
+
+    async def _instant_wait(_session: CoordinationSession, *, timeout: float):
+        seen_timeouts.append(timeout)
+        return []
+
+    monkeypatch.setattr(coord_wait, "_wait_events_with_ux", _instant_wait)
+    spy = LogSpy()
+    monkeypatch.setattr(coord_wait, "logger", spy)
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e-yield-widen", total_workers=2)
+    session._running_workers["w1"] = "研究员"
+    session._worker_started_at["w1"] = __import__("time").monotonic()
+    session.mark_worker_busy("w1", "llm")
+    session.drive_task = asyncio.create_task(asyncio.sleep(30))
+    set_active_coordination(session)
+    try:
+        await _inject("e-yield-widen", timeout=1.0)
+        assert session.idle_streak == 1
+        await _inject("e-yield-widen", timeout=1.0)
+        assert session.idle_streak == 2
+        session.post(_wc("w1"))
+        await _inject("e-yield-widen", timeout=1.0)
+        assert session.idle_streak == 0
+    finally:
+        session.drive_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await session.drive_task
+        clear_active_coordination()
+
+    # yield 路径：先按 streak 等满 idle 窗，再短等 1s，然后 bump。
+    assert seen_timeouts[:4] == [10.0, 1.0, 20.0, 1.0]
+    starts = [kw for name, kw in spy.events if name == "coordination.wait_start"]
+    assert [kw["idle_streak"] for kw in starts] == [0, 1, 2]
+    yields = [kw for name, kw in spy.events if name == "coordination.idle_yield_to_captain"]
+    assert [kw["idle_streak"] for kw in yields] == [1, 2]
+
+
+async def test_idle_yield_bumps_backoff_and_real_event_resets(monkeypatch):
+    """忙等 yield 也递增 idle_streak；仍注入健康简报（非巡查 nudge）；真实事件重置。"""
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr(coord_wait, "_COORD_WAIT_TIMEOUT_MAX_S", 1.0)
+    clear_active_coordination()
+    session = CoordinationSession(execution_id="e-yield-backoff", total_workers=2)
+    session._running_workers["w1"] = "研究员"
+    session._worker_started_at["w1"] = __import__("time").monotonic()
+    session.mark_worker_busy("w1", "llm")
+    session.drive_task = asyncio.create_task(asyncio.sleep(30))
+    set_active_coordination(session)
+    try:
+        msgs1, _ = await _inject("e-yield-backoff", timeout=3.0)
+        assert session.idle_streak == 1
+        text1 = msgs1[0].content or ""
+        assert "等待团队事件超时" not in text1
+        assert "流水线进度" in text1 or "队员进展" in text1
+        msgs2, _ = await _inject("e-yield-backoff", timeout=3.0)
+        assert session.idle_streak == 2
+        session.post(_wc("w1"))
+        msgs3, _ = await _inject("e-yield-backoff", timeout=3.0)
+        assert session.idle_streak == 0
+        assert "worker_completed" in (msgs3[0].content or "")
+    finally:
+        session.drive_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await session.drive_task
+        clear_active_coordination()
 
 
 async def test_idle_timeout_bumps_backoff_and_real_event_resets(monkeypatch):

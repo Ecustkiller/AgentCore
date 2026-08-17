@@ -93,13 +93,13 @@ class PromoteProductTool:
         return ToolSchema(
             name=PROMOTE_PRODUCT_TOOL_NAME,
             description=(
-                "成品归位：把【已验收】的成品从 AI 工作间（AgentCore/文档/）"
+                "成品归位：把【路径已核】的成品从 AI 工作间（AgentCore/文档/）"
                 "【移动】到用户工作区，让用户一眼看见。收口前调用；"
-                "先问用户要不要、下一轮再搬也可以（本会话此前批次的已验收成品仍可归位）。\n"
+                "先问用户要不要、下一轮再搬也可以（本会话此前批次路径已核的成品仍可归位）。\n"
                 "- paths：要归位的产物路径（工作间内的相对路径，取自交付清单）。\n"
                 "- dest：可选目标目录；省略 = 工作区根（裸聊 / 新建工作区首选）。"
                 "代码仓等已有结构的工作区请指定子目录（如 docs/），避免污染根目录。\n"
-                "只有交付对账里 status=accepted 的产物可归位；未验收 / 不在工作间 / "
+                "只有交付对账里 status=accepted 的产物可归位；路径未核 / 不在工作间 / "
                 "目标已存在同名文件的会被跳过并说明原因（【绝不覆盖】用户已有文件）。"
                 "归位是移动：原路径之后不复存在，交付清单会同步改写到新路径。\n"
                 "不搬也合法（多幕协作的中间幕常常无成品可交）——但收口时请明确说明"
@@ -121,7 +121,7 @@ class PromoteProductTool:
                 "required": ["paths"],
             },
             category=ToolCategory.FILESYSTEM,
-            # CEO 面不持 GRANTABLE：归位只在工作区内搬已验收产物、不覆盖、不删除。
+            # CEO 面不持 GRANTABLE：归位只在工作区内搬路径已核产物、不覆盖、不删除。
             approval=ToolApproval.NEVER,
         )
 
@@ -161,7 +161,7 @@ class PromoteProductTool:
             )
         if not has_delivery_reconciliation(ledger):
             return _fail(
-                "本会话还没有交付对账，取不到「已验收」清单，无法判断哪些产物可归位。"
+                "本会话还没有交付对账，取不到「路径已核」清单，无法判断哪些产物可归位。"
                 "请先完成派工并拿到交付状态后再归位；确无成品可交时，"
                 "直接在收口里说明「本轮无成品归位」即可。",
                 start,
@@ -241,7 +241,7 @@ def _ineligible_reason(path: str, accepted: dict[str, str]) -> str | None:
     if not path.startswith(_DOCS_SOURCE_PREFIX):
         return f"不在 AI 工作间（`{_DOCS_SOURCE_PREFIX}` 下）——已在工作区里的文件无需归位"
     if path not in accepted:
-        return "不在本回合交付对账的已验收清单里（未通过验收或本回合未产出）"
+        return "不在本回合交付对账的路径已核清单里（路径未核或本回合未产出）"
     return None
 
 

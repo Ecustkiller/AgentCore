@@ -210,6 +210,10 @@ describe("emptyFailureNotice", () => {
   it("flips default ON for degraded empty finishes", () => {
     expect(emptyFailureNotice("degraded")).toBe("模型返回空内容，请重试。");
   });
+
+  it("surfaces empty max_rounds as the chip sentence", () => {
+    expect(emptyFailureNotice("max_rounds")).toBe("已达最大轮次 · 提前收尾");
+  });
 });
 
 describe("emptyFailureVisibleNotice", () => {
@@ -304,6 +308,15 @@ describe("resolveEmptyFailureNotice (ChatPage gate)", () => {
         finishReason: "cancelled",
       }),
     ).toBeNull();
+  });
+
+  it("empty max_rounds uses the chip sentence", () => {
+    expect(
+      resolveEmptyFailureNotice({
+        content: "",
+        finishReason: "max_rounds",
+      }),
+    ).toBe("已达最大轮次 · 提前收尾");
   });
 
   it("empty paused stays silent (not a failure face)", () => {

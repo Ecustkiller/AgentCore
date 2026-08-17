@@ -169,6 +169,7 @@ def tool_use_end(
     display: dict[str, Any] | None = None,
     failure: dict[str, str] | None = None,
     run_id: str = "",
+    partial_failure: bool = False,
 ) -> SSEEvent:
     """Build ``tool_use_end``.
 
@@ -192,6 +193,8 @@ def tool_use_end(
             payload["failure"] = {"message": msg, "code": code}
     if run_id:
         payload["run_id"] = run_id
+    if partial_failure:
+        payload["partial_failure"] = True
     return SSEEvent(type=EventType.TOOL_USE_END, payload=payload)
 
 
@@ -226,6 +229,7 @@ def message_end(
     cost: dict[str, Any] | None = None,
     collab: dict[str, int] | None = None,
     duration_ms: int | None = None,
+    outcome: str | None = None,
 ) -> SSEEvent:
     # 未显式传入时复用 TurnLatencyProbe（与 chat.turn_complete 同锚）；无 probe 则省略字段。
     if duration_ms is None:
@@ -250,6 +254,8 @@ def message_end(
         payload["collab"] = collab
     if duration_ms is not None:
         payload["duration_ms"] = int(duration_ms)
+    if outcome in ("ok", "partial", "paused", "error"):
+        payload["outcome"] = outcome
     return SSEEvent(type=EventType.MESSAGE_END, payload=payload)
 
 

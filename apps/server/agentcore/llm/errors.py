@@ -11,6 +11,8 @@ from typing import Any, Protocol
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.core.errors import (
+    RETRY_AFTER_FROM_HEADER,
+    RETRY_AFTER_UNKNOWN,
     AgentCoreError,
     InferenceTokenExpiredError,
     LLMAuthError,
@@ -381,10 +383,17 @@ def inference_envelope_error(
     source: str | None = raw_source if raw_source in ("user", "platform") else None
 
     if envelope.code == ErrorCode.LLM_RATE_LIMIT:
+        retry = _envelope_retry_after(context)
+        # Envelope ``retry_after`` is only present when the leaf attested a header
+        # (ErrorContext documents it as 上游 Retry-After). Rebuild with that source
+        # so the hop does not treat a real header as unknown and drop the seconds.
         return upstream_rate_limit_error(
-            _envelope_retry_after(context),
+            retry,
             credential_source=source,
             retry_ceiling=retry_ceiling,
+            retry_after_source=(
+                RETRY_AFTER_FROM_HEADER if retry is not None else RETRY_AFTER_UNKNOWN
+            ),
             **details,
         )
     leaf = _ENVELOPE_LEAF_ERRORS.get(envelope.code)
@@ -458,8 +467,9 @@ _AUTH_BODY_MARKERS = re.compile(
     re.IGNORECASE,
 )
 # Balance exhaustion answered with 401/403 instead of the conventional 402
-# (OpenCode Zen: ``{"error":{"type":"CreditsError","message":"Insufficient balance…"}}``).
-# Body-proven only — a bare 401 with no balance marker stays an auth failure.
+# (OpenCode: ``{"error":{"type":"CreditsError",…}}`` — payment / subscription /
+# empty wallet). Body-proven only — a bare 401 with no balance marker stays auth.
+# Go *quota* exhaustion is ``GoUsageLimitError`` (429), not CreditsError.
 _BALANCE_BODY_CODES = frozenset(
     {
         "insufficient_balance",
@@ -522,18 +532,248 @@ _CONTEXT_OVERFLOW_MARKERS = re.compile(
 _CONTEXT_OVERFLOW_PRODUCT = "对话上下文过长，本轮无法继续。请压缩较早对话后重试"
 
 
+# ---------------------------------------------------------------------------
+# OpenCode structured ``error.type`` table (console source, 2026-08-18).
+# Envelope: ``{"type":"error","error":{"type": <class name>, "message": …}}``.
+# Classifier = nested ``error.type`` only. Top-level ``Router.Unavailable`` is
+# a different envelope and is out of this table. Add rows only from observed
+# class names — do not invent types, do not scan ``error.message``.
+# ---------------------------------------------------------------------------
+_OPENCODE_TYPED = frozenset(
+    {
+        "regionerror",  # 403
+        "autherror",  # 401
+        "creditserror",  # 401 — payment / subscription / empty wallet
+        "monthlylimiterror",  # 401 — workspace monthly cap
+        "userlimiterror",  # 401 — member cap
+        "modelerror",  # 401 — unsupported / disabled / trial ended
+        "ratelimiterror",  # 429
+        "freeusagelimiterror",  # 429
+        "gousagelimiterror",  # 429 — Go subscription window
+        "blackusagelimiterror",  # 429
+        "error",  # 500 literal fallback (not a class name)
+    }
+)
+OPENCODE_TYPED_KINDS = _OPENCODE_TYPED
+_OPENCODE_NON_AUTH = frozenset(
+    {
+        "regionerror",
+        "creditserror",
+        "monthlylimiterror",
+        "userlimiterror",
+        "modelerror",
+        "ratelimiterror",
+        "freeusagelimiterror",
+        "gousagelimiterror",
+        "blackusagelimiterror",
+    }
+)
+_OPENCODE_LIMIT_NAME = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
+# Scheduler reads the same field but must accept the upstream tokens with a
+# space (``5 hour``). Product-copy sanitizer above stays ASCII-token only.
+_OPENCODE_GO_LIMIT_NAME = re.compile(r"^[A-Za-z0-9._ -]{1,32}$")
+_OPENCODE_WORKSPACE_GO_URL = re.compile(
+    r"https://opencode\.ai/workspace/[A-Za-z0-9_-]+/go"
+)
+
+OPENCODE_CREDITS_MESSAGE = (
+    "OpenCode 账户余额不足、订阅未激活或未绑定支付方式。"
+    "请在 OpenCode 控制台完成充值或订阅后重试。"
+)
+OPENCODE_GO_QUOTA_MESSAGE = (
+    "OpenCode Go 订阅配额已用尽（5 小时 / 周 / 月）。请稍后再试，"
+    "或在 OpenCode 控制台开启 Use balance 以回落 Zen 余额。"
+)
+OPENCODE_FREE_USAGE_MESSAGE = "OpenCode 免费额度已用尽。请稍后再试。"
+OPENCODE_MONTHLY_LIMIT_MESSAGE = (
+    "OpenCode 工作区已达月度用量上限。请稍后再试，或在 OpenCode 控制台调整限额。"
+)
+OPENCODE_USER_LIMIT_MESSAGE = (
+    "OpenCode 工作区成员用量已达上限。请稍后再试，或在 OpenCode 控制台调整限额。"
+)
+OPENCODE_MODEL_UNAVAILABLE_MESSAGE = (
+    "该模型当前不可用（不支持、已禁用或试用已结束）。请更换模型后重试。"
+)
+OPENCODE_REGION_BYOK_MESSAGE = (
+    "该模型需在 OpenCode 控制台为工作区开启中国区托管授权后才能使用。"
+)
+OPENCODE_REGION_PLATFORM_MESSAGE = (
+    "平台侧该模型尚未就绪，请稍后重试或改用自己的 API Key。"
+)
+OPENCODE_PLATFORM_USAGE_MESSAGE = (
+    "平台侧用量暂时受限，请稍后重试或改用自己的 API Key。"
+)
+OPENCODE_PLATFORM_MODEL_MESSAGE = (
+    "平台侧该模型暂不可用，请稍后重试或改用自己的 API Key。"
+)
+
+
+def opencode_structured_error_type(body: bytes | str | None) -> str | None:
+    """Lowercased nested ``error.type``, or ``None``.
+
+    Reads only the structured field. Unknown values are returned so callers can
+    extend the table; they must not be guessed into product copy.
+    """
+    kind = (_extract_upstream_error_type(body_preview(body)) or "").strip().lower()
+    return kind or None
+
+
+def is_opencode_region_error(body: bytes | str | None) -> bool:
+    return opencode_structured_error_type(body) == "regionerror"
+
+
+def _opencode_error_object(body: bytes | str | None) -> dict[str, Any] | None:
+    preview = body_preview(body)
+    if not preview:
+        return None
+    try:
+        data = json.loads(preview)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    err = data.get("error")
+    return err if isinstance(err, dict) else None
+
+
+def _opencode_workspace_go_url(body: bytes | str | None) -> str | None:
+    extracted = (_extract_upstream_message(body_preview(body)) or "").strip()
+    if not extracted:
+        return None
+    match = _OPENCODE_WORKSPACE_GO_URL.search(extracted)
+    return match.group(0) if match else None
+
+
+def _opencode_limit_name(body: bytes | str | None) -> str | None:
+    err = _opencode_error_object(body)
+    if err is None:
+        return None
+    meta = err.get("metadata")
+    if not isinstance(meta, dict):
+        return None
+    name = meta.get("limitName")
+    if not isinstance(name, str):
+        return None
+    token = name.strip()
+    return token if _OPENCODE_LIMIT_NAME.fullmatch(token) else None
+
+
+def opencode_go_limit_name(body: bytes | str | None) -> str | None:
+    """Raw ``metadata.limitName`` for the pool state machine (may contain spaces)."""
+    err = _opencode_error_object(body)
+    if err is None:
+        return None
+    meta = err.get("metadata")
+    if not isinstance(meta, dict):
+        return None
+    name = meta.get("limitName")
+    if not isinstance(name, str):
+        return None
+    token = name.strip()
+    return token if token and _OPENCODE_GO_LIMIT_NAME.fullmatch(token) else None
+
+
+def opencode_region_product_message(
+    body: bytes | str | None, *, platform: bool
+) -> str:
+    if platform:
+        return OPENCODE_REGION_PLATFORM_MESSAGE
+    url = _opencode_workspace_go_url(body)
+    if url:
+        return f"{OPENCODE_REGION_BYOK_MESSAGE}请前往 {url} 完成授权后再试。"
+    return OPENCODE_REGION_BYOK_MESSAGE
+
+
+def opencode_credits_product_message(*, platform: bool) -> str | None:
+    """CreditsError family copy. Platform keeps the default 余额不足 / BYOK-exit sentence."""
+    if platform:
+        return None
+    return OPENCODE_CREDITS_MESSAGE
+
+
+def opencode_typed_client_error(
+    body: bytes | str | None,
+    *,
+    status: int,
+    platform: bool,
+) -> LLMError | None:
+    """Product copy for OpenCode 4xx types that are not auth / credits / 429.
+
+    AuthError and CreditsError stay on the existing auth / balance paths.
+    429 types stay on the rate-limit path (see ``opencode_typed_rate_limit_message``).
+    The 500 literal ``"error"`` stays on the existing 5xx path. Unknown types
+    fall through. Platform never echoes workspace URL / id.
+    """
+    kind = opencode_structured_error_type(body)
+    if kind == "regionerror":
+        return upstream_client_error(
+            opencode_region_product_message(body, platform=platform),
+            status=status,
+            body=body,
+        )
+    if kind == "monthlylimiterror":
+        copy = (
+            OPENCODE_PLATFORM_USAGE_MESSAGE if platform else OPENCODE_MONTHLY_LIMIT_MESSAGE
+        )
+        return upstream_client_error(copy, status=status, body=body)
+    if kind == "userlimiterror":
+        copy = (
+            OPENCODE_PLATFORM_USAGE_MESSAGE if platform else OPENCODE_USER_LIMIT_MESSAGE
+        )
+        return upstream_client_error(copy, status=status, body=body)
+    if kind == "modelerror":
+        copy = (
+            OPENCODE_PLATFORM_MODEL_MESSAGE
+            if platform
+            else OPENCODE_MODEL_UNAVAILABLE_MESSAGE
+        )
+        return upstream_client_error(copy, status=status, body=body)
+    return None
+
+
+def opencode_typed_rate_limit_message(
+    body: bytes | str | None, *, platform: bool
+) -> str | None:
+    """Overlay for proven OpenCode 429 types with distinct product copy.
+
+    ``RateLimitError`` / ``BlackUsageLimitError`` keep the existing 上游限流 sentence.
+    Does not change retry / ``retry_after`` handling — callers overlay ``.message``
+    on the error ``upstream_rate_limit_error`` already built.
+    """
+    kind = opencode_structured_error_type(body)
+    if kind == "gousagelimiterror":
+        if platform:
+            return OPENCODE_PLATFORM_USAGE_MESSAGE
+        name = _opencode_limit_name(body)
+        if name:
+            return (
+                f"OpenCode Go 订阅配额已用尽（{name}）。请稍后再试，"
+                "或在 OpenCode 控制台开启 Use balance 以回落 Zen 余额。"
+            )
+        return OPENCODE_GO_QUOTA_MESSAGE
+    if kind == "freeusagelimiterror":
+        if platform:
+            return OPENCODE_PLATFORM_USAGE_MESSAGE
+        return OPENCODE_FREE_USAGE_MESSAGE
+    return None
+
+
 def is_balance_exhausted(body: bytes | str | None) -> bool:
     """True when the upstream body proves an exhausted balance, whatever the status.
 
-    Vendors disagree on the status code — DeepSeek answers 402, OpenCode Zen answers
-    401 with a ``CreditsError`` body — so the body is authoritative here. A bare 401
-    carrying no balance marker stays an auth failure.
+    Vendors disagree on the status code — DeepSeek answers 402, OpenCode answers
+    401 with a ``CreditsError`` body — so the body is authoritative here.
+    A bare 401 carrying no balance marker stays an auth failure.
+    OpenCode ``GoUsageLimitError`` and other non-credits typed errors are not
+    balance, even if ``error.message`` happens to mention credits.
     """
     preview = body_preview(body)
     if not preview:
         return False
     code = (_extract_upstream_code(preview) or "").strip().lower()
     kind = (_extract_upstream_error_type(preview) or "").strip().lower()
+    if kind in _OPENCODE_NON_AUTH and kind != "creditserror":
+        return False
     if code in _BALANCE_BODY_CODES or kind in _BALANCE_BODY_CODES:
         return True
     extracted = _extract_upstream_message(preview) or ""
@@ -542,7 +782,10 @@ def is_balance_exhausted(body: bytes | str | None) -> bool:
 
 def is_auth_rejection(status_code: int, body: bytes | str | None) -> bool:
     """True when a 401/403 should surface as key/auth failure (not model-not-allowed)."""
-    if is_balance_exhausted(body):
+    kind = opencode_structured_error_type(body)
+    if kind == "autherror":
+        return True
+    if kind in _OPENCODE_NON_AUTH or is_balance_exhausted(body):
         return False
     if status_code == 401:
         return True
@@ -675,8 +918,13 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
 
     status = exc.details.get("upstream_status")
     retry_after = exc.details.get("retry_after")
-    if isinstance(exc, LLMRateLimitError) and retry_after is None:
-        retry_after = getattr(exc, "retry_after", None)
+    if isinstance(exc, LLMRateLimitError):
+        source = getattr(exc, "retry_after_source", RETRY_AFTER_UNKNOWN)
+        if source != RETRY_AFTER_FROM_HEADER:
+            # Unattested cooldown stays on the exception for the engine, not the wire.
+            retry_after = None
+        elif retry_after is None:
+            retry_after = getattr(exc, "retry_after", None)
     credential_source = exc.details.get("credential_source")
     moments = wire_moments(exc)
 
@@ -703,4 +951,6 @@ def error_context_from(exc: BaseException) -> dict[str, int | str | float | None
     # No Sub2API relay diagnosis here on purpose: it describes the *operator's*
     # upstream accounts, and this dict is the user-visible SSE / REST error
     # context. It stays on the log surface (``llm.upstream_error``).
+    # Same posture: ``platform_credential_id`` (which pool member paid) is
+    # logs + ``cost_calls`` only — never copied onto this wire context.
     return ctx or None

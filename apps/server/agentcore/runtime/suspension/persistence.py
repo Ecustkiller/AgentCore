@@ -50,6 +50,7 @@ from agentcore.runtime.suspension import (
     TurnSuspension,
     suspension_from_json,
 )
+from agentcore.runtime.turn.ceo_continue import is_ceo_continue_frame
 
 logger = get_logger(__name__)
 
@@ -317,6 +318,8 @@ async def load_paused_turn(
                 return None
             if conversation_id is not None and row.conversation_id != conversation_id:
                 return None
+            if is_ceo_continue_frame(row.frame):
+                return None
             return suspension_from_json(row.frame)
     except Exception as e:  # noqa: BLE001 — peek failure reads as "not resumable"
         logger.warning("suspension.load_failed", message_id=message_id, error=str(e))
@@ -334,7 +337,9 @@ async def paused_turn_exists(message_id: str, *, conversation_id: str) -> bool:
     """
     async with async_session_factory() as db:
         row = await PausedTurnRepository(db).get(message_id)
-    return row is not None and row.conversation_id == conversation_id
+    if row is None or row.conversation_id != conversation_id:
+        return False
+    return not is_ceo_continue_frame(row.frame)
 
 
 async def claim_paused_turn(
@@ -384,6 +389,9 @@ async def claim_paused_turn(
     claimed: dict[str, Any] | None = None
     try:
         async with async_session_factory() as db:
+            existing = await PausedTurnRepository(db).get(message_id)
+            if existing is not None and is_ceo_continue_frame(existing.frame):
+                return None
             row = await PausedTurnRepository(db).claim(
                 message_id,
                 conversation_id=conversation_id,
@@ -546,4 +554,9 @@ async def list_paused_turns(conversation_id: str) -> list[TurnSuspension]:
     except Exception as e:  # noqa: BLE001 — a list failure degrades to "none pending"
         logger.warning("suspension.list_failed", conversation_id=conversation_id, error=str(e))
         return []
-    return [suspension_from_json(r.frame) for r in rows]
+    out: list[TurnSuspension] = []
+    for r in rows:
+        if is_ceo_continue_frame(r.frame):
+            continue
+        out.append(suspension_from_json(r.frame))
+    return out

@@ -3,6 +3,7 @@
 from structlog.testing import capture_logs
 
 from agentcore.runtime.delegate.ceo_format import (
+    build_ceo_synthesis,
     format_for_ceo,
     worker_products,
 )
@@ -31,14 +32,17 @@ def test_format_for_ceo_surfaces_file_manifest():
         )
     }
     out = format_for_ceo(t, plan, results)
-    assert "文件产出（已验收）" in out
+    assert "文件产出（路径已核）" in out
+    assert "路径核对：已核" in out
+    assert "文件验收：已验收" not in out
+    assert "已验收" not in out
     assert "`dashboard.html`" in out
     assert "`assets/styles.css`" in out
     assert "地面真相" in out
 
 
-def test_format_for_ceo_no_acceptance_without_stamp():
-    """无 file_acceptance 戳时：不写「已验收」，也不用 files_touched 拼「未通过验收」。"""
+def test_format_for_ceo_no_acceptance_without_stamp_still_counts_failed_landings():
+    """FAILED 未盖戳但 files_touched 已落盘 → 计入路径已核（与 delivery_status 同源）。"""
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="写摘要", role="调研员")])
     results = {
@@ -50,13 +54,28 @@ def test_format_for_ceo_no_acceptance_without_stamp():
         )
     }
     out = format_for_ceo(t, plan, results)
-    assert "> 未通过验收：" not in out
-    assert "> 文件产出（已验收）：" not in out
-    assert "`AgentCore/文档/research/a.md`" not in out
+    assert "> 文件产出（路径已核）：`AgentCore/文档/research/a.md`" in out
+    assert "> 路径未核：" not in out
+
+
+def test_format_for_ceo_completed_without_stamp_still_silent():
+    """COMPLETED 无戳仍不从 files_touched 合成验收行。"""
+    t = tool(Provider([]))
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="写摘要", role="调研员")])
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="已落盘",
+            files_touched=["AgentCore/文档/research/a.md"],
+        )
+    }
+    out = format_for_ceo(t, plan, results)
+    assert "> 路径未核：" not in out
+    assert "> 文件产出（路径已核）：" not in out
 
 
 def test_format_for_ceo_rejected_file_acceptance():
-    """FAILED + 显式 rejected 戳 → 「未通过验收」，不得冒充已验收。"""
+    """FAILED + 显式 rejected 戳 → 「路径未核」，不得冒充路径已核。"""
     t = tool(Provider([]))
     plan = RunPlan(nodes=[RunSpec(run_id="w1", task="写摘要", role="调研员")])
     touched = ["AgentCore/文档/research/a.md"]
@@ -72,9 +91,9 @@ def test_format_for_ceo_rejected_file_acceptance():
         )
     }
     out = format_for_ceo(t, plan, results)
-    assert "未通过验收" in out
+    assert "路径未核" in out
     assert "`AgentCore/文档/research/a.md`" in out
-    assert "> 文件产出（已验收）：`AgentCore/文档/research/a.md`" not in out
+    assert "> 文件产出（路径已核）：`AgentCore/文档/research/a.md`" not in out
 
 
 def test_format_for_ceo_appends_tool_failures_and_hard_constraint():
@@ -458,7 +477,7 @@ def test_worker_products_empty_body_with_files_and_debrief_is_pointer():
     assert ok["status"] == "completed"
     assert "交接结论：报告已落盘" in ok["body"]
     assert "结论甲" in ok["body"]
-    assert "文件产出（已验收）" in ok["body"]
+    assert "文件产出（路径已核）" in ok["body"]
     fail = by_id["w_fail"]
     assert fail["fidelity"] == ""
     assert fail["status"] == "failed"
@@ -477,7 +496,9 @@ def test_format_for_ceo_footer_is_lean_but_keeps_iron_laws():
     out = format_for_ceo(t, plan, results)
     footer = out.split("以上为团队产出", 1)[-1]
     assert "防幻觉" in footer
-    assert "文件产出（已验收）" in footer
+    assert "文件产出（路径已核）" in footer
+    assert "文件产出（已验收）" not in footer
+    assert "脚本已跑通" in footer
     assert "未真正落盘" in footer or "未达成" in footer
     assert "队员终态名册" in footer or "全部交付" in footer
     assert "失败" in footer or "接替" in footer or "禁止编造" in footer
@@ -561,6 +582,20 @@ def test_format_for_ceo_emits_uncapped_synthesis_metric():
     assert metric["workers"] == 8 and metric["prose"] == 8
     assert metric["ratio"] < 1.0
     assert metric["ratio_capped"] is False
+
+
+def test_build_ceo_synthesis_same_conclusion_logs_once():
+    """finalize 幂等：同一 tool + execution + 结论只打一次 delegate.synthesis。"""
+    t = tool(Provider([]))
+    t._base_tool_context.execution_id = "e-syn-idem"
+    plan = RunPlan(nodes=[RunSpec(run_id="w1", task="分析", role="分析")])
+    results = {"w1": RunState(phase=RunPhase.COMPLETED, content="综述正文")}
+    with capture_logs() as logs:
+        first = build_ceo_synthesis(t, plan, results, call_idx=1)
+        second = build_ceo_synthesis(t, plan, results, call_idx=1)
+    assert first.text == second.text
+    synth = [e for e in logs if e["event"] == "delegate.synthesis"]
+    assert len(synth) == 1
 
 
 def test_format_for_ceo_caps_short_raw_expansion_ratio():

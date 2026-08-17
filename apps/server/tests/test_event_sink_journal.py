@@ -447,3 +447,53 @@ async def test_emit_updates_in_memory_journal_when_writer_sealed(monkeypatch) ->
         assert writer.schedule_append({"kind": "x"}) is None
     finally:
         current_journal_writer.reset(token)
+
+
+def test_journal_persist_caps_tool_use_end_live_payload_stays_full():
+    from agentcore.runtime.events.journal_config import cap_process_result
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+
+    log = TurnFactLog()
+    token = current_fact_log.set(log)
+    sink = EventSink()
+    try:
+        big = "x" * 9000
+        sink.emit(_plan())
+        sink.emit(tool_use_start("t1", "read_url", {"url": "https://example.com"}))
+        ev = tool_use_end("t1", "read_url", success=True, output=big)
+        sink.emit(ev)
+
+        assert ev.payload["result"] == big
+        journal = sink.execution_journal()
+        assert journal is not None
+        end = next(e for e in journal if e["type"] == EventType.TOOL_USE_END.value)
+        assert end["payload"]["result"] == cap_process_result(big)
+        fact = next(e for e in log.entries() if e["kind"] == "tool_use_end")
+        assert fact["payload"]["result"] == cap_process_result(big)
+        process = next(e for e in log.entries() if e["kind"] == "process_tool")
+        assert process["payload"]["result"] == cap_process_result(big)
+    finally:
+        current_fact_log.reset(token)
+
+
+def test_journal_persist_safety_caps_team_preview_resolved_note():
+    from agentcore.runtime.events import team_preview_resolved
+    from agentcore.runtime.events.journal_config import _JOURNAL_PAYLOAD_SAFETY_CAP
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+
+    log = TurnFactLog()
+    token = current_fact_log.set(log)
+    sink = EventSink()
+    try:
+        huge = "注" * (_JOURNAL_PAYLOAD_SAFETY_CAP + 25)
+        sink.emit(_plan())
+        ev = team_preview_resolved(checkpoint_id="tp1", decision="continue", note=huge)
+        sink.emit(ev)
+        assert ev.payload["note"] == huge
+        fact = next(e for e in log.entries() if e["kind"] == "team_preview_resolved")
+        note = fact["payload"]["note"]
+        assert len(note) == _JOURNAL_PAYLOAD_SAFETY_CAP
+        assert "journal_capped" in note
+        assert f"original_chars={len(huge)}" in note
+    finally:
+        current_fact_log.reset(token)

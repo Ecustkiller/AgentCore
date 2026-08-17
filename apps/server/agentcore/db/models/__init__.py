@@ -37,6 +37,7 @@ from .feedback import FeedbackRow
 from .llm_profiles import LlmModelProfile
 from .memory_pipeline import MemoryEpisode, MemoryScopeState
 from .notices import ProductNoticeDismissalRow, ProductNoticeRow
+from .platform import PlatformCredential
 from .runs import (
     PAUSED_TURN_EXPIRED,
     PAUSED_TURN_SETTLED,
@@ -92,6 +93,7 @@ __all__ = [
     "PAUSED_TURN_SETTLED",
     "PausedTurnOutcomeRow",
     "PausedTurnRow",
+    "PlatformCredential",
     "ProductNoticeDismissalRow",
     "ProductNoticeRow",
     "PushDeviceRow",

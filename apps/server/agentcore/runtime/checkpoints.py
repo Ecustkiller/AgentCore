@@ -36,9 +36,10 @@ class CheckpointDecision(StrEnum):
 
     ``CONTINUE`` / ``ADJUST`` / ``STOP`` are shared by ask_user / plan_review /
     team_preview (开工卡). On the kickoff card, ``CONTINUE`` means grant + start
-    (non-empty ``note`` steers all unrun workers — 嘱咐). ``ADJUST`` on
-    team_preview does **not** grant or start: user ``note`` is fed back so the
-    CEO revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
+    (non-empty ``note`` steers all unrun workers — 嘱咐, **not** a substitute
+    for ``ADJUST``). ``ADJUST`` on team_preview does **not** grant or start:
+    user ``note`` (required, non-empty on resume) is fed back so the CEO
+    revises and resubmits through the kickoff gate (可多轮). ``ADJUST`` on
     plan_review still steers then continues. ask_user rejects ``ADJUST``.
     ``RESEARCH_FIRST`` is debate kickoff only: 不开赛，回灌固定文案令 CEO 立即挂
     ``multi_lens_research``（与 STOP 同构的恢复分支；非辩论开工卡须拒绝/降级）。

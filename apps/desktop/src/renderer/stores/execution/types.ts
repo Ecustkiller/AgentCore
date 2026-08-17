@@ -337,6 +337,12 @@ export interface RunNode {
   failureKind?: import("@/types/events").RunFailureKind | null;
   /** `run_failed.product_landed` — files already on disk before failure. */
   productLanded?: boolean | null;
+  /** `run_failed.error_code` — desktop-local; stripped from ProjectedTurn. */
+  errorCode?: string | null;
+  /** `run_failed.retryable` — desktop-local; stripped from ProjectedTurn. */
+  retryable?: boolean | null;
+  /** `run_failed.retry_after` seconds — desktop-local; stripped from ProjectedTurn. */
+  retryAfter?: number | null;
   /** Delegating run id (`run_started` slot). 阶段1 always null (flat workers
    * under the CEO); set for 阶段2 nested delegation. */
   parentRunId: string | null;
@@ -517,6 +523,11 @@ export interface UserInterjectionAttachment {
   binary?: boolean;
 }
 
+export interface UserInterjectionMention {
+  agentId: string;
+  role: string;
+}
+
 export interface UserInterjection {
   interjectionId: string;
   executionId: string;
@@ -524,6 +535,8 @@ export interface UserInterjection {
   status: UserInterjectionStatus;
   note: string | null;
   attachments?: UserInterjectionAttachment[];
+  /** Soft `@` role chips on the interjection bubble (prompt hint, not a hard route). */
+  agentMentions?: UserInterjectionMention[];
 }
 
 /**

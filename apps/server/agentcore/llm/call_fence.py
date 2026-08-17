@@ -153,9 +153,27 @@ class ObservingLLMProvider:
             scenario=request.scenario,
         )
 
+    def _sync_platform_credential_context(self, request: LLMRequest) -> None:
+        """Stamp or drop ambient ``platform_credential_id`` for this leaf call.
+
+        Platform leaf re-resolves per ``request.model`` (一 key 一模型). BYOK /
+        vendor unbind so a prior platform extra in the same task cannot leak
+        onto their logs or ledger.
+        """
+        from agentcore.llm.credentials import bind_platform_credential_id
+
+        if self._provider_name() != "platform":
+            bind_platform_credential_id(None)
+            return
+        from agentcore.llm.resolve import platform_llm_credentials
+
+        creds = platform_llm_credentials(model=request.model)
+        bind_platform_credential_id(creds.platform_credential_id if creds is not None else None)
+
     async def complete(self, request: LLMRequest) -> LLMResponse:
         from agentcore.llm.turn_auth_dead import mark_turn_auth_dead, raise_if_turn_auth_dead
 
+        self._sync_platform_credential_context(request)
         start = time.monotonic()
         try:
             raise_if_turn_auth_dead()
@@ -197,6 +215,7 @@ class ObservingLLMProvider:
     async def stream(self, request: LLMRequest) -> AsyncIterator[LLMChunk]:
         from agentcore.llm.turn_auth_dead import mark_turn_auth_dead, raise_if_turn_auth_dead
 
+        self._sync_platform_credential_context(request)
         start = time.monotonic()
         usage: TokenUsage | None = None
         finish_reason: str | None = None
@@ -282,8 +301,7 @@ class ObservingLLMProvider:
                         scenario=request.scenario,
                         model=request.model,
                         usage=usage,
-                        finish_reason=finish_reason
-                        or ("aborted" if aborted else "stream_closed"),
+                        finish_reason=finish_reason or ("aborted" if aborted else "stream_closed"),
                         latency_ms=latency_ms,
                         stream=True,
                         messages=request.messages,

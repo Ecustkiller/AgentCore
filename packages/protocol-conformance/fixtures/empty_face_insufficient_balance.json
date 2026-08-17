@@ -45,6 +45,7 @@
   "projected": {
     "status": "failed",
     "finishReason": "error",
+    "outcome": "error",
     "error": {
       "code": "LLM_INSUFFICIENT_BALANCE",
       "message": "上游账户余额不足，请充值或更换 Key。"

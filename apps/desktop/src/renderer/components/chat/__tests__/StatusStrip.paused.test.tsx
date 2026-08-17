@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { conversationKeys } from "@/lib/queryKeys";
+import { useConversationStore } from "@/stores/conversation";
 import {
   type ExecutionPlan,
   ExecutionScopeContext,
   type RunFrame,
   projectExecution,
+  useExecutionStore,
 } from "@/stores/execution";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen } from "@testing-library/react";
@@ -89,6 +91,8 @@ function renderStrip(execution: ReturnType<typeof projectExecution>) {
 
 afterEach(() => {
   cleanup();
+  useExecutionStore.setState({ byId: {} });
+  useConversationStore.setState({ currentConversationId: null, byId: {} });
 });
 
 describe("StatusStrip · paused", () => {
@@ -173,6 +177,28 @@ describe("StatusStrip · paused", () => {
     expect(screen.queryByText("并行调研")).toBeNull();
     expect(screen.getByText("0/2")).toBeTruthy();
     expect(container.querySelector(".animate-spin")).toBeTruthy();
+  });
+
+  it("闸卡暂停不点亮「继续」（outcome 未 attested）", () => {
+    const exec = projectExecution(plan, waveDoneFrames, "paused");
+    renderStrip(exec);
+    expect(screen.getByTestId("status-strip-paused")).toBeTruthy();
+    expect(screen.queryByTestId("paused-continue-action")).toBeNull();
+    expect(screen.queryByText("继续")).toBeNull();
+  });
+
+  it("attested paused：已暂停 + 继续，不画失败条", () => {
+    useConversationStore.getState().switchConversation("conv-paused-continue");
+    useExecutionStore.getState().startExecution(plan, MID);
+    useExecutionStore.getState().setAttestedOutcome("paused", MID);
+    const exec = projectExecution(plan, waveDoneFrames, "failed");
+    renderStrip(exec);
+    expect(screen.getByTestId("status-strip-paused")).toBeTruthy();
+    expect(screen.getByTestId("paused-continue-action")).toBeTruthy();
+    expect(screen.getByText("已暂停")).toBeTruthy();
+    expect(screen.getByText("继续")).toBeTruthy();
+    expect(screen.queryByTestId("status-strip-failed")).toBeNull();
+    expect(screen.queryByText("失败")).toBeNull();
   });
 
   it("running 仍走转圈分支（回归）", () => {

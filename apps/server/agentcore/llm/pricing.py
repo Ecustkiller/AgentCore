@@ -12,6 +12,9 @@ the way to the pixel:
 - **community** snapshot — public vendor list prices, **USD**
   (:func:`~agentcore.llm.community_prices.community_currency`). BYOK estimates
   ride this table, so they are dollars and must render as ``$``.
+- **OpenCode Go public list** (ops-only, not this module) —
+  ``billing/opencode_go_public_prices.py``. Admin window-card USD estimate.
+  Must never feed ``calculate_cost`` / quota / user-facing money.
 
 Money is never a float. Costs are computed in :class:`~decimal.Decimal` and
 returned as integer **nano-units of** ``Cost.currency`` (``1 unit = 1e9 nano``).

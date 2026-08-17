@@ -87,6 +87,7 @@ def test_deepseek_v4_windows_follow_sku_not_family():
     assert model_metadata_for("deepseek-v4-flash-free").context_length == 200_000
     assert model_metadata_for("deepseek-v4-flash-0731").context_length == 1_000_000
     assert model_metadata_for("deepseek-v4-flash-free-0731").context_length == 200_000
+    # Window is SKU-keyed: paying Flash on Go (no ``-free`` catalog) stays 1M.
 
 
 def test_curated_display_name_badge_pairs_are_unique():

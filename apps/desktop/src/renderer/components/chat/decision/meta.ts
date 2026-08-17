@@ -176,14 +176,52 @@ export function isAskSilentResolvedDecision(
 
 type TeamResolvedRow = { label: string; icon: LucideIcon };
 
+/** Revision chrome + change-line templates. `{n}` / `{name}` / `{from}` / `{to}`. */
+export type TeamRevisionMeta = {
+  versionLabel: string;
+  caption: string;
+  noteLabel: string;
+  noteExpand: string;
+  noteCollapse: string;
+  changesLead: string;
+  unnamed: string;
+  added: string;
+  removed: string;
+  renamed: string;
+  roleChanged: string;
+  writeChanged: string;
+  planChanged: string;
+  motionChanged: string;
+  stanceChanged: string;
+};
+
 export type TeamPrimitiveMeta = {
   resumeLead: string;
   resumeCta: string;
   notePlaceholder: string;
+  /** Adjust-state primary — submit `adjust`, never continue. */
+  adjustCta: string;
+  adjustPlaceholder: string;
   resolved: Record<CheckpointDecision, TeamResolvedRow>;
   /** continue + non-empty note overrides the continue label. */
   continueWithNote: TeamResolvedRow;
+  revision: TeamRevisionMeta;
 };
+
+const TEAM_REVISION_CHROME = {
+  versionLabel: "第 {n} 版",
+  caption: "按你的意见修订",
+  noteLabel: "你交回的意见",
+  noteExpand: "展开全文",
+  noteCollapse: "收起",
+  changesLead: "相对上一版",
+  renamed: "{from} → {to}",
+  roleChanged: "{name}：角色/职责有变",
+  writeChanged: "{name}：写盘能力有变",
+  planChanged: "{name}：计划步骤有变",
+  motionChanged: "辩题有变",
+  stanceChanged: "{name}：立场有变",
+} as const;
 
 export const TEAM_PRIMITIVE_META = {
   delegate: {
@@ -191,6 +229,8 @@ export const TEAM_PRIMITIVE_META = {
     resumeLead: "预计开工。等待你确认后才会上场，分工如下：",
     resumeCta: "授权并开工",
     notePlaceholder: "开工时注入全体队员",
+    adjustCta: "交回修订",
+    adjustPlaceholder: "填写意见，交给 CEO 修订开工方案",
     resolved: {
       continue: {
         icon: Check,
@@ -216,11 +256,19 @@ export const TEAM_PRIMITIVE_META = {
       icon: Check,
       label: "已授权开工 · 嘱咐已注入队员",
     },
+    revision: {
+      ...TEAM_REVISION_CHROME,
+      unnamed: "未命名岗",
+      added: "新增 {name}",
+      removed: "去掉 {name}",
+    },
   },
   debate: {
     resumeLead: "预计开赛。等待你确认后才会开赛，辩题与立场如下：",
     resumeCta: "授权开赛",
     notePlaceholder: "开赛时注入各方",
+    adjustCta: "交回修订",
+    adjustPlaceholder: "填写意见，交给 CEO 修订开赛方案",
     resolved: {
       continue: {
         icon: Check,
@@ -244,6 +292,12 @@ export const TEAM_PRIMITIVE_META = {
     continueWithNote: {
       icon: Check,
       label: "已授权开赛 · 嘱咐已注入",
+    },
+    revision: {
+      ...TEAM_REVISION_CHROME,
+      unnamed: "未命名辩手",
+      added: "新增辩手 {name}",
+      removed: "去掉辩手 {name}",
     },
   },
 } as const satisfies Record<KickoffPrimitive, TeamPrimitiveMeta>;
@@ -303,6 +357,33 @@ export function teamResolvedOutcome(
  * Resolved 对账后缀：已排除 k 岗 / 已收紧写盘。缺省空 → 无后缀（同旧）。
  * 辩论开赛卡一般无修正字段；有则同样展示。
  */
+/** revision < 2（含缺省）不标版本，避免首版噪音。 */
+export function teamPreviewRevisionVersionLabel(
+  primitive: KickoffPrimitive,
+  revision: number | null | undefined,
+): string | null {
+  const n =
+    typeof revision === "number" && Number.isFinite(revision)
+      ? Math.floor(revision)
+      : 1;
+  if (n < 2) return null;
+  return TEAM_PRIMITIVE_META[primitive].revision.versionLabel.replaceAll(
+    "{n}",
+    String(n),
+  );
+}
+
+export function fillTeamRevisionTemplate(
+  template: string,
+  vars: { n?: number; name?: string; from?: string; to?: string },
+): string {
+  return template
+    .replaceAll("{n}", vars.n != null ? String(vars.n) : "")
+    .replaceAll("{name}", vars.name ?? "")
+    .replaceAll("{from}", vars.from ?? "")
+    .replaceAll("{to}", vars.to ?? "");
+}
+
 export function teamCorrectionSuffix(args: {
   excluded_run_ids?: readonly string[] | null;
   write_capability_overrides?: ReadonlyArray<{

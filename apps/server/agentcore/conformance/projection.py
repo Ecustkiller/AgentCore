@@ -26,7 +26,9 @@ the oracle never invents behavior the product doesn't already have:
   its *_resolved resumes when no gate remains pending; a paused turn's stream may end
   at the *_required). Full interaction lifecycle (pending|resolved|orphaned) is projected
   via :func:`fold_interactions` (runtime journal fold — single implementation);
-- ``cost`` / ``finishReason`` come from message_end (回合总账).
+- ``cost`` / ``finishReason`` come from message_end (回合总账);
+  ``outcome`` is ``message_end.outcome`` or the batch-bit aggregate
+  (``delivery_status=partial`` / ``product_landed`` / ``partial_failure``).
 
 Output keys are the camelCase ProjectedTurn shape (see
 ``packages/protocol-conformance/src/projectedTurn.ts``); wire-shaped leaves
@@ -44,6 +46,7 @@ from agentcore.runtime.journal.pending_interactions import (
     fold_interactions,
     project_interaction_leaf,
 )
+from agentcore.runtime.turn.outcome import resolve_turn_outcome
 
 # message_end.finish_reason → terminal TurnStatus (parity with TS
 # `@agentcore/protocol-fold-kit` turnStatusFromFinish / FINISH_TO_STATUS).
@@ -181,6 +184,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
     acts: list[dict[str, Any]] = []
     plan_id: str | None = None
     finish_reason: str | None = None
+    explicit_outcome: str | None = None
     cost: dict[str, Any] | None = None
     saw_error = False
     # Latest SSE ``error`` payload (turn-level face authority when content empty).
@@ -257,6 +261,7 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                 reasoning = ""
                 process = []
                 finish_reason = None
+                explicit_outcome = None
                 cost = None
                 turn_error = None
             if mid:
@@ -982,6 +987,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if aid and not has_marker("ask", "ask_id", aid):
                 process.append({"kind": "ask", "ask_id": aid})
 
+        elif etype == "question_resolved":
+            pass
+
         elif etype == "stage_card_required":
             # 阶段推进卡时间线落点：required 时刻锚点；生命周期仍由 fold_interactions 承载。
             # 跨回合流下 message_start 会清 process，故多回合向量的最终 projected.process
@@ -1002,6 +1010,9 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif etype == "message_end":
             finish_reason = p.get("finish_reason")
             cost = p.get("cost")
+            raw_outcome = p.get("outcome")
+            if raw_outcome in ("ok", "partial", "paused", "error"):
+                explicit_outcome = str(raw_outcome)
 
         elif etype == "turn_warning":
             msg = p.get("message")
@@ -1055,6 +1066,19 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
                     atts_out.append(entry)
                 if atts_out:
                     leaf["attachments"] = atts_out
+            raw_mentions = p.get("agent_mentions")
+            if isinstance(raw_mentions, list) and raw_mentions:
+                mentions_out: list[dict[str, Any]] = []
+                for m in raw_mentions:
+                    if not isinstance(m, dict):
+                        continue
+                    agent_id = str(m.get("agent_id") or "").strip()
+                    role = str(m.get("role") or "").strip()
+                    if not agent_id or not role:
+                        continue
+                    mentions_out.append({"agentId": agent_id, "role": role})
+                if mentions_out:
+                    leaf["agentMentions"] = mentions_out
             idx = _user_interjection_by_id.get(iid)
             if idx is None:
                 _user_interjection_by_id[iid] = len(user_interjections)
@@ -1114,9 +1138,18 @@ def project_turn(events: list[dict[str, Any]]) -> dict[str, Any]:
             if r["status"] == "pending":
                 r["status"] = "skipped"
 
+    outcome = resolve_turn_outcome(
+        events=events,
+        finish_reason=finish_reason,
+        has_error=saw_error,
+        explicit=explicit_outcome,
+        running=status == "running",
+    )
+
     return {
         "status": status,
         "finishReason": finish_reason,
+        "outcome": outcome,
         "error": turn_error,
         "content": content,
         "reasoning": reasoning,

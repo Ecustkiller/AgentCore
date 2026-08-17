@@ -57,6 +57,23 @@ describe("AttachmentChips 上传态", () => {
     expect(failed?.className).not.toContain("destructive");
   });
 
+  it("角色点名芯片写「点名」，不暗示已派单", () => {
+    render(
+      <TooltipProvider>
+        <AttachmentChips
+          attachments={[]}
+          agentMentions={[{ id: "m1", agentId: "a1", role: "研究员" }]}
+          onRemove={vi.fn()}
+          onRemoveAgent={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    expect(screen.getByText("点名")).toBeTruthy();
+    expect(screen.getByText("研究员")).toBeTruthy();
+    expect(screen.queryByText("已派单")).toBeNull();
+    expect(screen.queryByText("角色")).toBeNull();
+  });
+
   it("落地后回到普通 chip", () => {
     const { container } = renderChips([
       chip({ workspacePath: "attachments/shot.png" }),

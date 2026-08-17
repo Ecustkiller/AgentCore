@@ -83,6 +83,44 @@ def system_prune_ids(
     return [sid for sid in stale if sid not in pinned_ids]
 
 
+def byte_cap_prune_ids(
+    refs: list[SnapshotRef],
+    *,
+    max_bytes: int,
+    pinned_ids: set[str] | frozenset[str] | None = None,
+) -> list[str]:
+    """Return snapshot ids to delete so remaining total size fits ``max_bytes``.
+
+    ``refs`` is newest-first (``list_snapshots`` order). Evicts oldest first
+    among auto / baseline / system snapshots. User ``kept`` labels and
+    ``pinned_ids`` are never returned. ``max_bytes <= 0`` disables. Never
+    empties the history: a sole remaining snapshot is kept even if it alone
+    exceeds the cap.
+    """
+    if max_bytes <= 0 or not refs:
+        return []
+    pinned = pinned_ids or set()
+    total = sum(max(0, ref.size_bytes) for ref in refs)
+    if total <= max_bytes:
+        return []
+
+    stale: list[str] = []
+    remaining = len(refs)
+    for ref in reversed(refs):
+        if total <= max_bytes:
+            break
+        if remaining <= 1:
+            break
+        if ref.snapshot_id in pinned:
+            continue
+        if classify_snapshot_label(ref.label) == "kept":
+            continue
+        stale.append(ref.snapshot_id)
+        total -= max(0, ref.size_bytes)
+        remaining -= 1
+    return stale
+
+
 def _bucket_prune_ids(
     refs: list[SnapshotRef],
     *,

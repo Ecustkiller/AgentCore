@@ -1,5 +1,5 @@
-import { isEmptyCancelledAssistant } from "@/lib/composerContinueHint";
 import { isExecutionHarvestMessage } from "@/lib/executionHarvest";
+import { turnOutcomeForAssistant } from "@/lib/turnOutcome";
 import { useActiveMessageFocus } from "@/stores/conversation";
 import { memo, useEffect, useRef } from "react";
 import { AssistantMessage } from "./AssistantMessage";
@@ -33,8 +33,12 @@ export const MessageBubble = memo(function MessageBubble({
   if (isExecutionHarvestMessage(message)) {
     return null;
   }
-  // 空停止：聊天时间线不占「已停止」行（协作图 StatusStrip 仍保留）。
-  if (isEmptyCancelledAssistant(message)) {
+  // 空停止整泡不渲染的唯一列表入口（仲裁器 hideEmptyBubble）。气泡内部不再叠
+  // isUserStopped / 正文挡板；协作图 StatusStrip 仍可画「已停止」。
+  if (
+    message.role === "assistant" &&
+    turnOutcomeForAssistant(message, null).hideEmptyBubble
+  ) {
     return null;
   }
 

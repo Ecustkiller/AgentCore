@@ -17,14 +17,17 @@ Covered:
 * resume completion updates a paused snapshot in place;
 * a re-pause write-back with a fresh client user id reuses the paired user row;
 * a non-UUID ``user_message_id`` (sidecar ``resume-{turn_id}``) does not throw
-  and reuses the assistant-paired user row.
+  and reuses the assistant-paired user row (miss before PG UUID bind);
+* unpaired ``resume-*`` is not pinned as ``messages.id`` on create.
 """
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
 
+import asyncpg.exceptions
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 from agentcore.conversation import local_turn as local_turn_mod
 from agentcore.conversation.service import record_local_turn
@@ -34,7 +37,31 @@ from agentcore.runtime.events import FinishReason
 pytestmark = pytest.mark.anyio
 
 _TRACE = "0123456789abcdef0123456789abcdef"
-_USER_MSG_ID = "user-bubble-test"
+_USER_MSG_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+_PINNED_USER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+
+
+def _pg_uuid_bind_error(message_id: str) -> DBAPIError:
+    """Production asyncpg UUID bind failure (not CPython ``uuid.UUID`` ValueError)."""
+    orig = asyncpg.exceptions.DataError(
+        f"invalid input for query argument $1: {message_id!r}"
+    )
+    return DBAPIError(
+        "SELECT messages.id FROM messages WHERE messages.id = $1::UUID",
+        (message_id,),
+        orig,
+    )
+
+
+async def test_pg_uuid_bind_error_matches_production_shape():
+    """0.6.5 mocked CPython ValueError; production is DBAPIError(asyncpg DataError)."""
+    from sqlalchemy.exc import DataError as SADataError
+
+    err = _pg_uuid_bind_error("resume-72b2662b-eec1-4954-af03-941d9d04352a")
+    assert type(err) is DBAPIError
+    assert isinstance(err.orig, asyncpg.exceptions.DataError)
+    assert not isinstance(err, SADataError)
+    assert not isinstance(err, ValueError)
 
 
 class _FakeSession:
@@ -83,6 +110,7 @@ def _patch_persistence(
             events.append(("msg_id", role, kw.get("message_id")))
             events.append(("trace", role, kw.get("trace_id")))
             events.append(("user_usage", role, kw.get("metadata")))
+            events.append(("mentions", role, kw.get("agent_mentions")))
             return SimpleNamespace(id=f"{role}-id")
 
         async def upsert_assistant(self, **kw):
@@ -94,13 +122,12 @@ def _patch_persistence(
             return SimpleNamespace(id="assistant-id")
 
         async def get_by_id(self, message_id, *, conversation_id):
+            events.append(("get_by_id", message_id))
             if raise_on_invalid_uuid:
                 try:
                     UUID(str(message_id))
-                except ValueError as exc:
-                    raise ValueError(
-                        f"invalid UUID '{message_id}': length must be between 32..36"
-                    ) from exc
+                except ValueError:
+                    raise _pg_uuid_bind_error(str(message_id)) from None
             if message_id in seeded:
                 role = (
                     "assistant"
@@ -257,6 +284,26 @@ async def test_record_local_turn_persists_messages_and_journal(monkeypatch):
     assert result["title"] == "本地回合标题"
     usage = next(e for e in events if e[0] == "usage")
     assert usage[2]["status"] == "complete"
+
+
+async def test_record_local_turn_persists_agent_mentions(monkeypatch):
+    events: list = []
+    _patch_persistence(monkeypatch, events, existing_title="已有标题")
+    mentions = [{"agent_id": "w1", "role": "研究员"}]
+
+    await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="hi",
+        assistant_content="ok",
+        user_message_id=_USER_MSG_ID,
+        message_id="m-mentions",
+        trace_id=_TRACE,
+        agent_mentions=mentions,
+    )
+
+    created = next(e for e in events if e[0] == "mentions" and e[1] == "user")
+    assert created[2] == mentions
 
 
 async def test_record_local_turn_skips_title_when_inflight(monkeypatch):
@@ -508,12 +555,12 @@ async def test_record_local_turn_pins_user_row_to_client_id(monkeypatch):
         user_id="u1",
         user_message="hi",
         assistant_content="ok",
-        user_message_id="u-bubble-1",
+        user_message_id=_PINNED_USER_ID,
         message_id="m9",
         trace_id=_TRACE,
     )
 
-    assert ("msg_id", "user", "u-bubble-1") in events
+    assert ("msg_id", "user", _PINNED_USER_ID) in events
     assert ("msg_id", "assistant", "m9") in events
 
 
@@ -541,7 +588,7 @@ async def test_record_local_turn_retry_is_idempotent_merge(monkeypatch):
         monkeypatch,
         events,
         existing_title="已有标题",
-        existing_ids={"u-bubble-1", "m9"},
+        existing_ids={_PINNED_USER_ID, "m9"},
         existing_usage={"m9": {"status": "complete", "input_tokens": 1}},
         existing_content={"m9": "ok"},
     )
@@ -551,7 +598,7 @@ async def test_record_local_turn_retry_is_idempotent_merge(monkeypatch):
         user_id="u1",
         user_message="hi",
         assistant_content="ok",
-        user_message_id="u-bubble-1",
+        user_message_id=_PINNED_USER_ID,
         message_id="m9",
         trace_id=_TRACE,
     )
@@ -559,7 +606,7 @@ async def test_record_local_turn_retry_is_idempotent_merge(monkeypatch):
     assert not any(e[0] == "msg" for e in events)  # no duplicate user create
     assert ("upsert", "assistant", "c1") in events  # merge upsert, not early return
     assert not any(e[0] == "title" for e in events)
-    assert result["user_message_id"] == "u-bubble-1"
+    assert result["user_message_id"] == _PINNED_USER_ID
     assert result["assistant_message_id"] == "assistant-id"
     assert result["title"] == "已有标题"
 
@@ -638,9 +685,9 @@ async def test_record_local_turn_resume_after_pause_updates_assistant(monkeypatc
 async def test_record_local_turn_non_uuid_umid_reuses_paired_user(monkeypatch):
     """Legacy sidecar ``resume-{turn_id}`` must not throw; pair via assistant id.
 
-    Production ``Message.id`` is a PG UUID column: ``get_by_id(resume-*)`` raises
-    before the assistant-pairing fallback. This test mirrors that bind error so
-    the case is red on the old intercept.
+    Production ``Message.id`` is a PG UUID column. asyncpg raises
+    ``DataError`` at bind; SQLAlchemy wraps it as ``DBAPIError`` (not
+    ``sqlalchemy.exc.DataError``). The consume path must miss *before* bind.
     """
     events: list = []
     assistant_id = "11111111-1111-4111-8111-111111111111"
@@ -670,10 +717,38 @@ async def test_record_local_turn_non_uuid_umid_reuses_paired_user(monkeypatch):
         finish_reason=FinishReason.END_TURN.value,
     )
 
+    assert not any(e[0] == "get_by_id" and e[1] == resume_umid for e in events)
     assert not any(e[0] == "msg" and e[1] == "user" for e in events)
+    assert not any(e[0] == "msg_id" and e[1] == "user" and e[2] == resume_umid for e in events)
     assert ("upsert", "assistant", "c1") in events
     assert any(e[0] == "journal" for e in events)
     assert result["user_message_id"] == paired_user_id
+    assert result["assistant_message_id"] == "assistant-id"
+    assert result["noop"] is False
+
+
+async def test_record_local_turn_non_uuid_umid_create_drops_illegal_pin(monkeypatch):
+    """Unpaired ``resume-*`` must not be used as ``messages.id`` on create."""
+    events: list = []
+    resume_umid = "resume-72b2662b-eec1-4954-af03-941d9d04352a"
+    assistant_id = "33333333-3333-4333-8333-333333333333"
+    _patch_persistence(monkeypatch, events, raise_on_invalid_uuid=True)
+
+    result = await record_local_turn(
+        conversation_id="c1",
+        user_id="u1",
+        user_message="原始问题",
+        assistant_content="续跑完成",
+        user_message_id=resume_umid,
+        message_id=assistant_id,
+        trace_id=_TRACE,
+        finish_reason=FinishReason.END_TURN.value,
+    )
+
+    assert not any(e[0] == "get_by_id" and e[1] == resume_umid for e in events)
+    assert ("msg", "user", "c1") in events
+    user_pin = next(e for e in events if e[0] == "msg_id" and e[1] == "user")
+    assert user_pin[2] is None
     assert result["assistant_message_id"] == "assistant-id"
     assert result["noop"] is False
 

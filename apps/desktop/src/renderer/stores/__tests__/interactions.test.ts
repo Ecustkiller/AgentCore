@@ -773,6 +773,51 @@ describe("hydrateInteractionsFromJournal (history replay)", () => {
       hydrateInteractionsFromJournal("a", "m1", []);
       expect(messageNonBlockingAsks("a", "m1")).toEqual([]);
     });
+
+    it("folds question_resolved into answered settlement", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "question_posted", payload: postedPayload },
+        {
+          type: "question_resolved",
+          payload: {
+            ask_id: "n1",
+            status: "answered",
+            answer: "也要 PDF。",
+            note: "",
+          },
+        },
+      ]);
+      const askEntry = store().get("n1");
+      expect(askEntry?.status).toBe("resolved");
+      if (!askEntry) throw new Error("expected ask n1");
+      expect(entryToNonBlockingAsk(askEntry)).toMatchObject({
+        status: "resolved",
+        settlement: "answered",
+        answer: "也要 PDF。",
+      });
+    });
+
+    it("folds question_resolved discarded as CEO settlement (not a person)", () => {
+      hydrateInteractionsFromJournal("a", "m1", [
+        { type: "question_posted", payload: postedPayload },
+        {
+          type: "question_resolved",
+          payload: {
+            ask_id: "n1",
+            status: "discarded",
+            answer: "",
+            note: "按默认继续，后半等你。",
+          },
+        },
+      ]);
+      const discarded = store().get("n1");
+      if (!discarded) throw new Error("expected ask n1");
+      expect(entryToNonBlockingAsk(discarded)).toMatchObject({
+        status: "resolved",
+        settlement: "discarded",
+        note: "按默认继续，后半等你。",
+      });
+    });
   });
 });
 

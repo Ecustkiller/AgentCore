@@ -219,6 +219,7 @@ export function createStreamProjectionActions(
           isStreaming: true,
           serverMessageId: prev.serverMessageId ?? serverMessageId,
           finishReason: undefined,
+          outcome: undefined,
           composingTool: null,
         };
         return { messages, isGenerating: true };
@@ -389,6 +390,7 @@ export function createStreamProjectionActions(
               ? { finishReason: meta.finishReason }
               : {}),
             ...(meta.collab !== undefined ? { collab: meta.collab } : {}),
+            ...(meta.outcome !== undefined ? { outcome: meta.outcome } : {}),
           };
         }
         return { messages };

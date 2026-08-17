@@ -17,6 +17,7 @@ vi.mock("@/services/workspaceBinding", () => ({
   getWorkspaceBinding: vi.fn(),
 }));
 vi.mock("@/lib/capabilities", () => ({ hasLocalFiles: () => true }));
+vi.mock("@/lib/log", () => ({ logEvent: vi.fn() }));
 vi.mock("@/lib/fileIndex", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/fileIndex")>();
   return {
@@ -25,6 +26,7 @@ vi.mock("@/lib/fileIndex", async (importOriginal) => {
       files: [],
       dirs: [],
       sourceCount: 1,
+      truncated: false,
     })),
   };
 });
@@ -44,12 +46,16 @@ vi.mock("../resideAttachment", async (importOriginal) => {
   };
 });
 
+import { loadFileIndex } from "@/lib/fileIndex";
+import { logEvent } from "@/lib/log";
 import type {
   PendingAgentMention,
   PendingAttachment,
 } from "../composerAttachments";
 import { pickLocalFileAttachment } from "../resideAttachment";
 import { useMentionMenu } from "../useMentionMenu";
+
+const logged = vi.mocked(logEvent);
 
 const pick = vi.mocked(pickLocalFileAttachment);
 
@@ -82,9 +88,10 @@ describe("useMentionMenu 二级目录", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     pick.mockReset();
+    logged.mockReset();
   });
 
-  it("空 @ 停在一级目录，手打高亮团队，团队空态不可钻入", async () => {
+  it("空 @ 停在一级目录，空团队不占位，手打高亮文件", async () => {
     const { result } = renderHook(() => useMentionHarness("c1"));
     await act(async () => {
       result.current.mention.syncMention("@", 1);
@@ -92,27 +99,35 @@ describe("useMentionMenu 二级目录", () => {
 
     expect(result.current.mention.menuMode).toBe("mention");
     expect(result.current.mention.showCategoryLevel).toBe(true);
+    expect(result.current.mention.categories.map((c) => c.id)).toEqual([
+      "attach",
+      "file",
+      "folder",
+      "conversation",
+    ]);
     expect(result.current.mention.categories[0]).toMatchObject({
       id: "attach",
       label: "附件",
       hint: "从本机添加",
     });
-    expect(result.current.mention.categories[1]).toMatchObject({
-      id: "team",
-      disabled: true,
-    });
-    expect(result.current.mention.categories[2]).toMatchObject({
+    expect(result.current.mention.categories[3]).toMatchObject({
       id: "conversation",
       count: 1,
       disabled: false,
     });
     expect(result.current.mention.activeIndex).toBe(1);
+    expect(logged).toHaveBeenCalledWith("info", "mention.menu_open", {
+      mode: "mention",
+    });
   });
 
   it("Enter 钻入对话，← 回到一级", async () => {
     const { result } = renderHook(() => useMentionHarness("c1"));
     await act(async () => {
       result.current.mention.syncMention("@", 1);
+    });
+    await act(async () => {
+      result.current.mention.handleMenuNavKey(key("ArrowDown"));
     });
     await act(async () => {
       result.current.mention.handleMenuNavKey(key("ArrowDown"));
@@ -238,5 +253,39 @@ describe("useMentionMenu 二级目录", () => {
     });
     expect(result.current.value).toBe("");
     expect(result.current.mention.menuMode).toBeNull();
+    expect(logged).toHaveBeenCalledWith("info", "mention.select", {
+      category: "attach",
+    });
+  });
+
+  it("index truncated 钻入文件分区后仍可见", async () => {
+    vi.mocked(loadFileIndex).mockResolvedValueOnce({
+      files: [
+        {
+          sourceId: "local:r",
+          sourceLabel: "Demo",
+          relPath: "a.ts",
+          name: "a.ts",
+          display: "Demo/a.ts",
+          kind: "file",
+          mtimeMs: 10,
+        },
+      ],
+      dirs: [],
+      sourceCount: 1,
+      truncated: true,
+    });
+    const { result } = renderHook(() => useMentionHarness("c1", "@"));
+    await act(async () => {
+      result.current.mention.syncMention("@", 1);
+    });
+    await act(async () => {
+      result.current.mention.drillCategory("file");
+    });
+    const file = result.current.mention.sections.find((s) => s.id === "file");
+    expect(file?.truncated).toBe(true);
+    expect(file?.items.map((i) => "relPath" in i && i.relPath)).toEqual([
+      "a.ts",
+    ]);
   });
 });

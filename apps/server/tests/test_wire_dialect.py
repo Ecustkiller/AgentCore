@@ -11,6 +11,7 @@ from agentcore.llm.provider.wire_dialect import resolve_wire_dialect
 _MOONSHOT_URL = "https://api.moonshot.cn/v1"
 _MOONSHOT_AI_URL = "https://api.moonshot.ai/v1"
 _ZEN_URL = "https://opencode.ai/zen/v1"
+_GO_URL = "https://opencode.ai/zen/go/v1"
 
 
 @pytest.mark.parametrize(
@@ -20,6 +21,7 @@ _ZEN_URL = "https://opencode.ai/zen/v1"
 def test_resolve_omits_temperature_for_kimi_leaf(model: str):
     assert resolve_wire_dialect(model).omit_temperature is True
     assert resolve_wire_dialect(model, base_url=_ZEN_URL).omit_temperature is True
+    assert resolve_wire_dialect(model, base_url=_GO_URL).omit_temperature is True
 
 
 def test_resolve_keeps_temperature_for_moonshot_v1_leaf():
@@ -33,6 +35,7 @@ def test_resolve_keeps_temperature_for_moonshot_v1_leaf():
 def test_resolve_short_k3_omits_only_on_moonshot_base_url():
     assert resolve_wire_dialect("k3").omit_temperature is False
     assert resolve_wire_dialect("k3", base_url=_ZEN_URL).omit_temperature is False
+    assert resolve_wire_dialect("k3", base_url=_GO_URL).omit_temperature is False
     assert resolve_wire_dialect("k3", base_url=_MOONSHOT_URL).omit_temperature is True
     assert resolve_wire_dialect("k3", base_url=_MOONSHOT_AI_URL).omit_temperature is True
 
@@ -55,6 +58,7 @@ def test_resolve_ordinary_models_keep_temperature():
     for model in ("gpt-4o", "deepseek-v4-flash", "claude-opus-4-20250514", "hy3"):
         assert resolve_wire_dialect(model).omit_temperature is False, model
         assert resolve_wire_dialect(model, base_url=_ZEN_URL).omit_temperature is False, model
+        assert resolve_wire_dialect(model, base_url=_GO_URL).omit_temperature is False, model
 
 
 @pytest.mark.parametrize("model", ["kimi-k3", "kimi-k2.5", "kimi-k2.6"])
@@ -83,6 +87,7 @@ def test_build_payload_keeps_temperature_for_moonshot_v1():
 def test_build_payload_short_k3_omits_on_moonshot_base_url():
     moonshot = OpenAICompatibleProvider(name="test", api_key="k", base_url=_MOONSHOT_URL)
     zen = OpenAICompatibleProvider(name="test", api_key="k", base_url=_ZEN_URL)
+    go = OpenAICompatibleProvider(name="test", api_key="k", base_url=_GO_URL)
     req = LLMRequest(
         messages=[LLMMessage(role="user", content="hi")],
         model="k3",
@@ -90,3 +95,4 @@ def test_build_payload_short_k3_omits_on_moonshot_base_url():
     )
     assert "temperature" not in moonshot._build_payload(req, stream=False)
     assert zen._build_payload(req, stream=False)["temperature"] == 0.5
+    assert go._build_payload(req, stream=False)["temperature"] == 0.5

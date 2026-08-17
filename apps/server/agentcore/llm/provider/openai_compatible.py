@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import re
@@ -18,16 +19,19 @@ from agentcore.core.errors import (
     MAX_RETRY_AFTER,
     RETRY_AFTER_FROM_BACKOFF,
     RETRY_AFTER_FROM_HEADER,
+    RETRY_AFTER_UNKNOWN,
     InferenceTokenExpiredError,
     LLMAuthError,
     LLMClientClosedError,
     LLMError,
     LLMInsufficientBalanceError,
     LLMInvalidResponseError,
+    LLMQuotaExceededError,
     LLMRateLimitError,
     LLMTimeoutError,
     LLMUpstreamError,
     is_llm_client_closed_error,
+    mark_llm_leaf_exhausted,
     upstream_rate_limit_error,
 )
 from agentcore.core.logging import get_logger
@@ -41,12 +45,25 @@ from agentcore.llm.errors import (
     is_balance_exhausted,
     is_non_retryable_client_status,
     is_temperature_deprecated,
+    opencode_credits_product_message,
+    opencode_go_limit_name,
+    opencode_structured_error_type,
+    opencode_typed_client_error,
+    opencode_typed_rate_limit_message,
     our_inference_service_5xx_error,
     parse_agentcore_error_envelope,
     upstream_client_error,
     upstream_error,
 )
 from agentcore.llm.provider.call_budget import provider_retry_ceiling
+from agentcore.llm.provider.cooldown_gate import (
+    arm_cooldown,
+    clear_cooldown,
+    cooldown_key,
+    cooldown_remaining,
+    peek_cooldown,
+    silent_cooldown_seconds,
+)
 from agentcore.llm.provider.protocol import (
     BACKOFF_MULTIPLIER,
     CONNECT_INITIAL_BACKOFF,
@@ -215,21 +232,23 @@ def _interactive_rate_limit_fail_fast(
     retry_after: float | None,
     attempt: int | None,
 ) -> bool:
-    """Turn-scale 429s do not sit out an unattested or long cooldown.
+    """Turn-scale 429s sit only an attested short ``Retry-After``.
 
-    Header-less production 429s used to burn 2→4→8→16 of empty sleep before the
-    30s ceiling refused them. Interactive turns now fail immediately unless
-    upstream attested a short ``Retry-After`` (≤ one initial backoff), and even
-    then wait at most once. ``cooldown_source is None`` keeps the old
-    ceiling-only gate for callers that have not stamped provenance.
+    A header-less 429 (local backoff / unknown) returns immediately — guessing
+    a wait and occupying the turn is how one 429 became two ``run_failed``
+    frames plus a CEO slam. Attested ``Retry-After`` is waited as stated when
+    it fits :func:`silent_cooldown_seconds` (default 10s); longer ones bubble
+    up. ``cooldown_source is None`` keeps the old ceiling-only gate for
+    callers that have not stamped provenance.
     """
     if cooldown_source is None or scenario not in TURN_SCALE_SCENARIOS:
         return False
+    _ = attempt
     if cooldown_source != RETRY_AFTER_FROM_HEADER:
         return True
-    if retry_after is None or retry_after > _INITIAL_BACKOFF:
+    if retry_after is None:
         return True
-    return attempt is not None and attempt > 0
+    return retry_after > silent_cooldown_seconds()
 
 
 def _rate_limit_should_retry(
@@ -249,10 +268,11 @@ def _rate_limit_should_retry(
     there is no deadline — and anything past it fails immediately so the UI can
     surface rate-limit instead of spinning.
 
-    Turn-scale scenarios (chat / agent) additionally refuse unattested cooldowns
-    and headers longer than one initial backoff. Omitting ``cooldown_source``
-    keeps the ceiling-only behaviour so ``_rate_limit_should_retry(5.0)`` stays
-    True. Title / compaction keep the 2→4→8→16 chain.
+    Turn-scale scenarios (chat / agent) sit only an attested short
+    ``Retry-After``; a header-less / unknown cooldown fails immediately.
+    Omitting ``cooldown_source`` keeps the ceiling-only behaviour so
+    ``_rate_limit_should_retry(5.0)`` stays True. Title / compaction keep the
+    2→4→8→16 chain.
     """
     if _interactive_rate_limit_fail_fast(
         scenario=scenario,
@@ -285,6 +305,13 @@ def _error_cooldown(error: Exception) -> tuple[float | None, str | None]:
     carries no cooldown at all (plain 5xx / transport retries)."""
     if isinstance(error, LLMRateLimitError):
         return error.retry_after, error.retry_after_source
+    if isinstance(error, LLMQuotaExceededError):
+        raw = error.details.get("retry_after")
+        try:
+            seconds = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            seconds = None
+        return seconds, getattr(error, "retry_after_source", None)
     return None, None
 
 
@@ -297,10 +324,10 @@ def _no_retry_reason(
     attempt: int | None = None,
 ) -> str:
     """Why we stopped: upstream's cooldown outran the budget, our own next backoff
-    did, or an interactive turn refused to sit out an unattested / long cooldown.
-    The second case used to log as the first, which reads as upstream's fault.
-    Day-scale headers still log as ``retry_after_too_large`` (the 30s ceiling
-    already refuses them); ``interactive_fail_fast`` is only the new give-up."""
+    did, or an interactive turn refused to sit (header-less / unknown, or an
+    attested wait past the silent threshold). Day-scale headers still log as
+    ``retry_after_too_large``; ``interactive_fail_fast`` is the chat/agent
+    give-up that does not occupy the turn."""
     limit = _MAX_RETRY_AFTER if ceiling is None else ceiling
     ceiling_blocks = retry_after is not None and retry_after > limit
     if not ceiling_blocks and _interactive_rate_limit_fail_fast(
@@ -367,6 +394,7 @@ class OpenAICompatibleProvider:
             headers=headers,
             timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
         )
+        self._cooldown_key = cooldown_key(self._name, self._api_key, self._base_url)
 
     @property
     def name(self) -> str:
@@ -397,6 +425,224 @@ class OpenAICompatibleProvider:
         if self._is_inference_hop:
             return None
         return "platform" if self._name == "platform" else "user"
+
+    def _insufficient_balance_error(
+        self, *, status: int, body: bytes | str | None = None
+    ) -> LLMInsufficientBalanceError:
+        """Balance wall with OpenCode CreditsError family copy when typed."""
+        message = None
+        if opencode_structured_error_type(body) == "creditserror":
+            message = opencode_credits_product_message(
+                platform=self._name == "platform"
+            )
+        return LLMInsufficientBalanceError(
+            message,
+            provider_name=self._name,
+            display_name=self._display_name,
+            upstream_status=status,
+            upstream_body_preview=body_preview(body),
+        )
+
+    def _opencode_typed_client_error(
+        self, *, status: int, body: bytes | str | None
+    ) -> LLMError | None:
+        return opencode_typed_client_error(
+            body,
+            status=status,
+            platform=self._name == "platform",
+        )
+
+    async def _await_shared_cooldown(
+        self, *, scenario: str, ceiling: float, attempt: int, stream: bool
+    ) -> None:
+        """If a sibling armed a slot, raise immediately — do not sleep or probe."""
+        remaining = cooldown_remaining(self._cooldown_key)
+        if remaining <= 0:
+            remaining = self._platform_account_remaining()
+        if remaining <= 0:
+            return
+        if await self._try_platform_pool_failover():
+            return
+        slot = peek_cooldown(self._cooldown_key)
+        source = slot.source if slot is not None else RETRY_AFTER_UNKNOWN
+        seconds = slot.seconds if slot is not None else remaining
+        logger.info(
+            "llm.rate_limit_no_retry",
+            provider=self._name,
+            scenario=scenario,
+            attempt=attempt + 1,
+            **_cooldown_fields(seconds, source),
+            ceiling_sec=ceiling,
+            stream=stream,
+            reason="shared_cooldown",
+        )
+        err = upstream_rate_limit_error(
+            seconds,
+            credential_source=self._credential_source,
+            retry_ceiling=ceiling,
+            retry_after_source=source,
+        )
+        mark_llm_leaf_exhausted(err)
+        raise err
+
+    def _uses_platform_pool(self) -> bool:
+        return self._name == "platform" and not self._is_inference_hop
+
+    @staticmethod
+    def _is_pool_failover_signal(error: LLMError) -> bool:
+        # Long attested 429s become LLMQuotaExceededError on the platform leaf;
+        # that is the fill-first switch signal, not a reason to stick to the key.
+        # 403 RegionError is a per-workspace config miss: hop before commit.
+        # 401 stays off this list — ban/bad-key must not walk the rest of the pool.
+        if isinstance(error, LLMAuthError):
+            return False
+        if isinstance(error, (LLMRateLimitError, LLMQuotaExceededError)):
+            return True
+        preview = error.details.get("upstream_body_preview")
+        if not isinstance(preview, str):
+            return False
+        return opencode_structured_error_type(preview) == "regionerror"
+
+    def _platform_account_remaining(self) -> float:
+        if not self._uses_platform_pool():
+            return 0.0
+        from agentcore.llm.platform_pool_scheduler import platform_account_remaining
+
+        return platform_account_remaining(self._api_key, self._base_url)
+
+    def _record_platform_pool_rate_limit(
+        self, *, retry_after: RetryAfter, body: bytes | str | None
+    ) -> None:
+        if not self._uses_platform_pool():
+            return
+        from agentcore.llm.platform_pool_scheduler import record_platform_rate_limit
+
+        record_platform_rate_limit(
+            api_key=self._api_key,
+            base_url=self._base_url,
+            retry_after_seconds=retry_after.seconds,
+            retry_after_source=retry_after.source,
+            limit_name=opencode_go_limit_name(body),
+        )
+
+    def _record_platform_pool_block(self, *, reason: str = "upstream_401") -> None:
+        if not self._uses_platform_pool():
+            return
+        from agentcore.llm.platform_pool_scheduler import record_platform_auth_block
+
+        record_platform_auth_block(
+            api_key=self._api_key, base_url=self._base_url, reason=reason
+        )
+
+    async def _try_platform_pool_failover(self) -> bool:
+        """Rebind to the next fill-first member. True = retry now, do not sleep."""
+        if not self._uses_platform_pool():
+            return False
+        from agentcore.llm.credentials import (
+            bind_platform_credential_id,
+            require_http_header_safe_api_key,
+        )
+        from agentcore.llm.platform_pool_scheduler import failover_member, member_for_credentials
+
+        current = member_for_credentials(self._api_key, self._base_url)
+        nxt = failover_member(api_key=self._api_key, base_url=self._base_url)
+        if nxt is None:
+            return False
+        new_key = require_http_header_safe_api_key(nxt.api_key)
+        new_url = nxt.base_url.rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {new_key}",
+            "Content-Type": "application/json",
+        }
+        if self._extra_headers:
+            headers.update(self._extra_headers)
+        new_client = outbound_async_client(
+            base_url=new_url,
+            headers=headers,
+            timeout=httpx.Timeout(_REQUEST_TIMEOUT, connect=10.0),
+        )
+        old = self._client
+        from_id = current.id if current is not None else ""
+        self._api_key = new_key
+        self._base_url = new_url
+        self._client = new_client
+        self._cooldown_key = cooldown_key(self._name, self._api_key, self._base_url)
+        bind_platform_credential_id(nxt.id)
+        logger.info(
+            "platform_pool.failover",
+            from_credential_id=from_id,
+            to_credential_id=nxt.id,
+        )
+        with contextlib.suppress(Exception):
+            await old.aclose()
+        return True
+
+    def _rate_limit_retry_plan(
+        self,
+        error: LLMError,
+        *,
+        attempt: int,
+        ceiling: float,
+        scenario: str,
+        backoff: float,
+        stream: bool,
+    ) -> float:
+        """Arm the shared gate. Return seconds to sleep, or raise (leaf exhausted)."""
+        retry_after, cooldown_source = _error_cooldown(error)
+        if retry_after is not None and retry_after > 0:
+            arm_cooldown(
+                self._cooldown_key,
+                retry_after,
+                cooldown_source or RETRY_AFTER_UNKNOWN,
+            )
+        max_attempts = (
+            _RATE_LIMIT_MAX_RETRIES
+            if isinstance(error, LLMRateLimitError)
+            else _MAX_RETRIES
+        )
+        if not error.retryable or not self._can_retry_attempt(
+            attempt, max_attempts=max_attempts
+        ):
+            if isinstance(error, LLMRateLimitError):
+                mark_llm_leaf_exhausted(error)
+            raise error
+        if isinstance(error, LLMRateLimitError) and not _rate_limit_should_retry(
+            retry_after,
+            ceiling=ceiling,
+            scenario=scenario,
+            cooldown_source=cooldown_source,
+            attempt=attempt,
+        ):
+            logger.info(
+                "llm.rate_limit_no_retry",
+                provider=self._name,
+                scenario=scenario,
+                attempt=attempt + 1,
+                **_cooldown_fields(retry_after, cooldown_source),
+                ceiling_sec=ceiling,
+                stream=stream,
+                reason=_no_retry_reason(
+                    cooldown_source,
+                    retry_after=retry_after,
+                    ceiling=ceiling,
+                    scenario=scenario,
+                    attempt=attempt,
+                ),
+            )
+            mark_llm_leaf_exhausted(error)
+            raise error
+        wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
+        logger.info(
+            "llm.call_retried",
+            provider=self._name,
+            attempt=attempt + 1,
+            max_attempts=max_attempts,
+            wait_sec=wait,
+            **_cooldown_fields(retry_after, cooldown_source),
+            stream=stream,
+            reason=type(error).__name__,
+        )
+        return wait
 
     def clone(self) -> OpenAICompatibleProvider:
         """Independent HTTP client with the same credentials (coordination drive ownership)."""
@@ -535,6 +781,12 @@ class OpenAICompatibleProvider:
                 patience=request.retry_patience_seconds,
                 elapsed=time.monotonic() - started,
             )
+            await self._await_shared_cooldown(
+                scenario=request.scenario,
+                ceiling=ceiling,
+                attempt=attempt,
+                stream=True,
+            )
             committed = False
             lines_seen = 0
             has_content = False
@@ -569,6 +821,7 @@ class OpenAICompatibleProvider:
                         scenario=request.scenario,
                         retry_ceiling=ceiling,
                     )
+                    clear_cooldown(self._cooldown_key)
                     async for line in response.aiter_lines():
                         lines_seen += 1
                         if len(last_lines) >= 5:
@@ -725,55 +978,26 @@ class OpenAICompatibleProvider:
                     )
                     yield LLMChunk(aborted=True)
                     return
-                max_attempts = (
-                    _RATE_LIMIT_MAX_RETRIES
-                    if isinstance(e, LLMRateLimitError)
-                    else _MAX_RETRIES
-                )
-                if not e.retryable or not self._can_retry_attempt(
-                    attempt, max_attempts=max_attempts
+                if self._is_pool_failover_signal(e) and (
+                    await self._try_platform_pool_failover()
                 ):
-                    raise
-                retry_after, cooldown_source = _error_cooldown(e)
-                if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after,
+                    if yielded_ephemeral:
+                        yield LLMChunk(stream_reset=True)
+                        yielded_ephemeral = False
+                    continue
+                wait = self._rate_limit_retry_plan(
+                    e,
+                    attempt=attempt,
                     ceiling=ceiling,
                     scenario=request.scenario,
-                    cooldown_source=cooldown_source,
-                    attempt=attempt,
-                ):
-                    logger.info(
-                        "llm.rate_limit_no_retry",
-                        provider=self._name,
-                        scenario=request.scenario,
-                        attempt=attempt + 1,
-                        **_cooldown_fields(retry_after, cooldown_source),
-                        ceiling_sec=ceiling,
-                        stream=True,
-                        reason=_no_retry_reason(
-                            cooldown_source,
-                            retry_after=retry_after,
-                            ceiling=ceiling,
-                            scenario=request.scenario,
-                            attempt=attempt,
-                        ),
-                    )
-                    raise
+                    backoff=backoff,
+                    stream=True,
+                )
                 if yielded_ephemeral:
                     yield LLMChunk(stream_reset=True)
                     yielded_ephemeral = False
-                wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
-                logger.info(
-                    "llm.call_retried",
-                    provider=self._name,
-                    attempt=attempt + 1,
-                    max_attempts=max_attempts,
-                    wait_sec=wait,
-                    **_cooldown_fields(retry_after, cooldown_source),
-                    stream=True,
-                    reason=type(e).__name__,
-                )
                 await asyncio.sleep(wait)
+                clear_cooldown(self._cooldown_key)
                 backoff *= _BACKOFF_MULTIPLIER
             except httpx.TimeoutException as e:
                 last_error = LLMTimeoutError(f"连接 {self._display_name} 超时，请检查网络后重试")
@@ -999,12 +1223,19 @@ class OpenAICompatibleProvider:
                             attempt=attempt,
                         ),
                     )
-            raise upstream_rate_limit_error(
+            err = upstream_rate_limit_error(
                 cooldown.seconds,
                 credential_source=self._credential_source,
                 retry_ceiling=retry_ceiling,
                 retry_after_source=cooldown.source,
             )
+            overlay = opencode_typed_rate_limit_message(
+                body, platform=self._name == "platform"
+            )
+            if overlay:
+                err.message = overlay
+            self._record_platform_pool_rate_limit(retry_after=cooldown, body=body)
+            raise err
         if status_code in (401, 403):
             logger.warning(
                 "llm.client_error",
@@ -1019,16 +1250,19 @@ class OpenAICompatibleProvider:
                     upstream_status=status_code,
                     upstream_body_preview=body_preview(body),
                 )
+            typed = self._opencode_typed_client_error(
+                status=status_code, body=body
+            )
+            if typed is not None:
+                if opencode_structured_error_type(body) == "regionerror":
+                    self._record_platform_pool_block(reason="regionerror")
+                raise typed
             if is_balance_exhausted(body):
-                raise LLMInsufficientBalanceError(
-                    provider_name=self._name,
-                    display_name=self._display_name,
-                    upstream_status=status_code,
-                    upstream_body_preview=body_preview(body),
-                )
+                raise self._insufficient_balance_error(status=status_code, body=body)
             if is_auth_rejection(status_code, body):
                 # Product copy only (platform + BYOK): never echo upstream gateway
                 # tutorials (e.g. CC Switch). Upstream text stays in preview / logs.
+                self._record_platform_pool_block()
                 raise LLMAuthError(
                     provider_name=self._name,
                     display_name=self._display_name,
@@ -1041,10 +1275,7 @@ class OpenAICompatibleProvider:
                 body=body,
             )
         if status_code == 402:
-            raise LLMInsufficientBalanceError(
-                provider_name=self._name,
-                display_name=self._display_name,
-            )
+            raise self._insufficient_balance_error(status=status_code, body=body)
         if status_code >= 500:
             preview = body_preview(body)
             logger.warning(
@@ -1088,6 +1319,11 @@ class OpenAICompatibleProvider:
                 status_code=status_code,
                 body_preview=body_preview(body),
             )
+            typed = self._opencode_typed_client_error(
+                status=status_code, body=body
+            )
+            if typed is not None:
+                raise typed
             raise upstream_client_error(
                 client_error_message(self._display_name, status_code, body),
                 status=status_code,
@@ -1230,6 +1466,9 @@ class OpenAICompatibleProvider:
             ceiling = provider_retry_ceiling(
                 scenario=scenario, patience=patience, elapsed=time.monotonic() - started
             )
+            await self._await_shared_cooldown(
+                scenario=scenario, ceiling=ceiling, attempt=attempt, stream=False
+            )
             try:
                 self._ensure_client_open()
                 response = await self._client.post(
@@ -1251,6 +1490,7 @@ class OpenAICompatibleProvider:
                     scenario=scenario,
                     retry_ceiling=ceiling,
                 )
+                clear_cooldown(self._cooldown_key)
                 try:
                     return response.json()
                 except ValueError as e:
@@ -1271,52 +1511,20 @@ class OpenAICompatibleProvider:
                 )
             except (LLMRateLimitError, LLMError) as e:
                 last_error = e
-                max_attempts = (
-                    _RATE_LIMIT_MAX_RETRIES
-                    if isinstance(e, LLMRateLimitError)
-                    else _MAX_RETRIES
-                )
-                if not e.retryable or not self._can_retry_attempt(
-                    attempt, max_attempts=max_attempts
+                if self._is_pool_failover_signal(e) and (
+                    await self._try_platform_pool_failover()
                 ):
-                    raise
-                retry_after, cooldown_source = _error_cooldown(e)
-                if isinstance(e, LLMRateLimitError) and not _rate_limit_should_retry(
-                    retry_after,
+                    continue
+                wait = self._rate_limit_retry_plan(
+                    e,
+                    attempt=attempt,
                     ceiling=ceiling,
                     scenario=scenario,
-                    cooldown_source=cooldown_source,
-                    attempt=attempt,
-                ):
-                    logger.info(
-                        "llm.rate_limit_no_retry",
-                        provider=self._name,
-                        scenario=scenario,
-                        attempt=attempt + 1,
-                        **_cooldown_fields(retry_after, cooldown_source),
-                        ceiling_sec=ceiling,
-                        stream=False,
-                        reason=_no_retry_reason(
-                            cooldown_source,
-                            retry_after=retry_after,
-                            ceiling=ceiling,
-                            scenario=scenario,
-                            attempt=attempt,
-                        ),
-                    )
-                    raise
-                wait = _retry_wait(retry_after, backoff, ceiling=ceiling)
-                logger.info(
-                    "llm.call_retried",
-                    provider=self._name,
-                    attempt=attempt + 1,
-                    max_attempts=max_attempts,
-                    wait_sec=wait,
-                    **_cooldown_fields(retry_after, cooldown_source),
+                    backoff=backoff,
                     stream=False,
-                    reason=type(e).__name__,
                 )
                 await asyncio.sleep(wait)
+                clear_cooldown(self._cooldown_key)
                 backoff *= _BACKOFF_MULTIPLIER
             except RuntimeError as e:
                 translated = self._translate_closed_client(e)
@@ -1379,6 +1587,12 @@ class OpenAICompatibleProvider:
         if code < 300:
             self._require_chat_completions_body(response.content)
             return
+        if 400 <= code < 500:
+            typed = self._opencode_typed_client_error(
+                status=code, body=response.content
+            )
+            if typed is not None:
+                raise typed
         if code in (401, 403):
             preview = body_preview(response.content)
             logger.warning(
@@ -1388,12 +1602,7 @@ class OpenAICompatibleProvider:
                 body_preview=preview,
             )
             if is_balance_exhausted(response.content):
-                raise LLMInsufficientBalanceError(
-                    provider_name=self._name,
-                    display_name=self._display_name,
-                    upstream_status=code,
-                    upstream_body_preview=preview,
-                )
+                raise self._insufficient_balance_error(status=code, body=response.content)
             if is_auth_rejection(code, response.content):
                 raise LLMError(
                     f"{self._display_name} API Key 无效或无权限（鉴权失败），请检查后重试",
@@ -1406,10 +1615,7 @@ class OpenAICompatibleProvider:
                 body=response.content,
             )
         if code == 402:
-            raise LLMInsufficientBalanceError(
-                provider_name=self._name,
-                display_name=self._display_name,
-            )
+            raise self._insufficient_balance_error(status=code, body=response.content)
         if code == 404:
             # Must read body: model-id 404s (Not found the model / resource_not_found)
             # must not be mislabelled as a bad base_url.
@@ -1542,6 +1748,12 @@ class OpenAICompatibleProvider:
         except httpx.HTTPError as e:
             raise self._probe_connect_error(e) from e
         code = response.status_code
+        if 400 <= code < 500:
+            typed = self._opencode_typed_client_error(
+                status=code, body=response.content
+            )
+            if typed is not None:
+                raise typed
         if code in (401, 403):
             if "/inference/" in self._base_url:
                 raise InferenceTokenExpiredError(
@@ -1549,12 +1761,7 @@ class OpenAICompatibleProvider:
                     upstream_body_preview=body_preview(response.content),
                 )
             if is_balance_exhausted(response.content):
-                raise LLMInsufficientBalanceError(
-                    provider_name=self._name,
-                    display_name=self._display_name,
-                    upstream_status=code,
-                    upstream_body_preview=body_preview(response.content),
-                )
+                raise self._insufficient_balance_error(status=code, body=response.content)
             raise LLMAuthError(
                 provider_name=self._name,
                 display_name=self._display_name,
@@ -1562,10 +1769,7 @@ class OpenAICompatibleProvider:
                 upstream_body_preview=body_preview(response.content),
             )
         if code == 402:
-            raise LLMInsufficientBalanceError(
-                provider_name=self._name,
-                display_name=self._display_name,
-            )
+            raise self._insufficient_balance_error(status=code, body=response.content)
         if code >= 400:
             raise LLMError(f"{self._display_name} 列出模型失败（HTTP {code}）")
         try:

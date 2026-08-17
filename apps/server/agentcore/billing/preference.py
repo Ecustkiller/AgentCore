@@ -9,14 +9,19 @@ from agentcore.config.platform import parse_platform_model_credentials
 def is_platform_available() -> bool:
     """Whether the operator configured a usable platform upstream key.
 
-    True when the shared ``platform_api_key`` is set OR any per-model override in
-    ``platform_model_credentials`` carries its own key — either is enough to serve at
-    least one platform model (per-model credential resolution happens at the call site).
+    True when the shared ``platform_api_key`` is set, any per-model override in
+    ``platform_model_credentials`` carries its own key, **or** the admin-managed
+    pool has an enabled member. Any of those is enough to serve at least one
+    platform model (per-model / pool resolution happens at the call site).
     """
     if settings.platform_api_key.strip():
         return True
     overrides = parse_platform_model_credentials(settings.platform_model_credentials)
-    return any(entry.get("api_key") for entry in overrides.values())
+    if any(entry.get("api_key") for entry in overrides.values()):
+        return True
+    from agentcore.llm.platform_pool import pick_enabled_platform_pool_member
+
+    return pick_enabled_platform_pool_member() is not None
 
 
 def platform_model_allowlist() -> list[str]:

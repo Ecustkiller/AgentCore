@@ -12,18 +12,20 @@
 #   restore.sh [<backup.sql.gz>]    # 缺省取 BACKUP_DIR 最新 backup-*.sql.gz
 #   FORCE=1 restore.sh ...          # 跳过交互确认（自动化用，慎）
 #
-# 配置：同 backup.sh（AGENTCORE_HOME / BACKUP_DIR / ENV_FILE / PG_USER / PG_DB …）。
+# 配置：同 backup.sh（路径见 deploy-paths.sh；BACKUP_DIR / PG_USER / PG_DB …）。
 
 set -euo pipefail
 
-AGENTCORE_HOME="${AGENTCORE_HOME:-/opt/agentcore}"
-if [[ -f "$AGENTCORE_HOME/.env" ]]; then
-  set -a; . "$AGENTCORE_HOME/.env"; set +a
+# 活栈 compose/env：deploy-paths.sh（backup.sh / restore.sh / deploy-server.sh 共用）。
+_ac_paths="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deploy-paths.sh"
+if [[ ! -f "$_ac_paths" ]]; then
+  _ac_paths="${AGENTCORE_HOME:-/opt/agentcore}/repo/deploy/scripts/deploy-paths.sh"
 fi
-REPO_DIR="${REPO_DIR:-$AGENTCORE_HOME/repo}"
+# shellcheck source=deploy-paths.sh
+. "$_ac_paths"
+unset _ac_paths
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
-ENV_FILE="${ENV_FILE:-$REPO_DIR/deploy/config/production.env}"
 PG_USER="${PG_USER:-agentcore}"
 PG_DB="${PG_DB:-agentcore}"
 FORCE="${FORCE:-0}"
@@ -33,8 +35,8 @@ warn() { printf '\033[33m[warn]\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[31m[error]\033[0m %s\n' "$*" >&2; }
 
 COMPOSE_FILES=(
-  -f "$REPO_DIR/deploy/docker-compose.server.yml"
-  -f "$REPO_DIR/deploy/docker-compose.app.yml"
+  -f "$DEPLOY_DIR/docker-compose.server.yml"
+  -f "$DEPLOY_DIR/docker-compose.app.yml"
 )
 dc() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
 

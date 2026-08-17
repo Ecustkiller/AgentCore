@@ -39,11 +39,15 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from agentcore.runtime.runs.placeholder_scan import (
+    PlaceholderScanResult,
     is_content_deliverable_path,
+    is_opaque_source_data_path,
+    is_table_deliverable_path,
     needs_placeholder_scan,
     scan_placeholder_signals,
 )
@@ -79,6 +83,9 @@ class ContractVerdict:
     failures: list[str] = field(default_factory=list)
     # Soft signals (e.g.「示例数据」「虚构」) — never flip ``ok`` by themselves.
     warnings: list[str] = field(default_factory=list)
+    # Structured stamps for the same ``warnings`` (reason / severity). Executor
+    # copies these onto ``delivery_gaps`` so CEO collect/format read fields, not copy.
+    warning_rows: list[dict[str, str]] = field(default_factory=list)
     # Anti-slop / soft web-quality hits — flip ``ok`` for one rework shot, then the
     # executor demotes them to ``warnings`` (never hard-fail the run).
     soft_failures: list[str] = field(default_factory=list)
@@ -160,6 +167,139 @@ def _placeholder_hard_exempt_paths(
     ]
 
 
+def _scan_placeholders_for_contract(
+    artifact_contents: dict[str, str] | None,
+    *,
+    hard_exempt_paths: list[str] | None = None,
+) -> PlaceholderScanResult:
+    """Placeholder scan (skeleton + self-note → soft warnings)."""
+    return scan_placeholder_signals(
+        artifact_contents,
+        hard_exempt_paths=hard_exempt_paths,
+    )
+
+
+def _unverified_note_rows(warnings: list[str]) -> list[dict[str, str]]:
+    """Stamp placeholder-scan warnings as ``unverified_note`` (soft)."""
+    from agentcore.runtime.delegate.delivery_status import REASON_UNVERIFIED_NOTE
+
+    return _stamp_warning_rows(
+        warnings, reason=REASON_UNVERIFIED_NOTE, severity="warning"
+    )
+
+
+def _stamp_warning_rows(
+    warnings: list[str],
+    *,
+    reason: str,
+    severity: str = "",
+) -> list[dict[str, str]]:
+    """Attach a structured reason/severity to each warning string."""
+    rows: list[dict[str, str]] = []
+    for text in warnings:
+        if not text:
+            continue
+        row: dict[str, str] = {"description": text, "reason": reason}
+        if severity:
+            row["severity"] = severity
+        rows.append(row)
+    return rows
+
+
+def _normalize_source_relpath(path: str) -> str:
+    """Workspace-relative POSIX form for source-path comparison."""
+    return path.replace("\\", "/").strip().lstrip("./")
+
+
+def collect_opaque_source_data_paths(
+    *,
+    material_paths: Iterable[str] | None = None,
+    workspace_paths: Iterable[str] | None = None,
+    landed_paths: Iterable[str] | None = None,
+) -> list[str]:
+    """This-turn source files workers cannot reliably parse without execution.
+
+    Provenance, not names: this-turn attachments (``material_paths``) plus
+    pre-existing workspace files of opaque types. Historical ``attachments/``
+    entries that are not this-turn materials are skipped. This-run writes
+    (``landed_paths``) are not sources. ``AgentCore/`` draft tree leftovers
+    are not user source files.
+    """
+    from agentcore.workspace.sparse_listing import is_attachment_path
+
+    def _norm(raw: str) -> str:
+        return _normalize_source_relpath(raw)
+
+    landed = {_norm(p) for p in (landed_paths or ()) if p}
+    material_set = {_norm(p) for p in (material_paths or ()) if p}
+    out: list[str] = []
+    seen: set[str] = set()
+
+    def _add(path: str) -> None:
+        if not path or path in seen or not is_opaque_source_data_path(path):
+            return
+        seen.add(path)
+        out.append(path)
+
+    for raw in material_paths or ():
+        _add(_norm(raw))
+    for raw in workspace_paths or ():
+        path = _norm(raw)
+        if not path or path in landed:
+            continue
+        if is_attachment_path(path) and path not in material_set:
+            continue
+        if path == "AgentCore" or path.startswith("AgentCore/"):
+            continue
+        _add(path)
+    return out
+
+
+def _no_exec_table_gap(
+    *,
+    can_execute: bool,
+    artifact_contents: dict[str, str] | None,
+    workspace_paths: list[str] | None,
+    source_data_paths: list[str] | None,
+) -> tuple[str, dict[str, str]] | None:
+    """Hard gap: no-exec + opaque source data file + landed table file.
+
+    Premise is structural (this-turn attachments / workspace source type).
+    Inline data with no source file is not a gap — landing csv/xlsx is fine.
+    """
+    if can_execute:
+        return None
+    has_opaque_source = any(
+        p and is_opaque_source_data_path(p) for p in (source_data_paths or ())
+    )
+    if not has_opaque_source:
+        return None
+    from agentcore.runtime.delegate.delivery_status import REASON_NO_EXEC_TABLE
+
+    source_set = {
+        _normalize_source_relpath(p) for p in (source_data_paths or ()) if p
+    }
+    seen: set[str] = set()
+    paths: list[str] = []
+    for raw in (*(artifact_contents or {}), *(workspace_paths or [])):
+        if not raw or not is_table_deliverable_path(raw):
+            continue
+        rel = _normalize_source_relpath(raw)
+        if not rel or rel in seen or rel in source_set:
+            continue
+        seen.add(rel)
+        paths.append(raw)
+    if not paths:
+        return None
+    listed = "、".join(f"`{p}`" for p in paths[:6])
+    more = f" 等 {len(paths)} 个" if len(paths) > 6 else ""
+    text = (
+        f"无执行环境却落了表文件：{listed}{more}。"
+        "本回合完整交付应是结构报告 + 待跑脚本，禁止用手抄表交差。"
+    )
+    return text, {"description": text, "reason": REASON_NO_EXEC_TABLE}
+
+
 # 定案 B · 终态可见性：per-worker soft tip 前缀，CEO / delivery_status 按角色辨认。
 _MEMBER_WAVE_UNDELIVERED = "本队员本波未交卷"
 
@@ -210,6 +350,8 @@ def check_contract(
     citable_ids: frozenset[str] | set[str] | None = None,
     enforce_citations: bool = True,
     landing_failure_kind: str | None = None,
+    can_execute: bool = True,
+    source_data_paths: list[str] | None = None,
 ) -> ContractVerdict:
     """Check ``content`` against ``deliverable``; return a verdict + human reasons.
 
@@ -248,6 +390,13 @@ def check_contract(
     via ``artifacts``; parseability / seam / placeholder / citation checks are
     enforced when contents are given.
 
+    ``can_execute`` is the turn's execution-class fact (``code_execute`` in the
+    worker registry). Default True keeps the with-exec path unchanged. False +
+    a this-turn opaque source data file (attachment / workspace type signal) +
+    a landed spreadsheet/table file is a hard gap — hand-copied result sheets
+    are not no-exec complete delivery. Inline data with no such source file is
+    not a gap: landing csv/xlsx is the product.
+
     交付形态对齐: for a FILE deliverable (:func:`is_file_deliverable` — ``form=files`` /
     ``artifacts``) the same texts back the section
     checks, which then read the run's landed files ALONGSIDE the chat body — a section
@@ -266,7 +415,7 @@ def check_contract(
         return ContractVerdict(ok=False, failures=["产出为空"])
     if deliverable is None:
         web_failures = check_web_seam_failures(artifact_contents)
-        ph = scan_placeholder_signals(artifact_contents)
+        ph = _scan_placeholders_for_contract(artifact_contents)
         cite_failures = (
             _artifact_citation_failures(
                 artifact_contents,
@@ -277,9 +426,26 @@ def check_contract(
             else []
         )
         failures = [*web_failures, *ph.failures, *cite_failures]
+        table_gap = _no_exec_table_gap(
+            can_execute=can_execute,
+            artifact_contents=artifact_contents,
+            workspace_paths=workspace_paths,
+            source_data_paths=source_data_paths,
+        )
+        extra_w = [table_gap[0]] if table_gap else []
+        extra_r = [table_gap[1]] if table_gap else []
+        warnings = [*ph.warnings, *extra_w]
+        warning_rows = [*_unverified_note_rows(ph.warnings), *extra_r]
         if failures:
-            return ContractVerdict(ok=False, failures=failures, warnings=ph.warnings)
-        return ContractVerdict(ok=True, warnings=ph.warnings)
+            return ContractVerdict(
+                ok=False,
+                failures=failures,
+                warnings=warnings,
+                warning_rows=warning_rows,
+            )
+        return ContractVerdict(
+            ok=True, warnings=warnings, warning_rows=warning_rows
+        )
 
     exempt_paths = _placeholder_hard_exempt_paths(deliverable, artifact_contents)
     failures = []  # deliverable-specific failures (distinct from early-return above)
@@ -349,7 +515,10 @@ def check_contract(
         failures.extend(check_web_seam_failures(artifact_contents))
     # 占位符 / 未核实：内容类文件骨架标记 + 自注一律 warnings（定案乙：不硬拦）。
     # Internal coordination paths may declare skeleton exemption on the deliverable.
-    ph = scan_placeholder_signals(artifact_contents, hard_exempt_paths=exempt_paths)
+    ph = _scan_placeholders_for_contract(
+        artifact_contents,
+        hard_exempt_paths=exempt_paths,
+    )
     failures.extend(ph.failures)
     # 引用 / 书目：与 chat finish_guard 同源；仅台账接通时扫内容类落盘。
     # 调研阶段 A（enforce_citations=False）跳过成稿引用闸。
@@ -421,16 +590,43 @@ def check_contract(
         )
         failures.extend(wq.failures)
         soft_failures.extend(wq.soft_failures)
+    from agentcore.runtime.delegate.delivery_status import (
+        REASON_FILES_NOT_LANDED,
+        REASON_PATH_HINT,
+    )
+
     warnings = [
         *ph.warnings,
         *zero_files_warnings,
         *path_mismatch_warnings,
     ]
+    warning_rows = [
+        *_unverified_note_rows(ph.warnings),
+        *_stamp_warning_rows(
+            zero_files_warnings, reason=REASON_FILES_NOT_LANDED, severity="warning"
+        ),
+        *_stamp_warning_rows(
+            path_mismatch_warnings, reason=REASON_PATH_HINT, severity="warning"
+        ),
+    ]
+    table_gap = _no_exec_table_gap(
+        can_execute=can_execute,
+        artifact_contents=artifact_contents,
+        workspace_paths=workspace_paths,
+        source_data_paths=source_data_paths,
+    )
+    if table_gap:
+        warnings.append(table_gap[0])
+        warning_rows.append(table_gap[1])
     # Soft web-quality hits flip ok so the executor can spend one rework shot;
     # after that shot the executor demotes them to warnings.
     ok = not failures and not soft_failures
     return ContractVerdict(
-        ok=ok, failures=failures, warnings=warnings, soft_failures=soft_failures
+        ok=ok,
+        failures=failures,
+        warnings=warnings,
+        warning_rows=warning_rows,
+        soft_failures=soft_failures,
     )
 
 

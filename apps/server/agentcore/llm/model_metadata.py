@@ -56,9 +56,10 @@ _METADATA: dict[str, ModelMeta] = {
         capabilities=frozenset({CAPABILITY_TOOLS, CAPABILITY_REASONING}),
         context_length=1_000_000,
     ),
-    # Zen limited-free SKU: brand base name + curated badge (not auto「· free」).
-    # Exact row is load-bearing: family-prefix would otherwise inherit Flash's 1M,
-    # but OpenCode Zen's free tier caps this id at 200K (models.dev / Zen catalog).
+    # Limited-free SKU (Zen catalog; Go has no ``-free`` id): brand base name +
+    # curated badge (not auto「· free」). Exact row is load-bearing: family-prefix
+    # would otherwise inherit Flash's 1M, but this id is capped at 200K. Window
+    # follows SKU id, never the OpenCode endpoint.
     "deepseek-v4-flash-free": ModelMeta(
         display_name="DeepSeek V4 Flash",
         vendor="DeepSeek",

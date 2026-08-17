@@ -80,6 +80,10 @@ class KickoffSummary:
     model_candidates: list[dict[str, Any]] = field(default_factory=list)
     # 主文案：交付档短标 + 预计人数；缺省空 = 旧帧 / 前端本地回退。
     headline: str = ""
+    # 修订谱系：首版 revision=1；revised_from / revision_note 仅修订卡。
+    revision: int = 1
+    revised_from: str = ""
+    revision_note: str = ""
 
     def card_payload(self) -> dict[str, Any]:
         """Wire fields for ``team_preview_required`` / suspension extras."""
@@ -92,9 +96,14 @@ class KickoffSummary:
             "sides": list(self.sides),
             "max_rounds": self.max_rounds,
             "thorough": self.thorough,
+            "revision": self.revision if self.revision >= 1 else 1,
         }
         if self.headline:
             out["headline"] = self.headline
+        if self.revised_from:
+            out["revised_from"] = self.revised_from
+        if self.revision_note:
+            out["revision_note"] = self.revision_note
         if self.moderator_run_id:
             out["moderator_run_id"] = self.moderator_run_id
         if self.moderator_model:

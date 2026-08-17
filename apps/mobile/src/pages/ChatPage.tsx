@@ -29,6 +29,7 @@ import { resolveStageCardStream } from "@/api/stageCard";
 import {
   type ResumeTurnBody,
   type TeamPreviewAmendments,
+  continueStream,
   followConversation,
   regenerateStream,
   resumeStream,
@@ -46,6 +47,7 @@ import { RecoveredChip } from "@/components/AssistantMessageFooter";
 import {
   AssistantContent,
   SupportDiagnosticCopyButton,
+  shouldShowTeamGraph,
 } from "@/components/AssistantView";
 import {
   type AutoFolderNotice,
@@ -64,15 +66,19 @@ import {
   DraftFolderChip,
 } from "@/components/DraftFolderChip";
 import { FileArtifactsCard } from "@/components/FileArtifactsCard";
+import { HangingQuestionBar } from "@/components/HangingQuestionBar";
 import { MemoryUpdateCard } from "@/components/MemoryUpdateCard";
 import { ModelPicker } from "@/components/ModelPicker";
 import { PauseCard } from "@/components/PauseCard";
+import { PausedContinueCard } from "@/components/PausedContinueCard";
 import { PermissionAxesSheet } from "@/components/PermissionAxesSheet";
 import { QueuedTurnsBar } from "@/components/QueuedTurnsBar";
 import { RemoteSettledCards } from "@/components/RemoteSettledCards";
 import { ResumeCard } from "@/components/ResumeCard";
 import { StageCard } from "@/components/StageCard";
 import { EscalationAnswer } from "@/components/TeamView";
+import { TurnOutcomeActions } from "@/components/TurnOutcomeActions";
+import { UserBubbleChips } from "@/components/UserBubbleChips";
 import { VoiceButton, VoiceRecordingBar } from "@/components/VoiceInput";
 import { clearAiAttentionForConversation } from "@/lib/aiAttention";
 import { useAppForeground } from "@/lib/appLifecycle";
@@ -124,7 +130,6 @@ import {
   errorActionForCode,
   isPausedFrameGone,
   isUnstartedSendRefusal,
-  resolveEmptyFailureNotice,
 } from "@/lib/errors";
 import { resolveArtifactsForTurn } from "@/lib/fileArtifacts";
 import {
@@ -134,6 +139,10 @@ import {
   readSegmentHead,
   turnMessageId,
 } from "@/lib/followTurns";
+import {
+  collectPendingHangingQuestions,
+  eventsHaveExecutionDetached,
+} from "@/lib/hangingQuestion";
 import { placeMemoryUpdates } from "@/lib/memoryAnchors";
 import {
   type MessageDelivery,
@@ -181,8 +190,16 @@ import {
 } from "@/lib/stopLifecycle";
 import {
   type SupportDiagnosticIds,
-  extractSupportIdsFromEvents,
+  supportIdsFromEvents,
 } from "@/lib/supportDiagnostics";
+import {
+  type TurnOutcome,
+  isCeoContinuePause,
+  resolveTurnOutcomeFromJournal,
+  turnOutcomeShowsBubbleBanner,
+  turnOutcomeShowsComposerHint,
+  turnOwnsUserFacingOutlet,
+} from "@/lib/turnOutcome";
 import { useComposerMention } from "@/lib/useComposerMention";
 import { useStickScroll } from "@/lib/useStickScroll";
 import { useVoiceInput } from "@/lib/useVoiceInput";
@@ -202,6 +219,7 @@ import {
   extractWorkerToolPhases,
   fold,
 } from "@/protocol/fold";
+import { extractTeamPreviewTraces } from "@/protocol/teamPreviewTraces";
 import type {
   CheckpointDecision,
   DebateNarrativeRound,
@@ -282,27 +300,8 @@ interface Turn {
   events: SSEEvent[];
   // Display-only chips for files this turn carried (text inline and/or workspace resident).
   attachments?: { name: string; truncated?: boolean }[];
-}
-
-/** Attachment context chips on a user bubble (no download — text rode the send body and/or
- *  bytes were resided into the conversation workspace). `已截断` flags text capped at 256KB. */
-function AttachmentChips({
-  items,
-}: {
-  items: { name: string; truncated?: boolean }[];
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div className="attach-chips">
-      {items.map((a, i) => (
-        <span key={`${a.name}-${i}`} className="attach-chip">
-          <span aria-hidden>📎</span>
-          <span className="attach-chip-name">{a.name}</span>
-          {a.truncated && <span className="attach-chip-trunc">已截断</span>}
-        </span>
-      ))}
-    </div>
-  );
+  /** Conversation-page ``@`` role chips (soft mention; not attachment kind). */
+  agentMentions?: { agentId: string; role: string }[];
 }
 
 /** 主时间线用户气泡（排队期不插泡；出队开跑后再出现）。 */
@@ -313,7 +312,10 @@ function UserTurnBubble({ turn }: { turn: Turn }) {
       <CollapsibleUserText contentKey={turn.userText}>
         {turn.userText}
       </CollapsibleUserText>
-      <AttachmentChips items={turn.attachments ?? []} />
+      <UserBubbleChips
+        attachments={turn.attachments ?? []}
+        agentMentions={turn.agentMentions ?? []}
+      />
     </div>
   );
 }
@@ -422,11 +424,14 @@ function historySupportIds(
   conversationId: string | null,
   extras?: ReturnType<typeof supportErrorExtras>,
 ): SupportDiagnosticIds {
-  const fromEvents = m.runs?.events?.length
-    ? extractSupportIdsFromEvents(m.runs.events)
-    : {};
-  let executionId = fromEvents.executionId;
-  if (!executionId && m.runs?.process) {
+  if (m.runs?.events?.length) {
+    return supportIdsFromEvents(conversationId, m.runs.events, {
+      messageId: m.id,
+      traceId: m.trace_id,
+    });
+  }
+  let executionId: string | undefined;
+  if (m.runs?.process) {
     for (const s of m.runs.process) {
       if (s.kind === "team" && s.execution_id) {
         executionId = s.execution_id;
@@ -437,7 +442,7 @@ function historySupportIds(
   return {
     conversationId,
     messageId: m.id,
-    traceId: m.trace_id ?? fromEvents.traceId,
+    traceId: m.trace_id ?? undefined,
     executionId,
     ...extras,
   };
@@ -458,6 +463,21 @@ interface ChatError {
   text: string;
   reconnect?: boolean;
   action?: ErrorAction;
+  /** Turn-scoped: hide this bar when the assistant bubble already owns the outcome. */
+  fromTurn?: boolean;
+  supportIds?: SupportDiagnosticIds;
+}
+
+function withTurnSupport(
+  err: ChatError,
+  conversationId: string | undefined,
+  events: readonly SSEEvent[],
+): ChatError {
+  return {
+    ...err,
+    fromTurn: true,
+    supportIds: supportIdsFromEvents(conversationId, events),
+  };
 }
 
 /** User-facing tone: config remedy (去配置) → needs-you / accent; else recoverable gray. */
@@ -662,8 +682,7 @@ function summarize(p: ProjectedTurn): string | null {
   const tool = [...p.process].reverse().find((s) => s.kind === "tool");
   if (tool && tool.kind === "tool" && tool.status === "running")
     return `正在调用 ${tool.tool_name}…`;
-  if (p.status === "failed") return "出错了";
-  // 单 Agent 空停：聊天时间线不占「已停止」(P1)；多 Agent 走 TeamView 头。
+  // Failed-turn copy lives on the outcome banner (单一出口); do not add「出错了」.
   return null;
 }
 
@@ -716,6 +735,39 @@ function dedicatedPauseOrAskUi(opts: {
   );
 }
 
+function TurnOutcomeBanner({
+  outcome,
+  supportIds,
+  onRetry,
+  onContinue,
+  continueLocked,
+}: {
+  outcome: TurnOutcome;
+  supportIds: SupportDiagnosticIds;
+  onRetry?: () => void;
+  onContinue?: () => Promise<void> | void;
+  continueLocked?: boolean;
+}) {
+  if (isCeoContinuePause(outcome)) {
+    return (
+      <PausedContinueCard
+        reason={outcome.reason}
+        onContinue={onContinue}
+        locked={continueLocked}
+      />
+    );
+  }
+  if (!turnOutcomeShowsBubbleBanner(outcome)) return null;
+  if (!outcome.notice) return null;
+  return (
+    <TurnOutcomeActions
+      outcome={outcome}
+      supportIds={supportIds}
+      onRetry={onRetry}
+    />
+  );
+}
+
 function AssistantBubble({
   turn,
   live,
@@ -723,6 +775,8 @@ function AssistantBubble({
   onFill,
   onOpenBrowserLive,
   onRetry,
+  onContinue,
+  continueLocked,
 }: {
   turn: Turn;
   live: boolean;
@@ -730,8 +784,9 @@ function AssistantBubble({
   onFill: (text: string) => void;
   onOpenBrowserLive?: (opts?: OpenBrowserLiveOpts) => void;
   onRetry?: () => void;
+  onContinue?: () => Promise<void> | void;
+  continueLocked?: boolean;
 }) {
-  const navigate = useNavigate();
   const p = useMemo(() => fold(turn.events), [turn.events]);
   const messageId = useMemo(() => extractMessageId(turn.events), [turn.events]);
   const chrome = useMemo(() => extractTurnChrome(turn.events), [turn.events]);
@@ -759,6 +814,10 @@ function AssistantBubble({
   );
   const stageCardTraces = useMemo(
     () => extractStageCardTraces(turn.events),
+    [turn.events],
+  );
+  const teamPreviewTraces = useMemo(
+    () => extractTeamPreviewTraces(turn.events),
     [turn.events],
   );
   // 工具执行阶段进度 (联网搜索前端展示优化): tool_call_id→阶段，旁路读原始事件（不入 ProjectedTurn），
@@ -808,47 +867,33 @@ function AssistantBubble({
   const meta = summarize(p);
   const clockIso = extractTurnClock(turn.events);
   const isMulti = p.runs.length > 0;
-  const team = isMulti
-    ? {
-        agents: p.agents,
-        runs: p.runs,
-        progress: p.progress,
-        acts: p.acts,
-        teamNotes: p.teamNotes,
-        status: p.status,
-        conversationId,
-        executionId: teamExecutionId(p.process),
-        pendingEscalations,
-        escalationsInteractive: live,
-        runToolCalls,
-        workerToolPhases,
-        evidenceLedger: debateEvidenceLedger,
-        elapsedMs: turnElapsedMs(turn.events),
-      }
-    : undefined;
+  const hasTeamGraph = shouldShowTeamGraph(p.runs);
   const empty =
     !isMulti && p.process.length === 0 && !p.content && !p.reasoning;
-  // 对齐桌面：空正文 + 结构化 error / error·unproductive → 可见失败说明。
   const finishReason = live ? null : (chrome.finishReason ?? p.finishReason);
-  const stopped = finishReason === "cancelled";
-  const failureNotice = resolveEmptyFailureNotice({
-    content: p.content,
+  const pauseUi = dedicatedPauseOrAskUi({
     finishReason,
-    errorMessage: chrome.errorMessage,
-    skip: live,
-    hasDedicatedPauseOrAskUi: dedicatedPauseOrAskUi({
-      finishReason,
-      projectedStatus: p.status,
-      askCount: asks.length,
-      process: p.process,
-    }),
+    projectedStatus: p.status,
+    askCount: asks.length,
+    process: p.process,
   });
-  const errorAction = failureNotice
-    ? errorActionForCode(chrome.errorCode, {
-        credentialSource: chrome.credentialSource,
-        message: chrome.errorMessage,
-      })
-    : null;
+  const outcome = resolveTurnOutcomeFromJournal({
+    events: turn.events,
+    content: p.content,
+    skip: live,
+    hasDedicatedPauseOrAskUi: pauseUi,
+    finishReason,
+    errorCode: chrome.errorCode,
+    errorMessage: chrome.errorMessage,
+    credentialSource: chrome.credentialSource,
+    deliveryState: p.deliveryStatus?.state,
+    deliverySummary: p.deliveryStatus?.summary,
+    runs: p.runs,
+    projectedStatus: p.status,
+    hasTeamGraph,
+  });
+  const pauseFace = isCeoContinuePause(outcome);
+  const outcomeNotice = pauseFace ? null : outcome.notice;
   // 回合总账 — populated by message_end (null while streaming, so it appears on finish).
   // BYOK: billed total is 0; estimated_total may carry a community-catalog estimate.
   // 币种随金额走：记账读 currency，BYOK 估算读 estimated_currency（美元社区价目）。
@@ -868,16 +913,30 @@ function AssistantBubble({
       ? COST_UNPRICED_LABEL
       : null;
   const turnWarning = p.turnWarning;
-  const supportIds: SupportDiagnosticIds = {
-    conversationId,
-    ...extractSupportIdsFromEvents(turn.events),
-    ...supportErrorExtras({
-      errorCode: chrome.errorCode,
-      emptyDiagnosis: chrome.emptyDiagnosis,
-      bodyKind: chrome.bodyKind,
-      baseUrl: chrome.baseUrl,
-    }),
-  };
+  const supportIds = supportIdsFromEvents(conversationId, turn.events, {
+    messageId,
+  });
+  const team = isMulti
+    ? {
+        agents: p.agents,
+        runs: p.runs,
+        progress: p.progress,
+        acts: p.acts,
+        teamNotes: p.teamNotes,
+        status: p.status,
+        conversationId,
+        executionId: teamExecutionId(p.process),
+        pendingEscalations,
+        escalationsInteractive: live,
+        runToolCalls,
+        workerToolPhases,
+        evidenceLedger: debateEvidenceLedger,
+        elapsedMs: turnElapsedMs(turn.events),
+        outcome,
+        supportIds,
+        onRetry,
+      }
+    : undefined;
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
     chrome.errorMessage,
@@ -885,9 +944,9 @@ function AssistantBubble({
   // 空停止：聊天时间线不占「已停止」行（有团队面时 empty=false，走 TeamView）。
   if (
     empty &&
-    stopped &&
+    outcome.hideEmptyBubble &&
     !live &&
-    !failureNotice &&
+    !pauseFace &&
     !turnWarning &&
     artifacts.length === 0
   ) {
@@ -897,7 +956,7 @@ function AssistantBubble({
     <>
       <div className="bubble assistant">
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
-        {empty && !failureNotice ? (
+        {empty && !outcomeNotice ? (
           <span className="muted">{live ? "…" : ""}</span>
         ) : !empty ? (
           <AssistantContent
@@ -916,6 +975,7 @@ function AssistantBubble({
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}
             stageCardTraces={stageCardTraces}
+            teamPreviewTraces={teamPreviewTraces}
             toolPhases={toolPhases}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
@@ -925,9 +985,9 @@ function AssistantBubble({
             onFill={onFill}
             supportIds={supportIds}
             onOpenBrowserLive={onOpenBrowserLive}
-            finishReason={finishReason}
+            finishReason={outcomeNotice ? null : finishReason}
             finishDiagnosisLabel={finishDiagnosis}
-            failureNotice={failureNotice}
+            failureNotice={outcomeNotice}
             usage={live ? null : chrome.usage}
             rounds={live ? null : chrome.rounds}
             costText={live ? null : cost}
@@ -935,28 +995,13 @@ function AssistantBubble({
             clockIso={live ? null : clockIso}
           />
         ) : null}
-        {failureNotice && (
-          <div className={errorSurfaceClass("inline-actions", !!errorAction)}>
-            <span>{failureNotice}</span>
-            <div className="error-card-actions">
-              <SupportDiagnosticCopyButton ids={supportIds} />
-              {errorAction && (
-                <button
-                  type="button"
-                  className="retry-btn"
-                  onClick={() => navigate(errorAction.href)}
-                >
-                  {errorAction.label}
-                </button>
-              )}
-              {onRetry && (
-                <button type="button" className="retry-btn" onClick={onRetry}>
-                  重试
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        <TurnOutcomeBanner
+          outcome={outcome}
+          supportIds={supportIds}
+          onRetry={onRetry}
+          onContinue={onContinue}
+          continueLocked={continueLocked}
+        />
         <FileArtifactsCard
           artifacts={artifacts}
           reviewArtifacts={reviewArtifacts}
@@ -985,15 +1030,18 @@ function HistoryAssistant({
   conversationId,
   onFill,
   onRetry,
+  onContinue,
+  continueLocked,
   isLast,
 }: {
   m: MessageDetail;
   conversationId: string | null;
   onFill: (text: string) => void;
   onRetry?: () => void;
+  onContinue?: () => Promise<void> | void;
+  continueLocked?: boolean;
   isLast?: boolean;
 }) {
-  const navigate = useNavigate();
   const {
     team,
     debate,
@@ -1118,6 +1166,10 @@ function HistoryAssistant({
     () => extractStageCardTraces(m.runs?.events ?? []),
     [m.runs],
   );
+  const teamPreviewTraces = useMemo(
+    () => extractTeamPreviewTraces(m.runs?.events ?? []),
+    [m.runs],
+  );
   // P2：优先用 messages.cost 列（平台记账）；缺列或 BYOK 记账为 0 时 lazy-fetch 台账（含 estimated_cost）。
   const columnBilled =
     m.cost && m.cost.total > 0
@@ -1139,12 +1191,9 @@ function HistoryAssistant({
         : null;
   const streaming = m.status === "running" && !m.paused;
   const finishReason = m.runs?.finish_reason ?? chrome.finishReason ?? null;
-  // Cold path: prefer live chrome (SSE error in events), else durable runs.error.
   const errorMessage =
     chrome.errorMessage ?? m.runs?.error?.message ?? undefined;
   const errorCode = chrome.errorCode ?? m.runs?.error?.code ?? undefined;
-  const interrupted =
-    m.status === "incomplete" || finishReason === "interrupted";
   const emptyBody =
     !team &&
     (!process || process.length === 0) &&
@@ -1152,24 +1201,32 @@ function HistoryAssistant({
     !m.reasoning_content &&
     m.citations.length === 0 &&
     artifacts.length === 0;
-  const failureNotice = resolveEmptyFailureNotice({
-    content: m.content,
+  const pauseUi = dedicatedPauseOrAskUi({
+    paused: m.paused,
     finishReason,
-    errorMessage,
-    skip: streaming,
-    hasDedicatedPauseOrAskUi: dedicatedPauseOrAskUi({
-      paused: m.paused,
-      finishReason,
-      askCount: asks.length,
-      process,
-    }),
+    askCount: asks.length,
+    process,
   });
-  const errorAction = failureNotice
-    ? errorActionForCode(errorCode, {
-        credentialSource: chrome.credentialSource,
-        message: errorMessage,
-      })
-    : null;
+  const hasTeamGraph = shouldShowTeamGraph(team?.runs);
+  const outcome = resolveTurnOutcomeFromJournal({
+    events: m.runs?.events ?? [],
+    content: m.content,
+    skip: streaming,
+    hasDedicatedPauseOrAskUi: pauseUi,
+    paused: m.paused,
+    finishReason,
+    errorCode,
+    errorMessage,
+    credentialSource: chrome.credentialSource,
+    deliveryState: deliveryStatus?.state,
+    deliverySummary: deliveryStatus?.summary,
+    runs: team?.runs,
+    projectedStatus: team?.status,
+    wireResult: m.outcome,
+    hasTeamGraph,
+  });
+  const pauseFace = isCeoContinuePause(outcome);
+  const outcomeNotice = pauseFace ? null : outcome.notice;
   const supportIds = historySupportIds(
     m,
     conversationId,
@@ -1180,8 +1237,6 @@ function HistoryAssistant({
       baseUrl: chrome.baseUrl,
     }),
   );
-  // Stopped empty = omit chat-timeline face (P1); interrupted may keep recover.
-  const showRetry = !!onRetry && isLast && (interrupted || !!failureNotice);
   const finishDiagnosis = degradedFinishChipLabel(
     chrome.emptyDiagnosis,
     errorMessage,
@@ -1190,9 +1245,9 @@ function HistoryAssistant({
   if (
     emptyBody &&
     !turnWarning &&
-    !interrupted &&
     !streaming &&
-    !failureNotice &&
+    !outcomeNotice &&
+    !pauseFace &&
     userInterjections.length === 0
   ) {
     return null;
@@ -1207,7 +1262,7 @@ function HistoryAssistant({
         {turnWarning && <div className="turn-warning">{turnWarning}</div>}
         {streaming && !m.content && !m.reasoning_content && !process?.length ? (
           <span className="muted">…</span>
-        ) : emptyBody && failureNotice ? null : (
+        ) : emptyBody && outcomeNotice ? null : (
           <AssistantContent
             process={process}
             content={m.content ?? ""}
@@ -1217,13 +1272,23 @@ function HistoryAssistant({
             isStreaming={streaming}
             messageId={m.id}
             captainContext={m.runs?.captain_context ?? undefined}
-            team={team}
+            team={
+              team
+                ? {
+                    ...team,
+                    outcome,
+                    supportIds,
+                    onRetry: isLast ? onRetry : undefined,
+                  }
+                : undefined
+            }
             debate={debate}
             debateRounds={debateRounds}
             asks={asks}
             escalationSlots={escalationSlots}
             hotTraces={hotTraces}
             stageCardTraces={stageCardTraces}
+            teamPreviewTraces={teamPreviewTraces}
             graphAppendActKinds={graphAppendActKinds}
             graphAppendAuthorizedBy={graphAppendAuthorizedBy}
             prevExecutionIds={prevExecutionIds}
@@ -1231,9 +1296,9 @@ function HistoryAssistant({
             turnClosed
             onFill={onFill}
             supportIds={supportIds}
-            finishReason={streaming ? null : finishReason}
+            finishReason={streaming || outcomeNotice ? null : finishReason}
             finishDiagnosisLabel={finishDiagnosis}
-            failureNotice={failureNotice}
+            failureNotice={outcomeNotice}
             usage={streaming ? null : (m.usage ?? chrome.usage)}
             rounds={streaming ? null : (m.rounds ?? chrome.rounds)}
             costText={streaming ? null : cost}
@@ -1241,28 +1306,13 @@ function HistoryAssistant({
             clockIso={streaming ? null : m.created_at}
           />
         )}
-        {failureNotice && (
-          <div className={errorSurfaceClass("inline-actions", !!errorAction)}>
-            <span>{failureNotice}</span>
-            <div className="error-card-actions">
-              <SupportDiagnosticCopyButton ids={supportIds} />
-              {errorAction && (
-                <button
-                  type="button"
-                  className="retry-btn"
-                  onClick={() => navigate(errorAction.href)}
-                >
-                  {errorAction.label}
-                </button>
-              )}
-              {showRetry && (
-                <button type="button" className="retry-btn" onClick={onRetry}>
-                  重试
-                </button>
-              )}
-            </div>
-          </div>
-        )}
+        <TurnOutcomeBanner
+          outcome={outcome}
+          supportIds={supportIds}
+          onRetry={isLast ? onRetry : undefined}
+          onContinue={onContinue}
+          continueLocked={continueLocked}
+        />
         <FileArtifactsCard
           artifacts={artifacts}
           reviewArtifacts={reviewArtifacts}
@@ -1273,11 +1323,6 @@ function HistoryAssistant({
         {artifacts.length === 0 && autoFolder ? (
           <AutoFolderNoticeCard notice={autoFolder} />
         ) : null}
-        {interrupted && showRetry && !failureNotice && (
-          <button type="button" className="retry-btn" onClick={onRetry}>
-            重试
-          </button>
-        )}
       </div>
     </>
   );
@@ -2103,6 +2148,8 @@ export function ChatPage() {
           }
         }
         // 定面完成 → 挂对话级订阅（无论是否有回合在跑：空闲对话也要停在上面等）。
+        await recoveryLoaded;
+        if (cancelled) return;
         setFollowReady(true);
       })
       .catch((e) => {
@@ -2498,6 +2545,20 @@ export function ChatPage() {
     });
   }, [conversationId, coldById, paused, coldHosts, history, turns]);
 
+  const hangingEventLists = useMemo(() => {
+    const live = turns.map((t) => t.events);
+    const hist = (history ?? []).map((m) => m.runs?.events ?? []);
+    return [...live, ...hist];
+  }, [turns, history]);
+  const hangingAsks = useMemo(
+    () => collectPendingHangingQuestions(hangingEventLists),
+    [hangingEventLists],
+  );
+  const hangingDetached = useMemo(
+    () => eventsHaveExecutionDetached(turns.flatMap((t) => t.events)),
+    [turns],
+  );
+
   // 摆出去的卡登记进 ref，供收口事件判归属（只给用户真看得见的卡立「已由另一端处理」）。
   visibleCardIdsRef.current = new Set<string>([
     ...approvalCards.map((c) => c.id),
@@ -2505,6 +2566,7 @@ export function ChatPage() {
     ...escalationCards.map((c) => c.id),
     ...stageCards.map((c) => c.id),
     ...visibleResumes.map((p) => p.checkpoint_id),
+    ...hangingAsks.map((a) => a.id),
   ]);
 
   // Cold actionable pending with stamp ⇒ unlock composer (desktop finalizeGenerating
@@ -2665,20 +2727,22 @@ export function ChatPage() {
       attachments: MessageAttachment[];
       agentMentions?: PendingAgentMention[];
       folder?: DraftFolder | null;
+      askId?: string;
+      preserveComposer?: boolean;
     },
     deliveryOverride?: MessageDelivery,
-  ) {
+  ): Promise<boolean> {
     const text = (override?.text ?? input).trim();
     const outgoing = override?.attachments ?? attachments;
     const outgoingMentions = override?.agentMentions ?? agentMentions;
     const createdFolder = override?.folder ?? null;
-    if (!hasSendableDraft(text, outgoing) || !conversationId) return;
-    if (stopPhaseRef.current === "stopping") return;
+    if (!hasSendableDraft(text, outgoing) || !conversationId) return false;
+    if (stopPhaseRef.current === "stopping") return false;
     // Interactive mid-flight while a turn is already streaming (本端自发或跟播另一端的都算).
     if (!override && turnInFlight) {
       const delivery = deliveryOverride ?? defaultDelivery({ busy: true });
       void sendWhileBusy(text, delivery);
-      return;
+      return false;
     }
     let wireAttachments: Array<Omit<MessageAttachment, "fileBlob">> = [];
     if (outgoing.length > 0) {
@@ -2688,7 +2752,7 @@ export function ChatPage() {
       );
       if (!finalized.ok) {
         setAttachError(finalized.reason);
-        return;
+        return false;
       }
       wireAttachments = finalized.attachments;
     }
@@ -2715,6 +2779,10 @@ export function ChatPage() {
           name: a.name,
           truncated: a.truncated,
         })),
+        agentMentions: outgoingMentions.map((a) => ({
+          agentId: a.agentId,
+          role: a.role,
+        })),
       },
     ]);
 
@@ -2723,6 +2791,7 @@ export function ChatPage() {
     const collected: SSEEvent[] = [];
     const restoreComposer = () => {
       setTurns((t) => removeLiveTurn(t, turnId));
+      if (override?.preserveComposer) return;
       setInput(text);
       setAttachments(outgoing);
       setAgentMentions(outgoingMentions);
@@ -2767,6 +2836,7 @@ export function ChatPage() {
         });
       })();
     };
+    let sentOk = false;
     try {
       await streamMessage(
         conversationId,
@@ -2781,34 +2851,45 @@ export function ChatPage() {
         outgoingMentions.length > 0
           ? toOutgoingAgentMentions(outgoingMentions)
           : undefined,
+        override?.askId,
       );
       // SSE error 后 stream 常 resolve 不 throw：本发已落库 + 空失败 + Class B 码也要回滚。
       const zero = inspectZeroOutputSendRollback(collected);
       if (zero.rollback) {
         const err: ChatError | null = zero.errorMessage
-          ? {
-              text: zero.errorMessage,
-              action:
-                errorActionForCode(zero.errorCode, {
-                  credentialSource: zero.credentialSource,
-                  message: zero.errorMessage,
-                }) ?? undefined,
-            }
+          ? withTurnSupport(
+              {
+                text: zero.errorMessage,
+                action:
+                  errorActionForCode(zero.errorCode, {
+                    credentialSource: zero.credentialSource,
+                    message: zero.errorMessage,
+                  }) ?? undefined,
+              },
+              conversationId,
+              collected,
+            )
           : null;
         if (err) setError(err);
         restoreComposer();
         if (err) maybeDismantleEmptyConversation(err);
+      } else {
+        sentOk = true;
       }
     } catch (e) {
-      if (isAbort(e)) return; // conversation switch — partial stays, server salvages
+      if (isAbort(e)) return false; // conversation switch — partial stays, server salvages
       // Pre-stream refusal (402 LLM_KEY_REQUIRED etc.) — surface banner +「去配置」, do not
       // treat as a dropped live run (nothing started).
       if (e instanceof StreamHttpError) {
         const d = describeStreamHttpError(e);
-        const err: ChatError = {
-          text: d.message,
-          action: d.action ?? undefined,
-        };
+        const err: ChatError = withTurnSupport(
+          {
+            text: d.message,
+            action: d.action ?? undefined,
+          },
+          conversationId,
+          collected,
+        );
         setError(err);
         if (isUnstartedSendRefusal(e)) {
           restoreComposer();
@@ -2817,13 +2898,14 @@ export function ChatPage() {
           restoreComposer();
           maybeDismantleEmptyConversation(err);
         }
-        return;
+        return false;
       }
       // 诚实停止等待中断流：不自动重连，保持 stopping 等引擎终态。
-      if (isStoppingNow()) return;
+      if (isStoppingNow()) return false;
       // A mid-stream drop no longer means the turn died (slice 1a: it runs detached) —
       // rejoin it (1b) rather than resending, which would double-run it.
       reconnect();
+      sentOk = true;
     } finally {
       signalPrimaryIdle();
       // Only settle sending if still the current op — a switch / takeover (reconnect /
@@ -2834,13 +2916,19 @@ export function ChatPage() {
         inflightRef.current = Math.max(0, inflightRef.current - 1);
       }
     }
+    return sentOk;
   }
 
   /** 生成中发送：独立 POST SSE；queue → 仅条；出队开跑再进主时间线用户泡。 */
-  async function sendWhileBusy(text: string, delivery: MessageDelivery) {
-    if (!conversationId) return;
-    const outgoing = attachments;
-    const outgoingMentions = agentMentions;
+  async function sendWhileBusy(
+    text: string,
+    delivery: MessageDelivery,
+    extras?: { askId?: string; preserveComposer?: boolean },
+  ): Promise<false | "received" | "queued"> {
+    if (!conversationId) return false;
+    const preserve = extras?.preserveComposer === true;
+    const outgoing = preserve ? [] : attachments;
+    const outgoingMentions = preserve ? [] : agentMentions;
     let wireAttachments: Array<Omit<MessageAttachment, "fileBlob">> = [];
     if (outgoing.length > 0) {
       const finalized = await finalizeAttachmentsForSend(
@@ -2849,7 +2937,7 @@ export function ChatPage() {
       );
       if (!finalized.ok) {
         setAttachError(finalized.reason);
-        return;
+        return false;
       }
       wireAttachments = finalized.attachments;
     }
@@ -2865,7 +2953,7 @@ export function ChatPage() {
     let trackedQueueId: string | null = null;
     let composerCleared = false;
     const clearComposerOnAck = () => {
-      if (composerCleared) return;
+      if (preserve || composerCleared) return;
       composerCleared = true;
       setInput("");
       setAttachments([]);
@@ -2915,6 +3003,10 @@ export function ChatPage() {
                     name: a.name,
                     truncated: a.truncated,
                   })),
+                  agentMentions: outgoingMentions.map((a) => ({
+                    agentId: a.agentId,
+                    role: a.role,
+                  })),
                 },
               ]);
             }
@@ -2933,15 +3025,22 @@ export function ChatPage() {
         outgoingMentions.length > 0
           ? toOutgoingAgentMentions(outgoingMentions)
           : undefined,
+        extras?.askId,
       );
       if (result.kind === "blocked") {
         setError({ text: result.message ?? "请先处理待确认事项" });
-      } else if (result.kind === "error") {
+        return false;
+      }
+      if (result.kind === "error") {
         setError({ text: result.message });
-      } else if (result.kind === "received" || result.kind === "queued") {
+        return false;
+      }
+      if (result.kind === "received" || result.kind === "queued") {
         // 泵已结束时仍兜底清一次（ack 回调已清则 no-op）。
         clearComposerOnAck();
+        return result.kind;
       }
+      return false;
     } finally {
       midFlightControllersRef.current.delete(ac);
       if (trackedQueueId) {
@@ -2950,6 +3049,31 @@ export function ChatPage() {
       releaseLocalStream(ac);
       markStreamEnd();
     }
+  }
+
+  /** 带 `ask_id` 发出答复；`question_posted` 由服务端在回合提交成立后结算。 */
+  async function replyHangingQuestion(askId: string, text: string) {
+    if (!conversationId) throw new Error("缺少会话");
+    const trimmed = text.trim();
+    if (!trimmed) throw new Error("缺少答复");
+    if (turnInFlight) {
+      const kind = await sendWhileBusy(trimmed, "steer", {
+        askId,
+        preserveComposer: true,
+      });
+      if (kind === false) throw new Error("发送失败");
+      return;
+    }
+    const ok = await send(
+      {
+        text: trimmed,
+        attachments: [],
+        askId,
+        preserveComposer: true,
+      },
+      "steer",
+    );
+    if (!ok) throw new Error("发送失败");
   }
 
   // 诚实停止闭环：进入「停止中」可见态，POST /stop，保持 SSE 等后端终态（不本地 abort /
@@ -3037,10 +3161,16 @@ export function ChatPage() {
       if (isAbort(e)) return;
       if (e instanceof StreamHttpError) {
         const d = describeStreamHttpError(e);
-        setError({
-          text: d.message,
-          action: d.action ?? undefined,
-        });
+        setError(
+          withTurnSupport(
+            {
+              text: d.message,
+              action: d.action ?? undefined,
+            },
+            conversationId,
+            [],
+          ),
+        );
         if (isUnstartedSendRefusal(e)) {
           setTurns((t) => removeLiveTurn(t, turnId));
         }
@@ -3186,6 +3316,48 @@ export function ChatPage() {
     }
   }
 
+  /** CEO rate-limit pause continue — not checkpoint ResumeCard / `/resume`. */
+  async function continueCeoPaused(messageId: string) {
+    if (!conversationId || busy || !messageId) return;
+    setError(null);
+    clearStopping();
+    setSending(true);
+    const prepared = prepareResumePausedTurn({
+      messageId,
+      turns,
+      history,
+      newTurnId: crypto.randomUUID(),
+    });
+    const turnId = prepared.turnId;
+    setActiveTurn(turnId);
+    setTurns(prepared.turns);
+    if (prepared.history !== history) setHistory(prepared.history);
+
+    const ac = new AbortController();
+    claimLocalStream(ac);
+    try {
+      await continueStream(
+        conversationId,
+        messageId,
+        (event) => appendEventToTurn(turnId, event),
+        ac.signal,
+      );
+    } catch (err) {
+      if (isAbort(err)) return;
+      if (stopPhaseRef.current === "stopping") return;
+      if (err instanceof StreamHttpError) {
+        void reloadTranscript(conversationId, { dropFolded: true });
+        throw err;
+      }
+      // 掉线走重连看回合，但继续本身没成功——必须抛出让 PausedContinueCard 解锁，否则
+      // 无异常被当成成功，按钮停在「继续中…」无法重试。
+      reconnect();
+      throw new Error("连接中断，请重试");
+    } finally {
+      if (releaseLocalStream(ac)) setSending(false);
+    }
+  }
+
   /** 推进卡 resolve：起新回合 SSE（机制直起辩论或回灌调研）。 */
   async function runStageCard(
     stageCardId: string,
@@ -3288,6 +3460,56 @@ export function ChatPage() {
     [history, memoryUpdates],
   );
 
+  const latestOutlet = useMemo(() => {
+    const empty: {
+      owns: boolean;
+      pause: boolean;
+      outcome: TurnOutcome | null;
+      supportIds: SupportDiagnosticIds;
+    } = { owns: false, pause: false, outcome: null, supportIds: {} };
+    const live = [...turns].reverse().find((t) => t.events.length > 0);
+    if (live) {
+      const isLiveStream =
+        busy && activeStreamTurnId != null && live.id === activeStreamTurnId;
+      if (isLiveStream) return empty;
+      const out = resolveTurnOutcomeFromJournal({ events: live.events });
+      return {
+        owns: turnOwnsUserFacingOutlet(out),
+        pause: isCeoContinuePause(out),
+        outcome: out,
+        supportIds: supportIdsFromEvents(conversationId, live.events),
+      };
+    }
+    const hist = [...(history ?? [])]
+      .reverse()
+      .find((m) => m.role === "assistant");
+    if (!hist) return empty;
+    const out = resolveTurnOutcomeFromJournal({
+      events: hist.runs?.events ?? [],
+      content: hist.content,
+      finishReason: hist.runs?.finish_reason,
+      errorCode: hist.runs?.error?.code,
+      errorMessage: hist.runs?.error?.message,
+      paused: hist.paused,
+      wireResult: hist.outcome,
+    });
+    return {
+      owns: turnOwnsUserFacingOutlet(out),
+      pause: isCeoContinuePause(out),
+      outcome: out,
+      supportIds: historySupportIds(hist, conversationId ?? null),
+    };
+  }, [turns, history, busy, activeStreamTurnId, conversationId]);
+  const latestOwnsOutlet = latestOutlet.owns;
+  const latestPauseSurface = latestOutlet.pause;
+  const composerOutcomeHint =
+    !busy &&
+    !creatingConversation &&
+    latestOutlet.outcome &&
+    turnOutcomeShowsComposerHint(latestOutlet.outcome)
+      ? latestOutlet.outcome.notice
+      : null;
+
   // 一条历史消息的渲染（用户气泡 / 助手回合）。抽成函数是为了在它前面插锚定的记忆卡——
   // 被隐藏的消息（系统收口、空内容）返回 null，卡不能跟着一起消失。
   function renderHistoryRow(m: MessageDetail, isLast: boolean) {
@@ -3300,10 +3522,15 @@ export function ChatPage() {
           onFill={fillComposer}
           isLast={isLast}
           onRetry={isLast ? () => void retryInterrupted() : undefined}
+          onContinue={
+            conversationId ? () => continueCeoPaused(m.id) : undefined
+          }
+          continueLocked={busy}
         />
       );
     const atts = m.attachments ?? [];
-    if (!m.content && atts.length === 0) return null;
+    const mentions = m.agentMentions ?? [];
+    if (!m.content && atts.length === 0 && mentions.length === 0) return null;
     // 异步团队收口：识别后隐藏（不渲染用户气泡，避免露出模型提示词）
     if (
       m.origin === "execution_harvest" ||
@@ -3318,7 +3545,7 @@ export function ChatPage() {
             {m.content}
           </CollapsibleUserText>
         ) : null}
-        <AttachmentChips items={atts} />
+        <UserBubbleChips attachments={atts} agentMentions={mentions} />
       </div>
     );
   }
@@ -3430,6 +3657,16 @@ export function ChatPage() {
                     onOpenBrowserLive={
                       conversationId ? openBrowserLive : undefined
                     }
+                    onContinue={
+                      conversationId
+                        ? () => {
+                            const mid = extractMessageId(turn.events);
+                            if (!mid) return;
+                            return continueCeoPaused(mid);
+                          }
+                        : undefined
+                    }
+                    continueLocked={busy}
                   />
                 ) : null}
               </div>
@@ -3443,24 +3680,16 @@ export function ChatPage() {
                   <CollapsibleUserText contentKey={draftPending.text}>
                     {draftPending.text}
                   </CollapsibleUserText>
-                  <AttachmentChips
-                    items={[
-                      ...draftPending.agentMentions.map((a) => ({
-                        name: `@${a.role}`,
-                      })),
-                      ...draftPending.attachments,
-                    ]}
+                  <UserBubbleChips
+                    attachments={draftPending.attachments}
+                    agentMentions={draftPending.agentMentions}
                   />
                 </div>
               ) : (
                 <div className="bubble user">
-                  <AttachmentChips
-                    items={[
-                      ...draftPending.agentMentions.map((a) => ({
-                        name: `@${a.role}`,
-                      })),
-                      ...draftPending.attachments,
-                    ]}
+                  <UserBubbleChips
+                    attachments={draftPending.attachments}
+                    agentMentions={draftPending.agentMentions}
                   />
                 </div>
               )}
@@ -3550,6 +3779,14 @@ export function ChatPage() {
         />
       ))}
 
+      {conversationId ? (
+        <HangingQuestionBar
+          asks={hangingAsks}
+          detached={hangingDetached}
+          onReply={replyHangingQuestion}
+        />
+      ) : null}
+
       {!busy &&
         conversationId &&
         stageCards.map((card) => (
@@ -3562,39 +3799,43 @@ export function ChatPage() {
           />
         ))}
 
-      {error && (
-        <div className={errorSurfaceClass("bar", !!error.action)}>
-          <span>{error.text}</span>
-          <div className="error-bar-actions">
-            {conversationId && (
-              <SupportDiagnosticCopyButton ids={{ conversationId }} />
-            )}
-            {error.action && (
-              <button
-                type="button"
-                className="link config-action"
-                onClick={() => {
-                  const href = error.action?.href;
-                  if (!href) return;
-                  setError(null);
-                  navigate(href);
-                }}
-              >
-                {error.action.label}
-              </button>
-            )}
-            {error.reconnect && (
-              <button
-                type="button"
-                className="link reconnect"
-                onClick={() => reconnect()}
-              >
-                重连
-              </button>
-            )}
+      {error &&
+        !(error.fromTurn && latestOwnsOutlet) &&
+        !latestPauseSurface && (
+          <div className={errorSurfaceClass("bar", !!error.action)}>
+            <span>{error.text}</span>
+            <div className="error-bar-actions">
+              <SupportDiagnosticCopyButton
+                ids={
+                  error.supportIds ?? (conversationId ? { conversationId } : {})
+                }
+              />
+              {error.action && (
+                <button
+                  type="button"
+                  className="link config-action"
+                  onClick={() => {
+                    const href = error.action?.href;
+                    if (!href) return;
+                    setError(null);
+                    navigate(href);
+                  }}
+                >
+                  {error.action.label}
+                </button>
+              )}
+              {error.reconnect && (
+                <button
+                  type="button"
+                  className="link reconnect"
+                  onClick={() => reconnect()}
+                >
+                  重连
+                </button>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {attachError && (
         <div className="error bar">
@@ -3706,6 +3947,17 @@ export function ChatPage() {
           </button>
         </div>
       )}
+
+      {composerOutcomeHint ? (
+        <div
+          className="composer-delivery-hint"
+          data-testid="composer-outcome-hint"
+          aria-live="polite"
+        >
+          <span>{composerOutcomeHint}</span>
+          <SupportDiagnosticCopyButton ids={latestOutlet.supportIds} />
+        </div>
+      ) : null}
 
       {!conversationId && !creatingConversation && (
         <DraftFolderChip

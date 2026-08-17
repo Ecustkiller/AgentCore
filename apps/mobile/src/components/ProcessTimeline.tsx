@@ -15,6 +15,8 @@ import {
   extractCodeDiagnostics,
 } from "@/lib/codeDiagnostics";
 import { isFileReadCeilingGuidance } from "@/lib/fileReadCeiling";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
+import type { TurnOutcome } from "@/lib/turnOutcome";
 import { isVerifyBudgetExceeded } from "@/lib/verifyBudget";
 import type {
   EscalationSlot,
@@ -24,6 +26,7 @@ import type {
   StageCardTrace,
 } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
+import type { TeamPreviewTrace } from "@/protocol/teamPreviewTraces";
 import type {
   Citation,
   EvidenceLedgerEntry,
@@ -110,6 +113,31 @@ export function shouldShowTeamGraph(
   return kickoffReleased && list.length > 0;
 }
 
+/**
+ * 时间线尾部是否已有活性提示。通用思考尾迹只在「回合在流且尾部无活节点」时出现，
+ * 避免与跑着的工具、流式 Thought/正文、wait 空转或协作图重复。
+ * `graph_append` 自身只画锚点，活性来自它所属的协作图，故与 `team` 同闸。
+ */
+export function timelineTailHasLiveCue(
+  last: ProcessStep | undefined,
+  opts?: { teamGraphVisible?: boolean },
+): boolean {
+  if (!last) return false;
+  if (last.kind === "tool") {
+    return last.status === "running" || last.tool_name === "wait";
+  }
+  if (
+    last.kind === "reasoning" ||
+    last.kind === "content" ||
+    last.kind === "rework"
+  ) {
+    return true;
+  }
+  if (last.kind === "team" || last.kind === "graph_append")
+    return opts?.teamGraphVisible === true;
+  return false;
+}
+
 export function kickoffReleasedFromCold(
   entries: Iterable<{
     kind: string;
@@ -168,6 +196,10 @@ export interface TeamProjection {
   evidenceLedger?: EvidenceLedgerEntry[];
   /** 回合墙钟跨度（`turnElapsedMs(events)`，与桌面同量）：条上「用时」。缺省 0 = 不显示。 */
   elapsedMs?: number;
+  /** Arbiter verdict when the strip is the primary failure face. */
+  outcome?: TurnOutcome | null;
+  supportIds?: SupportDiagnosticIds;
+  onRetry?: () => void;
 }
 
 /** Tool execution phase → waiting-state chrome (transport-only `tool_use_progress`,
@@ -467,6 +499,7 @@ export function ProcessTimeline({
   escalationSlots,
   hotTraces,
   stageCardTraces,
+  teamPreviewTraces,
   toolPhases,
   graphAppendActKinds,
   graphAppendAuthorizedBy,
@@ -492,6 +525,8 @@ export function ProcessTimeline({
   escalationSlots?: Map<string, EscalationSlot>;
   hotTraces?: Map<string, HotDecisionTrace>;
   stageCardTraces?: Map<string, StageCardTrace>;
+  /** 开工卡 / 开赛卡 resolved 痕迹（桌面 TeamPreviewCard 对等）。 */
+  teamPreviewTraces?: Map<string, TeamPreviewTrace>;
   toolPhases?: Map<string, ToolPhase>;
   graphAppendActKinds?: Map<string, string>;
   graphAppendAuthorizedBy?: Map<string, string>;
@@ -529,13 +564,13 @@ export function ProcessTimeline({
   const showFallbackAfter =
     !hasContentStep && Boolean(fallbackText) && fallbackBeforeTeamIdx < 0;
 
-  // wait 空转后不刷 Thinking 尾迹；下一轮有真实动作再出现。
+  // 回合在流且尾部无活节点 → 通用思考尾迹（delegate/debate 顶位是 team 标记，不是已完成 tool）。
   const last = steps[steps.length - 1];
+  const teamGraphVisible = Boolean(
+    team && shouldShowTeamGraph(team.runs, kickoffReleased),
+  );
   const showThinkingTail =
-    isStreaming &&
-    last?.kind === "tool" &&
-    last.status !== "running" &&
-    last.tool_name !== "wait";
+    isStreaming && !timelineTailHasLiveCue(last, { teamGraphVisible });
 
   const renderFallback = (key: string) => (
     <div key={key} className="process-narration">
@@ -593,7 +628,7 @@ export function ProcessTimeline({
     }
     if (node.kind === "ask") {
       const ask = asks?.find((a) => a.id === node.ask_id);
-      return ask && onFill ? (
+      return ask ? (
         <NonBlockingAskCard key={ask.id} ask={ask} onFill={onFill} />
       ) : null;
     }
@@ -674,13 +709,28 @@ export function ProcessTimeline({
         </div>
       );
     }
-    // checkpoint·plan_review·team_preview：手机阻塞交互走 Sheet，时间线 no-op。
-    if (
-      node.kind === "checkpoint" ||
-      node.kind === "plan_review" ||
-      node.kind === "team_preview"
-    ) {
+    // checkpoint·plan_review：手机阻塞交互走 Sheet，时间线 no-op。
+    // team_preview pending 仍 no-op；resolved 画「已调整 · 已交回修订」等痕迹。
+    if (node.kind === "checkpoint" || node.kind === "plan_review") {
       return null;
+    }
+    if (node.kind === "team_preview") {
+      const t = teamPreviewTraces?.get(node.checkpoint_id);
+      if (!t || t.status === "pending") return null;
+      if (t.decision === "continue" && kickoffReleased) return null;
+      return (
+        <div
+          key={nodeKey}
+          className="hot-trace"
+          data-testid="team-preview-trace"
+          data-decision={t.decision ?? t.status}
+        >
+          <div>{t.label}</div>
+          {t.note.trim() ? (
+            <div className="hot-trace-note">{t.note}</div>
+          ) : null}
+        </div>
+      );
     }
     if (node.kind === "tool-group") {
       return (
@@ -780,7 +830,7 @@ export function ProcessTimeline({
       })}
       {showFallbackAfter && renderFallback("fallback-after")}
       {showThinkingTail && (
-        <span className="thinking-tail">
+        <span className="thinking-tail" data-testid="thinking-tail">
           <ThinkingDots />
           Thinking…
         </span>

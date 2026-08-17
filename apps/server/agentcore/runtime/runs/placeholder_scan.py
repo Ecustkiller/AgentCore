@@ -45,6 +45,10 @@ _CONTENT_EXTS = frozenset(
         ".svg",
     }
 )
+# Spreadsheet / table result files. No-exec data_file_landing must not ship these
+# as the product (structural signal at contract; not inferred from file copy).
+_DATA_LANDING_TABLE_EXTS = frozenset({".csv", ".xlsx", ".xls", ".tsv"})
+
 # Code surfaces — hard TODO/XXX habits exempt; soft skipped (防误报).
 _CODE_EXTS = frozenset(
     {
@@ -175,6 +179,23 @@ def is_content_deliverable_path(path: str) -> bool:
 def is_code_deliverable_path(path: str) -> bool:
     """True when ``path`` is a code / config surface (TODO/XXX habits exempt)."""
     return _ext(path) in _CODE_EXTS
+
+
+def is_table_deliverable_path(path: str) -> bool:
+    """True when ``path`` is a spreadsheet / table result file (csv / xlsx / …)."""
+    return _ext(path) in _DATA_LANDING_TABLE_EXTS
+
+
+def is_opaque_source_data_path(path: str) -> bool:
+    """True when workers cannot reliably parse this file without execution.
+
+    Reuses attachment-parse type buckets (Office/PDF extraction; xlsx/csv/tsv
+    structure-preview only). Provenance is decided by the caller — this is not
+    a filename guess and not an output-shape conjunction.
+    """
+    from agentcore.workspace.attachment_parse import MARKITDOWN_EXTENSIONS, TABLE_EXTENSIONS
+
+    return _ext(path) in MARKITDOWN_EXTENSIONS or _ext(path) in TABLE_EXTENSIONS
 
 
 def needs_placeholder_scan(paths: Iterable[str]) -> bool:

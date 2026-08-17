@@ -72,9 +72,23 @@ export async function steerQueuedTurn(
     .find((e) => e.queueId === queueId);
   if (!entry) return;
 
-  const { content } = entry;
+  const { content, askId } = entry;
+  // 浅拷贝快照里的已收口载荷，保留 ``workspace_path`` 等驻留引用，不另造路径。
+  const attachments = entry.attachments?.length
+    ? entry.attachments.map((a) => ({ ...a }))
+    : undefined;
+  const agentMentions = entry.agentMentions?.length
+    ? entry.agentMentions.map((a) => ({ ...a }))
+    : undefined;
   const outcome = await cancelQueuedTurn(conversationId, queueId);
   if (outcome !== "cancelled") return;
 
-  await sendMidFlightMessage(conversationId, content, undefined, "steer");
+  await sendMidFlightMessage(
+    conversationId,
+    content,
+    attachments,
+    "steer",
+    agentMentions,
+    askId,
+  );
 }

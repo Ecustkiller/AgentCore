@@ -5,6 +5,7 @@ import {
 } from "../composerAttachments";
 import {
   buildMentionCategoryRows,
+  categoryHighlightIndex,
   mentionMenuKeyAction,
   showMentionCategoryLevel,
 } from "../mentionMenuLevel";
@@ -128,16 +129,15 @@ describe("showMentionCategoryLevel", () => {
 });
 
 describe("buildMentionCategoryRows", () => {
-  it("prepending 附件, disables empty team and keeps other categories drillable", () => {
+  it("附件置顶，文件/文件夹前移，空团队整档隐藏", () => {
     const rows = buildMentionCategoryRows({
       counts: { team: 0, conversation: 3, folder: 0, file: 12 },
     });
     expect(rows.map((r) => r.id)).toEqual([
       "attach",
-      "team",
-      "conversation",
-      "folder",
       "file",
+      "folder",
+      "conversation",
     ]);
     expect(rows[0]).toMatchObject({
       id: "attach",
@@ -145,13 +145,28 @@ describe("buildMentionCategoryRows", () => {
       hint: "从本机添加",
       disabled: false,
     });
-    expect(rows[1]).toMatchObject({
-      disabled: true,
-      hint: "多 Agent 回合后可点名",
+    expect(rows.find((r) => r.id === "team")).toBeUndefined();
+    expect(rows[1]).toMatchObject({ id: "file", count: 12, disabled: false });
+    expect(rows[2]).toMatchObject({ id: "folder", count: 0, disabled: false });
+    expect(rows[3]).toMatchObject({
+      id: "conversation",
+      count: 3,
+      disabled: false,
     });
-    expect(rows[2].disabled).toBe(false);
-    expect(rows[3]).toMatchObject({ disabled: false, count: 0 });
-    expect(rows[4].count).toBe(12);
+  });
+
+  it("有团队时沉到最后，不置灰", () => {
+    const rows = buildMentionCategoryRows({
+      counts: { team: 2, conversation: 1, folder: 4, file: 8 },
+    });
+    expect(rows.map((r) => r.id)).toEqual([
+      "attach",
+      "file",
+      "folder",
+      "conversation",
+      "team",
+    ]);
+    expect(rows[4]).toMatchObject({ id: "team", count: 2, disabled: false });
   });
 
   it("marks file/folder loading when index is still empty", () => {
@@ -159,9 +174,27 @@ describe("buildMentionCategoryRows", () => {
       counts: { team: 1, conversation: 0, folder: 0, file: 0 },
       loadingFiles: true,
     });
-    expect(rows[1].disabled).toBe(false);
-    expect(rows[3].loading).toBe(true);
-    expect(rows[4].loading).toBe(true);
+    expect(rows[1]).toMatchObject({ id: "file", loading: true });
+    expect(rows[2]).toMatchObject({ id: "folder", loading: true });
+    expect(rows[4]).toMatchObject({ id: "team", disabled: false });
+  });
+});
+
+describe("categoryHighlightIndex", () => {
+  const rows = [
+    { id: "attach" },
+    { id: "file" },
+    { id: "folder" },
+    { id: "conversation" },
+  ];
+
+  it("hits the preferred row when present", () => {
+    expect(categoryHighlightIndex(rows, "attach")).toBe(0);
+    expect(categoryHighlightIndex(rows, "file")).toBe(1);
+  });
+
+  it("falls back to file when team is hidden", () => {
+    expect(categoryHighlightIndex(rows, "team")).toBe(1);
   });
 });
 

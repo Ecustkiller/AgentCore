@@ -361,6 +361,7 @@ async def test_replaces_mid_run_revives_cascade_skipped_dependent():
 
 
 async def test_retry_then_succeeds():
+    """Wave dispatches once: a terminal FAILED is not remounted."""
     plan = RunPlan()
     plan.add(_spec("a", on_failure="retry", max_retries=2))
     calls = {"n": 0}
@@ -368,13 +369,30 @@ async def test_retry_then_succeeds():
     async def ex(_spec: RunSpec, _completed) -> RunState:
         calls["n"] += 1
         if calls["n"] < 2:
-            return RunState(phase=RunPhase.FAILED, error="transient")
+            return RunState(
+                phase=RunPhase.FAILED, error="prompt too long", error_retryable=False
+            )
         return RunState(phase=RunPhase.COMPLETED, content="ok")
 
     res = await WaveScheduler().run(plan, ex)
-    assert res["a"].phase is RunPhase.COMPLETED
-    assert res["a"].attempt == 1
-    assert calls["n"] == 2
+    # BL-6: non-retryable still does not 整跑.
+    assert res["a"].phase is RunPhase.FAILED
+    assert calls["n"] == 1
+
+
+async def test_retryable_failure_does_not_rerun_node():
+    """Transient FAILED must not remount the worker (no second executor hop)."""
+    plan = RunPlan()
+    plan.add(_spec("a", on_failure="retry", max_retries=2))
+    calls = {"n": 0}
+
+    async def ex(_spec: RunSpec, _completed) -> RunState:
+        calls["n"] += 1
+        return RunState(phase=RunPhase.FAILED, error="5xx transient")
+
+    res = await WaveScheduler().run(plan, ex)
+    assert res["a"].phase is RunPhase.FAILED
+    assert calls["n"] == 1
 
 
 async def test_retry_merges_billing_including_string_annotations():
@@ -403,10 +421,12 @@ async def test_retry_merges_billing_including_string_annotations():
         )
 
     res = await WaveScheduler().run(plan, ex)
-    assert res["a"].phase is RunPhase.COMPLETED
-    assert res["a"].usage == {"input_tokens": 30, "output_tokens": 13}
+    # Transient no longer 整跑s; billing merge is the executor's in-node continue.
+    assert res["a"].phase is RunPhase.FAILED
+    assert calls["n"] == 1
+    assert res["a"].usage == {"input_tokens": 10, "output_tokens": 5}
     assert res["a"].cost == {
-        "total_microusd": 2000,
+        "total_microusd": 700,
         "currency": "USD",
         "pricing_source": "curated",
     }
@@ -430,11 +450,10 @@ async def test_deterministic_failure_skips_retry():
 
 
 async def test_retryable_failure_still_exhausts_retries():
-    """A transient FAILED (default ``error_retryable=True``) still burns its retry budget —
-    proves the deterministic skip is narrowly scoped and doesn't change ordinary retry."""
+    """Wave no longer 整跑s a transient FAILED — continue budget lives in the executor."""
     plan = RunPlan()
     plan.add(_spec("a", on_failure="retry", max_retries=2))
-    plan.nodes[0].policy.retry_delay_ms = 0  # keep the test fast
+    plan.nodes[0].policy.retry_delay_ms = 0
     calls = {"n": 0}
 
     async def ex(_spec: RunSpec, _completed) -> RunState:
@@ -443,12 +462,11 @@ async def test_retryable_failure_still_exhausts_retries():
 
     res = await WaveScheduler().run(plan, ex)
     assert res["a"].phase is RunPhase.FAILED
-    assert calls["n"] == 3  # 1 initial + 2 retries
+    assert calls["n"] == 1
 
 
 async def test_retry_hot_continues_prior_transcript():
-    """retryable FAILED + non-empty transcript → next hop seeds completed[self] (热续),
-    not a pure cold open with an empty prior site."""
+    """Wave does not remount a retryable FAILED — seed-continue is the executor's job."""
     from agentcore.llm.provider.protocol import LLMMessage
 
     plan = RunPlan()
@@ -464,19 +482,16 @@ async def test_retry_hot_continues_prior_transcript():
     async def ex(spec: RunSpec, completed) -> RunState:
         seeded = completed.get(spec.run_id)
         seen.append(list(seeded.transcript) if seeded is not None else None)
-        if len(seen) == 1:
-            return RunState(
-                phase=RunPhase.FAILED,
-                error="upstream disconnect",
-                transcript=prior,
-                content="半成品",
-            )
-        return RunState(phase=RunPhase.COMPLETED, content="ok")
+        return RunState(
+            phase=RunPhase.FAILED,
+            error="upstream disconnect",
+            transcript=prior,
+            content="半成品",
+        )
 
     res = await WaveScheduler().run(plan, ex)
-    assert res["a"].phase is RunPhase.COMPLETED
-    assert seen[0] is None  # first hop: cold
-    assert seen[1] == prior  # second hop: prior transcript offered for消费
+    assert res["a"].phase is RunPhase.FAILED
+    assert seen == [None]
 
 
 async def test_retry_without_transcript_stays_cold():
@@ -492,7 +507,7 @@ async def test_retry_without_transcript_stays_cold():
 
     res = await WaveScheduler().run(plan, ex)
     assert res["a"].phase is RunPhase.FAILED
-    assert seeded_self == [False, False]
+    assert seeded_self == [False]
 
 
 async def test_executor_exception_becomes_failed_state():

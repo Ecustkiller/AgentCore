@@ -14,7 +14,7 @@ import { useState } from "react";
 // Chat model pick lives in 模型组合, not this form.
 
 /** Mobile-local BYOK presets. */
-type ProviderId =
+export type ProviderId =
   | "deepseek"
   | "jiurelay"
   | "openai"
@@ -24,9 +24,10 @@ type ProviderId =
   | "hy"
   | "openrouter"
   | "opencode_zen"
+  | "opencode_go"
   | "custom";
 
-type ProviderPreset = {
+export type ProviderPreset = {
   id: Exclude<ProviderId, "custom">;
   label: string;
   baseUrl: string;
@@ -34,6 +35,7 @@ type ProviderPreset = {
   defaultModel: string;
   /** Common model IDs for the preset datalist (aligned with desktop byokProviderPresets). */
   models: readonly string[];
+  keyHelpUrl?: string;
 };
 
 const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -114,6 +116,17 @@ const PROVIDER_PRESETS: readonly ProviderPreset[] = [
     // Short seed for discovery-miss; full catalog = GET /models union.
     models: ["deepseek-v4-flash", "kimi-k2.6", "glm-5.2"],
   },
+  {
+    id: "opencode_go",
+    label: "OpenCode Go",
+    baseUrl: "https://opencode.ai/zen/go/v1",
+    defaultModel: "deepseek-v4-flash",
+    // Subscription quota (not Zen pay-as-you-go / -free). Seed = OpenAI
+    // chat/completions only; Grok/GPT Luna (/responses) and MiniMax/Qwen
+    // (/messages) stay out. Full catalog = GET /models union.
+    models: ["deepseek-v4-flash", "deepseek-v4-pro", "glm-5.2"],
+    keyHelpUrl: "https://opencode.ai/auth",
+  },
 ];
 
 const DEFAULT_PROVIDER_ID: Exclude<ProviderId, "custom"> = "deepseek";
@@ -132,6 +145,8 @@ function resolveProvider(baseUrl: string): ProviderId {
   const trimmed = baseUrl.trim();
   if (!trimmed) return DEFAULT_PROVIDER_ID;
   const normalized = normalizeBaseUrl(trimmed);
+  // Exact equality after normalize — never prefix-match, or
+  // OpenCode `/zen/v1` and `/zen/go/v1` would collide.
   for (const preset of PROVIDER_PRESETS) {
     const candidates = [preset.baseUrl, ...(preset.baseUrlAliases ?? [])];
     if (candidates.some((c) => normalizeBaseUrl(c) === normalized)) {
@@ -141,7 +156,7 @@ function resolveProvider(baseUrl: string): ProviderId {
   return "custom";
 }
 
-function getPreset(id: Exclude<ProviderId, "custom">): ProviderPreset {
+export function getPreset(id: Exclude<ProviderId, "custom">): ProviderPreset {
   const preset = PROVIDER_PRESETS.find((p) => p.id === id);
   if (!preset) throw new Error(`Unknown provider: ${id}`);
   return preset;

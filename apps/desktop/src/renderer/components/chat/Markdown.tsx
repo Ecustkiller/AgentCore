@@ -418,7 +418,7 @@ export const Markdown = memo(function Markdown({
 
   return (
     <div
-      className={`markdown-body ${muted ? "text-muted-foreground" : "text-foreground"}`}
+      className={`markdown-body min-w-0 max-w-full [overflow-wrap:anywhere] ${muted ? "text-muted-foreground" : "text-foreground"}`}
     >
       {blocks ? (
         blocks.map((block, i) => (

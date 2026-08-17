@@ -29,10 +29,11 @@ skip_if:
 - **`turn_queue_started`**（✅ EPHEMERAL）：FIFO 出队开跑（`queue_id` / `conversation_id` / `remaining_depth`）；`pop_next` 后、`stream_chat` 前作为**新回合 sink 首帧**（先于 `message_start`）。客户端据此清该 `queue_id` 轻态——**否决**靠 `message_start` 猜出队。
 - **`turn_queue_cancelled`**（✅ EPHEMERAL）：按项取消成功（`queue_id` / `conversation_id`）；多端清 UI——经**对话信号道**送达跟播各端，**无 live run 时亦然**（队列可比宿主回合活得久，撤单发生在空档期时对端此前什么都收不到）。语义 → [运行时三模型 · 同对话再发](/docs/03-AI核心/运行时三模型与挂起.md#同对话再发steer--queue)。
 - **`resume_settled`**（✅ EPHEMERAL）：冷卡「继续」提交时帧已被上一次续跑吃掉——回 200 + 本帧（`kind` / `checkpoint_id` / `decision` / `decided_at` / `turn_status`）而非 404，客户端据此把卡收成结果态；`turn_status=running` 表示同连接紧接着续那次跑的流。本帧只是这条连接的幂等 ack（与 `resume_deferred` 同款）：执行事实的权威是 `turn_journal`，**结算结论**的权威是 `paused_turn_outcomes`（抢到帧的那一方同事务写下），本帧转述的是赢家那份，不是本次提交的那份。语义 → [运行时三模型 · 冷 resume 与 live 交叉](/docs/03-AI核心/运行时三模型与挂起.md#冷-resume-与-live-交叉deferred)。
-- **`user_interjection`**（✅ DURABLE）：运行中插话（经典 steer + 协调共用）；同 `interjection_id` 保最新 `status`。协调：`received` → `injected` → `addressed` / `queued` / `failed`；经典：`received` → `injected`（终态）/ `queued` / `failed`（无 `addressed`）。`injected` = 内容真正进模型上下文。POST 短流 ack 看 `received`。→ 见代码：`runtime/events/run.py:user_interjection` · `runtime/turn/steer.py` · `runtime/coordination/interjections.py`
+- **`user_interjection`**（✅ DURABLE）：运行中插话（经典 steer + 协调共用）；同 `interjection_id` 保最新 `status`。协调：`received` → `injected` → `addressed` / `queued` / `failed`；经典：`received` → `injected`（终态）/ `queued` / `failed`（无 `addressed`）。`injected` = 内容真正进模型上下文。POST 短流 ack 看 `received`。可选 `attachments`（名字 + 路径 + 二进制标记）与可选 `agent_mentions`（`{agent_id, role}` 软芯片，非硬路由；旧客户端忽略）。可选 `ask_id`（答非阻塞提问时与出站 `question_posted.ask_id` 对上；缺省=普通插话，照常消化；**禁止**塞进 `agent_mentions`）。→ 见代码：`runtime/events/run.py:user_interjection` · `runtime/turn/steer.py` · `runtime/coordination/interjections.py`
 - **`workspace_lock_wait`**（✅ EPHEMERAL）：同 folder 写锁短等（A′ 后仅写路径争用）；`waiting` 进出。桌面空气泡「等待工作区…」——**不得静默等锁** / 禁空 Thinking… 冒充。与同对话 `turn_queued` 正交。→ 见代码：`workspace/locks.py` · `runtime/events/run.py:workspace_lock_wait`
 - **`replace`**（✅ additive；四条正文类 delta：`content_delta` / `reasoning_delta` / `run_output_delta` / `run_reasoning_delta`）：帧级标记，`true` = 本帧携带该通道**末尾那个尚未闭合的文本块**的完整内容，客户端换掉那一块而非追加（末尾已被工具/标记步闭合时当普通新块折）。attach 回放段专用，覆盖两种全文帧——按通道合成的整块，以及增量段里跨游标那步 `process_*` 行携带的整步全文（客户端手里只有它的前半截）；两者互斥（已被 process 覆盖的通道不再出合成块），故一个语义够用。live 帧永不带。→ 见代码：`runtime/events/attach_replay.py`
 - **`run_failed.failure_kind`**（✅ additive）：协作图失败脸优先按此类贴文案——`quality`→「未达标」、`format`→「格式未过」（结构/格式闸：code_audit·缺章节·JSON）、`model`→「模型中断」、`call`→「调用失败」；缺省→「失败」/空 error「调用失败」。禁前端扫正文猜脸。→ 见代码：`RunFailureKind` · `runtime/events/payloads/run.py`
+- **`message_end.outcome`**（✅ additive）：回合结果质量，与 `finish_reason` 正交。`ok | partial | paused | error`，四值均已产出。`paused` = 瞬时上游限流导致的**可续跑**暂停（闸卡暂停仍是 `finish=paused` 且 `outcome=null`，靠这个区分）；续跑入口与「为何不是 Interaction」→ [运行时三模型 · Interaction](/docs/03-AI核心/运行时三模型与挂起.md#interaction唯一交互式挂起原语)。fold 缺字段时从已有表达位回推：`delivery_status.state=partial` / `run_failed.product_landed` / `tool_use_end.partial_failure`。→ 见代码：`runtime/turn/outcome.py`
 
 `finish_reason` → 见代码 `FinishReason`。
 
@@ -46,7 +47,7 @@ skip_if:
 
 - **扇出**（✅）：每订阅者一条独立有界队列，同帧逐个投递——不瓜分、一端断开不连坐、`seq` 在 emit 侧一次性回填故各端编号一致。→ 见代码 `runtime/events/sink.py`
 - **接入姿势**（✅）：重放段 → `: attach-caught-up` 边界 → 实时段。客户端据此把首段整段缓冲后一次折，否则已完成的 worker 会再演一遍 running→completed。一次折约束的是**协作图**；打开/刷新时消息窗正文先揭开，不等这条回放。
-- **增量重放**（✅）：`Last-Event-ID` 决定**发什么、不决定读什么**——服务端照旧读整回合 journal，因为四处判定（是否结构化回合 / 已覆盖的 run 集 / `agent_id` 回填 / worker 全文拼接）必须扫过全表才成立，改成 `seq > 游标` 查会让它们翻面成「worker 正文整段重发或静默丢失」。贵的是网络与客户端重折，不是那一次主键索引扫描，故**过滤发生在产出事件之后**。→ 见代码 `runtime/events/attach_replay.py`
+- **增量重放**（✅）：`Last-Event-ID` 决定**发什么、不决定读什么**——服务端照旧读整回合 journal，因为四处判定（是否结构化回合 / 已覆盖的 run 集 / `agent_id` 回填 / worker 全文拼接）必须扫过全表才成立，改成 `seq > 游标` 查会让它们翻面成「worker 正文整段重发或静默丢失」。贵的是网络与客户端折，不是那一次主键索引扫描，故**过滤发生在产出事件之后**。attach 下发的 `tool_use_end.result` 与过程车道同为 8k 预览（live 主连接仍全文；完整 stdout 在 `tool_call`）。→ 见代码 `runtime/events/attach_replay.py`
 
 **两条指令都由服务端下达，客户端不拿屏上状态猜**——没有它们的年代，桌面 follow 重连分支猜错把正文折了两遍：
 

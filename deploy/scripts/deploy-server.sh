@@ -46,16 +46,17 @@ warn()  { printf '\033[33m[warn]\033[0m %s\n' "$*" >&2; }
 err()   { printf '\033[31m[error]\033[0m %s\n' "$*" >&2; }
 
 # ── 配置 ──
-AGENTCORE_HOME="${AGENTCORE_HOME:-/opt/agentcore}"
-# 根 .env：ACR 凭据 + 镜像标签等部署级变量（非应用密钥）。
-if [[ -f "$AGENTCORE_HOME/.env" ]]; then
-  set -a; . "$AGENTCORE_HOME/.env"; set +a
+# 活栈 env：deploy-paths.sh。compose 文件仍用 $REPO_DIR/deploy（本脚本其余逻辑不动）。
+_ac_paths="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deploy-paths.sh"
+if [[ ! -f "$_ac_paths" ]]; then
+  _ac_paths="${AGENTCORE_HOME:-/opt/agentcore}/repo/deploy/scripts/deploy-paths.sh"
 fi
-REPO_DIR="${REPO_DIR:-$AGENTCORE_HOME/repo}"
+# shellcheck source=deploy-paths.sh
+. "$_ac_paths"
+unset _ac_paths
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
 SHA_FILE="${SHA_FILE:-$AGENTCORE_HOME/.last-deployed-sha}"
 GIT_BRANCH="${GIT_BRANCH:-master}"
-ENV_FILE="${ENV_FILE:-$REPO_DIR/deploy/config/production.env}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8000/readyz}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
@@ -296,7 +297,21 @@ if [[ -n "${IMAGE_REGISTRY:-}" ]]; then
     stage "pruned old api tags (keep ${KEEP_API_IMAGES})"
   fi
   docker image prune -f >/dev/null 2>&1 || true
-  docker builder prune -af --filter until=168h >/dev/null 2>&1 || true
+fi
+# BuildKit 缓存：时间窗 + 体积上界（与 finish-server.sh 同口径）。
+BUILDER_PRUNE_UNTIL="${BUILDER_PRUNE_UNTIL:-48h}"
+BUILDER_CACHE_MAX="${BUILDER_CACHE_MAX:-12gb}"
+docker builder prune -af --filter "until=${BUILDER_PRUNE_UNTIL}" >/dev/null 2>&1 || true
+_builder_help="$(docker builder prune --help 2>&1 || true)"
+if grep -q -- '--max-used-space' <<<"$_builder_help"; then
+  docker builder prune -af --max-used-space "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+elif grep -q -- '--keep-storage' <<<"$_builder_help"; then
+  docker builder prune -af --keep-storage "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+else
+  _buildx_help="$(docker buildx prune --help 2>&1 || true)"
+  if grep -q -- '--max-used-space' <<<"$_buildx_help"; then
+    docker buildx prune -af --max-used-space "${BUILDER_CACHE_MAX}" >/dev/null 2>&1 || true
+  fi
 fi
 
 log "部署成功 ✅  $SHORT_SHA  （总耗时 ${SECONDS}s）"

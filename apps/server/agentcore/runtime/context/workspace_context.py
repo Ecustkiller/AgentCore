@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -116,6 +117,37 @@ _GIT_UNASSEMBLED_LINE = (
     "或改用云端工作区 / 桌面 sidecar 会话。"
     "文件读写与其它已装配工具不受影响。"
 )
+
+# Capability fact when execution class is withheld (HOW → worker identity / skill).
+_NO_EXEC_TABLE_FACT = (
+    "表格解析：xlsx/csv/tsv 本回合无代码解析路径；"
+    "结构面（列名/行数/类型/样例）已在附件块；"
+    "file_read 不对用户表格抽文本；本 run 已落盘的自产表格可回读。"
+)
+
+# Same structural premise as ``no_exec_table`` (this-turn attachments / workspace
+# type signal — not a body scan). Next-step HOW rides the exec-fact line so
+# data-file landing does not inherit the engineering bind_local / 本机跑 path.
+_OPAQUE_SOURCE_NEXT_STEP = (
+    "源数据文件下一步：只给稍后重试（环境恢复后可代跑）；"
+    "禁止绑本机文件夹、本机终端跑脚本、把 export_to_local 当运行路径。"
+)
+
+
+def _opaque_source_data_present(
+    backend: WorkspaceBackend,
+    *,
+    opaque_source_data_paths: Sequence[str] | None,
+) -> bool:
+    """True when this turn has source files workers cannot parse without execution."""
+    from agentcore.runtime.runs.contract import collect_opaque_source_data_paths
+
+    materials: Iterable[str] | None
+    if opaque_source_data_paths is not None:
+        materials = opaque_source_data_paths
+    else:
+        materials = getattr(backend, "ai_list_materials", None)
+    return bool(collect_opaque_source_data_paths(material_paths=materials))
 
 
 def format_workspace_git_line(
@@ -249,6 +281,7 @@ def build_workspace_context(
     mcp_enabled: bool = False,
     mcp_label: str | None = None,
     git_fact: WorkspaceGitFact | None = None,
+    opaque_source_data_paths: Sequence[str] | None = None,
 ) -> str:
     """Render the ``<workspace_context>`` block for this turn's backend + client.
 
@@ -280,6 +313,10 @@ def build_workspace_context(
     Whether the ``git`` TOOL is assembled at all is a separate fact
     (``git_execution_enabled_for`` — the same predicate the registries use), stamped on
     the capability line; override ``git_tool_enabled`` is tests / probes only.
+
+    ``opaque_source_data_paths`` is the same this-turn source list
+    ``collect_opaque_source_data_paths`` uses for ``no_exec_table`` (tests).
+    Production omits it and reads ``backend.ai_list_materials``.
     """
     if backend is None:
         return ""
@@ -537,24 +574,46 @@ def build_workspace_context(
         )
     if exec_on:
         exec_guide_line = None
-    elif is_local:
-        exec_guide_line = (
-            "执行事实：code_execute=未装配（本机执行类未开）；"
-            "本机传统 open/bind 合法非默认（≠离线）。"
-        )
     else:
-        from agentcore.runtime.delegate.exec_env_remediation import (
-            cloud_sandbox_failure_hint,
+        has_opaque_source = _opaque_source_data_present(
+            backend, opaque_source_data_paths=opaque_source_data_paths
         )
+        if is_local:
+            if has_opaque_source:
+                exec_guide_line = (
+                    "执行事实：code_execute=未装配（本机执行类未开）。"
+                    + _OPAQUE_SOURCE_NEXT_STEP
+                    + _NO_EXEC_TABLE_FACT
+                )
+            else:
+                exec_guide_line = (
+                    "执行事实：code_execute=未装配（本机执行类未开）；"
+                    "本机传统 open/bind 合法非默认（≠离线）。"
+                    + _NO_EXEC_TABLE_FACT
+                )
+        else:
+            from agentcore.runtime.delegate.exec_env_remediation import (
+                cloud_sandbox_failure_hint,
+            )
 
-        failure = cloud_sandbox_failure_hint()
-        failure_clause = f"（探测={failure}）" if failure else ""
-        exec_guide_line = (
-            "执行事实：code_execute=未装配——已是云端会话、沙箱不可用"
-            f"{failure_clause}，"
-            "故「导入到云 / 连接 Git」修不好这条腿；可选稍后重试 / export_to_local "
-            "本机跑 / 本机传统（合法非默认）。"
-        )
+            failure = cloud_sandbox_failure_hint()
+            failure_clause = f"（探测={failure}）" if failure else ""
+            if has_opaque_source:
+                exec_guide_line = (
+                    "执行事实：code_execute=未装配——已是云端会话、沙箱不可用"
+                    f"{failure_clause}，"
+                    "故「导入到云 / 连接 Git」修不好这条腿。"
+                    + _OPAQUE_SOURCE_NEXT_STEP
+                    + _NO_EXEC_TABLE_FACT
+                )
+            else:
+                exec_guide_line = (
+                    "执行事实：code_execute=未装配——已是云端会话、沙箱不可用"
+                    f"{failure_clause}，"
+                    "故「导入到云 / 连接 Git」修不好这条腿；可选稍后重试 / export_to_local "
+                    "本机跑 / 本机传统（合法非默认）。"
+                    + _NO_EXEC_TABLE_FACT
+                )
 
     if not desktop_online:
         mcp_guide_line = (

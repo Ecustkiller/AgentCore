@@ -207,6 +207,7 @@ def build_terminal_run_state(
                 *verdict.soft_failures,
                 *verdict.visual_failures,
             ],
+            warning_rows=list(verdict.warning_rows),
             soft_failures=[],
             visual_failures=[],
         )
@@ -263,11 +264,12 @@ def build_terminal_run_state(
                 failure_kind=contract_run_failure_kind(verdict),
                 debrief=debrief,
                 execution_id=env.execution_id,
+                retryable=False,
             )
         )
         # Contract retries already exhausted inside this executor; mark
-        # non-retryable so WaveScheduler's on_failure=retry does not cold-
-        # start the whole node (same tokens, same empty/short product).
+        # non-retryable so a later hop does not treat this as a transient
+        # transcript continue (same tokens, same empty/short product).
         return _stamp_retrieval_evidence_gap(
             RunState(
                 phase=RunPhase.FAILED,
@@ -321,7 +323,10 @@ def build_terminal_run_state(
     warnings = _apply_cutoff_reasons(cutoff_reasons, warnings=warnings)
     # 刀1：已落盘时 degraded_handoff 只记 warning，不抬硬缺口。
     delivery_gaps = _delivery_gaps_from_warnings(
-        warnings, debrief, files_landed=bool(touched)
+        warnings,
+        debrief,
+        files_landed=bool(touched),
+        stamped_rows=verdict.warning_rows,
     )
     # 成篇质量：有下游 + 相对合同未满足且无成篇 prose 落盘 → 失败（与 handoff 同口径）。
     # 认 tool_ctx.landed_artifact_kinds（跨 replace 存活）；勿用 has_landed_files /
@@ -407,6 +412,7 @@ def build_terminal_run_state(
                 failure_kind="quality",
                 debrief=debrief,
                 execution_id=env.execution_id,
+                retryable=False,
             )
         )
         return _stamp_retrieval_evidence_gap(
@@ -454,6 +460,7 @@ def build_terminal_run_state(
                 failure_kind=hard_gap.failure_kind,
                 debrief=debrief,
                 execution_id=env.execution_id,
+                retryable=False,
             )
         )
         return _stamp_retrieval_evidence_gap(
@@ -661,23 +668,22 @@ def handle_agent_node_exception(
     # ``inflight`` (B-deep 失败计费).
     if inflight:
         usage_acc = usage_acc + inflight[0]
-    # 确定性失败区分 (BL-6): a non-retryable upstream error (prompt 超长 / 400 /
-    # 鉴权 / 余额 — AgentCoreError.retryable=False) will re-fail identically, so
-    # carry that verdict onto the state and let the scheduler skip its infra retry.
-    # Closed httpx client (turn teardown race) is also deterministic — retrying
-    # the same closed client just multiplies llm.call_failed / run.failed.
-    # A plain crash / unknown exception has no ``retryable`` attr → defaults True
-    # (retry as before), so only KNOWN-deterministic failures opt out.
-    from agentcore.core.errors import LLMClientClosedError, is_llm_client_closed_error
+    # 确定性失败区分 (BL-6): ``run_error_signal`` reads ``llm_failure_class``
+    # (rate-limit stays transient after the leaf flips ``exc.retryable``).
+    # Closed httpx client is terminal — retrying the same closed client just
+    # multiplies llm.call_failed / run.failed.
+    from agentcore.runtime.runs.error_signal import run_error_signal
 
-    if is_llm_client_closed_error(e) and not isinstance(e, LLMClientClosedError):
-        e = LLMClientClosedError(str(e))
-    retryable = bool(getattr(e, "retryable", True))
+    signal = run_error_signal(e)
+    e = signal.exc
+    retryable = signal.retryable
     logger.error(
         "run.failed",
         run_id=spec.run_id,
         error=str(e),
         retryable=retryable,
+        error_code=signal.error_code,
+        retry_after=signal.retry_after,
         exc_info=True,
     )
     frozen = freeze_partial_transcript(messages) if messages else []
@@ -695,6 +701,9 @@ def handle_agent_node_exception(
             failure_kind="call",
             execution_id=env.execution_id,
             product_landed=product_landed or None,
+            error_code=signal.error_code,
+            retryable=retryable,
+            retry_after=signal.retry_after,
         )
     )
     failed = _priced_failure(
@@ -704,6 +713,8 @@ def handle_agent_node_exception(
         rounds=run_rounds,
         duration_ms=duration_ms,
         retryable=retryable,
+        error_code=signal.error_code or "",
+        retry_after=signal.retry_after,
         transcript=frozen or None,
         content=content_from_transcript(frozen) if frozen else "",
     )

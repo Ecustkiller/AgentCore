@@ -19,6 +19,11 @@ from agentcore.conversation.common import (
 )
 from agentcore.conversation.compaction import maybe_compact_near_ceiling
 from agentcore.conversation.history import load_chat_context
+from agentcore.conversation.mentions import to_stored_agent_mentions
+from agentcore.conversation.question_resolve import (
+    is_abort_finish_reason,
+    note_ask_replies_for_committed_send,
+)
 from agentcore.conversation.turn_backend import build_turn_backend
 from agentcore.conversation.turn_persistence import (
     close_user_stop_turn,
@@ -52,8 +57,13 @@ from agentcore.runtime.leases import (
     release_turn_lease,
 )
 from agentcore.runtime.pipeline import resume_chat_pipeline
+from agentcore.runtime.pipeline.continue_ceo import continue_ceo_pipeline
 from agentcore.runtime.suspension import TurnSuspension
 from agentcore.runtime.suspension.persistence import restore_paused_turn
+from agentcore.runtime.turn.ceo_continue import (
+    release_ceo_continue_claim,
+    restore_ceo_continue_lock,
+)
 from agentcore.runtime.turn.runs import turn_runs
 from agentcore.workspace.attachments import persist_attachments, to_stored_metadata
 
@@ -109,6 +119,7 @@ async def stream_chat(
     llm_supports_tools: bool | None = None,
     x_client_platform: str | None = None,
     agent_mentions: list[dict] | None = None,
+    ask_id: str | None = None,
 ) -> None:
     """Main entry: persist user message, run pipeline, persist assistant reply."""
     backend = None
@@ -169,6 +180,7 @@ async def stream_chat(
                 role="user",
                 content=user_message,
                 attachments=to_stored_metadata(resident_attachments),
+                agent_mentions=to_stored_agent_mentions(agent_mentions),
             )
             history = await load_chat_context(session, conversation_id)
 
@@ -202,13 +214,27 @@ async def stream_chat(
             llm_supports_tools=llm_supports_tools,
             x_client_platform=x_client_platform,
             agent_mentions=agent_mentions,
+            ask_id=ask_id,
         )
-        await maybe_delete_zero_output_send(
+        rolled_back = await maybe_delete_zero_output_send(
             conversation_id=conversation_id,
             user_message_id=user_msg.id,
             result=turn_result,
             user_created_this_send=True,
         )
+        finish = turn_result.get("finish_reason") if isinstance(turn_result, dict) else None
+        if (
+            turn_result is not None
+            and not rolled_back
+            and not is_abort_finish_reason(finish)
+        ):
+            await note_ask_replies_for_committed_send(
+                conversation_id=conversation_id,
+                sink=sink,
+                ask_id=ask_id,
+                answer=user_message,
+                has_attachments=bool(resident_attachments),
+            )
         # Pillar D1: delay sink.close while a detached coordination drive is live
         # (symmetric with sidecar _run_turn). Exception / cancel skip this.
         from agentcore.runtime.coordination import await_live_detached_drive
@@ -285,6 +311,9 @@ async def regenerate_chat(
             user_message = (
                 edited_content if edited_content is not None else (target.content or "")
             )
+            stored_mentions = to_stored_agent_mentions(
+                list(getattr(target, "agent_mentions", None) or [])
+            )
             target_created_at = target.created_at
             folder_id = conv.folder_id
             auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
@@ -351,6 +380,7 @@ async def regenerate_chat(
             permission_axes=permission_axes,
             board_id=board_id,
             llm_supports_tools=llm_supports_tools,
+            agent_mentions=stored_mentions or None,
         )
         from agentcore.runtime.coordination import await_live_detached_drive
 
@@ -584,9 +614,15 @@ async def resume_chat(
                     if collab is not None
                     else {}
                 )
+                resume_outcome = result.get("outcome")
                 logger.info(
                     "chat.resume_complete",
                     finish_reason=finish_value,
+                    **(
+                        {"outcome": resume_outcome}
+                        if resume_outcome in ("ok", "partial", "paused", "error")
+                        else {}
+                    ),
                     rounds=result.get("rounds", 0),
                     reply_chars=len(result.get("content") or ""),
                     reply_preview=preview(result.get("content") or ""),
@@ -676,3 +712,296 @@ async def resume_chat(
                 backend, block=_block_code_index_flush(sink)
             )
             sink.close(reason="resume_finally")
+
+
+def _turn_started_fields(entries: list[dict]) -> tuple[str, str]:
+    """``(user_message, system_prompt)`` from the journal ``turn_started`` fact."""
+    for entry in entries:
+        if (entry.get("kind") or "") != "turn_started":
+            continue
+        payload = entry.get("payload") or {}
+        return (
+            str(payload.get("user_message") or ""),
+            str(payload.get("system_prompt") or ""),
+        )
+    return "", ""
+
+
+def _captain_run_id_from_journal(entries: list[dict]) -> str:
+    for entry in entries:
+        if (entry.get("kind") or "") != "run_started":
+            continue
+        payload = entry.get("payload") or {}
+        if payload.get("kind") == "captain":
+            run_id = payload.get("run_id")
+            if isinstance(run_id, str) and run_id:
+                return run_id
+    return ""
+
+
+async def continue_chat(
+    *,
+    conversation_id: str,
+    message_id: str,
+    user_id: str,
+    sink: EventSink,
+    llm_credentials: LLMCredentials | None = None,
+    llm_supports_tools: bool | None = None,
+) -> None:
+    """Continue a cloud CEO turn paused on exhausted rate limit (no checkpoint card)."""
+    from agentcore.db.repositories import TurnJournalRepository
+    from agentcore.runtime.turn.ceo_continue import CEO_CONTINUE_KIND
+
+    backend = None
+    lock_user_id = user_id
+    restore_lock = True
+    try:
+        async with async_session_factory() as session:
+            conv = await ConversationRepository(session).get_by_id_unscoped(conversation_id)
+            if not conv:
+                sink.emit(error_event(ErrorCode.NOT_FOUND, "Conversation not found"))
+                sink.emit(message_end(FinishReason.ERROR))
+                return
+            folder_id = conv.folder_id
+            conversation_mode = conv.mode
+            auto_desk_raw = getattr(conv, "auto_desk_folder_id", None)
+            ws_folder_id, _auto_desk_folder_id = resolve_turn_file_workspace(
+                birth_folder_id=folder_id,
+                auto_desk_folder_id=auto_desk_raw
+                if isinstance(auto_desk_raw, str)
+                else None,
+            )
+            if ws_folder_id and not folder_id:
+                local_binding = await resolve_folder_local_binding(session, ws_folder_id)
+            else:
+                local_binding = await resolve_local_binding(session, conv)
+            profile_set = await resolve_profile_set(session, conv, user_id)
+            permission_axes = await resolve_permission_axes(session, conversation_id)
+            memory_enabled = await resolve_memory_enabled(session, user_id)
+            conversation_history_access = await resolve_conversation_history_access(
+                session, user_id
+            )
+            entries = await TurnJournalRepository(session).load(message_id)
+
+        if not entries:
+            sink.emit(error_event(ErrorCode.NOT_FOUND, "无法继续：执行日志不存在。"))
+            sink.emit(message_end(FinishReason.ERROR))
+            return
+
+        user_message, base_system_prompt = _turn_started_fields(entries)
+        captain_run_id = _captain_run_id_from_journal(entries)
+
+        await maybe_compact_near_ceiling(
+            conversation_id,
+            model_id=resolve_turn_model(llm_credentials),
+        )
+
+        async with async_session_factory() as session:
+            history = await load_chat_context(session, conversation_id)
+            board = await BoardRepository(session).get_by_conversation_id(
+                conversation_id, user_id=user_id
+            )
+            board_id = board.id if board else None
+
+        backend = await build_turn_backend(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            folder_id=ws_folder_id,
+            sink=sink,
+            local_binding=local_binding,
+        )
+        session_saver, session_loader = session_callbacks(conversation_id)
+        suspension_saver, suspension_deleter = suspension_callbacks()
+
+        trace_id = new_trace_id()
+        attempt_id = new_id()
+        started = time.monotonic()
+        with log_context(
+            trace_id=trace_id,
+            conversation_id=conversation_id,
+            user_id=user_id,
+            attempt_id=attempt_id,
+            message_id=message_id,
+            agent_id="CEO",
+            cost_role="captain",
+            persona="CEO",
+        ):
+            logger.info("chat.continue_start", message_id=message_id)
+            sink.bind_content_checkpoint(
+                conversation_id=conversation_id,
+                message_id=message_id,
+            )
+            lease_stop: asyncio.Event | None = None
+            heartbeat_task: asyncio.Task | None = None
+            if settings.turn_lease_enabled:
+                owner_id = await acquire_turn_lease(
+                    message_id=message_id,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    phase="resuming",
+                    meta={"trace_id": trace_id, "kind": CEO_CONTINUE_KIND},
+                )
+                lease_stop = asyncio.Event()
+                heartbeat_task = asyncio.create_task(
+                    lease_heartbeat_loop(
+                        message_id,
+                        owner_id=owner_id,
+                        interval_seconds=settings.turn_lease_heartbeat_seconds,
+                        stop=lease_stop,
+                        phase="resuming",
+                    )
+                )
+            release_lease_clean = True
+            try:
+                try:
+                    result = await continue_ceo_pipeline(
+                        conversation_id=conversation_id,
+                        message_id=message_id,
+                        user_id=user_id,
+                        user_message=user_message,
+                        base_system_prompt=base_system_prompt,
+                        journal_entries=list(entries),
+                        captain_run_id=captain_run_id,
+                        sink=sink,
+                        backend=backend,
+                        history=history[:-1] if history else None,
+                        board_id=board_id,
+                        folder_id=ws_folder_id,
+                        memory_enabled=memory_enabled,
+                        conversation_history_access=conversation_history_access,
+                        llm_credentials=llm_credentials,
+                        profile_set=profile_set,
+                        session_saver=session_saver,
+                        session_loader=session_loader,
+                        suspension_saver=suspension_saver,
+                        suspension_deleter=suspension_deleter,
+                        llm_supports_tools=llm_supports_tools,
+                        permission_axes=permission_axes,
+                        trace_id=trace_id,
+                    )
+                except asyncio.CancelledError:
+                    if turn_runs.is_clean_cancel(conversation_id):
+                        closed = await close_user_stop_turn(
+                            sink=sink,
+                            conversation_id=conversation_id,
+                            trace_id=trace_id,
+                            message_id=message_id,
+                            journal_entries=list(entries),
+                        )
+                        release_lease_clean = bool(closed)
+                    else:
+                        release_lease_clean = False
+                    raise
+                finish = result.get("finish_reason")
+                finish_value = getattr(finish, "value", finish)
+                duration_ms = int((time.monotonic() - started) * 1000)
+                delegated, workers = turn_worker_stats(result)
+                collab = result.get("collab")
+                collab_fields = (
+                    {
+                        "boundary_yields": collab.get("boundary_yields", 0),
+                        "scope_signals": collab.get("scope_signals", 0),
+                        "escalations": collab.get("escalations", 0),
+                        "revises": collab.get("revises", 0),
+                    }
+                    if collab is not None
+                    else {}
+                )
+                continue_outcome = result.get("outcome")
+                logger.info(
+                    "chat.continue_complete",
+                    finish_reason=finish_value,
+                    **(
+                        {"outcome": continue_outcome}
+                        if continue_outcome in ("ok", "partial", "paused", "error")
+                        else {}
+                    ),
+                    rounds=result.get("rounds", 0),
+                    reply_chars=len(result.get("content") or ""),
+                    reply_preview=preview(result.get("content") or ""),
+                    delegated=delegated,
+                    workers=workers,
+                    duration_ms=duration_ms,
+                    error=result.get("error"),
+                    **collab_fields,
+                )
+                await persist_turn_result(
+                    result=result,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    folder_id=folder_id,
+                    backend=backend,
+                    sink=sink,
+                    user_message=user_message,
+                    llm_credentials=llm_credentials,
+                    trace_id=trace_id,
+                    turn_id=attempt_id,
+                    duration_ms=duration_ms,
+                    kind="resume",
+                )
+                restore_lock = False
+                if conversation_mode == "standing":
+                    try:
+                        from agentcore.standing_tasks.inbox import settle_after_turn
+
+                        await settle_after_turn(
+                            conversation_id=conversation_id,
+                            finish_reason=finish,
+                            content=result.get("content") if isinstance(result, dict) else None,
+                            error=result.get("error") if isinstance(result, dict) else None,
+                            message_id=message_id,
+                        )
+                    except Exception as settle_err:  # noqa: BLE001
+                        logger.error(
+                            "standing_task.inbox_settle_failed",
+                            conversation_id=conversation_id,
+                            error=str(settle_err),
+                            exc_info=True,
+                        )
+            finally:
+                if lease_stop is not None:
+                    lease_stop.set()
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await heartbeat_task
+                if settings.turn_lease_enabled:
+                    if release_lease_clean:
+                        await release_turn_lease(message_id)
+                    else:
+                        with contextlib.suppress(asyncio.TimeoutError, Exception):
+                            await asyncio.wait_for(
+                                asyncio.shield(orphan_turn_lease(message_id)),
+                                timeout=2.0,
+                            )
+
+        from agentcore.runtime.coordination import await_live_detached_drive
+
+        await await_live_detached_drive(conversation_id)
+
+    except Exception as e:
+        logger.error("chat.continue_error", error=str(e), exc_info=True)
+        if not sink._closed:
+            code, message, err_ctx = error_fields_for(
+                e,
+                fallback_code=ErrorCode.STREAM_ERROR,
+                fallback_message="服务出错了，请稍后重试。",
+            )
+            sink.emit(error_event(code, message, context=err_ctx))
+            sink.emit(message_end(FinishReason.ERROR))
+    finally:
+        if restore_lock:
+            await restore_ceo_continue_lock(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                user_id=lock_user_id,
+            )
+        else:
+            await release_ceo_continue_claim(
+                message_id, conversation_id=conversation_id
+            )
+        if not sink._closed:
+            await _flush_code_index_before_close(
+                backend, block=_block_code_index_flush(sink)
+            )
+            sink.close(reason="continue_finally")

@@ -106,7 +106,8 @@
         "form": "",
         "sides": [],
         "max_rounds": 0,
-        "thorough": true
+        "thorough": true,
+        "revision": 1
       },
       "timestamp": "2026-01-01T00:00:00.005Z"
     },
@@ -203,6 +204,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队。已排除校对岗，调研交付。",
     "reasoning": "",

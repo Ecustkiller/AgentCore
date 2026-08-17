@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from agentcore.core.errors import (
+    LLM_FAILURE_TRANSIENT,
     RETRY_AFTER_FROM_BACKOFF,
     RETRY_AFTER_FROM_HEADER,
     LLMError,
@@ -16,9 +17,11 @@ from agentcore.core.errors import (
     LLMRateLimitError,
     LLMTimeoutError,
     LLMUpstreamError,
+    llm_failure_class,
 )
 from agentcore.llm.errors import is_non_retryable_client_status, is_retryable_upstream_status
 from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+from agentcore.llm.provider.cooldown_gate import reset_cooldown_gate
 from agentcore.llm.provider.openai_compatible import (
     _CONNECT_INITIAL_BACKOFF,
     _CONNECT_MAX_RETRIES,
@@ -36,6 +39,13 @@ from agentcore.llm.provider.protocol import (
     LLMMessage,
     LLMRequest,
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_cooldown_gate():
+    reset_cooldown_gate()
+    yield
+    reset_cooldown_gate()
 
 
 def _ok_body() -> dict:
@@ -535,11 +545,20 @@ def test_retry_wait_honors_small_retry_after_and_ignores_absurd():
             cooldown_source=RETRY_AFTER_FROM_HEADER,
             attempt=1,
         )
-        is False
+        is True
     )
     assert (
         _rate_limit_should_retry(
-            5.0,
+            8.0,
+            scenario="chat",
+            cooldown_source=RETRY_AFTER_FROM_HEADER,
+            attempt=0,
+        )
+        is True
+    )
+    assert (
+        _rate_limit_should_retry(
+            16.0,
             scenario="chat",
             cooldown_source=RETRY_AFTER_FROM_HEADER,
             attempt=0,
@@ -622,7 +641,7 @@ async def test_complete_rate_limit_honors_short_retry_after_chain(monkeypatch):
 
 @pytest.mark.parametrize("scenario", ["chat", "agent"])
 async def test_turn_scale_headerless_429_fails_immediately(scenario, monkeypatch):
-    """Interactive 429 with no Retry-After: one call, no 2→4→8→16 empty wait."""
+    """Interactive header-less 429: return the signal, do not sit local backoff."""
     calls = {"n": 0}
     sleeps: list[float] = []
 
@@ -633,12 +652,16 @@ async def test_turn_scale_headerless_429_fails_immediately(scenario, monkeypatch
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls["n"] += 1
-        return httpx.Response(429, content=b'{"error":"rate_limited"}')
+        if calls["n"] == 1:
+            return httpx.Response(429, content=b'{"error":"rate_limited"}')
+        return httpx.Response(200, json=_ok_body())
 
     provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMRateLimitError):
+        with pytest.raises(LLMRateLimitError) as ei:
             await provider.complete(_req(scenario))
+        assert ei.value.retryable is False
+        assert llm_failure_class(ei.value) == LLM_FAILURE_TRANSIENT
         assert calls["n"] == 1
         assert sleeps == []
     finally:
@@ -646,8 +669,10 @@ async def test_turn_scale_headerless_429_fails_immediately(scenario, monkeypatch
 
 
 @pytest.mark.parametrize("scenario", ["chat", "agent"])
-async def test_turn_scale_short_retry_after_waits_at_most_once(scenario, monkeypatch):
-    """Attested Retry-After ≤ 2s: sit it out once, then give up on the next 429."""
+async def test_turn_scale_short_retry_after_sits_out_until_budget(scenario, monkeypatch):
+    """Attested Retry-After ≤ silent threshold: wait in-place until the 429 budget."""
+    from agentcore.llm.provider.openai_compatible import _RATE_LIMIT_MAX_RETRIES
+
     calls = {"n": 0}
     sleeps: list[float] = []
 
@@ -666,10 +691,12 @@ async def test_turn_scale_short_retry_after_waits_at_most_once(scenario, monkeyp
 
     provider = await _mock_provider(handler)
     try:
-        with pytest.raises(LLMRateLimitError):
+        with pytest.raises(LLMRateLimitError) as ei:
             await provider.complete(_req(scenario))
-        assert calls["n"] == 2
-        assert sleeps == [2.0]
+        assert ei.value.retryable is False
+        assert llm_failure_class(ei.value) == LLM_FAILURE_TRANSIENT
+        assert calls["n"] == _RATE_LIMIT_MAX_RETRIES
+        assert sleeps == [2.0] * (_RATE_LIMIT_MAX_RETRIES - 1)
     finally:
         await provider.close()
 

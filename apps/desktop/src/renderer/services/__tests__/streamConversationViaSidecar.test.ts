@@ -742,6 +742,64 @@ describe("streamConversationViaSidecar", () => {
       }),
     );
   });
+
+  it("forwards agentMentions on startTurn and flushes outbox writeback", async () => {
+    const mentions = [{ agent_id: "a1", role: "研究员" }];
+    seedOriginalUserBubble("c1", "u-opt", "你好 @研究员");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好 @研究员",
+      optimisticUserId: "u-opt",
+      history: [],
+      agentMentions: mentions,
+    });
+
+    expect(startTurnMock).toHaveBeenCalledWith(
+      expect.objectContaining({ agentMentions: mentions }),
+    );
+    expect(flushTurnMock).toHaveBeenCalledWith({ userMessageId: "u-opt" });
+  });
+
+  it("reports turnCommit after a successful outbox flush", async () => {
+    const turnCommit = { committed: false };
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+      turnCommit,
+    });
+
+    expect(turnCommit.committed).toBe(true);
+  });
+
+  it("does not report turnCommit when outbox flush is still pending", async () => {
+    flushTurnMock.mockResolvedValue({
+      ok: false,
+      error: "writeback_pending",
+    });
+    const turnCommit = { committed: false };
+    seedOriginalUserBubble("c1", "u-opt", "你好");
+    startTurnMock.mockResolvedValue(turnResult());
+
+    await streamConversationViaSidecar({
+      conversationId: "c1",
+      rootId: "r1",
+      content: "你好",
+      optimisticUserId: "u-opt",
+      history: [],
+      turnCommit,
+    });
+
+    expect(turnCommit.committed).toBe(false);
+  });
 });
 
 describe("resumeConversationViaSidecar", () => {

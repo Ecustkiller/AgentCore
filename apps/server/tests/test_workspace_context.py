@@ -21,6 +21,13 @@ from agentcore.runtime.resolve.prompt import (
 from agentcore.tools.builtin import build_ceo_tool_registry
 
 
+def _exec_fact_line(ctx: str) -> str:
+    for line in ctx.splitlines():
+        if line.startswith("执行事实："):
+            return line
+    raise AssertionError("missing 执行事实 line")
+
+
 class _FakeBackend:
     def __init__(self, location: str, root_label: str = "workspace", *, channel=None) -> None:
         self.location = location
@@ -769,6 +776,31 @@ def _xlsx_clause(block: str) -> str:
     raise AssertionError(f"no .xlsx clause in {block!r}")
 
 
+def test_no_execution_states_table_structure_facts():
+    """无 code_execute：能力行陈述结构面已在附件块；有执行环境时不注入该句。"""
+    off = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "表格解析" in off
+    assert "结构面" in off
+    assert "列名" in off
+    assert "自产表格可回读" in off
+    assert "不可靠" not in off
+    assert "手抄" not in off  # HOW 归 worker identity，事实层不写禁令
+
+    on = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=True,
+        terminal_enabled=False,
+    )
+    assert "表格解析" not in on
+    assert "结构面（列名" not in on
+
+
 def test_artifact_formats_without_execution_mark_office_honesty():
     """无执行环境：.xlsx/.pptx 不可产；.docx/.pdf 经 md_to_* 可产。"""
     out = build_workspace_context(
@@ -840,3 +872,57 @@ def test_env_examples_gvisor_timeout_does_not_clamp_outer_verify():
         assert "GVISOR_TIMEOUT_MAX_SECONDS=60" not in text
         assert "GVISOR_TIMEOUT_MAX_SECONDS=1230" in text
         assert "夹死" in text or "外环" in text
+
+
+def test_no_exec_opaque_source_omits_local_run_from_exec_fact():
+    """无执行 + 源数据文件：执行事实行只给稍后重试，不含本机跑/绑本机推荐。"""
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+        opaque_source_data_paths=["attachments/synthetic_bill.csv"],
+    )
+    fact = _exec_fact_line(out)
+    assert "源数据文件下一步" in fact
+    assert "稍后重试" in fact
+    assert "本机跑 / 本机传统" not in fact
+    assert "open/bind 合法非默认" not in fact
+    assert "可选稍后重试 / export_to_local" not in fact
+
+
+def test_no_exec_engineering_keeps_local_remediation():
+    """工程类无执行（无源数据文件）：原有 export_to_local / 本机传统推荐不变。"""
+    out = build_workspace_context(
+        _FakeBackend("server"),
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    fact = _exec_fact_line(out)
+    assert "源数据文件下一步" not in fact
+    assert "export_to_local" in fact
+    assert "本机传统" in fact
+
+
+def test_opaque_source_reads_backend_this_turn_materials():
+    """生产路径：prepare 写入的 ai_list_materials 即 no_exec_table 同源判据。"""
+    backend = _FakeBackend("server")
+    backend.ai_list_materials = frozenset({"attachments/synthetic_bill.csv"})
+    out = build_workspace_context(
+        backend,
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "源数据文件下一步" in _exec_fact_line(out)
+
+    md_only = _FakeBackend("server")
+    md_only.ai_list_materials = frozenset({"attachments/note.md"})
+    md_out = build_workspace_context(
+        md_only,
+        desktop_online=True,
+        code_execute_enabled=False,
+        terminal_enabled=False,
+    )
+    assert "源数据文件下一步" not in _exec_fact_line(md_out)

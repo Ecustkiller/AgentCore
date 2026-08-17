@@ -3,9 +3,11 @@ import {
   ASK_INTENT_META,
   TEAM_PRIMITIVE_META,
   askResolvedOutcome,
+  fillTeamRevisionTemplate,
   isAskSilentResolvedDecision,
   teamCorrectionSuffix,
   teamPreviewLead,
+  teamPreviewRevisionVersionLabel,
   teamPreviewSettledLead,
   teamResolvedOutcome,
 } from "../meta";
@@ -94,6 +96,19 @@ describe("decision meta", () => {
       ASK_INTENT_META.kickoff.activeCaption,
     );
     expect(TEAM_PRIMITIVE_META.debate.resumeCta).toBe("授权开赛");
+    expect(TEAM_PRIMITIVE_META.delegate.adjustCta).toBe("交回修订");
+    expect(teamPreviewRevisionVersionLabel("delegate", 1)).toBeNull();
+    expect(teamPreviewRevisionVersionLabel("delegate", undefined)).toBeNull();
+    expect(teamPreviewRevisionVersionLabel("debate", 2)).toBe("第 2 版");
+    expect(
+      fillTeamRevisionTemplate(TEAM_PRIMITIVE_META.delegate.revision.added, {
+        name: "撰写员",
+      }),
+    ).toBe("新增 撰写员");
+    expect(TEAM_PRIMITIVE_META.delegate.revision.caption).toBe(
+      "按你的意见修订",
+    );
+    expect(TEAM_PRIMITIVE_META.debate.revision.noteLabel).toBe("你交回的意见");
   });
 
   it("teamPreviewLead prefers wire headline; falls back to headcount", () => {

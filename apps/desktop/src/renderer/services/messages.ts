@@ -5,6 +5,10 @@ import {
 import { ensureTimelineMarkersFromJournal } from "@/lib/foldMessageLane";
 import { logEvent } from "@/lib/log";
 import { promoteScalarContentIntoProcess } from "@/lib/processTimeline";
+import {
+  attestedKindFromEvents,
+  parseTurnOutcomeKind,
+} from "@/lib/turnOutcome";
 import { api } from "@/services/api";
 import { persistOpenedCache } from "@/services/offlineCache";
 import { surfaceResumeFromAssistant } from "@/services/resume";
@@ -56,6 +60,8 @@ export interface BackendMessage {
     workspace_path?: string | null;
     conversation_id?: string | null;
   }[];
+  /** Conversation-page ``@`` role chips (soft mention; not attachment kind). */
+  agent_mentions?: { agent_id: string; role: string }[];
   citations?: {
     url: string;
     title: string;
@@ -141,6 +147,8 @@ export interface BackendMessage {
   rounds?: number | null;
   /** 回合墙钟用时 (ms)：与 message_end.duration_ms 同锚；重载自 usage JSON 投影。 */
   duration_ms?: number | null;
+  /** Server-attested turn result (`turn_metrics.status` / `message_end.outcome`). */
+  outcome?: ("ok" | "partial" | "paused" | "error") | null;
   /** 协作质量 (学·度量 §2.5): orchestration signals for 诊断模式; nested in usage column. */
   collab?: {
     boundary_yields: number;
@@ -307,6 +315,10 @@ export function toMessage(m: BackendMessage): Message {
     // A clean turn carries no journal → undefined → no chip. (Multi-agent also
     // keeps its `runs.finishReason` above; this is redundant but harmless there.)
     finishReason,
+    outcome:
+      parseTurnOutcomeKind(m.outcome) ??
+      attestedKindFromEvents(events) ??
+      undefined,
     status,
     // 报错回合 error card (Tier 2 a): replay the inline error card from the persisted
     // outcome, mirroring the live `error` event handler's `{code, message}` attach.
@@ -341,6 +353,12 @@ export function toMessage(m: BackendMessage): Message {
       ? m.runs.captain_context
       : undefined,
     isStreaming,
+    agentMentions: m.agent_mentions?.length
+      ? m.agent_mentions.map((a) => ({
+          agentId: a.agent_id,
+          role: a.role,
+        }))
+      : undefined,
     attachments: m.attachments?.length
       ? m.attachments.map((a) => ({
           id: crypto.randomUUID(),

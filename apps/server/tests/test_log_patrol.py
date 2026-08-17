@@ -208,6 +208,12 @@ def test_family_matching_covers_event_names_patterns_and_tool_detector():
     )
     assert "event_loop_lag" in reg.match(event="event_loop.lag", text="event_loop.lag")
     assert "readyz_failed" in reg.match(event="http.readyz_failed", text="http.readyz_failed")
+    assert "disk_high_watermark" in reg.match(
+        event="disk.high_watermark", text="disk.high_watermark"
+    )
+    assert "disk_high_watermark" in reg.match(
+        event="disk.probe_failed", text="disk.probe_failed"
+    )
     assert "rate_limit_fail_open" in reg.match(
         event="rate_limit.redis_fail_open", text="rate_limit.redis_fail_open"
     )
@@ -235,6 +241,113 @@ def test_tightened_byok_family_no_longer_eats_web_403():
     )
     assert "byok_key_balance" in reg.match(
         event="llm.call_failed", text="当前模型 API Key 无效或无权限，请在「设置 · 服务商」中更新"
+    )
+
+
+def test_local_turn_id_invalid_claims_clipped_uuid_encode_frame():
+    # rev2：13k traceback 的 ValueError 行被 clip 切掉，改认 uuid_encode 栈帧。
+    frame = (
+        '  File "asyncpg/pgproto/codecs/uuid.pyx", line 16, in '
+        "asyncpg.pgproto.pgproto.uuid_encode\n"
+    )
+    dropped = (
+        '  File "asyncpg/pgproto/uuid.pyx", line 88, in '
+        "asyncpg.pgproto.pgproto.pg_uuid_bytes_from_str\n"
+        "ValueError: invalid UUID 'resume-72b2662b-eec1-4954-af03-941d9d04352a': "
+        "length must be between 32..36 characters, got 43\n"
+    )
+    last = "(Background on this error at: https://sqlalche.me/e/20/dbapi)"
+    # uuid_encode 留在首 480；ValueError 推到 clip 窗外，复现生产切法。
+    filler = "  File /app/x.py, line 1, in f\n" * 40
+    exc = "Traceback (most recent call last):\n" + frame + filler + dropped + last
+    clipped = clip_diagnostic_value(exc)
+    assert "uuid_encode" in clipped
+    assert "invalid UUID '" not in clipped
+    assert "pg_uuid_bytes_from_str" not in clipped
+    assert last in clipped
+    text = event_text(
+        {"event": "http.unhandled_error", "level": "error", "exception": exc}
+    )
+    reg = compile_registry()
+    assert "local_turn_id_invalid" in reg.match(
+        event="http.unhandled_error", text=text
+    )
+    assert FAMILIES_BY_KEY["local_turn_id_invalid"].revision == 2
+    # 同栈帧但不是本机回合 HTTP 500：路径当 UUID 的工具失败不入本族。
+    tool_text = event_text(
+        {
+            "event": "tool.execute_end",
+            "level": "error",
+            "exception": exc,
+            "tool": "read_folder_file",
+        }
+    )
+    assert "local_turn_id_invalid" not in reg.match(
+        event="tool.execute_end", text=tool_text
+    )
+
+
+def test_local_turn_id_invalid_still_claims_short_uuid_valueerror():
+    # 短 traceback 仍走 Python uuid.UUID 原文，避免只认 clip 栈帧漏掉别的发射点。
+    reg = compile_registry()
+    text = (
+        "invalid UUID 'resume-72b2662b-eec1-4954-af03-941d9d04352a': "
+        "length must be between 32..36 characters, got 43"
+    )
+    assert "local_turn_id_invalid" in reg.match(
+        event="http.unhandled_error", text=text
+    )
+
+
+def test_local_turn_id_invalid_does_not_claim_generic_dbapierror():
+    # 末行 sqlalche.me/e/20/dbapi 是所有 DBAPIError 的尾巴，单独命中会把普通 SQL 错扫进来。
+    last = "(Background on this error at: https://sqlalche.me/e/20/dbapi)"
+    exc = (
+        "Traceback (most recent call last):\n"
+        + ("  File /app/db.py, line 1, in execute\n" * 80)
+        + "sqlalchemy.exc.DBAPIError: connection reset\n"
+        + last
+    )
+    text = event_text(
+        {"event": "http.unhandled_error", "level": "error", "exception": exc}
+    )
+    assert last in text
+    assert "local_turn_id_invalid" not in compile_registry().match(
+        event="http.unhandled_error", text=text
+    )
+
+
+def test_runner_mismatch_ignores_framework_detect_help_text():
+    # rev2：`jest.{0,40}vitest` 扫中 test_run 自己的「无法检测测试框架」帮助文案。
+    help_text = (
+        "无法检测测试框架。请确认工作区包含 pyproject.toml（pytest）、"
+        "package.json scripts.test（vitest/jest）、vitest.config.* 或 "
+        "jest.config.*，或在 framework 参数中显式指定；"
+        "或改用 check=command 并提供 verify 命令。"
+    )
+    reg = compile_registry()
+    assert "runner_mismatch" not in reg.match(
+        event="tool.execute_end", text=f"test_run\nerror\n{help_text}"
+    )
+    assert "runner_mismatch" not in reg.match(
+        event="tool.execute_end", text="npx jest --coverage"
+    )
+    assert FAMILIES_BY_KEY["runner_mismatch"].revision == 2
+
+
+def test_runner_mismatch_still_claims_vitest_purpose_with_jest_command():
+    reg = compile_registry()
+    assert "runner_mismatch" in reg.match(
+        event="tool.execute_end",
+        text="purpose=vitest command=npx jest",
+    )
+    assert "runner_mismatch" in reg.match(
+        event="tool.execute_end",
+        text="vitest\nnpx jest",
+    )
+    assert "runner_mismatch" in reg.match(
+        event="tool.execute_end",
+        text="framework=vitest\nnpx jest",
     )
 
 

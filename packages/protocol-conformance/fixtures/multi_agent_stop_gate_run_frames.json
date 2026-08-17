@@ -153,6 +153,7 @@
   "projected": {
     "status": "cancelled",
     "finishReason": "cancelled",
+    "outcome": "ok",
     "error": null,
     "content": "已派出团队。",
     "reasoning": "",

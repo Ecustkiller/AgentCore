@@ -617,6 +617,9 @@ function answeredByAPerson(
   kind: InteractionKind,
   payload: Record<string, unknown>,
 ): boolean {
+  if (kind === "question_posted") {
+    return payload.status === "answered";
+  }
   if (kind !== "escalation") return true;
   if (payload.status !== "resolved") return false; // assumed / timed_out = 运行时兜底
   return !payload.arbitrated_by; // CEO 裁决（含 via_user：人答的是 CEO 的问，不是这张卡）

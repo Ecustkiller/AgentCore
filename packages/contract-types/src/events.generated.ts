@@ -122,6 +122,8 @@ export interface ToolUseEndPayload {
   failure?: ToolFailure;
   /** Worker-call tag; absent for the captain's own calls. */
   run_id?: string;
+  /** Delegate batch finished with FAILED/SKIPPED nodes (tool meta ``partial_failure``). Absent when false / non-delegate. */
+  partial_failure?: boolean;
 }
 
 /** One step in a turn's 思考·正文·工具·协作 inline timeline (统一团队时间线).
@@ -292,7 +294,7 @@ export interface CheckpointResolvedPayload {
 }
 
 /** A non-blocking ask the CEO posted (ask_user blocking=false): it already has a
- * default and KEPT WORKING — no suspend, no resolve. */
+ * default and KEPT WORKING — no suspend. Settlement is ``question_resolved``. */
 export interface QuestionPostedPayload {
   ask_id: string;
   conversation_id: string;
@@ -300,6 +302,20 @@ export interface QuestionPostedPayload {
   context: string;
   assumptions: AskAssumption[];
   questions: AskQuestion[];
+  /** 这个答案回来后解锁哪批活。新非阻塞提问必填；旧事件缺字段。 */
+  unlocks?: string;
+}
+
+/** Journal fact that folds a ``question_posted`` into 已答 / 已作废.
+ * 
+ * ``answered`` = the user submitted a reply (``answer`` is the text).
+ * ``discarded`` = CEO closed it without waiting (``note`` is the required 人话).
+ * Both are visible settlements — not a silent chip the CEO can ignore. */
+export interface QuestionResolvedPayload {
+  ask_id: string;
+  status: "answered" | "discarded";
+  answer: string;
+  note: string;
 }
 
 export interface PlanReviewStep {
@@ -424,6 +440,12 @@ export interface TeamPreviewRequiredPayload {
   model_candidates?: ModelCandidate[];
   /** 开工卡主导语（如「MVP主流程 · 预计 3 人」）；旧帧缺省。 */
   headline?: string;
+  /** 修订代数；首版 1。旧帧缺省（前端按 1）。 */
+  revision?: number;
+  /** 上一张开工卡 checkpoint_id；首版缺省。 */
+  revised_from?: string;
+  /** 触发本次修订的用户意见原文；首版缺省。 */
+  revision_note?: string;
 }
 
 /** 开工卡 continue 修正 / resolved 对账：单向收紧写盘（同效 form=prose）。仅允许 text_only。 */
@@ -914,6 +936,12 @@ export interface UserInterjectionAttachment {
   binary?: boolean;
 }
 
+/** Soft @Agent chip on a mid-flight interjection (prompt hint, not a hard route). */
+export interface UserInterjectionAgentMention {
+  agent_id: string;
+  role: string;
+}
+
 /** Mid-flight user interjection into a live turn (经典 steer + 协调插话共用).
  * 
  * Lifecycle:
@@ -927,6 +955,9 @@ export interface UserInterjectionPayload {
   status: "received" | "injected" | "addressed" | "queued" | "failed";
   note?: string;
   attachments?: UserInterjectionAttachment[];
+  agent_mentions?: UserInterjectionAgentMention[];
+  /** 若本插话是在回答非阻塞提问，出站 question_posted.ask_id。缺省=普通插话，照常消化；禁止塞进 agent_mentions。 */
+  ask_id?: string;
 }
 
 /** FIFO queue ack on the send SSE while another turn is in-flight (D9 · 发送即有流).
@@ -1090,6 +1121,9 @@ export interface RunFailedPayload {
   debrief?: RunDebrief;
   execution_id?: string;
   product_landed?: boolean;
+  error_code?: string;
+  retryable?: boolean;
+  retry_after?: number;
 }
 
 export interface RunCancelledPayload {
@@ -1530,6 +1564,8 @@ export interface MessageEndPayload {
   rounds?: number;
   collab?: TurnCollabMetrics;
   duration_ms?: number;
+  /** Turn-level result quality, independent of finish_reason. partial = landed product with gaps. paused is reserved (not produced this wave). */
+  outcome?: "ok" | "partial" | "paused" | "error";
 }
 
 export interface ErrorContext {
@@ -2005,6 +2041,7 @@ export type SSEPayloadMap = {
   checkpoint_required: CheckpointRequiredPayload;
   checkpoint_resolved: CheckpointResolvedPayload;
   question_posted: QuestionPostedPayload;
+  question_resolved: QuestionResolvedPayload;
   plan_review_required: PlanReviewRequiredPayload;
   plan_review_resolved: PlanReviewResolvedPayload;
   team_preview_required: TeamPreviewRequiredPayload;

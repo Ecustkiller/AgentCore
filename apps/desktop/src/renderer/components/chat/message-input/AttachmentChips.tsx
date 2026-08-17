@@ -35,7 +35,7 @@ export function AttachmentChips({
           className="inline-flex max-w-[220px] items-center gap-1.5 rounded-lg bg-accent px-2 py-1 text-xs text-accent-foreground"
         >
           <Users size={12} className="shrink-0" />
-          <span className="shrink-0 text-muted-foreground">角色</span>
+          <span className="shrink-0 text-muted-foreground">点名</span>
           <SimpleTooltip label={a.role}>
             <span className="truncate">{a.role}</span>
           </SimpleTooltip>

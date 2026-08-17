@@ -6,6 +6,7 @@ from collections.abc import Collection
 
 from agentcore.runtime.skills.ask_user import _ASK_USER_KICKOFF, _ASK_USER_MIDTASK
 from agentcore.runtime.skills.build import _BUILD_APP, _BUILD_WEBSITE
+from agentcore.runtime.skills.data_file_landing import _DATA_FILE_LANDING
 from agentcore.runtime.skills.debate_and_review import _DEBATE_AND_REVIEW
 from agentcore.runtime.skills.deep_multi_lens_research import (
     _DEEP_MULTI_LENS_RESEARCH,
@@ -193,6 +194,19 @@ _SYSTEM_SKILLS: tuple[SystemSkill, ...] = (
         ),
         body=_LONG_FORM_LANDING,
         audience=AUDIENCE_WORKER_ONLY,
+    ),
+    SystemSkill(
+        name="data_file_landing",
+        summary=(
+            "账单/报表/导出记录/凭证：用户丢数据文件+一句话要可打开产物"
+            "（整理成 excel/表、分栏、汇总）→ 有执行：脚本变换+不变量校验后交文件；"
+            "无执行：form=files 交结构报告+待跑脚本（完整交付），"
+            "下一步只说运算环境暂时不可用稍后再试；禁手抄、禁谎称已校验"
+        ),
+        body=_DATA_FILE_LANDING,
+        # Consult is CEO+worker. Body is the worker loop; CEO still consults to brief.
+        # Do not gate on ``code_execute`` (CEO has none → skill would vanish from
+        # the supervisor catalog).
     ),
     SystemSkill(
         name="deep_multi_lens_research",

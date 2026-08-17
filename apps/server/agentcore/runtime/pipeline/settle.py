@@ -20,15 +20,51 @@ from agentcore.runtime.events import (
     EventSink,
     FinishReason,
     citations_event,
+    content_delta,
     error_event,
     message_end,
 )
-from agentcore.runtime.facts import TurnFactLog
+from agentcore.runtime.facts import TurnFactLog, TurnPausedFact, record_turn_fact
 from agentcore.runtime.ledger_channel import emit_turn_evidence_ledger
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.runs import RunPhase
+from agentcore.runtime.turn.ceo_continue import (
+    is_ceo_rate_limit_pause,
+    mark_host_turn_paused,
+)
+from agentcore.runtime.turn.outcome import (
+    last_delegate_tool_output_from_events,
+    resolve_turn_outcome,
+)
 
 logger = get_logger(__name__)
+
+
+def _salvage_reply_and_outcome(
+    *,
+    sink: EventSink,
+    content: str,
+    finish: object,
+) -> tuple[str, str | None]:
+    """Fill empty captain prose from last delegate synthesis; stamp turn outcome."""
+    events = sink.history_snapshot()
+    if not (content or "").strip():
+        salvaged = last_delegate_tool_output_from_events(events)
+        if salvaged:
+            content = salvaged
+            sink.emit(content_delta(salvaged))
+            logger.info(
+                "engine.structured_reply_salvaged",
+                chars=len(salvaged),
+                source="delegate_events",
+            )
+            events = sink.history_snapshot()
+    outcome = resolve_turn_outcome(
+        events=events,
+        finish_reason=finish,
+        has_error=sink.last_turn_error() is not None,
+    )
+    return content, outcome
 
 
 async def settle_successful_turn(
@@ -58,6 +94,23 @@ async def settle_successful_turn(
     final_content = captain_state.content
     final_reasoning = captain_state.reasoning
     rounds = captain_state.rounds
+    finish = captain_state.finish_override or (
+        FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
+    )
+    final_content, outcome = _salvage_reply_and_outcome(
+        sink=sink, content=final_content, finish=finish
+    )
+    if is_ceo_rate_limit_pause(sink=sink, finish=finish):
+        outcome = "paused"
+        mark_host_turn_paused()
+        record_turn_fact(
+            TurnPausedFact(
+                checkpoint_id="",
+                suspension_kind="ceo_continue",
+                content=final_content,
+                reasoning=final_reasoning or "",
+            ).to_fact()
+        )
 
     # Turn usage = the captain run's own spend (priced once in the executor onto
     # captain_state.cost/.usage) + the delegated workers' usage + every 续派
@@ -69,9 +122,6 @@ async def settle_successful_turn(
         TokenUsage.from_usage_dict(captain_state.usage)
         + TokenUsage.from_usage_dict(delegate_tool.usage)
         + TokenUsage.from_usage_dict(debate_tool.usage)
-    )
-    finish = captain_state.finish_override or (
-        FinishReason.END_TURN if rounds < profile.max_rounds else FinishReason.MAX_ROUNDS
     )
 
     # Per-run cost ledger for 落账 (决策②: captain root + one row per member).
@@ -164,10 +214,13 @@ async def settle_successful_turn(
             rounds=rounds,
             cost=turn_cost,
             collab=collab,
+            outcome=outcome,
         )
     )
 
-    journal_entries = _journal_entries_for_turn(fact_log, sink=sink, finish=finish)
+    journal_entries = _journal_entries_for_turn(
+        fact_log, sink=sink, finish=finish, outcome=outcome
+    )
 
     # Drain journal → audit projection fully BEFORE 定格 audit_drops: the teardown
     # flush (finally) re-drains the writer, which can schedule + drop more audit
@@ -203,6 +256,7 @@ async def settle_successful_turn(
         # escalations off the delegate accumulator, plus the revise count (定向唤回).
         "collab": collab,
         "audit_drops": audit_recorder.drops,
+        "outcome": outcome,
     }
     # Soft-fail path (raise_on_error=False → settle_successful_turn): the live
     # ``error`` SSE must also land on the settle result so cloud persist stamps
@@ -227,7 +281,6 @@ async def salvage_failed_captain(
     """Salvage content/cost when the captain run ends FAILED."""
     err = captain_state.error or "captain run failed"
     sink.emit(error_event(ErrorCode.PIPELINE_ERROR, err))
-    sink.emit(message_end(FinishReason.ERROR))
     # Salvage longest available text (segment / captain_state / sink) — P1 §3.4.
     with contextlib.suppress(Exception):
         await sink.flush_stream_state()
@@ -248,6 +301,10 @@ async def salvage_failed_captain(
         captain_state.reasoning,
         sink.streamed_reasoning(),
     )
+    salvaged_content, outcome = _salvage_reply_and_outcome(
+        sink=sink, content=salvaged_content, finish=FinishReason.ERROR
+    )
+    sink.emit(message_end(FinishReason.ERROR, outcome=outcome))
     # A captain that died mid-loop still burned tokens (B-deep 失败计费): the
     # executor priced them onto captain_state, so carry the captain ledger row
     # back even on error — _persist_turn_result writes cost_runs independently
@@ -275,6 +332,7 @@ async def salvage_failed_captain(
         "finish_reason": FinishReason.ERROR,
         "cost_runs": cost_runs,
         "audit_drops": audit_recorder.drops,
+        "outcome": outcome,
     }
 
 
@@ -306,18 +364,6 @@ async def salvage_pipeline_exception(
         fallback_message=UNCLASSIFIED_EXCEPTION_USER_MESSAGE,
     )
     sink.emit(error_event(code, message, context=err_ctx))
-    sink.emit(message_end(FinishReason.ERROR))
-    # 异常也落库: a crash mid-turn must NOT discard already-finished work (a
-    # completed debate / delegated workers). Carry the journal so persist_turn_result
-    # writes it under the abnormal message even with empty reply content — otherwise a
-    # 6-min debate that survived the turn would vanish on the next refresh. Best-effort:
-    # never let journal assembly mask the original error.
-    try:
-        crash_journal = _journal_entries_for_turn(
-            fact_log, sink=sink, finish=FinishReason.ERROR
-        )
-    except Exception:  # noqa: BLE001 — salvage is best-effort; keep the real error
-        crash_journal = None
     # Salvage longest available text from segment / sink (captain_state may be absent).
     with contextlib.suppress(Exception):
         await sink.flush_stream_state()
@@ -336,6 +382,21 @@ async def salvage_pipeline_exception(
         mem.get(CHANNEL_CAPTAIN_REASONING),
         sink.streamed_reasoning(),
     )
+    salvaged_content, outcome = _salvage_reply_and_outcome(
+        sink=sink, content=salvaged_content, finish=FinishReason.ERROR
+    )
+    sink.emit(message_end(FinishReason.ERROR, outcome=outcome))
+    # 异常也落库: a crash mid-turn must NOT discard already-finished work (a
+    # completed debate / delegated workers). Carry the journal so persist_turn_result
+    # writes it under the abnormal message even with empty reply content — otherwise a
+    # 6-min debate that survived the turn would vanish on the next refresh. Best-effort:
+    # never let journal assembly mask the original error.
+    try:
+        crash_journal = _journal_entries_for_turn(
+            fact_log, sink=sink, finish=FinishReason.ERROR, outcome=outcome
+        )
+    except Exception:  # noqa: BLE001 — salvage is best-effort; keep the real error
+        crash_journal = None
     await audit_recorder.flush()
     if roster_writer is not None:
         await roster_writer.flush()
@@ -348,6 +409,7 @@ async def salvage_pipeline_exception(
         "finish_reason": FinishReason.ERROR,
         "journal_entries": crash_journal,
         "audit_drops": audit_recorder.drops,
+        "outcome": outcome,
     }
 
 

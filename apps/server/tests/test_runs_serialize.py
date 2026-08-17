@@ -300,6 +300,19 @@ def test_state_json_round_trips_error_retryable():
     assert restored.error_retryable is False
 
 
+def test_state_json_round_trips_error_code_and_retry_after():
+    state = RunState(
+        phase=RunPhase.FAILED,
+        error="限流",
+        error_retryable=True,
+        error_code="LLM_RATE_LIMIT",
+        error_retry_after=2.5,
+    )
+    restored = state_from_json(state_to_json(state))
+    assert restored.error_code == "LLM_RATE_LIMIT"
+    assert restored.error_retry_after == 2.5
+
+
 def test_state_json_error_retryable_defaults_true():
     # A COMPLETED state (and any older frame missing the key) defaults to retryable=True,
     # so ordinary retry behaviour is unchanged for pre-BL-6 rows.

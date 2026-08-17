@@ -295,8 +295,28 @@ async def _drive_captain_loop(
     except Exception as e:  # noqa: BLE001 — surface any captain failure to UI/state
         duration_ms = int((time.monotonic() - start) * 1000)
         partial = inflight[0] if inflight else TokenUsage()
-        logger.error("run.captain_failed", run_id=spec.run_id, error=str(e), exc_info=True)
-        sink.emit(run_failed(spec.run_id, agent_id, str(e), failure_kind="call"))
+        from agentcore.runtime.runs.error_signal import run_error_signal
+
+        signal = run_error_signal(e)
+        logger.error(
+            "run.captain_failed",
+            run_id=spec.run_id,
+            error=str(signal.exc),
+            retryable=signal.retryable,
+            error_code=signal.error_code,
+            exc_info=True,
+        )
+        sink.emit(
+            run_failed(
+                spec.run_id,
+                agent_id,
+                str(signal.exc),
+                failure_kind="call",
+                error_code=signal.error_code,
+                retryable=signal.retryable,
+                retry_after=signal.retry_after,
+            )
+        )
         from agentcore.runtime.runs.salvage import (
             content_from_transcript,
             freeze_partial_transcript,
@@ -304,11 +324,14 @@ async def _drive_captain_loop(
 
         frozen = freeze_partial_transcript(messages) if messages else []
         failed = _priced_failure(
-            str(e),
+            str(signal.exc),
             model=turn_model,
             usage=partial,
             rounds=inflight_rounds[0] if inflight_rounds else 0,
             duration_ms=duration_ms,
+            retryable=signal.retryable,
+            error_code=signal.error_code or "",
+            retry_after=signal.retry_after,
             transcript=frozen or None,
             content=content_from_transcript(frozen) if frozen else "",
         )

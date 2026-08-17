@@ -142,6 +142,7 @@ def register_always_ceo_tools(
     chat_tools: ToolRegistry,
     *,
     skill_registry: Any,
+    include_vision: bool = True,
 ) -> None:
     """Register zero/light-arg CEO ALWAYS tools — shared by assemble + resume.
 
@@ -149,6 +150,10 @@ def register_always_ceo_tools(
     and 2b resume cannot diverge. Skips ``delegate`` / ``debate`` (heavy deps).
     ``skill_registry`` is retained for call-site compatibility (consult no longer
     takes it here — merged consult is hand-wired with has_entries).
+
+    ``include_vision`` gates ``read_image`` the same way a dead local channel
+    retires it (``WORKSPACE_CHANNEL_DEAD_RETIRE_TOOLS``): catalog still lists the
+    tool; a surface that cannot succeed only invites failed rounds.
     """
     del skill_registry  # consult wiring moved; keep kwarg so callers need not change
     for cls in declared_tools(surface=ToolSurface.CEO_ORCHESTRATION):
@@ -156,6 +161,8 @@ def register_always_ceo_tools(
             continue
         name = declared_tool_name(cls)
         if name in _ALWAYS_HAND_WIRE_NAMES:
+            continue
+        if name == "read_image" and not include_vision:
             continue
         chat_tools.register(instantiate_declared(cls))
 

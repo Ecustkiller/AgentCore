@@ -45,6 +45,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "degraded",
+    "outcome": "error",
     "error": {
       "code": "LLM_EMPTY_RESPONSE",
       "message": "模型空响应 · 输出长度截断 · 返回空内容"

@@ -10,6 +10,12 @@
   color: var(--muted);
 }
 
+.hot-trace-note {
+  margin-top: 4px;
+  white-space: pre-wrap;
+  color: var(--fg);
+}
+
 /* 跨回合续接锚点：新契约「续自上一张图」/ 旧 journal graph_append（手机无跳转）。 */
 .graph-append-anchor {
   font-size: 12px;
@@ -38,8 +44,12 @@
 .process-thought {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  /* stretch body to the column; header stays w-auto (S4). */
+  align-items: stretch;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
 }
 
 .thinking-header {
@@ -70,6 +80,9 @@
 
 .process-thought-body {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--muted);
 }
 
@@ -107,6 +120,9 @@
 
 /* 过程线旁白：前景色 + 时间线 gap，不用左边线区分 Thought（S4） */
 .process-narration {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--fg);
 }
 

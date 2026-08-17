@@ -98,11 +98,31 @@ class SendMessageRequest(BaseModel):
     # Soft Agent @-mentions on the conversation page (软提示，非强制派单). Not IM mentions;
     # not MessageAttachment.kind. Empty → no prompt injection.
     agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
+    # Optional return-path slot: when this message answers a non-blocking
+    # ``question_posted``, the outbound ``ask_id``. Blank / absent = ordinary
+    # message (still digested). Not an Agent mention.
+    ask_id: str | None = Field(
+        None,
+        max_length=64,
+        description=(
+            "可选。若本条是在回答非阻塞提问，填出站 question_posted.ask_id。"
+            "缺省/空=普通消息，照常消化。禁止塞进 agent_mentions。"
+        ),
+    )
     # Soft gate: set when this turn is expected to call orchestration tools (delegate/debate).
     # Triggers a preflight warning (not a block) when probe recorded supports_tools=false.
     # Locality is conversation/project state (birth-time bind), not a per-turn field —
     # auto-promote is vetoed (双模式工作区).
     requires_tools: bool = False
+
+    @field_validator("ask_id", mode="before")
+    @classmethod
+    def _blank_ask_id(cls, v: object) -> object:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v.strip() if isinstance(v, str) else v
 
     @model_validator(mode="after")
     def _require_content_or_attachments(self) -> "SendMessageRequest":
@@ -233,6 +253,27 @@ class ResolveStageCardInteraction(BaseModel):
     motion_override: str | None = Field(None, max_length=2000)
 
 
+class ResolveQuestionPostedInteraction(BaseModel):
+    """Settle a non-blocking ``question_posted`` (journal fold 三态).
+
+    ``answered``：用户提交答复（``answer`` 必填）。``discarded``：CEO 作废（``note`` 必填人话）。
+    两者都是可见收口，不是客户端本地标记。
+    """
+
+    kind: Literal["question_posted"] = "question_posted"
+    status: Literal["answered", "discarded"]
+    answer: str = Field("", max_length=4000)
+    note: str = Field("", max_length=4000)
+
+    @model_validator(mode="after")
+    def _require_visible_settlement(self) -> "ResolveQuestionPostedInteraction":
+        if self.status == "answered" and not self.answer.strip():
+            raise ValueError("answered 须有非空 answer")
+        if self.status == "discarded" and not self.note.strip():
+            raise ValueError("discarded 须有非空 note")
+        return self
+
+
 # Discriminated union body for the unified resolve endpoint.
 ResolveInteractionRequest = (
     ResolveApprovalInteraction
@@ -240,6 +281,7 @@ ResolveInteractionRequest = (
     | ResolveClientToolInteraction
     | ResolveEscalationInteraction
     | ResolveStageCardInteraction
+    | ResolveQuestionPostedInteraction
 )
 
 
@@ -282,6 +324,12 @@ def interaction_result_from_body(body: ResolveInteractionRequest) -> Any:
             "decision": body.decision,
             "note": body.note,
             "motion_override": body.motion_override,
+        }
+    if isinstance(body, ResolveQuestionPostedInteraction):
+        return {
+            "status": body.status,
+            "answer": body.answer,
+            "note": body.note,
         }
 
     raise ValueError(f"unknown interaction kind: {getattr(body, 'kind', None)!r}")
@@ -450,7 +498,8 @@ class ResumeTurnRequest(BaseModel):
     vocabulary as the live resolve: ``continue`` (proceed — run the gated downstream
     for plan_review / accept the CEO direction for ask_user / grant+start kickoff),
     ``adjust`` (plan_review: inject ``note`` as a steer then continue; team_preview:
-    do not grant or start — feed ``note`` back so the CEO revises and resubmits),
+    do not grant or start — feed ``note`` back so the CEO revises and resubmits;
+    ``note`` must be non-empty),
     or ``stop`` (end the turn here). ``selected``
     carries the option(s) the user picked from an ask_user menu (ignored for
     plan_review; the server drops any pick not actually offered). The engine-only
@@ -465,7 +514,14 @@ class ResumeTurnRequest(BaseModel):
     """
 
     decision: CheckpointDecision
-    note: str = Field("", max_length=4000)
+    note: str = Field(
+        "",
+        max_length=4000,
+        description=(
+            "adjust 必须非空（修订意见）。kickoff continue 上非空=嘱咐，"
+            "不是 former adjust。stop 可选收场。"
+        ),
+    )
     selected: list[str] = Field(default_factory=list, max_length=50)
     excluded_run_ids: list[str] = Field(default_factory=list, max_length=50)
     write_capability_overrides: list[WriteCapabilityOverride] = Field(
@@ -475,6 +531,12 @@ class ResumeTurnRequest(BaseModel):
         default_factory=dict,
         description="run_id → {model, origin?, provider_id?}；空/缺键=不改该节点。",
     )
+
+    @model_validator(mode="after")
+    def _adjust_requires_note(self) -> "ResumeTurnRequest":
+        if self.decision is CheckpointDecision.ADJUST and not (self.note or "").strip():
+            raise ValueError("adjust 必须填写非空意见")
+        return self
 
 
 class PendingInteractionSummary(BaseModel):
@@ -534,6 +596,10 @@ class PausedTurnSummary(BaseModel):
     thorough: bool = True
     # 主导语（交付档 + 人数）；缺省空 = 旧帧 / 前端本地回退。
     headline: str = ""
+    # 开工卡修订谱系；非 team_preview 缺省空。
+    revision: int | None = None
+    revised_from: str | None = None
+    revision_note: str | None = None
     # ask_user
     question: str = ""
     context: str = ""
@@ -697,6 +763,16 @@ class MessageDetail(BaseModel):
     # from the ORM attribute via from_attributes.
     trace_id: str | None = None
     attachments: list[StoredAttachment] = Field(default_factory=list)
+    # Conversation-page @Agent chips (soft mention). Orthogonal to attachments;
+    # not MessageAttachment.kind. Empty on assistant / pre-feature rows.
+    agent_mentions: list[AgentMention] = Field(
+        default_factory=list,
+        max_length=10,
+        description=(
+            "Conversation-page @Agent chips (soft mention). Orthogonal to attachments; "
+            "not MessageAttachment.kind. Empty on assistant / pre-feature rows."
+        ),
+    )
     citations: list[Citation] = Field(default_factory=list)
     # 回合调研台账（引用即出处 P1, DERIVED）：live 走 ``evidence_ledger`` SSE；落库
     # ``messages.evidence_ledger``。缺字段 / [] = legacy。不含辩论场级台账。
@@ -739,6 +815,9 @@ class MessageDetail(BaseModel):
     # 协作质量 (学·度量 §2.5, 诊断模式): orchestration signals nested in the usage column;
     # projected on read like ``rounds``. null for single-agent / pre-feature rows.
     collab: TurnCollabMetrics | None = None
+    # 回合结果质量（与 finish_reason / usage.status 正交）：ok | partial | paused | error。
+    # 写入 usage JSON，读路径投影。本波不产出 paused。null for user / pre-feature rows.
+    outcome: Literal["ok", "partial", "paused", "error"] | None = None
     # 回复反馈 (点赞/点踩, 对话基础功能补齐): the user's satisfaction signal on this assistant
     # reply — "up" | "down" | null(未评价). Auto-populated from the ORM attribute via
     # from_attributes so a reloaded bubble replays the user's rating. null for user rows.
@@ -749,6 +828,19 @@ class MessageDetail(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("agent_mentions", mode="before")
+    @classmethod
+    def _agent_mentions_from_row(cls, v: object) -> object:
+        from agentcore.conversation.mentions import to_stored_agent_mentions
+
+        if v is None:
+            return []
+        if isinstance(v, list):
+            return to_stored_agent_mentions(
+                [item if isinstance(item, dict) else {} for item in v]
+            )
+        return []
 
     @field_validator("usage", mode="before")
     @classmethod
@@ -1063,6 +1155,8 @@ class RecordTurnRequest(BaseModel):
     origin: str | None = Field(None, max_length=64)
     execution_id: str | None = Field(None, max_length=64)
     harvest_kind: str | None = Field(None, max_length=32)
+    # Soft @Agent chips on the local user bubble (optional; old clients omit).
+    agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
 
 
 class RecordTurnResponse(BaseModel):
@@ -1100,12 +1194,47 @@ class QueuedTurnItem(BaseModel):
     ``interjection_id`` is set when the entry was promoted from a user interjection
     (协调升队 / 经典 steer leftover); omitted / null for plain ``delivery=queue``.
     ``position`` is 1-based FIFO index.
+    ``attachments`` / ``agent_mentions`` are the same fields drain forwards to
+    ``stream_chat`` (optional additive — old clients ignore).
+    ``ask_id`` is the non-blocking question return-path slot (must survive
+    steer leftover / 协调升队 degraded enqueue).
     """
 
     queue_id: str
     content: str
     position: int = Field(..., ge=1)
     interjection_id: str | None = None
+    ask_id: str | None = Field(
+        None,
+        max_length=64,
+        description="可选。答非阻塞提问时与出站 question_posted.ask_id 对上。",
+    )
+    attachments: list[MessageAttachment] = Field(default_factory=list)
+    agent_mentions: list[AgentMention] = Field(default_factory=list, max_length=10)
+
+    @field_validator("ask_id", mode="before")
+    @classmethod
+    def _queued_ask_id(cls, v: object) -> object:
+        from agentcore.conversation.ask_reply import normalize_ask_id
+
+        return normalize_ask_id(v)
+
+    @field_validator("agent_mentions", mode="before")
+    @classmethod
+    def _queued_agent_mentions(cls, v: object) -> object:
+        from agentcore.conversation.mentions import to_stored_agent_mentions
+
+        if not isinstance(v, list):
+            return []
+        rows: list[dict] = []
+        for item in v:
+            if isinstance(item, dict):
+                rows.append(item)
+            elif hasattr(item, "model_dump"):
+                dumped = item.model_dump()
+                if isinstance(dumped, dict):
+                    rows.append(dumped)
+        return to_stored_agent_mentions(rows)
 
 
 class QueuedTurnListResponse(BaseModel):

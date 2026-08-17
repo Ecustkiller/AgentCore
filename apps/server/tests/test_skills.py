@@ -32,8 +32,9 @@ from agentcore.tools.sandbox.subprocess import SubprocessSandbox
 from agentcore.workspace.server import ServerWorkspace
 
 # debate / delegate are wired on every path; ask_user is live-user only.
-# verify_and_fix / long_form_writing ride consult audience (worker loop vs CEO 派工);
-# long_form_landing is worker-only landing HOW. team_orchestration_advanced is ungated.
+# verify_and_fix / long_form_writing / data_file_landing ride consult audience
+# (worker loop vs CEO 派工); long_form_landing is worker-only landing HOW.
+# team_orchestration_advanced is ungated.
 _FULL_TOOLS = {"delegate", "ask_user", "debate"}
 _NO_LIVE_USER = {"delegate", "debate"}  # autonomous path: no ask_user
 
@@ -84,6 +85,7 @@ def test_registry_registers_the_system_skills():
         "verify_and_fix",
         "long_form_writing",
         "long_form_landing",
+        "data_file_landing",
         "deep_multi_lens_research",
     }
     assert "build_toolshed" not in names
@@ -122,6 +124,7 @@ def test_available_hides_gated_skills_without_required_tools():
     assert "debate_and_review" in available
     assert "revising_a_product" in available
     assert "verify_and_fix" in available
+    assert "data_file_landing" in available
     assert "work_discipline" in available
     assert "ask_user_kickoff" not in available
     assert "ask_user_midtask" not in available
@@ -150,6 +153,7 @@ def test_available_audience_hides_ceo_only_from_workers():
     assert "work_discipline" in worker
     assert "long_form_landing" in worker
     assert "verify_and_fix" in worker
+    assert "data_file_landing" in worker
     assert "long_form_writing" not in worker
     ceo = {s.name for s in reg.available(_FULL_TOOLS, audience="ceo")}
     assert "product_help" in ceo
@@ -157,6 +161,7 @@ def test_available_audience_hides_ceo_only_from_workers():
     assert "team_orchestration_advanced" in ceo
     assert "long_form_writing" in ceo
     assert "verify_and_fix" in ceo
+    assert "data_file_landing" in ceo
     assert "long_form_landing" not in ceo
 
 
@@ -173,11 +178,13 @@ async def test_worker_consult_source_hides_ceo_only_listing_and_fetch():
     assert "team_orchestration_advanced" in names
     assert "long_form_landing" in names
     assert "verify_and_fix" in names
+    assert "data_file_landing" in names
     assert "long_form_writing" not in names
     assert await source.fetch_by_name("u", "product_help") is None
     assert await source.fetch_by_name("u", "long_form_writing") is None
     assert await source.fetch_by_name("u", "team_orchestration_advanced") is not None
     assert await source.fetch_by_name("u", "long_form_landing") is not None
+    assert await source.fetch_by_name("u", "data_file_landing") is not None
 
 
 async def test_ceo_consult_source_keeps_product_help():
@@ -189,9 +196,11 @@ async def test_ceo_consult_source_keeps_product_help():
     names = {e.name for e in await source.list_directory("u")}
     assert "product_help" in names
     assert "long_form_writing" in names
+    assert "data_file_landing" in names
     assert "long_form_landing" not in names
     assert await source.fetch_by_name("u", "product_help") is not None
     assert await source.fetch_by_name("u", "long_form_writing") is not None
+    assert await source.fetch_by_name("u", "data_file_landing") is not None
     assert await source.fetch_by_name("u", "long_form_landing") is None
 
 
@@ -473,6 +482,14 @@ def test_team_orchestration_skill_teaches_shape_vocabulary():
     assert "模板路" in body and "手写路" in body
     assert "禁止】`code_audit`" in body or "同时传" in body
     assert "云端引擎员" in body or "本地引擎员" in body
+    # 整仓走 modules 扇出；「凡审计必两拨人」不得读成禁填 modules
+    assert "modules" in body
+    assert "整仓只填 scope 当单人" in body or "整仓" in body
+    assert "必须扇出" in body  # 仅出现在「仍非必须扇出」
+    assert "单缝省略" in body
+    assert "上限 8" in body or "上限8" in body
+    assert "超限末槽折叠" in body
+    assert "凡审计必两拨人" not in body
 
 
 def test_team_orchestration_skill_teaches_opening_table_and_draft_tiers():
@@ -786,6 +803,8 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "假两段" in body
     assert "为编排而编排" in body or "禁为编排而编排" in body
     assert "凡大活必嵌套" in body
+    assert "不是" in body and "modules" in body
+    assert "仍非" in body and "必须扇出" in body
     assert "默认" in body and "二选一" in body
     assert "禁止再平铺" in body
     # 协调补派失败节点须标 replaces_run_id，引擎改写下游 depends_on
@@ -795,6 +814,7 @@ def test_team_orchestration_skill_teaches_delegate_knobs():
     assert "勿复述字段名" in body or "工具通道用语" in body
     # 派完可见面：只留「人已派出」；禁与 host / COORDINATION_PERIOD_HINT 打架的「谁在后台」。
     assert "人已派出" in body
+    assert "后半等你" in body  # 非阻塞问收口与「还在等队员」切分
     assert "还在等" in body and "你不用管" in body
     assert "可静默" in body
     assert "谁还在跑" in body
@@ -860,6 +880,11 @@ def test_team_orchestration_skill_teaches_presentation_pptx_honesty():
     assert "当模板" in body
     assert "Presentation()" in body
     assert "再派" in body and "跑脚本" in body
+    assert "数据文件整理" in body
+    assert "结构报告" in body
+    assert "待跑变换脚本" in body
+    assert "暂时不可用" in body
+    assert "表格 → `.csv`" not in body
     assert "不算过闸" in body or "不算" in body
     assert "压体积" in body and "模板保真" in body
     assert "*_slim.pptx" in body or "slim.pptx" in body
@@ -1273,6 +1298,11 @@ def test_ask_user_midtask_skill_teaches_fork_annotate_and_nonblocking():
     assert "采纳正方" in body  # debate closing handed to the user
     assert "假设" in body and "若不符请指正" in body  # proceed-and-annotate
     assert "blocking=false" in body  # the non-blocking ask
+    assert "unlocks" in body
+    assert "后半等人" in body or "后半等你" in body
+    assert "【非阻塞问·压单】" in body  # 权威在常驻核，skill 只对齐、不另造说法
+    assert "立刻按默认继续把回合做完" not in body
+    assert "绝不等待" not in body
     assert "checkpoint_after" not in body
     # 定向修订委派须写明局部改纪律（risk_ack → 有界返工环）。
     assert "str_replace" in body
@@ -1438,6 +1468,103 @@ def test_long_form_writing_skill_teaches_skeleton_fill():
     assert "continue_from_run_id" not in landing.body
     assert "parallel_brief" not in landing.body
     assert "checkpoint_after" not in landing.body
+
+
+def test_data_file_landing_skill_teaches_script_transform_and_invariants():
+    skill = build_system_skill_registry().get("data_file_landing")
+    assert skill is not None
+    # Ungated: consult is CEO+worker; body is the worker loop. Do not gate on
+    # code_execute (CEO has none → skill would vanish from the supervisor catalog).
+    assert skill.requires_tools == ()
+    assert skill.audience == ("ceo", "worker")
+    body = skill.body
+    assert "微信" not in body
+    assert "手抄" in body
+    assert "code_execute" in body
+    assert "不变量" in body
+    assert "分类笔数" in body or "源记录总数" in body
+    assert "口径" in body
+    assert "改口" in body
+    assert "人质" in body
+    assert "先交" in body
+    assert "未装配" in body
+    assert "账单" in body and "报表" in body and "导出记录" in body
+    assert "看原件" in body
+    assert "认形态" in body
+    assert "一次性变换脚本" in body
+    # Technique only — library names live in cloud_python.txt, not this skill.
+    assert "抽表" in body
+    assert "按页抽文本" in body
+    # 有框线 vs 文本流：抽表空表不是死胡同；预解析残文仍不可信。
+    assert "格子表" in body
+    assert "文本流" in body
+    assert "文本层" in body
+    assert "空表" in body
+    assert "预解析" in body and "残文" in body
+    assert "不要用按页抽文本的库" not in body
+    assert "pypdf" not in body
+    assert "openpyxl" not in body
+    assert "pandas" not in body
+    assert "pdfplumber" not in body
+    assert "汇总页" in body
+    assert "form=files" in body
+    assert skill.summary
+    assert "手抄" in skill.summary
+    assert "不变量" in skill.summary
+    assert "结构报告" in skill.summary
+    assert "待跑" in skill.summary
+
+
+def test_data_file_landing_no_exec_is_complete_delivery():
+    """无执行：交付形态是结构报告+待跑脚本+一句人话，不是「表的缺口」。"""
+    skill = build_system_skill_registry().get("data_file_landing")
+    assert skill is not None
+    body = skill.body
+    assert "【有执行】" in body
+    assert "【无执行】" in body
+    no_exec = body.split("【无执行】", 1)[1]
+    with_exec = body.split("【无执行】", 1)[0]
+    assert "结构报告" in no_exec
+    assert "待跑变换脚本" in no_exec
+    assert "暂时不可用" in no_exec
+    assert "稍后再试" in no_exec
+    assert "artifacts" in no_exec
+    assert "form=files" in no_exec
+    assert "不是缺口" in no_exec or "正常完成" in no_exec
+    assert "绑本机" in no_exec
+    assert "导入到云" in no_exec
+    assert "终端跑脚本" in no_exec
+    assert "凭空" in no_exec
+    assert "已校验" in no_exec
+    assert "标缺口" not in no_exec
+    assert "不可靠" not in no_exec
+    # 有执行路径仍是脚本变换 + 校验后交文件。
+    assert "不变量校验" in with_exec
+    assert "产出可打开文件" in with_exec
+    assert "暂时不可用" not in with_exec
+    assert "终端跑脚本" not in with_exec
+
+
+def test_data_file_landing_pdf_text_stream_uses_text_layer():
+    """有执行：文本流 PDF 以执行环境抽出的文本层为真值；抽表空表≠失败。
+
+    锁的是 skill 文本语义。本机 Win32 沙箱不健康，该修复未经行为验证。
+    """
+    skill = build_system_skill_registry().get("data_file_landing")
+    assert skill is not None
+    with_exec = skill.body.split("【无执行】", 1)[0]
+    assert "框线" in with_exec and "格子表" in with_exec
+    assert "文本流" in with_exec
+    assert "文本层" in with_exec
+    assert "空表" in with_exec and "失败" in with_exec
+    assert "预解析" in with_exec
+    assert "残文" in with_exec
+    assert ".md" in with_exec
+    assert "file_read" in with_exec
+    assert "不是" in with_exec and "真源" in with_exec
+    # 旧死胡同：一律禁抽文本层。
+    assert "不要用按页抽文本的库" not in with_exec
+    assert "PDF 重抽须用" not in with_exec
 
 
 def test_deep_multi_lens_research_listed_and_gated_on_delegate():

@@ -24,6 +24,7 @@ import { DebriefBlock } from "@/components/DebriefBlock";
 import { EvidenceLedgerProvider } from "@/components/EvidenceLedgerContext";
 import { Markdown } from "@/components/Markdown";
 import { Modal } from "@/components/Modal";
+import { TurnOutcomeActions } from "@/components/TurnOutcomeActions";
 import {
   CONTEXT_CHANNEL_LABEL,
   runPhaseLabel,
@@ -40,7 +41,14 @@ import {
   unmarkLocalSettlement,
 } from "@/lib/remoteSettlement";
 import { markRunStopSent, useRunStopSent } from "@/lib/runStopPending";
+import type { SupportDiagnosticIds } from "@/lib/supportDiagnostics";
 import { formatDuration } from "@/lib/time";
+import {
+  PARTIAL_NOTICE,
+  type TurnOutcome,
+  teamFailureProgressBit,
+  teamStripFace,
+} from "@/lib/turnOutcome";
 import type { EscalationSlotEsc, RunToolCall } from "@/protocol/fold";
 import { actAuthorizedByLabel } from "@/protocol/fold";
 import type {
@@ -277,28 +285,6 @@ function debateEntryText(workers: readonly ProjectedRun[]): string {
   return parts.length > 0 ? parts.join(" · ") : "辩论协作进行中";
 }
 
-type StripFace = {
-  title: string;
-  mark: "run" | "ok" | "err" | "paused" | "muted";
-  phase: boolean;
-};
-
-function teamStripFace(status: TurnStatus | null | undefined): StripFace {
-  if (status === "failed") {
-    return { title: "失败", mark: "err", phase: false };
-  }
-  if (status === "cancelled") {
-    return { title: "已停止", mark: "muted", phase: false };
-  }
-  if (status === "paused") {
-    return { title: "", mark: "paused", phase: true };
-  }
-  if (status === "running") {
-    return { title: "", mark: "run", phase: true };
-  }
-  return { title: "", mark: "ok", phase: false };
-}
-
 /**
  * 完工的一行账：子任务 n/m、用时、花费。
  *
@@ -309,13 +295,17 @@ function teamStripMeta(args: {
   progress: { completed: number; total: number };
   status: TurnStatus | null | undefined;
   elapsedMs: number;
+  /** Partial verdict already lives in the strip title — don't repeat 部分完成 in meta. */
+  skipPartialBit?: boolean;
 }): string {
-  const { workers, progress, status, elapsedMs } = args;
+  const { workers, progress, status, elapsedMs, skipPartialBit } = args;
   const bits: string[] = [];
   // 「N 个 Agent」已删——与图/列表上成员重复；保留子任务 n/m。
   bits.push(`${progress.completed}/${progress.total} 子任务`);
-  const failed = workers.filter((r) => r.status === "failed").length;
-  if (failed > 0) bits.push(`${failed} 失败`);
+  const failedBit = teamFailureProgressBit(workers);
+  if (failedBit && !(skipPartialBit && failedBit === PARTIAL_NOTICE)) {
+    bits.push(failedBit);
+  }
   // 用时 = 回合墙钟跨度。曾按队员时长求和，并行越多数字越大。
   if (elapsedMs > 0 && status !== "running") {
     bits.push(`用时 ${formatDuration(elapsedMs)}`);
@@ -359,6 +349,9 @@ export function TeamView({
   workerToolPhases,
   evidenceLedger = [],
   elapsedMs = 0,
+  outcome = null,
+  supportIds,
+  onRetry,
 }: {
   agents: ProjectedAgent[];
   runs: ProjectedRun[];
@@ -389,6 +382,10 @@ export function TeamView({
   /** 回合墙钟跨度（`turnElapsedMs(turn.events)`）：条上「用时」。绝不用队员时长求和
    *  顶替，那是工时，并行越多数字越大。缺省 0 = 不显示用时。 */
   elapsedMs?: number;
+  /** Arbiter verdict: when `surface==="strip"` this bar is the primary failure face. */
+  outcome?: TurnOutcome | null;
+  supportIds?: SupportDiagnosticIds;
+  onRetry?: () => void;
 }) {
   // 深度检视单个队员 (RunDetail): tapping a RunCard opens a detail panel pinned to this run. The
   // panel navigates to another run (修订链切换 / 关系跳转) by swapping the selected id — the run
@@ -413,13 +410,15 @@ export function TeamView({
   const pct =
     progress.total > 0 ? (progress.completed / progress.total) * 100 : 0;
   const notesDefaultOpen = teamNotesDefaultExpanded(status, teamNotes);
-  const strip = teamStripFace(status);
+  const strip = teamStripFace(status, outcome);
   const stripMeta = teamStripMeta({
     workers,
     progress,
     status,
     elapsedMs,
+    skipPartialBit: outcome?.kind === "partial",
   });
+  const stripOwnsVerdict = outcome?.surface === "strip";
   const showDebateEntry = isDebate;
   const synthesisBlurbs = workers
     .filter((r) => r.status === "completed" && !!r.outputSummary)
@@ -537,6 +536,16 @@ export function TeamView({
               {expanded ? "▾" : "▸"}
             </button>
           </div>
+          {stripOwnsVerdict && outcome ? (
+            <div className="team-strip-verdict">
+              <TurnOutcomeActions
+                outcome={outcome}
+                supportIds={supportIds ?? {}}
+                onRetry={onRetry}
+                hideNotice={!!outcome.notice && outcome.notice === strip.title}
+              />
+            </div>
+          ) : null}
         </div>
         <div className="team-bar">
           <span className="team-bar-fill" style={{ width: `${pct}%` }} />

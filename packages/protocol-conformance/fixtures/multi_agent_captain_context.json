@@ -256,6 +256,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队。 已完成。",
     "reasoning": "",

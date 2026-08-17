@@ -131,7 +131,7 @@ def test_partial_with_blocking_gaps_injects():
     assert "新目标优先" in text
     assert "continue_from_run_id" in text
     assert "整锅重派" in text
-    assert "已验收" in text
+    assert "路径已核" in text
 
 
 def test_blocked_with_blocking_gaps_injects():

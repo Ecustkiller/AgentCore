@@ -15,6 +15,7 @@ import {
   type ColdResumeKind,
   isColdResumeKind,
 } from "@/lib/coldInteractions";
+import { pickKickoffRevisionFields } from "@/lib/kickoffRevision";
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -159,6 +160,7 @@ export function entryToPausedSummary(
   // team_preview
   return {
     ...base,
+    ...pickKickoffRevisionFields(p),
     workers: arr(p.workers) as PausedTurnSummary["workers"],
     tools: arr(p.tools).filter((t): t is string => typeof t === "string"),
     sides: arr(p.sides) as PausedTurnSummary["sides"],
@@ -209,6 +211,12 @@ export function pausedSummaryToRequiredPayload(
   if (paused.workers) payload.workers = paused.workers;
   if (paused.tools) payload.tools = paused.tools;
   if (paused.sides) payload.sides = paused.sides;
+  const lineage = pickKickoffRevisionFields(
+    paused as unknown as Record<string, unknown>,
+  );
+  if (lineage.revision != null) payload.revision = lineage.revision;
+  if (lineage.revised_from) payload.revised_from = lineage.revised_from;
+  if (lineage.revision_note) payload.revision_note = lineage.revision_note;
   const loose = paused as PausedTurnSummary & Record<string, unknown>;
   if (typeof loose.moderator_run_id === "string" && loose.moderator_run_id) {
     payload.moderator_run_id = loose.moderator_run_id;
@@ -288,9 +296,11 @@ export function selectVisibleColdResumes(args: {
 
   for (const entry of byId.values()) {
     if (entry.conversationId !== conversationId) continue;
-    if (entry.status !== "pending" && entry.status !== "submitting") continue;
     if (!isColdResumeKind(entry.kind)) continue;
     if (!entry.id || !entry.payload) continue;
+    const actionable =
+      entry.status === "pending" || entry.status === "submitting";
+    if (!actionable) continue;
     const resumeKey = resolveColdResumeKeyFromHosts(hosts, entry.messageId);
     if (!resumeKey) continue;
     const turn = entryToPausedSummary(entry, resumeKey, {

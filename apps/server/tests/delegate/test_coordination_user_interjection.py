@@ -82,6 +82,26 @@ def test_user_interjection_sse_carries_attachments():
     assert ev.payload["status"] == "received"
 
 
+def test_user_interjection_sse_carries_agent_mentions():
+    mentions = [{"agent_id": "agent_research", "role": "研究员"}]
+    ev = user_interjection(
+        interjection_id="inj-m",
+        execution_id="exec-m",
+        content="让研究员再核一遍",
+        status="received",
+        agent_mentions=mentions,
+    )
+    assert ev.payload["agent_mentions"] == mentions
+    empty = user_interjection(
+        interjection_id="inj-empty",
+        execution_id="exec-m",
+        content="无点名",
+        status="received",
+        agent_mentions=[],
+    )
+    assert "agent_mentions" not in empty.payload
+
+
 def test_interjection_attachment_meta_drops_text():
     meta = interjection_attachment_meta(
         [
@@ -129,6 +149,33 @@ def test_inject_brief_lists_attachment_paths():
     assert "attachments/成本表.xlsx" in brief
     assert "（二进制）" in brief
     assert "secret" not in brief
+
+
+def test_inject_brief_lists_agent_mentions():
+    session = CoordinationSession(execution_id="e", total_workers=2)
+    session.stash_interjection(
+        "inj-m",
+        {
+            "content": "让研究员再核一遍",
+            "agent_mentions": [{"agent_id": "agent_research", "role": "研究员"}],
+        },
+    )
+    brief = format_coordination_events(
+        session,
+        [
+            CoordinationEvent(
+                kind=CoordinationEventKind.USER_INTERJECTION,
+                payload={
+                    "interjection_id": "inj-m",
+                    "content": "让研究员再核一遍",
+                },
+            )
+        ],
+    )
+    assert "让研究员再核一遍" in brief
+    assert "用户点名关注以下 Agent（软提示，非强制派单/非硬路由）" in brief
+    assert "- 研究员 (id=agent_research)" in brief
+    assert "<agent_mentions>" in brief
 
 
 @pytest.mark.asyncio
@@ -346,7 +393,7 @@ async def test_note_interjections_injected_emits_injected_status():
             "requires_tools": False,
         },
     )
-    note_interjections_injected(
+    await note_interjections_injected(
         session,
         [
             CoordinationEvent(
@@ -385,7 +432,7 @@ async def test_update_synthesis_addresses_awaiting_interjection():
             "requires_tools": False,
         },
     )
-    note_interjections_injected(
+    await note_interjections_injected(
         session,
         [
             CoordinationEvent(
@@ -444,7 +491,7 @@ async def _awaiting_session(iid: str, content: str) -> tuple[CoordinationSession
             "requires_tools": False,
         },
     )
-    note_interjections_injected(
+    await note_interjections_injected(
         session,
         [
             CoordinationEvent(

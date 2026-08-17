@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from pydantic import ValidationError
 
-from agentcore.api.schemas.messages import SendMessageRequest
+from agentcore.api.schemas.messages import AgentMention, SendMessageRequest
 from agentcore.runtime.events import EventSink, EventType
 from agentcore.runtime.turn.queue import new_queued_turn, turn_queue
 from agentcore.runtime.turn.runs import turn_runs
@@ -418,6 +418,8 @@ async def test_list_queued_turns_route_empty_interjection_and_isolation(monkeypa
         content="插话升队",
         user_id="u",
         interjection_id="inj-list-1",
+        attachments=[{"name": "note.md", "path": "note.md", "text": "hi"}],
+        agent_mentions=[{"agent_id": "agent_research", "role": "研究员"}],
     )
     other = new_queued_turn(content="另一会话", user_id="u", interjection_id="inj-other")
     turn_queue.enqueue(cid_a, plain)
@@ -439,6 +441,12 @@ async def test_list_queued_turns_route_empty_interjection_and_isolation(monkeypa
         assert resp_a.items[1].content == "插话升队"
         assert resp_a.items[1].position == 2
         assert resp_a.items[1].interjection_id == "inj-list-1"
+        assert resp_a.items[1].attachments[0].name == "note.md"
+        assert resp_a.items[1].agent_mentions == [
+            AgentMention(agent_id="agent_research", role="研究员")
+        ]
+        assert resp_a.items[0].attachments == []
+        assert resp_a.items[0].agent_mentions == []
 
         resp_b = await messages_mod.list_queued_turns(
             conversation_id=cid_b,

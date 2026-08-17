@@ -81,6 +81,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "收到，继续推进交付。",
     "reasoning": "",

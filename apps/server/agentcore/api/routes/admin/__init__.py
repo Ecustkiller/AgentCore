@@ -19,6 +19,7 @@ from . import (
     notices,
     observability,
     overview,
+    platform_credentials,
     simulation_show,
     system,
     usage,
@@ -33,6 +34,7 @@ router.include_router(overview.router)
 router.include_router(users.router)
 router.include_router(usage.router)
 router.include_router(system.router)
+router.include_router(platform_credentials.router)
 router.include_router(audit_logs.router)
 router.include_router(agent_audit.router)
 router.include_router(conversations.router)

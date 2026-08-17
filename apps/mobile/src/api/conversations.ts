@@ -63,10 +63,14 @@ export interface MessageDetail {
   evidenceLedger?: TurnEvidenceLedgerEntry[];
   runs: RunsPayload | null;
   attachments?: AttachmentMeta[];
+  /** Conversation-page ``@`` role chips (REST ``agent_mentions``; 旁路 attachments). */
+  agentMentions?: { agentId: string; role: string }[];
   /** Progressive assistant-row lifecycle (``usage.status`` · P4 hydrate). */
   status?: "running" | "complete" | "incomplete" | "failed" | null;
   /** Cold-path pause latch (``usage.paused``): hydrate as paused, not streaming. */
   paused?: boolean | null;
+  /** Turn result quality (``usage.outcome``). ``paused`` = CEO continue face. */
+  outcome?: "ok" | "partial" | "paused" | "error" | null;
   /** 回合 ¥ 成本 (P2 DERIVED)：messages.cost 列；重载 footer 直接用。 */
   cost?: Schemas["CostBreakdown"] | null;
   /** 消息来源（如 execution_harvest 系统收口）；正文前缀为旧数据兜底. */
@@ -367,10 +371,17 @@ export function toMessageDetail(row: Schemas["MessageDetail"]): MessageDetail {
           : null,
     status,
     paused: paused || null,
+    outcome: row.outcome ?? null,
     attachments: row.attachments?.map((a) => ({
       name: a.name,
       truncated: a.truncated,
     })),
+    agentMentions: row.agent_mentions?.length
+      ? row.agent_mentions.map((a) => ({
+          agentId: a.agent_id,
+          role: a.role,
+        }))
+      : undefined,
     cost: row.cost ?? null,
     origin: row.origin ?? null,
     recovered: row.recovered ?? null,

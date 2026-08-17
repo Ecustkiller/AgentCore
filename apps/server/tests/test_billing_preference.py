@@ -89,6 +89,26 @@ def test_platform_models_empty_allowlist_skips_membership_check():
     )
     assert cfg.platform_model == "deepseek-v4-flash"
 
+
+def test_production_go_flash_allowlist_membership_and_curated_card():
+    """现网 allowlist 仅付费 Flash：membership 过 fail-fast，且必须有 CNY curated 卡。"""
+    from agentcore.config.platform import PlatformSettings
+    from agentcore.llm.pricing import has_curated_pricing
+    from agentcore.llm.profiles import DEEPSEEK_V4_FLASH
+
+    assert has_curated_pricing(DEEPSEEK_V4_FLASH)
+    cfg = PlatformSettings(
+        platform_base_url="https://opencode.ai/zen/go/v1",
+        platform_model=DEEPSEEK_V4_FLASH,
+        platform_models=DEEPSEEK_V4_FLASH,
+        platform_background_model=DEEPSEEK_V4_FLASH,
+    )
+    assert cfg.platform_base_url == "https://opencode.ai/zen/go/v1"
+    assert cfg.platform_model == DEEPSEEK_V4_FLASH
+    assert cfg.platform_models == DEEPSEEK_V4_FLASH
+    assert cfg.platform_background_model == DEEPSEEK_V4_FLASH
+
+
 def _mock_provider_default(monkeypatch, *, user, row):
     """Wire resolve's UserRepository + UserLlmProviderRepository for the default provider."""
     monkeypatch.setattr(

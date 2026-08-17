@@ -568,6 +568,8 @@ class DebateTool:
         from agentcore.runtime.kickoff import (
             await_kickoff,
             debate_kickoff_summary,
+            has_unfulfilled_kickoff_adjust,
+            kickoff_turn_journal,
             should_kickoff,
         )
         from agentcore.runtime.sandbox_approval import worker_gate_applies
@@ -579,10 +581,14 @@ class DebateTool:
         auto_adopt = tool_may_auto_debate(self)
         # Debate always wants the plan half at top-level; capability half is False
         # for read-only debaters (local_gate tools aren't grantable for debate).
+        unfulfilled_adjust = has_unfulfilled_kickoff_adjust(
+            kickoff_turn_journal(sink=self._sink)
+        )
         if not should_kickoff(
             plan_preview=True,
             local_gate=local_gate,
             axes=axes,
+            unfulfilled_adjust=unfulfilled_adjust,
         ):
             # team_kickoff=skip 本就全跳；仍计一次自治自动开辩（上限降级用）。
             if auto_adopt:

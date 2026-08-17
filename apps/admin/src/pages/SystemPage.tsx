@@ -1,3 +1,4 @@
+import { PlatformCredentialsCard } from "@/components/PlatformCredentialsCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Card, Page, PageHeader, SectionHeader } from "@/components/ui/Page";
@@ -78,7 +79,7 @@ export function SystemPage() {
     <Page>
       <PageHeader
         title="系统状态"
-        description="只读部署快照 · 计费模式、全局配额、数据库健康、版本"
+        description="部署快照 · 计费模式、全局配额、数据库健康、版本 · 平台额度账号池"
         actions={
           <Button
             variant="outline"
@@ -226,6 +227,8 @@ export function SystemPage() {
               <Row label="管理员">{fmtInt(data.admins)}</Row>
             </StatusCard>
           </Refreshing>
+
+          <PlatformCredentialsCard />
         </div>
       )}
     </Page>

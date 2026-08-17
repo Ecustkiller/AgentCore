@@ -1,0 +1,18 @@
+# 云端 gVisor 沙箱 Python（系统 site-packages；不是应用依赖，不进 uv.lock）。
+# 单一事实源：Dockerfile `pip install -r` 本文件；code_execute 工具描述同源读取。
+# 不钉版本——升级随镜像重建。
+#
+# 选型：大众文档场景（pptx/docx/xlsx 生成 + 数据分析 + 图表 + PDF）。
+# pdfplumber：PDF 抽表。pypdf 按页抽文本，会把表格一行拆成多行，不要当抽表主路径。
+# 否决（体积 / 额外系统依赖 / 已覆盖 / 非大众场景）：
+# camelot、PyMuPDF、pytesseract、geopandas、scipy、pyarrow、xlrd、py7zr。
+python-pptx
+python-docx
+openpyxl
+pandas
+numpy
+matplotlib
+reportlab
+pypdf
+pillow
+pdfplumber

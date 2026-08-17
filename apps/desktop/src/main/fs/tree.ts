@@ -4,9 +4,12 @@ import type {
   FsCreateKind,
   FsEntry,
   FsFileRef,
+  FsListFilesOrder,
+  FsListFilesResult,
   FsResult,
 } from "@shared/ipc-contract";
 import { LIST_FILES_CAP, LIST_FILES_MAX_DEPTH } from "./constants";
+import { loadIgnore } from "./loadIgnore";
 import { fromErrno, fsErr, locate, realFail, realInside } from "./pathGuard";
 import { ensureReady } from "./roots";
 import { resolveWritable } from "./workspace/write";
@@ -21,30 +24,65 @@ export type CollectedWorkspaceFile = FsFileRef & {
   sizeBytes: number;
 };
 
+/** `order: "recent"` 收齐路径后的并发 stat 上限；默认 path 序不 stat。 */
+const STAT_CONCURRENCY = 32;
+
+type WalkedFile = CollectedWorkspaceFile & { abs: string };
+
+async function fillMtimesLimited(
+  files: WalkedFile[],
+  concurrency: number,
+): Promise<void> {
+  if (files.length === 0) return;
+  let next = 0;
+  const worker = async () => {
+    while (true) {
+      const i = next;
+      next += 1;
+      if (i >= files.length) return;
+      const item = files[i];
+      try {
+        const st = await fs.stat(item.abs);
+        item.mtimeMs = st.mtimeMs;
+        item.sizeBytes = st.size;
+      } catch {
+        // unreadable stat → zeros; recent sort sinks to the bottom
+      }
+    }
+  };
+  const n = Math.min(concurrency, files.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+}
+
 /**
  * 工作区扁平文件索引（共享走法）：广度优先逐层展开 `real` 根，受深度（`LIST_FILES_MAX_DEPTH`）
- * 与总数（`LIST_FILES_CAP`）双重限制；跳过依赖/构建/VCS 目录，不跟随符号链接（避免环路与越界）。
- * `truncated` 表示命中 cap 截断。@ 提及检索（`listFiles`）与 worker 工作区清单（`opIndexFiles`）
- * 共用同一套走法，使本地根与云端 `ServerWorkspace.index_files` 呈现一致的扁平视图。
+ * 与总数（`LIST_FILES_CAP`）双重限制；跳过依赖/构建/VCS 目录与根 `.gitignore`，不跟随符号链接
+ * （避免环路与越界）。`truncated` 表示命中 cap 截断。@ 提及检索（`listFiles`）与 worker
+ * 工作区清单（`opIndexFiles`）共用同一套走法，使本地根与云端 `ServerWorkspace.index_files`
+ * 呈现一致的扁平视图。
  *
- * `order`：`"path"`（默认）= 字母序；`"recent"` = 按 mtime 倒序（需 stat）。
- * `fingerprint`：为 true 时对本机文件 `stat` 填 `mtimeMs`/`sizeBytes`（供服务端跳过未变文件）；
- * @ 提及走法默认 false、且 path 序下不 stat（延迟敏感）。`recent` 本身要 mtime，等同会 stat。
+ * `order`：`"path"`（默认）= 字母序且不 stat；`"recent"` = 按 mtime 倒序。
+ * `fingerprint`：为 true 时对本机文件当场 `stat` 填 `mtimeMs`/`sizeBytes`（供服务端跳过未变文件）。
+ * @ 提及走法默认 false。`recent` 收齐路径后以有限并发 stat（避免 OneDrive 占位上数千次串行）；
+ * 不是二段式异步加载。文件/目录判别只信 dirent，不为此 stat 全量。
+ * `cap`：覆盖 `LIST_FILES_CAP`（测试 / 有界扫描）；未传则用默认上限。
  */
 export async function collectWorkspaceFiles(
   real: string,
   order: "path" | "recent" = "path",
-  opts?: { fingerprint?: boolean },
+  opts?: { fingerprint?: boolean; cap?: number },
 ): Promise<{ files: CollectedWorkspaceFile[]; truncated: boolean }> {
   const recent = order === "recent";
-  const needStat = recent || opts?.fingerprint === true;
-  const collected: CollectedWorkspaceFile[] = [];
+  const fingerprint = opts?.fingerprint === true;
+  const cap = opts?.cap ?? LIST_FILES_CAP;
+  const ig = await loadIgnore(real);
+  const collected: WalkedFile[] = [];
   let truncated = false;
   const stack: Array<{ abs: string; rel: string; depth: number }> = [
     { abs: real, rel: "", depth: 0 },
   ];
   while (stack.length > 0) {
-    if (collected.length >= LIST_FILES_CAP) {
+    if (collected.length >= cap) {
       truncated = true;
       break;
     }
@@ -61,6 +99,7 @@ export async function collectWorkspaceFiles(
       const childRel = cur.rel ? `${cur.rel}/${d.name}` : d.name;
       if (d.isDirectory()) {
         if (shouldSkipWorkspaceEntry(d.name, true, cur.rel)) continue;
+        if (ig.ignores(`${childRel}/`)) continue;
         if (cur.depth + 1 <= LIST_FILES_MAX_DEPTH) {
           stack.push({
             abs: join(cur.abs, d.name),
@@ -70,15 +109,19 @@ export async function collectWorkspaceFiles(
         }
       } else if (d.isFile()) {
         if (shouldSkipWorkspaceEntry(d.name, false, cur.rel)) continue;
+        if (ig.ignores(childRel)) continue;
+        const abs = join(cur.abs, d.name);
         let mtimeMs = 0;
         let sizeBytes = 0;
-        if (needStat) {
+        // fingerprint 当场 stat（worker 清单要 size）；path 序不 stat。
+        // recent 收齐后再有限并发 stat，见 walk 结束后的 fillMtimesLimited。
+        if (fingerprint) {
           try {
-            const st = await fs.stat(join(cur.abs, d.name));
+            const st = await fs.stat(abs);
             mtimeMs = st.mtimeMs;
             sizeBytes = st.size;
           } catch {
-            // unreadable stat → zeros; recent sort sinks to the bottom
+            // unreadable stat → zeros
           }
         }
         collected.push({
@@ -86,20 +129,32 @@ export async function collectWorkspaceFiles(
           name: d.name,
           mtimeMs,
           sizeBytes,
+          abs,
         });
-        if (collected.length >= LIST_FILES_CAP) {
+        if (collected.length >= cap) {
           truncated = true;
           break;
         }
       }
     }
   }
+  if (recent && !fingerprint) {
+    await fillMtimesLimited(collected, STAT_CONCURRENCY);
+  }
   if (recent) {
     collected.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
   } else {
     collected.sort((a, b) => a.relPath.localeCompare(b.relPath, "zh"));
   }
-  return { files: collected, truncated };
+  return {
+    files: collected.map(({ relPath, name, mtimeMs, sizeBytes }) => ({
+      relPath,
+      name,
+      mtimeMs,
+      sizeBytes,
+    })),
+    truncated,
+  };
 }
 
 export async function listDir(
@@ -151,17 +206,29 @@ export async function listDir(
 
 export async function listFiles(
   rootId: string,
-): Promise<FsResult<FsFileRef[]>> {
+  opts?: { order?: FsListFilesOrder; cap?: number },
+): Promise<FsResult<FsListFilesResult>> {
   await ensureReady();
   const loc = locate(rootId, "");
   if ("error" in loc) return loc.error;
   const real = await realInside(loc.root, loc.abs);
   if (!real.ok) return realFail(real);
   try {
-    const { files } = await collectWorkspaceFiles(real.path);
+    const order = opts?.order ?? "path";
+    const recent = order === "recent";
+    const { files, truncated } = await collectWorkspaceFiles(
+      real.path,
+      order,
+      opts?.cap != null ? { cap: opts.cap } : undefined,
+    );
     return {
       ok: true,
-      data: files.map(({ relPath, name }) => ({ relPath, name })),
+      data: {
+        files: files.map(({ relPath, name, mtimeMs }) =>
+          recent ? { relPath, name, mtimeMs } : { relPath, name },
+        ),
+        truncated,
+      },
     };
   } catch (e) {
     return fromErrno(e);

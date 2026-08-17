@@ -2,22 +2,112 @@
 
 from __future__ import annotations
 
+from agentcore.core.error_codes import ErrorCode
+from agentcore.core.errors import LLMRateLimitError, mark_llm_leaf_exhausted
+from agentcore.llm.errors import error_context_from
+from agentcore.runtime.delegate.delivery_status import build_delivery_status
 from agentcore.runtime.events import (
     FinishReason,
     SSEEvent,
     content_delta,
     content_reset,
     delivery_status,
+    error_event,
     message_end,
     message_start,
     run_completed,
+    run_failed,
     run_plan,
     run_started,
     tool_use_end,
     tool_use_start,
 )
+from agentcore.runtime.runs.error_signal import run_error_signal
+from agentcore.runtime.runs.plan import RunPlan
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
+from agentcore.tools.builtin.file_ops.integrity import format_artifact_manifest
+from agentcore.tools.file_products import product_kind_for_path
 
 from .._common import _CONV, _COST, _USAGE
+
+# 生产实测（trace 933d81fea6cf4b278ee6ce1e0d607e86）：叶层用尽后的限流是
+# ``retry_after=None`` / ``cooldown_source=local_backoff``——本地退避猜的秒数
+# 不得进用户可见文案，也不得冒充 ErrorContext.retry_after（上游 Retry-After）。
+_RATE_LIMIT_RETRY_AFTER = 4.0
+
+# Worker 落盘的三份 CSV（路径即交付账认列；正文只为 file_write 回执逐字对齐生产 manifest）。
+# CEO 汇总撞 429 后，把 delegate 交代渲染成回复（降级出口），不再丢成空泡。
+_RATE_LIMIT_CEO_DEBRIEF = (
+    "已落盘 订单.csv、明细.csv、汇总.csv。数据分析队员因上游限流失败，未完成其余交付。"
+)
+_RATE_LIMIT_CSV_FILES: tuple[tuple[str, str], ...] = (
+    ("订单.csv", "id,amount\n1,100\n"),
+    ("明细.csv", "id,sku,qty\n1,A,2\n"),
+    ("汇总.csv", "sku,qty\nA,2\n"),
+)
+
+
+def _exhausted_rate_limit_signal():
+    """叶层用尽后的限流信号：``exc.retryable`` 已翻 False，但 ``llm_failure_class`` 仍瞬时。
+
+    引擎仍带着本地退避秒数（``self.retry_after``）；来源默认 unknown，文案与
+    线上 ``retry_after`` 都不报这个数。
+    """
+    exc = LLMRateLimitError(retry_after=_RATE_LIMIT_RETRY_AFTER)
+    mark_llm_leaf_exhausted(exc)
+    return run_error_signal(exc)
+
+
+def _csv_file_write_events(run_id: str) -> list[SSEEvent]:
+    """三连 ``file_write`` —— 回执走生产 ``format_artifact_manifest``，禁手写占位 output。"""
+    events: list[SSEEvent] = []
+    for i, (path, content) in enumerate(_RATE_LIMIT_CSV_FILES, start=1):
+        kind = product_kind_for_path(path)
+        events.append(
+            tool_use_start(
+                f"tc{i}",
+                "file_write",
+                {"path": path, "content": content},
+                run_id=run_id,
+            )
+        )
+        events.append(
+            tool_use_end(
+                f"tc{i}",
+                "file_write",
+                success=True,
+                output=format_artifact_manifest(
+                    path=path,
+                    content=content,
+                    chars_written=len(content),
+                    kind=kind,
+                ),
+                run_id=run_id,
+            )
+        )
+    return events
+
+
+def _landed_rate_limit_delivery_payload(error: str) -> dict:
+    """FAILED + ``files_touched`` 无验收戳 → 生产 ``build_delivery_status`` 的 partial 账。
+
+    历史 bug：落盘账认 3 个文件、交付账却 blocked / artifacts_count=0。此处不手写 payload，
+    直接调产出该事件的后端，回退那条修复时本向量的 delivery_status 会跟着变脏。
+    """
+    paths = [path for path, _ in _RATE_LIMIT_CSV_FILES]
+    plan = RunPlan(nodes=[RunSpec(run_id="r1", task="导出三份 CSV", role="数据分析")])
+    results = {
+        "r1": RunState(
+            phase=RunPhase.FAILED,
+            error=error,
+            files_touched=paths,
+            file_acceptance=[],
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="exec_rl")
+    if payload is None:
+        raise RuntimeError("rate-limit landed worker must emit delivery_status")
+    return payload
 
 
 def _multi_agent_delivery_status_partial() -> list[SSEEvent]:
@@ -289,4 +379,142 @@ def _multi_agent_pptx_promised_md_only() -> list[SSEEvent]:
         content_reset("finish_guard"),
         content_delta("讲稿与生成脚本已就绪；pptx 尚未生成，请绑定本机执行环境后运行脚本。"),
         message_end(FinishReason.END_TURN, input_tokens=2100, output_tokens=420, cost=_COST),
+    ]
+
+
+def _multi_agent_worker_rate_limit_partial() -> list[SSEEvent]:
+    """委派回合：一个 worker 落盘 3 个 CSV 后撞上游 429；CEO 汇总再撞 429。
+
+    生产实测 trace ``933d81fea6cf4b278ee6ce1e0d607e86``。钉四处刚落地的修复：
+
+    1. 该 worker 全链路只有一帧终态（历史：同 ``run_id`` 两帧 ``run_failed``，fold
+       last-write-wins → 直播 2 帧、重载 1 帧）。
+    2. ``run_failed`` 带 ``error_code=LLM_RATE_LIMIT`` / ``retryable=true``
+       （叶层用尽后限流仍是瞬时；判据 ``llm_failure_class``，不是
+       ``exc.retryable``）。未 attested 的退避秒数不进 ``retry_after``。
+    3. ``delivery_status`` 为 partial 且认到 3 个产物（历史：blocked / artifacts_count=0）。
+    4. CEO 汇总 429 后把 delegate 交代渲染成回复（``outcome=partial``，正文非空）；
+       仍保留 ``error`` SSE。引擎 salvage 后 ``finish_reason=degraded``。
+    """
+    signal = _exhausted_rate_limit_signal()
+    error = str(signal.exc)
+    ds = _landed_rate_limit_delivery_payload(error)
+    return [
+        message_start("m1", conversation_id=_CONV),
+        # CEO 首轮直接 delegate，汇总轮再撞 429 → 气泡正文为空（失败脸是唯一用户面）。
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "数据分析"}]}),
+        run_plan(
+            execution_id="exec_rl",
+            plan_type="multi_agent",
+            task_summary="导出三份 CSV",
+            agents=[{"id": "w1", "role": "数据分析", "thinking": True}],
+            runs=[{"id": "r1", "agent_id": "w1", "task": "导出三份 CSV", "depends_on": []}],
+        ),
+        run_started("r1", "w1"),
+        *_csv_file_write_events("r1"),
+        run_failed(
+            "r1",
+            "w1",
+            error,
+            failure_kind="call",
+            execution_id="exec_rl",
+            product_landed=True,
+            error_code=signal.error_code or ErrorCode.LLM_RATE_LIMIT,
+            retryable=signal.retryable,
+            retry_after=signal.retry_after,
+        ),
+        delivery_status(
+            execution_id=ds["execution_id"],
+            state=ds["state"],
+            summary=ds["summary"],
+            delivered_files=list(ds["delivered_files"]),
+            gaps=list(ds["gaps"]),
+            actions=list(ds["actions"]),
+            artifacts=list(ds["artifacts"]),
+        ),
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output=_RATE_LIMIT_CEO_DEBRIEF,
+            partial_failure=True,
+        ),
+        error_event(
+            ErrorCode.LLM_RATE_LIMIT,
+            error,
+            context=error_context_from(signal.exc),
+        ),
+        content_delta(_RATE_LIMIT_CEO_DEBRIEF),
+        message_end(
+            FinishReason.DEGRADED,
+            input_tokens=2000,
+            output_tokens=80,
+            cost=_COST,
+            outcome="partial",
+        ),
+    ]
+
+
+def _multi_agent_ceo_rate_limit_paused() -> list[SSEEvent]:
+    """委派回合：worker 落盘后撞 429；delegate 已闭合；CEO 汇总再撞 429 → 暂停可续。
+
+    与 ``multi_agent_worker_rate_limit_partial`` 对照：那条是 CEO 收口成功的
+    partial；本条是无 attested 短冷却 / 冷却过长后的 CEO 限流，回合权威
+    ``outcome=paused``，无 ``*_required``、无系统收口用户行。
+    """
+    signal = _exhausted_rate_limit_signal()
+    error = str(signal.exc)
+    ds = _landed_rate_limit_delivery_payload(error)
+    return [
+        message_start("m1", conversation_id=_CONV),
+        tool_use_start("dc1", "delegate", {"tasks": [{"role": "数据分析"}]}),
+        run_plan(
+            execution_id="exec_rl",
+            plan_type="multi_agent",
+            task_summary="导出三份 CSV",
+            agents=[{"id": "w1", "role": "数据分析", "thinking": True}],
+            runs=[{"id": "r1", "agent_id": "w1", "task": "导出三份 CSV", "depends_on": []}],
+        ),
+        run_started("r1", "w1"),
+        *_csv_file_write_events("r1"),
+        run_failed(
+            "r1",
+            "w1",
+            error,
+            failure_kind="call",
+            execution_id="exec_rl",
+            product_landed=True,
+            error_code=signal.error_code or ErrorCode.LLM_RATE_LIMIT,
+            retryable=signal.retryable,
+            retry_after=signal.retry_after,
+        ),
+        delivery_status(
+            execution_id=ds["execution_id"],
+            state=ds["state"],
+            summary=ds["summary"],
+            delivered_files=list(ds["delivered_files"]),
+            gaps=list(ds["gaps"]),
+            actions=list(ds["actions"]),
+            artifacts=list(ds["artifacts"]),
+        ),
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output=_RATE_LIMIT_CEO_DEBRIEF,
+            partial_failure=True,
+        ),
+        error_event(
+            ErrorCode.LLM_RATE_LIMIT,
+            error,
+            context=error_context_from(signal.exc),
+        ),
+        content_delta(_RATE_LIMIT_CEO_DEBRIEF),
+        message_end(
+            FinishReason.PAUSED,
+            input_tokens=2000,
+            output_tokens=80,
+            cost=_COST,
+            outcome="paused",
+        ),
     ]

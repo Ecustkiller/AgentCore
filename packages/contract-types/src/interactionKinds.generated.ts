@@ -83,7 +83,7 @@ export const INTERACTION_KIND_WIRE: Readonly<Record<UserInteractionKind, Interac
   },
   "question_posted": {
     requiredEvent: "question_posted",
-    resolvedEvent: null,
+    resolvedEvent: "question_resolved",
     idField: "ask_id",
   },
   "stage_card": {

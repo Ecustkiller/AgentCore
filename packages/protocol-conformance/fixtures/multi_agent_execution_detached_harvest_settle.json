@@ -192,6 +192,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "后台调研结论如下：……",
     "reasoning": "",

@@ -17,21 +17,22 @@
 #   BACKUP_DIR       备份落点            （默认 $AGENTCORE_HOME/backups）
 #   BACKUP_KEEP      保留最近几份        （默认 14，轮转删更旧的 backup-*）
 #   COMPOSE_PROJECT  compose 项目名      （默认 agentcore）
-#   ENV_FILE         compose env 文件    （默认 $REPO_DIR/deploy/config/production.env）
+#   AGENTCORE_DEPLOY_DIR / ENV_FILE / ENVF  见同目录 deploy-paths.sh
 #   PG_USER / PG_DB  库用户 / 库名       （默认 agentcore / agentcore）
 
 set -euo pipefail
 
-AGENTCORE_HOME="${AGENTCORE_HOME:-/opt/agentcore}"
-# 根 .env：与 deploy-server.sh 同源约定（运维级变量）。
-if [[ -f "$AGENTCORE_HOME/.env" ]]; then
-  set -a; . "$AGENTCORE_HOME/.env"; set +a
+# 活栈 compose/env：deploy-paths.sh（backup.sh / restore.sh / deploy-server.sh 共用）。
+_ac_paths="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/deploy-paths.sh"
+if [[ ! -f "$_ac_paths" ]]; then
+  _ac_paths="${AGENTCORE_HOME:-/opt/agentcore}/repo/deploy/scripts/deploy-paths.sh"
 fi
-REPO_DIR="${REPO_DIR:-$AGENTCORE_HOME/repo}"
+# shellcheck source=deploy-paths.sh
+. "$_ac_paths"
+unset _ac_paths
 BACKUP_DIR="${BACKUP_DIR:-$AGENTCORE_HOME/backups}"
 BACKUP_KEEP="${BACKUP_KEEP:-14}"
 COMPOSE_PROJECT="${COMPOSE_PROJECT:-agentcore}"
-ENV_FILE="${ENV_FILE:-$REPO_DIR/deploy/config/production.env}"
 PG_USER="${PG_USER:-agentcore}"
 PG_DB="${PG_DB:-agentcore}"
 
@@ -40,19 +41,19 @@ warn() { printf '\033[33m[warn]\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[31m[error]\033[0m %s\n' "$*" >&2; }
 
 COMPOSE_FILES=(
-  -f "$REPO_DIR/deploy/docker-compose.server.yml"
-  -f "$REPO_DIR/deploy/docker-compose.app.yml"
+  -f "$DEPLOY_DIR/docker-compose.server.yml"
+  -f "$DEPLOY_DIR/docker-compose.app.yml"
 )
 dc() { docker compose -p "$COMPOSE_PROJECT" "${COMPOSE_FILES[@]}" --env-file "$ENV_FILE" "$@"; }
 
-[[ -f "$ENV_FILE" ]] || { err "env file not found: $ENV_FILE（从 production.env.example 复制并填值）"; exit 1; }
+[[ -f "$ENV_FILE" ]] || { err "env file not found: $ENV_FILE（设 AGENTCORE_DEPLOY_DIR 或 ENV_FILE 指向活栈 compose 目录）"; exit 1; }
 mkdir -p "$BACKUP_DIR"
 
 ts="$(date +%Y%m%d-%H%M%S)"
 out="$BACKUP_DIR/backup-$ts.sql.gz"
 tmp="$out.partial"
 
-log "AgentCore DB backup → $(basename "$out")"
+log "AgentCore DB backup → $(basename "$out")  deploy_dir=$DEPLOY_DIR env=$ENV_FILE"
 
 # pipefail 保证 pg_dump 失败时整条管道失败（gzip 不掩盖）。先写 .partial、成功才改名，
 # 避免被中断的半截文件冒充完整备份。

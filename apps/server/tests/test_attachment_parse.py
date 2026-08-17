@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import html
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,10 +14,12 @@ from agentcore.workspace.attachment_parse import (
     ATTACHMENT_INLINE_MAX_CHARS,
     ParseStatus,
     extract_office_bytes,
+    extract_table_preview,
     looks_like_scanned,
     parsed_copy_path,
     preparse_resident,
     should_preparse,
+    should_preview_table,
     truncate_for_prompt,
 )
 from agentcore.workspace.attachments import persist_attachments
@@ -34,6 +39,11 @@ def test_should_preparse_routing():
     assert should_preparse("a.csv") is False
     assert should_preparse("a.xls") is False
     assert should_preparse("photo.png") is False
+    assert should_preview_table("a.xlsx") is True
+    assert should_preview_table("a.csv") is True
+    assert should_preview_table("a.tsv") is True
+    assert should_preview_table("a.xls") is True
+    assert should_preview_table("a.pdf") is False
 
 
 def test_looks_like_scanned_and_truncate():
@@ -138,7 +148,7 @@ async def test_preparse_scanned_pdf_writes_notice(tmp_path: Path):
     assert "OCR" in note
 
 
-async def test_preparse_xlsx_skipped(tmp_path: Path):
+async def test_preparse_xlsx_invalid_has_no_body(tmp_path: Path):
     ws = _ws(tmp_path)
     (tmp_path / "attachments").mkdir()
     (tmp_path / "attachments" / "report.xlsx").write_bytes(b"PK\x03\x04")
@@ -155,8 +165,9 @@ async def test_preparse_xlsx_skipped(tmp_path: Path):
             }
         ],
     )
-    assert out[0]["parse_status"] == "skipped"
+    assert out[0]["parse_status"] == "failed"
     assert "parsed_workspace_path" not in out[0]
+    assert "table_preview" not in out[0]
     assert not (out[0].get("text") or "").strip()
     assert not (tmp_path / "attachments" / "report.xlsx.md").exists()
     # Original untouched.
@@ -214,6 +225,8 @@ async def test_context_preparsed_inline_and_large_truncation():
     assert "Hello world from docx extract" in out
     assert "pre-parsed → attachments/a.docx.md" in out
     assert "pre-parsed at upload" in out
+    assert "lossy for tabular content" in out
+    assert "Do not use this extract as the data source" in out
 
     huge_text = "Z" * (ATTACHMENT_INLINE_MAX_CHARS + 500)
     large = {
@@ -273,3 +286,187 @@ async def test_preparse_read_failure_is_failed_not_raise(tmp_path: Path):
     )
     assert result.status == ParseStatus.FAILED
     assert "read" in result.detail
+
+
+_SECRET_TAIL = "UNIQUE_TAIL_ROW_SHOULD_NOT_ENTER_PROMPT"
+
+
+def _wide_csv(*, rows: int = 20) -> str:
+    lines = ["date,amount,memo"]
+    for i in range(1, rows + 1):
+        memo = _SECRET_TAIL if i == rows else f"item-{i}"
+        lines.append(f"2024-01-{i:02d},{i * 1.5:.1f},{memo}")
+    return "\n".join(lines) + "\n"
+
+
+def _col_letter(index: int) -> str:
+    text = ""
+    number = index + 1
+    while number:
+        number, rem = divmod(number - 1, 26)
+        text = chr(65 + rem) + text
+    return text
+
+
+def _minimal_xlsx(headers: list[str], rows: list[list[object]]) -> bytes:
+    ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    pkg = "http://schemas.openxmlformats.org/package/2006/relationships"
+    ct = "http://schemas.openxmlformats.org/package/2006/content-types"
+
+    def cell(ref: str, value: object) -> str:
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return f'<c r="{ref}"><v>{value}</v></c>'
+        escaped = html.escape(str(value), quote=True)
+        return f'<c r="{ref}" t="inlineStr"><is><t>{escaped}</t></is></c>'
+
+    sheet_rows: list[str] = []
+    for r_i, row in enumerate([headers, *rows], start=1):
+        cells = "".join(cell(f"{_col_letter(c)}{r_i}", value) for c, value in enumerate(row))
+        sheet_rows.append(f'<row r="{r_i}">{cells}</row>')
+    sheet = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<worksheet xmlns="{ns}"><sheetData>{"".join(sheet_rows)}</sheetData></worksheet>'
+    )
+    workbook = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<workbook xmlns="{ns}" xmlns:r="{rel}">'
+        f'<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>'
+        f"</workbook>"
+    )
+    rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="{pkg}">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="xl/workbook.xml"/>'
+        "</Relationships>"
+    )
+    wb_rels = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Relationships xmlns="{pkg}">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" '
+        'Target="worksheets/sheet1.xml"/>'
+        "</Relationships>"
+    )
+    ctypes = (
+        f'<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Types xmlns="{ct}">'
+        '<Default Extension="rels" '
+        'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/xl/workbook.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+        '<Override PartName="/xl/worksheets/sheet1.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+        "</Types>"
+    )
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("[Content_Types].xml", ctypes)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("xl/workbook.xml", workbook)
+        zf.writestr("xl/_rels/workbook.xml.rels", wb_rels)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet)
+    return buf.getvalue()
+
+
+def test_extract_table_preview_csv_structure_hides_tail():
+    body = _wide_csv(rows=20)
+    result = extract_table_preview(body.encode("utf-8"), ".csv")
+    assert result.status == ParseStatus.OK
+    assert result.preview is not None
+    sheet = result.preview.sheets[0]
+    assert [col.name for col in sheet.columns] == ["date", "amount", "memo"]
+    assert sheet.row_count == 20
+    types = {col.name: col.inferred_type for col in sheet.columns}
+    assert types["date"] == "date"
+    assert types["amount"] == "float"
+    assert types["memo"] == "string"
+    assert len(sheet.sample_rows) == 5
+    dumped = str(result.preview.to_dict())
+    assert _SECRET_TAIL not in dumped
+    assert "item-1" in dumped
+
+
+def test_extract_table_preview_xlsx_structure_hides_tail():
+    rows: list[list[object]] = []
+    for i in range(1, 21):
+        memo = _SECRET_TAIL if i == 20 else f"item-{i}"
+        rows.append([f"2024-01-{i:02d}", i * 1.5, memo])
+    result = extract_table_preview(_minimal_xlsx(["date", "amount", "memo"], rows), ".xlsx")
+    assert result.status == ParseStatus.OK
+    assert result.preview is not None
+    sheet = result.preview.sheets[0]
+    assert sheet.row_count == 20
+    assert [col.name for col in sheet.columns] == ["date", "amount", "memo"]
+    dumped = str(result.preview.to_dict())
+    assert _SECRET_TAIL not in dumped
+
+
+def test_extract_table_preview_xls_unsupported():
+    result = extract_table_preview(b"\xd0\xcf\x11\xe0" + b"\x00" * 20, ".xls")
+    assert result.status == ParseStatus.FAILED
+    assert result.preview is None
+    assert "xls_unsupported" in result.detail
+
+
+async def test_persist_csv_structure_does_not_inline_full_table(tmp_path: Path):
+    ws = _ws(tmp_path)
+    body = _wide_csv(rows=20)
+    out = await persist_attachments(
+        ws, [{"name": "ledger.csv", "path": "/local/ledger.csv", "text": body}]
+    )
+    assert out[0]["workspace_path"] == "attachments/ledger.csv"
+    assert out[0]["parse_status"] == "ok"
+    assert not (out[0].get("text") or "").strip()
+    preview = out[0]["table_preview"]
+    assert preview["sheets"][0]["row_count"] == 20
+    assert [c["name"] for c in preview["sheets"][0]["columns"]] == ["date", "amount", "memo"]
+    assert _SECRET_TAIL not in str(preview)
+    on_disk = (tmp_path / "attachments" / "ledger.csv").read_text(encoding="utf-8")
+    assert _SECRET_TAIL in on_disk
+
+    ctx = await _build_attachment_context(out, available_tools=frozenset())
+    assert ctx is not None
+    assert "[table / structure]" in ctx
+    assert "rows: 20" in ctx
+    assert "date:date" in ctx
+    assert "amount:float" in ctx
+    assert _SECRET_TAIL not in ctx
+    assert "includes code_execute" not in ctx
+    assert "with code_execute" not in ctx
+
+
+async def test_persist_xlsx_structure_does_not_inline_full_table(tmp_path: Path):
+    ws = _ws(tmp_path)
+    (tmp_path / "attachments").mkdir()
+    rows: list[list[object]] = []
+    for i in range(1, 21):
+        memo = _SECRET_TAIL if i == 20 else f"item-{i}"
+        rows.append([f"2024-01-{i:02d}", i * 1.5, memo])
+    raw = _minimal_xlsx(["date", "amount", "memo"], rows)
+    (tmp_path / "attachments" / "ledger.xlsx").write_bytes(raw)
+    out = await persist_attachments(
+        ws,
+        [
+            {
+                "name": "ledger.xlsx",
+                "path": "attachments/ledger.xlsx",
+                "text": "",
+                "binary": True,
+                "workspace_path": "attachments/ledger.xlsx",
+            }
+        ],
+    )
+    assert out[0]["parse_status"] == "ok"
+    assert not (out[0].get("text") or "").strip()
+    assert _SECRET_TAIL not in str(out[0]["table_preview"])
+    ctx = await _build_attachment_context(out, available_tools=frozenset())
+    assert ctx is not None
+    assert "[table / structure]" in ctx
+    assert "rows: 20" in ctx
+    assert _SECRET_TAIL not in ctx
+    assert "includes code_execute" not in ctx
+    assert "with code_execute" not in ctx

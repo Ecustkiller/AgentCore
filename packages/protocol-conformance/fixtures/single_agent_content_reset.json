@@ -114,6 +114,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "依据 [1] 可知……",
     "reasoning": "先查资料再作答。",

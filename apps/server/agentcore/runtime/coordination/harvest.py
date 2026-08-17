@@ -36,6 +36,20 @@ _HARVEST_MAX_ATTEMPTS = 60
 
 async def harvest_detached_execution(session: CoordinationSession) -> None:
     """Complete journal terminal facts and launch the system closing turn."""
+    logger.info(
+        "coordination.harvest_detached_started",
+        execution_id=session.execution_id,
+        conversation_id=session.conversation_id or "",
+        turn_attached=session.turn_attached,
+    )
+    if getattr(session, "host_turn_paused", False):
+        logger.info(
+            "coordination.harvest_skipped_host_paused",
+            execution_id=session.execution_id,
+            conversation_id=session.conversation_id or "",
+        )
+        _close_detached_session(session)
+        return
     if session.turn_attached:
         # Do not leave a false ``harvest_scheduled`` / ``settled_via=harvest`` that
         # blocks release_prefers_harvest — re-arm must remain possible.

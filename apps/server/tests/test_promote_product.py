@@ -1,4 +1,4 @@
-"""成品归位（``promote_product``）：CEO 把已验收成品从 AI 工作间移进用户工作区。
+"""成品归位（``promote_product``）：CEO 把路径已核成品从 AI 工作间移进用户工作区。
 
 Hermetic：真 ``ServerWorkspace`` 落在 ``tmp_path``，断言磁盘真实结果——归位是**移动**
 不是标记，所以每个用例都查「旧路径没了 / 新路径在」，而不是只看回执文本。
@@ -146,7 +146,7 @@ async def test_rejected_and_unknown_paths_are_skipped(tmp_path: Path):
     assert (tmp_path / rejected).exists()
     assert not (tmp_path / "预算表.md").exists()
     assert not (tmp_path / "未验收.md").exists()
-    assert result.output.count("已验收清单") == 2
+    assert result.output.count("路径已核清单") == 2
 
 
 async def test_paths_outside_the_ai_workspace_are_skipped(tmp_path: Path):
@@ -392,7 +392,7 @@ async def test_journal_only_admits_accepted(tmp_path: Path, monkeypatch: pytest.
 
     assert result.success is True
     assert (tmp_path / rejected).exists()
-    assert "已验收清单" in result.output
+    assert "路径已核清单" in result.output
 
 
 async def test_second_promotion_reads_the_rewritten_card_and_keeps_prior_rows(

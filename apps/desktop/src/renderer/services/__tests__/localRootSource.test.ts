@@ -35,13 +35,16 @@ describe("createLocalRootSource lazy workspace", () => {
     expect(listDir).toHaveBeenCalledWith("r1", "我的对话");
   });
 
-  it("subpath source: base not_found → listFileIndex returns []", async () => {
+  it("subpath source: base not_found → listFileIndex returns empty listing", async () => {
     listDir.mockResolvedValue(fail("not_found", "文件或目录不存在"));
     const src = createLocalRootSource("r1", "chat", "我的对话");
     expect(src.listFileIndex).toBeDefined();
     const listFileIndex = src.listFileIndex;
     if (listFileIndex == null) throw new Error("expected listFileIndex");
-    await expect(listFileIndex()).resolves.toEqual([]);
+    await expect(listFileIndex()).resolves.toEqual({
+      files: [],
+      truncated: false,
+    });
     expect(listFiles).not.toHaveBeenCalled();
   });
 
@@ -60,6 +63,46 @@ describe("createLocalRootSource lazy workspace", () => {
     await expect(src.listDir("")).rejects.toMatchObject({
       code: "out_of_root",
     });
+  });
+});
+
+describe("createLocalRootSource listFileIndex", () => {
+  let listDir: ReturnType<typeof vi.fn>;
+  let listFiles: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    listDir = vi.fn();
+    listFiles = vi.fn();
+    (globalThis as unknown as { window: { fsApi: Partial<FsApi> } }).window = {
+      fsApi: {
+        listDir: listDir as FsApi["listDir"],
+        listFiles: listFiles as FsApi["listFiles"],
+      },
+    };
+  });
+
+  it("requests recent order and passes files/truncated/mtime through", async () => {
+    listFiles.mockResolvedValue({
+      ok: true,
+      data: {
+        files: [
+          { relPath: "a.ts", name: "a.ts", mtimeMs: 20 },
+          { relPath: "b.ts", name: "b.ts", mtimeMs: 5 },
+        ],
+        truncated: true,
+      },
+    });
+    const src = createLocalRootSource("r1", "project", "");
+    const listFileIndex = src.listFileIndex;
+    if (listFileIndex == null) throw new Error("expected listFileIndex");
+    await expect(listFileIndex()).resolves.toEqual({
+      files: [
+        { relPath: "a.ts", mtimeMs: 20 },
+        { relPath: "b.ts", mtimeMs: 5 },
+      ],
+      truncated: true,
+    });
+    expect(listFiles).toHaveBeenCalledWith("r1", { order: "recent" });
   });
 });
 

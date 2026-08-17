@@ -1,3 +1,7 @@
+import {
+  installAccountStateIngress,
+  resetAccountStateIngressForTests,
+} from "@/services/accountStateIngress";
 import { ApiError, api } from "@/services/api";
 import {
   cancelQueuedTurn,
@@ -7,7 +11,7 @@ import {
 import { sendMidFlightMessage } from "@/services/turns/midFlight";
 import { useConversationStore } from "@/stores/conversation";
 import { useQueuedTurnsStore } from "@/stores/queuedTurns";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/services/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/services/api")>();
@@ -19,6 +23,17 @@ vi.mock("@/services/api", async (importOriginal) => {
 
 vi.mock("@/services/turns/midFlight", () => ({
   sendMidFlightMessage: vi.fn(),
+}));
+
+let cloudCb: ((frame: unknown) => void) | null = null;
+
+vi.mock("@/services/fulfillStream", () => ({
+  onFulfillFrame: (cb: (frame: unknown) => void) => {
+    cloudCb = cb;
+    return () => {
+      cloudCb = null;
+    };
+  },
 }));
 
 const post = vi.mocked(api.post);
@@ -61,10 +76,30 @@ function seedQueuedWithBubble() {
   });
 }
 
+const SNAPSHOT_ATTACHMENTS = [
+  {
+    name: "brief.txt",
+    path: "attachments/brief.txt",
+    text: "brief body",
+    truncated: false,
+    kind: "file" as const,
+    workspace_path: "attachments/brief.txt",
+  },
+];
+const SNAPSHOT_MENTIONS = [{ agent_id: "agent-research", role: "研究员" }];
+
 beforeEach(() => {
   post.mockReset();
   sendMidFlight.mockReset();
   useConversationStore.setState({ currentConversationId: null, byId: {} });
+  useQueuedTurnsStore.setState({ byConversation: {} });
+  resetAccountStateIngressForTests();
+  cloudCb = null;
+  installAccountStateIngress();
+});
+
+afterEach(() => {
+  resetAccountStateIngressForTests();
   useQueuedTurnsStore.setState({ byConversation: {} });
 });
 
@@ -155,6 +190,135 @@ describe("steerQueuedTurn", () => {
       "please jump",
       undefined,
       "steer",
+      undefined,
+      undefined,
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("排队时带附件 + 点名 → 取消插队重发后两者都还在", async () => {
+    useConversationStore.getState().switchConversation(CID);
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: CID,
+        items: [
+          {
+            queue_id: "q1",
+            content: "请按附件看",
+            position: 1,
+            attachments: SNAPSHOT_ATTACHMENTS,
+            agent_mentions: SNAPSHOT_MENTIONS,
+          },
+        ],
+      },
+    });
+    post.mockResolvedValueOnce({});
+    sendMidFlight.mockResolvedValueOnce({
+      kind: "received",
+      interjectionId: "ij1",
+    });
+
+    await steerQueuedTurn(CID, "q1");
+
+    expect(sendMidFlight).toHaveBeenCalledTimes(1);
+    expect(sendMidFlight).toHaveBeenCalledWith(
+      CID,
+      "请按附件看",
+      [
+        expect.objectContaining({
+          name: "brief.txt",
+          path: "attachments/brief.txt",
+          text: "brief body",
+          workspace_path: "attachments/brief.txt",
+        }),
+      ],
+      "steer",
+      SNAPSHOT_MENTIONS,
+      undefined,
+    );
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+  });
+
+  it("跨重启：store 为空、仅账号快照时插队重发仍带附件与点名", async () => {
+    expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
+    useConversationStore.getState().switchConversation(CID);
+    cloudCb?.({
+      type: "turn_queue_account_snapshot",
+      payload: {
+        queues: [
+          {
+            conversation_id: CID,
+            items: [
+              {
+                queue_id: "q-restart",
+                content: "请按附件看",
+                position: 1,
+                attachments: SNAPSHOT_ATTACHMENTS,
+                agent_mentions: SNAPSHOT_MENTIONS,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    post.mockResolvedValueOnce({});
+    sendMidFlight.mockResolvedValueOnce({
+      kind: "received",
+      interjectionId: "ij-restart",
+    });
+
+    await steerQueuedTurn(CID, "q-restart");
+
+    expect(sendMidFlight).toHaveBeenCalledTimes(1);
+    expect(sendMidFlight).toHaveBeenCalledWith(
+      CID,
+      "请按附件看",
+      [
+        expect.objectContaining({
+          name: "brief.txt",
+          path: "attachments/brief.txt",
+          workspace_path: "attachments/brief.txt",
+        }),
+      ],
+      "steer",
+      SNAPSHOT_MENTIONS,
+      undefined,
+    );
+  });
+
+  it("排队时带 askId → 取消插队重发后仍带上", async () => {
+    useConversationStore.getState().switchConversation(CID);
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: CID,
+        items: [
+          {
+            queue_id: "q1",
+            content: "也要 PDF。",
+            position: 1,
+            ask_id: "ask1",
+          },
+        ],
+      },
+    });
+    post.mockResolvedValueOnce({});
+    sendMidFlight.mockResolvedValueOnce({
+      kind: "received",
+      interjectionId: "ij1",
+    });
+
+    await steerQueuedTurn(CID, "q1");
+
+    expect(sendMidFlight).toHaveBeenCalledTimes(1);
+    expect(sendMidFlight).toHaveBeenCalledWith(
+      CID,
+      "也要 PDF。",
+      undefined,
+      "steer",
+      undefined,
+      "ask1",
     );
     expect(useQueuedTurnsStore.getState().list(CID)).toEqual([]);
   });

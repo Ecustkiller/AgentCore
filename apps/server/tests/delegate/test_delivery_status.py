@@ -834,6 +834,58 @@ def test_maybe_emit_gates_and_emits():
     assert events[0].payload["state"] == "delivered"
 
 
+def test_maybe_emit_same_execution_same_conclusion_once(monkeypatch):
+    """finalize 幂等：同一 sink + execution + 结论只发一次事件、只打一次 emitted 日志。"""
+    from agentcore.runtime.delegate import delivery_status as mod
+    from tests.conftest import LogSpy
+
+    spy = LogSpy()
+    monkeypatch.setattr(mod, "logger", spy)
+    sink = EventSink()
+    plan = _plan(RunSpec(run_id="w1", task="写文件", role="工程师"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        )
+    }
+    maybe_emit_delivery_status(sink, plan, results, execution_id="e-idem")
+    maybe_emit_delivery_status(sink, plan, results, execution_id="e-idem")
+    events = [e for e in sink._history if e.type is EventType.DELIVERY_STATUS]
+    assert len(events) == 1
+    emitted = [name for name, _ in spy.events if name == "delegate.delivery_status_emitted"]
+    assert len(emitted) == 1
+
+
+def test_maybe_emit_same_execution_new_conclusion_reemits():
+    """结论变了（补跑覆盖）仍发第二条。"""
+    sink = EventSink()
+    plan = _plan(RunSpec(run_id="w1", task="写文件", role="工程师"))
+    first = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md"],
+            file_acceptance=_accepted("a.md"),
+        )
+    }
+    second = {
+        "w1": RunState(
+            phase=RunPhase.COMPLETED,
+            content="ok",
+            files_touched=["a.md", "b.md"],
+            file_acceptance=_accepted("a.md", "b.md"),
+        )
+    }
+    maybe_emit_delivery_status(sink, plan, first, execution_id="e-idem-2")
+    maybe_emit_delivery_status(sink, plan, second, execution_id="e-idem-2")
+    events = [e for e in sink._history if e.type is EventType.DELIVERY_STATUS]
+    assert len(events) == 2
+    assert events[1].payload["delivered_files"] == ["a.md", "b.md"]
+
+
 def test_maybe_emit_logs_empty_gate_counts(monkeypatch):
     """无物质静默仍打诊断日志：三个闸条件各自为 0，巡检可证「为何没出卡」。"""
     from agentcore.runtime.delegate import delivery_status as mod
@@ -1319,7 +1371,7 @@ def test_cite_failure_path_rejected_not_in_delivered_files():
 
 
 def test_failed_with_landed_files_rejected_in_artifacts():
-    """FAILED but files on disk → paths rejected in artifacts, not delivered_files."""
+    """FAILED + 正式 rejected 戳 → 产物在 artifacts（非 delivered_files）；有落盘 → partial。"""
     from agentcore.runtime.runs.file_acceptance import build_file_acceptance
 
     err = "`site/index.html`：交付正文含未替换占位符/硬信号"
@@ -1341,12 +1393,105 @@ def test_failed_with_landed_files_rejected_in_artifacts():
     payload = build_delivery_status(plan, results, execution_id="e-fail-land")
     assert payload is not None
     assert payload["delivered_files"] == []
-    assert payload["state"] == "blocked"
+    assert payload["state"] == "partial"
     assert {a["path"] for a in payload["artifacts"]} == {
         "site/index.html",
         "site/style.css",
     }
     assert all(a["status"] == "rejected" for a in payload["artifacts"])
+
+
+def test_priced_failure_landings_are_partial_not_blocked():
+    """异常构造点盖上的落盘账：workspace_native + 成功写入 + 队员失败 → partial。"""
+    from agentcore.llm.provider.protocol import LLMMessage, TokenUsage
+    from agentcore.runtime.runs.executor.shared import _priced_failure
+    from agentcore.runtime.runs.types import Deliverable
+    from agentcore.tools.file_products import file_product, with_file_products_marker
+
+    paths = ["收入.csv", "支出.csv", "汇总.csv"]
+    transcript = [
+        LLMMessage(
+            role="tool",
+            tool_call_id="w1",
+            content=with_file_products_marker("已写入", [file_product(p) for p in paths]),
+        )
+    ]
+    failed = _priced_failure(
+        "上游限流，暂时无法继续本回合。",
+        model="m",
+        usage=TokenUsage(),
+        rounds=2,
+        duration_ms=10,
+        transcript=transcript,
+    )
+    plan = _plan(
+        RunSpec(
+            run_id="w1",
+            task="整理成 CSV",
+            role="数据整理员",
+            deliverable=Deliverable(form="files", workspace_native=True),
+        )
+    )
+    payload = build_delivery_status(plan, {"w1": failed}, execution_id="e-priced-fail")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert payload["delivered_files"] == paths
+    assert [a["path"] for a in payload["artifacts"]] == paths
+    assert all(a["status"] == "accepted" for a in payload["artifacts"])
+    assert any(g.get("reason") == "node_failed" for g in payload["gaps"])
+
+
+def test_failed_undeclared_transcript_landings_count_as_partial():
+    """失败前 file_write 已 ok、未盖 file_acceptance → 计入交付账，state=partial。"""
+    from agentcore.llm.provider.protocol import LLMMessage
+    from agentcore.tools.file_products import file_product, with_file_products_marker
+
+    paths = ["sales.csv", "inventory.csv", "customers.csv"]
+    transcript = [
+        LLMMessage(
+            role="tool",
+            tool_call_id="c1",
+            content=with_file_products_marker("已写入", [file_product(p) for p in paths]),
+        )
+    ]
+    plan = _plan(RunSpec(run_id="w1", task="导出三表", role="分析"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.FAILED,
+            error="LLM hung after writes",
+            content="半成品",
+            files_touched=[],
+            file_acceptance=[],
+            transcript=transcript,
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-fail-tx")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert payload["delivered_files"] == paths
+    assert [a["path"] for a in payload["artifacts"]] == paths
+    assert all(a["status"] == "accepted" for a in payload["artifacts"])
+    assert any(g.get("reason") == "node_failed" for g in payload["gaps"])
+
+
+def test_failed_undeclared_files_touched_count_as_partial():
+    """FAILED + files_touched 无戳 → 同样计入交付账。"""
+    paths = ["a.csv", "b.csv", "c.csv"]
+    plan = _plan(RunSpec(run_id="w1", task="导出表", role="分析"))
+    results = {
+        "w1": RunState(
+            phase=RunPhase.FAILED,
+            error="boom",
+            content="半成品",
+            files_touched=paths,
+            file_acceptance=[],
+        )
+    }
+    payload = build_delivery_status(plan, results, execution_id="e-fail-ft")
+    assert payload is not None
+    assert payload["state"] == "partial"
+    assert payload["delivered_files"] == paths
+    assert [a["path"] for a in payload["artifacts"]] == paths
 
 
 def test_clean_completed_artifacts_all_accepted():

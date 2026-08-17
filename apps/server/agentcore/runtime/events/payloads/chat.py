@@ -157,6 +157,10 @@ class ToolUseEndPayload(WirePayload):
         "Model-facing technical text stays in result."
     )
     run_id: str | None = absent("Worker-call tag; absent for the captain's own calls.")
+    partial_failure: bool | None = absent(
+        "Delegate batch finished with FAILED/SKIPPED nodes (tool meta ``partial_failure``). "
+        "Absent when false / non-delegate."
+    )
 
 
 class TitleGeneratedPayload(WirePayload):
@@ -269,3 +273,9 @@ class MessageEndPayload(WirePayload):
     collab: TurnCollabMetrics | None = absent()
     # 回合墙钟用时 (主回复 meta)：与 chat.turn_complete / turn_metrics 同锚；可选，旧向量可省略。
     duration_ms: int | None = absent()
+    # 回合结果质量（与 finish_reason 正交）：ok | partial | paused | error。
+    # ``paused`` 本波不产出（产品面卡下一波才落）。旧向量可省略，fold 从批次表达位回推。
+    outcome: Literal["ok", "partial", "paused", "error"] | None = absent(
+        "Turn-level result quality, independent of finish_reason. "
+        "partial = landed product with gaps. paused is reserved (not produced this wave)."
+    )

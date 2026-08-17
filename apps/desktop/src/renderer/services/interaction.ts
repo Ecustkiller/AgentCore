@@ -40,12 +40,15 @@ export type ResolveInteractionOutcome = "settled" | "already_processed";
  * 挂起即收口 (②, Phase 3): `ask_user` / `plan_review` are no longer settled here — a CEO
  * checkpoint finalizes the turn and is continued via the cold `POST .../resume` path
  * (services/turns.ts), so their resolve schemas are gone from the backend union.
+ *
+ * `question_posted` 收口走本端点（OpenAPI `ResolveQuestionPostedInteraction`）。
  */
 export type ResolveInteractionBody =
   | Schemas["ResolveApprovalInteraction"]
   | Schemas["ResolveClientToolInteraction"]
   | Schemas["ResolveEscalationInteraction"]
-  | ResolveDelegationAuthorizationBody;
+  | ResolveDelegationAuthorizationBody
+  | Schemas["ResolveQuestionPostedInteraction"];
 
 /**
  * Settle a paused hot-path interaction over the transport that owns the awaiter.

@@ -51,6 +51,7 @@ from .memory_pipeline import MemoryPipelineRepository
 from .memory_updates import MemoryUpdateRepository
 from .messages import MessageRepository
 from .notices import ProductNoticeRepository
+from .platform_credentials import PlatformCredentialRepository
 from .runs import (
     HandoffJobRepository,
     PausedTurnRepository,
@@ -93,6 +94,7 @@ __all__ = [
     "MemoryUpdateRepository",
     "MessageRepository",
     "PausedTurnRepository",
+    "PlatformCredentialRepository",
     "ProductNoticeRepository",
     "PushDeviceRepository",
     "RefreshTokenRepository",

@@ -83,6 +83,17 @@ def test_not_this_send_does_not_delete():
     assert _yes(user_created_this_send=False) is False
 
 
+def test_paused_does_not_delete():
+    from agentcore.runtime.events import FinishReason
+
+    assert _yes(outcome="paused") is False
+    assert _yes(finish_reason="paused") is False
+    assert _yes(outcome="paused", finish_reason="paused") is False
+    assert _yes(finish_reason=FinishReason.PAUSED) is False
+    assert _yes(outcome="error") is True
+    assert _yes(finish_reason="error") is True
+
+
 def test_class_b_codes_are_the_small_set_and_disjoint_from_class_a():
     assert frozenset(
         {
@@ -150,6 +161,48 @@ def test_result_wrong_code_does_not_delete():
             _empty_fail_result(error_code=ErrorCode.LLM_KEY_REQUIRED),
             user_created_this_send=True,
         )
+        is False
+    )
+
+
+def test_result_paused_llm_rate_limit_does_not_delete():
+    """Empty-body LLM_RATE_LIMIT that already paused must keep the send."""
+    from agentcore.conversation.zero_output_rollback import (
+        result_from_local_turn_writeback,
+    )
+
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(outcome="paused"),
+            user_created_this_send=True,
+        )
+        is False
+    )
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(finish_reason="paused"),
+            user_created_this_send=True,
+        )
+        is False
+    )
+    assert (
+        should_delete_zero_output_send_result(
+            _empty_fail_result(outcome="paused", finish_reason="paused"),
+            user_created_this_send=True,
+        )
+        is False
+    )
+    mapped = result_from_local_turn_writeback(
+        message_id="a1",
+        content="",
+        runs={
+            "error": {"code": ErrorCode.LLM_RATE_LIMIT, "message": "限流"},
+            "outcome": "paused",
+            "finish_reason": "paused",
+        },
+    )
+    assert (
+        should_delete_zero_output_send_result(mapped, user_created_this_send=True)
         is False
     )
 
@@ -251,3 +304,104 @@ async def test_zero_output_deletes_share_one_commit(monkeypatch):
     assert session.commits == 1
     assert session.alive == set()
     assert [c["commit"] for c in repo.calls] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_local_finalize_and_writeback_leave_no_zero_output_turn(
+    tmp_path, monkeypatch
+):
+    """Sidecar this-send Class B empty-fail: outbox gone, write-back does not persist."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agentcore.conversation.local_turn import record_local_turn
+    from agentcore.conversation.store.outbox import (
+        PHASE_READY,
+        OutboxStore,
+        list_outbox_records,
+    )
+    from agentcore.sidecar.server_pkg.turns import TurnExecutionMixin
+
+    outbox = OutboxStore(tmp_path / "outbox")
+    umid = "u-local-zero"
+    mid = "a-local-zero"
+    outbox.bind_turn(
+        conversation_id="c1",
+        user_message_id=umid,
+        user_message="hello",
+        message_id=mid,
+        trace_id="a" * 32,
+    )
+    await outbox.begin_turn(conversation_id="c1", message_id=mid, trace_id="a" * 32)
+    assert list_outbox_records(tmp_path / "outbox")
+
+    host = TurnExecutionMixin.__new__(TurnExecutionMixin)
+    await host._outbox_finalize(
+        outbox,
+        conversation_id="c1",
+        user_message="hello",
+        user_message_id=umid,
+        trace_id="a" * 32,
+        result=_empty_fail_result(message_id=mid),
+        user_created_this_send=True,
+    )
+    assert list_outbox_records(tmp_path / "outbox") == []
+
+    umid_keep = "u-resume-keep"
+    mid_keep = "a-resume-keep"
+    outbox.bind_turn(
+        conversation_id="c1",
+        user_message_id=umid_keep,
+        user_message="hello",
+        message_id=mid_keep,
+        trace_id="a" * 32,
+    )
+    await outbox.begin_turn(
+        conversation_id="c1", message_id=mid_keep, trace_id="a" * 32
+    )
+    await host._outbox_finalize(
+        outbox,
+        conversation_id="c1",
+        user_message="hello",
+        user_message_id=umid_keep,
+        trace_id="a" * 32,
+        result=_empty_fail_result(message_id=mid_keep),
+        user_created_this_send=False,
+    )
+    kept = list_outbox_records(tmp_path / "outbox")
+    assert len(kept) == 1
+    assert kept[0]["user_message_id"] == umid_keep
+    assert kept[0]["phase"] == PHASE_READY
+
+    finalize = AsyncMock(side_effect=AssertionError("write-back must not persist"))
+    settle_calls: list[dict] = []
+
+    async def _settle(**kwargs):
+        settle_calls.append(kwargs)
+        return "settled"
+
+    monkeypatch.setattr(
+        "agentcore.conversation.local_turn.get_cloud_store",
+        lambda: SimpleNamespace(finalize=finalize),
+    )
+    monkeypatch.setattr(
+        "agentcore.conversation.question_resolve.settle_question_posted", _settle
+    )
+    recorded = await record_local_turn(
+        conversation_id="c1",
+        user_id="user-1",
+        user_message="hello",
+        assistant_content="",
+        runs={
+            "error": {"code": ErrorCode.LLM_RATE_LIMIT, "message": "限流"},
+            "finish_reason": "error",
+        },
+        user_message_id=umid,
+        message_id=mid,
+        trace_id="a" * 32,
+        finish_reason="error",
+    )
+    assert recorded["noop"] is True
+    assert recorded["assistant_message_id"] is None
+    finalize.assert_not_called()
+    assert settle_calls == []

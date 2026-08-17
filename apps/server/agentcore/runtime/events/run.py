@@ -415,6 +415,9 @@ def run_failed(
     debrief: dict[str, Any] | None = None,
     execution_id: str = "",
     product_landed: bool | None = None,
+    error_code: str | None = None,
+    retryable: bool | None = None,
+    retry_after: float | None = None,
 ) -> SSEEvent:
     payload: dict[str, Any] = {"run_id": run_id, "agent_id": agent_id, "error": error}
     # Additive machine-readable face class (quality/format/model/call). Omit when unknown so
@@ -434,6 +437,14 @@ def run_failed(
     # then upstream 503). Face →「产出已落盘」.
     if product_landed:
         payload["product_landed"] = True
+    # Additive transient/terminal signals (AgentCoreError.code / retryable / retry_after).
+    # Omit when unknown so old fixtures stay byte-identical.
+    if error_code:
+        payload["error_code"] = error_code
+    if retryable is not None:
+        payload["retryable"] = bool(retryable)
+    if retry_after is not None:
+        payload["retry_after"] = float(retry_after)
     return SSEEvent(type=EventType.RUN_FAILED, payload=payload)
 
 
@@ -628,6 +639,8 @@ def user_interjection(
     status: str = "received",
     note: str | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
+    ask_id: str | None = None,
 ) -> SSEEvent:
     """运行中用户插话（经典 steer + 协调插话共用契约）。
 
@@ -635,7 +648,13 @@ def user_interjection(
     协调图内处置 → ``addressed``；转 FIFO / 收口升格 → ``queued``；真失败 → ``failed``
     （同 ``interjection_id`` 保最新）。经典无 ``addressed``（``injected`` 即终态）。
     DURABLE——落 journal，刷新可回看。``attachments`` 为名字 + 路径 + 二进制标记。
+    ``agent_mentions`` 为软点名芯片（``{agent_id, role}``）；空则不上 wire。
+    ``ask_id`` 为非阻塞提问回程标识（与出站 ``question_posted.ask_id`` 对上）；
+    空则不上 wire，按普通插话消化——禁止塞进 ``agent_mentions``。
     """
+    from agentcore.conversation.ask_reply import normalize_ask_id
+    from agentcore.conversation.mentions import wire_agent_mentions
+
     payload: dict[str, Any] = {
         "interjection_id": interjection_id,
         "execution_id": execution_id,
@@ -646,6 +665,12 @@ def user_interjection(
         payload["note"] = note.strip()
     if attachments:
         payload["attachments"] = attachments
+    mentions = wire_agent_mentions(agent_mentions)
+    if mentions:
+        payload["agent_mentions"] = mentions
+    aid = normalize_ask_id(ask_id)
+    if aid:
+        payload["ask_id"] = aid
     return SSEEvent(type=EventType.USER_INTERJECTION, payload=payload)
 
 

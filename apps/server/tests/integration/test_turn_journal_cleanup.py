@@ -22,6 +22,7 @@ from agentcore.db.repositories import (
     MessageRepository,
     PausedTurnRepository,
     TurnJournalRepository,
+    TurnStreamStateRepository,
 )
 
 _ENTRIES = [{"kind": "run_plan", "payload": {}, "ts": "t"}]
@@ -171,6 +172,75 @@ async def test_delete_after_clears_only_truncated_paused_turns(session_factory):
         repo = PausedTurnRepository(s)
         assert await repo.get(keep) is not None
         assert await repo.get(drop) is None
+
+
+async def _seed_stream(s, *, mid: str, text: str = "partial") -> None:
+    await TurnStreamStateRepository(s).upsert(
+        turn_id=mid, channel="captain:content", text=text, generation=0
+    )
+
+
+async def test_conversation_hard_delete_clears_turn_stream_state(session_factory):
+    cid = str(uuid4())
+    m1, m2 = str(uuid4()), str(uuid4())
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=m1)
+        await _seed_turn(s, cid=cid, mid=m2)
+        await _seed_stream(s, mid=m1)
+        await _seed_stream(s, mid=m2)
+
+    async with session_factory() as s:
+        await ConversationRepository(s).hard_delete(cid)
+
+    async with session_factory() as s:
+        repo = TurnStreamStateRepository(s)
+        assert await repo.list_for_turn(m1) == []
+        assert await repo.list_for_turn(m2) == []
+
+
+async def test_delete_after_clears_only_truncated_stream_state(session_factory):
+    cid = str(uuid4())
+    keep, drop = str(uuid4()), str(uuid4())
+    t0 = datetime(2026, 1, 1, tzinfo=UTC)
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=keep)
+        await _seed_turn(s, cid=cid, mid=drop)
+        await _seed_stream(s, mid=keep, text="keep")
+        await _seed_stream(s, mid=drop, text="drop")
+        await s.execute(update(Message).where(Message.id == keep).values(created_at=t0))
+        await s.execute(
+            update(Message).where(Message.id == drop).values(created_at=t0 + timedelta(minutes=1))
+        )
+        await s.commit()
+
+    async with session_factory() as s:
+        assert await MessageRepository(s).delete_after(cid, after_created_at=t0) == 1
+
+    async with session_factory() as s:
+        repo = TurnStreamStateRepository(s)
+        kept = await repo.list_for_turn(keep)
+        assert len(kept) == 1 and kept[0].text == "keep"
+        assert await repo.list_for_turn(drop) == []
+
+
+async def test_delete_by_id_clears_stream_state_and_is_idor_safe(session_factory):
+    cid, other_cid = str(uuid4()), str(uuid4())
+    mid = str(uuid4())
+    async with session_factory() as s:
+        await _seed_turn(s, cid=cid, mid=mid)
+        await _seed_stream(s, mid=mid)
+
+    async with session_factory() as s:
+        hit = await MessageRepository(s).delete_by_id(mid, conversation_id=other_cid)
+    assert hit is False
+    async with session_factory() as s:
+        assert len(await TurnStreamStateRepository(s).list_for_turn(mid)) == 1
+
+    async with session_factory() as s:
+        hit = await MessageRepository(s).delete_by_id(mid, conversation_id=cid)
+    assert hit is True
+    async with session_factory() as s:
+        assert await TurnStreamStateRepository(s).list_for_turn(mid) == []
 
 
 async def test_delete_by_id_clears_journal_and_is_idor_safe(session_factory):

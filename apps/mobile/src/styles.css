@@ -821,6 +821,9 @@ button.link {
   white-space: normal;
   font-size: 15px;
   line-height: 1.55;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .md > :first-child {
@@ -3233,6 +3236,91 @@ dialog.run-detail::backdrop {
   color: var(--muted);
 }
 
+/* 悬题底栏：回合在跑、有题等你。禁止复用 .ask 强调色 / .pause 琥珀（那是「卡住了」）。 */
+.hanging-question-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.hanging-question-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.hanging-question-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.hanging-question-q {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: pre-wrap;
+}
+
+.hanging-question-context,
+.hanging-question-default,
+.hanging-question-detached,
+.hanging-question-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+
+.hanging-question-error {
+  color: var(--error);
+}
+
+.hanging-question-input {
+  min-height: 4.5rem;
+  width: 100%;
+  resize: vertical;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.hanging-question-input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--fg) 25%, var(--border));
+}
+
+.hanging-question-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.hanging-question-submit {
+  padding: 6px 12px;
+  font-size: 13px;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.hanging-question-submit:disabled {
+  opacity: 0.45;
+}
+
 .composer {
   display: flex;
   flex-shrink: 0;
@@ -3606,6 +3694,11 @@ dialog.run-detail::backdrop {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 180px;
+}
+
+.attach-chip-kind {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 
 .attach-chip-trunc {
@@ -4572,6 +4665,27 @@ dialog.dialog::backdrop {
   align-items: center;
 }
 
+.paused-continue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.paused-continue-verdict {
+  font-weight: 600;
+}
+
+.paused-continue-reason {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.paused-continue-head .retry-btn {
+  margin-top: 0;
+}
+
 .error.inline-actions .msg-copy-btn {
   flex-shrink: 0;
   margin-top: 0;
@@ -4662,6 +4776,25 @@ dialog.dialog::backdrop {
 }
 
 .pause-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.kickoff-revision {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kickoff-revision-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.kickoff-revision-diff {
+  margin: 0;
+  padding-left: 1.15em;
   font-size: 12px;
   color: var(--muted);
 }

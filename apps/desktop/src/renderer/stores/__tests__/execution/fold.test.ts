@@ -269,6 +269,29 @@ describe("projectExecution (fold)", () => {
     expect(exec.runs.find((s) => s.id === "run-2")?.error).toBeNull();
   });
 
+  it("folds run_failed error_code / retryable / retry_after", () => {
+    const frames: RunFrame[] = [
+      started("agent-1", "run-1"),
+      {
+        t: 2,
+        kind: "run_failed",
+        runId: "run-1",
+        agentId: "agent-1",
+        error: "上游限流，暂时无法继续本回合。请稍后再试。",
+        errorCode: "LLM_RATE_LIMIT",
+        retryable: true,
+        retryAfter: 4,
+        productLanded: true,
+      },
+    ];
+    const exec = projectExecution(plan, frames, "failed");
+    const run = exec.runs.find((s) => s.id === "run-1");
+    expect(run?.errorCode).toBe("LLM_RATE_LIMIT");
+    expect(run?.retryable).toBe(true);
+    expect(run?.retryAfter).toBe(4);
+    expect(run?.productLanded).toBe(true);
+  });
+
   it("folds llm abort run_failed off running (not stuck executing)", () => {
     // B: engine.llm_failed_terminal / partial_failure → run_failed must leave the
     // graph node in failed (not permanent「执行中」), with a readable error.

@@ -80,6 +80,8 @@ class CallCost:
     duration_ms: int
     persona: str | None = None
     cost_estimated_nano: int = 0
+    # Platform-pool member that funded this call. None on BYOK / vendor / legacy.
+    platform_credential_id: str | None = None
 
 
 def split_cost(cost: dict) -> tuple[dict[str, int | str], int, int, str]:

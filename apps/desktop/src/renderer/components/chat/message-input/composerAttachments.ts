@@ -1,8 +1,18 @@
+import { getConversations } from "@/hooks/useConversations";
+import { getFolders } from "@/hooks/useFolders";
 import type { EntryKind, IndexedEntry } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
+import {
+  buildLocalMentionPicks,
+  collectRootUseEvents,
+} from "@/services/mentionRoots";
+import { resolveConversationLocalTarget } from "@/services/sidecarRouting";
 import { createLocalRootSource } from "@/services/sources/localRootSource";
 import { createCloudWorkspaceSource } from "@/services/sources/workspaceSource";
-import { getWorkspaceBinding } from "@/services/workspaceBinding";
+import {
+  type WorkspaceBinding,
+  getWorkspaceBinding,
+} from "@/services/workspaceBinding";
 
 /** 已选附件（含正文，仅发送时携带；气泡只展示元信息）。 */
 export interface PendingAttachment {
@@ -153,22 +163,40 @@ export function pickRecentConversations(
 export async function buildMentionSources(
   conversationId: string | null,
 ): Promise<FileSource[]> {
-  const sources: FileSource[] = [];
-
+  let binding: WorkspaceBinding | null = null;
   if (conversationId) {
     try {
-      const binding = await getWorkspaceBinding(conversationId);
+      binding = await getWorkspaceBinding(conversationId);
       if (binding.mode === "cloud") {
-        sources.push(
-          createCloudWorkspaceSource(`conv:${conversationId}`, "工作区"),
-        );
+        return [createCloudWorkspaceSource(`conv:${conversationId}`, "工作区")];
       }
     } catch {
-      // Binding unknown — index local roots only.
+      binding = null;
     }
   }
 
-  const roots = (await window.fsApi?.listRoots()) ?? [];
-  for (const r of roots) sources.push(createLocalRootSource(r.id, r.name));
-  return sources;
+  const listed = (await window.fsApi?.listRoots()) ?? [];
+  const roots = listed.map((r) => ({
+    id: r.id,
+    name: r.name,
+    absPath: r.absPath,
+  }));
+
+  let subpath = "";
+  if (conversationId && binding?.mode === "local" && binding.rootId) {
+    try {
+      const target = await resolveConversationLocalTarget(conversationId);
+      if (target?.rootId === binding.rootId) subpath = target.subpath ?? "";
+    } catch {
+      // store/cache miss — index the bound root itself
+    }
+  }
+
+  const picks = buildLocalMentionPicks({
+    binding,
+    roots,
+    subpath,
+    uses: collectRootUseEvents(getConversations(), getFolders()),
+  });
+  return picks.map((p) => createLocalRootSource(p.id, p.label, p.subpath));
 }

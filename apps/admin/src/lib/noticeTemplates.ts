@@ -291,12 +291,12 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
   },
   {
     id: "quota_platform_restored",
-    label: "额度已恢复 · Flash Free",
-    description: "平台额度恢复 · 单模型 Flash Free（Zen）",
-    title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free",
+    label: "额度已恢复 · Flash",
+    description: "平台额度恢复 · 单模型 Flash（OpenCode Go）",
+    title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash",
     body: `平台测试额度已恢复（内测期提供测试额度）。
 
-当前平台模型：DeepSeek V4 Flash Free（经 OpenCode Zen；限时免费档，条款以 OpenCode 为准）。额度仍为每月 / 每日上限；用尽后可在「设置 · 模型配置」接入自己的 Key 继续使用。
+当前平台模型：DeepSeek V4 Flash（经 OpenCode Go 订阅上游，非免费档。该路上 DeepSeek 按 OpenCode Go 当期 zero-retention / 零留存条款，声明写到 2026-08-31 且按月续约，非永久承诺）。额度仍为每月 / 每日上限；用尽后可在「设置 · 服务商」接入自己的 Key 继续使用。
 
 如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
     severity: "normal",
@@ -316,10 +316,10 @@ ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归�
       const note = v.note?.trim();
       const noteBlock = note ? `\n补充：${note}\n` : "\n";
       return {
-        title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash Free",
+        title: "平台额度已恢复 · 当前仅 DeepSeek V4 Flash",
         body: `平台测试额度已恢复（内测期提供测试额度）。
 
-当前平台模型：DeepSeek V4 Flash Free（经 OpenCode Zen；限时免费档，条款以 OpenCode 为准）。额度仍为每月 / 每日上限；用尽后可在「设置 · 模型配置」接入自己的 Key 继续使用。
+当前平台模型：DeepSeek V4 Flash（经 OpenCode Go 订阅上游，非免费档。该路上 DeepSeek 按 OpenCode Go 当期 zero-retention / 零留存条款，声明写到 2026-08-31 且按月续约，非永久承诺）。额度仍为每月 / 每日上限；用尽后可在「设置 · 服务商」接入自己的 Key 继续使用。
 ${noteBlock}如有疑问，打开消息页「AgentCore 官方」查看本条归档。`,
       };
     },

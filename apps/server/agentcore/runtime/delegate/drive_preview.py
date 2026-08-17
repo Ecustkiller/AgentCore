@@ -32,7 +32,7 @@ async def team_preview_before_workers(
     delegation grant for later application.
     """
     playbook_name = str(getattr(tool, "_active_playbook", None) or "").strip()
-    if seed_completed is not None or tool._depth != 0:
+    if tool._depth != 0:
         return None
     from agentcore.core.types import DEFAULT_PERMISSION_AXES
     from agentcore.runtime.delegate.preview import (
@@ -40,18 +40,31 @@ async def team_preview_before_workers(
         needs_capability_auth,
         should_kickoff,
     )
+    from agentcore.runtime.kickoff.revision import (
+        has_unfulfilled_kickoff_adjust,
+        kickoff_turn_journal,
+    )
     from agentcore.runtime.sandbox_approval import worker_gate_applies
 
+    unfulfilled_adjust = has_unfulfilled_kickoff_adjust(
+        kickoff_turn_journal(sink=getattr(tool, "_sink", None))
+    )
+    # 续跑 / 同回合追加带 seed 通常跳卡；未兑现 adjust 必须再出卡（与 light 同缝）。
+    if seed_completed is not None and not unfulfilled_adjust:
+        return None
     axes = getattr(tool, "_permission_axes", None) or DEFAULT_PERMISSION_AXES
     local_gate = worker_gate_applies(tool._base_tool_context.backend)
     # light 通常跳过开工卡；若需 capability auth（kickoff grant），不早退——
     # 否则 GRANTABLE（mkdir 等）会静默挂在 ApprovalGate。
-    if complexity_hint == "light" and not needs_capability_auth(
-        local_gate=local_gate, axes=axes
+    # 未兑现 adjust 同样不早退：否则「改成一个人」会推断 light 后直接开跑。
+    if (
+        complexity_hint == "light"
+        and not unfulfilled_adjust
+        and not needs_capability_auth(local_gate=local_gate, axes=axes)
     ):
         return None
     if not should_kickoff(
-        plan, local_gate=local_gate, axes=axes
+        plan, local_gate=local_gate, axes=axes, unfulfilled_adjust=unfulfilled_adjust
     ):
         # Card skipped: still silent-grant when command=auto, OR when team_kickoff=skip
         # with command=kickoff (跳组团卡但仍开工授执行类；托管或自定义轴).
@@ -67,7 +80,8 @@ async def team_preview_before_workers(
         return None
     # ask_user checkpoint_resolved 不跳 team_preview（澄清卡 ⊥ 开工卡）。
     # 批 B：stage_card research_first 决议 → 当次 MLR 一次性 pre-auth（不得泛化）。
-    if playbook_name == "multi_lens_research":
+    # 未兑现 adjust 不消费、不跳卡——否则重排等待面与队员开跑叠在一起。
+    if playbook_name == "multi_lens_research" and not unfulfilled_adjust:
         from agentcore.runtime.kickoff.stage_card import (
             consume_mlr_preauth,
             mark_turn_keeps_stage_card,

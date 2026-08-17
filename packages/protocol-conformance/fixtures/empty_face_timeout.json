@@ -45,6 +45,7 @@
   "projected": {
     "status": "failed",
     "finishReason": "error",
+    "outcome": "error",
     "error": {
       "code": "LLM_TIMEOUT",
       "message": "连接超时，请检查网络后重试。"

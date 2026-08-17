@@ -11,6 +11,7 @@ import {
   frameFromEvent,
   planFromRunPlan,
   useExecutionStore,
+  userInterjectionFromPayload,
 } from "@/stores/execution";
 import {
   INTERACTION_BY_KIND,
@@ -306,60 +307,20 @@ export function handleExecutionEvent(
       return true;
     }
     case "user_interjection": {
-      const p = event.payload as {
-        interjection_id?: string;
-        execution_id?: string;
-        content?: string;
-        status?: string;
-        note?: string | null;
-        attachments?: Array<{
-          name?: string;
-          workspace_path?: string;
-          binary?: boolean;
-        }>;
-      };
-      const iid = (p.interjection_id || "").trim();
-      if (iid) {
-        const attachments = (p.attachments ?? [])
-          .filter(
-            (
-              a,
-            ): a is {
-              name: string;
-              workspace_path?: string;
-              binary?: boolean;
-            } => typeof a.name === "string" && Boolean(a.name.trim()),
-          )
-          .map((a) => ({
-            name: a.name.trim(),
-            workspacePath:
-              typeof a.workspace_path === "string" && a.workspace_path.trim()
-                ? a.workspace_path
-                : undefined,
-            binary: Boolean(a.binary),
-          }));
+      const leaf = userInterjectionFromPayload(event.payload);
+      if (leaf) {
         const mid = execMessageId(
           conversationId,
           routeHintFromPayload(event.payload),
         );
         if (mid) {
-          useExecutionStore.getState().upsertUserInterjection(
-            {
-              interjectionId: iid,
-              executionId: p.execution_id || "",
-              content: p.content || "",
-              status: p.status || "received",
-              note: typeof p.note === "string" ? p.note : null,
-              ...(attachments.length > 0 ? { attachments } : {}),
-            },
-            mid,
-          );
+          useExecutionStore.getState().upsertUserInterjection(leaf, mid);
         }
         // 零宽 positional marker：flush 缓冲正文后钉到当时 process 末尾（同 id dedup）。
         flushPendingContent(conversationId);
         useConversationStore
           .getState()
-          .stampUserInterjectionMarker(iid, conversationId);
+          .stampUserInterjectionMarker(leaf.interjectionId, conversationId);
       }
       return true;
     }

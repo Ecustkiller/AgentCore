@@ -68,6 +68,7 @@
         ],
         "max_rounds": 5,
         "thorough": true,
+        "revision": 1,
         "moderator_run_id": "debate_mod1"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
@@ -87,7 +88,7 @@
         "tool_call_id": "db1",
         "tool_name": "debate",
         "status": "success",
-        "result": "用户要求调整开赛方案，辩论未开赛。用户意见：先改命题再辩\n请按用户意见修订方案后重新调用 debate；修订后须再次经开赛确认，未获确认不得开赛。下一步是改方案并重新提交，而不是再问用户同一件事。"
+        "result": "用户要求调整开赛方案，辩论未开赛。用户意见：先改命题再辩\n请按用户意见修订方案后重新调用 debate；修订后须再次经开赛确认，未获确认不得开赛。若某条意见做不到，必须在新方案里明说做不到及原因，禁止静默忽略。下一步是改方案并重新提交，而不是再问用户同一件事。"
       },
       "timestamp": "2026-01-01T00:00:00.006Z"
     },
@@ -125,6 +126,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来组织一场辩论。好的，我按你的意见改开赛方案再提交。",
     "reasoning": "",

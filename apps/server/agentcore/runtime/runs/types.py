@@ -147,14 +147,14 @@ RunContract = Deliverable
 class RunPolicy:
     """Node-level policy slots.
 
-    第一阶段实际生效的只有 ``on_failure`` / ``max_retries`` / ``retry_delay_ms``
-    （WaveScheduler 调度时读取）与 ``result_handling``（执行器拼装下游上下文时读取）。
-    其余字段（contract / audit / preflight / candidates / trust / shared_roots /
-    concurrency_slot / autosave_artifact）为阶段2声明位，当前不影响行为。
+    第一阶段实际生效的：``on_failure``（Wave 只读它做级联：skip/abort/degrade/
+    retry 的「失败后怎么对待下游」）；``max_retries`` / ``retry_delay_ms``
+    （契约返工预算；瞬时限流不整节点重跑）；``result_handling``
+    （执行器拼装下游上下文）。其余字段为阶段2声明位，当前不影响行为。
     """
 
-    # on_failure (WaveScheduler enacts these):
-    #   retry   = re-run up to ``max_retries`` with backoff, then cascade-skip
+    # on_failure (Wave enacts cascade only; a transient does not remount):
+    #   retry   = record FAILED (one run_failed) then cascade-skip
     #             dependents (same cascade as skip — CEO replaces via replaces_run_id);
     #   skip    = cascade-skip every dependent (they never run unless revived);
     #   abort   = stop scheduling further waves;
@@ -384,14 +384,16 @@ class RunState:
     phase: RunPhase = RunPhase.QUEUED
     attempt: int = 0
     wave: int = 0
-    # 确定性失败区分 (BL-6): whether this run's failure is worth an infra retry. A
-    # deterministic failure — a non-retryable upstream error (prompt 超长 / 400 客户端
-    # 拒绝 / 401 鉴权 / 402 余额, all ``AgentCoreError.retryable=False``) — sets this
-    # False so the WaveScheduler skips its ``on_failure="retry"`` re-run: re-running an
-    # identical over-long prompt just re-fails and burns tokens. Contract hard-fails
-    # (retries already exhausted inside the executor) also set False. True (the default)
-    # for a transient failure (5xx / timeout / rate-limit) and for any COMPLETED run.
+    # 确定性失败区分 (BL-6): ``llm_failure_class`` — not leaf ``exc.retryable``.
+    # False = terminal (prompt 超长 / 400 / 鉴权 / 余额 / 合同硬失败 / 关客户端)：
+    # waiting will not help; do not 整跑. True (default) = transient (rate-limit
+    # stays True even after ``mark_llm_leaf_exhausted``) or any COMPLETED run.
+    # A transient FAILED + transcript is the seed for in-node / hot continue.
     error_retryable: bool = True
+    # Wire ``run_failed.error_code`` / ``retry_after`` (AgentCoreError semantics). Empty /
+    # None when the failure was not a coded upstream error (contract hard-fail, crash).
+    error_code: str = ""
+    error_retry_after: float | None = None
     content: str = ""
     # The run's thinking text (the last attempt's, parallel to ``content``). Carried
     # so the CAPTAIN root run hands its reasoning to the pipeline for persistence AND

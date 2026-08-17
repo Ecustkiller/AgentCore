@@ -370,6 +370,95 @@ def _multi_agent_user_interjection_with_attachments() -> list[SSEEvent]:
     ]
 
 
+def _multi_agent_user_interjection_with_mentions() -> list[SSEEvent]:
+    """带点名插话：received SSE 携带 agent_mentions（软芯片，非硬路由）。"""
+    agents, plan_runs = _agents_and_plan()
+    mentions = [{"agent_id": "agent_research", "role": "研究员"}]
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我来安排团队并行推进。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "研究员"}, {"role": "撰写员"}]},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="并行调研 + 撰写",
+            agents=agents,
+            runs=plan_runs,
+        ),
+        run_started("r1", "w1"),
+        run_started("r2", "w2"),
+        user_interjection(
+            interjection_id="inj-mention",
+            execution_id="exec1",
+            content="请让研究员再核一遍成本。",
+            status="received",
+            agent_mentions=mentions,
+        ),
+        user_interjection(
+            interjection_id="inj-mention",
+            execution_id="exec1",
+            content="请让研究员再核一遍成本。",
+            status="injected",
+            agent_mentions=mentions,
+        ),
+        tool_use_start(
+            "syn1",
+            "update_synthesis",
+            {"draft": "已收到点名补充：会让研究员核验成本。"},
+        ),
+        tool_use_end(
+            "syn1",
+            "update_synthesis",
+            success=True,
+            output="已更新合成草稿，用户可见「进展中」预览。",
+        ),
+        user_interjection(
+            interjection_id="inj-mention",
+            execution_id="exec1",
+            content="请让研究员再核一遍成本。",
+            status="addressed",
+            note="已在合成草稿中承接",
+            agent_mentions=mentions,
+        ),
+        team_synthesis_preview(
+            execution_id="exec1",
+            completed=0,
+            total=2,
+            headline="合成草稿更新 · 已完成 0/2",
+            text="已收到点名补充：会让研究员核验成本。",
+            workers=[],
+            in_progress=True,
+        ),
+        run_completed(
+            "r1",
+            "w1",
+            output_summary="完成调研",
+            duration_ms=1000,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        run_completed(
+            "r2",
+            "w2",
+            output_summary="完成撰写",
+            duration_ms=800,
+            role="member",
+            model="deepseek-v4-flash",
+            usage=_USAGE,
+            cost=_COST,
+        ),
+        tool_use_end("dc1", "delegate", success=True, output="团队已完成。"),
+        content_delta("团队已按你的点名补充交稿。"),
+        message_end(FinishReason.END_TURN, input_tokens=2000, output_tokens=400, cost=_COST),
+    ]
+
+
 def _multi_agent_solo_coordinate_interjection() -> list[SSEEvent]:
     """单 worker + 协调：非阻塞 kickoff → 执行期插话可达 → CEO cancel_worker。
 

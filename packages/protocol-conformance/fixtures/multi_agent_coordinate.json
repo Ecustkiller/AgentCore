@@ -276,6 +276,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队并行推进，并在波内协调。 团队已完成：接口与文档对齐，按方案 A 定稿。",
     "reasoning": "",

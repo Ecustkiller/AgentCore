@@ -155,6 +155,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "阶段成果如下。按复核结论继续交付。",
     "reasoning": "",

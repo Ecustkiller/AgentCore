@@ -21,6 +21,7 @@ from agentcore.runtime.events import (
     plan_review_required,
     plan_review_resolved,
     question_posted,
+    question_resolved,
     reasoning_delta,
     run_completed,
     run_output_delta,
@@ -204,6 +205,48 @@ def _single_agent_non_blocking_ask() -> list[SSEEvent]:
             context="默认仅 Markdown。",
         ),
         content_delta(" 已完成初稿。"),
+        message_end(FinishReason.END_TURN, input_tokens=1000, output_tokens=200, cost=_COST),
+    ]
+
+
+def _single_agent_non_blocking_ask_answered() -> list[SSEEvent]:
+    """悬着 → 已答：用户提交答复后 ``question_resolved(answered)`` 收口，三态对人可见。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我先按常见默认推进。"),
+        question_posted(
+            ask_id="ask1",
+            conversation_id=_CONV,
+            question="需要同时导出 PDF 吗？",
+            context="默认仅 Markdown。",
+        ),
+        content_delta(" 已完成初稿。"),
+        question_resolved(
+            ask_id="ask1",
+            status="answered",
+            answer="也要 PDF。",
+        ),
+        message_end(FinishReason.END_TURN, input_tokens=1000, output_tokens=200, cost=_COST),
+    ]
+
+
+def _single_agent_non_blocking_ask_discarded() -> list[SSEEvent]:
+    """悬着 → 已作废：CEO 收口声明（故障态）须带人话 ``note``，不得静默消失。"""
+    return [
+        message_start("m1", conversation_id=_CONV),
+        content_delta("我先按常见默认推进。"),
+        question_posted(
+            ask_id="ask1",
+            conversation_id=_CONV,
+            question="需要同时导出 PDF 吗？",
+            context="默认仅 Markdown。",
+        ),
+        content_delta(" 已完成初稿。"),
+        question_resolved(
+            ask_id="ask1",
+            status="discarded",
+            note="按默认只出 Markdown，后半等你回来再决定要不要 PDF。",
+        ),
         message_end(FinishReason.END_TURN, input_tokens=1000, output_tokens=200, cost=_COST),
     ]
 
@@ -842,6 +885,124 @@ def _team_preview_resolved_adjust() -> list[SSEEvent]:
     ]
 
 
+def _team_preview_resolved_adjust_pre_ttft() -> list[SSEEvent]:
+    """开工卡 adjust 后 CEO 续跑、尚未吐首 token。
+
+    生产冷恢复增量（服务端已核实）：``message_start``（复用原助手 id，无 ``full_replay``）
+    → ``team_preview_resolved(adjust)`` → 每个未跑 worker 一条 ``run_skipped(abort)``
+    → ``tool_use_end``（修订引导回灌）→ ``run_started(captain)``（复用同一 captain_run_id）。
+    本向量停在 captain ``run_started`` 之后、首个 ``reasoning_delta`` / ``content_delta`` /
+    ``tool_use_start`` 之前，供逐帧回放看见该窗口的气泡。
+
+    前缀不含 ``message_end(paused)``：与 sibling adjust 同构。挂起收口后再用无
+    ``full_replay`` 的同 id ``message_start`` 续折，oracle 会保留 ``finish_reason=paused``，
+    无法观察「续跑中、无新正文」中间态。``run_plan`` 按生产注入 captain 根节点，使续跑
+    ``run_started`` 能点亮同一 captain run。
+    """
+    from agentcore.runtime.delegate.plan_events import captain_card, captain_run
+    from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
+
+    cap = "c1"
+    note = "人太多，改成两人调研"
+    refeed = format_kickoff_adjust_result(primitive="delegate", note=note)
+    return [
+        message_start("m1", conversation_id=_CONV),
+        run_started(cap, cap, kind="captain"),
+        content_delta("我来安排团队。"),
+        tool_use_start(
+            "dc1",
+            "delegate",
+            {"tasks": [{"role": "调研"}, {"role": "撰写"}], "coordinate": False},
+        ),
+        run_plan(
+            execution_id="exec1",
+            plan_type="multi_agent",
+            task_summary="构建 X",
+            agents=[
+                captain_card(cap),
+                {"id": "w1", "role": "调研", "thinking": True},
+                {"id": "w2", "role": "撰写", "thinking": True},
+            ],
+            runs=[
+                captain_run(cap),
+                {"id": "r1", "agent_id": "w1", "task": "调研方案", "depends_on": []},
+                {"id": "r2", "agent_id": "w2", "task": "写初稿", "depends_on": ["r1"]},
+            ],
+        ),
+        team_preview_required(
+            checkpoint_id="tp1",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r1",
+                    "role": "调研",
+                    "task": "调研方案",
+                    "depends_on": [],
+                },
+                {
+                    "run_id": "r2",
+                    "role": "撰写",
+                    "task": "写初稿",
+                    "depends_on": ["r1"],
+                },
+            ],
+            tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
+        ),
+        message_start("m1", conversation_id=_CONV),
+        team_preview_resolved(checkpoint_id="tp1", decision="adjust", note=note),
+        run_skipped("r1", "w1", reason="abort"),
+        run_skipped("r2", "w2", reason="abort"),
+        tool_use_end("dc1", "delegate", success=True, output=refeed),
+        run_started(cap, cap, kind="captain"),
+    ]
+
+
+def _team_preview_revised_card() -> list[SSEEvent]:
+    """adjust 后修订成 1 人仍再出开工卡；新卡带 revision / revised_from / revision_note。"""
+    from agentcore.runtime.kickoff.adjust_guidance import format_kickoff_adjust_result
+
+    note = "人太多，改成一个人做"
+    refeed = format_kickoff_adjust_result(primitive="delegate", note=note)
+    first = _team_preview_finalized()[:-1]
+    return [
+        *first,
+        team_preview_resolved(checkpoint_id="tp1", decision="adjust", note=note),
+        tool_use_end("dc1", "delegate", success=True, output=refeed),
+        content_delta("按你的意见改成一人，请再确认。"),
+        tool_use_start(
+            "dc2",
+            "delegate",
+            {"tasks": [{"role": "写手", "task": "一个人做完"}]},
+        ),
+        run_plan(
+            execution_id="exec2",
+            plan_type="multi_agent",
+            task_summary="一人交付",
+            agents=[{"id": "w3", "role": "写手", "thinking": True}],
+            runs=[{"id": "r3", "agent_id": "w3", "task": "一个人做完", "depends_on": []}],
+        ),
+        team_preview_required(
+            checkpoint_id="tp2",
+            conversation_id=_CONV,
+            workers=[
+                {
+                    "run_id": "r3",
+                    "role": "写手",
+                    "task": "一个人做完",
+                    "depends_on": [],
+                }
+            ],
+            tools=["code_execute", "file_write", "test_run"],
+            primitive="delegate",
+            revision=2,
+            revised_from="tp1",
+            revision_note=note,
+        ),
+        message_end(FinishReason.PAUSED, input_tokens=1800, output_tokens=140, cost=_COST),
+    ]
+
+
 def _team_preview_exclude_one_continue() -> list[SSEEvent]:
     """开工组队有限否决：排除一人后 continue — resolved 投影带 excluded_run_ids。
 
@@ -1145,6 +1306,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
         "开工卡：adjust 不授权不开工、意见回灌 CEO（无 worker start）",
         _team_preview_resolved_adjust,
     ),
+    "team_preview_resolved_adjust_pre_ttft": (
+        "开工卡：adjust 后 CEO 续跑、尚未吐首 token（停在 captain run_started）",
+        _team_preview_resolved_adjust_pre_ttft,
+    ),
+    "team_preview_revised_card": (
+        "开工卡：adjust 后修订成 1 人仍再出卡，谱系 revision/revised_from/revision_note",
+        _team_preview_revised_card,
+    ),
     "team_preview_exclude_one_continue": (
         "开工组队有限否决：排除一人 continue → resolved 投影 excluded_run_ids",
         _team_preview_exclude_one_continue,
@@ -1190,6 +1359,14 @@ VECTORS: dict[str, tuple[str, Callable[[], list[SSEEvent]]]] = {
     "single_agent_checkpoint_finalized": ("单聊：检查点收口即终止（②，checkpoint_required→message_end(paused)，单一冷路 resume）", _single_agent_checkpoint_finalized),
     "single_agent_checkpoint_resolved": ("单聊：检查点 ask_user(blocking) 经 resume 续跑（checkpoint_resolved 清挂起→跑到 end_turn）", _single_agent_checkpoint_resolved),
     "single_agent_non_blocking_ask": ("单聊：非阻塞发问 question_posted 在时间线原位落 ask 标记、回合照常收尾", _single_agent_non_blocking_ask),
+    "single_agent_non_blocking_ask_answered": (
+        "单聊：非阻塞发问已答（question_resolved answered）——刷新后三态可见",
+        _single_agent_non_blocking_ask_answered,
+    ),
+    "single_agent_non_blocking_ask_discarded": (
+        "单聊：非阻塞发问已作废（question_resolved discarded + CEO note）——故障态对人可见",
+        _single_agent_non_blocking_ask_discarded,
+    ),
     "proposal_pick_checkpoint": ("单聊：方案挑选卡 ask_user(card=proposal_pick) 挂起（intent=proposal_pick）", _proposal_pick_checkpoint),
     "ask_user_shape_reject_then_pick": (
         "单聊：方案挑选卡误塞多题被结构校验拒绝→自纠正改对（校验失败不落工具步、不外泄红错）",

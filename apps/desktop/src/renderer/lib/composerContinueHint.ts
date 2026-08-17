@@ -1,3 +1,7 @@
+import {
+  arbitrateTurnOutcome,
+  turnOutcomeInputFromMessage,
+} from "@/lib/turnOutcome";
 import type { Message } from "@/stores/conversation";
 
 /**
@@ -36,9 +40,8 @@ export function isEmptyInterruptedAssistant(
   if (!message || message.role !== "assistant" || message.isStreaming) {
     return false;
   }
-  if (message.content.length > 0) return false;
-  const finishReason = message.finishReason ?? message.runs?.finishReason;
-  return finishReason === "interrupted";
+  const outcome = arbitrateTurnOutcome(turnOutcomeInputFromMessage(message));
+  return outcome.showComposerHint && outcome.recovery.kind === "send_next";
 }
 
 /**
@@ -49,17 +52,11 @@ export function isEmptyInterruptedAssistant(
 export function isEmptyCancelledAssistant(
   message: Message | undefined | null,
 ): boolean {
-  if (!message || message.role !== "assistant" || message.isStreaming) {
+  if (!message || message.role !== "assistant") {
     return false;
   }
-  if ((message.content ?? "").trim().length > 0) return false;
-  if ((message.reasoning ?? "").trim().length > 0) return false;
-  if ((message.process?.length ?? 0) > 0) return false;
-  if (message.turnWarning) return false;
-  if ((message.citations?.length ?? 0) > 0) return false;
-  if (message.error?.code === "TURN_CANCELLED") return true;
-  const finishReason = message.finishReason ?? message.runs?.finishReason;
-  return finishReason === "cancelled";
+  return arbitrateTurnOutcome(turnOutcomeInputFromMessage(message))
+    .hideEmptyBubble;
 }
 
 export const COMPOSER_CONTINUE_PLACEHOLDER = "可输入「继续」接着说…";

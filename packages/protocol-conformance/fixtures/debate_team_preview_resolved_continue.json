@@ -68,6 +68,7 @@
         ],
         "max_rounds": 5,
         "thorough": true,
+        "revision": 1,
         "moderator_run_id": "debate_mod1"
       },
       "timestamp": "2026-01-01T00:00:00.004Z"
@@ -213,6 +214,7 @@
   "projected": {
     "status": "running",
     "finishReason": null,
+    "outcome": null,
     "error": null,
     "content": "我来组织一场辩论。",
     "reasoning": "",

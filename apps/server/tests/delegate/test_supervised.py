@@ -428,8 +428,8 @@ async def test_partial_failure_stashes_plan_and_replan_add_resumes(monkeypatch):
     assert result.success is True
     assert t._supervised is None
     assert "B_retry_OUT" in result.output
-    # B fails twice (default on_failure=retry infra retry) before B_retry succeeds.
-    assert executed_roles == ["A", "B", "B", "B_retry"]
+    # B fails once (transient no longer 整跑s at Wave); B_retry succeeds.
+    assert executed_roles == ["A", "B", "B_retry"]
 
 
 async def test_upstream_contract_fail_skips_synth_until_replaces_replan(monkeypatch):
@@ -441,7 +441,13 @@ async def test_upstream_contract_fail_skips_synth_until_replaces_replan(monkeypa
     async def _exec(spec, completed):  # noqa: ANN001
         executed.append(spec.role)
         if spec.role == "pr":
-            return RunState(phase=RunPhase.FAILED, error="contract.failed", content="")
+            # Real contract hard-fail (terminal.py) sets error_retryable=False.
+            return RunState(
+                phase=RunPhase.FAILED,
+                error="contract.failed",
+                content="",
+                error_retryable=False,
+            )
         if spec.role == "synth":
             # Replacement must be COMPLETED in the dep snapshot — never run on failed-only.
             assert any(
@@ -473,8 +479,8 @@ async def test_upstream_contract_fail_skips_synth_until_replaces_replan(monkeypa
     synth_node = next(n for n in t._supervised.plan.nodes if n.role == "synth")
     assert synth_node.run_id in t._supervised.completed
     assert t._supervised.completed[synth_node.run_id].phase is RunPhase.SKIPPED
-    # First wave: pr failed (infra retry once) and synth was cascade-skipped — never ran.
-    assert executed == ["pr", "pr"]
+    # First wave: pr failed (Wave does not 整跑 transient) and synth was cascade-skipped.
+    assert executed == ["pr"]
 
     result = await t.replan(
         {
@@ -491,7 +497,7 @@ async def test_upstream_contract_fail_skips_synth_until_replaces_replan(monkeypa
     assert result.success is True
     assert t._supervised is None
     assert "synth_OUT" in result.output
-    assert executed == ["pr", "pr", "pr_fix", "synth"]
+    assert executed == ["pr", "pr_fix", "synth"]
     # Edge rewrite: synth now depends on the replacement, not the failed original.
     assert pr_id not in synth_node.depends_on
     assert len(synth_node.depends_on) == 1

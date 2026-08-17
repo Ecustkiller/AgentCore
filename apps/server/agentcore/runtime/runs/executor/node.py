@@ -44,7 +44,7 @@ from agentcore.runtime.runs.executor.terminal import (
     handle_agent_node_cancel,
     handle_agent_node_exception,
 )
-from agentcore.runtime.runs.types import RunSpec, RunState
+from agentcore.runtime.runs.types import RunPhase, RunSpec, RunState
 
 # Re-exports for existing test imports (do not grow new external ``_`` callers).
 __all__ = [
@@ -62,21 +62,37 @@ __all__ = [
 ]
 
 
+def _is_infra_hot_continue(
+    completed: Mapping[str, RunState], spec: RunSpec
+) -> bool:
+    """True when a prior hop seeded this run_id with a transient FAILED transcript."""
+    prior = completed.get(spec.run_id)
+    return (
+        prior is not None
+        and prior.phase is RunPhase.FAILED
+        and bool(prior.transcript)
+        and prior.error_retryable
+    )
+
+
 async def execute_agent_node(
     env: AgentExecutorEnv,
     spec: RunSpec,
     completed: Mapping[str, RunState],
     agent_id: str,
 ) -> RunState:
-    env.sink.emit(
-        run_started(
-            spec.run_id,
-            agent_id,
-            parent_run_id=spec.parent_run_id,
-            kind=spec.kind,
-            replaces_run_id=spec.replaces_run_id,
+    # Same run_id already started: a Wave seed-continue must not emit a second
+    # run_started (fold last-write-wins would hide the live extra frame).
+    if not _is_infra_hot_continue(completed, spec):
+        env.sink.emit(
+            run_started(
+                spec.run_id,
+                agent_id,
+                parent_run_id=spec.parent_run_id,
+                kind=spec.kind,
+                replaces_run_id=spec.replaces_run_id,
+            )
         )
-    )
     from agentcore.runtime.runs.run_phase_emit import emit_run_phase
 
     emit_run_phase(env.sink, spec.run_id, agent_id, "thinking")
@@ -129,6 +145,9 @@ async def execute_agent_node(
         product_landing_artifacts = prepared.product_landing_artifacts
         tool_ctx = prepared.tool_ctx
 
+        # Transient infra (rate-limit / 5xx) is the leaf's job. A 429 that
+        # reaches here is already past the leaf — emit one run_failed and
+        # let the layer above go partial. Do not remount the node.
         loop_result = await run_contract_loop(
             env,
             spec,

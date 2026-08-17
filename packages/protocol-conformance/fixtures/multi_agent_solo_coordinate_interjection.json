@@ -182,6 +182,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我派一名工程师去做。收到，正在停止这名工程师。已按你的要求停下。",
     "reasoning": "",

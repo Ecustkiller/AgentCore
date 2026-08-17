@@ -154,6 +154,8 @@ describe("StatusStrip · FailureStrip error detail", () => {
     expect(screen.getByTestId("status-strip-failed")).toBeTruthy();
     expect(screen.getByText(INTERRUPT_COPY)).toBeTruthy();
     expect(screen.queryByText("未获取到具体错误信息。")).toBeNull();
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
   });
 
   it("failed run → curated sentence, never the raw run.error", () => {
@@ -202,7 +204,7 @@ describe("StatusStrip · FailureStrip error detail", () => {
     ).toBeTruthy();
   });
 
-  it("files already saved before the failure keep that fact", () => {
+  it("files already saved before the failure paint 部分完成, not 失败", () => {
     const frames: RunFrame[] = [
       {
         t: 1,
@@ -227,7 +229,10 @@ describe("StatusStrip · FailureStrip error detail", () => {
     const { container } = renderStrip(exec);
 
     expect(container.textContent).not.toContain("ConnectError");
-    expect(screen.getByText(failureDetailSentence("call", true))).toBeTruthy();
+    expect(screen.getByTestId("status-strip-partial")).toBeTruthy();
+    expect(screen.getByText("部分完成")).toBeTruthy();
+    expect(screen.queryByTestId("status-strip-failed")).toBeNull();
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
   });
 
   it("no run error and no session error → keep 未获取到 fallback", () => {

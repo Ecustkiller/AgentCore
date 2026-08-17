@@ -78,6 +78,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": null,
     "content": "请确认整理方案（取消勾选即剔除）：",
     "reasoning": "",

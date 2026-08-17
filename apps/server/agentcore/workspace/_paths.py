@@ -417,9 +417,19 @@ def _finalize_cleaned_name(cleaned: str, *, empty_fallback: str) -> str:
 
     Leading underscores (``_inventory``) and hidden-file dots (``.gitignore``) are
     intentional names — never strip them. Trailing spaces / dots are still removed
-    (Windows forbids them); consecutive underscores stay collapsed by callers.
+    (Windows forbids them) from the whole name **and** from the stem so a truncated
+    ``GoWindowsCard.tsx`` cannot land as ``GoWindowsCard..md``. Consecutive
+    underscores stay collapsed by callers.
     """
     cleaned = cleaned.lstrip(" ").rstrip(" .")
+    if not cleaned:
+        cleaned = empty_fallback
+    stem, dot, ext = cleaned.rpartition(".")
+    if dot and stem and "/" not in ext and "\\" not in ext:
+        # Dots/spaces only — a trailing ``_`` is often an unsafe-char substitute
+        # (``foo?.md`` → ``foo_.md``) and must stay.
+        stem = stem.rstrip(" .")
+        cleaned = (stem or empty_fallback) + dot + ext
     return truncate_filename_utf8(cleaned or empty_fallback)
 
 

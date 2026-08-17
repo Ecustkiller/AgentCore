@@ -23,6 +23,7 @@ from agentcore.runtime.events import (
 )
 from agentcore.runtime.evidence_ledger import EvidenceLedgerCore
 from agentcore.runtime.loop_controller import LoopController
+from agentcore.runtime.turn.outcome import salvage_captain_delegate_reply
 from agentcore.tools.protocol import ToolContext
 from agentcore.tools.registry import ToolRegistry
 
@@ -56,6 +57,25 @@ from .tool_protocol_sanitize import prepare_assistant_content
 from .tool_round import handle_tool_calls_round
 
 logger = get_logger(__name__)
+
+
+def _maybe_salvage_captain_reply(
+    *,
+    final_content: str,
+    messages: list[LLMMessage],
+    role: str,
+) -> str:
+    salvaged = salvage_captain_delegate_reply(
+        final_content=final_content, messages=messages, role=role
+    )
+    if not salvaged:
+        return final_content
+    logger.info(
+        "engine.structured_reply_salvaged",
+        chars=len(salvaged),
+        source="delegate",
+    )
+    return salvaged
 
 
 @dataclass
@@ -398,6 +418,22 @@ async def react_loop(
     ceiling_reason = "max_rounds"
     round_idx = 0
 
+    def _stamp_coord_busy(kind: str) -> None:
+        # Same busy channel as idle-patrol; piggyback pass-local rounds + this
+        # pass's tokens (executor already stamped prior-pass tokens; session
+        # keeps the max so a retry pass cannot wipe run-level spend).
+        if role == "captain" or not run_id:
+            return
+        from agentcore.runtime.coordination.session import note_coord_worker_busy
+
+        note_coord_worker_busy(
+            run_id,
+            kind,
+            rounds_used=round_idx,
+            rounds_limit=profile.max_rounds,
+            tokens_spent=total_usage.total_tokens,
+        )
+
     def _export_tool_failures() -> None:
         if tool_failure_sink is None:
             return
@@ -730,9 +766,9 @@ async def react_loop(
             # Parallel to coordination inject below — do NOT merge / fake coord_inject.
             if role == "captain" and steer_cid:
                 from agentcore.runtime.coordination.session import current_execution_id
-                from agentcore.runtime.turn.steer import drain_as_messages
+                from agentcore.runtime.turn.steer import drain_injected
 
-                steer_msgs = drain_as_messages(
+                steer_msgs = await drain_injected(
                     steer_cid,
                     sink=sink,
                     execution_id=current_execution_id.get() or tool_context.execution_id,
@@ -803,10 +839,8 @@ async def react_loop(
 
             # Coordination idle-patrol: stamp worker LLM/tool busy so a quiet
             # event queue does not wake the CEO while teammates are still working.
+            _stamp_coord_busy("llm")
             if role != "captain" and run_id:
-                from agentcore.runtime.coordination.session import note_coord_worker_busy
-
-                note_coord_worker_busy(run_id, "llm")
                 from agentcore.runtime.runs.run_phase_emit import emit_run_phase
 
                 emit_run_phase(sink, run_id, agent_id, "thinking")
@@ -858,7 +892,14 @@ async def react_loop(
                     error_message=round_result.error_message,
                     error_context=round_result.error_context,
                 )
-                directive: LoopDirective = decide_llm_failure(final_content=final_content)
+                final_content = _maybe_salvage_captain_reply(
+                    final_content=final_content, messages=messages, role=role
+                )
+                directive: LoopDirective = decide_llm_failure(
+                    final_content=final_content,
+                    error_code=round_result.error_code or "",
+                    role=role,
+                )
             elif round_result.aborted:
                 # Post-commit disconnect / stall: keep the partial prose and finish
                 # DEGRADED (resume entry stays available via existing infrastructure).
@@ -882,7 +923,14 @@ async def react_loop(
                     error_code=ErrorCode.LLM_ERROR,
                     error_message="模型响应中断，已保留已生成内容，可继续。",
                 )
-                directive = decide_llm_failure(final_content=final_content)
+                final_content = _maybe_salvage_captain_reply(
+                    final_content=final_content, messages=messages, role=role
+                )
+                directive = decide_llm_failure(
+                    final_content=final_content,
+                    error_code=ErrorCode.LLM_ERROR,
+                    role=role,
+                )
             else:
                 usage = round_result.usage
                 if usage:
@@ -1174,12 +1222,7 @@ async def react_loop(
                                     wind_down_breach_nudge_text = breach_nudge
 
                     if not skip_tool_exec:
-                        if role != "captain" and run_id:
-                            from agentcore.runtime.coordination.session import (
-                                note_coord_worker_busy,
-                            )
-
-                            note_coord_worker_busy(run_id, "tool")
+                        _stamp_coord_busy("tool")
                         try:
                             tool_round = await handle_tool_calls_round(
                                 outcome=outcome,

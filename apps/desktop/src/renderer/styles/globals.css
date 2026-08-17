@@ -134,6 +134,17 @@
 .markdown-body {
   font-size: 0.875rem;
   line-height: 1.625;
+  /* Long tokens (URLs / `1000+500+…`) wrap in the reading column; default
+   * overflow-wrap will not break at `+` and paints past max-w-3xl. */
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.process-thought,
+.process-narration {
+  min-width: 0;
+  max-width: 100%;
 }
 .markdown-body p {
   margin-bottom: 0.75rem;

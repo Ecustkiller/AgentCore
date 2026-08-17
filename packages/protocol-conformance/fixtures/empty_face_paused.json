@@ -45,6 +45,7 @@
   "projected": {
     "status": "paused",
     "finishReason": "paused",
+    "outcome": null,
     "error": {
       "code": "PIPELINE_ERROR",
       "message": "本轮未能完成，请重试。"

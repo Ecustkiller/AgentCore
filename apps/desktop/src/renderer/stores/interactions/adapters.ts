@@ -133,12 +133,19 @@ export function entryToNonBlockingAsk(
   e: InteractionEntry,
 ): NonBlockingAskDisplay {
   const p = e.payload;
+  const r = e.resolution ?? {};
+  const settlement =
+    r.status === "answered" || r.status === "discarded" ? r.status : undefined;
   return {
     id: e.id,
     question: str(p.question),
     context: str(p.context),
     assumptions: arr<AskAssumption>(p.assumptions),
     questions: arr<AskQuestion>(p.questions),
+    status: e.status === "resolved" ? "resolved" : "pending",
+    ...(settlement ? { settlement } : {}),
+    ...(typeof r.answer === "string" && r.answer ? { answer: r.answer } : {}),
+    ...(typeof r.note === "string" && r.note ? { note: r.note } : {}),
   };
 }
 
@@ -208,6 +215,24 @@ export function entryToTeamPreview(e: InteractionEntry): TeamPreviewDisplay {
     ...(typeof p.headline === "string" && p.headline.trim()
       ? { headline: p.headline.trim() }
       : {}),
+    ...(() => {
+      const n =
+        typeof p.revision === "number" ? p.revision : Number(p.revision);
+      const revision = Number.isFinite(n) && n >= 1 ? Math.floor(n) : undefined;
+      const revisedFrom =
+        typeof p.revised_from === "string" && p.revised_from.trim()
+          ? p.revised_from.trim()
+          : undefined;
+      const revisionNote =
+        typeof p.revision_note === "string" && p.revision_note.trim()
+          ? p.revision_note.trim()
+          : undefined;
+      return {
+        ...(revision != null ? { revision } : {}),
+        ...(revisedFrom ? { revisedFrom } : {}),
+        ...(revisionNote ? { revisionNote } : {}),
+      };
+    })(),
     motion: str(p.motion),
     form: str(p.form),
     sides: arr<{
@@ -491,6 +516,9 @@ export function entryToColdResume(
     tools: tp.tools ?? [],
     primitive: tp.primitive,
     ...(tp.headline ? { headline: tp.headline } : {}),
+    ...(tp.revision != null ? { revision: tp.revision } : {}),
+    ...(tp.revisedFrom ? { revisedFrom: tp.revisedFrom } : {}),
+    ...(tp.revisionNote ? { revisionNote: tp.revisionNote } : {}),
     motion: tp.motion,
     form: tp.form,
     sides: tp.sides,
@@ -519,4 +547,15 @@ export function listColdPendingEntries(
   return useInteractionStore
     .getState()
     .listPending(conversationId, [...COLD_RESUME_KINDS]);
+}
+
+/** Pending non-blocking questions for the bottom-bar hanging face. No cap. */
+export function listPendingHangingQuestions(
+  conversationId: string,
+): NonBlockingAskDisplay[] {
+  return useInteractionStore
+    .getState()
+    .listPending(conversationId, ["question_posted"])
+    .map(entryToNonBlockingAsk)
+    .filter((ask) => ask.status === "pending");
 }

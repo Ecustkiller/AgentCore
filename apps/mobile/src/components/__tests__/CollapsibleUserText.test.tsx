@@ -185,4 +185,25 @@ describe("InterjectionBubbles · 用户气泡折叠", () => {
     ).toBeTruthy();
     expect(screen.getByText("主 Agent 已看到")).toBeTruthy();
   });
+
+  it("插话气泡渲染点名芯片，不暗示已派单", () => {
+    render(
+      <InterjectionBubbles
+        items={[
+          {
+            interjectionId: "ij-m",
+            content: "请让研究员再核一遍成本。",
+            status: "injected",
+            agentMentions: [{ agentId: "agent_research", role: "研究员" }],
+            attachments: [{ name: "成本表.xlsx" }],
+          },
+        ]}
+      />,
+    );
+    const chip = screen.getByTestId("agent-mention-chip");
+    expect(chip.textContent).toContain("点名");
+    expect(chip.textContent).toContain("研究员");
+    expect(chip.textContent).not.toMatch(/派单|已派/);
+    expect(screen.getByText("成本表.xlsx")).toBeTruthy();
+  });
 });

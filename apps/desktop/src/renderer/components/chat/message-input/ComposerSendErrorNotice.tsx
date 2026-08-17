@@ -4,6 +4,12 @@ import {
   statusAccentText,
   statusChip,
 } from "@/components/ui/tone-presets";
+import { copyText } from "@/lib/clipboard";
+import {
+  buildSupportDiagnosticPack,
+  formatSupportDiagnosticText,
+} from "@/lib/supportDiagnostics";
+import { notifySuccess } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { isReconnectQuietBanner } from "@/services/turns/helpers";
 import {
@@ -15,7 +21,7 @@ import {
   useActiveErrorAction,
   useConversationStore,
 } from "@/stores/conversation";
-import { AlertTriangle, Info, KeyRound, X } from "lucide-react";
+import { AlertTriangle, Copy, Info, KeyRound, X } from "lucide-react";
 import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -27,19 +33,54 @@ import { useNavigate } from "react-router-dom";
  * Tone: config action → primary; quiet reconnect / finished → Info on
  * {@link noticeChipNeutral}; otherwise triangle on the same chrome.
  */
-export function ComposerSendErrorNotice({ draftKey }: { draftKey: string }) {
+export function ComposerSendErrorNotice({
+  draftKey,
+  suppressSession = false,
+  onCopySupportPack,
+}: {
+  draftKey: string;
+  /**
+   * Gate for sessionError from the turn arbitrator (`!showSessionBanner`).
+   * composerError (send before a turn exists) still shows — not a turn verdict.
+   */
+  suppressSession?: boolean;
+  /** 「复制排查包」when this notice is the session host. */
+  onCopySupportPack?: () => void;
+}) {
   const composerError = useComposerSendError(draftKey);
   const sessionError = useActiveError();
   const sessionAction = useActiveErrorAction();
   const navigate = useNavigate();
 
-  const message = composerError?.message ?? sessionError;
-  const action = composerError ? composerError.action : sessionAction;
+  const fromComposer = Boolean(composerError?.message);
+  const message =
+    composerError?.message ?? (suppressSession ? null : sessionError);
+  const action = composerError
+    ? composerError.action
+    : suppressSession
+      ? null
+      : sessionAction;
+  const composerPack = fromComposer ? composerError?.supportPack : undefined;
+  const composerPackText = composerPack
+    ? formatSupportDiagnosticText(composerPack)
+    : "";
+  const showComposerPack = Boolean(composerPackText);
+  const showSessionPack = Boolean(onCopySupportPack) && !fromComposer;
 
   const dismiss = useCallback(() => {
     clearComposerSendError(draftKey);
     useConversationStore.getState().clearError();
   }, [draftKey]);
+
+  const copyComposerPack = useCallback(() => {
+    if (!composerPack || !composerPackText) return;
+    void buildSupportDiagnosticPack(composerPack).then((text) => {
+      if (!text) return;
+      void copyText(text).then((ok) => {
+        if (ok) notifySuccess("已复制排查包");
+      });
+    });
+  }, [composerPack, composerPackText]);
 
   if (!message) return null;
 
@@ -66,6 +107,20 @@ export function ComposerSendErrorNotice({ draftKey }: { draftKey: string }) {
         )}
       />
       <span className="min-w-0 flex-1">{message}</span>
+      {(showSessionPack || showComposerPack) && (
+        <Button
+          variant="ghost"
+          className={
+            needsYou
+              ? "shrink-0 text-primary/70 hover:bg-transparent hover:text-primary"
+              : "shrink-0 text-muted-foreground hover:bg-transparent hover:text-foreground"
+          }
+          icon={<Copy size={13} />}
+          onClick={showComposerPack ? copyComposerPack : onCopySupportPack}
+        >
+          复制排查包
+        </Button>
+      )}
       {action && (
         <Button
           variant="primary"

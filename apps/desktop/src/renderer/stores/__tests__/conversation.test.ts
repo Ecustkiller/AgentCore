@@ -241,6 +241,24 @@ describe("conversation store", () => {
       }
       expect(store().byId.busy?.isGenerating).toBe(true);
     });
+
+    it("does not pin LRU on pending question_posted", () => {
+      store().switchConversation("ask-busy");
+      store().addMessage({ ...userMsg, id: "m-ask", content: "q" });
+      ix().upsertRequired({
+        kind: "question_posted",
+        conversationId: "ask-busy",
+        messageId: "m-ask",
+        payload: { ask_id: "n1", question: "要 PDF 吗？" },
+      });
+      expect(ix().listPending("ask-busy")).toHaveLength(1);
+      for (let i = 0; i < CONVERSATION_SLICE_LRU_LIMIT + 1; i++) {
+        const id = `idle-ask-${i}`;
+        store().switchConversation(id);
+        store().addMessage({ ...userMsg, id: `m-${id}`, content: id });
+      }
+      expect(store().byId["ask-busy"]).toBeUndefined();
+    });
   });
 
   // Step 6: the sidebar status dot (useConversationGenerating) reads each

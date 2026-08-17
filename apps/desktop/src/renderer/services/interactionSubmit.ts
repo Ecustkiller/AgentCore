@@ -5,7 +5,6 @@ import type { ResolveInteractionBody } from "@/services/interaction";
 import type { PlanReviewUserDecision } from "@/services/planReview";
 import type { TeamPreviewResumeCorrections } from "@/services/teamPreviewCorrections";
 import { isPausedFrameGone, runResume } from "@/services/turns";
-import { useComposerDraftStore } from "@/stores/composer";
 import {
   INTERACTION_SUBMIT_PATH,
   useInteractionStore,
@@ -141,21 +140,60 @@ export async function submitInteraction(args: {
   conversationId: string;
   hotBody?: HotSubmitBody;
   cold?: ColdSubmitArgs;
-  /** question_posted: text to drop into the composer. */
+  /** question_posted: settlement answer (send with ask_id is a separate path). */
   composeText?: string;
 }): Promise<SubmitInteractionResult> {
   const path = INTERACTION_SUBMIT_PATH[args.kind];
   const store = useInteractionStore.getState();
 
   if (path === "compose") {
-    const text =
-      args.composeText ??
-      (typeof store.get(args.id)?.payload.question === "string"
-        ? String(store.get(args.id)?.payload.question)
-        : "");
-    if (text) useComposerDraftStore.getState().fill(text, "replace");
-    store.markResolved({ kind: args.kind, id: args.id });
-    return "ok";
+    const text = (args.composeText ?? "").trim();
+    if (!text) {
+      throw new Error("缺少答复");
+    }
+    if (!store.beginSubmit(args.id)) return "busy";
+    try {
+      const receipt = await resolveInteraction(
+        args.conversationId,
+        args.id,
+        {
+          kind: "question_posted",
+          status: "answered",
+          answer: text,
+          note: "",
+        },
+        "cloud",
+      );
+      if (receipt === "already_processed") {
+        store.markSettledByReceipt({
+          kind: args.kind,
+          id: args.id,
+          conversationId: args.conversationId,
+        });
+        return "already_settled";
+      }
+      store.markResolved({
+        kind: args.kind,
+        id: args.id,
+        resolution: { status: "answered", answer: text, note: "" },
+      });
+      return "ok";
+    } catch (err) {
+      if (isInteractionOrphanedError(err)) {
+        store.markOrphaned(args.id);
+        return "orphaned";
+      }
+      if (err instanceof ApiError && err.status === 404) {
+        store.markSettledByReceipt({
+          kind: args.kind,
+          id: args.id,
+          conversationId: args.conversationId,
+        });
+        return "already_settled";
+      }
+      store.reopen(args.id);
+      throw err;
+    }
   }
 
   if (path === "hot") {

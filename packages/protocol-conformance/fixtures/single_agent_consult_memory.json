@@ -82,6 +82,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "按你记录的部署流程，先 pnpm dev 起壳，再 uv run 起服务端即可。",
     "reasoning": "这事和部署有关，先翻一下记忆里的部署流程。",

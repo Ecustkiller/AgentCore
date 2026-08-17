@@ -476,7 +476,8 @@ def test_core_teaches_split_criterion_over_count():
     assert "未代测" in hint and "现象已消除" in hint and "已全部落地" in hint
     assert "附件·勿否认" in hint
     assert "没看到照片" in hint and "图已收到" in hint
-    assert "read_image" in hint and "空口说读不了" in hint
+    assert "read_image" in hint
+    assert "空口说读不了" not in hint
     # 午后巡 e670：标完成前先报真实断点
     assert "收尾·先报断点" in hint
     assert "都实现了" in hint or "收尾完成" in hint
@@ -540,6 +541,29 @@ def test_core_teaches_split_criterion_over_count():
     assert "根委派切片诚实" in skill or "嵌套扇出" in skill
     assert "人已派出" in skill
     assert "谁在后台、完成后会再汇报" not in skill
+
+
+def test_core_teaches_nonblocking_hold_and_say():
+    """编排姿态（非阻塞问·压单）：常驻核短钩；禁止升成拒 delegate。"""
+    hint = _CEO_CORE_HINT
+    assert "【非阻塞问·压单】" in hint
+    assert "unlocks" in hint
+    assert "后半等你" in hint
+    assert "能做的做完了" in hint
+    assert "答案影响不到" in hint
+    assert "偷偷按默认" in hint
+    assert "半程说成交付" in hint
+    assert "接得上这张图" in hint or "勿假装已挂上" in hint
+    # 语义扩展：按默认继续 *或* 声明后半等人，两种都要写明默认。
+    assert "声明后半等人" in hint
+    # 与【派完·可见面】切分：等人答 ≠ 等队员。
+    assert "不是等队员" in hint
+    assert "抛了非阻塞问须另说" in hint
+    # 只写提示词：不得把姿态写成未答则拒 delegate。
+    assert "未答则拒" not in hint
+    assert "拒 `delegate`" not in hint
+    assert "拒 delegate" not in hint
+
 
 def test_consult_intensity_lives_only_in_the_core():
     """三条「按场面 consult」强度串只注入常驻核一次；按需目录不再复述（去重定案）。
@@ -809,6 +833,16 @@ def test_core_teaches_repair_code_ui_verify_routing():
     assert "勿" in hint and ("tsc" in hint or "pytest" in hint)
 
 
+def test_core_teaches_code_audit_modules_fanout():
+    """整仓审计填 modules 扇出；引擎不从 scope 自动拆（结构槽，非必须扇出）。"""
+    hint = _CEO_CORE_HINT
+    assert "code_audit" in hint
+    assert "playbook_args.modules" in hint or "modules" in hint
+    assert "不从 scope 自动拆" in hint
+    assert "整仓" in hint and "多子系统" in hint
+    # 上限 / 单缝省略 / 折叠 HOW → team_orchestration_advanced，不占常驻核
+
+
 def test_core_teaches_outline_checkpoint_prefers_structured_path():
     # 主拍板细则在 ask_user_*；核心一句钩子。
     hint = _CEO_CORE_HINT
@@ -826,6 +860,14 @@ def test_core_worker_capability_follows_workspace_facts():
     assert "本回合执行能力" in hint
     assert "code_execute=未装配" in hint
     assert "能写文件、不能运行" in hint
+    assert "data_file_landing" in hint
+    assert "表格 → `.csv`" not in hint
+    assert "源数据文件下一步" in hint
+    assert "无法可靠解析的源数据文件" in hint
+    # 工程/代码无执行补救仍在核里（执行事实行未写明源数据文件时）。
+    assert "export_to_local" in hint
+    assert "bind_local" in hint
+    assert "本机传统" in hint
 
 
 def test_core_teaches_delivery_honesty_when_no_execution():
@@ -1429,10 +1471,10 @@ def test_ceo_core_teaches_existing_tool_results_must_not_be_denied():
     assert honesty.index("【已有结果·勿否认】") < honesty.index("【多源合并·成篇优先】")
     worker = compose_worker_base_prompt(assemble_system_prompt())
     assert "【已有结果·勿否认】" not in worker
-    # 不改坏识图纪律原文
+    # 不改坏识图纪律原文（已装配半句已删：未配时工具面不再装 read_image）
     assert "没看到照片 / 没有附带图片 / 工作区是空的" in hint
     assert "图已收到 + 失败原因 + 请压缩或换图" in hint
-    assert "空口说读不了" in hint
+    assert "空口说读不了" not in hint
 
 
 def test_ceo_core_cross_product_rule_paradigm_routing_hook():

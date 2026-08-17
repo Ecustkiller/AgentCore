@@ -9,5 +9,6 @@ export * from "./project";
 export * from "./debate";
 export * from "./revision";
 export * from "./statusLabels";
+export * from "./userInterjection";
 export * from "./store";
 export * from "./hooks";

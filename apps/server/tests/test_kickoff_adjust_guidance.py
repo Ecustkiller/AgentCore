@@ -20,6 +20,8 @@ def test_format_kickoff_adjust_result_delegate_and_debate():
     assert "用户要求调整开工方案，团队未启动。" in d
     assert KICKOFF_ADJUST_GUIDANCE_DELEGATE in d
     assert "重新调用 delegate" in d
+    assert "做不到" in d
+    assert "禁止静默忽略" in d
     assert "宜先问" not in d
     assert "取消了开工" not in d
 
@@ -27,6 +29,7 @@ def test_format_kickoff_adjust_result_delegate_and_debate():
     assert "用户要求调整开赛方案，辩论未开赛。" in b
     assert KICKOFF_ADJUST_GUIDANCE_DEBATE in b
     assert "重新调用 debate" in b
+    assert "做不到" in b
     assert "宜先问" not in b
     assert "取消了辩论" not in b
 
@@ -374,3 +377,245 @@ async def test_recover_three_delegate_adjusts_no_workers():
     assert "宜先问" not in settled.output
     assert provider.calls == 0
     assert not approval.has_delegation_grant("e-adj-3")
+
+
+def test_resume_adjust_requires_non_empty_note():
+    """resume API：decision=adjust 必须带非空 note（与两端 UI 对齐）。"""
+    from pydantic import ValidationError
+
+    from agentcore.api.schemas.messages import ResumeTurnRequest
+
+    with pytest.raises(ValidationError, match="非空意见"):
+        ResumeTurnRequest(decision=CheckpointDecision.ADJUST, note="")
+    with pytest.raises(ValidationError, match="非空意见"):
+        ResumeTurnRequest(decision=CheckpointDecision.ADJUST, note="   ")
+    ok = ResumeTurnRequest(decision=CheckpointDecision.ADJUST, note="人太多")
+    assert ok.note == "人太多"
+    # continue / stop 仍允许空 note（嘱咐 / 收场可选）。
+    ResumeTurnRequest(decision=CheckpointDecision.CONTINUE, note="")
+    ResumeTurnRequest(decision=CheckpointDecision.STOP, note="")
+
+
+def _unfulfilled_adjust_facts(*, note: str = "人太多") -> list[dict]:
+    return [
+        {
+            "kind": "team_preview_required",
+            "payload": {"checkpoint_id": "tp1", "revision": 1},
+            "ts": "t0",
+        },
+        {
+            "kind": "team_preview_resolved",
+            "payload": {"checkpoint_id": "tp1", "decision": "adjust", "note": note},
+            "ts": "t1",
+        },
+    ]
+
+
+def _fulfilled_adjust_facts(*, note: str = "人太多") -> list[dict]:
+    return [
+        *_unfulfilled_adjust_facts(note=note),
+        {
+            "kind": "team_preview_required",
+            "payload": {
+                "checkpoint_id": "tp2",
+                "revision": 2,
+                "revised_from": "tp1",
+                "revision_note": note,
+            },
+            "ts": "t2",
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_drive_preview_seed_completed_still_hangs_on_unfulfilled_adjust(monkeypatch):
+    """seed_completed 早退必须让位于未兑现 adjust（与 light 同缝）。"""
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.runtime.delegate import preview as preview_mod
+    from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from tests.delegate.conftest import Provider, tool
+
+    await_calls = {"n": 0}
+
+    async def _fake_await(*_a, **_k):
+        await_calls["n"] += 1
+        return CheckpointDecision.CONTINUE
+
+    monkeypatch.setattr(preview_mod, "await_team_preview", _fake_await)
+    monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
+    monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
+
+    real = tool(Provider([]))
+    real._depth = 0
+    real._pending_pause = False
+    real._active_playbook = None
+    real._permission_axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+
+    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="调研", task="t1")])
+    token = current_fact_log.set(TurnFactLog(inherited_entries=_unfulfilled_adjust_facts()))
+    try:
+        result = await team_preview_before_workers(
+            real,
+            plan,
+            complexity_hint="standard",
+            seed_completed={"a": object()},
+            call_idx=0,
+        )
+    finally:
+        current_fact_log.reset(token)
+
+    assert result is None
+    assert await_calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_drive_preview_seed_completed_skips_when_adjust_fulfilled(monkeypatch):
+    """新 required 已兑现 → seed_completed 仍跳卡，不重复强制挂卡。"""
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.runtime.delegate import preview as preview_mod
+    from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from tests.delegate.conftest import Provider, tool
+
+    await_calls = {"n": 0}
+
+    async def _fake_await(*_a, **_k):
+        await_calls["n"] += 1
+        return CheckpointDecision.CONTINUE
+
+    monkeypatch.setattr(preview_mod, "await_team_preview", _fake_await)
+    monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
+    monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
+
+    real = tool(Provider([]))
+    real._depth = 0
+    real._pending_pause = False
+    real._active_playbook = None
+    real._permission_axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+
+    plan = RunPlan(nodes=[RunSpec(run_id="a", agent_id="a", role="调研", task="t1")])
+    token = current_fact_log.set(TurnFactLog(inherited_entries=_fulfilled_adjust_facts()))
+    try:
+        result = await team_preview_before_workers(
+            real,
+            plan,
+            complexity_hint="standard",
+            seed_completed={"a": object()},
+            call_idx=0,
+        )
+    finally:
+        current_fact_log.reset(token)
+
+    assert result is None
+    assert await_calls["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_drive_preview_mlr_preauth_still_hangs_on_unfulfilled_adjust(monkeypatch):
+    """should_kickoff 已判定挂卡后，未兑现 adjust 不得消费 MLR preauth 跳卡。"""
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.runtime.delegate import preview as preview_mod
+    from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.kickoff.stage_card import (
+        discard_mlr_preauth,
+        grant_mlr_preauth,
+        peek_mlr_preauth,
+    )
+    from tests.delegate.conftest import Provider, tool
+
+    await_calls = {"n": 0}
+
+    async def _fake_await(*_a, **_k):
+        await_calls["n"] += 1
+        return CheckpointDecision.CONTINUE
+
+    monkeypatch.setattr(preview_mod, "await_team_preview", _fake_await)
+    monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
+    monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
+
+    real = tool(Provider([]))
+    real._depth = 0
+    real._pending_pause = False
+    real._active_playbook = "multi_lens_research"
+    real._permission_axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="a", agent_id="a", role="调研", task="t1"),
+            RunSpec(run_id="b", agent_id="b", role="写手", task="t2"),
+        ]
+    )
+    grant_mlr_preauth()
+    token = current_fact_log.set(TurnFactLog(inherited_entries=_unfulfilled_adjust_facts()))
+    try:
+        result = await team_preview_before_workers(
+            real,
+            plan,
+            complexity_hint="standard",
+            seed_completed=None,
+            call_idx=0,
+        )
+        assert result is None
+        assert await_calls["n"] == 1
+        assert peek_mlr_preauth() is True
+    finally:
+        current_fact_log.reset(token)
+        discard_mlr_preauth()
+
+
+@pytest.mark.asyncio
+async def test_drive_preview_mlr_preauth_skips_when_adjust_fulfilled(monkeypatch):
+    """新 required 已兑现 → MLR preauth 仍可一次性跳卡。"""
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+    from agentcore.runtime.delegate import preview as preview_mod
+    from agentcore.runtime.delegate.drive_preview import team_preview_before_workers
+    from agentcore.runtime.facts import TurnFactLog, current_fact_log
+    from agentcore.runtime.kickoff.stage_card import (
+        consume_mlr_preauth,
+        discard_mlr_preauth,
+        grant_mlr_preauth,
+        peek_mlr_preauth,
+    )
+    from tests.delegate.conftest import Provider, tool
+
+    await_calls = {"n": 0}
+
+    async def _fake_await(*_a, **_k):
+        await_calls["n"] += 1
+        return CheckpointDecision.CONTINUE
+
+    monkeypatch.setattr(preview_mod, "await_team_preview", _fake_await)
+    monkeypatch.setattr(preview_mod, "should_kickoff", lambda *a, **k: True)
+    monkeypatch.setattr(preview_mod, "needs_capability_auth", lambda *a, **k: False)
+
+    real = tool(Provider([]))
+    real._depth = 0
+    real._pending_pause = False
+    real._active_playbook = "multi_lens_research"
+    real._permission_axes = recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)
+
+    plan = RunPlan(
+        nodes=[
+            RunSpec(run_id="a", agent_id="a", role="调研", task="t1"),
+            RunSpec(run_id="b", agent_id="b", role="写手", task="t2"),
+        ]
+    )
+    grant_mlr_preauth()
+    token = current_fact_log.set(TurnFactLog(inherited_entries=_fulfilled_adjust_facts()))
+    try:
+        result = await team_preview_before_workers(
+            real,
+            plan,
+            complexity_hint="standard",
+            seed_completed=None,
+            call_idx=0,
+        )
+        assert result is None
+        assert await_calls["n"] == 0
+        assert peek_mlr_preauth() is False
+        assert consume_mlr_preauth() is False
+    finally:
+        current_fact_log.reset(token)
+        discard_mlr_preauth()

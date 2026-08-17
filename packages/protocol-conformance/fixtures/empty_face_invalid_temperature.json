@@ -45,6 +45,7 @@
   "projected": {
     "status": "failed",
     "finishReason": "error",
+    "outcome": "error",
     "error": {
       "code": "LLM_ERROR",
       "message": "invalid temperature: only 1 is allowed for this model"

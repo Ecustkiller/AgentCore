@@ -261,6 +261,83 @@ describe("ModelKeyForm", () => {
     expect(screen.getByText("领取的 Key 须与所选模型对应。")).toBeTruthy();
   });
 
+  it("offers OpenCode Go preset with its own endpoint and chat/completions seed", async () => {
+    const go = getByokProviderPreset("opencode_go");
+    vi.mocked(createLlmProvider).mockResolvedValue(
+      savedProvider({
+        id: "p-go",
+        label: go.label,
+        base_url: go.baseUrl,
+        default_model: go.defaultModel,
+      }),
+    );
+    renderForm();
+
+    const vendor = providerSelect();
+    expect(
+      [...vendor.options].some((o) => o.textContent === "OpenCode Go"),
+    ).toBe(true);
+    expect(
+      [...vendor.options].some((o) => o.textContent === "OpenCode Zen"),
+    ).toBe(true);
+
+    fireEvent.change(vendor, { target: { value: "opencode_go" } });
+    expect((screen.getByLabelText("名称") as HTMLInputElement).value).toBe(
+      "OpenCode Go",
+    );
+
+    const modelInput = defaultModelControl() as HTMLInputElement;
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "https://opencode.ai/zen/go/v1",
+    );
+    expect(modelInput.value).toBe("deepseek-v4-flash");
+    expect(defaultModelDatalistOptions(modelInput)).toEqual([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "glm-5.2",
+    ]);
+    expect(
+      screen
+        .getByRole("link", { name: /前往 OpenCode Go/ })
+        .getAttribute("href"),
+    ).toBe("https://opencode.ai/auth");
+
+    fireEvent.change(screen.getByPlaceholderText("sk-..."), {
+      target: { value: "sk-go" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "添加" }));
+
+    await waitFor(() =>
+      expect(createLlmProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          label: "OpenCode Go",
+          base_url: "https://opencode.ai/zen/go/v1",
+          default_model: "deepseek-v4-flash",
+          api_key: "sk-go",
+        }),
+      ),
+    );
+  });
+
+  it("resolves stored OpenCode Go and Zen base_urls to distinct presets", () => {
+    const { unmount } = renderForm({
+      providerId: "p-go",
+      initialLabel: "OpenCode Go",
+      initialBaseUrl: "HTTPS://OPENCODE.AI/ZEN/GO/V1/",
+      initialModel: "deepseek-v4-flash",
+    });
+    expect(providerSelect().value).toBe("opencode_go");
+    unmount();
+
+    renderForm({
+      providerId: "p-zen",
+      initialLabel: "OpenCode Zen",
+      initialBaseUrl: "https://opencode.ai/zen/v1",
+      initialModel: "deepseek-v4-flash",
+    });
+    expect(providerSelect().value).toBe("opencode_zen");
+  });
+
   it("pre-fills default_model on preset change when still on prior default and still submits it", async () => {
     vi.mocked(createLlmProvider).mockResolvedValue(savedProvider());
     renderForm();

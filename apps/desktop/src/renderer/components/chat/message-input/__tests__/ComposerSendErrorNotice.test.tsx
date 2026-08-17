@@ -4,12 +4,20 @@ import {
   RECONNECTING_BANNER,
   RECONNECT_INTERRUPTED_BANNER,
 } from "@/services/turns/helpers";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerSendErrorNotice } from "../ComposerSendErrorNotice";
 
-let composerError: { message: string; action: ErrorAction | null } | null =
-  null;
+let composerError: {
+  message: string;
+  action: ErrorAction | null;
+  supportPack?: {
+    conversationId?: string;
+    userMessageId?: string;
+    messageId?: string;
+    errorCode?: string;
+  };
+} | null = null;
 let sessionError: string | null = null;
 let sessionAction: ErrorAction | null = null;
 
@@ -75,5 +83,60 @@ describe("ComposerSendErrorNotice", () => {
     expect(banner.className).toContain("bg-primary/10");
     expect(banner.className).not.toContain("destructive");
     expect(screen.getByRole("button", { name: "去设置" })).toBeTruthy();
+  });
+
+  it("suppressSession hides sessionError", () => {
+    sessionError = "网络中断，请重试。";
+    render(<ComposerSendErrorNotice draftKey="__draft__" suppressSession />);
+    expect(screen.queryByTestId("composer-send-error")).toBeNull();
+  });
+
+  it("composerError still shows when session is suppressed", () => {
+    sessionError = "网络中断，请重试。";
+    composerError = { message: "发送失败，请稍后重试", action: null };
+    render(<ComposerSendErrorNotice draftKey="__draft__" suppressSession />);
+    expect(screen.getByTestId("composer-send-error").textContent).toContain(
+      "发送失败，请稍后重试",
+    );
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+  });
+
+  it("session host can hang 复制排查包", () => {
+    sessionError = "网络中断，请重试。";
+    const onCopy = vi.fn();
+    render(
+      <ComposerSendErrorNotice
+        draftKey="__draft__"
+        onCopySupportPack={onCopy}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "复制排查包" }));
+    expect(onCopy).toHaveBeenCalled();
+  });
+
+  it("composerError does not show the session 复制排查包", () => {
+    composerError = { message: "发送失败，请稍后重试", action: null };
+    render(
+      <ComposerSendErrorNotice
+        draftKey="__draft__"
+        onCopySupportPack={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+  });
+
+  it("composerError with supportPack hosts 复制排查包", () => {
+    composerError = {
+      message: "上游限流，暂时无法继续本回合。",
+      action: null,
+      supportPack: {
+        conversationId: "c1",
+        userMessageId: "u1",
+        messageId: "a1",
+        errorCode: "LLM_RATE_LIMIT",
+      },
+    };
+    render(<ComposerSendErrorNotice draftKey="__draft__" />);
+    expect(screen.getByRole("button", { name: "复制排查包" })).toBeTruthy();
   });
 });

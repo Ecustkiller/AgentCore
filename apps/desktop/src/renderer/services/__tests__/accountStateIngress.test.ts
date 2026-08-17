@@ -210,6 +210,138 @@ describe("accountStateIngress turn_queue", () => {
     });
     expect(useQueuedTurnsStore.getState().list("c1")).toHaveLength(1);
   });
+
+  it("增量快照以服务端 attachments / agent_mentions 为真源", () => {
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: "c-snap",
+        items: [
+          {
+            queue_id: "q-snap",
+            content: "请按附件看",
+            position: 1,
+            attachments: [
+              {
+                name: "brief.txt",
+                path: "attachments/brief.txt",
+                text: "brief body",
+                truncated: false,
+                kind: "file",
+                workspace_path: "attachments/brief.txt",
+              },
+            ],
+            agent_mentions: [{ agent_id: "agent-research", role: "研究员" }],
+          },
+        ],
+      },
+    });
+    expect(useQueuedTurnsStore.getState().list("c-snap")).toEqual([
+      expect.objectContaining({
+        queueId: "q-snap",
+        content: "请按附件看",
+        attachments: [
+          expect.objectContaining({
+            name: "brief.txt",
+            path: "attachments/brief.txt",
+            text: "brief body",
+            workspace_path: "attachments/brief.txt",
+          }),
+        ],
+        agentMentions: [{ agent_id: "agent-research", role: "研究员" }],
+      }),
+    ]);
+  });
+
+  it("同 queue_id 快照冲掉本机 extras，仍保留 messageId", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q1",
+      conversationId: "c1",
+      content: "stale",
+      position: 1,
+      queueDepth: 1,
+      messageId: "user-q",
+      degradedFrom: "steer",
+      attachments: [
+        {
+          name: "local.txt",
+          path: "local.txt",
+          text: "should not survive",
+          truncated: false,
+        },
+      ],
+      agentMentions: [{ agent_id: "local-agent", role: "本地" }],
+    });
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: "c1",
+        items: [
+          {
+            queue_id: "q1",
+            content: "server",
+            position: 1,
+            attachments: [
+              {
+                name: "server.txt",
+                path: "attachments/server.txt",
+                text: "from server",
+                truncated: false,
+                workspace_path: "attachments/server.txt",
+              },
+            ],
+            agent_mentions: [{ agent_id: "server-agent", role: "研究员" }],
+          },
+        ],
+      },
+    });
+    expect(useQueuedTurnsStore.getState().list("c1")).toEqual([
+      expect.objectContaining({
+        queueId: "q1",
+        content: "server",
+        messageId: "user-q",
+        degradedFrom: "steer",
+        attachments: [
+          expect.objectContaining({
+            name: "server.txt",
+            path: "attachments/server.txt",
+            workspace_path: "attachments/server.txt",
+          }),
+        ],
+        agentMentions: [{ agent_id: "server-agent", role: "研究员" }],
+      }),
+    ]);
+  });
+
+  it("快照未带 extras 时不从旧条接回", () => {
+    useQueuedTurnsStore.getState().upsert({
+      queueId: "q1",
+      conversationId: "c1",
+      content: "keep text",
+      position: 1,
+      queueDepth: 1,
+      attachments: [
+        {
+          name: "cached.txt",
+          path: "cached.txt",
+          text: "local cache",
+          truncated: false,
+        },
+      ],
+      agentMentions: [{ agent_id: "cached", role: "缓存" }],
+    });
+    cloudCb?.({
+      type: "turn_queue_snapshot",
+      payload: {
+        conversation_id: "c1",
+        items: [{ queue_id: "q1", content: "keep text", position: 1 }],
+      },
+    });
+    const [entry] = useQueuedTurnsStore.getState().list("c1");
+    expect(entry?.queueId).toBe("q1");
+    expect(entry?.attachments).toBeUndefined();
+    expect(entry?.agentMentions).toBeUndefined();
+  });
 });
 
 describe("accountStateIngress ai_attention", () => {

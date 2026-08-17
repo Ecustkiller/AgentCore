@@ -22,7 +22,7 @@ from agentcore.core.logging import get_logger
 from agentcore.storage import SnapshotRef, StorageProvider, build_storage_provider
 from agentcore.workspace.locate import resolve_workspace_root, workspace_storage_key
 from agentcore.workspace.locks import workspace_lock
-from agentcore.workspace.snapshot_kinds import system_prune_ids
+from agentcore.workspace.snapshot_kinds import byte_cap_prune_ids, system_prune_ids
 
 logger = get_logger(__name__)
 
@@ -145,6 +145,40 @@ async def _enforce_system_caps(
         )
 
 
+async def _enforce_byte_cap(
+    provider: StorageProvider,
+    key: str,
+    *,
+    user_id: str,
+    folder_id: str | None,
+    conversation_id: str,
+) -> None:
+    """Prune oldest evictable snapshots until total zip bytes fit the cap.
+
+    Superimposed on count + TTL; never touches user-named kept versions or
+    ids pinned by open handoff Diff / turn baselines. Best-effort: failures
+    log and must not fail the create that triggered prune.
+    """
+    try:
+        pinned = await collect_pinned_system_snapshot_ids(
+            user_id=user_id, folder_id=folder_id, conversation_id=conversation_id
+        )
+        refs = await provider.list_snapshots(key)
+        stale_ids = byte_cap_prune_ids(
+            refs,
+            max_bytes=settings.workspace_snapshot_max_bytes,
+            pinned_ids=pinned,
+        )
+        for snapshot_id in stale_ids:
+            await provider.delete_snapshot(key, snapshot_id)
+    except Exception as e:
+        logger.warning(
+            "workspace.system_snapshot_prune_failed",
+            storage_key=key,
+            error=str(e),
+        )
+
+
 async def create_snapshot(
     *,
     user_id: str,
@@ -158,7 +192,9 @@ async def create_snapshot(
     Auto snapshots (no ``label``) are capped to ``workspace_auto_snapshot_max``
     (决策⑥). User-named kept versions are never pruned. System labels
     (turn-baseline / handoff / export·merge) are capped + TTL'd (D+C), except
-    ids still pinned by open handoff Diff / turn baselines.
+    ids still pinned by open handoff Diff / turn baselines. After those, a
+    per-key ``workspace_snapshot_max_bytes`` cap evicts oldest evictable
+    leftovers (same kept / pin exemptions).
 
     Holds ``workspace_lock`` for the manifest RMW (A′ sink).
     """
@@ -176,6 +212,13 @@ async def create_snapshot(
         if label is None:
             await _enforce_auto_cap(provider, key, settings.workspace_auto_snapshot_max)
         await _enforce_system_caps(
+            provider,
+            key,
+            user_id=user_id,
+            folder_id=folder_id,
+            conversation_id=conversation_id,
+        )
+        await _enforce_byte_cap(
             provider,
             key,
             user_id=user_id,

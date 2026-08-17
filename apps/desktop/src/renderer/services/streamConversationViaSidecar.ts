@@ -29,6 +29,8 @@ import {
 } from "@/services/sidecarRouting";
 import { takeRecentSidecarFailure } from "@/services/sidecarStatus";
 import {
+  type OutgoingAgentMention,
+  type TurnCommitReport,
   dispatchSSEEvent,
   flushPendingContent,
   flushPendingFrames,
@@ -83,6 +85,12 @@ export interface StreamViaSidecarOptions {
   /** 本轮用户气泡的乐观 id：回写落库后据此把它换成云端权威 id（仅当它仍是末条 user
    *  消息时——防用户在回写返回前又发了一条而误改）。 */
   optimisticUserId: string;
+  /** 本发 outbox flush 成功时置 `committed`。Class B 回滚读这个事实，不嗅消息 id。 */
+  turnCommit?: TurnCommitReport;
+  /** Soft @Agent chips — prompt hint only; forwarded to startTurn. Empty / omit = none. */
+  agentMentions?: OutgoingAgentMention[];
+  /** 答非阻塞提问时与出站 ``question_posted.ask_id`` 对上。缺省 = 普通消息。 */
+  askId?: string | null;
   signal?: AbortSignal;
 }
 
@@ -238,7 +246,10 @@ export async function streamConversationViaSidecar({
   content,
   history,
   optimisticUserId,
+  agentMentions,
+  askId,
   signal,
+  turnCommit,
 }: StreamViaSidecarOptions): Promise<SidecarTurnResult> {
   const turnId = newTurnId();
   // 本回合 trace_id：贯穿云代理推理调用 + 回写落库，使推理日志↔气泡同 trace（打通气泡↔日志）。
@@ -283,6 +294,8 @@ export async function streamConversationViaSidecar({
         userMessage: content,
         userMessageId: optimisticUserId,
         history,
+        ...(agentMentions && agentMentions.length > 0 ? { agentMentions } : {}),
+        ...(askId ? { askId } : {}),
         inference,
         foldersAuth,
         accountAuth,
@@ -321,7 +334,13 @@ export async function streamConversationViaSidecar({
         throw new Error("account 凭证续铸失败，请重新登录后再试");
       }
     },
-    writeBack: () => persistAndReconcile(conversationId, optimisticUserId),
+    writeBack: async () => {
+      const committed = await persistAndReconcile(
+        conversationId,
+        optimisticUserId,
+      );
+      if (committed && turnCommit) turnCommit.committed = true;
+    },
   });
 }
 
@@ -439,7 +458,9 @@ export async function resumeConversationViaSidecar({
           throw new Error("account 凭证续铸失败，请重新登录后再试");
         }
       },
-      writeBack: () => persistAndReconcile(conversationId, userMessageId),
+      writeBack: async () => {
+        await persistAndReconcile(conversationId, userMessageId);
+      },
     });
     console.warn(
       `[Resume] resumeConversationViaSidecar completed conversationId=${conversationId} messageId=${messageId} decision=${decision}`,
@@ -651,7 +672,7 @@ async function runSidecarTurn({
 async function persistAndReconcile(
   conversationId: string,
   optimisticUserId: string,
-): Promise<void> {
+): Promise<boolean> {
   const store = useConversationStore.getState();
   store.setTurnSyncStatus(optimisticUserId, "synced_pending", conversationId);
 
@@ -660,7 +681,7 @@ async function persistAndReconcile(
     console.error(
       "[sidecar] outboxApi missing — sync left to main-process drain",
     );
-    return;
+    return false;
   }
 
   try {
@@ -678,13 +699,14 @@ async function persistAndReconcile(
       setTimeout(() => {
         store.setTurnSyncStatus(anchor, undefined, conversationId);
       }, 2500);
-      return;
+      return true;
     }
     // Auth/network — file stays; polling + synced_pending UI cover the rest.
     console.error("[sidecar] outbox writeback pending", flushed.error);
   } catch (err) {
     console.error("[sidecar] outbox flushTurn failed", err);
   }
+  return false;
 }
 
 /**

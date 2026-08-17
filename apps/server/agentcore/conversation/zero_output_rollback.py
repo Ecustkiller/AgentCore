@@ -3,12 +3,14 @@
 Class B codes only — do **not** fold into Class A preflight
 (``LLM_KEY_REQUIRED`` / ``QUOTA_EXCEEDED`` / ``RATE_LIMITED`` /
 ``PLATFORM_BILLING_UNAVAILABLE``). Same codes mid-turn (body / tools / tokens)
-must stay a failed turn. Reload truth is the hard-delete; no new SSE.
+must stay a failed turn. Pause (``outcome=paused`` or ``finish_reason=paused``)
+keeps the send so CEO continue stays. Reload truth is the hard-delete (cloud)
+or outbox discard + write-back skip (sidecar); no new SSE.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from agentcore.conversation.turn_stats import turn_worker_stats
@@ -50,6 +52,11 @@ def is_zero_output_send_refusal_code(code: str | None) -> bool:
     return bool(code) and code in ZERO_OUTPUT_SEND_REFUSAL_CODES
 
 
+def _paused_signal(value: object) -> bool:
+    raw = getattr(value, "value", value)
+    return isinstance(raw, str) and raw.strip().lower() == "paused"
+
+
 def should_delete_zero_output_send(
     *,
     error_code: str | None,
@@ -58,11 +65,15 @@ def should_delete_zero_output_send(
     has_tool_call: bool,
     has_delegated_workers: bool,
     user_created_this_send: bool,
+    outcome: object = None,
+    finish_reason: object = None,
 ) -> bool:
     """True only when every Class B empty-fail condition holds."""
     if not user_created_this_send:
         return False
     if not is_zero_output_send_refusal_code(error_code):
+        return False
+    if _paused_signal(outcome) or _paused_signal(finish_reason):
         return False
     if (content or "").strip():
         return False
@@ -116,6 +127,18 @@ def has_tool_call_in_turn_result(result: Mapping[str, Any] | None) -> bool:
     return False
 
 
+def outcome_from_turn_result(result: Mapping[str, Any] | None) -> object:
+    if not isinstance(result, Mapping):
+        return None
+    return result.get("outcome")
+
+
+def finish_reason_from_turn_result(result: Mapping[str, Any] | None) -> object:
+    if not isinstance(result, Mapping):
+        return None
+    return result.get("finish_reason")
+
+
 def should_delete_zero_output_send_result(
     result: Mapping[str, Any] | None,
     *,
@@ -131,7 +154,88 @@ def should_delete_zero_output_send_result(
         has_tool_call=has_tool_call_in_turn_result(result),
         has_delegated_workers=delegated,
         user_created_this_send=user_created_this_send,
+        outcome=outcome_from_turn_result(result),
+        finish_reason=finish_reason_from_turn_result(result),
     )
+
+
+def result_from_local_turn_writeback(
+    *,
+    message_id: str | None,
+    content: str | None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    reasoning_tokens: int = 0,
+    cache_hit_tokens: int = 0,
+    cache_miss_tokens: int = 0,
+    journal: Sequence[Any] | None = None,
+    runs: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Map local-turn write-back fields onto the pipeline result the predicate reads.
+
+    ``runs.error`` is the same structured error local finalize already persists.
+    When the client omitted it, fold ``journal`` with the existing projection.
+    """
+    error = runs.get("error") if isinstance(runs, Mapping) else None
+    outcome = runs.get("outcome") if isinstance(runs, Mapping) else None
+    finish_reason = runs.get("finish_reason") if isinstance(runs, Mapping) else None
+    entries: list[dict[str, Any]] = [e for e in (journal or ()) if isinstance(e, dict)]
+    if (not isinstance(error, Mapping) or outcome is None or finish_reason is None) and entries:
+        from agentcore.runtime.journal import runs_from_entries
+
+        folded = runs_from_entries(entries)
+        if isinstance(folded, Mapping):
+            if not isinstance(error, Mapping):
+                error = folded.get("error")
+            if outcome is None:
+                outcome = folded.get("outcome")
+            if finish_reason is None:
+                finish_reason = folded.get("finish_reason")
+    return {
+        "message_id": message_id,
+        "content": content if isinstance(content, str) else "",
+        "error": error if isinstance(error, Mapping) else None,
+        "outcome": outcome,
+        "finish_reason": finish_reason,
+        "input_tokens": int(input_tokens or 0),
+        "output_tokens": int(output_tokens or 0),
+        "reasoning_tokens": int(reasoning_tokens or 0),
+        "cache_hit_tokens": int(cache_hit_tokens or 0),
+        "cache_miss_tokens": int(cache_miss_tokens or 0),
+        "journal_entries": entries,
+    }
+
+
+async def maybe_discard_zero_output_outbox(
+    outbox: Any,
+    *,
+    conversation_id: str,
+    user_message_id: str,
+    result: Mapping[str, Any] | None,
+    user_created_this_send: bool,
+) -> bool:
+    """Drop the local outbox file when Class B holds so write-back cannot resurrect.
+
+    Caller must skip ``finalize`` when this returns True. Same predicate as
+    :func:`maybe_delete_zero_output_send` — no second judgment.
+    """
+    if not should_delete_zero_output_send_result(
+        result, user_created_this_send=user_created_this_send
+    ):
+        return False
+    umid = str(user_message_id or "").strip()
+    if umid:
+        discard = getattr(outbox, "discard", None)
+        if callable(discard):
+            await discard(umid)
+    logger.info(
+        "chat.zero_output_send_deleted",
+        conversation_id=conversation_id,
+        message_id=str((result or {}).get("message_id") or ""),
+        user_message_id=umid,
+        error_code=error_code_from_turn_result(result),
+    )
+    return True
 
 
 async def maybe_delete_zero_output_send(

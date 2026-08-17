@@ -136,6 +136,7 @@ export interface ConversationState {
       durationMs?: number;
       finishReason?: string;
       collab?: import("@/types/events").TurnCollabMetrics;
+      outcome?: "ok" | "partial" | "paused" | "error" | null;
     },
     conversationId?: string | null,
   ) => void;

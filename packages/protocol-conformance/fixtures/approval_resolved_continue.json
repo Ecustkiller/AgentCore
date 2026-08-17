@@ -94,6 +94,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我需要运行代码。运行结果是 1。",
     "reasoning": "",

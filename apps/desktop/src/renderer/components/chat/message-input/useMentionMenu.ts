@@ -9,8 +9,10 @@ import {
   buildDirListing,
   filterEntries,
   loadFileIndex,
+  mentionFilterTotal,
 } from "@/lib/fileIndex";
 import type { FileSource } from "@/lib/fileSource";
+import { logEvent } from "@/lib/log";
 import { fetchMessageWindow } from "@/services/messages";
 import { useConversationStore } from "@/stores/conversation";
 import { useExecutionStore } from "@/stores/execution";
@@ -42,10 +44,12 @@ import {
 import {
   MENTION_CATEGORY_LABEL,
   buildMentionCategoryRows,
+  categoryHighlightIndex,
   isMentionSectionId,
   mentionMenuKeyAction,
   showMentionCategoryLevel,
 } from "./mentionMenuLevel";
+import { recordMentionRecent, stampMentionRecents } from "./mentionRecents";
 import {
   pickLocalFileAttachment,
   stageRootFileAttachment,
@@ -81,6 +85,8 @@ function pickTeamAgents(
 }
 
 const EMPTY_MESSAGES: { id: string; role: string }[] = [];
+/** 钻入后的条数上限；空态仍用 composerAttachments 的 EMPTY_MENTION_INDEX_LIMIT。 */
+const MENTION_DRILL_INDEX_LIMIT = 50;
 
 export function useMentionMenu({
   conversationId,
@@ -117,6 +123,7 @@ export function useMentionMenu({
   const [fileIndex, setFileIndex] = useState<IndexedEntry[]>([]);
   const [dirIndex, setDirIndex] = useState<IndexedEntry[]>([]);
   const [sourceCount, setSourceCount] = useState(0);
+  const [indexTruncated, setIndexTruncated] = useState(false);
   const [indexLoading, setIndexLoading] = useState(false);
   const [convTick, setConvTick] = useState(0);
   const indexLoadedRef = useRef(false);
@@ -155,7 +162,10 @@ export function useMentionMenu({
     setConvTick((n) => n + 1);
   }, [menuMode, conversationId]);
 
-  const emptyLimit = focusedSection !== null ? 50 : EMPTY_MENTION_INDEX_LIMIT;
+  const emptyLimit =
+    focusedSection !== null
+      ? MENTION_DRILL_INDEX_LIMIT
+      : EMPTY_MENTION_INDEX_LIMIT;
 
   const convItems = useMemo(() => {
     void convTick;
@@ -195,13 +205,15 @@ export function useMentionMenu({
   }, [convTick, conversationId, filterText]);
 
   const folderItems = useMemo(() => {
-    const dirs = filterEntries(dirIndex, filterText, emptyLimit);
-    return dirs;
+    return filterEntries(stampMentionRecents(dirIndex), filterText, emptyLimit);
   }, [dirIndex, filterText, emptyLimit]);
 
   const fileItems = useMemo(() => {
-    const files = filterEntries(fileIndex, filterText, emptyLimit);
-    return files;
+    return filterEntries(
+      stampMentionRecents(fileIndex),
+      filterText,
+      emptyLimit,
+    );
   }, [fileIndex, filterText, emptyLimit]);
 
   const agentItems = useMemo((): MentionMenuSelectable[] => {
@@ -221,19 +233,18 @@ export function useMentionMenu({
   }, [teamAgents, filterText]);
 
   const folderCount = useMemo(
-    () =>
-      filterText.trim()
-        ? filterEntries(dirIndex, filterText, Number.MAX_SAFE_INTEGER).length
-        : dirIndex.length,
+    () => mentionFilterTotal(dirIndex, filterText),
     [dirIndex, filterText],
   );
   const fileCount = useMemo(
-    () =>
-      filterText.trim()
-        ? filterEntries(fileIndex, filterText, Number.MAX_SAFE_INTEGER).length
-        : fileIndex.length,
+    () => mentionFilterTotal(fileIndex, filterText),
     [fileIndex, filterText],
   );
+  const folderTruncated =
+    folderItems.length > 0 &&
+    (folderItems.length < folderCount || indexTruncated);
+  const fileTruncated =
+    fileItems.length > 0 && (fileItems.length < fileCount || indexTruncated);
 
   const categories = useMemo(
     () =>
@@ -255,20 +266,8 @@ export function useMentionMenu({
 
     const out: MentionMenuSection[] = [];
 
-    // browse：不强推团队空态；mention 始终可出团队分区；钻入/前缀时允许空态。
-    if (menuMode === "mention" && show("team")) {
-      out.push({
-        id: "team",
-        label: "团队",
-        items: agentItems,
-        emptyHint:
-          agentItems.length === 0 ? "多 Agent 回合后可点名" : undefined,
-      });
-    } else if (
-      menuMode === "browse" &&
-      show("team") &&
-      (agentItems.length > 0 || focusedSection === "team")
-    ) {
+    // 团队 count=0 不占位；钻入/类型前缀时才允许空态提示。
+    if (show("team") && (agentItems.length > 0 || focusedSection === "team")) {
       out.push({
         id: "team",
         label: "团队",
@@ -286,6 +285,7 @@ export function useMentionMenu({
         id: "conversation",
         label: "对话",
         items: convItems,
+        truncated: convItems.length > 0 && convItems.length < convCount,
         emptyHint: convItems.length === 0 ? "暂无其他对话" : undefined,
       });
     }
@@ -295,6 +295,7 @@ export function useMentionMenu({
         id: "folder",
         label: "文件夹",
         items: folderItems,
+        truncated: folderTruncated,
         emptyHint:
           folderItems.length === 0 && focusedSection === "folder"
             ? "没有匹配的文件夹"
@@ -307,6 +308,7 @@ export function useMentionMenu({
         id: "file",
         label: "文件",
         items: fileItems,
+        truncated: fileTruncated,
         emptyHint:
           fileItems.length === 0 && focusedSection === "file"
             ? "没有匹配的文件"
@@ -315,7 +317,16 @@ export function useMentionMenu({
     }
 
     return out;
-  }, [menuMode, focusedSection, agentItems, convItems, folderItems, fileItems]);
+  }, [
+    focusedSection,
+    agentItems,
+    convItems,
+    convCount,
+    folderItems,
+    fileItems,
+    folderTruncated,
+    fileTruncated,
+  ]);
 
   const flatItems = useMemo(() => sections.flatMap((s) => s.items), [sections]);
 
@@ -323,9 +334,9 @@ export function useMentionMenu({
   // biome-ignore lint/correctness/useExhaustiveDependencies: categories read on level enter only
   useEffect(() => {
     if (!showCategoryLevel) return;
-    const want = highlightPrefRef.current;
-    const i = categories.findIndex((c) => c.id === want);
-    setActiveIndex(i >= 0 ? i : 0);
+    setActiveIndex(
+      categoryHighlightIndex(categories, highlightPrefRef.current),
+    );
   }, [query, menuMode, showCategoryLevel]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: query/menuMode/sections are intentional re-run keys
@@ -340,10 +351,16 @@ export function useMentionMenu({
     try {
       const sources = await buildMentionSources(conversationId);
       sourcesRef.current = new Map(sources.map((s) => [s.id, s]));
-      const { files, dirs, sourceCount: count } = await loadFileIndex(sources);
+      const {
+        files,
+        dirs,
+        sourceCount: count,
+        truncated,
+      } = await loadFileIndex(sources);
       setFileIndex(files);
       setDirIndex(dirs);
       setSourceCount(count);
+      setIndexTruncated(Boolean(truncated));
       indexLoadedRef.current = true;
     } catch {
       setMenuError("读取文件列表失败");
@@ -358,6 +375,7 @@ export function useMentionMenu({
     setFileIndex([]);
     setDirIndex([]);
     setSourceCount(0);
+    setIndexTruncated(false);
     sourcesRef.current = new Map();
   }, [conversationId]);
 
@@ -446,6 +464,7 @@ export function useMentionMenu({
       if (menuMode !== "mention") {
         setActiveCategory(null);
         highlightPrefRef.current = highlight;
+        logEvent("info", "mention.menu_open", { mode: "mention" });
       } else if (highlight === "attach") {
         highlightPrefRef.current = highlight;
       }
@@ -501,6 +520,7 @@ export function useMentionMenu({
     setActiveCategory(null);
     setMenuMode("browse");
     setMenuError(null);
+    logEvent("info", "mention.menu_open", { mode: "browse" });
     void ensureIndex();
     requestAnimationFrame(() => searchInputRef.current?.focus());
   }, [menuMode, closeMenu, ensureIndex]);
@@ -532,6 +552,7 @@ export function useMentionMenu({
         ...prev,
         { id: crypto.randomUUID(), agentId, role },
       ]);
+      logEvent("info", "mention.select", { category: "team" });
       stripMentionQuery();
       closeMenu();
     },
@@ -653,6 +674,14 @@ export function useMentionMenu({
       }
 
       const attachment = next;
+      recordMentionRecent(entry);
+      const category =
+        entry.kind === "dir"
+          ? "folder"
+          : entry.kind === "conversation"
+            ? "conversation"
+            : "file";
+      logEvent("info", "mention.select", { category });
       setAttachments((prev) => [...prev, attachment]);
       startCloudUpload(attachment);
 
@@ -730,6 +759,7 @@ export function useMentionMenu({
     };
     setAttachments((prev) => [...prev, attachment]);
     startCloudUpload(attachment);
+    logEvent("info", "mention.select", { category: "attach" });
     clearActiveMention();
   }, [
     attachments,

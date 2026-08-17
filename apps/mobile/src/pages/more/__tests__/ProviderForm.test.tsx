@@ -6,7 +6,7 @@
  */
 import type { LlmProviderView } from "@/api/llmProviders";
 import { createLlmProvider, updateLlmProvider } from "@/api/llmProviders";
-import { ProviderForm } from "@/pages/more/ProviderForm";
+import { ProviderForm, getPreset } from "@/pages/more/ProviderForm";
 import {
   cleanup,
   fireEvent,
@@ -359,6 +359,120 @@ describe("ProviderForm", () => {
     expect(modelInput.getAttribute("list")).toBeNull();
     fireEvent.change(modelInput, { target: { value: "my-custom-model" } });
     expect(modelInput.value).toBe("my-custom-model");
+  });
+
+  it("offers OpenCode Go preset with its own endpoint and chat/completions seed", async () => {
+    const go = getPreset("opencode_go");
+    expect(go.id).toBe("opencode_go");
+    expect(go.label).toBe("OpenCode Go");
+    expect(go.baseUrl).toBe("https://opencode.ai/zen/go/v1");
+    expect(go.defaultModel).toBe("deepseek-v4-flash");
+    expect(go.models).toEqual([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "glm-5.2",
+    ]);
+    expect(go.keyHelpUrl).toBe("https://opencode.ai/auth");
+    expect(go.models.join(" ")).not.toMatch(/-free|grok|gpt|minimax|qwen/i);
+
+    mockCreate.mockResolvedValue({
+      id: "prov-go",
+      label: "OpenCode Go",
+      base_url: "https://opencode.ai/zen/go/v1",
+      default_model: "deepseek-v4-flash",
+      status: "unchecked",
+    });
+    const onSaved = vi.fn();
+    render(<ProviderForm onSaved={onSaved} onCancel={vi.fn()} />);
+
+    const vendor = screen.getByLabelText("厂商") as HTMLSelectElement;
+    expect(
+      [...vendor.options].some((o) => o.textContent === "OpenCode Go"),
+    ).toBe(true);
+    expect(
+      [...vendor.options].some((o) => o.textContent === "OpenCode Zen"),
+    ).toBe(true);
+    fireEvent.change(vendor, { target: { value: "opencode_go" } });
+    expect((screen.getByLabelText("显示名称") as HTMLInputElement).value).toBe(
+      "OpenCode Go",
+    );
+    expect(modelDatalistValues()).toEqual([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "glm-5.2",
+    ]);
+    expect((screen.getByLabelText("Base URL") as HTMLInputElement).value).toBe(
+      "https://opencode.ai/zen/go/v1",
+    );
+    fireEvent.change(screen.getByLabelText("API Key"), {
+      target: { value: "sk-go" },
+    });
+    fireEvent.click(screen.getByText("保存"));
+
+    await waitFor(() =>
+      expect(mockCreate).toHaveBeenCalledWith({
+        api_key: "sk-go",
+        base_url: "https://opencode.ai/zen/go/v1",
+        default_model: "deepseek-v4-flash",
+        label: "OpenCode Go",
+      }),
+    );
+  });
+
+  it("resolves OpenCode Go and Zen base_urls to distinct presets", () => {
+    const { unmount } = render(
+      <ProviderForm
+        provider={{
+          id: "prov-go",
+          label: "OpenCode Go",
+          base_url: "HTTPS://OPENCODE.AI/ZEN/GO/V1/",
+          default_model: "deepseek-v4-flash",
+          status: "unchecked",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "opencode_go",
+    );
+    unmount();
+
+    render(
+      <ProviderForm
+        provider={{
+          id: "prov-zen",
+          label: "OpenCode Zen",
+          base_url: "https://opencode.ai/zen/v1/",
+          default_model: "deepseek-v4-flash",
+          status: "unchecked",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "opencode_zen",
+    );
+  });
+
+  it("does not treat OpenCode prefix leftovers as Zen or Go", () => {
+    render(
+      <ProviderForm
+        provider={{
+          id: "prov-custom",
+          label: "Custom",
+          base_url: "https://opencode.ai/zen/v1/go",
+          default_model: "deepseek-v4-flash",
+          status: "unchecked",
+        }}
+        onSaved={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect((screen.getByLabelText("厂商") as HTMLSelectElement).value).toBe(
+      "custom",
+    );
   });
 
   it("resolves jiurelay base URL when editing an existing provider", () => {

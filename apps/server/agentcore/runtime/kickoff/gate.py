@@ -58,6 +58,7 @@ def should_kickoff(
     plan_preview: bool,
     local_gate: bool,
     axes: PermissionAxes,
+    unfulfilled_adjust: bool = False,
 ) -> bool:
     """Whether to durable-pause for the merged kickoff card.
 
@@ -66,10 +67,14 @@ def should_kickoff(
     - ``skip`` — release both halves (对齐原 full_auto 跳卡)
     - ``always`` — force plan half on (仍由调用方限定「仍该挂的场景」)
     - ``rules`` — honor ``plan_preview`` soft-skip rules
+
+    ``unfulfilled_adjust`` forces the plan half on (bypass ≥2-worker / similar
+    skips) when this turn has a settled adjust not yet followed by a new card.
+    Never-adjust callers leave it False — zero behavior change.
     """
     if axes.skips_team_kickoff:
         return False
-    effective_plan = True if axes.forces_team_kickoff else plan_preview
+    effective_plan = True if (axes.forces_team_kickoff or unfulfilled_adjust) else plan_preview
     if effective_plan:
         return True
     return needs_capability_auth(local_gate=local_gate, axes=axes)

@@ -163,6 +163,15 @@ async def apply_loop_directive(
             # CEO soft banners：软Ⅱ′零写盘假改 + 云端装包拒仍称验绿 → 仅加横幅，不丢稿不拒发。
             if role == "captain" and content:
                 content = _captain_closing_honesty(content, controller)
+            # LLM 讲不出话但已有结构化产出：把降级正文推上直播气泡（此前从未 stream）。
+            if (
+                outcome.llm_failed
+                and role == "captain"
+                and content
+                and not (outcome.content or "").strip()
+                and not (content_before_round or "").strip()
+            ):
+                emit_content(content)
             return DirectiveApplyResult(
                 action="return",
                 content=content,

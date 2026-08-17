@@ -701,6 +701,76 @@ def test_sidecar_start_turn_local_binding_reaches_pipeline(tmp_path, monkeypatch
     assert "error" not in _response(sent, 2)
 
 
+def test_rpc_agent_mentions_accepts_camel_and_snake():
+    from agentcore.sidecar.server_pkg.turns import rpc_agent_mentions
+
+    mentions = [{"agent_id": "w1", "role": "研究员"}]
+    assert rpc_agent_mentions({"agentMentions": mentions}) == mentions
+    assert rpc_agent_mentions({"agent_mentions": mentions}) == mentions
+    assert rpc_agent_mentions({}) == []
+    assert rpc_agent_mentions({"agentMentions": [{"agent_id": "", "role": "x"}]}) == []
+
+
+def test_sidecar_start_turn_forwards_agent_mentions(tmp_path, monkeypatch):
+    captured: dict[str, Any] = {}
+    mentions = [{"agent_id": "agent_research", "role": "研究员"}]
+
+    async def fake_pipeline(**kwargs: Any) -> dict[str, Any]:
+        captured["agent_mentions"] = kwargs.get("agent_mentions")
+        kwargs["sink"].close()
+        return {"finish_reason": "end_turn", "content": "ok", "rounds": 1}
+
+    async def fake_baseline(**kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr("agentcore.sidecar.server.run_chat_pipeline", fake_pipeline)
+    monkeypatch.setattr(
+        "agentcore.workspace.turn_baseline.maybe_capture_turn_baseline",
+        fake_baseline,
+    )
+
+    sent, write_line = _recorder()
+    server = SidecarServer(write_line)
+
+    async def drive() -> None:
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "userId": "u",
+                        "workspaceRoot": str(tmp_path),
+                        "approvalsEnabled": True,
+                        "inference": _FAKE_INFERENCE,
+                    },
+                }
+            )
+        )
+        await server.handle_line(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "startTurn",
+                    "params": {
+                        "turnId": "t-mention",
+                        "conversationId": "c-mention",
+                        "userMessage": "让研究员看一下",
+                        "folderId": None,
+                        "agentMentions": mentions,
+                    },
+                }
+            )
+        )
+        await asyncio.gather(*list(server._turns.values()))
+
+    asyncio.run(drive())
+    assert captured["agent_mentions"] == mentions
+    assert "error" not in _response(sent, 2)
+
+
 def test_sidecar_start_turn_folder_id_param_skips_db(tmp_path, monkeypatch):
     """Injected folderId reaches pipeline without opening local PG."""
     captured: dict[str, Any] = {}

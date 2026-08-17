@@ -198,7 +198,7 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   user_interjection: {
     verdict: "ported",
     surface:
-      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles 五态（received/injected/addressed/queued/failed；经典+协调；fold → process 钉位 + userInterjections 同 id 保最新；旧 journal 无 marker 时 AssistantContent 尾部回退）",
+      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles 五态（received/injected/addressed/queued/failed；经典+协调；fold → process 钉位 + userInterjections 同 id 保最新，含 agentMentions 点名芯片；旧 journal 无 marker 时 AssistantContent 尾部回退）",
   },
   turn_queued: {
     verdict: "ported",
@@ -277,7 +277,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   team_preview_required: { verdict: "ported", surface: "ResumeCard" },
   team_preview_resolved: {
     verdict: "ported",
-    surface: "ResumeCard；另一端放行的 → RemoteSettledCards「已由另一端处理」",
+    surface:
+      "ProcessTimeline · team_preview resolved 痕迹（decision=adjust：已调整 · 已交回修订）；另一端放行的 → RemoteSettledCards「已由另一端处理」",
   },
   stage_card_required: { verdict: "ported", surface: "StageCard" },
   stage_card_resolved: {
@@ -286,7 +287,15 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
 
   // —— 非阻塞提问 (①) ——
-  question_posted: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
+  question_posted: {
+    verdict: "ported",
+    surface: "HangingQuestionBar（pending）／NonBlockingAskCard（resolved）",
+  },
+  question_resolved: {
+    verdict: "ported",
+    surface:
+      "NonBlockingAskCard 已答 / 已作废；另一端已答 → RemoteSettledCards「已由另一端处理」",
+  },
 
   // —— 跟进推荐（手机有意下线 CEO→用户 chips；事件仍 fold no-op / stopLifecycle 放行）——
   followups_generated: {
@@ -299,7 +308,11 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
 
   // —— 收尾 / 错误 ——
-  error: { verdict: "ported", surface: "ChatPage · 错误条" },
+  error: {
+    verdict: "ported",
+    surface:
+      "PausedContinueCard 原因说明（message_end.outcome=paused）／ChatPage · 错误条（其余）",
+  },
   message_start: {
     verdict: "internal",
     reason:
@@ -307,7 +320,8 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
   },
   message_end: {
     verdict: "ported",
-    surface: "ChatPage · 收尾 + 回合总账",
+    surface:
+      "ChatPage · 收尾 + 回合总账；outcome=paused → PausedContinueCard（已暂停 / 继续）",
   },
 
   // —— 纯管线 / 派生（非用户面）——
@@ -464,7 +478,10 @@ export const EVENT_PARITY: Record<SSEEventType, ParityEntry> = {
  *  infra / 渲染叶子记 `internal`（仍要求一句 reason，强制是有意分类而非遗漏）。 */
 export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   // —— 互动卡：已上手机 ——
-  NonBlockingAskCard: { verdict: "ported", surface: "NonBlockingAskCard (①)" },
+  NonBlockingAskCard: {
+    verdict: "ported",
+    surface: "NonBlockingAskCard（resolved）／HangingQuestionBar（pending）",
+  },
   EscalationCard: {
     verdict: "ported",
     surface: "AssistantView · EscalationAnswer (②)",
@@ -481,7 +498,13 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     reason:
       "ask intent 专用面已对等进 ResumeCard（decision/kickoff compose+其他；proposal/risk 行选；organize/daily 勾选墙）；本机目录 action 手机禁用",
   },
-  TeamPreviewCard: { verdict: "ported", surface: "ResumeCard" },
+  TeamPreviewCard: {
+    verdict: "ported",
+    surface:
+      "ProcessTimeline · team_preview resolved 痕迹（已调整·已交回修订等）；pending 操作面在 ResumeCard",
+    reason:
+      "桌面 TeamPreviewCard 是 resolved 痕迹卡（pending 不占时间线，可操作面在 ResumePrompt）。手机原先只把 pending 开工卡标成 ported。现补时间线痕迹；pending 仍在 ResumeCard 三态机",
+  },
   ApprovalPrompt: { verdict: "ported", surface: "PauseCard" },
   HotDecisionTrace: {
     verdict: "ported",
@@ -503,6 +526,18 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
     surface: "ResumeCard",
     reason:
       "桌面 ResumePrompt 复用 CheckpointCard；手机 ResumeCard 已承接全 ask intent 专用面（本机目录 action 除外）",
+  },
+  HangingQuestionBar: {
+    verdict: "ported",
+    surface: "HangingQuestionBar",
+    reason:
+      "非阻塞悬题可操作面在底栏（有事等你，团队照跑）；与 ResumeCard「需要你拍板」一眼可分；pending 不进过程线",
+  },
+  PausedContinueSurface: {
+    verdict: "ported",
+    surface: "PausedContinueCard",
+    reason:
+      "CEO 限流暂停（outcome=paused）：已暂停 + 继续；闸卡暂停仍走 ResumeCard，不进本面",
   },
   FileArtifactsCard: { verdict: "ported", surface: "FileArtifactsCard" },
   TurnFileChangesReview: {
@@ -531,7 +566,7 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   InterjectionTimeline: {
     verdict: "ported",
     surface:
-      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles（五态不变；经典 steer 亦进泡；旧 journal 无 marker 时 AssistantContent 尾部回退）",
+      "ProcessTimeline · user_interjection marker 槽 + InterjectionBubbles（五态不变；经典 steer 亦进泡；fold agentMentions → 点名芯片；旧 journal 无 marker 时 AssistantContent 尾部回退）",
   },
   QueuedTurnsBar: {
     verdict: "ported",
@@ -662,9 +697,9 @@ export const DESKTOP_CHAT_PARITY: Record<string, ParityEntry> = {
   MentionMenu: {
     verdict: "ported",
     surface:
-      "ComposerMentionSheet · ＋/@ 分类 sheet（附件/团队/对话/文件夹/文件）",
+      "ComposerMentionSheet · ＋/@ 分类 sheet（附件/团队/对话/文件夹/文件）；ChatPage 历史用户气泡 + InterjectionBubbles 角色点名芯片",
     reason:
-      "各端新建；附件走系统选文件，文件/文件夹只列云端索引；选中进草稿 attachments.kind=conversation / agent_mentions",
+      "各端新建；附件走系统选文件，文件/文件夹只列云端索引；选中进草稿 attachments.kind=file/dir/conversation；团队点名走 agent_mentions（REST 历史用户气泡 / user_interjection SSE 插话气泡回放「点名」芯片，不暗示已派单，不混 kind）",
   },
   RetryBanner: {
     verdict: "ported",

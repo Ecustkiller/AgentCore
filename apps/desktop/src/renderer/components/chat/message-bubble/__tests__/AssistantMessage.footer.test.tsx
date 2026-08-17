@@ -11,6 +11,9 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const genMock = vi.hoisted(() => ({ value: true }));
+const execById = vi.hoisted(() => ({
+  value: {} as Record<string, { deliveryStatus: null; plan?: unknown }>,
+}));
 
 vi.mock("@/stores/conversation", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/stores/conversation")>();
@@ -37,21 +40,31 @@ vi.mock("@/stores/usage", () => ({
 
 vi.mock("@/stores/execution", () => ({
   useExecutionStore: (
-    sel: (s: { byId: Record<string, { deliveryStatus: null }> }) => unknown,
-  ) => sel({ byId: {} }),
+    sel: (s: {
+      byId: Record<string, { deliveryStatus: null; plan?: unknown }>;
+    }) => unknown,
+  ) => sel({ byId: execById.value }),
 }));
 
-vi.mock("@/stores/interactions", () => ({
-  useMessageInteractionCards: () => ({
-    checkpoints: [],
-    nonBlockingAsks: [],
-    planReviews: [],
-    teamPreviews: [],
-  }),
-}));
+vi.mock("@/stores/interactions", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/stores/interactions")>();
+  return {
+    ...actual,
+    useMessageInteractionCards: () => ({
+      checkpoints: [],
+      nonBlockingAsks: [],
+      planReviews: [],
+      teamPreviews: [],
+    }),
+  };
+});
 
 vi.mock("@/services/turns", () => ({
   runRegenerate: vi.fn(),
+}));
+
+vi.mock("@/services/turns/continuePaused", () => ({
+  continuePausedTurn: vi.fn(),
 }));
 
 vi.mock("../AssistantMessageFooter", () => ({
@@ -93,6 +106,7 @@ function renderBubble(message: Message) {
 afterEach(() => {
   cleanup();
   genMock.value = true;
+  execById.value = {};
 });
 
 describe("AssistantMessage footer gate", () => {
@@ -163,7 +177,7 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 
-  it("空正文 + cancelled 不占聊天面；interrupted 仍合成脸（P1）", () => {
+  it("空正文 + cancelled 不占聊天面；interrupted 不在气泡画失败卡（P1）", () => {
     renderBubble(settledMessage({ content: "", finishReason: "cancelled" }));
     expect(screen.queryByTestId("assistant-stopped-notice")).toBeNull();
     expect(screen.queryByText("已停止")).toBeNull();
@@ -172,11 +186,68 @@ describe("AssistantMessage footer gate", () => {
     expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
     cleanup();
-    // Interrupted: error card only (layer-1 — no footer regenerate).
+    // Interrupted: unique verdict is the composer hint — bubble has no red card / footer.
     renderBubble(settledMessage({ content: "", finishReason: "interrupted" }));
-    expect(screen.getByText(/已中断/)).toBeTruthy();
+    expect(screen.queryByText(/已中断/)).toBeNull();
+    expect(screen.queryByText(/直接发送下一条/)).toBeNull();
     expect(screen.queryByTestId("assistant-footer")).toBeNull();
     expect(screen.queryByRole("button", { name: "重新生成" })).toBeNull();
+  });
+
+  it("attested paused：只已暂停+继续，不亮限流横幅或中断 hint", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        finishReason: "paused",
+        outcome: "paused",
+        error: {
+          code: "LLM_RATE_LIMIT",
+          message: "上游限流，暂时无法继续本回合。请约 2 秒后再试。",
+        },
+      }),
+    );
+    expect(screen.getByTestId("paused-continue-surface")).toBeTruthy();
+    expect(screen.getByText("已暂停")).toBeTruthy();
+    expect(screen.getByText("上游限流，暂时无法继续本回合。")).toBeTruthy();
+    expect(screen.queryByText(/请约/)).toBeNull();
+    expect(screen.queryByText(/稍后再试/)).toBeNull();
+    expect(screen.getByRole("button", { name: "继续" })).toBeTruthy();
+    expect(screen.queryByText(/直接发送下一条/)).toBeNull();
+    expect(screen.queryByText("已中断")).toBeNull();
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
+  });
+
+  it("限流 + interrupted finish：只亮限流横幅，不并写「直接发送下一条」", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        finishReason: "interrupted",
+        error: {
+          code: "LLM_RATE_LIMIT",
+          message: "上游限流，暂时无法继续本回合。请约 2 秒后再试。",
+        },
+      }),
+    );
+    expect(screen.getByText(/上游限流/)).toBeTruthy();
+    expect(screen.queryByText(/直接发送下一条/)).toBeNull();
+    expect(screen.queryByText("已中断")).toBeNull();
+  });
+
+  it("partial + 限流：气泡不重复红卡（判决在输入区）", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        outcome: "partial",
+        finishReason: "error",
+        error: {
+          code: "LLM_RATE_LIMIT",
+          message: "上游限流，暂时无法继续本回合。请稍后再试。",
+        },
+      }),
+    );
+    expect(screen.queryByText(/上游限流/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+    expect(screen.queryByTestId("assistant-footer")).toBeNull();
   });
 });
 
@@ -350,5 +421,70 @@ describe("AssistantMessage error card chrome", () => {
     const copyBtn = screen.getByRole("button", { name: "复制排查包" });
     expect(copyBtn.className).toContain("text-primary/70");
     expect(copyBtn.className).not.toContain("destructive");
+  });
+
+  it("credential_source=platform：接入自己的 Key，不是去设置", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: {
+          code: "LLM_KEY_INVALID",
+          message:
+            "平台模型暂时不可用（上游鉴权失败）。请改用自己的 API Key，或联系管理员。",
+          context: { credential_source: "platform" },
+        },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "接入自己的 Key" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "去设置" })).toBeNull();
+  });
+
+  it("credential_source=user：去设置", () => {
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: {
+          code: "LLM_KEY_INVALID",
+          message: "API Key 无效或已过期，请检查后重试。",
+          context: { credential_source: "user" },
+        },
+      }),
+    );
+    expect(screen.getByRole("button", { name: "去设置" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "接入自己的 Key" })).toBeNull();
+  });
+});
+
+describe("AssistantMessage trusts turnOutcome flags", () => {
+  it("有正文的中断/停止：半成品正文就是结果，不另画失败卡", () => {
+    renderBubble(
+      settledMessage({ content: "半成品答案", finishReason: "cancelled" }),
+    );
+    expect(screen.getByText("半成品答案")).toBeTruthy();
+    expect(screen.queryByText("已停止")).toBeNull();
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+    cleanup();
+    renderBubble(
+      settledMessage({ content: "半成品答案", finishReason: "interrupted" }),
+    );
+    expect(screen.getByText("半成品答案")).toBeTruthy();
+    expect(screen.queryByText(/已中断/)).toBeNull();
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
+  });
+
+  it("有团队图时条是主判决，气泡不重复红卡", () => {
+    execById.value = {
+      "asst-1": { deliveryStatus: null, plan: { agents: [] } },
+    };
+    renderBubble(
+      settledMessage({
+        content: "",
+        error: { code: "LLM_ERROR", message: "模型调用失败，请重试。" },
+      }),
+    );
+    expect(screen.queryByText("模型调用失败，请重试。")).toBeNull();
+    expect(screen.queryByRole("button", { name: "复制排查包" })).toBeNull();
+    // recovery.none on error: footer 重新生成 is the unique retry control.
+    expect(screen.getByTestId("assistant-footer")).toBeTruthy();
   });
 });

@@ -4,7 +4,8 @@ turns, the turn journal (唯一事实源) and per-turn metrics (观测看板).""
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
-from sqlalchemy import and_, case, delete, distinct, func, select, update
+from sqlalchemy import and_, case, delete, distinct, func, select, type_coerce, update
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import Insert as PgInsert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from agentcore.db.models import (
     PAUSED_TURN_SETTLED,
     Conversation,
     HandoffJob,
+    Message,
     PausedTurnOutcomeRow,
     PausedTurnRow,
     RunSessionRow,
@@ -474,6 +476,85 @@ class PausedTurnRepository:
         await self._session.commit()
         return row
 
+    async def claim_ceo_continue_lock(
+        self,
+        message_id: str,
+        *,
+        conversation_id: str,
+        user_id: str,
+        frame: dict,
+    ) -> PausedTurnRow | None:
+        """Atomically consume the CEO continue latch. Exactly one caller wins.
+
+        Marks an existing unclaimed ``kind=ceo_continue`` row claimed (no delete —
+        deleting would reopen the no-lock + ``usage.outcome=paused`` hole). When no
+        row exists, inserts ``frame`` only if the assistant row is paused
+        (``ON CONFLICT DO NOTHING`` so two inserters still have one winner). Does
+        not stamp ``paused_turn_outcomes`` (this latch is not a checkpoint card).
+        """
+        claimed = await self._session.execute(
+            update(PausedTurnRow)
+            .where(
+                PausedTurnRow.message_id == message_id,
+                PausedTurnRow.conversation_id == conversation_id,
+                PausedTurnRow.frame["kind"].astext == "ceo_continue",
+                func.coalesce(PausedTurnRow.frame["claimed"].astext, "") != "true",
+            )
+            .values(
+                frame=PausedTurnRow.frame.concat(type_coerce({"claimed": True}, JSONB)),
+                updated_at=datetime.now(UTC),
+            )
+            .returning(PausedTurnRow)
+        )
+        row = claimed.scalar_one_or_none()
+        if row is not None:
+            await self._session.commit()
+            return row
+
+        paused = await self._session.execute(
+            select(Message.id).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+                Message.usage["outcome"].astext == "paused",
+            )
+        )
+        if paused.scalar_one_or_none() is None:
+            await self._session.commit()
+            return None
+
+        inserted = await self._session.execute(
+            pg_insert(PausedTurnRow)
+            .values(
+                message_id=message_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                frame=frame,
+            )
+            .on_conflict_do_nothing(index_elements=["message_id"])
+            .returning(PausedTurnRow)
+        )
+        row = inserted.scalar_one_or_none()
+        await self._session.commit()
+        return row
+
+    async def delete_claimed_ceo_continue_lock(
+        self, message_id: str, *, conversation_id: str
+    ) -> None:
+        """Drop a consumed continue latch after a successful continue.
+
+        Only a claimed ``ceo_continue`` row is removed, so a re-pause that already
+        upserted a fresh unclaimed lock is left alone.
+        """
+        await self._session.execute(
+            delete(PausedTurnRow).where(
+                PausedTurnRow.message_id == message_id,
+                PausedTurnRow.conversation_id == conversation_id,
+                PausedTurnRow.frame["kind"].astext == "ceo_continue",
+                PausedTurnRow.frame["claimed"].astext == "true",
+            )
+        )
+        await self._session.commit()
+
     async def delete_stale(self, *, before: datetime, limit: int) -> list[tuple[str, str]]:
         """Delete up to ``limit`` paused turns idle since before ``before`` (TTL sweep).
 
@@ -679,6 +760,81 @@ class TurnJournalRepository:
             stmt = stmt.having(func.max(TurnJournalRow.created_at) > after)
         result = await self._session.execute(stmt)
         return list(result.scalars().all())
+
+    async def list_question_posted_hosts(
+        self,
+        *,
+        conversation_id: str | None = None,
+        user_id: str | None = None,
+        posted_before: datetime | None = None,
+        posted_after: datetime | None = None,
+        exclude_turn_id: str | None = None,
+        limit: int | None = None,
+    ) -> list[tuple[str, str]]:
+        """Turns that journaled ``question_posted``, oldest first.
+
+        Returns ``(conversation_id, turn_id)``. Pending vs resolved is fold's job —
+        this is only the host scan (injection / 「在等你」snapshot / 7-day sweep).
+        Soft-deleted conversations are omitted so a badge cannot relight a deleted chat.
+        ``limit`` is a sweep batch bound, not a product cap on hanging questions.
+        """
+        posted_at = func.min(TurnJournalRow.created_at)
+        stmt = (
+            select(TurnJournalRow.conversation_id, TurnJournalRow.turn_id)
+            .join(Conversation, Conversation.id == TurnJournalRow.conversation_id)
+            .where(
+                TurnJournalRow.kind == "question_posted",
+                Conversation.deleted_at.is_(None),
+            )
+            .group_by(TurnJournalRow.conversation_id, TurnJournalRow.turn_id)
+            .order_by(posted_at.asc())
+        )
+        cid = (conversation_id or "").strip()
+        if cid:
+            stmt = stmt.where(TurnJournalRow.conversation_id == cid)
+        uid = (user_id or "").strip()
+        if uid:
+            stmt = stmt.where(Conversation.user_id == uid)
+        excluded = (exclude_turn_id or "").strip()
+        if excluded:
+            stmt = stmt.where(TurnJournalRow.turn_id != excluded)
+        if posted_before is not None:
+            stmt = stmt.having(posted_at < posted_before)
+        if posted_after is not None:
+            stmt = stmt.having(posted_at >= posted_after)
+        if limit is not None:
+            if limit <= 0:
+                return []
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
+        return [(str(cid_), str(tid)) for cid_, tid in result.all()]
+
+    async def find_turn_id_for_question_posted(
+        self, *, conversation_id: str, ask_id: str
+    ) -> str | None:
+        """Host turn of this conversation's ``question_posted`` with ``ask_id``."""
+        from sqlalchemy import text
+
+        cid = (conversation_id or "").strip()
+        aid = (ask_id or "").strip()
+        if not cid or not aid:
+            return None
+        result = await self._session.execute(
+            text(
+                """
+                SELECT turn_id
+                FROM turn_journal
+                WHERE conversation_id = :cid
+                  AND kind = 'question_posted'
+                  AND payload->>'ask_id' = :ask_id
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ),
+            {"cid": cid, "ask_id": aid},
+        )
+        row = result.first()
+        return str(row[0]) if row and row[0] else None
 
     async def find_turn_id_for_execution(
         self, *, conversation_id: str, execution_id: str

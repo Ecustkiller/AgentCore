@@ -31,6 +31,8 @@ from agentcore.runtime.facts import TurnFactLog, current_fact_log
 from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.runtime.kickoff import (
     debate_kickoff_summary,
+    has_unfulfilled_kickoff_adjust,
+    kickoff_adjust_state,
     needs_capability_auth,
     should_kickoff,
     should_preview_delegate_plan,
@@ -697,4 +699,300 @@ async def test_delegate_full_auto_multi_skips_card():
 
     assert result.effect is not ToolEffect.SUSPEND
     assert saved == []
+    clear_active_coordination()
+
+
+def _adjust_journal(
+    *,
+    fulfilled: bool = False,
+    note: str = "人太多，改成一个人做",
+    first_id: str = "tp1",
+    second_id: str = "tp2",
+) -> list[dict]:
+    entries = [
+        {
+            "kind": "team_preview_required",
+            "payload": {"checkpoint_id": first_id, "revision": 1},
+            "ts": "t0",
+        },
+        {
+            "kind": "team_preview_resolved",
+            "payload": {"checkpoint_id": first_id, "decision": "adjust", "note": note},
+            "ts": "t1",
+        },
+    ]
+    if fulfilled:
+        entries.append(
+            {
+                "kind": "team_preview_required",
+                "payload": {
+                    "checkpoint_id": second_id,
+                    "revision": 2,
+                    "revised_from": first_id,
+                    "revision_note": note,
+                },
+                "ts": "t2",
+            }
+        )
+    return entries
+
+
+def test_unfulfilled_adjust_forces_plan_half():
+    """未兑现 adjust 绕过 ≥2 worker：solo 也挂；兑现后不再强制。"""
+    solo = _plan(RunSpec(run_id="r1", task="alone", role="写手"))
+    assert should_preview_delegate_plan(solo) is False
+    assert (
+        should_kickoff(
+            plan_preview=False,
+            local_gate=False,
+            axes=_KICKOFF_RULES,
+            unfulfilled_adjust=True,
+        )
+        is True
+    )
+    assert (
+        should_kickoff(
+            plan_preview=False,
+            local_gate=False,
+            axes=_KICKOFF_RULES,
+            unfulfilled_adjust=False,
+        )
+        is False
+    )
+    # never-adjust 路径：full_auto 仍跳。
+    assert (
+        should_kickoff(
+            plan_preview=True,
+            local_gate=True,
+            axes=recipe_to_axes(AutonomyPolicy.MANAGED),
+            unfulfilled_adjust=True,
+        )
+        is False
+    )
+
+
+def test_kickoff_adjust_state_lineage_and_fulfillment():
+    note = "人太多，改成一个人做"
+    pending = _adjust_journal(note=note)
+    assert has_unfulfilled_kickoff_adjust(pending) is True
+    pending_state = kickoff_adjust_state(pending)
+    assert pending_state.revision == 2
+    assert pending_state.revised_from == "tp1"
+    assert pending_state.revision_note == note
+
+    done = _adjust_journal(fulfilled=True, note=note)
+    assert has_unfulfilled_kickoff_adjust(done) is False
+    done_state = kickoff_adjust_state(done)
+    assert done_state.revision == 1
+    assert done_state.revised_from is None
+    assert done_state.revision_note is None
+
+    # 第二轮 adjust：谱系接到上一张卡。
+    second = [
+        *done,
+        {
+            "kind": "team_preview_resolved",
+            "payload": {"checkpoint_id": "tp2", "decision": "adjust", "note": "再瘦"},
+            "ts": "t3",
+        },
+    ]
+    second_state = kickoff_adjust_state(second)
+    assert second_state.unfulfilled is True
+    assert second_state.revision == 3
+    assert second_state.revised_from == "tp2"
+    assert second_state.revision_note == "再瘦"
+
+    assert has_unfulfilled_kickoff_adjust([]) is False
+    assert kickoff_adjust_state([]).revision == 1
+
+
+async def test_unfulfilled_adjust_solo_still_hangs_card():
+    """修订后只剩 1 人（会推断 light）仍挂卡，且新卡带谱系。"""
+    from agentcore.runtime.coordination.session import clear_active_coordination
+
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    note = "人太多，改成一个人做"
+    sink.seed_journal(
+        [
+            {
+                "type": EventType.TEAM_PREVIEW_REQUIRED.value,
+                "payload": {"checkpoint_id": "tp1", "revision": 1},
+                "timestamp": "t0",
+            },
+            {
+                "type": EventType.TEAM_PREVIEW_RESOLVED.value,
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "adjust",
+                    "note": note,
+                },
+                "timestamp": "t1",
+            },
+        ]
+    )
+    saved: list[TeamPreviewSuspension] = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["AOUT"]), sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog(
+        inherited_entries=[
+            {
+                "kind": "team_preview_required",
+                "payload": {"checkpoint_id": "tp1", "revision": 1},
+                "ts": "t0",
+            },
+            {
+                "kind": "team_preview_resolved",
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "adjust",
+                    "note": note,
+                },
+                "ts": "t1",
+            },
+        ]
+    )
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        result = await t.execute(
+            {"tasks": [{"role": "写手", "task": "一个人做完"}]},
+            ctx(),
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert result.effect is ToolEffect.SUSPEND
+    assert len(saved) == 1
+    required = next(e for e in sink._history if e.type is EventType.TEAM_PREVIEW_REQUIRED)
+    assert required.payload["revision"] == 2
+    assert required.payload["revised_from"] == "tp1"
+    assert required.payload["revision_note"] == note
+    assert saved[0].revision == 2
+    assert saved[0].revised_from == "tp1"
+    assert saved[0].revision_note == note
+    clear_active_coordination()
+
+
+async def test_fulfilled_adjust_does_not_force_solo_card():
+    """已兑现（此后已再出过开工卡）后，1 人不再强制挂卡。"""
+    from agentcore.runtime.coordination.session import clear_active_coordination
+
+    clear_active_coordination()
+    registry = InteractionRegistry()
+    sink = EventSink()
+    note = "人太多，改成一个人做"
+    sink.seed_journal(
+        [
+            {
+                "type": EventType.TEAM_PREVIEW_REQUIRED.value,
+                "payload": {"checkpoint_id": "tp1", "revision": 1},
+                "timestamp": "t0",
+            },
+            {
+                "type": EventType.TEAM_PREVIEW_RESOLVED.value,
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "adjust",
+                    "note": note,
+                },
+                "timestamp": "t1",
+            },
+            {
+                "type": EventType.TEAM_PREVIEW_REQUIRED.value,
+                "payload": {
+                    "checkpoint_id": "tp2",
+                    "revision": 2,
+                    "revised_from": "tp1",
+                    "revision_note": note,
+                },
+                "timestamp": "t2",
+            },
+        ]
+    )
+    saved: list = []
+
+    async def _save(frame):
+        saved.append(frame)
+
+    async def _drop(_mid):
+        pass
+
+    t = tool_durable(Provider(["AOUT"]), sink, registry, _save, _drop)
+    transcript = [
+        LLMMessage(role="user", content="原始请求"),
+        LLMMessage(
+            role="assistant",
+            content=None,
+            tool_calls=[
+                ToolCall(
+                    id="call_del",
+                    function=ToolCallFunction(name="delegate", arguments="{}"),
+                )
+            ],
+        ),
+    ]
+    log = TurnFactLog(
+        inherited_entries=[
+            {
+                "kind": "team_preview_required",
+                "payload": {"checkpoint_id": "tp1", "revision": 1},
+                "ts": "t0",
+            },
+            {
+                "kind": "team_preview_resolved",
+                "payload": {
+                    "checkpoint_id": "tp1",
+                    "decision": "adjust",
+                    "note": note,
+                },
+                "ts": "t1",
+            },
+            {
+                "kind": "team_preview_required",
+                "payload": {
+                    "checkpoint_id": "tp2",
+                    "revision": 2,
+                    "revised_from": "tp1",
+                    "revision_note": note,
+                },
+                "ts": "t2",
+            },
+        ]
+    )
+    fl_token = current_fact_log.set(log)
+    ct_token = captain_transcript.set(transcript)
+    try:
+        result = await t.execute(
+            {"tasks": [{"role": "写手", "task": "一个人做完"}]},
+            ctx(),
+        )
+    finally:
+        captain_transcript.reset(ct_token)
+        current_fact_log.reset(fl_token)
+
+    assert result.effect is not ToolEffect.SUSPEND
+    assert saved == []
+    assert not any(e.type is EventType.TEAM_PREVIEW_REQUIRED for e in sink._history)
     clear_active_coordination()

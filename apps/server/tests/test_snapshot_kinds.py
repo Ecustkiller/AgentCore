@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from agentcore.storage.protocol import SnapshotRef
 from agentcore.workspace.snapshot_kinds import (
+    byte_cap_prune_ids,
     classify_snapshot_label,
     system_prune_ids,
 )
@@ -15,13 +16,14 @@ def _ref(
     *,
     days_ago: float = 0,
     now: datetime | None = None,
+    size_bytes: int = 1,
 ) -> SnapshotRef:
     clock = now or datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
     return SnapshotRef(
         snapshot_id=sid,
         label=label,
         created_at=clock - timedelta(days=days_ago),
-        size_bytes=1,
+        size_bytes=size_bytes,
     )
 
 
@@ -122,3 +124,38 @@ def test_system_prune_still_deletes_unpinned_over_cap():
         pinned_ids={"b2"},  # only mid baseline pinned; b1 + h1 still go
     )
     assert set(stale) == {"b1", "h1"}
+
+
+def test_byte_cap_prunes_oldest():
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    refs = [
+        _ref("n3", None, days_ago=0, now=now, size_bytes=100),
+        _ref("n2", None, days_ago=1, now=now, size_bytes=100),
+        _ref("n1", None, days_ago=2, now=now, size_bytes=100),
+    ]
+    stale = byte_cap_prune_ids(refs, max_bytes=250)
+    assert stale == ["n1"]
+
+
+def test_byte_cap_skips_kept_label():
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    refs = [
+        _ref("auto2", None, days_ago=0, now=now, size_bytes=100),
+        _ref("auto1", None, days_ago=1, now=now, size_bytes=100),
+        _ref("kept", "发版前", days_ago=2, now=now, size_bytes=100),
+    ]
+    stale = byte_cap_prune_ids(refs, max_bytes=150)
+    assert "kept" not in stale
+    assert set(stale) == {"auto1", "auto2"}
+
+
+def test_byte_cap_skips_pinned_ids():
+    now = datetime(2026, 8, 11, 12, 0, tzinfo=UTC)
+    refs = [
+        _ref("new", None, days_ago=0, now=now, size_bytes=100),
+        _ref("mid", None, days_ago=1, now=now, size_bytes=100),
+        _ref("pinned", "turn-baseline:old", days_ago=2, now=now, size_bytes=100),
+    ]
+    stale = byte_cap_prune_ids(refs, max_bytes=250, pinned_ids={"pinned"})
+    assert stale == ["mid"]
+    assert "pinned" not in stale

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -10,6 +11,7 @@ from agentcore.runtime.interaction import InteractionRegistry
 from agentcore.workspace.channel import WorkspaceChannel
 from agentcore.workspace.indexing.registry import (
     clear_index_registry,
+    drain_index_registry,
     drop_index_registry,
     shared_index_maintainer_for_dir,
     shared_index_manager_for_dir,
@@ -91,4 +93,34 @@ async def test_drop_index_registry_releases_index_dir_entry():
         # Miss after drop → fresh manager instance for the same dir key.
         assert shared_index_manager_for_dir(idx) is not manager
     finally:
+        clear_index_registry()
+
+
+async def test_drain_index_registry_awaits_cancelled_maintain():
+    """Teardown must finish the cancelled task before the loop executor dies."""
+    hang = asyncio.Event()
+
+    async def _block(*_a: object, **_k: object) -> bool:
+        await hang.wait()
+        return False
+
+    clear_index_registry()
+    try:
+        ws = _local()
+        idx = ws._index_cache_dir()  # noqa: SLF001
+        manager = shared_index_manager_for_dir(idx)
+        manager.ensure_index = _block  # type: ignore[method-assign]
+        ws.start_code_index_maintenance()
+        maintainer = ws._index_maintainer  # noqa: SLF001
+        assert maintainer is not None and maintainer.building
+        await asyncio.sleep(0)
+        await drain_index_registry()
+        leftover = [
+            task
+            for task in asyncio.all_tasks()
+            if task.get_name() == "code-index-maintain" and not task.done()
+        ]
+        assert leftover == []
+    finally:
+        hang.set()
         clear_index_registry()

@@ -51,6 +51,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "好的，我先用纯文本回答。",
     "reasoning": "",

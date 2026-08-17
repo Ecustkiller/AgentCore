@@ -1159,6 +1159,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "按命题卡开辩。辩论收束；证人答问已进证据台账。",
     "reasoning": "",

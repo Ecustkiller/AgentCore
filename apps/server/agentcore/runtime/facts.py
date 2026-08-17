@@ -36,7 +36,8 @@ kinds), making the journal lossless so the window / frame become projections of 
   text fed back into the window), captured AFTER any post-emit annotation (the CEO
   path folds citation numbers into the tool message after ``tool_use_end`` fires —
   Phase 2 边界①). The window fold reads tool results from THIS fact, not the forwarded
-  display ``tool_use_end`` (whose ``result`` is the pre-annotation text). Carries
+  display ``tool_use_end`` (whose journaled ``result`` is the pre-annotation text,
+  capped to the process-lane 8k budget). Carries
   ``run_id`` so a multi-agent turn's tools scope per run.
 - :class:`NoteFact` — an engine-injected message (a convergence NUDGE reflection, the
   FINALIZE instruction): part of the real LLM window, so the fold needs it. Carries
@@ -276,7 +277,8 @@ class ToolCallFact:
     ``tool_use_end`` (执行级事件溯源 §8.3 投影边界①): on the CEO chat path the engine
     folds citation numbers into the tool message AFTER emitting ``tool_use_end``, so the
     event's ``result`` is the pre-annotation text while the model actually saw the
-    annotated one. Recorded after that annotation, so ``result`` is byte-for-byte what
+    annotated one (journaled display ``result`` is further capped to the process-lane
+    8k budget). Recorded after that annotation, so ``result`` is byte-for-byte what
     the next round's window carried. ``run_id`` scopes a multi-agent turn's tools per
     run; ``tool_call_id`` pairs it to the issuing ``llm_call``'s ``tool_calls`` entry.
     NOT recorded for a SUSPENDED call (``ask_user`` / ``delegate`` blocks inside

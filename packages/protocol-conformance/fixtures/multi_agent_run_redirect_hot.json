@@ -256,6 +256,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排两位并行推进。 团队已完成；调研按你的新方向热续写过。",
     "reasoning": "",

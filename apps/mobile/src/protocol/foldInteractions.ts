@@ -251,6 +251,32 @@ export function foldInteractions(
         });
         break;
       }
+      case "question_resolved": {
+        const id = str(p.ask_id);
+        if (!id) break;
+        const prev = map.get(keyOf("question_posted", id));
+        if (
+          !prev ||
+          prev.leaf.status !== "pending" ||
+          prev.leaf.kind !== "question_posted"
+        ) {
+          break;
+        }
+        const settlement =
+          p.status === "answered" || p.status === "discarded"
+            ? p.status
+            : undefined;
+        const answer = str(p.answer);
+        const note = str(p.note);
+        prev.leaf = {
+          ...prev.leaf,
+          status: "resolved",
+          ...(settlement ? { settlement } : {}),
+          ...(answer ? { answer } : {}),
+          ...(note ? { note } : {}),
+        };
+        break;
+      }
       case "stage_card_required": {
         const id = str(p.stage_card_id);
         if (!id) break;

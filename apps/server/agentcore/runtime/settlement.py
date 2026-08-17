@@ -29,6 +29,7 @@ SETTLEMENT_EVENT_KINDS: frozenset[str] = frozenset(
         EventType.TEAM_PREVIEW_RESOLVED.value,
         EventType.STAGE_CARD_REQUIRED.value,
         EventType.STAGE_CARD_RESOLVED.value,
+        EventType.QUESTION_RESOLVED.value,
         EventType.INTERACTION_ORPHANED.value,
     }
 )

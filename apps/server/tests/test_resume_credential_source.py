@@ -164,3 +164,6 @@ def test_bind_credential_pricing_context_keeps_byok_ambient_pricing_zero():
     call = next(c for c in caps if c.get("event") == "llm.call")
     assert call["cost_nano"] == 0
     assert call.get("cost_estimated_nano", 0) > 0
+    assert "platform_credential_id" not in call
+    assert get_log_value("platform_credential_id") == ""
+    clear_log_context()

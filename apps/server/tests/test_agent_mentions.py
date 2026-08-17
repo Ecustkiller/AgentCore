@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from agentcore.api.schemas.messages import AgentMention, SendMessageRequest
+from agentcore.api.schemas.messages import (
+    AgentMention,
+    MessageAttachment,
+    QueuedTurnItem,
+    RecordTurnRequest,
+    SendMessageRequest,
+)
 from agentcore.runtime.pipeline import (
     _build_agent_mention_context,
     merge_attachment_and_mention_context,
@@ -97,6 +103,40 @@ def test_queued_turn_preserves_agent_mentions():
     assert item.attachments[0]["name"] == "a.txt"
 
 
+def test_queued_turn_item_schema_returns_attachments_and_mentions():
+    row = QueuedTurnItem(
+        queue_id="q1",
+        content="go",
+        position=1,
+        attachments=[
+            MessageAttachment(name="a.txt", path="a.txt", text="hi"),
+        ],
+        agent_mentions=[AgentMention(agent_id="a1", role="研究员")],
+    )
+    dumped = row.model_dump()
+    assert dumped["attachments"][0]["name"] == "a.txt"
+    assert dumped["agent_mentions"] == [{"agent_id": "a1", "role": "研究员"}]
+    legacy = QueuedTurnItem(queue_id="q2", content="plain", position=1)
+    assert legacy.attachments == []
+    assert legacy.agent_mentions == []
+
+
+def test_record_turn_request_agent_mentions_optional():
+    empty = RecordTurnRequest(
+        user_message="hi",
+        user_message_id="u1",
+        trace_id="0123456789abcdef0123456789abcdef",
+    )
+    assert empty.agent_mentions == []
+    body = RecordTurnRequest(
+        user_message="hi",
+        user_message_id="u1",
+        trace_id="0123456789abcdef0123456789abcdef",
+        agent_mentions=[AgentMention(agent_id="w1", role="写手")],
+    )
+    assert body.agent_mentions == [AgentMention(agent_id="w1", role="写手")]
+
+
 def test_steer_enqueue_preserves_agent_mentions():
     reset_steer()
     begin_accepting("c1")
@@ -111,3 +151,265 @@ def test_steer_enqueue_preserves_agent_mentions():
     assert parked is not None
     assert parked.agent_mentions == mentions
     reset_steer()
+
+
+def test_to_stored_agent_mentions_sanitizes_and_caps():
+    from agentcore.conversation.mentions import to_stored_agent_mentions
+
+    assert to_stored_agent_mentions(None) == []
+    assert to_stored_agent_mentions([]) == []
+    assert to_stored_agent_mentions([{"agent_id": "", "role": "x"}]) == []
+    stored = to_stored_agent_mentions(
+        [
+            {"agent_id": "a1", "role": "研究员", "extra": "drop"},
+            {"agent_id": "a2", "role": "写手"},
+        ]
+    )
+    assert stored == [
+        {"agent_id": "a1", "role": "研究员"},
+        {"agent_id": "a2", "role": "写手"},
+    ]
+    too_many = [{"agent_id": f"a{i}", "role": f"r{i}"} for i in range(12)]
+    assert len(to_stored_agent_mentions(too_many)) == 10
+
+
+def test_resolve_interjection_mentions_payload_wins_over_stash():
+    from agentcore.conversation.mentions import resolve_interjection_mentions
+
+    payload = {
+        "interjection_id": "i1",
+        "agent_mentions": [{"agent_id": "from_payload", "role": "写手"}],
+    }
+    stashed = {"agent_mentions": [{"agent_id": "from_stash", "role": "研究员"}]}
+    assert resolve_interjection_mentions(payload, stashed) == [
+        {"agent_id": "from_payload", "role": "写手"}
+    ]
+    assert resolve_interjection_mentions({"interjection_id": "i1"}, stashed) == [
+        {"agent_id": "from_stash", "role": "研究员"}
+    ]
+    assert resolve_interjection_mentions({}, None) is None
+
+
+def test_message_detail_roundtrips_agent_mentions():
+    from datetime import UTC, datetime
+
+    from agentcore.api.schemas.messages import MessageDetail
+
+    d = MessageDetail.model_validate(
+        {
+            "id": "m1",
+            "conversation_id": "c1",
+            "role": "user",
+            "content": "帮我调研",
+            "created_at": datetime.now(UTC),
+            "agent_mentions": [{"agent_id": "w1", "role": "研究员"}],
+        }
+    )
+    assert d.agent_mentions == [AgentMention(agent_id="w1", role="研究员")]
+
+    legacy = MessageDetail.model_validate(
+        {
+            "id": "m2",
+            "conversation_id": "c1",
+            "role": "user",
+            "content": "hi",
+            "created_at": datetime.now(UTC),
+        }
+    )
+    assert legacy.agent_mentions == []
+
+    junk = MessageDetail.model_validate(
+        {
+            "id": "m3",
+            "conversation_id": "c1",
+            "role": "user",
+            "content": "hi",
+            "created_at": datetime.now(UTC),
+            "agent_mentions": [{"agent_id": "", "role": "x"}, "nope"],
+        }
+    )
+    assert junk.agent_mentions == []
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_persists_agent_mentions(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agentcore.api.sse import EventSink
+    from agentcore.conversation import turns as turns_mod
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+
+    created: list[dict] = []
+
+    class _FakeSessionCM:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+    class _ConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="t", folder_id=None)
+
+    class _MsgRepo:
+        def __init__(self, _session):
+            pass
+
+        async def create(self, **kwargs):
+            created.append(kwargs)
+            return SimpleNamespace(id="um1")
+
+    class _BoardRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_conversation_id(self, *_a, **_k):
+            return None
+
+    monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
+    monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
+    monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
+    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
+    monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
+    monkeypatch.setattr(turns_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        turns_mod,
+        "resolve_permission_axes",
+        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+    )
+    monkeypatch.setattr(
+        turns_mod,
+        "build_turn_backend",
+        AsyncMock(return_value=SimpleNamespace(location="server")),
+    )
+    monkeypatch.setattr(turns_mod, "persist_attachments", AsyncMock(return_value=[]))
+    monkeypatch.setattr(turns_mod, "to_stored_metadata", lambda _a: [])
+    monkeypatch.setattr(
+        turns_mod,
+        "load_chat_context",
+        AsyncMock(return_value=[{"role": "user", "content": "hi"}]),
+    )
+    monkeypatch.setattr(turns_mod, "maybe_compact_near_ceiling", AsyncMock())
+    monkeypatch.setattr(turns_mod, "maybe_delete_zero_output_send", AsyncMock())
+    monkeypatch.setattr(turns_mod, "run_and_persist", AsyncMock())
+    monkeypatch.setattr(turns_mod, "schedule_title_generation", lambda **_k: None)
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.await_live_detached_drive",
+        AsyncMock(),
+    )
+
+    mentions = [{"agent_id": "w1", "role": "研究员"}]
+    sink = EventSink()
+    await turns_mod.stream_chat(
+        conversation_id="c1",
+        user_message="帮我调研",
+        user_id="u1",
+        sink=sink,
+        agent_mentions=mentions,
+    )
+
+    assert created
+    assert created[0]["agent_mentions"] == mentions
+
+
+@pytest.mark.asyncio
+async def test_regenerate_forwards_stored_agent_mentions(monkeypatch):
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from agentcore.api.sse import EventSink
+    from agentcore.conversation import turns as turns_mod
+    from agentcore.core.types import AutonomyPolicy, recipe_to_axes
+
+    captured: list[dict] = []
+    mentions = [{"agent_id": "w1", "role": "写手"}]
+
+    class _FakeSessionCM:
+        async def __aenter__(self):
+            return SimpleNamespace(expire_all=lambda: None, commit=AsyncMock())
+
+        async def __aexit__(self, *_a):
+            return False
+
+    class _ConvRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id_unscoped(self, _cid):
+            return SimpleNamespace(title="t", folder_id=None)
+
+    class _MsgRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_id(self, _mid, conversation_id=None):
+            return SimpleNamespace(
+                id=_mid,
+                role="user",
+                content="帮我写",
+                created_at=datetime.now(UTC),
+                agent_mentions=mentions,
+            )
+
+        async def delete_after(self, *_a, **_k):
+            return None
+
+        async def update_content(self, *_a, **_k):
+            return None
+
+    class _BoardRepo:
+        def __init__(self, _session):
+            pass
+
+        async def get_by_conversation_id(self, *_a, **_k):
+            return None
+
+    async def _run(**kwargs):
+        captured.append(kwargs)
+
+    monkeypatch.setattr(turns_mod, "async_session_factory", lambda: _FakeSessionCM())
+    monkeypatch.setattr(turns_mod, "ConversationRepository", _ConvRepo)
+    monkeypatch.setattr(turns_mod, "MessageRepository", _MsgRepo)
+    monkeypatch.setattr(turns_mod, "BoardRepository", _BoardRepo)
+    monkeypatch.setattr(turns_mod, "resolve_local_binding", AsyncMock(return_value=None))
+    monkeypatch.setattr(turns_mod, "resolve_profile_set", AsyncMock(return_value=None))
+    monkeypatch.setattr(turns_mod, "resolve_memory_enabled", AsyncMock(return_value=True))
+    monkeypatch.setattr(
+        turns_mod,
+        "resolve_permission_axes",
+        AsyncMock(return_value=recipe_to_axes(AutonomyPolicy.LESS_INTERRUPT)),
+    )
+    monkeypatch.setattr(
+        turns_mod,
+        "build_turn_backend",
+        AsyncMock(return_value=SimpleNamespace(location="server")),
+    )
+    monkeypatch.setattr(
+        turns_mod,
+        "load_chat_context",
+        AsyncMock(return_value=[{"role": "user", "content": "帮我写"}]),
+    )
+    monkeypatch.setattr(turns_mod, "maybe_compact_near_ceiling", AsyncMock())
+    monkeypatch.setattr(turns_mod, "run_and_persist", _run)
+    monkeypatch.setattr(
+        "agentcore.runtime.coordination.await_live_detached_drive",
+        AsyncMock(),
+    )
+
+    sink = EventSink()
+    await turns_mod.regenerate_chat(
+        conversation_id="c1",
+        message_id="u1",
+        user_id="u1",
+        sink=sink,
+    )
+
+    assert captured
+    assert captured[0]["agent_mentions"] == mentions

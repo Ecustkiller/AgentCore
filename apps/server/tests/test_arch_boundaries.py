@@ -95,11 +95,19 @@ def test_llm_gateway_does_not_import_db() -> None:
 
     Exemptions are intentional llm↔db bridges:
     - ``provider_service`` / ``resolve`` — BYOK credential resolution
+    - ``platform_credential_service`` — platform-pool credential CRUD + snapshot reload
+      (boot/refresh opens a session; hot-path pick lives in db-free ``platform_pool``)
     - ``model_profiles`` — combo CRUD + expand (derived from catalog 上架; not metadata owner)
     - ``factory`` — ``build_turn_router`` may open a session to inject a cross-provider
       worker (agent provider_id ≠ chat provider)
     """
-    bridge = {"provider_service.py", "resolve.py", "model_profiles.py", "factory.py"}
+    bridge = {
+        "provider_service.py",
+        "resolve.py",
+        "platform_credential_service.py",
+        "model_profiles.py",
+        "factory.py",
+    }
     files = [f for f in _py_files("llm") if f.name not in bridge]
     assert _violations(files, ("agentcore.db",)) == {}
 

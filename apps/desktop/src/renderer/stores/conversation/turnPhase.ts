@@ -39,7 +39,7 @@ const INTERACTION_REQUIRED_EVENTS: ReadonlySet<string> = new Set(
 
 /**
  * 配对的 `*_resolved` 收口帧。`*_required` 既然能在这个窗把卡画出来（见上），它的收口
- * 帧就只可能在同一个窗到。`question_posted` 无收口帧（`resolvedEvent: null`）。
+ * 帧就只可能在同一个窗到。含 `question_posted` → `question_resolved`。
  */
 const INTERACTION_RESOLVED_EVENTS: ReadonlySet<string> = new Set(
   Object.values(INTERACTION_KIND_WIRE)

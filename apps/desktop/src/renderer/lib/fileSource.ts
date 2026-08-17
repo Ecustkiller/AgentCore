@@ -83,6 +83,19 @@ export interface FileSourceCaps {
   snapshots: boolean;
 }
 
+/** @ 提及扁平索引条目（对齐 `fsApi.listFiles` 的文件项）。 */
+export interface FileIndexFile {
+  relPath: string;
+  /** 仅本地 `order: "recent"` 带上；云端索引通常没有。 */
+  mtimeMs?: number;
+}
+
+/** 各源 `listFileIndex` 的单一真实形状。`truncated` 必须透出。 */
+export interface FileIndexListing {
+  files: FileIndexFile[];
+  truncated: boolean;
+}
+
 export interface FileSource {
   /** 稳定标识（拖拽载荷限定 + 每源折叠态持久化键）。 */
   readonly id: string;
@@ -108,12 +121,11 @@ export interface FileSource {
    */
   listTree?(): Promise<FileNode[]>;
   /**
-   * 扁平**文件**路径列表，喂给 @ 提及索引（文件中枢统一 F4）。只含文件（不含目录）、
+   * 扁平**文件**索引，喂给 @ 提及（文件中枢统一 F4）。只含文件（不含目录）、
    * 剪掉忽略目录（node_modules/.git…）、有上限——本地根经 `fsApi.listFiles`、云端
-   * 工作区经 `/file-index`，二者语义对齐，故 @ 无论源是本地还是云端表现一致。能
-   * 廉价枚举的源才提供；缺省即不参与 @ 索引。
+   * 工作区经 `/file-index`，二者语义对齐。能廉价枚举的源才提供；缺省即不参与 @ 索引。
    */
-  listFileIndex?(): Promise<string[]>;
+  listFileIndex?(): Promise<FileIndexListing>;
 
   /** 读一个文件用于面板内预览（传输失败抛异常）。 */
   read(path: string): Promise<FilePreviewResult>;

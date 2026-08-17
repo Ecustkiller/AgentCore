@@ -1120,6 +1120,20 @@ describe("toRecordTurnBody", () => {
     expect(body).not.toHaveProperty("origin");
     expect(body).not.toHaveProperty("execution_id");
     expect(body).not.toHaveProperty("harvest_kind");
+    expect(body).not.toHaveProperty("agent_mentions");
+  });
+
+  it("forwards agent_mentions when present", () => {
+    const mentions = [{ agent_id: "w1", role: "研究员" }];
+    const body = toRecordTurnBody({
+      user_message_id: "u-m",
+      conversation_id: "c1",
+      user_message: "hi",
+      content: "ok",
+      trace_id: "a".repeat(32),
+      agent_mentions: mentions,
+    });
+    expect(body.agent_mentions).toEqual(mentions);
   });
 });
 

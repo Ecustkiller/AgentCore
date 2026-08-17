@@ -2,6 +2,7 @@ import {
   BYOK_PROVIDER_PRESETS,
   DEFAULT_BYOK_PROVIDER_ID,
   getByokProviderPreset,
+  listByokProviderOptions,
   normalizeByokBaseUrl,
   resolveByokProviderFromConfig,
 } from "@/lib/byokProviderPresets";
@@ -48,6 +49,40 @@ describe("resolveByokProviderFromConfig", () => {
     );
     expect(resolveByokProviderFromConfig("https://opencode.ai/zen/v1/")).toBe(
       "opencode_zen",
+    );
+    expect(resolveByokProviderFromConfig("HTTPS://OPENCODE.AI/ZEN/V1/")).toBe(
+      "opencode_zen",
+    );
+  });
+
+  it("matches OpenCode Go base_url without confusing it with Zen", () => {
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/go/v1")).toBe(
+      "opencode_go",
+    );
+    expect(
+      resolveByokProviderFromConfig("https://opencode.ai/zen/go/v1/"),
+    ).toBe("opencode_go");
+    expect(
+      resolveByokProviderFromConfig("HTTPS://OpenCode.AI/ZEN/GO/V1/"),
+    ).toBe("opencode_go");
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/v1")).toBe(
+      "opencode_zen",
+    );
+    expect(
+      resolveByokProviderFromConfig("https://opencode.ai/zen/go/v1"),
+    ).not.toBe("opencode_zen");
+    expect(
+      resolveByokProviderFromConfig("https://opencode.ai/zen/v1"),
+    ).not.toBe("opencode_go");
+    // Prefix-style leftovers must not steal either preset.
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen")).toBe(
+      "custom",
+    );
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/v1/go")).toBe(
+      "custom",
+    );
+    expect(resolveByokProviderFromConfig("https://opencode.ai/zen/go")).toBe(
+      "custom",
     );
   });
 
@@ -140,6 +175,7 @@ describe("getByokProviderPreset", () => {
 
   it("returns OpenCode Zen metadata with short discovery seed", () => {
     const preset = getByokProviderPreset("opencode_zen");
+    expect(preset.id).toBe("opencode_zen");
     expect(preset.label).toBe("OpenCode Zen");
     expect(preset.baseUrl).toBe("https://opencode.ai/zen/v1");
     expect(preset.defaultModel).toBe("deepseek-v4-flash");
@@ -149,5 +185,32 @@ describe("getByokProviderPreset", () => {
       "glm-5.2",
     ]);
     expect(preset.keyHelpUrl).toBe("https://opencode.ai/auth");
+  });
+
+  it("returns OpenCode Go metadata with chat/completions seed", () => {
+    const preset = getByokProviderPreset("opencode_go");
+    expect(preset.id).toBe("opencode_go");
+    expect(preset.label).toBe("OpenCode Go");
+    expect(preset.baseUrl).toBe("https://opencode.ai/zen/go/v1");
+    expect(preset.defaultModel).toBe("deepseek-v4-flash");
+    expect(preset.models).toEqual([
+      "deepseek-v4-flash",
+      "deepseek-v4-pro",
+      "glm-5.2",
+    ]);
+    expect(preset.keyHelpUrl).toBe("https://opencode.ai/auth");
+    expect(preset.models.join(" ")).not.toMatch(/-free|grok|gpt|minimax|qwen/i);
+    const labels = listByokProviderOptions().map((opt) => opt.label);
+    expect(labels).toContain("OpenCode Zen");
+    expect(labels).toContain("OpenCode Go");
+  });
+
+  it("keeps preset base_urls unique after normalize (Zen vs Go)", () => {
+    const urls = BYOK_PROVIDER_PRESETS.flatMap((preset) =>
+      [preset.baseUrl, ...(preset.baseUrlAliases ?? [])].map(
+        normalizeByokBaseUrl,
+      ),
+    );
+    expect(new Set(urls).size).toBe(urls.length);
   });
 });

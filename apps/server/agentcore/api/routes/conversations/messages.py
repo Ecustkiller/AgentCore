@@ -22,7 +22,9 @@ from agentcore.api.dependencies import (
     get_turn_journal_repo,
 )
 from agentcore.api.schemas import (
+    AgentMention,
     MemoryUpdateView,
+    MessageAttachment,
     MessageDetail,
     MessageListResponse,
     QueuedTurnItem,
@@ -241,6 +243,9 @@ async def list_messages(
         collab = usage.get("collab")
         if collab is not None:
             detail.collab = TurnCollabMetrics.model_validate(collab)
+        raw_outcome = usage.get("outcome")
+        if raw_outcome in ("ok", "partial", "paused", "error"):
+            detail.outcome = raw_outcome
         details.append(detail)
 
     # 记忆更新对话内可见 (§1.6): the conversation-tail「记忆已更新」cards. They sit AFTER
@@ -398,6 +403,9 @@ async def send_message(
     # 批 B 失效修订：发消息不再立即 orphan；回合收尾若未调 debate / 未起 MLR 才落事实。
 
     needs_tools = body.requires_tools
+    from agentcore.conversation.ask_reply import normalize_ask_id
+
+    reply_ask_id = normalize_ask_id(body.ask_id)
     preflight = await _preflight_owned_chat_turn(
         conversation_id, user, session, needs_tools=needs_tools
     )
@@ -447,6 +455,7 @@ async def send_message(
                     "conversation_id": conversation_id,
                     "attachments": attachments,
                     "agent_mentions": raw_agent_mentions,
+                    "ask_id": reply_ask_id,
                     "requires_tools": needs_tools,
                     "x_client_platform": x_client_platform,
                     "origin_device_id": current_origin_device(),
@@ -461,6 +470,8 @@ async def send_message(
                         "interjection_id": interjection_id,
                         "content": body.content,
                         **({"attachments": att_meta} if att_meta else {}),
+                        **({"agent_mentions": raw_agent_mentions} if raw_agent_mentions else {}),
+                        **({"ask_id": reply_ask_id} if reply_ask_id else {}),
                     },
                 )
             )
@@ -476,6 +487,8 @@ async def send_message(
                         content=body.content,
                         status="received",
                         attachments=att_meta or None,
+                        agent_mentions=raw_agent_mentions or None,
+                        ask_id=reply_ask_id,
                     )
                 )
                 # Sender's POST: short SSE confirm — history/SSE only, do NOT re-journal
@@ -488,6 +501,8 @@ async def send_message(
                         content=body.content,
                         status="received",
                         attachments=att_meta or None,
+                        agent_mentions=raw_agent_mentions or None,
+                        ask_id=reply_ask_id,
                     )
                 )
                 confirm.close(reason="interjection_confirm")
@@ -508,6 +523,7 @@ async def send_message(
                 origin_device_id=current_origin_device(),
                 llm_credentials=preflight.credentials,
                 llm_supports_tools=preflight.supports_tools,
+                ask_id=reply_ask_id,
             )
             if parked is not None:
                 att_meta = interjection_attachment_meta(parked.attachments)
@@ -519,6 +535,8 @@ async def send_message(
                         content=body.content,
                         status="received",
                         attachments=att_meta or None,
+                        agent_mentions=raw_agent_mentions or None,
+                        ask_id=reply_ask_id,
                     )
                 )
                 # Sender's POST: short SSE confirm — history/SSE only, do NOT re-journal
@@ -531,6 +549,8 @@ async def send_message(
                         content=body.content,
                         status="received",
                         attachments=att_meta or None,
+                        agent_mentions=raw_agent_mentions or None,
+                        ask_id=reply_ask_id,
                     )
                 )
                 confirm.close(reason="steer_confirm")
@@ -554,6 +574,7 @@ async def send_message(
                 llm_credentials=preflight.credentials,
                 llm_supports_tools=preflight.supports_tools,
                 started=started,
+                ask_id=reply_ask_id,
             ),
         )
         return sse_queued_response(
@@ -576,6 +597,7 @@ async def send_message(
             sink=sink,
             attachments=[a.model_dump() for a in body.attachments],
             agent_mentions=[m.model_dump() for m in body.agent_mentions],
+            ask_id=reply_ask_id,
             llm_credentials=preflight.credentials,
             llm_supports_tools=preflight.supports_tools,
             x_client_platform=x_client_platform,
@@ -615,6 +637,9 @@ async def list_queued_turns(
                 content=item.content,
                 position=idx,
                 interjection_id=item.interjection_id,
+                attachments=[MessageAttachment.model_validate(a) for a in item.attachments],
+                agent_mentions=[AgentMention.model_validate(m) for m in item.agent_mentions],
+                ask_id=item.ask_id,
             )
             for idx, item in enumerate(pending, start=1)
         ]
@@ -840,5 +865,6 @@ async def record_local_turn_endpoint(
         origin=body.origin,
         execution_id=body.execution_id,
         harvest_kind=body.harvest_kind,
+        agent_mentions=[m.model_dump() for m in body.agent_mentions] or None,
     )
     return RecordTurnResponse(**result)

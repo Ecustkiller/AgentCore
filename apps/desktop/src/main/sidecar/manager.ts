@@ -379,6 +379,10 @@ export class SidecarManager {
         // Outbox idempotency anchor (as-built: 双模式工作区 §10.3).
         userMessageId: req.userMessageId,
         history: req.history ?? [],
+        ...(req.agentMentions && req.agentMentions.length > 0
+          ? { agentMentions: req.agentMentions }
+          : {}),
+        ...(req.askId ? { askId: req.askId } : {}),
         // Per-turn account id (long-lived sidecar may have initialized as "local").
         ...(req.userId?.trim() ? { userId: req.userId.trim() } : {}),
         // W3: session read-only mounts (abs paths stay in main → sidecar only).

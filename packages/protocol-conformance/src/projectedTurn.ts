@@ -55,6 +55,11 @@ export type TurnStatus =
   | "failed"
   | "cancelled";
 
+/** Turn-level result quality, orthogonal to {@link TurnStatus} lifecycle.
+ * `paused` is produced when the wire sets ``message_end.outcome=paused``
+ * (CEO rate-limit continue). Gate pauses keep outcome null. */
+export type TurnOutcome = "ok" | "partial" | "paused" | "error";
+
 export type RunStatus =
   | "pending"
   | "running"
@@ -273,6 +278,11 @@ export interface ProjectedUserInterjectionAttachment {
   binary?: boolean;
 }
 
+export interface ProjectedUserInterjectionMention {
+  agentId: string;
+  role: string;
+}
+
 export interface ProjectedUserInterjection {
   interjectionId: string;
   executionId: string;
@@ -280,6 +290,7 @@ export interface ProjectedUserInterjection {
   status: "received" | "injected" | "addressed" | "queued" | "failed" | string;
   note: string | null;
   attachments?: ProjectedUserInterjectionAttachment[];
+  agentMentions?: ProjectedUserInterjectionMention[];
 }
 
 /** Interaction lifecycle status in the projected turn (提问确认统一重构 P3). */
@@ -363,6 +374,9 @@ export type ProjectedInteraction =
       status: InteractionStatus;
       question: string;
       context: string;
+      settlement?: "answered" | "discarded";
+      answer?: string;
+      note?: string;
     }
   | {
       kind: "stage_card";
@@ -419,6 +433,13 @@ export interface ProjectedTurn {
   /** message_end.finish_reason (end_turn / max_rounds / degraded / unproductive /
    * error / cancelled), or null while the turn is still streaming. */
   finishReason: string | null;
+  /**
+   * Turn-level result quality (`message_end.outcome` or aggregated from
+   * `delivery_status=partial` / `run_failed.product_landed` /
+   * `tool_use_end.partial_failure`). Null while {@link status} is `running`,
+   * and on a reserved pause close this wave.
+   */
+  outcome: TurnOutcome | null;
   /**
    * Latest SSE ``error`` payload for this turn (code + user-facing message).
    * Empty-failure face authority on live/reload when ``content`` is empty —

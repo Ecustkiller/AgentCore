@@ -89,9 +89,10 @@ class _Open:
 def fold_interactions(entries: list[dict[str, Any]]) -> list[InteractionRecord]:
     """Fold journal/SSE entries → full interaction list (insertion order of required).
 
-    ``entries`` are ``{kind|type, payload}`` dicts. Terminal status is pending until a
-    matching resolved/orphaned settles it; ``question_posted`` has no settle event and
-    stays pending. ``awaiting=ceo`` escalations are omitted entirely.
+    ``entries`` are ``{kind|type, payload}`` dicts.     Terminal status is pending until a
+    matching resolved/orphaned settles it. ``question_posted`` settles on
+    ``question_resolved`` (answered / discarded). ``awaiting=ceo`` escalations are
+    omitted entirely.
     """
     by_key: dict[tuple[str, str], _Open] = {}
     order_counter = 0
@@ -267,11 +268,22 @@ def project_interaction_leaf(rec: InteractionRecord) -> dict[str, Any]:
             esc["awaiting"] = p["awaiting"]
         return esc
     if rec.kind == "question_posted":
-        return {
+        question_leaf: dict[str, Any] = {
             **base,
             "question": p.get("question", ""),
             "context": p.get("context", ""),
         }
+        resolution = rec.resolution or {}
+        settlement = resolution.get("status")
+        if rec.status == "resolved" and settlement in ("answered", "discarded"):
+            question_leaf["settlement"] = settlement
+            answer = resolution.get("answer")
+            if isinstance(answer, str) and answer:
+                question_leaf["answer"] = answer
+            note = resolution.get("note")
+            if isinstance(note, str) and note:
+                question_leaf["note"] = note
+        return question_leaf
     if rec.kind == "stage_card":
         return {
             **base,

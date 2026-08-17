@@ -45,6 +45,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "degraded",
+    "outcome": "error",
     "error": {
       "code": "LLM_EMPTY_RESPONSE",
       "message": "模型多次空响应 · 模型返回空内容"

@@ -111,6 +111,7 @@ describe("floatWindowSync", () => {
           executionDetached: null,
           deliveryStatus: null,
           userInterjections: [],
+          attestedOutcome: null,
         },
       },
     });
@@ -167,6 +168,7 @@ describe("floatWindowSync", () => {
           executionDetached: null,
           deliveryStatus: null,
           userInterjections: [],
+          attestedOutcome: null,
         },
       },
       interactions: [

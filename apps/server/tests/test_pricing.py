@@ -267,6 +267,7 @@ def test_deepseek_flash_official_cny_list_price():
     )
     assert hit.cached == 20_000_000  # ¥0.02
     # Zen free SKU meters at Flash nominal (upstream free; product quota anti-abuse).
+    # Production allowlist is paid Flash on Go — same curated card, subscription-amortized.
     free = calculate_cost(DEEPSEEK_V4_FLASH_FREE, usage, credential_source="platform")
     assert free.pricing_source == "curated"
     assert free.input == flash.input

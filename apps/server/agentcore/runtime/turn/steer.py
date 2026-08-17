@@ -20,6 +20,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from agentcore.conversation.ask_reply import format_ask_reply_prompt, normalize_ask_id
+from agentcore.conversation.mentions import format_agent_mention_prompt, wire_agent_mentions
 from agentcore.core.logging import get_logger
 from agentcore.core.types import new_id
 from agentcore.llm.provider.protocol import LLMMessage
@@ -48,6 +50,7 @@ class PendingTurnSteer:
     user_id: str = ""
     attachments: list[dict[str, Any]] = field(default_factory=list)
     agent_mentions: list[dict[str, Any]] = field(default_factory=list)
+    ask_id: str | None = None
     requires_tools: bool = False
     x_client_platform: str | None = None
     # Survives promotion to the conversation queue so a leftover steer keeps
@@ -95,17 +98,28 @@ def _format_steer_attachment_lines(attachments: list[dict[str, Any]]) -> list[st
 def format_steer_user_message(
     content: str,
     attachments: list[dict[str, Any]] | None = None,
+    agent_mentions: list[dict[str, Any]] | None = None,
+    ask_id: str | None = None,
 ) -> str:
     """User-role text injected into the live LLM window.
 
     Attachments are surfaced as a readable inventory (LLMMessage is text-only here;
-    same posture as coordination ``user_interjection`` brief lines). Never silently drop.
+    same posture as coordination ``user_interjection`` brief lines). Agent mentions
+    reuse the main-path soft-hint block (非强制派单 / 非硬路由). An ``ask_id`` is a
+    structured return-path slot (not a mention, not inferred from free text).
+    Never silently drop.
     """
     body = (content or "").strip()
     text = f"{_STEER_USER_PREFIX}{body}" if body else _STEER_USER_PREFIX.rstrip()
     att_lines = _format_steer_attachment_lines(list(attachments or []))
     if att_lines:
         text = f"{text}\n\n" + "\n".join(att_lines)
+    mention = format_agent_mention_prompt(agent_mentions)
+    if mention:
+        text = f"{text}\n\n{mention}"
+    reply = format_ask_reply_prompt(ask_id)
+    if reply:
+        text = f"{text}\n\n{reply}"
     return text
 
 
@@ -170,6 +184,7 @@ def try_enqueue(
     origin_device_id: str | None = None,
     llm_credentials: Any = None,
     llm_supports_tools: bool | None = None,
+    ask_id: str | None = None,
 ) -> PendingTurnSteer | None:
     """Park a classic steer if the captain loop is accepting; else ``None`` (→ FIFO)."""
     cid = conversation_id.strip()
@@ -183,6 +198,7 @@ def try_enqueue(
         user_id=user_id,
         attachments=list(attachments or []),
         agent_mentions=list(agent_mentions or []),
+        ask_id=normalize_ask_id(ask_id),
         requires_tools=requires_tools,
         x_client_platform=x_client_platform,
         origin_device_id=origin_device_id,
@@ -216,6 +232,38 @@ def drain(conversation_id: str) -> list[PendingTurnSteer]:
     return items
 
 
+def _injected_user_message(
+    item: PendingTurnSteer,
+    *,
+    sink: Any | None,
+    execution_id: str | None,
+) -> LLMMessage:
+    msg = LLMMessage(
+        role="user",
+        content=format_steer_user_message(
+            item.content,
+            item.attachments,
+            item.agent_mentions,
+            item.ask_id,
+        ),
+    )
+    if sink is None:
+        return msg
+    eid = (execution_id or item.execution_id or "").strip()
+    sink.emit(
+        user_interjection(
+            interjection_id=item.interjection_id,
+            execution_id=eid,
+            content=item.content,
+            status="injected",
+            attachments=_att_meta(item.attachments),
+            agent_mentions=wire_agent_mentions(item.agent_mentions),
+            ask_id=item.ask_id,
+        )
+    )
+    return msg
+
+
 def drain_as_messages(
     conversation_id: str,
     *,
@@ -225,29 +273,24 @@ def drain_as_messages(
     """Drain pending steers, map to user-role LLM messages, emit ``injected``.
 
     ``injected`` is the classic terminal status (内容真正进模型上下文).
+    Does not settle ``question_posted`` — that waits for host-turn commit.
     """
-    items = drain(conversation_id)
-    messages: list[LLMMessage] = []
-    for item in items:
-        messages.append(
-            LLMMessage(
-                role="user",
-                content=format_steer_user_message(item.content, item.attachments),
-            )
-        )
-        if sink is None:
-            continue
-        eid = (execution_id or item.execution_id or "").strip()
-        sink.emit(
-            user_interjection(
-                interjection_id=item.interjection_id,
-                execution_id=eid,
-                content=item.content,
-                status="injected",
-                attachments=_att_meta(item.attachments),
-            )
-        )
-    return messages
+    return [
+        _injected_user_message(item, sink=sink, execution_id=execution_id)
+        for item in drain(conversation_id)
+    ]
+
+
+async def drain_injected(
+    conversation_id: str,
+    *,
+    sink: Any | None = None,
+    execution_id: str | None = None,
+) -> list[LLMMessage]:
+    """Drain + emit ``injected``. Ask settlement waits for host-turn commit."""
+    return drain_as_messages(
+        conversation_id, sink=sink, execution_id=execution_id
+    )
 
 
 def peek_count(conversation_id: str) -> int:
@@ -315,6 +358,8 @@ def _emit_interjection_status(
             status=status,
             note=note,
             attachments=_att_meta(item.attachments),
+            agent_mentions=wire_agent_mentions(item.agent_mentions),
+            ask_id=item.ask_id,
         )
     )
 
@@ -384,6 +429,7 @@ def promote_leftovers_to_queue(leftovers: list[PendingTurnSteer]) -> int:
                     llm_credentials=item.llm_credentials,
                     llm_supports_tools=item.llm_supports_tools,
                     interjection_id=item.interjection_id,
+                    ask_id=item.ask_id,
                 ),
                 # 双发次序是契约：queued 状态先行，degraded turn_queued 随后由
                 # ``_emit_degraded_turn_queued`` 发出（含对话级信号）。

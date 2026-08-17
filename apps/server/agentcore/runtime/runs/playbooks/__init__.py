@@ -52,14 +52,15 @@ PLAYBOOKS: dict[str, Playbook] = {
         summary=(
             "【代码审计】A 宽扫→B 定案两阶段；强制字段/严重度/checklist/人审骨架；"
             "报告落 AgentCore/文档/reviews/；扇出靠 CEO 填 modules（不从 scope 自动拆；"
-            "按自然缝扇出，整仓/多子系统常 4–8，能少则少）；"
+            f"按自然缝扇出，整仓/多子系统常 4–8，能少则少，上限 {CODE_AUDIT_FANOUT}）；"
             "多模块并行+主管速览；"
             "正交于 parallel_brief（摸底）/ research_report（成文审校）/ repair_code（按症状修）"
         ),
         slots=(
             "scope(必填,审计范围路径或子系统;亦接受 topic/target) / "
             "modules(可选;探路后≥2 可独立并行子面则填短模块名/路径→并行审计+主管速览,"
-            "按自然缝扇出，整仓/多子系统常 4–8、能少则少;单缝省略;playbook 不从 scope 自动拆;"
+            f"按自然缝扇出，整仓/多子系统常 4–8、能少则少、上限 {CODE_AUDIT_FANOUT} 超限末槽折叠;"
+            "单缝省略;playbook 不从 scope 自动拆;"
             "禁把多目录拼进 scope 冒充多模块;禁把长作文当模块名,侧重进 focus) / "
             "focus(可选,侧重如 security|eng|流式刷新) / "
             "k(可选,每模块 Phase B 定案上限,默认 8) / "
@@ -222,10 +223,11 @@ def available_playbooks() -> str:
 
 
 def playbook_args_schema_description() -> str:
-    """``delegate.playbook_args`` schema description — required-slot names only.
+    """``delegate.playbook_args`` schema description.
 
-    Always-on path skips consult for build_website, so schema must carry required
-    keys. Full optional slot prose lives in each playbook's ``slots`` (consult skill).
+    Always-on path skips consult, so schema must carry required keys *and*
+    a short cue for fan-out-critical optional slots the engine will not infer
+    (``code_audit.modules``). Cap / fold / omit HOW lives in slots + skill.
     """
     cues: list[str] = []
     for p in PLAYBOOKS.values():
@@ -238,7 +240,8 @@ def playbook_args_schema_description() -> str:
         "建站必填 topic（简述；亦接受 purpose/brief/description；不接受旧键 site）、"
         "绿场必填 app——勿空对象。"
         f"必填槽：{required_cues}。"
-        "可选槽与细节→consult(team_orchestration_advanced)。"
+        "code_audit modules：整仓扇出（不从 scope 自动拆）。"
+        "其余可选槽与细节→consult(team_orchestration_advanced)。"
     )
 
 

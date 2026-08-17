@@ -6,6 +6,7 @@ import {
   type OpenBrowserLiveOpts,
 } from "@/components/BrowserLoginDecisionCard";
 import { PendingInteractionChrome } from "@/components/InteractionSheet";
+import { KickoffRevisionBanner } from "@/components/KickoffRevisionBanner";
 import { LocalPickerFailureCard } from "@/components/ask/LocalPickerFailureCard";
 import { composeAnswer } from "@/components/ask/composeAnswer";
 import {
@@ -14,6 +15,18 @@ import {
 } from "@/components/ask/parseRiskLabel";
 import type { ColdDeferredBusyReason } from "@/lib/coldInteractions";
 import type { VisibleColdResume } from "@/lib/coldResume";
+import {
+  clearKickoffAdjustDraft,
+  readKickoffAdjustDraft,
+  writeKickoffAdjustDraft,
+} from "@/lib/kickoffAdjustDraft";
+import {
+  diffKickoffRevision,
+  kickoffRevisionNote,
+  kickoffRevisionNumber,
+  kickoffRevisionVersionLabel,
+  lookupPriorKickoffPayload,
+} from "@/lib/kickoffRevision";
 import {
   type LocalPickerFailureKind,
   isDesktopFolderAction,
@@ -31,7 +44,9 @@ import {
 // Delegate team_preview：写盘单向收紧 + 嘱咐（确认面不提供排除岗 / 人改模；
 // excluded_run_ids / model_overrides 契约可保留，本卡 continue 不附）。
 // Debate team_preview：辩手 / 裁判节点显式；不展示模型下拉、不附 model_overrides。
-// 开工卡三键：继续 / 调整 / 取消。调整 = 不开工、回灌 CEO；复用嘱咐框且必填，不附写盘/模型修正。
+// 开工卡两态：确认（可选嘱咐 + 开工/调整/取消）／调整（必填意见 + 交回修订/返回，不渲染开工）。
+// 交回后表单留着作提交中反馈；服务端确认后卡消失，等时间线痕迹 + CEO 思考流。
+// 调整 = 不开工、回灌 CEO，不附写盘/模型修正。
 // ask_user + browser_login → BrowserLoginDecisionCard（冷路登录卡；可开 BrowserLiveSheet）。
 // Cold × live deferred：``resume_deferred`` →「放行已记下…」；settlement 已锁，不可再改口取消。
 // Dense kinds use Latch + Interaction Sheet so long worker lists never inflate .screen.
@@ -474,8 +489,18 @@ function ResumeCardBody({
   locked?: boolean;
 }) {
   const [note, setNote] = useState("");
+  const [confirmNote, setConfirmNote] = useState("");
+  const [adjustNote, setAdjustNote] = useState(() =>
+    isTeamPreview ? readKickoffAdjustDraft(paused.checkpoint_id) : "",
+  );
+  const [kickoffPhase, setKickoffPhase] = useState<"confirm" | "adjust">(() =>
+    isTeamPreview && readKickoffAdjustDraft(paused.checkpoint_id).trim()
+      ? "adjust"
+      : "confirm",
+  );
   const [localSubmitting, setLocalSubmitting] = useState(false);
   const busy = locked || localSubmitting;
+  const kickoffAdjusting = isTeamPreview && kickoffPhase === "adjust";
   const showWorkers = isPlanReview || isTeamPreview;
   const questions = asRecords(paused.questions);
   const assumptions = asRecords(paused.assumptions);
@@ -504,6 +529,24 @@ function ResumeCardBody({
   const isDebateKickoff =
     isTeamPreview && (paused as { primitive?: string }).primitive === "debate";
   const isDelegateKickoff = isTeamPreview && !isDebateKickoff;
+  const kickoffRevision = isTeamPreview
+    ? kickoffRevisionNumber(paused.revision)
+    : 1;
+  const kickoffRevisionNoteText = isTeamPreview
+    ? kickoffRevisionNote(paused.revision_note)
+    : "";
+  const kickoffRevisionChanges = isTeamPreview
+    ? diffKickoffRevision(
+        paused as unknown as Record<string, unknown>,
+        lookupPriorKickoffPayload(paused.revised_from),
+      )
+    : [];
+  const kickoffPrimitive = isDebateKickoff ? "debate" : "delegate";
+  const revisionBadge = kickoffRevisionVersionLabel(
+    kickoffPrimitive,
+    kickoffRevision,
+  );
+  const revisionBadgeSuffix = revisionBadge ? ` · ${revisionBadge}` : "";
   const wallPicked = isDailyReview || isOrganizePlan ? pickedCount(answers) : 0;
   const proposalPicked = isProposalPick ? pickedCount(answers) : 0;
 
@@ -635,6 +678,13 @@ function ResumeCardBody({
 
   const submit = (decision: CheckpointDecision) => {
     if (busy) return;
+    if (decision === "adjust" && isTeamPreview) {
+      if (!adjustNote.trim()) return;
+      setLocalSubmitting(true);
+      clearKickoffAdjustDraft(paused.checkpoint_id);
+      onResume("adjust", adjustNote.trim(), []);
+      return;
+    }
     if (decision === "adjust" && !note.trim()) return;
     if (decision === "continue" && findPendingFolderOption()) {
       setPickerFailure({ kind: "unavailable" });
@@ -642,7 +692,7 @@ function ResumeCardBody({
     }
     const selected = collectSelected(decision);
     const amendments = collectAmendments(decision);
-    let n = note.trim();
+    let n = isTeamPreview ? confirmNote.trim() : note.trim();
     if (decision === "continue" && isDecisionAsk) {
       n = composeAnswer(
         questions.map((q) => ({
@@ -656,7 +706,7 @@ function ResumeCardBody({
         note,
       );
     } else if (decision === "stop") {
-      n = note.trim();
+      n = isTeamPreview ? confirmNote.trim() : note.trim();
     } else if (CARRIES_SELECTED.has(intent ?? "")) {
       n = note.trim();
     }
@@ -666,6 +716,18 @@ function ResumeCardBody({
     } else {
       onResume(decision, n, selected);
     }
+  };
+
+  const enterKickoffAdjust = () => {
+    if (busy || !isTeamPreview) return;
+    setKickoffPhase("adjust");
+  };
+
+  const leaveKickoffAdjust = () => {
+    if (busy) return;
+    setAdjustNote("");
+    clearKickoffAdjustDraft(paused.checkpoint_id);
+    setKickoffPhase("confirm");
   };
 
   const effectiveWriteLabel = (w: PreviewWorker): string | null => {
@@ -698,21 +760,29 @@ function ResumeCardBody({
         ? "decision"
         : undefined;
 
-  const title = isDebateKickoff
-    ? "辩论开工 · 开赛前确认"
-    : isTeamPreview
-      ? "团队预审 · 开干前确认"
-      : isPlanReview
-        ? "执行已暂停 · 待你决定是否继续"
-        : isDailyReview
-          ? "复盘提案 · 确认要落盘的项"
-          : isOrganizePlan
-            ? "整理方案 · 确认要执行的项"
-            : isProposalPick
-              ? "方案挑选 · 选一条推进"
-              : isRiskAck
-                ? "风险确认 · 勾选本轮处理项"
-                : "需要你拍板（已离线保留）";
+  const title = kickoffAdjusting
+    ? isDebateKickoff
+      ? `调整开赛方案${revisionBadgeSuffix}`
+      : `调整开工方案${revisionBadgeSuffix}`
+    : isDebateKickoff
+      ? revisionBadge
+        ? `辩论开工 · ${revisionBadge}`
+        : "辩论开工 · 开赛前确认"
+      : isTeamPreview
+        ? revisionBadge
+          ? `团队预审 · ${revisionBadge}`
+          : "团队预审 · 开干前确认"
+        : isPlanReview
+          ? "执行已暂停 · 待你决定是否继续"
+          : isDailyReview
+            ? "复盘提案 · 确认要落盘的项"
+            : isOrganizePlan
+              ? "整理方案 · 确认要执行的项"
+              : isProposalPick
+                ? "方案挑选 · 选一条推进"
+                : isRiskAck
+                  ? "风险确认 · 勾选本轮处理项"
+                  : "需要你拍板（已离线保留）";
 
   const primaryCta = isDebateKickoff
     ? "开赛"
@@ -744,6 +814,9 @@ function ResumeCardBody({
     questions.length >= 2;
 
   const latchSummaryText = (() => {
+    if (kickoffAdjusting) {
+      return "填写调整意见";
+    }
     if (isDelegateKickoff) {
       return `${workers.length} 人待确认 · 点开授权开工`;
     }
@@ -772,7 +845,15 @@ function ResumeCardBody({
   const bodyInner = (
     <>
       {!useSheet ? <div className="pause-title">{title}</div> : null}
-      {paused.user_message && (
+      {isTeamPreview ? (
+        <KickoffRevisionBanner
+          revision={kickoffRevision}
+          revisionNote={kickoffRevisionNoteText}
+          changes={kickoffRevisionChanges}
+          primitive={kickoffPrimitive}
+        />
+      ) : null}
+      {!kickoffAdjusting && paused.user_message && (
         <div className="pause-context">{paused.user_message}</div>
       )}
       {!showWorkers && paused.question && (
@@ -1090,7 +1171,7 @@ function ResumeCardBody({
           })}
         </div>
       )}
-      {isDebateKickoff && debateKickoff && (
+      {!kickoffAdjusting && isDebateKickoff && debateKickoff && (
         <div className="pause-steps">
           {(paused as { motion?: string }).motion && (
             <div className="pause-step">
@@ -1132,7 +1213,7 @@ function ResumeCardBody({
           ) : null}
         </div>
       )}
-      {isDelegateKickoff && workers.length > 0 && (
+      {!kickoffAdjusting && isDelegateKickoff && workers.length > 0 && (
         <div className="pause-steps" data-testid="team-preview-workers">
           {workers.map((w) => {
             const writeCap = effectiveWriteCap(w);
@@ -1190,7 +1271,8 @@ function ResumeCardBody({
           )}
         </div>
       )}
-      {isDelegateKickoff &&
+      {!kickoffAdjusting &&
+        isDelegateKickoff &&
         workers.length === 0 &&
         (paused.workers?.length ?? 0) > 0 && (
           <div className="pause-steps">
@@ -1207,24 +1289,63 @@ function ResumeCardBody({
             })}
           </div>
         )}
-      <textarea
-        className="pause-note"
-        rows={2}
-        value={note}
-        placeholder={
-          isTeamPreview &&
-          (paused as { primitive?: string }).primitive === "debate"
-            ? "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入"
-            : isTeamPreview
-              ? "可选 · 对全体队员的嘱咐（授权开工时注入）"
-              : isPlanReview
-                ? "可选 · 调整时作为对下游的指示；取消时作为收尾备注"
-                : isDecisionAsk
-                  ? "可选 · 补充说明"
-                  : "可选 · 你的答复或补充，留空则按上面继续"
-        }
-        onChange={(e) => setNote(e.target.value)}
-      />
+      {kickoffAdjusting ? (
+        <>
+          <div className="pause-hint">调整意见（必填）</div>
+          <textarea
+            className="pause-note"
+            rows={3}
+            data-testid="team-preview-adjust-note"
+            value={adjustNote}
+            placeholder={
+              isDebateKickoff
+                ? "填写意见，交给 CEO 修订开赛方案"
+                : "填写意见，交给 CEO 修订开工方案"
+            }
+            enterKeyHint="send"
+            onChange={(e) => {
+              const v = e.target.value;
+              setAdjustNote(v);
+              writeKickoffAdjustDraft(paused.checkpoint_id, v);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                submit("adjust");
+              }
+            }}
+          />
+        </>
+      ) : isTeamPreview ? (
+        <>
+          <div className="pause-hint">嘱咐（可选）</div>
+          <textarea
+            className="pause-note"
+            rows={2}
+            value={confirmNote}
+            placeholder={
+              isDebateKickoff
+                ? "可选 · 开赛嘱咐（如你最关心的争议点），授权开赛时注入"
+                : "可选 · 对全体队员的嘱咐（授权开工时注入）"
+            }
+            onChange={(e) => setConfirmNote(e.target.value)}
+          />
+        </>
+      ) : (
+        <textarea
+          className="pause-note"
+          rows={2}
+          value={note}
+          placeholder={
+            isPlanReview
+              ? "可选 · 调整时作为对下游的指示；取消时作为收尾备注"
+              : isDecisionAsk
+                ? "可选 · 补充说明"
+                : "可选 · 你的答复或补充，留空则按上面继续"
+          }
+          onChange={(e) => setNote(e.target.value)}
+        />
+      )}
       {isDailyReview && (
         <div className="pause-hint">
           确认后服务端直接写入记忆/规则/文档，无需再跑工具
@@ -1238,17 +1359,38 @@ function ResumeCardBody({
     </>
   );
 
-  const footer = (
+  const footer = kickoffAdjusting ? (
     <div className="pause-actions">
       <button
         type="button"
-        className="pause-btn pause-btn-primary"
-        disabled={ctaDisabled}
-        onClick={() => submit("continue")}
+        className="pause-btn pause-btn-neutral"
+        disabled={busy}
+        onClick={leaveKickoffAdjust}
       >
-        {busy ? "提交中…" : primaryCta}
+        返回
       </button>
-      {(isPlanReview || isTeamPreview) && (
+      <button
+        type="button"
+        className="pause-btn pause-btn-primary"
+        disabled={busy || !adjustNote.trim()}
+        onClick={() => submit("adjust")}
+      >
+        {busy ? "提交中…" : "交回修订"}
+      </button>
+    </div>
+  ) : (
+    <div className="pause-actions">
+      {isTeamPreview ? (
+        <button
+          type="button"
+          className="pause-btn pause-btn-neutral"
+          disabled={busy}
+          onClick={enterKickoffAdjust}
+        >
+          调整
+        </button>
+      ) : null}
+      {isPlanReview ? (
         <button
           type="button"
           className="pause-btn pause-btn-neutral"
@@ -1257,7 +1399,7 @@ function ResumeCardBody({
         >
           调整
         </button>
-      )}
+      ) : null}
       <button
         type="button"
         className="pause-btn pause-btn-danger"
@@ -1265,6 +1407,14 @@ function ResumeCardBody({
         onClick={() => submit("stop")}
       >
         取消
+      </button>
+      <button
+        type="button"
+        className="pause-btn pause-btn-primary"
+        disabled={ctaDisabled}
+        onClick={() => submit("continue")}
+      >
+        {busy ? "提交中…" : primaryCta}
       </button>
     </div>
   );

@@ -176,6 +176,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "阶段成果如下。\n\n重写后的交付正文。",
     "reasoning": "",

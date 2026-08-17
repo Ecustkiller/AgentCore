@@ -36,9 +36,7 @@ from agentcore.db.base import Base
 
 from ._helpers import _new_uuid
 
-_ROLE_CHECK = (
-    "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision', 'assist')"
-)
+_ROLE_CHECK = "role in ('captain', 'member', 'arena', 'title', 'memory', 'vision', 'assist')"
 _OUTBOX_STATUS_CHECK = "status in ('pending', 'corrupt')"
 
 
@@ -118,6 +116,12 @@ class CostCall(Base):
         Index("ix_cost_calls_user_created", "user_id", "created_at"),
         Index("ix_cost_calls_message", "message_id"),
         Index("ix_cost_calls_run", "run_id"),
+        Index(
+            "ix_cost_calls_platform_credential_created",
+            "platform_credential_id",
+            "created_at",
+            postgresql_where=text("platform_credential_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[str] = mapped_column(PG_UUID(as_uuid=False), primary_key=True, default=_new_uuid)
@@ -142,6 +146,9 @@ class CostCall(Base):
     currency: Mapped[str] = mapped_column(String(8), default="CNY", server_default=text("'USD'"))
     duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
     trace_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # Platform-pool member (alias or stable hash). NULL on BYOK / vendor / pre-column rows.
+    # Logs + this column only — never user-visible SSE error context.
+    platform_credential_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=text("now()")
     )

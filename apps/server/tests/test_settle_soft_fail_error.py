@@ -9,7 +9,13 @@ import pytest
 
 from agentcore.core.error_codes import ErrorCode
 from agentcore.llm.provider.protocol import TokenUsage
-from agentcore.runtime.events import EventSink, FinishReason, error_event
+from agentcore.runtime.events import (
+    EventSink,
+    FinishReason,
+    delivery_status,
+    error_event,
+    tool_use_end,
+)
 from agentcore.runtime.pipeline.finalize import _journal_entries_for_turn
 from agentcore.runtime.pipeline.resume.finish import finish_resume_turn
 from agentcore.runtime.pipeline.settle import (
@@ -229,3 +235,75 @@ def test_journal_entries_include_error_when_process_present():
     assert entries is not None
     turn_end = next(e for e in entries if e["kind"] == "turn_end")
     assert turn_end["payload"]["error"]["code"] == ErrorCode.LLM_KEY_INVALID
+
+
+@pytest.mark.asyncio
+async def test_settle_salvages_delegate_reply_as_partial():
+    """Worker 已落盘 + CEO 汇总限流：回合 partial，回复取 delegate 交代。"""
+    sink = EventSink()
+    debrief = "已落盘 订单.csv、明细.csv、汇总.csv。数据分析队员因上游限流失败。"
+    sink.emit(
+        tool_use_end(
+            "dc1",
+            "delegate",
+            success=True,
+            output=debrief,
+            partial_failure=True,
+        )
+    )
+    sink.emit(
+        delivery_status(
+            execution_id="exec_rl",
+            state="partial",
+            summary="已交付 3 个文件；1 项未完成",
+            delivered_files=["订单.csv", "明细.csv", "汇总.csv"],
+            gaps=[{"role": "数据分析", "description": "限流", "reason": "node_failed"}],
+            actions=[],
+        )
+    )
+    sink.emit(error_event(ErrorCode.LLM_RATE_LIMIT, "上游限流，请约 4 秒后再试"))
+
+    captain_state = SimpleNamespace(
+        content="",
+        reasoning="",
+        rounds=2,
+        usage=TokenUsage().as_dict(),
+        cost={"total": 0, "currency": "USD"},
+        model="deepseek-v4-flash",
+        duration_ms=0,
+        finish_override=FinishReason.ERROR,
+    )
+    result = await settle_successful_turn(
+        message_id="m-partial",
+        captain_run_id="cap",
+        captain_state=captain_state,
+        delegate_tool=SimpleNamespace(
+            usage={},
+            run_ledger=[],
+            citations=[],
+            collab={"boundary_yields": 0, "scope_signals": 0, "escalations": 0},
+            continuation_count=0,
+            user_continuation_count=0,
+            dispose_open_supervised=AsyncMock(),
+        ),
+        debate_tool=SimpleNamespace(usage={}, run_ledger=[], citations=[]),
+        profile=SimpleNamespace(max_rounds=20),
+        citations=[],
+        vision_cost_sink=[],
+        sink=sink,
+        fact_log=None,
+        audit_recorder=SimpleNamespace(drops=0, flush=AsyncMock()),
+        roster_writer=None,
+        journal_writer=SimpleNamespace(flush=AsyncMock()),
+    )
+
+    assert result["outcome"] == "partial"
+    assert result["content"] == debrief
+    assert result["error_code"] == ErrorCode.LLM_RATE_LIMIT
+    turn_end = next(e for e in result["journal_entries"] if e["kind"] == "turn_end")
+    assert turn_end["payload"]["outcome"] == "partial"
+    assert any(
+        getattr(e.type, "value", e.type) == "content_delta"
+        and (e.payload or {}).get("delta") == debrief
+        for e in sink.history_snapshot()
+    )

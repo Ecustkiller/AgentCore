@@ -63,6 +63,31 @@ describe("composerContinueHint", () => {
         msg({ finishReason: "cancelled", content: "" }),
       ),
     ).toBe(false);
+    expect(
+      isEmptyInterruptedAssistant(
+        msg({
+          finishReason: "interrupted",
+          content: "",
+          error: {
+            code: "LLM_RATE_LIMIT",
+            message: "上游限流，暂时无法继续本回合。请稍后再试。",
+          },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      isEmptyInterruptedAssistant(
+        msg({
+          finishReason: "paused",
+          outcome: "paused",
+          content: "",
+          error: {
+            code: "LLM_RATE_LIMIT",
+            message: "上游限流，暂时无法继续本回合。请稍后再试。",
+          },
+        }),
+      ),
+    ).toBe(false);
   });
 
   it("detects empty cancelled for timeline omit (P1)", () => {

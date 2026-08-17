@@ -10,9 +10,12 @@
 
 ``delivered_files`` / CEO「已交付」= 仅 ``accepted``；cite-tier 等合同点名路径为
 ``rejected``，不得因 soft-COMPLETED 进入 delivered_files。主清单（桌面
-FileArtifactsCard）认 ``artifacts``（accepted+rejected），只走 ``file_acceptance``，
-不从 ``files_touched`` 合成验收行；每行随带工具自报的 ``kind`` / ``derived_from``
-（导出件 ← 源 md），客户端据此把源折成中间稿，口径同 ``fold_exported_sources``。
+FileArtifactsCard）认 ``artifacts``（accepted+rejected）。COMPLETED 只走
+``file_acceptance``，不从 ``files_touched`` 合成验收行；FAILED 且未盖戳时，从
+``files_touched`` / transcript 自报补入（与 ``product_landed`` 同源——失败前已落盘
+但没走完正式交付声明的产物仍计入交付账）。每行随带工具自报的 ``kind`` /
+``derived_from``（导出件 ← 源 md），客户端据此把源折成中间稿，口径同
+``fold_exported_sources``。blocked = 纯失败无文件；partial = 有落盘有缺口。
 
 刀1 / 方案 A：声明路径已落盘 → verdict 走交付成功路径；``degraded_handoff`` 仅
 notes/warning 备注，不整单硬失败、不拖文件 rejected。甲⁺：真无落盘 soft
@@ -41,7 +44,8 @@ handoff 不硬降档。``requires_draft_ack`` 扩至 ``evidence_deficit`` /
 挂在 drive 的各收尾路径旁路（正常终态 / 验收未满足 / 部分失败 stash / replan(stop)），
 永不抛错；纯 prose 成功批次（无落盘文件、无缺口）保持无声，不发事件。
 折叠语义：同 ``execution_id`` 保最新——反映最近一批委派的对账（多批场景下 FileArtifactsCard
-仍是全量文件清单，本事件承载「诚实对账」而非全量枚举）。
+仍是全量文件清单，本事件承载「诚实对账」而非全量枚举）。finalize 终态发射幂等：同一
+``execution_id`` 同一结论只发一次；结论变了（补跑覆盖）仍发。
 
 严重度：``severity=warning``（示例/虚构自注 / 路径建议 / 交接备注等）不单独撑起
 partial/blocked。轻 B：无 blocking 且 warnings **除去** ``unverified_note`` 后为空、
@@ -56,6 +60,7 @@ import re
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from weakref import WeakKeyDictionary
 
 from agentcore.core.logging import get_logger
 from agentcore.runtime.runs.plan import RunPlan
@@ -73,6 +78,9 @@ _MAX_GAPS = 12
 REASON_UNVERIFIED_NOTE = "unverified_note"
 REASON_PATH_HINT = "path_hint"
 REASON_FILES_NOT_LANDED = "files_not_landed"
+# No-exec worker shipped a table file while this turn had an opaque source
+# data file (attachment / workspace type signal — not body scan).
+REASON_NO_EXEC_TABLE = "no_exec_table"
 # Verify-shaped tool failure (browser_navigate / test_run / verify 形 code_execute·terminal).
 REASON_VERIFY_FAILED = "verify_failed"
 # test_run verify-budget incomplete（进程已中止，非仍在跑）.
@@ -147,7 +155,7 @@ def acceptance_counts(
     results: dict[str, RunState],
     plan: RunPlan | None = None,
 ) -> tuple[int, int]:
-    """Path-deduped ``(accepted, rejected)`` from ``file_acceptance`` — synthesis 同源."""
+    """Path-deduped ``(accepted, rejected)`` from the delivery ledger — synthesis 同源."""
     arts = _collect_artifacts(results, plan)
     accepted = sum(1 for a in arts if a.get("status") == "accepted")
     rejected = sum(1 for a in arts if a.get("status") == "rejected")
@@ -157,6 +165,9 @@ def acceptance_counts(
 current_delivery_verdict: ContextVar[DeliveryVerdict | None] = ContextVar(
     "current_delivery_verdict", default=None
 )
+
+# sink → {execution_id: fingerprint} — same sink + same conclusion → skip re-emit.
+_emitted_delivery_fp: WeakKeyDictionary[Any, dict[str, str]] = WeakKeyDictionary()
 
 # Soft reminder copy markers (placeholder soft + length/keyword soft · 定案乙).
 _SOFT_REMINDER_MARKERS = (
@@ -236,7 +247,7 @@ def _delivered_files(
     results: dict[str, RunState],
     plan: RunPlan | None = None,
 ) -> list[str]:
-    """Ordered, deduped accepted paths from ``file_acceptance`` only."""
+    """Ordered, deduped accepted paths from the delivery ledger (stamp or FAILED backfill)."""
     return [a["path"] for a in _collect_artifacts(results, plan) if a["status"] == "accepted"][
         :_MAX_FILES
     ]
@@ -260,13 +271,57 @@ def _product_meta(raw: dict[str, Any]) -> dict[str, str]:
     return out
 
 
+def _undeclared_failed_acceptance(state: RunState) -> list[dict[str, Any]]:
+    """FAILED worker landed files but never stamped ``file_acceptance``.
+
+    Exception-path failures freeze the transcript (``product_landed=true``) without
+    building acceptance rows. Those successful writes still count in the delivery
+    ledger; the gap is the failed node, not path rejection. COMPLETED stays silent
+    without a stamp (no ``files_touched`` synthesis).
+    """
+    if state.phase is not RunPhase.FAILED:
+        return []
+    if state.file_acceptance:
+        return []
+    from agentcore.runtime.runs.file_acceptance import build_file_acceptance
+    from agentcore.runtime.runs.serialize import file_products_from_transcript
+
+    products = file_products_from_transcript(state.transcript or [])
+    paths: list[str] = []
+    seen: set[str] = set()
+    for path in state.files_touched or []:
+        text = str(path or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            paths.append(text)
+    for product in products:
+        text = str(product.path or "").strip()
+        if text and text not in seen:
+            seen.add(text)
+            paths.append(text)
+    if not paths:
+        return []
+    # Writes already succeeded — accept the paths; node_failed still blocks delivered.
+    return build_file_acceptance(paths, phase=RunPhase.COMPLETED, products=products)
+
+
+def _acceptance_rows_for_state(state: RunState) -> list[dict[str, Any]]:
+    """Stamped ``file_acceptance``, or FAILED undeclared landings."""
+    stamped = [row for row in (state.file_acceptance or []) if isinstance(row, dict)]
+    if stamped:
+        return stamped
+    return _undeclared_failed_acceptance(state)
+
+
 def _collect_artifacts(
     results: dict[str, RunState],
     plan: RunPlan | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate ``file_acceptance`` rows across workers (dedupe by path, last wins).
+    """Aggregate acceptance rows across workers (dedupe by path, last wins).
 
-    Empty ``file_acceptance`` → no artifact rows (no ``files_touched`` synthesis).
+    Empty ``file_acceptance`` on COMPLETED → no artifact rows (no ``files_touched``
+    synthesis). FAILED with landed files and no stamp → backfill from
+    ``files_touched`` / transcript self-report (same facts as ``product_landed``).
     When ``plan`` is given, stamp ``workspace_id=folder:{target_folder_id}`` from
     the matching node (omit when the node has no target — client falls back to
     session birth desk). Does not rewrite session ``folder_id``.
@@ -293,7 +348,7 @@ def _collect_artifacts(
         if state is None:
             continue
         workspace_id = desk_by_run.get(str(run_id))
-        for raw in state.file_acceptance or []:
+        for raw in _acceptance_rows_for_state(state):
             row = normalize_acceptance_row(raw)
             if row is None:
                 continue
@@ -329,7 +384,7 @@ def _artifact_rejected_gaps(artifacts: list[dict[str, Any]]) -> list[dict[str, A
     return [
         _annotate_gap(
             "验收",
-            f"产物未通过验收：{shown}{more}",
+            f"产物路径未核：{shown}{more}",
             reason=REASON_ARTIFACT_REJECTED,
         )
     ]
@@ -859,6 +914,7 @@ def build_delivery_status(
 
     delivered = _delivered_files(results, plan)
     artifacts = _collect_artifacts(results, plan)
+    files_landed = bool(delivered) or bool(artifacts)
 
     # B1：worker 转录里 browser_* 成功 → 闩锁（CEO 综收可对账；非气泡启发式）。
     from agentcore.runtime.closing_posture import note_browser_tool_success_from_messages
@@ -948,16 +1004,16 @@ def build_delivery_status(
     # ③ 失败 / 未执行 / 取消的计划节点（热修已接手的取消节点不算缺口）。
     raw_gaps.extend(_node_gaps(plan, results))
     # ③b 拒收产物（file_acceptance rejected）→ 结构化 gap + draft_ack（能力4 残差）。
-    # 与 delivered_files / synthesis「已验收」同源；不扫盘上「缺席」散文。
+    # 与 delivered_files / synthesis「路径已核」同源；不扫盘上「缺席」散文。
     raw_gaps.extend(_artifact_rejected_gaps(artifacts))
     # ③c B1：空交接风暴 / cancel·0 产出 → blocking + draft_ack（强制 PARTIAL 缺口清单）。
-    storm = _empty_handoff_storm_gap(plan, results, files_landed=bool(delivered))
+    storm = _empty_handoff_storm_gap(plan, results, files_landed=files_landed)
     if storm is not None:
         raw_gaps.append(storm)
         from agentcore.runtime.closing_posture import note_empty_handoff_storm
 
         note_empty_handoff_storm()
-    cancel_gap = _cancel_zero_output_checklist_gap(plan, results, files_landed=bool(delivered))
+    cancel_gap = _cancel_zero_output_checklist_gap(plan, results, files_landed=files_landed)
     if cancel_gap is not None:
         raw_gaps.append(cancel_gap)
         from agentcore.runtime.closing_posture import note_cancel_zero_output
@@ -975,8 +1031,8 @@ def build_delivery_status(
             final_count=len(gaps),
             execution_id=execution_id,
         )
-    # 刀1 / 方案 A：有 accepted 落盘时 degraded_handoff 降为 warning 备注。
-    gaps = _soften_landed_degraded_gaps(gaps, files_landed=bool(delivered))
+    # 刀1 / 方案 A：有落盘时 degraded_handoff 降为 warning 备注。
+    gaps = _soften_landed_degraded_gaps(gaps, files_landed=files_landed)
     # 文献证据降档仅绑 research_report / 同等成文综述；非该形态丢弃误入的
     # evidence_deficit（parallel_brief 等不得因此离开 delivered）。
     from agentcore.runtime.runs.research_quality import plan_is_literature_report_delivery
@@ -1057,7 +1113,8 @@ def build_delivery_status(
         # 轻 B：仅 soft 自注（unverified_note）不降档；path_hint 等仍 notes。
         non_self_note = [g for g in warnings if g.get("reason") != REASON_UNVERIFIED_NOTE]
         state = "delivered" if not non_self_note and delivered else "notes"
-    elif delivered:
+    elif files_landed:
+        # blocked = 纯失败无文件；有落盘（accepted 或 rejected）且有缺口 → partial。
         state = "partial"
     else:
         state = "blocked"
@@ -1076,6 +1133,38 @@ def build_delivery_status(
         },
         promotion_ledger,
     )
+
+
+def _delivery_fingerprint(payload: dict[str, Any]) -> str:
+    """Stable conclusion key: state + delivered paths + artifact rows + gaps."""
+    delivered = payload.get("delivered_files") or []
+    artifacts = payload.get("artifacts") or []
+    gaps = payload.get("gaps") or []
+    art_part = ",".join(
+        f"{a.get('path')}:{a.get('status')}" for a in artifacts if isinstance(a, dict)
+    )
+    gap_part = ",".join(
+        f"{g.get('reason')}:{g.get('description')}" for g in gaps if isinstance(g, dict)
+    )
+    del_part = ",".join(str(p) for p in delivered)
+    return f"{payload.get('state')}|{del_part}|{art_part}|{gap_part}"
+
+
+def _already_emitted_delivery(sink: Any, execution_id: str, fingerprint: str) -> bool:
+    """True when this sink already emitted the same execution conclusion."""
+    if not execution_id:
+        return False
+    try:
+        by_exec = _emitted_delivery_fp.get(sink)
+    except TypeError:
+        return False
+    if by_exec is None:
+        _emitted_delivery_fp[sink] = {execution_id: fingerprint}
+        return False
+    if by_exec.get(execution_id) == fingerprint:
+        return True
+    by_exec[execution_id] = fingerprint
+    return False
 
 
 def maybe_emit_delivery_status(
@@ -1125,6 +1214,9 @@ def maybe_emit_delivery_status(
         from agentcore.runtime.delegate.promotion import note_delivery_reconciliation
         from agentcore.runtime.events import delivery_status
 
+        fingerprint = _delivery_fingerprint(payload)
+        if _already_emitted_delivery(sink, execution_id, fingerprint):
+            return
         sink.emit(delivery_status(**payload))
         # 成品归位的 accepted 闸门读这一份（CEO 收口时刻的最新对账）。
         note_delivery_reconciliation(promotion_ledger, payload)

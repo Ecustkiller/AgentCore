@@ -246,8 +246,17 @@ def test_from_settings_converts_costs_to_nano():
     assert limits.daily_requests == settings.quota_daily_requests
     assert limits.monthly_cost_nano == int(settings.quota_monthly_cost_cny * NANO_PER_CNY)
     assert limits.daily_cost_nano == int(settings.quota_daily_cost_cny * NANO_PER_CNY)
-    assert limits.monthly_cost_nano == 10 * NANO_PER_CNY
-    assert limits.daily_cost_nano == 10 * NANO_PER_CNY
+
+
+def test_quota_settings_defaults_are_five_yuan():
+    """Product default (unbound by local .env) is ¥5/月 · ¥5/日 · 500 请求."""
+    from agentcore.config.quota import QuotaSettings
+
+    defaults = QuotaSettings()
+    assert defaults.quota_monthly_cost_cny == 5.0
+    assert defaults.quota_daily_cost_cny == 5.0
+    assert defaults.quota_daily_requests == 500
+    assert defaults.quota_daily_tokens == 0
 
 
 # --- per-user resolution (QuotaLimits.for_user) ---

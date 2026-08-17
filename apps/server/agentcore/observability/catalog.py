@@ -103,8 +103,8 @@ EVENTS: list[EventSpec] = [
     EventSpec(
         name='attention.signalled',
         description=(
-            '「AI 停住在等你」信号已发；push_outcome = delivered / undelivered / skipped_mobile_onl'
-            'ine / not_requested，pushed 只在真有设备收下时为 true'
+            '「在等你」信号已发（阻塞卡或未答的非阻塞提问）；push_outcome = delivered / undelivered'
+            ' / skipped_mobile_online / not_requested，pushed 只在真有设备收下时为 true'
         ),
         fields={
             'conversation_id': FieldType('str'),
@@ -255,6 +255,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='chat.beta_moderator_cleared'),
     EventSpec(name='chat.beta_moderator_set'),
     EventSpec(name='chat.code_index_flush_failed'),
+    EventSpec(name='chat.continue_complete'),
+    EventSpec(name='chat.continue_error'),
+    EventSpec(name='chat.continue_start'),
     EventSpec(name='chat.incomplete_persist_failed'),
     EventSpec(name='chat.incomplete_persist_skipped'),
     EventSpec(name='chat.incomplete_persisted'),
@@ -269,8 +272,8 @@ EVENTS: list[EventSpec] = [
             'user': FieldType('str'),
         },
     ),
-    EventSpec(name='chat.local_turn_harvest_idempotent'),
     EventSpec(name='chat.local_turn_harvest_claim_continue'),
+    EventSpec(name='chat.local_turn_harvest_idempotent'),
     EventSpec(name='chat.local_turn_idempotent_race'),
     EventSpec(name='chat.local_turn_recorded'),
     EventSpec(name='chat.local_turn_reuse_paired_user'),
@@ -551,8 +554,10 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.file_ownership_snapshot_failed'),
     EventSpec(name='coordination.harvest_armed_while_attached'),
     EventSpec(name='coordination.harvest_attach_cleared'),
+    EventSpec(name='coordination.harvest_cancelled'),
     EventSpec(name='coordination.harvest_channel_dead_after_turn'),
     EventSpec(name='coordination.harvest_channel_dead_skip_llm'),
+    EventSpec(name='coordination.harvest_claim_continue'),
     EventSpec(name='coordination.harvest_closing_turn_done'),
     EventSpec(name='coordination.harvest_closing_turn_failed'),
     EventSpec(name='coordination.harvest_conversation_missing'),
@@ -560,14 +565,15 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='coordination.harvest_deferred_exhausted'),
     EventSpec(name='coordination.harvest_deferred_live_turn'),
     EventSpec(name='coordination.harvest_deferred_retry'),
+    EventSpec(name='coordination.harvest_detached_started'),
     EventSpec(name='coordination.harvest_failed'),
     EventSpec(name='coordination.harvest_fallback_persisted'),
     EventSpec(name='coordination.harvest_giving_up'),
     EventSpec(name='coordination.harvest_idempotent_skip'),
-    EventSpec(name='coordination.harvest_claim_continue'),
     EventSpec(name='coordination.harvest_missing_conversation'),
     EventSpec(name='coordination.harvest_no_session'),
     EventSpec(name='coordination.harvest_not_ready'),
+    EventSpec(name='coordination.harvest_skipped_host_paused'),
     EventSpec(name='coordination.harvest_skipped_reattached'),
     EventSpec(name='coordination.harvest_stale_attach_forcing'),
     EventSpec(name='coordination.harvest_user_missing'),
@@ -1079,6 +1085,30 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='desktop.mcp_server_failed'),
     EventSpec(name='desktop.notify_request'),
     EventSpec(name='desktop.notify_timeout'),
+    EventSpec(
+        name='disk.high_watermark',
+        description='宿主挂载点用量达到阈值（默认 80%）；/readyz body 可观测但不参与 200/503',
+        fields={
+            'free_bytes': FieldType('int'),
+            'fstype': FieldType('str'),
+            'overlay': FieldType('bool'),
+            'path': FieldType('str'),
+            'reason': FieldType('str'),
+            'suppressed': FieldType('int'),
+            'threshold_pct': FieldType('float'),
+            'total_bytes': FieldType('int'),
+            'used_pct': FieldType('float'),
+        },
+    ),
+    EventSpec(
+        name='disk.probe_failed',
+        description='读磁盘水位失败（水位缺测；同样不翻转 /readyz 状态）',
+        fields={
+            'error': FieldType('str'),
+            'path': FieldType('str'),
+            'suppressed': FieldType('int'),
+        },
+    ),
     EventSpec(name='dm.opened'),
     EventSpec(name='dm.user_blocked'),
     EventSpec(name='download_url.done'),
@@ -1112,6 +1142,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='engine.force_finalize_skipped_empty'),
     EventSpec(name='engine.force_finalize_wall_timeout'),
     EventSpec(name='engine.llm_failed_terminal'),
+    EventSpec(name='engine.llm_rate_limit_paused'),
     EventSpec(name='engine.loop_finalize', description='收敛治理：强制收尾'),
     EventSpec(name='engine.loop_nudge', description='收敛治理：循环提醒'),
     EventSpec(
@@ -1132,6 +1163,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='engine.retrieval_budget_critical'),
     EventSpec(name='engine.retrieval_budget_wind_down'),
+    EventSpec(name='engine.structured_reply_salvaged'),
     EventSpec(name='engine.team_gate_nudge'),
     EventSpec(name='engine.team_gate_restore'),
     EventSpec(name='engine.timeout_force_cancel'),
@@ -1292,6 +1324,7 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='friend.request_created'),
     EventSpec(name='friend.request_rejected'),
     EventSpec(name='fulfill.attention_pushed'),
+    EventSpec(name='fulfill.attention_questions_seed_failed'),
     EventSpec(name='fulfill.attention_seed_failed'),
     EventSpec(name='fulfill.attention_snapshot_pushed'),
     EventSpec(name='fulfill.delivered'),
@@ -1433,7 +1466,9 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='journal.sealed_at_pause'),
     EventSpec(
         name='llm.call',
-        description='单次 LLM 调用（latency/tokens/cost_nano）',
+        description=(
+            '单次 LLM 调用（latency/tokens/cost_nano；平台代付可带 platform_credential_id）'
+        ),
         fields={
             'cost_nano': FieldType('int'),
             'finish_reason': FieldType('str'),
@@ -1441,6 +1476,7 @@ EVENTS: list[EventSpec] = [
             'latency_ms': FieldType('int'),
             'model': FieldType('str'),
             'output_tokens': FieldType('int'),
+            'platform_credential_id': FieldType('str'),
             'reasoning_tokens': FieldType('int'),
             'scenario': FieldType('str'),
             'stream': FieldType('bool'),
@@ -1448,11 +1484,14 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(
         name='llm.call_failed',
-        description='LLM 调用失败（model/credential_source；可取则带 provider_id）',
+        description=(
+            'LLM 调用失败（model/credential_source；可取则带 provider_id / platform_credential_id）'
+        ),
         fields={
             'credential_source': FieldType('str'),
             'error': FieldType('str'),
             'model': FieldType('str'),
+            'platform_credential_id': FieldType('str'),
             'provider_id': FieldType('str'),
             'scenario': FieldType('str'),
         },
@@ -1505,11 +1544,15 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='llm.stream_partial_disconnect'),
     EventSpec(
         name='llm.stream_stalled',
-        description='LLM 流式空闲超时（model/credential_source；可取则带 provider_id）',
+        description=(
+            'LLM 流式空闲超时（model/credential_source；可取则带 provider_id / platform_credential_'
+            'id）'
+        ),
         fields={
             'committed': FieldType('bool'),
             'credential_source': FieldType('str'),
             'model': FieldType('str'),
+            'platform_credential_id': FieldType('str'),
             'provider_id': FieldType('str'),
             'scenario': FieldType('str'),
         },
@@ -1678,6 +1721,16 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='package.egress_proxy_stopped'),
     EventSpec(name='package.netns_setup'),
     EventSpec(
+        name='pending_questions.load_failed',
+        description='CEO 易变尾悬题清单读 journal 失败（本回合不注入该段）',
+        fields={
+            'conversation_id': FieldType('str'),
+            'error': FieldType('str'),
+        },
+    ),
+    EventSpec(name='pipeline.continue_initial_seq_fallback'),
+    EventSpec(name='pipeline.continue_start'),
+    EventSpec(
         name='pipeline.error',
         description='回合管线未捕获异常',
         fields={
@@ -1701,6 +1754,54 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='platform.model_credentials_not_object'),
     EventSpec(name='platform.model_credentials_parse_failed'),
     EventSpec(name='platform_catalog.pricing_missing'),
+    EventSpec(
+        name='platform_pool.blocked',
+        description=(
+            '平台池成员 401（封号或坏 key）或 403 RegionError 已摘除，需人工重新启用。401 不换号重'
+            '试；403 允许 commit 前换号'
+        ),
+        fields={
+            'credential_id': FieldType('str'),
+            'reason': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='platform_pool.cooling',
+        description=(
+            '平台池成员因上游 429 进入 cooling/exhausted；recovery_at 为 unix 秒（上游 Retry-After'
+            '）'
+        ),
+        fields={
+            'credential_id': FieldType('str'),
+            'limit_name': FieldType('str'),
+            'recovery_at': FieldType('float'),
+            'source': FieldType('str'),
+            'status': FieldType('str'),
+        },
+    ),
+    EventSpec(name='platform_pool.decrypt_failed'),
+    EventSpec(
+        name='platform_pool.failover',
+        description=(
+            '流式 commit 前换号：from_credential_id → to_credential_id（稳定账号 id，非 key）'
+        ),
+        fields={
+            'from_credential_id': FieldType('str'),
+            'to_credential_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='platform_pool.redis_fail_open',
+        description=(
+            '池状态 Redis 读写失败，本操当无记录（fail-open）；construct 失败则退回内存实现'
+        ),
+        fields={
+            'error': FieldType('str'),
+            'op': FieldType('str'),
+        },
+    ),
+    EventSpec(name='platform_pool.reload_failed'),
+    EventSpec(name='platform_pool.reloaded'),
     EventSpec(name='presence.audience_failed'),
     EventSpec(name='presence.broadcast'),
     EventSpec(name='presence.broadcast_failed'),
@@ -1767,6 +1868,49 @@ EVENTS: list[EventSpec] = [
         fields={
             'reason': FieldType('str'),
             'user_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='question_posted.ingest_settle_failed',
+        description='发送提交事实成立后关悬题 journal 失败（不让回合失败）',
+        fields={
+            'ask_id': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'error': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='question_posted.retention_failed',
+        description='悬题 7 天硬上限扫表整轮失败',
+        fields={
+            'error': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='question_posted.retention_settle_failed',
+        description='悬题硬上限作废单张失败（其余继续）',
+        fields={
+            'ask_id': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'error': FieldType('str'),
+            'turn_id': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='question_posted.retention_swept',
+        description='悬题 7 天硬上限扫表作废的张数（自有 journal 路径，不碰 paused_turns）',
+        fields={
+            'settled': FieldType('int'),
+        },
+    ),
+    EventSpec(
+        name='question_posted.settled',
+        description='非阻塞提问已答或已作废（journal question_resolved）',
+        fields={
+            'ask_id': FieldType('str'),
+            'conversation_id': FieldType('str'),
+            'status': FieldType('str'),
+            'turn_id': FieldType('str'),
         },
     ),
     EventSpec(
@@ -1864,6 +2008,7 @@ EVENTS: list[EventSpec] = [
     ),
     EventSpec(name='run.finish_interrupted'),
     EventSpec(name='run.redirect_cancelled'),
+    EventSpec(name='run.terminal_duplicate_dropped'),
     EventSpec(name='run.timeout_cancelled'),
     EventSpec(name='run.user_stop_cancelled'),
     EventSpec(name='run_outcome.accepted'),
@@ -2077,6 +2222,26 @@ EVENTS: list[EventSpec] = [
     EventSpec(name='standing_task.run_finished'),
     EventSpec(name='standing_task.schedule_advance_failed'),
     EventSpec(name='str_replace.collision'),
+    EventSpec(
+        name='stream_state.retention_failed',
+        description='流式在飞快照 TTL 扫表整轮失败',
+        fields={
+            'error': FieldType('str'),
+        },
+    ),
+    EventSpec(
+        name='stream_state.retention_swept',
+        description='流式在飞快照超保留期扫表删除的行数（对齐 paused_turns 7 天）',
+        fields={
+            'deleted': FieldType('int'),
+        },
+    ),
+    EventSpec(name='suspension.ceo_continue_lock_claim_failed'),
+    EventSpec(name='suspension.ceo_continue_lock_claimed'),
+    EventSpec(name='suspension.ceo_continue_lock_peek_failed'),
+    EventSpec(name='suspension.ceo_continue_lock_save_failed'),
+    EventSpec(name='suspension.ceo_continue_lock_saved'),
+    EventSpec(name='suspension.ceo_continue_usage_peek_failed'),
     EventSpec(name='suspension.claim_failed'),
     EventSpec(name='suspension.claim_hydrate_failed'),
     EventSpec(name='suspension.claim_journal_align_failed'),

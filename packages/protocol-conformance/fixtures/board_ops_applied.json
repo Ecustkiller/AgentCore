@@ -97,6 +97,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "已在白板上添加目标便签。",
     "reasoning": "先在白板上摆一个目标便签。",

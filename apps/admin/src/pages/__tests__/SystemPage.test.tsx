@@ -19,6 +19,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const build = vi.hoisted(() => ({ sha: "unknown" }));
 
 vi.mock("@/services/adminSystem", () => ({ fetchSystemStatus: vi.fn() }));
+vi.mock("@/services/adminPlatformCredentials", () => ({
+  listPlatformCredentials: vi.fn().mockResolvedValue({ data: [], fallback: "env" }),
+  createPlatformCredential: vi.fn(),
+  updatePlatformCredential: vi.fn(),
+  deletePlatformCredential: vi.fn(),
+}));
 vi.mock("@/lib/clientBuildInfo", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/clientBuildInfo")>()),
   clientGitSha: () => build.sha,

@@ -34,12 +34,14 @@ import {
   type ExecutionStatus,
   type RunFrame,
   type RunNode,
+  type UserInterjection,
   foldDebatePretrial,
   frameFromEvent,
   mergePlanInto,
   planFromRunPlan,
   projectExecution,
   upsertDebateRound,
+  userInterjectionFromPayload,
 } from "@/stores/execution";
 import type { DebatePretrialState } from "@/stores/execution";
 import {
@@ -81,7 +83,10 @@ import type {
   ProjectedTurn,
   TurnStatus,
 } from "@agentcore/protocol-conformance/projectedTurn";
-import { FINISH_TO_STATUS } from "@agentcore/protocol-fold-kit";
+import {
+  FINISH_TO_STATUS,
+  resolveTurnOutcome,
+} from "@agentcore/protocol-fold-kit";
 import { foldInteractions, hasGatePending } from "./foldInteractions";
 
 export type { ProjectedTurn };
@@ -128,6 +133,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let evidenceLedger: ProjectedEvidenceLedgerEntry[] = [];
   let citedIds: string[] = [];
   let finishReason: string | null = null;
+  let explicitOutcome: string | null = null;
   let cost: CostBreakdown | null = null;
   // 跨回合流 vs 同回合 resume：仅 message_id 变化时清空气泡正文（见 message_start）。
   let lastMessageId: string | null = null;
@@ -142,18 +148,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   let fromExecutionCompleted: ExecutionStatus | null = null;
   let turnWarning: string | null = null;
   let autoFolder: ProjectedTurn["autoFolder"] = null;
-  const userInterjections: {
-    interjectionId: string;
-    executionId: string;
-    content: string;
-    status: string;
-    note: string | null;
-    attachments?: {
-      name: string;
-      workspacePath?: string;
-      binary?: boolean;
-    }[];
-  }[] = [];
+  const userInterjections: UserInterjection[] = [];
   const userInterjectionIndex = new Map<string, number>();
   let sawError = false;
   let turnError: { code: string; message: string } | null = null;
@@ -415,7 +410,8 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
       case "checkpoint_resolved":
       case "approval_resolved":
       case "delegation_authorization_resolved":
-      case "stage_card_resolved": {
+      case "stage_card_resolved":
+      case "question_resolved": {
         maybeRecordInteractionFrame(ev.type, ev, frames);
         break;
       }
@@ -432,6 +428,15 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         const p = ev.payload as MessageEndPayload;
         finishReason = p.finish_reason;
         cost = p.cost ?? null;
+        const raw = p.outcome;
+        if (
+          raw === "ok" ||
+          raw === "partial" ||
+          raw === "paused" ||
+          raw === "error"
+        ) {
+          explicitOutcome = raw;
+        }
         break;
       }
       case "message_start": {
@@ -449,6 +454,7 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
             process: [],
           };
           finishReason = null;
+          explicitOutcome = null;
           cost = null;
           turnError = null;
         }
@@ -535,51 +541,19 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
         break;
       }
       case "user_interjection": {
-        const p = ev.payload as {
-          interjection_id?: string;
-          execution_id?: string;
-          content?: string;
-          status?: string;
-          note?: string | null;
-          attachments?: Array<{
-            name?: string;
-            workspace_path?: string;
-            binary?: boolean;
-          }>;
-        };
-        const iid = (p.interjection_id || "").trim();
-        if (iid) {
+        const leaf = userInterjectionFromPayload(ev.payload);
+        if (leaf) {
           // 零宽 positional marker：同 id 首次出现钉到 process；后续 status 只改旁路。
-          messageLane = foldUserInterjectionMarker(messageLane, iid);
-          const attachments = (p.attachments ?? [])
-            .filter(
-              (
-                a,
-              ): a is {
-                name: string;
-                workspace_path?: string;
-                binary?: boolean;
-              } => typeof a.name === "string" && Boolean(a.name.trim()),
-            )
-            .map((a) => ({
-              name: a.name.trim(),
-              workspacePath:
-                typeof a.workspace_path === "string" && a.workspace_path.trim()
-                  ? a.workspace_path
-                  : undefined,
-              binary: Boolean(a.binary),
-            }));
-          const leaf = {
-            interjectionId: iid,
-            executionId: p.execution_id || "",
-            content: p.content || "",
-            status: p.status || "received",
-            note: typeof p.note === "string" ? p.note : null,
-            ...(attachments.length > 0 ? { attachments } : {}),
-          };
-          const idx = userInterjectionIndex.get(iid);
+          messageLane = foldUserInterjectionMarker(
+            messageLane,
+            leaf.interjectionId,
+          );
+          const idx = userInterjectionIndex.get(leaf.interjectionId);
           if (idx === undefined) {
-            userInterjectionIndex.set(iid, userInterjections.length);
+            userInterjectionIndex.set(
+              leaf.interjectionId,
+              userInterjections.length,
+            );
             userInterjections.push(leaf);
           } else {
             userInterjections[idx] = leaf;
@@ -699,6 +673,13 @@ export function foldToProjectedTurn(events: SSEEvent[]): ProjectedTurn {
   return {
     status,
     finishReason,
+    outcome: resolveTurnOutcome({
+      events,
+      finishReason,
+      hasError: sawError,
+      explicit: explicitOutcome,
+      running: status === "running",
+    }),
     error: turnError,
     content: messageLane.content,
     reasoning: messageLane.reasoning,

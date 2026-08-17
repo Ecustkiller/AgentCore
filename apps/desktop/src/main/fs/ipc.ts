@@ -321,7 +321,11 @@ export function registerFsIpc(): void {
 
   ipcMain.handle(FS_CHANNELS.listRoots, async (): Promise<FsRoot[]> => {
     await ensureReady();
-    return getAllRoots().map((r) => ({ id: r.id, name: r.name }));
+    return getAllRoots().map((r) => ({
+      id: r.id,
+      name: r.name,
+      absPath: r.absPath,
+    }));
   });
 
   ipcMain.handle(FS_CHANNELS.removeRoot, async (_e, p: unknown) => {
@@ -452,7 +456,11 @@ export function registerFsIpc(): void {
   ipcMain.handle(FS_CHANNELS.listFiles, (_e, p: unknown) => {
     const args = requireStringFields(p, ["rootId"]);
     if (!args) return invalidFsResult();
-    return listFiles(args.rootId);
+    const order =
+      isRecord(p) && (p.order === "path" || p.order === "recent")
+        ? p.order
+        : undefined;
+    return listFiles(args.rootId, order ? { order } : undefined);
   });
 
   ipcMain.handle(FS_CHANNELS.readFile, (_e, p: unknown) => {

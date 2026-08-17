@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import socket
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 import pytest
 
@@ -31,35 +36,68 @@ from agentcore.workspace.server import ServerWorkspace
 from tests.delegate.conftest import LocalBackend
 
 
+class _FakeBridgeServer(ThreadingHTTPServer):
+    """Per-test loopback Bridge. CPython's HTTPServer sets allow_reuse_address=1;
+    on Windows that is SO_REUSEADDR and lets another xdist worker bind the same
+    port — its shutdown then RSTs in-flight 401s into host_unavailable.
+    """
+
+    allow_reuse_address = False
+    daemon_threads = True
+
+    def __init__(self, addr: tuple[str, int], handler: type[BaseHTTPRequestHandler]) -> None:
+        self.token = ""
+        self.navigations: list[dict] = []
+        self.fail_host = False
+        self.expire_after_posts: int | None = None
+        self.post_count = 0
+        self._state_lock = threading.Lock()
+        super().__init__(addr, handler)
+
+    def server_bind(self) -> None:
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class _FakeBridgeHandler(BaseHTTPRequestHandler):
     """Minimal DesktopBrowserBridge stand-in for unit tests."""
 
-    # Shared across requests in one server instance.
-    navigations: list[dict] = []
-    fail_host = False
-    # 回合中途 token 过期：前 N 次 POST 正常，之后一律 401（None = 从不过期）。
-    expire_after_posts: int | None = None
-    post_count = 0
+    protocol_version = "HTTP/1.0"
 
     def log_message(self, *_args):  # noqa: D401 - silence test noise
         return
 
+    def handle(self) -> None:
+        try:
+            super().handle()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError, TimeoutError):
+            # Windows urllib closes as soon as it sees 401; the handler flush then
+            # raises. Swallow so the accept loop stays up for the next request.
+            return
+
+    def _server(self) -> _FakeBridgeServer:
+        return self.server  # type: ignore[return-value]
+
     def _auth_ok(self) -> bool:
         auth = self.headers.get("Authorization", "")
-        return auth == f"Bearer {self.server.token}"  # type: ignore[attr-defined]
+        return auth == f"Bearer {self._server().token}"
 
     def _token_expired(self) -> bool:
-        cls = self.__class__
-        if cls.expire_after_posts is None:
+        srv = self._server()
+        if srv.expire_after_posts is None:
             return False
-        cls.post_count += 1
-        return cls.post_count > cls.expire_after_posts
+        with srv._state_lock:
+            srv.post_count += 1
+            return srv.post_count > srv.expire_after_posts
 
     def _json(self, status: int, body: dict) -> None:
         raw = json.dumps(body).encode("utf-8")
+        self.close_connection = True
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
+        self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(raw)
 
@@ -83,7 +121,8 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._json(400, {"ok": False, "error": "invalid_json"})
             return
-        if self.__class__.fail_host:
+        srv = self._server()
+        if srv.fail_host:
             self._json(
                 503,
                 {"ok": False, "error": "host_unavailable: no window", "code": "host_unavailable"},
@@ -95,7 +134,7 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
             url = args.get("url") or body.get("url") or ""
             page_id = body.get("pageId") or body.get("session_id") or ""
             conversation_id = body.get("conversationId") or body.get("conversation_id") or ""
-            self.__class__.navigations.append(
+            srv.navigations.append(
                 {
                     "pageId": page_id,
                     "conversationId": conversation_id,
@@ -119,25 +158,48 @@ class _FakeBridgeHandler(BaseHTTPRequestHandler):
         self._json(404, {"ok": False, "error": "not_found"})
 
 
+def _wait_bridge_accepting(base: str, token: str, *, timeout_s: float = 2.0) -> None:
+    """Block until serve_forever is accepting (bind ≠ accept on Windows)."""
+    deadline = time.monotonic() + timeout_s
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        req = Request(
+            f"{base}/health",
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(req, timeout=0.2) as resp:  # noqa: S310 - loopback test fixture
+                if resp.status == 200:
+                    return
+        except (URLError, TimeoutError, OSError) as exc:
+            last = exc
+            time.sleep(0.01)
+    raise RuntimeError(f"fake DesktopBrowserBridge did not accept on {base}: {last}")
+
+
 @pytest.fixture()
 def fake_bridge(monkeypatch):
     reset_desktop_bridge_health_for_tests()
-    _FakeBridgeHandler.navigations = []
-    _FakeBridgeHandler.fail_host = False
-    _FakeBridgeHandler.expire_after_posts = None
-    _FakeBridgeHandler.post_count = 0
-    server = HTTPServer(("127.0.0.1", 0), _FakeBridgeHandler)
+    server = _FakeBridgeServer(("127.0.0.1", 0), _FakeBridgeHandler)
     token = "test-bridge-token-abc"
-    server.token = token  # type: ignore[attr-defined]
+    server.token = token
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     port = server.server_address[1]
     base = f"http://127.0.0.1:{port}"
     monkeypatch.setenv("AGENTCORE_BROWSER_BRIDGE_URL", base)
     monkeypatch.setenv("AGENTCORE_BROWSER_BRIDGE_TOKEN", token)
-    yield {"base": base, "token": token, "server": server}
-    server.shutdown()
-    reset_desktop_bridge_health_for_tests()
+    try:
+        _wait_bridge_accepting(base, token)
+        yield {"base": base, "token": token, "server": server}
+    finally:
+        with contextlib.suppress(Exception):
+            server.shutdown()
+        with contextlib.suppress(Exception):
+            server.server_close()
+        thread.join(timeout=2)
+        reset_desktop_bridge_health_for_tests()
 
 
 def test_probe_desktop_bridge_health(fake_bridge):
@@ -183,9 +245,9 @@ async def test_local_bridge_session_navigate_async(fake_bridge):
     )
     assert result.ok
     assert result.data["final_url"] == "https://example.com/"
-    assert _FakeBridgeHandler.navigations[-1]["pageId"] == "sess-local-1"
-    assert _FakeBridgeHandler.navigations[-1]["action"] == "navigate"
-    assert _FakeBridgeHandler.navigations[-1]["conversationId"] == "c1"
+    assert fake_bridge["server"].navigations[-1]["pageId"] == "sess-local-1"
+    assert fake_bridge["server"].navigations[-1]["action"] == "navigate"
+    assert fake_bridge["server"].navigations[-1]["conversationId"] == "c1"
 
 
 @pytest.mark.asyncio
@@ -200,21 +262,21 @@ async def test_local_bridge_rewrites_relative_path_to_workspace(fake_bridge):
     assert result.ok
     expected = "workspace://conv.conv-id/site/index.html"
     assert result.data["final_url"] == expected
-    assert _FakeBridgeHandler.navigations[-1]["url"] == expected
-    assert _FakeBridgeHandler.navigations[-1]["args"]["url"] == expected
+    assert fake_bridge["server"].navigations[-1]["url"] == expected
+    assert fake_bridge["server"].navigations[-1]["args"]["url"] == expected
 
 
 @pytest.mark.asyncio
 async def test_local_bridge_rejects_file_url(fake_bridge):
     from agentcore.tools.sandbox.browser.protocol import BrowserCommand
 
-    before = len(_FakeBridgeHandler.navigations)
+    before = len(fake_bridge["server"].navigations)
     sess = LocalBridgeSession(conversation_id="c1", session_id="sess-bad")
     result = await sess.send(
         BrowserCommand(action="navigate", args={"url": "file:///tmp/x.html"})
     )
     assert not result.ok
-    assert len(_FakeBridgeHandler.navigations) == before
+    assert len(fake_bridge["server"].navigations) == before
 
 
 @pytest.mark.asyncio
@@ -264,13 +326,13 @@ async def test_tool_navigate_via_fake_bridge_updates_registry(fake_bridge, tmp_p
     assert infos[0].host_kind == "local"
     assert infos[0].url == "https://example.com/"
     assert infos[0].title == "Example Domain"
-    assert _FakeBridgeHandler.navigations
-    assert _FakeBridgeHandler.navigations[0]["url"] == "https://example.com/"
+    assert fake_bridge["server"].navigations
+    assert fake_bridge["server"].navigations[0]["url"] == "https://example.com/"
 
 
 @pytest.mark.asyncio
 async def test_tool_host_unavailable_when_bridge_returns_503(fake_bridge, tmp_path: Path):
-    _FakeBridgeHandler.fail_host = True
+    fake_bridge["server"].fail_host = True
     set_desktop_bridge_health_for_tests(True)
 
     async def factory(req: BrowserSessionRequest):
@@ -305,7 +367,7 @@ async def test_mid_turn_token_expiry_reports_bridge_unauthorized(fake_bridge):
     from agentcore.tools.sandbox.browser.protocol import BrowserCommand
 
     set_desktop_bridge_health_for_tests(True)
-    _FakeBridgeHandler.expire_after_posts = 1
+    fake_bridge["server"].expire_after_posts = 1
 
     sess = LocalBridgeSession(conversation_id="c1", session_id="sess-expiry")
     first = await sess.send(
@@ -367,7 +429,7 @@ async def test_probe_401_reports_bridge_unauthorized(fake_bridge, monkeypatch):
 async def test_tool_mid_turn_401_maps_to_bridge_unauthorized(fake_bridge, tmp_path: Path):
     """工具面 metadata code 决定用户文案：401 必须与 host_unavailable 分开。"""
     set_desktop_bridge_health_for_tests(True)
-    _FakeBridgeHandler.expire_after_posts = 1
+    fake_bridge["server"].expire_after_posts = 1
 
     async def factory(req: BrowserSessionRequest):
         return await open_local_bridge_session(req)
@@ -420,19 +482,19 @@ async def test_local_screencast_start_emits_frames_and_stop_halts(fake_bridge):
     assert frames[0]["frame_b64"] == "Zm9v"
     assert frames[0]["width"] == 1280
     assert frames[0]["height"] == 800
-    assert any(n["action"] == "screenshot" for n in _FakeBridgeHandler.navigations)
+    assert any(n["action"] == "screenshot" for n in fake_bridge["server"].navigations)
     assert any(
         n["action"] == "screenshot" and n["conversationId"] == "c1"
-        for n in _FakeBridgeHandler.navigations
+        for n in fake_bridge["server"].navigations
     )
 
     before = len(frames)
     await sess.stop_screencast()
     assert sess._screencast_task is None or sess._screencast_task.done()
-    shot_at_stop = sum(1 for n in _FakeBridgeHandler.navigations if n["action"] == "screenshot")
+    shot_at_stop = sum(1 for n in fake_bridge["server"].navigations if n["action"] == "screenshot")
     await asyncio.sleep(0.2)
     assert len(frames) == before
-    shot_after = sum(1 for n in _FakeBridgeHandler.navigations if n["action"] == "screenshot")
+    shot_after = sum(1 for n in fake_bridge["server"].navigations if n["action"] == "screenshot")
     assert shot_after == shot_at_stop  # no further Bridge captures after stop
 
     await sess.close()

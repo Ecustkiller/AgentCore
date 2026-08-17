@@ -936,6 +936,38 @@ describe("extractTurnQueued", () => {
       { kind: "content", text: "，世界" },
     ]);
   });
+
+  it("fold 透传 user_interjection.agent_mentions → agentMentions", () => {
+    const turn = fold([
+      ev("user_interjection", {
+        interjection_id: "inj-m",
+        execution_id: "exec-1",
+        content: "请让研究员再核一遍成本。",
+        status: "received",
+        agent_mentions: [{ agent_id: "agent_research", role: "研究员" }],
+      }),
+      ev("user_interjection", {
+        interjection_id: "inj-m",
+        execution_id: "exec-1",
+        content: "请让研究员再核一遍成本。",
+        status: "injected",
+        agent_mentions: [{ agent_id: "agent_research", role: "研究员" }],
+      }),
+      ev("message_start", { message_id: "m1", conversation_id: "c1" }),
+      ev("content_delta", { delta: "好的" }),
+      ev("message_end", { finish_reason: "end_turn" }),
+    ]);
+    expect(turn.userInterjections).toEqual([
+      {
+        interjectionId: "inj-m",
+        executionId: "exec-1",
+        content: "请让研究员再核一遍成本。",
+        status: "injected",
+        note: null,
+        agentMentions: [{ agentId: "agent_research", role: "研究员" }],
+      },
+    ]);
+  });
 });
 
 // attach 增量重放的帧级替换：增量段里「还没说完的那一步」带整步文字、未被 process 行覆盖的
@@ -1131,5 +1163,36 @@ describe("extractEscalationSlots · browser_login transport", () => {
     expect(
       (esc as { browserLogin?: boolean } | undefined)?.browserLogin,
     ).toBeUndefined();
+  });
+});
+
+describe("fold · CEO rate-limit pause", () => {
+  it("multi_agent_ceo_rate_limit_paused pins outcome=paused without a gate", () => {
+    const fixture = loadFixtures().find(
+      (f) => f.name === "multi_agent_ceo_rate_limit_paused",
+    );
+    expect(fixture).toBeTruthy();
+    if (!fixture) return;
+    const actual = fold(fixture.events as SSEEvent[]);
+    expect(diffProjected(fixture.projected, actual)).toEqual([]);
+    expect(actual.outcome).toBe("paused");
+    expect(actual.status).toBe("paused");
+    expect(actual.finishReason).toBe("paused");
+    expect(actual.interactions).toEqual([]);
+    expect(actual.runs[0]?.productLanded).toBe(true);
+  });
+});
+
+describe("fold · non-blocking ask 三态", () => {
+  it.each([
+    "single_agent_non_blocking_ask",
+    "single_agent_non_blocking_ask_answered",
+    "single_agent_non_blocking_ask_discarded",
+  ])("%s aligns with golden", (name) => {
+    const fixture = loadFixtures().find((f) => f.name === name);
+    expect(fixture).toBeTruthy();
+    if (!fixture) return;
+    const actual = fold(fixture.events as SSEEvent[]);
+    expect(diffProjected(fixture.projected, actual)).toEqual([]);
   });
 });

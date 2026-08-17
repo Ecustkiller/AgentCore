@@ -30,9 +30,9 @@ def _req(*, scenario: str = "chat") -> LLMRequest:
 
 
 class _FakeLeaf:
-    def __init__(self) -> None:
-        self.name = "platform"
-        self._name = "platform"
+    def __init__(self, name: str = "platform") -> None:
+        self.name = name
+        self._name = name
         self.complete = AsyncMock(
             return_value=LLMResponse(
                 content="ok",
@@ -98,7 +98,7 @@ async def test_fence_complete_failure_includes_ambient_credential_fields():
     """llm.call_failed surfaces ambient credential_source + provider_id (no base_url)."""
     from agentcore.core.log_context import bind_log_context, clear_log_context
 
-    leaf = _FakeLeaf()
+    leaf = _FakeLeaf(name="user")
     leaf.complete = AsyncMock(
         side_effect=LLMUpstreamError("boom", upstream_status=502, retry_attempts=0)
     )
@@ -115,6 +115,29 @@ async def test_fence_complete_failure_includes_ambient_credential_fields():
     assert failed["credential_source"] == "user"
     assert failed["provider_id"] == "prov-1"
     assert "base_url" not in failed
+    assert "platform_credential_id" not in failed
+
+
+@pytest.mark.asyncio
+async def test_fence_platform_leaf_emits_platform_credential_id(monkeypatch):
+    """Platform leaf stamps the pool-member id onto llm.call (not the key)."""
+    from agentcore.config import settings
+    from agentcore.core.log_context import clear_log_context
+
+    monkeypatch.setattr(settings, "platform_api_key", "sk-default-key")
+    monkeypatch.setattr(settings, "platform_base_url", "https://default/v1")
+    monkeypatch.setattr(settings, "platform_credential_id", "go-1")
+    monkeypatch.setattr(settings, "platform_model_credentials", "")
+    clear_log_context()
+    try:
+        provider = observe_provider(_FakeLeaf())
+        with capture_logs() as caps:
+            await provider.complete(_req())
+    finally:
+        clear_log_context()
+    call = next(c for c in caps if c.get("event") == "llm.call")
+    assert call["platform_credential_id"] == "go-1"
+    assert "sk-default-key" not in str(call)
 
 
 @pytest.mark.asyncio

@@ -265,6 +265,14 @@ def _finalize_act_cursor(
     return result
 
 
+def _tape_revision(raw: Any) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    return value if value >= 1 else 1
+
+
 def _ensure_checkpoint_id(payload: dict[str, Any], *, message_id: str) -> str:
     cid = str(payload.get("checkpoint_id") or "")
     if not cid:
@@ -297,6 +305,9 @@ def _build_required_event(
             max_rounds=int(payload.get("max_rounds") or 0),
             thorough=bool(payload.get("thorough", True)),
             headline=str(payload.get("headline") or ""),
+            revision=_tape_revision(payload.get("revision")),
+            revised_from=str(payload.get("revised_from") or ""),
+            revision_note=str(payload.get("revision_note") or ""),
         )
     elif et_name == "checkpoint_required":
         intent = payload.get("intent")

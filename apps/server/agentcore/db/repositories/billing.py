@@ -6,7 +6,7 @@ Postgres ``cost_ledger_outbox`` (:class:`~agentcore.billing.cost_ledger_queue.Co
 for at-least-once durability.
 """
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import Literal
 
@@ -49,6 +49,17 @@ def _fold_call_models_and_source(
         if str(raw) == "user":
             any_user = True
     return models, ("user" if any_user else "platform")
+
+
+def _platform_prepaid_call() -> ColumnElement:
+    """``cost_calls`` that hit the platform key — not BYOK, not vendor extras.
+
+    Missing ``credential_source`` follows ledger ``split_cost`` (defaults to
+    platform). This is「平台付的钱」, not「走了 Go」. Go-window reads further
+    restrict to pool members whose persisted ``base_url`` is the Go endpoint.
+    """
+    src = func.coalesce(CostCall.cost["credential_source"].astext, "platform")
+    return src == "platform"
 
 
 def _run_row_values(
@@ -168,6 +179,11 @@ class CostEventRepository:
                 "currency": c.get("currency", "CNY"),
                 "duration_ms": int(c.get("duration_ms", 0)),
                 "trace_id": trace_id,
+                "platform_credential_id": (
+                    str(c["platform_credential_id"]).strip()
+                    if c.get("platform_credential_id")
+                    else None
+                ),
             }
             for c in calls
         ]
@@ -313,14 +329,18 @@ class CostEventRepository:
         # pull another turn's tokens into this payroll (defensive; run_ids are
         # normally unique).
         calls = (
-            await self._session.execute(
-                select(CostCall).where(
-                    CostCall.user_id == user_id,
-                    CostCall.message_id == message_id,
-                    CostCall.run_id.in_(run_ids),
+            (
+                await self._session.execute(
+                    select(CostCall).where(
+                        CostCall.user_id == user_id,
+                        CostCall.message_id == message_id,
+                        CostCall.run_id.in_(run_ids),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         by_run: dict[str, list[CostCall]] = {}
         for row in calls:
             by_run.setdefault(row.run_id, []).append(row)
@@ -435,25 +455,23 @@ class CostEventRepository:
             _sum_int(_json_int(CostEvent.tokens, "reasoning")).label("t_reasoning"),
             _sum_int(_json_int(CostEvent.tokens, "cache_hit")).label("t_cache_hit"),
             _sum_int(_json_int(CostEvent.tokens, "cache_miss")).label("t_cache_miss"),
-            _sum_int(
-                case((billed, _json_int(CostEvent.cost, "input")), else_=0)
-            ).label("c_input"),
-            _sum_int(
-                case((billed, _json_int(CostEvent.cost, "cached")), else_=0)
-            ).label("c_cached"),
-            _sum_int(
-                case((billed, _json_int(CostEvent.cost, "output")), else_=0)
-            ).label("c_output"),
+            _sum_int(case((billed, _json_int(CostEvent.cost, "input")), else_=0)).label("c_input"),
+            _sum_int(case((billed, _json_int(CostEvent.cost, "cached")), else_=0)).label(
+                "c_cached"
+            ),
+            _sum_int(case((billed, _json_int(CostEvent.cost, "output")), else_=0)).label(
+                "c_output"
+            ),
             _sum_int(CostEvent.cost_total_nano).label("c_total"),
-            _sum_int(
-                case((estimated, _json_int(CostEvent.cost, "input")), else_=0)
-            ).label("e_input"),
-            _sum_int(
-                case((estimated, _json_int(CostEvent.cost, "cached")), else_=0)
-            ).label("e_cached"),
-            _sum_int(
-                case((estimated, _json_int(CostEvent.cost, "output")), else_=0)
-            ).label("e_output"),
+            _sum_int(case((estimated, _json_int(CostEvent.cost, "input")), else_=0)).label(
+                "e_input"
+            ),
+            _sum_int(case((estimated, _json_int(CostEvent.cost, "cached")), else_=0)).label(
+                "e_cached"
+            ),
+            _sum_int(case((estimated, _json_int(CostEvent.cost, "output")), else_=0)).label(
+                "e_output"
+            ),
             _sum_int(CostEvent.cost_estimated_nano).label("c_estimated"),
             # Each bucket's currency, read off the rows instead of assumed: billed
             # is CNY (curated cards) while BYOK estimates are USD (community
@@ -679,9 +697,7 @@ class CostEventRepository:
             if mid is None:
                 continue
             by_message.setdefault(mid, []).append(row)
-        return {
-            mid: _fold_call_models_and_source(calls) for mid, calls in by_message.items()
-        }
+        return {mid: _fold_call_models_and_source(calls) for mid, calls in by_message.items()}
 
     async def models_and_source_by_trace(
         self, trace_ids: Sequence[str]
@@ -694,9 +710,7 @@ class CostEventRepository:
         if not ids:
             return {}
         result = await self._session.execute(
-            select(CostCall)
-            .where(CostCall.trace_id.in_(ids))
-            .order_by(CostCall.created_at.asc())
+            select(CostCall).where(CostCall.trace_id.in_(ids)).order_by(CostCall.created_at.asc())
         )
         by_trace: dict[str, list[CostCall]] = {}
         for row in result.scalars().all():
@@ -704,9 +718,7 @@ class CostEventRepository:
             if not tid:
                 continue
             by_trace.setdefault(tid, []).append(row)
-        return {
-            tid: _fold_call_models_and_source(calls) for tid, calls in by_trace.items()
-        }
+        return {tid: _fold_call_models_and_source(calls) for tid, calls in by_trace.items()}
 
     async def aggregate_cost_by_conversations(
         self, conversation_ids: Sequence[str]
@@ -729,3 +741,51 @@ class CostEventRepository:
         )
         rows = (await self._session.execute(stmt)).all()
         return {row.conversation_id: int(row.c_total) for row in rows}
+
+    async def list_platform_prepaid_call_spend(
+        self, *, platform_credential_ids: Collection[str]
+    ) -> list[tuple[datetime, int]]:
+        """Go-window ``(created_at, cost_total_nano)`` oldest-first.
+
+        ``platform_credential_ids`` must already be the Go-endpoint pool
+        members (exact preset match). Empty → no rows. Admin-only full scan.
+        """
+        tagged = await self.list_platform_prepaid_call_spend_tagged(
+            platform_credential_ids=platform_credential_ids
+        )
+        return [(ts, amount) for ts, amount, _cid, _tokens, _model in tagged]
+
+    async def list_platform_prepaid_call_spend_tagged(
+        self, *, platform_credential_ids: Collection[str]
+    ) -> list[tuple[datetime, int, str | None, dict, str]]:
+        """Go-window series plus credential id, ``tokens``, and ``model``.
+
+        Only platform-prepaid rows whose ``platform_credential_id`` is in
+        ``platform_credential_ids``. Caller supplies the Go-endpoint set —
+        this method does not guess by model name or URL prefix.
+        """
+        if not platform_credential_ids:
+            return []
+        stmt = (
+            select(
+                CostCall.created_at,
+                CostCall.cost_total_nano,
+                CostCall.platform_credential_id,
+                CostCall.tokens,
+                CostCall.model,
+            )
+            .where(_platform_prepaid_call())
+            .where(CostCall.platform_credential_id.in_(platform_credential_ids))
+            .order_by(CostCall.created_at.asc())
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return [
+            (
+                row.created_at,
+                int(row.cost_total_nano or 0),
+                (str(row.platform_credential_id).strip() if row.platform_credential_id else None),
+                dict(row.tokens or {}),
+                str(row.model or ""),
+            )
+            for row in rows
+        ]

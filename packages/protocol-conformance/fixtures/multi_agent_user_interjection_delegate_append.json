@@ -314,6 +314,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "我来安排团队并行推进。收到，追加一名校对员。已按你的要求追加校对并收口。",
     "reasoning": "",

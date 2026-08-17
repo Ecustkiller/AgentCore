@@ -54,6 +54,7 @@ class EventType(StrEnum):
     CHECKPOINT_REQUIRED = "checkpoint_required"
     CHECKPOINT_RESOLVED = "checkpoint_resolved"
     QUESTION_POSTED = "question_posted"
+    QUESTION_RESOLVED = "question_resolved"
     PLAN_REVIEW_REQUIRED = "plan_review_required"
     PLAN_REVIEW_RESOLVED = "plan_review_resolved"
     # 团队预审薄预览: first-wave gate before workers start (≠ 波间 plan_review).

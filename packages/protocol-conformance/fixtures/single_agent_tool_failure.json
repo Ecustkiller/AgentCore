@@ -83,6 +83,7 @@
   "projected": {
     "status": "completed",
     "finishReason": "end_turn",
+    "outcome": "ok",
     "error": null,
     "content": "检索失败了，我先按已有知识回答。",
     "reasoning": "先搜一下。",

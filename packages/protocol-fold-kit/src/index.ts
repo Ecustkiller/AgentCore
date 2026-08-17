@@ -25,6 +25,16 @@ export {
 } from "./finishStatus";
 
 export {
+  PRODUCED_OUTCOMES,
+  coerceProducedOutcome,
+  eventsHavePartialProduct,
+  resolveTurnOutcome,
+  type OutcomeWireEvent,
+  type ProducedTurnOutcome,
+  type TurnOutcome,
+} from "./turnOutcome";
+
+export {
   RUN_FRAME_EVENT_TYPES,
   isRunFrameEvent,
   turnElapsedMs,

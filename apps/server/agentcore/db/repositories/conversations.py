@@ -31,6 +31,7 @@ from ._base import (
     commit_or_flush,
 )
 from ._journal_cascade import delete_journal_for_conversation
+from ._stream_state_cascade import delete_stream_state_for_conversation
 
 
 class ConversationRepository:
@@ -867,8 +868,11 @@ class ConversationRepository:
         after the grace period — distinct from ``soft_delete`` (the user-facing
         recoverable delete). The ``turn_journal`` replay stream (唯一事实源, §8.3)
         is dropped here too — it would otherwise orphan (it has no own TTL sweep).
+        In-flight ``turn_stream_state`` snapshots go first (keyed by message id,
+        no ``conversation_id`` — must run before the message delete).
         ``run_sessions`` are also cleared (现场跟随对话).
         """
+        await delete_stream_state_for_conversation(self._session, conversation_id)
         await self._session.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
         )

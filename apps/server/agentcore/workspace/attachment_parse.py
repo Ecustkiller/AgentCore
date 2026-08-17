@@ -2,8 +2,9 @@
 
 分流：docx/pdf/pptx 等用 markitdown 抽文本，写出与原件并存的 ``原名.ext.md``；
 ``.txt`` / ``.md`` / HTML 等可直接 UTF-8 读的格式只内联正文（原件已是可读副本）；
-xlsx/csv 跳过，保留运行时 ``code_execute``。扫描版 PDF 首版不做 OCR，写入明确
-降级提示。解析失败不阻塞驻留，回落「路径提示 + 委派解析」。
+xlsx/csv/tsv 不把全表抽进 prompt，只产**结构面**（列名 / 行数 / 推断类型 / 样例行），
+原始数据留在工作区文件。扫描版 PDF 首版不做 OCR，写入明确降级提示。解析失败
+不阻塞驻留，回落路径提示。
 
 工作区 ``file_read`` 对同一 markitdown 桶做**透明抽取**（读时默认不写 ``*.md``），
 复用本模块公开核 ``extract_office_bytes`` / ``convert_with_markitdown`` /
@@ -15,10 +16,15 @@ xlsx/csv 跳过，保留运行时 ``code_execute``。扫描版 PDF 首版不做 
 from __future__ import annotations
 
 import asyncio
+import csv
+import io
 import os
+import re
+import zipfile
 from dataclasses import dataclass
 from enum import StrEnum
 from io import BytesIO
+from xml.etree import ElementTree as ET
 
 from agentcore.core.logging import get_logger
 from agentcore.workspace.protocol import WorkspaceBackend, WorkspaceError
@@ -29,8 +35,9 @@ logger = get_logger(__name__)
 MARKITDOWN_EXTENSIONS = frozenset({".docx", ".pdf", ".pptx", ".odt", ".rtf"})
 # 已是文本层：直接 UTF-8 解码；原件本身即工作区可读副本。
 PLAIN_TEXT_EXTENSIONS = frozenset({".txt", ".md", ".markdown", ".html", ".htm"})
-# 大表 / 计算场景：不预解析全表；``file_read`` 亦不透明抽。
+# 大表 / 计算场景：不预解析全表进 prompt；只产结构面。``file_read`` 亦不透明抽。
 SKIP_EXTENSIONS = frozenset({".xlsx", ".xlsm", ".xls", ".csv", ".tsv"})
+TABLE_EXTENSIONS = SKIP_EXTENSIONS
 
 # Back-compat aliases (private names used by older call sites / tests).
 _MARKITDOWN_EXTENSIONS = MARKITDOWN_EXTENSIONS
@@ -46,6 +53,14 @@ _SCAN_LARGE_MIN_ALNUM = 200
 # 首轮 prompt 内联上限（字符）。约 6k tokens，给历史/工具/记忆留预算；
 # 全文落在 ``*.md`` 副本，Agent 可用 file_read 续读。多附件时各自独立截断。
 ATTACHMENT_INLINE_MAX_CHARS = 24_000
+
+# 表格结构面：只读到此字节数；样例/列/单元格各自封顶。全量行不进 prompt。
+TABLE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+TABLE_PREVIEW_MAX_SAMPLE_ROWS = 5
+TABLE_PREVIEW_MAX_COLUMNS = 24
+TABLE_PREVIEW_MAX_CELL_CHARS = 48
+TABLE_PREVIEW_MAX_SHEETS = 3
+TABLE_PREVIEW_MAX_PROMPT_CHARS = 4_000
 
 SCAN_NOTICE = (
     "This file appears to be a scanned / image-only document with little or no "
@@ -85,6 +100,97 @@ class PreparseResult:
     """Short machine-oriented reason for logs / tests."""
 
 
+@dataclass(frozen=True, slots=True)
+class TableColumn:
+    name: str
+    inferred_type: str
+
+
+@dataclass(frozen=True, slots=True)
+class TableSheetPreview:
+    name: str
+    row_count: int
+    """Data rows excluding the header."""
+    columns: tuple[TableColumn, ...]
+    sample_rows: tuple[tuple[str, ...], ...]
+    truncated: bool = False
+    """True when column / sample / scan caps hid part of this sheet."""
+
+
+@dataclass(frozen=True, slots=True)
+class TablePreview:
+    sheets: tuple[TableSheetPreview, ...]
+    detail: str = "ok"
+    bytes_truncated: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "sheets": [
+                {
+                    "name": sheet.name,
+                    "row_count": sheet.row_count,
+                    "columns": [
+                        {"name": col.name, "inferred_type": col.inferred_type}
+                        for col in sheet.columns
+                    ],
+                    "sample_rows": [list(row) for row in sheet.sample_rows],
+                    "truncated": sheet.truncated,
+                }
+                for sheet in self.sheets
+            ],
+            "detail": self.detail,
+            "bytes_truncated": self.bytes_truncated,
+        }
+
+    @classmethod
+    def from_dict(cls, raw: dict) -> TablePreview | None:
+        sheets_raw = raw.get("sheets")
+        if not isinstance(sheets_raw, list) or not sheets_raw:
+            return None
+        sheets: list[TableSheetPreview] = []
+        for item in sheets_raw:
+            if not isinstance(item, dict):
+                continue
+            cols_raw = item.get("columns") or []
+            columns = tuple(
+                TableColumn(
+                    name=str(col.get("name") or ""),
+                    inferred_type=str(col.get("inferred_type") or "string"),
+                )
+                for col in cols_raw
+                if isinstance(col, dict)
+            )
+            samples_raw = item.get("sample_rows") or []
+            samples = tuple(
+                tuple(str(cell) for cell in row)
+                for row in samples_raw
+                if isinstance(row, list)
+            )
+            sheets.append(
+                TableSheetPreview(
+                    name=str(item.get("name") or "Sheet1"),
+                    row_count=int(item.get("row_count") or 0),
+                    columns=columns,
+                    sample_rows=samples,
+                    truncated=bool(item.get("truncated")),
+                )
+            )
+        if not sheets:
+            return None
+        return cls(
+            sheets=tuple(sheets),
+            detail=str(raw.get("detail") or "ok"),
+            bytes_truncated=bool(raw.get("bytes_truncated")),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TablePreviewResult:
+    status: ParseStatus
+    preview: TablePreview | None = None
+    detail: str = ""
+
+
 def extension_of(name: str | None, workspace_path: str | None = None) -> str:
     """Lowercase extension from display name, falling back to workspace path."""
     for candidate in (name, workspace_path):
@@ -103,6 +209,12 @@ def should_preparse(name: str | None, workspace_path: str | None = None) -> bool
     if not ext or ext in SKIP_EXTENSIONS:
         return False
     return ext in MARKITDOWN_EXTENSIONS or ext in PLAIN_TEXT_EXTENSIONS
+
+
+def should_preview_table(name: str | None, workspace_path: str | None = None) -> bool:
+    """True when this resident is a spreadsheet / delimited table (structure only)."""
+    ext = extension_of(name, workspace_path)
+    return ext in TABLE_EXTENSIONS
 
 
 def looks_like_scanned(text: str, raw_size: int) -> bool:
@@ -304,3 +416,438 @@ async def preparse_resident(
         parsed_workspace_path=copy_path,
         detail="ok",
     )
+
+
+_DATE_RE = re.compile(
+    r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?$"
+)
+_BOOL_VALUES = frozenset({"true", "false", "yes", "no", "是", "否"})
+_XLS_MAGIC = b"\xd0\xcf\x11\xe0"
+
+
+def _xml_local(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _clip_cell(value: str) -> str:
+    text = value.replace("\r\n", "\n").replace("\r", "\n")
+    text = " ".join(text.split())
+    if len(text) <= TABLE_PREVIEW_MAX_CELL_CHARS:
+        return text
+    return text[: TABLE_PREVIEW_MAX_CELL_CHARS - 1] + "…"
+
+
+def _infer_cell_type(value: str) -> str:
+    raw = value.strip()
+    if not raw:
+        return "empty"
+    lowered = raw.lower()
+    if lowered in _BOOL_VALUES:
+        return "bool"
+    if _DATE_RE.match(raw):
+        return "date"
+    if re.fullmatch(r"-?\d+", raw):
+        return "int"
+    if re.fullmatch(r"-?\d+\.\d+", raw):
+        return "float"
+    return "string"
+
+
+def _infer_column_types(
+    header: list[str], samples: list[list[str]]
+) -> tuple[TableColumn, ...]:
+    width = len(header)
+    types: list[str] = []
+    for idx in range(width):
+        votes: dict[str, int] = {}
+        for row in samples:
+            if idx >= len(row):
+                continue
+            kind = _infer_cell_type(row[idx])
+            if kind == "empty":
+                continue
+            votes[kind] = votes.get(kind, 0) + 1
+        if not votes:
+            types.append("empty")
+            continue
+        top = max(votes.values())
+        winners = [name for name, count in votes.items() if count == top]
+        types.append(winners[0] if len(winners) == 1 else "mixed")
+    return tuple(
+        TableColumn(name=header[i] or f"col_{i + 1}", inferred_type=types[i])
+        for i in range(width)
+    )
+
+
+def _trim_sheet(
+    name: str,
+    header: list[str],
+    data_rows: list[list[str]],
+    *,
+    row_count: int,
+    extra_truncated: bool = False,
+) -> TableSheetPreview:
+    col_trunc = len(header) > TABLE_PREVIEW_MAX_COLUMNS
+    header = header[:TABLE_PREVIEW_MAX_COLUMNS]
+    clipped_rows = [
+        [_clip_cell(cell) for cell in row[:TABLE_PREVIEW_MAX_COLUMNS]]
+        for row in data_rows[:TABLE_PREVIEW_MAX_SAMPLE_ROWS]
+    ]
+    sample_trunc = row_count > len(clipped_rows)
+    columns = _infer_column_types(header, clipped_rows)
+    return TableSheetPreview(
+        name=name or "Sheet1",
+        row_count=row_count,
+        columns=columns,
+        sample_rows=tuple(tuple(row) for row in clipped_rows),
+        truncated=col_trunc or sample_trunc or extra_truncated,
+    )
+
+
+def _decode_delimited_bytes(data: bytes) -> str | None:
+    for encoding in ("utf-8-sig", "utf-8", "gb18030"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
+
+
+def _preview_delimited(
+    data: bytes, *, ext: str, bytes_truncated: bool
+) -> TablePreviewResult:
+    text = _decode_delimited_bytes(data)
+    if text is None:
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="decode")
+    if not text.strip():
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="empty_table")
+
+    delimiter = "\t" if ext == ".tsv" else ","
+    if ext == ".csv":
+        sample = text[:4096]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            delimiter = dialect.delimiter
+        except csv.Error:
+            delimiter = ","
+
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    rows = [list(row) for row in reader if any(cell.strip() for cell in row)]
+    if not rows:
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="empty_table")
+
+    header = [cell.strip() or f"col_{i + 1}" for i, cell in enumerate(rows[0])]
+    data_rows = rows[1:]
+    sheet = _trim_sheet(
+        "Sheet1",
+        header,
+        data_rows,
+        row_count=len(data_rows),
+        extra_truncated=bytes_truncated,
+    )
+    return TablePreviewResult(
+        status=ParseStatus.OK,
+        preview=TablePreview(
+            sheets=(sheet,),
+            detail="delimited",
+            bytes_truncated=bytes_truncated,
+        ),
+        detail="delimited",
+    )
+
+
+def _col_index(ref: str) -> int:
+    letters = []
+    for char in ref:
+        if char.isalpha():
+            letters.append(char.upper())
+        else:
+            break
+    if not letters:
+        return 0
+    index = 0
+    for char in letters:
+        index = index * 26 + (ord(char) - 64)
+    return index - 1
+
+
+def _xlsx_cell_text(cell: ET.Element, shared: list[str]) -> str:
+    kind = cell.get("t")
+    if kind == "inlineStr":
+        parts = [
+            (node.text or "")
+            for node in cell.iter()
+            if _xml_local(node.tag) == "t"
+        ]
+        return "".join(parts)
+    value_el = next((c for c in cell if _xml_local(c.tag) == "v"), None)
+    raw = (value_el.text or "") if value_el is not None else ""
+    if kind == "s":
+        try:
+            return shared[int(raw)]
+        except (ValueError, IndexError):
+            return raw
+    if kind == "b":
+        return "true" if raw in {"1", "true"} else "false"
+    return raw
+
+
+def _load_shared_strings(zf: zipfile.ZipFile) -> list[str]:
+    names = {name.replace("\\", "/") for name in zf.namelist()}
+    path = next((n for n in ("xl/sharedStrings.xml", "xl/SharedStrings.xml") if n in names), None)
+    if path is None:
+        return []
+    root = ET.fromstring(zf.read(path))
+    out: list[str] = []
+    for si in root:
+        if _xml_local(si.tag) != "si":
+            continue
+        parts = [
+            (node.text or "")
+            for node in si.iter()
+            if _xml_local(node.tag) == "t"
+        ]
+        out.append("".join(parts))
+    return out
+
+
+def _xlsx_sheet_targets(zf: zipfile.ZipFile) -> list[tuple[str, str]]:
+    names = {name.replace("\\", "/") for name in zf.namelist()}
+    if "xl/workbook.xml" not in names:
+        fallback = [
+            n for n in sorted(names) if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+        ]
+        return [(f"Sheet{i + 1}", path) for i, path in enumerate(fallback)]
+
+    root = ET.fromstring(zf.read("xl/workbook.xml"))
+    rels: dict[str, str] = {}
+    if "xl/_rels/workbook.xml.rels" in names:
+        rel_root = ET.fromstring(zf.read("xl/_rels/workbook.xml.rels"))
+        for rel in rel_root:
+            rid = rel.get("Id")
+            target = (rel.get("Target") or "").replace("\\", "/")
+            if not rid or not target:
+                continue
+            if target.startswith("/"):
+                target = target.lstrip("/")
+            elif not target.startswith("xl/"):
+                target = f"xl/{target}"
+            rels[rid] = target
+
+    sheets: list[tuple[str, str]] = []
+    for node in root.iter():
+        if _xml_local(node.tag) != "sheet":
+            continue
+        name = node.get("name") or f"Sheet{len(sheets) + 1}"
+        rid = node.get("id") or node.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+        if rid is None:
+            for key, value in node.attrib.items():
+                if key.endswith("}id"):
+                    rid = value
+                    break
+        sheet_target = rels.get(rid or "")
+        if sheet_target:
+            sheets.append((name, sheet_target))
+    if sheets:
+        return sheets
+    fallback = [
+        n for n in sorted(names) if n.startswith("xl/worksheets/sheet") and n.endswith(".xml")
+    ]
+    return [(f"Sheet{i + 1}", path) for i, path in enumerate(fallback)]
+
+
+def _preview_xlsx_sheet(
+    xml: bytes, *, name: str, shared: list[str]
+) -> TableSheetPreview | None:
+    try:
+        root = ET.fromstring(xml)
+    except ET.ParseError:
+        return None
+    rows: list[list[str]] = []
+    for row_el in root.iter():
+        if _xml_local(row_el.tag) != "row":
+            continue
+        cells: dict[int, str] = {}
+        max_idx = -1
+        for cell in row_el:
+            if _xml_local(cell.tag) != "c":
+                continue
+            idx = _col_index(cell.get("r") or "")
+            cells[idx] = _xlsx_cell_text(cell, shared)
+            if idx > max_idx:
+                max_idx = idx
+        if max_idx < 0:
+            continue
+        rows.append([cells.get(i, "") for i in range(max_idx + 1)])
+    nonempty = [row for row in rows if any(cell.strip() for cell in row)]
+    if not nonempty:
+        return None
+    header = [cell.strip() or f"col_{i + 1}" for i, cell in enumerate(nonempty[0])]
+    data_rows = nonempty[1:]
+    return _trim_sheet(name, header, data_rows, row_count=len(data_rows))
+
+
+def _preview_xlsx(data: bytes, *, bytes_truncated: bool) -> TablePreviewResult:
+    try:
+        zf = zipfile.ZipFile(BytesIO(data))
+    except zipfile.BadZipFile:
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="bad_xlsx_zip")
+    with zf:
+        try:
+            shared = _load_shared_strings(zf)
+            targets = _xlsx_sheet_targets(zf)
+        except (ET.ParseError, KeyError, OSError) as exc:
+            return TablePreviewResult(
+                status=ParseStatus.FAILED, detail=f"xlsx:{type(exc).__name__}"
+            )
+        if not targets:
+            return TablePreviewResult(status=ParseStatus.FAILED, detail="xlsx_no_sheets")
+        sheets: list[TableSheetPreview] = []
+        sheet_trunc = len(targets) > TABLE_PREVIEW_MAX_SHEETS
+        for sheet_name, path in targets[:TABLE_PREVIEW_MAX_SHEETS]:
+            try:
+                xml = zf.read(path)
+            except KeyError:
+                continue
+            sheet = _preview_xlsx_sheet(xml, name=sheet_name, shared=shared)
+            if sheet is not None:
+                sheets.append(sheet)
+        if not sheets:
+            return TablePreviewResult(status=ParseStatus.FAILED, detail="xlsx_empty")
+        if sheet_trunc or bytes_truncated:
+            first = sheets[0]
+            sheets[0] = TableSheetPreview(
+                name=first.name,
+                row_count=first.row_count,
+                columns=first.columns,
+                sample_rows=first.sample_rows,
+                truncated=True,
+            )
+        return TablePreviewResult(
+            status=ParseStatus.OK,
+            preview=TablePreview(
+                sheets=tuple(sheets),
+                detail="xlsx",
+                bytes_truncated=bytes_truncated,
+            ),
+            detail="xlsx",
+        )
+
+
+def extract_table_preview(data: bytes, ext: str) -> TablePreviewResult:
+    """Build a capped structure preview. Never returns the full table body."""
+    normalized = ext.lower() if ext.startswith(".") else (f".{ext.lower()}" if ext else "")
+    if normalized not in TABLE_EXTENSIONS:
+        return TablePreviewResult(status=ParseStatus.SKIPPED, detail=f"not_table:{normalized}")
+    if not data:
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="empty_bytes")
+    if normalized == ".xls" or data.startswith(_XLS_MAGIC):
+        return TablePreviewResult(status=ParseStatus.FAILED, detail="xls_unsupported")
+
+    over_budget = len(data) > TABLE_PREVIEW_MAX_BYTES
+    try:
+        if normalized in {".csv", ".tsv"}:
+            payload = data[:TABLE_PREVIEW_MAX_BYTES]
+            return _preview_delimited(
+                payload, ext=normalized, bytes_truncated=over_budget
+            )
+        if over_budget:
+            return TablePreviewResult(
+                status=ParseStatus.FAILED,
+                detail=f"extract_budget:{len(data)}>{TABLE_PREVIEW_MAX_BYTES}",
+            )
+        return _preview_xlsx(data, bytes_truncated=False)
+    except Exception as exc:  # noqa: BLE001 — preview must never break residency
+        logger.warning(
+            "attachment.preparse_failed",
+            ext=normalized,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return TablePreviewResult(
+            status=ParseStatus.FAILED, detail=f"preview:{type(exc).__name__}"
+        )
+
+
+def format_table_preview(preview: TablePreview) -> str:
+    """Render a structure-only block. Caps total characters; never dumps the table."""
+    lines: list[str] = []
+    if preview.bytes_truncated:
+        lines.append(
+            f"scan capped at {TABLE_PREVIEW_MAX_BYTES} bytes; row counts are from the scan."
+        )
+    if len(preview.sheets) > 1:
+        lines.append(f"sheets: {len(preview.sheets)}")
+    for sheet in preview.sheets:
+        lines.append(f"sheet: {sheet.name}")
+        lines.append(f"rows: {sheet.row_count} (data; header excluded)")
+        col_bits = [f"{col.name}:{col.inferred_type}" for col in sheet.columns]
+        lines.append(f"columns ({len(sheet.columns)}): {' | '.join(col_bits)}")
+        sample_n = len(sheet.sample_rows)
+        lines.append(f"sample rows ({sample_n} of {sheet.row_count}):")
+        if not sheet.sample_rows:
+            lines.append("  (none)")
+        for i, row in enumerate(sheet.sample_rows, start=1):
+            lines.append(f"  {i}. {' | '.join(row)}")
+        if sheet.truncated:
+            lines.append("  … additional columns or rows omitted from this preview.")
+    body = "\n".join(lines)
+    if len(body) <= TABLE_PREVIEW_MAX_PROMPT_CHARS:
+        return body
+    return body[: TABLE_PREVIEW_MAX_PROMPT_CHARS - 1] + "…"
+
+
+def table_preview_from_mapping(raw: object) -> TablePreview | None:
+    """Accept a persist-enriched dict or an already-built preview."""
+    if isinstance(raw, TablePreview):
+        return raw
+    if isinstance(raw, dict):
+        return TablePreview.from_dict(raw)
+    return None
+
+
+async def preview_table_resident(
+    backend: WorkspaceBackend,
+    *,
+    workspace_path: str,
+    name: str | None,
+) -> TablePreviewResult:
+    """Read a resident spreadsheet / delimited file and build a structure preview.
+
+    Never raises for parse failures. Does not write a ``*.md`` copy and never
+    returns the full table body.
+    """
+    ext = extension_of(name, workspace_path)
+    if ext not in TABLE_EXTENSIONS:
+        return TablePreviewResult(status=ParseStatus.SKIPPED, detail=f"not_table:{ext or '?'}")
+    try:
+        data = await backend.read_bytes(workspace_path)
+    except WorkspaceError as e:
+        logger.warning(
+            "attachment.preparse_read_failed",
+            path=workspace_path,
+            error=str(e),
+        )
+        return TablePreviewResult(status=ParseStatus.FAILED, detail=f"read:{e}")
+
+    result = await asyncio.to_thread(extract_table_preview, data, ext)
+    if result.status == ParseStatus.OK and result.preview is not None:
+        logger.info(
+            "attachment.preparse_ok",
+            path=workspace_path,
+            name=name,
+            kind="table",
+            sheets=len(result.preview.sheets),
+            rows=result.preview.sheets[0].row_count if result.preview.sheets else 0,
+        )
+    else:
+        logger.warning(
+            "attachment.preparse_failed",
+            path=workspace_path,
+            name=name,
+            kind="table",
+            detail=result.detail,
+        )
+    return result

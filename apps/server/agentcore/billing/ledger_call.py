@@ -34,6 +34,7 @@ def assemble_ledger_call(
     call_id: str | None = None,
     duration_ms: int = 0,
     credential_source: str | None = None,
+    platform_credential_id: str | None = None,
 ) -> CallCost:
     """Price one LLM call into a ``cost_calls`` detail row (shared by both paths).
 
@@ -57,4 +58,5 @@ def assemble_ledger_call(
         call_id=call_id,
         duration_ms=duration_ms,
         credential_source=source,
+        platform_credential_id=platform_credential_id,
     )
