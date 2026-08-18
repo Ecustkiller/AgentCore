@@ -67,6 +67,27 @@ from agentcore.runtime.runs.types import (
 
 logger = get_logger(__name__)
 
+
+def resolve_bind_boundary_timeout() -> float | None:
+    """R-05 晚绑定波边界等待 CEO 定稿的墙钟超时（秒）。
+
+    Lazy-import settings（runs 包模块加载零外部依赖，对齐
+    :func:`~agentcore.runtime.runs.concurrency.resolve_max_parallel` 的同款回落）：settings
+    不可用 / 配置为 None 或非正 → 返回 None（不启用，保持现状：BIND 边界 YIELD 后无限等
+    CEO replan）。>0 时 WaveScheduler 对同一 ``bind_after_deps`` 节点自首次进入边界起计时，
+    超时未定稿自动落单。
+    """
+    try:
+        from agentcore.config import settings
+
+        value = settings.engine_wave_bind_boundary_timeout_seconds
+        if value is None:
+            return None
+        value = float(value)
+        return value if value > 0 else None
+    except Exception:  # noqa: BLE001 — settings optional in unit stubs
+        return None
+
 # Host progress hook: sync (legacy tests) or async (drive hot-continue).
 OnProgress = Callable[[Mapping[str, RunState]], None | Awaitable[None]]
 # Optional per-node completion hook (additive): fires once when an executed node
@@ -82,7 +103,11 @@ class WaveScheduler:
     """Concrete :class:`RunScheduler` — drives a :class:`RunPlan` to terminal with
     continuous, dependency-driven dispatch."""
 
-    def __init__(self, max_parallel: int | None = None) -> None:
+    def __init__(
+        self,
+        max_parallel: int | None = None,
+        bind_boundary_timeout: float | None = None,
+    ) -> None:
         # ``None`` → resolve the configured dispatch width lazily
         # (settings.engine_max_parallel_delegations, fallback MAX_PARALLEL_DELEGATIONS); an
         # explicit value (a consumer's own resolved knob) wins. A single scheduler's width
@@ -90,6 +115,13 @@ class WaveScheduler:
         # wide fan-out.
         resolved = max_parallel if max_parallel is not None else resolve_max_parallel()
         self._max_parallel = max(1, resolved)
+        # R-05 晚绑定超时兜底：显式值（测试/调用方注入）优先；None → 延迟解析配置
+        # （settings.engine_wave_bind_boundary_timeout_seconds，回落 None = 关闭，保持现状）
+        if bind_boundary_timeout is None:
+            self._bind_boundary_timeout_seconds = resolve_bind_boundary_timeout()
+        else:
+            value = float(bind_boundary_timeout)
+            self._bind_boundary_timeout_seconds = value if value > 0 else None
 
     async def run(
         self,
@@ -334,6 +366,37 @@ class WaveScheduler:
                     bind_ready = self._bind_pending(plan, completed, skipped, dispatched)
                     if bind_ready:
                         bind_boundaries += 1
+                        # R-05 超时兜底（默认关闭）：首次进边界记时；同一节点超过
+                        # engine_wave_bind_boundary_timeout_seconds 仍未定稿 → 自动落单
+                        # （清 bind_after_deps 标记，下一轮 ready 扫描按普通节点调度），
+                        # 兜住协调模式下 CEO 波内缺席 / 掉线 / 未处理 BOUNDARY_YIELD 的悬停。
+                        # 计时挂在 RunSpec.bind_boundary_since，跨 YIELD/resume（计划复用）
+                        # 不丢。全部超时落单 → 无边界可让，直接继续调度（不触发 on_boundary）。
+                        timeout_s = self._bind_boundary_timeout_seconds
+                        if timeout_s is not None:
+                            now = time.monotonic()
+                            stale: list[RunSpec] = []
+                            fresh: list[RunSpec] = []
+                            for n in bind_ready:
+                                if n.bind_boundary_since is None:
+                                    n.bind_boundary_since = now
+                                    fresh.append(n)
+                                elif now - n.bind_boundary_since >= timeout_s:
+                                    stale.append(n)
+                                else:
+                                    fresh.append(n)
+                            if stale:
+                                for n in stale:
+                                    n.bind_after_deps = False
+                                    logger.warning(
+                                        "wave.bind_auto_finalise_timeout",
+                                        run_id=n.run_id,
+                                        elapsed_s=round(now - (n.bind_boundary_since or now), 1),
+                                        timeout_s=timeout_s,
+                                    )
+                                if not fresh:
+                                    continue
+                                bind_ready = fresh
                         outcome = await on_boundary(BoundaryReason.BIND, bind_ready, completed)
                         if outcome is BoundaryOutcome.ABORT:
                             aborted = True

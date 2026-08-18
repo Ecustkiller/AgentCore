@@ -59,6 +59,16 @@ class EngineSettings(BaseModel):
     # runs/constants.py::MAX_PARALLEL_DELEGATIONS，值同步为 12）。
     engine_max_parallel_delegations: int = 12
 
+    # R-05 晚绑定波边界等待 CEO 定稿的墙钟超时（秒）。None / 0 = 不启用（保持现状：
+    # BIND 边界 YIELD 后无限等待 CEO replan 定稿）。>0 时：同一 ``bind_after_deps`` 节点
+    # 自首次进入 BIND 边界起超过该时长仍未定稿 → 自动落单（清 ``bind_after_deps`` 标记、
+    # 按普通节点调度，不再等 CEO），并记 ``wave.bind_auto_finalise_timeout`` warning——
+    # 兜住协调模式下 CEO 波内缺席 / 掉线 / 未理解 BOUNDARY_YIELD 导致的波边界悬停。
+    # 经典模式的用户拍板语义（checkpoint plan_review）不受影响：本兜底只作用于「CEO 定稿」
+    # 的晚绑定节点，且默认关闭。计时挂在 RunSpec.bind_boundary_since（跨 YIELD/resume 持久，
+    # 计划复用不丢）。
+    engine_wave_bind_boundary_timeout_seconds: float | None = None
+
     # 当轮调查结果（NEVER + FILESYSTEM/SEARCH/RESEARCH）投影窗：只留最近 N 条
     # ≥min_chars 的全文。journal / UI 仍全文。旧结果 → 稳定指针；file_read 另附
     # ≤1200 字结构摘要 + 再读授额。2 打堆叠税（工人长调查把多份读窗整段

@@ -1633,3 +1633,55 @@ async def test_soft_stop_cancel_leaves_undispatched_for_resume(monkeypatch):
         await wave_task
 
     assert skipped == []
+
+
+# --- R-05: 晚绑定波边界等待 CEO 定稿超时自动落单（默认关闭，可配）--------
+
+
+async def test_bind_boundary_timeout_auto_finalises_stale_across_resume():
+    """配 bind_boundary_timeout>0 时，同一 bind_after_deps 节点跨 YIELD/resume（计划复用、
+    RunSpec 上计时）超过阈值仍未定稿 → 自动落单（清 bind_after_deps 标记、按普通节点
+    调度），不再触发 BIND 边界，下游照常完成。默认（None = 关闭，无限等待）的既有
+    语义由 test_bind_boundary_yield_soft_pauses_for_resume 覆盖，本用例只验证开启后的
+    兜底路径。
+    """
+    plan = RunPlan()
+    plan.add(_spec("a"))
+    plan.add(_spec("b", ("a",), bind_after_deps=True))
+    plan.add(_spec("c", ("b",)))
+    seen: list[tuple] = []
+
+    async def hook(reason, nodes, completed):
+        seen.append((reason, [n.run_id for n in nodes], set(completed)))
+        return BoundaryOutcome.YIELD
+
+    # 第一次 run：BIND 边界记时 + YIELD（模拟 CEO 未定稿、wave 软停等 resume）
+    r1 = await WaveScheduler(max_parallel=4, bind_boundary_timeout=0.01).run(
+        plan, _ok, on_boundary=hook,
+    )
+    assert r1["a"].phase is RunPhase.COMPLETED
+    assert "b" not in r1  # 未定稿的晚绑定尾留在计划里（YIELD 软停语义不变）
+    assert seen == [(BoundaryReason.BIND, ["b"], {"a"})]
+    b_spec = plan.by_id("b")
+    assert b_spec.bind_boundary_since is not None  # 计时已挂到 RunSpec（跨 resume 持久）
+
+    # 模拟 CEO 长时间未定稿：时间流逝超过阈值
+    await asyncio.sleep(0.05)
+
+    # 第二次 run（resume 语义：同一计划复用 + a 已完成 seed）：b 超时 → 自动落单 → 正常调度
+    seen2: list[tuple] = []
+
+    async def hook2(reason, nodes, completed):
+        seen2.append((reason, [n.run_id for n in nodes], set(completed)))
+        return BoundaryOutcome.YIELD
+
+    seed = {"a": RunState(phase=RunPhase.COMPLETED, content="cached")}
+    r2 = await WaveScheduler(max_parallel=4, bind_boundary_timeout=0.01).run(
+        plan, _ok, on_boundary=hook2, seed_completed=seed,
+    )
+    # b 超时落单：不再触发 BIND 边界，直接调度执行；c 下游照常完成
+    assert seen2 == []
+    assert r2["b"].phase is RunPhase.COMPLETED
+    assert r2["c"].phase is RunPhase.COMPLETED
+    # 落单后标记已清（不再被 _bind_pending 选中）
+    assert b_spec.bind_after_deps is False

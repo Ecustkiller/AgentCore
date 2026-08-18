@@ -250,6 +250,11 @@ class RunSpec:
     # default：未接 on_boundary 的调度（自治 / 测试）下完全无效，故一个无晚
     # 绑定节点的 plan 行为逐字不变。→ 见设计: docs/03-AI核心/执行引擎架构设计.md §受监督的波循环
     bind_after_deps: bool = False
+    # R-05 晚绑定超时兜底计时：本节点首次进入 BIND 波边界（deps 已就绪、未定稿、YIELD 回
+    # CEO）的墙钟（time.monotonic）时间戳。挂在 RunSpec 上而非调度器实例，保证跨 YIELD/
+    # resume（计划复用、可能新建调度器）不丢计时；配 engine_wave_bind_boundary_timeout_seconds
+    # 后，超时未定稿的节点被自动落单继续调度。None = 尚未进入过 BIND 边界。
+    bind_boundary_since: float | None = None
     parent_run_id: str | None = None
     # Tree position — also the SOLE determinant of whether this worker may nest a
     # sub-team (阶段2 嵌套子任务). Any worker with ``depth < MAX_DELEGATION_DEPTH``
