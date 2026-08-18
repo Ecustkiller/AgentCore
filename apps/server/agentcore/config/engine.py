@@ -17,6 +17,11 @@ class EngineSettings(BaseModel):
     # retrieval_budget.DEFAULT_RETRIEVAL_BUDGET=14）。≤0 → 卸检索工具。搜/读分池
     # （R-02）落地后本值语义随拆池调整。
     engine_retrieval_budget: int = 14
+    # R-03 前缀缓存观测（审计 D4，observability/prefix_cache.py）：观测已常驻（每
+    # llm.call 一条 cost.prefix_cache 探针），默认 debug 级不落 jsonl（长会话避免挤掉
+    # llm.call 的 20MB×5 窗口）。置 True → 提升为 info 落盘，无需全局 LOG_LEVEL=DEBUG，
+    # 便于按需积累 D4 数据后再动装配结构。
+    engine_prefix_cache_observability: bool = False
 
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3
