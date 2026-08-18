@@ -177,6 +177,14 @@ def log_llm_call(
             record_turn_tokens(usage.total_tokens)
         except Exception:  # noqa: BLE001 — budget meter must never break the LLM path
             pass
+        # R-01 成本护栏：把上面已单点计价的费用（不复价）累进回合成本 meter。
+        # cost_nano / cost_estimated_nano 已在函数头部算好，与 token 累计同源同步。
+        try:
+            from agentcore.runtime.turn.cost_budget import record_turn_cost
+
+            record_turn_cost(cost_nano, cost_estimated_nano)
+        except Exception:  # noqa: BLE001 — cost meter must never break the LLM path
+            pass
 
     if not settings.log_llm_bodies:
         return

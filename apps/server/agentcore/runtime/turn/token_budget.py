@@ -295,29 +295,45 @@ def resolve_wave_budget_hooks() -> tuple[
     unstarted workers are not admitted after the first confirmed ``LLMAuthError``.
     """
     from agentcore.llm.turn_auth_dead import is_turn_auth_dead
+    from agentcore.runtime.turn.cost_budget import (
+        is_turn_cost_ceiling_hit,
+        is_turn_cost_delivery_reserve_hit,
+    )
 
     if _nested_envelope.get() is not None:
 
         def _nested_stop() -> bool:
-            return is_nested_envelope_hit() or is_turn_auth_dead()
+            return is_nested_envelope_hit() or is_turn_auth_dead() or is_turn_cost_ceiling_hit()
 
         return _nested_stop, None
 
     def _parent_stop() -> bool:
-        return is_turn_token_ceiling_hit() or is_turn_auth_dead()
+        return (
+            is_turn_token_ceiling_hit()
+            or is_turn_auth_dead()
+            or is_turn_cost_ceiling_hit()
+        )
 
-    return _parent_stop, is_turn_token_delivery_reserve_hit
+    def _parent_reserve_hit() -> bool:
+        # 任一硬顶窗口（token / 费用）软闸命中即放行 priority 尾、软跳次要尾。
+        return (
+            is_turn_token_delivery_reserve_hit()
+            or is_turn_cost_delivery_reserve_hit()
+        )
+
+    return _parent_stop, _parent_reserve_hit
 
 
 def should_materialise_turn_token_budget_skips() -> bool:
     """Whether un-run tails should be materialised as SKIPPED after a wave."""
     from agentcore.llm.turn_auth_dead import is_turn_auth_dead
+    from agentcore.runtime.turn.cost_budget import is_turn_cost_ceiling_hit
 
     if is_turn_auth_dead():
         return True
     if _nested_envelope.get() is not None:
         return is_nested_envelope_hit()
-    return is_turn_token_ceiling_hit()
+    return is_turn_token_ceiling_hit() or is_turn_cost_ceiling_hit()
 
 
 def budget_skip_warning_for_active_scope() -> str:
@@ -326,11 +342,17 @@ def budget_skip_warning_for_active_scope() -> str:
         is_turn_auth_dead,
         turn_auth_dead_reject_message,
     )
+    from agentcore.runtime.turn.cost_budget import (
+        TURN_COST_CEILING_WARNING,
+        is_turn_cost_ceiling_hit,
+    )
 
     if is_turn_auth_dead():
         return turn_auth_dead_reject_message() or TURN_AUTH_DEAD_REJECT_MESSAGE
     if _nested_envelope.get() is not None:
         return TURN_TOKEN_NESTED_ENVELOPE_WARNING
+    if is_turn_cost_ceiling_hit() and not is_turn_token_ceiling_hit():
+        return TURN_COST_CEILING_WARNING
     return TURN_TOKEN_CEILING_WARNING
 
 

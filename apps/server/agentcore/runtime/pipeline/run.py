@@ -212,10 +212,13 @@ async def run_chat_pipeline(
     citations_token = turn_citations.set(citations)
     from agentcore.llm.turn_auth_dead import bind_turn_auth_dead, reset_turn_auth_dead
     from agentcore.runtime.memory_consult_cache import consulted_memory_cache
+    from agentcore.runtime.turn.cost_budget import bind_turn_cost_meter, reset_turn_cost_meter
     from agentcore.runtime.turn.token_budget import bind_turn_token_meter, reset_turn_token_meter
 
     # Turn 级 token 累计 meter（CEO + 全树 worker）；log_llm_call 写入，触顶禁新派。
     turn_token_meter_token = bind_turn_token_meter(seed=0)
+    # R-01 回合级成本累计 meter（与 token meter 同源，log_llm_call 单点计价后写入）。
+    turn_cost_meter_token = bind_turn_cost_meter(seed_billed=0, seed_estimated=0)
     # Turn 级 API Key 鉴权死位（甲+乙）：首次 LLMAuthError 后短路未启动 LLM。
     turn_auth_dead_token = bind_turn_auth_dead()
 
@@ -435,6 +438,7 @@ async def run_chat_pipeline(
         consulted_memory_cache.reset(memory_cache_token)
         turn_evidence_ledger.reset(ledger_token)
         reset_turn_token_meter(turn_token_meter_token)
+        reset_turn_cost_meter(turn_cost_meter_token)
         reset_turn_auth_dead(turn_auth_dead_token)
         if execution_id_token is not None:
             from agentcore.runtime.coordination.session import (

@@ -182,6 +182,11 @@ async def continue_ceo_pipeline(
     fact_log = TurnFactLog(inherited_entries=list(journal_entries))
     fact_log_token = current_fact_log.set(fact_log)
     from agentcore.llm.turn_auth_dead import bind_turn_auth_dead, reset_turn_auth_dead
+    from agentcore.runtime.turn.cost_budget import (
+        bind_turn_cost_meter,
+        cost_from_journal_entries,
+        reset_turn_cost_meter,
+    )
     from agentcore.runtime.turn.token_budget import (
         bind_turn_token_meter,
         reset_turn_token_meter,
@@ -190,6 +195,10 @@ async def continue_ceo_pipeline(
 
     turn_token_meter_token = bind_turn_token_meter(
         seed=tokens_from_journal_entries(journal_entries)
+    )
+    _seed_billed, _seed_estimated = cost_from_journal_entries(journal_entries)
+    turn_cost_meter_token = bind_turn_cost_meter(
+        seed_billed=_seed_billed, seed_estimated=_seed_estimated
     )
     turn_auth_dead_token = bind_turn_auth_dead()
     execution_id_token: Token[str | None] | None = None
@@ -374,6 +383,7 @@ async def continue_ceo_pipeline(
         if ledger_token is not None:
             turn_evidence_ledger.reset(ledger_token)
         reset_turn_token_meter(turn_token_meter_token)
+        reset_turn_cost_meter(turn_cost_meter_token)
         reset_turn_auth_dead(turn_auth_dead_token)
         if execution_id_token is not None:
             from agentcore.runtime.coordination.session import (

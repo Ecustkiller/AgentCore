@@ -48,6 +48,12 @@ def _materialise_turn_token_budget_skips(
     """
     from agentcore.core.logging import get_logger
     from agentcore.llm.turn_auth_dead import REASON_TURN_AUTH_DEAD, is_turn_auth_dead
+    from agentcore.runtime.turn.cost_budget import (
+        REASON_TURN_COST_BUDGET,
+        current_turn_cost_nano,
+        is_turn_cost_ceiling_hit,
+        resolve_turn_cost_ceiling_nano,
+    )
     from agentcore.runtime.turn.token_budget import (
         REASON_TURN_TOKEN_BUDGET,
         budget_skip_warning_for_active_scope,
@@ -60,9 +66,12 @@ def _materialise_turn_token_budget_skips(
 
     logger = get_logger(__name__)
     warning = budget_skip_warning_for_active_scope()
-    skip_reason = (
-        REASON_TURN_AUTH_DEAD if is_turn_auth_dead() else REASON_TURN_TOKEN_BUDGET
-    )
+    if is_turn_auth_dead():
+        skip_reason = REASON_TURN_AUTH_DEAD
+    elif is_turn_cost_ceiling_hit():
+        skip_reason = REASON_TURN_COST_BUDGET
+    else:
+        skip_reason = REASON_TURN_TOKEN_BUDGET
     skipped_ids: list[str] = []
     page_qa_ids: list[str] = []
     for node in plan.nodes:
@@ -88,7 +97,7 @@ def _materialise_turn_token_budget_skips(
     if skipped_ids:
         nested = current_nested_envelope()
         # 事件名必须是字面量：`scripts/sync_log_event_registry.py` 静态扫参数，条件表达式
-        # 会让这两个名字整个从 catalog 里消失（dev 每次调用刷未注册告警）。
+        # 会让这些名字整个从 catalog 里消失（dev 每次调用刷未注册告警）。
         fields = {
             "skipped": len(skipped_ids),
             "spent": current_turn_tokens(),
@@ -97,7 +106,11 @@ def _materialise_turn_token_budget_skips(
             "nested_baseline": nested.baseline if nested else None,
             "depth": getattr(tool, "_depth", None),
         }
-        if skip_reason == REASON_TURN_TOKEN_BUDGET:
+        if skip_reason == REASON_TURN_COST_BUDGET:
+            fields["cost_spent_nano"] = current_turn_cost_nano()
+            fields["cost_ceiling_nano"] = resolve_turn_cost_ceiling_nano()
+            logger.info("delegate.turn_cost_ceiling_skip", **fields)
+        elif skip_reason == REASON_TURN_TOKEN_BUDGET:
             logger.info("delegate.turn_token_ceiling_skip", **fields)
         else:
             logger.info("delegate.turn_auth_dead_skip", **fields)

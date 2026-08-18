@@ -490,12 +490,17 @@ def maybe_inject_debate_gate(
 
 
 def should_turn_token_budget_gate(controller: LoopController, *, role: str) -> bool:
-    """Whether the turn-token wrap-up steer should fire (ceiling hit, captain, one-shot)."""
+    """Whether the turn-budget wrap-up steer should fire (ceiling hit, captain, one-shot).
+
+    Covers token **and** cost ceilings — either firing pushes the same「基于已有产出
+    收口」intent, so they share the one-shot latch (no double steer).
+    """
     if role != "captain" or controller.turn_token_budget_gate_fired:
         return False
+    from agentcore.runtime.turn.cost_budget import is_turn_cost_ceiling_hit
     from agentcore.runtime.turn.token_budget import is_turn_token_ceiling_hit
 
-    return is_turn_token_ceiling_hit()
+    return is_turn_token_ceiling_hit() or is_turn_cost_ceiling_hit()
 
 
 def maybe_inject_turn_token_budget_gate(
@@ -506,14 +511,19 @@ def maybe_inject_turn_token_budget_gate(
     round_idx: int,
     role: str,
 ) -> bool:
-    """Inject the turn-token wrap-up steer once for the CEO captain. Returns True if injected.
+    """Inject the turn-budget wrap-up steer once for the CEO captain. Returns True if injected.
 
     Soft only: tools stay (delegate/debate already reject at execute). Does not
     force_finalize — reject copy + this one-shot steer is enough to push wrap-up.
+    Cost ceiling takes prompt priority (money is the tighter signal when both fire).
     """
     if not should_turn_token_budget_gate(controller, role=role):
         return False
 
+    from agentcore.runtime.turn.cost_budget import (
+        is_turn_cost_ceiling_hit,
+        turn_cost_budget_wrap_prompt,
+    )
     from agentcore.runtime.turn.token_budget import (
         current_turn_tokens,
         resolve_turn_token_ceiling,
@@ -521,18 +531,32 @@ def maybe_inject_turn_token_budget_gate(
     )
 
     controller.mark_turn_token_budget_gate_fired()
-    nudge = turn_token_budget_wrap_prompt()
-    logger.info(
-        "engine.turn_token_budget_nudge",
-        round=round_idx,
-        spent=current_turn_tokens(),
-        ceiling=resolve_turn_token_ceiling(),
-    )
+    if is_turn_cost_ceiling_hit():
+        nudge = turn_cost_budget_wrap_prompt()
+        reason = "turn_cost_budget"
+        from agentcore.runtime.turn.cost_budget import (
+            current_turn_cost_nano,
+            resolve_turn_cost_ceiling_nano,
+        )
+
+        logger.info(
+            "engine.turn_cost_budget_nudge",
+            round=round_idx,
+            spent=current_turn_cost_nano(),
+            ceiling=resolve_turn_cost_ceiling_nano(),
+        )
+    else:
+        nudge = turn_token_budget_wrap_prompt()
+        reason = "turn_token_budget"
+        logger.info(
+            "engine.turn_token_budget_nudge",
+            round=round_idx,
+            spent=current_turn_tokens(),
+            ceiling=resolve_turn_token_ceiling(),
+        )
     messages.append(LLMMessage(role="user", content=nudge))
     record_turn_fact(
-        NoteFact(
-            role="user", content=nudge, reason="turn_token_budget", run_id=run_id
-        ).to_fact()
+        NoteFact(role="user", content=nudge, reason=reason, run_id=run_id).to_fact()
     )
     return True
 

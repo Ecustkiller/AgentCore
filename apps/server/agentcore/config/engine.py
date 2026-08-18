@@ -136,6 +136,16 @@ class EngineSettings(BaseModel):
     # 默认 400k（够一次 QA/目验；不随 worker 顶同步抬）；≤0 或
     # reserve ≥ ceiling 关闭预留软闸（硬顶仍在）。
     engine_turn_token_delivery_reserve: int = 400_000
+    # R-01 回合级 LLM 聚合成本护栏（费用硬顶，整数 nano-CNY）：与 token 顶正交，
+    # 计量的是「已计价 billable 费用」（platform/vendor 的 cost_total_nano；BYOK 估计值
+    # 单独累计、不入顶）。触顶后禁新 delegate/debate/新波派发，在飞跑完不 cancel。
+    # ≤0 关闭。默认 0（关）——成本顶需按部署计费档位标定后再放开，避免误伤长任务；
+    # 语义与 engine_turn_token_ceiling 完全对齐（软闸→硬顶两段式降级）。
+    engine_turn_cost_ceiling_nano: int = 0
+    # R-01 成本交付预留（对齐 engine_turn_token_delivery_reserve）：累计 billable 费用
+    # ≥ ceiling − reserve 时只放行 ``ceiling_priority`` 节点，次要节点软跳过。≤0 或
+    # reserve ≥ ceiling 关闭成本软闸（成本硬顶仍在）。
+    engine_turn_cost_delivery_reserve_nano: int = 0
     # 预算收尾窗口：累计 token ≥ ceiling − reserve 时强制进入落盘/handoff-only 轮，
     # 降低硬顶后 degraded_synth。收尾需要的空间是绝对量（成篇落盘一次就是上万
     # token），不该随 ceiling 缩放；比例制在低 ceiling 下留量过薄、实测触顶超标。
