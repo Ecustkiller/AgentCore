@@ -9,6 +9,15 @@ class EngineSettings(BaseModel):
 
     engine_empty_response_threshold: int = 2
 
+    # R-04 收敛治理参数化：滑窗卡死检测的窗口大小（回落 loop_controller
+    # DEFAULT_WINDOW=8）。同参/交替失败在窗内计数达 engine_unproductive_threshold
+    # → NUDGE，再触发 → FINALIZE。
+    engine_loop_window: int = 8
+    # R-04 检索预算（web_search + read_url 共用 per-run 池；回落
+    # retrieval_budget.DEFAULT_RETRIEVAL_BUDGET=14）。≤0 → 卸检索工具。搜/读分池
+    # （R-02）落地后本值语义随拆池调整。
+    engine_retrieval_budget: int = 14
+
     engine_tool_failure_warn: int = 2
     engine_tool_failure_disable: int = 3
     engine_unproductive_threshold: int = 3

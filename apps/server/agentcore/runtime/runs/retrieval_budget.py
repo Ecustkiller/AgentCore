@@ -92,13 +92,20 @@ def parse_retrieval_budget(raw: Any) -> int | None:
 def default_retrieval_budget(spec: RunSpec, *, complexity_hint: str = "standard") -> int:
     """Structured default — unified single value for all ordinary workers.
 
-    Always :data:`DEFAULT_RETRIEVAL_BUDGET`（14）. ``form`` / role 不参与分档。
-    辩手有约定文档残搜 2 由辩论内部 writer 在 plan 建成后写入，不经本函数。
-    ``complexity_hint`` 保留签名兼容，**不再**参与分档。
+    R-04：优先 settings.engine_retrieval_budget（回落 :data:`DEFAULT_RETRIEVAL_BUDGET`
+    =14）；settings 不可用（unit stubs）或 ≤0 语义由调用方处理（≤0 → 卸检索工具）。
+    ``form`` / role 不参与分档。辩手有约定文档残搜 2 由辩论内部 writer 在 plan 建成后
+    写入，不经本函数。``complexity_hint`` 保留签名兼容，**不再**参与分档。
     """
     del complexity_hint  # API compat only; no tiering
     del spec  # form / deps 不再影响默认
-    return DEFAULT_RETRIEVAL_BUDGET
+    try:
+        from agentcore.config import settings
+
+        value = int(settings.engine_retrieval_budget)
+        return value
+    except Exception:  # noqa: BLE001 — settings optional in unit stubs
+        return DEFAULT_RETRIEVAL_BUDGET
 
 
 def exclude_retrieval_tools(

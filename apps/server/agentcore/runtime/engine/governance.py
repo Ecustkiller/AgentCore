@@ -184,6 +184,7 @@ def create_loop_controller(
     delivery_idle_report = False
 
     controller = LoopController(
+        window=settings.engine_loop_window,
         empty_threshold=settings.engine_empty_response_threshold,
         tool_failure_warn=tool_failure_warn,
         tool_failure_disable=tool_failure_disable,
