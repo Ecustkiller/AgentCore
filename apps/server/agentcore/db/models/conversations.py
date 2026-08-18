@@ -232,15 +232,18 @@ class Folder(Base):
 
 # --- Messages ---
 
-# One visible 系统收口 user row per execution. Process-local ``harvest_scheduled``
-# does not survive restart / multi-instance; this index is the durable *claim*.
-# Losing the insert means another process already claimed — skip only when a
-# closing assistant already settled or a fresh turn lease is still beating.
+# One visible 系统收口 user row per execution (rows at/after the timestamptz
+# bound). Process-local ``harvest_scheduled`` does not survive restart /
+# multi-instance; this index is the durable *claim*. Losing the insert means
+# another process already claimed — skip only when a closing assistant already
+# settled or a fresh turn lease is still beating. Historical pre-bound rows
+# stay outside the predicate so CREATE INDEX can succeed without deleting them.
 UQ_MESSAGES_EXECUTION_HARVEST = "uq_messages_execution_harvest"
 _HARVEST_USER_EXECUTION_WHERE = (
     "role = 'user' "
     "AND usage ->> 'origin' = 'execution_harvest' "
-    "AND COALESCE(usage ->> 'execution_id', '') <> ''"
+    "AND COALESCE(usage ->> 'execution_id', '') <> '' "
+    "AND created_at >= TIMESTAMPTZ '2026-08-18 06:00:00+00'"
 )
 
 
