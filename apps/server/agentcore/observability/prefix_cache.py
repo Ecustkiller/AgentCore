@@ -519,15 +519,35 @@ def observe_prefix_cache(
         ChainState(digests=digests, input_tokens=input_tokens, calls=probe.chain_calls),
         _MAX_CHAINS,
     )
-    # Per-call probe: debug so a long sidecar session does not rotate llm.call
-    # out of the 20MB×5 jsonl window. Raise LOG_LEVEL=DEBUG to keep D4 lines.
-    logger.debug(
-        "cost.prefix_cache",
-        scenario=scenario,
-        model=model,
-        **probe.as_log_fields(),
-    )
+    # Per-call probe: debug by default so a long sidecar session does not rotate
+    # llm.call out of the 20MB×5 jsonl window; engine_prefix_cache_observability
+    # (R-03) promotes it to info so D4 lines land in the default jsonl without a
+    # global LOG_LEVEL=DEBUG. Never raises into the LLM path.
+    if _prefix_cache_observability_enabled():
+        logger.info(
+            "cost.prefix_cache",
+            scenario=scenario,
+            model=model,
+            **probe.as_log_fields(),
+        )
+    else:
+        logger.debug(
+            "cost.prefix_cache",
+            scenario=scenario,
+            model=model,
+            **probe.as_log_fields(),
+        )
     return probe
+
+
+def _prefix_cache_observability_enabled() -> bool:
+    """Lazy settings read (module loads everywhere); False on unavailable settings."""
+    try:
+        from agentcore.config import settings
+
+        return bool(settings.engine_prefix_cache_observability)
+    except Exception:  # noqa: BLE001 — settings optional in unit stubs
+        return False
 
 
 def reset_prefix_cache_state() -> None:
